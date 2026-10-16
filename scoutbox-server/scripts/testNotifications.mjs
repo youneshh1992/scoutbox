@@ -868,4 +868,48 @@ test('rollback refusals leave no output and never touch the source: a later sche
   rm(src, later, s6, odd, o1, o2, o3, o4, o5);
 });
 
+
+// ============================================================= review of ac50b60 — the notification extras follow-up (the S7b finding-2 class)
+test('review of ac50b60 — nested unknown data on a notification is DETACHED at ingress, export and transaction snapshots: a legacy row imported with futureField { labels: [...] } and own prototype-like keys at depth exports a copy (mutating an export, or a second export, never changes the mirror or the stored JSON); an export mutation inside an aborted unit does not survive the rollback; a repository write inside an aborted unit and a real COMMIT failure leave the held view on the restored row; a reload (restart), the snapshot dispatcher and the copy-only rollback reproduce the stored JSON; unsupported non-JSON values refuse the import and the snapshot write whole; coalescing, preferences and the acknowledgment are unchanged', () => {
+  const dir = tempDir('ntf-rv-extras');
+  const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me","inner":{"__proto__":["deep"],"toString":null}},"constructor":{"toString":[1,{"__proto__":{"x":false}}]},"futureField":{"labels":["original"],"n":null,"b":true,"list":[[1,2],{"k":"v"}]}}');
+  const expectedExtras = plain(special); // a JSON round-trip keeps the own "__proto__" key an own key
+  const extrasOf = (row) => { const o = {}; for (const k of Object.keys(row)) if (!['id', 'ts', 'audience', 'type', 'text', 'refId', 'read', 'repeatCount', 'groupKey', 'category', 'deferredPush', 'actionRequired'].includes(k)) Object.defineProperty(o, k, { value: row[k], enumerable: true, writable: true, configurable: true }); return plain(o); };
+  const legacy = JSON.parse(JSON.stringify({ ...ntf({ id: 'x' }), id: 'ntf-x', category: 'messages', text: 'Synthetic.', actionRequired: { deadline: NOW + HOUR, ackedAt: null, ackedBy: null } }).replace('"id":"ntf-x"', `${JSON.stringify(special).slice(1, -1)},"id":"ntf-x"`));
+  assert.ok(Object.hasOwn(legacy, '__proto__'), 'the fixture carries an own __proto__ key');
+  s6File(dir, { notifications: [legacy, ntf({ id: 'plain' })] });
+  const L = live(dir); L.save();
+  const held = L.notifications.byId('ntf-x');
+  assert.deepEqual(extrasOf(held), expectedExtras, 'the mirror carries every nested extra after the import');
+  // Export aliasing: an export is a detached copy; so is the next one.
+  const exported = L.notifications.exportRows()[0]; exported.futureField.labels.push('export-alias'); exported.__proto__.inner.__proto__.push('export-alias'); exported.futureField.list[0].push(3);
+  assert.deepEqual(extrasOf(held), expectedExtras, 'the mirror is detached from an export'); assert.deepEqual(extrasOf(L.notifications.exportRows()[0]), expectedExtras, 'a later export is detached from an earlier one');
+  assert.throws(() => { held.futureField.labels.push('view'); }, /written through its domain repository/, 'the view refuses a nested write');
+  // An aborted unit: an export edit inside it changes nothing; a repository write inside it is restored, the held view included.
+  assert.throws(() => L.store.unitOfWork(() => { L.notifications.exportRows()[0].futureField.labels.push('aborted-unit'); L.notifications.coalesce('ntf-x', { at: NOW }); assert.equal(held.repeatCount, 2); throw new Error('synthetic abort'); }, { snapshot: L.snapshot }), /synthetic abort/);
+  assert.deepEqual(extrasOf(held), expectedExtras); assert.equal(held.repeatCount, 1); assert.equal(L.notifications.pending(), 0);
+  // A real COMMIT failure of a unit that marks the row read: the held view shows the restored row, the extras intact.
+  L.store.sqlite.exec('CREATE TEMP TABLE rv_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE rv_child (parent_id TEXT NOT NULL REFERENCES rv_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER rv_commit AFTER UPDATE ON notifications BEGIN INSERT INTO rv_child (parent_id) VALUES (\'missing-on-purpose\'); END');
+  assert.throws(() => L.store.unitOfWork(() => { L.notifications.markRead('org_user', 'usr-1'); }, { snapshot: L.snapshot }), /FOREIGN KEY constraint failed/);
+  assert.equal(held.read, false); assert.deepEqual(extrasOf(held), expectedExtras); L.store.sqlite.exec('DROP TRIGGER rv_commit');
+  // Stored, reloaded (a restart), round-tripped through the snapshot dispatcher and the copy-only rollback blob: the same JSON.
+  const storedExtra = JSON.parse(rowsOf(dir, 'notifications', 'seq')[0].extra_json); assert.deepEqual(storedExtra, expectedExtras); assert.ok(Object.hasOwn(storedExtra, '__proto__'));
+  L.notifications.reload(); assert.deepEqual(extrasOf(L.notifications.byId('ntf-x')), expectedExtras, 'after a reload');
+  // Coalescing, the acknowledgment and the preferences are unchanged around a row with extras.
+  const c = L.notifications.findCoalescible({ audience: ORG_USER, type: 'message', text: 'Synthetic.', refId: 'chan-1', at: NOW }); assert.equal(c?.id, 'ntf-x', 'the coalescing scan still finds the row');
+  assert.deepEqual(L.notifications.ack('ntf-x', ORG_USER, { at: NOW + 1 }), { status: 'ok', ackedAt: NOW + 1, already: false }); assert.deepEqual(extrasOf(L.notifications.byId('ntf-x')), expectedExtras);
+  L.notifications.updatePrefs('org_user', 'usr-1', { categories: { mentions: false } }); assert.equal(L.notifications.prefsFor('org_user', 'usr-1').categories.mentions, false);
+  L.save(); L.close();
+  { const tool = openStore(dir); const snap = tool.load(); assert.deepEqual(extrasOf(snap.db.notifications[0]), expectedExtras); tool.save(snap); assert.deepEqual(extrasOf(tool.load().db.notifications[0]), expectedExtras, 'round-tripped through replace'); tool.sqlite.close(); }
+  { const s7a = tempDir('ntf-rv-extras-s7a'); rollbackDispatchesCopy(dbFile(dir), s7a, { now: NOW }); const out = tempDir('ntf-rv-extras-rb'); rollbackNotificationsCopy(dbFile(s7a), out, { now: NOW }); const o = openRaw(out); const back = JSON.parse(o.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value)[0]; o.close(); assert.deepEqual(extrasOf(back), expectedExtras, 'the rollback blob carries the same JSON'); rm(s7a, out); }
+  // Unsupported non-JSON values refuse the import and the snapshot write whole (nothing written, nothing retired).
+  const SECRET = 'SECRET-TEXT-RV4';
+  for (const [label, value] of [['a function', () => 1], ['an undefined inside an object', { x: undefined }], ['a bigint', 1n], ['a non-finite number', Number.POSITIVE_INFINITY], ['a class instance', new Date(0)]]) {
+    assert.throws(() => validateNotificationRows([ntf({ id: 'bad', text: SECRET, futureField: value })]), (e) => /NOTIFICATIONS_IMPORT_BLOCKED/.test(e.message) && /futureField.*cannot be stored as JSON/.test(e.message) && !e.message.includes(SECRET), label);
+  }
+  const bad = tempDir('ntf-rv-extras-bad'); s6File(bad, { notifications: [ntf({ id: 'ok' })] }); { const s = openRaw(bad); migrate(s); s.close(); }
+  { const tool = openStore(bad); const snap = tool.load(); const seq0 = tool.revision(); assert.throws(() => tool.save({ ...snap, db: { ...snap.db, notifications: [ntf({ id: 'bad', text: SECRET, futureField: { f: () => 1 } })] } }), (e) => /cannot be stored as JSON/.test(e.message) && !e.message.includes(SECRET)); assert.equal(tool.revision(), seq0); assert.deepEqual(tool.load().db.notifications.map((n) => n.id), ['ok']); tool.sqlite.close(); }
+  rm(dir, bad);
+});
+
 console.log(`\n${passed} notification checks passed`);

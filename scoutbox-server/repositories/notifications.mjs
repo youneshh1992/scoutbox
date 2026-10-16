@@ -107,7 +107,13 @@
  * not know are copied as own data properties (`Object.defineProperty`, never
  * assignment: an own "__proto__" key of legacy JSON is data, and assignment
  * would rewrite the prototype and drop it) at validation, storage, read,
- * export, snapshot and rollback. Nested objects whose shape the schema maps
+ * export, snapshot and rollback. UNKNOWN NESTED DATA IS DETACHED (review of
+ * ac50b60, the follow-up of the S7b finding-2 class): an unknown field is a
+ * prototype-safe JSON clone at ingress (import, snapshot replace), on export
+ * and in every transaction snapshot, so a returned export can never change
+ * the mirror and a nested edit inside a rolled-back unit never survives it; a
+ * value JSON cannot carry (undefined, a function, a symbol, a bigint, a
+ * non-finite number, a class instance) refuses the whole write by name. Nested objects whose shape the schema maps
  * to columns (the audience, the acknowledgment contract, a category map)
  * refuse unknown fields — the whole migration or snapshot write, before any
  * row is written or any blob retired — because a field dropped there would be
@@ -195,6 +201,29 @@ const CATEGORIES_SET = Object.freeze(Object.fromEntries(CATEGORY_NAMES.map((k) =
 const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 /** Set an own data property — never `obj[k] = v`, which for an own "__proto__" key of parsed JSON would rewrite the prototype and lose the field. */
 const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
+/**
+ * A DETACHED, prototype-safe copy of a JSON value (review of ac50b60 — the
+ * follow-up of the S7b finding 2 class, the same approach as
+ * repositories/dispatches.mjs, kept local to this repository): null, booleans,
+ * strings, finite numbers, arrays and plain objects, every own key copied with
+ * `setOwn` at every depth (an own "__proto__", "constructor" or "toString" key
+ * is data). Anything JSON cannot carry — undefined, a function, a symbol, a
+ * bigint, a non-finite number, a class instance — is refused by name, never
+ * dropped or nulled silently (`JSON.stringify` would). `{ value }` or `{ reason }`.
+ */
+function cloneJson(v, at) {
+  if (v === null || typeof v === 'string' || typeof v === 'boolean') return { value: v };
+  if (typeof v === 'number') return Number.isFinite(v) ? { value: v } : { reason: `${at} is a non-finite number and cannot be stored as JSON` };
+  if (Array.isArray(v)) { const out = []; for (let i = 0; i < v.length; i++) { const r = cloneJson(v[i], `${at}[${i}]`); if (r.reason) return r; out.push(r.value); } return { value: out }; }
+  if (typeof v === 'object') {
+    const proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null) return { reason: `${at} is not a plain object and cannot be stored as JSON` };
+    const out = {}; for (const k of Object.keys(v)) { const r = cloneJson(v[k], `${at}.${k}`); if (r.reason) return r; setOwn(out, k, r.value); } return { value: out };
+  }
+  return { reason: `${at} (${typeof v}) cannot be stored as JSON` };
+}
+/** The unknown own fields of a mirror row, each a detached copy (the mirror only ever holds values `cloneJson` accepted). */
+function cloneExtras(row) { const extra = {}; for (const k of Object.keys(row)) if (!KNOWN_KEYS.includes(k)) setOwn(extra, k, cloneJson(row[k], k).value); return extra; }
 
 // ------------------------------------------------------------------ validation (no coercion; every refusal names the reason, never the text)
 const KNOWN_KEYS = Object.freeze(['id', 'ts', 'audience', 'type', 'text', 'refId', 'read', 'repeatCount', 'groupKey', 'category', 'deferredPush', 'actionRequired']);
@@ -240,8 +269,7 @@ export function validateNotificationRow(raw) {
   let deferredPush = raw.deferredPush; if (deferredPush === undefined) { deferredPush = false; normalised.push('deferredPush'); } else if (typeof deferredPush !== 'boolean') return { ok: false, reason: 'deferredPush must be a boolean' };
   const act = actionOf(raw.actionRequired); if (act.reason) return { ok: false, reason: act.reason };
   const extra = {};
-  for (const k of Object.keys(raw)) if (!KNOWN_KEYS.includes(k)) setOwn(extra, k, raw[k]);
-  try { JSON.stringify(extra); } catch { return { ok: false, reason: 'an unknown field cannot be serialised' }; }
+  for (const k of Object.keys(raw)) if (!KNOWN_KEYS.includes(k)) { const c = cloneJson(raw[k], k); if (c.reason) return { ok: false, reason: c.reason }; setOwn(extra, k, c.value); }
   const row = { ...extra, id: raw.id, ts: raw.ts, audience: a.audience, type: raw.type, text: raw.text, refId, read, repeatCount, groupKey, category, deferredPush };
   if (act.action) row.actionRequired = act.action;
   return { ok: true, row, normalised, hasExtra: Object.keys(extra).length > 0 };
@@ -315,7 +343,7 @@ function rowFromDb(r) {
 }
 /** The insert parameters for a mirror row. */
 function rowParams(row) {
-  const extra = {}; for (const k of Object.keys(row)) if (!KNOWN_KEYS.includes(k)) setOwn(extra, k, row[k]);
+  const extra = cloneExtras(row);
   const a = row.actionRequired ?? null;
   return {
     id: row.id, occurred_at: row.ts, audience_kind: row.audience.kind, audience_id: row.audience.id, type: row.type, text: row.text, ref_id: row.refId, read: row.read ? 1 : 0, repeat_count: row.repeatCount,
@@ -323,8 +351,8 @@ function rowParams(row) {
     extra_json: Object.keys(extra).length ? JSON.stringify(extra) : null,
   };
 }
-/** A plain copy of a mirror row (the export / snapshot shape; nothing shared with the mirror). */
-const copyRow = (row) => { const c = { ...row, audience: { ...row.audience } }; if (row.actionRequired) c.actionRequired = { ...row.actionRequired }; return c; };
+/** A DETACHED copy of a mirror row (the export / snapshot shape; nothing shared with the mirror — unknown nested data cloned, review of ac50b60). */
+const copyRow = (row) => { const c = { ...row, audience: { ...row.audience } }; if (row.actionRequired) c.actionRequired = { ...row.actionRequired }; for (const k of Object.keys(row)) if (!KNOWN_KEYS.includes(k)) setOwn(c, k, cloneJson(row[k], k).value); return c; };
 const copyPref = (p) => ({ audienceKind: p.audienceKind, audienceId: p.audienceId, categories: { ...p.categories }, emailIntent: p.emailIntent, updatedAt: p.updatedAt });
 const prefKey = (kind, id) => `${kind}\u0000${id}`;
 
@@ -506,7 +534,7 @@ export function createNotificationsRepository({ sqlite, now = Date.now, nextId =
     for (const [k, v] of Object.entries(copy)) {
       if (k === 'actionRequired' && obj.actionRequired && v) { Object.assign(obj.actionRequired, v); continue; }
       if (k === 'categories' && obj.categories && v) { for (const c of Object.keys(obj.categories)) delete obj.categories[c]; Object.assign(obj.categories, v); continue; }
-      setOwn(obj, k, v);
+      setOwn(obj, k, KNOWN_KEYS.includes(k) || k === 'audienceKind' || k === 'audienceId' || k === 'emailIntent' || k === 'updatedAt' ? v : cloneJson(v, k).value); // unknown nested data: a fresh detached copy, never the snapshot's object
     }
   };
 

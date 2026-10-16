@@ -20,10 +20,13 @@ implementation `ba6956d`, the correction `7655bae` of the four findings its firs
 raised (§8.4), and `0641b2c`, the correction of the two participant-contract defects and the
 replay-coverage gap the second review raised (§8.5); §8.4 and §8.5 are kept as the dated history of
 those rounds, not as current status. What was built, the four compatibility corrections it honours
-and the one deliberate reading it records are in §8.3. **S7b: IMPLEMENTED on top of `dc4b559` (15 October
-2026; §9 as corrected in place by the review of `dc4b559`, §9.7 the implementation record) and
-CORRECTED for the three findings of the independent review of `26d492b` (§9.8) — PENDING
-INDEPENDENT ACCEPTANCE, not accepted, not authorised for deployment. S7c–S7d not started.** §§0–8.2
+and the one deliberate reading it records are in §8.3. **S7b: independently ACCEPTED for the bounded dispatch/attempt
+storage milestone and its three corrections at `ac50b60257b89387aa1dec44bad7f571e61aa74e`** (16 October
+2026; §9.9 holds the acceptance record and its limits — not production or deployment approval, not
+acceptance of the whole migration; §9.7 is what was built, §9.8 the correction round as dated history).
+**The notification-extras follow-up the `ac50b60` review confirmed is corrected in the commit this
+handoff carries (§9.10) — pending independent review. S7c: implementation plan PREPARED (§10), NOT
+IMPLEMENTED, no cutover authorised. S7d not started.** §§0–8.2
 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where the
 implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
 correction is marked in place. The exact blockers of the remaining sub-steps are in §8. Nothing
@@ -33,7 +36,8 @@ the org-deletion question; those stay with the Founder.
 Sections: 0 summary · 1 ownership and data mapping · 2 the dependency graph · 3 transaction and
 delivery boundaries · 4 privacy, permissions and deletion · 5 preflight and cutover · 6 backup and
 rollback · 7 tests, acceptance and the performance objective · 8 the dependency table and the
-bounded recommendation.
+bounded recommendation · 9 S7b (design, implementation, corrections, acceptance, the notification
+follow-up) · 10 the S7c implementation plan (prepared, not implemented).
 
 ---
 
@@ -1508,6 +1512,457 @@ semantics, no shadow blob, the coupled saves, the acknowledgment unit, the read-
 copy-only rollback to `0641b2c`, option A without cascade or cleanup, and the documented
 pending-save retry limitation (not redesigned). Verification of the corrected tree is in the handoff
 note and its logs.
+
+### 9.9 Independent acceptance of S7b — `ac50b60257b89387aa1dec44bad7f571e61aa74e` (16 October 2026)
+
+The independent review of the correction handoff `scoutbox-s7b-fix1-handoff-ac50b60.zip` (SHA-256
+`413fa69f067adbff7014ff70549db1cfd872dd5f27f4dd4e59626b954087c5f9`, 477 manifest entries verified)
+**accepts S7b at `ac50b60` for the bounded dispatch/attempt storage milestone and its three
+corrections**, subject to its validation and limits. What the reviewer verified on real Node v24.19.0
+(offline `npm ci --ignore-scripts` in both projects): backend `npm test` exit 0, 23 suites / 324
+checks (after local-network permission; the accepted `2d7ddeb` pre-S7a and `0641b2c` pre-S7b servers
+booted the rollback copies with equivalent reads and accepted writes); Player `npm test -- --runInBand`
+exit 0, 4 suites / 41 tests; `review-26d492b-reproductions.mjs` unchanged exit 0 (4 CORRECT, the callback
+comparison against the unmodified `dc4b559` handler); `review-ba6956d-reproductions.mjs` and
+`review-7655bae-reproductions.mjs` unchanged exit 0 (3 CORRECT each); the packaged reviewer scripts
+byte-identical to the originals. **Limits stated by the review:** not deployment approval and not
+acceptance of the whole migration; real older-Node checks skipped (`SCOUTBOX_TEST_NODE_BINS` unset);
+browser suites, the demo rebuild, the wider E2E battery, the standalone compatibility probe and
+`m13E2E` not independently rerun (the sender's runs are evidence, not independent executions); the
+staged-save retry limitation (§9.7 reading iii) and the in-memory notification external-effect crash
+window (§8.6) remain documented. S7b retains orphan dispatches without a notification cascade; the
+acceptance decides no retention policy. §9.7 is what was built, §9.8 the correction round, both dated
+history; this section is the current status.
+
+**Separately confirmed by the same review:** the notification-extras isolation defect §9.8 reported
+for the reviewer (the accepted S7a repository's shallow copies of unknown nested fields). The
+reviewer's `review-ac50b60-notification-isolation.mjs` reproduces it on `ac50b60` (an export mutation
+changes the mirror; an export mutation inside an aborted unit survives the rollback; the stored
+`extra_json` keeps `['original']`). It is an existing S7a defect, not a regression of the corrected
+dispatch repository; its correction is §9.10.
+
+### 9.10 Notification-extras follow-up — corrected (16 October 2026; the commit this handoff carries; **pending independent review**)
+
+`repositories/notifications.mjs` now detaches unknown nested data exactly as the dispatch repository
+does, with a local `cloneJson` (no cross-project helper): a prototype-safe JSON clone at ingress
+(`validateNotificationRow`, so the legacy import and the snapshot replace never share the caller's
+objects), at storage (`rowParams`), on export and in every transaction snapshot (`copyRow`), and on
+restore (`restoreInto`, which assigns a fresh clone of the snapshot's copy). Own `"__proto__"`,
+`"constructor"` and `"toString"` keys survive at every depth with arrays, nulls and booleans; a value
+JSON cannot carry (undefined, a function, a symbol, a bigint, a non-finite number, a class instance)
+refuses the import or the snapshot write whole, by name, instead of being dropped or nulled silently
+by `JSON.stringify`. The public API is unchanged (`create` still takes known arguments only; no
+extras argument was added); coalescing, the acknowledgment, preferences, mandatory categories, effect
+staging and the replay cursor are untouched (the existing S7a suites run unchanged). The reviewer's
+script, run unchanged: on `ac50b60` exit 1 (`exportAliased: true, leakedRollback: true`, mirror
+`['original','outside-write','aborted-unit']`, stored `['original']`); on the corrected tree exit 0
+(`CORRECT`, mirror and stored `['original']`). The failing-first regression (`testNotifications.mjs`
+"review of ac50b60") was recorded failing on `ac50b60` before the change and covers export aliasing,
+a second export, nested prototype-like keys, a nested write through the view, a rolled-back unit
+(export edit and repository write), a real COMMIT failure, the stored JSON, a reload, the snapshot
+dispatcher, the copy-only rollback blob, the non-JSON refusals at import and at snapshot write, and
+the unchanged coalescing / acknowledgment / preferences around a row with extras.
+
+---
+
+## 10. S7c implementation plan — `outbox`, `push_log`, `push_tokens` (prepared 16 October 2026 on `ac50b60`; design and a synthetic probe only; **PREPARED, NOT IMPLEMENTED — no table, repository, migration or rollback tool exists, nothing is registered, no cutover is authorised**)
+
+This is the one current plan for the third S7 sub-step. It reuses the survey of §1.6–§1.9 (the
+two outbox shapes, the push log, the push tokens, the persistence paths), the boundary rules of
+§3.2, the cutover rules of §5 and the rollback design of §6.2, and the pattern S7b built (§9.3–§9.4,
+§9.7) — it does not repeat them; where this section states something more precisely than an
+earlier one, this section is current. The storage move keeps every observable behaviour of the
+current build; the behaviour questions that were already flagged (the staff push identity, the six
+plain-code mail sites, retention) are carried through unchanged and listed in §10.3, not decided
+here. Line numbers in this section are those of **`ac50b60`** (`S:` server.mjs, `AD:` adapters.mjs,
+`DL:` m13/delivery.mjs, `EN:` m13/enterprise.mjs, `ORG:` m14/organisations.mjs, `CR:`
+m23/contactRoutes.mjs, `IX:` repositories/index.mjs). The probe that produced the observations
+cited as "probe" is `scoutbox-server/scripts/probeS7cOutboxPush.mjs` (§10.6; outside `npm test`; its
+JSON is in the handoff package).
+
+### 10.1 The accepted row shapes, and every writer and reader (current code)
+
+**Outbox — two writers, two literals, told apart structurally.**
+
+| Shape | Literal (key order as written) | Writer | Persisted by |
+|---|---|---|---|
+| (a) mailer | `{id:'mail-N', ts, to, subject, text, transport:'sendgrid'\|'dev-outbox', delivered}` (AD:90; pushed AD:95 **before** the provider call; `delivered` is `!live` at creation and, on the live transport, overwritten on the same object by `res.ok` or `false` after the `fetch` settles, AD:108–110) | `createMailer.send`, called from nine sites: S:1335 (guardian sign-up code), S:3165 (club e-mail challenge — **the only site passing `secrets`**, S:3169), S:3916 (reference request), ORG:236, 533, 717, 918, CR:521, EN:88 | the route's own `persistNow()` in the same save as the business row (EN:89; ORG:536, 718, 920; CR:544 — and a **second** `persistNow()` when the mail promise settles, writing `contact.emailCopy = {state, to:'guardian', outboxId, at}` CR:546–551), or the debounced `persist()` (S:1335 has none of its own and lands with the save `nextId` schedules; S:3171 calls `persist()`; S:3916 is `void`) |
+| (b) delivery centre | `{id:'mail-N', at, channel, to, text (first 300 characters of the notification text), providerMessageId:'fm_<16 hex>', provider:'local-fake'}` (DL:50) | `fakeSend` (DL:44–52), called only by the sweep (DL:130) for a due `queued`/`retrying`/`held_quiet_hours` external dispatch; `in_app` rows are created `delivered` (DL:108) and never pass through it, so `channel` is `'email'` today | the sweep's `persistNow()` (DL:151, when it changed anything) — the same save as the dispatch row and its attempt (S7b; probe "outbox (b)": `sameRevisionAsDispatchRow: true`) |
+
+Observed on the probe's file (4 rows, 3 (a) + 1 (b)): the key sets are exactly the two literals;
+a field a shape does not have is **absent** (no `channel`/`providerMessageId` key on (a), no
+`subject`/`delivered` key on (b)), never `null`; no value is `null` or `undefined` anywhere; every
+row has a non-empty `to` (every site passes an address it validated or read from a record; ORG:717
+and CR:519 guard on the address existing); `delivered` is `true` on every (a) row (dev transport);
+ids are unique with a strictly increasing numeric suffix minted by `nextId` (one counter for every
+collection, so `mail-N` numbers are sparse); **string order of the ids is not array order in general**
+(`mail-999` sorts after `mail-1000`) and `ts`/`at` may tie (nothing forbids it) — **array position
+is the only total order**, read newest-first by `/admin/outbox` (S:4413) and counted by
+`/admin/overview` (S:4396). Shape (a) is identified by `ts`+`subject`+`transport` present and
+`at`+`channel`+`provider` absent, shape (b) by the reverse; an entry matching both or neither is
+unmapped (§5.3). The S6a contract observed through the probe: the persisted (a) row of the
+challenge carries `OUTBOX_SECRET_PLACEHOLDER`; `/admin/outbox` serves the full text from the mailer's
+process memory before a restart (the same row, only `text` differs) and the placeholder after it;
+the other five code-bearing sites persist the code in clear (probe "outbox (a1)":
+`codeInPersistedText: true` — the known defect, §1.6, carried through).
+
+**Push log — one writer, one literal.** `{id:'push-N', ts, audience:{kind,id}, title:'ScoutBox',
+body, transport:'expo'|'dev-log'}` (AD:126; pushed AD:127 **before** any Expo call, whether or not
+a token matches), written only by `createPushSender.send`, called only from `notify` (S:922) through
+`notifications.afterDurable` when `deferredPush` is false — i.e. **after the COMMIT of the save that
+carried the notification row**, by the effect mechanism S7a's correction introduced (§8.4). `body`
+is the notification's `text`, which the notification repository has already required to be a string
+(repositories/notifications.mjs:631) — a push row never carries a non-string body. The audience is
+the `{kind, id}` the repository validated (`audienceOf`, notifications.mjs:233–239: both non-empty
+strings, nothing else, **kind open**). Persisted by whatever save comes next (§10.2). Read by
+`/admin/push-log` (S:4414, `slice(-200).reverse()` — the last 200 by array position, newest first)
+and counted by `/admin/overview` (S:4397). A coalesced repeat writes no push row (S7a; probe:
+`rowsAfterSecondMessage: 0`). Key set observed: exactly the literal; audience kinds observed
+`guardian`, `org_user`, `player`; no current `notify` call site passes another kind (grep of
+`notify(` at `ac50b60`).
+
+**Push tokens — one writer, one literal, a natural key the code enforces by rewriting the array.**
+`POST /push/register` (S:4022–4031): `db.pushTokens = db.pushTokens.filter(not the same
+(kind, refId, token))` then `push({kind: session.kind, refId: session.refId, token, ts})`, then
+`persist()`. `kind` is the session kind — `player` (S:1254, S:4015), `guardian` (S:1342), `org`
+(S:1851, S:1970, EN:122, EN:321) with `refId` = **the organisation's id**, `ts_reviewer`
+(m25/index.mjs:129); nothing else creates a session. Observed (probe "push tokens"): the same device
+token under a player, a guardian and an org session is three rows; re-registering an existing triple
+keeps the count, updates `ts` and **moves the row to the end of the array** (position 0 → 3) — array
+order is "last registration" order, not first; the org row is `('org', 'org-eastport')` while the
+staff push rows it would serve carry `('org_user', <user id>)`, so under the sender's filter (AD:131,
+`t.kind === audience.kind && t.refId === audience.id`) the one staff push row on the file matches
+**0** tokens (defect 10 of the schema document, §1.8, carried through). **The route accepts any truthy
+JSON value as a token** (`if (!token)`, S:4026): a number and an object were both answered 201 and
+stored as they came (probe "non-string input": stored token types `number`, `object`, `string`) —
+JSON input the current build accepts that no `TEXT` column can hold losslessly (§10.4).
+
+**Consumers audited (startup, deletion, export, backup, old-build rollback).**
+
+- *Startup:* the containers are `db.outbox ??= []`, `db.pushLog ??= []`, `db.pushTokens ??= []`
+  (S:279–281) and the seed's empty arrays (seed.mjs:485–487); after cutover these become the
+  repository's read-only views, as `db.dispatches` did (§9.7), and the stale-array rule of §5.1
+  applies (a non-empty array at attach that was not just imported is reported as a count and
+  dropped).
+- *Deletion:* `deletePlayerData` (S:4220–4276) and the guardian child deletion touch **none** of the
+  three (probe "deletion": counts unchanged; the deleted player's 2 token rows and 2 push rows stay;
+  the revoked session can no longer register). `exportPlayer` (S:4278) exports none of them.
+- *Backup:* `POST /admin/backup` spreads `db` (EN:475) — today the three arrays go out as blobs;
+  after cutover they are exported explicitly through the repositories' `exportRows()` as
+  `dispatches` is (EN:475), in stored form (the withheld text, never the dev full text).
+- *Restore:* a boot on a `db.json` → the legacy import writes the three collections through the
+  migration's import (§5.1; ST:356–380); a restore of a post-cutover backup goes through the same
+  import from the stored shape (§6.1).
+- *Store contract:* `outbox` (storeContract.mjs:124), `pushLog` (:139), `pushTokens` (:140) are
+  module/core entries removed at cutover, as S6a–S7b did.
+- *Snapshot dispatcher:* `readTableBacked` / the per-table `replace` (IX:87–97, 171) gain the three
+  tables; a snapshot **omitting** a collection leaves its table untouched (the existing rule,
+  IX:171 `present.includes(table.name)`), a snapshot carrying an empty array empties it.
+- *Dependants by reference:* m23's `contact.emailCopy.outboxId` (CR:546, 551) names an outbox
+  row by id — a reference written in a later save than the row itself (plan §S8 "contacts' outbox
+  copies"); S7c keeps the id and the timing, so the reference keeps resolving exactly as today.
+- *Old-build rollback:* the copy-only tool of §10.5 writes the three blobs back in the old literals;
+  the `ac50b60` build (S7b accepted) reads them.
+
+### 10.2 Where each write commits, relative to the business action, the dispatch rows, the notification effects and the remaining blob bookkeeping
+
+The server attaches every S7 repository in **staged** mode (§9.7): a repository mutation is applied
+to the mirror at once and its SQL is queued into the next save (`persistNow()` or the debounced
+`persist()`), or joined into the open unit of work. S7c uses the same mode for the three new
+repositories, so **the save that carries a row is the save that carries the blob entry today** —
+the timing of every path below is preserved, only the storage changes.
+
+| Path (current, observed) | After S7c (proposed) |
+|---|---|
+| **Mail from a route** (nine sites): the mailer pushes the (a) record synchronously, the provider call runs afterwards (never inside a unit, §3.2), the route's `persistNow()` saves the record with the business row in one revision (probe "outbox (a2)": the invite row and its mail row in revision 2 → 3), or the debounced save carries it (probe "outbox (a1)": not in the database at the response, landed with the next revision). The live transport's `record.delivered = res.ok` mutates the already-pushed object and lands with whatever save follows. | `createMailer.send` calls `outbox.append(record)` (staged INSERT, same save as today) and, on the live transport only, `outbox.markDelivered(id, ok)` after the `fetch` settles (staged UPDATE, the next save — as the mutated object did). `secrets` withholding, `devDeliveries` and the `/admin/outbox` read-time merge stay in the mailer and the route, unchanged (§3.2 last bullet). No mailer call site changes. |
+| **Mail from the sweep** (b): `fakeSend` pushes the record inside the sweep; the sweep's `persistNow()` commits it with the dispatch row, the attempt, the status patch, the fail-inject decrement and the ops/webhook rows in one revision (S7b §9.7; probe: `sameRevisionAsDispatchRow: true`). | `fakeSend` calls `outbox.append(record)` — staged into the same save as the dispatch repository's rows. One revision, as today. |
+| **Push log**: `notify` creates the notification row (staged) and registers `pushSender.send` as an after-durable effect; the route's `persistNow()` (S:1016 for a message) commits the row; the effect then pushes the push record into memory. **It is in `/admin/push-log` at once but in no save yet** (probe "push log timing": 1 row in memory, 0 in the database at the response). Nothing schedules a save for it: it rides on the next save by anybody — on the probe's file the sweep's `persistNow()` 318 ms later (the save that created the notification's 2 dispatch rows; the sweep runs every 60 s in production, DL:304, and a new notification always gives it rows to create, DL:99–117, so it saves), otherwise any later route. | `createPushSender.send` calls `pushLog.append(record)` — staged into the next save, exactly as today. **The dependency is stated, not hidden:** the push row is written by an effect that runs *after* the notification's COMMIT, so it can never be in the notification's save; it is durable with a **later** save and is never reported durable with the first. Its guarantee: durable with the next save, which under normal operation is at most the sweep interval away (≤ 60 s) and usually the next request; a crash in that window loses the push-log row (an audit record of a push that was already handed to the transport — the push is not re-sent, the row is not reconstructed; the notification row is intact). This is an at-most-once audit of an at-least-once-per-commit effect, not exactly-once delivery. **D1 (§10.7)** asks whether the sender should call the ordinary debounced `persist()` after appending, bounding the window to 2 s at no new mechanism. |
+| **Push tokens**: filter-then-push on the array, then the debounced `persist()`. | `pushTokens.register({kind, refId, token, ts})` = staged `DELETE WHERE (ref_kind, ref_id, token) = ?` + `INSERT` with a **new `seq`** (so the view's order stays "last registration last", byte-for-byte the array behaviour the probe recorded), then the route's `persist()` as today. |
+| **Remaining blob bookkeeping**: every save still upserts every non-table-backed blob (ST:177–183). | The three collections leave the blob save (the §7.3 phase "S7c: `pushLog`/`outbox` leave it"); the store's blob write is otherwise unchanged; the sweep's `opsEvents`/`webhookDeliveries` blobs and the routes' other blobs stay in the same save as the new rows (the §3.2 correction: coupled blob writes inside the same commit). |
+
+Nothing here moves an external effect before a COMMIT: the mailer's provider call and the push
+remain outside every transaction (§3.2 "network calls never inside a SQLite transaction"; the store
+refuses async work inside a unit, ST:236–245). The accepted after-durable boundary (S7a §8.4) is
+untouched: the push still runs after the notification's save committed.
+
+### 10.3 What S7c preserves, what it carries through unchanged, and the one real conflict
+
+- **No staff push re-keying.** Tokens stay `('org', <org id>)` as the route writes them; the sender's
+  filter stays `(audience.kind, audience.id)`; staff pushes keep matching no token (probe: 0 of 1).
+  The re-keying is the behaviour change the plan's S7 objective describes and §1.8/§6.2 keep out of
+  the storage move; it needs the registration route to resolve the staff user and a decision on the
+  existing `org` rows. Carried through.
+- **No audience change, no retention cleanup, no cascade.** Deletion leaves all three collections
+  as today (probe "deletion"); `/admin/push-log`'s 200-row window stays a read-time slice; nothing
+  prunes the outbox. The §4.4 retention items stay open.
+- **No provider change.** `transport`/`provider` values are written by the adapters as today;
+  `delivered` keeps its meaning (the provider's synchronous answer or `!live`, §3.2); the unread
+  `deliveryFailInject.push` counter stays unread.
+- **No redaction or erasure of historical mail or codes.** The six plain-code sites (§1.6) keep
+  writing what they write and every historical row is imported byte-for-byte; the migration never
+  reads `text` for a diagnostic and never rewrites it. The S6a withholding at S:3165 is preserved as
+  it is (probe "outbox (a3)", "restart"). Whether to mask or cleanse the other five is the owner
+  decision §8.1 records; S7c does not take it.
+- **No constraint current data does not satisfy.** The structural constraints kept in §10.4 are the
+  ones the writers already guarantee (and the dry run on the real file reports any row that fails
+  one as a refusal, never a coercion); the vocabulary CHECKs of the proposed DDL are dropped
+  (§10.4 says which and why).
+- **The one actual conflict, identified before choosing:** the registration route accepts a non-string
+  token (probe: a number and an object answered 201 and were stored as JSON values). A `TEXT`
+  column cannot hold either losslessly — a STRICT `TEXT` column **silently converts** a bound number
+  (node binds every number as a double: `424242` is stored as the text `'424242.0'`, probe
+  "executed SQL") and refuses an object. Preserving today's semantics would mean an `ANY` column or
+  a JSON-encoded token, both of which change what the sender hands to Expo on the way back. The plan
+  therefore (i) refuses the import whole for a legacy row whose `token` is not a non-empty string
+  (naming the row's position and kind, never the value) and (ii) proposes that the route answer 400
+  `TOKEN_INVALID` for a non-string token after cutover — a small, visible behaviour change that
+  needs the Founder's yes (**D2**). Until D2 is taken, S7c is not implementable as specified here.
+- **No other implementation blocker found.** The staged repository, the snapshot dispatcher, the
+  effect mechanism and the rollback-tool chain all exist; S7c adds three tables to the same
+  machinery.
+
+### 10.4 Lossless mappings, detached extras, ordering keys, the constraints that are real, and text-free refusal
+
+**The DDL this plan proposes** (supersedes SQL03:440–512 — the file is not touched until
+implementation, as S7b did; the schema test then checks it):
+
+```sql
+CREATE TABLE outbox (
+  seq                 INTEGER PRIMARY KEY,            -- insertion order (array position); never a client value
+  id                  TEXT NOT NULL UNIQUE,           -- 'mail-N'
+  source              TEXT NOT NULL CHECK (source IN ('mailer', 'delivery')),  -- shape (a) | shape (b): structural, decides the way back
+  created_at          INTEGER NOT NULL,               -- ts (a) | at (b)
+  to_address          TEXT NOT NULL,                  -- personal data
+  subject             TEXT,                           -- (a) only; NULL for (b)
+  text                TEXT NOT NULL,                  -- withheld text for the one `secrets` site; as written elsewhere
+  transport           TEXT NOT NULL,                  -- transport (a) | provider (b); no vocabulary CHECK
+  delivered           INTEGER NOT NULL DEFAULT 0 CHECK (delivered IN (0, 1)),  -- (a) boolean → 0/1; (b) always 0 (the key is absent on the way back)
+  channel             TEXT,                           -- (b) only; NULL for (a); no vocabulary CHECK
+  provider_message_id TEXT,                           -- (b) only
+  extra_json          TEXT                            -- unknown keys, detached (S5/S7a/S7b precedent); NULL when none
+) STRICT;
+CREATE INDEX outbox_created_at ON outbox(created_at);
+
+CREATE TABLE push_log (
+  seq           INTEGER PRIMARY KEY,
+  id            TEXT NOT NULL UNIQUE,                 -- 'push-N'
+  created_at    INTEGER NOT NULL,                     -- ts
+  audience_kind TEXT NOT NULL,                        -- open, as notifications.audience_kind is (S7a)
+  audience_id   TEXT NOT NULL,                        -- polymorphic, no foreign key
+  title         TEXT NOT NULL,
+  body          TEXT NOT NULL,
+  transport     TEXT NOT NULL,                        -- no vocabulary CHECK
+  extra_json    TEXT
+) STRICT;
+CREATE INDEX push_log_created_at ON push_log(created_at);
+
+CREATE TABLE push_tokens (
+  seq           INTEGER PRIMARY KEY,                  -- "last registration last" (the array's order)
+  ref_kind      TEXT NOT NULL,                        -- the session kind as written: player | guardian | org | ts_reviewer today; no CHECK
+  ref_id        TEXT NOT NULL,
+  token         TEXT NOT NULL,                        -- device identifier (personal data), in clear as today
+  registered_at INTEGER NOT NULL,                     -- ts
+  extra_json    TEXT,
+  UNIQUE (ref_kind, ref_id, token)
+) STRICT;
+```
+
+- **Kept (structural, already guaranteed by the writers, verified by the probe's executed SQL):**
+  every `NOT NULL`; `delivered IN (0,1)`; `UNIQUE id` on both logs; `UNIQUE (ref_kind, ref_id,
+  token)` — the exact natural key the route rewrites the array by (`push_tokens duplicate triple`
+  refused, `same token, other ref_kind` admitted, as the code does); `source IN ('mailer','delivery')`
+  — a two-value structural discriminator the migration itself writes, not a vocabulary a writer may
+  grow.
+- **Dropped from the proposed DDL (vocabularies):** `transport IN (…)` on both logs, `channel IN
+  ('email')`, `audience_kind IN (…)`, `ref_kind IN (…)`. Reason: the S7a/S7b rule — the notification
+  audience kind is open (notifications.mjs:233–239) and a push row copies it, so `audience_kind
+  IN (player, guardian, org_user)` would refuse a kind the accepted repository admits (probe:
+  `'other'` refused by the CHECK); `ref_kind IN (…)` would refuse `'org_user'` (probe) — exactly the
+  value a future re-keying writes — so the vocabulary would force a schema change on a behaviour
+  change; `transport`/`channel` are adapter literals that an added provider or channel would extend.
+  None of these drops admits anything the current writers do not already write; the dry run reports
+  the observed vocabularies as counts.
+- **NULL behaviour, with the actual predicates (probe "executed SQL", in-memory SQLite):** a CHECK
+  whose result is NULL **passes** — `channel IS NULL OR channel IN ('email')` admitted a NULL
+  channel and refused `'sms'`; what refuses an absent value is `NOT NULL`: an explicit NULL
+  `delivered` (a shape-(b) row mapped naively) failed `NOT NULL constraint failed: outbox.delivered`
+  while omitting the column took `DEFAULT 0` — **the mapping writes `0`, never NULL, for (b)**;
+  NULL `transport`, `to_address`, `audience_kind`, `body`, `token` are each refused by their `NOT
+  NULL`; `delivered = 2` is refused by the CHECK; a duplicate `id` by `UNIQUE`. The STRICT `TEXT`
+  conversion of a bound number (§10.3) is why non-string input is refused by the import's own
+  validation, before SQLite sees it.
+- **The mapping, verified lossless (probe "JavaScript mapping": 4 + 4 + 4 rows byte-identical, key
+  order included):** (a) `{id, ts, to, subject, text, transport, delivered}` ⇄ `source='mailer'`,
+  `created_at=ts`, `delivered = 0/1`, `channel = NULL`, `provider_message_id = NULL`; (b) `{id, at,
+  channel, to, text, providerMessageId, provider}` ⇄ `source='delivery'`, `created_at=at`,
+  `transport=provider`, `subject=NULL`, `delivered=0`; the way back rebuilds **exactly the source
+  shape's keys in the writer's literal order** (no `subject`/`delivered` on a (b) row, no
+  `channel`/`providerMessageId` on an (a) row), because the old build and every reader compare whole
+  objects. Push log: `{id, ts, audience:{kind,id}, title, body, transport}` ⇄ the six columns.
+  Tokens: `{kind, refId, token, ts}` ⇄ the four columns, `seq` order = array order.
+- **Accepted input, per field (no coercion; a refusal names the collection, the position, the id
+  where there is one and a reason code — never `to`, `text`, `token` or `body`):** `id` non-empty
+  string, unique in its collection; `ts`/`at` a safe integer (both present or neither present →
+  unmapped shape); `to`/`to_address` a non-empty string; `subject` a string ((a)); `text` a string;
+  `transport`/`provider` a non-empty string; `delivered` a boolean ((a); absent on (b) → 0); `channel`
+  a non-empty string ((b)); `providerMessageId` a non-empty string ((b)); push `audience` exactly
+  `{kind, id}` with both non-empty strings (the S7a rule, an extra audience field refuses); `title`,
+  `body` strings; token `kind`, `refId`, `token` non-empty strings, `ts` a safe integer, the triple
+  unique. **Unknown keys** on any entry go to `extra_json` through the prototype-safe JSON clone
+  (dispatches.mjs `cloneJson`, now also notifications.mjs §9.10): detached at ingress, export and
+  snapshot; own `"__proto__"`/`"constructor"`/`"toString"` keys preserved at every depth; a value
+  JSON cannot carry (`undefined`, a function, a symbol, a bigint, a non-finite number, a class
+  instance) refuses the write whole, by name. Exported views list extras first, then the known keys,
+  as S7b does.
+- **JSON input versus non-JSON in-memory state a current writer can produce:** the live mailer's
+  `record.delivered = res.ok` is a boolean; a rejected `fetch` writes `false`; `ts`/`at` come from
+  `Date.now()`; the push body is the validated string; the only non-JSON-safe or non-TEXT value a
+  writer can produce today is the token (any truthy JSON, §10.3) — identified, not coerced (D2). No
+  non-finite number can reach these collections (unlike the S7b callback clock), so no REAL/`ANY`
+  column is needed.
+
+### 10.5 Migration identifier, atomic import, authority, snapshots, failure recovery, copy-only rollback and the old-build proof
+
+- **Identifier:** the next unused is **`0011`** (`repositories/migrations/` ends at
+  `0010_dispatches.mjs`; `DATA_MIGRATIONS` IX:49) → **`0011_outbox_push`** — **not assigned, not
+  registered** by this plan; the plan's `0011_scouting` placeholder (plan §S9) moves to the next free
+  number when that stage is approved, as `0010_recruitment` did for `0010_dispatches` (§9.4). The
+  S7b rollback tool already refuses a file carrying a later id (`LATER_SCHEMA` for `0011_future_step`,
+  testDispatches.mjs) — the real `0011_outbox_push` will be refused by it the same way, and the
+  S7c tool will know it.
+- **Atomic import (one transaction, the 0009/0010 pattern):** create the three tables and indexes;
+  read the `outbox`, `pushLog` and `pushTokens` blobs **from the file**; for each: **absent** → import
+  nothing; **empty array** → nothing; **non-array / non-JSON** → refuse; validate every entry (§10.4)
+  collecting problems and refuse the whole step on the first non-empty list
+  (`OUTBOX_PUSH_IMPORT_BLOCKED`, with `{collection, position, id?, code}` entries only); insert in
+  array order (`seq`); write `meta.outboxPushCutover` = counts only (`outbox: {imported, bySource:
+  {mailer, delivery}, withExtraFields}`, `pushLog: {imported, byAudienceKind}`, `pushTokens:
+  {imported, byKind}`); delete the three blob rows. A refusal leaves the blobs, the file and `saveSeq`
+  untouched and the previous build still boots it (§5.1, §5.3).
+- **Authority:** `0011_outbox_push` in `data_migrations` — never the tables' existence or row
+  counts; the record without the tables or the tables without the record → `UNEXPECTED_SCHEMA` at
+  boot (§5.1). A stale in-memory array at attach (the containers S:279–281, the seed's, a restored
+  pre-S7c backup's blob just imported) is dropped and its blob row deleted; a non-empty array not
+  just imported is reported as a count (the S7a rule).
+- **Snapshot writes** (restore, tools, the persistence suites): the dispatcher validates every entry
+  of each **present** collection, rewrites that table in array order inside the caller's transaction,
+  and refuses the whole write on the first problem; a collection **omitted** from the snapshot leaves
+  its table untouched (IX:171, the existing rule), an empty array empties it; **final-state
+  validation** checks only what the schema enforces (unique ids, the unique triple) — nothing
+  cross-table, because none of the three references another table. A backup from any build restores
+  through 0011 with orders intact; the exported outbox rows carry the withheld text (§6.1).
+- **Failure recovery:** boot after a crash mid-migration finds the pre-cutover file (no record,
+  blobs intact) or the post-cutover file (record, tables, blob rows gone), never a mixture (one
+  transaction; the 0007/0008 SIGKILL-between-steps tests are reused, §5.4). A failed save after
+  cutover rolls back every staged row and the mirror (S7b's owned-transaction restore; the staged
+  retry limitation of §9.7 reading iii applies unchanged: a failed `persistNow()` schedules no
+  retry, the next save by anybody lands the pending rows).
+- **Copy-only rollback to the accepted `ac50b60` build:** `repositories/outboxPushRollback.mjs` +
+  `scripts/outboxPushRollback.mjs` (`npm run rollback:outbox-push -- <data-dir> <fresh-empty-dir>`),
+  the S7b tool's structure: open read-only, `VACUUM INTO` a copy; `KNOWN_MIGRATIONS` = the S7b
+  tool's list + `0011_outbox_push`, any other id → `LATER_SCHEMA`; `NOT_CUT_OVER`, `OUTPUT_NOT_EMPTY`,
+  `UNEXPECTED_SCHEMA` as before; in one transaction write every outbox row back as its **source
+  shape's literal in the writer's key order** (`extra_json` keys spread first), every push row as
+  the sender literal, every token as the route literal, each blob in `seq` order; drop the three
+  tables; remove the `0011` record and `meta.outboxPushCutover`; advance `saveSeq`;
+  `foreign_key_check`; VACUUM; revalidate (tables gone, record gone, blob counts equal the table
+  counts, every untouched table byte-identical). **Every post-cutover mail, push and token row and
+  every unrelated record is retained.** The chain then continues: the S7b tool rolls the copy to
+  `0641b2c`, the S7a tool to `812e13b`, and so on.
+- **Old-build boot/write proof (an actual old server, as S7a/S7b):** `SCOUTBOX_PRE_S7C_SERVER`
+  pointing at an `ac50b60` checkout boots the rolled-back copy (its log carries no `0011`),
+  `GET /admin/outbox` and `GET /admin/push-log` return the same ids in the same order as the S7c
+  build did, `/admin/overview` the same counts; a mail sent and a token registered on the old build
+  land in the blobs; the S7c build then re-upgrades the file (0011 import from the blobs) with every
+  row and order intact. When the old checkout is unavailable the gate reports the skip, as before.
+
+### 10.6 Synthetic compatibility probe — results (`scripts/probeS7cOutboxPush.mjs`, 16 October 2026, Node v22.22.2, real server on a temporary directory, second read-only connection; the JSON is in the handoff package)
+
+| Observation | Result on `ac50b60` (+ the §9.10 correction) | Classification |
+|---|---|---|
+| Outbox shape (a), three routes | guardian sign-up: `{id, ts, to, subject, text, transport, delivered}`, not in the database at the response, landed with the next revision (debounced); the persisted text contains the one-time code; org invite: same shape, committed by the route's `persistNow()` in the same revision as the invite row (2 → 3); club challenge: the persisted text carries the placeholder, `/admin/outbox` serves the full text before a restart (same row, only `text` differs) and the placeholder after | current behaviour, preserved (staged append = same save; the S6a contract untouched) |
+| Outbox shape (b), the sweep | `{id, at, channel, to, text, providerMessageId, provider}` with `text` = the first ≤ 300 characters of the notification text, written in the same revision as the dispatch row whose `provider_message_id` it carries (1 row) | current behaviour, preserved |
+| Outbox collection | 4 rows; two key sets; absent keys absent, nothing `null`/`undefined`; every row has `to`; ids unique with a monotonic numeric suffix; 0 timestamp ties here with no rule against them; admin view newest-first by array position | `seq` is the ordering key; `source` the discriminator (JavaScript mapping) |
+| Push-log timing | notification row committed at the response (revision 10, 0 dispatch rows yet); 1 push row in memory and 0 in the database at the response; landed 318 ms later with revision 11 — the sweep's save that created the notification's 2 dispatch rows (400 ms sweep under `M13_FAST_RETRY`; 60 s in production); the row's `body` equals the notification text | current behaviour; the coupling §10.2 states; D1 |
+| Push-log collection | one key set; a coalesced repeat adds 0 rows; title `'ScoutBox'`; kinds `guardian`, `org_user`, `player` | current behaviour, preserved |
+| Push tokens | one key set; the same token under player/guardian/org sessions = 3 rows; re-registration 4 → 4 rows, `ts` updated, row moved from position 0 to 3; org row `('org', <org id>)`; the one staff push row matches 0 tokens; unauthenticated 401, missing token 400; **a number and an object accepted (201) and stored as such** | current behaviour; the order is reproduced by DELETE + INSERT (new `seq`); the staff defect carried through; the non-string token is the §10.3 conflict (D2) |
+| Deletion | `DELETE /player/account`: outbox 4 → 4, push log 4 → 4, tokens 6 → 6; the deleted person's 2 token rows and 2 push rows stay; player notifications 0; the revoked session cannot register | current behaviour, preserved; retention stays open (§4.4) |
+| JavaScript mapping | 4 outbox, 4 push-log, 4 token rows: blob → proposed columns → blob **byte-identical** (key order included); no unknown keys | the §10.4 mapping is lossless on observed data |
+| Executed SQL (in-memory SQLite, the proposed DDL with `seq`) | every observed row inserts except the object-valued token (cannot be bound); a numeric token is **converted** to `'424242.0'` by a STRICT `TEXT` column; NULL behaviour of every CHECK and `NOT NULL` as §10.4 lists; `'other'` refused by the proposed `audience_kind` CHECK; `'org_user'` refused by the proposed `ref_kind` CHECK; the duplicate triple refused, the same token under another kind admitted | the vocabulary CHECKs are dropped (D3); `delivered` is written as `0`; non-string tokens refused by validation |
+| Restart | the admin outbox lists the same 4 ids in the same order; the challenge mail shows the placeholder after the restart; 4 push rows, 6 token rows | current behaviour, preserved |
+
+### 10.7 Bounded implementation checklist, expected files, failing-first regressions, acceptance checks, decisions needed
+
+**Checklist (in order; each step keeps both gates green):** (1) D1–D3 answered; (2) failing-first
+suites written and recorded failing on the unchanged tree; (3) `repositories/outboxPush.mjs` — the
+three repositories in one module (validators; `OUTBOX_TABLE`, `PUSH_LOG_TABLE`, `PUSH_TOKENS_TABLE`
+for the snapshot dispatcher; staged/immediate participation with mirrors; views `db.outbox`,
+`db.pushLog`, `db.pushTokens`; methods `outbox.append`, `outbox.markDelivered`, `pushLog.append`,
+`pushTokens.register`, `pushTokens.forAudience(kind, id)` (the sender's filter, unchanged
+semantics), `exportRows` ×3, `count` ×3, `recent(n)` for the two admin views; no `afterDurable`
+— these rows are records, not effects); (4) `repositories/migrations/0011_outbox_push.mjs`
+(registered at implementation, `DATA_MIGRATIONS`, `TABLE_BACKED`, the snapshot dispatch list);
+(5) writer conversion: `adapters.mjs` (mailer append + live `markDelivered`; push sender append +
+`forAudience`), `m13/delivery.mjs` (`fakeSend` append), `server.mjs` (`/push/register` →
+`register`; containers; the data-layer destructure; `/admin/outbox`, `/admin/push-log`,
+`/admin/overview` read the views unchanged), `m13/enterprise.mjs` (explicit backup export),
+`storeContract.mjs` (three entries removed); (6) `repositories/outboxPushRollback.mjs` +
+`scripts/outboxPushRollback.mjs` + `package.json` (`rollback:outbox-push`, the `npm test` chain);
+(7) `sql/03` rewritten per §10.4 and `scripts/testSchemaDdl.mjs`; (8) older suites' expected lists
+(`TABLE_BACKED`, rollback-chain revision counts, dump except-lists) for `0011`; (9) docs
+(`sqlite-schema.md`, `sqlite-migration-plan.md`, `OPERATIONS.md` operator section + cutover
+procedure, `CLAUDE.md`, this section's status line); (10) verification and the handoff package.
+
+**Failing-first regressions** (written before any source change; recorded failing with reasons on
+the unchanged tree): `scripts/testOutboxPush.mjs` — migration shapes and refusals (both outbox
+literals round-trip; an entry matching both or neither shape refused; a non-string token, a
+duplicate id, a duplicate triple, an extra audience field refused by position/kind; own
+`"__proto__"` key round-trip through `extra_json`; a non-JSON value refused by name; absent / empty
+/ non-array blobs; `saveSeq` and the blobs unchanged on refusal; the cutover counts); repository
+operations in immediate and staged mode (owned-transaction failure restores the mirror; a joined
+unit's caught failure poisons the unit; real COMMIT failure; retry; `register` order = DELETE +
+INSERT; `markDelivered` on a missing id refused inside the participant boundary); snapshot
+replace / omitted collection / final state; copy-only rollback (every row back in the writer's key
+order, `LATER_SCHEMA` for a `0012_*` id, the S7b tool's `LATER_SCHEMA` on a 0011 file, exit codes,
+an injected COMMIT failure leaves no output). `scripts/testOutboxPushServer.mjs` — through the real
+routes: the invite's mail row and invite row in ONE revision (second connection); the sign-up's
+mail row with the debounced save; the challenge's withheld row and the admin view's full text, then
+the placeholder after a restart; the sweep's (b) row with the dispatch rows in one revision; the
+push row after COMMIT in a LATER revision — never in the notification's — with a SIGKILL between
+the two leaving the notification and no push row (no re-send on restart); token register /
+re-register order and the 400 for a non-string token (D2); a deletion leaving all three
+collections untouched (fixture: probe "deletion"); backup → restore → rollback → re-upgrade with
+orders intact; the `ac50b60` build booting and writing to the rollback copy
+(`SCOUTBOX_PRE_S7C_SERVER`). The four reviewer scripts stay unchanged and green; `m13E2E`,
+`testNotificationsServer`, `testDispatchesServer` unchanged and green.
+
+**Independent acceptance checks:** every §10.6 behaviour reproduced on the table-backed build with
+the same observable results (the probe runs unchanged against it, its adapted reader the only
+difference, as §9.5's did); no diagnostic carries a text, an address, a code or a token; no new
+vocabulary CHECK; `delivered` never NULL; the push row never in the notification's revision and
+never reported durable with it; every write refused whole or applied whole; the three blobs gone
+from the save after cutover and back after rollback; both mandatory gates green on the final tree
+and from a fresh extraction; the old-build proof on the actual `ac50b60` checkout.
+
+**Decisions needed before implementation (precise):**
+
+- **D1 — push-row durability window.** Keep today's timing (the row lands with the next save by
+  anybody, ≤ the 60 s sweep interval under normal operation) **or** have the push sender call the
+  server's ordinary debounced `persist()` after appending (window ≤ 2 s; no new mechanism; no
+  change to what is reported durable). Recommendation: the debounced `persist()` — it is the same
+  call the token route already makes.
+- **D2 — non-string push tokens.** After cutover the route answers 400 `TOKEN_INVALID` for a token
+  that is not a non-empty string (today 201), and the import refuses a legacy row with one (by
+  position and kind). Recommendation: yes; the dry run on the real file reports whether any such
+  row exists before the cutover is scheduled.
+- **D3 — vocabulary CHECKs.** Drop `transport`, `channel`, `audience_kind` and `ref_kind` CHECKs,
+  keeping the structural constraints and the two-value `source` discriminator (§10.4).
+  Recommendation: drop, the S7a/S7b rule.
+- Not S7c decisions, restated so they are not re-asked: the staff push re-keying, the five
+  plain-code mail sites, retention after deletion (§4.4), the org-deletion question. The S7d
+  blockers (§8.1) are unchanged.
+
+S7c stays **PREPARED, NOT IMPLEMENTED** until this section is reviewed.
 
 ---
 

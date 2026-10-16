@@ -132,11 +132,16 @@ and design changes the Founder explicitly requests.
   the acknowledgment and the dispatch rows commit in one unit; the copy-only
   rollback is `scripts/notificationsRollback.mjs` (every row written back in
   order; nothing lost) and the S6a tool refuses a file carrying 0009.
+  Since the review of `ac50b60` the notification repository detaches unknown
+  NESTED data exactly as the dispatch repository does (a prototype-safe JSON
+  clone at ingress, export and snapshot; a value JSON cannot carry refuses the
+  write) — a follow-up pending independent review.
   **Delivery dispatch records and their attempts are tables since S7b**
-  (IMPLEMENTED on top of `dc4b559`, PENDING INDEPENDENT ACCEPTANCE — not
-  accepted, not production approval; `repositories/dispatches.mjs`, migration
-  `0010_dispatches`; `docs/architecture/s7-readiness-review.md` §9 as corrected
-  by the review of `dc4b559`, §9.7): `db.dispatches` is a read-only view over
+  (independently accepted at commit
+  `ac50b60257b89387aa1dec44bad7f571e61aa74e` for the bounded migration
+  milestone and its three corrections — not production approval;
+  `repositories/dispatches.mjs`, migration `0010_dispatches`;
+  `docs/architecture/s7-readiness-review.md` §9 as corrected, §9.7–§9.9): `db.dispatches` is a read-only view over
   the repository's mirror (insertion order, attempts nested); the ONLY writers
   are `dispatches.create` / `recordAttempt` / `patch` (m13/delivery.mjs sweep,
   acknowledgment and callback); the eighteen-key literal is required whole and
@@ -160,6 +165,16 @@ and design changes the Founder explicitly requests.
   NO effects queue (a dispatch has no push and no live event); the copy-only
   rollback is `scripts/dispatchesRollback.mjs` (every row and attempt written
   back; nothing lost) and the S7a tool refuses a file carrying 0010.
+  **S7c (`outbox`, `pushLog`, `pushTokens`) is PREPARED, NOT IMPLEMENTED:**
+  the one current plan is `docs/architecture/s7-readiness-review.md` §10 with
+  its synthetic probe `scoutbox-server/scripts/probeS7cOutboxPush.mjs` (outside
+  `npm test`); no table, repository, migration or rollback tool exists, the
+  next unused identifier `0011` is named there and NOT assigned, the three
+  collections are still blobs written by the mailer, the delivery centre's
+  `fakeSend`, the push sender and `POST /push/register`, and three decisions
+  (D1 push-row durability window, D2 non-string push tokens, D3 vocabulary
+  CHECKs) are needed before any cutover. The staff push identity and the
+  plain-code mail sites are carried through unchanged, not decided.
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state

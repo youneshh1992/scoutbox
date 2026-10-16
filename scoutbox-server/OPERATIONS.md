@@ -948,7 +948,7 @@ preferences (`GET`/`PUT …/notification-preferences`) are rows of
    <data-dir> <fresh-empty-dir>`, then start the S6a build on the output —
    every notification written since the cutover is in it.
 
-### Delivery dispatch records and their attempts (live since migration `0010`, S7b — implemented, PENDING INDEPENDENT ACCEPTANCE; not accepted, not production-approved)
+### Delivery dispatch records and their attempts (live since migration `0010`, S7b — independently accepted at `ac50b60` for the bounded migration milestone; not production-approved)
 
 The delivery centre's dispatch records (`GET /org/delivery`, `GET /admin/delivery`,
 `GET /admin/metrics` → `dispatchBacklog`, `POST /admin/delivery/sweep`,
@@ -1050,6 +1050,15 @@ rows in the same order.
 4. **Rollback, if needed.** `node scripts/dispatchesRollback.mjs
    <data-dir> <fresh-empty-dir>`, then start the S7a build (`0641b2c`) on the
    output — every dispatch and attempt written since the cutover is in it.
+
+**What is still a blob in this area (S7c, prepared — not implemented).** The
+mail outbox (`db.outbox`, two writer shapes), the push log (`db.pushLog`) and
+the device push tokens (`db.pushTokens`) are JSON blob collections saved with
+every snapshot, exactly as before S7; `/admin/outbox`, `/admin/push-log`,
+`/admin/overview` and `POST /push/register` behave as documented above and in
+the admin section. The implementation plan for moving them to tables, with the
+decisions it needs first, is `docs/architecture/s7-readiness-review.md` §10;
+nothing of it exists in this build and there is no operator procedure yet.
 
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request

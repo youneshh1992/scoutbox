@@ -32,10 +32,12 @@ production or deployment approval; the notification tables, migration `0009_noti
 copy-only rollback; [`s7-readiness-review.md`](./s7-readiness-review.md) §8.3 records what was
 built, §8.4–§8.5 the two correction rounds as dated history, §8.6 the acceptance and its limits:
 no exactly-once external delivery, the explicit raw-transaction `reload()`, hook registration as the
-caller's responsibility; the Player app was not touched), **S7b implemented, pending independent
-acceptance — not accepted** (15 October 2026, on top of `dc4b559`: `dispatches` and `dispatch_attempts`
-as tables, migration **`0010_dispatches`**, its copy-only rollback; review §9 as corrected by the
-independent review of `dc4b559` and §9.7 the implementation record; no deployment authorised),
+caller's responsibility; the Player app was not touched), **S7b independently accepted at `ac50b60257b89387aa1dec44bad7f571e61aa74e`** (16 October 2026; the
+bounded dispatch/attempt storage milestone and its three corrections — `dispatches` and
+`dispatch_attempts` as tables, migration **`0010_dispatches`**, its copy-only rollback; backend 23 suites /
+324 checks, Player 4 / 41 and the three reviewer scripts verified by the reviewer on real Node v24.19.0; not
+production or deployment approval; review §9.9), **the notification-extras follow-up corrected, pending
+independent review** (review §9.10), **S7c prepared, not implemented** (review §10; no cutover authorised),
 **S7c–S7d not started** (their blockers are stated in the review and in §S7)
 — S8–S14 planned. The evidence-based plan of S4 is
 [`s4-readiness-review.md`](./s4-readiness-review.md).
@@ -1342,8 +1344,10 @@ performance, existing tests, what this plan is not).
 > default immediate participant, a caught precondition refusal bypassing the unit) and its
 > replay-coverage gap in §8.5; both rounds are dated history, the acceptance in §8.6 is the current
 > status.
-> **Status (S7b): IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE — not accepted** (15 October 2026,
-> one local commit on `feat/sqlite-schema` on top of `dc4b559`; review §9 as corrected by the
+> **Status (S7b): independently ACCEPTED at `ac50b60257b89387aa1dec44bad7f571e61aa74e`** (16 October
+> 2026, for the bounded dispatch/attempt storage milestone and its three corrections; review §9.9
+> holds the acceptance record and its limits — not production or deployment approval. Built as one
+> local commit on `feat/sqlite-schema` on top of `dc4b559` and corrected once; review §9 as corrected by the
 > independent review of `dc4b559` — the total attempt-shape CHECK, the callback timestamp contract
 > with REAL columns, the first-match strict-equality lookup — and §9.7 the implementation record):
 > `dispatches` and `dispatch_attempts` are tables since migration **`0010_dispatches`**, with the
@@ -1355,9 +1359,12 @@ performance, existing tests, what this plan is not).
 > notification's unit, and a copy-only rollback proven on the actual `0641b2c` build; the three
 > findings of the independent review of `26d492b` (patch refusals outside the participant boundary,
 > nested unknown data shared by reference, the legacy non-finite callback clock's precedence) are
-> corrected in a correction commit, review §9.8. Not
-> production or deployment approval; retention stays an open decision.
-> **Status (S7c–S7d): not started.** The evidence-based review is
+> corrected in the correction commit `ac50b60`, review §9.8 (dated history). Retention stays an open
+> decision.
+> **Status (notification extras follow-up): corrected, pending independent review** (review §9.10).
+> **Status (S7c): PREPARED, NOT IMPLEMENTED** (review §10: the implementation plan for `outbox`,
+> `push_log` and `push_tokens` with its synthetic probe; no table, repository or migration exists; the
+> cutover is not authorised until the design is reviewed). **Status (S7d): not started.** The evidence-based review is
 > [`s7-readiness-review.md`](./s7-readiness-review.md);
 > the text below is the sequence it derived and replaces the earlier assumptions of this
 > section (recorded there, §0). No further migration identifier is assigned until a sub-step is
@@ -1377,9 +1384,12 @@ performance, existing tests, what this plan is not).
   `notification_id` as a plain reference — no foreign key, no cascade, today's deletion and its
   retained dispatch rows preserved, orphan references counted not refused; migration
   `0010_dispatches`, so the `0010_recruitment` placeholder below moves when S8a is approved);
-  **S7c** `outbox` (two writer shapes unified), `push_log`,
+  **S7c** `outbox` (two writer shapes unified under a structural `source` discriminator), `push_log`,
   `push_tokens` (storage move only — the staff-push re-keying, defect 10 of the schema
-  document, is a behaviour change needing its own decision); **S7d** `channels`, `messages`,
+  document, is a behaviour change needing its own decision; **prepared, not implemented**: the
+  implementation plan with its synthetic probe is review §10, the next unused identifier `0011`
+  is named there and not assigned, and three decisions D1–D3 — the push-row durability window,
+  non-string push tokens, dropping the vocabulary CHECKs — are needed before any cutover); **S7d** `channels`, `messages`,
   `message_attachments` (after the request-reference decision and the retention answer). The
   whole-database-write objective is met in phases measured by a synthetic benchmark (review
   §7.3), not claimed by any single sub-step.
@@ -1464,7 +1474,9 @@ performance, existing tests, what this plan is not).
   playlists, vacancies, opportunities, applications, campaigns and submissions, player
   preferences (lazy insert moved into the repository read).
 - **Depends on.** S5, S8 (assessments reference trials/cases by id).
-- **Files / tables.** `repositories/scouting/*.mjs`, migration `0011_scouting`; `m12/passport.mjs`,
+- **Files / tables.** `repositories/scouting/*.mjs`, migration `0011_scouting` (a placeholder: `0011`
+  is the next unused identifier and the S7c plan names it for `0011_outbox_push`, review §10.5 — this
+  stage takes the next free number when it is approved, as `0010_recruitment` did); `m12/passport.mjs`,
   `m12/scouting.mjs`, `m12/journeys.mjs`, `m13/suitability.mjs`, `server.mjs` 2705/2797/2913.
 - **Data transformation.** Template id reuse across versions becomes the composite key;
   tactical re-save diffs roles by id (so vacancies keep `role_id`); cross-org role id
