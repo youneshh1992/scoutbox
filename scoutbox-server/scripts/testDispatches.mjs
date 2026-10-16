@@ -89,7 +89,7 @@ test('migration 0010 (legacy blob): every dispatch is imported with its 18 field
   ];
   s7aFile(dir, { dispatches: legacy });
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s).ran, [DISPATCHES_MIGRATION]);
+  assert.deepEqual(migrate(s).ran, [DISPATCHES_MIGRATION, '0011_outbox_push']); // S7c: 0011 follows on the same run
   assert.deepEqual(s.prepare('SELECT seq, id FROM dispatches ORDER BY seq').all().map((r) => [r.seq, r.id]), [[1, 'dsp-1'], [2, 'dsp-2'], [3, 'dsp-3'], [4, 'dsp-4']], 'the array position is the durable ordering key');
   assert.deepEqual(s.prepare('SELECT dispatch_seq, seq, kind, ok, error, note FROM dispatch_attempts ORDER BY dispatch_seq, seq').all().map((r) => [r.dispatch_seq, r.seq, r.kind, r.ok, r.error, r.note]), [
     [2, 0, 'quiet_recheck', null, null, 'quiet hours re-check'], [2, 1, 'send', 0, 'injected provider failure', null], [2, 2, 'send', 1, null, null],
@@ -260,13 +260,13 @@ test('staged mode (the server): a create, an attempt and a patch are visible in 
   const dir = tempDir('dsp-staged'); s7aFile(dir, { dispatches: [] });
   const L = live(dir); L.save();
   const seq0 = seqOf(dir);
-  L.db.outbox.push({ id: 'mail-1', at: NOW, channel: 'email', to: 'synthetic@example.test', text: 'x', providerMessageId: 'fm_1', provider: 'local-fake' });
+  L.layer.outbox.append({ id: 'mail-1', at: NOW, channel: 'email', to: 'synthetic@example.test', text: 'x', providerMessageId: 'fm_1', provider: 'local-fake' }); // S7c: the outbox row goes through its repository (staged into the same save)
   const a = L.dispatches.create(dsp({ id: 'dsp-1', status: 'queued', providerMessageId: null, attempts: [] }));
   L.dispatches.recordAttempt('dsp-1', { at: NOW, ok: true, error: null }); L.dispatches.patch('dsp-1', { status: 'accepted', providerMessageId: 'fm_1' });
-  assert.equal(a.status, 'accepted', 'visible at once'); assert.equal(L.dispatches.pending(), 3); assert.deepEqual(idsOf(dir), [], 'nothing durable before the save'); assert.equal(blobOf(dir, 'outbox'), '[]');
+  assert.equal(a.status, 'accepted', 'visible at once'); assert.equal(L.dispatches.pending(), 3); assert.deepEqual(idsOf(dir), [], 'nothing durable before the save'); assert.equal(rowsOf(dir, 'outbox', 'seq').length, 0);
   // A failed save (statement): pending stays.
   L.store.sqlite.exec("CREATE TEMP TRIGGER rv_fx BEFORE INSERT ON dispatches BEGIN SELECT RAISE(ABORT, 'synthetic flush failure'); END");
-  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(idsOf(dir), []); assert.equal(seqOf(dir), seq0); assert.equal(L.dispatches.pending(), 3); assert.equal(blobOf(dir, 'outbox'), '[]', 'the blob did not land without the rows');
+  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(idsOf(dir), []); assert.equal(seqOf(dir), seq0); assert.equal(L.dispatches.pending(), 3); assert.equal(rowsOf(dir, 'outbox', 'seq').length, 0, 'the outbox row did not land without the dispatch rows');
   L.store.sqlite.exec('DROP TRIGGER rv_fx');
   // A failed save (real COMMIT): pending stays.
   L.store.sqlite.exec('CREATE TEMP TABLE rv_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE rv_child (parent_id TEXT NOT NULL REFERENCES rv_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER rv_commit AFTER INSERT ON dispatches BEGIN INSERT INTO rv_child (parent_id) VALUES (\'missing-on-purpose\'); END');
@@ -274,7 +274,7 @@ test('staged mode (the server): a create, an attempt and a patch are visible in 
   L.store.sqlite.exec('DROP TRIGGER rv_commit');
   // The retry: one revision, the row, its attempt, its patch and the outbox row together.
   L.save();
-  assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(idsOf(dir), ['dsp-1']); assert.deepEqual(rowsOf(dir, 'dispatches', 'seq').map((r) => [r.status, r.provider_message_id]), [['accepted', 'fm_1']]); assert.deepEqual(attemptsOf(dir), [[1, 0, 'send', 1, null, null]]); assert.equal(JSON.parse(blobOf(dir, 'outbox')).length, 1); assert.equal(L.dispatches.pending(), 0);
+  assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(idsOf(dir), ['dsp-1']); assert.deepEqual(rowsOf(dir, 'dispatches', 'seq').map((r) => [r.status, r.provider_message_id]), [['accepted', 'fm_1']]); assert.deepEqual(attemptsOf(dir), [[1, 0, 'send', 1, null, null]]); assert.equal(rowsOf(dir, 'outbox', 'seq').length, 1, 'the outbox row landed in the same save'); assert.equal(L.dispatches.pending(), 0);
   L.save(); assert.equal(seqOf(dir), seq0 + 2); assert.deepEqual(attemptsOf(dir).length, 1, 'a later save does not replay');
   // A unit of work: together or not at all; a caught participant failure still poisons the unit; pre-unit writes survive.
   const pre = L.dispatches.create(inApp('dsp-pre', 'ntf-2')); assert.equal(L.dispatches.pending(), 1);
@@ -341,7 +341,7 @@ test('rollback (copy-only): every dispatch and every attempt is written back int
   const special = JSON.parse('{"id":"dsp-proto","notificationId":"ntf-gone","audience":{"kind":"player","id":"pl-x"},"channel":"email","to":null,"provider":"local-fake","status":"skipped","skipReason":"no email on record","providerMessageId":null,"attempts":[],"nextAt":1,"actionDeadline":null,"createdAt":1,"deliveredAt":null,"openedAt":null,"actionedAt":null,"failedAt":null,"failReason":null,"__proto__":{"legacyMarker":"keep-me"}}');
   const legacy = [inApp('dsp-1', 'ntf-1'), dsp({ id: 'dsp-2', attempts: [{ at: 1, note: 'quiet hours re-check' }, { at: 2, ok: false, error: 'e' }, { at: 3, ok: true, error: null }], deliveredAt: FRACTIONAL, openedAt: FRACTIONAL, status: 'opened' }), special];
   s7aFile(src, { dispatches: legacy });
-  { const s = openRaw(src); migrate(s); const repo = bare(s); repo.create(dsp({ id: 'dsp-after', attempts: [{ at: 4, ok: true, error: null }] })); s.close(); }
+  { const s = openRaw(src); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id <= DISPATCHES_MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } }); const repo = bare(s); repo.create(dsp({ id: 'dsp-after', attempts: [{ at: 4, ok: true, error: null }] })); s.close(); } // S7c: this proof is the S7b tool on an S7b-level file (a file carrying 0011 is refused by it — LATER_SCHEMA, proven in testOutboxPush.mjs)
   const srcBytes = fs.readFileSync(dbFile(src)); const srcDump = (() => { const s = openRaw(src); try { return dump(s); } finally { s.close(); } })();
   const out = tempDir('dsp-rb-out');
   const result = rollbackDispatchesCopy(dbFile(src), out, { now: NOW });
@@ -355,7 +355,7 @@ test('rollback (copy-only): every dispatch and every attempt is written back int
   assert.equal(applied(o).includes(DISPATCHES_MIGRATION), false); assert.equal(meta(o, DISPATCHES_CUTOVER_META), undefined); assert.equal(Number(meta(o, 'saveSeq')), Number(meta(openRaw(src), 'saveSeq')) + 1);
   assert.equal(o.prepare('PRAGMA integrity_check').get().integrity_check, 'ok'); assert.ok(tableExists(o, 'notifications'), 'the S7a tables are untouched');
   // Re-upgrade: the real migration brings the copy back to the same rows.
-  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [DISPATCHES_MIGRATION]);
+  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [DISPATCHES_MIGRATION, '0011_outbox_push']); // S7c: the rollback copy predates 0011 too
   assert.equal(JSON.stringify(bare(o).exportRows()), JSON.stringify(back), 'the same rows after the re-upgrade'); assert.equal(JSON.parse(meta(o, DISPATCHES_CUTOVER_META)).dispatches.orphanReferences, 1);
   o.close();
   // The S7a tool refuses a 0010 file: no partial downgrade.

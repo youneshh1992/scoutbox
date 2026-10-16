@@ -135,7 +135,7 @@ and design changes the Founder explicitly requests.
   Since the review of `ac50b60` the notification repository detaches unknown
   NESTED data exactly as the dispatch repository does (a prototype-safe JSON
   clone at ingress, export and snapshot; a value JSON cannot carry refuses the
-  write) — a follow-up pending independent review.
+  write) — independently accepted at `6ca66ba` for that bounded correction.
   **Delivery dispatch records and their attempts are tables since S7b**
   (independently accepted at commit
   `ac50b60257b89387aa1dec44bad7f571e61aa74e` for the bounded migration
@@ -165,16 +165,32 @@ and design changes the Founder explicitly requests.
   NO effects queue (a dispatch has no push and no live event); the copy-only
   rollback is `scripts/dispatchesRollback.mjs` (every row and attempt written
   back; nothing lost) and the S7a tool refuses a file carrying 0010.
-  **S7c (`outbox`, `pushLog`, `pushTokens`) is PREPARED, NOT IMPLEMENTED:**
-  the one current plan is `docs/architecture/s7-readiness-review.md` §10 with
-  its synthetic probe `scoutbox-server/scripts/probeS7cOutboxPush.mjs` (outside
-  `npm test`); no table, repository, migration or rollback tool exists, the
-  next unused identifier `0011` is named there and NOT assigned, the three
-  collections are still blobs written by the mailer, the delivery centre's
-  `fakeSend`, the push sender and `POST /push/register`, and three decisions
-  (D1 push-row durability window, D2 non-string push tokens, D3 vocabulary
-  CHECKs) are needed before any cutover. The staff push identity and the
-  plain-code mail sites are carried through unchanged, not decided.
+  **The mail outbox, the push log and the device push tokens are tables since
+  S7c** (IMPLEMENTED on top of `6ca66ba`, PENDING INDEPENDENT ACCEPTANCE — not
+  accepted; `repositories/outboxPush.mjs`, migration `0011_outbox_push`;
+  `docs/architecture/s7-readiness-review.md` §10 as corrected by the review of
+  `6ca66ba`, §10.8): `db.outbox`, `db.pushLog` and `db.pushTokens` are
+  read-only views over one participant's three mirrors (insertion order); the
+  ONLY writers are `outbox.append` / `outbox.markDelivered` (adapters.mjs mailer
+  — the record before the provider call, the live answer on the caller's
+  record AND the row), `outbox.append` (m13/delivery.mjs `fakeSend`, `to` as the
+  dispatch holds it — null included), `pushLog.append` (the push sender, run by
+  the notification's after-durable effect AFTER the notification's save: the
+  row lands with the later save the sender's `nextId()`/`persist()` already
+  schedules — nothing new scheduled, no guarantee implied) and
+  `pushTokens.register` (`POST /push/register`: any truthy JSON value is the
+  token, stored LOSSLESSLY as JSON text and decoded on read; the route's `===`
+  rule — a primitive collapses an earlier row of the same value and type,
+  objects and arrays never — reproduced; NO uniqueness constraint). The two
+  outbox literals are told apart structurally (`source`, a total CHECK: NULL is
+  "absent key"); `to_address` is nullable; vocabularies are open; unknown and
+  nested data are detached clones; a failed ordinary staged save keeps its
+  pending state for the next save, an aborted unit restores the pre-unit
+  state; the copy-only rollback is `scripts/outboxPushRollback.mjs` (every
+  row written back in its writer's literal; nothing lost; proven on the actual
+  `6ca66ba` build) and the S7b tool refuses a file carrying 0011. The staff
+  push identity, the plain-code mail sites and retention are carried through
+  unchanged, not decided. S7d is not started.
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state

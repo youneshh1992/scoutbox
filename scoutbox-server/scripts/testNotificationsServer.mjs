@@ -313,8 +313,9 @@ await test('backup/restore: the admin backup exports the notifications and prefe
   // The old build on the rollback copy (when its server.mjs is given).
   const OLD = process.env.SCOUTBOX_PRE_S7A_SERVER;
   if (OLD && fs.existsSync(OLD)) {
-    const copy = path.join(tempDir('s7a-rb'), 'copy'); const s7aCopy = path.join(tempDir('s7a-rb-s7b'), 'copy');
-    execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, s7aCopy], { encoding: 'utf8' }); // S7b: the file carries 0010; its rollback goes first
+    const copy = path.join(tempDir('s7a-rb'), 'copy'); const s7aCopy = path.join(tempDir('s7a-rb-s7b'), 'copy'); const s7bCopy = path.join(tempDir('s7a-rb-s7c'), 'copy');
+    execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), dir, s7bCopy], { encoding: 'utf8' }); // S7c: the file carries 0011; its rollback goes first,
+    execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), s7bCopy, s7aCopy], { encoding: 'utf8' }); // then S7b (0010),
     const out = execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), s7aCopy, copy], { encoding: 'utf8' });
     assert.match(out, /written back as blobs/);
     const old = await boot(copy, {}, OLD);

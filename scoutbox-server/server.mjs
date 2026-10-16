@@ -199,7 +199,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -276,6 +276,10 @@ db.signings ??= [];
 // db.pairingCodes: the data layer's hash-free read-only view since S6a (rows of pairing_codes; repositories/oneTimeCodes.mjs) — never assigned here.
 // db.notifications, db.notificationPrefs: the data layer's read-only views since S7a (rows of notifications / notification_prefs; repositories/notifications.mjs) — never assigned here; writes go through `notifications`.
 db.sessions ??= [];        // bearer-token sessions (all roles): already the data layer's read-only view since S2, so this never assigns; kept as the store's inventory line
+// S7c: db.outbox, db.pushLog and db.pushTokens are read-only views over the
+// outbox / push_log / push_tokens tables (repositories/outboxPush.mjs, migration
+// 0011) since attachDataLayer ran above; the three `??=` below are no-ops on
+// this build and stay as the containers every earlier build created.
 db.outbox ??= [];          // mailer dev transport (+ delivery audit when live)
 db.pushLog ??= [];         // push dev transport (+ delivery audit when live)
 db.pushTokens ??= [];      // device push tokens, registered per user
@@ -291,8 +295,11 @@ for (const o of db.orgs) {
 }
 
 // ---------------------------------------------------- production adapters
-const mailer = createMailer(db, (p) => nextId(p));
-const pushSender = createPushSender(db, (p) => nextId(p));
+// S7c: the records go through the repositories (staged into the next save, as
+// the blob entries were); the provider calls, the `secrets` withholding, the
+// dev full-text memory and `nextId`'s persist() are unchanged.
+const mailer = createMailer(db, (p) => nextId(p), { outbox });
+const pushSender = createPushSender(db, (p) => nextId(p), { pushLog, pushTokens });
 const idv = createIdvProvider();
 const billing = createBilling(db, (p) => nextId(p));
 const storage = createStorage(DATA_DIR);
@@ -4024,8 +4031,11 @@ app.post('/push/register', (req, res) => {
   if (!session) return res.status(401).json({ error: 'AUTH_REQUIRED' });
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ error: 'TOKEN_REQUIRED' });
-  db.pushTokens = db.pushTokens.filter((t) => !(t.kind === session.kind && t.refId === session.refId && t.token === token));
-  db.pushTokens.push({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
+  // S7c: the same filter-then-push on the push_tokens table (repositories/outboxPush.mjs
+  // `register`): any truthy JSON value is the token, stored losslessly; an earlier
+  // row of this session holding the same primitive goes, an object never matches;
+  // the new row is last. The record lands with the debounced save, as before.
+  pushTokens.register({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
   persist();
   res.status(201).json({ registered: true });
 });
@@ -4588,7 +4598,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,

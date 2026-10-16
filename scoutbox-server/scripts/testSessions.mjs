@@ -19,6 +19,7 @@ import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRo
 import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
 import { rollbackNotificationsCopy } from '../repositories/notificationsRollback.mjs';
 import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
+import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
@@ -445,7 +446,8 @@ test('snapshot mode (review correction 1): before the cutover record exists the 
   assert.throws(() => rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0004_orgs_live/.test(err.message) && /0005_core_identity_live/.test(err.message));
   assert.throws(() => rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused3')), (err) => err.code === 'LATER_SCHEMA' && /0005_core_identity_live, 0006_media_deletions/.test(err.message));
   const s4aState = tempDir('s2-snap-rb-s4a'); const s3State = tempDir('s2-snap-rb-s3'); const s2State = tempDir('s2-snap-rb-s2');
-  const s7aState = tempDir('s2-snap-rb-s7a'); rollbackDispatchesCopy(path.join(dir, 'scoutbox.db'), s7aState); const s6aState = tempDir('s2-snap-rb-s6a'); rollbackNotificationsCopy(path.join(s7aState, 'scoutbox.db'), s6aState); // S7b first (the file carries 0010), then S7a on its output
+  const s7bState = tempDir('s2-snap-rb-s7b'); rollbackOutboxPushCopy(path.join(dir, 'scoutbox.db'), s7bState); // S7c first (the file carries 0011),
+  const s7aState = tempDir('s2-snap-rb-s7a'); rollbackDispatchesCopy(path.join(s7bState, 'scoutbox.db'), s7aState); const s6aState = tempDir('s2-snap-rb-s6a'); rollbackNotificationsCopy(path.join(s7aState, 'scoutbox.db'), s6aState); // then S7b on its output, then S7a
   const s5State = tempDir('s2-snap-rb-s5'); rollbackOneTimeCodesCopy(path.join(s6aState, 'scoutbox.db'), s5State); // then S6a: the copy carries 0008
   rollbackPlayerSubrecordsCopy(path.join(s5State, 'scoutbox.db'), s4aState); // then S5: it carries 0007
   rollbackCoreIdentityCopy(path.join(s4aState, 'scoutbox.db'), s3State);

@@ -66,14 +66,14 @@ test('every index references an existing table', () => {
 // column (S4a); media_deletions (0006) is documented in 08; the twelve
 // player sub-record tables (0007, S5) are in 01 with their position and
 // extra_json columns.
-test('the registered migrations 0001–0010 match 01_identity.sql (identity, facets_json and the twelve player sub-record tables included), 08 (media_deletions) and 03 (email_challenges, pairing_codes, notifications, notification_prefs, notification_pref_categories, dispatches, dispatch_attempts) column for column', () => {
+test('the registered migrations 0001–0011 match 01_identity.sql (identity, facets_json and the twelve player sub-record tables included), 08 (media_deletions) and 03 (email_challenges, pairing_codes, notifications, notification_prefs, notification_pref_categories, dispatches, dispatch_attempts, outbox, push_log, push_tokens) column for column', () => {
   const mig = new DatabaseSync(':memory:');
   mig.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(mig, DATA_MIGRATIONS, { now: Date.UTC(2026, 9, 11, 12), log: () => {} });
   assert.equal(mig.prepare('SELECT COUNT(*) AS n FROM data_migrations').get().n, DATA_MIGRATIONS.length);
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches']);
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push']);
   const S5_TABLES = ['player_season_history', 'player_badges', 'player_drills', 'player_attendance', 'player_timeline', 'player_media', 'player_media_tags', 'player_medical_records', 'player_drill_results', 'player_activity_log', 'player_external_ids', 'player_programme_completions'];
-  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', ...S5_TABLES]) {
+  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', ...S5_TABLES]) {
     const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
     assert.deepEqual(cols(mig), cols(docs), `${t} columns`);
     const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all(t).map((r) => r.name);
@@ -97,6 +97,14 @@ test('the registered migrations 0001–0010 match 01_identity.sql (identity, fac
   assert.match(header03, /dispatches\s+→ dispatches, dispatch_attempts[^\n]*0010_dispatches[^\n]*REGISTERED/, 'the scope header of 03 states that the dispatch tables are live since 0010');
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'dispatch_attempts'").get().sql, /ok IS NOT NULL/, 'the documented attempt CHECK rejects a NULL send outcome');
   assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(dispatches)').all(), [], 'the documented dispatches table has no foreign key (option A: an indexed reference, no cascade)');
+  // S7c: the outbox and push tables (review of 6ca66ba): the structural source CHECK, a nullable destination, a JSON token column, no uniqueness on tokens, no vocabulary CHECK.
+  for (const t of ['outbox', 'push_log', 'push_tokens']) assert.match(header03, new RegExp(`${t}[^\\n]*0011_outbox_push[^\\n]*REGISTERED`), `the scope header of 03 states that ${t} is live since 0011`);
+  const outboxSql = docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'outbox'").get().sql;
+  assert.match(outboxSql, /source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL/, 'the documented outbox CHECK ties each source to its columns');
+  assert.equal(docs.prepare("PRAGMA table_info(outbox)").all().find((c) => c.name === 'to_address').notnull, 0, 'the documented destination is nullable');
+  assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'push_tokens'").get().sql, /token_json\s+TEXT NOT NULL CHECK \(json_valid\(token_json\)\)/, 'the documented token column is JSON text');
+  assert.equal(docs.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'index' AND tbl_name = 'push_tokens' AND sql LIKE '%UNIQUE%'").get().n, 0, 'no unique index on the documented tokens');
+  for (const t of ['outbox', 'push_log', 'push_tokens']) { assert.doesNotMatch(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /transport IN \(|audience_kind IN \(|ref_kind IN \(|channel IN \(/, `${t}: no vocabulary CHECK`); assert.deepEqual(docs.prepare(`PRAGMA foreign_key_list(${t})`).all(), [], `${t} references nothing`); }
 });
 
 console.log(`\n${passed} schema-DDL checks passed (${files.length} files, ${tables.length} tables)`);

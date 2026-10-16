@@ -61,7 +61,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
@@ -472,7 +472,7 @@ export function registerEnterprise(ctx) {
       // state in memory, like every blob collection — so a backup restores on
       // any build: a pre-S7a build reads the blobs, this build imports them
       // through migration 0009 with the feed order intact.
-      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes(), notifications: notifications.exportRows(), notificationPrefs: notifications.exportPrefs(), dispatches: dispatches.exportRows() } }));
+      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes(), notifications: notifications.exportRows(), notificationPrefs: notifications.exportPrefs(), dispatches: dispatches.exportRows(), outbox: outbox.exportRows(), pushLog: pushLog.exportRows(), pushTokens: pushTokens.exportRows() } })); // S7c: the three collections in their legacy shapes (the withheld mail text as stored; tokens with their registered types)
       // 2. Media files — except those whose removal is queued: a backup never
       //    carries a file without the intent to remove it. Their ids are in
       //    db.json; on a restored server the entry is cleared once the file is

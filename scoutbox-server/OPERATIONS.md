@@ -1051,14 +1051,96 @@ rows in the same order.
    <data-dir> <fresh-empty-dir>`, then start the S7a build (`0641b2c`) on the
    output — every dispatch and attempt written since the cutover is in it.
 
-**What is still a blob in this area (S7c, prepared — not implemented).** The
-mail outbox (`db.outbox`, two writer shapes), the push log (`db.pushLog`) and
-the device push tokens (`db.pushTokens`) are JSON blob collections saved with
-every snapshot, exactly as before S7; `/admin/outbox`, `/admin/push-log`,
-`/admin/overview` and `POST /push/register` behave as documented above and in
-the admin section. The implementation plan for moving them to tables, with the
-decisions it needs first, is `docs/architecture/s7-readiness-review.md` §10;
-nothing of it exists in this build and there is no operator procedure yet.
+### The mail outbox, the push log and the device push tokens (live since migration `0011`, S7c — implemented, pending independent acceptance; not production-approved)
+
+`/admin/outbox`, `/admin/push-log`, `/admin/overview` and `POST /push/register`
+answer exactly as before; the records behind them are rows of `outbox`,
+`push_log` and `push_tokens` (`repositories/outboxPush.mjs`;
+`docs/architecture/s7-readiness-review.md` §10 as corrected by the independent
+review of `6ca66ba`). The mailer, the delivery centre's local fake provider,
+the push sender and the registration route are the only writers.
+
+- **Order and keys.** `seq` is the insertion order every reader depends on
+  (the admin views list newest first). An outbox row is one of two literals,
+  told apart structurally and never by a value: the mailer record
+  `{id, ts, to, subject, text, transport, delivered}` or the delivery record
+  `{id, at, channel, to, text, providerMessageId, provider}`; in SQL `source`
+  says which, and a total CHECK ties each source to its columns, so NULL always
+  means "that key is absent in this shape". `to_address` may be NULL: an
+  accepted queued dispatch without a destination is swept into a delivery record
+  with `to: null`, as every build since M13 did. A token is ANY JSON value the
+  route accepted (a number, a string, a boolean, an object, an array), stored
+  losslessly as JSON text and handed back with the type it was registered with
+  (the push sender sends Expo the same value); the route's rule is unchanged — a
+  repeated primitive replaces its earlier row and goes last, an object or an
+  array is always a new row — and there is no uniqueness constraint. Vocabularies
+  (`transport`, `provider`, `channel`, the audience kind, the session kind) are
+  open.
+- **Writes.** A mail's row is written before the provider is called and lands in
+  the save its route always used (an invite with its invite row, a sign-up with
+  the debounced save); on the live transport the provider's answer updates the
+  row afterwards. The club e-mail challenge still persists the withheld text; the
+  admin view serves the full text from this process's memory until a restart.
+  The sweep's delivery record lands in the same save as the dispatch rows of the
+  pass. A push row is written by the notification's after-durable effect AFTER
+  the save carrying the notification committed — it is never in that save; the
+  sender's `nextId()` schedules the ordinary debounced save (about two seconds,
+  best effort), so the row lands with that save or an earlier one. A crash in
+  that window loses the push row (the push was already handed to the transport;
+  nothing is re-sent). A failed ordinary save keeps every pending row for the
+  next save, which lands it once; an aborted unit of work restores the state
+  from before the unit. Nothing here changes what a route answers.
+- **Boot.** The data layer attaches to the tables as they are; an in-memory
+  `outbox` / `pushLog` / `pushTokens` array (the seed's empty containers, a
+  stale copy) is never imported — the blob the migration just imported is
+  dropped silently, anything else is logged as a count and dropped.
+  `GET /capabilities` → `persistence.dataLayer.domains.outboxPush` reports the
+  three row counts and the number of staged writes not yet in a committed save.
+- **S7c cutover (first boot of this build on an S7b file).** Migration
+  `0011_outbox_push` creates the three tables and imports the `outbox`,
+  `pushLog` and `pushTokens` blobs: every entry validated and nothing coerced —
+  an outbox entry must be exactly one of the two literals (all of its keys,
+  none of the other's), a push entry the sender's literal with an audience of
+  kind and id only, a token entry the route's literal with any JSON token;
+  unknown fields kept (`extra_json`); duplicates of a token are legal. An entry
+  that fails any check refuses the WHOLE step (`OUTBOX_PUSH_IMPORT_BLOCKED`:
+  collection, entry positions and reasons, never an address, a text, a token or
+  a code), the blobs and `saveSeq` are untouched, and the next boot refuses the
+  same way until the blob is resolved on the previous build. A file without a
+  blob imports nothing for it. A backup from any build restores through the same
+  migration with the order intact; a snapshot that omits a collection leaves its
+  table alone, an explicit empty array clears it, a malformed collection rolls
+  the whole write back.
+- **Rollback (copy-only).** `npm run rollback:outbox-push -- <data-dir>
+  <fresh-empty-dir>` (`scripts/outboxPushRollback.mjs`) opens the file
+  read-only, copies it (`VACUUM INTO`), writes every row back into the three
+  blobs in insertion order — each outbox row in its own literal with exactly its
+  keys, each token with its registered type — **nothing written after the
+  cutover is lost** — drops the three tables, removes the 0011 record and its
+  meta key, advances the save revision, checks every foreign key, VACUUMs and
+  revalidates the copy (every other table untouched). Refusals, no output: a
+  later schema step (exit 4), a file that never applied 0011 (exit 5), a
+  non-empty output directory (exit 1), a recorded 0011 whose tables are missing
+  (exit 10). Proven by booting the copy on the actual pre-S7c build (`6ca66ba`):
+  the same outbox and push-log records in the admin views, and that build keeps
+  writing (a token registered, a mail sent) to its blobs; this build then
+  re-upgrades the copy with every row. To go further back, run
+  `scripts/dispatchesRollback.mjs` on this tool's output (it refuses the S7c
+  file itself with exit 4).
+
+#### Operator procedure for the S7c cutover (not run on real data by this work)
+
+1. **Dry run on a copy.** With the S7b build (`6ca66ba`) still serving, copy the
+   data directory and boot this build on it (`DATA_DIR=<copy>` on a spare port):
+   the log shows the 0011 import counts (outbox records by source, push records,
+   tokens by kind and type, unknown-field rows); an `OUTBOX_PUSH_IMPORT_BLOCKED`
+   line lists what to resolve on the previous build.
+2. **Backup.** `POST /admin/backup` on the previous build, verify it, keep it.
+3. **Cutover.** Stop the previous build, start this build on the real directory,
+   read the same log lines.
+4. **Rollback, if needed.** `node scripts/outboxPushRollback.mjs <data-dir>
+   <fresh-empty-dir>`, then start the previous build (`6ca66ba`) on the output —
+   every mail, push and token row written since the cutover is in it.
 
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request

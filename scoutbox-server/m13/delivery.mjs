@@ -27,12 +27,23 @@ const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened
 
 export function registerDelivery(ctx) {
   const {
-    db, users, notifications, dispatches, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+    db, users, notifications, dispatches, outbox, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
     nextId, persist, persistNow, notify, findPlayer, isAdult,
     signBody, timingSafeEq, paginate,
   } = ctx;
   if (!notifications) throw new TypeError('registerDelivery needs the notifications repository (ctx.notifications)');
   if (!dispatches) throw new TypeError('registerDelivery needs the dispatches repository (ctx.dispatches)');
+  // S7c: the local fake provider's record is an outbox row (repositories/outboxPush.mjs).
+  // The server always passes the repository. Without one, the record is pushed onto
+  // db.outbox exactly as before the cutover — the same fallback adapters.mjs keeps —
+  // so a bare context built around an array (the reviewer feasibility scripts of
+  // 26d492b and 6ca66ba) keeps running; anything else refuses loudly.
+  const outboxStore = outbox ?? {
+    append(record) {
+      if (!Array.isArray(db.outbox)) throw new TypeError('registerDelivery needs the outbox repository (ctx.outbox) or an outbox array on db');
+      db.outbox.push(record);
+    },
+  };
 
   db.deliveryFailInject ??= { email: 0, push: 0 }; // admin-injected provider failures (tests/monitoring)
   db.deliveryCentreSince ??= Date.now(); // notifications older than this get an in-app record only — no retroactive email blast on upgrade
@@ -47,7 +58,10 @@ export function registerDelivery(ctx) {
       return { ok: false, error: 'injected provider failure' };
     }
     const providerMessageId = `fm_${crypto.randomBytes(8).toString('hex')}`;
-    db.outbox.push({ id: nextId('mail'), at: Date.now(), channel, to, text: String(text).slice(0, 300), providerMessageId, provider: PROVIDER });
+    // S7c: the delivery record is an outbox row (repositories/outboxPush.mjs), staged
+    // into the same save as the dispatch rows and attempts of this pass; `to` is the
+    // dispatch's destination as it is — an accepted queued dispatch may carry null.
+    outboxStore.append({ id: nextId('mail'), at: Date.now(), channel, to, text: String(text).slice(0, 300), providerMessageId, provider: PROVIDER });
     return { ok: true, providerMessageId };
   }
 

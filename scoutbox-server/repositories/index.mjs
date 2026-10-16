@@ -41,12 +41,14 @@ import * as m0007 from './migrations/0007_player_subrecords.mjs';
 import * as m0008 from './migrations/0008_one_time_codes.mjs';
 import * as m0009 from './migrations/0009_notifications.mjs';
 import * as m0010 from './migrations/0010_dispatches.mjs';
+import * as m0011 from './migrations/0011_outbox_push.mjs';
 import { trialReportsFor } from './playerSubrecords.mjs';
 import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, NOTIFICATIONS_MIGRATION, NOTIFICATIONS_CUTOVER_META } from './notifications.mjs';
 import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCHES_MIGRATION, DISPATCHES_CUTOVER_META } from './dispatches.mjs';
+import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MIGRATION, OUTBOX_PUSH_CUTOVER_META } from './outboxPush.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -69,12 +71,16 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
  * (repositories/notifications.mjs). `dispatches` (S7b, migration 0010) is the
  * delivery dispatch table with its attempts nested, in the eighteen-key shape
  * every build since M13 wrote, in insertion order (repositories/dispatches.mjs).
+ * `outbox`, `pushLog` and `pushTokens` (S7c, migration 0011) are the mail
+ * outbox (two writer literals, told apart structurally), the push log and the
+ * device push tokens (any JSON token value, stored losslessly), each in its
+ * legacy shape, in insertion order (repositories/outboxPush.mjs).
  */
-export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name]);
+export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name)]);
 /** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
-/** The notification tables and the dispatch tables: no reference to any other table (polymorphic audiences; the dispatch's notification reference is indexed, not a foreign key), dispatched last. */
-const NOTIFICATION_TABLE_DISPATCH = Object.freeze([NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, DISPATCHES_TABLE]);
+/** The notification, dispatch, outbox and push tables: no reference to any other table (polymorphic audiences; the dispatch's notification reference is indexed, not a foreign key; the outbox and push rows reference nothing), dispatched last. */
+const NOTIFICATION_TABLE_DISPATCH = Object.freeze([NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, DISPATCHES_TABLE, ...OUTBOX_PUSH_SNAPSHOT_TABLES]);
 
 /**
  * Whole-snapshot access for tools that read or write the database file as one
@@ -162,12 +168,13 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // the FINAL combined state is checked whichever side was written.
   for (const table of CODE_TABLES) if (present.includes(table.name) && table.replace(sqlite, db[table.name])) written.push(table.name);
   if (written.some((n) => IDENTITY_COLLECTIONS.includes(n))) assertPairingCodesConsistent(sqlite, { label: 'the snapshot (players and pairingCodes together)' });
-  // S7a/S7b: the notification tables and the dispatch tables reference nothing
-  // (polymorphic audiences, no cascade with a person; a dispatch's notification
-  // reference is indexed but not a foreign key — an orphan is legal), so a
-  // snapshot that carries one collection and omits another leaves the omitted
-  // table alone; each entry is validated (never coerced) and one refusal rolls
-  // the whole save back.
+  // S7a/S7b/S7c: the notification, dispatch, outbox and push tables reference
+  // nothing (polymorphic audiences, no cascade with a person; a dispatch's
+  // notification reference is indexed but not a foreign key — an orphan is
+  // legal; an outbox or push row references nothing at all), so a snapshot
+  // that carries one collection and omits another leaves the omitted table
+  // alone; each entry is validated (never coerced) and one refusal rolls the
+  // whole save back.
   for (const table of NOTIFICATION_TABLE_DISPATCH) if (present.includes(table.name) && table.replace(sqlite, db[table.name])) written.push(table.name);
   return written;
 }
@@ -332,6 +339,38 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   }
   Object.defineProperty(db, DISPATCHES_TABLE.name, { value: dispatches.view, writable: false, configurable: false, enumerable: true });
 
+  // The mail outbox, the push log and the device push tokens (S7c, migration
+  // 0011): the three tables are the record, one participant. STAGED mode here
+  // (see repositories/outboxPush.mjs): a mailer record lands in the save the
+  // route's persistNow() or the debounced save would have carried its blob
+  // entry in; a delivery record in the sweep's save with the dispatch rows of
+  // the pass; a push record — written by the after-durable effect AFTER the
+  // notification's save committed — in the later save the sender's nextId()
+  // already schedules (nothing new is scheduled here); a token in the route's
+  // persist(). An `outbox` / `pushLog` / `pushTokens` array the caller holds
+  // in memory is either the blob the migration just imported from the file (a
+  // restored backup, a pre-S7c file: dropped, the table is the record) or a
+  // stale copy (the seed's empty containers, server.mjs's `??= []`), reported
+  // when it is not empty, dropped, and its blob row deleted so no save can
+  // bring it back. The repository never imports from memory. From here on the
+  // three `db.*` names are read-only views over the mirrors.
+  const outboxPush = createOutboxPushRepository({ sqlite, log, now, unit: store.unit, staged: true });
+  const outboxPushBoot = outboxPush.attach();
+  store.setSaveHook?.(outboxPush.saveHook());
+  if (migrations.ran.includes(OUTBOX_PUSH_MIGRATION)) {
+    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(OUTBOX_PUSH_CUTOVER_META)?.value;
+    if (record) { const c = JSON.parse(record); log(`outbox/push: cutover imported ${c.outbox.imported} outbox record(s) (${c.outbox.bySource?.mailer ?? 0} mailer, ${c.outbox.bySource?.delivery ?? 0} delivery; ${c.outbox.withExtraFields} with unknown fields kept), ${c.pushLog.imported} push log record(s) and ${c.pushTokens.imported} device token(s) (${Object.entries(c.pushTokens.byTokenType ?? {}).map(([t, n]) => `${n} ${t}`).join(', ') || 'none'})`); }
+  }
+  for (const [name, view] of [['outbox', outboxPush.outbox.view], ['pushLog', outboxPush.pushLog.view], ['pushTokens', outboxPush.pushTokens.view]]) {
+    if (Object.hasOwn(db, name)) {
+      const given = db[name];
+      if (!migrations.ran.includes(OUTBOX_PUSH_MIGRATION) && Array.isArray(given) && given.length) warn(`outbox/push: an in-memory ${name} array with ${given.length} entr${given.length === 1 ? 'y' : 'ies'} was ignored; the ${name === 'outbox' ? 'outbox' : name === 'pushLog' ? 'push_log' : 'push_tokens'} table is authoritative`);
+      delete db[name];
+      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
+    }
+    Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
+  }
+
   return {
     orgs,
     identity,
@@ -343,8 +382,12 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     codes,
     notifications,
     dispatches,
+    outboxPush,
+    outbox: outboxPush.outbox,
+    pushLog: outboxPush.pushLog,
+    pushTokens: outboxPush.pushTokens,
     migrations,
-    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot },
+    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot },
     /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
     report: () => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
@@ -357,6 +400,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         oneTimeCodes: { mode: 'live', rows: codes.counts(), outstanding: codes.outstanding(), lifetimesMs: { emailChallenge: codes.emailChallengeTtlMs, pairingCode: codes.pairingCodeTtlMs }, maxEmailAttempts: codes.maxEmailAttempts },
         notifications: { mode: 'live', rows: notifications.counts(), pendingWrites: notifications.pending(), pendingEffects: notifications.pendingEffects(), coalesceMs: notifications.coalesceMs, writeMode: 'staged: a standalone write lands in the next snapshot save with the blobs it announces; a write inside a unit of work lands in its commit; its push and live event run only once that save committed' },
         dispatches: { mode: 'live', rows: dispatches.count(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: dispatches.pending(), writeMode: 'staged: a sweep\'s rows, attempts and status changes land in the next snapshot save with the outbox row, the injection counter and the ops/webhook rows written alongside; an acknowledgment lands in its unit\'s commit', notificationReference: 'indexed, no foreign key, no cascade (orphans after an ordinary deletion are retained; retention is an open decision)' },
+        outboxPush: { mode: 'live', rows: outboxPush.counts(), pendingWrites: outboxPush.pending(), writeMode: 'staged: a mailer record lands in the save its route would have carried the blob in; a delivery record in the sweep\'s save with the dispatch rows; a push record — written after the notification\'s save committed — in the later save the sender\'s nextId() already schedules; a token in the route\'s persist()', tokens: 'any JSON value the route accepted, stored losslessly as JSON text; no uniqueness constraint (primitives collapse by strict equality, objects never — the route\'s rule)' },
       },
       identity: { initState: identity.initState(), uncommittedFacets: identity.report().uncommittedFacets },
       mediaDeletions: { queued: mediaDeletions.count(), conflicts: mediaDeletions.conflicts().length },

@@ -121,7 +121,11 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   orgInvites: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   orgNotes: { guarantee: 'migration', owner: 'core', reason: 'a club private notes on a player; same first-write defect as idvQueue' },
   orgs: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
-  outbox: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  // outbox, pushLog, pushTokens: no longer blob collections since S7c — the rows live in outbox / push_log / push_tokens
+  // (migration 0011, repositories/outboxPush.mjs); the data layer defines read-only views at db.outbox, db.pushLog and
+  // db.pushTokens (insertion order), written only through the repository (the mailer, the delivery centre's fake
+  // provider, the push sender and POST /push/register).
+  outbox: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the outbox table (defined by attachDataLayer), written only through the outbox repository' },
   outcomeReports: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   // pairingCodes: no longer a production db.* read since S6a — the rows live in pairing_codes (migration 0008,
   // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free
@@ -136,8 +140,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   players: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   playlists: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   prospects: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  pushLog: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
-  pushTokens: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  pushLog: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_log table (defined by attachDataLayer), written only through the push log repository' },
+  pushTokens: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_tokens table (defined by attachDataLayer), written only through the push tokens repository' },
   recruitmentBriefs: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
   recruitmentCases: { guarantee: 'migration', owner: 'm12', reason: 'the canonical recruitment object (M12); the lifecycle lives on it' },
   recruitmentContacts: { guarantee: 'migration', owner: 'm23', reason: 'M23 P3 Contact workflow: the club-internal record of a communication process. A draft must live where no recipient route reads, and delivery truth must not become a case state' },

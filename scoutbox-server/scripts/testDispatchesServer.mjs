@@ -66,6 +66,10 @@ const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'sc
 const live = (dir) => !!q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0010_dispatches'");
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
 const blobRows = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
+/** The mail outbox as the DATABASE holds it, in insertion order: the S7c table after its cutover (0011), the blob before it. */
+const outboxRows = (dir) => (q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'")
+  ? qAll(dir, 'SELECT id, provider_message_id FROM outbox ORDER BY seq').map((r) => ({ id: r.id, providerMessageId: r.provider_message_id }))
+  : (blobRows(dir, 'outbox') ?? []));
 /** The dispatch records as the DATABASE holds them, in insertion order, with attempts re-nested: the tables after the cutover, the blob before it (so a check reads the same way on both builds). */
 const stored = (dir) => {
   if (!live(dir)) return (blobRows(dir, 'dispatches') ?? []).map((d) => ({ ...d }));
@@ -101,7 +105,7 @@ await test('a sweep pass is ONE save: the dispatch rows it creates, the attempt 
   assert.ok(emailId, 'the sweep created and saved the dispatch rows');
   const first = storedRow(dir, emailId); assert.equal(first.status, 'retrying'); assert.deepEqual(first.attempts.map((a) => [a.ok, a.error]), [[false, 'injected provider failure']]);
   assert.equal(q1(dir, "SELECT COUNT(*) AS n FROM collections WHERE name = 'dispatches'").n, 0, 'no dispatches blob after the cutover');
-  const outboxBefore = (blobRows(dir, 'outbox') ?? []).length; const seq0 = seqOf(dir); const injectBefore = blobRows(dir, 'deliveryFailInject');
+  const outboxBefore = outboxRows(dir).length; const seq0 = seqOf(dir); const injectBefore = blobRows(dir, 'deliveryFailInject');
   // The next pass sends (and the provider accepts): arm the seam so that pass's save fails at COMMIT.
   await inject(S, 0 + 1); await sleep(50); // one more failure, so the row is still retrying when the seam is armed and the following success is the one we watch
   await until(async () => storedRow(dir, emailId).attempts.length === 2, 5000);
@@ -111,7 +115,7 @@ await test('a sweep pass is ONE save: the dispatch rows it creates, the attempt 
   assert.match(S.log().slice(logBefore), /snapshot save failed: FOREIGN KEY constraint failed/, 'the pass that accepted the send failed at its COMMIT');
   const afterFailure = storedRow(dir, emailId);
   assert.equal(afterFailure.status, 'retrying', 'the accepted status is not durable'); assert.equal(afterFailure.attempts.length, 2, 'the third attempt row is not durable'); assert.equal(afterFailure.providerMessageId, null);
-  assert.equal((blobRows(dir, 'outbox') ?? []).length, outboxBefore, 'the outbox row did not land without the dispatch rows'); assert.equal(seqOf(dir), seqArmed, 'saveSeq unchanged');
+  assert.equal(outboxRows(dir).length, outboxBefore, 'the outbox row did not land without the dispatch rows'); assert.equal(seqOf(dir), seqArmed, 'saveSeq unchanged');
   const inMemory = (await admin(S)).recent.find((d) => d.id === emailId); assert.equal(inMemory.status, 'accepted', 'memory shows the pass (every unsaved edit does)'); assert.equal(inMemory.attempts.length, 3);
   // The next save lands everything once. Memory is the intended state (the store's contract since S3): the failed save
   // schedules nothing by itself, and a pass that changes nothing saves nothing, so the retry rides on the next pass that
@@ -122,8 +126,8 @@ await test('a sweep pass is ONE save: the dispatch rows it creates, the attempt 
   const landed = storedRow(dir, emailId);
   assert.equal(landed.status, 'accepted', 'the accepted status landed on the next save');
   assert.equal(landed.attempts.length, 3); assert.deepEqual(landed.attempts.map((a) => a.ok), [false, false, true]); assert.ok(landed.providerMessageId);
-  assert.equal((blobRows(dir, 'outbox') ?? []).filter((m) => m.providerMessageId === landed.providerMessageId).length, 1, 'exactly one outbox row for the one accepted send (no replay of the failed save)');
-  assert.ok((blobRows(dir, 'outbox') ?? []).length >= outboxBefore + 1); assert.ok(seqOf(dir) > seqArmed);
+  assert.equal(outboxRows(dir).filter((m) => m.providerMessageId === landed.providerMessageId).length, 1, 'exactly one outbox row for the one accepted send (no replay of the failed save)');
+  assert.ok(outboxRows(dir).length >= outboxBefore + 1); assert.ok(seqOf(dir) > seqArmed);
   assert.deepEqual(blobRows(dir, 'deliveryFailInject'), { ...injectBefore, email: 0 }, 'the counter landed with the rows');
   assert.ok(stored(dir).some((d) => d.notificationId === notice2.id), 'the new notice\'s rows landed in that same save');
   await S.stop(); rm(dir);
@@ -316,9 +320,12 @@ await test('backup/restore and the old-build rollback proof: the admin backup ex
   const refusedBoot = await bootRefuses(bad); assert.match(refusedBoot.log, /DISPATCHES_IMPORT_BLOCKED/); assert.equal(refusedBoot.log.includes('example.test'), false, 'no address in the log'); assert.equal(live(bad), false);
   // The S7a tool refuses the S7b file.
   try { execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), dir, tempDir('s7b-s7atool')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
-  // The copy-only rollback booted by the accepted build.
-  const copy = tempDir('s7b-rollback');
-  const out = execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, copy], { encoding: 'utf8' });
+  // The copy-only rollback booted by the accepted build. S7c: the file carries 0011, so the S7b tool refuses it (exit 4)
+  // and the chain starts with the S7c tool (copy-only); the S7b tool then runs on that copy.
+  try { execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, tempDir('s7b-s7btool')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
+  const s7bCopy = tempDir('s7b-rollback-s7c'); const copy = tempDir('s7b-rollback');
+  execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), dir, s7bCopy], { encoding: 'utf8' });
+  const out = execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), s7bCopy, copy], { encoding: 'utf8' });
   assert.match(out, /written back as a blob/); assert.equal(live(copy), false); assert.deepEqual(stored(copy), all, 'the blob holds every row and attempt in order');
   const OLD = process.env.SCOUTBOX_PRE_S7B_SERVER;
   if (OLD && fs.existsSync(OLD)) {
@@ -336,7 +343,7 @@ await test('backup/restore and the old-build rollback proof: the admin backup ex
   } else {
     console.log('    (SCOUTBOX_PRE_S7B_SERVER not set: the old-build boot of the rollback copy was SKIPPED; the blob shape was checked by this process only)');
   }
-  rm(dir, restored, bad, copy);
+  rm(dir, restored, bad, s7bCopy, copy);
 });
 
 

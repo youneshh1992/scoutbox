@@ -5,10 +5,10 @@
 --   channels            → channels, messages, message_attachments
 --   notifications       → notifications                                     (LIVE since migration 0009_notifications, S7a, REGISTERED)
 --   notificationPrefs   → notification_prefs, notification_pref_categories  (LIVE since migration 0009_notifications, S7a, REGISTERED)
---   dispatches          → dispatches, dispatch_attempts                  (LIVE since migration 0010_dispatches, S7b, REGISTERED — implemented, pending independent acceptance)
---   outbox              → outbox
---   pushLog             → push_log
---   pushTokens          → push_tokens
+--   dispatches          → dispatches, dispatch_attempts                  (LIVE since migration 0010_dispatches, S7b, REGISTERED — independently accepted at ac50b60)
+--   outbox              → outbox                                           (LIVE since migration 0011_outbox_push, S7c, REGISTERED — implemented, pending independent acceptance)
+--   pushLog             → push_log                                         (LIVE since migration 0011_outbox_push, S7c, REGISTERED — implemented, pending independent acceptance)
+--   pushTokens          → push_tokens                                      (LIVE since migration 0011_outbox_push, S7c, REGISTERED — implemented, pending independent acceptance)
 --   blocks              → blocks
 --   reports             → reports
 --   moderationLog       → moderation_log
@@ -411,105 +411,149 @@ CREATE TABLE dispatch_attempts (
 
 
 -- -----------------------------------------------------------------------------
--- outbox
--- source: db.outbox  TWO writers with two shapes:
---   (a) adapters.mjs:76-77 createMailer.send → {id, ts, to, subject, text, transport, delivered}
---   (b) m13/delivery.mjs:33 fakeSend         → {id, at, channel, to, text(≤300), providerMessageId, provider}
---   container server.mjs:219, seed.mjs:485.
--- owner/writer: adapters.mjs mailer (called from server.mjs 1250/3026/3695,
---         m14/organisations.mjs 236/533/717/918, m23/contactRoutes.mjs:521,
---         m13/enterprise.mjs:88) and m13/delivery.mjs fakeSend.
--- lifecycle: append-only; never pruned; never deleted on player deletion.
--- mapping (unified):
---   id                 -> id (mail-*)
+-- outbox   (LIVE since migration 0011_outbox_push, S7c — repositories/outboxPush.mjs;
+--           docs/architecture/s7-readiness-review.md §10 as corrected by the review of 6ca66ba)
+-- source: db.outbox  TWO writers with two literals, told apart STRUCTURALLY (never by a value):
+--   (a) the MAILER record   adapters.mjs createMailer.send → {id, ts, to, subject, text, transport, delivered}
+--   (b) the DELIVERY record m13/delivery.mjs fakeSend     → {id, at, channel, to, text(≤300), providerMessageId, provider}
+--   a shape's keys must ALL be present and none of the other shape's; an entry matching both
+--   or neither is refused by position. `source` records which literal a row is.
+-- owner/writer: the outbox repository, called by adapters.mjs createMailer.send (nine route
+--         sites: server.mjs guardian sign-up, club e-mail challenge (the one `secrets` site),
+--         reference request; m14/organisations.mjs 236/533/717/918; m23/contactRoutes.mjs:521;
+--         m13/enterprise.mjs:88) and by m13/delivery.mjs fakeSend; the mailer's `markDelivered`
+--         after the live provider call settles.
+-- lifecycle: append-only; never pruned; never deleted on player deletion; `seq` is the
+--         insertion order every reader depends on (the admin view lists newest first).
+-- mapping:
+--   (position)         -> seq (the array position at import; assigned at insert afterwards)
+--   id                 -> id (mail-*; UNIQUE)
+--   (shape)            -> source ('mailer' for (a), 'delivery' for (b))
 --   ts | at            -> created_at (source field is `ts` in (a), `at` in (b))
---   to                 -> to_address  -- personal data
---   subject            -> subject (NULL for (b) rows)
---   text               -> text (full mail body in (a); first 300 chars of the notification text in (b))
---   transport | provider -> transport ('sendgrid' | 'dev-outbox' from (a); 'local-fake' from (b))
---   delivered          -> delivered ((a): !live, or res.ok when live; (b) never sets it → 0)
---   channel            -> channel ('email' for (b) rows; NULL for (a))
---   providerMessageId  -> provider_message_id ((b) only)
--- notes: KNOWN DEFECT — the (a) rows carry one-time secrets in clear in `text`
---   (guardian email code 1250, club domain code 3026, m14 domain/application
---   codes, m14/m13 invite codes). They are retained here unchanged because the
---   outbox is the dev transport's only record; redaction of `text` for rows
---   older than their code's expiry is a follow-up, not a schema concern.
---   Reads: admin full list newest first (4151), count (4136).
+--   to                 -> to_address  -- personal data; NULL is a VALUE a writer produces: the real
+--                                        boot sweep over an accepted queued dispatch with to:null writes
+--                                        a delivery record with to:null (review of 6ca66ba) — kept as
+--                                        present-and-null on the way back
+--   subject            -> subject ((a) only; NULL = the key is absent in (b))
+--   text               -> text (the withheld mail text in (a) — S6a: every `secrets` value replaced by the
+--                                placeholder; the dev full text lives in process memory only, never here;
+--                                the first 300 chars of the notification text in (b))
+--   transport | provider -> transport (as written: 'sendgrid' | 'dev-outbox' from (a); 'local-fake' from (b);
+--                                      OPEN vocabulary, no CHECK)
+--   delivered          -> delivered ((a) only, 0/1 from the boolean; NULL = the key is absent in (b))
+--   channel            -> channel ((b) only, as written; NULL = absent in (a); OPEN vocabulary)
+--   providerMessageId  -> provider_message_id ((b) only; NULL = absent in (a))
+--   (unknown own keys) -> extra_json (detached JSON, spread back FIRST on export)
+-- notes: the structural CHECK below is total: a mailer row carries subject and delivered and no
+--   channel/provider_message_id; a delivery row carries channel and provider_message_id and no
+--   subject/delivered — so NULL always means "absent key" and the way back rebuilds exactly the
+--   writer's literal with exactly its keys. The six plain-code mail sites (every site but the club
+--   challenge) still write their one-time code into `text`: carried through unchanged (an owner
+--   decision outside S7c, not a schema concern); the one `secrets` site persists the placeholder.
+--   Reads: /admin/outbox (newest first, the dev full text merged from memory), /admin/overview count.
 -- -----------------------------------------------------------------------------
 CREATE TABLE outbox (
-  id                  TEXT PRIMARY KEY,
+  seq                 INTEGER PRIMARY KEY,
+  id                  TEXT NOT NULL UNIQUE,
+  source              TEXT NOT NULL CHECK (source IN ('mailer', 'delivery')),
   created_at          INTEGER NOT NULL,
-  to_address          TEXT NOT NULL,                                       -- personal data
+  to_address          TEXT,                                                -- personal data; NULL accepted (an accepted queued dispatch)
   subject             TEXT,
-  text                TEXT NOT NULL,                                       -- may contain one-time codes (defect)
-  transport           TEXT NOT NULL CHECK (transport IN ('sendgrid','dev-outbox','local-fake')),
-  delivered           INTEGER NOT NULL DEFAULT 0 CHECK (delivered IN (0,1)),
-  channel             TEXT CHECK (channel IS NULL OR channel IN ('email')),
-  provider_message_id TEXT
+  text                TEXT NOT NULL,                                       -- withheld where the writer withheld; may contain a one-time code elsewhere (carried through)
+  transport           TEXT NOT NULL,
+  delivered           INTEGER,
+  channel             TEXT,
+  provider_message_id TEXT,
+  extra_json          TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  CHECK ((source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL AND delivered IN (0, 1) AND channel IS NULL AND provider_message_id IS NULL)
+      OR (source = 'delivery' AND subject IS NULL AND delivered IS NULL AND channel IS NOT NULL AND provider_message_id IS NOT NULL))
 ) STRICT;
 
-CREATE INDEX outbox_created_at ON outbox(created_at);
+CREATE INDEX outbox_created_at ON outbox (created_at);
 
 
 -- -----------------------------------------------------------------------------
--- push_log
--- source: db.pushLog  created at adapters.mjs:106-107 (createPushSender.send);
---         container server.mjs:220, seed.mjs:486.
--- owner/writer: adapters.mjs push sender, called only from notify() (server.mjs:818)
---         when deferredPush is false.
--- lifecycle: append-only; never pruned; never deleted on player deletion.
+-- push_log   (LIVE since migration 0011_outbox_push, S7c — repositories/outboxPush.mjs)
+-- source: db.pushLog  the SENDER record adapters.mjs createPushSender.send →
+--         {id, ts, audience: {kind, id}, title, body, transport}.
+-- owner/writer: the push log repository, called by the push sender, which notify()
+--         (server.mjs) runs through the notification repository's after-durable effect
+--         when deferredPush is false — i.e. AFTER the save carrying the notification row
+--         committed, so the push row is never in that save; the sender's nextId() calls the
+--         server's debounced persist(), the existing best-effort scheduling (about two
+--         seconds, not a guarantee) that lands it in a later save (review of 6ca66ba, D1).
+-- lifecycle: append-only; never pruned (the admin view's 200-row window is a read-time slice);
+--         never deleted on player deletion; `seq` is the insertion order.
 -- mapping:
---   id            -> id (push-*)
+--   (position)    -> seq
+--   id            -> id (push-*; UNIQUE)
 --   ts            -> created_at (source field is literally `ts`)
---   audience.kind -> audience_kind ('player' | 'guardian' | 'org_user')
+--   audience.kind -> audience_kind (OPEN, as notifications.audience_kind: the notification
+--                                   repository validated the audience; no CHECK)
 --   audience.id   -> audience_id (polymorphic; no FK)
 --   title         -> title (always 'ScoutBox' today)
 --   body          -> body (= notification text)
---   transport     -> transport ('expo' | 'dev-log')
--- notes: the row is written whether or not any device token matched. Reads:
---   last 200 newest first (4152), count (4137).
+--   transport     -> transport ('expo' | 'dev-log' as written; OPEN, no CHECK)
+--   (unknown own keys) -> extra_json
+-- notes: the row is written whether or not any device token matched (the staff-push
+--   identity mismatch — tokens registered under 'org', pushes addressed to 'org_user' — is
+--   carried through unchanged). Reads: /admin/push-log (last 200, newest first), /admin/overview count.
 -- -----------------------------------------------------------------------------
 CREATE TABLE push_log (
-  id            TEXT PRIMARY KEY,
+  seq           INTEGER PRIMARY KEY,
+  id            TEXT NOT NULL UNIQUE,
   created_at    INTEGER NOT NULL,
-  audience_kind TEXT NOT NULL CHECK (audience_kind IN ('player','guardian','org_user')),
+  audience_kind TEXT NOT NULL,
   audience_id   TEXT NOT NULL,
   title         TEXT NOT NULL,
   body          TEXT NOT NULL,
-  transport     TEXT NOT NULL CHECK (transport IN ('expo','dev-log'))
+  transport     TEXT NOT NULL,
+  extra_json    TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
 
-CREATE INDEX push_log_created_at ON push_log(created_at);
+CREATE INDEX push_log_created_at ON push_log (created_at);
+CREATE INDEX push_log_audience_seq ON push_log (audience_kind, audience_id, seq);
 
 
 -- -----------------------------------------------------------------------------
--- push_tokens
--- source: db.pushTokens  created at server.mjs:3787-3788 (POST /push/register);
---         container server.mjs:221, seed.mjs:487.
--- owner/writer: server.mjs /push/register (delete-then-push upsert of the triple).
--- lifecycle: no expiry, no revocation; NOT removed on player deletion or logout.
+-- push_tokens   (LIVE since migration 0011_outbox_push, S7c — repositories/outboxPush.mjs)
+-- source: db.pushTokens  the ROUTE record POST /push/register (server.mjs) → {kind, refId, token, ts}.
+-- owner/writer: the push tokens repository (`register`), called by the route; read by the
+--         push sender (`forAudience`) on every live push.
+-- lifecycle: no expiry, no revocation; NOT removed on player deletion or logout; `seq` is
+--         "last registration last" — the route's filter-then-push order.
 -- mapping:
---   kind   -> ref_kind (session.kind: 'player' | 'guardian' | 'org' | 'ts_reviewer')
---   refId  -> ref_id (session.refId: players.id / guardians.id / orgs.id / tsReviewers.id — polymorphic, no FK)
---   token  -> token (Expo device push token, kept in CLEAR — see notes)
+--   (position)    -> seq
+--   kind   -> ref_kind (the session kind as written: 'player' | 'guardian' | 'org' | 'ts_reviewer' today; OPEN, no CHECK)
+--   refId  -> ref_id (session.refId — polymorphic, no FK)
+--   token  -> token_json: ANY JSON value the route accepted (it checks truthiness only — the review
+--             of 6ca66ba registered a number, a string, a boolean, objects and arrays), stored
+--             LOSSLESSLY as JSON text and decoded on read to the value and type it was registered
+--             with (a consumer never sees the encoded string; the sender hands Expo the same value)
 --   ts     -> registered_at (source field is literally `ts`)
--- notes: natural key (kind, refId, token) — UNIQUE enforced by code today, here the PK.
---   The token is NOT hashed: it is the delivery address handed to Expo on every
---   send (adapters.mjs:115), not a credential for ScoutBox; a hash would make it
---   unusable. Treat as a device identifier (personal data).
---   KNOWN DEFECT: org sessions register ref_kind='org' with ref_id=orgs.id
---   (createSession('org', org.id, …) 1740/1859), but the sender filters on the
---   notification audience kind 'org_user' with an org_users.id (adapters.mjs:111)
---   → org-staff pushes never match a token. Read: by (ref_kind, ref_id) on every live push.
+--   (unknown own keys) -> extra_json
+-- notes: NO uniqueness constraint. The route's rule is JavaScript `===` on the token: a primitive
+--   collapses an earlier row of the same (kind, refId) holding the same value of the same type
+--   (424242 and '424242' are different tokens); an object or an array NEVER matches an existing
+--   row (every request body is freshly parsed), so structurally equal objects are separate rows.
+--   `register` reproduces exactly that (in SQL: equality of the JSON text, which for primitives is
+--   the same relation; objects and arrays excluded). A UNIQUE on the JSON text would collapse the
+--   object/array rows — rejected. The token is NOT hashed: it is the delivery address handed to
+--   Expo, not a credential for ScoutBox. Treat as a device identifier (personal data).
+--   KNOWN DEFECT, carried through: org sessions register ref_kind='org' with ref_id=orgs.id while
+--   the sender filters on the notification audience ('org_user', org_users.id) → org-staff pushes
+--   never match a token. Not re-keyed here.
 -- -----------------------------------------------------------------------------
 CREATE TABLE push_tokens (
-  ref_kind      TEXT NOT NULL CHECK (ref_kind IN ('player','guardian','org','ts_reviewer')),
+  seq           INTEGER PRIMARY KEY,
+  ref_kind      TEXT NOT NULL,
   ref_id        TEXT NOT NULL,
-  token         TEXT NOT NULL,                                             -- personal data (device identifier)
+  token_json    TEXT NOT NULL CHECK (json_valid(token_json)),              -- personal data (device identifier), any JSON type
   registered_at INTEGER NOT NULL,
-  PRIMARY KEY (ref_kind, ref_id, token)
+  extra_json    TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
+
+CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
 
 
 -- -----------------------------------------------------------------------------

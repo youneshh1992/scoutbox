@@ -24,9 +24,11 @@ and the one deliberate reading it records are in §8.3. **S7b: independently ACC
 storage milestone and its three corrections at `ac50b60257b89387aa1dec44bad7f571e61aa74e`** (16 October
 2026; §9.9 holds the acceptance record and its limits — not production or deployment approval, not
 acceptance of the whole migration; §9.7 is what was built, §9.8 the correction round as dated history).
-**The notification-extras follow-up the `ac50b60` review confirmed is corrected in the commit this
-handoff carries (§9.10) — pending independent review. S7c: implementation plan PREPARED (§10), NOT
-IMPLEMENTED, no cutover authorised. S7d not started.** §§0–8.2
+**The notification-extras follow-up the `ac50b60` review confirmed is corrected in `6ca66ba` and
+independently ACCEPTED there for its bounded scope (§9.10, §10.9). S7c (`outbox`, `push_log`,
+`push_tokens`): the prepared plan (§10) was corrected by the review of `6ca66ba` (D1, D2, the null
+destination — §10.3, §10.4, §10.7) and IMPLEMENTED on top of `6ca66ba` (§10.8) — pending independent
+acceptance, not accepted; migration `0011_outbox_push` is registered. S7d not started.** §§0–8.2
 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where the
 implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
 correction is marked in place. The exact blockers of the remaining sub-steps are in §8. Nothing
@@ -37,7 +39,8 @@ Sections: 0 summary · 1 ownership and data mapping · 2 the dependency graph ·
 delivery boundaries · 4 privacy, permissions and deletion · 5 preflight and cutover · 6 backup and
 rollback · 7 tests, acceptance and the performance objective · 8 the dependency table and the
 bounded recommendation · 9 S7b (design, implementation, corrections, acceptance, the notification
-follow-up) · 10 the S7c implementation plan (prepared, not implemented).
+follow-up) · 10 S7c (the plan as corrected by the review of `6ca66ba`, the implementation §10.8, the
+follow-up's acceptance §10.9).
 
 ---
 
@@ -1541,7 +1544,7 @@ changes the mirror; an export mutation inside an aborted unit survives the rollb
 `extra_json` keeps `['original']`). It is an existing S7a defect, not a regression of the corrected
 dispatch repository; its correction is §9.10.
 
-### 9.10 Notification-extras follow-up — corrected (16 October 2026; the commit this handoff carries; **pending independent review**)
+### 9.10 Notification-extras follow-up — corrected (16 October 2026, commit `6ca66ba`; **independently ACCEPTED at `6ca66ba` for its bounded scope — §10.9**)
 
 `repositories/notifications.mjs` now detaches unknown nested data exactly as the dispatch repository
 does, with a local `cloneJson` (no cross-project helper): a prototype-safe JSON clone at ingress
@@ -1565,9 +1568,17 @@ the unchanged coalescing / acknowledgment / preferences around a row with extras
 
 ---
 
-## 10. S7c implementation plan — `outbox`, `push_log`, `push_tokens` (prepared 16 October 2026 on `ac50b60`; design and a synthetic probe only; **PREPARED, NOT IMPLEMENTED — no table, repository, migration or rollback tool exists, nothing is registered, no cutover is authorised**)
+## 10. S7c — `outbox`, `push_log`, `push_tokens` (plan prepared 16 October 2026 on `ac50b60`; **three design assumptions corrected by the independent review of `6ca66ba`** (§10.3, §10.4, §10.6, §10.7); **IMPLEMENTED 16 October 2026 on top of `6ca66ba` — pending independent acceptance, not accepted**; what was built is §10.8)
 
-This is the one current plan for the third S7 sub-step. It reuses the survey of §1.6–§1.9 (the
+This is the one current plan for the third S7 sub-step, kept as the design record and corrected in
+place where the independent review of `6ca66ba` (its baseline script `review-6ca66ba-compatibility.mjs`,
+run unchanged on the starting tree: exit 0, three observations REPRODUCED) showed an assumption wrong:
+**(D1)** the push row already has a save scheduled — the sender's `nextId('push')` calls the server's
+debounced `persist()` — so no durability decision was needed and none was taken; **(D2)** a token is
+stored losslessly as JSON and the route is unchanged — no `TOKEN_INVALID`, no refusal of legacy
+non-string rows, no uniqueness constraint; **(to:null)** an accepted queued dispatch without a
+destination is swept into a delivery record with `to: null`, so the destination column is nullable.
+Each correction is marked where it applies; the uncorrected text is not kept as current. It reuses the survey of §1.6–§1.9 (the
 two outbox shapes, the push log, the push tokens, the persistence paths), the boundary rules of
 §3.2, the cutover rules of §5 and the rollback design of §6.2, and the pattern S7b built (§9.3–§9.4,
 §9.7) — it does not repeat them; where this section states something more precisely than an
@@ -1676,7 +1687,7 @@ the timing of every path below is preserved, only the storage changes.
 |---|---|
 | **Mail from a route** (nine sites): the mailer pushes the (a) record synchronously, the provider call runs afterwards (never inside a unit, §3.2), the route's `persistNow()` saves the record with the business row in one revision (probe "outbox (a2)": the invite row and its mail row in revision 2 → 3), or the debounced save carries it (probe "outbox (a1)": not in the database at the response, landed with the next revision). The live transport's `record.delivered = res.ok` mutates the already-pushed object and lands with whatever save follows. | `createMailer.send` calls `outbox.append(record)` (staged INSERT, same save as today) and, on the live transport only, `outbox.markDelivered(id, ok)` after the `fetch` settles (staged UPDATE, the next save — as the mutated object did). `secrets` withholding, `devDeliveries` and the `/admin/outbox` read-time merge stay in the mailer and the route, unchanged (§3.2 last bullet). No mailer call site changes. |
 | **Mail from the sweep** (b): `fakeSend` pushes the record inside the sweep; the sweep's `persistNow()` commits it with the dispatch row, the attempt, the status patch, the fail-inject decrement and the ops/webhook rows in one revision (S7b §9.7; probe: `sameRevisionAsDispatchRow: true`). | `fakeSend` calls `outbox.append(record)` — staged into the same save as the dispatch repository's rows. One revision, as today. |
-| **Push log**: `notify` creates the notification row (staged) and registers `pushSender.send` as an after-durable effect; the route's `persistNow()` (S:1016 for a message) commits the row; the effect then pushes the push record into memory. **It is in `/admin/push-log` at once but in no save yet** (probe "push log timing": 1 row in memory, 0 in the database at the response). Nothing schedules a save for it: it rides on the next save by anybody — on the probe's file the sweep's `persistNow()` 318 ms later (the save that created the notification's 2 dispatch rows; the sweep runs every 60 s in production, DL:304, and a new notification always gives it rows to create, DL:99–117, so it saves), otherwise any later route. | `createPushSender.send` calls `pushLog.append(record)` — staged into the next save, exactly as today. **The dependency is stated, not hidden:** the push row is written by an effect that runs *after* the notification's COMMIT, so it can never be in the notification's save; it is durable with a **later** save and is never reported durable with the first. Its guarantee: durable with the next save, which under normal operation is at most the sweep interval away (≤ 60 s) and usually the next request; a crash in that window loses the push-log row (an audit record of a push that was already handed to the transport — the push is not re-sent, the row is not reconstructed; the notification row is intact). This is an at-most-once audit of an at-least-once-per-commit effect, not exactly-once delivery. **D1 (§10.7)** asks whether the sender should call the ordinary debounced `persist()` after appending, bounding the window to 2 s at no new mechanism. |
+| **Push log**: `notify` creates the notification row (staged) and registers `pushSender.send` as an after-durable effect; the route's `persistNow()` (S:1016 for a message) commits the row; the effect then writes the push record into memory. **It is in `/admin/push-log` at once but in no save yet** (probe "push log timing": 1 row in memory, 0 in the database at the response). **CORRECTED (review of `6ca66ba`, D1):** the earlier text said "nothing schedules a save for it" — wrong. The sender's `nextId('push')` (AD:126) calls the server's `nextId`, which calls the debounced `persist()` (S:665, S:159–169): the push row ALWAYS has a save scheduled about two seconds after the effect ran. The reviewer's real-server measurement with `M13_FAST_RETRY` unset: 2044 ms (this tree's rerun: 2016 ms), zero dispatch rows for the notice, no further request; the preparation probe's 400 ms sweep had masked the timer (its `persistNow()` came first). | `createPushSender.send` calls `pushLog.append(record)` — staged into the next save, exactly as today; **nothing else changes**: no new durability policy, no recursive save, no redundant timer, no change to `nextId`/`persist` or to the after-durable boundary. The push row is written by an effect that runs *after* the notification's COMMIT, so it can never be in the notification's save; it is durable with a **later** save and is never reported durable with the first. The actual guarantee: the existing best-effort debounce (about two seconds; an earlier save by a sweep or a route may carry it first); a failed save keeps it pending for the next one; a crash or an event-loop stall in that window loses the push-log row (an audit record of a push already handed to the transport — the push is not re-sent, the row is not reconstructed; the notification row is intact). No at-least-once or exactly-once delivery claim follows from an in-memory after-durable callback. Tested in both modes (`testOutboxPushServer.mjs` [compat] D1 normal / accelerated). |
 | **Push tokens**: filter-then-push on the array, then the debounced `persist()`. | `pushTokens.register({kind, refId, token, ts})` = staged `DELETE WHERE (ref_kind, ref_id, token) = ?` + `INSERT` with a **new `seq`** (so the view's order stays "last registration last", byte-for-byte the array behaviour the probe recorded), then the route's `persist()` as today. |
 | **Remaining blob bookkeeping**: every save still upserts every non-table-backed blob (ST:177–183). | The three collections leave the blob save (the §7.3 phase "S7c: `pushLog`/`outbox` leave it"); the store's blob write is otherwise unchanged; the sweep's `opsEvents`/`webhookDeliveries` blobs and the routes' other blobs stay in the same save as the new rows (the §3.2 correction: coupled blob writes inside the same commit). |
 
@@ -1706,25 +1717,38 @@ untouched: the push still runs after the notification's save committed.
 - **No constraint current data does not satisfy.** The structural constraints kept in §10.4 are the
   ones the writers already guarantee (and the dry run on the real file reports any row that fails
   one as a refusal, never a coercion); the vocabulary CHECKs of the proposed DDL are dropped
-  (§10.4 says which and why).
-- **The one actual conflict, identified before choosing:** the registration route accepts a non-string
-  token (probe: a number and an object answered 201 and were stored as JSON values). A `TEXT`
-  column cannot hold either losslessly — a STRICT `TEXT` column **silently converts** a bound number
-  (node binds every number as a double: `424242` is stored as the text `'424242.0'`, probe
-  "executed SQL") and refuses an object. Preserving today's semantics would mean an `ANY` column or
-  a JSON-encoded token, both of which change what the sender hands to Expo on the way back. The plan
-  therefore (i) refuses the import whole for a legacy row whose `token` is not a non-empty string
-  (naming the row's position and kind, never the value) and (ii) proposes that the route answer 400
-  `TOKEN_INVALID` for a non-string token after cutover — a small, visible behaviour change that
-  needs the Founder's yes (**D2**). Until D2 is taken, S7c is not implementable as specified here.
+  (§10.4 says which and why). **CORRECTED (review of `6ca66ba`):** the proposed `to_address TEXT
+  NOT NULL` and the "non-empty `to`" validation would have refused an accepted stored state — the
+  dispatch repository accepts a queued e-mail dispatch with `to: null`, and the real boot sweep over
+  it writes a delivery record with `to: null`, saves it and marks the dispatch accepted (the
+  reviewer's script and `testOutboxPushServer.mjs` [compat] "null destination"). The column is
+  nullable, the key is preserved as present-and-null on the way back, and the case is covered
+  through migration, sweep save, restart, backup and rollback. No new delivery rule.
+- **The non-string token — CORRECTED (review of `6ca66ba`, D2): a representation problem, not a
+  conflict.** The route accepts any truthy JSON value (the reviewer registered a number, a string, a
+  boolean, two equal objects and two equal arrays: nine requests, seven persisted rows — 1/1/1/2/2 —
+  because the route's filter is JavaScript `===`: a repeated primitive collapses its earlier row,
+  structurally equal objects and arrays never match). The earlier proposal (`TOKEN_INVALID` at the
+  route, refusal of legacy non-string rows, a UNIQUE triple) is **withdrawn**: it would have changed
+  the API and merged the object/array rows. The token is stored LOSSLESSLY as JSON text
+  (`token_json`, validated at decode) and decoded on read into an ordinary value of the same type —
+  the reviewer round-tripped the seven values through a STRICT SQLite JSON column and then called the
+  real `createPushSender` with a stubbed provider: every outgoing token value and type was preserved,
+  so what Expo receives does not change. `register` reproduces the route's rule exactly (primitives
+  by strict equality of value and type — in SQL, equality of the JSON text, which for primitives is
+  the same relation; objects and arrays never), appends the new row last, and there is **no
+  uniqueness constraint**. Legacy rows of any JSON token type import as they are. This is technical
+  compatibility, not a product decision; no Founder approval was needed or asked.
 - **No other implementation blocker found.** The staged repository, the snapshot dispatcher, the
   effect mechanism and the rollback-tool chain all exist; S7c adds three tables to the same
   machinery.
 
 ### 10.4 Lossless mappings, detached extras, ordering keys, the constraints that are real, and text-free refusal
 
-**The DDL this plan proposes** (supersedes SQL03:440–512 — the file is not touched until
-implementation, as S7b did; the schema test then checks it):
+**The DDL as implemented** (`repositories/outboxPush.mjs` `OUTBOX_PUSH_DDL`; `sql/03` rewritten to match,
+checked column for column by `scripts/testSchemaDdl.mjs`; **CORRECTED** from the prepared proposal by the
+review of `6ca66ba`: `to_address` nullable, `delivered` NULL for a delivery row under a total structural
+CHECK, `token_json` instead of a TEXT token, and NO unique triple):
 
 ```sql
 CREATE TABLE outbox (
@@ -1732,16 +1756,18 @@ CREATE TABLE outbox (
   id                  TEXT NOT NULL UNIQUE,           -- 'mail-N'
   source              TEXT NOT NULL CHECK (source IN ('mailer', 'delivery')),  -- shape (a) | shape (b): structural, decides the way back
   created_at          INTEGER NOT NULL,               -- ts (a) | at (b)
-  to_address          TEXT NOT NULL,                  -- personal data
-  subject             TEXT,                           -- (a) only; NULL for (b)
+  to_address          TEXT,                           -- personal data; NULL is a value a writer produces (an accepted queued dispatch)
+  subject             TEXT,                           -- (a) only; NULL = the key is absent in (b)
   text                TEXT NOT NULL,                  -- withheld text for the one `secrets` site; as written elsewhere
   transport           TEXT NOT NULL,                  -- transport (a) | provider (b); no vocabulary CHECK
-  delivered           INTEGER NOT NULL DEFAULT 0 CHECK (delivered IN (0, 1)),  -- (a) boolean → 0/1; (b) always 0 (the key is absent on the way back)
-  channel             TEXT,                           -- (b) only; NULL for (a); no vocabulary CHECK
-  provider_message_id TEXT,                           -- (b) only
-  extra_json          TEXT                            -- unknown keys, detached (S5/S7a/S7b precedent); NULL when none
+  delivered           INTEGER,                        -- (a) only, 0/1; NULL = the key is absent in (b)
+  channel             TEXT,                           -- (b) only; NULL = absent in (a); no vocabulary CHECK
+  provider_message_id TEXT,                           -- (b) only; NULL = absent in (a)
+  extra_json          TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  CHECK ((source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL AND delivered IN (0, 1) AND channel IS NULL AND provider_message_id IS NULL)
+      OR (source = 'delivery' AND subject IS NULL AND delivered IS NULL AND channel IS NOT NULL AND provider_message_id IS NOT NULL))
 ) STRICT;
-CREATE INDEX outbox_created_at ON outbox(created_at);
+CREATE INDEX outbox_created_at ON outbox (created_at);
 
 CREATE TABLE push_log (
   seq           INTEGER PRIMARY KEY,
@@ -1752,27 +1778,33 @@ CREATE TABLE push_log (
   title         TEXT NOT NULL,
   body          TEXT NOT NULL,
   transport     TEXT NOT NULL,                        -- no vocabulary CHECK
-  extra_json    TEXT
+  extra_json    TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-CREATE INDEX push_log_created_at ON push_log(created_at);
+CREATE INDEX push_log_created_at ON push_log (created_at);
+CREATE INDEX push_log_audience_seq ON push_log (audience_kind, audience_id, seq);
 
 CREATE TABLE push_tokens (
   seq           INTEGER PRIMARY KEY,                  -- "last registration last" (the array's order)
   ref_kind      TEXT NOT NULL,                        -- the session kind as written: player | guardian | org | ts_reviewer today; no CHECK
   ref_id        TEXT NOT NULL,
-  token         TEXT NOT NULL,                        -- device identifier (personal data), in clear as today
+  token_json    TEXT NOT NULL CHECK (json_valid(token_json)),  -- ANY JSON value the route accepted, lossless; decoded on read
   registered_at INTEGER NOT NULL,                     -- ts
-  extra_json    TEXT,
-  UNIQUE (ref_kind, ref_id, token)
+  extra_json    TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
+CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
 ```
 
-- **Kept (structural, already guaranteed by the writers, verified by the probe's executed SQL):**
-  every `NOT NULL`; `delivered IN (0,1)`; `UNIQUE id` on both logs; `UNIQUE (ref_kind, ref_id,
-  token)` — the exact natural key the route rewrites the array by (`push_tokens duplicate triple`
-  refused, `same token, other ref_kind` admitted, as the code does); `source IN ('mailer','delivery')`
-  — a two-value structural discriminator the migration itself writes, not a vocabulary a writer may
-  grow.
+- **Kept (structural, already guaranteed by the writers, verified in SQL by `testOutboxPush.mjs`):**
+  `NOT NULL` where every writer writes a value (`id`, `created_at`, `text`, `transport`, the push
+  row's audience/title/body, the token's kind/refId/json/ts); `UNIQUE id` on both logs; the total
+  **source CHECK** on the outbox — a mailer row carries `subject` and `delivered` (0/1) and no
+  `channel`/`provider_message_id`, a delivery row the reverse — so NULL always means "absent key",
+  never a value, and the way back rebuilds exactly the writer's literal; `json_valid` on the token
+  and on every `extra_json`. **Dropped from the prepared proposal (review of `6ca66ba`):** `to_address
+  NOT NULL` (an accepted queued dispatch yields `to: null`); the `UNIQUE (ref_kind, ref_id, token)`
+  triple (it would merge the object/array rows the route keeps separate; the route's rule lives in
+  `register`, not in a constraint); `delivered NOT NULL DEFAULT 0` (a delivery row has no such key —
+  NULL under the structural CHECK, not a fabricated 0).
 - **Dropped from the proposed DDL (vocabularies):** `transport IN (…)` on both logs, `channel IN
   ('email')`, `audience_kind IN (…)`, `ref_kind IN (…)`. Reason: the S7a/S7b rule — the notification
   audience kind is open (notifications.mjs:233–239) and a push row copies it, so `audience_kind
@@ -1782,54 +1814,65 @@ CREATE TABLE push_tokens (
   change; `transport`/`channel` are adapter literals that an added provider or channel would extend.
   None of these drops admits anything the current writers do not already write; the dry run reports
   the observed vocabularies as counts.
-- **NULL behaviour, with the actual predicates (probe "executed SQL", in-memory SQLite):** a CHECK
-  whose result is NULL **passes** — `channel IS NULL OR channel IN ('email')` admitted a NULL
-  channel and refused `'sms'`; what refuses an absent value is `NOT NULL`: an explicit NULL
-  `delivered` (a shape-(b) row mapped naively) failed `NOT NULL constraint failed: outbox.delivered`
-  while omitting the column took `DEFAULT 0` — **the mapping writes `0`, never NULL, for (b)**;
-  NULL `transport`, `to_address`, `audience_kind`, `body`, `token` are each refused by their `NOT
-  NULL`; `delivered = 2` is refused by the CHECK; a duplicate `id` by `UNIQUE`. The STRICT `TEXT`
-  conversion of a bound number (§10.3) is why non-string input is refused by the import's own
-  validation, before SQLite sees it.
-- **The mapping, verified lossless (probe "JavaScript mapping": 4 + 4 + 4 rows byte-identical, key
-  order included):** (a) `{id, ts, to, subject, text, transport, delivered}` ⇄ `source='mailer'`,
-  `created_at=ts`, `delivered = 0/1`, `channel = NULL`, `provider_message_id = NULL`; (b) `{id, at,
-  channel, to, text, providerMessageId, provider}` ⇄ `source='delivery'`, `created_at=at`,
-  `transport=provider`, `subject=NULL`, `delivered=0`; the way back rebuilds **exactly the source
-  shape's keys in the writer's literal order** (no `subject`/`delivered` on a (b) row, no
-  `channel`/`providerMessageId` on an (a) row), because the old build and every reader compare whole
-  objects. Push log: `{id, ts, audience:{kind,id}, title, body, transport}` ⇄ the six columns.
-  Tokens: `{kind, refId, token, ts}` ⇄ the four columns, `seq` order = array order.
+- **NULL behaviour, with the actual predicates (probe "executed SQL" on the prepared DDL;
+  `testOutboxPush.mjs` "the actual schema" on the implemented DDL):** a lone CHECK whose result is
+  NULL **passes** (the prepared `channel IS NULL OR channel IN ('email')` admitted a NULL channel);
+  what refuses an absent value is `NOT NULL` — which is why the implemented outbox uses a **total
+  structural CHECK** keyed on `source` instead of per-column defaults: a mailer row without
+  `subject` or `delivered`, or carrying `channel`, is refused; a delivery row carrying `subject` or
+  `delivered`, or lacking `channel`/`provider_message_id`, is refused; `delivered = 2` is refused;
+  `to_address` NULL is **accepted for both sources**; `token_json` must be valid JSON of any type;
+  a duplicate `id` is refused by `UNIQUE`; the same token under another kind, and duplicate token
+  rows, are admitted. The STRICT `TEXT` conversion of a bound number the probe recorded (`424242` →
+  `'424242.0'`) is why a plain TEXT token column was rejected in favour of JSON text.
+- **The mapping, verified lossless (probe "JavaScript mapping" on observed rows; `testOutboxPush.mjs`
+  migration and rollback tests byte-for-byte, key order included):** (a) `{id, ts, to, subject, text,
+  transport, delivered}` ⇄ `source='mailer'`, `created_at=ts`, `delivered = 0/1`, `channel = NULL`,
+  `provider_message_id = NULL`; (b) `{id, at, channel, to, text, providerMessageId, provider}` ⇄
+  `source='delivery'`, `created_at=at`, `transport=provider`, `subject=NULL`, `delivered=NULL`; the
+  way back rebuilds **exactly the source shape's keys in the writer's literal order** (no
+  `subject`/`delivered` on a (b) row, no `channel`/`providerMessageId` on an (a) row; `to: null`
+  present-and-null), because the old build and every reader compare whole objects. Push log: `{id,
+  ts, audience:{kind,id}, title, body, transport}` ⇄ the six columns. Tokens: `{kind, refId, token,
+  ts}` ⇄ `ref_kind`, `ref_id`, `token_json` (`JSON.stringify` / prototype-safe decode), `registered_at`;
+  `seq` order = array order ("last registration last").
 - **Accepted input, per field (no coercion; a refusal names the collection, the position, the id
-  where there is one and a reason code — never `to`, `text`, `token` or `body`):** `id` non-empty
-  string, unique in its collection; `ts`/`at` a safe integer (both present or neither present →
-  unmapped shape); `to`/`to_address` a non-empty string; `subject` a string ((a)); `text` a string;
-  `transport`/`provider` a non-empty string; `delivered` a boolean ((a); absent on (b) → 0); `channel`
-  a non-empty string ((b)); `providerMessageId` a non-empty string ((b)); push `audience` exactly
-  `{kind, id}` with both non-empty strings (the S7a rule, an extra audience field refuses); `title`,
-  `body` strings; token `kind`, `refId`, `token` non-empty strings, `ts` a safe integer, the triple
-  unique. **Unknown keys** on any entry go to `extra_json` through the prototype-safe JSON clone
-  (dispatches.mjs `cloneJson`, now also notifications.mjs §9.10): detached at ingress, export and
-  snapshot; own `"__proto__"`/`"constructor"`/`"toString"` keys preserved at every depth; a value
-  JSON cannot carry (`undefined`, a function, a symbol, a bigint, a non-finite number, a class
-  instance) refuses the write whole, by name. Exported views list extras first, then the known keys,
-  as S7b does.
+  where there is one and a reason — never `to`, `text`, `token` or `body`):** `id` non-empty
+  string, unique in its collection; `ts`/`at` a safe integer (a shape's keys all present, none of the
+  other shape's → otherwise "matches both/neither"); `to` a string **or null**; `subject` a string ((a));
+  `text` a string; `transport`/`provider` a non-empty string; `delivered` a boolean ((a) only);
+  `channel` and `providerMessageId` non-empty strings ((b) only); push `audience` exactly `{kind, id}`
+  with both non-empty strings (the S7a rule, an extra audience field refuses); `title`, `body` strings;
+  token `kind`, `refId` non-empty strings, `token` **any JSON value** (null, boolean, number, string,
+  array, plain object — a detached prototype-safe clone), `ts` a safe integer; **no uniqueness** on
+  tokens. **Unknown keys** on any entry go to `extra_json` through the prototype-safe JSON clone
+  (`cloneJson`, the dispatch and notification repositories' approach, local to the module): detached
+  at ingress, export and snapshot; own `"__proto__"`/`"constructor"`/`"toString"` keys preserved at
+  every depth (inside a token too); a value JSON cannot carry (`undefined`, a function, a symbol, a
+  bigint, a non-finite number, a class instance) refuses the write whole, by name. Exported views
+  list extras first, then the known keys, as S7b does.
 - **JSON input versus non-JSON in-memory state a current writer can produce:** the live mailer's
-  `record.delivered = res.ok` is a boolean; a rejected `fetch` writes `false`; `ts`/`at` come from
-  `Date.now()`; the push body is the validated string; the only non-JSON-safe or non-TEXT value a
-  writer can produce today is the token (any truthy JSON, §10.3) — identified, not coerced (D2). No
-  non-finite number can reach these collections (unlike the S7b callback clock), so no REAL/`ANY`
-  column is needed.
+  `record.delivered = res.ok` is a boolean (the adapter now also calls `outbox.markDelivered(id, ok)`,
+  because the stored row is a detached copy and a mutation of the local record alone would be lost);
+  a rejected `fetch` writes `false`; `ts`/`at` come from `Date.now()`; the push body is the string the
+  notification repository validated; the token is whatever JSON the route parsed (never `undefined`,
+  a function or a symbol — JSON cannot carry them; the repository refuses them by name should a
+  direct caller pass one). No non-finite number can reach these collections (unlike the S7b callback
+  clock), so no REAL/`ANY` column is needed. Cloning does not change the token matching rule:
+  primitives compare by value; an object a caller still holds is compared by reference against the
+  mirror's detached clone and never matches — exactly the rule the route's freshly parsed bodies
+  always had (the one theoretical difference, an in-process caller re-registering the same object
+  reference, has no writer).
 
 ### 10.5 Migration identifier, atomic import, authority, snapshots, failure recovery, copy-only rollback and the old-build proof
 
-- **Identifier:** the next unused is **`0011`** (`repositories/migrations/` ends at
-  `0010_dispatches.mjs`; `DATA_MIGRATIONS` IX:49) → **`0011_outbox_push`** — **not assigned, not
-  registered** by this plan; the plan's `0011_scouting` placeholder (plan §S9) moves to the next free
-  number when that stage is approved, as `0010_recruitment` did for `0010_dispatches` (§9.4). The
-  S7b rollback tool already refuses a file carrying a later id (`LATER_SCHEMA` for `0011_future_step`,
-  testDispatches.mjs) — the real `0011_outbox_push` will be refused by it the same way, and the
-  S7c tool will know it.
+- **Identifier:** the next unused was **`0011`** (`repositories/migrations/` ended at
+  `0010_dispatches.mjs`; `DATA_MIGRATIONS` IX:49), reconfirmed at implementation → **`0011_outbox_push`,
+  assigned and REGISTERED** (`repositories/migrations/0011_outbox_push.mjs`, §10.8); the plan's
+  `0011_scouting` placeholder (plan §S9) moves to the next free number when that stage is approved,
+  as `0010_recruitment` did for `0010_dispatches` (§9.4). The S7b rollback tool refuses a file
+  carrying `0011_outbox_push` (`LATER_SCHEMA`; `testOutboxPush.mjs`, `testOutboxPushServer.mjs`), and
+  the S7c tool knows every earlier id.
 - **Atomic import (one transaction, the 0009/0010 pattern):** create the three tables and indexes;
   read the `outbox`, `pushLog` and `pushTokens` blobs **from the file**; for each: **absent** → import
   nothing; **empty array** → nothing; **non-array / non-JSON** → refuse; validate every entry (§10.4)
@@ -1851,30 +1894,40 @@ CREATE TABLE push_tokens (
   validation** checks only what the schema enforces (unique ids, the unique triple) — nothing
   cross-table, because none of the three references another table. A backup from any build restores
   through 0011 with orders intact; the exported outbox rows carry the withheld text (§6.1).
-- **Failure recovery:** boot after a crash mid-migration finds the pre-cutover file (no record,
-  blobs intact) or the post-cutover file (record, tables, blob rows gone), never a mixture (one
-  transaction; the 0007/0008 SIGKILL-between-steps tests are reused, §5.4). A failed save after
-  cutover rolls back every staged row and the mirror (S7b's owned-transaction restore; the staged
-  retry limitation of §9.7 reading iii applies unchanged: a failed `persistNow()` schedules no
-  retry, the next save by anybody lands the pending rows).
-- **Copy-only rollback to the accepted `ac50b60` build:** `repositories/outboxPushRollback.mjs` +
+- **Failure recovery — two different things (wording CORRECTED, review of `6ca66ba`):** boot after a
+  crash mid-migration finds the pre-cutover file (no record, blobs intact) or the post-cutover file
+  (record, tables, blob rows gone), never a mixture (one transaction; the 0007/0008
+  SIGKILL-between-steps tests are reused, §5.4). After cutover, **a failed ORDINARY staged save**
+  (at a statement or at the real COMMIT) leaves the mirrors as they are and keeps every queued
+  statement for the next save: memory is the intended state, nothing is dropped, the next save by
+  anybody lands it once (the staged retry limitation of §9.7 reading iii applies unchanged: a failed
+  `persistNow()` schedules no retry of its own). **An ABORTED UNIT OF WORK** — a thrown failure, a
+  queued statement failing at the unit's flush, a real COMMIT failure, a caught participant refusal —
+  restores the mirrors and the queue to the state they had when the unit began (`snapshotState` /
+  `restoreState`), held views included; writes pending before the unit stay pending. Both are
+  tested (`testOutboxPush.mjs` "staged mode", `testOutboxPushServer.mjs` [cutover] "failed ordinary
+  save"). Provider side effects are outside database rollback either way.
+- **Copy-only rollback to the accepted `6ca66ba` build** (which carries the notification nested-extras
+  correction; the pre-S7c build is no longer `ac50b60`): `repositories/outboxPushRollback.mjs` +
   `scripts/outboxPushRollback.mjs` (`npm run rollback:outbox-push -- <data-dir> <fresh-empty-dir>`),
   the S7b tool's structure: open read-only, `VACUUM INTO` a copy; `KNOWN_MIGRATIONS` = the S7b
   tool's list + `0011_outbox_push`, any other id → `LATER_SCHEMA`; `NOT_CUT_OVER`, `OUTPUT_NOT_EMPTY`,
   `UNEXPECTED_SCHEMA` as before; in one transaction write every outbox row back as its **source
-  shape's literal in the writer's key order** (`extra_json` keys spread first), every push row as
-  the sender literal, every token as the route literal, each blob in `seq` order; drop the three
-  tables; remove the `0011` record and `meta.outboxPushCutover`; advance `saveSeq`;
-  `foreign_key_check`; VACUUM; revalidate (tables gone, record gone, blob counts equal the table
-  counts, every untouched table byte-identical). **Every post-cutover mail, push and token row and
-  every unrelated record is retained.** The chain then continues: the S7b tool rolls the copy to
-  `0641b2c`, the S7a tool to `812e13b`, and so on.
+  shape's literal in the writer's key order** (`extra_json` keys spread first; `to: null` present),
+  every push row as the sender literal, every token as the route literal with its value decoded to
+  the type it was registered with, each blob in `seq` order; drop the three tables; remove the
+  `0011` record and `meta.outboxPushCutover`; advance `saveSeq`; `foreign_key_check`; VACUUM;
+  revalidate (tables gone, record gone, blob counts equal the table counts, every untouched table —
+  the S7a and S7b tables included — byte-identical). **Every post-cutover mail, push and token row
+  and every unrelated record is retained.** The chain then continues: the S7b tool rolls the copy to
+  `0641b2c`, the S7a tool to `812e13b`, and so on; the S7b tool refuses a copy still carrying 0011.
 - **Old-build boot/write proof (an actual old server, as S7a/S7b):** `SCOUTBOX_PRE_S7C_SERVER`
-  pointing at an `ac50b60` checkout boots the rolled-back copy (its log carries no `0011`),
-  `GET /admin/outbox` and `GET /admin/push-log` return the same ids in the same order as the S7c
-  build did, `/admin/overview` the same counts; a mail sent and a token registered on the old build
-  land in the blobs; the S7c build then re-upgrades the file (0011 import from the blobs) with every
-  row and order intact. When the old checkout is unavailable the gate reports the skip, as before.
+  pointing at a `6ca66ba` checkout boots the rolled-back copy (no `0011` applied), `GET /admin/outbox`
+  and `GET /admin/push-log` return the same ids in the same order as the S7c build did; a token
+  (an object token included) registered and a mail sent on the old build land in its blobs; the S7c
+  build then re-upgrades the file (0011 import from the blobs) with every row and order intact, the
+  old build's writes included (`testOutboxPushServer.mjs`, last test). When the old checkout is
+  unavailable the gate reports the skip, as before.
 
 ### 10.6 Synthetic compatibility probe — results (`scripts/probeS7cOutboxPush.mjs`, 16 October 2026, Node v22.22.2, real server on a temporary directory, second read-only connection; the JSON is in the handoff package)
 
@@ -1883,17 +1936,19 @@ CREATE TABLE push_tokens (
 | Outbox shape (a), three routes | guardian sign-up: `{id, ts, to, subject, text, transport, delivered}`, not in the database at the response, landed with the next revision (debounced); the persisted text contains the one-time code; org invite: same shape, committed by the route's `persistNow()` in the same revision as the invite row (2 → 3); club challenge: the persisted text carries the placeholder, `/admin/outbox` serves the full text before a restart (same row, only `text` differs) and the placeholder after | current behaviour, preserved (staged append = same save; the S6a contract untouched) |
 | Outbox shape (b), the sweep | `{id, at, channel, to, text, providerMessageId, provider}` with `text` = the first ≤ 300 characters of the notification text, written in the same revision as the dispatch row whose `provider_message_id` it carries (1 row) | current behaviour, preserved |
 | Outbox collection | 4 rows; two key sets; absent keys absent, nothing `null`/`undefined`; every row has `to`; ids unique with a monotonic numeric suffix; 0 timestamp ties here with no rule against them; admin view newest-first by array position | `seq` is the ordering key; `source` the discriminator (JavaScript mapping) |
-| Push-log timing | notification row committed at the response (revision 10, 0 dispatch rows yet); 1 push row in memory and 0 in the database at the response; landed 318 ms later with revision 11 — the sweep's save that created the notification's 2 dispatch rows (400 ms sweep under `M13_FAST_RETRY`; 60 s in production); the row's `body` equals the notification text | current behaviour; the coupling §10.2 states; D1 |
+| Push-log timing | notification row committed at the response (revision 10, 0 dispatch rows yet); 1 push row in memory and 0 in the database at the response; landed 318 ms later with revision 11 — the sweep's save that created the notification's 2 dispatch rows (400 ms sweep under `M13_FAST_RETRY`; 60 s in production); the row's `body` equals the notification text. **CORRECTED (review of `6ca66ba`):** the probe's conclusion "the effect schedules no save of its own" was wrong — the accelerated sweep masked the sender's own `nextId()`/`persist()` debounce. The reviewer's measurement with `M13_FAST_RETRY` unset: landed after 2044 ms, zero dispatch rows, no request (this tree: 2016 ms); the probe's commentary and §10.2 are corrected, its original output kept as evidence | current behaviour, preserved unchanged (no new policy); the existing best-effort debounce, not a guarantee |
 | Push-log collection | one key set; a coalesced repeat adds 0 rows; title `'ScoutBox'`; kinds `guardian`, `org_user`, `player` | current behaviour, preserved |
-| Push tokens | one key set; the same token under player/guardian/org sessions = 3 rows; re-registration 4 → 4 rows, `ts` updated, row moved from position 0 to 3; org row `('org', <org id>)`; the one staff push row matches 0 tokens; unauthenticated 401, missing token 400; **a number and an object accepted (201) and stored as such** | current behaviour; the order is reproduced by DELETE + INSERT (new `seq`); the staff defect carried through; the non-string token is the §10.3 conflict (D2) |
+| Push tokens | one key set; the same token under player/guardian/org sessions = 3 rows; re-registration 4 → 4 rows, `ts` updated, row moved from position 0 to 3; org row `('org', <org id>)`; the one staff push row matches 0 tokens; unauthenticated 401, missing token 400; **a number and an object accepted (201) and stored as such**. The reviewer's baseline adds: nine registrations (number ×2, string, boolean ×2, equal objects ×2, equal arrays ×2) → seven rows (1/1/1/2/2): primitives collapse by `===`, objects and arrays never | current behaviour, **preserved**: the order is reproduced by DELETE + INSERT (new `seq`); the staff defect carried through; the token is stored losslessly as JSON with the route's rule (§10.3 D2, corrected) |
 | Deletion | `DELETE /player/account`: outbox 4 → 4, push log 4 → 4, tokens 6 → 6; the deleted person's 2 token rows and 2 push rows stay; player notifications 0; the revoked session cannot register | current behaviour, preserved; retention stays open (§4.4) |
 | JavaScript mapping | 4 outbox, 4 push-log, 4 token rows: blob → proposed columns → blob **byte-identical** (key order included); no unknown keys | the §10.4 mapping is lossless on observed data |
-| Executed SQL (in-memory SQLite, the proposed DDL with `seq`) | every observed row inserts except the object-valued token (cannot be bound); a numeric token is **converted** to `'424242.0'` by a STRICT `TEXT` column; NULL behaviour of every CHECK and `NOT NULL` as §10.4 lists; `'other'` refused by the proposed `audience_kind` CHECK; `'org_user'` refused by the proposed `ref_kind` CHECK; the duplicate triple refused, the same token under another kind admitted | the vocabulary CHECKs are dropped (D3); `delivered` is written as `0`; non-string tokens refused by validation |
+| Executed SQL (in-memory SQLite, the PREPARED DDL with `seq`) | every observed row inserts except the object-valued token (cannot be bound); a numeric token is **converted** to `'424242.0'` by a STRICT `TEXT` column; NULL behaviour of every CHECK and `NOT NULL`; `'other'` refused by the proposed `audience_kind` CHECK; `'org_user'` refused by the proposed `ref_kind` CHECK; the duplicate triple refused, the same token under another kind admitted | the vocabulary CHECKs are dropped (D3, the preservation rule); **superseded** by the implemented schema (§10.4): JSON token text instead of a TEXT column (the conversion is why), nullable destination, `delivered` NULL for a delivery row under the total source CHECK, no unique triple — exercised in SQL by `testOutboxPush.mjs` |
+| Null destination (the reviewer's baseline; `testOutboxPushServer.mjs` [compat]) | a queued e-mail dispatch with `to: null` accepted by the dispatch repository; the real boot sweep writes a delivery record with `to: null`, saves it, marks the dispatch accepted; survives restart; carried by the backup with the key present | current behaviour, preserved: `to_address` nullable, the key present-and-null on the way back |
 | Restart | the admin outbox lists the same 4 ids in the same order; the challenge mail shows the placeholder after the restart; 4 push rows, 6 token rows | current behaviour, preserved |
 
 ### 10.7 Bounded implementation checklist, expected files, failing-first regressions, acceptance checks, decisions needed
 
-**Checklist (in order; each step keeps both gates green):** (1) D1–D3 answered; (2) failing-first
+**Checklist (in order; each step keeps both gates green):** (1) D1–D3 resolved — by the independent
+review of `6ca66ba`, none a product decision (below); (2) failing-first
 suites written and recorded failing on the unchanged tree; (3) `repositories/outboxPush.mjs` — the
 three repositories in one module (validators; `OUTBOX_TABLE`, `PUSH_LOG_TABLE`, `PUSH_TOKENS_TABLE`
 for the snapshot dispatcher; staged/immediate participation with mirrors; views `db.outbox`,
@@ -1944,25 +1999,128 @@ never reported durable with it; every write refused whole or applied whole; the 
 from the save after cutover and back after rollback; both mandatory gates green on the final tree
 and from a fresh extraction; the old-build proof on the actual `ac50b60` checkout.
 
-**Decisions needed before implementation (precise):**
+**The three "decisions" as resolved by the independent review of `6ca66ba` — none was a product
+decision, and the earlier claim that they needed new Founder approval is withdrawn:**
 
-- **D1 — push-row durability window.** Keep today's timing (the row lands with the next save by
-  anybody, ≤ the 60 s sweep interval under normal operation) **or** have the push sender call the
-  server's ordinary debounced `persist()` after appending (window ≤ 2 s; no new mechanism; no
-  change to what is reported durable). Recommendation: the debounced `persist()` — it is the same
-  call the token route already makes.
-- **D2 — non-string push tokens.** After cutover the route answers 400 `TOKEN_INVALID` for a token
-  that is not a non-empty string (today 201), and the import refuses a legacy row with one (by
-  position and kind). Recommendation: yes; the dry run on the real file reports whether any such
-  row exists before the cutover is scheduled.
-- **D3 — vocabulary CHECKs.** Drop `transport`, `channel`, `audience_kind` and `ref_kind` CHECKs,
-  keeping the structural constraints and the two-value `source` discriminator (§10.4).
-  Recommendation: drop, the S7a/S7b rule.
+- **D1 — push-row durability window: no decision existed.** The push sender's `nextId('push')`
+  already calls the server's debounced `persist()` (S:665); the sender has always had its save
+  scheduled. S7c changes nothing here: no new policy, timer or recursive save. The row is durable with
+  that later save (best effort, about two seconds; a crash, a failed save or an event-loop stall still
+  loses or delays it) and never with the notification's preceding commit (§10.2).
+- **D2 — non-string push tokens: lossless storage, no API change.** No `TOKEN_INVALID`, no refusal of
+  supported legacy rows, no coercion to text, no uniqueness constraint. The token is JSON text decoded
+  on read; `register` reproduces the route's `===` rule (§10.3, §10.4).
+- **D3 — vocabulary CHECKs: dropped, by the already-authorised preservation rule** (open
+  `transport`/`provider`/`channel`/`audience.kind`/`kind` values as current behaviour supports them);
+  only the structural constraints of §10.4 are kept.
 - Not S7c decisions, restated so they are not re-asked: the staff push re-keying, the five
   plain-code mail sites, retention after deletion (§4.4), the org-deletion question. The S7d
   blockers (§8.1) are unchanged.
 
-S7c stays **PREPARED, NOT IMPLEMENTED** until this section is reviewed.
+S7c is **IMPLEMENTED (§10.8), pending independent acceptance — not accepted.**
+
+### 10.8 S7c as implemented (16 October 2026, one local commit on `feat/sqlite-schema` on top of `6ca66ba`; **pending independent acceptance — not accepted**)
+
+**Baseline first.** The reviewer's `review-6ca66ba-compatibility.mjs` was run unchanged on the
+starting tree before any edit: exit 0, `REPRODUCED D1` (elapsed 2016 ms, 0 dispatch rows, normal
+sweep 60 000 ms), `REPRODUCED D2` (numbers 1, strings 1, booleans 1, objects 2, arrays 2), `PROVEN`
+(typed JSON round trip through STRICT SQLite preserving the real sender payload), `REPRODUCED` the null
+destination, `PASS`. It is a **baseline-only script**: it reads the pre-S7c blobs (`collections`
+rows named `pushLog`, `pushTokens`, `outbox`) and drives `registerDelivery` with a plain `db` array
+and no outbox repository, so it does not apply to the cut-over tree and is not presented as a
+post-cutover test; the same observations are covered table-aware by the two new suites
+(`[compat]` tests, which pass on both trees) and its unchanged script and both logs are in the handoff.
+
+**Built** (the plan of §10.7, with the three corrections): `repositories/outboxPush.mjs` — one
+participant for the three tables (one queue, one snapshot), the validators (`validateOutboxRow`,
+`validatePushLogRow`, `validatePushTokenRow` and the collection forms), `outboxSourceOf` (structural
+shape detection), `cloneJson` (local, the dispatch/notification approach), the snapshot tables
+`OUTBOX_TABLE` / `PUSH_LOG_TABLE` / `PUSH_TOKENS_TABLE`, `importOutboxPushBlobs`, and
+`createOutboxPushRepository({ sqlite, now, log, unit, staged })` with `outbox.append` /
+`outbox.markDelivered` / `outbox.byId` / `outbox.exportRows`, `pushLog.append` / `pushLog.exportRows`,
+`pushTokens.register` (the route's filter-then-push: primitives by `===`, objects never; DELETE by
+`(ref_kind, ref_id, token_json)` for primitives only, then INSERT with a new `seq`) /
+`pushTokens.forAudience` (the sender's filter, detached copies with the registered types) /
+`pushTokens.exportRows`, views `db.outbox`, `db.pushLog`, `db.pushTokens`, `attach`, `reload`,
+`counts`, `pending`, the save hook, `snapshotState` / `restoreState` (rows by identity, held views
+restored in place); `repositories/migrations/0011_outbox_push.mjs` (REGISTERED, after 0010; the three
+tables; the three blobs imported from the file in array order, nothing coerced; `meta.outboxPushCutover`
+= counts only — by source, by audience kind, by token kind and token type); `repositories/index.mjs`
+(`DATA_MIGRATIONS`, `TABLE_BACKED` + 3, the snapshot dispatch list, the staged attach with the
+stale-array rule, `outboxPush` / `outbox` / `pushLog` / `pushTokens` on the data layer, the report
+domain `outboxPush`); `repositories/outboxPushRollback.mjs` + `scripts/outboxPushRollback.mjs`
+(`npm run rollback:outbox-push`; exit codes 0/1/4/5/10 as the S7b tool); `adapters.mjs`
+(`createMailer(db, nextId, { outbox })` appends the record before the provider call and, on the live
+transport, sets `record.delivered` on the caller's record **and** calls `outbox.markDelivered` —
+the stored row is a detached copy, so the earlier mutation of the local object alone would have
+been lost; `createPushSender(db, nextId, { pushLog, pushTokens })` appends through the repository
+and filters tokens through `forAudience`; both keep the plain-array behaviour when no repositories
+are passed, which is what the reviewer's feasibility check and the older tool call sites use);
+`m13/delivery.mjs` (`fakeSend` → `outbox.append`, `to` as the dispatch holds it — null included;
+without `ctx.outbox` the record is pushed onto a `db.outbox` **array** exactly as before the cutover,
+the same fallback `adapters.mjs` keeps — the server always passes the repository; the fallback is
+what keeps the unchanged reviewer scripts `review-26d492b-reproductions.mjs` and
+`review-6ca66ba-compatibility.mjs` running, both of which build a bare context around an array; a
+first implementation that threw without the repository broke the former, which the final-tree run of
+the four reviewer scripts caught); `server.mjs` (the data-layer destructure, the adapters
+built with the repositories, `POST /push/register` → `pushTokens.register` with the same
+truthiness check, response and `persist()`, the m13 context); `m13/enterprise.mjs` (the backup
+exports the three collections explicitly in their legacy shapes); `storeContract.mjs` (reasons);
+`sql/03` (the three sections rewritten; header lines) and `scripts/testSchemaDdl.mjs` (0011,
+the three tables column for column, the S7c assertions); `package.json` (the two new suites in
+`npm test`, the rollback script); the older suites' lists and rollback chains for 0011
+(`testDataLayer`, `testCoreSchema`, `testCoreIdentityMigration`, `testCoreIdentityRollback`,
+`testOneTimeCodes`, `testPlayerSubrecords`, `testMediaDeletions`, `testNotifications` — whose
+`registerDelivery` context now carries an outbox repository — and `testDispatches`, whose
+S7b-tool proof now builds an S7b-level file, since the S7b tool refuses a 0011 file; then, found
+by the first final-tree run of the backend gate rather than by the focused runs: `testSessions`,
+`testOrgs`, `testCoreIdentityServer` and `testNotificationsServer`, whose rollback chains now start
+with the S7c tool (the S7b tool's `LATER_SCHEMA` refusal of a 0011 file is asserted where the chain
+asserted the earlier tools' refusals), `testOrgs` and `testCoreIdentityServer` expecting
+`0011_outbox_push` in the capabilities' migration list, `testIdentityRepositories` expecting the
+three collections in `TABLE_BACKED`, `testDispatchesServer` reading the outbox
+from the table after the cutover and chaining the S7c tool before the S7b tool, and
+`testOneTimeCodesServer` reading the saved, code-withheld mail from the table);
+`scripts/probeS7cOutboxPush.mjs` (readers adapted to the tables; the D1 and D2 commentary corrected
+in place, the uncorrected output kept in the handoff as evidence).
+
+**Failing-first.** Both suites were run on the unchanged `6ca66ba` tree before the implementation
+(logs in the handoff): `testOutboxPush.mjs` — the `[compat]` test passes, the first `[cutover]`
+test fails on `0011_outbox_push is registered as the next unused identifier` (a concrete assertion
+on `DATA_MIGRATIONS`, not a missing module); `testOutboxPushServer.mjs` — the four `[compat]`
+tests (D1 normal and accelerated, D2 through the route, the null destination) pass, the first
+`[cutover]` test fails on `this proof reads the S7c tables`.
+
+**Readings recorded with the implementation (none a behaviour change):** (i) the mirror's token is a
+detached clone, so an in-process caller re-registering the **same object reference** gets a new row
+where today's array would have collapsed it by reference — no writer does this (the route's bodies
+are always fresh), and the rule for the route is identical; (ii) `markDelivered` is a staged UPDATE
+that lands with the next save, as the mutated blob entry did; (iii) a mailer row with a `to` that is
+not a string or null, or a push row whose audience is not exactly `{kind, id}` of non-empty strings,
+refuses the import — the S7a audience rule and the writers' literals; the dry run on the real file
+reports any such row before a cutover is scheduled.
+
+**What stays open, unchanged:** retention of these rows after a deletion (§4.4), the staff push
+identity (tokens under `org`, pushes to `org_user` — 0 matches on the probe's file, carried through),
+the five plain-code mail sites, the external-effect crash window (a push handed to the transport
+whose row is lost to a crash before its later save; no re-send, documented and tested), the
+staged-save retry limitation (§9.7 reading iii).
+
+### 10.9 Independent acceptance of the notification nested-extras follow-up — `6ca66bab1041eeb907b08f1e352fb78acdf73abd` (16 October 2026)
+
+The independent review of `scoutbox-s7c-prep-handoff-6ca66ba.zip` (SHA-256
+`270649999a5fc1e6ee6539831a95615a4d617741fe14b6e95ca557b5a700bf5c`, 457 manifest entries verified)
+**accepts the notification nested-extras correction at `6ca66ba` for its bounded scope** (§9.10; not
+production approval). What the reviewer verified on real Node v24.19.0 (offline `npm ci
+--ignore-scripts`): backend `npm test` exit 0, 23 suites / 325 checks, with the accepted `2d7ddeb`
+pre-S7a and `0641b2c` pre-S7b builds booting the rollback copies; Player `npm test -- --runInBand`
+exit 0, 4 suites / 41 tests; the four reviewer scripts unchanged, exit 0 (1, 4, 3 and 3 CORRECT).
+S7b stays accepted at `ac50b60`. The same review did **not** accept the S7c preparation unchanged: its
+three findings (D1 scheduling overlooked; D2 solvable without an API change and the UNIQUE triple
+behaviour-changing; the null destination) are corrected above and implemented in §10.8. Limits stated
+by the review: real older-Node checks skipped (`SCOUTBOX_TEST_NODE_BINS` unset); browser suites, the
+full E2E battery and `m13E2E` not independently rerun; S7c implemented must return for independent
+acceptance.
 
 ---
 

@@ -1,8 +1,21 @@
-// S7c preparation — synthetic compatibility probe for the mail outbox, the push log and the push tokens.
+// S7c — synthetic compatibility probe for the mail outbox, the push log and the push tokens.
 //
 // NOT a test of desired behaviour and NOT part of `npm test`: it RECORDS what the current build does
 // with `db.outbox`, `db.pushLog` and `db.pushTokens` on synthetic data, so the S7c implementation plan
-// (docs/architecture/s7-readiness-review.md §10) rests on observed rows rather than narrative:
+// (docs/architecture/s7-readiness-review.md §10) rests on observed rows rather than narrative.
+// CORRECTED after the independent review of 6ca66ba: this probe's original timing narrative said the push
+// row "schedules no save of its own" — wrong. The push sender calls nextId('push'), and the server's nextId
+// calls the debounced persist(), so the push row reaches the file about two seconds later through that
+// existing best-effort save even when nothing else saves; the 400 ms sweep of this probe's M13_FAST_RETRY
+// run masked that timer (its persistNow came first). The timing note below now labels which save carried
+// the row; scripts/testOutboxPushServer.mjs measures both modes. The original (uncorrected) output is kept
+// in the handoff as evidence. The review's independent script (review-6ca66ba-compatibility.mjs) is the
+// baseline for the two other observations this probe records: the registration route accepts any truthy
+// JSON token (number, string, boolean, object, array; primitives collapse by `===`, objects never), and the
+// real boot sweep over an accepted queued dispatch with to: null writes a delivery record with to: null.
+// After the S7c cutover the three collections are tables; the probe's readers were ADAPTED to read them in
+// the same legacy shapes (see `storedOutbox` / `storedPush` / `storedTokens`) — the only change to its readers.
+// What it records:
 //   1. the TWO outbox shapes from the real routes — (a) the mailer record (guardian sign-up, org invite,
 //      club e-mail challenge with its withheld secret) and (b) the delivery centre's fakeSend record (the
 //      sweep of a guardian notice) — with their key sets, missing-versus-null fields, insertion order,
@@ -57,6 +70,11 @@ async function boot(dir) {
 }
 const q = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
 const blob = (dir, name) => { const r = q(dir, 'SELECT value FROM collections WHERE name = ?', name)[0]; return r ? JSON.parse(r.value) : null; };
+/** ADAPTED for S7c (the only change to this probe's readers): after the 0011_outbox_push cutover the three collections are tables and the probe reads them in the same legacy shapes; before it (an older build) it reads the blobs. Every observation is computed on the same shapes as before. */
+const liveS7c = (dir) => q(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'").length > 0;
+const storedOutbox = (dir) => (liveS7c(dir) ? q(dir, 'SELECT id, source, created_at, to_address, subject, text, transport, delivered, channel, provider_message_id FROM outbox ORDER BY seq').map((r) => (r.source === 'mailer' ? { id: r.id, ts: r.created_at, to: r.to_address, subject: r.subject, text: r.text, transport: r.transport, delivered: r.delivered === 1 } : { id: r.id, at: r.created_at, channel: r.channel, to: r.to_address, text: r.text, providerMessageId: r.provider_message_id, provider: r.transport })) : storedOutbox(dir));
+const storedPush = (dir) => (liveS7c(dir) ? q(dir, 'SELECT id, created_at, audience_kind, audience_id, title, body, transport FROM push_log ORDER BY seq').map((r) => ({ id: r.id, ts: r.created_at, audience: { kind: r.audience_kind, id: r.audience_id }, title: r.title, body: r.body, transport: r.transport })) : storedPush(dir));
+const storedTokens = (dir) => (liveS7c(dir) ? q(dir, 'SELECT ref_kind, ref_id, token_json, registered_at FROM push_tokens ORDER BY seq').map((r) => ({ kind: r.ref_kind, refId: r.ref_id, token: JSON.parse(r.token_json), ts: r.registered_at })) : storedTokens(dir));
 const revision = (dir) => Number(q(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")[0]?.value) || 0;
 const must = (ok, what) => { if (!ok) throw new Error(`probe precondition failed: ${what}`); };
 const orgLogin = async (S, orgId, scoutName, role) => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role }); must(r.status === 200, `org login ${r.status} ${r.text.slice(0, 200)}`); return r.body.token; };
@@ -81,8 +99,8 @@ try {
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
   const kola = await playerLogin(S, 'pl-adeyemi');
   const amara = await guardianLogin(S, 'gd-amara');
-  const outboxBefore = (blob(dir, 'outbox') ?? []).length;
-  const pushBefore = (blob(dir, 'pushLog') ?? []).length;
+  const outboxBefore = storedOutbox(dir).length;
+  const pushBefore = storedPush(dir).length;
 
   // ------------------------------------------------------------- 1. the two outbox shapes, from the real routes
   {
@@ -93,9 +111,9 @@ try {
     const memA1 = (await S.j('GET', '/admin/outbox', undefined, null, A)).body;
     const rowA1 = memA1.find((m) => m.subject && /guardian account/i.test(m.subject));
     must(rowA1, 'the sign-up mail is in the admin outbox view');
-    const inDbA1 = (blob(dir, 'outbox') ?? []).some((m) => m.id === rowA1.id);
-    const landedA1 = await until(async () => ((blob(dir, 'outbox') ?? []).some((m) => m.id === rowA1.id) ? revision(dir) : null), 6000);
-    report.sections.outboxGuardianSignup = { row: outboxShape(rowA1), inDatabaseAtResponse: inDbA1, revisionAtResponse: r0, revisionWhenLanded: landedA1, codeInPersistedText: typeof signup.body.devEmailCode === 'string' && (blob(dir, 'outbox') ?? []).find((m) => m.id === rowA1.id)?.text.includes(signup.body.devEmailCode) };
+    const inDbA1 = storedOutbox(dir).some((m) => m.id === rowA1.id);
+    const landedA1 = await until(async () => (storedOutbox(dir).some((m) => m.id === rowA1.id) ? revision(dir) : null), 6000);
+    report.sections.outboxGuardianSignup = { row: outboxShape(rowA1), inDatabaseAtResponse: inDbA1, revisionAtResponse: r0, revisionWhenLanded: landedA1, codeInPersistedText: typeof signup.body.devEmailCode === 'string' && storedOutbox(dir).find((m) => m.id === rowA1.id)?.text.includes(signup.body.devEmailCode) };
     note(`outbox (a1) guardian sign-up: a shape-(a) row, keys ${JSON.stringify(outboxShape(rowA1).keys)}; it was ${inDbA1 ? 'already' : 'NOT yet'} in the database when the route answered and landed with save revision ${landedA1} (the debounced persist, 2 s); the persisted text ${report.sections.outboxGuardianSignup.codeInPersistedText ? 'CONTAINS the one-time code in clear (one of the six plain-code sites)' : 'does not contain the code'}.`);
 
     // (a2) org invite: the mailer record, persisted by the route's own persistNow() with the invite row.
@@ -105,7 +123,7 @@ try {
     const memA2 = (await S.j('GET', '/admin/outbox', undefined, null, A)).body;
     const rowA2 = memA2.find((m) => m.subject && /invited you/i.test(m.subject));
     must(rowA2, 'the invite mail is in the admin outbox view');
-    const dbA2 = (blob(dir, 'outbox') ?? []).find((m) => m.id === rowA2.id);
+    const dbA2 = storedOutbox(dir).find((m) => m.id === rowA2.id);
     report.sections.outboxOrgInvite = { row: outboxShape(rowA2), inDatabaseAtResponse: !!dbA2, revisionBefore: r1, revisionAtResponse: revision(dir), inviteRowInSameRevision: !!dbA2 && (blob(dir, 'orgInvites') ?? []).some((i) => i.id === invite.body.invite.id) };
     note(`outbox (a2) org invite: a shape-(a) row written by the mailer BEFORE its (dev) delivery resolves, committed by the route's persistNow() in the same save as the invite row (revision ${r1} → ${report.sections.outboxOrgInvite.revisionAtResponse}).`);
 
@@ -114,7 +132,7 @@ try {
     must(challenge.status === 201, `challenge ${challenge.status} ${challenge.text.slice(0, 200)}`);
     const memA3 = (await S.j('GET', '/admin/outbox', undefined, null, A)).body.find((m) => m.subject && /^Verify .* on ScoutBox$/.test(m.subject));
     must(memA3, 'the challenge mail is in the admin outbox view');
-    const dbA3 = await until(async () => (blob(dir, 'outbox') ?? []).find((m) => m.id === memA3.id), 6000);
+    const dbA3 = await until(async () => storedOutbox(dir).find((m) => m.id === memA3.id), 6000);
     must(dbA3, 'the challenge row landed');
     const PLACEHOLDER = '[code withheld — delivered to the recipient only]';
     report.sections.outboxChallengeWithheld = { row: outboxShape(dbA3), persistedTextHasPlaceholder: dbA3.text.includes(PLACEHOLDER), adminViewHasPlaceholderBeforeRestart: memA3.text.includes(PLACEHOLDER), adminViewTextDiffersFromPersisted: memA3.text !== dbA3.text, adminViewRowOtherwiseIdentical: JSON.stringify({ ...memA3, text: null }) === JSON.stringify({ ...dbA3, text: null }) };
@@ -125,14 +143,14 @@ try {
     must(req.status === 201, `contact request on the minor ${req.status} ${req.text.slice(0, 300)}`);
     const guardianNotice = await until(async () => (await S.j('GET', '/guardian/notifications', undefined, amara)).body?.find((n) => n.type === 'request' && n.refId === req.body.requestId));
     must(guardianNotice, 'the guardian was notified of the request');
-    const rowB = await until(async () => { await sweep(S); return (blob(dir, 'outbox') ?? []).find((m) => m.provider === 'local-fake' && m.providerMessageId && q(dir, 'SELECT provider_message_id FROM dispatches WHERE notification_id = ? AND channel = ?', guardianNotice.id, 'email').some((d) => d.provider_message_id === m.providerMessageId)); }, 15_000);
+    const rowB = await until(async () => { await sweep(S); return storedOutbox(dir).find((m) => m.provider === 'local-fake' && m.providerMessageId && q(dir, 'SELECT provider_message_id FROM dispatches WHERE notification_id = ? AND channel = ?', guardianNotice.id, 'email').some((d) => d.provider_message_id === m.providerMessageId)); }, 15_000);
     must(rowB, 'the sweep wrote a fakeSend outbox row for the guardian e-mail dispatch');
     const dispatchRev = revision(dir);
     report.sections.outboxDelivery = { row: outboxShape(rowB), textIsNotificationTextTruncatedTo300: rowB.text.length <= 300 && guardianNotice.text.startsWith(rowB.text), sameRevisionAsDispatchRow: dispatchRev === revision(dir), dispatchRowReferencesIt: q(dir, 'SELECT COUNT(*) AS n FROM dispatches WHERE provider_message_id = ?', rowB.providerMessageId)[0].n };
     note(`outbox (b) delivery centre: a shape-(b) row, keys ${JSON.stringify(outboxShape(rowB).keys)} — no subject, no delivered, \`at\` instead of \`ts\`, \`provider\` instead of \`transport\`, a providerMessageId that exactly one dispatch row carries; written by the sweep in the same save as the dispatch row and its attempt (S7b).`);
 
     // The collection as a whole: order, ids, shapes, missing-versus-null.
-    const all = blob(dir, 'outbox') ?? [];
+    const all = storedOutbox(dir);
     const ids = all.map((m) => m.id);
     const idNums = ids.map((id) => Number(String(id).replace(/^mail-/, '')));
     const stamps = all.map((m) => m.ts ?? m.at);
@@ -155,7 +173,7 @@ try {
     must((await S.j('POST', `/player/requests/${reqA.body.requestId}/respond`, { accept: true }, kola)).status === 200, 'accept');
     const channel = (await S.j('GET', '/player/channels', undefined, kola)).body[0]; must(channel?.id, 'channel');
     // Settle first: the accept above produced pushes of its own; wait until memory and database agree and the sweep has nothing left to create.
-    const settled = await until(async () => { await sleep(500); const mem = (await S.j('GET', '/admin/push-log', undefined, null, A)).body.length; const dbn = (blob(dir, 'pushLog') ?? []).length; return mem === dbn ? dbn : null; }, 12_000);
+    const settled = await until(async () => { await sleep(500); const mem = (await S.j('GET', '/admin/push-log', undefined, null, A)).body.length; const dbn = storedPush(dir).length; return mem === dbn ? dbn : null; }, 12_000);
     must(settled !== null, 'push log memory and database agree before the timing measurement');
     const pushCountBefore = settled;
     const memPushBefore = settled;
@@ -165,20 +183,20 @@ try {
     const noticeRow = q(dir, "SELECT id FROM notifications WHERE audience_kind = 'player' AND audience_id = 'pl-adeyemi' AND type = 'message' ORDER BY seq DESC LIMIT 1")[0];
     const dispatchRowsAtResponse = q(dir, 'SELECT COUNT(*) AS n FROM dispatches WHERE notification_id = ?', noticeRow?.id ?? '')[0].n;
     const memPushAtResponse = (await S.j('GET', '/admin/push-log', undefined, null, A)).body.length;
-    const dbPushAtResponse = (blob(dir, 'pushLog') ?? []).length;
+    const dbPushAtResponse = storedPush(dir).length;
     // Leave the server alone and watch: which save carries the push row, how long after the response, and what else that save introduced.
     let landing = null;
-    await until(async () => { const n = (blob(dir, 'pushLog') ?? []).length; if (n > pushCountBefore) { landing = { afterMs: Date.now() - t0, revision: revision(dir), dispatchRowsForTheNotification: q(dir, 'SELECT COUNT(*) AS n FROM dispatches WHERE notification_id = ?', noticeRow?.id ?? '')[0].n }; return true; } return null; }, 6000);
+    await until(async () => { const n = storedPush(dir).length; if (n > pushCountBefore) { landing = { afterMs: Date.now() - t0, revision: revision(dir), dispatchRowsForTheNotification: q(dir, 'SELECT COUNT(*) AS n FROM dispatches WHERE notification_id = ?', noticeRow?.id ?? '')[0].n }; return true; } return null; }, 6000);
     const revAfterWatch = revision(dir);
     // If it never landed on its own, an unrelated write that calls persist() carries it.
     let unrelated = null;
     if (!landing) {
       must((await S.j('POST', '/push/register', { token: TOKEN_A }, kola)).status === 201, 'register (unrelated write)');
-      unrelated = await until(async () => ((blob(dir, 'pushLog') ?? []).length > pushCountBefore ? revision(dir) : null), 6000);
+      unrelated = await until(async () => (storedPush(dir).length > pushCountBefore ? revision(dir) : null), 6000);
     } else {
       must((await S.j('POST', '/push/register', { token: TOKEN_A }, kola)).status === 201, 'register (the player token the token section builds on)');
     }
-    const pushRows = blob(dir, 'pushLog') ?? [];
+    const pushRows = storedPush(dir);
     const newest = pushRows[pushRows.length - 1];
     report.sections.pushLogTiming = {
       notificationRowInDatabaseAtResponse: !!noticeRow, revisionAtResponse: revAtResponse, dispatchRowsForTheNotificationAtResponse: dispatchRowsAtResponse,
@@ -187,31 +205,31 @@ try {
       row: newest ? pushShape(newest) : null, bodyEqualsNotificationText: newest && q(dir, 'SELECT text FROM notifications WHERE id = ?', noticeRow?.id)[0]?.text === newest.body,
       sweepIntervalInThisRunMs: 400, sweepIntervalInProductionMs: 60_000,
     };
-    note(`push log timing (CURRENT behaviour): the message route's persistNow() commits the notification row (revision ${revAtResponse}, ${dispatchRowsAtResponse} dispatch rows for it yet); the push row is written to memory by the after-durable effect right after that COMMIT (in \`/admin/push-log\` at once: ${memPushAtResponse - memPushBefore} row) but NOT in that save (${dbPushAtResponse - pushCountBefore} in the database at the response). ${landing ? `It landed ${landing.afterMs} ms later with revision ${landing.revision}, the save that also introduced the notification's ${landing.dispatchRowsForTheNotification} dispatch rows — i.e. it rode on the delivery sweep's persistNow() (400 ms here under M13_FAST_RETRY; 60 s in production, m13/delivery.mjs:304).` : `It had not landed after 6 s idle; an unrelated write's save carried it (revision ${unrelated}).`} The effect schedules no save of its own: the push-log row's durability today depends on the next save by anybody, which is the coupling S7c must not turn into "durable with the first save".`);
+    note(`push log timing (CURRENT behaviour, M13_FAST_RETRY=1 — this run): the message route's persistNow() commits the notification row (revision ${revAtResponse}, ${dispatchRowsAtResponse} dispatch rows for it yet); the push row is written to memory by the after-durable effect right after that COMMIT (in \`/admin/push-log\` at once: ${memPushAtResponse - memPushBefore} row) but NOT in that save (${dbPushAtResponse - pushCountBefore} in the database at the response). ${landing ? `It landed ${landing.afterMs} ms later with revision ${landing.revision}${landing.dispatchRowsForTheNotification > 0 ? `, the save that also introduced the notification's ${landing.dispatchRowsForTheNotification} dispatch rows — i.e. the 400 ms sweep's persistNow() came FIRST in this accelerated run and carried it` : ' with no dispatch rows yet — i.e. the sender\'s own nextId()/persist() debounce carried it'}.` : `It had not landed after 6 s idle; an unrelated write's save carried it (revision ${unrelated}).`} CORRECTION (review of 6ca66ba, D1): the sender's nextId('push') calls the server's debounced persist(), so the row ALWAYS has a save scheduled (about two seconds, best effort — scripts/testOutboxPushServer.mjs measures the normal mode: it lands with zero dispatch rows and no sweep); the earlier claim that "the effect schedules no save of its own" was wrong. The row is never in the notification's own save; its durability is the next save, which may be the sweep's, a route's, or that debounce.`);
 
     // A coalesced repeat: no second push row (current behaviour, S7a).
     const before2 = (await S.j('GET', '/admin/push-log', undefined, null, A)).body.length;
     must((await S.j('POST', `/org/channels/${channel.id}/messages`, { text: 'Synthetic second message, coalesced.' }, maria)).status === 201, 'second message');
     const after2 = (await S.j('GET', '/admin/push-log', undefined, null, A)).body.length;
     const allPush = (await S.j('GET', '/admin/push-log', undefined, null, A)).body;
-    report.sections.pushLogCollection = { rowsAfterSecondMessage: after2 - before2, keySets: [...new Set(allPush.map((p) => Object.keys(p).join(',')))], audienceKinds: [...new Set(allPush.map((p) => p.audience?.kind))].sort(), titles: [...new Set(allPush.map((p) => p.title))], transports: [...new Set(allPush.map((p) => p.transport))], adminViewNewestFirst: allPush.map((p) => p.id).join(',') === [...(blob(dir, 'pushLog') ?? allPush)].reverse().map((p) => p.id).join(',') || 'pending rows differ', seededRows: pushBefore };
+    report.sections.pushLogCollection = { rowsAfterSecondMessage: after2 - before2, keySets: [...new Set(allPush.map((p) => Object.keys(p).join(',')))], audienceKinds: [...new Set(allPush.map((p) => p.audience?.kind))].sort(), titles: [...new Set(allPush.map((p) => p.title))], transports: [...new Set(allPush.map((p) => p.transport))], adminViewNewestFirst: allPush.map((p) => p.id).join(',') === [...storedPush(dir)].reverse().map((p) => p.id).join(',') || 'pending rows differ', seededRows: pushBefore };
     note(`push log collection: one key set ${JSON.stringify(report.sections.pushLogCollection.keySets)}; a coalesced repeat adds ${after2 - before2} push row(s); title is always 'ScoutBox'; audience kinds observed ${JSON.stringify(report.sections.pushLogCollection.audienceKinds)}.`);
   }
 
   // ------------------------------------------------------------- 3. push tokens: keys, audiences, duplicates, order
   {
-    const tokensBefore = (blob(dir, 'pushTokens') ?? []).length;
+    const tokensBefore = storedTokens(dir).length;
     must((await S.j('POST', '/push/register', { token: TOKEN_A }, amara)).status === 201, 'guardian register');
     must((await S.j('POST', '/push/register', { token: TOKEN_A }, maria)).status === 201, 'org register');
     must((await S.j('POST', '/push/register', { token: TOKEN_B }, kola)).status === 201, 'player register B');
-    const firstOrder = await until(async () => { const t = blob(dir, 'pushTokens') ?? []; return t.length >= tokensBefore + 3 ? t : null; }, 6000);
+    const firstOrder = await until(async () => { const t = storedTokens(dir); return t.length >= tokensBefore + 3 ? t : null; }, 6000);
     must(firstOrder, 'the three registrations landed');
     const tsBefore = firstOrder.find((t) => t.kind === 'player' && t.token === TOKEN_A)?.ts;
     must(typeof tsBefore === 'number', "the player's first token row is in the database");
     const positionBefore = firstOrder.findIndex((t) => t.kind === 'player' && t.token === TOKEN_A);
     await sleep(5);
     must((await S.j('POST', '/push/register', { token: TOKEN_A }, kola)).status === 201, 'player re-register A');
-    const afterRe = await until(async () => { const t = blob(dir, 'pushTokens') ?? []; const row = t.find((x) => x.kind === 'player' && x.token === TOKEN_A); return row && row.ts !== tsBefore ? t : null; }, 6000);
+    const afterRe = await until(async () => { const t = storedTokens(dir); const row = t.find((x) => x.kind === 'player' && x.token === TOKEN_A); return row && row.ts !== tsBefore ? t : null; }, 6000);
     must(afterRe, 'the re-registration landed');
     const key = (t) => `${t.kind}\u0000${t.refId}\u0000${String(t.token)}`;
     const unauth = await S.j('POST', '/push/register', { token: TOKEN_B });
@@ -219,12 +237,12 @@ try {
     // Non-string tokens: the route checks truthiness only. What does the collection hold afterwards? (JSON input the route ACCEPTS today.)
     const numberToken = await S.j('POST', '/push/register', { token: 424242 }, amara);
     const objectToken = await S.j('POST', '/push/register', { token: { nested: ['value'] } }, maria);
-    const withOdd = (await until(async () => { const t = blob(dir, 'pushTokens') ?? []; return t.some((x) => typeof x.token !== 'string') ? t : null; }, 6000)) ?? [];
+    const withOdd = (await until(async () => { const t = storedTokens(dir); return t.some((x) => typeof x.token !== 'string') ? t : null; }, 6000)) ?? [];
     report.sections.pushTokensNonStringInput = { numberTokenStatus: numberToken.status, objectTokenStatus: objectToken.status, storedTokenTypes: [...new Set(withOdd.map((t) => (t.token === null ? 'null' : Array.isArray(t.token) ? 'array' : typeof t.token)))].sort(), rowsWithNonStringToken: withOdd.filter((t) => typeof t.token !== 'string').length };
-    note(`push tokens, non-string input (CURRENT behaviour): the route accepts any truthy JSON value as a token (number → ${numberToken.status}, object → ${objectToken.status}) and stores it as it came — a STRICT TEXT column silently CONVERTS a number and refuses an object (see the executed SQL section), so the import must decide for itself: refuse the whole write naming the row's position and kind only (never the value), or coerce. The plan refuses.`);
+    note(`push tokens, non-string input (CURRENT behaviour, PRESERVED): the route accepts any truthy JSON value as a token (number → ${numberToken.status}, object → ${objectToken.status}) and stores it as it came. CORRECTION (review of 6ca66ba, D2): the earlier conclusion "the plan refuses" was withdrawn — the implemented S7c stores every token LOSSLESSLY as JSON text (token_json) and decodes it on read, keeps the route's acceptance and its \`===\` matching rule (a primitive collapses an earlier row holding the same value of the same type; objects and arrays never collapse) and adds no uniqueness constraint; a plain STRICT TEXT column would have converted a number and refused an object (the executed SQL section records that), which is why the JSON column was chosen.`);
     const orgRow = afterRe.find((t) => t.token === TOKEN_A && t.kind !== 'player' && t.kind !== 'guardian');
     // The sender's filter (adapters.mjs createPushSender.send): tokens where t.kind === audience.kind && t.refId === audience.id.
-    const pushRows = blob(dir, 'pushLog') ?? [];
+    const pushRows = storedPush(dir);
     const orgUserAudiences = pushRows.filter((p) => p.audience?.kind === 'org_user').map((p) => p.audience);
     const matchesForOrgUserAudiences = orgUserAudiences.map((a) => afterRe.filter((t) => t.kind === a.kind && t.refId === a.id).length);
     report.sections.pushTokens = {
@@ -242,19 +260,19 @@ try {
 
   // ------------------------------------------------------------- 4. ordinary deletion: what remains
   {
-    const counts = () => ({ outbox: (blob(dir, 'outbox') ?? []).length, pushLog: (blob(dir, 'pushLog') ?? []).length, pushTokens: (blob(dir, 'pushTokens') ?? []).length });
+    const counts = () => ({ outbox: storedOutbox(dir).length, pushLog: storedPush(dir).length, pushTokens: storedTokens(dir).length });
     await sleep(2200); // let any pending debounced save land so the counts are stable
     const before = counts();
-    const playerTokensBefore = (blob(dir, 'pushTokens') ?? []).filter((t) => t.kind === 'player' && t.refId === 'pl-adeyemi').length;
-    const playerPushRowsBefore = (blob(dir, 'pushLog') ?? []).filter((p) => p.audience?.kind === 'player' && p.audience?.id === 'pl-adeyemi').length;
+    const playerTokensBefore = storedTokens(dir).filter((t) => t.kind === 'player' && t.refId === 'pl-adeyemi').length;
+    const playerPushRowsBefore = storedPush(dir).filter((p) => p.audience?.kind === 'player' && p.audience?.id === 'pl-adeyemi').length;
     const del = await S.j('DELETE', '/player/account', {}, kola); must(del.status === 200, `delete ${del.status}`);
     await until(async () => q(dir, "SELECT COUNT(*) AS n FROM notifications WHERE audience_kind = 'player' AND audience_id = 'pl-adeyemi'")[0].n === 0);
     await sleep(2200);
     const after = counts();
     report.sections.deletion = {
       before, after, unchanged: JSON.stringify(before) === JSON.stringify(after),
-      deletedPlayerTokensBefore: playerTokensBefore, deletedPlayerTokensAfter: (blob(dir, 'pushTokens') ?? []).filter((t) => t.kind === 'player' && t.refId === 'pl-adeyemi').length,
-      deletedPlayerPushRowsBefore: playerPushRowsBefore, deletedPlayerPushRowsAfter: (blob(dir, 'pushLog') ?? []).filter((p) => p.audience?.kind === 'player' && p.audience?.id === 'pl-adeyemi').length,
+      deletedPlayerTokensBefore: playerTokensBefore, deletedPlayerTokensAfter: storedTokens(dir).filter((t) => t.kind === 'player' && t.refId === 'pl-adeyemi').length,
+      deletedPlayerPushRowsBefore: playerPushRowsBefore, deletedPlayerPushRowsAfter: storedPush(dir).filter((p) => p.audience?.kind === 'player' && p.audience?.id === 'pl-adeyemi').length,
       playerNotificationsAfter: q(dir, "SELECT COUNT(*) AS n FROM notifications WHERE audience_kind = 'player' AND audience_id = 'pl-adeyemi'")[0].n,
       sessionRevokedSoNoReRegistration: (await S.j('POST', '/push/register', { token: TOKEN_B }, kola)).status,
     };
@@ -263,7 +281,7 @@ try {
 
   // ------------------------------------------------------------- 5. the proposed mapping (JavaScript) and the proposed DDL (executed SQL)
   {
-    const outbox = blob(dir, 'outbox') ?? []; const pushLog = blob(dir, 'pushLog') ?? []; const pushTokens = blob(dir, 'pushTokens') ?? [];
+    const outbox = storedOutbox(dir); const pushLog = storedPush(dir); const pushTokens = storedTokens(dir);
     // JavaScript mapping check — the unified outbox row and the way back, chosen by the stored transport.
     const KNOWN_A = SHAPE_A, KNOWN_B = SHAPE_B;
     const toOutboxRow = (m, seq) => {
@@ -335,7 +353,7 @@ try {
     const numericTokenStored = mem.prepare('SELECT typeof(token) AS t, length(token) AS n FROM push_tokens WHERE seq = 9000').get();
     mem.close();
     report.sections.constraintsExecutedSql = { observedRows: { outbox: tally(outboxInserts), pushLog: tally(pushInserts), pushTokens: tally(tokenInserts) }, nullBehaviour, numericTokenAfterStrictTextInsert: numericTokenStored ? { ...numericTokenStored } : null };
-    note(`executed SQL: observed rows against the proposed tables: ${JSON.stringify(report.sections.constraintsExecutedSql.observedRows)} — a STRICT TEXT column CONVERTS a bound number (node binds every number as a double: 424242 becomes the text '424242.0', typeof ${numericTokenStored?.t}, ${numericTokenStored?.n} chars) and refuses an object, so a non-string token must be refused by the import's own validation, not left to SQLite; a NULL \`channel\` passes its CHECK (NULL result = pass), a NULL \`delivered\` is refused by NOT NULL — so the mapping must write 0 for shape (b), never NULL; the proposed \`audience_kind\` CHECK would refuse a kind outside the three while S7a keeps the kind open (no current notify call site uses another kind); the push_tokens unique triple admits the same token under another kind, as the code does.`);
+    note(`executed SQL against the PREPARED DDL (superseded: the implemented schema — nullable to_address, a total source CHECK with delivered NULL for a delivery row, token_json, no unique triple — is exercised by scripts/testOutboxPush.mjs; this section is kept as the record that motivated it): observed rows against the prepared tables: ${JSON.stringify(report.sections.constraintsExecutedSql.observedRows)} — a STRICT TEXT column CONVERTS a bound number (node binds every number as a double: 424242 becomes the text '424242.0', typeof ${numericTokenStored?.t}, ${numericTokenStored?.n} chars) and refuses an object, so a non-string token must be refused by the import's own validation, not left to SQLite; a NULL \`channel\` passes its CHECK (NULL result = pass), a NULL \`delivered\` is refused by NOT NULL — so the mapping must write 0 for shape (b), never NULL; the proposed \`audience_kind\` CHECK would refuse a kind outside the three while S7a keeps the kind open (no current notify call site uses another kind); the push_tokens unique triple admits the same token under another kind, as the code does.`);
   }
 
   // ------------------------------------------------------------- 6. restart: the admin view after the process memory is gone
@@ -347,7 +365,7 @@ try {
     S = await boot(dir);
     const afterRestart = (await S.j('GET', '/admin/outbox', undefined, null, A)).body;
     const challengeAfter = afterRestart.find((m) => m.id === challengeBefore?.id);
-    report.sections.restart = { outboxRowsBefore: beforeRestart.length, outboxRowsAfter: afterRestart.length, sameIdsSameOrder: beforeRestart.map((m) => m.id).join(',') === afterRestart.map((m) => m.id).join(','), challengeFullTextBeforeRestart: !!challengeBefore && !challengeBefore.text.includes(PLACEHOLDER), challengePlaceholderAfterRestart: !!challengeAfter && challengeAfter.text.includes(PLACEHOLDER), pushLogRowsAfter: (await S.j('GET', '/admin/push-log', undefined, null, A)).body.length, pushTokensAfter: (blob(dir, 'pushTokens') ?? []).length };
+    report.sections.restart = { outboxRowsBefore: beforeRestart.length, outboxRowsAfter: afterRestart.length, sameIdsSameOrder: beforeRestart.map((m) => m.id).join(',') === afterRestart.map((m) => m.id).join(','), challengeFullTextBeforeRestart: !!challengeBefore && !challengeBefore.text.includes(PLACEHOLDER), challengePlaceholderAfterRestart: !!challengeAfter && challengeAfter.text.includes(PLACEHOLDER), pushLogRowsAfter: (await S.j('GET', '/admin/push-log', undefined, null, A)).body.length, pushTokensAfter: storedTokens(dir).length };
     note(`restart: the admin outbox lists the same ${afterRestart.length} ids in the same order; the challenge mail that showed its full text before the restart shows the placeholder after it (the in-memory dev delivery is gone, the column was always the withheld text).`);
   }
 } finally {

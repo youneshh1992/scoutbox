@@ -269,7 +269,10 @@ await test('review of e020aba, finding 1 — the challenge mail: on the dev tran
   assert.equal((await S.j('POST', '/org/verification/email', { email: 'f1@eastportfc.test' }, pro)).status, 201);
   const devMail = (await S.j('GET', '/admin/outbox', undefined, null, A)).body.find((m) => m.to === 'f1@eastportfc.test');
   const code = /code is ([A-Z0-9]{6})/.exec(devMail.text)?.[1]; assert.ok(code, 'the dev outbox delivers the code while the process runs');
-  const saved = () => qAll(dir, "SELECT value FROM collections WHERE name = 'outbox'").map((r) => r.value).join('');
+  // S7c: the outbox is a table after its cutover (0011); the blob before it — the saved text is read either way.
+  const saved = () => (q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'")
+    ? qAll(dir, 'SELECT to_address, text FROM outbox ORDER BY seq').map((r) => `${r.to_address} ${r.text}`)
+    : qAll(dir, "SELECT value FROM collections WHERE name = 'outbox'").map((r) => r.value)).join('');
   for (let i = 0; i < 120 && !saved().includes('f1@eastportfc.test'); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(saved().includes('f1@eastportfc.test') && saved().includes('code withheld'), 'the outbox record was saved (debounced save restored), its code withheld');
   assert.equal(fileText(dir).includes(code), false, 'no raw code anywhere in the database file');
