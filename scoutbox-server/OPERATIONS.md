@@ -1074,7 +1074,10 @@ the push sender and the registration route are the only writers.
   the ORIGINAL value, so an ARRAY reaches the mailer and the accepted build
   persisted it — a string lives in `to_address`, any other JSON value is encoded
   in `to_json` and decoded on read, so the admin view, the backup, the restore
-  and the rollback hand back the same array. A token is ANY JSON value the
+  and the rollback hand back the same array; a non-finite number inside such
+  an array (raw JSON `[1e400,"…"]` parses to `Infinity`; review of `78c14b9`)
+  is kept live for this process and persisted as `null` in that position,
+  exactly as the blob's JSON did. A token is ANY JSON value the
   route accepted (a number, a string, a boolean, an object, an array), stored
   losslessly as JSON text and handed back with the type it was registered with
   (the push sender sends Expo the same value); the route's rule is unchanged — a

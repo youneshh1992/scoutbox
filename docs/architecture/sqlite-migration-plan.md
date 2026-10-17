@@ -39,7 +39,8 @@ bounded dispatch/attempt storage milestone and its three corrections — `dispat
 production or deployment approval; review §9.9), **the notification-extras follow-up independently accepted at
 `6ca66ba`** (review §9.10), **S7c implemented on top of `6ca66ba` — migration `0011_outbox_push` — and corrected on top of `40aa05c`
 after the independent review found two compatibility defects (an array mail destination, raw JSON overflow
-tokens; review §10.10), pending independent acceptance** (review §10.8; the three design assumptions
+tokens; review §10.10), and on top of `78c14b9` for the remaining boundary (a non-finite number inside an
+accepted array destination; review §10.11), pending independent acceptance** (review §10.8; the three design assumptions
 corrected first, §10.7),
 **S7d not started** (its blockers are stated in the review and in §S7)
 — S8–S14 planned. The evidence-based plan of S4 is
@@ -1399,7 +1400,8 @@ performance, existing tests, what this plan is not).
   of the schema document) a behaviour change carried through unchanged; **implemented on top of
   `6ca66ba`, migration `0011_outbox_push`; corrected on top of `40aa05c` — the destination is any JSON
   value (`to_address` / `to_json`), a non-finite token value is kept live and persisted as null, the DDL
-  amended in place (review §10.10); pending independent acceptance** (review §10.8; the three
+  amended in place (review §10.10); a non-finite number inside an accepted array destination is kept live and
+  persisted as the old JSON null too (review §10.11); pending independent acceptance** (review §10.8; the three
   design assumptions the review of `6ca66ba` corrected are recorded in §10.3/§10.4/§10.7 — none was
   a product decision); **S7d** `channels`, `messages`,
   `message_attachments` (after the request-reference decision and the retention answer). The

@@ -467,7 +467,7 @@ test('[review of 40aa05c, F2] a mail destination the accepted build persisted as
   const ap = repo.outbox.append(mail({ id: 'mail-ap', to: ['synthetic-append@example.invalid'] })); assert.deepEqual(plain(ap.to), ['synthetic-append@example.invalid'], 'append accepts what the route accepts');
   const dl = repo.outbox.append(delivery({ id: 'mail-dl', to: ['synthetic-delivery@example.invalid'], providerMessageId: 'fm_dl' })); assert.deepEqual(plain(dl.to), ['synthetic-delivery@example.invalid'], 'the representation is the literal\'s, in either shape');
   assert.deepEqual(repo.outbox.append(mail({ id: 'mail-null', to: null })).to, null, 'explicit null kept'); assert.equal(repo.outbox.append(mail({ id: 'mail-str', to: ADDRESS })).to, ADDRESS, 'an ordinary string kept');
-  assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: undefined })), /to \(undefined\) cannot be stored as JSON/, 'a non-JSON destination is still refused by name'); assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: Symbol('s') })), /to \(symbol\) cannot be stored as JSON/); assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: Infinity })), /to is a non-finite number/); assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: [() => 1] })), /to\[0\] \(function\) cannot be stored as JSON/);
+  assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: undefined })), /to \(undefined\) cannot be stored as JSON/, 'a non-JSON destination is still refused by name'); assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: Symbol('s') })), /to \(symbol\) cannot be stored as JSON/); assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: [() => 1] })), /to\[0\] \(function\) cannot be stored as JSON/);
   assert.equal(repo.outbox.byId('mail-x'), null, 'nothing written by a refusal'); assert.equal(repo.outbox.count(), 9);
   // The schema itself: exclusive columns; to_json never a JSON string or JSON null (those are to_address / NULL).
   const insert = (to_address, to_json) => s.prepare("INSERT INTO outbox (id, source, created_at, to_address, to_json, subject, text, transport, delivered) VALUES ('bad', 'mailer', 1, ?, ?, 'S', 'T', 'dev-outbox', 1)").run(to_address, to_json);
@@ -549,6 +549,49 @@ test('[review of 40aa05c, F1] raw JSON number overflow in a token (1e400 parses 
   assert.ok(rollbackMod); const out = tempDir('obp-f1-out'); rollbackMod.rollbackOutboxPushCopy(dbFile(dir), out, { now: NOW });
   assert.equal(JSON.stringify(JSON.parse(blobOf(out, 'pushTokens')).map((t) => t.token)), JSON.stringify(all.map((t) => t.token)), 'the blob the accepted build reads');
   L2.close(); rm(dir, out);
+});
+
+test('[review of 78c14b9] numeric overflow INSIDE an accepted array destination (raw JSON [1e400,"…"] or [[-1e400],"…"] through the coercing invite route: the elements parse to ±Infinity, the accepted build kept the live array until a restart and its JSON persistence wrote null / nested null in those positions): append accepts the live array, the mirror and every detached copy keep ±Infinity, the save boundary writes the accepted build\'s JSON (to_json with null in the overflow positions), a failed save keeps it pending and the retry lands it once, an aborted unit restores the live value, a restart reads the nulls as the old restart did, the snapshot (backup) and the rollback blob carry the old JSON and the re-upgrade keeps it; a bare non-finite destination (not writer-reachable) follows the same boundary (live value kept, persisted as the old JSON null); every other field keeps the strict rule', () => {
+  const dir = tempDir('obp-f2b');
+  const OVER = JSON.parse('[1e400,"synthetic-overflow@example.invalid"]'); const NEST = JSON.parse('[[-1e400],"synthetic-nested@example.invalid"]');
+  assert.equal(OVER[0], Infinity); assert.equal(NEST[0][0], -Infinity);
+  const OVER_JSON = '[null,"synthetic-overflow@example.invalid"]'; const NEST_JSON = '[[null],"synthetic-nested@example.invalid"]';
+  assert.equal(JSON.stringify(OVER), OVER_JSON); assert.equal(JSON.stringify(NEST), NEST_JSON); // what the accepted build's save wrote
+  // A file the accepted build wrote (its JSON): imports as before.
+  s7bFile(dir, { outbox: [mail({ id: 'mail-old', to: JSON.parse(OVER_JSON) })] });
+  const L = live(dir); L.save(); assert.deepEqual(L.repo.outbox.exportRows()[0].to, [null, 'synthetic-overflow@example.invalid'], 'the imported row reads the old JSON');
+  // The live writer's array: accepted, kept live, detached.
+  const held = L.repo.outbox.append(mail({ id: 'mail-over', to: OVER })); const held2 = L.repo.outbox.append(mail({ id: 'mail-nest', to: NEST }));
+  assert.equal(held.to[0], Infinity, 'the held view shows the live value'); assert.equal(held2.to[0][0], -Infinity);
+  const ex = L.repo.outbox.exportRows(); assert.deepEqual(ex[1].to, [Infinity, 'synthetic-overflow@example.invalid'], 'an export keeps the live value (the admin view serialises it to null, as the old array did)'); assert.deepEqual(ex[2].to, [[-Infinity], 'synthetic-nested@example.invalid']);
+  assert.equal(JSON.stringify(ex[1].to), OVER_JSON); assert.equal(JSON.stringify(ex[2].to), NEST_JSON);
+  ex[1].to[0] = 7; OVER[1] = 'mutated after append'; assert.deepEqual(L.repo.outbox.exportRows()[1].to, [Infinity, 'synthetic-overflow@example.invalid'], 'detached from the export and from the caller\'s input');
+  assert.deepEqual(rowsOf(dir, 'outbox').map((r) => r.id), ['mail-old'], 'nothing durable before the save');
+  // A failed save keeps the pending rows; the retry lands them once with the old JSON.
+  L.store.sqlite.exec("CREATE TEMP TRIGGER rv_f2b BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT, 'synthetic flush failure'); END");
+  assert.throws(() => L.save(), /synthetic flush failure/); assert.equal(L.repo.pending(), 2); assert.equal(held.to[0], Infinity, 'memory is the intended state');
+  L.store.sqlite.exec('DROP TRIGGER rv_f2b'); L.save();
+  assert.deepEqual(rowsOf(dir, 'outbox').map((r) => [r.id, r.to_address, r.to_json]), [['mail-old', null, OVER_JSON], ['mail-over', null, OVER_JSON], ['mail-nest', null, NEST_JSON]], 'persisted as the accepted build\'s JSON: null in the overflow positions, the array structure kept');
+  L.save(); assert.equal(rowsOf(dir, 'outbox').length, 3, 'no replay');
+  // An aborted unit restores the live values, not the JSON.
+  assert.throws(() => L.store.unitOfWork(() => { L.repo.outbox.append(mail({ id: 'mail-u', to: OVER })); L.repo.outbox.markDelivered('mail-over', false); throw new Error('abort'); }, { snapshot: L.snapshot }), /abort/);
+  assert.equal(L.repo.outbox.byId('mail-u'), null); assert.equal(held.delivered, true); assert.equal(held.to[0], Infinity, 'the restored row keeps the live value'); assert.equal(L.repo.outbox.exportRows()[2].to[0][0], -Infinity);
+  // The snapshot table reader (backup, the reviewer's script, the rollback) and the dispatcher round trip: the old JSON.
+  assert.deepEqual(needModule().OUTBOX_TABLE.read(L.store.sqlite).map((m) => m.to), [[null, 'synthetic-overflow@example.invalid'], [null, 'synthetic-overflow@example.invalid'], [[null], 'synthetic-nested@example.invalid']]);
+  // A bare non-finite destination (no writer produces one — the route's regular expressions refuse it — but the boundary is the same): live value kept, persisted as the old JSON `null`.
+  const bare = L.repo.outbox.append(mail({ id: 'mail-bare', to: Infinity })); assert.equal(bare.to, Infinity); L.save();
+  assert.deepEqual(rowsOf(dir, 'outbox').at(-1).to_json, null); assert.deepEqual(rowsOf(dir, 'outbox').at(-1).to_address, null, 'NULL/NULL: what JSON.stringify(Infinity) → null meant in the blob');
+  // Every other field keeps the strict rule.
+  assert.throws(() => L.repo.outbox.append(mail({ id: 'mail-x', note: Infinity })), /note is a non-finite number/); assert.throws(() => L.repo.outbox.append(mail({ id: 'mail-x', to: [() => 1] })), /to\[0\] \(function\) cannot be stored as JSON/); assert.throws(() => L.repo.pushLog.append(push({ id: 'push-x', note: Infinity })), /note is a non-finite number/);
+  assert.equal(L.repo.outbox.byId('mail-x'), null); assert.equal(L.repo.pending(), 0);
+  L.close();
+  // Restart: the nulls, as the old restart read them; the live value is gone with the process.
+  const L2 = live(dir); assert.deepEqual(L2.repo.outbox.exportRows().map((m) => m.to), [[null, 'synthetic-overflow@example.invalid'], [null, 'synthetic-overflow@example.invalid'], [[null], 'synthetic-nested@example.invalid'], null]); L2.close();
+  const tool = openStore(dir); const snap = tool.load(); assert.equal(JSON.stringify(snap.db.outbox.map((m) => m.to)), JSON.stringify([[null, 'synthetic-overflow@example.invalid'], [null, 'synthetic-overflow@example.invalid'], [[null], 'synthetic-nested@example.invalid'], null])); tool.save(snap); tool.sqlite.close();
+  assert.ok(rollbackMod); const out = tempDir('obp-f2b-out'); assert.equal(rollbackMod.rollbackOutboxPushCopy(dbFile(dir), out, { now: NOW }).counts.outbox, 4);
+  assert.equal(JSON.stringify(JSON.parse(blobOf(out, 'outbox')).map((m) => m.to)), JSON.stringify([[null, 'synthetic-overflow@example.invalid'], [null, 'synthetic-overflow@example.invalid'], [[null], 'synthetic-nested@example.invalid'], null]), 'the blob the accepted build reads: its own JSON');
+  { const o = openRaw(out); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION]); assert.deepEqual(rowsOf(out, 'outbox').map((r) => r.to_json), [OVER_JSON, OVER_JSON, NEST_JSON, null]); o.close(); }
+  rm(dir, out);
 });
 
 console.log(`\n${passed} outbox/push checks passed`);

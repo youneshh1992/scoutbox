@@ -167,7 +167,8 @@ and design changes the Founder explicitly requests.
   back; nothing lost) and the S7a tool refuses a file carrying 0010.
   **The mail outbox, the push log and the device push tokens are tables since
   S7c** (IMPLEMENTED on top of `6ca66ba`, CORRECTED on top of `40aa05c` after
-  the independent review found two compatibility defects, PENDING INDEPENDENT
+  the independent review found two compatibility defects and on top of
+  `78c14b9` for the remaining destination boundary, PENDING INDEPENDENT
   ACCEPTANCE — not accepted; `repositories/outboxPush.mjs`, migration
   `0011_outbox_push` with its DDL amended in place;
   `docs/architecture/s7-readiness-review.md` §10 as corrected by the review of
@@ -187,7 +188,9 @@ and design changes the Founder explicitly requests.
   outbox literals are told apart structurally (`source`, a total CHECK: NULL is
   "absent key"); the destination is ANY JSON value — a string in `to_address`,
   null, any other value (the ARRAY the coercing invite routes hand the mailer)
-  in `to_json`, decoded on read (review of `40aa05c`, F2); a non-finite token
+  in `to_json`, decoded on read (review of `40aa05c`, F2), a non-finite number
+  inside that array kept live and persisted as the old JSON null (review of
+  `78c14b9`, §10.11); a non-finite token
   value (JSON `1e400`) is kept live and persisted as null, a replacement
   deleting by row seq (review of `40aa05c`, F1); a scratch file at `40aa05c`
   (outbox without `to_json`) is refused by name, rolled back by the tool and

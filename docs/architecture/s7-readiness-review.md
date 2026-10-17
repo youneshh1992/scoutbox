@@ -29,8 +29,10 @@ independently ACCEPTED there for its bounded scope (§9.10, §10.9). S7c (`outbo
 `push_tokens`): the prepared plan (§10) was corrected by the review of `6ca66ba` (D1, D2, the null
 destination — §10.3, §10.4, §10.7) and IMPLEMENTED on top of `6ca66ba` (§10.8); the independent review of
 `40aa05c` found two compatibility defects (an array mail destination refused and crashing the process; raw
-JSON overflow tokens refused), CORRECTED on top of `40aa05c` (§10.10) — pending independent acceptance, not
-accepted; migration `0011_outbox_push` is registered with its DDL amended in place. S7d not started.** §§0–8.2
+JSON overflow tokens refused), CORRECTED on top of `40aa05c` (§10.10); the review of `78c14b9` found one
+remaining boundary (a non-finite number INSIDE an accepted array destination dropped its mail record), CORRECTED
+on top of `78c14b9` (§10.11) — pending independent acceptance, not accepted; migration `0011_outbox_push` is
+registered with its DDL amended in place. S7d not started.** §§0–8.2
 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where the
 implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
 correction is marked in place. The exact blockers of the remaining sub-steps are in §8. Nothing
@@ -1849,7 +1851,9 @@ CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
   other shape's → otherwise "matches both/neither"); `subject` a string ((a));
   `text` a string; `transport`/`provider` a non-empty string; `delivered` a boolean ((a) only); `to` **any
   JSON value** (a string → `to_address`; null → NULL/NULL; anything else, in practice the ARRAY the coercing
-  invite routes hand the mailer → `to_json`, review of `40aa05c` F2 — a non-JSON value is refused by name);
+  invite routes hand the mailer → `to_json`, review of `40aa05c` F2 — a non-JSON value is refused by name,
+  except the non-finite numbers JSON syntax produces inside such an array, which are kept live and persisted
+  as the accepted build's JSON null — review of `78c14b9`, §10.11);
   `channel` and `providerMessageId` non-empty strings ((b) only); push `audience` exactly `{kind, id}`
   with both non-empty strings (the S7a rule, an extra audience field refuses); `title`, `body` strings;
   token `kind`, `refId` non-empty strings, `token` **any JSON value** (null, boolean, number, string,
@@ -2231,6 +2235,44 @@ S7c objective); `sqlite-schema.md` (the outbox and token rows); `sql/03` (the DD
 `OPERATIONS.md` (the S7c section: destinations, non-finite tokens, scratch databases at `40aa05c`);
 `CLAUDE.md`. Status: **S7c corrections implemented, pending independent acceptance.** S7b stays accepted
 at `ac50b60`; the notification nested-extras follow-up stays accepted at `6ca66ba`.
+
+### 10.11 Independent review of `78c14b9` — one remaining destination boundary, corrected on top of `78c14b9` (17 October 2026; **pending independent acceptance — not accepted**)
+
+**What the review found** (`review-78c14b9-summary.txt`; reproduction `review-78c14b9-reproductions.mjs
+<candidate-root> <6ca66ba-root>`, run unchanged on the unchanged `78c14b9` tree against the `6ca66ba` checkout
+before any edit: exit 1, one REPRODUCED finding — the log is in the handoff). The review verified both gates on
+real Node v24.19.0 (backend 25 suites / 346 checks, Player 4 / 41), the five earlier reviewer scripts (all CORRECT)
+and the actual pre-S7a/S7b/S7c rollback boots; the earlier push-timing failure did not recur there, which is a
+passing run, not a root cause (the §10.10 observation and its diagnostics stand).
+
+The two §10.10 corrections were proven separately — arrays for destinations, non-finite numbers for tokens — but
+the coercing invite writer produces BOTH in one destination: raw JSON `["…"]`, `[1e400,"…"]` and
+`[[-1e400],"…"]` all pass its regular expression, the elements parse to ±Infinity, and the accepted build kept
+the live array until a restart and wrote null / nested null in those positions at the save. On `78c14b9` the
+three invites answered 201 and the process stayed alive (the promise handler of §10.10), but `validateOutboxRow`
+still applied the strict clone to `to`, so two mail records were refused after the route had reported success —
+one outbox record instead of three, two refusals in the log.
+
+**Correction (`repositories/outboxPush.mjs`; failing-first regressions recorded on the unchanged `78c14b9` tree —
+`testOutboxPush.mjs` "[review of 78c14b9]" fails on the `to[0]` non-finite refusal, `testOutboxPushServer.mjs`
+"[review of 78c14b9]" on the two refusals logged after 201 — logs in the handoff):** the destination's clone keeps
+non-finite numbers live (`NON_FINITE_KEPT`) in validation, in every detached copy (`copyOutboxRow`: export,
+`forAudience`-style reads, the unit snapshot and its restore), so the held view and the export show the live
+array and the admin view and the provider serialise it to null exactly as the accepted build's array did; the
+save boundary (`destinationColumns`) writes `JSON.stringify` of the live value — the accepted build's JSON, null
+in the overflow positions, the array structure kept — and a bare non-finite destination (no writer produces one)
+persists as the old JSON `null` (NULL/NULL). The earlier claim that a non-finite destination is refused is
+withdrawn (test, comment and this document). Everything else is unchanged: ordinary strings, explicit null,
+ordinary and nested arrays, both source shapes, insertion order, the save boundary, the promise handling, the
+token semantics and deletion by `seq`, the strict rule for unknown fields, the push log and the dispatches, the
+`40aa05c` scratch-file refusal and its rollback/re-upgrade path; no migration, no schema change. Proven in the
+repository (live copies, detachment, failed save and retry, aborted unit, restart, backup, rollback, re-upgrade)
+and through the real route with the three raw bodies (three 201, alive, no refusal logged, three invite rows and
+three mail records in the routes' own saves, the stored JSON text, the admin view, restart, backup, restore, the
+live transport's provider payload with the local stub, the rollback blob and the re-upgrade), with the actual
+`6ca66ba` build persisting the same destinations for the same raw bodies, its file upgrading on this build, and
+it reading and extending the rollback copy. Status: **S7c correction implemented, pending independent
+acceptance.** S7b stays accepted at `ac50b60`; the notification nested-extras follow-up stays accepted at `6ca66ba`.
 
 ---
 

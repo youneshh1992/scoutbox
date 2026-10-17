@@ -438,4 +438,57 @@ await test('[review of 40aa05c, F1] POST /push/register with RAW JSON bodies (1e
   rm(dir, bk.body.dir, copy);
 });
 
+await test('[review of 78c14b9] POST /org/invites with RAW JSON destinations the route coerces and accepts — ["…"] (control), [1e400,"…"] and [[-1e400],"…"] (the elements parse to ±Infinity): three 201 responses, the process alive, three invite rows and THREE mail records in the routes\' own saves with the array structure kept and the accepted build\'s JSON in the overflow positions (null, nested null); no refusal logged; the admin view, a restart, the backup, a restore, the live transport\'s provider payload (intercepted locally), the copy-only rollback blob and the re-upgrade all match; the actual 6ca66ba build persists the same destinations for the same raw bodies, reads the rollback copy and writes one itself', async () => {
+  const dir = tempDir('s7c-f2b'); let S = await boot(dir);
+  const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const seq0 = seqOf(dir); const logBefore = S.log().length;
+  const RAW = ['{"email":["synthetic-control@example.invalid"],"name":"Synthetic Control","role":"Scout"}', '{"email":[1e400,"synthetic-overflow@example.invalid"],"name":"Synthetic Overflow","role":"Scout"}', '{"email":[[-1e400],"synthetic-nested@example.invalid"],"name":"Synthetic Nested","role":"Scout"}'];
+  const EXPECTED = [['synthetic-control@example.invalid'], [null, 'synthetic-overflow@example.invalid'], [[null], 'synthetic-nested@example.invalid']]; // the accepted build's persisted JSON
+  const statuses = []; for (const b of RAW) statuses.push((await S.raw('POST', '/org/invites', b, maria)).status);
+  assert.deepEqual(statuses, [201, 201, 201]); await sleep(600); assert.equal(S.proc.exitCode, null, 'the process is alive');
+  assert.doesNotMatch(S.log().slice(logBefore), /non-finite|cannot be stored as JSON|not recorded/, 'no refusal logged after a 201');
+  const byName = (list, n) => list.find((m) => typeof m.text === 'string' && m.text.includes(`Hi ${n},`));
+  const after = snap(dir, (c) => { const st = readStored(c); return { seq: st.seq, mails: ['Control', 'Overflow', 'Nested'].map((n) => byName(st.outbox, `Synthetic ${n}`)), invites: (blobRows(c, 'orgInvites') ?? []).filter((i) => /^Synthetic (Control|Overflow|Nested)$/.test(i.name)).length }; });
+  assert.equal(after.seq, seq0 + 3, 'three saves (one persistNow per invite)'); assert.equal(after.invites, 3, 'three invite rows');
+  assert.deepEqual(after.mails.map((m) => m?.to), EXPECTED, 'three mail records, the array structure kept, the old JSON in the overflow positions');
+  assert.deepEqual(snap(dir, (c) => c.all("SELECT to_json FROM outbox WHERE text LIKE 'Hi Synthetic %' ORDER BY seq").map((r) => r.to_json)), EXPECTED.map((v) => JSON.stringify(v)), 'the stored JSON text');
+  const view = (await S.j('GET', '/admin/outbox', undefined, null, A)).body; assert.deepEqual(['Control', 'Overflow', 'Nested'].map((n) => byName(view, `Synthetic ${n}`).to), EXPECTED, 'the admin view serialises the live array as the accepted build did');
+  const idsBefore = view.map((m) => m.id);
+  await S.stop(); S = await boot(dir);
+  const viewAfter = (await S.j('GET', '/admin/outbox', undefined, null, A)).body; assert.deepEqual(viewAfter.map((m) => m.id), idsBefore); assert.deepEqual(['Control', 'Overflow', 'Nested'].map((n) => byName(viewAfter, `Synthetic ${n}`).to), EXPECTED, 'after a restart');
+  const all = stored(dir); const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
+  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')); assert.deepEqual(snapshot.db.outbox, all.outbox, 'the backup carries the arrays with the nulls');
+  await S.stop();
+  const restored = tempDir('s7c-f2b-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true }); S = await boot(restored); assert.ok(live(restored)); assert.deepEqual(stored(restored).outbox, all.outbox, 'restored row for row'); await S.stop();
+  // Live transport, provider intercepted locally: the provider receives JSON.stringify of the live array (null in the overflow position), as before.
+  const liveDir = tempDir('s7c-f2b-live'); const stubLog = path.join(liveDir, '..', `${path.basename(liveDir)}-sendgrid.log`);
+  const SL = await boot(liveDir, { SENDGRID_API_KEY: 'synthetic-not-a-real-key', SENDGRID_STUB_LOG: stubLog, NODE_OPTIONS: `--import=${path.join(HERE, 'testSendgridStub.mjs')}` });
+  const lm = await orgLogin(SL, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
+  assert.equal((await SL.raw('POST', '/org/invites', RAW[1], lm)).status, 201); await sleep(600); assert.equal(SL.proc.exitCode, null);
+  const providerBody = JSON.parse(fs.readFileSync(stubLog, 'utf8').trim().split('\n').at(-1)); assert.deepEqual(providerBody.personalizations[0].to[0].email, EXPECTED[1], 'the provider payload, as before');
+  assert.equal((await SL.j('POST', '/org/invites', { email: 'synthetic-live-3@example.invalid', name: 'Synthetic Live Three', role: 'Scout' }, lm)).status, 201); // the next save carries the provider's answer
+  const liveRow = byName(stored(liveDir).outbox, 'Synthetic Overflow'); assert.deepEqual([liveRow.transport, liveRow.delivered, liveRow.to], ['sendgrid', true, EXPECTED[1]]);
+  await SL.stop(); rm(liveDir); fs.rmSync(stubLog, { force: true });
+  // Rollback: the blob holds the old JSON.
+  const copy = tempDir('s7c-f2b-rollback'); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), dir, copy], { encoding: 'utf8' });
+  assert.equal(live(copy), false); assert.deepEqual(stored(copy).outbox, all.outbox);
+  const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
+  if (OLD && fs.existsSync(OLD)) {
+    // The same raw bodies on the accepted build: the same persisted destinations.
+    const oldDir = tempDir('s7c-f2b-old'); const o1 = await boot(oldDir, {}, OLD); const om1 = await orgLogin(o1, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
+    const oldStatuses = []; for (const b of RAW) oldStatuses.push((await o1.raw('POST', '/org/invites', b, om1)).status); await sleep(300); assert.equal(o1.proc.exitCode, null); await o1.stop();
+    assert.deepEqual(oldStatuses, [201, 201, 201]); assert.deepEqual(['Control', 'Overflow', 'Nested'].map((n) => byName(stored(oldDir).outbox, `Synthetic ${n}`).to), EXPECTED, 'the accepted build persisted the same destinations');
+    const up0 = await boot(oldDir); assert.ok(live(oldDir)); assert.deepEqual(['Control', 'Overflow', 'Nested'].map((n) => byName(stored(oldDir).outbox, `Synthetic ${n}`).to), EXPECTED, 'and its file upgrades on this build with them intact'); await up0.stop();
+    // The rollback copy on the accepted build.
+    const old = await boot(copy, {}, OLD); const om = await orgLogin(old, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
+    const oldView = (await old.j('GET', '/admin/outbox', undefined, null, A)).body; assert.deepEqual(['Control', 'Overflow', 'Nested'].map((n) => byName(oldView, `Synthetic ${n}`).to), EXPECTED, 'the accepted build reads the rollback copy');
+    assert.equal((await old.raw('POST', '/org/invites', '{"email":[1e400,"synthetic-old-overflow@example.invalid"],"name":"Synthetic Old Overflow","role":"Scout"}', om)).status, 201); await sleep(300); assert.equal(old.proc.exitCode, null); await old.stop();
+    assert.deepEqual(byName(stored(copy).outbox, 'Synthetic Old Overflow').to, [null, 'synthetic-old-overflow@example.invalid'], 'the accepted build wrote its JSON into the blob');
+    const up = await boot(copy); assert.ok(live(copy)); const re = stored(copy).outbox; assert.deepEqual(re.slice(0, all.outbox.length), all.outbox); assert.deepEqual(byName(re, 'Synthetic Old Overflow').to, [null, 'synthetic-old-overflow@example.invalid']); await up.stop();
+    console.log('    (pre-S7c build: same persisted destinations for the raw overflow bodies, its file upgrades, it reads and extends the rollback copy)'); rm(oldDir);
+  } else {
+    console.log('    (SCOUTBOX_PRE_S7C_SERVER not set: the old-build comparisons were not exercised here)');
+  }
+  rm(dir, bk.body.dir, restored, copy);
+});
+
 console.log(`\n${passed} outbox/push server checks passed`);

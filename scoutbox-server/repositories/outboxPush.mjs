@@ -130,7 +130,15 @@
  *   record present, `outbox` without `to_json` — is refused at attach by name
  *   (OUTBOX_PUSH_SCHEMA_STALE, nothing changed); the rollback tool reads that
  *   shape, and the re-upgrade creates the corrected table. A value JSON cannot
- *   carry is still refused by name.
+ *   carry is still refused by name — except the non-finite numbers JSON syntax
+ *   itself produces, which the review of 78c14b9 showed reach the destination
+ *   INSIDE such an array (raw `[1e400,"…"]`, `[[-1e400],"…"]`): the destination
+ *   is kept live through validation, every detached copy, the unit snapshot
+ *   and restore and the export (so the admin view and the provider serialise
+ *   it to null, as the accepted build's array did), and the save boundary
+ *   writes the accepted build's JSON — null in those positions, the array
+ *   structure kept; a bare non-finite destination (no writer produces one)
+ *   follows the same boundary and persists as the old JSON `null`.
  *   F1, NON-FINITE TOKENS. JSON syntax such as 1e400 parses to Infinity; the
  *   route accepts it (truthy), the old array kept it as the live value until a
  *   restart, and JSON.stringify wrote null at the save — also inside an object
@@ -270,7 +278,10 @@ export function outboxSourceOf(raw) {
 export function validateOutboxRow(raw) {
   const s = outboxSourceOf(raw); if (s.reason) return { ok: false, reason: s.reason };
   if (!nonEmpty(raw.id)) return { ok: false, reason: 'id must be a non-empty string' };
-  const d = cloneJson(raw.to, 'to'); if (d.reason) return { ok: false, reason: d.reason }; // any JSON value: a string, null (an accepted queued dispatch), or what a coercing route handed the mailer — an array (review of 40aa05c, F2)
+  // Any JSON value: a string, null (an accepted queued dispatch), or what a coercing route handed the mailer — an array
+  // (review of 40aa05c, F2) whose elements may themselves be the non-finite numbers JSON syntax produces (1e400 →
+  // Infinity; review of 78c14b9): kept LIVE here, written as the accepted build's JSON (null) at the save boundary.
+  const d = cloneJson(raw.to, 'to', NON_FINITE_KEPT); if (d.reason) return { ok: false, reason: d.reason };
   if (typeof raw.text !== 'string') return { ok: false, reason: 'text must be a string' };
   const e = extrasOf(raw, s.source === 'mailer' ? MAILER_KEYS : DELIVERY_KEYS); if (e.reason) return { ok: false, reason: e.reason };
   if (s.source === 'mailer') {
@@ -353,7 +364,11 @@ const TOKEN_DELETE_BY_SEQ = 'DELETE FROM push_tokens WHERE seq = ?';
 /** Whether the outbox table carries the corrected destination pair (a table created by the unaccepted 40aa05c build has to_address only). */
 const outboxHasToJson = (sqlite) => !!sqlite.prepare("SELECT 1 FROM pragma_table_info('outbox') WHERE name = 'to_json'").get();
 /** The destination's two columns: a string in to_address, null as NULL/NULL, any other JSON value encoded in to_json. */
-const destinationColumns = (to) => (typeof to === 'string' ? { to_address: to, to_json: null } : to === null ? { to_address: null, to_json: null } : { to_address: null, to_json: JSON.stringify(to) });
+const destinationColumns = (to) => {
+  if (typeof to === 'string') return { to_address: to, to_json: null };
+  const json = to === null ? 'null' : JSON.stringify(to); // the accepted build's save boundary: a non-finite number becomes null here, inside an array too (review of 78c14b9)
+  return json === 'null' ? { to_address: null, to_json: null } : { to_address: null, to_json: json };
+};
 const destinationOf = (r) => (r.to_json != null ? parseJson(r.to_json, 'to') : r.to_address);
 /** A live file whose outbox table lacks to_json was created by the unaccepted 40aa05c build: refused by name before any statement is prepared or any row read; nothing is changed. */
 function refuseStaleOutbox(sqlite) {
@@ -380,6 +395,7 @@ const tokenFromDb = (r) => assemble(r.extra_json ? parseJson(r.extra_json, 'extr
 /** A DETACHED copy of a mirror row (the transaction snapshot / export shape: nothing shared with the mirror, nested data cloned); `keptKey` names the one field whose non-finite numbers are kept (the token). */
 const copyRow = (row, keptKey = null) => { const c = {}; for (const k of Object.keys(row)) setOwn(c, k, cloneJson(row[k], k, k === keptKey ? NON_FINITE_KEPT : NON_FINITE_REFUSED).value); return c; };
 const copyTokenRow = (row) => copyRow(row, 'token');
+const copyOutboxRow = (row) => copyRow(row, 'to'); // the destination keeps its live non-finite elements in every detached copy (review of 78c14b9)
 
 /** Reads the corrected table, and the 40aa05c shape without to_json (every destination there is a string or null) so the rollback tool and the snapshot reader can take a scratch database back. */
 const readOutbox = (sqlite) => sqlite.prepare(`${outboxHasToJson(sqlite) ? OUTBOX_SELECT : OUTBOX_SELECT.replace('to_json', 'NULL AS to_json')} ORDER BY seq`).all().map(outboxFromDb);
@@ -551,7 +567,7 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
         });
       },
       /** Every record in its legacy shape (extras first, then the writer's keys), in insertion order, detached (the admin backup). */
-      exportRows: () => outboxRows.map(copyRow),
+      exportRows: () => outboxRows.map(copyOutboxRow),
     },
 
     // ---------------------------------------------------------- the push log
@@ -615,11 +631,11 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
     /** The store reports a failed save: nothing the flush ran exists; the writes stay queued for the next save (memory is the intended state). */
     rollback() { inFlight = 0; },
     /** Unit-of-work participation: the mirror rows (by identity, restored in place) and the queue length when the unit began. */
-    snapshotState: () => ({ pendingLength: pending.length, outbox: outboxRows.map((r) => [r, copyRow(r)]), pushLog: pushRows.map((r) => [r, copyRow(r)]), pushTokens: tokenRows.map((r) => [r, copyTokenRow(r)]) }),
+    snapshotState: () => ({ pendingLength: pending.length, outbox: outboxRows.map((r) => [r, copyOutboxRow(r)]), pushLog: pushRows.map((r) => [r, copyRow(r)]), pushTokens: tokenRows.map((r) => [r, copyTokenRow(r)]) }),
     restoreState(state) {
       if (!state) return;
       pending.length = state.pendingLength; inFlight = 0;
-      restoreList(outboxRows, state.outbox); outboxById.clear(); for (const r of outboxRows) outboxById.set(r.id, r);
+      restoreList(outboxRows, state.outbox, 'to'); outboxById.clear(); for (const r of outboxRows) outboxById.set(r.id, r);
       restoreList(pushRows, state.pushLog);
       restoreList(tokenRows, state.pushTokens, 'token');
     },
