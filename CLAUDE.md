@@ -205,9 +205,13 @@ and design changes the Founder explicitly requests.
   `6ca66ba` build) and the S7b tool refuses a file carrying 0011. The staff
   push identity, the plain-code mail sites and retention are carried through
   unchanged, not decided. **S7d is not started**; the next milestone is
-  PREPARED / NOT IMPLEMENTED in the S7 review §11 (S7d storage-only with the
-  §2.3 transitional validated request reference and today's deletion
-  reproduced inside the unit — no CASCADE/RESTRICT, no retention decision) and
+  PREPARED / NOT IMPLEMENTED in the S7 review §11, corrected after the
+  independent review of `46e5afe` (§11.7: S7d storage-only with the §2.3
+  transitional validated request reference and today's deletion reproduced
+  inside the unit — no player- or request-lifecycle CASCADE/RESTRICT, no
+  retention decision; present legacy fields such as `orgUserIdForNotify`
+  preserved losslessly; final-state validation of partial snapshots in both
+  directions; channel-list and message order kept) and
   is NOT authorised until the Founder decides D-A and D-B (review §11.6); no
   migration identifier is assigned for it. S8, S4b and the remaining S6 tables
   are not started; S4b waits for the open country-code decision.

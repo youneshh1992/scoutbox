@@ -1395,8 +1395,9 @@ performance, existing tests, what this plan is not).
 > authorised. **Blockers of S7d, exactly:** (1) the proposed `channels.request_id` references
 > `recruitment_requests`, an S8 table that itself references S8's `recruitment_cases`, `trials`
 > and `org_users`, while S8 lists S7 as a dependency — the transitional validated reference
-> proposed in the review §2.3 needs approval (D-A), or S8a ships first (which carries the same device
-> twice, for `case_id` and `trial_id`, and is the larger step — review §11.3); (2) message retention after
+> proposed in the review §2.3 needs approval (D-A), or S8a ships first (the larger step: fourteen tables,
+> the request–trial pair enforceable by its own foreign keys, the two `case_id` columns still dependent on
+> `recruitment_cases` — review §11.1, §11.3 as corrected in §11.7); (2) message retention after
 > a player deletion is an open policy question (`s4-deletion-decision.md` §4 "messages — review"),
 > so no `players(id)` CASCADE/RESTRICT may be encoded for channels — a storage-only step can reproduce
 > today's explicit deletion inside the unit if the Founder confirms that reading (D-B); (3) the ledger row
@@ -1418,9 +1419,12 @@ performance, existing tests, what this plan is not).
   **independently accepted at `9119187`, migration `0011_outbox_push`** (review §10.12; the three design
   assumptions the review of `6ca66ba` corrected are recorded in §10.3/§10.4/§10.7 and the two correction
   rounds in §10.10/§10.11 — none was a product decision); **S7d** `channels`, `messages`,
-  `message_attachments` — **PREPARED / NOT IMPLEMENTED** (review §11.5: storage-only, the §2.3 transitional
-  validated request reference, today's deletion reproduced inside the unit, no CASCADE/RESTRICT, an ordering
-  column for equal timestamps; needs decisions D-A and D-B, review §11.6). The
+  `message_attachments` — **PREPARED / NOT IMPLEMENTED** (review §11.5 as corrected in §11.7: storage-only,
+  the §2.3 transitional validated request reference, today's deletion reproduced inside the unit, no
+  player- or request-lifecycle CASCADE/RESTRICT — the `org_id` RESTRICT and the internal message/attachment
+  cascades remain, `guardian_id` checked in code —, every present legacy field preserved in `extra_json`,
+  final-state validation of partial snapshots in both directions, channel-list and message order kept; needs
+  decisions D-A and D-B, review §11.6). The
   whole-database-write objective is met in phases measured by a synthetic benchmark (review
   §7.3), not claimed by any single sub-step — S7d alone leaves the `ledger` blob (and, on the acceptance
   path, `requests` and `trials`) in every send's save (review §11.2).
@@ -1465,11 +1469,13 @@ performance, existing tests, what this plan is not).
   `channels.request_id → recruitment_requests` means S7d needs S8a or the transitional design
   in the S7 review §2.3, while S8c needs S7c (accepted). S7a, S7b and S7c are accepted; what
   follows is **either** S7d with the transitional reference (prepared, review §11.5 — recommended)
-  **or** S8a first — neither is authorised, and going S8a-first does not remove the case/trial
-  dependencies: `recruitment_requests.case_id` and `trial_id` reference `recruitment_cases` (S8b) and
-  `trials` (S8a), so S8a either carries those two as validated references without foreign keys —
-  the same device as S7d's — or grows to S8a+S8b (review §11.1, §11.3). The sequence after S7c is
-  decided when a step is authorised:
+  **or** S8a first — neither is authorised. Going S8a-first does not remove the `recruitment_cases`
+  dependency: `recruitment_requests.case_id` and `trials.case_id` reference a table of S8b, so S8a
+  either carries those two columns as validated references without foreign keys (a transitional device
+  of the S7 review §2.3 kind, needing its own approval) or grows to S8a+S8b; the request–trial pair
+  itself needs no such device — both tables arrive in S8a and their mutual foreign keys can be
+  enforced from the start (review §11.1, §11.3, corrected in §11.7 after the independent review of
+  `46e5afe`). The sequence after S7c is decided when a step is authorised:
   - *Player tombstone (schema O1 — partially resolved on 12 October 2026; **S4b NOT implemented**).*
     `02_recruitment.sql` today declares no foreign key on any `player_id` because
     `deletePlayerData` hard-deletes the player row — and it still does: S4a kept today's deletion

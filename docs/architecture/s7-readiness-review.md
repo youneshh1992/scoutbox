@@ -36,8 +36,8 @@ implemented on top of `6ca66ba` (`40aa05c`, §10.8); the review of `40aa05c` fou
 `78c14b9` (§10.10); the review of `78c14b9` found one remaining boundary (a non-finite number INSIDE an
 accepted array destination dropped its mail record), corrected in `9119187` (§10.11), the accepted commit;
 migration `0011_outbox_push` is registered with its DDL amended in place before acceptance. **S7d not
-started. The next milestone is prepared in §11 — PREPARED / NOT IMPLEMENTED — and waits for the decisions
-listed there.** §§0–8.2 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where
+started. The next milestone is prepared in §11 — PREPARED / NOT IMPLEMENTED, corrected after the independent
+review of `46e5afe` (§11.7) — and waits for the decisions listed there.** §§0–8.2 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where
 the implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
 correction is marked in place, and the dependency table §8.1 carries the current status of each row. Nothing
 here decides a retention period, a deletion policy, the country-code or child-status questions, or
@@ -50,7 +50,7 @@ bounded recommendation · 9 S7b (design, implementation, corrections, acceptance
 follow-up) · 10 S7c (the plan as corrected by the review of `6ca66ba`, the implementation §10.8, the
 follow-up's acceptance §10.9, the two correction rounds §10.10–§10.11 as history, the acceptance §10.12) ·
 11 the next milestone, PREPARED / NOT IMPLEMENTED (the current-code survey, the two routes compared, the
-recommendation and the decisions it needs).
+recommendation and the decisions it needs; §11.7 the corrections from the review of `46e5afe`).
 
 ---
 
@@ -2366,16 +2366,24 @@ Nothing here decides a retention period or a deletion policy.
 | `reports`, `moderationLog` | **blobs** | `storeContract.mjs:154`, `:109`; `moderateOrRefuse` (S:1136–1150) pushes to both on a hit, then `persist()` |
 | `blocks`, `orgNotes`, `opsEvents`, `sourceChanges`, `idvQueue` | **blobs** | S6, not started (plan §S6) |
 
-So of the three references the proposed `channels` DDL and the proposed `recruitment_requests` DDL make
-between them, **every target but `org_users` is a blob today**: `channels.request_id → recruitment_requests`
+So of the references the proposed `channels` DDL and the proposed `recruitment_requests` DDL make between
+them, **every target but `org_users` is a blob today**: `channels.request_id → recruitment_requests`
 (SQL03:71) names a table that does not exist; `recruitment_requests.case_id → recruitment_cases` (SQL02:539),
 `trial_id → trials` (:540) and `user_id → org_users` (:519) name two blobs and one table;
-`requests.contactChannel → channels` (SQL02:499 "no FK") points back at a blob. Moving S8a ahead of S7d
-therefore does **not** remove the case/trial dependencies: `recruitment_requests` cannot carry its
-`case_id`/`trial_id` foreign keys until `recruitment_cases` and `trials` are tables (S8a includes trials;
-cases are S8b), so an S8a-first route either ships those two columns as validated references without
-foreign keys — the same transitional device §2.3 proposes for `channels.request_id`, applied to two
-columns instead of one — or grows to S8a+S8b before `channels` can follow.
+`requests.contactChannel → channels` (SQL02:499 "no FK") points back at a blob. What that means for an
+S8a-first route (corrected after the independent review of `46e5afe`, §11.7): **the request–trial pair is
+not a dependency problem** — S8a introduces `recruitment_requests` and `trials` together, and a table can be
+created in the same milestone as the table that references it, with both foreign keys enforced from the
+start (`trials.request_id → recruitment_requests` RESTRICT, SQL02:632; `recruitment_requests.trial_id →
+trials` SET NULL, :540): a request is inserted with `trial_id` null, its trial inserted, and the link filled
+in the same transaction — the reviewer's probe `review-46e5afe-design-checks.mjs` demonstrates this with the
+actual two definitions on an in-memory database (a feasibility check of the pair only, not approval of the
+recruitment design). **What remains a real dependency is `recruitment_cases`**: `recruitment_requests.case_id`
+(SQL02:539) and `trials.case_id` (SQL02:633) both reference a table of S8b, so an S8a-first route either
+carries those two case columns as validated references without foreign keys until S8b (a transitional
+device of the §2.3 kind, needing its own approval), or grows to S8a+S8b. No count of transitional
+references is claimed beyond that: which columns need the device depends on how S8a and S8b are cut, and
+that is decided when S8 is prepared, not here.
 
 ### 11.2 Readers, writers, deletion and the snapshot paths (current code)
 
@@ -2422,27 +2430,30 @@ can later reference a table directly.
 
 | Boundary | Route A — S7d with the transitional reference | Route B — S8a first |
 |---|---|---|
-| ordinary write (channel open) | the repository's `open(request)` refuses a `requestId` that is not the id of a request in `db.requests` (the blob is still authoritative), refuses a second channel for one request (the unique index `channels_request_id`, SQL03:86, is real DDL and enforced by SQLite), staged into the acceptance route's own `persistNow()` save as S7b/S7c stage theirs — the request's status, the channel row, the trial and the ledger row stay one save | `recruitment_requests` rows written by a repository inside the request routes; `case_id`/`trial_id` either become foreign keys only once `trials` (S8a) and `recruitment_cases` (S8b) are tables, or ship as validated references without FK — the same device as A, on two columns; `contact_channel_id` stays a plain id (SQL02:499 says so) because `channels` is still a blob |
+| ordinary write (channel open) | the repository's `open(request)` refuses a `requestId` that is not the id of a request in `db.requests` (the blob is still authoritative), refuses a second channel for one request (the unique index `channels_request_id`, SQL03:86, is real DDL and enforced by SQLite), staged into the acceptance route's own `persistNow()` save as S7b/S7c stage theirs — the request's status, the channel row, the trial and the ledger row stay one save | `recruitment_requests` and `trials` rows written by repositories inside the request/trial routes with their mutual foreign keys enforced from the start (request inserted with `trial_id` null, trial inserted, link filled in the same transaction — §11.1, §11.7); the two `case_id` columns (requests :539, trials :633) either wait for `recruitment_cases` (S8b) or ship as validated references without FK — a transitional device of the §2.3 kind needing its own approval; `contact_channel_id` stays a plain id (SQL02:499 says so) because `channels` is still a blob |
 | joined transaction (deletion unit) | the repository's `deleteForPlayer(playerId)` joins the deletion `unit()` (S:4245) exactly where the filter runs today (S:4279): the same rows go, in the same transaction as the tombstones and the notification deletion | the request/trial tombstoning (S:4256–4257) becomes repository updates in the unit; channels stay a blob filter |
 | import (the cutover migration) | preflight refuses the cutover, file unchanged, when a channel's `requestId` names no request in the file's `requests` blob or two channels name one request (ids listed, no text) — the §5.3 pattern; message ordering keyed by array position (the ordering column, §1.2) | preflight validates the natural keys SQL02 lists (one pending request per org/player/type — bypassed today by the open-day path, SQL02:505; the 1:1 trial link) and every `case_id`/`trial_id` against the blobs or tables as they stand; the plan already says conflicts are "resolved by data fix with a written record, never by the migration guessing" |
-| full snapshot restore / persistence suites | `writeTableBacked` validates every channel row's `requestId` against the same snapshot's `requests` collection and refuses the whole write on a miss (the S6a `PAIRING_CODE_PLAYER_MISSING` precedent; `oneTimeCodes.mjs`) | the same device for `case_id`/`trial_id` against the snapshot's cases/trials until both are tables |
+| snapshot write — full or PARTIAL (restore, persistence suites) | the **final combined state** is validated whichever side the snapshot carries (§11.5 "Snapshot validation"): incoming channels against the final `requests` (the supplied collection, or the retained blob when `requests` is omitted); incoming `requests` against the retained channels when `channels` is omitted; both supplied → the proposed combination; one miss refuses the whole transaction, unrelated data untouched (the identity `trials` reconciliation and the S6a `PAIRING_CODE_PLAYER_MISSING` precedents, `identity.mjs`, `oneTimeCodes.mjs`) | the same final-state device for the two `case_id` columns against the snapshot's or retained cases until `recruitment_cases` is a table; the request–trial pair is enforced by its own foreign keys |
 | deletion | today's explicit filter reproduced as an explicit repository delete inside the unit; **no CASCADE and no RESTRICT on `players(id)`** in the S7d DDL (§2.4: a RESTRICT would fail today's hard delete; a CASCADE encodes an open retention decision) | the tombstone rewrite of requests/trials becomes row updates; `recruitment_requests.player_id` still has no FK (SQL02:511; O1/S4b) |
 | copy-only rollback | `channelsRollback` rewrites every channel with its nested messages, attachments and `readBy` into the `channels` blob the `9119187` build reads; refuses a later schema; the S7c tool refuses a file carrying the S7d id — nothing lost, proven by booting the copy on the actual `9119187` build | the same for requests/trials — a larger blob shape (slots, history, keys, day/schedule containers, tombstone shapes) to prove losslessly |
-| the eventual foreign-key upgrade | when S8a creates `recruitment_requests`, its migration rebuilds `channels` with `REFERENCES recruitment_requests(id) ON DELETE RESTRICT` (SQLite cannot add a FK in place; the S4a/S5 rebuild pattern) after its own preflight proves every `request_id` resolves — true by construction if A's validation has held | when S8b creates `recruitment_cases`, `recruitment_requests` is rebuilt with the `case_id` FK; `channels` (still a blob) joins at S7d with a direct FK |
+| the eventual foreign-key upgrade | when S8a creates `recruitment_requests`, its migration rebuilds `channels` with `REFERENCES recruitment_requests(id) ON DELETE RESTRICT` (SQLite cannot add a FK in place; the S4a/S5 rebuild pattern) after its own preflight proves every `request_id` resolves — true by construction if A's validation has held | when S8b creates `recruitment_cases`, `recruitment_requests` and `trials` are rebuilt with their `case_id` FKs if those shipped as validated references; `channels` (still a blob) joins at S7d with a direct FK |
 | size of the step | three tables, one creator, one appender, three receipt writers, one deletion site, ~20 readers; the smallest aggregate left in S7 | 14 tables for requests + trials (SQL02; the trial day/schedule/attendance/consent containers; `keys` → `idempotency_keys`), fifteen `db.requests` and ten `db.trials` sites in `server.mjs` alone plus `m23/*`; O1's open parts bear on `recruitment_requests.player_id` directly; the largest aggregate in the system |
 
-Neither route may use an empty placeholder table or silently drop an integrity check (§2.2). Both carry a
-validated non-FK reference somewhere; A carries one (`channels.request_id`), B carries two
-(`case_id`, `trial_id`) and still leaves `channels` for later. **A is the smaller coherent step and the one
-whose transitional device is already specified (§2.3 step 4)**; B is coherent but larger, is not made
-independent by going first, and carries the O1/O2 decisions the plan §S8 lists as blocking its migration.
+Neither route may use an empty placeholder table or silently drop an integrity check (§2.2). Each route
+carries at least one validated non-FK reference somewhere until a later stage: A carries
+`channels.request_id` until S8a; B carries whatever its cut leaves pointing at `recruitment_cases` until S8b
+(the request–trial pair itself needs none, §11.1) and still leaves `channels` for later. **A is recommended as
+the smaller coherent step on its actual scope**: three tables, one creator and one appender, no `players(id)`
+reference, one already-specified device (§2.3 step 4) — against B's fourteen tables, the largest aggregate in
+the system, the open O1/O2 decisions the plan §S8 lists as blocking its migration, and the `recruitment_cases`
+dependency. The recommendation does not rest on B needing more transitional references than A.
 
 ### 11.4 Which deletion and retention decisions block which route
 
 | Decision | Kind | Blocks A (S7d, storage-only)? | Blocks B (S8a)? | Where it is needed |
 |---|---|---|---|---|
 | message retention after a player deletion (`s4-deletion-decision.md` §4 "messages — review") | **product policy / legal** | **not if** the step is explicitly storage-only and reproduces today's hard delete of the player's threads inside the unit, with no CASCADE and no RESTRICT in the DDL (decision **D-B** below confirms that reading) | no | S4b (the tombstone makes a CASCADE inert; the retention form must be designed then) |
-| the §2.3 transitional validated `request_id` (code-enforced, no FK, later FK rebuild) | **technical design approval** | **yes** (decision **D-A**) | no (B's own version of it would need the same approval for `case_id`/`trial_id`) | S7d |
+| the §2.3 transitional validated `request_id` (code-enforced, no FK, later FK rebuild) | **technical design approval** | **yes** (decision **D-A**) | no (B needs its own approval only for what its cut leaves pointing at `recruitment_cases` — the two `case_id` columns — not for the request–trial pair, §11.1) | S7d |
 | O1 open parts — country code on the retained record; child-status stamping | product policy | no (S7d adds no `players(id)` reference and no safeguarding stamp) | partly — `recruitment_requests.player_id` gets its FK only at S4b/S8a amendment (plan §S8) | S4b, S8a |
 | O2 — organisation deletion policy | product policy | no (`org_id RESTRICT` on a table nobody deletes from changes nothing; §2.4) | yes for the file-02 `RESTRICT` choice (plan §S8) | S8a |
 | dispatch cascade with notifications (§4.3 a) | product policy | no | no | S7b follow-up / S4b |
@@ -2472,17 +2483,44 @@ mappings (§1.2); `db.channels` becomes a read-only view in insertion order with
 nested as today; every route answers exactly as before; today's deletion behaviour is reproduced, not
 changed; a copy-only rollback loses nothing. It is a storage move only.
 
-**Scope.** The three tables of SQL03:69–158 with these amendments to make before the DDL is written:
-`request_id TEXT NOT NULL` **without** the `REFERENCES recruitment_requests(id)` clause and with a comment
-stating the transitional validation and the planned rebuild at S8a; `player_id TEXT NOT NULL` **without** a
-`REFERENCES players(id)` clause (today's hard delete reproduced in code; §2.4); an ordering column on
-`messages` for equal `created_at` (array position at import, the next position at append — §1.2);
-`orgUserIdForNotify` not migrated (dead, SQL03:63) — read once at S:1009 with `?? null`, so the view may
-omit it as the 0009 import omitted dead fields. **Exclusions:** no FK to `recruitment_requests` or
-`players`; no CASCADE/RESTRICT; no retention or pruning; no change to moderation, visibility, blocks,
-typing, SSE, read receipts' semantics or the ledger (which stays a blob); no touch of `requests`, `trials`,
-`recruitmentCases`, m26 `linkedThreads`; no re-keying; no S4b, S6 or S8 work; no performance claim beyond
-the measured §7.3 phase.
+**Scope.** The three tables of SQL03:69–158 with these amendments to make before the DDL is written
+(corrected after the review of `46e5afe`, §11.7): `request_id TEXT NOT NULL` **without** the `REFERENCES
+recruitment_requests(id)` clause and with a comment stating the transitional validation and the planned
+rebuild at S8a; `player_id TEXT NOT NULL` **without** a `REFERENCES players(id)` clause (today's hard delete
+reproduced in code; §2.4); `guardian_id` **without** a `REFERENCES guardians(id)` clause, validated in code
+against the final identity state (the `pairing_codes.player_id` precedent, SQL03:912 — see "Dispatch order
+and retained constraints" below for why the proposed RESTRICT cannot survive the identity snapshot
+rewrite); `org_id … REFERENCES orgs(id) ON DELETE RESTRICT` **kept** as DDL; an insertion-order key on
+`channels` (`seq INTEGER PRIMARY KEY`, `id TEXT NOT NULL UNIQUE`, the S7a–S7c pattern — the list order every
+reader sees today is `db.channels` array order) and an ordering column on `messages` for equal `created_at`
+(array position at import, the next position at append — §1.2); `extra_json` on `channels`, `messages` and
+`message_attachments` for present legacy and unknown own fields (next paragraph). **The earlier instruction
+that the view may omit `orgUserIdForNotify` is withdrawn** (§11.7): the field is never written by the current
+creator, but a value present in a legacy record IS observable — `channelViewFor` (S:1048) spreads the channel,
+the JSON export carries it, and the reviewer's probe shows both with the actual function — so it is preserved
+like any other present legacy field, with no dedicated column and no new runtime use. **Exclusions:** no FK to
+`recruitment_requests` or `players`; no CASCADE or RESTRICT tied to the player or request lifecycle; no
+retention or pruning; no change to moderation, visibility, blocks, typing, SSE, read receipts' semantics or
+the ledger (which stays a blob); no touch of `requests`, `trials`, `recruitmentCases`, m26 `linkedThreads`;
+no re-keying; no S4b, S6 or S8 work; no performance claim beyond the measured §7.3 phase; no general
+persistence refactor.
+
+**Legacy-field preservation (the storage-only contract, stated precisely).** Every present, JSON-compatible
+own field of a legacy record that the mapping does not name is preserved losslessly and round-trips through
+import, the live view, export, the unit snapshot and its restore, a whole-snapshot write and the copy-only
+rollback — at every level: unknown own keys of a **channel** (`orgUserIdForNotify` among them) in the channel's
+`extra_json`; unknown own keys of a **message** in the message's `extra_json`; unknown own keys of an
+**attachment** in the attachment's `extra_json`; unknown own keys inside the known nested objects **`readBy`**
+and **`sender`** kept under those known key names inside the parent's `extra_json` (a known key can never
+collide with an unknown one, so the nesting is unambiguous and needs no extra column). Copies are detached
+and prototype-safe (`setOwn` at every depth; an own `"__proto__"` key is data — the S7a rule, `notifications.mjs`
+`cloneJson`/`setOwn`), spread back FIRST on export so the mapped fields win (the S7a/S7b/S7c convention).
+Absence is preserved as absence: no key is manufactured, no `null` invented for a missing field, no present
+value erased, no payload shape normalised. A value JSON cannot carry cannot come from a file (the blob was
+JSON); a live non-finite number is kept live for the process and persisted as the blob's JSON would have
+written it (null), the S7c rule — never a refusal of the whole record for that reason alone. Unknown fields
+are preserved, not validated against a vocabulary; the refusals below concern only the literal's required
+fields and the reference checks.
 
 **Prerequisites.** (1) decision D-A approved; (2) decision D-B confirmed; (3) the SQL03 amendments above
 agreed as the DDL to build (a documentation change in `sql/03`, asserted by `testSchemaDdl`); (4) the next
@@ -2509,8 +2547,80 @@ into `extra_json` with own keys preserved (the S7a rule); nothing coerced. **Ref
 unchanged, ids only:** a channel whose `requestId` names no request in the file's `requests` blob; two
 channels naming one request; a message whose `sender.kind` is outside the three kinds; an attachment of
 neither shape; a channel missing a required field of the literal. A stale in-memory `channels` array after
-cutover is dropped and counted, never imported (the S6a/0006 rule). The same validation runs at
-`writeTableBacked` for a whole-snapshot write and at `restore`. Refusal text names no message content.
+cutover is dropped and counted, never imported (the S6a/0006 rule). Refusal text names no message content.
+The request-existence check is exactly that — the id names a request present in the final `requests` — and
+is kept distinct from any new rule about a request's `status`, `contactChannel` or other fields, which would
+need evidence from the existing writers (tombstoned requests keep their id with `contactChannel: null`,
+S:4228; nothing removes a request from `db.requests`, S:4256 is the only reassignment) and is not proposed.
+
+**Snapshot validation — the FINAL combined state, in both directions** (corrected after the review of
+`46e5afe`, §11.7). The snapshot contract allows PARTIAL writes: an omitted collection is retained unchanged,
+an explicitly supplied non-array refuses, absence and an empty array are distinct (`repositories/index.mjs:111–134`
+`checkTableBackedShapes`; `store.mjs` `writeBody`). The channels table joins `writeTableBacked` with a
+final-state assertion in the identity `trials`-reconciliation and S6a `assertPairingCodesConsistent` shape
+(`index.mjs:146`, `:170`): the assertion runs when **either** `channels` was written **or** the snapshot
+carries `requests` (present as a key), and takes the final requests as `Object.hasOwn(db, 'requests') ?
+db.requests : <the retained requests blob read from the file>` — never an empty set for an omitted collection.
+- *Incoming `channels`, `requests` omitted:* every incoming channel's `requestId` must name a request in the
+  **retained** requests blob; a miss refuses the whole transaction (`CHANNEL_REQUEST_MISSING`, channel ids
+  only), nothing written, the retained data untouched.
+- *Incoming `requests`, `channels` omitted:* every **retained** channel's `request_id` must name a request in
+  the incoming collection; a miss refuses (`CHANNEL_REQUEST_MISSING`, the orphaned channel ids), so a request
+  cannot be removed under a channel that still names it. A check that runs only when channels are replaced
+  would miss this case; the assertion is keyed on the presence of `requests` too.
+- *Both supplied:* the proposed final combination is validated — a coordinated removal (request and its
+  channel both absent) succeeds; an invalid combination refuses the entire transaction without altering
+  unrelated data.
+- *Malformed explicit collections:* `channels` present but not an array refuses before any statement (the
+  `checkTableBackedShapes` rule); `requests` present but not an array refuses whenever the assertion needs it
+  (the identity `trials` wording: "supplied with the snapshot is … not an array"); an **empty** `requests`
+  array with retained or incoming channels refuses (every channel orphaned) — it is a supplied value, not an
+  omission. No silent cleanup, no dropped rows, no invented parents.
+- *Where it runs, who reports:* inside the one snapshot transaction, in `writeTableBacked` after the channel
+  rows are dispatched and before the blob loop writes `requests` and the other blobs (the incoming `requests`
+  value is read from the snapshot object, as the identity code reads `trials`); a refusal throws out of
+  `writeTableBacked`, `write()` rolls the transaction back, and the caller — the restore boot (`store.mjs:375`,
+  fatal, `db.json` left in place), the persistence suite or the legacy import — receives the typed error. The
+  staged save hooks are not involved: an ordinary server-mode save does not pass through `writeTableBacked`
+  (`asSnapshot` false), and its channel rows were validated at `open` time inside the participant boundary.
+  The duplicate-request rule (two channels, one request) is the unique index and fires on the offending
+  INSERT inside the same transaction.
+
+**Dispatch order and retained constraints** (corrected after the review of `46e5afe`, §11.7). "No
+CASCADE/RESTRICT" in this section means **no constraint that encodes the unapproved player or request
+lifecycle** — nothing more. These remain: `org_id … REFERENCES orgs(id) ON DELETE RESTRICT` (real DDL, as
+SQL03:74 proposes; organisations are upserted and pruned, never rewritten, `orgs.mjs` `prune`); the unique
+index on `request_id`; `messages.channel_id … REFERENCES channels(id) ON DELETE CASCADE` (SQL03:114) and
+`message_attachments.message_id … REFERENCES messages(id) ON DELETE CASCADE` (SQL03:147) — internal
+parent–child cascades that fire **only after an explicit channel deletion** (the repository's
+`deleteForPlayer` inside the deletion unit, or a snapshot that no longer lists the channel) and reproduce
+today's nesting, where a message exists only inside its channel array; and the identity/org snapshot prunes
+as they are. What cannot stand as written is `guardian_id … REFERENCES guardians(id) ON DELETE RESTRICT`
+(SQL03:80): the identity snapshot write REWRITES its tables — `DELETE FROM guardian_children; DELETE FROM
+players; DELETE FROM guardians;` then reinsertion (`identity.mjs:205–207`) — and a RESTRICT action fires
+immediately even under `PRAGMA defer_foreign_keys`, so any file holding one guardian channel would refuse
+every identity snapshot write, retained guardians included. This is the reason `pairing_codes.player_id` has
+no foreign key by design (SQL03:912–926) and the same precedent applies: `guardian_id` carries no FK clause,
+and the final-state assertion above also checks that every retained or incoming channel's `guardian_id`
+(when non-null) and the existing `org_id` name a guardian/organisation present in the final state
+(`CHANNEL_GUARDIAN_MISSING`, ids only) — reproducing RESTRICT semantics in code for a parent-only removal
+while allowing a coordinated removal. (The alternative — a plain `REFERENCES guardians(id)` with checking
+deferred to COMMIT for the snapshot transaction — would also work for the rewrite but changes the store's
+transaction setup; it is noted, not proposed.) **Ordering within `writeTableBacked`:** the channel group is
+dispatched **after** the identity pair and the users/sessions writes and **before** the `sessions`/`users`/`orgs`
+prunes (`index.mjs:154`), deleting the rows the snapshot no longer lists and upserting the rest, so that a
+legitimate full replacement removing an organisation **and** its channels succeeds (the channel rows are gone
+before the org prune), while an organisation removed with its channel retained is refused atomically by the
+`org_id` RESTRICT at the prune, and a guardian removed with its channel retained is refused by the
+final-state assertion — both roll the whole transaction back with unrelated data untouched. The final-state
+assertion itself runs after the prunes (it reads the final identity and org tables). This is a dispatch-order
+rule for one new table group, not a general persistence refactor.
+
+**Order preservation.** The channel list order every reader sees (`db.channels` array order: the guardian,
+org, player, admin and export routes all filter that array) is the `seq` insertion key; messages within a
+channel keep array order through the ordering column, ties on `created_at` included. Both survive save,
+restart, export (`db.json` row form in `seq` order), a whole-snapshot write (rows inserted in the snapshot's
+array order) and the copy-only rollback (`ORDER BY seq`, messages by position).
 
 **Copy-only rollback.** `repositories/channelsRollback.mjs` + `scripts/channelsRollback.mjs <data-dir>
 <fresh-empty-dir>`: every channel rewritten into the blob literal with its nested messages in order,
@@ -2522,8 +2632,9 @@ receipts in the same order through `/org/channels`, `/guardian/channels`, `/play
 lost.
 
 **API compatibility.** Every channel, message and receipt payload byte-identical in shape and order
-(`channelViewFor`, `/admin/channels` returning every channel with ids); messages oldest-first with insertion
-order preserved for equal timestamps; `201` with the stored message on a duplicate `clientMsgId`;
+(`channelViewFor`, `/admin/channels` returning every channel with ids; present legacy fields such as
+`orgUserIdForNotify` still present, absent ones still absent); the channel list in today's array order;
+messages oldest-first with insertion order preserved for equal timestamps; `201` with the stored message on a duplicate `clientMsgId`;
 `/admin/overview` counts; the player export's `threads`; the SSE `channelId` lookup; m26 `channelReadableBy`
 and link-thread behaviour; the backup format (`db.json` carries the channels in row form as S7a–S7c's
 tables do) and a restore into a fresh directory.
@@ -2537,22 +2648,49 @@ both acceptance paths (adult and guardian), messages from all three sender kinds
 shapes, the duplicate `clientMsgId`, read receipts, the player deletion through a second connection (the
 player's threads gone, guardian–club threads of that player included, as today; other players' intact),
 backup/restore, SIGKILL between accept and save, the copy-only rollback on the actual `9119187` build
-(`SCOUTBOX_PRE_S7D_SERVER`) and the re-upgrade. Existing suites unchanged and green: `apiE2E`,
-`connectedE2E`, `m13E2E`, `m23ContactE2E`, `m23P4AClosureE2E`, `m26*` (linked threads), the S4a/S5
-deletion suites, both gates.
+(`SCOUTBOX_PRE_S7D_SERVER`) and the re-upgrade. **Added by the review of `46e5afe` (§11.7) — design
+requirements for the future suites, not claims about an unimplemented repository:**
+- legacy-field preservation: a channel record carrying `orgUserIdForNotify` and an unknown own key (an own
+  `"__proto__"` key among them), a message with an unknown own key and an unknown key inside `sender`, an
+  attachment with an unknown own key, an unknown key inside `readBy` — each imported, visible in
+  `channelViewFor` for every viewer kind, in `/admin/channels`, in the player export, in `db.json`, after a
+  restart, through a whole-snapshot write and through the copy-only rollback blob, with absent fields absent
+  (no manufactured null) and present values byte-identical; a live non-finite number persisted as null, as the
+  blob's JSON would;
+- partial snapshots, both directions: `channels` supplied with `requests` omitted against retained requests
+  (valid passes; an orphan refuses, nothing written); `requests` supplied with `channels` omitted (a request
+  removed under a retained channel refuses; a request set that keeps every referenced id passes); both
+  supplied (a coordinated removal of a request and its channel passes; an invalid combination refuses the
+  whole transaction with unrelated collections untouched — asserted by reading them back); `requests`
+  supplied as an empty array with retained channels refuses; `channels` or `requests` supplied as a non-array
+  refuses before any statement; absence versus empty array distinguished in every case;
+- parent pruning order: a full replacement removing an organisation together with its channels succeeds; an
+  organisation removed while its channel is retained refuses atomically (the `org_id` RESTRICT); a guardian
+  removed while a guardian channel is retained refuses (`CHANNEL_GUARDIAN_MISSING`); a guardian removed
+  together with its channels succeeds; the identity rewrite of retained guardians with guardian channels
+  present succeeds (the reason `guardian_id` carries no FK clause);
+- order: the channel list order and the message order, ties on `created_at` included, identical through
+  save, restart, export, a whole-snapshot write and the rollback blob;
+- request-existence only: a channel whose request is a tombstone (`contactChannel: null`, `playerName: null`)
+  imports and restores unchanged — no status or field rule is added.
+Existing suites unchanged and green: `apiE2E`, `connectedE2E`, `m13E2E`, `m23ContactE2E`,
+`m23P4AClosureE2E`, `m26*` (linked threads), the S4a/S5 deletion suites, both gates.
 
 **Acceptance criteria.** Both gates green on the final tree with the four old-build paths available
 (pre-S7a/S7b/S7c/S7d); the two suites above; the §7.3 phase-S7d benchmark number recorded honestly (the
 ledger blob still written per send, stated); the preflight refusals exercised on synthetic files; the
-rollback proven on the actual `9119187` build; no route payload changed; no retention, cascade or re-keying
-behaviour introduced; the DDL comment states the transitional reference and the S8a rebuild; the documents
-updated in place with S7d marked pending independent acceptance until reviewed.
+rollback proven on the actual `9119187` build; no route payload changed; no present legacy field dropped and
+none manufactured; no retention behaviour, no player- or request-lifecycle cascade or restrict, no re-keying
+introduced; the partial-snapshot cases in both directions and the prune-order cases above exercised; the DDL
+comment states the transitional reference, the S8a rebuild and why `guardian_id` carries no FK clause; the
+documents updated in place with S7d marked pending independent acceptance until reviewed.
 
 **Likely files** (from the survey, not line-guessed): new `repositories/channels.mjs`,
 `repositories/migrations/<next-id>_channels.mjs`, `repositories/channelsRollback.mjs`,
 `scripts/channelsRollback.mjs`, `scripts/testChannels.mjs`, `scripts/testChannelsServer.mjs`;
-`repositories/index.mjs` (`TABLE_BACKED`, the snapshot dispatch order — channels before the notification
-group, after identity, since the request validation reads the `requests` blob of the same snapshot);
+`repositories/index.mjs` (`TABLE_BACKED`; the snapshot dispatch order — the channel group after the identity
+pair and users/sessions, before the `sessions`/`users`/`orgs` prunes, with the final-state assertion after the
+prunes, keyed on `channels` written OR `requests` present — "Dispatch order and retained constraints" above);
 `server.mjs` (`openChannel`, `postMessage`, the three `readBy` routes, `deletePlayerData`, the readers listed
 in §11.2 if the view does not cover them, the SSE lookup); `m26/index.mjs` (reads only, if the view does not
 cover them); `m13/enterprise.mjs` (backup export); `storeContract.mjs` (remove `channels`);
@@ -2569,10 +2707,11 @@ S7d with a direct FK — impossible without S8a (§2.2).
 Recommended path: **S7d, storage-only, with the transitional validated request reference** (§11.5). It is
 next because it is the last S7 aggregate, the smallest coherent storage step left, has one creator and one
 appender, needs no `players(id)` reference, and its one design device is already specified; the
-recruitment-first alternative is larger, is not made independent by going first (its own `case_id`/`trial_id`
-references need the same device twice) and carries the open O1/O2 policy decisions. Technical and
-retention/legal questions are kept apart below. No retention period is invented; no note here establishes
-legal compliance.
+recruitment-first alternative is larger (fourteen tables, the largest aggregate in the system), still depends
+on `recruitment_cases` for its two `case_id` columns (the request–trial pair itself can ship with its foreign
+keys enforced, §11.1 — corrected after the review of `46e5afe`) and carries the open O1/O2 policy decisions.
+Technical and retention/legal questions are kept apart below. No retention period is invented; no note here
+establishes legal compliance.
 
 **Blocking decisions (two).**
 
@@ -2603,6 +2742,50 @@ notifications (S7b follow-up or S4b); removed-staff notifications/e-mail (a beha
 staff push re-keying (its own change); plain-text codes in six mail sites (S6-area correction); retention
 periods for the append-only logs (before any pruning); the "no whole-database write on send" objective
 (needs the S6 `ledger` or a store dirty-save change — a later, separately scoped step).
+
+### 11.7 Corrections to this section from the independent review of `46e5afe` (17 October 2026; documentation only)
+
+The review of the documentation handoff `46e5afe` (`review-46e5afe-summary.txt`) found the S7c acceptance
+record accurate (all 418 packaged non-Markdown files identical to the accepted `9119187`) and raised three
+**design corrections to this proposed section** — findings in a proposal, not defects in S7c, which stays
+accepted at `9119187`. Each is corrected in place above; this subsection records what changed and why. The
+reviewer's read-only probe, `review-46e5afe-design-checks.mjs <repository-root>`, exits 0 on the unchanged
+tree (its log is in the handoff): it verifies two design premises with the actual DDL and the actual view
+function on an in-memory database with synthetic rows, and its four minimal parent tables are isolated test
+fixtures, **not** proposed production placeholder tables. It is not a failing-first regression; nothing of
+S7d exists to regress.
+
+1. **The recruitment-first comparison** (§11.1, §11.3, §11.4, §11.6; the plan's S7 and S8 sections) claimed
+   that S8a-first necessarily needs transitional non-FK references for both `recruitment_requests.case_id` and
+   `trial_id`. Wrong for `trial_id`: S8a includes `trials`, a table may be introduced in the same milestone as
+   the table that references it, and the proposed DDL lets a request be inserted with `trial_id` null, its
+   trial inserted, and the link filled in one transaction with both foreign keys enforced — the probe shows it.
+   The `recruitment_cases` dependency stays real for both `recruitment_requests.case_id` (SQL02:539) and
+   `trials.case_id` (SQL02:633). The text now says so and no longer rests the recommendation on a count of
+   transitional references; S7d is still recommended, on its actual scope.
+2. **`orgUserIdForNotify`** (§11.5 Scope) was marked omittable because the current creator never writes it.
+   Withdrawn: `channelViewFor` (S:1048) spreads the record, so a present legacy value is observable in every
+   viewer's response and in the JSON export (the probe shows both). The storage-only contract now states
+   lossless preservation of every present JSON-compatible legacy or unknown own field at channel, message,
+   attachment, `readBy` and `sender` level in detached, prototype-safe `extra_json`, absence preserved as
+   absence, no dedicated column, no new runtime use.
+3. **The transitional-integrity specification** covered a full snapshot only. It now specifies the FINAL
+   combined state for partial writes in both directions (incoming channels against retained requests;
+   incoming requests against retained channels; both; malformed explicit collections; absence versus empty
+   array), where the assertion runs relative to the staged hooks and the blob loop and which boundary reports
+   the failure; the dispatch order around the retained `org_id` RESTRICT and the identity rewrite (a
+   coordinated parent-and-channel removal succeeds; a parent-only removal that would orphan a protected
+   channel refuses atomically); that "no CASCADE/RESTRICT" concerns the unapproved player/request lifecycle
+   only, with the retained constraints and the internal cascades listed; and channel-list order alongside
+   message order. One consequence surfaced while writing it: the proposed `guardian_id … RESTRICT` (SQL03:80)
+   cannot coexist with the identity snapshot rewrite, so S7d's DDL amendments now include `guardian_id`
+   without a FK clause on the `pairing_codes.player_id` precedent, with the check in code. Concrete cases were
+   added to the future failing-first suites as requirements.
+
+Housekeeping from the same review: the schema document's §5.0 counts-table row still read "O1 is implemented
+at S4" and now says S4b, not implemented. Status after this round: **S7c accepted at `9119187`; S7d PREPARED /
+NOT IMPLEMENTED with these corrections; D-A and D-B still unanswered** (no answer is recorded in the bundle;
+none is inferred).
 
 ---
 
