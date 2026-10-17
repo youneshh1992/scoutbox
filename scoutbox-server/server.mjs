@@ -3920,7 +3920,7 @@ function createVouchRequest(player, { coachName, coachEmail, role }, res) {
     status: 'pending', code: randomCode(8), text: null, seasons: null, ts: Date.now(), publishedAt: null,
   };
   db.vouches.push(vouch);
-  void mailer.send({
+  mailer.send({
     to: vouch.coachEmail,
     subject: `Reference request for ${player.name} on ScoutBox`,
     text: `Hi ${vouch.coachName},
@@ -3930,7 +3930,7 @@ ${player.name} has asked you for a coach reference on ScoutBox Grassroots.
 Your one-time reference code is ${vouch.code}. Submitting with it confirms this mailbox is yours; your name and role will appear with the reference on ${player.name}'s profile.
 
 References are screened by moderation and reviewed by Trust & Safety.`,
-  });
+  }).catch((err) => console.error(`reference request ${vouch.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`)); // observed, never an unhandled rejection (review of 40aa05c, F2)
   persist();
   res.status(201).json({ requested: true, vouchId: vouch.id });
 }
@@ -4035,6 +4035,9 @@ app.post('/push/register', (req, res) => {
   // `register`): any truthy JSON value is the token, stored losslessly; an earlier
   // row of this session holding the same primitive goes, an object never matches;
   // the new row is last. The record lands with the debounced save, as before.
+  // A non-finite number JSON syntax can produce (1e400 → Infinity) is kept as the
+  // live value for this process and persists as null, as the blob's JSON did
+  // (review of 40aa05c, F1).
   pushTokens.register({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
   persist();
   res.status(201).json({ registered: true });

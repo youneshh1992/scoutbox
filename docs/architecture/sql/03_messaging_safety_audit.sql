@@ -433,7 +433,11 @@ CREATE TABLE dispatch_attempts (
 --   to                 -> to_address  -- personal data; NULL is a VALUE a writer produces: the real
 --                                        boot sweep over an accepted queued dispatch with to:null writes
 --                                        a delivery record with to:null (review of 6ca66ba) — kept as
---                                        present-and-null on the way back
+--                                        present-and-null on the way back; a STRING goes here
+--   to (not a string)  -> to_json  -- the value JSON-encoded, to_address NULL, decoded on read: POST /org/invites
+--                                   (RegExp.test coerces, the invite stores String(email), the mailer gets the
+--                                   ORIGINAL value) and the m14 player invite (emailProblem coerces) hand the
+--                                   mailer an ARRAY, which the accepted build persisted (review of 40aa05c, F2)
 --   subject            -> subject ((a) only; NULL = the key is absent in (b))
 --   text               -> text (the withheld mail text in (a) — S6a: every `secrets` value replaced by the
 --                                placeholder; the dev full text lives in process memory only, never here;
@@ -458,6 +462,7 @@ CREATE TABLE outbox (
   source              TEXT NOT NULL CHECK (source IN ('mailer', 'delivery')),
   created_at          INTEGER NOT NULL,
   to_address          TEXT,                                                -- personal data; NULL accepted (an accepted queued dispatch)
+  to_json             TEXT CHECK (to_json IS NULL OR (json_valid(to_json) AND json_type(to_json) NOT IN ('text', 'null'))),  -- any OTHER JSON destination value, losslessly (review of 40aa05c, F2)
   subject             TEXT,
   text                TEXT NOT NULL,                                       -- withheld where the writer withheld; may contain a one-time code elsewhere (carried through)
   transport           TEXT NOT NULL,
@@ -465,6 +470,7 @@ CREATE TABLE outbox (
   channel             TEXT,
   provider_message_id TEXT,
   extra_json          TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  CHECK (to_address IS NULL OR to_json IS NULL),                          -- a destination is in one column, or null
   CHECK ((source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL AND delivered IN (0, 1) AND channel IS NULL AND provider_message_id IS NULL)
       OR (source = 'delivery' AND subject IS NULL AND delivered IS NULL AND channel IS NOT NULL AND provider_message_id IS NOT NULL))
 ) STRICT;

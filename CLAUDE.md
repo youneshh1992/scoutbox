@@ -166,10 +166,12 @@ and design changes the Founder explicitly requests.
   rollback is `scripts/dispatchesRollback.mjs` (every row and attempt written
   back; nothing lost) and the S7a tool refuses a file carrying 0010.
   **The mail outbox, the push log and the device push tokens are tables since
-  S7c** (IMPLEMENTED on top of `6ca66ba`, PENDING INDEPENDENT ACCEPTANCE — not
-  accepted; `repositories/outboxPush.mjs`, migration `0011_outbox_push`;
+  S7c** (IMPLEMENTED on top of `6ca66ba`, CORRECTED on top of `40aa05c` after
+  the independent review found two compatibility defects, PENDING INDEPENDENT
+  ACCEPTANCE — not accepted; `repositories/outboxPush.mjs`, migration
+  `0011_outbox_push` with its DDL amended in place;
   `docs/architecture/s7-readiness-review.md` §10 as corrected by the review of
-  `6ca66ba`, §10.8): `db.outbox`, `db.pushLog` and `db.pushTokens` are
+  `6ca66ba`, §10.8, and by the review of `40aa05c`, §10.10): `db.outbox`, `db.pushLog` and `db.pushTokens` are
   read-only views over one participant's three mirrors (insertion order); the
   ONLY writers are `outbox.append` / `outbox.markDelivered` (adapters.mjs mailer
   — the record before the provider call, the live answer on the caller's
@@ -183,8 +185,14 @@ and design changes the Founder explicitly requests.
   rule — a primitive collapses an earlier row of the same value and type,
   objects and arrays never — reproduced; NO uniqueness constraint). The two
   outbox literals are told apart structurally (`source`, a total CHECK: NULL is
-  "absent key"); `to_address` is nullable; vocabularies are open; unknown and
-  nested data are detached clones; a failed ordinary staged save keeps its
+  "absent key"); the destination is ANY JSON value — a string in `to_address`,
+  null, any other value (the ARRAY the coercing invite routes hand the mailer)
+  in `to_json`, decoded on read (review of `40aa05c`, F2); a non-finite token
+  value (JSON `1e400`) is kept live and persisted as null, a replacement
+  deleting by row seq (review of `40aa05c`, F1); a scratch file at `40aa05c`
+  (outbox without `to_json`) is refused by name, rolled back by the tool and
+  re-upgraded; the two fire-and-forget mail sites observe their promise;
+  vocabularies are open; unknown and nested data are detached clones; a failed ordinary staged save keeps its
   pending state for the next save, an aborted unit restores the pre-unit
   state; the copy-only rollback is `scripts/outboxPushRollback.mjs` (every
   row written back in its writer's literal; nothing lost; proven on the actual

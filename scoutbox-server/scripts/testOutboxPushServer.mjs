@@ -66,7 +66,13 @@ async function boot(dir, env = {}, server = SERVER) {
       const text = await r.text(); let parsed = null; try { parsed = JSON.parse(text); } catch { /* no body */ }
       return { status: r.status, body: parsed, text };
     };
-    const S = { proc, port, dir, log: () => log, j, stop: () => new Promise((res) => { proc.on('exit', () => res()); proc.kill('SIGTERM'); }), kill: () => new Promise((res) => { proc.on('exit', () => res()); proc.kill('SIGKILL'); }) };
+    /** The same request with the body sent as given (raw JSON text): what a client's parser produced is not pre-normalised by JSON.stringify here. */
+    const raw = async (method, p, bodyText, token, headers = {}) => {
+      const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: bodyText });
+      const text = await r.text(); let parsed = null; try { parsed = JSON.parse(text); } catch { /* no body */ }
+      return { status: r.status, body: parsed, text };
+    };
+    const S = { proc, port, dir, log: () => log, j, raw, stop: () => new Promise((res) => { proc.on('exit', () => res()); proc.kill('SIGTERM'); }), kill: () => new Promise((res) => { proc.on('exit', () => res()); proc.kill('SIGKILL'); }) };
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(S); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code, signal) => reject(Object.assign(new Error(`server exited ${code} (${signal}): ${log.slice(-1500)}`), { code, log })));
@@ -80,13 +86,15 @@ const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
 const live = (dir) => !!q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'");
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
 const blobRows = (c, name) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
-const outboxFromRow = (r) => (r.source === 'mailer' ? { id: r.id, ts: r.created_at, to: r.to_address, subject: r.subject, text: r.text, transport: r.transport, delivered: r.delivered === 1 } : { id: r.id, at: r.created_at, channel: r.channel, to: r.to_address, text: r.text, providerMessageId: r.provider_message_id, provider: r.transport });
+/** The destination as the row holds it: a string in to_address, any other JSON value in to_json (review of 40aa05c, F2), NULL/NULL = null. */
+const destinationOf = (r) => (r.to_json != null ? JSON.parse(r.to_json) : r.to_address);
+const outboxFromRow = (r) => (r.source === 'mailer' ? { id: r.id, ts: r.created_at, to: destinationOf(r), subject: r.subject, text: r.text, transport: r.transport, delivered: r.delivered === 1 } : { id: r.id, at: r.created_at, channel: r.channel, to: destinationOf(r), text: r.text, providerMessageId: r.provider_message_id, provider: r.transport });
 /** The three collections as the DATABASE holds them, in insertion order: the tables after the cutover, the blobs before it (so a check reads the same way on both builds). */
 const readStored = (c) => {
   const cut = !!c.get("SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'");
   if (!cut) return { outbox: blobRows(c, 'outbox') ?? [], pushLog: blobRows(c, 'pushLog') ?? [], pushTokens: blobRows(c, 'pushTokens') ?? [], seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0 };
   return {
-    outbox: c.all('SELECT seq, id, source, created_at, to_address, subject, text, transport, delivered, channel, provider_message_id FROM outbox ORDER BY seq').map(outboxFromRow),
+    outbox: c.all(`SELECT seq, id, source, created_at, to_address, ${c.get("SELECT 1 AS one FROM pragma_table_info('outbox') WHERE name = 'to_json'") ? 'to_json' : 'NULL AS to_json'}, subject, text, transport, delivered, channel, provider_message_id FROM outbox ORDER BY seq`).map(outboxFromRow),
     pushLog: c.all('SELECT id, created_at, audience_kind, audience_id, title, body, transport FROM push_log ORDER BY seq').map((r) => ({ id: r.id, ts: r.created_at, audience: { kind: r.audience_kind, id: r.audience_id }, title: r.title, body: r.body, transport: r.transport })),
     pushTokens: c.all('SELECT ref_kind, ref_id, token_json, registered_at FROM push_tokens ORDER BY seq').map((r) => ({ kind: r.ref_kind, refId: r.ref_id, token: JSON.parse(r.token_json), ts: r.registered_at })),
     seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0,
@@ -106,16 +114,28 @@ async function adultChannel(S, maria, kola) {
   await sleep(2600);
   return channel;
 }
+/**
+ * Content-free state for a timing failure (the independent review of 40aa05c saw the normal-mode
+ * row miss its 12 s window twice on Node 24/macOS and then pass unchanged; the cause is unconfirmed):
+ * elapsed time, the save revisions, the row counts, the staged-write and pending-effect counts the
+ * server reports, the child's exit code and its log tail with addresses redacted.
+ */
+async function timingDiagnostics(S, dir, t0, atResponse, before) {
+  let cap = null; try { cap = (await S.j('GET', '/capabilities')).body; } catch { /* the child may be gone */ }
+  const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {};
+  const st = stored(dir);
+  return JSON.stringify({ elapsedMs: Date.now() - t0, seqAtResponse: atResponse.seq, seqNow: st.seq, pushRowsBefore: before, pushRowsNow: st.pushLog.length, outboxPushPendingWrites: domains.outboxPush?.pendingWrites ?? null, notificationsPendingEffects: domains.notifications?.pendingEffects ?? null, childExitCode: S.proc.exitCode, logTail: S.log().slice(-1200).replace(/[\w.+-]+@[\w.-]+/g, '<address>') });
+}
 /** Send one message and watch the push row land WITHOUT any further request: when, with which revision, and how many dispatch rows the notice had by then. */
 async function measurePush(S, dir, channel, maria) {
-  const before = stored(dir).pushLog.length;
+  const before = stored(dir).pushLog.length; const memBefore = (await S.j('GET', '/admin/push-log', undefined, null, A)).body.length;
   const t0 = Date.now();
   assert.equal((await S.j('POST', `/org/channels/${channel.id}/messages`, { text: 'Synthetic timing message' }, maria)).status, 201);
   const atResponse = snap(dir, (c) => { const st = readStored(c); return { notice: c.get("SELECT id FROM notifications WHERE audience_kind = 'player' AND audience_id = 'pl-adeyemi' AND type = 'message' ORDER BY seq DESC LIMIT 1"), pushRows: st.pushLog.length, seq: st.seq }; });
   assert.ok(atResponse.notice, 'the notification row is committed when the route answers'); assert.equal(atResponse.pushRows, before, 'the push row is NOT in the notification\'s commit');
-  const memory = (await S.j('GET', '/admin/push-log', undefined, null, A)).body; assert.ok(memory.length > 0);
+  const memory = (await S.j('GET', '/admin/push-log', undefined, null, A)).body; assert.equal(memory.length, memBefore + 1, 'THIS message\'s push row is in memory at once (the after-durable effect ran)');
   const landed = await until(async () => snap(dir, (c) => { const st = readStored(c); if (st.pushLog.length <= before) return null; return { afterMs: Date.now() - t0, seq: st.seq, dispatchRows: c.get('SELECT COUNT(*) AS n FROM dispatches WHERE notification_id = ?', atResponse.notice.id).n, row: st.pushLog.at(-1) }; }), 12_000, 20);
-  assert.ok(landed, 'the push row landed within 12 s without a further request');
+  if (!landed) assert.fail(`the push row landed within 12 s without a further request — ${await timingDiagnostics(S, dir, t0, atResponse, before)}`);
   assert.ok(landed.seq > atResponse.seq, 'the push row is in a LATER save than the notification'); assert.equal(landed.row.audience.kind, 'player'); assert.equal(landed.row.audience.id, 'pl-adeyemi');
   return { ...landed, noticeId: atResponse.notice.id, noticeSeq: atResponse.seq };
 }
@@ -309,6 +329,113 @@ await test('[cutover] an ordinary account deletion leaves the three tables alone
     console.log('    (SCOUTBOX_PRE_S7C_SERVER not set: the pre-S7c boot of the rollback copy was not exercised here)');
   }
   rm(dir, bk.body.dir, restored, bad, copy);
+});
+
+// ============================================================= review of 40aa05c — two independently reproduced compatibility defects, through the real routes
+await test('[review of 40aa05c, F2] POST /org/invites with a destination the route COERCES (email given as a JSON array: RegExp.test coerces it, the invite stores String(email), the mailer receives the ORIGINAL array — the accepted build persisted that array): the response is the same 201, the process stays alive, the invite row and its mail record are durable in the route\'s one save with the array destination; a two-element array the regular expression also passes, an ordinary string and an object (400, unchanged) behave as before; the admin view, a restart, the backup, a restore, the copy-only rollback blob and the re-upgrade keep the array by value and type; on the live transport (provider intercepted locally) the provider receives the same JSON as before and the row records its answer; the accepted 6ca66ba build reads the rollback copy, writes an array itself, and a file it created from scratch with an array invite upgrades on this build', async () => {
+  const dir = tempDir('s7c-f2'); let S = await boot(dir);
+  const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const seq0 = seqOf(dir); const logBefore = S.log().length;
+  const ONE = ['synthetic-review@example.invalid']; const TWO = ['synthetic-second@example.invalid', 'x'];
+  const r = await S.j('POST', '/org/invites', { email: ONE, name: 'Synthetic Reviewer', role: 'Scout' }, maria);
+  assert.equal(r.status, 201, r.text); assert.equal(r.body.invite.email, ONE[0], 'the invite stores String(email), as before');
+  await sleep(600); assert.equal(S.proc.exitCode, null, 'the process is alive (no unobserved rejection)'); assert.doesNotMatch(S.log().slice(logBefore), /to must be a string or null|cannot be stored as JSON|UnhandledPromiseRejection|not recorded/, 'no refusal in the log');
+  const after = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mail: readStored(c).outbox.find((m) => m.subject && /invited you/.test(m.subject) && /Hi Synthetic Reviewer/.test(m.text)), inviteRow: (blobRows(c, 'orgInvites') ?? []).some((i) => i.id === r.body.invite.id) }));
+  assert.equal(after.seq, seq0 + 1, 'one save (the route\'s persistNow)'); assert.ok(after.inviteRow, 'the invite row is durable'); assert.ok(after.mail, 'the mail record is durable in that same save'); assert.deepEqual(after.mail.to, ONE, 'with the array the mailer received'); assert.equal(after.mail.transport, 'dev-outbox'); assert.equal(after.mail.delivered, true);
+  assert.equal((await S.j('POST', '/org/invites', { email: TWO, name: 'Synthetic Second', role: 'Scout' }, maria)).status, 201, 'a two-element array the regular expression also passes');
+  assert.equal((await S.j('POST', '/org/invites', { email: 'synthetic-plain@example.invalid', name: 'Synthetic Plain', role: 'Scout' }, maria)).status, 201);
+  assert.equal((await S.j('POST', '/org/invites', { email: { a: 1 }, name: 'Synthetic Object', role: 'Scout' }, maria)).status, 400, 'an object never passed the route\'s regular expression (unchanged)');
+  await sleep(300); assert.equal(S.proc.exitCode, null);
+  const view = (await S.j('GET', '/admin/outbox', undefined, null, A)).body; const byName = (list, n) => list.find((m) => typeof m.text === 'string' && m.text.includes(`Hi ${n},`));
+  assert.deepEqual(byName(view, 'Synthetic Reviewer').to, ONE, 'the admin view returns the array, as the accepted build did'); assert.deepEqual(byName(view, 'Synthetic Second').to, TWO); assert.equal(byName(view, 'Synthetic Plain').to, 'synthetic-plain@example.invalid');
+  const idsBefore = view.map((m) => m.id);
+  // Restart, backup, restore.
+  await S.stop(); S = await boot(dir);
+  const viewAfter = (await S.j('GET', '/admin/outbox', undefined, null, A)).body; assert.deepEqual(viewAfter.map((m) => m.id), idsBefore, 'same ids, same order after a restart'); assert.deepEqual(byName(viewAfter, 'Synthetic Reviewer').to, ONE, 'the array after a restart');
+  const all = stored(dir); const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
+  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')); assert.deepEqual(snapshot.db.outbox, all.outbox, 'the backup carries the arrays'); assert.ok(snapshot.db.outbox.some((m) => Array.isArray(m.to) && m.to.length === 2));
+  await S.stop();
+  const restored = tempDir('s7c-f2-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true }); S = await boot(restored); assert.ok(live(restored)); assert.deepEqual(stored(restored).outbox, all.outbox, 'restored row for row (migration 0011)'); await S.stop();
+  // Live transport, provider intercepted locally (never a real request).
+  const liveDir = tempDir('s7c-f2-live'); const stubLog = path.join(liveDir, '..', `${path.basename(liveDir)}-sendgrid.log`);
+  const SL = await boot(liveDir, { SENDGRID_API_KEY: 'synthetic-not-a-real-key', SENDGRID_STUB_LOG: stubLog, NODE_OPTIONS: `--import=${path.join(HERE, 'testSendgridStub.mjs')}` });
+  const lm = await orgLogin(SL, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
+  assert.equal((await SL.j('POST', '/org/invites', { email: ONE, name: 'Synthetic Live', role: 'Scout' }, lm)).status, 201); await sleep(600); assert.equal(SL.proc.exitCode, null);
+  const providerBody = JSON.parse(fs.readFileSync(stubLog, 'utf8').trim().split('\n').at(-1)); assert.deepEqual(providerBody.personalizations[0].to[0].email, ONE, 'the provider input is the original value, as before');
+  const liveMem = byName((await SL.j('GET', '/admin/outbox', undefined, null, A)).body, 'Synthetic Live'); assert.deepEqual([liveMem.transport, liveMem.delivered, liveMem.to], ['sendgrid', true, ONE], 'the provider\'s answer on the record at once (memory), the array kept');
+  assert.equal(byName(stored(liveDir).outbox, 'Synthetic Live').delivered, false, 'the route\'s save carried the record before the provider answered; the answer lands with the NEXT save, as the mutated blob entry did (§10.8 reading ii)');
+  assert.equal((await SL.j('POST', '/org/invites', { email: 'synthetic-live-2@example.invalid', name: 'Synthetic Live Two', role: 'Scout' }, lm)).status, 201); // that next save
+  const liveRow = byName(stored(liveDir).outbox, 'Synthetic Live'); assert.deepEqual([liveRow.transport, liveRow.delivered, liveRow.to], ['sendgrid', true, ONE], 'the provider\'s answer recorded on the row, the array kept');
+  await SL.stop(); rm(liveDir); fs.rmSync(stubLog, { force: true });
+  // Rollback and the accepted build.
+  const copy = tempDir('s7c-f2-rollback'); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), dir, copy], { encoding: 'utf8' });
+  assert.equal(live(copy), false); assert.deepEqual(stored(copy).outbox, all.outbox, 'the blob holds every row, the arrays by value and type');
+  const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
+  if (OLD && fs.existsSync(OLD)) {
+    const old = await boot(copy, {}, OLD); const om = await orgLogin(old, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
+    assert.deepEqual(byName((await old.j('GET', '/admin/outbox', undefined, null, A)).body, 'Synthetic Reviewer').to, ONE, 'the accepted build reads the array back');
+    assert.equal((await old.j('POST', '/org/invites', { email: ['synthetic-old@example.invalid'], name: 'Synthetic Old', role: 'Scout' }, om)).status, 201); await sleep(300); assert.equal(old.proc.exitCode, null); await old.stop();
+    assert.deepEqual(byName(stored(copy).outbox, 'Synthetic Old').to, ['synthetic-old@example.invalid'], 'the accepted build wrote its array into the blob');
+    const up = await boot(copy); assert.ok(live(copy), 're-upgraded'); const re = stored(copy).outbox; assert.deepEqual(re.slice(0, all.outbox.length), all.outbox); assert.deepEqual(byName(re, 'Synthetic Old').to, ['synthetic-old@example.invalid']); await up.stop();
+    const fresh = tempDir('s7c-f2-old-fresh'); const o2 = await boot(fresh, {}, OLD); const fm = await orgLogin(o2, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
+    assert.equal((await o2.j('POST', '/org/invites', { email: ['synthetic-upgrade@example.invalid'], name: 'Synthetic Upgrade', role: 'Scout' }, fm)).status, 201); await o2.stop();
+    assert.deepEqual(byName(stored(fresh).outbox, 'Synthetic Upgrade').to, ['synthetic-upgrade@example.invalid'], 'the pre-S7c file holds the array');
+    const up2 = await boot(fresh); assert.ok(live(fresh), 'this build upgrades a file the accepted build wrote'); assert.deepEqual(byName(stored(fresh).outbox, 'Synthetic Upgrade').to, ['synthetic-upgrade@example.invalid'], 'with the array intact'); assert.doesNotMatch(up2.log(), /OUTBOX_PUSH_IMPORT_BLOCKED/); await up2.stop();
+    console.log('    (pre-S7c build: reads the rollback copy, writes an array destination, and its own file upgrades on this build)'); rm(fresh);
+  } else {
+    console.log('    (SCOUTBOX_PRE_S7C_SERVER not set: the old-build array-destination proofs were not exercised here)');
+  }
+  rm(dir, bk.body.dir, restored, copy);
+});
+
+await test('[review of 40aa05c, F1] POST /push/register with RAW JSON bodies (1e400 twice, -1e400, {"n":1e400}, [1e400] — JSON.stringify would pre-normalise them): five 201 responses as the accepted build answered; four rows persisted [null,null,{"n":null},[null]] with the debounced save (a repeated positive Infinity collapses by strict equality on the live value, negative Infinity is a separate row); the same five again collapse only their own live rows; falsy tokens are still 400; the backup carries null; after a restart every non-finite value reads null and a new live Infinity removes none of them; finite primitives and structurally equal objects behave as before; the push sender hands the live provider (intercepted locally) the same JSON payload as the accepted build; the rollback blob holds the nulls, the accepted build boots it and persists its own raw overflow registration as null, and the re-upgrade keeps every row', async () => {
+  const dir = tempDir('s7c-f1'); let S = await boot(dir, { M13_FAST_RETRY: '' }); let kola = await playerLogin(S, 'pl-adeyemi');
+  const RAW = ['{"token":1e400}', '{"token":1e400}', '{"token":-1e400}', '{"token":{"n":1e400}}', '{"token":[1e400]}'];
+  const statuses = []; for (const b of RAW) statuses.push((await S.raw('POST', '/push/register', b, kola)).status);
+  assert.deepEqual(statuses, [201, 201, 201, 201, 201], 'five 201 responses, as the accepted build answered'); assert.equal(S.proc.exitCode, null);
+  const four = await until(async () => { const t = playerTokens(dir); return t.length === 4 ? t : null; }, 8000); assert.ok(four, `four rows persisted with the debounced save (${playerTokens(dir).length})`);
+  assert.deepEqual(four.map((t) => t.token), [null, null, { n: null }, [null]], 'the accepted build\'s persisted values: +Infinity collapsed, -Infinity separate, nested nulls'); assert.ok(four[0].ts <= four[1].ts && four[1].ts <= four[2].ts && four[2].ts <= four[3].ts, 'registration order');
+  for (const b of RAW) assert.equal((await S.raw('POST', '/push/register', b, kola)).status, 201);
+  const six = await until(async () => { const t = playerTokens(dir); return t.length === 6 ? t : null; }, 8000); assert.ok(six, 'six rows: the two live primitives replaced their own rows, the object and the array are new');
+  assert.deepEqual(six.map((t) => t.token), [{ n: null }, [null], null, null, { n: null }, [null]]);
+  for (const b of ['{"token":0}', '{"token":null}', '{"token":""}', '{"token":false}', '{}']) assert.equal((await S.raw('POST', '/push/register', b, kola)).status, 400, `falsy token refused as before: ${b}`);
+  const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
+  assert.deepEqual(snapshot.db.pushTokens.filter((t) => t.kind === 'player' && t.refId === 'pl-adeyemi').map((t) => t.token), six.map((t) => t.token), 'the backup carries null');
+  // Restart: null for every non-finite value; a new live Infinity removes none of them.
+  await S.stop(); S = await boot(dir, { M13_FAST_RETRY: '' }); kola = await playerLogin(S, 'pl-adeyemi');
+  assert.equal((await S.raw('POST', '/push/register', '{"token":1e400}', kola)).status, 201);
+  const seven = await until(async () => { const t = playerTokens(dir); return t.length === 7 ? t : null; }, 8000); assert.ok(seven, 'a persisted null from the previous process is not removed by the new live Infinity'); assert.deepEqual(seven.slice(0, 6).map((t) => t.ts), six.map((t) => t.ts), 'the earlier rows untouched');
+  assert.equal((await S.raw('POST', '/push/register', '{"token":1e400}', kola)).status, 201); await sleep(2600);
+  const again = playerTokens(dir); assert.equal(again.length, 7, 'the repeated live Infinity collapsed only its own row'); assert.deepEqual(again.slice(0, 6).map((t) => t.ts), six.map((t) => t.ts)); assert.ok(again[6].ts > seven[6].ts);
+  for (const b of ['{"token":424242}', '{"token":424242}', '{"token":{"n":1e400}}']) assert.equal((await S.raw('POST', '/push/register', b, kola)).status, 201);
+  const nine = await until(async () => { const t = playerTokens(dir); return t.length === 9 ? t : null; }, 8000); assert.ok(nine, 'one number row (collapsed) and one more object row'); assert.deepEqual(nine.slice(-2).map((t) => t.token), [424242, { n: null }]);
+  await S.stop();
+  // The provider payload (the live push transport, intercepted locally): JSON.stringify of the live values.
+  const payloads = async (server) => {
+    const d = tempDir('s7c-f1-expo'); const stubLog = path.join(d, '..', `${path.basename(d)}-expo.log`);
+    const X = await boot(d, { M13_FAST_RETRY: '', EXPO_ACCESS_TOKEN: 'synthetic-not-a-real-token', EXPO_STUB_LOG: stubLog, NODE_OPTIONS: `--import=${path.join(HERE, 'testExpoStub.mjs')}` }, server);
+    const m = await orgLogin(X, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const k = await playerLogin(X, 'pl-adeyemi');
+    for (const b of ['{"token":1e400}', '{"token":{"n":1e400}}', '{"token":"ExponentPushToken[synthetic]"}']) assert.equal((await X.raw('POST', '/push/register', b, k)).status, 201);
+    const channel = await adultChannel(X, m, k); fs.writeFileSync(stubLog, '');
+    assert.equal((await X.j('POST', `/org/channels/${channel.id}/messages`, { text: 'Synthetic payload message' }, m)).status, 201);
+    const lines = await until(async () => { const l = fs.readFileSync(stubLog, 'utf8').trim().split('\n').filter(Boolean); return l.length >= 3 ? l : null; }, 8000); assert.ok(lines, 'one provider call per registered token');
+    await sleep(300); const parsed = fs.readFileSync(stubLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    await X.stop(); rm(d); fs.rmSync(stubLog, { force: true });
+    return parsed.map((l) => ({ to: l.to, title: l.title }));
+  };
+  const mine = await payloads(SERVER);
+  assert.deepEqual(mine, [{ to: null, title: 'ScoutBox' }, { to: { n: null }, title: 'ScoutBox' }, { to: 'ExponentPushToken[synthetic]', title: 'ScoutBox' }], 'null for Infinity in the provider payload, as JSON.stringify always wrote');
+  const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
+  if (OLD && fs.existsSync(OLD)) { assert.deepEqual(await payloads(OLD), mine, 'the accepted 6ca66ba build sends the identical payloads'); console.log('    (pre-S7c build: identical provider payloads for non-finite tokens)'); } else console.log('    (SCOUTBOX_PRE_S7C_SERVER not set: the old-build payload comparison was not exercised here)');
+  // Rollback: the blob holds the nulls; the accepted build boots it and persists its own raw overflow registration as null; the re-upgrade keeps every row.
+  const copy = tempDir('s7c-f1-rollback'); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), dir, copy], { encoding: 'utf8' });
+  assert.deepEqual(playerTokens(copy).map((t) => t.token), nine.map((t) => t.token), 'the blob the accepted build reads');
+  if (OLD && fs.existsSync(OLD)) {
+    const old = await boot(copy, {}, OLD); const ok = await playerLogin(old, 'pl-adeyemi');
+    assert.equal((await old.raw('POST', '/push/register', '{"token":-1e400}', ok)).status, 201); assert.ok(await until(async () => playerTokens(copy).length === 10, 8000), 'the accepted build persisted its own null'); assert.equal(playerTokens(copy).at(-1).token, null); await old.stop();
+    const up = await boot(copy); assert.ok(live(copy)); assert.equal(playerTokens(copy).length, 10); assert.deepEqual(playerTokens(copy).slice(0, 9).map((t) => t.token), nine.map((t) => t.token)); await up.stop();
+    console.log('    (pre-S7c build booted the rollback copy: a raw overflow registration persisted as null; re-upgraded with every row)');
+  }
+  rm(dir, bk.body.dir, copy);
 });
 
 console.log(`\n${passed} outbox/push server checks passed`);

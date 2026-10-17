@@ -28,7 +28,7 @@ import { DISPATCHES_MIGRATION } from '../dispatches.mjs';
 import { OUTBOX_PUSH_MIGRATION, OUTBOX_PUSH_CUTOVER_META, OUTBOX_PUSH_DDL, OUTBOX_PUSH_TABLES, importOutboxPushBlobs } from '../outboxPush.mjs';
 
 export const id = OUTBOX_PUSH_MIGRATION;
-export const note = 'the mail outbox, the push log and the device push tokens become their own tables (insertion order kept; two outbox shapes told apart structurally; tokens stored losslessly as JSON)';
+export const note = 'the mail outbox, the push log and the device push tokens become their own tables (insertion order kept; two outbox shapes told apart structurally; tokens and non-string destinations stored losslessly as JSON (review of 40aa05c))';
 
 export function up(sqlite, { now = Date.now() } = {}) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

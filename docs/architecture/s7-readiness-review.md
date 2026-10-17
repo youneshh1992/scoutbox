@@ -27,8 +27,10 @@ acceptance of the whole migration; §9.7 is what was built, §9.8 the correction
 **The notification-extras follow-up the `ac50b60` review confirmed is corrected in `6ca66ba` and
 independently ACCEPTED there for its bounded scope (§9.10, §10.9). S7c (`outbox`, `push_log`,
 `push_tokens`): the prepared plan (§10) was corrected by the review of `6ca66ba` (D1, D2, the null
-destination — §10.3, §10.4, §10.7) and IMPLEMENTED on top of `6ca66ba` (§10.8) — pending independent
-acceptance, not accepted; migration `0011_outbox_push` is registered. S7d not started.** §§0–8.2
+destination — §10.3, §10.4, §10.7) and IMPLEMENTED on top of `6ca66ba` (§10.8); the independent review of
+`40aa05c` found two compatibility defects (an array mail destination refused and crashing the process; raw
+JSON overflow tokens refused), CORRECTED on top of `40aa05c` (§10.10) — pending independent acceptance, not
+accepted; migration `0011_outbox_push` is registered with its DDL amended in place. S7d not started.** §§0–8.2
 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where the
 implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
 correction is marked in place. The exact blockers of the remaining sub-steps are in §8. Nothing
@@ -1748,7 +1750,10 @@ untouched: the push still runs after the notification's save committed.
 **The DDL as implemented** (`repositories/outboxPush.mjs` `OUTBOX_PUSH_DDL`; `sql/03` rewritten to match,
 checked column for column by `scripts/testSchemaDdl.mjs`; **CORRECTED** from the prepared proposal by the
 review of `6ca66ba`: `to_address` nullable, `delivered` NULL for a delivery row under a total structural
-CHECK, `token_json` instead of a TEXT token, and NO unique triple):
+CHECK, `token_json` instead of a TEXT token, and NO unique triple; **AMENDED IN PLACE after the review of
+`40aa05c`** (§10.10): the destination pair `to_address` / `to_json` under an exclusivity CHECK — 0011 was
+registered but never accepted or released, so the one registered migration carries the corrected DDL and no
+`0012` encodes an unreleased intermediate shape):
 
 ```sql
 CREATE TABLE outbox (
@@ -1756,7 +1761,8 @@ CREATE TABLE outbox (
   id                  TEXT NOT NULL UNIQUE,           -- 'mail-N'
   source              TEXT NOT NULL CHECK (source IN ('mailer', 'delivery')),  -- shape (a) | shape (b): structural, decides the way back
   created_at          INTEGER NOT NULL,               -- ts (a) | at (b)
-  to_address          TEXT,                           -- personal data; NULL is a value a writer produces (an accepted queued dispatch)
+  to_address          TEXT,                           -- personal data; a STRING destination; NULL is a value a writer produces (an accepted queued dispatch)
+  to_json             TEXT CHECK (to_json IS NULL OR (json_valid(to_json) AND json_type(to_json) NOT IN ('text', 'null'))),  -- any OTHER JSON destination value (review of 40aa05c, F2: the coercing invite routes hand the mailer an ARRAY), decoded on read
   subject             TEXT,                           -- (a) only; NULL = the key is absent in (b)
   text                TEXT NOT NULL,                  -- withheld text for the one `secrets` site; as written elsewhere
   transport           TEXT NOT NULL,                  -- transport (a) | provider (b); no vocabulary CHECK
@@ -1764,6 +1770,7 @@ CREATE TABLE outbox (
   channel             TEXT,                           -- (b) only; NULL = absent in (a); no vocabulary CHECK
   provider_message_id TEXT,                           -- (b) only; NULL = absent in (a)
   extra_json          TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  CHECK (to_address IS NULL OR to_json IS NULL),       -- a destination is in one column, or null
   CHECK ((source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL AND delivered IN (0, 1) AND channel IS NULL AND provider_message_id IS NULL)
       OR (source = 'delivery' AND subject IS NULL AND delivered IS NULL AND channel IS NOT NULL AND provider_message_id IS NOT NULL))
 ) STRICT;
@@ -1839,13 +1846,16 @@ CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
 - **Accepted input, per field (no coercion; a refusal names the collection, the position, the id
   where there is one and a reason — never `to`, `text`, `token` or `body`):** `id` non-empty
   string, unique in its collection; `ts`/`at` a safe integer (a shape's keys all present, none of the
-  other shape's → otherwise "matches both/neither"); `to` a string **or null**; `subject` a string ((a));
-  `text` a string; `transport`/`provider` a non-empty string; `delivered` a boolean ((a) only);
+  other shape's → otherwise "matches both/neither"); `subject` a string ((a));
+  `text` a string; `transport`/`provider` a non-empty string; `delivered` a boolean ((a) only); `to` **any
+  JSON value** (a string → `to_address`; null → NULL/NULL; anything else, in practice the ARRAY the coercing
+  invite routes hand the mailer → `to_json`, review of `40aa05c` F2 — a non-JSON value is refused by name);
   `channel` and `providerMessageId` non-empty strings ((b) only); push `audience` exactly `{kind, id}`
   with both non-empty strings (the S7a rule, an extra audience field refuses); `title`, `body` strings;
   token `kind`, `refId` non-empty strings, `token` **any JSON value** (null, boolean, number, string,
-  array, plain object — a detached prototype-safe clone), `ts` a safe integer; **no uniqueness** on
-  tokens. **Unknown keys** on any entry go to `extra_json` through the prototype-safe JSON clone
+  array, plain object — a detached prototype-safe clone) **including the non-finite numbers JSON syntax
+  produces** (`1e400` → `Infinity`; kept live, persisted as JSON null — review of `40aa05c` F1, §10.10),
+  `ts` a safe integer; **no uniqueness** on tokens. **Unknown keys** on any entry go to `extra_json` through the prototype-safe JSON clone
   (`cloneJson`, the dispatch and notification repositories' approach, local to the module): detached
   at ingress, export and snapshot; own `"__proto__"`/`"constructor"`/`"toString"` keys preserved at
   every depth (inside a token too); a value JSON cannot carry (`undefined`, a function, a symbol, a
@@ -1857,8 +1867,12 @@ CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
   a rejected `fetch` writes `false`; `ts`/`at` come from `Date.now()`; the push body is the string the
   notification repository validated; the token is whatever JSON the route parsed (never `undefined`,
   a function or a symbol — JSON cannot carry them; the repository refuses them by name should a
-  direct caller pass one). No non-finite number can reach these collections (unlike the S7b callback
-  clock), so no REAL/`ANY` column is needed. Cloning does not change the token matching rule:
+  direct caller pass one). **Corrected by the review of `40aa05c` (F1):** a non-finite number DOES reach
+  the token collection — JSON syntax `1e400` parses to `Infinity`, the route checks truthiness only — so
+  the token's clone keeps it live and `token_json` holds JSON.stringify's `null`, as the blob did; no
+  REAL/`ANY` column is needed because the persisted value was always null. The mailer's `to` is not always
+  a string either (F2): the coercing invite routes hand the mailer an array. Cloning does not change the
+  token matching rule:
   primitives compare by value; an object a caller still holds is compared by reference against the
   mirror's detached clone and never matches — exactly the rule the route's freshly parsed bodies
   always had (the one theoretical difference, an in-process caller re-registering the same object
@@ -2095,8 +2109,9 @@ tests (D1 normal and accelerated, D2 through the route, the null destination) pa
 detached clone, so an in-process caller re-registering the **same object reference** gets a new row
 where today's array would have collapsed it by reference — no writer does this (the route's bodies
 are always fresh), and the rule for the route is identical; (ii) `markDelivered` is a staged UPDATE
-that lands with the next save, as the mutated blob entry did; (iii) a mailer row with a `to` that is
-not a string or null, or a push row whose audience is not exactly `{kind, id}` of non-empty strings,
+that lands with the next save, as the mutated blob entry did; (iii) a mailer row with a `to` JSON cannot carry
+(an undefined, a function — corrected by the review of `40aa05c`, §10.10: an array or any other JSON value is
+accepted and stored losslessly), or a push row whose audience is not exactly `{kind, id}` of non-empty strings,
 refuses the import — the S7a audience rule and the writers' literals; the dry run on the real file
 reports any such row before a cutover is scheduled.
 
@@ -2121,6 +2136,101 @@ behaviour-changing; the null destination) are corrected above and implemented in
 by the review: real older-Node checks skipped (`SCOUTBOX_TEST_NODE_BINS` unset); browser suites, the
 full E2E battery and `m13E2E` not independently rerun; S7c implemented must return for independent
 acceptance.
+
+### 10.10 Independent review of `40aa05c` — two compatibility defects, corrected on top of `40aa05c` (17 October 2026; **pending independent acceptance — not accepted**)
+
+**What the review found** (`review-40aa05c-summary.txt`; reproduction `review-40aa05c-reproductions.mjs
+<candidate-root> <6ca66ba-root>`, run unchanged on the unchanged `40aa05c` tree against the `6ca66ba`
+checkout before any edit: exit 1, three REPRODUCED checks for two defects, the ordinary-message push control
+CORRECT on both builds — the log is in the handoff).
+
+- **F2 — an accepted invitation could end the process; the same legacy record blocked the upgrade.**
+  `POST /org/invites` validates `email` with `RegExp.test`, which coerces: `["a@b.c"]` passes, the invite
+  stores `String(email)`, and `mailer.send` receives the ORIGINAL array. The accepted build persisted the
+  array. §10.4's first implementation refused every non-string `to`; the route still answered 201, the
+  rejection of `void mailer.send(...)` was unobserved and ended the process with exit 1, and a file the
+  `6ca66ba` build had written refused to upgrade (`OUTBOX_PUSH_IMPORT_BLOCKED`). The survey of the
+  coercing writer paths: `m13/enterprise.mjs` `/org/invites` (RegExp.test) and `m14/organisations.mjs`
+  player invite (`emailProblem`, `String(email ?? '')`) hand the ORIGINAL value on; every other mailer
+  site builds a string (`String(...)`, `reqText`, a guardian record) or `null` comes from a dispatch. An
+  array is the only non-string, non-null shape a writer can produce (an object or a number never passes
+  either regular expression), but the representation covers any JSON value, not a hand-picked singleton.
+- **F1 — raw JSON number overflow tokens failed registration.** `1e400` parses to `Infinity`; the route
+  accepts it (truthy), the old array kept the live value until a restart (`===`: a repeated `+Infinity`
+  collapsed, `-Infinity` was a separate row) and `JSON.stringify` wrote `null` at the save — also inside an
+  object or an array. Five raw requests: five 201 and `[null,null,{"n":null},[null]]` on `6ca66ba`; five 500
+  and nothing stored on `40aa05c` (`cloneJson` refused the non-finite number).
+
+**Corrections (`repositories/outboxPush.mjs`; failing-first regressions recorded on the unchanged `40aa05c`
+tree — `testOutboxPush.mjs` "[review of 40aa05c, F2]" fails on the import refusal and "[F1]" on the
+non-finite refusal; `testOutboxPushServer.mjs` "[review of 40aa05c, F2]" fails on "the process is alive"
+(exit code 1) and "[F1]" on five 500s — logs in the handoff):**
+
+1. **The destination is any JSON value, stored losslessly in two columns:** a string in `to_address`, null
+   as NULL in both, any other value JSON-encoded in `to_json` (`CHECK`: valid JSON that is neither a JSON
+   string nor JSON null; `CHECK (to_address IS NULL OR to_json IS NULL)`), decoded on read into the value
+   and type the writer handed over — in the export, the admin view, the backup, the snapshot reader
+   (`OUTBOX_TABLE.read`, which the reviewer's script and the rollback use), the rollback blob and the
+   re-upgrade. Explicit null and ordinary strings are unchanged; a non-JSON destination is still refused by
+   name. The migration's DDL is amended in place (above). **Scratch databases already at `40aa05c`** (the
+   0011 record present, `outbox` without `to_json` — only synthetic files; no real database carries the
+   shape) are refused at attach by name, `OUTBOX_PUSH_SCHEMA_STALE`, before any statement is prepared and
+   with the file untouched; `scripts/outboxPushRollback.mjs` reads that shape (every destination there is a
+   string or null) and this build re-upgrades the copy into the corrected table (`testOutboxPush.mjs`).
+   The two fire-and-forget mail sites (`/org/invites`, the reference request) now observe the promise: a
+   refused record or a failed send is logged by id (no address), never an unhandled rejection; the invite
+   stands, as it always did; nothing manufactures a success record and the awaited sites are unchanged.
+   Proven through the real route and a second connection: 201, the process alive, invite row and mail
+   record in the route's one save with the array; the two-element array the regular expression also
+   passes; a string; an object still 400; the admin view, restart, backup, restore, rollback blob and
+   re-upgrade keep the array; the live transport with the locally intercepted provider receives the same
+   JSON as before (`personalizations[0].to[0].email` = the array) and the row records its answer; the
+   actual `6ca66ba` build reads the rollback copy, writes an array itself, and a file it created from
+   scratch with an array invite upgrades on this build (`testOutboxPushServer.mjs`).
+2. **Non-finite token values are kept live and persisted as null.** `cloneJson` takes an option; the
+   token's clone (`validatePushTokenRow`, the mirror copies, the unit snapshot/restore, `forAudience`,
+   `exportRows`) keeps a non-finite number as is, so the route's strict-equality rule works on the live
+   value exactly as the array did (a repeated `+Infinity` collapses; `-Infinity` is another row; a
+   persisted null from an earlier process is never the live `Infinity`); `token_json` holds
+   `JSON.stringify`'s null, so a restart reads null as before; the provider receives the same payload
+   (`to: null`, locally intercepted; identical on the `6ca66ba` build). Because `+Infinity`, `-Infinity`
+   and a persisted null all read `"null"` in SQL, **a replacement deletes the removed rows by their own
+   `seq`** (tracked per mirror row; the previous DELETE by `(kind, refId, token_json)` is gone), never by
+   JSON text. Every other field — a registration's unknown fields, the outbox, the push log — keeps the
+   strict rule; `undefined`, functions, symbols, bigints and class instances are still refused by name;
+   the route's falsy-token 400 is unchanged and no `TOKEN_INVALID` policy exists. Proven in the
+   repository (both write modes, aborted unit, failed save and retry, restart, backup, rollback) and
+   through the real route with RAW bodies (five 201 and `[null,null,{"n":null},[null]]`; the same five again
+   collapse only their own live rows; after a restart a new `1e400` removes none of the persisted nulls;
+   finite primitives and fresh structurally equal objects as before; the `6ca66ba` build boots the
+   rollback copy and persists its own raw overflow registration as null; re-upgrade).
+
+**The backend-gate timing observation (reviewer: Node v24.19.0 / macOS; `testOutboxPushServer.mjs:118`,
+the normal-mode push row not observed within 12 s, twice; an unchanged later run of the full suite passed;
+the reviewer's own control probe passed on both builds).** Investigated, cause not confirmed: the
+assertion is unchanged. What was inspected: the save path (`persist()` is a 2 s trailing debounce, `if
+(saveTimer) return`, the timer nulled before the save; `persistNow()` clears and nulls it; `store.save` is
+synchronous and absorbed only inside an open unit, which is synchronous too — no lost-wakeup path was
+found); the effect path (the message's notification is created inside a unit, its after-durable push
+effect runs after the unit's COMMIT, appends the push row to the staged queue and calls `nextId()` →
+`persist()`); the deferral rule (`pushDeferred`: quiet hours need preferences the seeded recipient has
+none of; the school-hours mute applies to minors and the seeded recipient was born in 2004); the
+coalescing rule (a second identical unread `message` notification within six hours coalesces and sends no
+push — the test sends one message per server); locking (WAL, `busy_timeout = 5000`, the test polls through
+short read-only connections, which do not block a WAL writer). Six consecutive runs of the normal-mode test
+on this machine (Node v22.22.2) passed, each landing through the 2 s debounce. What changed in the test,
+supported by that evidence: (i) the in-memory check now asserts that THIS message's push row is in the admin
+push log (it previously passed on any earlier row); (ii) on a timeout the assertion carries content-free
+diagnostics — elapsed time, save revisions, row counts, the staged-write and pending-effect counts the
+server reports, the child's exit code and its log tail with addresses redacted — so a recurrence is
+diagnosable. No timer, retry or policy was added; the later-save boundary is unchanged. If the failure
+recurs on the reviewer's machine, the diagnostics are the next evidence.
+
+**Documents updated in place:** this section, §10.4, the status header; `sqlite-migration-plan.md` (status,
+S7c objective); `sqlite-schema.md` (the outbox and token rows); `sql/03` (the DDL and the mapping);
+`OPERATIONS.md` (the S7c section: destinations, non-finite tokens, scratch databases at `40aa05c`);
+`CLAUDE.md`. Status: **S7c corrections implemented, pending independent acceptance.** S7b stays accepted
+at `ac50b60`; the notification nested-extras follow-up stays accepted at `6ca66ba`.
 
 ---
 

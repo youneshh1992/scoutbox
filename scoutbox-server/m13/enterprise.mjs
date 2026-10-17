@@ -85,7 +85,9 @@ export function registerEnterprise(ctx) {
       expiresAt: Date.now() + 7 * 86_400_000, acceptedAt: null, revokedAt: null,
     };
     db.orgInvites.push(inv);
-    void mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} invited you to join ${req.org.name} on ScoutBox as ${inv.role}.\n\nAccept with invite code: ${inv.token}\n\nThe code expires in 7 days.` });
+    // A rejected send (a refused record, a failed provider call) is observed here: logged by id, never an unhandled
+    // rejection ending the process; the invite stands as it always did (review of 40aa05c, F2).
+    mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} invited you to join ${req.org.name} on ScoutBox as ${inv.role}.\n\nAccept with invite code: ${inv.token}\n\nThe code expires in 7 days.` }).catch((err) => console.error(`staff invite ${inv.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`));
     persistNow();
     res.status(201).json({ invite: { ...inv, token: undefined }, note: 'The invite code went to their email (dev outbox in this environment).' });
   });

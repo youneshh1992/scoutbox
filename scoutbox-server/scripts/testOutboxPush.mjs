@@ -256,7 +256,7 @@ test('[cutover] repository (immediate mode): append validates like the import (b
   const r3 = repo.pushTokens.register(token(obj, { ts: NOW + 22 })); assert.equal(r3.removed, 0, 'the same object reference again: the mirror holds a clone, so even an in-process caller reusing the object gets a new row (the route\'s bodies are always fresh)');
   assert.equal(repo.pushTokens.register(token('424242', { ts: NOW + 23 })).removed, 1, 'the string collapses the string row, not the number');
   repo.pushTokens.register({ kind: 'org', refId: 'org-pro', token: 424242, ts: NOW + 24 }); assert.equal(repo.pushTokens.forAudience('org', 'org-pro').length, 1); assert.equal(repo.pushTokens.forAudience('player', 'pl-adult').length, 9);
-  assert.throws(() => repo.pushTokens.register(token(undefined)), /token \(undefined\) cannot be stored as JSON/); assert.throws(() => repo.pushTokens.register(token(() => 1)), /token \(function\) cannot be stored as JSON/); assert.throws(() => repo.pushTokens.register(token(Number.NaN)), /non-finite number/); assert.throws(() => repo.pushTokens.register({ kind: 'player', token: 'x', ts: 1 }), /refId is absent/);
+  assert.throws(() => repo.pushTokens.register(token(undefined)), /token \(undefined\) cannot be stored as JSON/); assert.throws(() => repo.pushTokens.register(token(() => 1)), /token \(function\) cannot be stored as JSON/); assert.throws(() => repo.pushTokens.register({ kind: 'player', token: 'x', ts: 1 }), /refId is absent/);
   const copies = repo.pushTokens.forAudience('player', 'pl-adult'); assert.deepEqual(copies.map((t) => t.token), [true, { review: 'synthetic' }, { review: 'synthetic' }, ['synthetic'], ['synthetic'], 424242, { review: 'synthetic' }, { review: 'mutated after the call' }, '424242'], 'the third registration cloned the object as it was at that call'); copies[1].token.review = 'edited'; assert.equal(repo.pushTokens.forAudience('player', 'pl-adult')[1].token.review, 'synthetic', 'forAudience hands out detached copies');
   assert.deepEqual(rowsOf(dir, 'push_tokens').map((x) => x.ref_kind), [...Array(9).fill('player'), 'org']);
   // Owned-transaction failure: statement and real COMMIT failures restore the mirrors in place.
@@ -428,6 +428,127 @@ test('[cutover] rollback (copy-only): every outbox record (each in its writer\'s
   try { assert.throws(() => rollbackOutboxPushCopy(dbFile(src), o5), /injected COMMIT failure/); } finally { proto.exec = exec; }
   assert.deepEqual(fs.readdirSync(o5), [], 'no partial copy'); assert.equal(fs.statSync(dbFile(src)).size, before.bytes);
   rm(src, out, s7bOut, cli, later, o1, notCut, o2, o3, odd, o4, o5);
+});
+
+// ============================================================= review of 40aa05c — two independently reproduced compatibility defects
+/** The `outbox` table exactly as the unaccepted 40aa05c build of migration 0011 created it (no `to_json` column): a scratch database at that build. */
+const OUTBOX_DDL_40AA05C = `CREATE TABLE outbox (
+  seq                 INTEGER PRIMARY KEY,
+  id                  TEXT NOT NULL UNIQUE,
+  source              TEXT NOT NULL CHECK (source IN ('mailer', 'delivery')),
+  created_at          INTEGER NOT NULL,
+  to_address          TEXT,
+  subject             TEXT,
+  text                TEXT NOT NULL,
+  transport           TEXT NOT NULL,
+  delivered           INTEGER,
+  channel             TEXT,
+  provider_message_id TEXT,
+  extra_json          TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  CHECK ((source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL AND delivered IN (0, 1) AND channel IS NULL AND provider_message_id IS NULL)
+      OR (source = 'delivery' AND subject IS NULL AND delivered IS NULL AND channel IS NOT NULL AND provider_message_id IS NOT NULL))
+) STRICT;
+CREATE INDEX outbox_created_at ON outbox (created_at);`;
+
+test('[review of 40aa05c, F2] a mail destination the accepted build persisted as a JSON ARRAY (POST /org/invites validates with RegExp.test, which coerces, stores String(email) on the invite and hands the ORIGINAL value to the mailer; the m14 player invite does the same through emailProblem): migration 0011 imports it with its value and type, append accepts it, the table holds it losslessly beside string and null destinations (to_address for a string, to_json for any other JSON value, never both), the export / the snapshot reader / the backup round trip / the copy-only rollback reproduce the array exactly as the 6ca66ba blob held it, the re-upgrade keeps it; a non-JSON destination is still refused by name with nothing written; a scratch database created by the unaccepted 40aa05c build (0011 recorded, outbox without to_json) is refused by name at attach with the file untouched, read by the rollback tool, and re-upgraded into the corrected table', () => {
+  const dir = tempDir('obp-f2');
+  const ONE = ['synthetic-review@example.invalid']; const TWO = ['synthetic-second@example.invalid', 'x']; const NESTED = [['synthetic-nested@example.invalid'], 7, null, true];
+  const arrayMail = mail({ id: 'mail-arr', to: ONE }); const twoMail = mail({ id: 'mail-two', to: TWO }); const nestedMail = mail({ id: 'mail-nested', to: NESTED });
+  s7bFile(dir, { outbox: [mail(), arrayMail, delivery({ to: null }), twoMail, nestedMail] });
+  assert.deepEqual(JSON.parse(blobOf(dir, 'outbox'))[1].to, ONE, 'the baseline: the 6ca66ba blob holds the array by value and type');
+  const s = openRaw(dir);
+  assert.deepEqual(migrate(s).ran, [MIGRATION], 'the array destination imports (the whole step, nothing refused)');
+  const cols = s.prepare('PRAGMA table_info(outbox)').all().map((c) => c.name); assert.ok(cols.includes('to_json'), 'the corrected table carries to_json');
+  assert.deepEqual(s.prepare('SELECT id, to_address, to_json FROM outbox ORDER BY seq').all().map((r) => [r.id, r.to_address, r.to_json]), [['mail-1', ADDRESS, null], ['mail-arr', null, JSON.stringify(ONE)], ['mail-2', null, null], ['mail-two', null, JSON.stringify(TWO)], ['mail-nested', null, JSON.stringify(NESTED)]], 'a string in to_address, null as NULL/NULL, any other JSON value in to_json');
+  const repo = bare(s);
+  const ex = repo.outbox.exportRows();
+  assert.deepEqual(ex.map((m) => m.to), [ADDRESS, ONE, null, TWO, NESTED], 'the export reproduces every destination with its type'); assert.deepEqual(Object.keys(ex[1]), MAILER_KEYS); assert.equal(JSON.stringify(ex[1]), JSON.stringify(arrayMail), 'byte-identical to the accepted literal');
+  ex[1].to.push('mutated export'); assert.deepEqual(plain(repo.outbox.exportRows()[1].to), ONE, 'the exported array is detached');
+  const ap = repo.outbox.append(mail({ id: 'mail-ap', to: ['synthetic-append@example.invalid'] })); assert.deepEqual(plain(ap.to), ['synthetic-append@example.invalid'], 'append accepts what the route accepts');
+  const dl = repo.outbox.append(delivery({ id: 'mail-dl', to: ['synthetic-delivery@example.invalid'], providerMessageId: 'fm_dl' })); assert.deepEqual(plain(dl.to), ['synthetic-delivery@example.invalid'], 'the representation is the literal\'s, in either shape');
+  assert.deepEqual(repo.outbox.append(mail({ id: 'mail-null', to: null })).to, null, 'explicit null kept'); assert.equal(repo.outbox.append(mail({ id: 'mail-str', to: ADDRESS })).to, ADDRESS, 'an ordinary string kept');
+  assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: undefined })), /to \(undefined\) cannot be stored as JSON/, 'a non-JSON destination is still refused by name'); assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: Symbol('s') })), /to \(symbol\) cannot be stored as JSON/); assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: Infinity })), /to is a non-finite number/); assert.throws(() => repo.outbox.append(mail({ id: 'mail-x', to: [() => 1] })), /to\[0\] \(function\) cannot be stored as JSON/);
+  assert.equal(repo.outbox.byId('mail-x'), null, 'nothing written by a refusal'); assert.equal(repo.outbox.count(), 9);
+  // The schema itself: exclusive columns; to_json never a JSON string or JSON null (those are to_address / NULL).
+  const insert = (to_address, to_json) => s.prepare("INSERT INTO outbox (id, source, created_at, to_address, to_json, subject, text, transport, delivered) VALUES ('bad', 'mailer', 1, ?, ?, 'S', 'T', 'dev-outbox', 1)").run(to_address, to_json);
+  for (const [a, j] of [['a@example.invalid', '["b"]'], [null, '"text"'], [null, 'null'], [null, 'not json']]) assert.throws(() => insert(a, j), /CHECK constraint failed/, `refused in SQL: to_address=${a} to_json=${j}`);
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM outbox WHERE id = 'bad'").get().n, 0);
+  // The snapshot reader (what the backup, the rollback tool and the reviewer's script read) and the dispatcher's round trip.
+  assert.deepEqual(needModule().OUTBOX_TABLE.read(s).map((m) => m.to), [ADDRESS, ONE, null, TWO, NESTED, ['synthetic-append@example.invalid'], ['synthetic-delivery@example.invalid'], null, ADDRESS]);
+  s.close();
+  const tool = openStore(dir); const snap = tool.load(); assert.deepEqual(snap.db.outbox[1].to, ONE); tool.save(snap); assert.deepEqual(tool.load().db.outbox.map((m) => m.to), [ADDRESS, ONE, null, TWO, NESTED, ['synthetic-append@example.invalid'], ['synthetic-delivery@example.invalid'], null, ADDRESS], 'round-tripped through replace'); tool.sqlite.close();
+  // The copy-only rollback: the blob holds the array exactly as the 6ca66ba build held it; the re-upgrade keeps it.
+  assert.ok(rollbackMod, 'repositories/outboxPushRollback.mjs exists'); const out = tempDir('obp-f2-out');
+  assert.equal(rollbackMod.rollbackOutboxPushCopy(dbFile(dir), out, { now: NOW }).counts.outbox, 9);
+  const back = JSON.parse(blobOf(out, 'outbox')); assert.deepEqual(back.map((m) => m.to), [ADDRESS, ONE, null, TWO, NESTED, ['synthetic-append@example.invalid'], ['synthetic-delivery@example.invalid'], null, ADDRESS]); assert.equal(JSON.stringify(back[1]), JSON.stringify(arrayMail));
+  { const o = openRaw(out); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION]); assert.deepEqual(o.prepare('SELECT to_json FROM outbox ORDER BY seq').all().map((r) => r.to_json), [null, JSON.stringify(ONE), null, JSON.stringify(TWO), JSON.stringify(NESTED), '["synthetic-append@example.invalid"]', '["synthetic-delivery@example.invalid"]', null, null]); o.close(); }
+  // A scratch database at the unaccepted 40aa05c build: refused by name, untouched, rolled back by the tool, re-upgraded.
+  const stale = tempDir('obp-f2-stale'); s7bFile(stale, { outbox: [mail()], pushLog: [push()], pushTokens: [token('t')] });
+  { const x = openRaw(stale); migrate(x); x.exec('BEGIN'); x.exec('DROP TABLE outbox'); x.exec(OUTBOX_DDL_40AA05C); x.prepare("INSERT INTO outbox (id, source, created_at, to_address, subject, text, transport, delivered) VALUES ('mail-1', 'mailer', ?, ?, 'Synthetic subject', 'T', 'dev-outbox', 1)").run(NOW - MIN, ADDRESS); x.exec('COMMIT'); x.close(); }
+  const staleBytes = fs.readFileSync(dbFile(stale));
+  { const x = openRaw(stale); assert.throws(() => bare(x), (e) => e.code === 'OUTBOX_PUSH_SCHEMA_STALE' && /to_json/.test(e.message) && /40aa05c/.test(e.message) && !e.message.includes(ADDRESS), 'the repository refuses the 40aa05c shape by name (no address in the message)'); assert.equal(x.isTransaction, false); x.close(); }
+  assert.throws(() => live(stale), /OUTBOX_PUSH_SCHEMA_STALE/, 'the data layer refuses to boot on it');
+  assert.equal(Buffer.compare(fs.readFileSync(dbFile(stale)), staleBytes), 0, 'the refusal changes nothing');
+  const staleOut = tempDir('obp-f2-stale-out');
+  assert.deepEqual(rollbackMod.rollbackOutboxPushCopy(dbFile(stale), staleOut, { now: NOW }).counts, { outbox: 1, pushLog: 1, pushTokens: 1 }, 'the rollback tool reads the 40aa05c shape (every destination there is a string or null)');
+  assert.equal(JSON.parse(blobOf(staleOut, 'outbox'))[0].to, ADDRESS);
+  { const o = openRaw(staleOut); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION]); assert.ok(o.prepare('PRAGMA table_info(outbox)').all().some((c) => c.name === 'to_json'), 're-upgraded into the corrected table'); const r = bare(o); assert.equal(r.outbox.count(), 1); assert.equal(r.outbox.exportRows()[0].to, ADDRESS); o.close(); }
+  rm(dir, out, stale, staleOut);
+});
+
+test('[review of 40aa05c, F1] raw JSON number overflow in a token (1e400 parses to Infinity; also inside an object or an array): the route-reachable value is accepted and kept AS IS in the live mirror — the route\'s strict-equality rule needs the live value: a repeated positive Infinity collapses, negative Infinity is a different row, a persisted null from an earlier process is never the live Infinity — and written as JSON null at the save boundary exactly as the accepted build\'s JSON.stringify did; a replacement deletes exactly the removed row (by seq), never every row whose JSON text is "null"; registration order, timestamps, detached exports, aborted units, a failed save and its retry, the restart semantics (null after a restart), the backup and the rollback blob all match the accepted build; NaN cannot arrive from JSON but follows the same rule; genuinely unsupported values and the strict rule for every OTHER field (extras, outbox, push log) are unchanged', () => {
+  const dir = tempDir('obp-f1');
+  // A null row from an earlier process: what the accepted build persisted for a 1e400 registration (JSON.stringify(Infinity) === 'null').
+  s7bFile(dir, { pushTokens: [token(null, { ts: NOW - 2 * MIN })] });
+  const INF = JSON.parse('1e400'); const NEG = JSON.parse('-1e400'); assert.equal(INF, Infinity); assert.equal(NEG, -Infinity);
+  // The accepted build's rule on its array: five registrations after the persisted null → five entries, JSON [null,null,null,{"n":null},[null]].
+  let old = [token(null, { ts: NOW - 2 * MIN })]; [INF, INF, NEG, { n: INF }, [INF]].forEach((v, i) => { old = routeRegister(old, 'player', 'pl-adult', v, NOW + 1 + i); });
+  assert.equal(JSON.stringify(old.map((t) => t.token)), '[null,null,null,{"n":null},[null]]'); assert.deepEqual(old.map((t) => t.ts), [NOW - 2 * MIN, NOW + 2, NOW + 3, NOW + 4, NOW + 5]);
+  const L = live(dir); L.save();
+  const r1 = L.repo.pushTokens.register(token(INF, { ts: NOW + 1 })); assert.equal(r1.removed, 0, 'the persisted null of an earlier process is not the live Infinity');
+  assert.equal(L.repo.pushTokens.register(token(INF, { ts: NOW + 2 })).removed, 1, 'a repeated positive Infinity collapses (===)');
+  assert.equal(L.repo.pushTokens.register(token(NEG, { ts: NOW + 3 })).removed, 0, 'negative Infinity is a different value');
+  assert.equal(L.repo.pushTokens.register(token({ n: INF }, { ts: NOW + 4 })).removed, 0); assert.equal(L.repo.pushTokens.register(token([INF], { ts: NOW + 5 })).removed, 0);
+  const live1 = L.repo.pushTokens.forAudience('player', 'pl-adult');
+  assert.deepEqual(live1.map((t) => t.token), [null, Infinity, -Infinity, { n: Infinity }, [Infinity]], 'the live mirror keeps the values the sender compares and sends'); assert.deepEqual(live1.map((t) => t.ts), old.map((t) => t.ts), 'order and timestamps as the accepted build');
+  assert.equal(JSON.stringify(live1.map((t) => t.token)), JSON.stringify(old.map((t) => t.token)), 'the provider payload and the backup JSON: null, as JSON.stringify always wrote');
+  live1[1].token = 5; assert.equal(L.repo.pushTokens.forAudience('player', 'pl-adult')[1].token, Infinity, 'detached copies');
+  assert.deepEqual(tokenRows(dir).map((r) => r[2]), ['null'], 'nothing durable before the save');
+  L.save();
+  assert.deepEqual(tokenRows(dir).map((r) => [r[2], r[3]]), [['null', NOW - 2 * MIN], ['null', NOW + 2], ['null', NOW + 3], ['{"n":null}', NOW + 4], ['[null]', NOW + 5]], 'persisted as JSON null at the save boundary; the earlier null row untouched; seq order = registration order');
+  // Deletion is by row: a repeated -Infinity removes the -Infinity row only, although three rows read "null" in SQL.
+  assert.equal(L.repo.pushTokens.register(token(NEG, { ts: NOW + 6 })).removed, 1); L.save();
+  assert.deepEqual(tokenRows(dir).map((r) => r[3]), [NOW - 2 * MIN, NOW + 2, NOW + 4, NOW + 5, NOW + 6], 'exactly the -Infinity row went; the persisted null and the +Infinity row stayed');
+  // An aborted unit restores the live values (Infinity, not null) and the durable rows.
+  assert.throws(() => L.store.unitOfWork(() => { L.repo.pushTokens.register(token(INF, { ts: NOW + 7 })); throw new Error('abort'); }, { snapshot: L.snapshot }), /abort/);
+  assert.deepEqual(L.repo.pushTokens.forAudience('player', 'pl-adult').map((t) => t.token), [null, Infinity, { n: Infinity }, [Infinity], -Infinity]); assert.equal(tokenRows(dir).length, 5);
+  // A failed ordinary save keeps the pending state; the retry lands it once.
+  assert.equal(L.repo.pushTokens.register(token(INF, { ts: NOW + 8 })).removed, 1, 'the live +Infinity collapses again');
+  L.store.sqlite.exec("CREATE TEMP TRIGGER rv_f1 BEFORE DELETE ON push_tokens BEGIN SELECT RAISE(ABORT, 'synthetic delete failure'); END");
+  assert.throws(() => L.save(), /synthetic delete failure/); assert.deepEqual(tokenRows(dir).map((r) => r[3]), [NOW - 2 * MIN, NOW + 2, NOW + 4, NOW + 5, NOW + 6]); assert.equal(L.repo.pending(), 1); assert.equal(L.repo.pushTokens.forAudience('player', 'pl-adult').at(-1).token, Infinity, 'memory is the intended state');
+  L.store.sqlite.exec('DROP TRIGGER rv_f1'); L.save();
+  assert.deepEqual(tokenRows(dir).map((r) => r[3]), [NOW - 2 * MIN, NOW + 4, NOW + 5, NOW + 6, NOW + 8], 'landed once: the +Infinity row moved last'); L.save(); assert.equal(tokenRows(dir).length, 5, 'no replay');
+  // Restart semantics: a new process reads null for every non-finite value (as the accepted build did); a new live Infinity no longer matches any of them.
+  L.close(); const L2 = live(dir);
+  assert.deepEqual(L2.repo.pushTokens.forAudience('player', 'pl-adult').map((t) => t.token), [null, { n: null }, [null], null, null], 'after a restart: null');
+  assert.equal(L2.repo.pushTokens.register(token(INF, { ts: NOW + 9 })).removed, 0, 'a persisted null is not removed by a new live Infinity'); L2.save(); assert.equal(tokenRows(dir).length, 6);
+  assert.equal(L2.repo.pushTokens.register(token(INF, { ts: NOW + 10 })).removed, 1, 'and that live Infinity collapses only itself'); L2.save(); assert.equal(tokenRows(dir).length, 6); assert.deepEqual(tokenRows(dir).map((r) => r[3]).slice(0, 5), [NOW - 2 * MIN, NOW + 4, NOW + 5, NOW + 6, NOW + 8], 'the earlier rows untouched');
+  // Finite primitives, fresh structurally equal objects, NaN.
+  assert.equal(L2.repo.pushTokens.register(token(424242, { ts: NOW + 11 })).removed, 0); assert.equal(L2.repo.pushTokens.register(token(424242, { ts: NOW + 12 })).removed, 1, 'a finite primitive collapses as before');
+  assert.equal(L2.repo.pushTokens.register(token({ n: INF }, { ts: NOW + 13 })).removed, 0, 'a fresh structurally equal object is a new row, as before');
+  assert.equal(L2.repo.pushTokens.register(token(Number.NaN, { ts: NOW + 14 })).removed, 0); assert.equal(L2.repo.pushTokens.register(token(Number.NaN, { ts: NOW + 15 })).removed, 0, 'NaN never equals itself under ===, so it never collapses (the array behaved the same)'); L2.save();
+  assert.deepEqual(tokenRows(dir).slice(-2).map((r) => r[2]), ['null', 'null'], 'NaN persists as null, as JSON.stringify wrote');
+  // Unchanged refusals: non-JSON values everywhere; the strict number rule for every OTHER field.
+  assert.throws(() => L2.repo.pushTokens.register(token(undefined)), /token \(undefined\) cannot be stored as JSON/); assert.throws(() => L2.repo.pushTokens.register(token(10n)), /cannot be stored as JSON/); assert.throws(() => L2.repo.pushTokens.register(token([Symbol('x')])), /token\[0\] \(symbol\) cannot be stored as JSON/);
+  assert.throws(() => L2.repo.pushTokens.register(token('fine', { note: INF })), /note is a non-finite number/, 'an unknown field of a registration keeps the strict rule');
+  assert.throws(() => L2.repo.outbox.append(mail({ id: 'mail-inf', note: INF })), /note is a non-finite number/); assert.throws(() => L2.repo.pushLog.append(push({ id: 'push-inf', note: INF })), /note is a non-finite number/);
+  assert.equal(L2.repo.pending(), 0, 'nothing queued by a refusal');
+  // The snapshot (backup) and the rollback blob carry null, as the accepted build's JSON did.
+  const all = L2.repo.pushTokens.exportRows(); assert.equal(all.length, 10, 'two NaN rows: NaN never collapses');
+  const tool = openStore(dir); const snap = tool.load(); assert.equal(JSON.stringify(snap.db.pushTokens.map((t) => t.token)), JSON.stringify(all.map((t) => t.token))); tool.sqlite.close();
+  assert.ok(rollbackMod); const out = tempDir('obp-f1-out'); rollbackMod.rollbackOutboxPushCopy(dbFile(dir), out, { now: NOW });
+  assert.equal(JSON.stringify(JSON.parse(blobOf(out, 'pushTokens')).map((t) => t.token)), JSON.stringify(all.map((t) => t.token)), 'the blob the accepted build reads');
+  L2.close(); rm(dir, out);
 });
 
 console.log(`\n${passed} outbox/push checks passed`);

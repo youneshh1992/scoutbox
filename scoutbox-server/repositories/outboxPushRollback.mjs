@@ -12,7 +12,10 @@
  * correction) reads — the `outbox`, `pushLog` and `pushTokens` blobs with
  * EVERY row of the three tables in `seq` order, each in the literal the writer
  * wrote (the mailer record or the delivery record with exactly its keys, a null
- * destination kept as present-and-null; the sender record; the registration
+ * destination kept as present-and-null, a non-string destination decoded from
+ * to_json back to its value — review of 40aa05c, F2; a copy created by the
+ * unaccepted 40aa05c build, whose outbox has no to_json column, is read too, so
+ * such a scratch database can be taken back and re-upgraded); the sender record; the registration
  * record with its token decoded to the value and type it was registered with)
  * and unknown fields spread first — so nothing written after the cutover is
  * lost and the mailer, the sweep, the sender, the registration route and the

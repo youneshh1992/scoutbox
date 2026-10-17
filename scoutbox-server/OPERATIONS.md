@@ -1051,7 +1051,7 @@ rows in the same order.
    <data-dir> <fresh-empty-dir>`, then start the S7a build (`0641b2c`) on the
    output — every dispatch and attempt written since the cutover is in it.
 
-### The mail outbox, the push log and the device push tokens (live since migration `0011`, S7c — implemented, pending independent acceptance; not production-approved)
+### The mail outbox, the push log and the device push tokens (live since migration `0011`, S7c — implemented, corrected after the independent review of `40aa05c`, pending independent acceptance; not production-approved)
 
 `/admin/outbox`, `/admin/push-log`, `/admin/overview` and `POST /push/register`
 answer exactly as before; the records behind them are rows of `outbox`,
@@ -1068,12 +1068,24 @@ the push sender and the registration route are the only writers.
   says which, and a total CHECK ties each source to its columns, so NULL always
   means "that key is absent in this shape". `to_address` may be NULL: an
   accepted queued dispatch without a destination is swept into a delivery record
-  with `to: null`, as every build since M13 did. A token is ANY JSON value the
+  with `to: null`, as every build since M13 did. A destination that is not a
+  string is kept too (review of `40aa05c`, F2): `POST /org/invites` and the m14
+  player invite validate the address with a coercing check and hand the mailer
+  the ORIGINAL value, so an ARRAY reaches the mailer and the accepted build
+  persisted it — a string lives in `to_address`, any other JSON value is encoded
+  in `to_json` and decoded on read, so the admin view, the backup, the restore
+  and the rollback hand back the same array. A token is ANY JSON value the
   route accepted (a number, a string, a boolean, an object, an array), stored
   losslessly as JSON text and handed back with the type it was registered with
   (the push sender sends Expo the same value); the route's rule is unchanged — a
   repeated primitive replaces its earlier row and goes last, an object or an
-  array is always a new row — and there is no uniqueness constraint. Vocabularies
+  array is always a new row — and there is no uniqueness constraint. A
+  non-finite number JSON syntax can produce (`1e400` parses to `Infinity`;
+  review of `40aa05c`, F1) is kept as the live value for this process — a
+  repeated `+Infinity` collapses, `-Infinity` is another row — and persists as
+  `null`, exactly as the blob's JSON did; after a restart it reads `null`, and a
+  new live `Infinity` removes none of the persisted nulls (a replacement deletes
+  by row, never by JSON text). Vocabularies
   (`transport`, `provider`, `channel`, the audience kind, the session kind) are
   open.
 - **Writes.** A mail's row is written before the provider is called and lands in
@@ -1123,10 +1135,19 @@ the push sender and the registration route are the only writers.
   non-empty output directory (exit 1), a recorded 0011 whose tables are missing
   (exit 10). Proven by booting the copy on the actual pre-S7c build (`6ca66ba`):
   the same outbox and push-log records in the admin views, and that build keeps
-  writing (a token registered, a mail sent) to its blobs; this build then
-  re-upgrades the copy with every row. To go further back, run
+  writing (a token registered, a mail sent, an array destination) to its blobs;
+  this build then re-upgrades the copy with every row. To go further back, run
   `scripts/dispatchesRollback.mjs` on this tool's output (it refuses the S7c
   file itself with exit 4).
+- **Scratch databases created by the unaccepted `40aa05c` build.** Its `outbox`
+  table has no `to_json` column (the 0011 record is present). This build refuses
+  to attach to such a file by name — `OUTBOX_PUSH_SCHEMA_STALE`, before any
+  statement is prepared, nothing changed — because the first shape could not
+  hold an array destination. The rollback tool reads that shape (every
+  destination there is a string or null): run `npm run rollback:outbox-push --
+  <data-dir> <fresh-empty-dir>` and boot this build on the copy, which
+  re-upgrades it into the corrected table. No real database carries the first
+  shape; nothing is altered in place.
 
 #### Operator procedure for the S7c cutover (not run on real data by this work)
 
