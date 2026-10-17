@@ -138,13 +138,13 @@ them.
 | `signings` | persistent | 02 | `signings`, `signing_parties` (single writer `recordCompletedSigning`; `firstQualifyingInteraction` → ledger id, at, type) | S8 |
 | `followUps` | persistent | 02 | `follow_ups` (UNIQUE signing + milestone) | S8 |
 | `outcomeReports` | persistent | 02 | `outcome_reports`, `outcome_report_confirmations` (UNIQUE follow_up_id) | S8 |
-| `channels` | persistent | 03 | `channels`; `messages[]` → `messages`, `attachment` → `message_attachments`; `readBy` → columns; `orgUserIdForNotify` dead | S7 |
+| `channels` | persistent | 03 | `channels`; `messages[]` → `messages`, `attachment` → `message_attachments`; `readBy` → columns; `orgUserIdForNotify` dead — S7d is PREPARED / NOT IMPLEMENTED (S7 review §11: `request_id` as a transitional validated reference without a foreign key, `player_id` without a reference clause, an ordering column for equal timestamps; the DDL below is not yet amended) | S7d |
 | `notifications` | persistent | 03 | `notifications` (`seq` insertion-order key; `actionRequired` → flag + columns; unknown fields → `extra_json`, own keys preserved; an audience is `kind` and `id` only, anything more refused) — **LIVE since migration 0009 (S7a, independently accepted at `0641b2c`)** | S7a |
 | `notificationPrefs` | persistent | 03 | `notification_prefs`, `notification_pref_categories` (no mandatory-false CHECK, no category-list CHECK: the vocabulary lives in code) — **LIVE since migration 0009 (S7a, independently accepted at `0641b2c`)** | S7a |
 | `dispatches` | persistent | 03 | `dispatches` (`seq` insertion-order key; `notification_id` an indexed reference, **no foreign key, no cascade** — orphans after an ordinary deletion are kept and counted; `delivered_at` / `opened_at` REAL: the callback route's finite number, fractional or not, stored exactly; the legacy non-finite in-memory clock stored NULL as the previous build's JSON did; unknown fields → `extra_json`, nested data detached), `dispatch_attempts` (keyed by dispatch and position, no minted id; total shape CHECK: a send row's `ok IS NOT NULL`) — **LIVE since migration 0010 (S7b, independently accepted at `ac50b60`)** | S7b |
-| `outbox` | audit | 03 | `outbox` (two writer literals told apart by a structural `source` discriminator under a total CHECK — NULL means "absent key"; `to_address` nullable: an accepted queued dispatch yields `to: null`; a non-string destination — the array the coercing invite routes hand the mailer — in `to_json`, decoded on read (review of `40aa05c`, F2), a non-finite number inside it kept live and persisted as the old JSON null (review of `78c14b9`); `seq` insertion-order key; unknown fields → `extra_json`) — **LIVE since migration 0011 (S7c, implemented and corrected after the review of `40aa05c`, pending independent acceptance)** | S7c |
-| `pushLog` | audit | 03 | `push_log` (`seq` key; open `audience_kind`, as `notifications`; the row is written by the after-durable effect after the notification's save and lands with the later save the sender's `nextId()` already schedules) — LIVE since migration 0011 (S7c, pending independent acceptance) | S7c |
-| `pushTokens` | persistent | 03 | `push_tokens` (`token_json`: any JSON value the route accepted, stored losslessly and decoded on read — the token is the delivery address, kept plain; **no uniqueness constraint**: the route's `===` rule lives in `register` — primitives collapse, objects never; a non-finite number (JSON `1e400`) is kept live and persisted as null, as the blob's JSON did, a replacement deleting by `seq` — review of `40aa05c`, F1; `seq` = last-registration order) — LIVE since migration 0011 (S7c, corrected, pending independent acceptance) | S7c |
+| `outbox` | audit | 03 | `outbox` (two writer literals told apart by a structural `source` discriminator under a total CHECK — NULL means "absent key"; `to_address` nullable: an accepted queued dispatch yields `to: null`; a non-string destination — the array the coercing invite routes hand the mailer — in `to_json`, decoded on read (review of `40aa05c`, F2), a non-finite number inside it kept live and persisted as the old JSON null (review of `78c14b9`); `seq` insertion-order key; unknown fields → `extra_json`) — **LIVE since migration 0011 (S7c, independently accepted at `9119187`)** | S7c |
+| `pushLog` | audit | 03 | `push_log` (`seq` key; open `audience_kind`, as `notifications`; the row is written by the after-durable effect after the notification's save and lands with the later save the sender's `nextId()` already schedules) — **LIVE since migration 0011 (S7c, independently accepted at `9119187`)** | S7c |
+| `pushTokens` | persistent | 03 | `push_tokens` (`token_json`: any JSON value the route accepted, stored losslessly and decoded on read — the token is the delivery address, kept plain; **no uniqueness constraint**: the route's `===` rule lives in `register` — primitives collapse, objects never; a non-finite number (JSON `1e400`) is kept live and persisted as null, as the blob's JSON did, a replacement deleting by `seq` — review of `40aa05c`, F1; `seq` = last-registration order) — **LIVE since migration 0011 (S7c, independently accepted at `9119187`)** | S7c |
 | `blocks` | persistent (safeguarding) | 03 | `blocks` | S6 |
 | `reports` | audit (safeguarding) | 03 | `reports` | S6 |
 | `moderationLog` | audit (safeguarding) | 03 | `moderation_log` | S6 |
@@ -403,9 +403,14 @@ this branch: 13 checks passed.
 | Of the proposed, **blocked on an unresolved decision** | file 02 (55 tables): every `player_id` lacks a foreign key until the tombstone decision O1 is implemented at S4, and `org_id RESTRICT` depends on O2; `webhook_endpoints.secret` and `org_users.mfa_json` depend on O3; `exposure_events`, `webhook_deliveries`, `dispatches`, `outbox` retention depends on O4; `assessments` depends on O6; `second_look_items` key on O7; `representations` on O8; `agent_profile_facets.member_association` sentinel on O10 | §10, §12 |
 
 Counts: 19 implemented, 302 proposed, of which 55 (file 02) cannot be cut over until S4b
-has shipped the tombstone (O1) and the file has been amended with the player foreign keys
-(plan S8 "Depends on"). The remaining open questions change columns or retention rules,
-not table boundaries.
+(not implemented; O1 partially resolved — the full birth date chosen, the country code and the
+child-status stamp open) has shipped the tombstone and the file has been amended with the player
+foreign keys (plan S8 "Depends on"). The remaining open questions change columns or retention
+rules, not table boundaries. The table above predates S6a and S7; the live tables since then are
+listed with their steps in §4's mapping (`email_challenges`, `pairing_codes` — S6a, accepted at
+`2d7ddeb`; `notifications`, `notification_prefs`, `notification_pref_categories` — S7a, accepted at
+`0641b2c`; `dispatches`, `dispatch_attempts` — S7b, accepted at `ac50b60`; `outbox`, `push_log`,
+`push_tokens` — S7c, accepted at `9119187`).
 
 ### 5.0.1 Why 320 tables and 388 indexes
 
@@ -800,11 +805,13 @@ DECISIONs:
   for); files 03–08 reference `players(id)` with `RESTRICT` or `CASCADE` (48 references),
   which presumes the tombstone above. Both are documented in the file headers. This is not
   a finished design: the recruitment domain cannot be cut over while its player references
-  are unenforced. Resolution, in order: O1 is decided by the Founder before S4; **S4**
-  implements the tombstone (`players.deleted_at`, erasure of personal columns, the
-  per-table lifecycle statements); **S8a** amends `02_recruitment.sql` to add `REFERENCES
-  players(id) ON DELETE RESTRICT` on every `player_id` and ships it in migration
-  `0010_recruitment`. Until S8a lands, the file 02 DDL is proposed, not accepted.
+  are unenforced. Resolution, in order: O1 is decided by the Founder (partially resolved on 12
+  October 2026 — the full birth date; the country code and the child-status stamp still open, §12);
+  **S4b** — not implemented; S4a kept today's hard delete — implements the tombstone
+  (`players.deleted_at`, erasure of personal columns, the per-table lifecycle statements); **S8a**
+  amends `02_recruitment.sql` to add `REFERENCES players(id) ON DELETE RESTRICT` on every
+  `player_id` and ships it in its migration (`0010_recruitment` is a placeholder; `0010` is
+  `0010_dispatches`). Until S8a lands, the file 02 DDL is proposed, not accepted.
 - **Guardian and org deletion.** New routes in S4 (guardian: only when no non-deleted child
   remains) and S3 (org: `suspended` plus `deleted_at`; staff and sessions cascade; recruitment
   rows keep the org tombstone). OPEN: the Founder's policy on org deletion with open

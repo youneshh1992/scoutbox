@@ -1051,7 +1051,7 @@ rows in the same order.
    <data-dir> <fresh-empty-dir>`, then start the S7a build (`0641b2c`) on the
    output — every dispatch and attempt written since the cutover is in it.
 
-### The mail outbox, the push log and the device push tokens (live since migration `0011`, S7c — implemented, corrected after the independent review of `40aa05c`, pending independent acceptance; not production-approved)
+### The mail outbox, the push log and the device push tokens (live since migration `0011`, S7c — independently accepted at `9119187` for its bounded storage-migration scope; not production-approved)
 
 `/admin/outbox`, `/admin/push-log`, `/admin/overview` and `POST /push/register`
 answer exactly as before; the records behind them are rows of `outbox`,

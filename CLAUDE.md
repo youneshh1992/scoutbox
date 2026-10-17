@@ -166,13 +166,16 @@ and design changes the Founder explicitly requests.
   rollback is `scripts/dispatchesRollback.mjs` (every row and attempt written
   back; nothing lost) and the S7a tool refuses a file carrying 0010.
   **The mail outbox, the push log and the device push tokens are tables since
-  S7c** (IMPLEMENTED on top of `6ca66ba`, CORRECTED on top of `40aa05c` after
-  the independent review found two compatibility defects and on top of
-  `78c14b9` for the remaining destination boundary, PENDING INDEPENDENT
-  ACCEPTANCE — not accepted; `repositories/outboxPush.mjs`, migration
-  `0011_outbox_push` with its DDL amended in place;
-  `docs/architecture/s7-readiness-review.md` §10 as corrected by the review of
-  `6ca66ba`, §10.8, and by the review of `40aa05c`, §10.10): `db.outbox`, `db.pushLog` and `db.pushTokens` are
+  S7c** (independently ACCEPTED at commit
+  `911918749687a3acdca430fe011d6c868ee640df` on 17 October 2026 for its bounded
+  storage-migration scope — not production, security, legal-compliance or
+  deployment approval, and not acceptance of S7d, S4b, the remaining S6 tables
+  or S8; implemented on top of `6ca66ba`, corrected after the independent
+  reviews of `40aa05c` and `78c14b9`, both dated history;
+  `repositories/outboxPush.mjs`, migration `0011_outbox_push` with its DDL
+  amended in place before acceptance; `docs/architecture/s7-readiness-review.md`
+  §10 as corrected by the review of `6ca66ba`, §10.8, §10.10, §10.11, the
+  acceptance §10.12): `db.outbox`, `db.pushLog` and `db.pushTokens` are
   read-only views over one participant's three mirrors (insertion order); the
   ONLY writers are `outbox.append` / `outbox.markDelivered` (adapters.mjs mailer
   — the record before the provider call, the live answer on the caller's
@@ -201,7 +204,13 @@ and design changes the Founder explicitly requests.
   row written back in its writer's literal; nothing lost; proven on the actual
   `6ca66ba` build) and the S7b tool refuses a file carrying 0011. The staff
   push identity, the plain-code mail sites and retention are carried through
-  unchanged, not decided. S7d is not started.
+  unchanged, not decided. **S7d is not started**; the next milestone is
+  PREPARED / NOT IMPLEMENTED in the S7 review §11 (S7d storage-only with the
+  §2.3 transitional validated request reference and today's deletion
+  reproduced inside the unit — no CASCADE/RESTRICT, no retention decision) and
+  is NOT authorised until the Founder decides D-A and D-B (review §11.6); no
+  migration identifier is assigned for it. S8, S4b and the remaining S6 tables
+  are not started; S4b waits for the open country-code decision.
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state

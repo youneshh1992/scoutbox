@@ -37,12 +37,14 @@ bounded dispatch/attempt storage milestone and its three corrections — `dispat
 `dispatch_attempts` as tables, migration **`0010_dispatches`**, its copy-only rollback; backend 23 suites /
 324 checks, Player 4 / 41 and the three reviewer scripts verified by the reviewer on real Node v24.19.0; not
 production or deployment approval; review §9.9), **the notification-extras follow-up independently accepted at
-`6ca66ba`** (review §9.10), **S7c implemented on top of `6ca66ba` — migration `0011_outbox_push` — and corrected on top of `40aa05c`
-after the independent review found two compatibility defects (an array mail destination, raw JSON overflow
-tokens; review §10.10), and on top of `78c14b9` for the remaining boundary (a non-finite number inside an
-accepted array destination; review §10.11), pending independent acceptance** (review §10.8; the three design assumptions
-corrected first, §10.7),
-**S7d not started** (its blockers are stated in the review and in §S7)
+`6ca66ba`** (review §9.10), **S7c independently accepted at `911918749687a3acdca430fe011d6c868ee640df`** (17 October
+2026, for its bounded storage-migration scope — `outbox`, `push_log` and `push_tokens` as tables, migration
+**`0011_outbox_push`**, its copy-only rollback; implemented on top of `6ca66ba` and corrected twice after independent
+reviews, review §10.8, §10.10, §10.11 as dated history; the reviewer verified backend 25 suites / 348 checks, Player
+4 / 41, `m13E2E` 212 checks, the six reviewer scripts and the actual pre-S7a/S7b/S7c rollback boots on real Node
+v24.19.0; not production, security, legal-compliance or deployment approval; review §10.12),
+**S7d not started — the next milestone is PREPARED / NOT IMPLEMENTED in the review §11** (S7d storage-only with the
+§2.3 transitional request reference, recommended over S8a-first; it waits for the two decisions in review §11.6)
 — S8–S14 planned. The evidence-based plan of S4 is
 [`s4-readiness-review.md`](./s4-readiness-review.md).
 Migration numbering: `0006` is `0006_media_deletions` (S4a); S5 took **`0007_player_subrecords`**;
@@ -1368,49 +1370,65 @@ performance, existing tests, what this plan is not).
 > decision.
 > **Status (notification extras follow-up): independently accepted at `6ca66ba`** for its bounded
 > scope (review §9.10, §10.9).
-> **Status (S7c): IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE — not accepted** (review §10.8: migration
-> `0011_outbox_push` registered; `outbox`, `push_log`, `push_tokens` are tables written through
-> `repositories/outboxPush.mjs`; the prepared design was corrected by the review of `6ca66ba` before
-> the implementation — the push row's existing save scheduling kept as it is, tokens stored losslessly
-> as JSON with the route's rule and no uniqueness constraint, a nullable delivery destination; the
-> copy-only rollback is `scripts/outboxPushRollback.mjs`, proven on the actual `6ca66ba` build).
-> **Status (S7d): not started.** The evidence-based review is
+> **Status (S7c): independently ACCEPTED at `911918749687a3acdca430fe011d6c868ee640df`** (17 October
+> 2026, for the bounded storage-migration scope; review §10.12 holds the acceptance record, the reviewer's
+> results on real Node v24.19.0 and its limits — not production, security, legal-compliance or deployment
+> approval, and not acceptance of S7d, S4b, the remaining S6 tables or S8): migration `0011_outbox_push`
+> registered; `outbox`, `push_log`, `push_tokens` are tables written through `repositories/outboxPush.mjs`;
+> the prepared design was corrected by the review of `6ca66ba` before the implementation (the push row's
+> existing save scheduling kept as it is, tokens stored losslessly as JSON with the route's rule and no
+> uniqueness constraint, a nullable delivery destination), then corrected twice after the independent
+> reviews of `40aa05c` (an array mail destination; raw JSON overflow tokens — review §10.10) and `78c14b9`
+> (a non-finite number inside an accepted array destination kept live and persisted as the old JSON null —
+> review §10.11), both dated history; the copy-only rollback is `scripts/outboxPushRollback.mjs`, proven on
+> the actual `6ca66ba` build. The earlier intermittent push-timing observation did not recur in the
+> reviewer's accepting run; no root cause is established (review §10.10, §10.12).
+> **Status (S7d): not started. The next milestone is PREPARED / NOT IMPLEMENTED in the review §11** —
+> S7d storage-only (`channels`, `messages`, `message_attachments`) with the §2.3 transitional validated
+> request reference and today's deletion behaviour reproduced unchanged, recommended over S8a-first after a
+> survey of the current code (§11.1–§11.3); it is not authorised and takes no identifier until the Founder
+> decides D-A (approve the transitional reference) and D-B (confirm the storage-only reading of today's
+> deletion) in review §11.6. The evidence-based review is
 > [`s7-readiness-review.md`](./s7-readiness-review.md);
 > the text below is the sequence it derived and replaces the earlier assumptions of this
 > section (recorded there, §0). No further migration identifier is assigned until a sub-step is
-> authorised. **Blockers, exactly:** (1) the proposed `channels.request_id` references
+> authorised. **Blockers of S7d, exactly:** (1) the proposed `channels.request_id` references
 > `recruitment_requests`, an S8 table that itself references S8's `recruitment_cases`, `trials`
-> and `org_users`, while S8 lists S7 as a dependency — a transitional validated reference is
-> proposed in the review §2.3 and needs approval, or S8a ships first; (2) message retention after
+> and `org_users`, while S8 lists S7 as a dependency — the transitional validated reference
+> proposed in the review §2.3 needs approval (D-A), or S8a ships first (which carries the same device
+> twice, for `case_id` and `trial_id`, and is the larger step — review §11.3); (2) message retention after
 > a player deletion is an open policy question (`s4-deletion-decision.md` §4 "messages — review"),
-> so no `players(id)` CASCADE/RESTRICT may be encoded for channels; (3) the ledger row every send
-> writes stays a blob until the S6 `ledger` table, which waits for S4b, so the "no whole-database
-> write on send" objective cannot be met by S7 alone (review §7.3).
+> so no `players(id)` CASCADE/RESTRICT may be encoded for channels — a storage-only step can reproduce
+> today's explicit deletion inside the unit if the Founder confirms that reading (D-B); (3) the ledger row
+> every send writes stays a blob until the S6 `ledger` table, which waits for S4b, so the "no whole-database
+> write on send" objective cannot be met by S7 alone (review §7.3, §11.2).
 
 - **Objective.** The nine S7 collections become tables in four sub-steps, each independently
   testable and rolled back copy-only without loss: **S7a** `notifications`,
-  `notification_prefs`, `notification_pref_categories` (accepted at `0641b2c`); **S7b** `dispatches`,
-  `dispatch_attempts` (implemented on top of `dc4b559`, pending independent acceptance; review §9:
+  `notification_prefs`, `notification_pref_categories` (independently accepted at `0641b2c`); **S7b** `dispatches`,
+  `dispatch_attempts` (independently accepted at `ac50b60`; review §9:
   `notification_id` as a plain reference — no foreign key, no cascade, today's deletion and its
   retained dispatch rows preserved, orphan references counted not refused; migration
   `0010_dispatches`, so the `0010_recruitment` placeholder below moves when S8a is approved);
-  **S7c** `outbox` (two writer shapes unified under a structural `source` discriminator, a nullable
-  destination), `push_log`, `push_tokens` (any JSON token value stored losslessly; the route's
-  matching rule; no uniqueness constraint) — storage move only, the staff-push re-keying (defect 10
-  of the schema document) a behaviour change carried through unchanged; **implemented on top of
-  `6ca66ba`, migration `0011_outbox_push`; corrected on top of `40aa05c` — the destination is any JSON
-  value (`to_address` / `to_json`), a non-finite token value is kept live and persisted as null, the DDL
-  amended in place (review §10.10); a non-finite number inside an accepted array destination is kept live and
-  persisted as the old JSON null too (review §10.11); pending independent acceptance** (review §10.8; the three
-  design assumptions the review of `6ca66ba` corrected are recorded in §10.3/§10.4/§10.7 — none was
-  a product decision); **S7d** `channels`, `messages`,
-  `message_attachments` (after the request-reference decision and the retention answer). The
+  **S7c** `outbox` (two writer shapes unified under a structural `source` discriminator, the
+  destination any JSON value — `to_address` / `to_json` — null included), `push_log`, `push_tokens` (any
+  JSON token value stored losslessly; the route's matching rule; no uniqueness constraint; a non-finite
+  number kept live and persisted as null, as the blob's JSON did) — storage move only, the staff-push
+  re-keying (defect 10 of the schema document) a behaviour change carried through unchanged;
+  **independently accepted at `9119187`, migration `0011_outbox_push`** (review §10.12; the three design
+  assumptions the review of `6ca66ba` corrected are recorded in §10.3/§10.4/§10.7 and the two correction
+  rounds in §10.10/§10.11 — none was a product decision); **S7d** `channels`, `messages`,
+  `message_attachments` — **PREPARED / NOT IMPLEMENTED** (review §11.5: storage-only, the §2.3 transitional
+  validated request reference, today's deletion reproduced inside the unit, no CASCADE/RESTRICT, an ordering
+  column for equal timestamps; needs decisions D-A and D-B, review §11.6). The
   whole-database-write objective is met in phases measured by a synthetic benchmark (review
-  §7.3), not claimed by any single sub-step.
+  §7.3), not claimed by any single sub-step — S7d alone leaves the `ledger` blob (and, on the acceptance
+  path, `requests` and `trials`) in every send's save (review §11.2).
 - **Depends on.** S4a (live identity tables) for every sub-step; **S4b** for any `players(id)`
-  reference and for the S6 ledger; **S8a** (or the approved transitional design) for
-  `channels.request_id`; nothing else for S7a–S7c. "Depends on S4" in the earlier text did not
-  establish that S4a alone suffices; it does not.
+  reference and for the S6 ledger (S7d as prepared carries `player_id` without a reference clause,
+  as `pairing_codes` does, so it does not wait for S4b — review §11.4); **S8a** (or the approved
+  transitional design, decision D-A) for `channels.request_id`; nothing else for S7a–S7c. "Depends on
+  S4" in the earlier text did not establish that S4a alone suffices; it does not.
 - **Files / tables.** Per sub-step, in the review §8.2 (S7a) and §2.3; `server.mjs` 828–877
   (`notify`), 897–917 (`openChannel`), 940–971 (`postMessage`), 3979–3981 (push register);
   `adapters.mjs` (mailer with the S6a withholding, push sender); `m13/delivery.mjs`;
@@ -1444,16 +1462,26 @@ performance, existing tests, what this plan is not).
   `recruitmentContacts[].emailCopy.outboxId` references — "contacts' outbox copies"), and
   the two unresolved relational-integrity decisions below, which must be closed **before
   S8a's migration is written**, not during it. Note the cross-reference with S7: the proposed
-  `channels.request_id → recruitment_requests` means S7d needs S8a (or the transitional design
-  in the S7 review §2.3), while S8c needs S7c — the sequence is S7a → S7b → S7c → S8a → S7d or
-  S8c, decided when each is authorised:
-  - *Player tombstone (schema O1, implemented at S4).* `02_recruitment.sql` today declares
-    no foreign key on any `player_id` because `deletePlayerData` hard-deletes the player
-    row. S4 replaces the hard delete with a tombstone row; S8a then amends
-    `02_recruitment.sql` to add `REFERENCES players(id) ON DELETE RESTRICT` on every
-    `player_id` column and ships that DDL in migration `0010_recruitment`. Until S4 has
-    shipped and the file has been amended, the recruitment domain is **not ready to cut
-    over**; the design is unresolved on this point, not finished.
+  `channels.request_id → recruitment_requests` means S7d needs S8a or the transitional design
+  in the S7 review §2.3, while S8c needs S7c (accepted). S7a, S7b and S7c are accepted; what
+  follows is **either** S7d with the transitional reference (prepared, review §11.5 — recommended)
+  **or** S8a first — neither is authorised, and going S8a-first does not remove the case/trial
+  dependencies: `recruitment_requests.case_id` and `trial_id` reference `recruitment_cases` (S8b) and
+  `trials` (S8a), so S8a either carries those two as validated references without foreign keys —
+  the same device as S7d's — or grows to S8a+S8b (review §11.1, §11.3). The sequence after S7c is
+  decided when a step is authorised:
+  - *Player tombstone (schema O1 — partially resolved on 12 October 2026; **S4b NOT implemented**).*
+    `02_recruitment.sql` today declares no foreign key on any `player_id` because
+    `deletePlayerData` hard-deletes the player row — and it still does: S4a kept today's deletion
+    unchanged, and S4b (the tombstone rewrite) is not built. The Founder chose the full birth date
+    for the retained record; the country-code and child-status questions stay open
+    (`s4-deletion-decision.md` §10), and S4b cannot finish without the country-code answer. When
+    S4b ships the tombstone row, S8a then amends `02_recruitment.sql` to add `REFERENCES
+    players(id) ON DELETE RESTRICT` on every `player_id` column and ships that DDL in its
+    migration (the `0010_recruitment` identifier below is a placeholder — `0010` is taken by
+    `0010_dispatches`; S8a takes the next free number when approved). Until S4b has shipped and
+    the file has been amended, the recruitment domain is **not ready to cut over**; the design is
+    unresolved on this point, not finished.
   - *Org deletion policy (schema O2).* `org_id` columns in file 02 are `RESTRICT` on the
     assumption that no org deletion route exists. S3 shipped **without** one (no
     `deleted_at`, no hard delete; `suspended` is the only lifecycle flag, and `org_users`
@@ -1461,7 +1489,8 @@ performance, existing tests, what this plan is not).
     answer on open recruitment cases decides whether S8 keeps `RESTRICT` or adds a
     tombstone-aware rule.
 - **Files / tables.** `repositories/recruitment/*.mjs` (one module per aggregate), migration
-  `0010_recruitment`; `server.mjs` requests/trials routes (2068–2371, 2612), `m12/scouting.mjs`
+  `0010_recruitment` (a placeholder identifier: `0010` is `0010_dispatches`; the real number is
+  assigned when S8a is approved); `server.mjs` requests/trials routes (2068–2371, 2612), `m12/scouting.mjs`
   cases, `m17/rooms.mjs`, `m23/*` (contacts, trials P4B, decisions, journey), `m27`–`m29`
   (handoffs, offers, packages, signings). Largest step; sub-steps S8a requests+trials, S8b
   cases+rooms+decisions, S8c contacts+offers, S8d packages+signings+follow-ups.
