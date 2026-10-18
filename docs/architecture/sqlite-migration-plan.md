@@ -43,16 +43,19 @@ production or deployment approval; review §9.9), **the notification-extras foll
 reviews, review §10.8, §10.10, §10.11 as dated history; the reviewer verified backend 25 suites / 348 checks, Player
 4 / 41, `m13E2E` 212 checks, the six reviewer scripts and the actual pre-S7a/S7b/S7c rollback boots on real Node
 v24.19.0; not production, security, legal-compliance or deployment approval; review §10.12),
-**S7d not started — the next milestone is PREPARED / NOT IMPLEMENTED in the review §11** (S7d storage-only with the
-§2.3 transitional request reference, recommended over S8a-first; it waits for the two decisions in review §11.6)
-— S8–S14 planned. The evidence-based plan of S4 is
+**S7d IMPLEMENTED on top of `b67bce5` (18 October 2026), PENDING INDEPENDENT ACCEPTANCE** (storage-only:
+`channels`, `messages`, `message_attachments` as tables, migration **`0012_channels`**, the §2.3 transitional
+code-checked request reference approved by the Founder as D-A, today's deletion of a deleted player's threads
+reproduced inside the deletion unit as confirmed by D-B — a scope confirmation, not a retention decision; copy-only
+rollback `scripts/channelsRollback.mjs` proven on the actual `b67bce5` build; review §11.9) — S8–S14 planned. The evidence-based plan of S4 is
 [`s4-readiness-review.md`](./s4-readiness-review.md).
 Migration numbering: `0006` is `0006_media_deletions` (S4a); S5 took **`0007_player_subrecords`**;
 S6a took the next unused identifier, **`0008_one_time_codes`** (the plan's placeholder
 `0008_safety_audit` is withdrawn); S7a took **`0009_notifications`**; S7b took **`0010_dispatches`**
 (the plan's `0010_recruitment` placeholder for S8a moves to the next free number when S8a is
-approved); S7c took **`0011_outbox_push`** (the `0011_scouting` placeholder for S9 moves likewise). The
-later steps' identifiers
+approved); S7c took **`0011_outbox_push`** (the `0011_scouting` placeholder for S9 moves likewise); S7d took
+**`0012_channels`** (implemented, pending independent acceptance — the next free identifier after verifying the
+registry at `b67bce5`). The later steps' identifiers
 in §B are placeholders, assigned from the actual order in which steps are approved and built.
 Existing migration ids never change.
 
@@ -1383,26 +1386,26 @@ performance, existing tests, what this plan is not).
 > review §10.11), both dated history; the copy-only rollback is `scripts/outboxPushRollback.mjs`, proven on
 > the actual `6ca66ba` build. The earlier intermittent push-timing observation did not recur in the
 > reviewer's accepting run; no root cause is established (review §10.10, §10.12).
-> **Status (S7d): not started. The next milestone is PREPARED / NOT IMPLEMENTED in the review §11** —
-> S7d storage-only (`channels`, `messages`, `message_attachments`) with the §2.3 transitional validated
-> request reference and today's deletion behaviour reproduced unchanged, recommended over S8a-first after a
-> survey of the current code (§11.1–§11.3); it is not authorised and takes no identifier until the Founder
-> decides D-A (approve the transitional reference) and D-B (confirm the storage-only reading of today's
-> deletion) in review §11.6. The evidence-based review is
-> [`s7-readiness-review.md`](./s7-readiness-review.md);
-> the text below is the sequence it derived and replaces the earlier assumptions of this
-> section (recorded there, §0). No further migration identifier is assigned until a sub-step is
-> authorised. **Blockers of S7d, exactly:** (1) the proposed `channels.request_id` references
-> `recruitment_requests`, an S8 table that itself references S8's `recruitment_cases`, `trials`
-> and `org_users`, while S8 lists S7 as a dependency — the transitional validated reference
-> proposed in the review §2.3 needs approval (D-A), or S8a ships first (the larger step: fourteen tables,
-> the request–trial pair enforceable by its own foreign keys, the two `case_id` columns still dependent on
-> `recruitment_cases` — review §11.1, §11.3 as corrected in §11.7); (2) message retention after
-> a player deletion is an open policy question (`s4-deletion-decision.md` §4 "messages — review"),
-> so no `players(id)` CASCADE/RESTRICT may be encoded for channels — a storage-only step can reproduce
-> today's explicit deletion inside the unit if the Founder confirms that reading (D-B); (3) the ledger row
-> every send writes stays a blob until the S6 `ledger` table, which waits for S4b, so the "no whole-database
-> write on send" objective cannot be met by S7 alone (review §7.3, §11.2).
+> **Status (S7d): IMPLEMENTED on top of `b67bce5` (18 October 2026), PENDING INDEPENDENT ACCEPTANCE** (review
+> §11.9 holds the implementation record, the Founder's approvals verbatim, the verification and its limits — not
+> production, security, legal-compliance or deployment approval; not acceptance of S4b, the remaining S6 tables or
+> S8): migration `0012_channels` registered; `channels`, `messages` and `message_attachments` are tables written
+> through `repositories/channels.mjs` (the acceptance routes' `openChannel`, `postMessage`, the three receipt
+> routes, the account deletion); `db.channels` is a read-only view in insertion order with each thread's
+> `messages` nested as before; every route answers as before; the copy-only rollback is
+> `scripts/channelsRollback.mjs`, proven on the actual `b67bce5` build. The evidence-based review is
+> [`s7-readiness-review.md`](./s7-readiness-review.md); the text below is the sequence it derived and replaces
+> the earlier assumptions of this section (recorded there, §0). **The three blockers recorded here before the
+> implementation, and how each stands:** (1) `channels.request_id` referenced `recruitment_requests`, an S8 table
+> — the Founder approved D-A, the §2.3 transitional code-checked reference (`NOT NULL UNIQUE`, no foreign key,
+> checked in code at open, import and every snapshot write) until recruitment requests move to tables at S8a,
+> which rebuilds the table with the foreign key after its own preflight; (2) message retention after a player
+> deletion is an open policy question (`s4-deletion-decision.md` §4 "messages — review"), so no `players(id)`
+> CASCADE/RESTRICT is encoded — the Founder confirmed D-B, the storage-only reading: today's explicit deletion of
+> the deleted player's threads, guardian–club threads included, is reproduced inside the deletion unit, and that
+> confirmation decides no future retention policy; (3) the ledger row every send writes stays a blob until the S6
+> `ledger` table, which waits for S4b, so the "no whole-database write on send" objective is narrowed by S7d, not
+> met (review §7.3, §11.2, §11.9 — the benchmark shows the ledger blob still rewritten on every save).
 
 - **Objective.** The nine S7 collections become tables in four sub-steps, each independently
   testable and rolled back copy-only without loss: **S7a** `notifications`,
@@ -1419,14 +1422,15 @@ performance, existing tests, what this plan is not).
   **independently accepted at `9119187`, migration `0011_outbox_push`** (review §10.12; the three design
   assumptions the review of `6ca66ba` corrected are recorded in §10.3/§10.4/§10.7 and the two correction
   rounds in §10.10/§10.11 — none was a product decision); **S7d** `channels`, `messages`,
-  `message_attachments` — **PREPARED / NOT IMPLEMENTED** (review §11.5 as corrected in §11.7: storage-only,
-  the §2.3 transitional validated request reference, today's deletion reproduced inside the unit, no
-  player- or request-lifecycle CASCADE/RESTRICT — the `org_id` RESTRICT and the internal message/attachment
-  cascades remain, `guardian_id` checked in code on every identity, channel or request snapshot write (review
-  §11.8: a bounded choice, with the deferred-foreign-key alternative stated) —, every present legacy field
-  preserved in `extra_json`,
-  final-state validation of partial snapshots in both directions, channel-list and message order kept; needs
-  decisions D-A and D-B, review §11.6). The
+  `message_attachments` — **IMPLEMENTED on top of `b67bce5`, migration `0012_channels`, PENDING INDEPENDENT
+  ACCEPTANCE** (review §11.5 as corrected in §11.7/§11.8 and implemented as recorded in §11.9: storage-only, the
+  §2.3 transitional code-checked request reference (D-A approved), today's deletion reproduced inside the unit
+  (D-B confirmed — a scope confirmation, not a retention decision), no player- or request-lifecycle
+  CASCADE/RESTRICT — the `org_id` RESTRICT and the internal message/attachment cascades remain, `guardian_id`
+  checked in code at open and on every identity, channel or request snapshot write (a bounded choice, with the
+  deferred-foreign-key alternative stated) —, every present legacy field preserved in `extra_json` and absent
+  optional keys preserved as absent (`absent_keys_json`), final-state validation of partial snapshots in both
+  directions, channel-list and message order kept as `seq` and `position`). The
   whole-database-write objective is met in phases measured by a synthetic benchmark (review
   §7.3), not claimed by any single sub-step — S7d alone leaves the `ledger` blob (and, on the acceptance
   path, `requests` and `trials`) in every send's save (review §11.2).
@@ -1468,10 +1472,11 @@ performance, existing tests, what this plan is not).
   `recruitmentContacts[].emailCopy.outboxId` references — "contacts' outbox copies"), and
   the two unresolved relational-integrity decisions below, which must be closed **before
   S8a's migration is written**, not during it. Note the cross-reference with S7: the proposed
-  `channels.request_id → recruitment_requests` means S7d needs S8a or the transitional design
-  in the S7 review §2.3, while S8c needs S7c (accepted). S7a, S7b and S7c are accepted; what
-  follows is **either** S7d with the transitional reference (prepared, review §11.5 — recommended)
-  **or** S8a first — neither is authorised. Going S8a-first does not remove the `recruitment_cases`
+  `channels.request_id → recruitment_requests` meant S7d needed S8a or the transitional design
+  in the S7 review §2.3, while S8c needs S7c (accepted). S7a, S7b and S7c are accepted; S7d is
+  implemented with the transitional reference the Founder approved (D-A; review §11.9, pending independent
+  acceptance), so S8a now inherits the rebuild of `channels` with the real foreign key after its own
+  preflight (true by construction if the transitional validation has held). Going S8a-first would not have removed the `recruitment_cases`
   dependency: `recruitment_requests.case_id` and `trials.case_id` reference a table of S8b, so S8a
   either carries those two columns as validated references without foreign keys (a transitional device
   of the S7 review §2.3 kind, needing its own approval) or grows to S8a+S8b; the request–trial pair

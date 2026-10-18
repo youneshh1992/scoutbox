@@ -199,7 +199,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -283,6 +283,10 @@ db.sessions ??= [];        // bearer-token sessions (all roles): already the dat
 db.outbox ??= [];          // mailer dev transport (+ delivery audit when live)
 db.pushLog ??= [];         // push dev transport (+ delivery audit when live)
 db.pushTokens ??= [];      // device push tokens, registered per user
+// S7d: db.channels is a read-only view over the channels / messages /
+// message_attachments tables (repositories/channels.mjs, migration 0012) since
+// attachDataLayer ran above — never assigned here; writes go through `channels`
+// (openChannel, postMessage, the receipt routes, deletePlayerData).
 db.invoices ??= [];        // billing records (success fees)
 // db.emailChallenges: the data layer's hash-free read-only view since S6a (rows of email_challenges) — never assigned here.
 db.openTrials ??= [];      // grassroots open trial days + registrations
@@ -949,6 +953,13 @@ function markNotificationsRead(kind, id) {
 // A channel is the ONLY conversation surface, and it exists solely because a
 // request was accepted. For minors the counterparty is the guardian — the
 // child is never in the thread. Every message is moderated and logged.
+// S7d: the thread is a row of the `channels` table (repositories/channels.mjs,
+// migration 0012), written through the repository in its staged mode — it lands
+// in the acceptance route's own persistNow() with the request's answer, exactly
+// where the blob entry landed before. The repository checks the request against
+// the live requests collection (the transitional reference, D-A), the
+// organisation and the guardian, and refuses a second thread for one request.
+// The literal below is unchanged; what comes back is the read-only view of it.
 function openChannel(request) {
   const channel = {
     id: nextId('chan'),
@@ -967,8 +978,7 @@ function openChannel(request) {
     // Read receipts: last time each side opened the thread.
     readBy: { org: null, counterparty: null },
   };
-  db.channels.push(channel);
-  return channel;
+  return channels.open(channel);
 }
 
 // Resolve a message attachment reference into a safe, shareable summary.
@@ -999,8 +1009,10 @@ function postMessage(channel, sender, text, attachment = null, clientMsgId = nul
     const dup = channel.messages.find((m) => m.clientMsgId === clientMsgId && m.sender.kind === sender.kind && m.sender.id === sender.id);
     if (dup) return dup;
   }
-  const msg = { id: nextId('msg'), ts: Date.now(), sender, text, attachment, ...(clientMsgId ? { clientMsgId } : {}) };
-  channel.messages.push(msg);
+  // S7d: the message is a row of the `messages` table (its attachment a row of
+  // `message_attachments`), appended at the end of the thread through the
+  // repository; it lands in the persistNow() below, before the sender hears 201.
+  const msg = channels.appendMessage(channel.id, { id: nextId('msg'), ts: Date.now(), sender, text, attachment, ...(clientMsgId ? { clientMsgId } : {}) });
   ledgerAppend({ type: 'message', playerId: channel.playerId, orgId: channel.orgId, orgName: channel.orgName, userId: sender.kind === 'org_user' ? sender.id : null, scoutName: sender.name });
   const recipient = sender.kind === 'org_user'
     ? channel.counterparty === 'guardian'
@@ -1631,7 +1643,7 @@ guardianRouter.post('/channels/:id/messages', (req, res) => {
 guardianRouter.post('/channels/:id/read', (req, res) => {
   const channel = db.channels.find((c) => c.id === req.params.id && c.guardianId === req.guardian.id);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  channel.readBy.counterparty = Date.now();
+  channels.markRead(channel.id, 'counterparty', Date.now()); // S7d: the receipt column, in this route's save
   persistNow();
   broadcast('messages', { channelId: channel.id });
   res.json({ readBy: channel.readBy });
@@ -2389,7 +2401,7 @@ orgRouter.post('/channels/:id/messages', (req, res) => {
 orgRouter.post('/channels/:id/read', (req, res) => {
   const channel = db.channels.find((c) => c.id === req.params.id && c.orgId === req.org.id);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  channel.readBy.org = Date.now();
+  channels.markRead(channel.id, 'org', Date.now()); // S7d: the receipt column, in this route's save
   persistNow();
   broadcast('messages', { channelId: channel.id });
   res.json({ readBy: channel.readBy });
@@ -3472,7 +3484,7 @@ playerRouter.post('/channels/:id/read', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
   const channel = db.channels.find((c) => c.id === req.params.id && c.playerId === req.player.id && c.counterparty === 'player');
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  channel.readBy.counterparty = Date.now();
+  channels.markRead(channel.id, 'counterparty', Date.now()); // S7d: the receipt column, in this route's save
   persistNow();
   broadcast('messages', { channelId: channel.id });
   res.json({ readBy: channel.readBy });
@@ -4276,7 +4288,11 @@ function deletePlayerData(playerId) {
   // M23 P6.1: Offers keep ids, states and times and lose the person's name and words.
   m28Ctx?.onPlayerDeleted?.(playerId, at);
   m29Ctx?.onPlayerDeleted?.(playerId, at);
-  db.channels = db.channels.filter((c) => c.playerId !== playerId);
+  // S7d (D-B, approved for this storage-only step): today's behaviour, reproduced
+  // — every thread of the player goes, guardian–club threads included, with its
+  // messages, attachments and receipts, inside this unit. No retention rule is
+  // introduced here; the retention question stays open for S4b.
+  channels.deleteForPlayer(playerId);
   notifications.deleteForAudience('player', playerId); // S7a: the person's rows go in this unit; their preferences are retained (no cascade, by decision)
   // (The pairing code row was revoked above, inside this unit, before the player row went.)
   // (Every guardian's childIds followed the link rows when the player row went: players.remove cascades.)
@@ -4601,7 +4617,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,

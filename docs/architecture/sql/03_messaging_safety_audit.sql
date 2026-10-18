@@ -2,8 +2,8 @@
 -- 03_messaging_safety_audit.sql — ScoutBox target SQLite schema, part 3
 --
 -- Scope (source collections → tables):
---   channels            → channels, messages, message_attachments
---   notifications       → notifications                                     (LIVE since migration 0009_notifications, S7a, REGISTERED)
+--   channels            → channels, messages, message_attachments           (LIVE since migration 0012_channels, S7d, REGISTERED — implemented, pending independent acceptance)
+--   notifications       → notifications                                    (LIVE since migration 0009_notifications, S7a, REGISTERED)
 --   notificationPrefs   → notification_prefs, notification_pref_categories  (LIVE since migration 0009_notifications, S7a, REGISTERED)
 --   dispatches          → dispatches, dispatch_attempts                  (LIVE since migration 0010_dispatches, S7b, REGISTERED — independently accepted at ac50b60)
 --   outbox              → outbox                                           (LIVE since migration 0011_outbox_push, S7c, REGISTERED — implemented, pending independent acceptance)
@@ -34,127 +34,168 @@
 
 
 -- -----------------------------------------------------------------------------
--- channels
--- source: db.channels  created at server.mjs:841-861 (openChannel); container
---         seeded seed.mjs:490, restored by migration m230_001 (m182/migrations.mjs:253)
--- owner/writer: server.mjs (openChannel on request acceptance; readBy on
---         /channels/:id/read 1526, 2273, 3307). Read by m26 (transaction
---         linked threads, m26/index.mjs:402, 1215).
--- lifecycle: no status field; "closed" is DERIVED on every read
---         (channelClosedForOrg 920 / channelClosedForCounterparty 928) from
---         blocks, org.suspended and visibility. Hard-deleted with all messages
---         when the player is deleted (server.mjs:4014) → player FK CASCADE.
--- mapping:
+-- channels — LIVE since migration 0012_channels (S7d, REGISTERED — implemented, pending
+--   independent acceptance: repositories/migrations/0012_channels.mjs; repositories/channels.mjs;
+--   docs/architecture/s7-readiness-review.md §11.5 as corrected in §11.7/§11.8, approved by the
+--   Founder's decisions D-A and D-B recorded in §11.9).
+-- source: db.channels (the blob every build since M9 wrote; imported and retired by 0012, array
+--         position → seq). The container is still created by seed.mjs and the snapshot migration
+--         m230_001 (m182/migrations.mjs) before the data layer attaches; attachDataLayer drops that
+--         array and defines db.channels as a read-only view over the mirror.
+-- owner/writer: repositories/channels.mjs through server.mjs openChannel (the acceptance routes,
+--         player and guardian), postMessage (appendMessage), the three /channels/:id/read routes
+--         (markRead) and deletePlayerData (deleteForPlayer, inside the account-deletion unit).
+--         Readers unchanged: the three list routes, the export, the admin audit, the SSE lookup,
+--         m26 (transaction linked threads, read-only), the enterprise backup (exportRows).
+-- lifecycle: no status field; "closed" is DERIVED on every read (channelClosedForOrg /
+--         channelClosedForCounterparty) from blocks, org.suspended and visibility. Deleted with
+--         every message, attachment and receipt when the player is deleted — EXPLICITLY, by
+--         deleteForPlayer inside the deletion unit (D-B: today's behaviour reproduced for this
+--         storage-only step; no CASCADE, no RESTRICT, no retention rule — retention stays OPEN for S4b).
+-- mapping (the openChannel literal, key for key):
+--   (array position) -> seq (the durable thread order every reader sees)
 --   id            -> id (chan-*)
---   requestId     -> request_id (1:1 with recruitment_requests; UNIQUE, enforced by code today)
---   playerId      -> player_id
---   playerName    -> player_name (snapshot)
---   orgId         -> org_id
+--   requestId     -> request_id (UNIQUE: a request opens one thread, enforced by the routes and the
+--                    repository; NO foreign key — recruitment_requests is an S8 table that does not
+--                    exist yet. D-A: the TRANSITIONAL CHECKED REFERENCE — open() refuses a request
+--                    that is not in the requests collection, the import refuses a channel whose
+--                    request is not in the file's requests blob, every snapshot write validates the
+--                    FINAL combined state; S8a rebuilds this table with the foreign key)
+--   playerId      -> player_id (NO foreign key and NO lifecycle clause — D-B, see lifecycle)
+--   playerName    -> player_name (snapshot; nullable; absent recorded in absent_keys_json)
+--   orgId         -> org_id (REFERENCES orgs — kept: organisations are upserted and pruned, never rewritten)
 --   orgName       -> org_name (snapshot)
---   orgVerified   -> org_verified (snapshot of the org's verified flag at open time)
---   scoutName     -> scout_name (snapshot)
---   scoutRole     -> scout_role (snapshot)
+--   orgVerified   -> org_verified (snapshot of the org's verified flag at open time; nullable)
+--   scoutName     -> scout_name (snapshot; nullable)
+--   scoutRole     -> scout_role (snapshot; nullable)
 --   counterparty  -> counterparty ('player' | 'guardian' = request.routedTo)
---   guardianId    -> guardian_id (NULL for adult players)
+--   guardianId    -> guardian_id (NULL for adult players; NO foreign key — a bounded code-validated
+--                    reference, not a SQLite necessity (review of 8330f08): open() refuses a guardian
+--                    that does not exist and the final-state assertion checks every retained or
+--                    incoming channel against the final guardians table after every identity rewrite)
 --   createdAt     -> created_at
---   messages[]    -> messages table (child)
+--   messages[]    -> messages table (child, position = array index)
 --   readBy.org          -> read_by_org_at
 --   readBy.counterparty -> read_by_counterparty_at
---   orgUserIdForNotify  -> dead field, not migrated (read at server.mjs:898, never written anywhere)
+--   (absent optional keys: playerName, orgVerified, scoutName, scoutRole, guardianId, readBy.org,
+--    readBy.counterparty) -> absent_keys_json (a JSON array of the ABSENT keys; NULL when every key
+--                    was present — absence is preserved as absence, a NULL column alone cannot tell
+--                    present-and-null from absent)
+--   orgUserIdForNotify and every other unknown own field -> extra_json (a JSON object; the unknown
+--                    keys INSIDE readBy are nested under "readBy"); spread back FIRST on export.
+--                    orgUserIdForNotify is never written by the current creator but is read by
+--                    postMessage and observable through the spread views and the export — preserved exactly.
 -- notes: tenant = org_id; minors: the child is never a party — counterparty is
---   the guardian. Admin /admin/channels (4246) returns every channel with ids.
---   Reads: by org_id (2247), by guardian_id (1506), by player_id+counterparty
---   (3285), by id+owner (all message/read/typing routes), by id alone (m26, SSE 449).
+--   the guardian. Admin /admin/channels returns every channel with ids.
+--   Reads: by org_id, by guardian_id, by player_id+counterparty, by id+owner (all
+--   message/read/typing routes), by id alone (m26, SSE).
 -- -----------------------------------------------------------------------------
 CREATE TABLE channels (
-  id                      TEXT PRIMARY KEY,
-  request_id              TEXT NOT NULL REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
-  player_id               TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  player_name             TEXT NOT NULL,                                   -- snapshot
+  seq                     INTEGER PRIMARY KEY,
+  id                      TEXT NOT NULL UNIQUE,
+  request_id              TEXT NOT NULL,
+  player_id               TEXT NOT NULL,
+  player_name             TEXT,
   org_id                  TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name                TEXT NOT NULL,                                   -- snapshot
-  org_verified            INTEGER NOT NULL DEFAULT 0 CHECK (org_verified IN (0,1)), -- snapshot
-  scout_name              TEXT,                                            -- snapshot
-  scout_role              TEXT,                                            -- snapshot
-  counterparty            TEXT NOT NULL CHECK (counterparty IN ('player','guardian')),
-  guardian_id             TEXT REFERENCES guardians(id) ON DELETE RESTRICT,
+  org_name                TEXT NOT NULL,
+  org_verified            INTEGER CHECK (org_verified IS NULL OR org_verified IN (0, 1)),
+  scout_name              TEXT,
+  scout_role              TEXT,
+  counterparty            TEXT NOT NULL CHECK (counterparty IN ('player', 'guardian')),
+  guardian_id             TEXT,
   created_at              INTEGER NOT NULL,
   read_by_org_at          INTEGER,
-  read_by_counterparty_at INTEGER
+  read_by_counterparty_at INTEGER,
+  absent_keys_json        TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  extra_json              TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
 
-CREATE UNIQUE INDEX channels_request_id ON channels(request_id);          -- 1:1, enforced by code today
-CREATE INDEX channels_org_id ON channels(org_id);
-CREATE INDEX channels_guardian_id ON channels(guardian_id);
-CREATE INDEX channels_player_id_counterparty ON channels(player_id, counterparty);
+CREATE UNIQUE INDEX channels_request_id ON channels (request_id);          -- one thread per request
+CREATE INDEX channels_org_id ON channels (org_id);
+CREATE INDEX channels_guardian_id ON channels (guardian_id);
+CREATE INDEX channels_player_id_counterparty ON channels (player_id, counterparty);
 
 
 -- -----------------------------------------------------------------------------
--- messages
--- source: db.channels[].messages[]  created at server.mjs:884-915 (postMessage)
--- owner/writer: server.mjs postMessage (guardian 1520, org 2266, player 3300).
--- lifecycle: append-only; never edited; removed only with the channel.
--- mapping:
+-- messages — LIVE since migration 0012_channels (S7d, REGISTERED — implemented, pending independent acceptance)
+-- source: db.channels[].messages[] (the postMessage literal; imported with its thread by 0012,
+--         array index → position)
+-- owner/writer: repositories/channels.mjs appendMessage, called by server.mjs postMessage
+--         (guardian, org and player message routes).
+-- lifecycle: append-only; never edited; removed only with the channel (ON DELETE CASCADE from the
+--         explicit thread deletion).
+-- mapping (the postMessage literal, key for key):
+--   (array index) -> position (UNIQUE per channel: the durable message order; a tie on ts keeps its order)
 --   id            -> id (msg-*)
 --   (parent)      -> channel_id
 --   ts            -> created_at (source field is literally `ts`)
---   sender.kind   -> sender_kind ('player' | 'guardian' | 'org_user')
+--   sender.kind   -> sender_kind ('player' | 'guardian' | 'org_user' — the three kinds the routes produce)
 --   sender.id     -> sender_id (polymorphic: players.id / guardians.id / org_users.id; no FK)
---   sender.name   -> sender_name (snapshot; for org_user it is "Name · Role · Org" composed at 2266)
+--   sender.name   -> sender_name (snapshot; for org_user it is "Name · Role · Org" composed by the route;
+--                    nullable; an absent key is recorded as "sender.name" in absent_keys_json)
 --   text          -> text (moderated before write; moderation hits are refused, never stored here)
---   attachment    -> message_attachments table (0..1 row per message)
---   clientMsgId   -> client_msg_id (≤64 chars, optional; idempotency key)
--- notes: ordering is array order = oldest→newest (ts). Idempotency: a resend
+--   attachment    -> message_attachments table (0..1 row per message; the key is always present and null
+--                    when the writer sends no attachment; an ABSENT key — a legacy record — is recorded in
+--                    absent_keys_json)
+--   clientMsgId   -> client_msg_id (present only when the client sent one — the writer omits the key
+--                    otherwise, never null; the route bounds it to 64 chars)
+--   every unknown own field -> extra_json (the unknown keys INSIDE sender nested under "sender")
+-- notes: ordering is array order = position (oldest→newest). Idempotency: a resend
 --   with the same (clientMsgId, sender.kind, sender.id) inside the same channel
---   returns the existing message (888) → UNIQUE index below is "enforced by
---   code today". A ledger row of type 'message' is appended per message (893).
+--   returns the existing message — postMessage reads the thread's view first, as before;
+--   no uniqueness index is declared for it (the rule stays the writer's). A ledger row of
+--   type 'message' is appended per message.
 -- -----------------------------------------------------------------------------
 CREATE TABLE messages (
-  id            TEXT PRIMARY KEY,
-  channel_id    TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-  created_at    INTEGER NOT NULL,
-  sender_kind   TEXT NOT NULL CHECK (sender_kind IN ('player','guardian','org_user')),
-  sender_id     TEXT NOT NULL,
-  sender_name   TEXT NOT NULL,                                             -- snapshot
-  text          TEXT NOT NULL,
-  client_msg_id TEXT CHECK (client_msg_id IS NULL OR length(client_msg_id) <= 64)
+  seq              INTEGER PRIMARY KEY,
+  id               TEXT NOT NULL UNIQUE,
+  channel_id       TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  position         INTEGER NOT NULL,
+  created_at       INTEGER NOT NULL,
+  sender_kind      TEXT NOT NULL CHECK (sender_kind IN ('player', 'guardian', 'org_user')),
+  sender_id        TEXT NOT NULL,
+  sender_name      TEXT,
+  text             TEXT NOT NULL,
+  client_msg_id    TEXT,
+  absent_keys_json TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  extra_json       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
 
-CREATE INDEX messages_channel_id_created_at ON messages(channel_id, created_at);
-CREATE UNIQUE INDEX messages_channel_sender_client_msg_id
-  ON messages(channel_id, sender_kind, sender_id, client_msg_id)
-  WHERE client_msg_id IS NOT NULL;                                         -- enforced by code today
+CREATE UNIQUE INDEX messages_channel_position ON messages (channel_id, position);
 
 
 -- -----------------------------------------------------------------------------
--- message_attachments
--- source: db.channels[].messages[].attachment  built at server.mjs:864-882 (buildAttachment)
--- owner/writer: server.mjs postMessage (one attachment per message, or none).
--- lifecycle: immutable; removed with the message.
--- mapping (shape depends on kind):
+-- message_attachments — LIVE since migration 0012_channels (S7d, REGISTERED — implemented, pending independent acceptance)
+-- source: db.channels[].messages[].attachment (the two shapes buildAttachment produces; imported with
+--         its message by 0012)
+-- owner/writer: repositories/channels.mjs appendMessage (one attachment per message, or none).
+-- lifecycle: immutable; removed with the message (ON DELETE CASCADE).
+-- mapping (shape depends on kind; the CHECK ties each kind to its columns):
 --   kind                 -> kind ('clip' | 'trial_report')
 --   clip.mediaId         -> media_id (players[].media[].id; polymorphic to the media table of 01, no FK — the
 --                           clip may be deleted later while the message keeps the reference)
---   clip.title           -> title (snapshot)
---   clip.url             -> url (snapshot)
+--   clip.title           -> title (snapshot; nullable)
+--   clip.url             -> url (snapshot; nullable)
 --   clip.verifiedClip    -> verified_clip (snapshot boolean of !!m.verifiedClip)
 --   trial_report.reportId -> report_id (players[].trialReports[].id = trials.report.id, rep-*; no FK)
---   trial_report.orgName  -> org_name (snapshot)
---   trial_report.summary  -> summary (pre-rendered metrics line, snapshot)
--- notes: an org sender may only attach a trial report its own org wrote (873).
+--   trial_report.orgName  -> org_name (snapshot; nullable)
+--   trial_report.summary  -> summary (pre-rendered metrics line, snapshot; nullable)
+--   every unknown own field -> extra_json
+-- notes: an org sender may only attach a trial report its own org wrote (the route's rule).
 -- -----------------------------------------------------------------------------
 CREATE TABLE message_attachments (
   message_id    TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-  kind          TEXT NOT NULL CHECK (kind IN ('clip','trial_report')),
+  kind          TEXT NOT NULL CHECK (kind IN ('clip', 'trial_report')),
   media_id      TEXT,
-  title         TEXT,                                                      -- snapshot
-  url           TEXT,                                                      -- snapshot
-  verified_clip INTEGER NOT NULL DEFAULT 0 CHECK (verified_clip IN (0,1)), -- snapshot
+  title         TEXT,
+  url           TEXT,
+  verified_clip INTEGER CHECK (verified_clip IS NULL OR verified_clip IN (0, 1)),
   report_id     TEXT,
-  org_name      TEXT,                                                      -- snapshot
-  summary       TEXT,                                                      -- snapshot
-  CHECK ((kind = 'clip' AND media_id IS NOT NULL AND report_id IS NULL)
-      OR (kind = 'trial_report' AND report_id IS NOT NULL AND media_id IS NULL))
+  org_name      TEXT,
+  summary       TEXT,
+  extra_json    TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  CHECK ((kind = 'clip' AND media_id IS NOT NULL AND verified_clip IS NOT NULL AND report_id IS NULL AND org_name IS NULL AND summary IS NULL)
+      OR (kind = 'trial_report' AND report_id IS NOT NULL AND media_id IS NULL AND title IS NULL AND url IS NULL AND verified_clip IS NULL))
 ) STRICT;
 
 

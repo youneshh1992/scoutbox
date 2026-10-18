@@ -35,9 +35,13 @@ implemented on top of `6ca66ba` (`40aa05c`, §10.8); the review of `40aa05c` fou
 (an array mail destination refused and crashing the process; raw JSON overflow tokens refused), corrected in
 `78c14b9` (§10.10); the review of `78c14b9` found one remaining boundary (a non-finite number INSIDE an
 accepted array destination dropped its mail record), corrected in `9119187` (§10.11), the accepted commit;
-migration `0011_outbox_push` is registered with its DDL amended in place before acceptance. **S7d not
-started. The next milestone is prepared in §11 — PREPARED / NOT IMPLEMENTED, corrected after the independent
-reviews of `46e5afe` (§11.7) and `8330f08` (§11.8) — and waits for the decisions listed there.** §§0–8.2 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where
+migration `0011_outbox_push` is registered with its DDL amended in place before acceptance. **S7d (`channels`,
+`messages`, `message_attachments`): IMPLEMENTED on top of `b67bce5` on 18 October 2026, PENDING INDEPENDENT
+ACCEPTANCE (§11.9 holds the implementation record, the Founder's two approvals D-A and D-B recorded verbatim, the
+verification and its limits; migration `0012_channels` is registered; `repositories/channels.mjs`;
+`scripts/channelsRollback.mjs`).** The preparation §11.1–§11.6 and its two correction rounds §11.7 (review of
+`46e5afe`) and §11.8 (review of `8330f08`) are kept as the dated history the implementation followed; the "PREPARED
+/ NOT IMPLEMENTED" wording inside them is the status at the time, not the status now. §§0–8.2 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where
 the implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
 correction is marked in place, and the dependency table §8.1 carries the current status of each row. Nothing
 here decides a retention period, a deletion policy, the country-code or child-status questions, or
@@ -49,9 +53,10 @@ rollback · 7 tests, acceptance and the performance objective · 8 the dependenc
 bounded recommendation · 9 S7b (design, implementation, corrections, acceptance, the notification
 follow-up) · 10 S7c (the plan as corrected by the review of `6ca66ba`, the implementation §10.8, the
 follow-up's acceptance §10.9, the two correction rounds §10.10–§10.11 as history, the acceptance §10.12) ·
-11 the next milestone, PREPARED / NOT IMPLEMENTED (the current-code survey, the two routes compared, the
-recommendation and the decisions it needs; §11.7 the corrections from the review of `46e5afe`; §11.8 the
-guardian-reference corrections from the review of `8330f08`).
+11 S7d (the current-code survey, the two routes compared, the recommendation and the decisions it needed —
+§11.1–§11.6 as prepared; §11.7 the corrections from the review of `46e5afe`; §11.8 the guardian-reference
+corrections from the review of `8330f08`; **§11.9 S7d as implemented on top of `b67bce5` after the Founder's
+decisions D-A and D-B — pending independent acceptance**).
 
 ---
 
@@ -781,7 +786,7 @@ with the ledger and notification sizes stated. The harness is not changed by thi
 | **S7c** `outbox`, `push_log` | **independently ACCEPTED at `9119187` (17 October 2026; §10.12)** | as first written: the two-shape unification (§1.6) — built as the structural `source` discriminator (§10.4); the six plain-text code call sites remain an **owner decision** (cleanse, mask like S6a, or carry as is) — S7c carried the rows as they are |
 | **S7c** `push_tokens` storage move | **independently ACCEPTED at `9119187` (§10.12)** | tokens stored losslessly as JSON, the route's rule reproduced, no uniqueness constraint (§10.4) |
 | **S7c** push-token audience re-keying (staff pushes) | needs a **product/behaviour decision** — not taken by S7c | which identity a staff push targets; what to do with existing `org`-kind rows; kept out of the storage move (§6.2) |
-| **S7d** `channels` + `messages` + `message_attachments` | needs **another storage stage or an approved transitional design** — the two routes are compared in §11.3 and the smaller one is prepared in §11.5 (PREPARED / NOT IMPLEMENTED) | `request_id` → S8's `recruitment_requests` (§2.2); the transitional reference (§2.3 step 4) is a proposal awaiting approval (§11 decision D-A); an ordering column for equal timestamps (§1.2) to add to SQL03 |
+| **S7d** `channels` + `messages` + `message_attachments` | **IMPLEMENTED on top of `b67bce5` (18 October 2026), PENDING INDEPENDENT ACCEPTANCE — §11.9**; migration `0012_channels`; the §2.3 transitional code-checked request reference approved by the Founder (D-A), today's deletion reproduced inside the deletion unit (D-B, a scope confirmation) | `request_id` → S8's `recruitment_requests` (§2.2) stays a code-checked reference until S8a rebuilds the table with the foreign key; the ordering column for equal timestamps (§1.2) is `messages.position`; retention OPEN (S4b) |
 | S7d `channels.player_id` deletion behaviour | needs a **product-policy answer** for retention; a storage-only step can carry today's behaviour unchanged if the Founder confirms that reading (§11.4, decision D-B) | message retention after deletion (`s4-deletion-decision.md` §4 "review"); until then the repository deletes explicitly inside the deletion unit, no CASCADE in the DDL |
 | the `ledger` rows every send writes | needs **another storage stage** (S6 ledger) which needs **S4b** | `ledger.player_id RESTRICT` (S6 review §4.1) |
 | "no whole-database write on send" | needs S7a + S7c + S7d + the S6 ledger (or a store dirty-save change) | §7.3 phases |
@@ -2345,9 +2350,14 @@ this record.
 
 ---
 
-## 11. The next milestone — PREPARED / NOT IMPLEMENTED (17 October 2026, from the code at `9119187`)
+## 11. S7d — prepared 17 October 2026 from the code at `9119187` (§11.1–§11.8, dated history); IMPLEMENTED 18 October 2026 on top of `b67bce5`, PENDING INDEPENDENT ACCEPTANCE (§11.9)
 
-**Status: PREPARED, NOT IMPLEMENTED, NOT AUTHORISED.** This section is a documentation-only readiness and
+**Status now (18 October 2026): IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE — §11.9.** The Founder approved D-A and
+D-B explicitly (recorded verbatim in §11.9); migration `0012_channels` is registered; the "PREPARED, NOT
+IMPLEMENTED, NOT AUTHORISED" wording in the paragraph below and in §11.1–§11.8 is the status at the time those
+sections were written and is kept as the dated record the implementation followed.
+
+**Status at preparation (17 October 2026): PREPARED, NOT IMPLEMENTED, NOT AUTHORISED.** This section is a documentation-only readiness and
 sequencing record: a read-only survey of the current code, a comparison of the two routes the plan allows
 after S7c, one recommended smallest coherent milestone, and the decisions it needs. No migration is
 registered, no identifier assigned, no repository, endpoint, DDL or runtime behaviour changed, no test
@@ -2477,7 +2487,7 @@ question. The alternative is to wait for the retention answer before S7d (then A
 policy work, and nothing in S7 can proceed; S6's audit tables wait for S4b too; B is the only movable
 storage step and it is the largest).
 
-### 11.5 The recommendation — S7d, storage-only, with the §2.3 transitional reference (PREPARED / NOT IMPLEMENTED)
+### 11.5 The recommendation — S7d, storage-only, with the §2.3 transitional reference (PREPARED 17 October 2026; IMPLEMENTED 18 October 2026 as recorded in §11.9 — the wording below is the specification the implementation followed)
 
 **Objective.** `channels`, `messages` and `message_attachments` become tables with lossless, one-to-one
 mappings (§1.2); `db.channels` becomes a read-only view in insertion order with each channel's `messages`
@@ -2916,7 +2926,122 @@ application code (Node v22.22.2, before any edit; log `reproduce-reviewer-failur
 the focused case passed (1 selected check, 31 s) and the whole one-time-codes server suite passed (10 checks,
 42 s); neither failure reproduced here. The full gates of this round and their attempt counts are in the
 handoff's `gates-summary.txt`. Status after this round: **S7c accepted at `9119187`; S7d PREPARED / NOT
-IMPLEMENTED with the corrected guardian design; D-A and D-B still unanswered.**
+IMPLEMENTED with the corrected guardian design; D-A and D-B still unanswered** (the status at the time; the
+decisions and the implementation followed in §11.9).
+
+### 11.9 S7d as implemented (18 October 2026, one local commit on `feat/sqlite-schema` on top of `b67bce5` — PENDING INDEPENDENT ACCEPTANCE)
+
+**Status: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE.** Not production, security, legal-compliance or deployment
+approval; not acceptance of S4b, the remaining S6 tables or S8; nothing pushed, merged or deployed; no real data, no
+real provider. The independent review of `b67bce5` (`review-b67bce5-summary.txt`) accepted the corrected §11.5
+specification as the basis for the bounded storage migration and handed over a conditional implementation prompt,
+to be applied only with both Founder decisions. Both were given before any source edit.
+
+**The Founder's decisions, recorded verbatim (18 October 2026).**
+
+> I approve D-A: migrate messaging first, using the transitional code-checked request reference until recruitment
+> requests move to tables at S8a. I confirm D-B: for this storage-only migration, preserve today's behaviour of
+> deleting a deleted player's message threads, including guardian–club conversations. This does not decide our
+> future message-retention policy. Proceed with the reviewed S7d implementation plan from b67bce5. Keep all other
+> agreed restrictions, run backend and Player tests, complete the Markdown cleanup review, commit locally and
+> provide the verified handoff package. Do not push, merge or deploy.
+
+D-A is the transitional reference of §2.3/§11.5: `channels.request_id` is `NOT NULL UNIQUE` with no foreign key
+(`recruitment_requests` does not exist yet), checked in code at every write boundary; S8a rebuilds the table with
+the foreign key after its own preflight. D-B is a scope confirmation for this storage-only step, not a retention
+decision: the deleted player's threads — guardian–club threads included — are deleted explicitly inside the
+account-deletion unit, exactly as the array filter did; no CASCADE, no RESTRICT and no retention rule is encoded,
+and the retention question stays OPEN for S4b (`s4-deletion-decision.md` §4). Under-18 records without a valid
+guardian link still stop migration; the full birth date stays selected for the proposed deletion record; country
+retention and child-status stamping remain OPEN; nothing here approves S4b, a message-retention period, an
+organisation-deletion policy, the staff-push re-keying or a user-interface change.
+
+**What was built (the files, all under `scoutbox-server/` unless stated).**
+
+- `repositories/channels.mjs` — the repository and the migration support: `CHANNELS_DDL` (the three tables as the
+  DDL document now shows them, §11.5 "Scope"), `validateChannel` / `validateMessage` / `validateAttachment` (the
+  channel literal, the message literal, the two attachment shapes; nothing coerced; the three sender kinds, the two
+  counterparties and the two attachment kinds are the only vocabularies narrowed, exactly as the writers produce
+  them), the lossless row mapping (array position → `seq` and `position`; every unknown own field at channel,
+  message, attachment, `readBy` and `sender` level into `extra_json`, the nested ones under their known key;
+  absent optional keys recorded in `absent_keys_json` so the way back manufactures no null — `orgUserIdForNotify`
+  preserved exactly, as §11.7 required), `importChannelsBlob` (the 0012 import, text-free refusals
+  `CHANNELS_IMPORT_BLOCKED`), `CHANNELS_TABLE` (the whole-snapshot `read`/`replace` used by backups, restores and
+  the persistence suites), `assertChannelReferencesConsistent` (the FINAL-state assertion of §11.5 as corrected in
+  §11.8: request, guardian and organisation references of every retained or incoming thread; `CHANNEL_REQUEST_MISSING`,
+  `CHANNEL_GUARDIAN_MISSING`, `CHANNEL_ORG_MISSING`, `CHANNEL_REQUESTS_MALFORMED`; ids only) and
+  `createChannelsRepository` (`open`, `appendMessage`, `markRead`, `deleteForPlayer`, `exportRows`, the staged
+  save hook and the unit-of-work participant contract of S7a–S7c: a failed ordinary save keeps the pending state,
+  an aborted unit restores the mirror in place, held views included).
+- `repositories/migrations/0012_channels.mjs` — REGISTERED after `0011_outbox_push`: creates the three tables,
+  imports the `channels` blob through the validation above (a channel whose request is not in the file's `requests`
+  blob, whose guardian is not in `guardians` or whose organisation is not in `orgs` refuses the whole step), retires
+  the blob row, records counts only in `meta.channelsCutover`; refuses to run before 0011 or when a table exists.
+- `repositories/index.mjs` — `channels` in `TABLE_BACKED` and `readTableBacked`; the dispatch order of §11.5:
+  the channel group after the identity pair and the staff and BEFORE the organisation prune (an organisation
+  removed under a retained thread is refused by the org foreign key at the prune), the final-state assertion after
+  the prunes whenever `channels` was written, `requests` was supplied or the identity pair was written (an omitted
+  `requests` collection is judged by the retained blob, never by an empty set); `attachDataLayer` creates the
+  repository in staged mode with `requests: () => db.requests`, registers its save hook, drops the stale in-memory
+  array and its blob row, defines `db.channels` as a read-only view and reports the domain.
+- `server.mjs` — `openChannel` returns `channels.open(literal)` (the literal unchanged); `postMessage` appends
+  through `channels.appendMessage` (the duplicate-`clientMsgId` answer stays the writer's rule, read from the view
+  first, 201 with the stored message); the three `/channels/:id/read` routes write through `channels.markRead`;
+  `deletePlayerData` calls `channels.deleteForPlayer(playerId)` inside the deletion unit where the array filter ran
+  (D-B); `channels` is handed to the module context. `m13/enterprise.mjs` exports `channels: channels.exportRows()`
+  in the admin backup. `storeContract.mjs` records the view. Every reader is unchanged (the three list routes, the
+  export, the admin audit and overview, the SSE lookup, m26's linked-thread reads).
+- `repositories/channelsRollback.mjs` + `scripts/channelsRollback.mjs` (`npm run rollback:channels`) — the
+  copy-only rollback to the `b67bce5` build: every thread written back into the `channels` blob in `seq` order with
+  its messages in `position` order, each in its writer's literal (extras first, absence preserved, both attachment
+  shapes, `clientMsgId` present or absent), the three tables dropped, the 0012 record and its meta key removed,
+  `saveSeq` advanced, every other table byte-identical, revalidation, no output on failure; exit codes 0/1/4/5/10;
+  `KNOWN_MIGRATIONS` extends the S7c chain, and the S7c tool refuses a 0012 file (`LATER_SCHEMA`, exit 4).
+- `docs/architecture/sql/03_messaging_safety_audit.sql` — the three tables amended in place to the DDL the
+  migration creates (column for column, index for index; `scripts/testSchemaDdl.mjs` compares them) with the
+  mapping comments of §11.5/§11.7/§11.8; `scripts/notificationsPersistenceBench.mjs` appends through the repository
+  when the tree has one and reports the channels and ledger blob bytes; `package.json` runs the two new suites.
+- Tests: `scripts/testChannels.mjs` (9 checks: the lossless import, every refusal, the actual schema, the
+  repository in both modes, joined units, real COMMIT failures, the snapshot dispatcher, the FINAL-state assertion
+  in every direction of §11.5 — the five guardian cases included — and the rollback) and
+  `scripts/testChannelsServer.mjs` (5 checks through the real server: both acceptance paths, all three sender
+  kinds, both attachment shapes, the duplicate `clientMsgId`, the three receipt routes, typing, the per-audience
+  views, the export, the admin audit, SSE scoping, the block, the account deletion of D-B, the cutover, the
+  SIGKILL windows, the real COMMIT failure, the backup, a restore, the S7c tool's refusal, legacy and unknown
+  fields through the import, the rollback booted by the actual `b67bce5` build and the re-upgrade). Both were
+  written first and recorded failing on the unchanged `b67bce5` tree (logs in the handoff): every `[cutover]`
+  check fails on a concrete assertion (the 0012 record absent, the tables absent, a restore keeping the blob, the
+  rollback tool absent); the `[compat]` checks pass on both trees — they are the behaviour the move preserves.
+  The older suites' migration lists and rollback chains were extended to 0012 (the S7d tool runs first on a file
+  this tree wrote); `testUnitOfWork` uses another new blob collection name because `db.channels` is a view.
+
+**What the implementation decided inside the approved scope.** The optional literal keys (`playerName`,
+`orgVerified`, `scoutName`, `scoutRole`, `guardianId`, `readBy.org`, `readBy.counterparty`, a message's
+`attachment`, `sender.name`) are nullable columns plus `absent_keys_json`, so present-and-null and absent round-trip
+distinctly; `clientMsgId` follows the writer's rule (present ⇔ a non-empty string; a present null is refused as
+malformed, since no build ever wrote one). A trial request accepted on either path opens a thread too, exactly as
+before (the server suite records it). The repository refuses a second thread for one request, a request not in the
+live `requests` collection, a missing organisation or a missing guardian by name (`CHANNEL_*` codes, ids only). The
+org-side and counterparty-side standing checks (blocks, suspension, visibility) are unchanged and still refuse both
+sides after a block. No vocabulary, payload, status code or ordering changed.
+
+**Verification (Node v22.22.2, npm 10.9.7, SQLite 3.51.2; every log in the handoff package).** Both new suites
+pass with `SCOUTBOX_PRE_S7D_SERVER` pointing at an actual `b67bce5` checkout (the old build booted the rollback copy,
+listed the same threads, posted a message into its blob; this build re-upgraded the copy with that message).
+The backend gate `cd scoutbox-server && npm test` and the Player gate `cd scoutbox-player && npm test -- --runInBand`
+ran after the implementation with the four old-build paths supplied; their counts, attempt counts and the fresh-extraction
+runs are in the handoff's `gates-summary.txt` and the sidecar. The six historical reviewer scripts and both design
+probes ran unchanged. The synthetic benchmark (`notificationsPersistenceBench.mjs 3000 100`): 2 blob rows per save,
+387 302 blob bytes, channels blob 0 bytes (not rewritten), ledger blob 309 491 bytes (rewritten), mean 2.18 ms per
+save — the `ledger` is still a blob, so the whole-database-write objective is narrowed again, not met (§7.3). The
+reviewer's two Node 24 failures of the `8330f08` round (§11.8) stay recorded as recorded; nothing here establishes
+their cause. Not run: browser suites, the demo rebuild, the wider E2E battery beyond what `npm test` and the focused
+suites contain, real data, real providers.
+
+**Known limits.** The request reference is code-validated until S8a (D-A); `guardian_id` is code-validated (the
+bounded choice of §11.8, the deferred-foreign-key route still the stated alternative); `player_id` carries no
+lifecycle clause (D-B); retention is OPEN. A guardian-deletion path, should one be added, must keep the §11.8
+invariant (the final-state assertion covers snapshot writes; no ordinary writer removes a guardian today).
 
 ---
 

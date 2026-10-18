@@ -55,7 +55,7 @@ function operation(t, { failBlob = false, afterCommit = null } = {}) {
     pro.squad.push({ id: 'sq-op', name: 'Op', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
     req1.status = 'accepted'; req1.history.push('accepted');
     t.db.requests.push({ id: 'req-2', playerId: 'pl-1', status: 'pending', history: [] });
-    t.db.channels = [{ id: 'ch-1', playerId: 'pl-1' }];
+    t.db.syntheticNotes = [{ id: 'syn-1', playerId: 'pl-1' }]; // a NEW blob collection (S7d: `channels` is the data layer's read-only view, so another name stands in)
     token = t.layer.sessions.create('player', 'pl-1').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
     if (failBlob) t.db.requests[0].big = 1n; // JSON cannot serialise it: the blob write fails after the rows and facets were written
@@ -70,7 +70,7 @@ function assertDatabaseUntouched(t, { unrelatedSaved }) {
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0, 'no flushed facet');
   const requests = t.blob('requests');
   assert.equal(requests.length, 1); assert.equal(requests[0].status, 'pending'); assert.deepEqual(requests[0].history, []);
-  assert.equal(t.blob('channels'), undefined, 'no new blob');
+  assert.equal(t.blob('syntheticNotes'), undefined, 'no new blob');
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player'").n, 0, 'no session row');
   const grass = JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-grass'").facets_json);
   assert.deepEqual(grass.lookingFor, unrelatedSaved ? ['GK'] : ['ST']);
@@ -85,7 +85,7 @@ function assertMemoryRestored(t, refs) {
   assert.equal(t.layer.orgs.byId('org-new'), null); assert.equal(t.db.orgs.length, 3); assert.equal(t.layer.orgs.count(), 3);
   assert.equal(t.db.requests[0], req1, 'the same blob record object'); assert.equal(req1.status, 'pending');
   assert.equal(req1.history, hist, 'the same nested array object'); assert.equal(hist.length, 0);
-  assert.equal(t.db.requests.length, 1); assert.equal('channels' in t.db, false, 'a key added by the operation is gone');
+  assert.equal(t.db.requests.length, 1); assert.equal('syntheticNotes' in t.db, false, 'a key added by the operation is gone');
   // Unrelated edits made BEFORE the operation are still in memory and still pending.
   assert.deepEqual(grass.lookingFor, ['GK']); assert.equal(t.db.requests[0].note, 'pending-before');
   assert.equal(t.layer.orgs.uncommitted(), 1, 'the pre-operation facet change is still eligible for the next save');
@@ -96,7 +96,7 @@ function assertOperationPersisted(t, token) {
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 1);
   const requests = t.blob('requests');
   assert.equal(requests.length, 2); assert.equal(requests[0].status, 'accepted'); assert.deepEqual(requests[0].history, ['accepted']);
-  assert.deepEqual(t.blob('channels'), [{ id: 'ch-1', playerId: 'pl-1' }]);
+  assert.deepEqual(t.blob('syntheticNotes'), [{ id: 'syn-1', playerId: 'pl-1' }]);
   assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
   assert.deepEqual(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-grass'").facets_json).lookingFor, ['GK']);
   assert.equal(t.layer.orgs.uncommitted(), 0);

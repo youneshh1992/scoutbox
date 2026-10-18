@@ -323,8 +323,9 @@ await test('backup/restore and the old-build rollback proof: the admin backup ex
   // The copy-only rollback booted by the accepted build. S7c: the file carries 0011, so the S7b tool refuses it (exit 4)
   // and the chain starts with the S7c tool (copy-only); the S7b tool then runs on that copy.
   try { execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, tempDir('s7b-s7btool')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
-  const s7bCopy = tempDir('s7b-rollback-s7c'); const copy = tempDir('s7b-rollback');
-  execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), dir, s7bCopy], { encoding: 'utf8' });
+  const s7cCopy = tempDir('s7b-rollback-s7d'); const s7bCopy = tempDir('s7b-rollback-s7c'); const copy = tempDir('s7b-rollback');
+  execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, s7cCopy], { encoding: 'utf8' }); // S7d first (the file carries 0012), then S7c on its output
+  execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, s7bCopy], { encoding: 'utf8' });
   const out = execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), s7bCopy, copy], { encoding: 'utf8' });
   assert.match(out, /written back as a blob/); assert.equal(live(copy), false); assert.deepEqual(stored(copy), all, 'the blob holds every row and attempt in order');
   const OLD = process.env.SCOUTBOX_PRE_S7B_SERVER;

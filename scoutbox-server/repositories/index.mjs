@@ -42,13 +42,15 @@ import * as m0008 from './migrations/0008_one_time_codes.mjs';
 import * as m0009 from './migrations/0009_notifications.mjs';
 import * as m0010 from './migrations/0010_dispatches.mjs';
 import * as m0011 from './migrations/0011_outbox_push.mjs';
+import * as m0012 from './migrations/0012_channels.mjs';
 import { trialReportsFor } from './playerSubrecords.mjs';
 import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, NOTIFICATIONS_MIGRATION, NOTIFICATIONS_CUTOVER_META } from './notifications.mjs';
 import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCHES_MIGRATION, DISPATCHES_CUTOVER_META } from './dispatches.mjs';
 import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MIGRATION, OUTBOX_PUSH_CUTOVER_META } from './outboxPush.mjs';
+import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, CHANNELS_CUTOVER_META, assertChannelReferencesConsistent } from './channels.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -74,9 +76,13 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
  * `outbox`, `pushLog` and `pushTokens` (S7c, migration 0011) are the mail
  * outbox (two writer literals, told apart structurally), the push log and the
  * device push tokens (any JSON token value, stored losslessly), each in its
- * legacy shape, in insertion order (repositories/outboxPush.mjs).
+ * legacy shape, in insertion order (repositories/outboxPush.mjs). `channels`
+ * (S7d, migration 0012) are the message threads — the openChannel literal with
+ * its messages nested in the postMessage literal and their attachments — in
+ * insertion order, with legacy and unknown fields kept at every level
+ * (repositories/channels.mjs).
  */
-export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name)]);
+export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name]);
 /** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
 /** The notification, dispatch, outbox and push tables: no reference to any other table (polymorphic audiences; the dispatch's notification reference is indexed, not a foreign key; the outbox and push rows reference nothing), dispatched last. */
@@ -100,7 +106,7 @@ export function readTableBacked(sqlite) {
   if (identity) Object.assign(out, identity);
   const queue = MEDIA_DELETIONS_TABLE.read(sqlite);
   if (queue) out[MEDIA_DELETIONS_TABLE.name] = queue;
-  for (const table of [...CODE_TABLES, ...NOTIFICATION_TABLE_DISPATCH]) {
+  for (const table of [...CODE_TABLES, ...NOTIFICATION_TABLE_DISPATCH, CHANNELS_TABLE]) {
     const rows = table.read(sqlite);
     if (rows) out[table.name] = rows;
   }
@@ -147,6 +153,15 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   for (const name of ['users', 'sessions']) if (present.includes(name) && single(name).replace(sqlite, db[name])) written.push(name);
   // The media-removal queue: validated entry by entry and rewritten (false before migration 0006, so the caller writes the blob the migration imports).
   if (present.includes(MEDIA_DELETIONS_TABLE.name) && MEDIA_DELETIONS_TABLE.replace(sqlite, db[MEDIA_DELETIONS_TABLE.name])) written.push(MEDIA_DELETIONS_TABLE.name);
+  // S7d: the message threads are dispatched after the identity pair and the staff
+  // (their guardians and organisations are then the snapshot's) and BEFORE the
+  // organisation prune, so an organisation the snapshot removed while a thread
+  // still names it is refused by the org foreign key at the prune (below) rather
+  // than vanishing under its thread. The incoming rows' request references are
+  // checked against the snapshot's `requests` when it carries them, the retained
+  // blob otherwise (false before the 0012 record exists: the caller writes the blob).
+  const requestsSupplied = Object.hasOwn(db, 'requests') && db.requests !== undefined;
+  if (present.includes(CHANNELS_TABLE.name) && CHANNELS_TABLE.replace(sqlite, db[CHANNELS_TABLE.name], { requests: requestsSupplied ? db.requests : undefined })) written.push(CHANNELS_TABLE.name);
   // Rows the snapshot no longer lists go last, children before parents, so a
   // parent that is still referenced makes the foreign key refuse the save
   // instead of the row disappearing under its dependants. (The identity pair
@@ -176,6 +191,18 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // alone; each entry is validated (never coerced) and one refusal rolls the
   // whole save back.
   for (const table of NOTIFICATION_TABLE_DISPATCH) if (present.includes(table.name) && table.replace(sqlite, db[table.name])) written.push(table.name);
+  // S7d: the FINAL combined state of the threads (review §11.5, corrected by the
+  // review of 8330f08): whenever this snapshot wrote the channels, carries the
+  // requests, or rewrote the identity pair, every thread row the file now holds
+  // must name a request in the final requests (the supplied collection, or the
+  // retained blob when omitted — never an empty set for an omission), an existing
+  // guardian when it names one (the code-validated reference: the guardians table
+  // was rewritten above and carries no foreign key from channels) and an existing
+  // organisation. A miss throws inside the caller's transaction: the whole save
+  // rolls back, unrelated collections and the save revision included.
+  if (written.includes(CHANNELS_TABLE.name) || requestsSupplied || written.some((n) => IDENTITY_COLLECTIONS.includes(n))) {
+    assertChannelReferencesConsistent(sqlite, { requests: requestsSupplied ? db.requests : undefined, label: 'the snapshot (channels, requests and guardians together)' });
+  }
   return written;
 }
 
@@ -371,6 +398,35 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
   }
 
+  // Message threads (S7d, migration 0012): the three tables are the record, one
+  // participant. STAGED mode here (see repositories/channels.mjs): a thread lands
+  // in the acceptance route's own save with the request's answer, a message in
+  // postMessage's persistNow() before the sender hears 201, a receipt in its
+  // route's save; a deletion joins the account-deletion unit (D-B). The
+  // TRANSITIONAL CHECKED REFERENCE (D-A): `open` checks the request against the
+  // live `requests` blob, read at the call (the modules replace that array). A
+  // `channels` array the caller holds in memory is either the blob the migration
+  // just imported from the file (a restored backup, a pre-S7d file: dropped, the
+  // tables are the record) or a stale copy (the seed's empty container, the
+  // snapshot migrations' `??= []`), reported when it is not empty, dropped, and
+  // its blob row deleted so no save can bring it back. The repository never
+  // imports from memory. From here on `db.channels` is a read-only view over the
+  // mirror; the message arrays inside it are read-only too.
+  const channels = createChannelsRepository({ sqlite, log, now, unit: store.unit, staged: true, requests: () => db.requests });
+  const channelsBoot = channels.attach();
+  store.setSaveHook?.(channels.saveHook());
+  if (migrations.ran.includes(CHANNELS_MIGRATION)) {
+    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(CHANNELS_CUTOVER_META)?.value;
+    if (record) { const c = JSON.parse(record); log(`channels: cutover imported ${c.imported} thread(s) (${c.byCounterparty?.player ?? 0} with a player, ${c.byCounterparty?.guardian ?? 0} with a guardian) with ${c.messages} message(s) and ${c.attachments} attachment(s); ${c.withExtraFields} with legacy or unknown fields kept, ${c.withAbsentKeys} with absent optional keys preserved`); }
+  }
+  if (Object.hasOwn(db, CHANNELS_TABLE.name)) {
+    const given = db[CHANNELS_TABLE.name];
+    if (!migrations.ran.includes(CHANNELS_MIGRATION) && Array.isArray(given) && given.length) warn(`channels: an in-memory channels array with ${given.length} entr${given.length === 1 ? 'y' : 'ies'} was ignored; the channels table is authoritative`);
+    delete db[CHANNELS_TABLE.name];
+    sqlite.prepare('DELETE FROM collections WHERE name = ?').run(CHANNELS_TABLE.name);
+  }
+  Object.defineProperty(db, CHANNELS_TABLE.name, { value: channels.view, writable: false, configurable: false, enumerable: true });
+
   return {
     orgs,
     identity,
@@ -386,8 +442,9 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     outbox: outboxPush.outbox,
     pushLog: outboxPush.pushLog,
     pushTokens: outboxPush.pushTokens,
+    channels,
     migrations,
-    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot },
+    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot },
     /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
     report: () => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
@@ -401,6 +458,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         notifications: { mode: 'live', rows: notifications.counts(), pendingWrites: notifications.pending(), pendingEffects: notifications.pendingEffects(), coalesceMs: notifications.coalesceMs, writeMode: 'staged: a standalone write lands in the next snapshot save with the blobs it announces; a write inside a unit of work lands in its commit; its push and live event run only once that save committed' },
         dispatches: { mode: 'live', rows: dispatches.count(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: dispatches.pending(), writeMode: 'staged: a sweep\'s rows, attempts and status changes land in the next snapshot save with the outbox row, the injection counter and the ops/webhook rows written alongside; an acknowledgment lands in its unit\'s commit', notificationReference: 'indexed, no foreign key, no cascade (orphans after an ordinary deletion are retained; retention is an open decision)' },
         outboxPush: { mode: 'live', rows: outboxPush.counts(), pendingWrites: outboxPush.pending(), writeMode: 'staged: a mailer record lands in the save its route would have carried the blob in; a delivery record in the sweep\'s save with the dispatch rows; a push record — written after the notification\'s save committed — in the later save the sender\'s nextId() already schedules; a token in the route\'s persist()', tokens: 'any JSON value the route accepted, stored losslessly as JSON text; no uniqueness constraint (primitives collapse by strict equality on the live value, objects never — the route\'s rule); a non-finite number (JSON 1e400) is kept live and persists as null, as before', destinations: 'a string in to_address, null, or any other JSON value in to_json (what a coercing route handed the mailer: an array), decoded on read' },
+        channels: { mode: 'live', rows: channels.counts(), pendingWrites: channels.pending(), writeMode: 'staged: a thread lands in the acceptance route\'s save with the request\'s answer; a message in postMessage\'s save before the sender hears 201; a receipt in its route\'s save; a deletion in the account-deletion unit', references: 'request_id unique, checked in code against the requests collection until S8a creates recruitment_requests (D-A); guardian_id checked in code at open and on every snapshot\'s final state (no foreign key, by bounded choice); org_id a foreign key (RESTRICT); player_id no lifecycle clause — the deleted player\'s threads are deleted explicitly, as before (D-B); messages and attachments cascade with their thread' },
       },
       identity: { initState: identity.initState(), uncommittedFacets: identity.report().uncommittedFacets },
       mediaDeletions: { queued: mediaDeletions.count(), conflicts: mediaDeletions.conflicts().length },

@@ -324,7 +324,7 @@ test('identity snapshot (tool mode, review of 9656a4b): a VALID full replacement
 
 test('identity snapshot: before the cutover record exists (a pre-S4 file read by a tool) the blobs are authoritative and the tables are ignored; the store contract lists every live collection', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => !/^00(0[56789]|1[01])_/.test(m.id))); // S6a: 0008 needs 0005 too; S7a: 0009 needs 0008; S7b: 0010 needs 0009; S7c: 0011 needs 0010
+  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => !/^00(0[56789]|1[012])_/.test(m.id))); // S6a: 0008 needs 0005 too; S7a: 0009 needs 0008; S7b: 0010 needs 0009; S7c: 0011 needs 0010; S7d: 0012 needs 0011
   assert.equal(IDENTITY_SNAPSHOT.read(s), null, 'nothing to read from the tables before the cutover');
   assert.equal(transaction(s, () => IDENTITY_SNAPSHOT.replace(s, { players: [PLAYER_ADULT()], guardians: [] }, { now: NOW })), false, 'nothing is written to the tables before the cutover (the caller writes the blob)');
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0);
@@ -334,7 +334,7 @@ test('identity snapshot: before the cutover record exists (a pre-S4 file read by
   assert.throws(() => IDENTITY_SNAPSHOT.replace(s, { players: [], guardians: [] }, { now: NOW }), /replace\(\) runs inside the caller's transaction/);
   assert.deepEqual(IDENTITY_SNAPSHOT.read(s), { guardians: [], players: [] });
   s.close();
-  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions', 'mediaDeletions', 'emailChallenges', 'pairingCodes', 'notifications', 'notificationPrefs', 'dispatches', 'outbox', 'pushLog', 'pushTokens']);
+  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'users', 'sessions', 'mediaDeletions', 'emailChallenges', 'pairingCodes', 'notifications', 'notificationPrefs', 'dispatches', 'outbox', 'pushLog', 'pushTokens', 'channels']);
   assert.deepEqual([...IDENTITY_SNAPSHOT.names], ['players', 'guardians']);
 });
 

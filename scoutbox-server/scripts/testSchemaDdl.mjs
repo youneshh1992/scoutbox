@@ -66,14 +66,14 @@ test('every index references an existing table', () => {
 // column (S4a); media_deletions (0006) is documented in 08; the twelve
 // player sub-record tables (0007, S5) are in 01 with their position and
 // extra_json columns.
-test('the registered migrations 0001–0011 match 01_identity.sql (identity, facets_json and the twelve player sub-record tables included), 08 (media_deletions) and 03 (email_challenges, pairing_codes, notifications, notification_prefs, notification_pref_categories, dispatches, dispatch_attempts, outbox, push_log, push_tokens) column for column', () => {
+test('the registered migrations 0001–0012 match 01_identity.sql (identity, facets_json and the twelve player sub-record tables included), 08 (media_deletions) and 03 (email_challenges, pairing_codes, notifications, notification_prefs, notification_pref_categories, dispatches, dispatch_attempts, outbox, push_log, push_tokens, channels, messages, message_attachments) column for column', () => {
   const mig = new DatabaseSync(':memory:');
   mig.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(mig, DATA_MIGRATIONS, { now: Date.UTC(2026, 9, 11, 12), log: () => {} });
   assert.equal(mig.prepare('SELECT COUNT(*) AS n FROM data_migrations').get().n, DATA_MIGRATIONS.length);
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push']);
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels']);
   const S5_TABLES = ['player_season_history', 'player_badges', 'player_drills', 'player_attendance', 'player_timeline', 'player_media', 'player_media_tags', 'player_medical_records', 'player_drill_results', 'player_activity_log', 'player_external_ids', 'player_programme_completions'];
-  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', ...S5_TABLES]) {
+  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', ...S5_TABLES]) {
     const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
     assert.deepEqual(cols(mig), cols(docs), `${t} columns`);
     const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all(t).map((r) => r.name);
@@ -107,6 +107,15 @@ test('the registered migrations 0001–0011 match 01_identity.sql (identity, fac
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'push_tokens'").get().sql, /token_json\s+TEXT NOT NULL CHECK \(json_valid\(token_json\)\)/, 'the documented token column is JSON text');
   assert.equal(docs.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'index' AND tbl_name = 'push_tokens' AND sql LIKE '%UNIQUE%'").get().n, 0, 'no unique index on the documented tokens');
   for (const t of ['outbox', 'push_log', 'push_tokens']) { assert.doesNotMatch(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /transport IN \(|audience_kind IN \(|ref_kind IN \(|channel IN \(/, `${t}: no vocabulary CHECK`); assert.deepEqual(docs.prepare(`PRAGMA foreign_key_list(${t})`).all(), [], `${t} references nothing`); }
+  // S7d (review §11.5 as corrected by the reviews of 46e5afe and 8330f08; D-A, D-B): the thread tables.
+  for (const t of ['channels', 'messages', 'message_attachments']) assert.match(header03, new RegExp(`${t}[^\\n]*0012_channels[^\\n]*REGISTERED`), `the scope header of 03 states that ${t} is live since 0012`);
+  assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(channels)').all().map((f) => [f.from, f.table, f.on_delete]), [['org_id', 'orgs', 'RESTRICT']], 'the documented channels table references orgs only: request_id (D-A, the transitional checked reference), player_id (D-B, no lifecycle clause) and guardian_id (the bounded code-validated reference) carry no foreign key');
+  assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(messages)').all().map((f) => [f.from, f.table, f.on_delete]), [['channel_id', 'channels', 'CASCADE']]);
+  assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(message_attachments)').all().map((f) => [f.from, f.table, f.on_delete]), [['message_id', 'messages', 'CASCADE']]);
+  assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'channels_request_id'").get().sql, /UNIQUE/, 'one thread per request');
+  assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'messages_channel_position'").get().sql, /UNIQUE/, 'one message per position in a thread');
+  for (const t of ['channels', 'messages']) assert.ok(docs.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'absent_keys_json'), `${t}: the documented absent-keys column (absence preserved as absence)`);
+  assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_attachments'").get().sql, /kind = 'clip' AND media_id IS NOT NULL AND verified_clip IS NOT NULL AND report_id IS NULL/, 'the documented attachment CHECK ties each kind to its columns');
 });
 
 console.log(`\n${passed} schema-DDL checks passed (${files.length} files, ${tables.length} tables)`);

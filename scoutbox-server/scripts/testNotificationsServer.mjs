@@ -130,8 +130,10 @@ await test('feed and coalescing through the real routes: an identical message no
   if (live(dir)) {
     assert.deepEqual(qAll(dir, 'SELECT id FROM notifications WHERE audience_kind = ? AND audience_id = ? ORDER BY seq DESC', 'player', 'pl-adeyemi').map((r) => r.id), orderBefore, 'the table holds the feed in its durable order (second connection)');
     assert.equal(q1(dir, 'SELECT repeat_count AS n FROM notifications WHERE id = ?', msg.id).n, 2, 'the coalesce is durable with the message it announces (postMessage saves at once)');
-    const channelBlob = q1(dir, "SELECT value FROM collections WHERE name = 'channels'").value;
-    assert.ok(channelBlob.includes('Second message'), 'the message is in the channels blob of the same file');
+    // S7d: the message is a row of the messages table after the 0012 cutover; before it, an entry of the channels blob — the same file either way.
+    const channelsCut = !!q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0012_channels'");
+    const storedMessages = channelsCut ? qAll(dir, 'SELECT text FROM messages WHERE channel_id = ? ORDER BY position', channelId).map((r) => r.text).join('\n') : q1(dir, "SELECT value FROM collections WHERE name = 'channels'").value;
+    assert.ok(storedMessages.includes('Second message'), 'the message is in the same file (the messages table since S7d; the channels blob before)');
   }
   // SIGKILL: the order and the counts are what the file holds.
   await S.kill(); S = await boot(dir);
@@ -313,8 +315,9 @@ await test('backup/restore: the admin backup exports the notifications and prefe
   // The old build on the rollback copy (when its server.mjs is given).
   const OLD = process.env.SCOUTBOX_PRE_S7A_SERVER;
   if (OLD && fs.existsSync(OLD)) {
-    const copy = path.join(tempDir('s7a-rb'), 'copy'); const s7aCopy = path.join(tempDir('s7a-rb-s7b'), 'copy'); const s7bCopy = path.join(tempDir('s7a-rb-s7c'), 'copy');
-    execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), dir, s7bCopy], { encoding: 'utf8' }); // S7c: the file carries 0011; its rollback goes first,
+    const copy = path.join(tempDir('s7a-rb'), 'copy'); const s7aCopy = path.join(tempDir('s7a-rb-s7b'), 'copy'); const s7bCopy = path.join(tempDir('s7a-rb-s7c'), 'copy'); const s7cCopy = path.join(tempDir('s7a-rb-s7d'), 'copy');
+    execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, s7cCopy], { encoding: 'utf8' }); // S7d: the file carries 0012; its rollback goes first,
+    execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, s7bCopy], { encoding: 'utf8' }); // then S7c (0011),
     execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), s7bCopy, s7aCopy], { encoding: 'utf8' }); // then S7b (0010),
     const out = execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), s7aCopy, copy], { encoding: 'utf8' });
     assert.match(out, /written back as blobs/);

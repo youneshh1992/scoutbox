@@ -204,19 +204,33 @@ and design changes the Founder explicitly requests.
   row written back in its writer's literal; nothing lost; proven on the actual
   `6ca66ba` build) and the S7b tool refuses a file carrying 0011. The staff
   push identity, the plain-code mail sites and retention are carried through
-  unchanged, not decided. **S7d is not started**; the next milestone is
-  PREPARED / NOT IMPLEMENTED in the S7 review §11, corrected after the
-  independent reviews of `46e5afe` (§11.7) and `8330f08` (§11.8: the guardian
-  reference is a code-validated choice checked on every identity, channel or
-  request snapshot write, with the deferred-foreign-key alternative stated;
-  the earlier engine claim withdrawn) (§11.7: S7d storage-only with the §2.3
-  transitional validated request reference and today's deletion reproduced
-  inside the unit — no player- or request-lifecycle CASCADE/RESTRICT, no
-  retention decision; present legacy fields such as `orgUserIdForNotify`
-  preserved losslessly; final-state validation of partial snapshots in both
-  directions; channel-list and message order kept) and
-  is NOT authorised until the Founder decides D-A and D-B (review §11.6); no
-  migration identifier is assigned for it. S8, S4b and the remaining S6 tables
+  unchanged, not decided. **Message threads are tables since S7d** (IMPLEMENTED
+  on top of `b67bce5` on 18 October 2026, PENDING INDEPENDENT ACCEPTANCE — not
+  production, security, legal-compliance or deployment approval; approved by the
+  Founder's explicit decisions D-A and D-B, recorded verbatim in
+  `docs/architecture/s7-readiness-review.md` §11.9; `repositories/channels.mjs`,
+  migration `0012_channels`): `db.channels` is a read-only view in insertion
+  order with each thread's `messages` nested in array order; the ONLY writers
+  are `channels.open` (the two acceptance routes' `openChannel` — the literal
+  unchanged, the request checked against the live `requests` collection, the
+  organisation and the guardian checked by name, one thread per request),
+  `channels.appendMessage` (`postMessage`; the duplicate-`clientMsgId` answer
+  stays the writer's rule), `channels.markRead` (the three receipt routes) and
+  `channels.deleteForPlayer` (`deletePlayerData`, inside the deletion unit:
+  today's deletion of the deleted player's threads, guardian–club threads
+  included — D-B, a scope confirmation, not a retention decision). The tables
+  carry `request_id NOT NULL UNIQUE` with no foreign key (D-A, the §2.3
+  transitional code-checked reference until S8a), `player_id` with no
+  lifecycle clause, `guardian_id` code-validated at open and against the FINAL
+  guardians table on every identity, channel or request snapshot write (§11.8),
+  `org_id RESTRICT`, the internal message/attachment cascades, `seq`/`position`
+  order, `absent_keys_json` (absence preserved as absence) and `extra_json` at
+  every level (`orgUserIdForNotify` and unknown fields preserved exactly);
+  a failed ordinary staged save keeps its pending state, an aborted unit
+  restores the pre-unit state; the copy-only rollback is
+  `scripts/channelsRollback.mjs` (every thread and message written back;
+  nothing lost; proven on the actual `b67bce5` build) and the S7c tool refuses a
+  file carrying 0012. Retention stays OPEN (S4b). S8, S4b and the remaining S6 tables
   are not started; S4b waits for the open country-code decision.
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,

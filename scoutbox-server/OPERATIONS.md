@@ -1166,6 +1166,109 @@ the push sender and the registration route are the only writers.
    <fresh-empty-dir>`, then start the previous build (`6ca66ba`) on the output —
    every mail, push and token row written since the cutover is in it.
 
+### Message threads (live since migration `0012`, S7d — implemented on top of `b67bce5`, pending independent acceptance; not production-approved)
+
+The thread routes (`GET /player/channels`, `/guardian/channels`, `/org/channels`,
+the message, read and typing routes, the exports, `/admin/channels`,
+`/admin/overview`) answer exactly as before; the records behind them are rows of
+`channels`, `messages` and `message_attachments` (`repositories/channels.mjs`;
+`docs/architecture/s7-readiness-review.md` §11.5 as corrected in §11.7/§11.8,
+implemented as recorded in §11.9 after the Founder's decisions D-A and D-B). The
+acceptance routes (`openChannel`), `postMessage`, the three receipt routes and
+the account deletion are the only writers.
+
+- **Order and keys.** `channels.seq` is the thread order every list depends on;
+  `messages.position` is the array order within a thread (a tie on `ts` keeps
+  its order). A thread is the `openChannel` literal, a message the `postMessage`
+  literal, an attachment one of the two shapes `buildAttachment` produces (a
+  total CHECK ties each kind to its columns). Optional keys that may be present
+  and null or absent (`playerName`, `orgVerified`, `scoutName`, `scoutRole`,
+  `guardianId`, the two receipts, a message's `attachment`, `sender.name`) are
+  nullable columns plus `absent_keys_json`, so an absent key comes back absent
+  and a null comes back null; `clientMsgId` is present only when the client sent
+  one. A present legacy field (`orgUserIdForNotify`, which `postMessage` still
+  reads) and every unknown own field at channel, message, attachment, `readBy`
+  or `sender` level is kept in `extra_json` and spread back first.
+- **References (the approved scope).** `request_id` is `NOT NULL UNIQUE` with
+  NO foreign key: `recruitment_requests` does not exist yet, so the request is
+  checked in code (D-A, the transitional reference) — a thread opens only for a
+  request in the live `requests` collection, one thread per request, the import
+  refuses a channel whose request is not in the file's blob, and every snapshot
+  write validates the FINAL combined state (below); S8a rebuilds the table with
+  the foreign key. `player_id` carries NO lifecycle clause: a deleted player's
+  threads — guardian–club threads included — are deleted explicitly inside the
+  account-deletion unit, as every build did (D-B: a scope confirmation for this
+  storage-only step; retention stays OPEN for S4b). `guardian_id` carries NO
+  foreign key: a guardian is checked by name at open and every retained or
+  incoming thread is checked against the FINAL guardians table whenever a
+  snapshot writes the threads, carries the requests or rewrites the identity
+  pair (a bounded code-validated choice; the deferred-foreign-key route is the
+  stated alternative). `org_id` keeps its RESTRICT foreign key: an organisation
+  removed under a retained thread is refused at the prune. Messages and
+  attachments cascade with their thread only.
+- **Writes.** A thread lands in the acceptance route's own save together with
+  the request's answer; a message lands in `postMessage`'s save before the
+  sender hears 201 (a SIGKILL right after the answer loses nothing); a receipt
+  lands in its route's save; a deletion lands in the deletion unit's commit. A
+  failed ordinary save keeps every pending row for the next save, which lands it
+  once; an aborted unit of work restores the state from before the unit.
+  Nothing here changes what a route answers, who may read a thread, the block
+  and suspension checks, moderation, SSE scoping or the duplicate-send answer.
+- **Boot.** The data layer attaches to the tables as they are; an in-memory
+  `channels` array (the seed's empty container, the snapshot migration's
+  `??= []`, a stale copy) is never imported — the blob the migration just
+  imported is dropped silently, anything else is logged as a count and dropped.
+  `GET /capabilities` → `persistence.dataLayer.domains.channels` reports the
+  thread, message and attachment counts and the number of staged writes not yet
+  in a committed save.
+- **S7d cutover (first boot of this build on an S7c file).** Migration
+  `0012_channels` creates the three tables and imports the `channels` blob:
+  every thread, message and attachment validated and nothing coerced (the three
+  sender kinds, the two counterparties and the two attachment kinds are the only
+  vocabularies the writers ever produced); array order becomes `seq` and
+  `position`; legacy and unknown fields kept; absence kept; a channel whose
+  request is not in the `requests` blob, whose guardian is not in the
+  `guardians` table or whose organisation is not in `orgs`, a duplicate id, a
+  second channel for one request, a present null `clientMsgId` or an attachment
+  of neither shape refuses the WHOLE step (`CHANNELS_IMPORT_BLOCKED`: entry
+  positions, ids and reasons — never a message text, a name or an address); the
+  blob and `saveSeq` are untouched and the next boot refuses the same way until
+  the entry is resolved on the previous build. A file without a blob imports
+  nothing. A backup from any build restores through the same migration with the
+  order intact; a snapshot that omits `channels` leaves the tables alone, an
+  explicit empty array clears them, a malformed collection or a reference the
+  final state does not satisfy rolls the whole write back.
+- **Rollback (copy-only).** `npm run rollback:channels -- <data-dir>
+  <fresh-empty-dir>` (`scripts/channelsRollback.mjs`) opens the file read-only,
+  copies it (`VACUUM INTO`), writes every thread back into the `channels` blob in
+  insertion order with its messages in array order — each in its writer's
+  literal, extras first, absence preserved — **nothing written after the cutover
+  is lost** — drops the three tables, removes the 0012 record and its meta key,
+  advances the save revision, checks every foreign key, VACUUMs and revalidates
+  the copy (every other table untouched). Refusals, no output: a later schema
+  step (exit 4), a file that never applied 0012 (exit 5), a non-empty output
+  directory (exit 1), a recorded 0012 whose tables are missing (exit 10). Proven
+  by booting the copy on the actual pre-S7d build (`b67bce5`): the same threads,
+  messages and receipts in its routes and admin audit, a message posted there
+  into its blob; this build then re-upgrades the copy with that message. To go
+  further back, run `scripts/outboxPushRollback.mjs` on this tool's output (it
+  refuses the S7d file itself with exit 4).
+
+#### Operator procedure for the S7d cutover (not run on real data by this work)
+
+1. **Dry run on a copy.** With the S7c build (`b67bce5`) still serving, copy the
+   data directory and boot this build on it (`DATA_DIR=<copy>` on a spare port):
+   the log shows the 0012 import counts (threads by counterparty, messages,
+   attachments, rows with legacy or unknown fields, rows with absent optional
+   keys); a `CHANNELS_IMPORT_BLOCKED` line lists what to resolve on the previous
+   build (positions and ids, never a message text).
+2. **Backup.** `POST /admin/backup` on the previous build, verify it, keep it.
+3. **Cutover.** Stop the previous build, start this build on the real directory,
+   read the same log lines.
+4. **Rollback, if needed.** `node scripts/channelsRollback.mjs <data-dir>
+   <fresh-empty-dir>`, then start the previous build (`b67bce5`) on the output —
+   every thread, message and receipt written since the cutover is in it.
+
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request
 logs) key on the client address. Behind a platform proxy (Fly, Render, a load

@@ -66,7 +66,11 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   calibrationSessions: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   campaignSubmissions: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   campaigns: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
-  channels: { guarantee: 'migration', owner: 'core', reason: 'moderated message threads, opened on acceptance (D2)' },
+  // channels: no longer a blob collection since S7d — the threads live in channels / messages / message_attachments
+  // (migration 0012, repositories/channels.mjs); the data layer defines a read-only view at db.channels (insertion
+  // order, messages nested in array order), written only through the channels repository (the acceptance routes'
+  // openChannel, postMessage, the three receipt routes, the account deletion).
+  channels: { guarantee: 'migration', owner: 'core', reason: 'moderated message threads, opened on acceptance (D2); container guaranteed by the migration registry before the data layer attaches; since S7d a read-only view over the channels table, written only through the channels repository' },
   coachAffiliations: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   combineAttempts: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
   combineRequests: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
