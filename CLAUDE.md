@@ -206,7 +206,10 @@ and design changes the Founder explicitly requests.
   push identity, the plain-code mail sites and retention are carried through
   unchanged, not decided. **S7d is not started**; the next milestone is
   PREPARED / NOT IMPLEMENTED in the S7 review §11, corrected after the
-  independent review of `46e5afe` (§11.7: S7d storage-only with the §2.3
+  independent reviews of `46e5afe` (§11.7) and `8330f08` (§11.8: the guardian
+  reference is a code-validated choice checked on every identity, channel or
+  request snapshot write, with the deferred-foreign-key alternative stated;
+  the earlier engine claim withdrawn) (§11.7: S7d storage-only with the §2.3
   transitional validated request reference and today's deletion reproduced
   inside the unit — no player- or request-lifecycle CASCADE/RESTRICT, no
   retention decision; present legacy fields such as `orgUserIdForNotify`

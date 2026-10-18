@@ -37,7 +37,7 @@ implemented on top of `6ca66ba` (`40aa05c`, §10.8); the review of `40aa05c` fou
 accepted array destination dropped its mail record), corrected in `9119187` (§10.11), the accepted commit;
 migration `0011_outbox_push` is registered with its DDL amended in place before acceptance. **S7d not
 started. The next milestone is prepared in §11 — PREPARED / NOT IMPLEMENTED, corrected after the independent
-review of `46e5afe` (§11.7) — and waits for the decisions listed there.** §§0–8.2 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where
+reviews of `46e5afe` (§11.7) and `8330f08` (§11.8) — and waits for the decisions listed there.** §§0–8.2 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where
 the implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
 correction is marked in place, and the dependency table §8.1 carries the current status of each row. Nothing
 here decides a retention period, a deletion policy, the country-code or child-status questions, or
@@ -50,7 +50,8 @@ bounded recommendation · 9 S7b (design, implementation, corrections, acceptance
 follow-up) · 10 S7c (the plan as corrected by the review of `6ca66ba`, the implementation §10.8, the
 follow-up's acceptance §10.9, the two correction rounds §10.10–§10.11 as history, the acceptance §10.12) ·
 11 the next milestone, PREPARED / NOT IMPLEMENTED (the current-code survey, the two routes compared, the
-recommendation and the decisions it needs; §11.7 the corrections from the review of `46e5afe`).
+recommendation and the decisions it needs; §11.7 the corrections from the review of `46e5afe`; §11.8 the
+guardian-reference corrections from the review of `8330f08`).
 
 ---
 
@@ -2488,9 +2489,10 @@ changed; a copy-only rollback loses nothing. It is a storage move only.
 recruitment_requests(id)` clause and with a comment stating the transitional validation and the planned
 rebuild at S8a; `player_id TEXT NOT NULL` **without** a `REFERENCES players(id)` clause (today's hard delete
 reproduced in code; §2.4); `guardian_id` **without** a `REFERENCES guardians(id)` clause, validated in code
-against the final identity state (the `pairing_codes.player_id` precedent, SQL03:912 — see "Dispatch order
-and retained constraints" below for why the proposed RESTRICT cannot survive the identity snapshot
-rewrite); `org_id … REFERENCES orgs(id) ON DELETE RESTRICT` **kept** as DDL; an insertion-order key on
+against the final identity state (the `pairing_codes.player_id` precedent, SQL03:912) — a **bounded design
+choice, not a SQLite necessity**; its trade-off against a deferred foreign key and the exact validation
+trigger are in "Dispatch order and retained constraints" below, corrected after the review of `8330f08`
+(§11.8); `org_id … REFERENCES orgs(id) ON DELETE RESTRICT` **kept** as DDL; an insertion-order key on
 `channels` (`seq INTEGER PRIMARY KEY`, `id TEXT NOT NULL UNIQUE`, the S7a–S7c pattern — the list order every
 reader sees today is `db.channels` array order) and an ordering column on `messages` for equal `created_at`
 (array position at import, the next position at append — §1.2); `extra_json` on `channels`, `messages` and
@@ -2556,11 +2558,24 @@ S:4228; nothing removes a request from `db.requests`, S:4256 is the only reassig
 **Snapshot validation — the FINAL combined state, in both directions** (corrected after the review of
 `46e5afe`, §11.7). The snapshot contract allows PARTIAL writes: an omitted collection is retained unchanged,
 an explicitly supplied non-array refuses, absence and an empty array are distinct (`repositories/index.mjs:111–134`
-`checkTableBackedShapes`; `store.mjs` `writeBody`). The channels table joins `writeTableBacked` with a
+`checkTableBackedShapes`; `store.mjs` `writeBody`). The channels table joins `writeTableBacked` with ONE
 final-state assertion in the identity `trials`-reconciliation and S6a `assertPairingCodesConsistent` shape
-(`index.mjs:146`, `:170`): the assertion runs when **either** `channels` was written **or** the snapshot
-carries `requests` (present as a key), and takes the final requests as `Object.hasOwn(db, 'requests') ?
-db.requests : <the retained requests blob read from the file>` — never an empty set for an omitted collection.
+(`index.mjs:146`, `:170`). **Trigger (corrected after the review of `8330f08`, §11.8 — the earlier
+"channels written OR requests present" missed identity-only snapshots):** the assertion runs when **any** of
+these holds — `channels` was written; the snapshot carries `requests` (present as a key); **the identity pair
+(`players` + `guardians`) was written**. A snapshot that touches none of the three leaves every reference
+untouched and needs no check. **Sources, per parent and child, always the FINAL state of this transaction:**
+the channels are the rows of the `channels` table after this snapshot's dispatch (the incoming collection if
+written, the retained rows otherwise); the guardians are the rows of the `guardians` table after the identity
+rewrite (read back from the table, never from the incoming array alone); the organisations are the `orgs`
+table after its prune; the requests are `Object.hasOwn(db, 'requests') ? db.requests : <the retained requests
+blob read from the file>`. Never an empty set for an omitted collection; a present non-array is a malformed
+explicit value and refuses.
+- *Identity pair supplied, `channels` and `requests` omitted* (the case the review of `8330f08` named): every
+  **retained** channel's `guardian_id` (when non-null) must name a guardian in the rewritten `guardians`
+  table; a miss refuses the whole transaction (`CHANNEL_GUARDIAN_MISSING`, channel and guardian ids only) —
+  tables, unrelated blobs and the save revision unchanged. Retained guardians rewritten in place pass, with
+  channel, message and receipt rows, order and content untouched (the channel group is not dispatched).
 - *Incoming `channels`, `requests` omitted:* every incoming channel's `requestId` must name a request in the
   **retained** requests blob; a miss refuses the whole transaction (`CHANNEL_REQUEST_MISSING`, channel ids
   only), nothing written, the retained data untouched.
@@ -2571,6 +2586,13 @@ db.requests : <the retained requests blob read from the file>` — never an empt
 - *Both supplied:* the proposed final combination is validated — a coordinated removal (request and its
   channel both absent) succeeds; an invalid combination refuses the entire transaction without altering
   unrelated data.
+- *Identity pair and `channels` supplied:* a guardian and its channel removed together succeed when every
+  remaining channel's `guardian_id`, `org_id` and `request_id` resolve; an invalid coordinated replacement
+  (a guardian removed, a channel naming it kept or incoming) refuses whole — no partial deletes, no leaked
+  effects (the snapshot write schedules none).
+- *Incoming `channels` with an invalid `guardian_id`, identity omitted:* refused against the **retained**
+  `guardians` table (`CHANNEL_GUARDIAN_MISSING`); likewise an incoming `org_id` naming no organisation is
+  refused by the `org_id` foreign key at the INSERT.
 - *Malformed explicit collections:* `channels` present but not an array refuses before any statement (the
   `checkTableBackedShapes` rule); `requests` present but not an array refuses whenever the assertion needs it
   (the identity `trials` wording: "supplied with the snapshot is … not an array"); an **empty** `requests`
@@ -2595,26 +2617,64 @@ index on `request_id`; `messages.channel_id … REFERENCES channels(id) ON DELET
 parent–child cascades that fire **only after an explicit channel deletion** (the repository's
 `deleteForPlayer` inside the deletion unit, or a snapshot that no longer lists the channel) and reproduce
 today's nesting, where a message exists only inside its channel array; and the identity/org snapshot prunes
-as they are. What cannot stand as written is `guardian_id … REFERENCES guardians(id) ON DELETE RESTRICT`
-(SQL03:80): the identity snapshot write REWRITES its tables — `DELETE FROM guardian_children; DELETE FROM
-players; DELETE FROM guardians;` then reinsertion (`identity.mjs:205–207`) — and a RESTRICT action fires
-immediately even under `PRAGMA defer_foreign_keys`, so any file holding one guardian channel would refuse
-every identity snapshot write, retained guardians included. This is the reason `pairing_codes.player_id` has
-no foreign key by design (SQL03:912–926) and the same precedent applies: `guardian_id` carries no FK clause,
-and the final-state assertion above also checks that every retained or incoming channel's `guardian_id`
-(when non-null) and the existing `org_id` name a guardian/organisation present in the final state
-(`CHANNEL_GUARDIAN_MISSING`, ids only) — reproducing RESTRICT semantics in code for a parent-only removal
-while allowing a coordinated removal. (The alternative — a plain `REFERENCES guardians(id)` with checking
-deferred to COMMIT for the snapshot transaction — would also work for the rewrite but changes the store's
-transaction setup; it is noted, not proposed.) **Ordering within `writeTableBacked`:** the channel group is
-dispatched **after** the identity pair and the users/sessions writes and **before** the `sessions`/`users`/`orgs`
-prunes (`index.mjs:154`), deleting the rows the snapshot no longer lists and upserting the rest, so that a
-legitimate full replacement removing an organisation **and** its channels succeeds (the channel rows are gone
-before the org prune), while an organisation removed with its channel retained is refused atomically by the
-`org_id` RESTRICT at the prune, and a guardian removed with its channel retained is refused by the
-final-state assertion — both roll the whole transaction back with unrelated data untouched. The final-state
-assertion itself runs after the prunes (it reads the final identity and org tables). This is a dispatch-order
-rule for one new table group, not a general persistence refactor.
+as they are.
+
+*The guardian reference — the engine facts, corrected after the review of `8330f08` (§11.8).* The earlier
+text here claimed that a RESTRICT action fires immediately even under `PRAGMA defer_foreign_keys` and that
+the proposed `guardian_id … RESTRICT` (SQL03:80) therefore could not coexist with the identity snapshot
+rewrite (`DELETE FROM guardian_children; DELETE FROM players; DELETE FROM guardians;` then reinsertion,
+`identity.mjs:205–207`). **That claim is withdrawn.** The reviewer's probe `review-8330f08-design-checks.mjs`,
+run unchanged here (Node v22.22.2, SQLite 3.51.2; the reviewer: Node v24.19.0, SQLite 3.53.3), verifies on
+the real engine that: (a) with the pragma off, RESTRICT refuses at the DELETE whether or not the column is
+declared `DEFERRABLE INITIALLY DEFERRED` — the declaration and the pragma are different mechanisms; (b) with
+`PRAGMA defer_foreign_keys = ON` inside the transaction, deleting and reinserting a retained guardian commits
+with its channel intact; (c) a retained channel whose guardian is genuinely gone is refused at COMMIT and
+rolled back; (d) an explicit `PRAGMA foreign_key_check` run before the child rows are cleaned still sees the
+intermediate orphan even with deferral. So a foreign key is **possible**. What a foreign-key design would
+actually require in this codebase: (1) the normal snapshot transaction does not enable the pragma — the one
+occurrence in `store.mjs:403` is the test seam `failCommitOfOpenTransaction`, not `write()`'s setup — so
+`write()` would set `PRAGMA defer_foreign_keys = ON` for snapshot writes; (2) `identity.mjs:225` runs
+`PRAGMA foreign_key_check` immediately after the identity rewrite and throws on any broken reference, so a
+coordinated removal (guardian and its channel both absent) would fail there unless the channel rows the
+snapshot no longer lists are deleted **before** the identity rewrite while the new channel rows are inserted
+**after** it — a split dispatch of the channel group — or that check is relaxed to the end of the snapshot
+write. Both are changes to existing persistence code outside the new table group. **The bounded choice this
+section keeps is the code-validated reference:** `guardian_id` carries no FK clause (the
+`pairing_codes.player_id` precedent, SQL03:912–926, chosen there for the same rewrite), and the final-state
+assertion above, with its corrected trigger, reproduces RESTRICT semantics in code for every parent-only
+removal while allowing a coordinated one. **Trade-off, stated:** the code path carries the integrity rule
+instead of the engine, so it must run on every path that can rewrite guardians (next paragraph) and its
+coverage is proven by the regression cases, not by a constraint; in exchange the store's transaction setup,
+the identity check and the dispatch structure stay as they are. The foreign-key alternative above is concrete
+and in scope if DDL enforcement is preferred at implementation time; it is described, not implemented, and
+choosing it is part of approving S7d's DDL, not a decision this document takes.
+
+*Every path that can remove or replace a guardian, and how the rule covers each (surveyed at `8330f08`).*
+Ordinary writers: `guardians.insert` and `guardians.update` (identity.mjs:805, :829; callers S:1337, 1365,
+1388, 1425, 1444, 1699, 4122, 4506) never remove a row; `players.remove` (identity.mjs:768) deletes a player
+and its link rows and never a guardian; `unlink`/`ageUp` (identity.mjs:549, :757) remove link rows only;
+`DELETE /guardian/children/:id` (S:4307) deletes the **child player** through `deletePlayerData`; there is **no
+guardian-deletion HTTP route** today (§4.2). Nothing to validate on these paths — a guardian cannot
+disappear through them. Snapshot writes (`writeTableBacked`: the legacy `db.json` import at boot,
+`store.mjs:375`; a restore; the persistence suites) — the only paths that rewrite the `guardians` table
+wholesale — are covered by the assertion with the identity-pair trigger. The S7d cutover migration imports
+the `channels` blob on a file whose identity tables are already live (0005 precedes it), so its preflight
+validates every channel's `guardian_id` against the `guardians` table of the same file and refuses the
+cutover otherwise (ids only, file unchanged). The copy-only rollback tools run newest-first: the S7d tool
+restores the channels blob before `coreIdentityRollback` may drop the identity tables (that tool refuses a
+later schema, `LATER_SCHEMA`, coreIdentityRollback.mjs:160), so no rollback leaves a channel row behind
+without its guardian table.
+
+**Ordering within `writeTableBacked`:** the channel group is dispatched **after** the identity pair and the
+users/sessions writes and **before** the `sessions`/`users`/`orgs` prunes (`index.mjs:154`), deleting the rows
+the snapshot no longer lists and upserting the rest, so that a legitimate full replacement removing an
+organisation **and** its channels succeeds (the channel rows are gone before the org prune), while an
+organisation removed with its channel retained is refused atomically by the `org_id` RESTRICT at the prune,
+and a guardian removed with its channel retained — whether the identity pair came alone or with channels — is
+refused by the final-state assertion, which runs **after** the prunes and reads the final `guardians`, `orgs`
+and `channels` tables and the final requests. Both refusals roll the whole transaction back with unrelated
+data and the save revision untouched. This is a dispatch-order rule and one assertion for one new table
+group, not a general persistence refactor.
 
 **Order preservation.** The channel list order every reader sees (`db.channels` array order: the guardian,
 org, player, admin and export routes all filter that array) is the `seq` insertion key; messages within a
@@ -2665,10 +2725,18 @@ requirements for the future suites, not claims about an unimplemented repository
   supplied as an empty array with retained channels refuses; `channels` or `requests` supplied as a non-array
   refuses before any statement; absence versus empty array distinguished in every case;
 - parent pruning order: a full replacement removing an organisation together with its channels succeeds; an
-  organisation removed while its channel is retained refuses atomically (the `org_id` RESTRICT); a guardian
-  removed while a guardian channel is retained refuses (`CHANNEL_GUARDIAN_MISSING`); a guardian removed
-  together with its channels succeeds; the identity rewrite of retained guardians with guardian channels
-  present succeeds (the reason `guardian_id` carries no FK clause);
+  organisation removed while its channel is retained refuses atomically (the `org_id` RESTRICT);
+- the guardian reference, every trigger (added by the review of `8330f08`, §11.8): (i) identity pair only —
+  `players` and `guardians` supplied, `channels` and `requests` omitted — with a referenced guardian removed:
+  refused atomically (`CHANNEL_GUARDIAN_MISSING`); the tables, the unrelated blobs and the save revision
+  (`meta.saveSeq`) read back unchanged; (ii) identity pair only with every referenced guardian retained:
+  succeeds, and the channel, message and receipt rows, their order and their content read back identical;
+  (iii) identity pair and `channels` supplied, a guardian and its channel removed together: succeeds when
+  every remaining `guardian_id`, `org_id` and `request_id` resolves; (iv) an invalid coordinated replacement
+  (a guardian removed while a channel naming it is kept or incoming): refused whole — no partial deletes,
+  no leaked effects, unrelated data and the save revision unchanged; (v) `channels` only with an invalid
+  `guardian_id`, identity omitted: refused against the retained `guardians` table; plus the identity rewrite
+  of retained guardians with guardian channels present succeeding (the pairing-codes precedent in practice);
 - order: the channel list order and the message order, ties on `created_at` included, identical through
   save, restart, export, a whole-snapshot write and the rollback blob;
 - request-existence only: a channel whose request is a tombstone (`contactChannel: null`, `playerName: null`)
@@ -2681,8 +2749,9 @@ Existing suites unchanged and green: `apiE2E`, `connectedE2E`, `m13E2E`, `m23Con
 ledger blob still written per send, stated); the preflight refusals exercised on synthetic files; the
 rollback proven on the actual `9119187` build; no route payload changed; no present legacy field dropped and
 none manufactured; no retention behaviour, no player- or request-lifecycle cascade or restrict, no re-keying
-introduced; the partial-snapshot cases in both directions and the prune-order cases above exercised; the DDL
-comment states the transitional reference, the S8a rebuild and why `guardian_id` carries no FK clause; the
+introduced; the partial-snapshot cases in both directions, the five guardian-trigger cases and the
+prune-order cases above exercised; the DDL comment states the transitional reference, the S8a rebuild and the
+guardian-reference choice with its trade-off (a code-validated reference, not an engine impossibility); the
 documents updated in place with S7d marked pending independent acceptance until reviewed.
 
 **Likely files** (from the survey, not line-guessed): new `repositories/channels.mjs`,
@@ -2690,7 +2759,8 @@ documents updated in place with S7d marked pending independent acceptance until 
 `scripts/channelsRollback.mjs`, `scripts/testChannels.mjs`, `scripts/testChannelsServer.mjs`;
 `repositories/index.mjs` (`TABLE_BACKED`; the snapshot dispatch order — the channel group after the identity
 pair and users/sessions, before the `sessions`/`users`/`orgs` prunes, with the final-state assertion after the
-prunes, keyed on `channels` written OR `requests` present — "Dispatch order and retained constraints" above);
+prunes, keyed on `channels` written OR `requests` present OR the identity pair written — "Snapshot
+validation" and "Dispatch order and retained constraints" above);
 `server.mjs` (`openChannel`, `postMessage`, the three `readBy` routes, `deletePlayerData`, the readers listed
 in §11.2 if the view does not cover them, the SSE lookup); `m26/index.mjs` (reads only, if the view does not
 cover them); `m13/enterprise.mjs` (backup export); `storeContract.mjs` (remove `channels`);
@@ -2777,15 +2847,76 @@ S7d exists to regress.
    coordinated parent-and-channel removal succeeds; a parent-only removal that would orphan a protected
    channel refuses atomically); that "no CASCADE/RESTRICT" concerns the unapproved player/request lifecycle
    only, with the retained constraints and the internal cascades listed; and channel-list order alongside
-   message order. One consequence surfaced while writing it: the proposed `guardian_id … RESTRICT` (SQL03:80)
-   cannot coexist with the identity snapshot rewrite, so S7d's DDL amendments now include `guardian_id`
-   without a FK clause on the `pairing_codes.player_id` precedent, with the check in code. Concrete cases were
-   added to the future failing-first suites as requirements.
+   message order. This round also introduced `guardian_id` without a FK clause on the `pairing_codes.player_id`
+   precedent, with the check in code — **but justified it with an incorrect engine claim ("the proposed
+   RESTRICT cannot coexist with the identity snapshot rewrite; RESTRICT fires immediately even under
+   `PRAGMA defer_foreign_keys`") and a trigger that missed identity-only snapshots; both are corrected in
+   §11.8, and the sentence is kept here only as the history of this round.** Concrete cases were added to the
+   future failing-first suites as requirements.
 
 Housekeeping from the same review: the schema document's §5.0 counts-table row still read "O1 is implemented
 at S4" and now says S4b, not implemented. Status after this round: **S7c accepted at `9119187`; S7d PREPARED /
 NOT IMPLEMENTED with these corrections; D-A and D-B still unanswered** (no answer is recorded in the bundle;
 none is inferred).
+
+### 11.8 Corrections to the guardian-reference design from the independent review of `8330f08` (18 October 2026; documentation only)
+
+The review of the documentation handoff `8330f08` (`review-8330f08-summary.txt`) accepted the recruitment-first
+and legacy-field corrections of §11.7 and the request-side partial-snapshot contract, and found two issues in
+the guardian-reference design §11.7 had introduced — findings in an unimplemented specification, not defects
+in S7c, which stays accepted at `9119187`. Both are corrected in place in §11.5 ("Snapshot validation",
+"Dispatch order and retained constraints", the failing-first cases, the acceptance criteria, "Likely files");
+the superseded sentence in §11.7 item 3 is marked as history. Nothing is implemented; no DDL, test or source
+file changed; no identifier assigned; D-A and D-B remain unanswered (no answer is recorded in the bundle and
+none is inferred).
+
+1. **Validation coverage.** The assertion's trigger read "`channels` written OR `requests` present", which does
+   not run for an identity-only partial snapshot (`players` and `guardians` supplied, `channels` and `requests`
+   omitted) — the retained channels stay while a guardian can disappear. The trigger now includes the identity
+   pair, the final-state sources are named per parent and child (the `channels`, `guardians` and `orgs` tables
+   after this transaction's dispatch and prunes; the requests as supplied or retained), absent collections
+   stay distinct from explicit empty arrays and malformed values, and five regression cases were added
+   (identity-only with a referenced guardian removed → atomic refusal with tables, unrelated blobs and the save
+   revision unchanged; identity-only with every guardian retained → success with channel/message/receipt
+   order and content unchanged; identity pair plus channels with a guardian and its channel removed together →
+   success; an invalid coordinated replacement → whole refusal with no partial deletes or leaked effects;
+   channels only with an invalid guardian → refusal against the retained identity tables). The guardian
+   write paths were surveyed: no ordinary writer removes a guardian (`guardians.insert`/`update` only;
+   `players.remove`, `unlink`, `ageUp` touch players and link rows; `DELETE /guardian/children/:id` deletes the
+   child player; **no guardian-deletion HTTP route exists**), so the snapshot writes are the only paths that
+   rewrite guardians and the assertion with the identity trigger covers them; the S7d import validates against
+   the live `guardians` table of the same file; the rollback chain refuses a later schema.
+2. **The engine claim.** §11.7 justified dropping the proposed `guardian_id … RESTRICT` with "RESTRICT fires
+   immediately even under `PRAGMA defer_foreign_keys`". **That is false and is withdrawn.** The reviewer's
+   `review-8330f08-design-checks.mjs`, run unchanged here before any edit (exit 0; Node v22.22.2, SQLite 3.51.2;
+   the reviewer: Node v24.19.0, SQLite 3.53.3; the log is in the handoff), verifies four engine facts — with the
+   pragma off RESTRICT refuses at the DELETE with or without a `DEFERRABLE INITIALLY DEFERRED` declaration;
+   with the pragma on, deleting and reinserting a retained guardian commits with its channel intact; a
+   genuinely orphaned retained channel refuses at COMMIT and rolls back; an explicit `foreign_key_check` before
+   the child cleanup still sees the intermediate orphan — plus one explicitly modelled specification predicate
+   (the old trigger is false for an identity-only snapshot). It uses in-memory synthetic fixtures; it is not a
+   failing-first regression and not a production schema proposal. Only Node 22 is a supported server runtime on
+   this machine (`/opt/node20`, `/opt/node21` exist but are below the server's minimum), so no second supported
+   binary ran it here. §11.5 now states the real trade-off: a foreign key is possible, but would need the
+   normal snapshot transaction to set the pragma (today's only occurrence, `store.mjs:403`, is the
+   `failCommitOfOpenTransaction` test seam) and the early `identity.mjs:225` `foreign_key_check` to be moved
+   or the channel group split around the identity rewrite — changes to existing persistence code; the
+   code-validated reference is kept as the bounded choice with that trade-off stated, and the foreign-key route
+   is described as the in-scope alternative, not implemented.
+
+**Gate evidence the review recorded, kept as recorded.** The reviewer's Player gate passed (4 suites / 41
+tests). Their backend gate did **not** achieve a clean full run on the unchanged `8330f08` tree (Node
+v24.19.0): attempt 1 exited 1 when `testOneTimeCodesServer.mjs:46` timed out after 30 s waiting for a child
+server to start (last output "snapshot loaded (sqlite): players table-backed, 0 ledger rows"; cause
+unestablished); attempt 2, unchanged source, exited 1 at `testDispatchesServer.mjs:292` ("the ladder resumed
+after the restart": the wait returned null after 20 s). A focused `TEST_ONLY='crash recovery'` run of that one
+case then passed; that does not turn either full attempt into a pass, no root cause is established, and these
+are distinct from the `46e5afe`-round `EADDRINUSE` event. This session's reproduction on the unchanged
+application code (Node v22.22.2, before any edit; log `reproduce-reviewer-failures@8330f08.txt` in the handoff):
+the focused case passed (1 selected check, 31 s) and the whole one-time-codes server suite passed (10 checks,
+42 s); neither failure reproduced here. The full gates of this round and their attempt counts are in the
+handoff's `gates-summary.txt`. Status after this round: **S7c accepted at `9119187`; S7d PREPARED / NOT
+IMPLEMENTED with the corrected guardian design; D-A and D-B still unanswered.**
 
 ---
 

@@ -1422,7 +1422,9 @@ performance, existing tests, what this plan is not).
   `message_attachments` — **PREPARED / NOT IMPLEMENTED** (review §11.5 as corrected in §11.7: storage-only,
   the §2.3 transitional validated request reference, today's deletion reproduced inside the unit, no
   player- or request-lifecycle CASCADE/RESTRICT — the `org_id` RESTRICT and the internal message/attachment
-  cascades remain, `guardian_id` checked in code —, every present legacy field preserved in `extra_json`,
+  cascades remain, `guardian_id` checked in code on every identity, channel or request snapshot write (review
+  §11.8: a bounded choice, with the deferred-foreign-key alternative stated) —, every present legacy field
+  preserved in `extra_json`,
   final-state validation of partial snapshots in both directions, channel-list and message order kept; needs
   decisions D-A and D-B, review §11.6). The
   whole-database-write objective is met in phases measured by a synthetic benchmark (review
