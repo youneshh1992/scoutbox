@@ -205,7 +205,8 @@ and design changes the Founder explicitly requests.
   `6ca66ba` build) and the S7b tool refuses a file carrying 0011. The staff
   push identity, the plain-code mail sites and retention are carried through
   unchanged, not decided. **Message threads are tables since S7d** (IMPLEMENTED
-  on top of `b67bce5` on 18 October 2026, PENDING INDEPENDENT ACCEPTANCE — not
+  on top of `b67bce5` on 18 October 2026, corrected once after the independent
+  review of `62e9c1a` — review §11.10 — PENDING INDEPENDENT ACCEPTANCE — not
   production, security, legal-compliance or deployment approval; approved by the
   Founder's explicit decisions D-A and D-B, recorded verbatim in
   `docs/architecture/s7-readiness-review.md` §11.9; `repositories/channels.mjs`,
@@ -227,7 +228,11 @@ and design changes the Founder explicitly requests.
   order, `absent_keys_json` (absence preserved as absence) and `extra_json` at
   every level (`orgUserIdForNotify` and unknown fields preserved exactly);
   a failed ordinary staged save keeps its pending state, an aborted unit
-  restores the pre-unit state; the copy-only rollback is
+  restores the pre-unit state IN PLACE through the graph memento
+  (`repositories/memento.mjs`) — every object of the mirror by identity, so a
+  held nested view (`channels.byId(id).readBy`, a message's `sender` or
+  `attachment`, an unknown nested field) reads the pre-unit value afterwards
+  and follows the next committed write (the review of `62e9c1a`); the copy-only rollback is
   `scripts/channelsRollback.mjs` (every thread and message written back;
   nothing lost; proven on the actual `b67bce5` build) and the S7c tool refuses a
   file carrying 0012. Retention stays OPEN (S4b). S8, S4b and the remaining S6 tables

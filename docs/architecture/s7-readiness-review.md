@@ -2350,9 +2350,11 @@ this record.
 
 ---
 
-## 11. S7d — prepared 17 October 2026 from the code at `9119187` (§11.1–§11.8, dated history); IMPLEMENTED 18 October 2026 on top of `b67bce5`, PENDING INDEPENDENT ACCEPTANCE (§11.9)
+## 11. S7d — prepared 17 October 2026 from the code at `9119187` (§11.1–§11.8, dated history); IMPLEMENTED 18 October 2026 on top of `b67bce5` (§11.9), corrected after the independent review of `62e9c1a` (§11.10); PENDING INDEPENDENT ACCEPTANCE
 
-**Status now (18 October 2026): IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE — §11.9.** The Founder approved D-A and
+**Status now (18 October 2026): IMPLEMENTED, CORRECTED ONCE (§11.10), PENDING INDEPENDENT ACCEPTANCE — §11.9 is the
+implementation record, §11.10 the one correction the independent review of `62e9c1a` required (an aborted unit of work
+now restores the nested objects of a held view by identity).** The Founder approved D-A and
 D-B explicitly (recorded verbatim in §11.9); migration `0012_channels` is registered; the "PREPARED, NOT
 IMPLEMENTED, NOT AUTHORISED" wording in the paragraph below and in §11.1–§11.8 is the status at the time those
 sections were written and is kept as the dated record the implementation followed.
@@ -2972,7 +2974,9 @@ organisation-deletion policy, the staff-push re-keying or a user-interface chang
   `CHANNEL_GUARDIAN_MISSING`, `CHANNEL_ORG_MISSING`, `CHANNEL_REQUESTS_MALFORMED`; ids only) and
   `createChannelsRepository` (`open`, `appendMessage`, `markRead`, `deleteForPlayer`, `exportRows`, the staged
   save hook and the unit-of-work participant contract of S7a–S7c: a failed ordinary save keeps the pending state,
-  an aborted unit restores the mirror in place, held views included).
+  an aborted unit restores the mirror in place, held views included — at `62e9c1a` the restore replaced the NESTED
+  objects of a thread with clones, so a held `readBy` kept the failed value; corrected in §11.10 to the graph memento,
+  every object by identity).
 - `repositories/migrations/0012_channels.mjs` — REGISTERED after `0011_outbox_push`: creates the three tables,
   imports the `channels` blob through the validation above (a channel whose request is not in the file's `requests`
   blob, whose guardian is not in `guardians` or whose organisation is not in `orgs` refuses the whole step), retires
@@ -3001,7 +3005,8 @@ organisation-deletion policy, the staff-push re-keying or a user-interface chang
   migration creates (column for column, index for index; `scripts/testSchemaDdl.mjs` compares them) with the
   mapping comments of §11.5/§11.7/§11.8; `scripts/notificationsPersistenceBench.mjs` appends through the repository
   when the tree has one and reports the channels and ledger blob bytes; `package.json` runs the two new suites.
-- Tests: `scripts/testChannels.mjs` (9 checks: the lossless import, every refusal, the actual schema, the
+- Tests: `scripts/testChannels.mjs` (9 checks at `62e9c1a`; a tenth, the held nested view across an aborted unit,
+  was added by the correction of §11.10: the lossless import, every refusal, the actual schema, the
   repository in both modes, joined units, real COMMIT failures, the snapshot dispatcher, the FINAL-state assertion
   in every direction of §11.5 — the five guardian cases included — and the rollback) and
   `scripts/testChannelsServer.mjs` (5 checks through the real server: both acceptance paths, all three sender
@@ -3042,6 +3047,79 @@ suites contain, real data, real providers.
 bounded choice of §11.8, the deferred-foreign-key route still the stated alternative); `player_id` carries no
 lifecycle clause (D-B); retention is OPEN. A guardian-deletion path, should one be added, must keep the §11.8
 invariant (the final-state assertion covers snapshot writes; no ordinary writer removes a guardian today).
+
+### 11.10 Correction from the independent review of `62e9c1a` (18 October 2026; one local commit on top of `62e9c1a` — S7d still PENDING INDEPENDENT ACCEPTANCE)
+
+**Status: IMPLEMENTED AND CORRECTED ONCE, PENDING INDEPENDENT ACCEPTANCE.** Not production, security, legal-compliance
+or deployment approval; not acceptance of S4b, the remaining S6 tables or S8; nothing pushed, merged or deployed; no
+real data, no real provider. S7a, S7b and S7c stay accepted as recorded; D-A and D-B are not reopened or changed.
+
+**The finding (P2, `review-62e9c1a-summary.txt`, reproduced by `review-62e9c1a-reproductions.mjs` in two failure
+paths).** The repository's `restoreState` restored each thread and each message IN PLACE but rebuilt their nested
+objects from the detached snapshot copy (`restoreInto` → `clone(copy[k])`), so `row.readBy` — and likewise a message's
+`sender`, its `attachment` and every unknown nested field — became a NEW object after a rollback. `readonlyView` caches
+one proxy per target object, so a caller holding `channels.byId(id).readBy` (the nested receipts view, not the outer
+thread) stayed attached to the discarded object: after an aborted unit it still read the failed receipt
+(`1791720000001` in the reviewer's fixture) while a fresh lookup and the database read `null`, and it never followed a
+later committed receipt. Both paths reproduce: an exception thrown from the unit body, and an actual SQLite UPDATE
+failure during the unit's flush. The in-memory view contract of §11.5 ("an aborted unit restores the mirror … held
+views included") was therefore not met for nested views; no durable corruption was observed, and no current HTTP
+route is shown to hold a nested receipts view across a unit — the repository's public contract and the real
+unit-of-work failure paths demonstrate it directly. The reviewer's two attachment compatibility controls (a clip
+whose media omits `url`, normalised to `url: null` by the S5 mapping, accepted by both the `b67bce5` and the candidate
+server; the baseline-written attachment upgrading through 0012) pass and are NOT a finding; attachment validation is
+unchanged.
+
+**The correction (`repositories/channels.mjs` only; no DDL, migration, route, payload, retention or policy change).**
+`snapshotState()` now captures the graph memento of the whole mirror — `captureGraph([rows])`
+(`repositories/memento.mjs`, the facility the identity and organisation repositories already use): every plain object
+and array reachable from the thread list, by identity, with its own data properties by reference. `restoreState()`
+calls `restoreGraph`, which puts every captured object back to its captured keys and values IN PLACE: the thread list,
+each thread, its `readBy`, its `messages` array, each message, its `sender`, its `attachment` and every unknown nested
+field keep their identity, so every held view — nested ones included — reads the pre-unit state afterwards and
+follows the next committed write. Objects created during the unit (a new thread, a new message) are no longer
+referenced once their parents are restored; nothing is cloned, so key order, absence versus null (no key is
+manufactured or dropped — restoreGraph deletes keys added during the unit and reassigns the captured ones) and live
+non-finite values in unknown fields come back exactly as captured; own `"__proto__"` keys are data to the memento (an
+own data property shadows the accessor on assignment, and no repository operation deletes a key, so no restore has
+to recreate one). The queue is trimmed to its pre-unit length as before, so writes queued BEFORE the unit stay pending
+and land once with the next save; a failed ORDINARY save still never reaches `restoreState` (its mirror and queue are
+the intended state, §11.5). Both write modes share the one `restoreState`: the staged server path (the store's unit
+of work) and the immediate path (the repository's own transaction, `operation()`), so the correction covers both. The
+detached-copy helpers remain for `exportRows` (the admin backup) only; the clone-based `restoreInto` is gone.
+
+**Failing-first evidence (recorded on the unchanged `62e9c1a` source before the edit; logs in the handoff).** The
+reviewer's script, unchanged, on the clean tree: `REPRODUCED` in both failure paths, exit 1 (mandatory mode), and the
+same with the two passing controls against the actual `b67bce5` checkout. The new tenth check of
+`scripts/testChannels.mjs` holds `channels.byId('chan-1').readBy`, a message's `sender` and `attachment` and an unknown
+nested field (`legacyMeta`) before the unit, queues a message BEFORE the unit, aborts the unit by a thrown body and —
+in a second pass — by a `BEFORE UPDATE ON channels` trigger refusing the receipt at the flush, then asserts: the held
+receipts object reads the pre-unit value, a fresh lookup returns the SAME object, a second connection agrees, the
+pre-unit write is still the only pending one, nothing landed, the next save lands that write exactly once together
+with a new receipt, and the held receipts follow it; then the immediate mode's own transaction with the same trigger.
+It failed on the unchanged source at its first assertion (`body: the held receipts object reads the pre-unit value`:
+`1791720000001` instead of `null`). A scratch probe of the immediate-mode path (kept in the handoff's `review/`, a
+harness of this round, not a reviewer artefact) reproduced the same on a `git archive` of `62e9c1a` — its first
+version read the held value after the later commit (a harness slip, corrected before the recorded runs).
+
+**Verification (Node v22.22.2, npm 10.9.7, SQLite 3.51.2; every log in the handoff).** The reviewer's script,
+unchanged, on the corrected tree: `CORRECT` in both failure paths, exit 0, in both modes (the controls still
+`CORRECT`). `testChannels.mjs` (10 checks), `testUnitOfWork.mjs` (17) and `testChannelsServer.mjs` (5, with the actual
+`b67bce5` build booting the rollback copy) pass. The six historical reviewer scripts and both design probes ran
+unchanged; the focused real-server suites the correction can touch (`m13E2E`, `connectedE2E`, `m23ContactE2E`) ran;
+the backend gate `cd scoutbox-server && npm test` with the four old-build paths and the Player gate ran on the final
+tree after every edit, and again from the fresh extraction of the handoff ZIP (old builds skipped there, stated) —
+exit codes, counts and attempts in the handoff's `gates-summary.txt` and sidecar. Not run: browser suites, the demo
+rebuild, `apiE2E` and the wider E2E battery (unchanged since `62e9c1a`'s run), real older-Node runtimes, real data,
+real providers.
+
+**Observed, not changed (for the reviewer and the Founder).** The accepted S7a–S7c repositories restore their outer
+rows by identity but rebuild SOME nested values from clones on rollback (`notifications.mjs`: unknown nested fields —
+`actionRequired` and `categories` are merged in place; `dispatches.mjs`: the attempt objects and unknown nested
+fields — `audience` in place; `outboxPush.mjs`: every nested value, an array destination or an object token included).
+That is the same class as this finding for a caller that would hold such a nested view across an aborted unit; whether
+any caller does was not surveyed in this bounded round, those milestones are accepted at their recorded commits, and
+nothing there is changed here. The graph memento would bound each of them the same way should the Founder ask.
 
 ---
 

@@ -102,7 +102,14 @@
  * receipt with its route's persistNow(). A failed ordinary save keeps the mirror and
  * the queue as they are (memory is the intended state; the next save lands them
  * once); an aborted unit of work restores the mirror and the queue to the pre-unit
- * state, held views included. Deletion joins the deletion unit.
+ * state, held views included — EVERY object of the mirror by identity (the graph
+ * memento, repositories/memento.mjs): the thread list, each thread, its `readBy`, its
+ * messages array, each message, its `sender`, its `attachment` and every unknown
+ * nested field go back to their pre-unit keys and values IN PLACE, so a caller holding
+ * the receipts object itself (`channels.byId(id).readBy`), not only the thread, reads
+ * the pre-unit value afterwards and follows the next committed write (the review of
+ * 62e9c1a: a restore that replaced the nested objects with clones left such a held
+ * view attached to the discarded value). Deletion joins the deletion unit.
  *
  * Whether the tables are authoritative is decided by the cutover record
  * `0012_channels` in `data_migrations`, never by the tables existing or by row
@@ -111,6 +118,7 @@
  * address.
  */
 import { readonlyView } from './readonly.mjs';
+import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied, transaction } from './database.mjs';
 import { cloneJson, NON_FINITE_KEPT } from './outboxPush.mjs';
 
@@ -515,15 +523,18 @@ export function importChannelsBlob(sqlite) {
   return { ...counts, ...v.counts };
 }
 
-// ------------------------------------------------------------------ detached copies and in-place restore
+// ------------------------------------------------------------------ detached copies (the export)
 const copyMessage = (m) => { const c = {}; for (const k of Object.keys(m)) setOwn(c, k, clone(m[k], k).value); return c; };
 /** A DETACHED copy of a mirror channel (the export shape): every key cloned, the messages array cloned message by message. */
 const copyChannel = (row) => { const c = {}; for (const k of Object.keys(row)) setOwn(c, k, k === 'messages' ? row.messages.map(copyMessage) : clone(row[k], k).value); return c; };
-/** Restore a mirror object IN PLACE from its detached copy (held views stay valid); `keep` names keys restored by the caller. */
-const restoreInto = (obj, copy, keep = []) => {
-  for (const k of Object.keys(obj)) if (!Object.hasOwn(copy, k) && !keep.includes(k)) delete obj[k];
-  for (const k of Object.keys(copy)) if (!keep.includes(k)) setOwn(obj, k, clone(copy[k], k).value);
-};
+// The unit-of-work snapshot is NOT a detached copy: it is the graph memento of the mirror
+// (repositories/memento.mjs — every plain object and array reachable from `rows`, by
+// identity, with its own data properties by reference), restored IN PLACE. A clone-and-
+// replace restore kept the outer thread but swapped its nested objects, so a held
+// `readBy` (or sender, attachment, unknown nested field) stayed attached to the failed
+// value (the review of 62e9c1a). Own "__proto__" keys are data to the memento (own data
+// properties shadow the accessor on assignment); the mirror never deletes a key inside
+// an operation, so no restore has to recreate one.
 
 // ------------------------------------------------------------------ the repository
 /**
@@ -673,18 +684,21 @@ export function createChannelsRepository({ sqlite, now = Date.now, log = () => {
     },
     commit() { pending.splice(0, inFlight); inFlight = 0; },
     rollback() { inFlight = 0; },
-    /** Unit-of-work participation: every mirror object by identity (channels and their messages, restored in place) and the queue length when the unit began. */
-    snapshotState: () => ({ pendingLength: pending.length, channels: rows.map((r) => [r, copyChannel(r), r.messages.map((m) => [m, copyMessage(m)])]) }),
+    /**
+     * Unit-of-work participation: the graph memento of the whole mirror (the thread list,
+     * every thread, its receipts, its messages, each sender, attachment and unknown nested
+     * field — by identity, restored IN PLACE so every held view, nested ones included,
+     * reads the pre-unit state) and the queue length when the unit began. Objects added
+     * during the unit (a new thread, a new message) are no longer referenced once their
+     * parents are restored; nothing is cloned, so key order, absence versus null and live
+     * non-finite values come back exactly as captured. A failed ORDINARY save never
+     * reaches here: its mirror and queue are the intended state (see the header).
+     */
+    snapshotState: () => ({ pendingLength: pending.length, graph: captureGraph([rows]) }),
     restoreState(state) {
       if (!state) return;
       pending.length = state.pendingLength; inFlight = 0;
-      rows.length = 0;
-      for (const [obj, copy, messages] of state.channels) {
-        restoreInto(obj, copy, ['messages']);
-        obj.messages.length = 0;
-        for (const [m, mcopy] of messages) { restoreInto(m, mcopy); obj.messages.push(m); }
-        rows.push(obj);
-      }
+      restoreGraph(state.graph);
       index();
     },
     /** What the store registers (staged mode; and immediate mode with a `unit`, before any operation may join one). Taking it is the registration this repository can see. */

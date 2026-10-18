@@ -43,7 +43,9 @@ production or deployment approval; review §9.9), **the notification-extras foll
 reviews, review §10.8, §10.10, §10.11 as dated history; the reviewer verified backend 25 suites / 348 checks, Player
 4 / 41, `m13E2E` 212 checks, the six reviewer scripts and the actual pre-S7a/S7b/S7c rollback boots on real Node
 v24.19.0; not production, security, legal-compliance or deployment approval; review §10.12),
-**S7d IMPLEMENTED on top of `b67bce5` (18 October 2026), PENDING INDEPENDENT ACCEPTANCE** (storage-only:
+**S7d IMPLEMENTED on top of `b67bce5` (18 October 2026), corrected once after the independent review of `62e9c1a`
+(an aborted unit restores the nested objects of a held view by identity; review §11.10), PENDING INDEPENDENT
+ACCEPTANCE** (storage-only:
 `channels`, `messages`, `message_attachments` as tables, migration **`0012_channels`**, the §2.3 transitional
 code-checked request reference approved by the Founder as D-A, today's deletion of a deleted player's threads
 reproduced inside the deletion unit as confirmed by D-B — a scope confirmation, not a retention decision; copy-only
@@ -1386,7 +1388,10 @@ performance, existing tests, what this plan is not).
 > review §10.11), both dated history; the copy-only rollback is `scripts/outboxPushRollback.mjs`, proven on
 > the actual `6ca66ba` build. The earlier intermittent push-timing observation did not recur in the
 > reviewer's accepting run; no root cause is established (review §10.10, §10.12).
-> **Status (S7d): IMPLEMENTED on top of `b67bce5` (18 October 2026), PENDING INDEPENDENT ACCEPTANCE** (review
+> **Status (S7d): IMPLEMENTED on top of `b67bce5` (18 October 2026), corrected once after the independent review
+> of `62e9c1a` (review §11.10: the unit-of-work restore of `repositories/channels.mjs` now uses the graph memento, so
+> a held nested view such as `channels.byId(id).readBy` reads the pre-unit state after an aborted unit), PENDING
+> INDEPENDENT ACCEPTANCE** (review
 > §11.9 holds the implementation record, the Founder's approvals verbatim, the verification and its limits — not
 > production, security, legal-compliance or deployment approval; not acceptance of S4b, the remaining S6 tables or
 > S8): migration `0012_channels` registered; `channels`, `messages` and `message_attachments` are tables written

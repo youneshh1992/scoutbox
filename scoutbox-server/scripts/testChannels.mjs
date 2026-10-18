@@ -20,7 +20,10 @@
 // the tests marked [cutover] need the 0012 migration and the repository module and FAIL
 // there on concrete assertions (the migration id is absent from DATA_MIGRATIONS; the
 // three tables do not exist; the channels blob survives). The tests marked [compat]
-// exercise behaviour the accepted build already has and pass on both trees.
+// exercise behaviour the accepted build already has and pass on both trees. The check
+// named "the review of 62e9c1a" was recorded FAILING on the unchanged 62e9c1a source
+// (a held nested receipts view kept the failed value after an aborted unit) before the
+// repository's snapshot/restore moved to the graph memento.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -276,6 +279,42 @@ test('[cutover] staged mode (the server): a thread, a message and a receipt are 
   }
   assert.throws(() => stagedUnit.open(channel({ id: 'chan-h', requestId: 'req-free' })), /save hook/); assert.throws(() => createChannelsRepository({ sqlite: L.store.sqlite, staged: true }), /needs the store's participant API/);
   L.close(); rm(dir);
+});
+
+// The review of 62e9c1a (FAILING-FIRST, recorded on the unchanged 62e9c1a tree): the restore replaced the NESTED objects of a
+// channel (readBy, each message's sender and attachment, unknown nested fields) with fresh clones, so a caller holding
+// channels.byId(id).readBy — not the outer channel — kept reading the failed value and never followed later commits.
+test('[cutover] an ABORTED UNIT OF WORK restores the NESTED objects of a held view IN PLACE (the review of 62e9c1a): a caller holding channels.byId(id).readBy before the unit reads the pre-unit value afterwards and the SAME object is what a fresh lookup returns, a second connection agrees, the failed receipt leaves no pending SQL, a write queued BEFORE the unit survives it and lands exactly once, and the held receipts follow the NEXT committed write — whether the unit body threw or the receipt UPDATE itself failed at the unit\'s flush; a message\'s sender and attachment and an unknown nested field keep their identity too; the immediate mode\'s own transaction restores the same way', () => {
+  for (const failure of ['body', 'flush']) {
+    const dir = tempDir(`ch-held-${failure}`); s7cFile(dir, { channels: [channel({ legacyMeta: { tag: 'keep-me' }, messages: [message({ id: 'm-0', attachment: clip() })] })] });
+    const L = live(dir); L.save(); const seq0 = seqOf(dir);
+    const heldChannel = L.repo.byId('chan-1'); const heldReceipts = heldChannel.readBy; const heldSender = heldChannel.messages[0].sender; const heldAttachment = heldChannel.messages[0].attachment; const heldExtra = heldChannel.legacyMeta;
+    assert.equal(heldReceipts.org, null); assert.deepEqual(plain(heldExtra), { tag: 'keep-me' });
+    L.repo.appendMessage('chan-1', message({ id: 'm-pre' })); assert.equal(L.repo.pending(), 1, 'a write queued BEFORE the unit');
+    if (failure === 'flush') L.store.sqlite.exec("CREATE TEMP TRIGGER rv_held BEFORE UPDATE ON channels BEGIN SELECT RAISE(ABORT, 'synthetic receipt failure'); END");
+    assert.throws(() => L.store.unitOfWork(() => { L.repo.markRead('chan-1', 'org', NOW + 1); assert.equal(heldReceipts.org, NOW + 1, 'inside the unit the held receipts show the change'); if (failure === 'body') throw new Error('synthetic unit failure'); }, { snapshot: L.snapshot }), failure === 'body' ? /synthetic unit failure/ : /synthetic receipt failure/);
+    if (failure === 'flush') L.store.sqlite.exec('DROP TRIGGER rv_held');
+    const fresh = L.repo.byId('chan-1');
+    assert.equal(heldReceipts.org, null, `${failure}: the held receipts object reads the pre-unit value`); assert.equal(heldReceipts.counterparty, null);
+    assert.equal(fresh.readBy.org, null, `${failure}: a fresh lookup agrees`); assert.equal(rowsOf(dir, 'channels', 'seq')[0].read_by_org_at, null, `${failure}: a second connection agrees`);
+    assert.equal(fresh.readBy, heldReceipts, `${failure}: the fresh lookup returns the SAME receipts object the caller held (restored in place, not replaced)`);
+    assert.equal(fresh.messages[0].sender, heldSender, `${failure}: the sender keeps its identity`); assert.equal(fresh.messages[0].attachment, heldAttachment, `${failure}: the attachment keeps its identity`); assert.equal(fresh.legacyMeta, heldExtra, `${failure}: the unknown nested field keeps its identity`);
+    assert.deepEqual(plain(heldSender), message().sender); assert.deepEqual(plain(heldAttachment), clip()); assert.deepEqual(plain(heldExtra), { tag: 'keep-me' });
+    assert.equal(L.repo.pending(), 1, `${failure}: the pre-unit write is still pending and the failed receipt left no SQL behind`); assert.deepEqual(messageRows(dir).map((r) => r[2]), ['m-0'], 'nothing landed yet'); assert.equal(seqOf(dir), seq0);
+    L.repo.markRead('chan-1', 'org', NOW + 2); L.save();
+    assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(messageRows(dir).map((r) => r[2]), ['m-0', 'm-pre'], 'the pre-unit write landed with the retry'); assert.equal(rowsOf(dir, 'channels', 'seq')[0].read_by_org_at, NOW + 2); assert.equal(L.repo.pending(), 0);
+    assert.equal(heldReceipts.org, NOW + 2, `${failure}: the held receipts follow the committed write`); assert.equal(fresh.readBy.org, NOW + 2);
+    L.save(); assert.deepEqual(messageRows(dir).map((r) => r[2]), ['m-0', 'm-pre'], 'exactly once'); assert.equal(rowsOf(dir, 'channels', 'seq')[0].read_by_org_at, NOW + 2);
+    L.close(); rm(dir);
+  }
+  // Immediate mode (a tool, a test): the repository's own transaction restores the same objects in place.
+  const dir = tempDir('ch-held-bare'); s7cFile(dir, { channels: [channel()] }); const s = openRaw(dir); migrate(s); const repo = bare(s);
+  const heldReceipts = repo.byId('chan-1').readBy;
+  s.exec("CREATE TEMP TRIGGER rv_bare BEFORE UPDATE ON channels BEGIN SELECT RAISE(ABORT, 'synthetic receipt failure'); END");
+  assert.throws(() => repo.markRead('chan-1', 'org', NOW + 1), /synthetic receipt failure/); s.exec('DROP TRIGGER rv_bare');
+  assert.equal(heldReceipts.org, null, 'immediate mode: the held receipts read the pre-operation value'); assert.equal(repo.byId('chan-1').readBy, heldReceipts, 'immediate mode: the same object'); assert.equal(s.prepare('SELECT read_by_org_at AS v FROM channels').get().v, null); assert.equal(s.isTransaction, false);
+  repo.markRead('chan-1', 'org', NOW + 3); assert.equal(heldReceipts.org, NOW + 3, 'immediate mode: the held receipts follow the committed write'); assert.equal(s.prepare('SELECT read_by_org_at AS v FROM channels').get().v, NOW + 3);
+  s.close(); rm(dir);
 });
 
 // ============================================================= [cutover] the snapshot dispatcher and the FINAL-STATE assertion
