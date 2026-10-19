@@ -648,6 +648,16 @@ Nothing is registered by this review. Existing identifiers never change.
 §2, §3 and §5's "code fact" columns are the first; §4.1's no-FK shape, §4.2's treatments, §6 and
 §7 are the second; §4.3, the two open O1 parts and the last two rows of this table are the third.
 
+**Update, 19 October 2026 (from the code at `4f954ad`, after all four S7 sub-steps were accepted).** The table
+above is kept as the dated record; the current per-table statement is `sqlite-migration-plan.md` §D.2: the
+`players(id)` foreign key on five of the eight tables (`blocks`, `reports`, `org_notes`, `ledger`,
+`source_changes`) waits for S4b — the one SQLite fact; the tables themselves wait for the Founder's approval of
+the no-FK shape of §4.1 (plan Q4) and for the block-lift behaviour choice (keep today's row delete at
+`server.mjs:4534`, or §4.2's `lifted_at`/`lifted_by` rows — plan Q5); `moderation_log`, `ops_events` and
+`idv_queue` wait for nothing but authorisation. The candidate step (S6b, the eight tables in the no-FK shape,
+behaviour preserved, migration `0013`, copy-only rollback) is plan §D.4 Candidate A; the "rows → blobs" rollback
+of §7 stands; the writer line numbers of §2–§4 predate S7 and the current ones are in plan §D.2's table.
+
 ---
 
 ## 10. S6a as implemented (independently accepted at `2d7ddeb`; not production-approved)

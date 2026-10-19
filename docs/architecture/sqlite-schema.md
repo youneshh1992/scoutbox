@@ -138,7 +138,7 @@ them.
 | `signings` | persistent | 02 | `signings`, `signing_parties` (single writer `recordCompletedSigning`; `firstQualifyingInteraction` → ledger id, at, type) | S8 |
 | `followUps` | persistent | 02 | `follow_ups` (UNIQUE signing + milestone) | S8 |
 | `outcomeReports` | persistent | 02 | `outcome_reports`, `outcome_report_confirmations` (UNIQUE follow_up_id) | S8 |
-| `channels` | persistent | 03 | `channels` (`seq` insertion-order key); `messages[]` → `messages` (`position` per thread: array order, ties on `ts` kept), `attachment` → `message_attachments` (the clip or trial-report shape, a total CHECK); `readBy` → columns; `request_id NOT NULL UNIQUE` with NO foreign key — the §2.3 transitional code-checked reference the Founder approved as D-A, checked at open, import and every snapshot write until S8a rebuilds the table with the foreign key; `player_id` with NO lifecycle clause — today's explicit deletion of the deleted player's threads reproduced inside the deletion unit as confirmed by D-B (no retention decision); `guardian_id` with NO foreign key — a bounded code-validated reference checked at open and against the FINAL guardians table on every identity, channel or request snapshot write (S7 review §11.8; the deferred foreign key is the stated alternative); `org_id RESTRICT` kept; `absent_keys_json` keeps absent optional keys absent; `orgUserIdForNotify` and every other present legacy or unknown field → `extra_json` at channel/message/attachment level (the unknown keys inside `readBy`/`sender` nested under those names), spread back first — **LIVE since migration 0012 (S7d, implemented on top of `b67bce5`, pending independent acceptance; S7 review §11.9)** | S7d |
+| `channels` | persistent | 03 | `channels` (`seq` insertion-order key); `messages[]` → `messages` (`position` per thread: array order, ties on `ts` kept), `attachment` → `message_attachments` (the clip or trial-report shape, a total CHECK); `readBy` → columns; `request_id NOT NULL UNIQUE` with NO foreign key — the §2.3 transitional code-checked reference the Founder approved as D-A, checked at open, import and every snapshot write until S8a rebuilds the table with the foreign key; `player_id` with NO lifecycle clause — today's explicit deletion of the deleted player's threads reproduced inside the deletion unit as confirmed by D-B (no retention decision); `guardian_id` with NO foreign key — a bounded code-validated reference checked at open and against the FINAL guardians table on every identity, channel or request snapshot write (S7 review §11.8; the deferred foreign key is the stated alternative); `org_id RESTRICT` kept; `absent_keys_json` keeps absent optional keys absent; `orgUserIdForNotify` and every other present legacy or unknown field → `extra_json` at channel/message/attachment level (the unknown keys inside `readBy`/`sender` nested under those names), spread back first — **LIVE since migration 0012 (S7d, independently accepted at `4f954ad`; S7 review §11.9, §11.11)** | S7d |
 | `notifications` | persistent | 03 | `notifications` (`seq` insertion-order key; `actionRequired` → flag + columns; unknown fields → `extra_json`, own keys preserved; an audience is `kind` and `id` only, anything more refused) — **LIVE since migration 0009 (S7a, independently accepted at `0641b2c`)** | S7a |
 | `notificationPrefs` | persistent | 03 | `notification_prefs`, `notification_pref_categories` (no mandatory-false CHECK, no category-list CHECK: the vocabulary lives in code) — **LIVE since migration 0009 (S7a, independently accepted at `0641b2c`)** | S7a |
 | `dispatches` | persistent | 03 | `dispatches` (`seq` insertion-order key; `notification_id` an indexed reference, **no foreign key, no cascade** — orphans after an ordinary deletion are kept and counted; `delivered_at` / `opened_at` REAL: the callback route's finite number, fractional or not, stored exactly; the legacy non-finite in-memory clock stored NULL as the previous build's JSON did; unknown fields → `extra_json`, nested data detached), `dispatch_attempts` (keyed by dispatch and position, no minted id; total shape CHECK: a send row's `ok IS NOT NULL`) — **LIVE since migration 0010 (S7b, independently accepted at `ac50b60`)** | S7b |
@@ -410,7 +410,8 @@ rules, not table boundaries. The table above predates S6a and S7; the live table
 listed with their steps in §4's mapping (`email_challenges`, `pairing_codes` — S6a, accepted at
 `2d7ddeb`; `notifications`, `notification_prefs`, `notification_pref_categories` — S7a, accepted at
 `0641b2c`; `dispatches`, `dispatch_attempts` — S7b, accepted at `ac50b60`; `outbox`, `push_log`,
-`push_tokens` — S7c, accepted at `9119187`).
+`push_tokens` — S7c, accepted at `9119187`; `channels`, `messages`, `message_attachments` — S7d, accepted at
+`4f954ad`). Which tables the next stage can create, and the decisions it needs, are in the plan's §D.
 
 ### 5.0.1 Why 320 tables and 388 indexes
 
@@ -918,7 +919,9 @@ catalogue; shadow-then-cutover per domain; no integer keys; no triggers or views
   the Founder chose the full birth date** (`s4-deletion-decision.md` §10; the "keep year only"
   proposal is superseded). Still open by the Founder's choice: whether the country code stays on
   the retained record, and whether future safeguarding rows record that the subject was treated
-  as a child when written. S4b remains unimplemented; today's deletion is unchanged.
+  as a child when written. S4b remains unimplemented; today's deletion is unchanged. What remains to build
+  for S4b, the treatment of the ids of players deleted before S4b, and the options for each open part are
+  in `sqlite-migration-plan.md` §D.1 and §D.5 (Q1, Q3, Q6; 19 October 2026).
 - O2. Org deletion policy with open recruitment cases. **Deferred past S3 deliberately**: S3
   cut organisations over without a tombstone column and without a hard-delete path, because
   no route deletes an organisation today and the foreign key from `org_users` (and, from S8,
@@ -936,7 +939,10 @@ catalogue; shadow-then-cutover per domain; no integer keys; no triggers or views
 - O8. `representations` (legacy, creation closed with 410): migrate or archive as JSON?
   Proposed: migrate (it is small, and the shape is known from commit `e865531`).
 - O9. Player foreign keys on the recruitment tables (file 02 has none; §10). Proposed: add
-  `RESTRICT` references at S8, after the tombstone exists.
+  `RESTRICT` references at S8, after the tombstone exists. The S8a dependencies as the code stands
+  (player tombstones, organisation lifecycle, the two `case_id` references to S8b, the conversion of the
+  approved `channels.request_id` check into a foreign key) are tabulated in `sqlite-migration-plan.md`
+  §D.3; the two approvals S8a would need before S4b/S8b are Q7a and Q7b of §D.5.
 - O10. `agent_profile_facets.member_association` cannot be NULL in a STRICT composite primary
   key, so the FIFA-level facet is stored as `'INT'` (the vocabulary's code). Confirm with the
   compliance owner that `INT` is the right sentinel.

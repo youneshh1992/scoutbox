@@ -786,7 +786,10 @@ withdrawn (`s4-deletion-decision.md` §4).
    country code may stay): `s4-deletion-decision.md` §9. Blocks S4b only. **Partially resolved
    (12 October 2026, §10 of that record):** full birth date chosen; the country code and the
    write-time child-status stamp remain open by the Founder's explicit choice — the S4b items
-   that depend on them are listed there. Not to be re-asked on the birth-date axis.
+   that depend on them are listed there. Not to be re-asked on the birth-date axis. **19 October 2026:**
+   what remains to build for S4b and its open answers (the country code; the ids of players deleted before
+   S4b; the optional additional deletion behaviours) are consolidated in `sqlite-migration-plan.md` §D.1
+   and §D.5; the S4b paragraph of §9 above is the dated design it builds on.
 2. ~~**Legacy minors without any guardian link**~~ — **decided (11 October 2026): refuse the
    cutover until each is resolved by hand on the pre-S4 build** (§5.5); implemented in the
    preflight and the repositories' initialisation. No longer open.

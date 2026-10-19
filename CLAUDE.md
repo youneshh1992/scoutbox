@@ -204,13 +204,21 @@ and design changes the Founder explicitly requests.
   row written back in its writer's literal; nothing lost; proven on the actual
   `6ca66ba` build) and the S7b tool refuses a file carrying 0011. The staff
   push identity, the plain-code mail sites and retention are carried through
-  unchanged, not decided. **Message threads are tables since S7d** (IMPLEMENTED
-  on top of `b67bce5` on 18 October 2026, corrected once after the independent
-  review of `62e9c1a` — review §11.10 — PENDING INDEPENDENT ACCEPTANCE — not
-  production, security, legal-compliance or deployment approval; approved by the
-  Founder's explicit decisions D-A and D-B, recorded verbatim in
-  `docs/architecture/s7-readiness-review.md` §11.9; `repositories/channels.mjs`,
-  migration `0012_channels`): `db.channels` is a read-only view in insertion
+  unchanged, not decided. **Message threads are tables since S7d** (independently
+  ACCEPTED at commit `4f954ad92cda6ca5178cc6c3d5485265684e0c03` on 18 October
+  2026 for its bounded backend storage-migration scope — not production,
+  security, legal-compliance or deployment approval, and not acceptance of S4b,
+  the remaining S6 tables or S8; implemented on top of `b67bce5` and corrected
+  once after the independent review of `62e9c1a`, both dated history —
+  `docs/architecture/s7-readiness-review.md` §11.9, §11.10, the acceptance
+  §11.11; approved by the Founder's explicit decisions D-A and D-B, recorded
+  verbatim in §11.9; `repositories/channels.mjs`, migration `0012_channels`).
+  **All four S7 sub-steps are accepted; that completes the communications
+  storage stage, not the migration** — the `ledger`, `requests`, `trials`,
+  `recruitmentCases` and every other remaining blob are still rewritten by
+  every save (review §7.3); the next stage's findings and the Founder's
+  decision list are `docs/architecture/sqlite-migration-plan.md` §D (the one
+  list: §D.5); the next free migration identifier is `0013`. S7d: `db.channels` is a read-only view in insertion
   order with each thread's `messages` nested in array order; the ONLY writers
   are `channels.open` (the two acceptance routes' `openChannel` — the literal
   unchanged, the request checked against the live `requests` collection, the

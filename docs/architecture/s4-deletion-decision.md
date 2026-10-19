@@ -406,3 +406,15 @@ method's shape with `country` as the one marked input. None of that is built eit
 
 Until the Founder answers, O1 stays open in `sqlite-schema.md` §12, S4b does not start, and S4a
 (the storage cutover in `s4-readiness-review.md`) keeps today's deletion behaviour unchanged.
+
+## 11. Where the S4b questions are consolidated (19 October 2026)
+
+After the acceptance of all four S7 sub-steps, what remains to build for S4b (read from the code at
+`4f954ad`: `deletePlayerData`, `server.mjs:4245–4305`; `players.remove`, `repositories/identity.mjs:768–779`;
+the unused `deleted_at` columns), the answers it still needs and their options are consolidated in one place,
+**`sqlite-migration-plan.md` §D.1 and §D.5** — the country code (Q1, open since §10), the treatment of the ids
+of players deleted before S4b that audit and recruitment rows already carry (Q3, new), and the additional
+deletion behaviours §5 of this record proposes beyond the retained row (Q6: push tokens, verification tokens
+and passport shares; dangling media ids; the deletion ledger row of §8 item 9). This record stays the
+authoritative statement of the birth-date decision (§10) and of the retention questions that need qualified
+review (§8); nothing in the plan's §D reopens them or infers an answer from the birth-date choice.

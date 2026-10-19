@@ -36,10 +36,17 @@ implemented on top of `6ca66ba` (`40aa05c`, §10.8); the review of `40aa05c` fou
 `78c14b9` (§10.10); the review of `78c14b9` found one remaining boundary (a non-finite number INSIDE an
 accepted array destination dropped its mail record), corrected in `9119187` (§10.11), the accepted commit;
 migration `0011_outbox_push` is registered with its DDL amended in place before acceptance. **S7d (`channels`,
-`messages`, `message_attachments`): IMPLEMENTED on top of `b67bce5` on 18 October 2026, PENDING INDEPENDENT
-ACCEPTANCE (§11.9 holds the implementation record, the Founder's two approvals D-A and D-B recorded verbatim, the
-verification and its limits; migration `0012_channels` is registered; `repositories/channels.mjs`;
-`scripts/channelsRollback.mjs`).** The preparation §11.1–§11.6 and its two correction rounds §11.7 (review of
+`messages`, `message_attachments`): independently ACCEPTED for its bounded backend storage-migration scope at
+`4f954ad92cda6ca5178cc6c3d5485265684e0c03`** (18 October 2026; §11.11 holds the acceptance record, the reviewer's
+results and its limits — not production, security, legal-compliance or deployment approval, and not acceptance of
+S4b, the remaining S6 tables or S8). Its history, kept as dated history: implemented on top of `b67bce5` (§11.9, the
+Founder's two approvals D-A and D-B recorded verbatim), corrected once after the review of `62e9c1a` (§11.10, the
+held nested view restored by identity); migration `0012_channels` is registered; `repositories/channels.mjs`;
+`scripts/channelsRollback.mjs`. **All four S7 sub-steps are accepted. That closes the communications storage stage
+and nothing more**: the `ledger` and every other remaining blob are still rewritten by every save (§7.3), and the
+next stage's findings and decisions are in `sqlite-migration-plan.md` §D. The nested-restore observation of §11.10
+about the accepted S7a–S7c repositories is classified in §11.12 as a separately scoped follow-up (no caller-visible
+stale value established; not fixed; not a blocker). The preparation §11.1–§11.6 and its two correction rounds §11.7 (review of
 `46e5afe`) and §11.8 (review of `8330f08`) are kept as the dated history the implementation followed; the "PREPARED
 / NOT IMPLEMENTED" wording inside them is the status at the time, not the status now. §§0–8.2 are the review as written at `2d7ddeb`, kept as the record of the reasoning; where
 the implementation corrected a proposal (§3.2 coupled writes, §8.2 "transaction of its own"), the
@@ -55,8 +62,10 @@ follow-up) · 10 S7c (the plan as corrected by the review of `6ca66ba`, the impl
 follow-up's acceptance §10.9, the two correction rounds §10.10–§10.11 as history, the acceptance §10.12) ·
 11 S7d (the current-code survey, the two routes compared, the recommendation and the decisions it needed —
 §11.1–§11.6 as prepared; §11.7 the corrections from the review of `46e5afe`; §11.8 the guardian-reference
-corrections from the review of `8330f08`; **§11.9 S7d as implemented on top of `b67bce5` after the Founder's
-decisions D-A and D-B — pending independent acceptance**).
+corrections from the review of `8330f08`; §11.9 S7d as implemented on top of `b67bce5` after the Founder's
+decisions D-A and D-B; §11.10 the one correction after the review of `62e9c1a`; **§11.11 the independent
+acceptance at `4f954ad`**; §11.12 the S7a–S7c nested-restore observation classified as a separately scoped
+follow-up).
 
 ---
 
@@ -763,6 +772,15 @@ Phase S6-ledger (after S4b) or the dirty-save change: the count reaches the blob
 not touch, which is the point at which "no whole-database write" is true. Each phase states its
 number; none claims the objective early.
 
+**Where the phases stand (19 October 2026, S7 complete).** Phases S7a, S7c and S7d are reached: the
+notification, outbox/push-log and channel rows of a send are table rows, and the S7d benchmark (§11.9:
+`notificationsPersistenceBench.mjs 3000 100`) shows the `channels` blob no longer rewritten per save. The
+`ledger` row the send still appends is a blob rewritten by every save (309 491 bytes in that run), and so
+are `requests`, `trials`, `recruitmentCases` and every other unconverted collection. **The objective is
+therefore not met by S7's completion**; it is reached for the send path only when the `ledger` becomes a
+table (the S6 audit step — `sqlite-migration-plan.md` §D.2, §D.4 Candidate A), and for the whole
+application only when every collection a route writes is a table or the store writes only changed blobs.
+
 **The benchmark, reproducible and synthetic** (described, not built): extend
 `scripts/dataLayerPerf.mjs` (synthetic snapshot in the server's own shapes, throwaway database,
 nothing touches `DATA_DIR`) with K channels × M messages and a notification history, then run
@@ -786,9 +804,9 @@ with the ledger and notification sizes stated. The harness is not changed by thi
 | **S7c** `outbox`, `push_log` | **independently ACCEPTED at `9119187` (17 October 2026; §10.12)** | as first written: the two-shape unification (§1.6) — built as the structural `source` discriminator (§10.4); the six plain-text code call sites remain an **owner decision** (cleanse, mask like S6a, or carry as is) — S7c carried the rows as they are |
 | **S7c** `push_tokens` storage move | **independently ACCEPTED at `9119187` (§10.12)** | tokens stored losslessly as JSON, the route's rule reproduced, no uniqueness constraint (§10.4) |
 | **S7c** push-token audience re-keying (staff pushes) | needs a **product/behaviour decision** — not taken by S7c | which identity a staff push targets; what to do with existing `org`-kind rows; kept out of the storage move (§6.2) |
-| **S7d** `channels` + `messages` + `message_attachments` | **IMPLEMENTED on top of `b67bce5` (18 October 2026), PENDING INDEPENDENT ACCEPTANCE — §11.9**; migration `0012_channels`; the §2.3 transitional code-checked request reference approved by the Founder (D-A), today's deletion reproduced inside the deletion unit (D-B, a scope confirmation) | `request_id` → S8's `recruitment_requests` (§2.2) stays a code-checked reference until S8a rebuilds the table with the foreign key; the ordering column for equal timestamps (§1.2) is `messages.position`; retention OPEN (S4b) |
-| S7d `channels.player_id` deletion behaviour | needs a **product-policy answer** for retention; a storage-only step can carry today's behaviour unchanged if the Founder confirms that reading (§11.4, decision D-B) | message retention after deletion (`s4-deletion-decision.md` §4 "review"); until then the repository deletes explicitly inside the deletion unit, no CASCADE in the DDL |
-| the `ledger` rows every send writes | needs **another storage stage** (S6 ledger) which needs **S4b** | `ledger.player_id RESTRICT` (S6 review §4.1) |
+| **S7d** `channels` + `messages` + `message_attachments` | **independently ACCEPTED at `4f954ad` (18 October 2026; §11.11)** — implemented on top of `b67bce5` (§11.9), corrected once (§11.10); migration `0012_channels`; the §2.3 transitional code-checked request reference approved by the Founder (D-A), today's deletion reproduced inside the deletion unit (D-B, a scope confirmation) | `request_id` → S8's `recruitment_requests` (§2.2) stays a code-checked reference until S8a rebuilds the table with the foreign key (plan §D.3); the ordering column for equal timestamps (§1.2) is `messages.position`; retention OPEN (S4b) |
+| S7d `channels.player_id` deletion behaviour | the Founder confirmed the storage-only reading (**D-B**, §11.9); the retention question itself is still a **product-policy answer** for S4b | message retention after deletion (`s4-deletion-decision.md` §4 "review"); the repository deletes explicitly inside the deletion unit, no CASCADE in the DDL |
+| the `ledger` rows every send writes | needs **another storage stage** (the S6 audit tables): the `ledger` table with its `players(id)` foreign key needs **S4b**; without the foreign key it needs the Founder's approval of the no-FK shape (plan §D.2, Q4) | `ledger.player_id RESTRICT` (S6 review §4.1); plan §D.4 Candidate A |
 | "no whole-database write on send" | needs S7a + S7c + S7d + the S6 ledger (or a store dirty-save change) | §7.3 phases |
 | retention periods, pruning, deletion cleanup of delivery records, removed-staff notifications, the minor export gate, the grooming report's org | **product-policy answers** | listed in §4.1/§4.4; not decided here |
 | guardian deletion, org deletion | S4b (O1) and O2 | out of S7 |
@@ -2350,11 +2368,12 @@ this record.
 
 ---
 
-## 11. S7d — prepared 17 October 2026 from the code at `9119187` (§11.1–§11.8, dated history); IMPLEMENTED 18 October 2026 on top of `b67bce5` (§11.9), corrected after the independent review of `62e9c1a` (§11.10); PENDING INDEPENDENT ACCEPTANCE
+## 11. S7d — prepared 17 October 2026 from the code at `9119187` (§11.1–§11.8, dated history); IMPLEMENTED 18 October 2026 on top of `b67bce5` (§11.9), corrected after the independent review of `62e9c1a` (§11.10); independently ACCEPTED at `4f954ad` (§11.11); the S7a–S7c nested-restore observation classified (§11.12)
 
-**Status now (18 October 2026): IMPLEMENTED, CORRECTED ONCE (§11.10), PENDING INDEPENDENT ACCEPTANCE — §11.9 is the
-implementation record, §11.10 the one correction the independent review of `62e9c1a` required (an aborted unit of work
-now restores the nested objects of a held view by identity).** The Founder approved D-A and
+**Status now (19 October 2026): independently ACCEPTED at `4f954ad92cda6ca5178cc6c3d5485265684e0c03` for the bounded
+backend storage-migration scope (§11.11) — not production, security, legal-compliance or deployment approval.** §11.9 is
+the implementation record, §11.10 the one correction the independent review of `62e9c1a` required (an aborted unit of
+work restores the nested objects of a held view by identity); both are dated history now. The Founder approved D-A and
 D-B explicitly (recorded verbatim in §11.9); migration `0012_channels` is registered; the "PREPARED, NOT
 IMPLEMENTED, NOT AUTHORISED" wording in the paragraph below and in §11.1–§11.8 is the status at the time those
 sections were written and is kept as the dated record the implementation followed.
@@ -2931,9 +2950,9 @@ handoff's `gates-summary.txt`. Status after this round: **S7c accepted at `91191
 IMPLEMENTED with the corrected guardian design; D-A and D-B still unanswered** (the status at the time; the
 decisions and the implementation followed in §11.9).
 
-### 11.9 S7d as implemented (18 October 2026, one local commit on `feat/sqlite-schema` on top of `b67bce5` — PENDING INDEPENDENT ACCEPTANCE)
+### 11.9 S7d as implemented (18 October 2026, one local commit on `feat/sqlite-schema` on top of `b67bce5` — dated history; accepted at `4f954ad`, §11.11)
 
-**Status: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE.** Not production, security, legal-compliance or deployment
+**Status at the time of writing: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (accepted since, §11.11).** Not production, security, legal-compliance or deployment
 approval; not acceptance of S4b, the remaining S6 tables or S8; nothing pushed, merged or deployed; no real data, no
 real provider. The independent review of `b67bce5` (`review-b67bce5-summary.txt`) accepted the corrected §11.5
 specification as the basis for the bounded storage migration and handed over a conditional implementation prompt,
@@ -3048,9 +3067,9 @@ bounded choice of §11.8, the deferred-foreign-key route still the stated altern
 lifecycle clause (D-B); retention is OPEN. A guardian-deletion path, should one be added, must keep the §11.8
 invariant (the final-state assertion covers snapshot writes; no ordinary writer removes a guardian today).
 
-### 11.10 Correction from the independent review of `62e9c1a` (18 October 2026; one local commit on top of `62e9c1a` — S7d still PENDING INDEPENDENT ACCEPTANCE)
+### 11.10 Correction from the independent review of `62e9c1a` (18 October 2026; one local commit on top of `62e9c1a` — dated history; accepted at `4f954ad`, §11.11)
 
-**Status: IMPLEMENTED AND CORRECTED ONCE, PENDING INDEPENDENT ACCEPTANCE.** Not production, security, legal-compliance
+**Status at the time of writing: IMPLEMENTED AND CORRECTED ONCE, PENDING INDEPENDENT ACCEPTANCE (accepted since, §11.11).** Not production, security, legal-compliance
 or deployment approval; not acceptance of S4b, the remaining S6 tables or S8; nothing pushed, merged or deployed; no
 real data, no real provider. S7a, S7b and S7c stay accepted as recorded; D-A and D-B are not reopened or changed.
 
@@ -3120,6 +3139,97 @@ fields — `audience` in place; `outboxPush.mjs`: every nested value, an array d
 That is the same class as this finding for a caller that would hold such a nested view across an aborted unit; whether
 any caller does was not surveyed in this bounded round, those milestones are accepted at their recorded commits, and
 nothing there is changed here. The graph memento would bound each of them the same way should the Founder ask.
+(Classified in §11.12 on 19 October 2026.)
+
+### 11.11 Independent acceptance of S7d — `4f954ad92cda6ca5178cc6c3d5485265684e0c03` (18 October 2026)
+
+**Conclusion recorded (`review-4f954ad-summary.txt`, verbatim in substance):** "ACCEPTED within the reviewed backend
+storage-migration scope. The single P2 finding from 62e9c1a is closed. No new blocking finding was identified in this
+six-file correction. S7d is independently accepted at 4f954ad92cda6ca5178cc6c3d5485265684e0c03. Together with the
+previously accepted S7a, S7b and S7c, this completes the four planned S7 sub-steps. It does not complete the entire
+SQLite migration or authorize production, deployment, new deletion policies, S4b, remaining S6 or S8." The review
+compared the package with the previous verified package and found exactly the six declared changes; the earlier
+reproduction script was byte-identical to the reviewer's held copy. It is an archive review: branch state and tree
+cleanliness were reported by the package, not observed live.
+
+**What the reviewer ran (Node v24.19.0, SQLite 3.53.3, npm 11.6.0; both applications installed from an offline cache
+with lifecycle scripts disabled, exit 0).** The original reviewer script of `62e9c1a`, unchanged: exit 0 in both
+failure paths; both real-server attachment compatibility controls still pass (controls, not findings); the
+immediate-mode probe rerun against both packaged builds — exit 1 on `62e9c1a`, exit 0 on `4f954ad`. Backend
+`npm test`: first full attempt, exit 0, 27 suites / 363 checks, with the actual pre-S7a, pre-S7b, pre-S7c and
+pre-S7d server paths supplied (the logs show the old builds booting the rollback copies, `b67bce5` reading the S7d
+copy, writing a message, this build re-upgrading it). Player `npm test -- --runInBand`: first attempt, exit 0,
+4 suites / 41 tests. The six historical reviewer scripts rerun independently, all exit 0 (the two S7c comparisons
+against the actual `6ca66ba` build; the dispatch comparison against its bundled historical handler). Both design
+probes pass; the reviewer's first invocation of `review-46e5afe-design-checks.mjs` omitted its root argument and
+exited 1 before checking code — a reviewer invocation error, corrected and retained, not an application regression.
+A permission-review timeout while reading the final backend log was retried; the test process itself had returned
+exit 0 and was not restarted.
+
+**Limits the reviewer stated, carried here unchanged.** Real alternate Node runtimes were not supplied (the runtime
+suite skipped those checks; its simulation is not an old-runtime result); browser suites, the wider E2E battery, real
+data and real providers were not exercised; the probes establish design premises, not implementation acceptance;
+the no-whole-collection-rewrite objective is not met (`ledger` and other domains still blobs — §7.3). The §11.10
+observation about the older repositories is a separately scoped follow-up: the reviewer confirmed some nested values
+are rebuilt by the S7a–S7c restore code and did **not** establish a current caller-visible stale-value failure; no
+change to those repositories is authorised by this acceptance (§11.12 classifies it).
+
+**Standing decisions, restated by the reviewer and unchanged here:** D-A and D-B remain approved for S7's bounded
+storage work; under-18 without a valid guardian link stops migration; the full birth date is chosen for the proposed
+deleted-player record; country retention and future safeguarding child-status stamping remain OPEN; S4b is not
+implemented; the remaining S6 audit tables and the S8 dependencies need their recorded decisions resolved before
+dependent implementation — consolidated in `sqlite-migration-plan.md` §D (the Founder's list, §D.5).
+
+### 11.12 The nested-restore observation of §11.10, classified (19 October 2026; read-only; no source changed)
+
+**Question.** The accepted S7a–S7c repositories rebuild SOME nested values from clones when a unit of work aborts
+(§11.10 "Observed, not changed"). Is that (a) a proven caller-visible defect of the S7d class — a held nested view
+reading a stale VALUE — (b) a public-contract/identity risk only, or (c) an unproven concern?
+
+**Classification: (b) — a public-contract/identity risk with no caller-visible stale value established.** The S7d
+defect needed two conditions together: a nested object that a repository method **mutates in place** after the row
+exists (`readBy[side] = at` in `markRead`) **and** a restore that **replaces** that object with a clone. Read against
+the code at `4f954ad`, no S7a–S7c repository combines the two:
+
+| Repository | Nested values a method mutates in place after creation | Restored how | Nested values rebuilt from clones on restore | Mutated after creation by any method? |
+|---|---|---|---|---|
+| `notifications.mjs` | `row.actionRequired` (`ack` :673; `coalesce` :656 `Object.assign`), `prefs.categories` (`updatePrefs` :716 `Object.assign`) | **in place** — `restoreInto` :535 (`Object.assign(obj.actionRequired, v)`), :536 (categories cleared then reassigned) | `row.audience` (a known key: :537 assigns the snapshot copy's clone, `copyRow` :355 spreads it); unknown nested fields (:537 `cloneJson`) | **no** — `audience` is written only by `create` (:639); extras only by the import |
+| `dispatches.mjs` | the `attempts` **array** (`recordAttempt` :516 `push`) | the array **in place** (:443: length reset, elements re-pushed) | each attempt **object** (:443 `copyAttempt`); `audience` is merged in place (:442); unknown nested fields (:444 `cloneJson`) | **no** — an attempt object is never touched after its push; `patch` (:540) writes top-level keys only |
+| `outboxPush.mjs` | none | — | every nested value (`restoreInto` :521–523 `cloneJson` of every key): an array `to`, the push log's `audience`, an object or array `token` | **no** — `markDelivered` (:563) writes the top-level flag; `register` (:607–608) removes and appends whole rows; `append` only creates |
+
+**Evidence (synthetic probe, this round's harness in the handoff `review/probe-nested-restore.mjs`, run on
+`4f954ad`; log `logs/probe-nested-restore@4f954ad.txt`).** Through the repositories' public API and the store's
+real `unitOfWork`: eight nested views held before an aborted unit that exercised every in-place mutation above
+(`ack`, `coalesce` with a new deadline, `updatePrefs`, `recordAttempt`, `patch`, `markDelivered`, a token
+replacement). After the abort every held view read its pre-unit value and equalled a fresh lookup, and the
+database agreed where a column exists; identity was preserved for the four in-place-mutated values
+(`actionRequired`, `categories`, `audience` of a dispatch, the `attempts` array) and lost for the four
+clone-rebuilt ones (a notification's `audience`, one attempt object, an outbox `to`, a push token). A later
+**committed** change through the same methods was then seen through every held view whose value any method
+can change (`actionRequired`, `categories`, `attempts`); for the four clone-rebuilt values no method changes
+them after creation, so held and fresh stay equal indefinitely. Zero stale values in eight views; exit 0. The
+probe also confirms by text that the three in-place mutation sites exist and that `outboxPush.mjs` has none.
+
+**One caveat recorded, no defect.** `restoreInto` in `notifications.mjs` merges `actionRequired` with
+`Object.assign` (:535), which would not delete a key **added** to that object during a unit; no method adds one
+(`ack` writes `ackedAt`/`ackedBy`, `coalesce` assigns exactly the three `ACTION_KEYS`, :652/:656), and an
+import-time unknown key inside it is present in both the object and its copy. It becomes a defect only if a
+future method adds keys there.
+
+**Limits.** The probe exercises the repository API and the store's unit of work, not live HTTP routes; whether
+any route or module holds one of the four clone-rebuilt nested views across an aborted unit **and compares it by
+identity** was not surveyed exhaustively (a value comparison cannot differ, as shown; an identity comparison
+could) — the classification is "identity risk, unproven as a defect", not "no caller can be affected". It
+describes the code at `4f954ad`; a new in-place mutation of a clone-rebuilt value would recreate the S7d class.
+
+**Proposed bounded fix for a future authorisation (not made here; S7a–S7c acceptance unchanged).** Replace the
+three clone-based `restoreInto`/`restoreList` restores with the graph memento the identity, organisation and
+channels repositories use (`captureGraph([rows…])` in `snapshotState`, `restoreGraph` in `restoreState` —
+exactly §11.10's change), one function each in `notifications.mjs` (:532–539, :759–767), `dispatches.mjs`
+(:439–446, :562–568) and `outboxPush.mjs` (:521–525, :634–641), with a tenth-check-style regression per suite
+(a held nested view across a thrown-body and a flush-refused unit; identity, value, pending queue, later commit).
+No schema, migration, route, payload or retention change; the rollback tools are untouched. It is a uniformity
+and defence-in-depth change, not a blocker for S4b, S6 or S8.
 
 ---
 

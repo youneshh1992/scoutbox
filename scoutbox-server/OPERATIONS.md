@@ -1166,7 +1166,7 @@ the push sender and the registration route are the only writers.
    <fresh-empty-dir>`, then start the previous build (`6ca66ba`) on the output —
    every mail, push and token row written since the cutover is in it.
 
-### Message threads (live since migration `0012`, S7d — implemented on top of `b67bce5`, corrected once after the independent review of `62e9c1a`, pending independent acceptance; not production-approved)
+### Message threads (live since migration `0012`, S7d — implemented on top of `b67bce5`, corrected once after the independent review of `62e9c1a`, independently accepted at `4f954ad` on 18 October 2026 for its bounded storage-migration scope; not production-approved)
 
 The thread routes (`GET /player/channels`, `/guardian/channels`, `/org/channels`,
 the message, read and typing routes, the exports, `/admin/channels`,
