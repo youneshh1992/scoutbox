@@ -28,6 +28,7 @@ import { rollbackNotificationsCopy } from '../repositories/notificationsRollback
 import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
 import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
+import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
 import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
@@ -35,6 +36,8 @@ import { registerNotificationPrefs, CATEGORY_NAMES } from '../m182/notificationP
 import { registerDelivery } from '../m13/delivery.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump, filesDigest } from './coreIdentityTestFixtures.mjs';
+// S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
+const preS6b = (file) => { const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(file, out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -796,7 +799,7 @@ test('review of ba6956d, finding 3 — unknown data is never lost silently: an o
   // Snapshot round trip and the copy-only rollback blob.
   const tool = openStore(dir); const snap = tool.load(); assert.ok(Object.hasOwn(snap.db.notifications[0], '__proto__')); tool.save(snap);
   assert.ok(Object.hasOwn(tool.load().db.notifications[0], '__proto__'), 'round-tripped through replace'); tool.sqlite.close();
-  const s7c = tempDir('ntf-rv-extra-s7c'); rollbackChannelsCopy(dbFile(dir), s7c, { now: NOW }); /* S7d first: the live boot applied 0012 */ const s7b = tempDir('ntf-rv-extra-s7b'); rollbackOutboxPushCopy(dbFile(s7c), s7b, { now: NOW }); const s7a = tempDir('ntf-rv-extra-s7a'); rollbackDispatchesCopy(dbFile(s7b), s7a, { now: NOW }); // the live boot above applied 0010: the S7b rollback goes first
+  const s7c = tempDir('ntf-rv-extra-s7c'); rollbackChannelsCopy(preS6b(dbFile(dir)), s7c, { now: NOW }); /* S7d first: the live boot applied 0012 */ const s7b = tempDir('ntf-rv-extra-s7b'); rollbackOutboxPushCopy(dbFile(s7c), s7b, { now: NOW }); const s7a = tempDir('ntf-rv-extra-s7a'); rollbackDispatchesCopy(dbFile(s7b), s7a, { now: NOW }); // the live boot above applied 0010: the S7b rollback goes first
   const out = tempDir('ntf-rv-extra-rb'); rollbackNotificationsCopy(dbFile(s7a), out, { now: NOW });
   const o = openRaw(out); const blobRow = JSON.parse(o.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value)[0]; o.close();
   assert.ok(Object.hasOwn(blobRow, '__proto__') && blobRow.__proto__.legacyMarker === 'keep-me', 'the pre-S7a build reads the key back');
@@ -904,7 +907,7 @@ test('review of ac50b60 — nested unknown data on a notification is DETACHED at
   L.notifications.updatePrefs('org_user', 'usr-1', { categories: { mentions: false } }); assert.equal(L.notifications.prefsFor('org_user', 'usr-1').categories.mentions, false);
   L.save(); L.close();
   { const tool = openStore(dir); const snap = tool.load(); assert.deepEqual(extrasOf(snap.db.notifications[0]), expectedExtras); tool.save(snap); assert.deepEqual(extrasOf(tool.load().db.notifications[0]), expectedExtras, 'round-tripped through replace'); tool.sqlite.close(); }
-  { const s7c = tempDir('ntf-rv-extras-s7c'); rollbackChannelsCopy(dbFile(dir), s7c, { now: NOW }); const s7b = tempDir('ntf-rv-extras-s7b'); rollbackOutboxPushCopy(dbFile(s7c), s7b, { now: NOW }); const s7a = tempDir('ntf-rv-extras-s7a'); rollbackDispatchesCopy(dbFile(s7b), s7a, { now: NOW }); const out = tempDir('ntf-rv-extras-rb'); rollbackNotificationsCopy(dbFile(s7a), out, { now: NOW }); const o = openRaw(out); const back = JSON.parse(o.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value)[0]; o.close(); assert.deepEqual(extrasOf(back), expectedExtras, 'the rollback blob carries the same JSON'); rm(s7a, out); }
+  { const s7c = tempDir('ntf-rv-extras-s7c'); rollbackChannelsCopy(preS6b(dbFile(dir)), s7c, { now: NOW }); const s7b = tempDir('ntf-rv-extras-s7b'); rollbackOutboxPushCopy(dbFile(s7c), s7b, { now: NOW }); const s7a = tempDir('ntf-rv-extras-s7a'); rollbackDispatchesCopy(dbFile(s7b), s7a, { now: NOW }); const out = tempDir('ntf-rv-extras-rb'); rollbackNotificationsCopy(dbFile(s7a), out, { now: NOW }); const o = openRaw(out); const back = JSON.parse(o.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value)[0]; o.close(); assert.deepEqual(extrasOf(back), expectedExtras, 'the rollback blob carries the same JSON'); rm(s7a, out); }
   // Unsupported non-JSON values refuse the import and the snapshot write whole (nothing written, nothing retired).
   const SECRET = 'SECRET-TEXT-RV4';
   for (const [label, value] of [['a function', () => 1], ['an undefined inside an object', { x: undefined }], ['a bigint', 1n], ['a non-finite number', Number.POSITIVE_INFINITY], ['a class instance', new Date(0)]]) {

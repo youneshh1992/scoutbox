@@ -21,6 +21,7 @@ import { rollbackNotificationsCopy } from '../repositories/notificationsRollback
 import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
 import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
+import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
@@ -35,6 +36,8 @@ import { openStore } from '../store.mjs';
 const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
+// S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
+const preS6b = (file) => { const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(file, out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 // TEST_ONLY=<substring> runs the matching checks alone (reproductions and reviews); unset, every check runs.
@@ -599,7 +602,7 @@ test('rollback: the tool produces a pre-S3 copy — orgs back in the blob with e
   // The file is at S4a after the boot: the S3 tool refuses it until the S4a rollback produced the S3-shaped copy it works on.
   assert.throws(() => rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), tempDir('s3-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0005_core_identity_live, 0006_media_deletions/.test(err.message));
   // S5: the file carries 0007 too; the chain is the S5 rollback, then the S4a rollback, then this tool.
-  const s7cState = tempDir('s3-rb-s7c'); rollbackChannelsCopy(path.join(dir, 'scoutbox.db'), s7cState); // S7d first (the file carries 0012),
+  const s7cState = tempDir('s3-rb-s7c'); rollbackChannelsCopy(preS6b(path.join(dir, 'scoutbox.db')), s7cState); // S7d first (the file carries 0012),
   const s7bState = tempDir('s3-rb-s7b'); rollbackOutboxPushCopy(path.join(s7cState, 'scoutbox.db'), s7bState); // then S7c on its output,
   const s7aState = tempDir('s3-rb-s7a'); rollbackDispatchesCopy(path.join(s7bState, 'scoutbox.db'), s7aState); const s6aState = tempDir('s3-rb-s6a'); rollbackNotificationsCopy(path.join(s7aState, 'scoutbox.db'), s6aState); // then S7b on its output, then S7a
   const s5State = tempDir('s3-rb-s5'); rollbackOneTimeCodesCopy(path.join(s6aState, 'scoutbox.db'), s5State); // then S6a: the copy carries 0008
@@ -678,7 +681,7 @@ await atest('server: an S2 database boots and cuts over; registration, settings,
     const maria = seed.sessions[0].token;
     assert.equal((await j('GET', '/org/notifications', undefined, maria)).status, 200, 'the staff session survived the org_users rebuild');
     const cap = await j('GET', '/capabilities');
-    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels']);
+    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit']);
     assert.equal(cap.body.dataLayer.domains.orgs.mode, 'live'); assert.equal(cap.body.dataLayer.domains.orgs.rows, 5);
     assert.equal(cap.body.integrity.ok, true, `the boot integrity report sees the live organisations: ${JSON.stringify(cap.body.integrity.byCode)}`);
     assert.ok(cap.body.integrity.checked >= 6, 'the report counted the organisations and the Room');

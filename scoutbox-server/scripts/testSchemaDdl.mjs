@@ -66,14 +66,15 @@ test('every index references an existing table', () => {
 // column (S4a); media_deletions (0006) is documented in 08; the twelve
 // player sub-record tables (0007, S5) are in 01 with their position and
 // extra_json columns.
-test('the registered migrations 0001–0012 match 01_identity.sql (identity, facets_json and the twelve player sub-record tables included), 08 (media_deletions) and 03 (email_challenges, pairing_codes, notifications, notification_prefs, notification_pref_categories, dispatches, dispatch_attempts, outbox, push_log, push_tokens, channels, messages, message_attachments) column for column', () => {
+test('the registered migrations 0001–0013 match 01_identity.sql (identity, facets_json and the twelve player sub-record tables included), 08 (media_deletions) and 03 (email_challenges, pairing_codes, notifications, notification_prefs, notification_pref_categories, dispatches, dispatch_attempts, outbox, push_log, push_tokens, channels, messages, message_attachments, and the eight S6b audit tables: blocks, reports, moderation_log, org_notes, ledger, ops_events, source_changes, idv_queue) column for column', () => {
   const mig = new DatabaseSync(':memory:');
   mig.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(mig, DATA_MIGRATIONS, { now: Date.UTC(2026, 9, 11, 12), log: () => {} });
   assert.equal(mig.prepare('SELECT COUNT(*) AS n FROM data_migrations').get().n, DATA_MIGRATIONS.length);
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels']);
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit']);
+  const AUDIT_TABLES = ['blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue'];
   const S5_TABLES = ['player_season_history', 'player_badges', 'player_drills', 'player_attendance', 'player_timeline', 'player_media', 'player_media_tags', 'player_medical_records', 'player_drill_results', 'player_activity_log', 'player_external_ids', 'player_programme_completions'];
-  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', ...S5_TABLES]) {
+  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', ...AUDIT_TABLES, ...S5_TABLES]) {
     const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
     assert.deepEqual(cols(mig), cols(docs), `${t} columns`);
     const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all(t).map((r) => r.name);
@@ -116,6 +117,22 @@ test('the registered migrations 0001–0012 match 01_identity.sql (identity, fac
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'messages_channel_position'").get().sql, /UNIQUE/, 'one message per position in a thread');
   for (const t of ['channels', 'messages']) assert.ok(docs.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'absent_keys_json'), `${t}: the documented absent-keys column (absence preserved as absence)`);
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_attachments'").get().sql, /kind = 'clip' AND media_id IS NOT NULL AND verified_clip IS NOT NULL AND report_id IS NULL/, 'the documented attachment CHECK ties each kind to its columns');
+  // S6b (plan §D.4 Candidate A as accepted at 1792fc7; Q4, Q4b, Q5): the eight audit tables — no foreign key on any (the five player references tolerant, the organisation/staff references historical pointers, the IDV guardian reference checked in code), no vocabulary CHECK, every literal column nullable, seq order, the three lossless columns, the documented indexes (reports_target_player_id included).
+  for (const t of AUDIT_TABLES) {
+    assert.match(header03, new RegExp(`${t}[^\\n]*0013_safety_audit[^\\n]*REGISTERED`), `the scope header of 03 states that ${t} is live since 0013`);
+    const sql = docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
+    assert.deepEqual(docs.prepare(`PRAGMA foreign_key_list(${t})`).all(), [], `${t} references nothing (Q4: tolerant player references; the organisation and staff ids are historical pointers; Q4b: the guardian check is in code)`);
+    assert.doesNotMatch(sql, /\bIN \(/, `${t}: no vocabulary CHECK`);
+    const cols = docs.prepare(`PRAGMA table_info(${t})`).all();
+    assert.deepEqual(cols.slice(0, 2).map((c) => [c.name, c.type, c.notnull, c.pk]), [['seq', 'INTEGER', 0, 1], ['id', 'TEXT', 1, 0]], `${t}: seq is the order, id the writer's id`);
+    for (const c of ['absent_keys_json', 'offtype_json', 'extra_json']) assert.ok(cols.some((x) => x.name === c && x.notnull === 0), `${t}: the lossless column ${c}`);
+    for (const c of cols) if (!['id', 'guardian_id'].includes(c.name)) assert.equal(c.notnull, 0, `${t}.${c.name}: every literal column is nullable (absence is absence)`);
+    assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name = ?").get(t, 'sqlite_autoindex_' + t + '_1')?.sql ?? 'UNIQUE', /UNIQUE|^$/, `${t}: id is UNIQUE`);
+  }
+  assert.equal(docs.prepare('PRAGMA table_info(idv_queue)').all().find((c) => c.name === 'guardian_id').notnull, 1, 'idv_queue.guardian_id is NOT NULL (Domain G, strict)');
+  assert.equal(docs.prepare('PRAGMA table_info(ledger)').all().some((c) => c.name === 'actor_kind'), false, 'the ledger derives no actor kind: user_id and actor_name are stored verbatim');
+  assert.ok(docs.prepare('PRAGMA table_info(moderation_log)').all().some((c) => c.name === 'context_json'), 'the moderation context is kept whole');
+  assert.ok(docs.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'reports_target_player_id'").get(), 'the unresolved-player count reads reports by target_player_id');
 });
 
 console.log(`\n${passed} schema-DDL checks passed (${files.length} files, ${tables.length} tables)`);

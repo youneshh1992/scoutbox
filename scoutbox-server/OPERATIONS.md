@@ -1252,7 +1252,9 @@ the account deletion are the only writers.
   messages and receipts in its routes and admin audit, a message posted there
   into its blob; this build then re-upgrades the copy with that message. To go
   further back, run `scripts/outboxPushRollback.mjs` on this tool's output (it
-  refuses the S7d file itself with exit 4).
+  refuses the S7d file itself with exit 4). Since S6b a file this build wrote
+  carries `0013_safety_audit`, which this tool refuses (exit 4): run
+  `scripts/safetyAuditRollback.mjs` first and this tool on its output.
 
 #### Operator procedure for the S7d cutover (not run on real data by this work)
 
@@ -1268,6 +1270,106 @@ the account deletion are the only writers.
 4. **Rollback, if needed.** `node scripts/channelsRollback.mjs <data-dir>
    <fresh-empty-dir>`, then start the previous build (`b67bce5`) on the output —
    every thread, message and receipt written since the cutover is in it.
+
+### Safeguarding and audit records (live since migration `0013`, S6b — implemented 19 October 2026 on top of `1792fc7` under the Founder's decisions Q4, Q4b and Q5; PENDING INDEPENDENT ACCEPTANCE; not production-approved)
+
+The block, report, note, moderation, ledger, ops-event, source-change and IDV
+routes and consoles answer exactly as before; the records behind them are rows
+of `blocks`, `reports`, `moderation_log`, `org_notes`, `ledger`, `ops_events`,
+`source_changes` and `idv_queue` (`repositories/safetyAudit.mjs`;
+`docs/architecture/sqlite-migration-plan.md` §D.4 Candidate A as accepted at
+`1792fc7`, implemented as recorded in `docs/architecture/s6-readiness-review.md`
+§11). The writers are `ledgerAppend`, `moderateOrRefuse`, `handleReport`, the
+block, note, IDV, resolve, IDV-toggle and lift routes, the m13 ops events
+(delivery, enterprise, imports) and m181's source changes — all through the
+repository; every `db.<name>` is a read-only view in insertion order.
+
+- **Order and keys.** `seq` is the array position at the import and the
+  insertion order afterwards; every list, export and backup reads it. A row is
+  the writer's literal: unknown own fields come back first (`extra_json`), a key
+  the writer did not pass comes back absent (`absent_keys_json`), a known key
+  whose value is not the column's type — the numeric or object `targetPlayerId`
+  `handleReport` stores as received, an object `orgId` — comes back exactly as
+  stored (`offtype_json`). No vocabulary is enforced by the database.
+- **References (the approved scope).** NO foreign key on any of the eight. The
+  five player references (`blocks`, `reports`, `org_notes`, `ledger`,
+  `source_changes`) are **tolerant** (Q4): a row naming a player that is not in
+  `players` — a deleted account, a pre-S4a import, a report naming an unknown
+  player — is kept as it is and COUNTED (the boot log, every snapshot write's
+  log line, `GET /capabilities` → `persistence.dataLayer.domains.safetyAudit.
+  unresolvedPlayerReferences`); the count says how many rows name no present
+  player, never why. No parent-existence rule was added to any writer: a report
+  naming an unknown player is accepted as before. The organisation and staff ids
+  are historical pointers (the block and report routes accept them unchecked
+  today — a stated shape-compatibility decision). `idv_queue.guardian_id` is
+  **strict** (Q4b, in code): a new entry, an imported entry and every snapshot
+  write that carries `idvQueue` or rewrites the identity pair are checked
+  against the FINAL `guardians` table; an entry naming a missing guardian
+  refuses the whole operation atomically (`IDV_GUARDIAN_MISSING`, ids only) —
+  an identity-only replacement that removes a referenced guardian included.
+  Lifting a block deletes its row (Q5). Account deletion is unchanged: every
+  audit row naming the person stays with its now-unresolved id.
+- **Writes.** A block and its ledger row land in the route's next save
+  together (one revision); a report lands in `handleReport`'s next save with
+  the suspension blocks; the IDV entry commits with the guardian's columns
+  before the 200 (both failure seams and the real COMMIT leave nothing; a
+  SIGKILL right after the answer loses nothing); a failed ordinary save keeps
+  every pending row for the next save, which lands it once; an aborted unit
+  restores the mirror in place. Nothing here changes what a route answers, who
+  may read a record, `isBlocked`, moderation, the resolve or toggle rules.
+- **Boot.** The data layer attaches to the tables as they are; an in-memory
+  array (the seed's empty containers, the snapshot migrations' `??= []`,
+  `migrateM13`'s `opsEvents`) is never imported — dropped silently when empty,
+  logged as a count otherwise. The log reports the eight counts, the pending
+  writes and the unresolved player references.
+- **S6b cutover (first boot of this build on a 4f954ad file).** Migration
+  `0013_safety_audit` creates the eight tables and imports the eight blobs:
+  every entry validated and nothing coerced (an object with a non-empty string
+  id, unique within its collection); array order becomes `seq`; unknown fields,
+  absent keys and off-type values kept; unresolved player ids counted; an IDV
+  entry naming a guardian that is not in `guardians`, a non-object entry, a
+  missing or duplicate id refuses the WHOLE step (`SAFETY_AUDIT_IMPORT_BLOCKED`:
+  collections, positions, ids and reasons — never a report text, a note, an
+  excerpt, a name or a document value); the blobs and `saveSeq` are untouched
+  and the next boot refuses the same way until the entry is resolved on the
+  previous build. A file without the blobs imports nothing. A backup from any
+  build restores through the same migration with the order intact; a snapshot
+  that omits a collection leaves its table alone, an explicit empty array clears
+  it, a malformed collection or a strict refusal rolls the whole write back.
+  The admin backup writes its `db.json` before appending its own
+  `backup_created` event, as every build did.
+- **Rollback (copy-only).** `npm run rollback:safety-audit -- <data-dir>
+  <fresh-empty-dir>` (`scripts/safetyAuditRollback.mjs`) opens the file
+  read-only, copies it (`VACUUM INTO`), writes every row of the eight tables
+  back into its legacy blob in insertion order in the writer's literal (extras
+  first, absence preserved, off-type values restored) — **nothing written,
+  updated or deleted after the cutover is lost** (a lifted block is absent, a
+  resolved report carries its resolution) — drops the eight tables, removes
+  the 0013 record and its meta key, advances the save revision, checks every
+  foreign key, VACUUMs and revalidates the copy (every other table untouched,
+  the S4a–S7d tables included). Refusals, no output: a later schema step (exit
+  4), a file that never applied 0013 (exit 5), a non-empty output directory
+  (exit 1), a recorded 0013 whose tables are missing (exit 10). Proven by
+  booting the copy on the actual pre-S6b build (`4f954ad`): the same rows in
+  its routes and admin consoles, a block and a report accepted there into its
+  blobs; this build then re-upgrades the copy with those writes. To go further
+  back, run `scripts/channelsRollback.mjs` on this tool's output (it refuses the
+  S6b file itself with exit 4); every earlier tool refuses a 0013 file.
+
+#### Operator procedure for the S6b cutover (not run on real data by this work)
+
+1. **Dry run on a copy.** With the S7d build (`4f954ad`) still serving, copy the
+   data directory and boot this build on it (`DATA_DIR=<copy>` on a spare port):
+   the log shows the 0013 import counts per collection (rows, rows with extra
+   fields, absent keys, off-type values, unresolved player references, IDV
+   entries); a `SAFETY_AUDIT_IMPORT_BLOCKED` line lists what to resolve on the
+   previous build (collections, positions and ids, never a text).
+2. **Backup.** `POST /admin/backup` on the previous build, verify it, keep it.
+3. **Cutover.** Stop the previous build, start this build on the real directory,
+   read the same log lines.
+4. **Rollback, if needed.** `node scripts/safetyAuditRollback.mjs <data-dir>
+   <fresh-empty-dir>`, then start the previous build (`4f954ad`) on the output —
+   every audit row written, updated or deleted since the cutover is in it.
 
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request

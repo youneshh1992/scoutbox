@@ -218,7 +218,7 @@ and design changes the Founder explicitly requests.
   `recruitmentCases` and every other remaining blob are still rewritten by
   every save (review §7.3); the next stage's findings and the Founder's
   decision list are `docs/architecture/sqlite-migration-plan.md` §D (the one
-  list: §D.5); the next free migration identifier is `0013`. S7d: `db.channels` is a read-only view in insertion
+  list: §D.5; Q4/Q4b/Q5 answered and S6b built since — below). S7d: `db.channels` is a read-only view in insertion
   order with each thread's `messages` nested in array order; the ONLY writers
   are `channels.open` (the two acceptance routes' `openChannel` — the literal
   unchanged, the request checked against the live `requests` collection, the
@@ -243,8 +243,41 @@ and design changes the Founder explicitly requests.
   and follows the next committed write (the review of `62e9c1a`); the copy-only rollback is
   `scripts/channelsRollback.mjs` (every thread and message written back;
   nothing lost; proven on the actual `b67bce5` build) and the S7c tool refuses a
-  file carrying 0012. Retention stays OPEN (S4b). S8, S4b and the remaining S6 tables
-  are not started; S4b waits for the open country-code decision.
+  file carrying 0012. Retention stays OPEN (S4b). **The eight safeguarding and
+  audit collections are tables since S6b** (IMPLEMENTED 19 October 2026 on top of
+  `1792fc7`, whose next-stage brief the independent review accepted; PENDING
+  INDEPENDENT ACCEPTANCE — not production, security, legal-compliance or
+  deployment approval, not acceptance of S4b or S8; `docs/architecture/s6-readiness-review.md`
+  §11, plan §D.4/§D.5; `repositories/safetyAudit.mjs`, migration
+  `0013_safety_audit`). Built under the Founder's explicit decisions of
+  19 October 2026, recorded verbatim in review §11 and not to be asked again:
+  **Q4 "Approve — preserve current behaviour"** — the five historical player
+  references (`blocks`, `reports`, `org_notes`, `ledger`, `source_changes`) stay
+  when the player is absent, unresolved ids are counted and never refused,
+  invented or deleted, no parent-existence rule on any writer (`handleReport`
+  still stores a truthy `targetPlayerId` of any type as received); **Q4b
+  "Approve — move with strict guardian checks"** — `idv_queue` moved with the
+  application check that the guardian exists (new writes, the import, every
+  snapshot write that carries the queue or rewrites the identity pair; an
+  identity-only replacement removing a referenced guardian is refused
+  atomically, ids only); the database foreign key is a later step; **Q5 "Keep
+  today's removal behaviour"** — lifting a block deletes its row. NO foreign key
+  on any of the eight (the organisation and staff ids are historical pointers
+  because the block and report routes accept them unchecked — a stated
+  shape-compatibility decision); no vocabulary CHECK; `seq` order;
+  `absent_keys_json` / `offtype_json` / `extra_json` keep every writer's literal
+  (absence as absence, a numeric or object `targetPlayerId` as received); the
+  ledger's `userId` / `scoutName` verbatim, no actor kind; the moderation
+  context whole; every ops-event kind a row; writes staged into the route's
+  next save or the enclosing unit (the IDV row commits with the guardian's
+  columns); the copy-only rollback is `scripts/safetyAuditRollback.mjs` (every
+  row written back in its writer's literal; nothing lost; proven on the actual
+  `4f954ad` build) and the S7d tool refuses a file carrying 0013. S6b removes
+  the eight audit blobs from every save's serialisation and does NOT meet the
+  whole-snapshot-write objective (plan §D.4). Child-status stamping (Q2) and
+  the country code (Q1) stay OPEN; the full birth date, D-A/D-B and the
+  legacy-minor stop rule are unchanged; A0–A3, S4b and S8 are not started. The
+  next free migration identifier is `0014`.
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state

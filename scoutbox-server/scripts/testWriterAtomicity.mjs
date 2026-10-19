@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
+import { AUDIT_SNAPSHOT_TABLES } from '../repositories/safetyAudit.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -55,7 +56,8 @@ async function boot(dir) {
 // Every database read below goes through a SECOND connection (read-only), never the server's: what it sees is what is committed.
 const q1 = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).get(...p); } finally { s.close(); } };
 const facets = (dir, table, id) => JSON.parse(q1(dir, `SELECT facets_json FROM ${table} WHERE id = ?`, id).facets_json);
-const blob = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : []; };
+// S6b: the eight audit collections are tables since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
+const blob = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); if (r) return JSON.parse(r.value); const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === name); if (!t) return []; const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t.table) ? t.read(s) : []; } finally { s.close(); } };
 const orgLogin = async (S, orgId, scoutName, role, platform) => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) }); assert.equal(r.status, 200, `org login ${orgId}: ${JSON.stringify(r.body)}`); return r.body.token; };
 const signupAdult = async (S, name, extra = {}) => { const r = await S.j('POST', '/auth/player/signup', { name, dob: '2000-01-01', country: 'GB', password: 'synthetic-pass-1', ...extra }); assert.equal(r.status, 201, JSON.stringify(r.body)); return { pid: r.body.playerId, token: r.body.token }; };
 const count = (text, re) => (text.match(re) ?? []).length;

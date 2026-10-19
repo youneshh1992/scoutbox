@@ -21,6 +21,7 @@ import { rollbackNotificationsCopy } from '../repositories/notificationsRollback
 import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
 import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
+import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
@@ -34,6 +35,8 @@ import { openStore } from '../store.mjs';
 const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
+// S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
+const preS6b = (file) => { const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(file, out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 function test(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -447,7 +450,7 @@ test('snapshot mode (review correction 1): before the cutover record exists the 
   assert.throws(() => rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0004_orgs_live/.test(err.message) && /0005_core_identity_live/.test(err.message));
   assert.throws(() => rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused3')), (err) => err.code === 'LATER_SCHEMA' && /0005_core_identity_live, 0006_media_deletions/.test(err.message));
   const s4aState = tempDir('s2-snap-rb-s4a'); const s3State = tempDir('s2-snap-rb-s3'); const s2State = tempDir('s2-snap-rb-s2');
-  const s7cState = tempDir('s2-snap-rb-s7c'); rollbackChannelsCopy(path.join(dir, 'scoutbox.db'), s7cState); // S7d first (the file carries 0012),
+  const s7cState = tempDir('s2-snap-rb-s7c'); rollbackChannelsCopy(preS6b(path.join(dir, 'scoutbox.db')), s7cState); // S7d first (the file carries 0012),
   const s7bState = tempDir('s2-snap-rb-s7b'); rollbackOutboxPushCopy(path.join(s7cState, 'scoutbox.db'), s7bState); // then S7c on its output,
   const s7aState = tempDir('s2-snap-rb-s7a'); rollbackDispatchesCopy(path.join(s7bState, 'scoutbox.db'), s7aState); const s6aState = tempDir('s2-snap-rb-s6a'); rollbackNotificationsCopy(path.join(s7aState, 'scoutbox.db'), s6aState); // then S7b on its output, then S7a
   const s5State = tempDir('s2-snap-rb-s5'); rollbackOneTimeCodesCopy(path.join(s6aState, 'scoutbox.db'), s5State); // then S6a: the copy carries 0008

@@ -42,8 +42,11 @@ export function registerImports(ctx) {
   const {
     db, orgRouter, adminRouter, app, nextId, persist, persistNow, notify,
     requireLead, isLead, orgCanSee, paginate, histAppend, webhookUrlProblem,
-    signBody, timingSafeEq, findPlayer, players, unit,
+    signBody, timingSafeEq, findPlayer, players, unit, safetyAudit,
   } = ctx;
+  // S6b: an exhausted webhook delivery's ops event is a row of ops_events (repositories/safetyAudit.mjs),
+  // staged into the save that follows the webhook sweep; a bare context without the repository keeps the array push.
+  const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
 
   // ------------------------------------------------------------- templates
   orgRouter.get('/imports/template', (req, res) => {
@@ -413,7 +416,7 @@ export function registerImports(ctx) {
     }
     if (d.attempts.length >= MAX_ATTEMPTS) {
       d.status = 'failed';
-      db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'webhook_failed', detail: { deliveryId: d.id, endpointId: d.endpointId } });
+      opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'webhook_failed', detail: { deliveryId: d.id, endpointId: d.endpointId } });
     } else {
       d.status = 'retrying';
       d.nextAt = Date.now() + RETRY_MS[d.attempts.length];

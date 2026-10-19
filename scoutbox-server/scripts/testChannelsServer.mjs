@@ -32,11 +32,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
+import { AUDIT_SNAPSHOT_TABLES } from '../repositories/safetyAudit.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
+const preS6bDir = (dir) => { const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -75,6 +78,8 @@ const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
 const blobRows = (c, name) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
+// S6b: the ledger is a table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
+const ledgerRows = (dir) => { const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === 'ledger'); const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const r = s.prepare("SELECT value FROM collections WHERE name = 'ledger'").get(); if (r) return JSON.parse(r.value); return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger'").get() ? t.read(s) : []; } finally { s.close(); } };
 const requestsOf = (dir) => snap(dir, (c) => blobRows(c, 'requests') ?? []);
 const CHANNEL_KEYS = ['id', 'requestId', 'playerId', 'playerName', 'orgId', 'orgName', 'orgVerified', 'scoutName', 'scoutRole', 'counterparty', 'guardianId', 'createdAt', 'messages', 'readBy'];
 const MESSAGE_KEYS = ['id', 'ts', 'sender', 'text', 'attachment', 'clientMsgId'];
@@ -251,7 +256,7 @@ await test('[compat] account deletion reproduces today\'s behaviour (D-B, as app
   assert.equal((await S.j('POST', `/org/channels/${guardian.id}/messages`, { text: 'Synthetic to the guardian.' }, maria)).status, 201);
   assert.equal((await S.j('POST', `/player/channels/${other.id}/messages`, { text: 'Synthetic other player.' }, mateus)).status, 201);
   assert.equal((await S.j('POST', `/org/channels/${adult.id}/read`, {}, maria)).status, 200);
-  const ledgerBefore = snap(dir, (c) => blobRows(c, 'ledger')).filter((l) => l.type === 'message').length;
+  const ledgerBefore = ledgerRows(dir).filter((l) => l.type === 'message').length;
   assert.deepEqual(storedIds(dir).map(([id, ms]) => [id, ms.length]), [[adult.id, 1], [guardian.id, 1], [other.id, 1]]);
   assert.equal((await S.j('DELETE', '/player/account', {}, kola)).status, 200);
   assert.deepEqual(storedIds(dir).map(([id, ms]) => [id, ms.length]), [[guardian.id, 1], [other.id, 1]], 'the adult\'s thread went with its message when the route answered; the others stay');
@@ -261,7 +266,7 @@ await test('[compat] account deletion reproduces today\'s behaviour (D-B, as app
   assert.deepEqual(storedIds(dir).map(([id]) => id), [other.id], 'the guardian–club thread of the deleted child went too (today\'s behaviour, kept)');
   assert.deepEqual((await S.j('GET', '/guardian/channels', undefined, amara)).body, []);
   assert.deepEqual((await S.j('GET', '/admin/channels', undefined, null, A)).body.map((c) => c.id), [other.id]);
-  assert.equal(snap(dir, (c) => blobRows(c, 'ledger')).filter((l) => l.type === 'message').length, ledgerBefore, 'the ledger rows stay (append-only, ids only)');
+  assert.equal(ledgerRows(dir).filter((l) => l.type === 'message').length, ledgerBefore, 'the ledger rows stay (append-only, ids only)');
   await S.stop(); S = await boot(dir);
   assert.deepEqual((await S.j('GET', '/admin/channels', undefined, null, A)).body.map((c) => [c.id, c.messages.length]), [[other.id, 1]]);
   assert.deepEqual((await S.j('GET', '/player/channels', undefined, await playerLogin(S, 'pl-carvalho'))).body.map((c) => c.id), [other.id], 'the other player\'s thread is intact after the restart');
@@ -272,7 +277,7 @@ await test('[compat] account deletion reproduces today\'s behaviour (D-B, as app
 await test('[cutover] the cutover and the save points: a fresh boot records 0012_channels after 0011 and creates channels, messages and message_attachments with no blob behind them (the data layer reports the domain); the thread opened by an acceptance is in the SAME revision as the request\'s answer and survives a SIGKILL right after the response; a message is in the file before the sender hears 201 (SIGKILL right after); a FAILED ORDINARY SAVE at the REAL COMMIT (internal:save.sqlite_commit) leaves the message in memory and absent from the table while the route answered 201, and the next save (a receipt) lands the message and the receipt ONCE — a later save does not replay; rows carry seq/position in post order', async () => {
   const dir = tempDir('s7d-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
   assert.ok(live(dir), 'the boot recorded 0012'); // fails on b67bce5: no such record
-  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).slice(-2)), ['0011_outbox_push', MIGRATION]);
+  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).slice(-3)), ['0011_outbox_push', MIGRATION, '0013_safety_audit']); // S6b: 0013 follows on the same boot
   for (const t of ['channels', 'messages', 'message_attachments']) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
   assert.equal(q1(dir, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0, 'no channels blob');
   const cap = (await S.j('GET', '/capabilities')).body; const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {}; assert.ok(domains.channels, `the data layer reports the channels domain (${Object.keys(domains).join(', ')})`);
@@ -330,7 +335,7 @@ await test('[cutover] the admin backup, a restore, the S7c tool\'s refusal, lega
   try { execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), dir, tempDir('s7d-s7ctool')], { stdio: 'pipe' }); assert.fail('the S7c tool must refuse a 0012 file'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
   // The copy-only rollback, then legacy/unknown fields written into the blob by hand (what an older file might carry).
   const copy = tempDir('s7d-copy');
-  const out = execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, copy], { encoding: 'utf8' }); // fails on b67bce5: no such tool
+  const out = execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), copy], { encoding: 'utf8' }); // fails on b67bce5: no such tool
   assert.match(out, /written back/); assert.equal(live(copy), false); assert.deepEqual(stored(copy), original, 'the blob holds every thread in order, in the legacy shape');
   assert.ok(live(dir), 'the source is untouched'); assert.deepEqual(stored(dir), original);
   const SECRET = 'SECRET-LEGACY-MARKER-91';
@@ -361,7 +366,7 @@ await test('[cutover] the admin backup, a restore, the S7c tool\'s refusal, lega
   S = await boot(restored); assert.ok(live(restored)); assert.equal(JSON.stringify(stored(restored)), JSON.stringify(snapshot.db.channels), 'row for row'); assert.equal(q1(restored, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0);
   await S.stop();
   // The accepted build boots the (unedited) rollback copy of the original file.
-  const copy2 = tempDir('s7d-copy2'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, copy2], { encoding: 'utf8' }); assert.deepEqual(stored(copy2), original);
+  const copy2 = tempDir('s7d-copy2'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), copy2], { encoding: 'utf8' }); assert.deepEqual(stored(copy2), original);
   const OLD = process.env.SCOUTBOX_PRE_S7D_SERVER;
   if (OLD && fs.existsSync(OLD)) {
     const old = await boot(copy2, {}, OLD);

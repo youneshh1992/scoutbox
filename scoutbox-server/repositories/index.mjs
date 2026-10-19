@@ -43,14 +43,16 @@ import * as m0009 from './migrations/0009_notifications.mjs';
 import * as m0010 from './migrations/0010_dispatches.mjs';
 import * as m0011 from './migrations/0011_outbox_push.mjs';
 import * as m0012 from './migrations/0012_channels.mjs';
+import * as m0013 from './migrations/0013_safety_audit.mjs';
 import { trialReportsFor } from './playerSubrecords.mjs';
 import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, NOTIFICATIONS_MIGRATION, NOTIFICATIONS_CUTOVER_META } from './notifications.mjs';
 import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCHES_MIGRATION, DISPATCHES_CUTOVER_META } from './dispatches.mjs';
 import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MIGRATION, OUTBOX_PUSH_CUTOVER_META } from './outboxPush.mjs';
 import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, CHANNELS_CUTOVER_META, assertChannelReferencesConsistent } from './channels.mjs';
+import { createSafetyAuditRepository, AUDIT_COLLECTIONS, AUDIT_SNAPSHOT_TABLES, SAFETY_AUDIT_MIGRATION, SAFETY_AUDIT_CUTOVER_META, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences } from './safetyAudit.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -80,9 +82,13 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
  * (S7d, migration 0012) are the message threads — the openChannel literal with
  * its messages nested in the postMessage literal and their attachments — in
  * insertion order, with legacy and unknown fields kept at every level
- * (repositories/channels.mjs).
+ * (repositories/channels.mjs). The eight audit collections `blocks`, `reports`,
+ * `moderationLog`, `orgNotes`, `ledger`, `opsEvents`, `sourceChanges` and `idvQueue`
+ * (S6b, migration 0013) are the audit tables in their writers' literals, in insertion
+ * order, with unknown fields, absent keys and off-type values kept
+ * (repositories/safetyAudit.mjs).
  */
-export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name]);
+export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS]);
 /** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
 /** The notification, dispatch, outbox and push tables: no reference to any other table (polymorphic audiences; the dispatch's notification reference is indexed, not a foreign key; the outbox and push rows reference nothing), dispatched last. */
@@ -106,7 +112,7 @@ export function readTableBacked(sqlite) {
   if (identity) Object.assign(out, identity);
   const queue = MEDIA_DELETIONS_TABLE.read(sqlite);
   if (queue) out[MEDIA_DELETIONS_TABLE.name] = queue;
-  for (const table of [...CODE_TABLES, ...NOTIFICATION_TABLE_DISPATCH, CHANNELS_TABLE]) {
+  for (const table of [...CODE_TABLES, ...NOTIFICATION_TABLE_DISPATCH, CHANNELS_TABLE, ...AUDIT_SNAPSHOT_TABLES]) {
     const rows = table.read(sqlite);
     if (rows) out[table.name] = rows;
   }
@@ -202,6 +208,19 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // rolls back, unrelated collections and the save revision included.
   if (written.includes(CHANNELS_TABLE.name) || requestsSupplied || written.some((n) => IDENTITY_COLLECTIONS.includes(n))) {
     assertChannelReferencesConsistent(sqlite, { requests: requestsSupplied ? db.requests : undefined, label: 'the snapshot (channels, requests and guardians together)' });
+  }
+  // S6b: the eight audit tables go after the identity pair and the prunes. They carry
+  // no foreign key. Domain P (the five player references): a snapshot that rewrites
+  // the players and omits an audit collection keeps every audit row as it is, and a
+  // supplied audit collection may name players that are absent — tolerated and
+  // counted, never refused (Q4). Domain G (the IDV guardian reference, Q4b): an
+  // incoming queue is checked against the guardians table as it stands (the identity
+  // pair was dispatched above), and the FINAL combined state is asserted whenever this
+  // snapshot wrote the queue OR rewrote the identity pair — the queue omitted
+  // included — so a guardian removed under a retained entry refuses the whole save.
+  for (const table of AUDIT_SNAPSHOT_TABLES) if (present.includes(table.name) && table.replace(sqlite, db[table.name])) written.push(table.name);
+  if (written.includes('idvQueue') || written.some((n) => IDENTITY_COLLECTIONS.includes(n))) {
+    assertIdvQueueGuardiansConsistent(sqlite, { label: 'the snapshot (idvQueue and guardians together)' });
   }
   return written;
 }
@@ -427,6 +446,39 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   }
   Object.defineProperty(db, CHANNELS_TABLE.name, { value: channels.view, writable: false, configurable: false, enumerable: true });
 
+  // The eight audit collections (S6b, migration 0013): the tables are the record, one
+  // participant. STAGED mode here (see repositories/safetyAudit.mjs): a block and its
+  // ledger row land in the next save, a moderation hit in moderateOrRefuse's persist(),
+  // a report in the next save with its suspension blocks and frozen requests, a note
+  // in the next save, a source change in m181's persistNow(), an ops event in its
+  // caller's save; the IDV entry and the admin toggle join their units of work. An
+  // audit array the caller holds in memory is either the blob the migration just
+  // imported from the file (a restored backup, a pre-S6b file: dropped, the tables are
+  // the record) or a stale copy (the seed's empty containers, the snapshot migrations'
+  // `??= []`), reported when it is not empty, dropped, and its blob row deleted so no
+  // save can bring it back. The repository never imports from memory. From here on the
+  // eight `db.*` names are read-only views over the mirrors.
+  const safetyAudit = createSafetyAuditRepository({ sqlite, log, unit: store.unit, staged: true });
+  const safetyAuditBoot = safetyAudit.attach();
+  store.setSaveHook?.(safetyAudit.saveHook());
+  if (migrations.ran.includes(SAFETY_AUDIT_MIGRATION)) {
+    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(SAFETY_AUDIT_CUTOVER_META)?.value;
+    if (record) {
+      const c = JSON.parse(record);
+      const unresolved = Object.entries(c).filter(([, v]) => v && typeof v === 'object' && 'unresolvedPlayerIds' in v).map(([n, v]) => `${v.unresolvedPlayerIds} ${n}`).join(', ');
+      log(`safety audit: cutover imported ${AUDIT_COLLECTIONS.map((n) => `${c[n]?.imported ?? 0} ${n}`).join(', ')}; ${AUDIT_COLLECTIONS.reduce((a, n) => a + (c[n]?.withExtraFields ?? 0), 0)} with unknown fields kept, ${AUDIT_COLLECTIONS.reduce((a, n) => a + (c[n]?.withOfftypeValues ?? 0), 0)} with off-type values kept; rows naming a player that is not in the players table (counted, imported as they are): ${unresolved}`);
+    }
+  }
+  for (const name of AUDIT_COLLECTIONS) {
+    if (Object.hasOwn(db, name)) {
+      const given = db[name];
+      if (!migrations.ran.includes(SAFETY_AUDIT_MIGRATION) && Array.isArray(given) && given.length) warn(`safety audit: an in-memory ${name} array with ${given.length} entr${given.length === 1 ? 'y' : 'ies'} was ignored; the ${AUDIT_SNAPSHOT_TABLES.find((t) => t.name === name).table} table is authoritative`);
+      delete db[name];
+      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
+    }
+    Object.defineProperty(db, name, { value: safetyAudit.views[name], writable: false, configurable: false, enumerable: true });
+  }
+
   return {
     orgs,
     identity,
@@ -443,8 +495,9 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     pushLog: outboxPush.pushLog,
     pushTokens: outboxPush.pushTokens,
     channels,
+    safetyAudit,
     migrations,
-    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot },
+    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot, safetyAudit: safetyAuditBoot },
     /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
     report: () => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
@@ -459,6 +512,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         dispatches: { mode: 'live', rows: dispatches.count(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: dispatches.pending(), writeMode: 'staged: a sweep\'s rows, attempts and status changes land in the next snapshot save with the outbox row, the injection counter and the ops/webhook rows written alongside; an acknowledgment lands in its unit\'s commit', notificationReference: 'indexed, no foreign key, no cascade (orphans after an ordinary deletion are retained; retention is an open decision)' },
         outboxPush: { mode: 'live', rows: outboxPush.counts(), pendingWrites: outboxPush.pending(), writeMode: 'staged: a mailer record lands in the save its route would have carried the blob in; a delivery record in the sweep\'s save with the dispatch rows; a push record — written after the notification\'s save committed — in the later save the sender\'s nextId() already schedules; a token in the route\'s persist()', tokens: 'any JSON value the route accepted, stored losslessly as JSON text; no uniqueness constraint (primitives collapse by strict equality on the live value, objects never — the route\'s rule); a non-finite number (JSON 1e400) is kept live and persists as null, as before', destinations: 'a string in to_address, null, or any other JSON value in to_json (what a coercing route handed the mailer: an array), decoded on read' },
         channels: { mode: 'live', rows: channels.counts(), pendingWrites: channels.pending(), writeMode: 'staged: a thread lands in the acceptance route\'s save with the request\'s answer; a message in postMessage\'s save before the sender hears 201; a receipt in its route\'s save; a deletion in the account-deletion unit', references: 'request_id unique, checked in code against the requests collection until S8a creates recruitment_requests (D-A); guardian_id checked in code at open and on every snapshot\'s final state (no foreign key, by bounded choice); org_id a foreign key (RESTRICT); player_id no lifecycle clause — the deleted player\'s threads are deleted explicitly, as before (D-B); messages and attachments cascade with their thread' },
+        safetyAudit: { mode: 'live', rows: safetyAudit.counts(), pendingWrites: safetyAudit.pending(), unresolvedPlayerReferences: unresolvedPlayerReferences(sqlite), writeMode: 'staged: a block with its ledger row, a report with its suspension blocks, a note and a moderation hit land in the next save; a source change in its writer\'s save; an ops event in its caller\'s save; the IDV entry and the admin toggle land in their units\' commits', references: 'no foreign key on any of the eight tables. The five player references (blocks, reports, org_notes, ledger, source_changes) are tolerant historical references (Q4): an id that resolves to no player is counted here, never refused, never given a fabricated parent, never deleted; a count, not a claim about why it is absent. idv_queue.guardian_id is strict (Q4b): a write or import naming a missing guardian is refused and every snapshot that touches the queue or the identity pair is checked against the FINAL guardians table. A lifted block is deleted, as before (Q5). Organisation and staff references are historical pointers the routes never checked' },
       },
       identity: { initState: identity.initState(), uncommittedFacets: identity.report().uncommittedFacets },
       mediaDeletions: { queued: mediaDeletions.count(), conflicts: mediaDeletions.conflicts().length },

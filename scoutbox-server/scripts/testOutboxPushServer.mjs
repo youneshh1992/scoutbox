@@ -42,6 +42,8 @@ let passed = 0;
 const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
+const preS6bDir = (dir) => { const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -306,7 +308,7 @@ await test('[cutover] an ordinary account deletion leaves the three tables alone
   // The S7b tool refuses the S7c file.
   try { execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, tempDir('s7c-s7btool')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
   // The copy-only rollback booted by the accepted build.
-  const copy = tempDir('s7c-rollback'); const s7cCopy = tempDir('s7c-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, s7cCopy], { encoding: 'utf8' }); // S7d first (the file carries 0012)
+  const copy = tempDir('s7c-rollback'); const s7cCopy = tempDir('s7c-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); // S7d first (the file carries 0012)
   const out = execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
   assert.match(out, /written back as blobs/); assert.equal(live(copy), false); assert.deepEqual([stored(copy).outbox, stored(copy).pushLog, stored(copy).pushTokens], [all.outbox, all.pushLog, all.pushTokens], 'the blobs hold every row in order');
   const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
@@ -367,7 +369,7 @@ await test('[review of 40aa05c, F2] POST /org/invites with a destination the rou
   const liveRow = byName(stored(liveDir).outbox, 'Synthetic Live'); assert.deepEqual([liveRow.transport, liveRow.delivered, liveRow.to], ['sendgrid', true, ONE], 'the provider\'s answer recorded on the row, the array kept');
   await SL.stop(); rm(liveDir); fs.rmSync(stubLog, { force: true });
   // Rollback and the accepted build.
-  const copy = tempDir('s7c-f2-rollback'); const s7cCopy = tempDir('s7c-f2-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, s7cCopy], { encoding: 'utf8' }); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
+  const copy = tempDir('s7c-f2-rollback'); const s7cCopy = tempDir('s7c-f2-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
   assert.equal(live(copy), false); assert.deepEqual(stored(copy).outbox, all.outbox, 'the blob holds every row, the arrays by value and type');
   const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
   if (OLD && fs.existsSync(OLD)) {
@@ -427,7 +429,7 @@ await test('[review of 40aa05c, F1] POST /push/register with RAW JSON bodies (1e
   const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
   if (OLD && fs.existsSync(OLD)) { assert.deepEqual(await payloads(OLD), mine, 'the accepted 6ca66ba build sends the identical payloads'); console.log('    (pre-S7c build: identical provider payloads for non-finite tokens)'); } else console.log('    (SCOUTBOX_PRE_S7C_SERVER not set: the old-build payload comparison was not exercised here)');
   // Rollback: the blob holds the nulls; the accepted build boots it and persists its own raw overflow registration as null; the re-upgrade keeps every row.
-  const copy = tempDir('s7c-f1-rollback'); const s7cCopy = tempDir('s7c-f1-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, s7cCopy], { encoding: 'utf8' }); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
+  const copy = tempDir('s7c-f1-rollback'); const s7cCopy = tempDir('s7c-f1-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
   assert.deepEqual(playerTokens(copy).map((t) => t.token), nine.map((t) => t.token), 'the blob the accepted build reads');
   if (OLD && fs.existsSync(OLD)) {
     const old = await boot(copy, {}, OLD); const ok = await playerLogin(old, 'pl-adeyemi');
@@ -469,7 +471,7 @@ await test('[review of 78c14b9] POST /org/invites with RAW JSON destinations the
   const liveRow = byName(stored(liveDir).outbox, 'Synthetic Overflow'); assert.deepEqual([liveRow.transport, liveRow.delivered, liveRow.to], ['sendgrid', true, EXPECTED[1]]);
   await SL.stop(); rm(liveDir); fs.rmSync(stubLog, { force: true });
   // Rollback: the blob holds the old JSON.
-  const copy = tempDir('s7c-f2b-rollback'); const s7cCopy = tempDir('s7c-f2b-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, s7cCopy], { encoding: 'utf8' }); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
+  const copy = tempDir('s7c-f2b-rollback'); const s7cCopy = tempDir('s7c-f2b-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
   assert.equal(live(copy), false); assert.deepEqual(stored(copy).outbox, all.outbox);
   const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
   if (OLD && fs.existsSync(OLD)) {

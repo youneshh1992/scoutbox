@@ -61,10 +61,12 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
+  // S6b: an ops event is a row of ops_events (repositories/safetyAudit.mjs), staged into the persist() that follows each one; a bare context without the repository keeps the array push.
+  const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
 
   const DEV = (process.env.NODE_ENV ?? 'development') !== 'production' || process.env.ALLOW_DEV_LOGINS === '1';
 
@@ -338,7 +340,7 @@ export function registerEnterprise(ctx) {
       grantsReceived: db.groupGrants.filter((g) => g.toOrgIds?.includes(orgId)),
       supportAccess: db.supportAccessGrants.filter((g) => g.orgId === orgId),
     };
-    db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'audit_export', detail: { orgId, by: req.orgUser.name } });
+    opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'audit_export', detail: { orgId, by: req.orgUser.name } });
     persist();
     res.json(scoped);
   });
@@ -442,7 +444,7 @@ export function registerEnterprise(ctx) {
     // directory exists; ids only, never a record.
     const conflicts = mediaDeletions.conflicts();
     if (conflicts.length) {
-      db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'backup_refused', detail: { dir: stamp, error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflicts: conflicts.map((c) => ({ mediaId: c.media_id, owners: c.owners })) } });
+      opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_refused', detail: { dir: stamp, error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflicts: conflicts.map((c) => ({ mediaId: c.media_id, owners: c.owners })) } });
       persistNow();
       return res.status(409).json({
         error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT',
@@ -474,7 +476,7 @@ export function registerEnterprise(ctx) {
       // state in memory, like every blob collection — so a backup restores on
       // any build: a pre-S7a build reads the blobs, this build imports them
       // through migration 0009 with the feed order intact.
-      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes(), notifications: notifications.exportRows(), notificationPrefs: notifications.exportPrefs(), dispatches: dispatches.exportRows(), outbox: outbox.exportRows(), pushLog: pushLog.exportRows(), pushTokens: pushTokens.exportRows(), channels: channels.exportRows() } })); // S7c: the three collections in their legacy shapes (the withheld mail text as stored; tokens with their registered types); S7d: the threads in the legacy shape, insertion order, messages nested in array order, legacy and unknown fields kept
+      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes(), notifications: notifications.exportRows(), notificationPrefs: notifications.exportPrefs(), dispatches: dispatches.exportRows(), outbox: outbox.exportRows(), pushLog: pushLog.exportRows(), pushTokens: pushTokens.exportRows(), channels: channels.exportRows(), ...safetyAudit.exportAll() } })); // S7c: the three collections in their legacy shapes (the withheld mail text as stored; tokens with their registered types); S7d: the threads in the legacy shape, insertion order, messages nested in array order, legacy and unknown fields kept
       // 2. Media files — except those whose removal is queued: a backup never
       //    carries a file without the intent to remove it. Their ids are in
       //    db.json; on a restored server the entry is cleared once the file is
@@ -512,11 +514,11 @@ export function registerEnterprise(ctx) {
       // never claims a backup that does not exist.
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
       console.error(`backup failed (${stamp}): ${err?.message ?? err}`);
-      db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'backup_failed', detail: { dir: stamp, error: String(err?.message ?? err).slice(0, 200) } });
+      opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_failed', detail: { dir: stamp, error: String(err?.message ?? err).slice(0, 200) } });
       persistNow();
       return res.status(500).json({ error: 'BACKUP_FAILED', message: 'The backup could not be completed; the partial directory was removed.' });
     }
-    db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'backup_created', detail: { dir: stamp, files: manifest.files.length, queuedForRemoval: manifest.media.queuedForRemoval } });
+    opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_created', detail: { dir: stamp, files: manifest.files.length, queuedForRemoval: manifest.media.queuedForRemoval } });
     persistNow();
     res.status(201).json({ dir, manifest });
   });

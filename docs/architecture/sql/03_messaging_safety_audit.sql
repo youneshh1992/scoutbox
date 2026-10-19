@@ -9,27 +9,29 @@
 --   outbox              → outbox                                           (LIVE since migration 0011_outbox_push, S7c, REGISTERED — implemented, pending independent acceptance)
 --   pushLog             → push_log                                         (LIVE since migration 0011_outbox_push, S7c, REGISTERED — implemented, pending independent acceptance)
 --   pushTokens          → push_tokens                                      (LIVE since migration 0011_outbox_push, S7c, REGISTERED — implemented, pending independent acceptance)
---   blocks              → blocks
---   reports             → reports
---   moderationLog       → moderation_log
---   orgNotes            → org_notes
---   ledger              → ledger
---   opsEvents           → ops_events
---   sourceChanges       → source_changes
+--   blocks              → blocks                                           (LIVE since migration 0013_safety_audit, S6b, REGISTERED — implemented, pending independent acceptance)
+--   reports             → reports                                          (LIVE since migration 0013_safety_audit, S6b, REGISTERED — implemented, pending independent acceptance)
+--   moderationLog       → moderation_log                                   (LIVE since migration 0013_safety_audit, S6b, REGISTERED — implemented, pending independent acceptance)
+--   orgNotes            → org_notes                                        (LIVE since migration 0013_safety_audit, S6b, REGISTERED — implemented, pending independent acceptance)
+--   ledger              → ledger                                           (LIVE since migration 0013_safety_audit, S6b, REGISTERED — implemented, pending independent acceptance)
+--   opsEvents           → ops_events                                       (LIVE since migration 0013_safety_audit, S6b, REGISTERED — implemented, pending independent acceptance)
+--   sourceChanges       → source_changes                                   (LIVE since migration 0013_safety_audit, S6b, REGISTERED — implemented, pending independent acceptance)
 --   emailChallenges     → email_challenges   (LIVE since migration 0008_one_time_codes, S6a, REGISTERED)
 --   pairingCodes        → pairing_codes      (LIVE since migration 0008_one_time_codes, S6a, REGISTERED)
---   idvQueue            → idv_queue
+--   idvQueue            → idv_queue                                        (LIVE since migration 0013_safety_audit, S6b, REGISTERED — implemented, pending independent acceptance; Domain G strict in code, Q4b)
 --
 -- Depends on 01_identity.sql: orgs(id), org_users(id), players(id), guardians(id)
 -- Depends on 02_recruitment.sql: recruitment_requests(id), trials(id)
 --
 -- Timestamps are epoch milliseconds (INTEGER). Source fields literally named
 -- `ts` / `at` are renamed per convention and the mapping line says so.
--- Audit tables use ON DELETE RESTRICT on players/orgs/guardians: today the
--- server hard-deletes the player row (server.mjs:3984) while keeping these
--- rows id-only; under this schema that deletion must become a tombstone
--- (01_identity owns that decision) or the RESTRICT will refuse it. This is
--- deliberate: the audit rows must outlive their subject.
+-- The eight audit tables (S6b, 0013) carry NO foreign key: today the server
+-- hard-deletes the player row while keeping these rows with their now-unresolved
+-- id, and the Founder's decision Q4 (19 October 2026) preserves exactly that —
+-- the references are tolerant and COUNTED, never refused, invented or deleted.
+-- The RESTRICT references the earlier drafts of this file proposed would have
+-- refused that deletion; they stay OPEN for S4b (tombstones) and the foreign-key
+-- step of the plan (§D.2a). The audit rows must outlive their subject either way.
 -- =============================================================================
 
 
@@ -603,298 +605,377 @@ CREATE TABLE push_tokens (
 CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
 
 
+-- =============================================================================
+-- S6b (migration 0013_safety_audit, REGISTERED — implemented, pending independent
+-- acceptance; repositories/safetyAudit.mjs, repositories/migrations/0013_safety_audit.mjs;
+-- docs/architecture/sqlite-migration-plan.md §D.4 Candidate A as accepted at 1792fc7, and
+-- the Founder's decisions of 19 October 2026: Q4 — the five historical player references
+-- stay when the player is absent, counted and never refused, invented or deleted; Q4b —
+-- idv_queue moves now with a STRICT application check that the guardian exists (no FK
+-- yet; the database constraint is a later step); Q5 — lifting a block deletes its row).
+-- The eight tables below are the IMPLEMENTED DDL (SAFETY_AUDIT_DDL), column for column:
+-- NO foreign key on any of them (the player references are tolerant per Q4; the
+-- organisation and staff references are historical pointers, because POST /player/block
+-- and handleReport accept an unchecked orgId / targetOrgId / byOrgId today and that
+-- shape is preserved — stated as a shape-compatibility decision, not a design goal),
+-- NO vocabulary CHECK (open sets: by_kind, status, kind, type, severity, provider…
+-- are stored as the writers pass them), every literal column nullable (an absent key
+-- is absence, recorded in absent_keys_json), `seq INTEGER PRIMARY KEY` as the durable
+-- order and `id TEXT NOT NULL UNIQUE` as the writer's id. The target-model constraints
+-- the earlier drafts of this file proposed (NOT NULL, CHECK vocabularies, RESTRICT
+-- references, a derived actor kind) are NOT what 0013 creates; they remain OPEN for the
+-- milestone that decides tombstones/retention (S4b) and the foreign keys (§D.2a).
+-- =============================================================================
+
 -- -----------------------------------------------------------------------------
--- blocks
--- source: db.blocks  created at server.mjs:1633 (guardian), 3751 (player),
---         1672 (auto, urgent report); container seed.mjs:482, migration m230_001 (migrations.mjs:250).
--- owner/writer: server.mjs. Read by isBlocked (605) inside EVERY visibility
---         path, m23/journey.mjs:557, m23/journeyRoutes.mjs:104.
--- lifecycle: hard delete only by admin lift (4235-4237). No soft delete.
---         Kept after player deletion.
--- mapping:
+-- blocks — LIVE since migration 0013_safety_audit (S6b, REGISTERED — implemented,
+--   pending independent acceptance). Repository: repositories/safetyAudit.mjs (blocks).
+-- source: db.blocks (the blob every build wrote; imported and retired by 0013, array position
+--         → seq). The container is still created by seed.mjs and the snapshot migration
+--         m230_001 before the data layer attaches; attachDataLayer drops that array and
+--         defines db.blocks as a read-only view over the mirror (insertion order).
+-- owner/writer: safetyAudit.blocks.append from server.mjs — the guardian block route, the
+--         player block route (an UNCHECKED orgId: stored as received) and handleReport's
+--         urgent suspension (reason 'suspended_pending_review'); safetyAudit.blocks.remove
+--         from the admin lift route (Q5: the row is deleted, as it always was; no lifted_at).
+-- lifecycle: append + delete-on-lift; KEPT after player deletion with the now-unresolved
+--         player_id (Q4: counted by the data-layer report, never refused or invented).
+-- mapping (the route literal, key for key):
+--   (array position) -> seq
 --   id       -> id (blk-*)
---   playerId -> player_id
---   orgId    -> org_id
---   by       -> by_kind ('guardian' | 'player' — who placed it; the auto path reuses the reporter's kind)
---   reason   -> reason ('' allowed; 'suspended_pending_review' for the auto path)
+--   playerId -> player_id (NO foreign key — Q4, tolerant historical reference; indexed)
+--   orgId    -> org_id (NO foreign key — the player route accepts an unchecked id)
+--   by       -> by_kind ('guardian' | 'player' today; the auto path reuses the reporter's kind; open)
+--   reason   -> reason ('' allowed; an off-type value kept in offtype_json)
 --   ts       -> created_at (source field is literally `ts`)
--- notes: NO uniqueness today — the same (player, org) can be blocked several
---   times (e.g. manual + auto); isBlocked is `some()`, lift removes one row.
---   Index (player_id, org_id) is the hottest read in the system. Safeguarding:
---   a block hides the player from the org entirely (404, not 403).
+--   (every S6b table also carries the three lossless columns of the writers' literals:
+--   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
+--   (absence is restored as absence, never as null); offtype_json — a JSON object of the
+--   known keys whose value is not the column's type, kept exactly (a numeric or object
+--   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
+--   unknown own fields, restored first, in their order. `seq` is the array position at
+--   the import and the insertion order afterwards: every list, export, backup and the
+--   rollback read the rows in `seq` order, exactly as the array was read.)
+-- notes: NO uniqueness — the same (player, org) can be blocked several times; isBlocked is
+--   `some()` on the view, lift removes one row. (player_id, org_id) is the hottest read.
 -- -----------------------------------------------------------------------------
 CREATE TABLE blocks (
-  id         TEXT PRIMARY KEY,
-  player_id  TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
-  org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  by_kind    TEXT NOT NULL CHECK (by_kind IN ('guardian','player')),
-  reason     TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL
+  seq                INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE,
+  player_id          TEXT,
+  org_id             TEXT,
+  by_kind            TEXT,
+  reason             TEXT,
+  created_at         INTEGER,
+  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-
-CREATE INDEX blocks_player_id_org_id ON blocks(player_id, org_id);
-
+CREATE INDEX blocks_player_id_org_id ON blocks (player_id, org_id);
 
 -- -----------------------------------------------------------------------------
--- reports
--- source: db.reports  created at server.mjs:1647-1661 (handleReport: guardian 1623,
---         org_user 2239, player 3746) and 1032-1037 (automatic grooming escalation);
---         container seed.mjs:481, migration m230_001 (migrations.mjs:251).
--- owner/writer: server.mjs; resolved by admin (4164-4181).
--- lifecycle: status 'pending_review' → 'resolved' (both 'dismiss' and other
---         actions land on 'resolved', 4170). Never deleted; kept after player deletion.
--- mapping:
---   id              -> id (rep-*; prefix SHARED with trials.report ids — globally unique via the counter)
+-- reports — LIVE since migration 0013_safety_audit (S6b, REGISTERED — implemented,
+--   pending independent acceptance). Repository: repositories/safetyAudit.mjs (reports).
+-- source: db.reports (imported and retired by 0013, array position → seq; container seed.mjs
+--         / m230_001 as for blocks; db.reports is the read-only view).
+-- owner/writer: safetyAudit.reports.append from handleReport (guardian / player / org_user
+--         callers — the org caller adds byOrgId) and from moderateOrRefuse (the automatic
+--         grooming escalation: by 'system', byId 'moderation', NO targetPlayerId key);
+--         safetyAudit.reports.patch(id, {status, outcome, resolvedAt}) from the admin resolve
+--         route — the three fields the route always changed, by row id.
+-- lifecycle: 'pending_review' → 'resolved' (dismiss and every other action); never deleted;
+--         KEPT after player deletion (Q4). A report about a club, a scout or an automatic
+--         escalation has no player target; a report naming an UNKNOWN player is accepted
+--         (handleReport stores a truthy targetPlayerId as received, any type — not narrowed).
+-- mapping (the handleReport literal, key for key):
+--   (array position) -> seq
+--   id              -> id (rep-*)
 --   ts              -> created_at (source field is literally `ts`)
---   by              -> by_kind ('guardian' | 'player' | 'org_user' | 'system')
---   byId            -> by_id (polymorphic: guardians.id / players.id / org_users.id / the literal 'moderation' for system; no FK)
---   byOrgId         -> by_org_id (org_user reports only, 2239)
---   targetKind      -> target_kind ('club' | 'scout' | 'player')
---   targetOrgId     -> target_org_id
---   targetScoutName -> target_scout_name (free text typed by the reporter, not a snapshot)
---   targetPlayerId  -> target_player_id (NULL on the auto path)
+--   by              -> by_kind ('guardian' | 'player' | 'org_user' | 'system'; open)
+--   byId            -> by_id (polymorphic; no FK)
+--   byOrgId         -> by_org_id (org_user reports only; absent otherwise → absent_keys_json; no FK)
+--   targetKind      -> target_kind ('club' | 'scout' | 'player'; open)
+--   targetOrgId     -> target_org_id (NO foreign key — accepted unchecked)
+--   targetScoutName -> target_scout_name (free text typed by the reporter)
+--   targetPlayerId  -> target_player_id (NO foreign key — Q4; a non-string value kept in offtype_json; indexed)
 --   reason          -> reason
---   urgent          -> urgent
+--   urgent          -> urgent (0/1; a non-boolean kept in offtype_json)
 --   status          -> status
---   outcome         -> outcome (admin text)
+--   outcome         -> outcome
 --   resolvedAt      -> resolved_at
--- notes: an urgent report naming an org creates blocks for the reporter's
---   players and suspends their pending requests (1665-1678). safeguardingCertified
---   (978) scans reports by (target_org_id, urgent, status) on every org view →
---   index. Resolution notifies the reporter at (by_kind, by_id) with type
---   'report_resolved' (4178) — for by_kind='system' that targets audience kind
---   'system', which no reader serves (defect, harmless). Reads: by (by_kind, by_id)
---   per router (1600, 2242, 3331), admin triage sort (4146-4148), by id (4165),
---   pending count (4130).
+--   (every S6b table also carries the three lossless columns of the writers' literals:
+--   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
+--   (absence is restored as absence, never as null); offtype_json — a JSON object of the
+--   known keys whose value is not the column's type, kept exactly (a numeric or object
+--   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
+--   unknown own fields, restored first, in their order. `seq` is the array position at
+--   the import and the insertion order afterwards: every list, export, backup and the
+--   rollback read the rows in `seq` order, exactly as the array was read.)
+-- notes: an urgent report naming an org creates blocks for the reporter's players and
+--   suspends their pending requests (same request, next save). safeguardingCertified scans
+--   (target_org_id, urgent, status) on every org view → index; admin triage sorts by status
+--   and time; reporters read their own by (by_kind, by_id).
 -- -----------------------------------------------------------------------------
 CREATE TABLE reports (
-  id                TEXT PRIMARY KEY,
-  created_at        INTEGER NOT NULL,
-  by_kind           TEXT NOT NULL CHECK (by_kind IN ('guardian','player','org_user','system')),
-  by_id             TEXT NOT NULL,
-  by_org_id         TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  target_kind       TEXT NOT NULL CHECK (target_kind IN ('club','scout','player')),
-  target_org_id     TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  target_scout_name TEXT,
-  target_player_id  TEXT REFERENCES players(id) ON DELETE RESTRICT,
-  reason            TEXT NOT NULL,
-  urgent            INTEGER NOT NULL DEFAULT 0 CHECK (urgent IN (0,1)),
-  status            TEXT NOT NULL DEFAULT 'pending_review' CHECK (status IN ('pending_review','resolved')),
-  outcome           TEXT,
-  resolved_at       INTEGER,
-  CHECK ((status = 'resolved') = (resolved_at IS NOT NULL))
+  seq                INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE,
+  created_at         INTEGER,
+  by_kind            TEXT,
+  by_id              TEXT,
+  by_org_id          TEXT,
+  target_kind        TEXT,
+  target_org_id      TEXT,
+  target_scout_name  TEXT,
+  target_player_id   TEXT,
+  reason             TEXT,
+  urgent             INTEGER,
+  status             TEXT,
+  outcome            TEXT,
+  resolved_at        INTEGER,
+  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-
-CREATE INDEX reports_by_kind_by_id ON reports(by_kind, by_id);
-CREATE INDEX reports_target_org_id_urgent_status ON reports(target_org_id, urgent, status);
-CREATE INDEX reports_status_created_at ON reports(status, created_at);
-
+CREATE INDEX reports_by_kind_by_id ON reports (by_kind, by_id);
+CREATE INDEX reports_target_org_id_urgent_status ON reports (target_org_id, urgent, status);
+CREATE INDEX reports_status_created_at ON reports (status, created_at);
+CREATE INDEX reports_target_player_id ON reports (target_player_id);
 
 -- -----------------------------------------------------------------------------
--- moderation_log
--- source: db.moderationLog  created at server.mjs:1028 (moderateOrRefuse);
---         container seed.mjs:483, migration m230_001 (migrations.mjs:252).
--- owner/writer: server.mjs moderateOrRefuse, invoked from ~75 call sites across
---         server.mjs and m12–m28 modules (each passes its own context object).
+-- moderation_log — LIVE since migration 0013_safety_audit (S6b, REGISTERED — implemented,
+--   pending independent acceptance). Repository: repositories/safetyAudit.mjs (moderationLog).
+-- source: db.moderationLog (imported and retired by 0013, array position → seq; db.moderationLog
+--         is the read-only view).
+-- owner/writer: safetyAudit.moderationLog.append from server.mjs moderateOrRefuse, invoked from
+--         every moderated text route in server.mjs and the m12–m28 modules (each passes its own
+--         context object, kept WHOLE).
 -- lifecycle: append-only; never deleted; kept after player deletion.
--- mapping:
---   id               -> id (mod-*)
---   ts               -> created_at (source field is literally `ts`)
---   context.kind     -> context_kind (open set of ~70 caller labels, e.g. 'org_message',
---                       'guardian_message', 'player_message', 'trial_notes', 'recruitment_room_comment',
---                       'recruitment_contact', 'passport_bio', 'coach_vouch'… → TEXT, no CHECK)
---   context.orgId    -> context_org_id
---   context.userId   -> context_user_id
---   context.channelId-> context_channel_id
---   context.playerId -> context_player_id
---   context.requestId-> context_request_id
---   context.trialId  -> context_trial_id (m23/trialRoutes.mjs:948/976)
---   flags[]          -> flags_json (JSON array of rule codes from domain.mjs:131-142:
---                       email, email_obfuscated, phone_number, phone_spelled, social_handle,
---                       social_platform, url, meet_off_platform, secrecy, personal_probing.
---                       Retained as JSON by design: a variable-length list read only for
---                       display on the admin console, never queried per flag.)
---   severity         -> severity ('contact' | 'grooming')
---   excerpt          -> excerpt (first 140 chars of the BLOCKED text — sensitive: may hold the
---                       very contact details / grooming language that was refused)
--- notes: context ids are kept as plain TEXT without FKs — they are forensic
---   pointers and must survive their subjects. A 'grooming' hit also creates an
---   urgent system report (1031-1037). Reads: admin full list newest first (4243),
---   count (4132), count by severity (4140) → index.
+-- mapping (the moderateOrRefuse literal, key for key):
+--   (array position) -> seq
+--   id       -> id (mod-*)
+--   ts       -> created_at (source field is literally `ts`)
+--   context  -> context_json (the caller's context object AS A WHOLE — kind, orgId, userId,
+--               channelId, playerId, requestId, trialId and any future field, nested values
+--               included; the per-field columns the earlier draft proposed are NOT created)
+--   flags    -> flags_json (JSON array of rule codes; display only)
+--   severity -> severity ('contact' | 'grooming'; open)
+--   excerpt  -> excerpt (first 140 chars of the BLOCKED text — sensitive; never printed in a
+--               log or an error by the repository)
+--   (every S6b table also carries the three lossless columns of the writers' literals:
+--   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
+--   (absence is restored as absence, never as null); offtype_json — a JSON object of the
+--   known keys whose value is not the column's type, kept exactly (a numeric or object
+--   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
+--   unknown own fields, restored first, in their order. `seq` is the array position at
+--   the import and the insertion order afterwards: every list, export, backup and the
+--   rollback read the rows in `seq` order, exactly as the array was read.)
+-- notes: a 'grooming' hit also creates an urgent system report (same request). Reads: the
+--   admin list newest first, the dashboard counts (total, by severity) → index.
 -- -----------------------------------------------------------------------------
 CREATE TABLE moderation_log (
-  id                 TEXT PRIMARY KEY,
-  created_at         INTEGER NOT NULL,
-  context_kind       TEXT NOT NULL,
-  context_org_id     TEXT,
-  context_user_id    TEXT,
-  context_channel_id TEXT,
-  context_player_id  TEXT,
-  context_request_id TEXT,
-  context_trial_id   TEXT,
-  flags_json         TEXT NOT NULL CHECK (json_valid(flags_json) AND json_type(flags_json) = 'array'),
-  severity           TEXT NOT NULL CHECK (severity IN ('contact','grooming')),
-  excerpt            TEXT NOT NULL CHECK (length(excerpt) <= 140)          -- sensitive
+  seq                INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE,
+  created_at         INTEGER,
+  context_json       TEXT CHECK (context_json IS NULL OR json_valid(context_json)),
+  flags_json         TEXT CHECK (flags_json IS NULL OR json_valid(flags_json)),
+  severity           TEXT,
+  excerpt            TEXT,
+  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-
-CREATE INDEX moderation_log_severity ON moderation_log(severity);
-CREATE INDEX moderation_log_created_at ON moderation_log(created_at);
-
+CREATE INDEX moderation_log_severity ON moderation_log (severity);
+CREATE INDEX moderation_log_created_at ON moderation_log (created_at);
 
 -- -----------------------------------------------------------------------------
--- org_notes
--- source: db.orgNotes  created at server.mjs:1982-1983 (POST /org/players/:id/notes);
---         container by migration m230_003 (migrations.mjs:312) — previously ??= in the handler.
--- owner/writer: server.mjs.
--- lifecycle: never edited, never deleted; KEPT after player deletion (with the note text).
--- mapping:
+-- org_notes — LIVE since migration 0013_safety_audit (S6b, REGISTERED — implemented,
+--   pending independent acceptance). Repository: repositories/safetyAudit.mjs (orgNotes).
+-- source: db.orgNotes (imported and retired by 0013, array position → seq; container by the
+--         snapshot migration m230_003; db.orgNotes is the read-only view).
+-- owner/writer: safetyAudit.orgNotes.append from POST /org/players/:id/notes (server.mjs).
+-- lifecycle: never edited, never deleted; KEPT after player deletion with the note text
+--         (Q4; the retention question stays OPEN for S4b, as before).
+-- mapping (the route literal, key for key):
+--   (array position) -> seq
 --   id        -> id (note-*)
---   orgId     -> org_id
---   playerId  -> player_id
---   userId    -> user_id (author org user; SET NULL tolerated — only scout_name is displayed)
+--   orgId     -> org_id (NO foreign key — historical pointer)
+--   playerId  -> player_id (NO foreign key — Q4, tolerant; indexed with org_id)
+--   userId    -> user_id (NO foreign key — the author's staff id as recorded)
 --   scoutName -> scout_name (snapshot)
---   text      -> text (moderation is NOT applied to notes — only TEXT_REQUIRED, 1981)
+--   text      -> text (moderation is NOT applied to notes — TEXT_REQUIRED only, unchanged)
 --   ts        -> created_at (source field is literally `ts`)
--- notes: tenant = org_id; org-private (never visible to the player or other
---   orgs). Privacy: free text about a possibly-minor player, retained after
---   deletion — flagged by the survey. Read: by (org_id, player_id) newest first (1969).
+--   (every S6b table also carries the three lossless columns of the writers' literals:
+--   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
+--   (absence is restored as absence, never as null); offtype_json — a JSON object of the
+--   known keys whose value is not the column's type, kept exactly (a numeric or object
+--   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
+--   unknown own fields, restored first, in their order. `seq` is the array position at
+--   the import and the insertion order afterwards: every list, export, backup and the
+--   rollback read the rows in `seq` order, exactly as the array was read.)
+-- notes: tenant = org_id; org-private (never visible to the player or other orgs). Read:
+--   by (org_id, player_id) newest first.
 -- -----------------------------------------------------------------------------
 CREATE TABLE org_notes (
-  id         TEXT PRIMARY KEY,
-  org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  player_id  TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
-  user_id    TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  scout_name TEXT NOT NULL,                                                -- snapshot
-  text       TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  seq                INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE,
+  org_id             TEXT,
+  player_id          TEXT,
+  user_id            TEXT,
+  scout_name         TEXT,
+  text               TEXT,
+  created_at         INTEGER,
+  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-
-CREATE INDEX org_notes_org_id_player_id_created_at ON org_notes(org_id, player_id, created_at);
-
+CREATE INDEX org_notes_org_id_player_id_created_at ON org_notes (org_id, player_id, created_at);
 
 -- -----------------------------------------------------------------------------
--- ledger
--- source: db.ledger  created at server.mjs:595-602 (ledgerAppend: `{id, ts, ...entry}`);
---         container seed.mjs:480. ~45 call sites in server.mjs, m12, m13, m15, m16, m29.
--- owner/writer: server.mjs ledgerAppend (the only push). KNOWN DEFECT: m29/index.mjs:618
---         truncates the array (`db.ledger.length = snapshot.ledgerLen`) when a signing
---         rollback fires — the one place "append-only" is violated.
--- lifecycle: append-only; never edited; kept id-only after player deletion.
--- mapping:
+-- ledger — LIVE since migration 0013_safety_audit (S6b, REGISTERED — implemented, pending
+--   independent acceptance). Repository: repositories/safetyAudit.mjs (ledger).
+-- source: db.ledger (imported and retired by 0013, array position → seq; container seed.mjs;
+--         db.ledger is the read-only view, in insertion order).
+-- owner/writer: safetyAudit.ledger.append from server.mjs ledgerAppend (`{id, ts, ...entry}` —
+--         the ONE writer; its ~45 callers in server.mjs, m12, m13, m15, m16, m29 are unchanged;
+--         m29 appends its signing row INSIDE the signing unit, so the row commits or rolls back
+--         with the signing — the array truncation an earlier draft of this file described no
+--         longer exists in m29). Any direct write on the view throws (repositories/readonly.mjs).
+-- lifecycle: append-only; never edited; KEPT after player deletion with the now-unresolved
+--         player_id (Q4; counted, never refused).
+-- mapping (the ledgerAppend literal, key for key):
+--   (array position) -> seq
 --   id        -> id (led-*)
 --   ts        -> occurred_at (source field is literally `ts`)
---   type      -> type (open set — includes template literals `${request.type}_accepted`,
---                `${type}_request_to_guardian` etc. Values seen: view, save, shortlist, message,
---                contact_request, trial_request, contact_request_to_guardian,
---                trial_request_to_guardian, contact_accepted, trial_accepted, contact_declined,
---                trial_declined, *_accepted_by_guardian, *_declined_by_guardian,
---                org_blocked_by_guardian, org_blocked_by_player, clip_tagged, trial_report,
---                open_trial_posted, open_trial_registration, open_trial_registration_by_guardian,
---                released_by_club, matchday_logged, account_transitioned, attendance_verified,
---                signing, assessment_submitted, staff_removed, passport_view,
---                passport_recruitment_view, passport_share_created, passport_share_revoked,
---                coach_affiliation_confirmed, opportunity_application, trial_checkin,
---                transition_pack_view, level_review, box_assignment_created,
---                box_assignment_cancelled, box_challenge_published, box_prefs_changed,
---                box_result_invalidated, box_result_restored → TEXT, no CHECK)
---   playerId  -> player_id (NULL for org-only events: open_trial_posted, matchday_logged, staff_removed…)
---   orgId     -> org_id (NULL for platform events; org_name then holds 'ScoutBox' / 'Trust & Safety')
---   orgName   -> org_name (snapshot; falls back to the org id at 1634/3752 when the org is unknown)
---   userId    -> actor_id when actor_kind = 'org_user' (see actor pair below)
---   scoutName -> actor_name (snapshot; also carries the pseudo-actors 'guardian', 'player',
---                'system', 'open day', 'T&S level review')
---   (derived) -> actor_kind: polymorphic actor pair per convention —
---                'org_user' when userId is set (actor_id = userId → org_users.id);
---                'guardian' when scoutName = 'guardian' (actor_id NULL: the guardian id is NOT recorded today);
---                'player' when scoutName = 'player' (actor_id = playerId);
---                'system' when scoutName ∈ {'system','T&S level review'} or orgId IS NULL and userId IS NULL;
---                NULL when none of the above applies (e.g. 'open day' rows without createdByUserId,
---                m16/m15 rows that omit scoutName entirely).
---   detail    -> detail_json (only m13/m15/m16 rows set it; per-type small objects such as
---                {drillId,target}, {shareId,mode}, {from,to,reason}. Retained JSON: shape is
---                per type and never queried — read only in audit exports.)
--- notes: reads — by player_id + type (insightsFor 992, 3734), by player_id (1611 via
---   guardian childIds, 3888 export), by (player_id, org_id) ordered (3062, m29:258),
---   by org_id (2986, 3054, enterprise.mjs:331, audit.mjs:206), by org_id + type
---   'shortlist'/'save' (2011, 2351, imports.mjs:305, planning.mjs:193, groups.mjs:128,
---   nobodyMissed.mjs:129), ts-range windows inside insightsFor (1008-1011).
---   Privacy: a minor's discovery events are visible to the guardian only.
+--   type      -> type (open set, template literals included — no CHECK)
+--   playerId  -> player_id (NO foreign key — Q4; NULL/absent for org-only events; indexed)
+--   orgId     -> org_id (NO foreign key — historical pointer; NULL for platform events)
+--   orgName   -> org_name (snapshot; the org id when the org was unknown, as the routes do)
+--   userId    -> user_id (VERBATIM — whatever the caller passed, null included; NO actor kind
+--                is derived: the polymorphic actor pair the earlier draft proposed is NOT created)
+--   scoutName -> actor_name (VERBATIM — the pseudo-actors 'guardian', 'player', 'system',
+--                'open day', 'T&S level review' stay as text)
+--   detail    -> detail_json (m13/m15/m16 rows only; per-type small objects, kept whole)
+--   (every S6b table also carries the three lossless columns of the writers' literals:
+--   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
+--   (absence is restored as absence, never as null); offtype_json — a JSON object of the
+--   known keys whose value is not the column's type, kept exactly (a numeric or object
+--   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
+--   unknown own fields, restored first, in their order. `seq` is the array position at
+--   the import and the insertion order afterwards: every list, export, backup and the
+--   rollback read the rows in `seq` order, exactly as the array was read.)
+-- notes: reads — by player_id + type (insightsFor), by player_id (the guardian log, the export),
+--   by (player_id, org_id) ordered (the org's player timeline, m29), by org_id (the org ledger,
+--   enterprise, audit), by org_id + type 'shortlist'/'save' (planning, groups, nobodyMissed,
+--   imports); every reader filters the view in insertion order, exactly as the array.
 -- -----------------------------------------------------------------------------
 CREATE TABLE ledger (
-  id          TEXT PRIMARY KEY,
-  occurred_at INTEGER NOT NULL,
-  type        TEXT NOT NULL,
-  player_id   TEXT REFERENCES players(id) ON DELETE RESTRICT,
-  org_id      TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name    TEXT,                                                        -- snapshot
-  actor_kind  TEXT CHECK (actor_kind IS NULL OR actor_kind IN ('org_user','guardian','player','system')),
-  actor_id    TEXT,                                                        -- org_users.id / players.id; no FK
-  actor_name  TEXT,                                                        -- snapshot (source: scoutName)
-  detail_json TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
+  seq                INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE,
+  occurred_at        INTEGER,
+  type               TEXT,
+  player_id          TEXT,
+  org_id             TEXT,
+  org_name           TEXT,
+  user_id            TEXT,
+  actor_name         TEXT,
+  detail_json        TEXT CHECK (detail_json IS NULL OR json_valid(detail_json)),
+  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-
-CREATE INDEX ledger_player_id_type ON ledger(player_id, type);
-CREATE INDEX ledger_player_id_org_id_occurred_at ON ledger(player_id, org_id, occurred_at);
-CREATE INDEX ledger_org_id_type ON ledger(org_id, type);
-CREATE INDEX ledger_occurred_at ON ledger(occurred_at);
-
+CREATE INDEX ledger_player_id_type ON ledger (player_id, type);
+CREATE INDEX ledger_player_id_org_id_occurred_at ON ledger (player_id, org_id, occurred_at);
+CREATE INDEX ledger_org_id_type ON ledger (org_id, type);
+CREATE INDEX ledger_occurred_at ON ledger (occurred_at);
 
 -- -----------------------------------------------------------------------------
--- ops_events
--- source: db.opsEvents  created at server.mjs:1844, m13/delivery.mjs:118,
---         m13/enterprise.mjs:338 and :458, m13/imports.mjs:413; container m13/shared.mjs:34.
--- owner/writer: the five call sites above (all `db.opsEvents.push`).
--- lifecycle: append-only; UNBOUNDED, never pruned.
--- mapping:
+-- ops_events — LIVE since migration 0013_safety_audit (S6b, REGISTERED — implemented,
+--   pending independent acceptance). Repository: repositories/safetyAudit.mjs (opsEvents).
+-- source: db.opsEvents (imported and retired by 0013, array position → seq; container
+--         m13/shared.mjs migrateM13; db.opsEvents is the read-only view).
+-- owner/writer: safetyAudit.opsEvents.append from server.mjs (staff_bootstrapped),
+--         m13/delivery.mjs (delivery_failed, staged into the sweep pass's persistNow with the
+--         dispatch and outbox rows), m13/enterprise.mjs (audit_export, backup_created,
+--         backup_refused, backup_failed and the other operations events: EVERY kind is an
+--         ordinary row — no vocabulary CHECK), m13/imports.mjs (webhook_failed). The m13
+--         modules keep an array push for a bare context without the repository (the reviewer
+--         feasibility scripts); the server always passes the repository.
+-- lifecycle: append-only; UNBOUNDED, never pruned (unchanged).
+-- mapping (the writers' literal, key for key):
+--   (array position) -> seq
 --   id     -> id (ops-*)
 --   at     -> occurred_at (source field is literally `at`)
---   kind   -> kind ('staff_bootstrapped' | 'delivery_failed' | 'audit_export' | 'backup_created' | 'webhook_failed')
---   detail -> detail_json (per-kind object: {orgId,userId,by} / {dispatchId,channel} / {orgId,by} /
---             {dir,files} / {deliveryId,endpointId}. Retained JSON by design: operator display
---             only (last 50, enterprise.mjs:512); never filtered on a detail field.)
--- notes: reads — count by kind (enterprise.mjs:508-509), last 50 newest first (512).
+--   kind   -> kind (open set)
+--   detail -> detail_json (per-kind object, kept whole; operator display only)
+--   (every S6b table also carries the three lossless columns of the writers' literals:
+--   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
+--   (absence is restored as absence, never as null); offtype_json — a JSON object of the
+--   known keys whose value is not the column's type, kept exactly (a numeric or object
+--   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
+--   unknown own fields, restored first, in their order. `seq` is the array position at
+--   the import and the insertion order afterwards: every list, export, backup and the
+--   rollback read the rows in `seq` order, exactly as the array was read.)
+-- notes: reads — counts by kind and the last 50 newest first (enterprise metrics). The
+--   admin backup writes its db.json BEFORE appending its own backup_created event (as every
+--   build did), so that one row is never inside the backup it describes.
 -- -----------------------------------------------------------------------------
 CREATE TABLE ops_events (
-  id          TEXT PRIMARY KEY,
-  occurred_at INTEGER NOT NULL,
-  kind        TEXT NOT NULL CHECK (kind IN ('staff_bootstrapped','delivery_failed','audit_export','backup_created','webhook_failed')),
-  detail_json TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
+  seq                INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE,
+  occurred_at        INTEGER,
+  kind               TEXT,
+  detail_json        TEXT CHECK (detail_json IS NULL OR json_valid(detail_json)),
+  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-
-CREATE INDEX ops_events_kind ON ops_events(kind);
-CREATE INDEX ops_events_occurred_at ON ops_events(occurred_at);
-
+CREATE INDEX ops_events_kind ON ops_events (kind);
+CREATE INDEX ops_events_occurred_at ON ops_events (occurred_at);
 
 -- -----------------------------------------------------------------------------
--- source_changes
--- source: db.sourceChanges (M18.1)  created at m181/sourceChanges.mjs:37-44 (recordSourceChange);
---         container :29. Called from m15/passport.mjs:327 and :343 only.
--- owner/writer: m181/sourceChanges.mjs.
--- lifecycle: append-only; capped at 20,000 rows (oldest spliced, :47) — a change LOG,
---         not history of record. No deletion hook on player deletion.
--- mapping:
+-- source_changes — LIVE since migration 0013_safety_audit (S6b, REGISTERED — implemented,
+--   pending independent acceptance). Repository: repositories/safetyAudit.mjs (sourceChanges).
+-- source: db.sourceChanges (M18.1; imported and retired by 0013, array position → seq;
+--         db.sourceChanges is the read-only view).
+-- owner/writer: m181/sourceChanges.mjs recordSourceChange — safetyAudit.sourceChanges.append
+--         then safetyAudit.sourceChanges.trimTo(20000) (the cap deletes the OLDEST rows beyond
+--         20 000 in insertion order, the same splice the array had), both staged into the
+--         persistNow() that follows. Called from m15/passport.mjs only.
+-- lifecycle: append-only, capped; no deletion hook on player deletion (Q4: the row stays with
+--         its now-unresolved player_id, counted).
+-- mapping (the recordSourceChange literal, key for key):
+--   (array position) -> seq
 --   id           -> id (srcc-*)
---   playerId     -> player_id
---   type         -> type ('position_changed' is the only value written today; 'current_club_confirmed'
---                   is declared derivable and never written → TEXT with CHECK on the one real value)
---   sourceSystem -> source_system ('passport_prefs' | 'position_history')
---   sourceId     -> source_id (the canonical row this change points at; polymorphic, no FK)
---   occurredAt   -> occurred_at (the moment the fact changed — never a record's createdAt)
---   detail       -> detail_json (small structured copy input, e.g. {from, to}; retained JSON by design:
---                   used only to render change copy, never queried)
--- notes: holds no player content. Read: by player_id ordered occurred_at asc (:53-55).
+--   playerId     -> player_id (NO foreign key — Q4; indexed with occurred_at)
+--   type         -> type (open; 'position_changed' is the only value written today)
+--   sourceSystem -> source_system (open)
+--   sourceId     -> source_id (polymorphic; no FK)
+--   occurredAt   -> occurred_at (the moment the fact changed)
+--   detail       -> detail_json (small structured copy input, kept whole)
+--   (every S6b table also carries the three lossless columns of the writers' literals:
+--   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
+--   (absence is restored as absence, never as null); offtype_json — a JSON object of the
+--   known keys whose value is not the column's type, kept exactly (a numeric or object
+--   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
+--   unknown own fields, restored first, in their order. `seq` is the array position at
+--   the import and the insertion order afterwards: every list, export, backup and the
+--   rollback read the rows in `seq` order, exactly as the array was read.)
+-- notes: holds no player content. Read: by player_id ordered occurred_at asc.
 -- -----------------------------------------------------------------------------
 CREATE TABLE source_changes (
-  id            TEXT PRIMARY KEY,
-  player_id     TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
-  type          TEXT NOT NULL CHECK (type IN ('position_changed')),
-  source_system TEXT NOT NULL CHECK (source_system IN ('passport_prefs','position_history')),
-  source_id     TEXT,
-  occurred_at   INTEGER NOT NULL,
-  detail_json   TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
+  seq                INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE,
+  player_id          TEXT,
+  type               TEXT,
+  source_system      TEXT,
+  source_id          TEXT,
+  occurred_at        INTEGER,
+  detail_json        TEXT CHECK (detail_json IS NULL OR json_valid(detail_json)),
+  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-
-CREATE INDEX source_changes_player_id_occurred_at ON source_changes(player_id, occurred_at);
+CREATE INDEX source_changes_player_id_occurred_at ON source_changes (player_id, occurred_at);
 
 
 -- -----------------------------------------------------------------------------
@@ -972,38 +1053,62 @@ CREATE INDEX pairing_codes_expires_at ON pairing_codes (expires_at);
 
 
 -- -----------------------------------------------------------------------------
--- idv_queue
--- source: db.idvQueue  created at server.mjs:1332-1336 (POST /guardian/verify-id);
---         container by migration m230_003 (migrations.mjs:311) — previously ??= in the handler.
--- owner/writer: server.mjs; status flipped by admin (4222-4229).
--- lifecycle: 'approved' → 'revoked' (and back) by admin; never deleted.
--- mapping:
+-- idv_queue — LIVE since migration 0013_safety_audit (S6b, REGISTERED — implemented,
+--   pending independent acceptance; Q4b). Repository: repositories/safetyAudit.mjs (idvQueue).
+-- source: db.idvQueue (imported and retired by 0013, array position → seq; container by the
+--         snapshot migration m230_003; db.idvQueue is the read-only view).
+-- owner/writer: safetyAudit.idvQueue.append from POST /guardian/verify-id, INSIDE the unit
+--         that sets the guardian's idVerified / idvReference columns (the row and the columns
+--         commit together, or nothing does); safetyAudit.idvQueue.patch(id, {status}) from the
+--         admin toggle, on the FIRST entry of the guardian in insertion order (as before), in the
+--         same unit as the guardian's idVerified column.
+-- Domain G — STRICT (Q4b, in code; NO foreign key yet): guardian_id is NOT NULL and the
+--         repository refuses an append, an import (0013) and a snapshot write whose entry names
+--         a guardian that does not exist in the FINAL guardians table (IDV_GUARDIAN_MISSING,
+--         ids only) — the whole operation is refused atomically, the identity-only replacement
+--         (a snapshot that omits idvQueue but replaces guardians) included. The database
+--         constraint is a later step (§D.2a).
+-- lifecycle: 'approved' ↔ 'revoked' by admin; never deleted (a guardian's own deletion path
+--         is unchanged by S6b).
+-- mapping (the route literal, key for key):
+--   (array position) -> seq
 --   id           -> id (idv-*)
---   guardianId   -> guardian_id
+--   guardianId   -> guardian_id (NOT NULL; checked in code against guardians — no FK)
 --   guardianName -> guardian_name (snapshot)
 --   documentType -> document_type (free text from the guardian)
---   documentRef  -> document_ref_last4 (only the last 4 chars are stored, adapters.mjs:145)
---   provider     -> provider ('onfido' | 'dev-attestation')
---   reference    -> reference (provider check reference, idv_<16hex>; same value as guardians.idvReference)
+--   documentRef  -> document_ref_last4 (only the last 4 chars are stored by the route — unchanged)
+--   provider     -> provider (open)
+--   reference    -> reference (provider check reference; same value as guardians.idvReference)
 --   ts           -> created_at (source field is literally `ts`)
---   status       -> status ('approved' | 'revoked')
--- notes: a guardian may verify more than once → several rows; admin updates
---   only the FIRST row for the guardian (4226 `find`) — defect: later rows keep
---   'approved'. Reads: admin full list (4219), first by guardian_id (4226).
+--   status       -> status (open; 'approved' | 'revoked' today)
+--   (every S6b table also carries the three lossless columns of the writers' literals:
+--   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
+--   (absence is restored as absence, never as null); offtype_json — a JSON object of the
+--   known keys whose value is not the column's type, kept exactly (a numeric or object
+--   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
+--   unknown own fields, restored first, in their order. `seq` is the array position at
+--   the import and the insertion order afterwards: every list, export, backup and the
+--   rollback read the rows in `seq` order, exactly as the array was read.)
+-- notes: a guardian may verify more than once → several rows; the admin toggle updates only
+--   the FIRST row for the guardian (the known behaviour, preserved). Reads: the admin list,
+--   first by guardian_id. Logs and refusals name ids only — never a name or a document value.
 -- -----------------------------------------------------------------------------
 CREATE TABLE idv_queue (
-  id                 TEXT PRIMARY KEY,
-  guardian_id        TEXT NOT NULL REFERENCES guardians(id) ON DELETE RESTRICT,
-  guardian_name      TEXT NOT NULL,                                        -- snapshot
-  document_type      TEXT NOT NULL,
-  document_ref_last4 TEXT NOT NULL CHECK (length(document_ref_last4) <= 4),
-  provider           TEXT NOT NULL CHECK (provider IN ('onfido','dev-attestation')),
-  reference          TEXT NOT NULL,
-  created_at         INTEGER NOT NULL,
-  status             TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('approved','revoked'))
+  seq                INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE,
+  guardian_id        TEXT NOT NULL,
+  guardian_name      TEXT,
+  document_type      TEXT,
+  document_ref_last4 TEXT,
+  provider           TEXT,
+  reference          TEXT,
+  created_at         INTEGER,
+  status             TEXT,
+  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-
-CREATE INDEX idv_queue_guardian_id_created_at ON idv_queue(guardian_id, created_at);
+CREATE INDEX idv_queue_guardian_id_created_at ON idv_queue (guardian_id, created_at);
 
 
 -- =============================================================================

@@ -24,6 +24,8 @@ let passed = 0;
 const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
+const preS6bDir = (dir) => { const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -316,7 +318,7 @@ await test('backup/restore: the admin backup exports the notifications and prefe
   const OLD = process.env.SCOUTBOX_PRE_S7A_SERVER;
   if (OLD && fs.existsSync(OLD)) {
     const copy = path.join(tempDir('s7a-rb'), 'copy'); const s7aCopy = path.join(tempDir('s7a-rb-s7b'), 'copy'); const s7bCopy = path.join(tempDir('s7a-rb-s7c'), 'copy'); const s7cCopy = path.join(tempDir('s7a-rb-s7d'), 'copy');
-    execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, s7cCopy], { encoding: 'utf8' }); // S7d: the file carries 0012; its rollback goes first,
+    execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); // S7d: the file carries 0012; its rollback goes first,
     execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, s7bCopy], { encoding: 'utf8' }); // then S7c (0011),
     execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), s7bCopy, s7aCopy], { encoding: 'utf8' }); // then S7b (0010),
     const out = execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), s7aCopy, copy], { encoding: 'utf8' });

@@ -14,7 +14,11 @@ server line numbers predate S4a and S5 and are superseded by the ones here.
 > `2178c5b` and are kept as the record of the analysis; their line numbers are those of that
 > commit. The one-time-code sub-step proposed in §6 has since been implemented on top of
 > `7fbce74` as migration `0008_one_time_codes`; **§10 records what was actually built**, where it
-> departs from §§5–7 and why, and how it was verified. The eight audit tables remain not started.
+> departs from §§5–7 and why, and how it was verified. **The eight audit tables are IMPLEMENTED since
+> 19 October 2026 as S6b (migration `0013_safety_audit`, one local commit on top of `1792fc7`) and PENDING
+> INDEPENDENT ACCEPTANCE — §11 records what was built, the Founder's decisions Q4, Q4b and Q5 it rests on,
+> where it departs from §§2–7 and plan §D.4, and how it was verified.** Not production, security,
+> legal-compliance or deployment approval; not acceptance of S4b or S8.
 
 Three kinds of statement are kept apart throughout: **code facts** (what runs today, cited),
 **proposed implementation** (a design for the next step; nothing is built), and **unresolved
@@ -24,7 +28,7 @@ Sections: 1 where S6 stands · 2 the ten domains, one by one · 3 deletion paths
 dependencies · 4 append-only, `RESTRICT` and the current hard delete · 5 the one-time codes ·
 6 the smallest safe sub-step · 7 test and rollback design · 8 migration registry · 9 dependency
 table · 10 S6a as implemented (independently accepted at `2d7ddeb`; §10.6 and §10.7 are the two
-review-correction rounds).
+review-correction rounds) · 11 S6b as implemented (19 October 2026; pending independent acceptance).
 
 ---
 
@@ -973,3 +977,173 @@ Not run in this round: the full `npm test` chain on the real 22.16.0 binary (the
 above were run there; the chain was run on 22.22.2 with the real binaries probed), the wider E2E
 battery and the browser suites (no route, client, mail, backup or migration behaviour changed),
 and the `7fbce74` old-build proof. Nothing here is production approval.
+
+---
+
+## 11. S6b as implemented (19 October 2026, one local commit on `feat/sqlite-schema` on top of `1792fc7` — dated history; PENDING INDEPENDENT ACCEPTANCE)
+
+**Status at the time of writing: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE.** Not production, security,
+legal-compliance or deployment approval; not acceptance of S4b, S8 or the whole SQLite migration; nothing pushed,
+merged or deployed; no real data, no real provider. The independent review of `1792fc7`
+(`review-1792fc7-summary.txt`, 19 October 2026) accepted the corrected next-stage brief — plan §D.4 Candidate A with
+its per-reference contract — as the basis for this bounded storage migration (S7a–S7d stay accepted; the brief's
+acceptance is not an S6b acceptance) and handed over an implementation prompt carrying the Founder's three answers.
+
+**The Founder's decisions, recorded verbatim (19 October 2026, received in the review conversation; explicit answers,
+not inferences from documents or silence; not to be asked again):**
+
+> Q4: Approve — preserve current behaviour (Recommended).
+> Q4b: Approve — move with strict guardian checks (Recommended).
+> Q5: Keep today's removal behaviour for this migration (Recommended).
+
+The review's reading of them, which this implementation follows: Q4 — the five historical player-audit references
+(`blocks.player_id`, `reports.target_player_id`, `org_notes.player_id`, `ledger.player_id`,
+`source_changes.player_id`) stay when the player is absent; unresolved references are **counted and reported, never
+refused**, no record deleted, no account invented, and **no new parent-existence rule** for these five. Q4b —
+`idv_queue` moves now with **application checks requiring an existing guardian**; the database foreign key is a later
+step. Q5 — lifting a block **deletes its row** as today; no retained block history, no `lifted_at`/`lifted_by`.
+Nothing else was decided: child-status stamping (Q2) and the country code (Q1) stay OPEN; the full birth date, D-A/D-B
+and the legacy-minor stop rule are unchanged; A0/A1/A2/A3, S4b and S8 were not authorised and were not built.
+
+### 11.1 What was built
+
+- **Repository** `repositories/safetyAudit.mjs` — one module for the eight collections (the plan named it
+  `audit.mjs`; the name follows the migration's). Each table is `seq INTEGER PRIMARY KEY` (array position at the
+  import, insertion order afterwards), `id TEXT NOT NULL UNIQUE`, the writer's literal columns, and three lossless
+  columns: `absent_keys_json` (a known key the writer did not pass — restored as absence), `offtype_json` (a known
+  key whose value is not the column's type — a numeric or object `targetPlayerId`, an object `orgId`, a numeric
+  `reason` — kept as JSON and restored exactly) and `extra_json` (unknown own fields, restored first). The
+  `moderationLog.context` object is kept WHOLE in `context_json` (the per-field columns the DDL draft proposed are
+  not created, so no context key can be lost — §2.3's open point); `ledger.userId` / `scoutName` are stored verbatim
+  as `user_id` / `actor_name` with **no actor kind derived** (§2.5); every `opsEvents.kind` is an ordinary row — no
+  vocabulary CHECK anywhere (§2.6's missing kinds cannot recur). The repository runs in the data layer's staged mode
+  (a write is queued and lands in the next save — `persist()`/`persistNow()` — or in the enclosing unit of work's
+  commit; the graph memento restores the mirror in place on an aborted unit, review §11.10/§11.12 pattern); the
+  eight `db.*` names are read-only views in insertion order, so every existing reader (the admin consoles, the
+  reporters' lists, the guardian log, the org ledger, `isBlocked`, `insightsFor`, the exports) reads the view
+  unchanged. Operations: `append` on every collection (validated like an import), `reports.patch` (status, outcome,
+  resolvedAt — the resolve route's three fields, by row id), `idvQueue.patch` (status, by row id) and
+  `idvQueue.firstForGuardian` (the toggle's first-entry rule, preserved), `blocks.remove` (Q5),
+  `sourceChanges.trimTo` (the m181 cap: the OLDEST rows beyond 20 000 deleted, the array's splice), `exportAll` (the
+  admin backup), `counts`, `pending`, `unresolvedPlayerReferences`.
+- **Migration** `repositories/migrations/0013_safety_audit.mjs` (REGISTERED after `0012_channels`): creates the eight
+  tables, imports the eight blobs through the repository's validation (nothing coerced, narrowed or dropped), counts
+  per collection the rows with extra fields, absent keys, off-type values and — Domain P — unresolved player ids,
+  refuses the WHOLE step on any shape refusal or any IDV entry naming a missing guardian
+  (`SAFETY_AUDIT_IMPORT_BLOCKED`, listing `IDV_GUARDIAN_MISSING` with ids only), retires the blob rows and records
+  the counts in `meta.safetyAuditCutover`. A file without the blobs creates the tables and imports nothing.
+- **Domain P (tolerant, Q4)** — `unresolvedPlayerReferences()` counts per table the rows whose `player_id` /
+  `target_player_id` names no row of `players` and the rows without one; the count is in the cutover record, the
+  data-layer report (`GET /capabilities` → `persistence.dataLayer.domains.safetyAudit.unresolvedPlayerReferences`)
+  and every snapshot write's log line. It is a count, never provenance, never a refusal. `handleReport` still stores
+  a truthy `targetPlayerId` of any type as received (checked by the suites with a numeric and an object value).
+- **Domain G (strict, Q4b)** — `idv_queue.guardian_id NOT NULL`, checked in code: `append` refuses a guardian that
+  is not in the `guardians` table; the import refuses the whole 0013 step; the snapshot dispatcher runs the
+  final-state assertion whenever a save carries `idvQueue` **or** the identity pair (the S7d trigger: an
+  identity-only replacement that removes a referenced guardian is refused with ids only, atomically — the omitted-
+  queue case the brief named; a coordinated replacement removing the guardian and its entries together passes).
+- **Writers converted** (all surveyed call sites; the module context objects pass `safetyAudit`): `ledgerAppend`,
+  `moderateOrRefuse` (moderation hit and the automatic grooming report), `handleReport` (the report and the urgent
+  suspension blocks), the guardian and player block routes, the org note route, the IDV route (inside the guardian's
+  unit, the row and the columns commit together), the staff bootstrap ops event, the admin resolve, IDV toggle and
+  lift routes, `m13/delivery.mjs` (`delivery_failed`), `m13/enterprise.mjs` (every ops-event kind and the backup
+  export, which now spreads `safetyAudit.exportAll()`), `m13/imports.mjs` (`webhook_failed`),
+  `m181/sourceChanges.mjs` (append + cap). The three m13 modules and m181 keep an array push for a bare context
+  without the repository (the reviewer feasibility scripts); the server always passes it.
+- **Data layer** (`repositories/index.mjs`): the eight names in `TABLE_BACKED`; the snapshot dispatcher reads and
+  replaces the eight tables (an omitted collection leaves its table alone, an explicit empty array empties it, a
+  malformed collection or a strict refusal rolls the whole write back); at attach the stale in-memory arrays are
+  dropped and the names defined as views; the schema report lists the eight tables and `0013`.
+- **Rollback (copy-only)** `scripts/safetyAuditRollback.mjs` / `repositories/safetyAuditRollback.mjs`
+  (`npm run rollback:safety-audit -- <data-dir> <fresh-empty-dir>`): every row of the eight tables written back into
+  its legacy blob in `seq` order in the writer's literal (extras first, absence preserved, off-type values restored),
+  the tables dropped, the 0013 record and its meta key removed, `saveSeq` advanced, foreign keys checked, VACUUM,
+  revalidation (every other table byte-identical); refusals with no output: a later schema step (exit 4), a file
+  that never applied 0013 (exit 5), a non-empty output directory (exit 1), a recorded 0013 whose tables are missing
+  (exit 10); an injected failure before COMMIT removes the output. The S7d tool refuses a 0013 file (exit 4); the
+  chain to any earlier build runs this tool first.
+- **Documentation**: `sql/03_messaging_safety_audit.sql` carries the implemented DDL for the eight tables (the
+  earlier draft's NOT NULL, CHECK vocabularies, RESTRICT references and derived actor kind are withdrawn there and
+  recorded as OPEN for S4b / the foreign-key step); `scripts/testSchemaDdl.mjs` checks migration and document column
+  for column; `OPERATIONS.md` has the cutover, rollback and operator procedure; `storeContract.mjs` names the eight
+  as views; `scripts/safetyAuditPersistenceBench.mjs` is the benchmark.
+
+### 11.2 Where it departs from §§2–7 and plan §D.4, and why
+
+| Earlier statement | What was built | Why |
+|---|---|---|
+| §4.2 / Q5 option: `blocks` gains `lifted_at`/`lifted_by` | the lift deletes the row (`blocks.remove`) | Q5: keep today's removal behaviour |
+| §4.1 / DDL draft: `REFERENCES players(id) ON DELETE RESTRICT` on five tables; `REFERENCES guardians(id)` on `idv_queue`; `REFERENCES orgs(id)` / `org_users(id)` | **no foreign key on any of the eight** | Q4 (tolerant player references), Q4b (strict guardian check in code, FK later), and — a shape-compatibility decision stated here, not a design goal — `POST /player/block` and `handleReport` accept an unchecked `orgId` / `targetOrgId` / `byOrgId` today, so an organisation or staff foreign key would turn accepted requests into refusals; those ids are historical pointers until a later step decides otherwise |
+| DDL draft: `NOT NULL` literal columns, CHECK vocabularies (`by_kind`, `status`, `kind`, `type`, `severity`, `provider`, the 140-character excerpt) | every literal column nullable; no vocabulary CHECK; `absent_keys_json` / `offtype_json` / `extra_json` | the writers' literals are preserved exactly (absence as absence, off-type values as received — the review's "no hidden coercion/rejection" requirement); vocabularies live in code as for S7a–S7d |
+| §2.5 / DDL draft: a derived `actor_kind` / `actor_id` pair | `user_id` and `actor_name` verbatim | §2.5's own recommendation, confirmed by the brief |
+| §2.3: per-field `context_*` columns for `moderation_log` | `context_json` whole | no caller's context key can be lost or need a refusal |
+| plan §D.4: `repositories/audit.mjs` | `repositories/safetyAudit.mjs` | the migration's name; no other difference |
+| plan §D.4 benchmark wording | `scripts/safetyAuditPersistenceBench.mjs` reports blob rows and bytes upserted per save, the eight audit blobs' share, the remaining blob collections by name and the median save time — before and after, same fixture | as specified; no dirty tracking was added and none is claimed |
+| §7's "rows → blobs" rollback | built exactly so (`safetyAuditRollback.mjs`) | — |
+
+Unchanged and not decided here: retention of report reasons, note text and moderation excerpts (now rows, as the
+blobs were); guardian deletion; the IDV toggle's first-entry rule (preserved, §2.8); the unbounded `ops_events`
+growth (§2.6); child-status stamping (Q2 OPEN — no column reserved); the country code (Q1 OPEN).
+
+### 11.3 Verification
+
+Node v22.22.2, npm 10.9.7, SQLite 3.51.2 (the independent reviewer's runtime is Node v24.19.0 / SQLite 3.53.3;
+not available here). Every run below is on the final tree after every edit, one attempt unless stated; the logs
+are in the handoff package (`logs/`), the counts in `logs/gates-summary.txt`.
+
+- **Failing-first on the unchanged `1792fc7` tree** (the two suites untracked, no source change): `testSafetyAudit.mjs`
+  — the [compat] check passed (the legacy representation holds today) and each of the eight [cutover] checks failed
+  for its stated reason (no 0013 record; no duplicate-id refusal; no table; no `repositories/safetyAudit.mjs`; the
+  blobs loaded in the legacy shape; an identity-only replacement that removed a referenced guardian was NOT refused;
+  no rollback module); `testSafetyAuditServer.mjs` — both [compat] tests passed (the real deletion round trip with the
+  old-build boot skipped only where the rollback tool does not exist yet, stated in the log) and both [cutover] tests
+  failed ("the boot recorded 0013" false; the legacy-shape test undefined at its first table read).
+- **The two S6b suites on the final tree:** `testSafetyAudit.mjs` 9 checks passed; `testSafetyAuditServer.mjs` 4 tests
+  passed with `SCOUTBOX_PRE_S6B_SERVER` = the actual `4f954ad` checkout (a REAL boot of the rollback copy: the same
+  rows in its routes, a block and a report accepted there into its blobs, the copy re-upgraded by this build).
+- **Benchmark** (`scripts/safetyAuditPersistenceBench.mjs`, the same file and fixture — 5 000 ledger rows plus 50
+  blocks, 100 reports, 100 moderation hits, 250 notes, 50 ops events, 250 source changes, 20 IDV entries, 400
+  requests, 60 threads × 25 messages, 500 notifications — 100 message+notification+ledger+save rounds; synthetic
+  temporary database; one run each on a shared machine):
+
+  | Tree | blob rows upserted per save | blob bytes serialised per save | of which the eight audit blobs | remaining blob collections | save time median / mean / p95 |
+  |---|---|---|---|---|---|
+  | `4f954ad` (pre-S6b) | 9 | 1 092 859 | 8 rows, 1 015 048 bytes | the eight audit names + `requests` | 10.03 / 11.53 / 18.12 ms |
+  | this tree (S6b) | 1 | 77 811 | 0 rows, 0 bytes | `requests` | 2.01 / 3.83 / 6.23 ms |
+
+  Claimed: the eight audit blobs leave every save's serialisation and UPSERT. Not claimed: that the whole-database
+  write is gone — every remaining blob (`requests` in this fixture; every other blob collection on a real file) is
+  still serialised and UPSERTed by every save; no dirty tracking exists or was added (plan §D.4).
+- **Reviewer scripts, byte-identical to the `1792fc7` bundle, unchanged:** `review-62e9c1a-reproductions.mjs` exit 0
+  in both modes (4 CORRECT, 0 reproductions with the `b67bce5` controls); `probe-nested-restore.mjs` exit 0 (0 stale
+  values in 8 nested views); the six historical reviewer scripts and the two older design probes exit 0.
+  `review-e7f7692-design-checks.mjs` and `review-6956f52-design-checks.mjs` — design-premise probes written against
+  the PRE-S6b storage — pass unchanged on the `1792fc7` tree (exit 0) and STOP on the final tree (exit 1): the first
+  after its three engine VERIFIED lines and the F1 finding, at its F2 check, which reads the `ledger` BLOB from
+  `collections` (that blob no longer exists — the ledger is a table since 0013); the second at its setup, which
+  creates its own synthetic `idv_queue` table (the real 0013 migration now creates it). The change between the two
+  runs is the storage move the scripts were written to examine; the premises they probed are covered on the real
+  routes and tables by the two S6b suites. Stated, not hidden; the scripts were not edited.
+- **Focused suites:** `testUnitOfWork` 17, `testWriterAtomicity` 9, `testChannelsServer` 5 (the actual `b67bce5`
+  build booting its rollback copy), `testCoreIdentityServer` 14 — all passed.
+- **E2E (real server boots):** `apiE2E` 130 (against a freshly seeded server on port 4000 with a temporary
+  `DATA_DIR`), `connectedE2E` 62, `m12E2E` 152, `m13E2E` 212, `m15E2E` 190, `m16E2E` 118, `m181E2E` all, `m23E2E` all,
+  `m23RecruitmentJourneyE2E` 168, `m23SigningE2E` all, `m23P4AClosureE2E` 337, `preM24SweepE2E` 40 — all passed.
+  `m23BootContract` and `m23Persistence` FAIL on this tree and on the unchanged `4f954ad` tree with the identical
+  failure set (compared line for line): the `dispatches` store-contract claim versus the running server's module
+  initialisation (since S7b) and the m23Persistence fixture's pre-S7d channel without a `requestId`, refused by the
+  0012 import — pre-existing, not caused by S6b, not fixed here; recorded as a remaining limit.
+- **Backend gate** `cd scoutbox-server && npm test` — 29 suites, 376 checks, exit 0, one attempt on the final tree,
+  with the five `SCOUTBOX_PRE_*` variables pointing at the actual `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5` and
+  `4f954ad` checkouts (real old-build execution: 1 / 1 / 5 / 1 / 1 boot lines); the real older-Node runtime checks
+  SIMULATED (`SCOUTBOX_TEST_NODE_BINS` unset). The interim full-chain runs during development are kept in the
+  package (`logs/npm-test-interim*.log`): each failure was an older suite's expectation of the pre-S6b table set,
+  migration list, rollback chain or revision count, adapted as the diff shows; no application source was changed to
+  make a suite pass.
+- **Player gate** `cd scoutbox-player && npm test -- --runInBand` — 4 suites, 41 tests, exit 0, one attempt (no
+  Player source changed; the gate is mandatory).
+- **Fresh extraction of the handoff ZIP:** `npm ci` in both projects, both gates (the five old-build boots SKIPPED
+  there — the old builds are outside the package), the S6b server suite, the benchmark, the reviewer scripts and
+  probes — the sidecar record beside the ZIP.
+- **Not run:** browser suites, demo rebuild, the remaining E2E suites, real older-Node runtimes, real data, real
+  providers.

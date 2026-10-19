@@ -25,10 +25,13 @@ import { rollbackNotificationsCopy } from '../repositories/notificationsRollback
 import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
 import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
+import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
 import { openStore } from '../store.mjs';
 import { createMailer, OUTBOX_SECRET_PLACEHOLDER } from '../adapters.mjs';
 import { NOW, TTL, tempDir, s3File, migrate, openRaw, applied, blob, meta, dump, filesDigest } from './coreIdentityTestFixtures.mjs';
+// S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
+const preS6b = (file) => { const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(file, out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -59,7 +62,7 @@ function s5File(dir, { emailChallenges, pairingCodes } = {}) {
   s.close();
 }
 /** S7a: a live file carries 0009, which the S6a tool refuses outright (LATER_SCHEMA); the S7a rollback (copy-only, nothing lost) goes first and the S6a tool runs on ITS output. */
-const s6aCopy = (dir) => { const s7c = tempDir('s7d-to-s7c'); rollbackChannelsCopy(dbFile(dir), s7c); /* S7d first: the live file carries 0012 */ const s7b = tempDir('s7c-to-s7b'); rollbackOutboxPushCopy(dbFile(s7c), s7b); const s7a = tempDir('s7b-to-s7a'); rollbackDispatchesCopy(dbFile(s7b), s7a); const out = tempDir('s7a-to-s6a'); rollbackNotificationsCopy(dbFile(s7a), out); return out; }; // S7b: the live file carries 0010 too; its rollback goes first
+const s6aCopy = (dir) => { const s7c = tempDir('s7d-to-s7c'); rollbackChannelsCopy(preS6b(dbFile(dir)), s7c); /* S7d first: the live file carries 0012 */ const s7b = tempDir('s7c-to-s7b'); rollbackOutboxPushCopy(dbFile(s7c), s7b); const s7a = tempDir('s7b-to-s7a'); rollbackDispatchesCopy(dbFile(s7b), s7a); const out = tempDir('s7a-to-s6a'); rollbackNotificationsCopy(dbFile(s7a), out); return out; }; // S7b: the live file carries 0010 too; its rollback goes first
 /** A live server-mode store with the data layer attached at `now`. */
 function live(dir, { now = () => NOW } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
@@ -74,7 +77,7 @@ test('migration 0008 (legacy blobs): every live entry is imported as a hash — 
   const dir = tempDir('otc-mig');
   s5File(dir, { emailChallenges: [legacyChallenge(), legacyChallenge({ orgId: 'org-gone-but-expired', expiresAt: NOW - MIN })], pairingCodes: [legacyPairing(), legacyPairing({ code: 'OLD999', playerId: 'pl-child2', expiresAt: NOW - 1 })] });
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s, { now: NOW }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels'], '0008, then 0009 (S7a), 0010 (S7b) and 0011 (S7c) on the same run');
+  assert.deepEqual(migrate(s, { now: NOW }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit'], '0008, then 0009 (S7a), 0010 (S7b) and 0011 (S7c) on the same run');
   const challenge = s.prepare('SELECT * FROM email_challenges').all().map((r) => ({ ...r }));
   assert.deepEqual(challenge, [{ org_id: 'org-pro', email: 'recruitment@eastport.test', code_hash: hashCode('CHAL22'), expires_at: NOW + 20 * MIN, attempts: 0 }]);
   const pairing = s.prepare('SELECT * FROM pairing_codes').all().map((r) => ({ ...r }));
@@ -461,7 +464,7 @@ test('rollback: the copy-only tool writes the empty code blobs the S5 build read
   assert.equal(applied(o).includes(ONE_TIME_CODES_MIGRATION), false); assert.equal(meta(o, ONE_TIME_CODES_CUTOVER_META), undefined);
   assert.deepEqual([blob(o, 'pairingCodes'), blob(o, 'emailChallenges')], [[], []]);
   for (const t of ['players', 'guardians', 'orgs', 'sessions', 'org_users', 'guardian_children']) assert.equal(JSON.stringify(o.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()), (() => { const s = openRaw(src); try { return JSON.stringify(s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()); } finally { s.close(); } })(), `${t} untouched`);
-  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels'], 're-upgrade: 0008 runs again on the empty blobs (0009, 0010 and 0011 follow, as the S7a, S7b and S7c copies had removed them)'); assert.equal(o.prepare('SELECT COUNT(*) AS n FROM pairing_codes').get().n, 0);
+  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit'], 're-upgrade: 0008 runs again on the empty blobs (0009, 0010 and 0011 follow, as the S7a, S7b and S7c copies had removed them)'); assert.equal(o.prepare('SELECT COUNT(*) AS n FROM pairing_codes').get().n, 0);
   o.close();
   const s5out = tempDir('otc-rb-s5'); const s5out2 = tempDir('otc-rb-s5b');
   assert.throws(() => rollbackPlayerSubrecordsCopy(dbFile(src), s5out), (err) => err.code === 'LATER_SCHEMA' && /0008_one_time_codes/.test(err.message)); assert.deepEqual(fs.readdirSync(s5out), []);

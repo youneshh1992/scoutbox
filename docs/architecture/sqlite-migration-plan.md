@@ -1327,7 +1327,8 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
 > only as an approved strict checked reference (Q4b) or after Alternative A's deferral (A0); the five player
 > references are tolerant historical references (Q4; the per-reference contract in §D.4, corrected after the
 > review of `e7f7692`); the candidate step S6b and the decisions it needs (Q4, Q4b, Q5) are in §D.4–§D.5. S6b
-> does not meet the whole-snapshot-write objective (§D.4).
+> does not meet the whole-snapshot-write objective (§D.4). **S6b is implemented since 19 October 2026 under
+> those three decisions (status paragraph below; review §11); pending independent acceptance.**
 >
 > **Status (S6, the rest): not started.** The readiness review grounded in the code at `2178c5b` is
 > [`s6-readiness-review.md`](./s6-readiness-review.md); where the bullets below differ from it,
@@ -1340,8 +1341,21 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
 > accepts losing post-S6 audit rows, is **not** the proposed path — a copy-only tool is (review
 > §7); the migration identifier `0008_safety_audit` is a placeholder assigned from the actual
 > order of approval (review §8; S6a took `0008_one_time_codes`). The smallest technically
-> independent sub-step was the two code tables (review §6), now implemented as S6a; nothing of the
-> audit tables is built or registered.
+> independent sub-step was the two code tables (review §6), now implemented as S6a.
+>
+> **Status (S6b — the eight audit tables): IMPLEMENTED 19 October 2026, PENDING INDEPENDENT ACCEPTANCE.**
+> Built as §D.4 Candidate A on top of `1792fc7` (whose brief the independent review accepted), under the
+> Founder's explicit decisions Q4, Q4b and Q5 of 19 October 2026 (recorded verbatim in
+> [`s6-readiness-review.md`](./s6-readiness-review.md) §11 and in §D.5 below): migration `0013_safety_audit`
+> (REGISTERED), `repositories/safetyAudit.mjs`, the eight tables with NO foreign key (the five player
+> references tolerant and counted; the organisation and staff ids historical pointers because the block and
+> report routes accept them unchecked today — a stated shape-compatibility decision; the IDV guardian reference
+> strict in code), the writers converted, the copy-only rollback `scripts/safetyAuditRollback.mjs` proven on the
+> actual `4f954ad` build. The "status (S6, the rest)" paragraph above and the bullets below are the dated
+> record and are superseded by review §11 where they differ (no `RESTRICT` references, no reversal row — the
+> truncation no longer exists — and the IDV toggle updates by row id as built). It removes the eight audit blobs
+> from every save's serialisation and **does not meet the whole-snapshot-write objective** (§D.4). Not production,
+> security, legal-compliance or deployment approval; not acceptance of S4b or S8.
 
 - **Objective.** Append-only audit tables live with `RESTRICT` references; one-time codes
   hashed with attempt limits; the ledger gets a reversal row instead of truncation on signing
@@ -2104,8 +2118,18 @@ rows back into the blobs the previous build reads, refuses a later schema, and i
 actual previous build on the copy) — the old plan's "backup + previous commit, audit rows lost" rollback is
 not a path (`s6-readiness-review.md` §7).
 
+> **Update, 19 October 2026 — Candidate A is IMPLEMENTED (pending independent acceptance).** The independent
+> review of `1792fc7` accepted this brief; the Founder answered Q4, Q4b and Q5 (§D.5, recorded verbatim in
+> `s6-readiness-review.md` §11); the implementation is one local commit on top of `1792fc7`: migration
+> `0013_safety_audit`, `repositories/safetyAudit.mjs` (the plan's `audit.mjs`), the writers converted, the copy-only
+> rollback `scripts/safetyAuditRollback.mjs`, the suites `scripts/testSafetyAudit.mjs` and
+> `scripts/testSafetyAuditServer.mjs` (written first and failing on the unchanged `1792fc7` tree), the benchmark
+> `scripts/safetyAuditPersistenceBench.mjs`. What was built, where it departs from the wording below and why, and
+> the verification are review §11. The text of Candidate A below is kept as the specification the implementation
+> followed (dated history).
+
 **Candidate A — S6b, the eight audit tables with checked identity references, behaviour preserved,
-child-status stamping deferred (the step proposed next).** *Prerequisites:* **Q4** (the five player
+child-status stamping deferred (the step proposed next; IMPLEMENTED 19 October 2026, see the update above).** *Prerequisites:* **Q4** (the five player
 references as **tolerant** checked references — §D.2a Alternative B in its B-tolerant form; the contract below),
 **Q4b** (the `idv_queue` guardian reference as a **strict** checked reference — B-strict, the
 `channels.guardian_id` pattern; a separate approval, not implied by Q4), **Q5** (block lift stays a delete, or
@@ -2222,13 +2246,18 @@ to exist before any permanent key to the identity tables ships.
 ### D.5 Decisions required to proceed — the one list (product policy, technical approval, qualified review kept apart)
 
 Already decided and **not asked again**: the full birth date on the retained record; D-A and D-B (S7d);
+Q4, Q4b and Q5 (S6b, 19 October 2026 — below);
 the legacy-minor rule (under-18 without a valid guardian link stops migration). O2 (organisation deletion)
 blocks nothing now and is not asked. **Only the first three questions are needed for the step proposed next
 (Candidate A); the rest are recorded for the stages that need them and are not required to proceed.** No
 approval of an implementation is sought beyond Candidate A's concrete scope in §D.4; nothing is inferred from
 silence.
 
-**Needed for Candidate A (S6b)**
+**Needed for Candidate A (S6b) — ANSWERED by the Founder on 19 October 2026** (received in the review conversation;
+explicit answers, not inferences; verbatim: *"Q4: Approve — preserve current behaviour (Recommended). Q4b: Approve —
+move with strict guardian checks (Recommended). Q5: Keep today's removal behaviour for this migration
+(Recommended)."* — the implementation record is `s6-readiness-review.md` §11; the three rows below are the questions
+as asked, kept as the dated record):
 
 | # | Question | Kind | What the app does today | Blocks | Options and practical consequences |
 |---|---|---|---|---|---|

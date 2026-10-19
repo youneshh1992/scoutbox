@@ -27,12 +27,16 @@ const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened
 
 export function registerDelivery(ctx) {
   const {
-    db, users, notifications, dispatches, outbox, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+    db, users, notifications, dispatches, outbox, safetyAudit, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
     nextId, persist, persistNow, notify, findPlayer, isAdult,
     signBody, timingSafeEq, paginate,
   } = ctx;
   if (!notifications) throw new TypeError('registerDelivery needs the notifications repository (ctx.notifications)');
   if (!dispatches) throw new TypeError('registerDelivery needs the dispatches repository (ctx.dispatches)');
+  // S6b: an exhausted retry's ops event is a row of ops_events (repositories/safetyAudit.mjs),
+  // staged into the sweep pass's persistNow() with the dispatch rows and the outbox row; a bare
+  // context without the repository keeps the array push (the same fallback as the outbox below).
+  const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
   // S7c: the local fake provider's record is an outbox row (repositories/outboxPush.mjs).
   // The server always passes the repository. Without one, the record is pushed onto
   // db.outbox exactly as before the cutover — the same fallback adapters.mjs keeps —
@@ -148,7 +152,7 @@ export function registerDelivery(ctx) {
         dispatches.patch(d.id, { status: 'accepted', providerMessageId: result.providerMessageId }); // provider accepted ≠ delivered ≠ read
       } else if (sends >= MAX_ATTEMPTS) {
         dispatches.patch(d.id, { status: 'failed', failedAt: Date.now(), failReason: result.error });
-        db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'delivery_failed', detail: { dispatchId: d.id, channel: d.channel } });
+        opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'delivery_failed', detail: { dispatchId: d.id, channel: d.channel } });
         ctx.emitWebhook?.(d.audience.kind === 'org_user' ? (db.users.find((u) => u.id === d.audience.id)?.orgId ?? null) : null, 'delivery.failed', { dispatchId: d.id });
       } else {
         dispatches.patch(d.id, { status: 'retrying', nextAt: Date.now() + RETRY_MS[sends] });

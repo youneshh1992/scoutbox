@@ -23,11 +23,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
+import { AUDIT_SNAPSHOT_TABLES } from '../repositories/safetyAudit.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
+const preS6bDir = (dir) => { const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -65,7 +68,8 @@ const q1 = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scou
 const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
 const live = (dir) => !!q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0010_dispatches'");
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
-const blobRows = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
+// S6b: opsEvents is the ops_events table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
+const blobRows = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); if (r) return JSON.parse(r.value); const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === name); if (!t) return null; const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t.table) ? t.read(s) : null; } finally { s.close(); } };
 /** The mail outbox as the DATABASE holds it, in insertion order: the S7c table after its cutover (0011), the blob before it. */
 const outboxRows = (dir) => (q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'")
   ? qAll(dir, 'SELECT id, provider_message_id FROM outbox ORDER BY seq').map((r) => ({ id: r.id, providerMessageId: r.provider_message_id }))
@@ -324,7 +328,7 @@ await test('backup/restore and the old-build rollback proof: the admin backup ex
   // and the chain starts with the S7c tool (copy-only); the S7b tool then runs on that copy.
   try { execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, tempDir('s7b-s7btool')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
   const s7cCopy = tempDir('s7b-rollback-s7d'); const s7bCopy = tempDir('s7b-rollback-s7c'); const copy = tempDir('s7b-rollback');
-  execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, s7cCopy], { encoding: 'utf8' }); // S7d first (the file carries 0012), then S7c on its output
+  execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); // S7d first (the file carries 0012), then S7c on its output
   execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, s7bCopy], { encoding: 'utf8' });
   const out = execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), s7bCopy, copy], { encoding: 'utf8' });
   assert.match(out, /written back as a blob/); assert.equal(live(copy), false); assert.deepEqual(stored(copy), all, 'the blob holds every row and attempt in order');

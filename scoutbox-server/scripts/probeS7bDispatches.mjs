@@ -26,6 +26,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
+import { AUDIT_SNAPSHOT_TABLES } from '../repositories/safetyAudit.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
@@ -55,7 +56,8 @@ async function boot(dir) {
   });
 }
 const q = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
-const blob = (dir, name) => { const r = q(dir, 'SELECT value FROM collections WHERE name = ?', name)[0]; return r ? JSON.parse(r.value) : null; };
+// S6b: opsEvents is the ops_events table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
+const blob = (dir, name) => { const r = q(dir, 'SELECT value FROM collections WHERE name = ?', name)[0]; if (r) return JSON.parse(r.value); const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === name); if (!t) return null; const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t.table) ? t.read(s) : null; } finally { s.close(); } };
 /**
  * The dispatch records as the DATABASE holds them, in insertion order, attempts re-nested. Written against the
  * dc4b559 build (the `dispatches` blob). ADAPTED for S7b: after the 0010_dispatches cutover the rows are in the

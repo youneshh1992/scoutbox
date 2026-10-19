@@ -20,9 +20,12 @@ import { rollbackNotificationsCopy } from '../repositories/notificationsRollback
 import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
 import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
+import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { createStorage } from '../adapters.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, adult, s3File, migrate, openRaw, applied, blob, dump } from './coreIdentityTestFixtures.mjs';
+// S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
+const preS6b = (file) => { const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(file, out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -106,7 +109,7 @@ test('rollback tool: a copy whose queue is not empty is refused (MEDIA_QUEUE_PEN
   assert.throws(() => rollbackCoreIdentityCopy(path.join(dir, 'scoutbox.db'), out0), (err) => err.code === 'LATER_SCHEMA' && /0007_player_subrecords/.test(err.message));
   assert.deepEqual(fs.readdirSync(out0), []);
   // S6a: the file carries 0008 too; the S6a rollback goes first (copy-only; the queue and everything else kept), then the S5 tool on its output.
-  const s7c = tempDir('media-rb-s7c'); rollbackChannelsCopy(path.join(dir, 'scoutbox.db'), s7c); /* S7d first: the file carries 0012 */ const s7b = tempDir('media-rb-s7b'); rollbackOutboxPushCopy(path.join(s7c, 'scoutbox.db'), s7b); const s7a = tempDir('media-rb-s7a'); rollbackDispatchesCopy(path.join(s7b, 'scoutbox.db'), s7a); const s6a = tempDir('media-rb-s6a'); rollbackNotificationsCopy(path.join(s7a, 'scoutbox.db'), s6a); const s5 = tempDir('media-rb-s5'); rollbackOneTimeCodesCopy(path.join(s6a, 'scoutbox.db'), s5); // S7a: the file carries 0009 too; its rollback goes first (copy-only, nothing lost)
+  const s7c = tempDir('media-rb-s7c'); rollbackChannelsCopy(preS6b(path.join(dir, 'scoutbox.db')), s7c); /* S7d first: the file carries 0012 */ const s7b = tempDir('media-rb-s7b'); rollbackOutboxPushCopy(path.join(s7c, 'scoutbox.db'), s7b); const s7a = tempDir('media-rb-s7a'); rollbackDispatchesCopy(path.join(s7b, 'scoutbox.db'), s7a); const s6a = tempDir('media-rb-s6a'); rollbackNotificationsCopy(path.join(s7a, 'scoutbox.db'), s6a); const s5 = tempDir('media-rb-s5'); rollbackOneTimeCodesCopy(path.join(s6a, 'scoutbox.db'), s5); // S7a: the file carries 0009 too; its rollback goes first (copy-only, nothing lost)
   const s4a = tempDir('media-rb-s4a'); rollbackPlayerSubrecordsCopy(path.join(s5, 'scoutbox.db'), s4a);
   assert.equal(openRaw(s4a).prepare('SELECT COUNT(*) AS n FROM media_deletions').get().n, 1, 'the S5 rollback keeps the pending queue entry');
   const out1 = tempDir('media-rb-o1');
@@ -115,7 +118,7 @@ test('rollback tool: a copy whose queue is not empty is refused (MEDIA_QUEUE_PEN
   const script = path.join(HERE, 'coreIdentityRollback.mjs');
   try { execFileSync(process.execPath, [script, s4a, path.join(tempDir('media-rb-cli'), 'x')], { stdio: 'pipe' }); assert.fail('should refuse'); } catch (err) { assert.equal(err.status, 8); }
   s = openRaw(dir); s.prepare('DELETE FROM media_deletions').run(); s.close(); // the sweep removed the file and cleared the entry
-  const s7c2 = tempDir('media-rb-s7c2'); rollbackChannelsCopy(path.join(dir, 'scoutbox.db'), s7c2); const s7b2 = tempDir('media-rb-s7b2'); rollbackOutboxPushCopy(path.join(s7c2, 'scoutbox.db'), s7b2); const s7a2 = tempDir('media-rb-s7a2'); rollbackDispatchesCopy(path.join(s7b2, 'scoutbox.db'), s7a2); const s6a2 = tempDir('media-rb-s6a2'); rollbackNotificationsCopy(path.join(s7a2, 'scoutbox.db'), s6a2); const s52 = tempDir('media-rb-s52'); rollbackOneTimeCodesCopy(path.join(s6a2, 'scoutbox.db'), s52);
+  const s7c2 = tempDir('media-rb-s7c2'); rollbackChannelsCopy(preS6b(path.join(dir, 'scoutbox.db')), s7c2); const s7b2 = tempDir('media-rb-s7b2'); rollbackOutboxPushCopy(path.join(s7c2, 'scoutbox.db'), s7b2); const s7a2 = tempDir('media-rb-s7a2'); rollbackDispatchesCopy(path.join(s7b2, 'scoutbox.db'), s7a2); const s6a2 = tempDir('media-rb-s6a2'); rollbackNotificationsCopy(path.join(s7a2, 'scoutbox.db'), s6a2); const s52 = tempDir('media-rb-s52'); rollbackOneTimeCodesCopy(path.join(s6a2, 'scoutbox.db'), s52);
   const s4a2 = tempDir('media-rb-s4a2'); rollbackPlayerSubrecordsCopy(path.join(s52, 'scoutbox.db'), s4a2);
   const out2 = tempDir('media-rb-o2');
   const result = rollbackCoreIdentityCopy(path.join(s4a2, 'scoutbox.db'), out2);
@@ -123,7 +126,7 @@ test('rollback tool: a copy whose queue is not empty is refused (MEDIA_QUEUE_PEN
   const o = openRaw(out2);
   assert.equal(o.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'media_deletions'").get().n, 0, 'the table is gone');
   assert.deepEqual(o.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live']);
-  assert.deepEqual(migrate(o, { now: NOW }).ran, ['0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels'], 're-upgrade: the six steps run again');
+  assert.deepEqual(migrate(o, { now: NOW }).ran, ['0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit'], 're-upgrade: the six steps run again');
   assert.equal(o.prepare('SELECT COUNT(*) AS n FROM media_deletions').get().n, 0);
   o.close(); rm(dir, out1, out2);
 });
@@ -162,7 +165,7 @@ test('backup/restore pieces (review of 9656a4b): the queue travels as the mediaD
   tool.save(snap);
   assert.deepEqual(blob(tool.sqlite, 'mediaDeletions').map((r) => r.media_id), ['media-restored'], 'written as a blob (no table yet)');
   tool.sqlite.close();
-  { const s = openRaw(pre); assert.deepEqual(migrate(s, { now: NOW }).ran, ['0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels']);
+  { const s = openRaw(pre); assert.deepEqual(migrate(s, { now: NOW }).ran, ['0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit']);
     assert.deepEqual(s.prepare('SELECT media_id, attempts, last_error FROM media_deletions').all().map((r) => ({ ...r })), [{ media_id: 'media-restored', attempts: 1, last_error: 'EACCES' }], 'the migration imported the blob');
     assert.equal(blob(s, 'mediaDeletions'), undefined, 'and retired it'); s.close(); }
   // (c) A tampered blob aborts the migration whole; the next run refuses the same way.

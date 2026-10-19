@@ -24,6 +24,8 @@ let passed = 0;
 const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
+const preS6bDir = (dir) => { const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -72,7 +74,7 @@ await test('new installation: the seed is initialised once (never again), served
   let S = await boot(dir, nextPort());
   assert.match(S.log(), /initialised from the first installation's records/);
   let cap = (await S.j('GET', '/capabilities')).body;
-  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels']);
+  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit']);
   assert.equal(cap.dataLayer.identity.initState, 'done'); assert.equal(cap.dataLayer.domains.players.mode, 'live');
   assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players); assert.equal(cap.dataLayer.domains.guardians.rows, seedCounts.guardians);
   assert.equal(cap.core_identity_storage?.state ?? cap.dataLayer.domains.players.mode, 'live');
@@ -349,7 +351,7 @@ await test('deletion: the player row, the links, the sessions and the media-remo
   try { execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), dir, path.join(out, 'refused-s7a')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4); }
   // S7d: the file carries 0012; the S7b tool refuses it (exit 4) and the chain starts with the S7d tool, then the S7c tool on its output (copy-only; nothing lost).
   try { execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, path.join(out, 'refused-s7b')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4); }
-  execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, path.join(out, 's7c')], { stdio: 'pipe' });
+  execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), path.join(out, 's7c')], { stdio: 'pipe' });
   execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), path.join(out, 's7c'), path.join(out, 's7b')], { stdio: 'pipe' });
   execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), path.join(out, 's7b'), path.join(out, 's7a')], { stdio: 'pipe' });
   execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), path.join(out, 's7a'), path.join(out, 's6a')], { stdio: 'pipe' });
@@ -367,7 +369,7 @@ await test('deletion: the player row, the links, the sessions and the media-remo
   assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0, 'cleared at boot once the file is absent');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.mediaDeletions.queued, 0);
   await S.stop();
-  execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, path.join(out, 's7c2')], { stdio: 'pipe' }); // S7d first,
+  execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), path.join(out, 's7c2')], { stdio: 'pipe' }); // S7d first,
   execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), path.join(out, 's7c2'), path.join(out, 's7b2')], { stdio: 'pipe' }); // then S7c,
   execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), path.join(out, 's7b2'), path.join(out, 's7a2')], { stdio: 'pipe' }); // then S7b,
   execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), path.join(out, 's7a2'), path.join(out, 's6a2')], { stdio: 'pipe' }); // then S7a,

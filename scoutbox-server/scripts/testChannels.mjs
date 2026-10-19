@@ -70,14 +70,14 @@ const soloChannel = (over = {}) => channel({ id: 'chan-solo', requestId: 'req-so
 
 /** A file at S7c (0001–0011 applied) carrying the channels blob the way the b67bce5 build wrote it, with the requests blob the threads reference. */
 function s7cFile(dir, { channels, requests = REQUESTS(), rawBlobs, extra: more = {} } = {}) {
-  const extra = { requests, ledger: [], notifications: [], dispatches: [], ...more };
+  const extra = { requests, ledger: [], vouches: [], notifications: [], dispatches: [], ...more }; // vouches: the unrelated plain blob the snapshot tests below touch (the ledger is a table since S6b)
   if (channels !== undefined) extra.channels = channels;
   s3File(dir, { extra, rawBlobs });
   const s = openRaw(dir);
   runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } });
   s.close();
 }
-const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
+const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id <= MIGRATION), { now, context: { sessionTtlMs: TTL } }); // up to 0012: this suite exercises the S7d step and its tool (S6b's 0013 and its tool have their own suite, testSafetyAudit.mjs)
 let mod = null;
 try { mod = await import('../repositories/channels.mjs'); } catch { mod = null; }
 let rollbackMod = null;
@@ -329,11 +329,11 @@ test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file 
   const text0 = JSON.stringify(snap.db.channels);
   const seq0 = tool.revision(); tool.save(snap); assert.equal(tool.revision(), seq0 + 1);
   const again = tool.load(); assert.equal(JSON.stringify(again.db.channels), text0, 'round-tripped through replace'); assert.ok(Object.hasOwn(again.db.channels[0], '__proto__')); assert.equal(Object.hasOwn(again.db.channels[1], 'scoutName'), false);
-  const { channels: _omit, ...without } = snap.db; tool.save({ ...snap, db: { ...without, ledger: [{ id: 'led-1' }] } });
-  assert.deepEqual(channelIds(dir), ['chan-1', 'chan-g'], 'an omitted collection leaves its tables alone'); assert.equal(blobOf(dir, 'channels'), null, 'no shadow blob'); assert.equal(JSON.parse(blobOf(dir, 'ledger')).length, 1);
+  const { channels: _omit, ...without } = snap.db; tool.save({ ...snap, db: { ...without, vouches: [{ id: 'vch-1' }] } });
+  assert.deepEqual(channelIds(dir), ['chan-1', 'chan-g'], 'an omitted collection leaves its tables alone'); assert.equal(blobOf(dir, 'channels'), null, 'no shadow blob'); assert.equal(JSON.parse(blobOf(dir, 'vouches')).length, 1);
   const beforeDump = dump(tool.sqlite); const seq1 = tool.revision();
-  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, ledger: [{ id: 'led-x' }], channels: { id: 'x' } } }), /channels: the snapshot collection must be an array/);
-  assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the save landed (ledger included)');
+  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, vouches: [{ id: 'vch-x' }], channels: { id: 'x' } } }), /channels: the snapshot collection must be an array/);
+  assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the save landed (vouches included)');
   const SECRET = 'SECRET-MESSAGE-TEXT-77';
   assert.throws(() => tool.save({ ...snap, db: { ...snap.db, channels: [channel({ messages: [message({ text: SECRET, sender: { kind: 'admin', id: 'a', name: 'b' } })] })] } }), (e) => /CHANNELS_IMPORT_BLOCKED/.test(e.message) && /sender\.kind/.test(e.message) && !e.message.includes(SECRET));
   assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump);
@@ -360,10 +360,10 @@ test('[cutover] the FINAL-STATE assertion, every direction (review §11.5): chan
   unchangedAfter(() => save({ ...noChannels, requests: [] }), /CHANNEL_REQUEST_MISSING/, 'CHANNEL_REQUEST_MISSING', 'an explicit empty requests array with retained channels');
   unchangedAfter(() => save({ ...noChannels, requests: 'not-an-array' }), /CHANNEL_REQUESTS_MALFORMED/, 'CHANNEL_REQUESTS_MALFORMED', 'a non-array requests collection');
   // both supplied
-  save({ ...base, requests: base.requests.filter((r) => r.id !== 'req-g'), channels: base.channels.filter((c) => c.id !== 'chan-g'), ledger: [{ id: 'led-coord' }] }); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-solo'], 'a coordinated removal passes'); assert.equal(JSON.parse(blobOf(dir, 'ledger'))[0].id, 'led-coord');
+  save({ ...base, requests: base.requests.filter((r) => r.id !== 'req-g'), channels: base.channels.filter((c) => c.id !== 'chan-g'), vouches: [{ id: 'vch-coord' }] }); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-solo'], 'a coordinated removal passes'); assert.equal(JSON.parse(blobOf(dir, 'vouches'))[0].id, 'vch-coord');
   const requestsNow = base.requests.filter((r) => r.id !== 'req-g'); // the current state: chan-1 only, req-1 and req-free
-  unchangedAfter(() => save({ ...base, requests: requestsNow.filter((r) => r.id !== 'req-1'), channels: base.channels.filter((c) => c.id !== 'chan-g'), ledger: [{ id: 'led-invalid' }] }), /CHANNEL_REQUEST_MISSING/, 'CHANNEL_REQUEST_MISSING', 'an invalid combination (ledger untouched)');
-  assert.equal(JSON.parse(blobOf(dir, 'ledger'))[0].id, 'led-coord', 'the unrelated collection is untouched');
+  unchangedAfter(() => save({ ...base, requests: requestsNow.filter((r) => r.id !== 'req-1'), channels: base.channels.filter((c) => c.id !== 'chan-g'), vouches: [{ id: 'vch-invalid' }] }), /CHANNEL_REQUEST_MISSING/, 'CHANNEL_REQUEST_MISSING', 'an invalid combination (vouches untouched)');
+  assert.equal(JSON.parse(blobOf(dir, 'vouches'))[0].id, 'vch-coord', 'the unrelated collection is untouched');
   // the five guardian cases (the guardian thread put back first, coordinated with its request)
   save({ ...base, requests: base.requests, channels: base.channels }); assert.deepEqual(channelIds(dir), ALL);
   const { channels: _c2, requests: _r2, ...identityOnly } = base;
@@ -372,10 +372,10 @@ test('[cutover] the FINAL-STATE assertion, every direction (review §11.5): chan
   const withoutSolo = base.guardians.filter((g) => g.id !== 'gd-signup'); assert.equal(withoutSolo.length, base.guardians.length - 1);
   unchangedAfter(() => save({ ...identityOnly, players: base.players, guardians: withoutSolo }), /CHANNEL_GUARDIAN_MISSING[^;]*chan-solo/, 'CHANNEL_GUARDIAN_MISSING', '(i) identity pair only, referenced guardian removed');
   save({ ...identityOnly, players: base.players, guardians: base.guardians }); assert.equal(JSON.stringify(tool.load().db.channels), textBefore, '(ii) identity pair only, every guardian retained: the threads unchanged in order and content');
-  save({ ...identityOnly, players: base.players, guardians: withoutSolo, channels: base.channels.filter((c) => c.id !== 'chan-solo'), requests: base.requests.filter((r) => r.id !== 'req-solo'), ledger: [{ id: 'led-iii' }] }); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-g'], '(iii) guardian and its channel removed together'); assert.equal(rowsOf(dir, 'guardians').some((g) => g.id === 'gd-signup'), false);
+  save({ ...identityOnly, players: base.players, guardians: withoutSolo, channels: base.channels.filter((c) => c.id !== 'chan-solo'), requests: base.requests.filter((r) => r.id !== 'req-solo'), vouches: [{ id: 'vch-iii' }] }); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-g'], '(iii) guardian and its channel removed together'); assert.equal(rowsOf(dir, 'guardians').some((g) => g.id === 'gd-signup'), false);
   save({ ...base }); assert.deepEqual(channelIds(dir), ALL); assert.ok(rowsOf(dir, 'guardians').some((g) => g.id === 'gd-signup'), 'the guardian is back');
-  unchangedAfter(() => save({ ...identityOnly, players: base.players, guardians: withoutSolo, channels: base.channels, ledger: [{ id: 'led-iv' }] }), /CHANNEL_GUARDIAN_MISSING[^;]*chan-solo/, 'CHANNEL_GUARDIAN_MISSING', '(iv) invalid coordinated replacement: guardian removed, its channel kept');
-  assert.deepEqual(JSON.parse(blobOf(dir, 'ledger')), base.ledger, '(iv) the unrelated collection is untouched (the base ledger the previous save wrote, not led-iv)');
+  unchangedAfter(() => save({ ...identityOnly, players: base.players, guardians: withoutSolo, channels: base.channels, vouches: [{ id: 'vch-iv' }] }), /CHANNEL_GUARDIAN_MISSING[^;]*chan-solo/, 'CHANNEL_GUARDIAN_MISSING', '(iv) invalid coordinated replacement: guardian removed, its channel kept');
+  assert.deepEqual(JSON.parse(blobOf(dir, 'vouches')), base.vouches, '(iv) the unrelated collection is untouched (the base vouches the previous save wrote, not vch-iv)');
   unchangedAfter(() => save({ ...noRequests, channels: [...base.channels, guardianChannel({ id: 'chan-bad', requestId: 'req-free', guardianId: 'gd-missing' })] }), /CHANNEL_GUARDIAN_MISSING/, undefined, '(v) channels only with an invalid guardian, against the retained identity tables');
   // the organisation
   unchangedAfter(() => save({ ...noChannels, orgs: [] }), /no longer lists organisation org-pro but other records still reference it/, undefined, 'an organisation removed with its channel retained');

@@ -3,8 +3,9 @@
 Status: design proposed, executable DDL in `docs/architecture/sql/`, implementation steps
 S0 (staff), S1 (core identity shadow, corrected after acceptance review), S2 (sessions
 live, hashed tokens), S3 (organisations live, `org_users` rebuilt STRICT with its
-foreign key) and S4a (players, guardians and `guardian_children` live with the
-transitional `facets_json`; the `media_deletions` queue; the S1 shadow retired) done
+foreign key), S4a (players, guardians and `guardian_children` live with the
+transitional `facets_json`; the `media_deletions` queue; the S1 shadow retired), S5, S6a, S7a–S7d
+and S6b (the eight audit tables, 19 October 2026, pending independent acceptance) done
 (§5.0 says exactly which parts are implemented, proposed, or waiting on a decision). Companion
 document: [`sqlite-migration-plan.md`](./sqlite-migration-plan.md). Written 10 October
 2026 on branch `feat/sqlite-schema`.
@@ -145,16 +146,16 @@ them.
 | `outbox` | audit | 03 | `outbox` (two writer literals told apart by a structural `source` discriminator under a total CHECK — NULL means "absent key"; `to_address` nullable: an accepted queued dispatch yields `to: null`; a non-string destination — the array the coercing invite routes hand the mailer — in `to_json`, decoded on read (review of `40aa05c`, F2), a non-finite number inside it kept live and persisted as the old JSON null (review of `78c14b9`); `seq` insertion-order key; unknown fields → `extra_json`) — **LIVE since migration 0011 (S7c, independently accepted at `9119187`)** | S7c |
 | `pushLog` | audit | 03 | `push_log` (`seq` key; open `audience_kind`, as `notifications`; the row is written by the after-durable effect after the notification's save and lands with the later save the sender's `nextId()` already schedules) — **LIVE since migration 0011 (S7c, independently accepted at `9119187`)** | S7c |
 | `pushTokens` | persistent | 03 | `push_tokens` (`token_json`: any JSON value the route accepted, stored losslessly and decoded on read — the token is the delivery address, kept plain; **no uniqueness constraint**: the route's `===` rule lives in `register` — primitives collapse, objects never; a non-finite number (JSON `1e400`) is kept live and persisted as null, as the blob's JSON did, a replacement deleting by `seq` — review of `40aa05c`, F1; `seq` = last-registration order) — **LIVE since migration 0011 (S7c, independently accepted at `9119187`)** | S7c |
-| `blocks` | persistent (safeguarding) | 03 | `blocks` | S6 |
-| `reports` | audit (safeguarding) | 03 | `reports` | S6 |
-| `moderationLog` | audit (safeguarding) | 03 | `moderation_log` | S6 |
-| `orgNotes` | persistent | 03 | `org_notes` | S6 |
-| `ledger` | audit | 03 | `ledger` | S6 |
-| `opsEvents` | audit | 03 | `ops_events` | S6 |
-| `sourceChanges` | audit | 03 | `source_changes` | S6 |
+| `blocks` | persistent (safeguarding) | 03 | `blocks` (`seq` insertion-order key; `player_id` / `org_id` indexed, **no foreign key** — Q4 tolerant player reference, the org id a historical pointer; the lift deletes the row — Q5) — **LIVE since migration 0013 (S6b, implemented 19 October 2026, pending independent acceptance)** | S6b |
+| `reports` | audit (safeguarding) | 03 | `reports` (`seq` key; `target_player_id` indexed, no foreign key — a non-string value `handleReport` accepted is kept in `offtype_json`; resolution by row id) — **LIVE since migration 0013 (S6b, pending independent acceptance)** | S6b |
+| `moderationLog` | audit (safeguarding) | 03 | `moderation_log` (`seq` key; the caller's context object kept whole in `context_json`) — **LIVE since migration 0013 (S6b, pending independent acceptance)** | S6b |
+| `orgNotes` | persistent | 03 | `org_notes` (`seq` key; no foreign key) — **LIVE since migration 0013 (S6b, pending independent acceptance)** | S6b |
+| `ledger` | audit | 03 | `ledger` (`seq` key; `user_id` / `actor_name` verbatim, no actor kind derived; no foreign key) — **LIVE since migration 0013 (S6b, pending independent acceptance)** | S6b |
+| `opsEvents` | audit | 03 | `ops_events` (`seq` key; every kind an ordinary row) — **LIVE since migration 0013 (S6b, pending independent acceptance)** | S6b |
+| `sourceChanges` | audit | 03 | `source_changes` (`seq` key; the 20 000 cap deletes the oldest rows) — **LIVE since migration 0013 (S6b, pending independent acceptance)** | S6b |
 | `emailChallenges` | temporary | 03 | `email_challenges` (`code_hash`, `attempts`) — **LIVE since migration 0008 (S6a, accepted at `2d7ddeb`)** | S6a |
 | `pairingCodes` | temporary | 03 | `pairing_codes` (`code_hash`; `player_id` without a foreign key, see 03's header) — **LIVE since migration 0008 (S6a, accepted at `2d7ddeb`)** | S6a |
-| `idvQueue` | audit (verification provenance) | 03 | `idv_queue` | S6 |
+| `idvQueue` | audit (verification provenance) | 03 | `idv_queue` (`seq` key; `guardian_id NOT NULL`, checked STRICTLY in code against the final `guardians` — Q4b; no foreign key yet) — **LIVE since migration 0013 (S6b, pending independent acceptance)** | S6b |
 | `evidence` | persistent | 04 | `evidence`, `evidence_media`, `evidence_disputes`, `evidence_history` | S9 |
 | `coachAffiliations` | persistent | 04 | `coach_affiliations`, `coach_affiliations_history` | S9 |
 | `squadInvites` | persistent | 04 | `squad_invites` | S9 |
@@ -411,7 +412,10 @@ listed with their steps in §4's mapping (`email_challenges`, `pairing_codes` �
 `2d7ddeb`; `notifications`, `notification_prefs`, `notification_pref_categories` — S7a, accepted at
 `0641b2c`; `dispatches`, `dispatch_attempts` — S7b, accepted at `ac50b60`; `outbox`, `push_log`,
 `push_tokens` — S7c, accepted at `9119187`; `channels`, `messages`, `message_attachments` — S7d, accepted at
-`4f954ad`). Which tables the next stage can create, and the decisions it needs, are in the plan's §D.
+`4f954ad`; `blocks`, `reports`, `moderation_log`, `org_notes`, `ledger`, `ops_events`, `source_changes`,
+`idv_queue` — S6b, implemented 19 October 2026 under the Founder's decisions Q4/Q4b/Q5, pending independent
+acceptance, `s6-readiness-review.md` §11). Which tables the next stage can create, and the decisions it needs, are
+in the plan's §D.
 
 ### 5.0.1 Why 320 tables and 388 indexes
 
@@ -561,8 +565,12 @@ Channels are 1:1 with a request; messages are children, oldest-first by `(channe
 created_at)` with a unique `(channel_id, sender_kind, sender_id, client_msg_id)` for the
 client idempotency key. Notifications are addressed to `(audience_kind, audience_id)`.
 Safeguarding rows (`blocks`, `reports`, `moderation_log`) and audit rows (`ledger`,
-`ops_events`, `source_changes`, `idv_queue`, `org_notes`) reference players with `ON DELETE
-RESTRICT`: they must outlive the subject, which is why §10 makes player deletion a tombstone.
+`ops_events`, `source_changes`, `idv_queue`, `org_notes`) are live tables since migration 0013 (S6b,
+19 October 2026, pending independent acceptance) **with no foreign key**: the five player references are
+tolerant historical references, counted when unresolved and never refused (Q4 — today's hard delete leaves them
+in place, which is why they must outlive the subject), the IDV guardian reference is checked strictly in code
+(Q4b), and the `ON DELETE RESTRICT` references this document designed stay OPEN for S4b's tombstone and the
+foreign-key step (plan §D.2a) — the DESIGN below still assumes them for that later step.
 One-time codes (`email_challenges`, `pairing_codes`) are stored hashed (live since migration 0008, S6a: sha256 of the code trimmed and upper-cased; the guardian e-mail code stays plain in `guardians.facets_json` until a resend route exists, `s6-readiness-review.md` §5.3).
 
 ### 5.4 Scouting and assessment (file 04)

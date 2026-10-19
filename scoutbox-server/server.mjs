@@ -145,7 +145,7 @@ function loadSnapshot() {
     Object.assign(db, raw.db);
     snapshotIdCounter = Number(raw.idCounter) || 0;
     snapshotLoaded = true;
-    console.log(`snapshot loaded (${store.engine}): ${Array.isArray(db.players) ? `${db.players.length} players in the blob` : 'players table-backed'}, ${db.ledger?.length ?? 0} ledger rows`);
+    console.log(`snapshot loaded (${store.engine}): ${Array.isArray(db.players) ? `${db.players.length} players in the blob` : 'players table-backed'}, ${Array.isArray(db.ledger) ? `${db.ledger.length} ledger rows in the blob` : 'ledger table-backed'}`);
   } catch (err) {
     if (err?.code === 'SNAPSHOT_INVALID') throw err;
     // A legacy db.json that could not be imported is a snapshot that exists
@@ -199,7 +199,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -287,6 +287,13 @@ db.pushTokens ??= [];      // device push tokens, registered per user
 // message_attachments tables (repositories/channels.mjs, migration 0012) since
 // attachDataLayer ran above — never assigned here; writes go through `channels`
 // (openChannel, postMessage, the receipt routes, deletePlayerData).
+// S6b: db.blocks, db.reports, db.moderationLog, db.orgNotes, db.ledger,
+// db.opsEvents, db.sourceChanges and db.idvQueue are read-only views over the
+// blocks / reports / moderation_log / org_notes / ledger / ops_events /
+// source_changes / idv_queue tables (repositories/safetyAudit.mjs, migration
+// 0013) since attachDataLayer ran above — never assigned here; writes go through
+// `safetyAudit` (ledgerAppend, moderateOrRefuse, handleReport, the block, note,
+// IDV, resolve and lift routes, the m13 ops events and m181's source changes).
 db.invoices ??= [];        // billing records (success fees)
 // db.emailChallenges: the data layer's hash-free read-only view since S6a (rows of email_challenges) — never assigned here.
 db.openTrials ??= [];      // grassroots open trial days + registrations
@@ -690,9 +697,10 @@ function findPlayer(id) {
 
 function ledgerAppend(entry) {
   // Discovery Ledger is append-only; nothing in this file ever mutates or
-  // deletes an entry after this push.
-  const row = { id: nextId('led'), ts: Date.now(), ...entry };
-  db.ledger.push(row);
+  // deletes an entry after this append. S6b: a row of the ledger table, written
+  // through the repository in the caller's unit or staged into its next save;
+  // userId / scoutName are stored verbatim, exactly as the caller passes them.
+  const row = safetyAudit.ledger.append({ id: nextId('led'), ts: Date.now(), ...entry });
   broadcast('ledger', { type: row.type, playerId: row.playerId });
   return row;
 }
@@ -1148,11 +1156,11 @@ function insightsFor(playerId) {
 function moderateOrRefuse(res, text, context) {
   const check = moderateText(text);
   if (!check.ok) {
-    db.moderationLog.push({ id: nextId('mod'), ts: Date.now(), context, flags: check.flags, severity: check.severity, excerpt: String(text).slice(0, 140) });
+    safetyAudit.moderationLog.append({ id: nextId('mod'), ts: Date.now(), context, flags: check.flags, severity: check.severity, excerpt: String(text).slice(0, 140) });
     // Grooming-pattern hits don't just block — they escalate to a human
     // immediately as an urgent auto-report against the sender.
     if (check.severity === 'grooming') {
-      db.reports.push({
+      safetyAudit.reports.append({
         id: nextId('rep'), ts: Date.now(), by: 'system', byId: 'moderation',
         targetKind: context.orgId ? 'club' : 'player', targetOrgId: context.orgId ?? null,
         reason: `Automatic escalation: grooming-pattern language blocked (${check.flags.join(', ')}) in ${context.kind}.`,
@@ -1437,7 +1445,9 @@ guardianRouter.post('/verify-id', async (req, res, next) => {
       guardians.update(req.guardian.id, { idVerified: true, idvReference: result.reference });
       seam('guardian.verify_id.after_row');
       // Every check lands in the admin IDV queue for audit — and can be revoked there.
-      db.idvQueue.push({
+      // S6b: a row of idv_queue in the same unit as the guardian's column (Domain G:
+      // the repository refuses an entry naming a guardian that does not exist).
+      safetyAudit.idvQueue.append({
         id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name,
         documentType, documentRef: result.document.refLast4, provider: result.provider,
         reference: result.reference, ts: Date.now(), status: 'approved',
@@ -1759,7 +1769,7 @@ guardianRouter.post('/block', (req, res) => {
   const childId = playerId || (req.guardian.childIds.length === 1 ? req.guardian.childIds[0] : null);
   if (!orgId || !childId) return res.status(400).json({ error: 'ORG_AND_CHILD_REQUIRED', message: playerId ? undefined : 'Name which child the block is for (playerId).' });
   if (!db.orgs.some((o) => o.id === orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-  db.blocks.push({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
+  safetyAudit.blocks.append({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
   ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'guardian' });
   broadcast('players');
   res.status(201).json({ blocked: true });
@@ -1787,7 +1797,9 @@ function handleReport(req, res, actor) {
     outcome: null,
     resolvedAt: null,
   };
-  db.reports.push(report);
+  // S6b: a row of the reports table, stored as built here — a truthy
+  // targetPlayerId of any type is kept as received (Domain P: no player check).
+  safetyAudit.reports.append(report);
   // Reports now land in the REAL review queue: the trust-and-safety admin
   // console resolves them (POST /admin/reports/:id/resolve) and the reporter
   // is notified with the outcome. No more auto-resolve timer.
@@ -1798,7 +1810,7 @@ function handleReport(req, res, actor) {
       ? db.guardians.find((g) => g.id === actor.byId)?.childIds ?? []
       : actor.by === 'player' ? [actor.byId] : [];
     for (const pid of playerIds) {
-      db.blocks.push({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
+      safetyAudit.blocks.append({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
       for (const r of db.requests) {
         if (r.playerId === pid && r.orgId === targetOrgId && r.status === 'pending') r.status = 'suspended';
       }
@@ -1971,7 +1983,7 @@ app.post('/auth/org/login', (req, res) => {
         role: isLeadRole(requested) ? requested : 'Manager',
         provenance: 'org_password_bootstrap',
       });
-      db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: user.id, by: user.name } });
+      safetyAudit.opsEvents.append({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: user.id, by: user.name } });
       persist();
     } else {
       user = users.insert({ orgId, name: scoutName.trim(), role: (role || 'Scout').trim() });
@@ -2110,7 +2122,7 @@ orgRouter.post('/players/:id/notes', (req, res) => {
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   const note = { id: nextId('note'), orgId: req.org.id, playerId: p.id, userId: req.orgUser.id, scoutName: req.orgUser.name, text: text.trim(), ts: Date.now() };
-  db.orgNotes.push(note);
+  safetyAudit.orgNotes.append(note);
   broadcast('players', { playerId: p.id });
   res.status(201).json(note);
 });
@@ -3988,7 +4000,7 @@ playerRouter.post('/report', (req, res) => handleReport(req, res, { by: 'player'
 playerRouter.post('/block', (req, res) => {
   const { orgId, reason } = req.body || {};
   if (!orgId) return res.status(400).json({ error: 'ORG_REQUIRED' });
-  db.blocks.push({ id: nextId('blk'), playerId: req.player.id, orgId, by: 'player', reason: reason || '', ts: Date.now() });
+  safetyAudit.blocks.append({ id: nextId('blk'), playerId: req.player.id, orgId, by: 'player', reason: reason || '', ts: Date.now() });
   ledgerAppend({ type: 'org_blocked_by_player', playerId: req.player.id, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'player' });
   broadcast('players');
   res.status(201).json({ blocked: true });
@@ -4458,9 +4470,9 @@ adminRouter.post('/reports/:id/resolve', (req, res) => {
   if (report.status !== 'pending_review') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
   const { outcome, action } = req.body || {};
   if (!outcome || !String(outcome).trim()) return res.status(400).json({ error: 'OUTCOME_REQUIRED' });
-  report.status = action === 'dismiss' ? 'resolved' : 'resolved';
-  report.resolvedAt = Date.now();
-  report.outcome = String(outcome).trim();
+  // S6b: the three fields the route always changed, updated by row id (the view
+  // `report` reflects the change; the row lands in the persist() below).
+  safetyAudit.reports.patch(report.id, { status: action === 'dismiss' ? 'resolved' : 'resolved', resolvedAt: Date.now(), outcome: String(outcome).trim() });
   if (action === 'suspend_org' && report.targetOrgId) {
     const org = db.orgs.find((o) => o.id === report.targetOrgId);
     if (org) orgs.update(org.id, { suspended: true });
@@ -4517,11 +4529,12 @@ adminRouter.post('/guardians/:id/idv', (req, res) => {
   const g = db.guardians.find((x) => x.id === req.params.id);
   if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
   const approved = !!req.body?.approved;
-  // One unit of work: the column and the review-queue entry (a blob) commit together.
+  // One unit of work: the column and the review-queue row commit together
+  // (S6b: the FIRST entry of the guardian in insertion order, as before).
   unit(() => {
     guardians.update(g.id, { idVerified: approved });
-    const entry = (db.idvQueue ?? []).find((q) => q.guardianId === g.id);
-    if (entry) entry.status = approved ? 'approved' : 'revoked';
+    const entry = safetyAudit.idvQueue.firstForGuardian(g.id);
+    if (entry) safetyAudit.idvQueue.patch(entry.id, { status: approved ? 'approved' : 'revoked' });
   });
   res.json(adminGuardianView(g));
 });
@@ -4529,9 +4542,9 @@ adminRouter.post('/guardians/:id/idv', (req, res) => {
 adminRouter.get('/blocks', (_req, res) => res.json(db.blocks.slice().reverse()));
 
 adminRouter.post('/blocks/:id/lift', (req, res) => {
-  const idx = db.blocks.findIndex((b) => b.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'BLOCK_NOT_FOUND' });
-  const [lifted] = db.blocks.splice(idx, 1);
+  // Q5 (19 October 2026): lifting a block deletes its row, as it always did.
+  const lifted = safetyAudit.blocks.remove(req.params.id);
+  if (!lifted) return res.status(404).json({ error: 'BLOCK_NOT_FOUND' });
   persist();
   broadcast('players');
   res.json({ lifted });
@@ -4606,7 +4619,7 @@ function revokeOrgUserAccess(userId) {
 
 registerM12({
   db, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4618,7 +4631,7 @@ registerM12({
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
   db, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4632,7 +4645,7 @@ const m13Ctx = registerM13({
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
   db, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4643,7 +4656,7 @@ const m14Ctx = registerM14({
 // write to it (M15 preferences) and the system that reads it (M18 Second Look),
 // so a change carries the clock of the moment it happened rather than one
 // borrowed from a record describing a different event.
-const srcCtx = { db, nextId, persistNow };
+const srcCtx = { db, nextId, persistNow, safetyAudit }; // S6b: source changes are rows of source_changes, written through the repository
 registerSourceChanges(srcCtx);
 
 // M18.2 — preferences, audit and fault injection. Registered here, after the
@@ -4673,7 +4686,7 @@ const rateLimit = createRateLimiter();
 // receives the same context and adds no new authorization surface.
 const m15Ctx = registerM15({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
   recordSourceChange: srcCtx.recordSourceChange,
@@ -4681,7 +4694,7 @@ const m15Ctx = registerM15({
 const m16Ctx = registerM16({
   rateLimit,
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   players, unit, // S5: a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
 });
@@ -4692,7 +4705,7 @@ const m16Ctx = registerM16({
 // authorization surface (a Trust Score grants nothing).
 const m162Ctx = registerM162({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
   testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
@@ -4707,7 +4720,7 @@ const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4740,7 +4753,7 @@ const m17Ctx = registerM17({
 const m18Ctx = registerM18({
   rateLimit,
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, sessionFor, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
