@@ -65,7 +65,8 @@ follow-up's acceptance §10.9, the two correction rounds §10.10–§10.11 as hi
 corrections from the review of `8330f08`; §11.9 S7d as implemented on top of `b67bce5` after the Founder's
 decisions D-A and D-B; §11.10 the one correction after the review of `62e9c1a`; **§11.11 the independent
 acceptance at `4f954ad`**; §11.12 the S7a–S7c nested-restore observation classified as a separately scoped
-follow-up).
+follow-up; §11.13 the review of `6956f52` — acceptance record confirmed, three corrections to the next-stage
+brief in the plan).
 
 ---
 
@@ -777,9 +778,17 @@ notification, outbox/push-log and channel rows of a send are table rows, and the
 `notificationsPersistenceBench.mjs 3000 100`) shows the `channels` blob no longer rewritten per save. The
 `ledger` row the send still appends is a blob rewritten by every save (309 491 bytes in that run), and so
 are `requests`, `trials`, `recruitmentCases` and every other unconverted collection. **The objective is
-therefore not met by S7's completion**; it is reached for the send path only when the `ledger` becomes a
-table (the S6 audit step — `sqlite-migration-plan.md` §D.2, §D.4 Candidate A), and for the whole
-application only when every collection a route writes is a table or the store writes only changed blobs.
+therefore not met by S7's completion, and — corrected 19 October 2026 after the review of `6956f52` — it is
+not met by moving the `ledger` either.** What a send *mutates* (channels, ledger, notifications, push log) is
+not what its save *persists*: `store.mjs:177–183` serialises and UPSERTs every collection that is not a table
+on every save, whether or not it changed. The reviewer's design check (`review-6956f52-design-checks.mjs`,
+rerun unchanged here) excludes all eight proposed audit collections through the real server-mode skip list,
+appends a real channel message and saves: `requests`, `trials` and an unrelated collection are UPDATEd with
+identical content. Moving the audit collections (plan §D.4 Candidate A) removes **their** serialisation and
+UPSERT work from every save and nothing more. The objective is reached only when every collection a save
+persists is a table, or when a separately authorised change to the save path writes only changed blobs — not
+proposed in any current step. The earlier sentence here that the objective would be reached "for the send
+path only" when the ledger became a table was wrong and is withdrawn.
 
 **The benchmark, reproducible and synthetic** (described, not built): extend
 `scripts/dataLayerPerf.mjs` (synthetic snapshot in the server's own shapes, throwaway database,
@@ -806,7 +815,7 @@ with the ledger and notification sizes stated. The harness is not changed by thi
 | **S7c** push-token audience re-keying (staff pushes) | needs a **product/behaviour decision** — not taken by S7c | which identity a staff push targets; what to do with existing `org`-kind rows; kept out of the storage move (§6.2) |
 | **S7d** `channels` + `messages` + `message_attachments` | **independently ACCEPTED at `4f954ad` (18 October 2026; §11.11)** — implemented on top of `b67bce5` (§11.9), corrected once (§11.10); migration `0012_channels`; the §2.3 transitional code-checked request reference approved by the Founder (D-A), today's deletion reproduced inside the deletion unit (D-B, a scope confirmation) | `request_id` → S8's `recruitment_requests` (§2.2) stays a code-checked reference until S8a rebuilds the table with the foreign key (plan §D.3); the ordering column for equal timestamps (§1.2) is `messages.position`; retention OPEN (S4b) |
 | S7d `channels.player_id` deletion behaviour | the Founder confirmed the storage-only reading (**D-B**, §11.9); the retention question itself is still a **product-policy answer** for S4b | message retention after deletion (`s4-deletion-decision.md` §4 "review"); the repository deletes explicitly inside the deletion unit, no CASCADE in the DDL |
-| the `ledger` rows every send writes | needs **another storage stage** (the S6 audit tables): the `ledger` table with its `players(id)` foreign key needs **S4b**; without the foreign key it needs the Founder's approval of the no-FK shape (plan §D.2, Q4) | `ledger.player_id RESTRICT` (S6 review §4.1); plan §D.4 Candidate A |
+| the `ledger` rows every send writes | needs **another storage stage** (the S6 audit tables): the `ledger` table with its `players(id)` foreign key needs **S4b and identity-snapshot compatibility** (plan §D.2a — the snapshot's DELETE/reinsert of `players`, the same fact as §11.8's for guardians); without the foreign key it needs the Founder's approval of the checked-reference shape (plan §D.2, Q4). Moving it does not meet the whole-snapshot-write objective (§7.3) | `ledger.player_id RESTRICT` (S6 review §4.1); plan §D.4 Candidate A |
 | "no whole-database write on send" | needs S7a + S7c + S7d + the S6 ledger (or a store dirty-save change) | §7.3 phases |
 | retention periods, pruning, deletion cleanup of delivery records, removed-staff notifications, the minor export gate, the grooming report's org | **product-policy answers** | listed in §4.1/§4.4; not decided here |
 | guardian deletion, org deletion | S4b (O1) and O2 | out of S7 |
@@ -3230,6 +3239,29 @@ exactly §11.10's change), one function each in `notifications.mjs` (:532–539,
 (a held nested view across a thrown-body and a flush-refused unit; identity, value, pending queue, later commit).
 No schema, migration, route, payload or retention change; the rollback tools are untouched. It is a uniformity
 and defence-in-depth change, not a blocker for S4b, S6 or S8.
+
+### 11.13 Review of `6956f52` — the S7 acceptance record confirmed; three corrections to the next-stage brief (19 October 2026; documentation only)
+
+The independent review of `6956f52` (`review-6956f52-summary.txt`) confirmed the acceptance record of §11.11
+(S7d accepted at `4f954ad`; all four S7 sub-steps accepted; no new regression in the accepted code; backend
+27 suites / 363 checks and Player 4 / 41 on Node v24.19.0 with the four actual old builds; the unchanged S7d
+reproduction exit 0; the eight-view nested-restore probe of §11.12 rerun exit 0 — no stale values for those
+fixtures, identity loss still reported, a bounded follow-up and not a universal claim) and found the
+**next-stage brief** (`sqlite-migration-plan.md` §D) not implementation-ready on three P2 documentation
+points, each corrected in place in the plan: **F1** the proposed foreign keys to `players(id)` and
+`guardians(id)` need identity-snapshot compatibility — the snapshot's DELETE/reinsert of both tables
+(`identity.mjs:205–207`, the fact §11.8 established for `channels.guardian_id`) refuses an unchanged valid
+snapshot under any immediate `RESTRICT` child, a guardian "never deleted by a route" included, and a tombstone
+does not address it (plan §D.2a: the two bounded alternatives, the six required checks, and the consequence
+that S4b alone does not make the permanent keys ready); **F2** moving the `ledger` and the other audit blobs
+does not meet the whole-snapshot-write objective for a send — the save still serialises every remaining blob
+(§7.3 corrected above; plan §D.4); **F3** Candidate A no longer contradicts Q2 — it is proposed as a
+behaviour-preserving stage that defers stamping with Q2 OPEN and a later additive migration (plan §D.4, §D.5).
+The reviewer's design-check script `review-6956f52-design-checks.mjs` installs the drafted `idv_queue` and
+`ledger` DDL only in disposable synthetic databases, exercises the real snapshot writer, and models the
+exclusion of all eight audit names in the real save loop; it runs unchanged on this tree (exit 0, Node
+v22.22.2) and verifies those engine and store facts — design premises, not regressions in S7, and a corrected
+document does not make them disappear. No source changed; S7a–S7d acceptance and D-A/D-B are untouched.
 
 ---
 

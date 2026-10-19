@@ -1321,8 +1321,11 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
 > built, the decisions and the verification are in the readiness review §10. The guardian e-mail
 > code stays plain (review §5.3). **The eight audit tables remain not started.** Which of them truly wait for
 > S4b (the `players(id)` foreign key on five), which wait only for an approval of the no-FK shape, and which
-> wait for nothing but authorisation (`moderation_log`, `ops_events`, `idv_queue`) is set out in §D.2 from the
-> code at `4f954ad`; the candidate step S6b and the decisions it needs (Q4, Q5) are in §D.4–§D.5.
+> wait for nothing but authorisation (`moderation_log`, `ops_events`) is set out in §D.2 from the
+> code at `4f954ad`; `idv_queue`'s guardian reference needs the identity-snapshot compatibility of §D.2a (the
+> identity snapshot deletes and reinserts every guardian row — verified by the review of `6956f52`), so it ships
+> only as an approved checked reference (Q4b) or after Alternative A; the candidate step S6b and the decisions
+> it needs (Q4, Q4b, Q5) are in §D.4–§D.5. S6b does not meet the whole-snapshot-write objective (§D.4).
 >
 > **Status (S6, the rest): not started.** The readiness review grounded in the code at `2178c5b` is
 > [`s6-readiness-review.md`](./s6-readiness-review.md); where the bullets below differ from it,
@@ -1809,6 +1812,18 @@ earlier section of this plan still says "waits for S4b" without qualification, t
 Nothing here decides a retention period, infers compliance from a development choice, or reopens the
 Founder's recorded choices (the full birth date; D-A; D-B; the legacy-minor rule).
 
+**Corrected 19 October 2026 after the independent review of `6956f52`** (`review-6956f52-summary.txt`; its
+design-check script `review-6956f52-design-checks.mjs` runs unchanged on this tree, exit 0, and verifies the
+engine and store facts below on synthetic databases — design premises, not regressions in the accepted S7
+code). Three defects of the first version are corrected in place: **F1** the proposed foreign keys to
+`players(id)` and `guardians(id)` need **identity-snapshot compatibility**, not only an account-deletion
+policy (§D.2, new §D.2a, §D.3, §D.4); **F2** moving the `ledger` and the other audit blobs does **not** meet
+the no-whole-snapshot-write objective for a message send — the save still serialises every remaining blob
+(§D.4 Candidate A, the recommendation, Q4); **F3** Candidate A no longer contradicts Q2: it is a
+behaviour-preserving stage that **defers** child-status stamping and leaves Q2 OPEN, with the later additive
+step described (§D.4, §D.5). The decision list is reduced to what the proposed next step needs; the other
+questions are recorded, not demanded.
+
 ### D.1 S4b — what the code does today, what remains to build, what still needs an answer
 
 **Today (file/line, `scoutbox-server/`).** `deletePlayerData` (`server.mjs:4245–4305`) is one unit of work
@@ -1864,42 +1879,119 @@ S4b depends on it, but a reviewer of a deleted player's safeguarding row depends
 
 ### D.2 S6 — the eight audit tables: which truly wait for S4b, and which "dependencies" are design choices
 
-| Table (DDL `03_messaging_safety_audit.sql`) | Player reference as drafted | Writers today (`server.mjs` unless stated) | Waits for S4b? |
+| Table (DDL `03_messaging_safety_audit.sql`) | Identity reference as drafted | Writers today (`server.mjs` unless stated) | What the drafted foreign key waits for |
 |---|---|---|---|
-| `blocks` (:626) | `player_id … REFERENCES players(id) ON DELETE RESTRICT` (:628) | insert :1762, :1801, :3991; **lift = hard delete** (`splice`, :4534) | **for the foreign key only** |
-| `reports` (:670) | `target_player_id … RESTRICT` (:679) | insert :1155, :1790; status update :1803, :4461 | for the foreign key only |
-| `org_notes` (:762) | `player_id … RESTRICT` (:765) | insert :2113 | for the foreign key only |
-| `ledger` (:823) | `player_id … RESTRICT` (:827) | `ledgerAppend` :691–695 (one push; ~45 call sites) | for the foreign key only |
-| `source_changes` (:887) | `player_id … RESTRICT` (:889) | `m181/sourceChanges.mjs:44`; cap of 20 000 by `splice` (:47) | for the foreign key only |
-| `moderation_log` (:725) | none, by design | insert :1151 | **no** |
-| `ops_events` (:857) | none (no person) | :1974; `m13/delivery.mjs:151`; `m13/enterprise.mjs:341, 445, 515, 519` | **no** |
-| `idv_queue` (:994) | `guardian_id … REFERENCES guardians(id) ON DELETE RESTRICT` (:996) — no guardian deletion route exists | insert :1440; status update :4523 | **no** |
+| `blocks` (:626) | `player_id … REFERENCES players(id) ON DELETE RESTRICT` (:628) | insert :1762, :1801, :3991; **lift = hard delete** (`splice`, :4534) | **S4b** (account deletion) **and §D.2a** (snapshot replacement); the table itself waits for neither |
+| `reports` (:670) | `target_player_id … RESTRICT` (:679) | insert :1155, :1790; status update :1803, :4461 | S4b and §D.2a — for the foreign key only |
+| `org_notes` (:762) | `player_id … RESTRICT` (:765) | insert :2113 | S4b and §D.2a — for the foreign key only |
+| `ledger` (:823) | `player_id … RESTRICT` (:827) | `ledgerAppend` :691–695 (one push; ~45 call sites) | S4b and §D.2a — for the foreign key only |
+| `source_changes` (:887) | `player_id … RESTRICT` (:889) | `m181/sourceChanges.mjs:44`; cap of 20 000 by `splice` (:47) | S4b and §D.2a — for the foreign key only |
+| `moderation_log` (:725) | none, by design | insert :1151 | **nothing** (authorisation) |
+| `ops_events` (:857) | none (no person) | :1974; `m13/delivery.mjs:151`; `m13/enterprise.mjs:341, 445, 515, 519` | **nothing** (authorisation) |
+| `idv_queue` (:994) | `guardian_id … REFERENCES guardians(id) ON DELETE RESTRICT` (:996) | insert :1440; status update :4523 | **§D.2a** — no guardian deletion route exists, but the identity snapshot deletes and reinserts every guardian row, so the drafted key fails an unchanged snapshot (verified); **not** "nothing but authorisation" as the first version of this section said |
 
-**What is unavoidable and what is a choice.** The one hard fact is SQLite's: a `RESTRICT` reference to
-`players(id)` needs a row to point at after a deletion, and today's deletion removes the row
-(`s6-readiness-review.md` §4.1) — so **the foreign key on five tables waits for S4b**. Everything else is a
-design or sequencing choice, not a SQLite limitation: (i) the five tables **can** be created now with
-`player_id TEXT` indexed and **no** `REFERENCES players(id)`, which reproduces today's dangling-id state
-exactly (§4.1's "proposed implementation"); SQLite cannot add a foreign key with `ALTER TABLE`, so the S4b
-migration would rebuild those tables (create–copy–drop–rename, the S4a/S5 pattern) once a retained row
-exists — a known cost, not a blocker. That shape is a transitional device of the D-A kind and **needs the
-Founder's explicit approval (Q4)**; it is not approved by anything recorded so far, and this plan does not
-approve it. (ii) The "append-only" treatments the S6 review proposed (`lifted_at`/`lifted_by` on `blocks`
-instead of the delete at :4534, §4.2) are **behaviour changes**; preserving present behaviour means the
-block lift stays a row `DELETE` unless the Founder approves the change (Q5). The status updates on
-`reports` and `idv_queue` and the `source_changes` cap are today's behaviour and stay. (iii) The three
-tables without a player reference (`moderation_log`, `ops_events`, `idv_queue`) wait for nothing but
-authorisation. (iv) The write-time child-status stamp (D2) is a product decision (Q2); no column is
-reserved for it.
+**What is unavoidable and what is a choice — two engine facts, then choices.** *Fact 1 (account
+deletion):* a `RESTRICT` reference to `players(id)` needs a row to point at after a deletion, and today's
+deletion removes the row (`s6-readiness-review.md` §4.1) — the foreign key on the five player-referencing
+tables waits for S4b. *Fact 2 (whole-snapshot replacement — the dependency the first version of this section
+missed, reviewer's F1):* every snapshot-mode save (a restore, a snapshot tool, the persistence suites, any
+`store.save` in tool mode) rewrites the identity pair by **deleting and reinserting** every row
+(`IDENTITY_SNAPSHOT.replace`, `repositories/identity.mjs:205–207`: `DELETE FROM guardian_children; DELETE FROM
+players; DELETE FROM guardians;` then the candidate rows) and runs `PRAGMA foreign_key_check` immediately after
+(:225). With `PRAGMA foreign_keys = ON` (`store.mjs:104`) and an immediate `RESTRICT` child — a retained
+`idv_queue` row naming a guardian, or a retained `ledger` row naming a **live** player — the `DELETE` is refused
+at once and **saving an unchanged, valid snapshot fails** (the reviewer's design check installs the drafted DDL
+in a disposable database and calls the real writer: `FOREIGN KEY constraint failed`, the save revision does not
+advance, the parent and child rows survive; removing the child table makes the same save succeed; the ledger
+case fails with the player still alive). A guardian "never deleted by a route" is deleted in storage on every
+snapshot write; **a tombstone solves account deletion and nothing of snapshot replacement.** The S7 review
+reached the same fact for `channels.guardian_id` (§11.8) and chose the code-validated reference. Account
+deletion policy and whole-snapshot replacement are therefore two different dependencies, and both bind
+wherever a foreign key to `players(id)` or `guardians(id)` is introduced — §D.2a. *Choices:* (i) the five
+player-referencing tables and `idv_queue` **can** be created now with the reference column indexed and **no**
+`REFERENCES` clause, reproducing today's dangling-id state exactly (§4.1's "proposed implementation"); SQLite
+cannot add a foreign key with `ALTER TABLE`, so a later migration rebuilds the table (create–copy–drop–rename,
+the S4a/S5 pattern) once §D.2a is in place — a known cost, not a blocker. That shape is a transitional device of
+the D-A kind and **needs the Founder's explicit approval**: Q4 for the player references, and — because Q4 as
+worded covers players only — a separate approval for the guardian reference of `idv_queue` (Q4b); neither is
+approved by anything recorded so far. (ii) The "append-only" treatments the S6 review proposed
+(`lifted_at`/`lifted_by` on `blocks` instead of the delete at :4534, §4.2) are **behaviour changes**;
+preserving present behaviour means the block lift stays a row `DELETE` unless the Founder approves the change
+(Q5). The status updates on `reports` and `idv_queue` and the `source_changes` cap are today's behaviour and
+stay. (iii) Only `moderation_log` and `ops_events` wait for nothing but authorisation. (iv) The write-time
+child-status stamp (D2) is a product decision (Q2); no column is reserved for it, and a step may defer it
+(§D.4) — deferring is not answering.
+
+#### D.2a Identity-snapshot compatibility — required wherever a foreign key to `players(id)` or `guardians(id)` is introduced
+
+**Where it binds.** The five player-referencing audit tables and `idv_queue` (above); S4b's own rebuild that
+would add `REFERENCES players(id)` to them; S8a's file-02 columns (`recruitment_requests.player_id`,
+`trials.player_id`, `recruitment_requests.guardian_id … SET NULL` at `02_recruitment.sql:537`); and the 48
+`players(id)` references `sqlite-schema.md` §10 counts in files 03–08. **S4b by itself does not make any of
+these permanent keys ready**: it changes what account deletion does to a row; the identity snapshot still
+deletes and reinserts every row. One of the two alternatives below must be built first or alongside each
+introduction, and the choice is recorded per table.
+
+**Alternative A — coordinated snapshot writing with deferral and a final-state check (the store learns to
+replace parents under live children).** (1) The snapshot-mode write transaction sets `PRAGMA defer_foreign_keys
+= ON` right after `BEGIN` (`store.mjs` `write()`/`writeBody()`; the pragma is per transaction and resets at
+COMMIT or ROLLBACK; the one occurrence today, `store.mjs:403`, is the test seam `failCommitOfOpenTransaction`,
+not the writer). With the pragma on, the engine defers every foreign-key action — RESTRICT included — to COMMIT,
+so a parent deleted and reinserted inside the transaction commits with its children intact; this is the engine
+fact verified by the `8330f08` probe (S7 review §11.8 (b)) and the withdrawn claim that RESTRICT cannot be
+deferred stays withdrawn. **A `DEFERRABLE INITIALLY DEFERRED` declaration alone is not a design:** with the
+pragma off, RESTRICT still refuses at the DELETE whether or not the column is declared deferrable (§11.8 (a));
+the pragma, not the declaration, is what makes the rewrite legal. (2) The early check at `identity.mjs:225`
+is narrowed to the identity tables (`PRAGMA foreign_key_check(players)`, `(guardians)`, `(guardian_children)`
+and the S5 child tables — SQLite accepts a table argument), because an audit child the same snapshot also
+removes is written or pruned **after** the identity group in the dispatch order (`repositories/index.mjs:143–`:
+orgs → identity → staff/sessions → media queue → channels → prunes → codes → notification group → the channel
+final-state assertion) and would otherwise be a false orphan at that moment (§11.8 (d)). (3) One whole-database
+`PRAGMA foreign_key_check` at the end of `writeTableBacked`, before COMMIT, so a genuine orphan — a retained
+child whose parent the snapshot removed — is refused with table and ids (never a value) instead of the engine's
+bare `FOREIGN KEY constraint failed` at COMMIT; a refusal rolls the whole save back, unrelated collections
+included. (4) The unit-of-work path is unaffected (no unit deletes and reinserts the identity pair; account
+deletion under live RESTRICT children remains the S4b dependency of fact 1). (5) The copy-only rollback tools
+already run their rebuilds with `PRAGMA foreign_keys = OFF` and check at the end
+(`coreIdentityRollback.mjs:188–223` and the S5–S7 tools), so they are unaffected; the previous build has no such
+child tables after the rollback. **Scope and cost:** three changes to existing persistence code outside the
+new table group (`store.mjs`, `repositories/index.mjs`, `repositories/identity.mjs`), every snapshot-mode suite
+(`testCoreSchema`, `testCoreIdentityMigration`, `testIdentityRepositories`, `testMediaDeletions`, the S6a and
+S7 suites, the persistence and backup/restore server tests) re-asserted, and the six checks below written
+first. Once built, every later foreign key to the identity tables rides on it.
+
+**Alternative B — an explicitly approved transitional checked reference (the D-A kind), per table.** The
+reference column carries no `REFERENCES` clause; the repository refuses a write naming a missing parent, the
+cutover migration's preflight refuses a blob entry naming a missing parent, and a final-state assertion runs
+at every snapshot write that touched either side (the `assertChannelReferencesConsistent` /
+`assertPairingCodesConsistent` pattern, `repositories/index.mjs:185` and the S7d assertion, triggered on
+identity rewrites too — §11.8's corrected trigger). Precedents already accepted on this branch:
+`pairing_codes.player_id` (S6a, chosen for exactly this rewrite — `03_messaging_safety_audit.sql` header),
+`channels.guardian_id` (S7d, §11.8), `channels.request_id` (D-A). **Scope and cost:** one assertion per table
+group and no change to the store; the foreign key arrives later only through Alternative A and a table
+rebuild. Each use is a separate approval (Q4 for the five player references, Q4b for the `idv_queue` guardian
+reference, Q7 for file 02); nothing here widens D-A or Q4 by implication.
+
+**Required checks, whichever alternative a step takes (written first, failing on the tree before the step).**
+(a) An **unchanged** valid snapshot saves and advances the revision with the new table populated. (b) A
+**retained parent referenced by retained** IDV/audit rows survives a snapshot that keeps the parent and omits
+or repeats the child collection. (c) A **coordinated replacement** — the snapshot removes a parent and every
+child row naming it — is accepted. (d) A snapshot that removes a parent while **retaining children that name
+it** is **refused atomically** with ids only: no row changed, revision unchanged, unrelated collections
+untouched. (e) An injected **failure before COMMIT** (a statement seam and the real COMMIT) leaves every table
+and the revision unchanged, and the retry lands everything. (f) **Backup and restore** through the admin
+backup and a restore into a new directory, and the **previous-build rollback copy and re-upgrade**, carry
+every parent and child row. For Alternative A, (a)–(d) also run with the pragma deliberately off to prove the
+suite detects its absence; for Alternative B, (d) is the assertion's refusal.
 
 ### D.3 S8a — the dependencies as they stand
 
 | Dependency | Today (file/line) | What S8a needs | Decision? |
 |---|---|---|---|
-| Player tombstones and deletion policy | `recruitment_requests.player_id` (`02_recruitment.sql:511`) and `trials.player_id` (:634) carry **no** foreign key by design; `deletePlayerData` rewrites both as tombstones in place (`server.mjs:4268–4269`) | the tombstone rewrites become repository updates inside the deletion unit; the two columns gain `REFERENCES players(id) ON DELETE RESTRICT` **only after S4b** (schema §10 O9), or ship as today (no FK) — a validated-reference device needing its own approval | **yes**: S4b first, or approve the no-FK shape for file 02 (Q7a) |
+| Player tombstones and deletion policy | `recruitment_requests.player_id` (`02_recruitment.sql:511`) and `trials.player_id` (:634) carry **no** foreign key by design; `deletePlayerData` rewrites both as tombstones in place (`server.mjs:4268–4269`) | the tombstone rewrites become repository updates inside the deletion unit; the two columns gain `REFERENCES players(id) ON DELETE RESTRICT` **only after S4b and with §D.2a in place** (schema §10 O9 — S4b alone leaves the snapshot DELETE/reinsert of `players`), or ship as today (no FK) — a validated-reference device needing its own approval | **yes**: S4b and §D.2a first, or approve the no-FK shape for file 02 (Q7a) |
 | Organisation lifecycle (O2) | no route or repository method deletes an organisation (`repositories/orgs.mjs` has no remove; `suspended` is the only flag — `server.mjs:491, 509, 1054`); `org_id … RESTRICT` on requests (:513) and trials (:636) | nothing for S8a as the code stands: a `RESTRICT` reference nobody deletes from changes nothing. O2 decides only a **future** org-deletion route | no (recorded, not blocking) |
 | Case references to S8b | `recruitment_requests.case_id` (:539) and `trials.case_id` (:633) reference `recruitment_cases` (:138, an S8b table); `caseId` is set by the case writer (`m12/scouting.mjs:460` and the eight `caseId` sites in `server.mjs`) | either S8a grows to S8a+S8b (`recruitment_cases` and its thirteen child tables, :138–401), or the two `case_id` columns ship as code-validated references without a foreign key until S8b rebuilds the tables — the D-A kind of device, **not** approved by D-A | **yes** (Q7b) |
-| The approved transitional `channels.request_id` | checked in code at open (`repositories/channels.mjs:613–616`), at import (:512), at every snapshot write (`CHANNELS_TABLE.replace` :491 and `assertChannelReferencesConsistent` in `repositories/index.mjs`) | S8a's migration rebuilds `channels` with `request_id … REFERENCES recruitment_requests(id) ON DELETE RESTRICT` after its own preflight proves every `request_id` resolves — true by construction if the check has held; requests are never deleted today (tombstoned in place), so `RESTRICT` encodes nothing new. `contact_channel_id` (:538, "no FK" per :499) can become a real reference to `channels(id)` in the same migration since `channels` is now a table | no (technical; D-A already approved the conversion) |
+| The approved transitional `channels.request_id` | checked in code at open (`repositories/channels.mjs:613–616`), at import (:512), at every snapshot write (`CHANNELS_TABLE.replace` :491 and `assertChannelReferencesConsistent` in `repositories/index.mjs`) | S8a's migration rebuilds `channels` with `request_id … REFERENCES recruitment_requests(id) ON DELETE RESTRICT` after its own preflight proves every `request_id` resolves — true by construction if the check has held; requests are never deleted today (tombstoned in place), so `RESTRICT` encodes nothing new for the routes. **Snapshot compatibility applies here too (§D.2a):** once `channels.request_id` is a live immediate `RESTRICT` child, the `recruitment_requests` snapshot replace must **upsert and prune** (the organisations' pattern, which is why `channels.org_id RESTRICT` works today) rather than delete and reinsert like the identity pair, or Alternative A must be in place. `contact_channel_id` (:538, "no FK" per :499) can become a real reference to `channels(id)` in the same migration since `channels` is now a table, under the same condition for the channels replace (which already deletes and rewrites rows, `CHANNELS_TABLE.replace`) | no new approval (D-A approved the conversion); a design constraint on S8a's replace, recorded |
 | Size | 55 tables in file 02; S8a (requests + trials) is 14 of them plus `idempotency_keys` (:74); fifteen `db.requests` and ten `db.trials` sites in `server.mjs`, `db.requests` read by fourteen other modules and `db.trials` by twenty-three (textual count at `4f954ad`) | the largest aggregate; the copy-only rollback must prove the tombstone shapes, slots, history, day/schedule containers and `keys` losslessly on the actual `4f954ad` build | — |
 
 **No placeholder table and no silently approved reference.** S8a must not create an empty
@@ -1916,58 +2008,105 @@ rows back into the blobs the previous build reads, refuses a later schema, and i
 actual previous build on the copy) — the old plan's "backup + previous commit, audit rows lost" rollback is
 not a path (`s6-readiness-review.md` §7).
 
-**Candidate A — S6b, the eight audit tables in the no-FK shape, behaviour preserved.** Needs **Q4** (approve
-the no-FK shape, with the S4b rebuild adding the foreign key) and **Q5** (block lift stays a delete, or the
-`lifted_at` change is approved); needs nothing from S4b. Order: `repositories/audit.mjs` (eight mirrors,
-staged save hook, unit-of-work participation through the graph memento — review §11.10/§11.12 — so no
-nested view goes stale), migration `0013_safety_audit` importing the eight blobs (preflight: `ledger`
-`userId`/`scoutName` kept verbatim, no actor kind derived — §2.5 of the S6 review; `moderationLog.context`
-keys the columns cannot hold → `extra_json` or refusal; `opsEvents.kind` outside the CHECK list → the two
-missing kinds added first, §2.6), every writer converted (`ledgerAppend`, `handleReport`, the block
-routes, `moderateOrRefuse`, notes, the sweep's ops events, the m181 cap, the IDV toggle), the admin backup,
-the snapshot dispatcher, `scripts/safetyAuditRollback.mjs` (rows → the eight blobs one-to-one; nothing lost;
-the S7d tool refuses a `0013` file). Acceptance: the two S6-review suites written first and failing on
+**Candidate A — S6b, the eight audit tables with checked identity references, behaviour preserved,
+child-status stamping deferred (the step proposed next).** *Prerequisites:* **Q4** (the five player
+references in the no-FK, code-validated shape of §D.2a Alternative B), **Q4b** (the `idv_queue` guardian
+reference in the same shape — a separate approval, not implied by Q4), **Q5** (block lift stays a delete, or
+the `lifted_at` change is approved). Needs nothing from S4b and **no answer to Q1, Q2, Q3, Q6 or Q7**.
+*Q2 is deferred, not answered:* the tables are created **without** a child-status column; when the Founder
+decides Q2, a later **additive** migration adds the nullable columns (`subject_minor`, the rule, the basis —
+SQLite `ALTER TABLE … ADD COLUMN`, no rebuild) and the writers start stamping; every row written before that
+migration reads "unknown" for the stamp (no value is manufactured for it), and a "no" leaves the tables
+exactly as built. Deferral is this plan's proposal for the step's scope, not a decision on Q2. *Order:*
+`repositories/audit.mjs` (eight mirrors, staged save hook, unit-of-work participation through the graph
+memento — review §11.10/§11.12 — so no nested view goes stale), the three final-state assertions of
+Alternative B (player references of the five tables against the FINAL `players`; the `idv_queue` guardian
+reference against the FINAL `guardians`; both triggered on identity rewrites, the S7d trigger), migration
+`0013_safety_audit` importing the eight blobs (preflight: `ledger` `userId`/`scoutName` kept verbatim, no
+actor kind derived — §2.5 of the S6 review; `moderationLog.context` keys the columns cannot hold →
+`extra_json` or refusal; `opsEvents.kind` outside the CHECK list → the two missing kinds added first, §2.6;
+references validated against the file's identity tables, dangling ids of players deleted before the cutover
+**counted and imported as they are** — today's state, Q3 untouched), every writer converted (`ledgerAppend`,
+`handleReport`, the block routes, `moderateOrRefuse`, notes, the sweep's ops events, the m181 cap, the IDV
+toggle), the admin backup, the snapshot dispatcher, `scripts/safetyAuditRollback.mjs` (rows → the eight blobs
+one-to-one; nothing lost; the S7d tool refuses a `0013` file). *Acceptance (measurable, honest):* the two
+S6-review suites plus the §D.2a checks (a)–(f) in Alternative B's form, written first and failing on
 `4f954ad`; every route payload unchanged; `isBlocked` and the admin lift behave as today; the deletion unit
-leaves the eight collections untouched as today; the benchmark shows the `ledger` blob no longer rewritten
-per send (the last blob on the send path — review §7.3's phase "S6-ledger" reached, the objective then
-met **for the send path only**); the actual `4f954ad` build boots the rollback copy. What it does **not**
-do: no `players(id)` foreign key (deferred to S4b's rebuild), no child-status column, no retention rule.
+leaves the eight collections untouched as today; **the benchmark reports, before and after: the number of
+`collections` rows upserted per save and their bytes — the eight audit blobs and their bytes leave every
+save, and the remaining blob rows and bytes serialised per message save are reported as they are, not
+claimed reduced; the median save time; atomicity and rollback (an injected failure leaves nothing)**; the
+actual `4f954ad` build boots the rollback copy. *What it does not do:* no `players(id)` or `guardians(id)`
+foreign key (Alternative A and a rebuild later), no child-status column (Q2 deferred), no retention rule,
+**and it does not meet the no-whole-snapshot-write objective** — see the next paragraph.
+
+**What a send mutates versus what its save persists (reviewer's F2).** A message send mutates the
+`channels` rows, a `ledger` row, a `notifications` row and a `pushLog` row. Its save persists **every
+collection that is not a table**: `store.mjs:177–183` loops over `snapshot.db` and serialises and UPSERTs each
+remaining blob regardless of change. The reviewer's design check excludes all eight audit names through the
+real server-mode skip list, appends a real channel message and saves: `requests`, `trials` and an unrelated
+collection receive an `UPDATE` with identical content; `ledger` is absent from the writes; the message is
+committed. So moving the `ledger` (and the other seven) removes **their** serialisation and UPSERT work from
+every save — nothing else. The first version of this section said Candidate A "takes the `ledger` off the send
+path" and meets the objective "for the send path only"; **that is withdrawn.** The broader objective of S7
+review §7.3 stays open until every collection a save persists is a table (S8–S14) or a separately authorised
+change to the save path writes only changed blobs — a dirty-collection design that is **not** proposed here
+and needs its own review against the S3 save contract. (The design check does not measure physical page
+writes; its claim is about rows serialised and UPSERTed.)
 
 **Candidate B — S4b, the retained player record.** Needs **Q1** (country) and **Q3** (pre-S4b dangling ids);
 Q6 items only if the Founder wants them in the same step. Order: `players.erase`, the view filtering and
 the explicit child deletions (§D.1 items 1–3), migration `0013_player_tombstones` (DDL rebuild of `players`
 only if Q1 or Q3 make a `NOT NULL` column nullable; otherwise a cutover record and the lifecycle
-statements), the readiness tests at the age boundaries, the identity suites extended. Rollback — the
-honest difficulty: the pre-S4b build (`4f954ad`) reads every `players` row as a live player, so a copy
-carrying tombstone rows would show "Deleted player" entries as accounts; the copy-only tool therefore
-removes the retained rows from the copy **and** preserves them in a table the old build does not read
-(the re-upgrade restores them), which is "preserved, not visible" rather than lossless in place — to be
-verified on the actual `4f954ad` build at implementation and stated as such.
+statements), the readiness tests at the age boundaries, the identity suites extended. **S4b does not by itself
+make the permanent player foreign keys ready** (§D.2a): adding `REFERENCES players(id)` to the audit or
+file-02 tables in S4b's rebuild also needs Alternative A built in the same step or before it, with the §D.2a
+checks; without that, S4b ships the retained row and the keys wait. Rollback — the honest difficulty: the
+pre-S4b build (`4f954ad`) reads every `players` row as a live player, so a copy carrying tombstone rows would
+show "Deleted player" entries as accounts; the copy-only tool therefore removes the retained rows from the
+copy **and** preserves them in a table the old build does not read (the re-upgrade restores them), which is
+"preserved, not visible" rather than lossless in place — to be verified on the actual `4f954ad` build at
+implementation and stated as such.
 
-**Candidate C — S8a (requests + trials).** Needs Q7a and Q7b (or S4b and S8b first); the largest aggregate.
-Not recommended as the next step.
+**Candidate C — S8a (requests + trials).** Needs Q7a and Q7b (or S4b, §D.2a and S8b first); its snapshot
+replace for `recruitment_requests` must upsert and prune, or Alternative A must exist, because
+`channels.request_id` becomes a live `RESTRICT` child (§D.3); the largest aggregate. Not recommended as the
+next step.
 
-**Technical recommendation (not a decision).** If the Founder approves Q4 and answers Q5, **Candidate A** is
-the smallest coherent step: it preserves every behaviour, needs no retention or deletion answer, is the
-step that takes the `ledger` off the send path, and its rollback is lossless in place. If the Founder
-would rather not approve a second transitional shape, **Candidate B** is next once Q1 and Q3 are answered,
-and the audit tables then ship with their foreign keys after it. Either way S8a follows.
+**Technical recommendation (not a decision).** If the Founder approves Q4 and Q4b and answers Q5,
+**Candidate A** is the smallest coherent behaviour-preserving step: it needs no retention, deletion or
+stamping answer, moves eight audit collections out of the per-save serialisation, and its rollback is lossless
+in place. It does **not** meet the whole-snapshot-write objective and is not presented as doing so. If the
+Founder would rather not approve further checked references, **Candidate B** is next once Q1 and Q3 are
+answered — with Alternative A built if its rebuild is to carry foreign keys. Either way S8a follows, and
+Alternative A has to exist before any permanent key to the identity tables ships.
 
 ### D.5 Decisions required to proceed — the one list (product policy, technical approval, qualified review kept apart)
 
 Already decided and **not asked again**: the full birth date on the retained record; D-A and D-B (S7d);
 the legacy-minor rule (under-18 without a valid guardian link stops migration). O2 (organisation deletion)
-blocks nothing now and is not asked.
+blocks nothing now and is not asked. **Only the first three questions are needed for the step proposed next
+(Candidate A); the rest are recorded for the stages that need them and are not required to proceed.** No
+approval of an implementation is sought beyond Candidate A's concrete scope in §D.4; nothing is inferred from
+silence.
+
+**Needed for Candidate A (S6b)**
 
 | # | Question | Kind | What the app does today | Blocks | Options and practical consequences |
 |---|---|---|---|---|---|
-| Q1 | May the two-letter **country code** stay on the retained record of a deleted player? | **product policy / privacy** (OPEN since 12 October 2026) | the row is deleted; `players.country` is `NOT NULL` (`01_identity.sql:158`) | S4b: the erase column set, `wasMinorOn`'s threshold, the boundary tests | **keep** — the country threshold (18, or KR/TH/EG/SG) applies to the retained birth date; one more identifier retained. **drop** — the column must become nullable for tombstones (a `players` rebuild in the S4b migration) and only the fixed-18 rule can be applied, which is wrong for those four countries; the implementation must not pick silently |
-| Q2 | Should future safeguarding rows (`blocks`, `reports`, `moderationLog`, `orgNotes`) **record that the subject was treated as a child when written** (rule and basis)? | **product policy** (OPEN since 12 October 2026) | nothing is stamped; reviewers infer from the live birth date | the S6 column design (either candidate's audit tables carry the column or not) | **yes** — a column written by every future safeguarding row (a retention choice of its own; pre-change rows stay "unknown"). **no** — reviews of a deleted player's row rely on the retained birth date and Q1 alone |
-| Q3 | How are the **ids of players deleted before S4b**, already carried by audit and recruitment rows, treated when the foreign keys are added? | **technical, with a privacy aspect** (new) | they dangle (documented state, `s6-readiness-review.md` §3) | S4b's foreign-key rebuild of the audit tables (and S8a's of file 02) | **(a)** synthesise id-only retained rows for them — needs `name`, `birth_date`, `country` nullable for tombstones (a rebuild) and retains an id for a person deleted under the old rule (privacy review); **(b)** leave those tables without the player foreign key permanently and keep code-validated references (the D-A kind, as a permanent rule — approval needed); **(c)** delete the dangling audit rows — contradicts "never pruned" and is not proposed |
-| Q4 | May the **eight audit tables ship before S4b in the no-FK shape** (`player_id` indexed, no `REFERENCES players(id)`, the S4b migration adding the key by rebuild)? | **technical design approval** (the D-A kind) | the eight collections are blobs rewritten by every save | Candidate A (S6b) | **approve** — the send path's last blob moves now; today's dangling-id state is reproduced exactly; the foreign key arrives with S4b's rebuild. **decline** — the audit tables wait for S4b (Candidate B first) |
-| Q5 | Does a **lifted block** stay a row delete, or become a retained row with `lifted_at`/`lifted_by`? | **product/behaviour** | lifting deletes the row (`server.mjs:4534`); nothing records who lifted or when | the `blocks` table design in either candidate | **preserve** (default) — the table reproduces today's delete; no history of lifted blocks. **change** — append-only history of blocks (the S6 review's proposal, §4.2); the admin list stays unchanged by default |
+| Q4 | May the **five player-referencing audit tables** (`blocks`, `reports`, `org_notes`, `ledger`, `source_changes`) ship with `player_id` **indexed and code-validated, no `REFERENCES players(id)`** (§D.2a Alternative B), the foreign key arriving later through Alternative A and a rebuild? | **technical design approval** (the D-A kind) | the five collections are blobs rewritten by every save; their player ids dangle after a deletion | Candidate A | **approve** — the five tables move now; today's dangling-id state is reproduced exactly; refusals name ids only; the key arrives only with Alternative A and a rebuild. **decline** — the five tables wait for S4b **and** Alternative A (Candidate B first, then the compatibility work). Approving Q4 says nothing about the whole-snapshot-write objective (§D.4) |
+| Q4b | May `idv_queue` ship with `guardian_id` **indexed and code-validated, no `REFERENCES guardians(id)`** (Alternative B) — the guardian reference the identity snapshot would otherwise break even without any guardian deletion? | **technical design approval** (the D-A kind; separate from Q4, which covers players) | the collection is a blob; no guardian deletion route exists; the identity snapshot deletes and reinserts every guardian row | Candidate A's `idv_queue` table | **approve** — the table moves with the other seven under the same assertion pattern as `channels.guardian_id` (S7d §11.8). **decline** — `idv_queue` waits for Alternative A; Candidate A ships seven tables |
+| Q5 | Does a **lifted block** stay a row delete, or become a retained row with `lifted_at`/`lifted_by`? | **product/behaviour** | lifting deletes the row (`server.mjs:4534`); nothing records who lifted or when | the `blocks` table design | **preserve** (default) — the table reproduces today's delete; no history of lifted blocks. **change** — append-only history of blocks (the S6 review's proposal, §4.2); the admin list stays unchanged by default |
+
+**Recorded for later stages — not required to proceed with Candidate A**
+
+| # | Question | Kind | What the app does today | Blocks | Options and practical consequences |
+|---|---|---|---|---|---|
+| Q1 | May the two-letter **country code** stay on the retained record of a deleted player? | **product policy / privacy** (OPEN since 12 October 2026) | the row is deleted; `players.country` is `NOT NULL` (`01_identity.sql:158`); today's helper `isAdult`/`adultAgeFor` (`domain.mjs:76–79`) applies a country's threshold when the country is known and **defaults to 18** when it is not — a development default, not a policy and not legal advice | S4b: the erase column set, `wasMinorOn`'s threshold, the boundary tests | **keep** — a country-specific threshold can be applied to the retained birth date; one more identifier retained. **drop** — the column becomes nullable for tombstones (a `players` rebuild in the S4b migration) and a future `wasMinorOn` cannot apply a country-specific threshold; the design must then choose **explicitly** between reporting the country-specific status of a deleted player as **"unknown"** and applying the default of 18 — a product/privacy choice, not one the code may make silently, and retaining no country does not force a knowingly wrong inference |
+| Q2 | Should future safeguarding rows (`blocks`, `reports`, `moderationLog`, `orgNotes`) **record that the subject was treated as a child when written** (rule and basis)? | **product policy** (OPEN since 12 October 2026) | nothing is stamped; reviewers infer from the live birth date | **the stamping step only** — an additive migration after Candidate A (§D.4); Candidate A defers it and is not blocked by it | **yes** — nullable columns added by an additive migration, written by every later safeguarding row (a retention choice of its own); rows written before it read "unknown". **no** — the tables stay as built; reviews of a deleted player's row rely on the retained birth date and Q1 alone. **Deferral in Candidate A is neither answer** |
+| Q3 | How are the **ids of players deleted before S4b**, already carried by audit and recruitment rows, treated when foreign keys are added? | **technical, with a privacy aspect** (new) | they dangle (documented state, `s6-readiness-review.md` §3); Candidate A imports and counts them as they are | S4b's foreign-key rebuild of the audit tables (and S8a's of file 02) — not Candidate A | **(a)** synthesise id-only retained rows for them — needs `name`, `birth_date`, `country` nullable for tombstones (a rebuild) and retains an id for a person deleted under the old rule (privacy review); **(b)** leave those tables without the player foreign key permanently and keep code-validated references (the D-A kind, as a permanent rule — approval needed); **(c)** delete the dangling audit rows — contradicts "never pruned" and is not proposed |
 | Q6 | Which of the **additional deletion behaviours** the decision record proposes go into S4b: deleting the subject's device push tokens, verification tokens and passport shares; nulling dangling media ids; one ledger row recording the deletion (§8 item 9, itself a retention choice)? | **product policy** (each a behaviour change) | none of them happens today (`server.mjs:4245–4305`) | the S4b scope | **none** (default) — S4b is the retained row and the filtering only. **some/all** — each named item is specified, tested and recorded; the deletion ledger row records a guardian's id |
-| Q7 | For S8a: **(a)** may `recruitment_requests.player_id` and `trials.player_id` ship without a player foreign key before S4b (as today's DDL drafts them), and **(b)** may the two `case_id` columns ship as code-validated references until S8b, or must S8a grow to S8a+S8b? | **technical design approval** (two devices of the D-A kind) | both references are plain ids in blobs | Candidate C | **approve a** — S8a before S4b, FK added by S4b's rebuild. **approve b** — S8a alone; S8b rebuilds. **decline both** — S8a waits for S4b and ships with S8b |
+| Q7 | For S8a: **(a)** may `recruitment_requests.player_id` and `trials.player_id` ship without a player foreign key before S4b and Alternative A (as today's DDL drafts them), and **(b)** may the two `case_id` columns ship as code-validated references until S8b, or must S8a grow to S8a+S8b? | **technical design approval** (two devices of the D-A kind) | both references are plain ids in blobs | Candidate C | **approve a** — S8a before S4b; the key arrives with S4b's rebuild and Alternative A. **approve b** — S8a alone; S8b rebuilds. **decline both** — S8a waits for S4b, Alternative A and S8b |
 
 **Already marked for qualified privacy/legal review, not asked of the Founder alone** (`s4-deletion-decision.md`
 §8, unchanged): message retention against record-keeping duties (item 1); health information (2); audit free

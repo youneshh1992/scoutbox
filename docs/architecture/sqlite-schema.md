@@ -796,7 +796,12 @@ DECISIONs:
   and snapshots, signings, invoices) keep their `player_id` foreign key (`RESTRICT`) pointing
   at the tombstone; name snapshots on those rows are replaced by the tombstone name in the
   same transaction. This is the only way the `RESTRICT` audit references and the deletion
-  obligation can both hold.
+  obligation can both hold. **A second condition, recorded 19 October 2026 (plan §D.2a):** a `RESTRICT`
+  reference to `players(id)` or `guardians(id)` must also survive the identity snapshot's DELETE and
+  reinsert of every row (`repositories/identity.mjs:205–207`); the tombstone does not provide that, so
+  wherever such a key is introduced the snapshot write must defer enforcement and check the final state
+  (`PRAGMA defer_foreign_keys` in the write transaction plus a whole-database check before COMMIT), or the
+  column ships as an explicitly approved code-validated reference until that exists.
 - **What survives deletion is listed, not implied.** Each DDL header's `lifecycle` line says
   whether the table is erased, cascaded or retained on subject deletion; the plan's S4
   acceptance test enumerates them and fails if a new table lacks the statement.
