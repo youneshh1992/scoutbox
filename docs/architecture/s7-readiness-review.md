@@ -66,7 +66,8 @@ corrections from the review of `8330f08`; §11.9 S7d as implemented on top of `b
 decisions D-A and D-B; §11.10 the one correction after the review of `62e9c1a`; **§11.11 the independent
 acceptance at `4f954ad`**; §11.12 the S7a–S7c nested-restore observation classified as a separately scoped
 follow-up; §11.13 the review of `6956f52` — acceptance record confirmed, three corrections to the next-stage
-brief in the plan).
+brief in the plan; §11.14 the review of `e7f7692` — two further corrections to that brief: action-aware
+snapshot compatibility and the per-reference audit contract).
 
 ---
 
@@ -816,7 +817,7 @@ with the ledger and notification sizes stated. The harness is not changed by thi
 | **S7d** `channels` + `messages` + `message_attachments` | **independently ACCEPTED at `4f954ad` (18 October 2026; §11.11)** — implemented on top of `b67bce5` (§11.9), corrected once (§11.10); migration `0012_channels`; the §2.3 transitional code-checked request reference approved by the Founder (D-A), today's deletion reproduced inside the deletion unit (D-B, a scope confirmation) | `request_id` → S8's `recruitment_requests` (§2.2) stays a code-checked reference until S8a rebuilds the table with the foreign key (plan §D.3); the ordering column for equal timestamps (§1.2) is `messages.position`; retention OPEN (S4b) |
 | S7d `channels.player_id` deletion behaviour | the Founder confirmed the storage-only reading (**D-B**, §11.9); the retention question itself is still a **product-policy answer** for S4b | message retention after deletion (`s4-deletion-decision.md` §4 "review"); the repository deletes explicitly inside the deletion unit, no CASCADE in the DDL |
 | the `ledger` rows every send writes | needs **another storage stage** (the S6 audit tables): the `ledger` table with its `players(id)` foreign key needs **S4b and identity-snapshot compatibility** (plan §D.2a — the snapshot's DELETE/reinsert of `players`, the same fact as §11.8's for guardians); without the foreign key it needs the Founder's approval of the checked-reference shape (plan §D.2, Q4). Moving it does not meet the whole-snapshot-write objective (§7.3) | `ledger.player_id RESTRICT` (S6 review §4.1); plan §D.4 Candidate A |
-| "no whole-database write on send" | needs S7a + S7c + S7d + the S6 ledger (or a store dirty-save change) | §7.3 phases |
+| "no whole-database write on send" | **not met by S7's completion, and not met by moving the S6 `ledger` or the other audit blobs either** (§7.3, corrected 19 October 2026): the save persists every non-table collection regardless of change (`store.mjs:177–183`); met only when every persisted collection is a table (S8–S14) or a separately authorised save-path change writes only changed blobs — not proposed. The earlier wording of this row ("needs S7a + S7c + S7d + the S6 ledger") is withdrawn | §7.3; plan §D.4 "what a send mutates versus what its save persists" |
 | retention periods, pruning, deletion cleanup of delivery records, removed-staff notifications, the minor export gate, the grooming report's org | **product-policy answers** | listed in §4.1/§4.4; not decided here |
 | guardian deletion, org deletion | S4b (O1) and O2 | out of S7 |
 
@@ -3262,6 +3263,42 @@ The reviewer's design-check script `review-6956f52-design-checks.mjs` installs t
 exclusion of all eight audit names in the real save loop; it runs unchanged on this tree (exit 0, Node
 v22.22.2) and verifies those engine and store facts — design premises, not regressions in S7, and a corrected
 document does not make them disappear. No source changed; S7a–S7d acceptance and D-A/D-B are untouched.
+
+### 11.14 Review of `e7f7692` — S7 still accepted; two further corrections to the next-stage brief (19 October 2026; documentation only)
+
+The independent review of `e7f7692` (`review-e7f7692-summary.txt`) kept S7 ACCEPTED (backend 27 suites /
+363 checks and Player 4 / 41 on Node v24.19.0 with the four actual old builds; the held `6956f52` design checks
+and the unchanged S7d reproduction exit 0; the eight-view probe of §11.12 still zero stale values) and found
+the corrected brief of §11.13 not yet implementation-ready on two P2 documentation points, both corrected in
+place in the plan. **F1 — deferral is not preservation.** §D.2a Alternative A had said `PRAGMA
+defer_foreign_keys` defers *every* foreign-key action, so a parent deleted and reinserted inside the
+transaction keeps all its children. The reviewer's script `review-e7f7692-design-checks.mjs` (three in-memory
+checks, exact child rows before and after COMMIT) shows what §11.8 (b) actually established and no more: with
+the pragma on, a `RESTRICT` child survives the DELETE/reinsert (`{c, p}`); a `SET NULL` child has its
+reference **nulled at the DELETE** (`{c, null}`); a `CASCADE` child is **deleted at the DELETE** (empty);
+reinserting the parent undoes neither, and COMMIT and `foreign_key_check` succeed in all three cases. The
+withdrawn claim that RESTRICT cannot be deferred stays withdrawn; the universal claim is withdrawn too. Plan
+§D.2a is now action-aware: the deferral (A0) covers the drafted `RESTRICT` references exactly (12 to `players`,
+1 to `guardians` at `e7f7692`); every `SET NULL` (6 + 7) and `CASCADE` (28) reference needs one of three bounded
+designs — preserve the parent rows by upsert-and-prune (A1), enforcement off for the snapshot write only with a
+final check (A2), or capture-and-rewrite the retained children including omitted collections (A3, the S5
+precedent) — chosen when first needed; a clean final check restores nothing; the required checks assert exact
+rows with child collections omitted and supplied. This section's own §11.8 text concerns the `RESTRICT`
+guardian reference of `channels` and stands. **F2 — one contract per reference.** Candidate A had required
+the five player-audit references to be refused when their parent is missing *and* to import and preserve the
+ids of deleted players; the reviewer's fourth check deletes a synthetic adult through the real repository and
+unit of work with its ledger row retained, reopens, and saves an unchanged snapshot — it **succeeds today**,
+and a separately labelled model of the strict rule rejects it. The plan now states one per-reference contract
+(§D.4): the five historical player-audit references are **tolerant** (shape-validated; unresolved ids counted
+and reported, never refused, never given a fabricated parent, never deleted; today's `handleReport` accepts an
+unchecked `targetPlayerId`, so a parent-existence rule would be a labelled behaviour change and is not
+proposed; account deletion unchanged), and the `idv_queue` guardian reference is **strict** (the
+`channels.guardian_id` pattern; every writer resolves the guardian first). Q4 and Q4b are reworded to match,
+check (d) is domain-specific, and the acceptance includes a real deletion/retained-audit round trip through
+backup, restore, the `4f954ad` rollback copy and re-upgrade. **Housekeeping:** the last stale §8.1 row ("no
+whole-database write on send") is aligned with the corrected §7.3 above. No source changed; S7a–S7d
+acceptance, D-A/D-B, the full birth date and the legacy-minor rule are untouched; country retention and
+child-status stamping stay OPEN; Q4, Q4b and Q5 remain the Founder's, and nothing is inferred from this record.
 
 ---
 

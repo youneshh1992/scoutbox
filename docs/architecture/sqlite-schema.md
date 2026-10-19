@@ -799,17 +799,22 @@ DECISIONs:
   obligation can both hold. **A second condition, recorded 19 October 2026 (plan §D.2a):** a `RESTRICT`
   reference to `players(id)` or `guardians(id)` must also survive the identity snapshot's DELETE and
   reinsert of every row (`repositories/identity.mjs:205–207`); the tombstone does not provide that, so
-  wherever such a key is introduced the snapshot write must defer enforcement and check the final state
-  (`PRAGMA defer_foreign_keys` in the write transaction plus a whole-database check before COMMIT), or the
-  column ships as an explicitly approved code-validated reference until that exists.
+  wherever such a key is introduced the snapshot write must be made compatible **by action** (plan §D.2a,
+  corrected after the review of `e7f7692`): for `RESTRICT`, `PRAGMA defer_foreign_keys` in the write
+  transaction plus a whole-database check before COMMIT (deferral postpones enforcement of RESTRICT only);
+  for `SET NULL` and `CASCADE`, which act at the parent's DELETE whatever the pragma says, a design that
+  preserves the parent rows or reconstructs the retained children — a clean final check restores nothing;
+  or the column ships as an explicitly approved checked reference (strict or tolerant, stated per table)
+  until that exists.
 - **What survives deletion is listed, not implied.** Each DDL header's `lifecycle` line says
   whether the table is erased, cascaded or retained on subject deletion; the plan's S4
   acceptance test enumerates them and fails if a new table lacks the statement.
 - **One unresolved relational-integrity point (OPEN O9), with its resolving step.** File 02
   (recruitment) carries no foreign key on any `player_id` because its author designed
   against today's hard delete (a `SET NULL` FK would erase the id the tombstone exists
-  for); files 03–08 reference `players(id)` with `RESTRICT` or `CASCADE` (48 references),
-  which presumes the tombstone above. Both are documented in the file headers. This is not
+  for); files 03–08 reference `players(id)` with `RESTRICT`, `CASCADE` or `SET NULL` (48 references
+  when first counted; 46 with an `ON DELETE` action at `e7f7692` — 12 `RESTRICT`, 28 `CASCADE`, 6 `SET
+  NULL`, plan §D.2a's table), which presumes the tombstone above. Both are documented in the file headers. This is not
   a finished design: the recruitment domain cannot be cut over while its player references
   are unenforced. Resolution, in order: O1 is decided by the Founder (partially resolved on 12
   October 2026 — the full birth date; the country code and the child-status stamp still open, §12);

@@ -655,10 +655,15 @@ above is kept as the dated record; the current per-table statement is `sqlite-mi
 plan §D (corrected 19 October 2026 after the review of `6956f52`): every snapshot-mode save deletes and
 reinserts the players and guardians (`repositories/identity.mjs:205–207`), so an immediate `RESTRICT` reference
 to either table — `idv_queue.guardian_id` included, with no guardian deletion route at all — makes even an
-unchanged valid snapshot fail; a tombstone addresses account deletion and not that** (plan §D.2a: coordinated
-snapshot writing with `PRAGMA defer_foreign_keys` and a final-state check, or an explicitly approved checked
-reference per table, with the six required checks). The tables themselves wait for the Founder's approval of
-the no-FK shape of §4.1 (plan Q4 for the five player references, Q4b for `idv_queue`'s guardian reference) and
+unchanged valid snapshot fail; a tombstone addresses account deletion and not that** (plan §D.2a, corrected
+again after the review of `e7f7692`: the `PRAGMA defer_foreign_keys` deferral covers `RESTRICT` references
+only — `SET NULL` and `CASCADE` act at the parent's DELETE whatever the pragma says and a clean final check
+restores nothing — so every `SET NULL`/`CASCADE` key needs a parent-preserving or child-reconstructing design;
+or an explicitly approved checked reference per table, **strict** for `idv_queue`'s guardian and **tolerant**
+for the five historical player references, with the six exact-row checks). The tables themselves wait for the
+Founder's approval of the no-FK shape of §4.1 (plan Q4 for the five player references as tolerant historical
+references — no parent-existence rule, unresolved ids counted and kept; Q4b for `idv_queue`'s guardian
+reference as a strict one — the per-reference contract is plan §D.4) and
 for the block-lift behaviour choice (keep today's row delete at `server.mjs:4534`, or §4.2's
 `lifted_at`/`lifted_by` rows — plan Q5); only `moderation_log` and `ops_events` wait for nothing but
 authorisation. The candidate step (S6b, the eight tables with checked identity references, behaviour preserved,
