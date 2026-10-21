@@ -2503,8 +2503,10 @@ as `{ id, deletedAt, birthDate, country? }` (`country` only under Q1 = keep) in 
 **`playersRetained`**, **never inside `players`**: the admin backup exports it beside the live `players`; a restore
 into a new directory imports `players` through `0005` as today and `playersRetained` through `0014` (shape-validated;
 an id that is also a live player **refuses the boot** with ids only, nothing written); a snapshot save that carries
-`playersRetained` replaces the retained rows with exactly that collection (same validation, same refusal), one that
-omits it keeps them as they are, and the identity replace — which deletes and reinserts every `players` row —
+`playersRetained` may only ADD retained records — every stored record must be listed with its four facts unchanged, or the
+whole save is refused with ids only (the protected contract, corrected after the independent review of `6d66655`, §D.6.3; the
+first implementation replaced the stored set with the supplied collection, which let an ordinary save prune a deletion record
+or amend its facts) — one that omits it keeps them as they are, and the identity replace — which deletes and reinserts every `players` row —
 **captures the retained rows before its DELETE and reinserts them byte-identical after the candidate**, refusing a
 candidate that lists a retained id as a live record. The copy-only rollback tool writes `playersRetained` as a legacy
 blob into `collections` and removes the rows from `players`: the previous build (`f0abd34`) loads the blob into memory
@@ -2541,3 +2543,23 @@ nothing); the two suites `scripts/testPlayerErasure.mjs` and `scripts/testPlayer
 the unchanged `d16362f` tree. The implementation record, where it departs from the wording above and why, and the verification
 are `s4-readiness-review.md` §12. **The next free migration identifier is `0015`.** Not production, security, legal-compliance
 or deployment approval; not acceptance of S8, of the foreign keys (A0–A3, Q3) or of anything Q2, Q6 or Q7 name.
+
+#### D.6.3 Correction after the independent review of `6d66655` (21 October 2026; S4b-R still IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE)
+
+The review found one P2 finding, reproduced two ways by its unchanged script (`review-6d66655-reproductions.mjs`, exit 1:
+F1a and F1b REPRODUCED on `6d66655`). **F1:** `PLAYERS_RETAINED.replace` deleted the whole stored retained set and
+inserted the supplied collection, so an ordinary snapshot save carrying an empty or partial `playersRetained` could erase a
+deletion record — after which a later save could re-create the id as a live account (F1a) — and a same-id record could
+rewrite the stored birth date, country and deletion instant (F1b). The generic "a supplied collection replaces the table"
+convention had silently overridden the narrower promise the retained record exists for. **Correction (one commit on top of
+`6d66655`):** the contract is now PROTECTED — a supplied collection may only add records; every stored record must be listed
+with its four facts unchanged, and a stored record that is not listed, or listed with a changed fact, refuses the whole
+save atomically (`RETAINED_RECORD_PROTECTED`, ids only; accompanying changes to other collections roll back with it; no
+transaction stays open). New records are validated as before (shape, no duplicate, no live id); omitted collections keep
+the rows; a fresh restore and a re-upgraded rollback copy still import through migration 0014. No stored row is ever
+deleted or updated by a save. The unit test that blessed pruning was corrected (its expectation conflicted with preserving
+retained deletion facts) and a dedicated regression covers the empty and subset collections, each changed fact separately,
+the two-save prune-then-recreate sequence, the live-id collision, the rollback of accompanying changes and the positive
+controls. The reviewer's script, unchanged, reports both checks CORRECT on the corrected tree. No decision was reopened or
+added: the four retained facts and the Founder's two choices stand; no retention period, correction or purge policy, age
+rule, foreign key, guardian lifecycle change, field or migration identifier was introduced.

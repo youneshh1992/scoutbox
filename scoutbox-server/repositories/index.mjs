@@ -160,8 +160,10 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // S5: the `trials` the snapshot carries (written as a blob below, in the same transaction) judge every `trialReports` claim on its players; a snapshot without them is judged by the retained blob.
   if (IDENTITY_COLLECTIONS.every((n) => present.includes(n)) && IDENTITY_SNAPSHOT.replace(sqlite, { players: db.players, guardians: db.guardians }, { now, trials: Object.hasOwn(db, 'trials') && db.trials !== undefined ? db.trials : undefined })) written.push(...IDENTITY_COLLECTIONS);
   // S4b-R: the retained records go right after the identity pair (which carried the
-  // existing ones through its rewrite): a supplied collection IS the retained set,
-  // checked against the live rows as they now stand; an omitted one keeps the rows.
+  // existing ones through its rewrite). PROTECTED (review of 6d66655, F1): a supplied
+  // collection may only ADD records — every stored record must be listed unchanged or
+  // the whole save is refused (ids only); new records are checked against the live rows
+  // as they now stand; an omitted collection keeps the rows.
   if (present.includes(PLAYERS_RETAINED.name) && PLAYERS_RETAINED.replace(sqlite, db[PLAYERS_RETAINED.name])) written.push(PLAYERS_RETAINED.name);
   for (const name of ['users', 'sessions']) if (present.includes(name) && single(name).replace(sqlite, db[name])) written.push(name);
   // The media-removal queue: validated entry by entry and rewritten (false before migration 0006, so the caller writes the blob the migration imports).

@@ -227,10 +227,18 @@ export function importPlayersRetainedBlob(sqlite) {
 }
 /**
  * The retained records as a snapshot collection: read for backups and the persistence
- * tools (null before migration 0014); `replace` is the snapshot contract — a supplied
- * collection IS the retained set (validated against the live rows as they stand in the
- * caller's transaction; a refusal rolls the whole save back), an omitted one keeps the
- * rows as they are.
+ * tools (null before migration 0014). `replace` is the PROTECTED contract (review of
+ * 6d66655, F1): a supplied collection may only ADD retained records. Every record the
+ * file already holds must be listed with the same four facts — a stored record that is
+ * not listed, or listed with a changed birth date, country or deletion instant, refuses
+ * the WHOLE save (ids only; the caller's transaction rolls back, accompanying changes
+ * included). New records are validated as before (shape, no duplicate, no live id) and
+ * inserted; the stored rows are never deleted or updated by a save. An omitted collection
+ * keeps the rows as they are. The generic "a supplied collection replaces the table"
+ * convention of the other collections does not apply here: a retained deletion record
+ * is a fact that survives and an id that is never re-created, and no save may erase or
+ * amend it. (A fresh restore and a re-upgraded rollback copy import through migration
+ * 0014, where no stored record exists yet.)
  */
 export const PLAYERS_RETAINED = {
   name: PLAYERS_RETAINED_COLLECTION,
@@ -244,9 +252,22 @@ export const PLAYERS_RETAINED = {
     if (!sqlite.isTransaction) throw new Error('playersRetained: replace() runs inside the caller\'s transaction');
     const liveIds = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NULL').all().map((r) => r.id));
     const records = checkRetainedCollection(list, { liveIds, label: 'the snapshot' });
-    sqlite.exec('DELETE FROM players WHERE deleted_at IS NOT NULL');
+    const stored = new Map(sqlite.prepare('SELECT id, deleted_at, birth_date, country FROM players WHERE deleted_at IS NOT NULL').all().map((r) => [r.id, retainedRecordFromRow(r)]));
+    const supplied = new Map(records.map((r) => [r.id, r]));
+    const missing = []; const amended = [];
+    for (const [id, rec] of stored) {
+      const given = supplied.get(id);
+      if (!given) { missing.push(id); continue; }
+      if (given.deletedAt !== rec.deletedAt || given.birthDate !== rec.birthDate || given.country !== rec.country) amended.push(id);
+    }
+    if (missing.length || amended.length) {
+      const parts = [];
+      if (missing.length) parts.push(`${missing.length} stored retained record(s) are not listed (${missing.slice(0, 20).join(', ')}${missing.length > 20 ? ', …' : ''})`);
+      if (amended.length) parts.push(`${amended.length} would be amended — the stored birth date, country or deletion instant differs from the listed one (${amended.slice(0, 20).join(', ')}${amended.length > 20 ? ', …' : ''})`);
+      throw Object.assign(new Error(`RETAINED_RECORD_PROTECTED: the snapshot's playersRetained collection — ${parts.join('; ')}; a retained deletion record is never removed or amended by a save (a supplied collection may only add records); the save was rolled back and nothing was written`), { code: 'RETAINED_RECORD_PROTECTED', missing, amended });
+    }
     const ins = sqlite.prepare(insertSql('players', PLAYER_COLUMNS));
-    for (const rec of records) ins.run(retainedRowFor(rec));
+    for (const rec of records) if (!stored.has(rec.id)) ins.run(retainedRowFor(rec));
     return true;
   },
 };

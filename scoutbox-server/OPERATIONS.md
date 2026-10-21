@@ -1422,7 +1422,12 @@ m24–m29 hooks, the threads and the player-audience notifications deleted
   `players` carries a retained id as a live player is refused at boot
   (`PLAYER_ERASURE_IMPORT_BLOCKED`, ids only, nothing of 0014 written). A
   previous build restoring such a backup keeps `playersRetained` as a blob no
-  route reads — never as accounts.
+  route reads — never as accounts. **A snapshot save that carries
+  `playersRetained` (a persistence tool) may only ADD records:** every stored
+  retained record must be listed with its four facts unchanged, or the whole
+  save is refused with ids only (`RETAINED_RECORD_PROTECTED`); a stored record
+  is never removed or amended by a save (corrected after the independent review
+  of `6d66655`; `docs/architecture/s4-readiness-review.md` §12.4).
 - **Rollback — copy-only, and the one way back.** `npm run
   rollback:player-erasure -- <data-dir> <fresh-empty-dir>`
   (`scripts/playerErasureRollback.mjs`) opens the file read-only, copies it,

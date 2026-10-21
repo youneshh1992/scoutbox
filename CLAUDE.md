@@ -306,7 +306,10 @@ and design changes the Founder explicitly requests.
   the deletion unit is today's behaviour (no further name-copy erasure, no Q6
   item). A retained row is served by NOTHING that serves accounts and only by
   the narrow accessors; it survives every snapshot save (the identity replace
-  carries the rows through its rewrite); a retained id is never re-created as
+  carries the rows through its rewrite, and a supplied `playersRetained`
+  collection may only ADD records — a stored record not listed, or listed with
+  a changed fact, refuses the whole save, ids only: the protected contract,
+  corrected after the independent review of `6d66655`, review §12.4); a retained id is never re-created as
   a live account (insert, snapshot, backup import refuse it, ids only); the
   backup exports `playersRetained` and never a retained id inside `players`.
   Nothing is fabricated for ids deleted before this step (Q4 counted; Q3

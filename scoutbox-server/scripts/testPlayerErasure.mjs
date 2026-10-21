@@ -138,7 +138,7 @@ function snapshotStore(dir) {
   return { store, db: loaded.db, all, save, revision: () => store.revision(), close: () => store.sqlite.close() };
 }
 
-test('snapshots: an unchanged save keeps the retained rows byte-identical and advances the revision — an ordinary server-mode save, then in snapshot mode with the collection supplied, supplied twice, omitted (partial snapshot) and through the identity replace (every players row deleted and reinserted); a snapshot that lists a retained id as a LIVE player is refused atomically with ids only (no birth date in the message), nothing changed, revision unchanged; a playersRetained collection that is not an array, an entry without an id, a non-integer deletedAt, a malformed birth date, a country that is not text, a duplicate id, an unknown field, or an id that is also a live player is refused the same way; the under-18-without-guardian refusal still holds for LIVE records while retained rows sit beside them; a pairing code left behind by an erase that did not revoke it names a retained id and refuses the next identity-rewriting save (ids only) — cleared, it is accepted; a supplied collection IS the retained set', () => {
+test('snapshots: an unchanged save keeps the retained rows byte-identical and advances the revision — an ordinary server-mode save, then in snapshot mode with the collection supplied, supplied twice, omitted (partial snapshot) and through the identity replace (every players row deleted and reinserted); a snapshot that lists a retained id as a LIVE player is refused atomically with ids only (no birth date in the message), nothing changed, revision unchanged; a playersRetained collection that is not an array, an entry without an id, a non-integer deletedAt, a malformed birth date, a country that is not text, a duplicate id, an unknown field, or an id that is also a live player is refused the same way; the under-18-without-guardian refusal still holds for LIVE records while retained rows sit beside them; a pairing code left behind by an erase that did not revoke it names a retained id and refuses the next identity-rewriting save (ids only) — cleared, it is accepted; a subset of the stored retained records is refused, never pruned (review of 6d66655)', () => {
   const dir = tempDir('erase-snapshot'); const t = boot(dir, FIXTURE());
   t.codes.issuePairingCode('pl-child2'); // a live child's code, left behind on purpose by the erase below (the route revokes it in the same unit; the repository does not)
   t.players.erase('pl-seeded', { at: NOW }); t.unit(() => t.players.erase('pl-child2', { at: NOW + 1 }));
@@ -177,12 +177,58 @@ test('snapshots: an unchanged save keeps the retained rows byte-identical and ad
   refused({ playersRetained: [RECORD('pl-adult', NOW, '2001-05-20', 'GB')] }, /pl-adult/, 'a retained record whose id is a live player');
   // The Founder's rule for live records is unchanged: a minor with no guardian link refuses the whole save.
   refused({ players: [...clone(S.db.players), child('pl-orphan', null, '2015-05-05')], guardians: clone(S.db.guardians) }, new RegExp(MINOR_WITHOUT_LINK_REASON.slice(0, 30)), 'a live minor without a guardian link');
-  // A supplied collection REPLACES the retained set (the snapshot contract: supplied means exactly this).
-  S.save({ playersRetained: [RECORD('pl-seeded', NOW, '2004-03-14', 'GB')] });
-  assert.equal(rows(), JSON.stringify([RETAINED_ROW('pl-seeded', NOW, '2004-03-14', 'GB')]), 'the supplied collection is the retained set');
+  // Review of 6d66655, F1: the earlier expectation here — that a supplied collection REPLACES the retained set, so
+  // listing a subset prunes the rest — conflicted with the promise the retained record exists for (a deletion fact
+  // that survives and an id that is never re-created). A supplied collection may only ADD records: a stored record
+  // that is not listed, or listed with a changed fact, refuses the whole save (ids only). The protected contract is
+  // proven in the next test; here the subset is refused and both records stay.
+  refused({ playersRetained: [RECORD('pl-seeded', NOW, '2004-03-14', 'GB')] }, /pl-child2/, 'a subset of the stored retained records (pruning is refused, not performed)');
   S.close();
-  const r = reopen(dir); assert.deepEqual(r.players.retainedRecords(), [RECORD('pl-seeded', NOW, '2004-03-14', 'GB')]); assert.equal(r.players.byId('pl-child2'), null); r.close();
+  const r = reopen(dir); assert.deepEqual(r.players.retainedRecords(), [RECORD('pl-seeded', NOW, '2004-03-14', 'GB'), RECORD('pl-child2', NOW + 1, '2016-08-08', 'GB')]); assert.equal(r.players.byId('pl-child2'), null); r.close();
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('snapshot contract (review of 6d66655, F1): stored retained records are PROTECTED — a supplied playersRetained collection may only add records; an empty collection, a subset, or a record whose birth date, country or deletion instant differs from the stored one refuses the WHOLE save atomically with ids only (an accompanying change to another collection is rolled back too, no transaction stays open, the tool\'s loaded view is untouched); the two-save sequence prune-then-recreate is refused at both steps and the id stays retained; a direct live-id collision is refused as before; a superset that adds a new record is accepted with every stored record byte-identical; unchanged, repeated and omitted saves stay positive controls', () => {
+  const dir = tempDir('erase-protected'); const t = boot(dir, FIXTURE());
+  t.players.erase('pl-seeded', { at: NOW }); t.unit(() => t.players.erase('pl-child2', { at: NOW + 1 })); t.save(); t.close();
+  const S = snapshotStore(dir);
+  const expected = JSON.stringify([RETAINED_ROW('pl-seeded', NOW, '2004-03-14', 'GB'), RETAINED_ROW('pl-child2', NOW + 1, '2016-08-08', 'GB')]);
+  const rows = () => JSON.stringify(S.all('SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid'));
+  const live = () => JSON.stringify(S.all('SELECT id FROM players WHERE deleted_at IS NULL ORDER BY rowid'));
+  const requestsBlob = () => S.all("SELECT value FROM collections WHERE name = 'requests'")[0]?.value ?? null;
+  assert.equal(rows(), expected);
+  const loadedView = JSON.stringify(S.db.playersRetained); const liveBefore = live(); const requestsBefore = requestsBlob();
+  const seeded = RECORD('pl-seeded', NOW, '2004-03-14', 'GB'); const kid = RECORD('pl-child2', NOW + 1, '2016-08-08', 'GB');
+  const refused = (over, pattern, label) => {
+    const revBefore = S.revision();
+    let err = null; try { S.save(over); } catch (e) { err = e; }
+    assert.ok(err, `${label}: refused`); assert.match(String(err.message), pattern, `${label}: ${err?.message}`);
+    assert.doesNotMatch(String(err.message), /2004-03-14|2016-08-08|1990-01-01|2001-05-20/, `${label}: no birth date in the message`);
+    assert.equal(rows(), expected, `${label}: every stored retained row byte-identical`); assert.equal(live(), liveBefore, `${label}: live rows unchanged`);
+    assert.equal(S.revision(), revBefore, `${label}: revision unchanged`); assert.equal(S.store.sqlite.isTransaction, false, `${label}: no open transaction`);
+    assert.equal(JSON.stringify(S.db.playersRetained), loadedView, `${label}: the tool's loaded view is untouched`); assert.equal(requestsBlob(), requestsBefore, `${label}: an accompanying change to another collection did not land`);
+  };
+  refused({ playersRetained: [] }, /pl-child2|pl-seeded/, 'an empty collection');
+  refused({ playersRetained: [seeded] }, /pl-child2/, 'a subset');
+  refused({ playersRetained: [{ ...seeded, birthDate: '1990-01-01' }, kid] }, /pl-seeded/, 'a changed birth date');
+  refused({ playersRetained: [{ ...seeded, country: 'DE' }, kid] }, /pl-seeded/, 'a changed country');
+  refused({ playersRetained: [{ ...seeded, deletedAt: NOW + 1000 }, kid] }, /pl-seeded/, 'a changed deletion instant');
+  refused({ playersRetained: [], requests: [{ id: 'req-rolled-back', status: 'pending' }] }, /pl-/, 'an empty collection with an accompanying requests change');
+  // The two-save sequence: prune (refused), then recreate the id as a live player (refused by the identity replace: the record is still there).
+  refused({ playersRetained: [] }, /pl-/, 'step one of prune-then-recreate');
+  refused({ players: [...clone(S.db.players), { ...adult(), id: 'pl-seeded' }], guardians: clone(S.db.guardians) }, /pl-seeded/, 'step two of prune-then-recreate');
+  refused({ playersRetained: [seeded, kid, RECORD('pl-adult', NOW, '2001-05-20', 'GB')] }, /pl-adult/, 'a direct live-id collision');
+  // Positive controls: unchanged, repeated, omitted; a superset adds a record and changes nothing stored.
+  let r1 = S.revision();
+  S.save({}); assert.equal(rows(), expected); S.save({}); assert.equal(rows(), expected); S.save({ playersRetained: undefined }); assert.equal(rows(), expected); assert.equal(S.revision(), r1 + 3);
+  S.save({ playersRetained: [seeded, kid, RECORD('pl-imported', NOW + 2, '2003-01-01', 'FR')] });
+  assert.equal(rows(), JSON.stringify([...JSON.parse(expected), RETAINED_ROW('pl-imported', NOW + 2, '2003-01-01', 'FR')]), 'the new record is added; the stored rows are byte-identical');
+  assert.equal(S.revision(), r1 + 4); assert.equal(S.store.sqlite.isTransaction, false);
+  S.close();
+  const r = reopen(dir);
+  assert.deepEqual(r.players.retainedRecords(), [seeded, kid, RECORD('pl-imported', NOW + 2, '2003-01-01', 'FR')]);
+  assert.throws(() => r.players.insert({ ...adult(), id: 'pl-seeded' }), /retained/, 'the id stays retained after every attempt');
+  r.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('unit of work: an erase inside a unit that fails after every write — and one whose REAL COMMIT fails — leaves the account exactly as it was: the row, the child rows, the links, the session, the media queue, the pairing code; memory restored through the memento (the same held view object, the held childIds array with its content, the indexes, no retained record, the facet tracking), an unrelated pending facet edit survives; the retry lands everything once and a second erase is refused; the audit rows (a ledger row naming the player) are untouched throughout', () => {

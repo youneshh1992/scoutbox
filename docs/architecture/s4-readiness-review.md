@@ -832,7 +832,9 @@ audit rows); the decisions it rests on are the Founder's, recorded verbatim: the
 - **Snapshots:** `IDENTITY_SNAPSHOT.replace` captures the retained rows before its DELETE, refuses a candidate that
   lists a retained id as a live player (`PLAYER_ID_RETAINED`, ids only) and reinserts the rows byte-identical after the
   candidate; `PLAYERS_RETAINED` (`playersRetained`, table-backed) is read for backups and tools and, when a snapshot
-  supplies it, IS the retained set (validated: exactly `{ id, deletedAt, birthDate, country }`, no duplicate, no live id).
+  supplies it, may only ADD records (validated: exactly `{ id, deletedAt, birthDate, country }`, no duplicate, no live id;
+  every stored record listed unchanged or the save is refused — the protected contract of §12.4, corrected after the
+  review of `6d66655`; the first implementation let a supplied collection replace the stored set).
 - **Migration `0014_player_erasure`** (REGISTERED, after 0013): refuses a file in which a `players` row already carries
   `deleted_at` (`UNEXPECTED_SCHEMA`), imports a `playersRetained` blob (a restored backup, a re-upgraded rollback copy)
   or nothing, records `meta.playerErasureCutover` `{ at, imported }`. No table, no column, no foreign key.
@@ -886,3 +888,32 @@ counts, commands, exits and skips of the final tree are in the handoff's `logs/g
 - **Both gates** on the final tree with the six historical builds booted for real, and the fresh extraction of the
   handoff, as the milestone rule requires; **not run:** browser suites, the demo rebuild, the route-level E2E battery,
   real older-Node runtimes, real data, real providers.
+
+### 12.4 Correction after the independent review of `6d66655` (21 October 2026; S4b-R still IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE)
+
+**The finding (one P2, reproduced two ways by the reviewer's unchanged script — exit 1 on `6d66655`).** `PLAYERS_RETAINED.replace`
+treated a supplied `playersRetained` collection like every other snapshot collection: it deleted the stored retained set and
+inserted what was supplied. So an ordinary snapshot save with an empty or partial collection erased a deletion record and a
+later save could re-create that id as a live account (F1a: the single-save collision check had nothing left to check), and a
+same-id record rewrote the stored birth date, country and deletion instant (F1b). The unit suite's snapshot test explicitly
+expected the pruning; passing it did not establish the retention invariant.
+
+**The correction** (`repositories/identity.mjs`, `PLAYERS_RETAINED.replace`; the comment in `repositories/index.mjs`): the
+contract is PROTECTED. A supplied collection may only add records. Every record the file already holds must be listed with the
+same four facts; a stored record that is not listed, or listed with a changed birth date, country or deletion instant, refuses
+the whole save (`RETAINED_RECORD_PROTECTED`, ids only — never a date) inside the caller's transaction, so an accompanying
+change to any other collection rolls back with it and no transaction stays open. New records are validated as before (shape,
+no duplicate, no live id) and inserted; no stored row is deleted or updated by a save; an omitted collection keeps the rows. A
+fresh restore and a re-upgraded rollback copy are unaffected: they import through migration 0014, where no stored record
+exists yet. The live-id collision check and the identity replace's resurrection refusal are unchanged.
+
+**Tests, written first and failing on the unchanged `6d66655` tree** (`logs/failing-first-unit@6d66655.txt`): the snapshot
+test's pruning expectation was corrected to a refusal — its earlier expectation conflicted with preserving retained deletion
+facts and was not weakened but reversed — and a dedicated regression covers an empty collection, a subset, a changed birth
+date, a changed country and a changed deletion instant (each separately), the two-save prune-then-recreate sequence (refused
+at both steps, the id still retained), a direct live-id collision, the rollback of an accompanying `requests` change on
+refusal, no open transaction and the tool's loaded view untouched after every refusal, and the positive controls: unchanged,
+repeated and omitted saves, and a superset that adds a record with every stored row byte-identical. The copy-only rollback and
+re-upgrade controls of §12.3 are unchanged. The reviewer's script, unchanged, reports F1a and F1b CORRECT on the corrected
+tree. Scope: no decision reopened or added — the four retained facts and the Founder's two choices stand; no retention period,
+correction or purge policy, age rule, foreign key, guardian lifecycle change, personal-data field or migration identifier.
