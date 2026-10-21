@@ -6,7 +6,7 @@ live, hashed tokens), S3 (organisations live, `org_users` rebuilt STRICT with it
 foreign key), S4a (players, guardians and `guardian_children` live with the
 transitional `facets_json`; the `media_deletions` queue; the S1 shadow retired), S5, S6a, S7a–S7d
 S6b (the eight audit tables, 19 October 2026; independently accepted at `f0abd34` on 21 October 2026) and S4b-R
-(the retained player record, migration 0014, 21 October 2026; implemented, awaiting independent acceptance) done
+(the retained player record, migration 0014, 21 October 2026; independently accepted at `9b109dc`) done
 (§5.0 says exactly which parts are implemented, proposed, or waiting on a decision). Companion
 document: [`sqlite-migration-plan.md`](./sqlite-migration-plan.md). Written 10 October
 2026 on branch `feat/sqlite-schema`.
@@ -125,7 +125,7 @@ them.
 | `users` | persistent | 01 | `org_users` (LIVE since migration 0001) | S0 done |
 | `orgs` | persistent | 01 (+04, 05) | `orgs`; nested `tactical` → `org_tactical_setups/roles/role_criteria/windows`, `squad[]` → `org_squad_members`, `lookingFor[]` → `org_looking_for`, `federationCheck` → `org_federation_checks` (04); `verification.domains[]` → `org_verified_domains` (05); `verification.revokedAt/orgType` → columns on `orgs`; `agencySettings` → 06 | **S3 done** (live; scalars and composites are columns, the nested facets ride in `orgs.facets_json` until S9/S10/S11; blob retired by migration `0004`) |
 | `guardians` | persistent | 01 | `guardians` (LIVE since migration 0005; `coGuardians[]`, `emailCode` and unknown fields in `facets_json`); `childIds[]` → `guardian_children` (LIVE) | **S4a done** (S4b: lifecycle, after O1) |
-| `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`); **since migration 0014 (S4b-R) an account deletion keeps the row as the retained record — `id`, `deleted_at`, `birth_date`, `country`; placeholders and NULL elsewhere — served by no account reader** | S4 (scalars, shadow since S1), S5 (sub-records), S4b-R (the retained record; implemented 21 October 2026, awaiting independent acceptance) |
+| `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`); **since migration 0014 (S4b-R) an account deletion keeps the row as the retained record — `id`, `deleted_at`, `birth_date`, `country`; placeholders and NULL elsewhere — served by no account reader** | S4 (scalars, shadow since S1), S5 (sub-records), S4b-R (the retained record; implemented 21 October 2026, independently accepted at `9b109dc`) |
 | `sessions` | temporary | 01 | `sessions` (token stored as `token_hash`) | **S2 done** (live; blob retired by migration `0003`) |
 | `requests` | persistent | 02 | `recruitment_requests`, `request_trial_slots`; `keys` → `idempotency_keys` | S8 |
 | `trials` | persistent | 02 | `trials`, `trial_schedule_sessions`, `trial_session_evidence`, `trial_schedule_revisions`, `trial_attendance`, `trial_reminders`, `trial_day_staff`, `trial_day_consents`, `trial_day_checkins`, `trial_day_status_events`, `trial_reports` (the one copy; `players[].trialReports` is derived from it), `trial_history`; `keys` → `idempotency_keys` | S8 |
@@ -945,7 +945,7 @@ catalogue; shadow-then-cutover per domain; no integer keys; no triggers or views
   for S4b, the treatment of the ids of players deleted before S4b, and the options for each open part are
   in `sqlite-migration-plan.md` §D.1 and §D.5 (Q1, Q3, Q6; 19 October 2026). **The country code: answered on
   21 October 2026 — kept (verbatim "Keep the country code (Recommended)", `s4-deletion-decision.md` §12); the
-  retained record is built as S4b-R (plan §D.6.2, migration 0014; awaiting independent acceptance). Still open: the
+  retained record is built as S4b-R (plan §D.6.2, migration 0014; independently accepted at `9b109dc` on 21 October 2026). Still open: the
   child-status stamp (Q2); the guardian lifecycle; Q3 and the foreign keys; Q6.**
 - O2. Org deletion policy with open recruitment cases. **Deferred past S3 deliberately**: S3
   cut organisations over without a tombstone column and without a hard-delete path, because
@@ -967,7 +967,7 @@ catalogue; shadow-then-cutover per domain; no integer keys; no triggers or views
   `RESTRICT` references at S8, after the tombstone exists. The S8a dependencies as the code stands
   (player tombstones, organisation lifecycle, the two `case_id` references to S8b, the conversion of the
   approved `channels.request_id` check into a foreign key) are tabulated in `sqlite-migration-plan.md`
-  §D.3; the two approvals S8a would need before S4b/S8b are Q7a and Q7b of §D.5.
+  §D.3; since S4b-R the current S8a brief and its three approvals (Q7a, Q7b, Q7c) are plan §D.7.
 - O10. `agent_profile_facets.member_association` cannot be NULL in a STRICT composite primary
   key, so the FIFA-level facet is stored as `'INT'` (the vocabulary's code). Confirm with the
   compliance owner that `INT` is the right sentinel.

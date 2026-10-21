@@ -1376,7 +1376,7 @@ repository; every `db.<name>` is a read-only view in insertion order.
    <fresh-empty-dir>`, then start the previous build (`4f954ad`) on the output —
    every audit row written, updated or deleted since the cutover is in it.
 
-### Retained player records (live since migration `0014`, S4b-R — implemented 21 October 2026 on top of `d16362f` under the Founder's decisions of 12 October (the full birth date) and 21 October 2026 (the country code kept); IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE; not production-approved)
+### Retained player records (live since migration `0014`, S4b-R — implemented 21 October 2026 on top of `d16362f` under the Founder's decisions of 12 October (the full birth date) and 21 October 2026 (the country code kept); corrected once and independently ACCEPTED at `9b109dc` on 21 October 2026 for the bounded retained-player-record milestone; not production-approved)
 
 An account deletion (`DELETE /player/account`, `DELETE /guardian/children/:id`)
 no longer deletes the player row. `deletePlayerData` calls `players.erase`

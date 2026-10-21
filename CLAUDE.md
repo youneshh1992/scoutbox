@@ -288,10 +288,13 @@ and design changes the Founder explicitly requests.
   the refusing default); that corrected commit is the accepted one. The two
   intermittent test failures of the `c6cf5e1` review did not recur in any run
   since; their causes are unresolved (not fixed, not disproven; review §11.5).
-  **S4b-R, the retained player record, is IMPLEMENTED since 21 October 2026**
-  (one local commit on top of `d16362f`; AWAITING INDEPENDENT ACCEPTANCE — not
-  production, security, legal-compliance or deployment approval; plan §D.6,
-  §D.6.1, §D.6.2; `docs/architecture/s4-readiness-review.md` §12;
+  **S4b-R, the retained player record, is IMPLEMENTED since 21 October 2026
+  and independently ACCEPTED at commit
+  `9b109dc41f44159b082dd261b2de78a2bab13762`** (one commit on top of `d16362f`,
+  corrected once after the independent review of `6d66655`; bounded
+  development acceptance — not production, security, legal-compliance or
+  deployment approval; plan §D.6, §D.6.1, §D.6.2, §D.6.3;
+  `docs/architecture/s4-readiness-review.md` §12, the acceptance §12.5;
   `scoutbox-server/OPERATIONS.md` "Retained player records"). Built under the
   Founder's explicit decisions, recorded verbatim and not to be asked again:
   the **full birth date** (12 October 2026) and **"Keep the country code
@@ -320,9 +323,14 @@ and design changes the Founder explicitly requests.
   build on the copy) and the S6b tool refuses a file carrying 0014. **Never
   boot the previous build directly on a 0014 file: it serves a retained row as
   a passwordless account** (OPERATIONS.md). The next free migration identifier
-  is `0015`. The six historical builds the backend gate boots for real:
-  `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`
-  (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR_SERVER`).
+  is `0015` (not reserved). The six historical builds the backend gate boots
+  for real: `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`
+  (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR_SERVER`). **The next step is
+  prepared, not started: S8a-core** (requests and trials, their owned child
+  tables, `idempotency_keys`, the `channels.request_id` conversion; no key to
+  `players(id)` or `guardians(id)`; upsert-and-prune for the two tables) —
+  plan §D.7 — which needs the Founder's answers to **Q7a, Q7b and Q7c** and
+  nothing else; nothing of it is implemented, stubbed or reserved.
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state

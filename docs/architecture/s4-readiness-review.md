@@ -38,7 +38,7 @@ lists what each step may proceed with. *Status, 12 October 2026:* S4a is done an
 the Founder has answered the birth-date part of O1 (full birth date) and kept the country-code
 and child-status-stamp parts open; the decision record's §10 lists which S4b design items still
 wait on those. S4b-R — the retained player record, narrowed as plan §D.6.1 says — is implemented since
-21 October 2026 and awaits independent acceptance (§12); the guardian lifecycle is not built.
+21 October 2026 and independently accepted at `9b109dc` (§12, §12.5); the guardian lifecycle is not built.
 
 Sections: 1 what S4 is and is not · 2 player fields · 3 guardian fields · 4 what moves, what
 stays nested · 5 relationships, minors, duplicates, inconsistencies, invalid records · 6 views
@@ -804,9 +804,9 @@ Recorded, not for decision now: the co-guardian design is reproduced faithfully;
 `drillResults` signup defect and the export/minor gap are route defects outside S4; the runtime
 metadata alignment (plan §S3) is independent of S4.
 
-## 12. S4b-R as implemented (21 October 2026, one local commit on `feat/sqlite-schema` on top of `d16362f` — IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE)
+## 12. S4b-R as implemented (21 October 2026, one local commit on `feat/sqlite-schema` on top of `d16362f` — written while IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE; **corrected once (§12.4) and independently ACCEPTED at `9b109dc`, §12.5**)
 
-**Status at the time of writing: IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE.** Not production, security,
+**Status at the time of writing: IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE (accepted since, §12.5).** Not production, security,
 legal-compliance or deployment approval; not acceptance of S8, of the foreign keys (plan §D.2a, Q3) or of
 anything Q2, Q6 or Q7 name; no real data, no real provider. The specification is `sqlite-migration-plan.md` §D.6 as
 narrowed by §D.6.1 (the exact column mapping, today's name cleanup and nothing more, the corrected claim about the
@@ -889,7 +889,7 @@ counts, commands, exits and skips of the final tree are in the handoff's `logs/g
   handoff, as the milestone rule requires; **not run:** browser suites, the demo rebuild, the route-level E2E battery,
   real older-Node runtimes, real data, real providers.
 
-### 12.4 Correction after the independent review of `6d66655` (21 October 2026; S4b-R still IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE)
+### 12.4 Correction after the independent review of `6d66655` (21 October 2026; written while S4b-R was still AWAITING INDEPENDENT ACCEPTANCE — accepted since, §12.5)
 
 **The finding (one P2, reproduced two ways by the reviewer's unchanged script — exit 1 on `6d66655`).** `PLAYERS_RETAINED.replace`
 treated a supplied `playersRetained` collection like every other snapshot collection: it deleted the stored retained set and
@@ -917,3 +917,62 @@ repeated and omitted saves, and a superset that adds a record with every stored 
 re-upgrade controls of §12.3 are unchanged. The reviewer's script, unchanged, reports F1a and F1b CORRECT on the corrected
 tree. Scope: no decision reopened or added — the four retained facts and the Founder's two choices stand; no retention period,
 correction or purge policy, age rule, foreign key, guardian lifecycle change, personal-data field or migration identifier.
+
+### 12.5 Independent acceptance of S4b-R at `9b109dc` (21 October 2026)
+
+**Status: S4b-R — the retained player record (migration `0014_player_erasure`) and its F1 correction — is INDEPENDENTLY
+ACCEPTED at commit `9b109dc41f44159b082dd261b2de78a2bab13762`** for the bounded retained-player-record milestone (the
+review's decision, recorded as given: *"ACCEPTED for the bounded S4b-R milestone and its F1 correction at 9b109dc. No new
+blocking finding identified."*). This is bounded development acceptance: not production readiness, deployment approval,
+legal-compliance certification, a security audit or completion of the data-layer rebuild; not acceptance of S8, of any
+foreign key, of the guardian lifecycle or of anything Q2, Q3, Q6 or Q7 name. S6b stays accepted at `f0abd34`, S7 at
+`4f954ad`. The §12 and §12.4 headings keep their "awaiting" wording as the dated history of those rounds.
+
+**What the reviewer verified, from the handoff ZIP of `9b109dc` (SHA-256
+`cee98290e25fc7c73fd144bc07a04aab7fdb921a4fb3fad29d78cabc0e7ef11b`, all 475 manifest entries verified; the bundled prior
+reviewer script byte-identical to the reviewer's own copy).** Runtime: Node v24.19.0, SQLite 3.53.3, npm 11.6.0; both
+projects installed from their lockfiles with an offline `npm ci --ignore-scripts`, exit 0. The reviewer tested the
+extracted handoff; the remote head, the push and the PR state were this work's statements, not independently queried.
+
+- **F1 CLOSED, both manifestations:** `PLAYERS_RETAINED.replace` validates the incoming collection, compares every
+  stored record by id and the three retained facts, refuses missing or amended records with `RETAINED_RECORD_PROTECTED`
+  and inserts only new records; an empty supplied collection is refused and the row stays, a later attempt to re-create
+  the id live is refused with `PLAYER_ID_RETAINED` (F1a); a changed birth date, country or deletion instant is refused and
+  the stored record stays (F1b). The original `review-6d66655-reproductions.mjs`, unchanged, reports CORRECT for both
+  and exits 0.
+- **Three further independent checks** (`review-9b109dc-atomicity.mjs`, real store and repositories, synthetic temporary
+  databases): an organisation update made earlier in the same snapshot transaction rolls back when the retained
+  collection is refused (organisation, retained row and revision unchanged, transaction closed); a newly inserted
+  retained record rolls back when a later malformed session is refused; retrying with a valid superset, reordering the
+  complete set and then omitting the collection preserves the existing and the new record.
+- **Gates:** backend `npm test` exit 0, 31 suites / 388 checks, one completed run (a first attempt stopped at a
+  sandbox `EPERM` on the local listen — an environment failure, logged separately, not counted as a run — after which
+  the gate was restarted from the beginning); Player `npm test -- --runInBand` exit 0, 4 suites / 41 tests, one attempt.
+  The six historical rollback servers were configured from the reviewer's extracted prior handoffs (pre-S7a `2d7ddeb`,
+  `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`) and the real old-build boot checks ran. **One difference from
+  this work's runs, recorded as it is:** the reviewer's pre-S7a build is `2d7ddeb`, this work's is `812e13b`; the other
+  five match.
+- **Diff review:** the seven declared changed files match; the pruning test now requires refusal; the new test covers
+  changed facts, empty and subset collections, id reuse, atomic refusal and the positive controls; no migration, policy,
+  foreign key or UI change was introduced.
+
+**Limits the reviewer kept visible (and this work's own):** no independent Node 22 or minimum-runtime gate, browser
+suite, demo rebuild or route-level E2E battery; the real older-runtime checks skipped on both sides (simulated API
+masking only); this work's Node 22 results and the fresh-extraction record (§12.3) are separate from the independent
+results above; the two S6b-era intermittent failures remain **not reproduced; cause unresolved**; the pre-existing
+`m23BootContract` / `m23Persistence` failures remain outside this acceptance. Passing gates do not establish causes or
+certify the product.
+
+**The contracts this acceptance covers, now the standing ones:** the exact retained row (plan §D.6.1 item 1); the
+atomic refusal of a resurrected id, of a malformed `playersRetained` record and of a pruned or amended stored record
+(§12.4); the backup under `playersRetained` and its import on restore; every account reader filtering retained rows;
+the copy-only rollback chain starting with `scripts/playerErasureRollback.mjs`. **The decisions it rests on, unchanged
+and not asked again:** the full birth date and the country code on the retained record. **Still open, unchanged by
+acceptance:** Q2 (the child-status stamp), Q3 (historically missing ids), Q6 (further deletion behaviours), the
+guardian lifecycle, the foreign keys (plan §D.2a), Q7a–Q7c (plan §D.7).
+
+**This acceptance milestone** (documentation and technical preparation only, one commit on top of `9b109dc`) changed no
+application source, schema, migration, test or Player file: it records the acceptance here, in plan §D.6.2/§D.6.3/§D.7,
+`sqlite-schema.md`, `OPERATIONS.md` and `CLAUDE.md`, and prepares the next step (plan §D.7). The two milestone gates were
+run on its final tree with the six historical builds wired in; the commands, versions, exits and totals are in the
+handoff (`logs/gates-run.txt`) and the PR description.
