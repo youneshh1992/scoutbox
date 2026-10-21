@@ -277,7 +277,10 @@ and design changes the Founder explicitly requests.
   whole-snapshot-write objective (plan §D.4). Child-status stamping (Q2) and
   the country code (Q1) stay OPEN; the full birth date, D-A/D-B and the
   legacy-minor stop rule are unchanged; A0–A3, S4b and S8 are not started. The
-  next free migration identifier is `0014`.
+  next free migration identifier is `0014`. The correction of 21 October 2026 (review of `c6cf5e1`,
+  review §11.4) makes `patch` atomic (F1) and stores a nested undefined in an
+  audit record as JSON did (F2, opt-in `cloneJson` option; outbox and push keep
+  the refusing default); S6b stays PENDING INDEPENDENT ACCEPTANCE.
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state

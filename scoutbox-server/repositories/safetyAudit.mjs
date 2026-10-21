@@ -91,7 +91,7 @@
 import { readonlyView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied, transaction } from './database.mjs';
-import { cloneJson, NON_FINITE_KEPT } from './outboxPush.mjs';
+import { cloneJson } from './outboxPush.mjs';
 
 export const SAFETY_AUDIT_MIGRATION = '0013_safety_audit';
 /** `meta` key holding the cutover record: counts only, never data. */
@@ -141,8 +141,14 @@ const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArr
 const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
 const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
-/** A detached, prototype-safe clone; a non-finite number in live data is kept live (persisted as JSON null, the blob's rule). */
-const clone = (v, at) => cloneJson(v, at, NON_FINITE_KEPT);
+/**
+ * A detached, prototype-safe clone with the pre-S6b blob's JSON rules: a non-finite number in live data is kept live
+ * (persisted as JSON null), and a NESTED undefined is stored as JSON.stringify stored it — an object property omitted,
+ * an array entry null (review of c6cf5e1, F2: the Box Cam prefs writer's `detail.share` on a partial prefs row). A
+ * function, a symbol, a BigInt, a non-plain object or a cycle is still refused by name.
+ */
+const AUDIT_JSON = Object.freeze({ nonFinite: 'keep', undefinedNested: 'json' });
+const clone = (v, at) => cloneJson(v, at, AUDIT_JSON);
 const parseJson = (text, at) => clone(JSON.parse(text), at).value;
 const ids = (list) => list.slice(0, 20).join(', ') + (list.length > 20 ? ', …' : '');
 /** A mirror object: extras first (the export convention), then the literal's present keys in the writer's order. */
@@ -402,14 +408,23 @@ export function createSafetyAuditRepository({ sqlite, now = Date.now, log = () =
     exec(() => { stmt.insert[n].run(p); });
     return readonlyView(row, label(n));
   });
-  /** Change exactly `allowed` keys of a row by id (the routes' status updates); the values become present keys. */
+  /**
+   * Change exactly `allowed` keys of a row by id (the routes' status updates); the values become present keys.
+   * ATOMIC (review of c6cf5e1, F1): every field is validated and cloned, and the UPDATE parameters computed from a
+   * candidate copy, BEFORE anything is published — a refusal at any field leaves the row (and so every held or fresh
+   * view), the queue and the file untouched. Only then are the values assigned to the live row (its identity, and so
+   * every held view, is kept) and the statement queued.
+   */
   const patch = (n, id, fields, allowed) => operation((exec) => {
     const row = byId[n].get(id); if (!row) throw new Error(`${n}: no ${n === 'reports' ? 'report' : 'entry'} ${id}`);
     if (!isPlainObject(fields)) throw new TypeError(`${n}: patch takes an object of fields`);
     const keys = Object.keys(fields);
     if (!keys.length || keys.some((k) => !allowed.includes(k))) throw new TypeError(`${n}: patch changes ${allowed.length === 1 ? allowed[0] : `${allowed.slice(0, -1).join(', ')} and ${allowed.at(-1)}`} only`);
-    for (const k of keys) { const c = clone(fields[k], `${n}.${k}`); if (c.reason) throw new TypeError(`${n}: ${c.reason}`); row[k] = c.value; }
-    const p = params(n, row);
+    const prepared = [];
+    for (const k of keys) { const c = clone(fields[k], `${n}.${k}`); if (c.reason) throw new TypeError(`${n}: ${c.reason}`); prepared.push([k, c.value]); }
+    const candidate = {}; for (const k of Object.keys(row)) setOwn(candidate, k, row[k]); for (const [k, v] of prepared) candidate[k] = v;
+    const p = params(n, candidate);
+    for (const [k, v] of prepared) row[k] = v;
     exec(() => { stmt.update[n].run(p); });
     return readonlyView(row, label(n));
   });

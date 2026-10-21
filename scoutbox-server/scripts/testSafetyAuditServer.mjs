@@ -312,8 +312,13 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0013
   assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM reports WHERE id = ?', rep.body.reportId).n, 1, 'once'); assert.ok(q1(dir, 'SELECT 1 AS one FROM org_notes WHERE id = ?', note.body.id));
   // The block lift (Q5) is durable in its route's save.
   const blockId = (await adminBlocks(S)).find((b) => b.playerId === pid).id;
-  assert.equal((await S.j('POST', `/admin/blocks/${blockId}/lift`, {}, null, A)).status, 200);
-  assert.ok(await until(async () => !q1(dir, 'SELECT 1 AS one FROM blocks WHERE id = ?', blockId), 8000), 'the lifted block row is deleted in the file');
+  const seqLift = seqOf(dir); const logLift = S.log().length; const liftAt = Date.now();
+  const lift = await S.j('POST', `/admin/blocks/${blockId}/lift`, {}, null, A); assert.equal(lift.status, 200, lift.text);
+  const gone = await until(async () => !q1(dir, 'SELECT 1 AS one FROM blocks WHERE id = ?', blockId), 8000);
+  // Diagnostics on failure only (the review of c6cf5e1 saw this assertion fail once): the save revisions, the clocks,
+  // the in-memory list, the lift answer and the child server's output since the lift (save failures are logged there).
+  const diag = async () => JSON.stringify({ seqBefore: seqLift, seqNow: seqOf(dir), waitedMs: Date.now() - liftAt, liftAnswer: lift.body, inMemory: (await adminBlocks(S)).map((b) => b.id), inFile: snap(dir, (c) => c.all('SELECT id FROM blocks ORDER BY seq')).map((r) => r.id), childExit: S.proc.exitCode, childLogSinceLift: S.log().slice(logLift).slice(-2500) });
+  assert.ok(gone, `the lifted block row is deleted in the file — ${gone ? '' : await diag()}`);
   await S.stop(); rm(dir);
 });
 
@@ -370,6 +375,51 @@ await test('[cutover] legacy and unknown shapes through the import, the admin ba
   assert.deepEqual(snap(strict, (c) => COLLECTIONS.map((n) => c.get('SELECT value FROM collections WHERE name = ?', n)?.value ?? null)), blobsBefore, 'every blob as it was'); assert.equal(seqOf(strict), seqBefore);
   void gid;
   rm(dir, copy, up, bk.body.dir, restored, strict);
+});
+
+await test('[S6b correction F2] an EXISTING partial Box Cam prefs row ({ playerId } only, as an older build or a restore can leave it) and the real authenticated PATCH /player/box-cam/prefs { retainClips: true }: answered 200 with the same payload the pre-S6b build gives (no preference default introduced), the box_prefs_changed ledger row recorded with detail { by, retainClips } — the absent share key absent, exactly as the pre-S6b blob stored it; the prefs and the row survive a restart; the admin backup carries the row exactly; the copy-only rollback blob holds it in the legacy literal; the pre-S6b build reads the copy and answers the same PATCH the same way; this build re-upgrades the copy', async () => {
+  const dir = tempDir('s6b-f2'); let S = await boot(dir);
+  const { pid, token } = await signupAdult(S, 'Prefs Adult');
+  assert.equal((await S.j('PATCH', '/player/box-cam/prefs', { retainClips: false }, token)).status, 200, 'control: a full prefs row created by the route');
+  await S.stop();
+  { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); const v = JSON.parse(s.prepare("SELECT value FROM collections WHERE name = 'boxCamPrefs'").get().value); const i = v.findIndex((p) => p.playerId === pid); assert.ok(i >= 0); v[i] = { playerId: pid }; s.prepare("UPDATE collections SET value = ? WHERE name = 'boxCamPrefs'").run(JSON.stringify(v)); s.close(); }
+  S = await boot(dir);
+  assert.deepEqual((await S.j('GET', '/player/box-cam/prefs', undefined, token)).body, { prefs: { playerId: pid } }, 'the partial row is served as it is');
+  const r = await S.j('PATCH', '/player/box-cam/prefs', { retainClips: true }, token);
+  assert.equal(r.status, 200, `the update is answered (fails on c6cf5e1 with 500): ${r.text}`);
+  assert.deepEqual(Object.keys(r.body.prefs), ['playerId', 'retainClips', 'updatedAt', 'updatedBy'], 'no shareDevelopmentActivity default introduced'); assert.equal(r.body.prefs.retainClips, true); assert.deepEqual(r.body.prefs.updatedBy, { kind: 'player', id: pid });
+  const prefsRows = () => stored(dir, 'ledger').filter((l) => l.playerId === pid && l.type === 'box_prefs_changed');
+  assert.ok(await until(async () => prefsRows().length === 2, 8000), 'the second ledger row landed (persistNow)');
+  const row = prefsRows()[1];
+  assert.equal(JSON.stringify(row.detail), JSON.stringify({ by: 'player', retainClips: true }), 'the detail as the pre-S6b blob stored it: share absent');
+  assert.equal(Object.hasOwn(row.detail, 'share'), false);
+  const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
+  const backupRow = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')).db.ledger.find((l) => l.id === row.id);
+  assert.equal(JSON.stringify(canon('ledger', [backupRow])[0]), JSON.stringify(row), 'the backup carries the row exactly');
+  await S.kill(); // SIGKILL after the answers: nothing pending is lost
+  S = await boot(dir);
+  assert.equal((await S.j('GET', '/player/box-cam/prefs', undefined, token)).body.prefs.retainClips, true, 'the prefs survived the restart');
+  assert.equal(JSON.stringify(prefsRows()[1]), JSON.stringify(row), 'the row survived the restart');
+  await S.stop();
+  const copy = tempDir('s6b-f2-copy');
+  execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, copy], { encoding: 'utf8' });
+  const legacy = snap(copy, (c) => blobRows(c, 'ledger')).find((l) => l.id === row.id);
+  assert.equal(JSON.stringify(canon('ledger', [legacy])[0]), JSON.stringify(row), 'the rollback blob holds the legacy literal');
+  const OLD = process.env.SCOUTBOX_PRE_S6B_SERVER;
+  if (OLD && fs.existsSync(OLD)) {
+    const old = await boot(copy, {}, OLD);
+    const again = await old.j('PATCH', '/player/box-cam/prefs', { retainClips: false }, token); assert.equal(again.status, 200, 'the pre-S6b build answers the same PATCH');
+    assert.deepEqual(Object.keys(again.body.prefs), ['playerId', 'retainClips', 'updatedAt', 'updatedBy'], 'with the same payload shape');
+    await old.stop();
+    console.log('    (pre-S6b build booted the F2 rollback copy and answered the same PATCH with the same payload)');
+    const re = await boot(copy); assert.ok(live(copy), 'this build re-upgraded the copy');
+    const rows = stored(copy, 'ledger').filter((l) => l.playerId === pid && l.type === 'box_prefs_changed');
+    assert.equal(rows.length, 3); assert.equal(JSON.stringify(rows[1]), JSON.stringify(row)); assert.equal(Object.hasOwn(rows[2].detail, 'share'), false, 'the old build\'s row, re-imported, keeps share absent');
+    await re.stop();
+  } else {
+    console.log('    (SCOUTBOX_PRE_S6B_SERVER not set: the pre-S6b boot of the F2 rollback copy was not exercised here)');
+  }
+  rm(dir, bk.body.dir, copy);
 });
 
 console.log(`\n${passed} safety-audit server checks passed`);

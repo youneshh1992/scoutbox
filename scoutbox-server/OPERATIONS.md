@@ -1290,7 +1290,10 @@ repository; every `db.<name>` is a read-only view in insertion order.
   the writer did not pass comes back absent (`absent_keys_json`), a known key
   whose value is not the column's type — the numeric or object `targetPlayerId`
   `handleReport` stores as received, an object `orgId` — comes back exactly as
-  stored (`offtype_json`). No vocabulary is enforced by the database.
+  stored (`offtype_json`). A NESTED undefined (an object property, an array
+  entry) is stored as JSON stores it: the property omitted, the entry null —
+  the pre-S6b blob's rule (review §11.4, F2). No vocabulary is enforced by the
+  database.
 - **References (the approved scope).** NO foreign key on any of the eight. The
   five player references (`blocks`, `reports`, `org_notes`, `ledger`,
   `source_changes`) are **tolerant** (Q4): a row naming a player that is not in

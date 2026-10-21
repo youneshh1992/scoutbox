@@ -17,7 +17,8 @@ server line numbers predate S4a and S5 and are superseded by the ones here.
 > departs from §§5–7 and why, and how it was verified. **The eight audit tables are IMPLEMENTED since
 > 19 October 2026 as S6b (migration `0013_safety_audit`, one local commit on top of `1792fc7`) and PENDING
 > INDEPENDENT ACCEPTANCE — §11 records what was built, the Founder's decisions Q4, Q4b and Q5 it rests on,
-> where it departs from §§2–7 and plan §D.4, and how it was verified.** Not production, security,
+> where it departs from §§2–7 and plan §D.4, and how it was verified.** §11.4 records the correction after the independent review of `c6cf5e1`
+> (F1 and F2 fixed; two intermittent test failures not reproduced, cause unresolved); S6b is still pending. Not production, security,
 > legal-compliance or deployment approval; not acceptance of S4b or S8.
 
 Three kinds of statement are kept apart throughout: **code facts** (what runs today, cited),
@@ -28,7 +29,8 @@ Sections: 1 where S6 stands · 2 the ten domains, one by one · 3 deletion paths
 dependencies · 4 append-only, `RESTRICT` and the current hard delete · 5 the one-time codes ·
 6 the smallest safe sub-step · 7 test and rollback design · 8 migration registry · 9 dependency
 table · 10 S6a as implemented (independently accepted at `2d7ddeb`; §10.6 and §10.7 are the two
-review-correction rounds) · 11 S6b as implemented (19 October 2026; pending independent acceptance).
+review-correction rounds) · 11 S6b as implemented (19 October 2026; §11.4 the correction of 21 October 2026; pending independent
+acceptance).
 
 ---
 
@@ -1147,3 +1149,53 @@ are in the handoff package (`logs/`), the counts in `logs/gates-summary.txt`.
   probes — the sidecar record beside the ZIP.
 - **Not run:** browser suites, demo rebuild, the remaining E2E suites, real older-Node runtimes, real data, real
   providers.
+
+### 11.4 Correction after the independent review of `c6cf5e1` (21 October 2026; S6b still PENDING INDEPENDENT ACCEPTANCE)
+
+The independent review of `c6cf5e1` reported two findings and two unexplained test failures. This correction is one
+commit on top of `c6cf5e1`. It changes `repositories/safetyAudit.mjs`, adds one opt-in to the shared `cloneJson`
+validator in `repositories/outboxPush.mjs`, and adds regressions and failure diagnostics to four test scripts. No
+route, schema, migration, rollback tool or Player file changed. Q4, Q4b and Q5 and the under-18 refusal are unchanged.
+
+- **F1 — a rejected staged report patch changed live state.** Cause: `patch` assigned each field to the live row
+  as it validated it, so a refusal at a later field left the earlier fields changed in
+  the mirror, in every held and fresh view and in the export, while the file kept the old value; the next valid patch
+  then wrote the half-applied fields to the file. Fix: `patch` validates and clones every field, builds the UPDATE
+  parameters from a candidate copy, and only then assigns the values to the live row (row identity, and so every held
+  view, is kept) and queues the statement. Regression (`testSafetyAudit.mjs`, "[S6b correction F1]"): refused patches
+  with an undefined, a function and a Map value, an unknown key, and an IDV status that is a function each leave the
+  held view, a fresh view, the export, the pending queue (with a statement already queued), the file and the save
+  revision unchanged; a later valid patch persists only its own field; inside a unit the refusal still refuses the
+  unit and the state is restored; an accepted patch whose COMMIT fails stays pending and lands once on retry.
+- **F2 — an existing partial Box Cam prefs row (`{ playerId }` only) failed during audit recording.** Cause: the
+  prefs writer records `detail.share` from the stored row; on a partial row that value is `undefined`, which the
+  pre-S6b blob stored by omitting the key (JSON) but the S6b clone refused, so the route answered 500 after the prefs
+  had already changed. Fix: the S6b audit clone opts into `undefinedNested: 'json'`, which stores a NESTED undefined
+  exactly as `JSON.stringify` did (an object property omitted, an array entry null). A top-level undefined is still
+  an absent key, and a function, symbol, BigInt, non-plain object or cycle is still refused by name. Regressions:
+  the unit test "[S6b correction F2]" (mirror, file, export, restart and rollback blob agree with `JSON.stringify`),
+  and the server test "[S6b correction F2]" (a real authenticated PATCH on a partial row answers 200 with the same
+  payload as the pre-S6b build, the ledger detail is `{ by, retainClips }`, the row survives SIGKILL and restart, the
+  admin backup carries it, the rollback blob holds the legacy literal, the actual `4f954ad` build answers the same
+  PATCH from the rollback copy and this build re-upgrades it).
+- **Isolation of the `cloneJson` opt-in.** The default stays the refusing one. The outbox and push validators do not
+  pass the option. The F2 unit regression proves it: the default refuses `{ a: undefined }` and `[1, undefined]`;
+  `validateOutboxRow`, `validatePushTokenRow` and `validatePushLogRow` each still refuse a nested undefined, with an
+  accepted control for each.
+- **The two intermittent failures** (`testDispatchesServer.mjs` "the ladder resumed after the restart";
+  `testSafetyAuditServer.mjs` "the lifted block row is deleted in the file"): **not reproduced in these attempts;
+  cause unresolved.** Neither is claimed fixed or disproven. Serial repeat runs: Node v22.22.0 (SQLite 3.50.4) 20 of
+  20 passed for each; Node v24.19.0 (SQLite 3.53.3) 4 of 4 passed for each. The planned parallel-load batches were not
+  run; repetition stopped on the Founder's instruction. No assertion was removed and no timeout was changed. Both
+  assertions now print, on failure only, the rows, save counters, revision, wait time, clock and the child server's
+  exit and log tail, so a recurrence carries its own evidence.
+- **Reviewer script.** The independent review bundle (`review-c6cf5e1-reproductions.mjs`) did not reach this
+  environment and was **not run**. An own reproduction script (`review/repro-s6b-findings.mjs` in the handoff) shows
+  F1 and F2 reproduced on `c6cf5e1`, the F2 control correct on `1792fc7`, and 0 reproductions on the corrected tree.
+- **Verification on the final tree:** both S6b suites; the backend gate on Node v22.22.0 and again on Node v24.19.0,
+  with the five `SCOUTBOX_PRE_*` variables pointing at the actual `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5` and
+  `4f954ad` checkouts; the Player gate; the fresh extraction of the handoff ZIP. Counts, versions and any failure are
+  in the handoff's `logs/gates-run.txt` and the fresh-extraction record. `m23BootContract` and `m23Persistence` still
+  fail identically on `4f954ad` (pre-existing, outside the gate, not touched).
+
+Not production, security, legal-compliance or deployment approval; S6b awaits independent acceptance.

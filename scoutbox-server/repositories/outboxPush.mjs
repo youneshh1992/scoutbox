@@ -228,11 +228,15 @@ export const NON_FINITE_KEPT = Object.freeze({ nonFinite: 'keep' });
 export function cloneJson(v, at, opts = NON_FINITE_REFUSED) {
   if (v === null || typeof v === 'string' || typeof v === 'boolean') return { value: v };
   if (typeof v === 'number') return Number.isFinite(v) || opts.nonFinite === 'keep' ? { value: v } : { reason: `${at} is a non-finite number and cannot be stored as JSON` };
-  if (Array.isArray(v)) { const out = []; for (let i = 0; i < v.length; i++) { const r = cloneJson(v[i], `${at}[${i}]`, opts); if (r.reason) return r; out.push(r.value); } return { value: out }; }
+  // `undefinedNested: 'json'` (opt-in; the S6b audit records only — review of c6cf5e1, F2): a NESTED undefined is stored the
+  // way JSON.stringify, and so every pre-S6b blob, stored it: an object property is omitted, an array entry becomes null. The
+  // default (outbox, push) still refuses it. A top-level undefined is never accepted here; the caller decides what it means.
+  const asJson = opts.undefinedNested === 'json';
+  if (Array.isArray(v)) { const out = []; for (let i = 0; i < v.length; i++) { if (asJson && v[i] === undefined) { out.push(null); continue; } const r = cloneJson(v[i], `${at}[${i}]`, opts); if (r.reason) return r; out.push(r.value); } return { value: out }; }
   if (typeof v === 'object') {
     const proto = Object.getPrototypeOf(v);
     if (proto !== Object.prototype && proto !== null) return { reason: `${at} is not a plain object and cannot be stored as JSON` };
-    const out = {}; for (const k of Object.keys(v)) { const r = cloneJson(v[k], `${at}.${k}`, opts); if (r.reason) return r; setOwn(out, k, r.value); } return { value: out };
+    const out = {}; for (const k of Object.keys(v)) { if (asJson && v[k] === undefined) continue; const r = cloneJson(v[k], `${at}.${k}`, opts); if (r.reason) return r; setOwn(out, k, r.value); } return { value: out };
   }
   return { reason: `${at} (${typeof v}) cannot be stored as JSON` };
 }

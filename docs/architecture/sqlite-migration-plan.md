@@ -1355,7 +1355,10 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
 > record and are superseded by review §11 where they differ (no `RESTRICT` references, no reversal row — the
 > truncation no longer exists — and the IDV toggle updates by row id as built). It removes the eight audit blobs
 > from every save's serialisation and **does not meet the whole-snapshot-write objective** (§D.4). Not production,
-> security, legal-compliance or deployment approval; not acceptance of S4b or S8.
+> security, legal-compliance or deployment approval; not acceptance of S4b or S8. **Correction (21 October 2026,
+> review of `c6cf5e1`):** a refused report or IDV patch no longer changes live state (F1), and a nested undefined in
+> an audit record is stored as JSON stored it, so a partial Box Cam prefs row no longer fails (F2); review §11.4.
+> S6b is still PENDING INDEPENDENT ACCEPTANCE.
 
 - **Objective.** Append-only audit tables live with `RESTRICT` references; one-time codes
   hashed with attempt limits; the ledger gets a reversal row instead of truncation on signing

@@ -292,8 +292,12 @@ await test('crash recovery: a SIGKILL while an e-mail dispatch is retrying loses
   const atKill = storedRow(dir, id); assert.equal(atKill.status, 'retrying');
   await S.kill(); S = await boot(dir);
   assert.deepEqual(storedRow(dir, id).attempts.slice(0, atKill.attempts.length), atKill.attempts, 'the attempts saved before the kill are intact (the boot sweep may already have appended the next one)');
+  const resumedAt = Date.now();
   const done = await until(async () => { const d = storedRow(dir, id); return d.status === 'accepted' ? d : null; }, 20_000);
-  assert.ok(done, 'the ladder resumed after the restart'); assert.equal(done.attempts.length, 4); assert.deepEqual(done.attempts.map((a) => a.ok), [false, false, false, true]);
+  // Diagnostics on failure only (the review of c6cf5e1 saw this assertion fail once): the row, every e-mail row of the
+  // notice, the persisted failure-injection counter, the save revision, the clocks and the child server's own output.
+  const diag = () => JSON.stringify({ atKill, now: storedRow(dir, id), sameNotice: stored(dir).filter((x) => x.notificationId === notice.id).map((x) => ({ id: x.id, channel: x.channel, status: x.status, nextAt: x.nextAt, attempts: x.attempts })), deliveryFailInject: blobRows(dir, 'deliveryFailInject'), saveSeq: seqOf(dir), waitedMs: Date.now() - resumedAt, clock: Date.now(), childExit: S.proc.exitCode, childLog: S.log().slice(-2500) });
+  assert.ok(done, `the ladder resumed after the restart — ${done ? '' : diag()}`); assert.equal(done.attempts.length, 4); assert.deepEqual(done.attempts.map((a) => a.ok), [false, false, false, true]);
   await S.stop(); rm(dir);
 });
 

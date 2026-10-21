@@ -37,6 +37,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
+import { cloneJson as outboxCloneJson, validateOutboxRow, validatePushTokenRow, validatePushLogRow } from '../repositories/outboxPush.mjs';
 import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
@@ -413,6 +414,83 @@ test('[cutover] rollback (copy-only): every row of the eight tables is written b
   const injected = tempDir('sa-rb-inject-out');
   assert.throws(() => rollbackSafetyAuditCopy(dbFile(src), injected, { now: NOW, _failBeforeCommit: true }), /synthetic commit failure/); assert.deepEqual(fs.readdirSync(injected), [], 'a failure removes the output');
   rm(src, out, later, laterOut, never, neverOut, full, missing, missingOut, injected);
+});
+
+// ============================================================= [S6b correction] the two findings of the independent review of c6cf5e1
+test('[S6b correction F1] a REJECTED staged patch changes nothing: reports.patch({ status, outcome }) with a valid status and an invalid LATER field (undefined; a function; a Map) throws and leaves the held view, a fresh view, the export, the pending queue (a valid write queued before it stays queued) and the file exactly as before; a later valid patch of another field persists only that field (the rejected status never lands); an idvQueue.patch with an invalid value changes nothing either; inside a unit of work the caught refusal still refuses the unit and restores the pre-unit state; an ACCEPTED patch whose save COMMIT fails is kept and lands once on the retry; held-view identity kept throughout', () => {
+  const dir = tempDir('sa-f1'); s7dFile(dir, { blobs: { reports: [report()], idvQueue: [idv()] } });
+  const L = live(dir); L.save(); const seq0 = seqOf(dir);
+  const held = L.repo.reports.byId('rep-1'); const heldIdv = L.repo.idvQueue.byId('idv-1');
+  L.repo.ledger.append(led({ id: 'led-queued' })); assert.equal(L.repo.pending(), 1, 'a valid write queued before the rejected patch');
+  const fileReport = () => { const r = rowsOf(dir, 'reports')[0]; return { status: r.status, outcome: r.outcome, resolved_at: r.resolved_at }; };
+  const state = () => ({ export: JSON.stringify(L.repo.exportAll()), held: [held.status, held.outcome, held.resolvedAt], fresh: [L.repo.reports.byId('rep-1').status, L.repo.reports.byId('rep-1').outcome], idv: [heldIdv.status, L.repo.idvQueue.byId('idv-1').status], pending: L.repo.pending(), file: fileReport(), seq: seqOf(dir) });
+  const before = state();
+  assert.deepEqual(before.held, ['pending_review', null, null]);
+  for (const [label, bad] of [['undefined', undefined], ['a function', () => 'x'], ['a Map', new Map([['k', 'v']])]]) {
+    assert.throws(() => L.repo.reports.patch('rep-1', { status: 'resolved', resolvedAt: NOW, outcome: bad }), /reports\.outcome/, `${label}: refused, naming the field`);
+    assert.deepEqual(state(), before, `${label}: nothing changed — held and fresh views, export, queue and file`);
+  }
+  assert.throws(() => L.repo.reports.patch('rep-1', { status: 'resolved', bogus: 1 }), /patch changes status, outcome and resolvedAt only/); assert.deepEqual(state(), before, 'an unknown key changes nothing');
+  assert.throws(() => L.repo.idvQueue.patch('idv-1', { status: () => 'revoked' }), /idvQueue\.status/); assert.deepEqual(state(), before, 'a rejected IDV patch changes nothing');
+  assert.equal(L.repo.reports.byId('rep-1'), held, 'held-view identity kept after the refusals');
+  // A later valid patch of ANOTHER field persists only that field.
+  L.repo.reports.patch('rep-1', { outcome: 'Later valid outcome.' }); assert.equal(L.repo.pending(), 2);
+  L.save();
+  assert.deepEqual(fileReport(), { status: 'pending_review', outcome: 'Later valid outcome.', resolved_at: null }, 'the rejected status never lands'); assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(idsIn(dir, 'ledger'), ['led-queued'], 'the write queued before the refusal landed with the save');
+  assert.deepEqual([held.status, held.outcome], ['pending_review', 'Later valid outcome.'], 'the held view follows the committed write');
+  // Inside a unit of work: the caught refusal still refuses the unit, which restores the pre-unit state.
+  const beforeUnit = state(); let caught = null; let outer = null;
+  try { L.store.unitOfWork(() => { L.repo.ledger.append(led({ id: 'led-unit' })); try { L.repo.reports.patch('rep-1', { status: 'resolved', outcome: () => 'x' }); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  assert.match(caught?.message ?? '', /reports\.outcome/); assert.ok(outer, 'the caught participant failure still refuses the unit'); assert.equal(outer.unitOfWork, 'rolled_back');
+  assert.deepEqual(state(), beforeUnit, 'the unit restored everything'); assert.equal(L.store.sqlite.isTransaction, false);
+  // An ACCEPTED staged patch whose save COMMIT fails stays pending and lands once on the retry (unchanged behaviour).
+  L.repo.reports.patch('rep-1', { status: 'resolved', resolvedAt: NOW, outcome: 'Resolved.' }); assert.equal(held.status, 'resolved');
+  L.store.sqlite.exec('CREATE TEMP TABLE f1_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE f1_child (parent_id TEXT NOT NULL REFERENCES f1_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER f1_commit AFTER UPDATE ON reports BEGIN INSERT INTO f1_child (parent_id) VALUES (\'missing-on-purpose\'); END');
+  assert.throws(() => L.save(), /FOREIGN KEY constraint failed/); assert.equal(fileReport().status, 'pending_review'); assert.equal(L.repo.pending(), 1); assert.equal(held.status, 'resolved', 'the accepted write stays in memory');
+  L.store.sqlite.exec('DROP TRIGGER f1_commit'); L.save();
+  assert.deepEqual(fileReport(), { status: 'resolved', outcome: 'Resolved.', resolved_at: NOW }); assert.equal(L.repo.pending(), 0); L.save(); assert.equal(fileReport().status, 'resolved', 'no replay');
+  L.close(); rm(dir);
+});
+
+test('[S6b correction F2] a nested OPTIONAL value that JSON cannot carry is stored the way the pre-S6b blob stored it, never refused: ledger detail { share: undefined } (the Box Cam prefs writer on a partial prefs row) is accepted, the key is ABSENT in the mirror, the file, the export and the rollback blob; an undefined array entry becomes null (JSON.stringify\'s rule); the same holds for a nested context, an unknown nested field and a report patch value; a TOP-LEVEL undefined stays an absent key (unchanged); a nested function, a Map, a BigInt or a cyclic object is still refused; cloneJson\'s default and the outbox / push-token / push-log validators that use it are unchanged and still refuse a nested undefined (object property and array entry), with accepted controls', () => {
+  const dir = tempDir('sa-f2'); s7dFile(dir, { blobs: { reports: [report()] } });
+  const L = live(dir); L.save();
+  const detail = { by: 'player', share: undefined, retainClips: true };
+  const row = L.repo.ledger.append({ ...led({ id: 'led-prefs', type: 'box_prefs_changed', orgId: null, userId: undefined }), detail });
+  assert.deepEqual(Object.keys(row.detail), ['by', 'retainClips'], 'the undefined nested key is absent, as JSON would have it'); assert.equal(Object.hasOwn(row, 'userId'), false, 'a top-level undefined is an absent key (unchanged)');
+  assert.equal(JSON.stringify(row), JSON.stringify({ ...led({ id: 'led-prefs', type: 'box_prefs_changed', orgId: null, userId: undefined }), detail }), 'the mirror is exactly the JSON form of what the writer passed');
+  L.repo.moderationLog.append(modHit({ id: 'mod-u', context: { kind: 'player_message', channelId: undefined, list: [1, undefined, 3] }, flags: ['email', undefined] }));
+  const m = L.repo.moderationLog.byId('mod-u'); assert.deepEqual(plain(m.context), { kind: 'player_message', list: [1, null, 3] }); assert.deepEqual(plain(m.flags), ['email', null]); assert.equal(Object.hasOwn(m.context, 'channelId'), false);
+  L.repo.opsEvents.append({ ...ops({ id: 'ops-u' }), futureNested: { a: undefined, b: [undefined] } }); assert.deepEqual(plain(L.repo.opsEvents.byId('ops-u').futureNested), { b: [null] });
+  L.repo.reports.patch('rep-1', { outcome: 'x' }); // a patch value that is a plain string (the route's) is unchanged
+  for (const [label, bad] of [['a nested function', { f: () => 1 }], ['a nested Map', { m: new Map() }], ['a nested BigInt', { n: 10n }]]) assert.throws(() => L.repo.ledger.append({ ...led({ id: `led-bad-${label}` }), detail: bad }), /cannot be stored as JSON/, `${label} is still refused`);
+  const cyc = { a: 1 }; cyc.self = cyc; assert.throws(() => L.repo.ledger.append({ ...led({ id: 'led-cyc' }), detail: cyc }), RangeError, 'a cyclic object is still refused (no partial row)');
+  assert.equal(L.repo.ledger.byId('led-cyc'), null); assert.equal(L.repo.ledger.byId('led-bad-a nested function'), null);
+  L.save();
+  const fileRow = rowsOf(dir, 'ledger').find((r) => r.id === 'led-prefs'); assert.equal(fileRow.detail_json, JSON.stringify({ by: 'player', retainClips: true }));
+  assert.equal(JSON.stringify(stored(L.store.sqlite).ledger.find((r) => r.id === 'led-prefs')), JSON.stringify(row), 'the file reads back the same row');
+  assert.equal(JSON.stringify(L.repo.exportAll().ledger.find((r) => r.id === 'led-prefs')), JSON.stringify(row), 'the export (the admin backup) carries the same row');
+  L.close();
+  // A restart serves the same row; the rollback copy's blob is exactly what the pre-S6b build would have written.
+  const L2 = live(dir); assert.equal(JSON.stringify(L2.repo.ledger.byId('led-prefs')), JSON.stringify(row)); L2.close();
+  const out = tempDir('sa-f2-rb'); rollbackMod.rollbackSafetyAuditCopy(dbFile(dir), out, { now: NOW });
+  const legacy = JSON.parse(blobOf(out, 'ledger')).find((r) => r.id === 'led-prefs'); assert.equal(JSON.stringify(legacy), JSON.stringify({ ...led({ id: 'led-prefs', type: 'box_prefs_changed', orgId: null, userId: undefined }), detail }), 'the legacy blob row equals JSON.stringify of the writer literal');
+  // ISOLATION: the opt-in is the audit repository's only. cloneJson's default and the S7c outbox / push validators that use
+  // it still refuse a nested undefined exactly as before (an object property or an array entry), and still accept the same
+  // values without it.
+  assert.match(outboxCloneJson({ a: undefined }, 'to').reason ?? '', /cannot be stored as JSON/, 'cloneJson default: a nested undefined property is still refused');
+  assert.match(outboxCloneJson([1, undefined], 'to').reason ?? '', /cannot be stored as JSON/, 'cloneJson default: an undefined array entry is still refused');
+  const mail = { id: 'mail-iso', ts: NOW, to: 'a@example.test', subject: 's', text: 't', transport: 'dev', delivered: false };
+  assert.equal(validateOutboxRow(mail).ok, true, 'outbox control: the same mailer row is accepted');
+  assert.match(validateOutboxRow({ ...mail, to: ['a@example.test', undefined] }).reason ?? '', /to\[1\].*cannot be stored as JSON/, 'outbox: an undefined entry in an array destination is still refused');
+  assert.match(validateOutboxRow({ ...mail, futureNested: { a: undefined } }).reason ?? '', /cannot be stored as JSON/, 'outbox: a nested undefined in an unknown field is still refused');
+  const token = { kind: 'player', refId: 'pl-adult', token: { value: 'tok' }, ts: NOW };
+  assert.equal(validatePushTokenRow(token).ok, true, 'push token control: accepted');
+  assert.match(validatePushTokenRow({ ...token, token: { value: 'tok', extra: undefined } }).reason ?? '', /token\.extra.*cannot be stored as JSON/, 'push token: a nested undefined is still refused');
+  const plog = { id: 'push-iso', ts: NOW, audience: { kind: 'player', id: 'pl-adult' }, title: 't', body: 'b', transport: 'dev' };
+  assert.equal(validatePushLogRow(plog).ok, true, 'push log control: accepted');
+  assert.match(validatePushLogRow({ ...plog, futureNested: [undefined] }).reason ?? '', /cannot be stored as JSON/, 'push log: an undefined array entry in an unknown field is still refused');
+  rm(dir, out);
 });
 
 console.log(`\n${passed} safety-audit checks passed`);
