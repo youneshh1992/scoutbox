@@ -2283,7 +2283,7 @@ as asked, kept as the dated record):
 
 | # | Question | Kind | What the app does today | Blocks | Options and practical consequences |
 |---|---|---|---|---|---|
-| Q1 | May the two-letter **country code** stay on the retained record of a deleted player? | **product policy / privacy** (OPEN since 12 October 2026) | the row is deleted; `players.country` is `NOT NULL` (`01_identity.sql:158`); today's helper `isAdult`/`adultAgeFor` (`domain.mjs:76–79`) applies a country's threshold when the country is known and **defaults to 18** when it is not — a development default, not a policy and not legal advice | S4b: the erase column set, `wasMinorOn`'s threshold, the boundary tests | **keep** — a country-specific threshold can be applied to the retained birth date; one more identifier retained. **drop** — the column becomes nullable for tombstones (a `players` rebuild in the S4b migration) and a future `wasMinorOn` cannot apply a country-specific threshold; the design must then choose **explicitly** between reporting the country-specific status of a deleted player as **"unknown"** and applying the default of 18 — a product/privacy choice, not one the code may make silently, and retaining no country does not force a knowingly wrong inference |
+| Q1 | May the two-letter **country code** stay on the retained record of a deleted player? — **ANSWERED by the Founder on 21 October 2026, verbatim: "Keep the country code (Recommended)"** (received in the implementation conversation; an explicit answer, not an inference; not to be asked again; S4b-R built under it, §D.6.2) | **product policy / privacy** (answered 21 October 2026) | the row is deleted; `players.country` is `NOT NULL` (`01_identity.sql:158`); today's helper `isAdult`/`adultAgeFor` (`domain.mjs:76–79`) applies a country's threshold when the country is known and **defaults to 18** when it is not — a development default, not a policy and not legal advice | S4b: the erase column set, `wasMinorOn`'s threshold, the boundary tests | **keep** — a country-specific threshold can be applied to the retained birth date; one more identifier retained. **drop** — the column becomes nullable for tombstones (a `players` rebuild in the S4b migration) and a future `wasMinorOn` cannot apply a country-specific threshold; the design must then choose **explicitly** between reporting the country-specific status of a deleted player as **"unknown"** and applying the default of 18 — a product/privacy choice, not one the code may make silently, and retaining no country does not force a knowingly wrong inference |
 | Q2 | Should future safeguarding rows (`blocks`, `reports`, `moderationLog`, `orgNotes`) **record that the subject was treated as a child when written** (rule and basis)? | **product policy** (OPEN since 12 October 2026) | nothing is stamped; reviewers infer from the live birth date | **the stamping step only** — an additive migration after Candidate A (§D.4); Candidate A defers it and is not blocked by it | **yes** — nullable columns added by an additive migration, written by every later safeguarding row (a retention choice of its own); rows written before it read "unknown". **no** — the tables stay as built; reviews of a deleted player's row rely on the retained birth date and Q1 alone. **Deferral in Candidate A is neither answer** |
 | Q3 | How are the **ids of players deleted before S4b**, already carried by audit and recruitment rows, treated when foreign keys are added? | **technical, with a privacy aspect** (new) | they dangle (documented state, `s6-readiness-review.md` §3); Candidate A imports and counts them as they are | S4b's foreign-key rebuild of the audit tables (and S8a's of file 02) — not Candidate A | **(a)** synthesise id-only retained rows for them — needs `name`, `birth_date`, `country` nullable for tombstones (a rebuild) and retains an id for a person deleted under the old rule (privacy review); **(b)** leave those tables without the player foreign key permanently and keep code-validated references (the D-A kind, as a permanent rule — approval needed); **(c)** delete the dangling audit rows — contradicts "never pruned" and is not proposed |
 | Q6 | Which of the **additional deletion behaviours** the decision record proposes go into S4b: deleting the subject's device push tokens, verification tokens and passport shares; nulling dangling media ids; one ledger row recording the deletion (§8 item 9, itself a retention choice)? | **product policy** (each a behaviour change) | none of them happens today (`server.mjs:4245–4305`) | the S4b scope | **none** (default) — S4b is the retained row and the filtering only. **some/all** — each named item is specified, tested and recorded; the deletion ledger row records a guardian's id |
@@ -2301,7 +2301,7 @@ establishes compliance.
 **Status.** S6b is independently accepted at `f0abd3459b435774c00b4e384b046eba23813e88` (`s6-readiness-review.md`
 §11.5); S7a–S7d stay accepted at `4f954ad`. Thirteen migrations are registered (`repositories/index.mjs:55`,
 `0001`–`0013`); **the next free migration identifier is `0014`** — verified against the registry, not copied from any
-placeholder. §D–§D.5 above are the dated record of 19 October (written at `4f954ad`, corrected twice); this section is
+placeholder (taken by S4b-R on 21 October 2026, §D.6.2; `0015` is next). §D–§D.5 above are the dated record of 19 October (written at `4f954ad`, corrected twice); this section is
 current where they differ, and it replaces no decision. Statements of §B–§D.5 that are now superseded, listed so no
 reader acts on them: the §D status line "S4b, the eight S6 audit tables and S8 are not started" (S6b is done); §D.4's
 "the next free migration identifier is `0013`" and "every candidate takes `0013`" (now `0014`); Candidate B's
@@ -2442,3 +2442,102 @@ retained column set; `players.country` is `NOT NULL` (`01_identity.sql:158`); th
 
 **After S4b-R** (recorded, not proposed now): S8a (Candidate C) with Q7a/Q7b, or the A0 deferral together with the
 first permanent `RESTRICT` key once Q3 is decided — in the order the Founder chooses then.
+
+#### D.6.1 S4b-R — clarifications resolved before coding (21 October 2026, from the code at `d16362f`; the implementation record is `s4-readiness-review.md` §12 once built)
+
+These correct and narrow §D.6 where the Founder's review of it found ambiguity. They are the specification the
+implementation follows; where §D.6 differs, this section is current.
+
+**1. The retained row, column by column, against the LIVE `players` table** (`identityPreflight.mjs:92–135`, the
+STRICT DDL migration `0005` created; 42 columns). Three kinds of value are kept apart: an **identifier**, a
+**retained personal fact** (only what the Founder decided), and a **fixed storage placeholder** — a constant the
+table's constraints need, never the person's previous value and never read back as a fact about the person.
+
+| Column(s) | Retained row | Kind |
+|---|---|---|
+| `id` | kept | identifier (what every audit, recruitment and commercial row points at) |
+| `deleted_at` | the deletion instant (`INTEGER`, ms) | the one new fact: that and when the account was deleted |
+| `birth_date` | kept | retained personal fact — **decided** (`s4-deletion-decision.md` §10) |
+| `country` | **Q1**: kept (retained personal fact) **or** removed — but the column is `NOT NULL`, so "removed" needs the schema change in item 2 | retained personal fact or not, per the Founder |
+| `name` | the constant `'Deleted player'` | fixed storage placeholder (the column is `NOT NULL`; the constant is not a name) |
+| `academy_plus`, `first_team_seeker`, `identity_verified`, `medical_shared` | `0` | fixed storage placeholders — the columns' declared defaults, **not** the person's previous values (a verified player's row reads `0` afterwards; that is a placeholder, not a statement that the person was unverified) |
+| `availability`, `contract_status`, `level`, `medical_condition_status` | `'not_seeking'`, `'unknown'`, `'amateur'`, `'unknown'` | fixed storage placeholders — the declared defaults, same rule |
+| `city`, `position`, `foot`, `height_cm`, `weight_kg`, `squad_number`, `contract_until_date`, `market_value_range`, `agent_name`, `football_category`, `lat`, `lng`, the seven `stats_*`, the four `prefs_*`, `programme_track`, `programme_started_at`, `password_hash`, `created_at`, `guardian_id`, `facets_json` | `NULL` | nothing of the person (the `(lat IS NULL) = (lng IS NULL)` CHECK holds; `facets_json` NULL means no unknown field and no shape metadata survives) |
+| the twelve `player_*` child tables, `guardian_children` | **rows deleted explicitly** in the same transaction (today they cascade with the row; a retained row cascades nothing) | owned rows and links |
+
+The retained row is **never read as a player record**: no reader decodes it through the mapping, the placeholders are
+never served, and the only readers are the deletion unit (the collision check), the snapshot writer, the backup, the
+`/capabilities` count and the rollback tool.
+
+**2. Whether a schema change is necessary.** **Q1 is answered: the country code is KEPT** (the Founder, 21 October 2026, verbatim: *"Keep the country code (Recommended)"*). With **Q1 = keep**: none — every constraint of the live table is
+satisfied by the mapping above (`deleted_at` exists since `0005`; `birth_date NOT NULL` keeps its value; the
+placeholders satisfy every `NOT NULL` and `CHECK`), so migration `0014` is a cutover record, an import of the
+`playersRetained` backup collection (item 5) and nothing else. With **Q1 = remove**: a **rebuild of `players`** is
+necessary (SQLite cannot relax `NOT NULL` in place): create–copy–drop–rename under the runner's `foreignKeysOff`
+(the `0005` pattern; the twelve `player_*` tables and `guardian_children` reference `players(id)`), with
+`country TEXT` nullable **and** `CHECK (deleted_at IS NOT NULL OR country IS NOT NULL)` so a LIVE row still requires
+it — "keep country" is therefore not assumed to mean "no schema work" (it does mean that, but only because the
+mapping above was checked column by column), and "remove" is not assumed to be a one-line change.
+
+**3. The name cleanup is today's, not more.** `deletePlayerData` (`server.mjs:4257–4313`) already nulls or
+tombstones names where its hooks reach (requests and trials as id-only tombstones; `recruitmentCases.playerName`,
+assessments, contact responses and open-trial registrations nulled; the m24–m29 hooks). S4b-R **preserves exactly
+that** and changes only one statement of the unit: `players.remove` → `players.erase`. §D.6 item 4's proposal to
+replace the remaining name copies (`recruitmentCases.history[].byName`, offer and package guardian names,
+`applications`, `campaignSubmissions`, `squadInvites`, `transitionCases`, `evidenceSuggestions`) is **withdrawn from
+this milestone as an "engineering choice"**: it is additional erasure of recruitment and guardian-name copies, a
+behaviour change in its own right, and goes into no step without the Founder's explicit authorisation. It is recorded
+here as a proposed extension (together with the commercial names and the audit free text of
+`s4-deletion-decision.md` §8 items 3–4), not scheduled.
+
+**4. What the step gives the audit rows — corrected.** §D.6 said S4b-R "gives every retained audit row a real
+subject row". That is wrong. It gives one to every audit row whose subject is deleted **under the new behaviour**,
+from the cutover on. The ids that audit and recruitment rows carry today for players deleted before S4b-R, imported
+before S4a, or never existing (`handleReport`'s unchecked `targetPlayerId`) **stay exactly as they are**: preserved,
+counted under Q4, resolved to nothing. **No historical retained row is fabricated for them** — that is Q3, untouched.
+The `/capabilities` report keeps the Q4 count (`unresolvedPlayerReferences`: ids naming no `players` row at all) and
+adds, beside it, the count of references that name a **retained** row — a count, not provenance.
+
+**5. Backups, restores, snapshots and the rollback copy — the retained records' shape.** A retained record travels
+as `{ id, deletedAt, birthDate, country? }` (`country` only under Q1 = keep) in a collection of its own,
+**`playersRetained`**, **never inside `players`**: the admin backup exports it beside the live `players`; a restore
+into a new directory imports `players` through `0005` as today and `playersRetained` through `0014` (shape-validated;
+an id that is also a live player **refuses the boot** with ids only, nothing written); a snapshot save that carries
+`playersRetained` replaces the retained rows with exactly that collection (same validation, same refusal), one that
+omits it keeps them as they are, and the identity replace — which deletes and reinserts every `players` row —
+**captures the retained rows before its DELETE and reinserts them byte-identical after the candidate**, refusing a
+candidate that lists a retained id as a live record. The copy-only rollback tool writes `playersRetained` as a legacy
+blob into `collections` and removes the rows from `players`: the previous build (`f0abd34`) loads the blob into memory
+under a name no route reads, keeps it through its saves and exports it in its backups, and **serves nothing of it as
+an account**; the re-upgrade imports it back through `0014`. The erased personal data is not restored by any of this.
+
+**6. The danger the runbook states.** The migration runner skips recorded steps and refuses none it does not know
+(`repositories/database.mjs:31–35`). Booting the previous build **directly on a `0014` file** therefore does not fail:
+that build reads every `players` row as an account and would serve a retained row as a live, passwordless player
+named "Deleted player" with the retained birth date (and country). Going back is the rollback tool, never the old
+build on the live file. The server suite proves the danger on a synthetic copy and the tool's copy as the answer.
+
+**7. Other SQL readers of `players` that must not resolve a retained row as a player:** the identity load
+(`identity.mjs:259`, `:435`), the snapshot read (`playerSubrecords.mjs:567`, used by backups and the rollback
+chain), the media-queue ownership check (`mediaDeletions.mjs:77`), the pairing-code consistency check and the
+pairing-code write (`oneTimeCodes.mjs:209`, `:295` — a code naming a retained id is refused, as one naming a missing
+id is today). The guardian checks (`channels`, `idv_queue`) read `guardians`, which S4b-R does not touch.
+
+**8. Unchanged, and not asked again:** Q4/Q4b/Q5; D-A/D-B; the full birth date; the under-18-without-valid-guardian
+refusal (it applies to live records in `validateCoreIdentity`; a retained row is not a record and never reaches
+it); today's e-mail behaviour (a player row has no e-mail column; an adult logs in by player id, so nothing about
+addresses changes); Q2, Q3, Q6, Q7 untouched.
+
+#### D.6.2 S4b-R as implemented (21 October 2026, one local commit on `feat/sqlite-schema` on top of `d16362f`; IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE)
+
+Built exactly to §D.6 as narrowed by §D.6.1, under the Founder's answer to Q1 (the country code kept, recorded verbatim in
+§D.5): migration `0014_player_erasure` (REGISTERED; a cutover record and the `playersRetained` import — no table, no column,
+no foreign key, no retention period); `players.erase` in `repositories/identity.mjs` called by `deletePlayerData` in place of
+`players.remove` (everything else of the deletion unit unchanged); the retained rows excluded from every account reader and
+served by the narrow accessors only; the identity snapshot carrying them through its rewrite and refusing a resurrection;
+the backup's `playersRetained` collection and its import on restore; the copy-only rollback `scripts/playerErasureRollback.mjs`
+(the records moved into the `playersRetained` legacy blob the previous build serves to nobody; the erased data restored by
+nothing); the two suites `scripts/testPlayerErasure.mjs` and `scripts/testPlayerErasureServer.mjs`, written first and failing on
+the unchanged `d16362f` tree. The implementation record, where it departs from the wording above and why, and the verification
+are `s4-readiness-review.md` §12. **The next free migration identifier is `0015`.** Not production, security, legal-compliance
+or deployment approval; not acceptance of S8, of the foreign keys (A0–A3, Q3) or of anything Q2, Q6 or Q7 name.

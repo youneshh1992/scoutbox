@@ -35,8 +35,9 @@ import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump } from './coreIdentityTestFixtures.mjs';
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
 import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
+import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
 // S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(file, out); return path.join(out, 'scoutbox.db'); };
+const preS6b = (file) => { const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(file, s4br); /* S4b-R: the file carries 0014; its rollback goes first */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -133,10 +134,10 @@ test('[cutover] migration 0011 (legacy blobs): every outbox record is imported i
   const protoToken = JSON.parse('{"kind":"guardian","refId":"gd-primary","token":{"__proto__":{"deviceMarker":"x"},"id":"dev-1"},"ts":5}');
   const pushTokens = [...list, { kind: 'org', refId: 'org-pro', token: 'ExponentPushToken[synthetic]', ts: NOW, extra: 'kept' }, protoToken];
   s7bFile(dir, { outbox, pushLog, pushTokens });
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).slice(-4), ['0010_dispatches', MIGRATION, '0012_channels', '0013_safety_audit'], '0011_outbox_push is registered after 0010; 0012_channels (S7d) and 0013_safety_audit (S6b) follow it');
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).slice(-5), ['0010_dispatches', MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure'], '0011_outbox_push is registered after 0010; 0012_channels (S7d) and 0013_safety_audit (S6b) follow it');
   assert.deepEqual([...TABLE_BACKED].slice(-12, -9), ['outbox', 'pushLog', 'pushTokens']); // followed by channels (S7d) and the eight S6b audit collections
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit']); assert.ok(applied(s).includes(MIGRATION));
+  assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); assert.ok(applied(s).includes(MIGRATION));
   // The outbox table: order, source, NULL = absent key.
   const o = s.prepare('SELECT seq, id, source, created_at, to_address, subject, text, transport, delivered, channel, provider_message_id, extra_json FROM outbox ORDER BY seq').all().map((r) => ({ ...r }));
   assert.deepEqual(o.map((r) => [r.seq, r.id, r.source]), [[1, 'mail-1', 'mailer'], [2, 'mail-2', 'delivery'], [3, 'mail-3', 'delivery'], [4, 'mail-9', 'mailer']]);
@@ -172,7 +173,7 @@ test('[cutover] migration 0011 (legacy blobs): every outbox record is imported i
 
 test('[cutover] migration 0011: a missing collection, an empty collection, an empty database and a first installation import nothing (never from the seed, never from memory); a rerun does nothing', () => {
   const none = tempDir('obp-mig-none'); s7bFile(none);
-  { const s = openRaw(none); assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit']); for (const t of ['outbox', 'push_log', 'push_tokens']) assert.equal(s.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0); assert.deepEqual(JSON.parse(meta(s, 'outboxPushCutover')).outbox, { imported: 0, withExtraFields: 0, bySource: {} }); s.close(); }
+  { const s = openRaw(none); assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); for (const t of ['outbox', 'push_log', 'push_tokens']) assert.equal(s.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0); assert.deepEqual(JSON.parse(meta(s, 'outboxPushCutover')).outbox, { imported: 0, withExtraFields: 0, bySource: {} }); s.close(); }
   const empty = tempDir('obp-mig-empty'); s7bFile(empty, { outbox: [], pushLog: [], pushTokens: [] });
   { const s = openRaw(empty); migrate(s); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM outbox').get().n, 0); assert.equal(blob(s, 'pushTokens'), undefined, 'the empty blob row is retired too'); s.close(); }
   const fresh = tempDir('obp-mig-fresh');
@@ -407,7 +408,7 @@ test('[cutover] rollback (copy-only): every outbox record (each in its writer\'s
   const s7cSrc = s7cCopy(src); // the S7d tool first (the file carries 0012); the S7c tool works on its output
   const out = tempDir('obp-rb-out');
   const result = rollbackOutboxPushCopy(dbFile(s7cSrc), out, { now: NOW });
-  assert.equal(result.output, dbFile(out)); assert.deepEqual(result.counts, { outbox: 4, pushLog: 2, pushTokens: 8 }); assert.equal(result.recordRemoved, true); assert.equal(result.saveSeq, before.saveSeq + 3, 'the S6b tool advanced the revision once, the S7d tool once, this tool once');
+  assert.equal(result.output, dbFile(out)); assert.deepEqual(result.counts, { outbox: 4, pushLog: 2, pushTokens: 8 }); assert.equal(result.recordRemoved, true); assert.equal(result.saveSeq, before.saveSeq + 4, 'the S4b-R tool advanced the revision once, the S6b tool advanced the revision once, the S7d tool once, this tool once');
   assert.equal(fs.statSync(dbFile(src)).size, before.bytes, 'the source is untouched'); assert.equal(seqOf(src), before.saveSeq); assert.ok(tableExistsIn(src, 'outbox'));
   const o = openRaw(out);
   assert.ok(!applied(o).includes(MIGRATION)); for (const t of ['outbox', 'push_log', 'push_tokens']) assert.equal(o.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), undefined); assert.equal(meta(o, 'outboxPushCutover'), undefined);
@@ -417,7 +418,7 @@ test('[cutover] rollback (copy-only): every outbox record (each in its writer\'s
   assert.equal(dump(o, { except: ['outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', 'collections', 'meta', 'data_migrations'] }), before.dump, 'every other table byte-identical'); assert.deepEqual(rowsOf(out, 'notifications', 'rowid'), before.notifications); assert.deepEqual(rowsOf(out, 'dispatches', 'rowid'), before.dispatches);
   assert.equal(o.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   // Re-upgrade: the real migration brings the same rows back.
-  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit']); assert.deepEqual(rowsOf(out, 'outbox').map((r) => [r.id, r.source, r.to_address]), [['mail-1', 'mailer', ADDRESS], ['mail-2', 'delivery', null], ['mail-proto', 'mailer', 'synthetic@example.test'], ['mail-after', 'delivery', ADDRESS]]); assert.equal(rowsOf(out, 'push_tokens').length, 8); assert.equal(blob(o, 'pushTokens'), undefined);
+  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); assert.deepEqual(rowsOf(out, 'outbox').map((r) => [r.id, r.source, r.to_address]), [['mail-1', 'mailer', ADDRESS], ['mail-2', 'delivery', null], ['mail-proto', 'mailer', 'synthetic@example.test'], ['mail-after', 'delivery', ADDRESS]]); assert.equal(rowsOf(out, 'push_tokens').length, 8); assert.equal(blob(o, 'pushTokens'), undefined);
   o.close();
   // The S7b tool refuses the S7c file.
   const s7bOut = tempDir('obp-rb-s7b'); assert.throws(() => rollbackDispatchesCopy(dbFile(src), s7bOut), (e) => e.code === 'LATER_SCHEMA' && /0011_outbox_push/.test(e.message)); assert.deepEqual(fs.readdirSync(s7bOut), []);
@@ -464,7 +465,7 @@ test('[review of 40aa05c, F2] a mail destination the accepted build persisted as
   s7bFile(dir, { outbox: [mail(), arrayMail, delivery({ to: null }), twoMail, nestedMail] });
   assert.deepEqual(JSON.parse(blobOf(dir, 'outbox'))[1].to, ONE, 'the baseline: the 6ca66ba blob holds the array by value and type');
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit'], 'the array destination imports (the whole step, nothing refused)');
+  assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure'], 'the array destination imports (the whole step, nothing refused)');
   const cols = s.prepare('PRAGMA table_info(outbox)').all().map((c) => c.name); assert.ok(cols.includes('to_json'), 'the corrected table carries to_json');
   assert.deepEqual(s.prepare('SELECT id, to_address, to_json FROM outbox ORDER BY seq').all().map((r) => [r.id, r.to_address, r.to_json]), [['mail-1', ADDRESS, null], ['mail-arr', null, JSON.stringify(ONE)], ['mail-2', null, null], ['mail-two', null, JSON.stringify(TWO)], ['mail-nested', null, JSON.stringify(NESTED)]], 'a string in to_address, null as NULL/NULL, any other JSON value in to_json');
   const repo = bare(s);
@@ -488,7 +489,7 @@ test('[review of 40aa05c, F2] a mail destination the accepted build persisted as
   assert.ok(rollbackMod, 'repositories/outboxPushRollback.mjs exists'); const out = tempDir('obp-f2-out');
   assert.equal(rollbackMod.rollbackOutboxPushCopy(dbFile(s7cCopy(dir)), out, { now: NOW }).counts.outbox, 9);
   const back = JSON.parse(blobOf(out, 'outbox')); assert.deepEqual(back.map((m) => m.to), [ADDRESS, ONE, null, TWO, NESTED, ['synthetic-append@example.invalid'], ['synthetic-delivery@example.invalid'], null, ADDRESS]); assert.equal(JSON.stringify(back[1]), JSON.stringify(arrayMail));
-  { const o = openRaw(out); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit']); assert.deepEqual(o.prepare('SELECT to_json FROM outbox ORDER BY seq').all().map((r) => r.to_json), [null, JSON.stringify(ONE), null, JSON.stringify(TWO), JSON.stringify(NESTED), '["synthetic-append@example.invalid"]', '["synthetic-delivery@example.invalid"]', null, null]); o.close(); }
+  { const o = openRaw(out); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); assert.deepEqual(o.prepare('SELECT to_json FROM outbox ORDER BY seq').all().map((r) => r.to_json), [null, JSON.stringify(ONE), null, JSON.stringify(TWO), JSON.stringify(NESTED), '["synthetic-append@example.invalid"]', '["synthetic-delivery@example.invalid"]', null, null]); o.close(); }
   // A scratch database at the unaccepted 40aa05c build: refused by name, untouched, rolled back by the tool, re-upgraded.
   const stale = tempDir('obp-f2-stale'); s7bFile(stale, { outbox: [mail()], pushLog: [push()], pushTokens: [token('t')] });
   { const x = openRaw(stale); migrate(x); x.exec('BEGIN'); x.exec('DROP TABLE outbox'); x.exec(OUTBOX_DDL_40AA05C); x.prepare("INSERT INTO outbox (id, source, created_at, to_address, subject, text, transport, delivered) VALUES ('mail-1', 'mailer', ?, ?, 'Synthetic subject', 'T', 'dev-outbox', 1)").run(NOW - MIN, ADDRESS); x.exec('COMMIT'); x.close(); }
@@ -499,7 +500,7 @@ test('[review of 40aa05c, F2] a mail destination the accepted build persisted as
   const staleOut = tempDir('obp-f2-stale-out');
   assert.deepEqual(rollbackMod.rollbackOutboxPushCopy(dbFile(s7cCopy(stale)), staleOut, { now: NOW }).counts, { outbox: 1, pushLog: 1, pushTokens: 1 }, 'the rollback tool reads the 40aa05c shape (every destination there is a string or null)');
   assert.equal(JSON.parse(blobOf(staleOut, 'outbox'))[0].to, ADDRESS);
-  { const o = openRaw(staleOut); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit']); assert.ok(o.prepare('PRAGMA table_info(outbox)').all().some((c) => c.name === 'to_json'), 're-upgraded into the corrected table'); const r = bare(o); assert.equal(r.outbox.count(), 1); assert.equal(r.outbox.exportRows()[0].to, ADDRESS); o.close(); }
+  { const o = openRaw(staleOut); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); assert.ok(o.prepare('PRAGMA table_info(outbox)').all().some((c) => c.name === 'to_json'), 're-upgraded into the corrected table'); const r = bare(o); assert.equal(r.outbox.count(), 1); assert.equal(r.outbox.exportRows()[0].to, ADDRESS); o.close(); }
   rm(dir, out, stale, staleOut);
 });
 
@@ -597,7 +598,7 @@ test('[review of 78c14b9] numeric overflow INSIDE an accepted array destination 
   const tool = openStore(dir); const snap = tool.load(); assert.equal(JSON.stringify(snap.db.outbox.map((m) => m.to)), JSON.stringify([[null, 'synthetic-overflow@example.invalid'], [null, 'synthetic-overflow@example.invalid'], [[null], 'synthetic-nested@example.invalid'], null])); tool.save(snap); tool.sqlite.close();
   assert.ok(rollbackMod); const out = tempDir('obp-f2b-out'); assert.equal(rollbackMod.rollbackOutboxPushCopy(dbFile(s7cCopy(dir)), out, { now: NOW }).counts.outbox, 4);
   assert.equal(JSON.stringify(JSON.parse(blobOf(out, 'outbox')).map((m) => m.to)), JSON.stringify([[null, 'synthetic-overflow@example.invalid'], [null, 'synthetic-overflow@example.invalid'], [[null], 'synthetic-nested@example.invalid'], null]), 'the blob the accepted build reads: its own JSON');
-  { const o = openRaw(out); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit']); assert.deepEqual(rowsOf(out, 'outbox').map((r) => r.to_json), [OVER_JSON, OVER_JSON, NEST_JSON, null]); o.close(); }
+  { const o = openRaw(out); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); assert.deepEqual(rowsOf(out, 'outbox').map((r) => r.to_json), [OVER_JSON, OVER_JSON, NEST_JSON, null]); o.close(); }
   rm(dir, out);
 });
 

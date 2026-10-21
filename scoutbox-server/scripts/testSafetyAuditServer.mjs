@@ -39,6 +39,8 @@ const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
+// S4b-R: a file this build wrote carries 0014 too; the S4b-R tool (copy-only, the retained records kept as a blob) goes first and the S6b tool works on its output.
+const preS4bR = (dir) => { const out = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), dir, out], { stdio: 'pipe' }); return out; };
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -221,7 +223,7 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
   const naming = (rows) => rows.filter((r) => r.playerId === pid || r.targetPlayerId === pid);
   assert.deepEqual([naming(before.blocks).length, naming(before.reports).length, naming(before.orgNotes).length, naming(before.ledger).length >= 1, naming(before.sourceChanges).length], [1, 1, 1, true, 1], 'rows in all five player-audit tables name the adult');
   const del = await S.j('DELETE', '/player/account', {}, adult); assert.equal(del.status, 200, del.text);
-  assert.equal(q1(dir, 'SELECT 1 AS one FROM players WHERE id = ?', pid), undefined, 'the player row is gone (today\'s hard delete)');
+  assert.ok(Number.isInteger(q1(dir, 'SELECT deleted_at FROM players WHERE id = ?', pid)?.deleted_at), 'the player row is the retained record (S4b-R, migration 0014; a hard delete before it) — the audit rows below are unchanged either way');
   const after = storedAll(dir);
   for (const n of COLLECTIONS) assert.equal(JSON.stringify(after[n]), JSON.stringify(before[n]), `${n}: every row exactly as before the deletion (the id now resolves to nothing)`);
   assert.equal((await S.j('GET', `/org/players/${pid}`, undefined, maria)).status, 404);
@@ -243,7 +245,7 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
   const copy = tempDir('s6b-copy');
   const OLD = process.env.SCOUTBOX_PRE_S6B_SERVER;
   let rolled = null;
-  try { rolled = execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, copy], { encoding: 'utf8' }); } catch (e) { rolled = null; }
+  try { rolled = execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), preS4bR(dir), copy], { encoding: 'utf8' }); } catch (e) { rolled = null; }
   if (rolled === null) { console.log('    (scripts/safetyAuditRollback.mjs is not on this tree: the rollback copy was not produced — expected on the unchanged 1792fc7 tree)'); }
   else {
     const final = storedAll(dir);
@@ -273,7 +275,7 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
 await test('[cutover] the cutover and the save points: a fresh boot records 0013_safety_audit after 0012 and creates the eight tables with no blob behind them (the data layer reports the domain); a player\'s block and its ledger row land together in ONE revision with the next save; the IDV entry commits with the guardian\'s column before the 200 — both failure seams and the real COMMIT leave nothing, the retry lands, a SIGKILL right after the response loses nothing, a restart serves it; a failed ordinary save at the REAL COMMIT keeps a report in memory and lands it ONCE with the next save; the block lift is durable in its route\'s save', async () => {
   const dir = tempDir('s6b-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
   assert.ok(live(dir), 'the boot recorded 0013'); // fails on 1792fc7: no such record
-  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).slice(-2)), ['0012_channels', MIGRATION]);
+  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).slice(-3)), ['0012_channels', MIGRATION, '0014_player_erasure']); // S4b-R registered after this step
   for (const t of Object.values(TABLES)) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
   assert.equal(q1(dir, `SELECT COUNT(*) AS n FROM collections WHERE name IN (${COLLECTIONS.map((n) => `'${n}'`).join(', ')})`).n, 0, 'no audit blob');
   const cap = (await S.j('GET', '/capabilities')).body; const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {}; assert.ok(domains.safetyAudit, `the data layer reports the safetyAudit domain (${Object.keys(domains).join(', ')})`);
@@ -334,7 +336,7 @@ await test('[cutover] legacy and unknown shapes through the import, the admin ba
   // The S7d tool refuses the 0013 file.
   try { execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, tempDir('s6b-s7dtool')], { stdio: 'pipe' }); assert.fail('the S7d tool must refuse a 0013 file'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
   // The rollback copy, edited by hand.
-  const copy = tempDir('s6b-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, copy], { encoding: 'utf8' }); assert.match(out, /written back/); assert.equal(live(copy), false);
+  const copy = tempDir('s6b-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), preS4bR(dir), copy], { encoding: 'utf8' }); assert.match(out, /written back/); assert.equal(live(copy), false);
   for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(copy, n)), JSON.stringify(original[n]), `the copy's ${n} blob`);
   const SECRET = 'SECRET-LEGACY-MARKER-55';
   { const s = new DatabaseSync(path.join(copy, 'scoutbox.db'));
@@ -402,7 +404,7 @@ await test('[S6b correction F2] an EXISTING partial Box Cam prefs row ({ playerI
   assert.equal(JSON.stringify(prefsRows()[1]), JSON.stringify(row), 'the row survived the restart');
   await S.stop();
   const copy = tempDir('s6b-f2-copy');
-  execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, copy], { encoding: 'utf8' });
+  execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), preS4bR(dir), copy], { encoding: 'utf8' });
   const legacy = snap(copy, (c) => blobRows(c, 'ledger')).find((l) => l.id === row.id);
   assert.equal(JSON.stringify(canon('ledger', [legacy])[0]), JSON.stringify(row), 'the rollback blob holds the legacy literal');
   const OLD = process.env.SCOUTBOX_PRE_S6B_SERVER;

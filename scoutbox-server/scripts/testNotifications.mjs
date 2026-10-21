@@ -29,6 +29,7 @@ import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
 import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
 import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
+import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
 import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
@@ -37,7 +38,7 @@ import { registerDelivery } from '../m13/delivery.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump, filesDigest } from './coreIdentityTestFixtures.mjs';
 // S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(file, out); return path.join(out, 'scoutbox.db'); };
+const preS6b = (file) => { const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(file, s4br); /* S4b-R: the file carries 0014; its rollback goes first */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

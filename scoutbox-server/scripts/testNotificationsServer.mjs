@@ -25,7 +25,7 @@ const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6bDir = (dir) => { const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, out], { stdio: 'pipe' }); return out; };
+const preS6bDir = (dir) => { const s4br = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), dir, s4br], { stdio: 'pipe' }); /* S4b-R: the file carries 0014; its rollback (copy-only, the retained records kept as a blob) goes first */ const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), s4br, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -275,7 +275,7 @@ await test('account deletion: the person\'s notification rows go inside the dele
     assert.ok(mine() >= 2, `${label}: the rows are retained`); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ?', 'pl-adeyemi').n, 1, `${label}: the player is retained`);
   });
   assert.equal((await del()).status, 200);
-  assert.equal(mine(), 0); assert.equal(others(), othersBefore, 'nobody else lost a row'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ?', 'pl-adeyemi').n, 0);
+  assert.equal(mine(), 0); assert.equal(others(), othersBefore, 'nobody else lost a row'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', 'pl-adeyemi').n, 0, 'the live row went (S4b-R: the retained record stays)');
   assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM notification_pref_categories WHERE audience_id = ?', 'pl-adeyemi').n, 1, 'the preferences are retained');
   await S.stop(); rm(dir);
 });

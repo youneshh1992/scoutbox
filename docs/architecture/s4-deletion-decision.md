@@ -2,7 +2,8 @@
 
 Written 11 October 2026 on branch `feat/sqlite-schema` at commit `d4ca3f2`, corrected after
 review at `0c038ef`, from reading the code as it was then. **Status (12 October 2026, at
-`2178c5b`): PARTIALLY RESOLVED — see §10.** The Founder answered the birth-date question
+`2178c5b`): PARTIALLY RESOLVED — see §10; the country-code question answered on 21 October 2026
+and the retained record implemented as S4b-R — see §12.** The Founder answered the birth-date question
 (§9): the full birth date is the chosen precision for the retained record. The two companion
 questions (the country code; a write-time child-status stamp on future safeguarding records)
 are open by the Founder's explicit choice. §§1–9 are kept as written on 11 October as the
@@ -418,3 +419,25 @@ deletion behaviours §5 of this record proposes beyond the retained row (Q6: pus
 and passport shares; dangling media ids; the deletion ledger row of §8 item 9). This record stays the
 authoritative statement of the birth-date decision (§10) and of the retention questions that need qualified
 review (§8); nothing in the plan's §D reopens them or infers an answer from the birth-date choice.
+
+## 12. The Founder's answer on the country code (21 October 2026) and the retained record as built
+
+**Recorded verbatim.** Asked, before any implementation, *"After a player deletes their account, should the minimal
+retained record keep their two-letter country code, or remove it?"*, the Founder answered: **"Keep the country code
+(Recommended)"** (received in the implementation conversation; an explicit answer, not an inference from this record,
+the plan's recommendation or silence; not to be asked again).
+
+**What this settles.** The minimal retained record after an account deletion is the player **id**, the **deletion
+instant**, the **full birth date** (§10) and the **two-letter country code** — nothing else of the person. It is built
+as S4b-R (`sqlite-migration-plan.md` §D.6, §D.6.1, §D.6.2; `s4-readiness-review.md` §12): the row stays in `players`
+with `deleted_at` set, those two facts kept, a fixed storage placeholder in every other `NOT NULL` column (the column's
+declared default — never the person's previous value, never read back as a fact), `NULL` everywhere else, no facets; the
+owned rows and links are deleted explicitly; no reader that serves accounts serves the row.
+
+**What this does not settle, and must not be read as settling.** The write-time child-status stamp on future
+safeguarding rows (D2, Q2): **still open** — nothing is designed, stubbed or reserved for it. No age rule was added and
+none is implied: no code computes a deleted player's age, and the first reader that needs one is the step that adds
+it, under Q2. §8 stands in full (no retention period, no inference of compliance); the proposed extensions of §5
+beyond today's deletion behaviour — the remaining recruitment and guardian-name copies, the commercial names, the
+audit free text, the deletion ledger row, the push and verification tokens (Q6) — are **not** built and not
+authorised by this answer. Nothing is fabricated for the ids of players deleted before S4b-R (Q3, Q4).

@@ -103,6 +103,10 @@ let mod = null;
 try { mod = await import('../repositories/safetyAudit.mjs'); } catch { mod = null; }
 let rollbackMod = null;
 try { rollbackMod = await import('../repositories/safetyAuditRollback.mjs'); } catch { rollbackMod = null; }
+// S4b-R: a file this build writes carries 0014 too; the S4b-R tool (copy-only, the retained records kept as a blob) goes first and the S6b tool works on its output.
+let erasureRollbackMod = null;
+try { erasureRollbackMod = await import('../repositories/playerErasureRollback.mjs'); } catch { erasureRollbackMod = null; }
+const preS4bR = (file) => { if (!erasureRollbackMod) return file; const out = tempDir('sa-s4br-to-s6b'); erasureRollbackMod.rollbackPlayerErasureCopy(file, out); return dbFile(out); };
 const needModule = () => { assert.ok(mod, 'repositories/safetyAudit.mjs exists (the S6b repository module)'); return mod; };
 /** A live server-mode store with the data layer attached: the repository in its STAGED mode, as the server runs it. */
 function live(dir, { now = () => NOW } = {}) {
@@ -147,7 +151,7 @@ test('[cutover] migration 0013 is registered after 0012 and imports the eight bl
   assert.ok(!applied(s).includes(MIGRATION)); for (const n of COLLECTIONS) assert.ok(blob(s, n), `${n} blob before`);
   const ran = migrate(s);
   assert.ok(ran.ran.includes(MIGRATION), `0013 ran (${ran.ran.join(', ')})`); // fails on 1792fc7: the id is not registered
-  assert.deepEqual(applied(s).slice(-2), ['0012_channels', MIGRATION]);
+  assert.deepEqual(applied(s).slice(-3), ['0012_channels', MIGRATION, '0014_player_erasure']); // S4b-R registered after this step
   for (const t of Object.values(TABLES)) assert.ok(s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), `${t} exists`);
   for (const n of COLLECTIONS) assert.equal(blob(s, n), undefined, `the ${n} blob row is retired`);
   // Columns and order.
@@ -390,8 +394,9 @@ test('[cutover] rollback (copy-only): every row of the eight tables is written b
   const AUDIT_T = Object.values(TABLES);
   const before = { dump: dump(openRaw(src), { except: [...AUDIT_T, 'collections', 'meta', 'data_migrations'] }), bytes: fs.statSync(dbFile(src)).size, saveSeq: seqOf(src), stored: stored(openRaw(src)) };
   const out = tempDir('sa-rb-out');
-  const result = rollbackSafetyAuditCopy(dbFile(src), out, { now: NOW });
-  assert.equal(result.output, dbFile(out)); assert.deepEqual(result.counts, { blocks: 2, reports: 2, moderationLog: 1, orgNotes: 1, ledger: 3, opsEvents: 1, sourceChanges: 1, idvQueue: 2 }); assert.equal(result.recordRemoved, true); assert.equal(result.saveSeq, before.saveSeq + 1);
+  const s4brCopy = preS4bR(dbFile(src));
+  const result = rollbackSafetyAuditCopy(s4brCopy, out, { now: NOW });
+  assert.equal(result.output, dbFile(out)); assert.deepEqual(result.counts, { blocks: 2, reports: 2, moderationLog: 1, orgNotes: 1, ledger: 3, opsEvents: 1, sourceChanges: 1, idvQueue: 2 }); assert.equal(result.recordRemoved, true); assert.equal(result.saveSeq, before.saveSeq + 2, 'the S4b-R tool advanced the revision once, this tool once more');
   assert.equal(fs.statSync(dbFile(src)).size, before.bytes, 'the source is untouched'); assert.equal(seqOf(src), before.saveSeq); assert.ok(tableExistsIn(src, 'ledger'));
   const o = openRaw(out);
   assert.ok(!applied(o).includes(MIGRATION)); for (const t of AUDIT_T) assert.equal(o.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), undefined, `${t} dropped`); assert.equal(meta(o, META), undefined);
@@ -410,9 +415,9 @@ test('[cutover] rollback (copy-only): every row of the eight tables is written b
   const laterOut = tempDir('sa-rb-later-out'); assert.equal(cli(later, laterOut), 4); assert.deepEqual(fs.readdirSync(laterOut), [], 'no output');
   const never = tempDir('sa-rb-never'); s7dFile(never); const neverOut = tempDir('sa-rb-never-out'); assert.equal(cli(never, neverOut), 5); assert.deepEqual(fs.readdirSync(neverOut), []);
   const full = tempDir('sa-rb-full'); fs.writeFileSync(path.join(full, 'keep.txt'), 'x'); assert.equal(cli(src, full), 1); assert.deepEqual(fs.readdirSync(full), ['keep.txt']);
-  const missing = tempDir('sa-rb-missing'); { fs.copyFileSync(dbFile(src), dbFile(missing)); const s = openRaw(missing); s.exec('DROP TABLE ops_events; DROP TABLE org_notes;'); s.close(); } const missingOut = tempDir('sa-rb-missing-out'); assert.equal(cli(missing, missingOut), 10); assert.deepEqual(fs.readdirSync(missingOut), []);
+  const missing = tempDir('sa-rb-missing'); { fs.copyFileSync(s4brCopy, dbFile(missing)); /* the S4b-R tool's output: a 0013 file without 0014, so this tool reaches its own refusal */ const s = openRaw(missing); s.exec('DROP TABLE ops_events; DROP TABLE org_notes;'); s.close(); } const missingOut = tempDir('sa-rb-missing-out'); assert.equal(cli(missing, missingOut), 10); assert.deepEqual(fs.readdirSync(missingOut), []);
   const injected = tempDir('sa-rb-inject-out');
-  assert.throws(() => rollbackSafetyAuditCopy(dbFile(src), injected, { now: NOW, _failBeforeCommit: true }), /synthetic commit failure/); assert.deepEqual(fs.readdirSync(injected), [], 'a failure removes the output');
+  assert.throws(() => rollbackSafetyAuditCopy(s4brCopy, injected, { now: NOW, _failBeforeCommit: true }), /synthetic commit failure/); assert.deepEqual(fs.readdirSync(injected), [], 'a failure removes the output');
   rm(src, out, later, laterOut, never, neverOut, full, missing, missingOut, injected);
 });
 
@@ -473,7 +478,7 @@ test('[S6b correction F2] a nested OPTIONAL value that JSON cannot carry is stor
   L.close();
   // A restart serves the same row; the rollback copy's blob is exactly what the pre-S6b build would have written.
   const L2 = live(dir); assert.equal(JSON.stringify(L2.repo.ledger.byId('led-prefs')), JSON.stringify(row)); L2.close();
-  const out = tempDir('sa-f2-rb'); rollbackMod.rollbackSafetyAuditCopy(dbFile(dir), out, { now: NOW });
+  const out = tempDir('sa-f2-rb'); rollbackMod.rollbackSafetyAuditCopy(preS4bR(dbFile(dir)), out, { now: NOW });
   const legacy = JSON.parse(blobOf(out, 'ledger')).find((r) => r.id === 'led-prefs'); assert.equal(JSON.stringify(legacy), JSON.stringify({ ...led({ id: 'led-prefs', type: 'box_prefs_changed', orgId: null, userId: undefined }), detail }), 'the legacy blob row equals JSON.stringify of the writer literal');
   // ISOLATION: the opt-in is the audit repository's only. cloneJson's default and the S7c outbox / push validators that use
   // it still refuse a nested undefined exactly as before (an object property or an array entry), and still accept the same

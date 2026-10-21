@@ -1254,7 +1254,9 @@ the account deletion are the only writers.
   further back, run `scripts/outboxPushRollback.mjs` on this tool's output (it
   refuses the S7d file itself with exit 4). Since S6b a file this build wrote
   carries `0013_safety_audit`, which this tool refuses (exit 4): run
-  `scripts/safetyAuditRollback.mjs` first and this tool on its output.
+  `scripts/safetyAuditRollback.mjs` first and this tool on its output; since S4b-R the
+  file carries `0014_player_erasure` as well — `scripts/playerErasureRollback.mjs` first,
+  then the S6b tool, then this one.
 
 #### Operator procedure for the S7d cutover (not run on real data by this work)
 
@@ -1374,6 +1376,86 @@ repository; every `db.<name>` is a read-only view in insertion order.
    <fresh-empty-dir>`, then start the previous build (`4f954ad`) on the output —
    every audit row written, updated or deleted since the cutover is in it.
 
+### Retained player records (live since migration `0014`, S4b-R — implemented 21 October 2026 on top of `d16362f` under the Founder's decisions of 12 October (the full birth date) and 21 October 2026 (the country code kept); IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE; not production-approved)
+
+An account deletion (`DELETE /player/account`, `DELETE /guardian/children/:id`)
+no longer deletes the player row. `deletePlayerData` calls `players.erase`
+(`repositories/identity.mjs`) in place of the hard delete; everything else in
+the deletion unit is unchanged — the session revoked, the pairing code revoked,
+the media files queued and removed after COMMIT, the requests and trials
+tombstoned, the case, assessment, contact and open-trial names nulled, the
+m24–m29 hooks, the threads and the player-audience notifications deleted
+(`docs/architecture/sqlite-migration-plan.md` §D.6, §D.6.1, §D.6.2;
+`docs/architecture/s4-readiness-review.md` §12; the decision record
+`docs/architecture/s4-deletion-decision.md` §10 and §12).
+
+- **The retained record.** The row stays in `players` with `deleted_at` set to
+  the deletion instant; `birth_date` and `country` are kept (the Founder's two
+  decisions); `name` is the constant `Deleted player` and every other `NOT NULL`
+  column holds its declared default — fixed storage placeholders, never the
+  person's previous values and never read back as facts — every other column is
+  `NULL`, `facets_json` is `NULL`; the twelve `player_*` child tables and the
+  `guardian_children` rows are emptied explicitly; every guardian stops listing
+  the id. Nothing of the person comes back from any rollback.
+- **Served by nothing that serves accounts.** `db.players`, `players.byId`,
+  `byGuardian`, `count`, `guardians.linksOf`, the login, the session lookup,
+  the club views and lists, the guardian's children list, the pairing code
+  (revoked; a code naming a retained id is refused by the snapshot check), the
+  media-queue ownership check and the snapshot read all read live rows only. A
+  retained id is never re-created as a live account: `players.insert`, the
+  identity snapshot replace, the backup import and the `playersRetained`
+  collection all refuse it with ids only. `/capabilities` reports
+  `dataLayer.domains.players.retained` (a count) and the audit domain adds
+  `retainedPlayerReferences` beside the Q4 `unresolvedPlayerReferences`.
+- **What it does NOT change.** The ids of players deleted before this step,
+  pre-S4a imports and ids that never existed stay as they are in the audit and
+  recruitment rows — preserved and counted (Q4), never given a fabricated
+  record (Q3 untouched). No foreign key to `players(id)` exists (plan §D.2a).
+  No guardian deletion route. No retention period. No new age rule: no code
+  computes a deleted player's age. The audit rows naming the person are
+  byte-identical before and after the deletion.
+- **Backups and restores.** The admin backup exports the retained records under
+  `db.playersRetained` — `{ id, deletedAt, birthDate, country }` and nothing
+  else — and **never inside `db.players`**; the manifest counts them as
+  `retainedPlayers`. A restore into a new directory imports `players` through
+  `0005` as before and `playersRetained` through `0014`; a backup whose
+  `players` carries a retained id as a live player is refused at boot
+  (`PLAYER_ERASURE_IMPORT_BLOCKED`, ids only, nothing of 0014 written). A
+  previous build restoring such a backup keeps `playersRetained` as a blob no
+  route reads — never as accounts.
+- **Rollback — copy-only, and the one way back.** `npm run
+  rollback:player-erasure -- <data-dir> <fresh-empty-dir>`
+  (`scripts/playerErasureRollback.mjs`) opens the file read-only, copies it,
+  moves every retained record out of `players` into the `playersRetained`
+  legacy blob (the accepted `f0abd34` build loads it under a name no route
+  reads, keeps it through its saves and exports it in its backups, and serves
+  nothing of it as an account), removes the `0014` record and its meta key,
+  advances the save revision and revalidates the copy. The live rows and every
+  other table are untouched; nothing written since the cutover is lost; **the
+  erased personal data is restored by nothing** — the copy carries the retained
+  records, not the deleted accounts. Exit codes: 0 done, 1 usage / output not
+  empty, 4 a later schema step, 5 never applied 0014, 10 a recorded 0014 whose
+  table is missing. To go further back, run `scripts/safetyAuditRollback.mjs`
+  on THIS tool's output (it refuses a file carrying 0014), then the S7d tool,
+  and so on down the chain. Re-upgrading the copy (booting this build on it)
+  imports the blob back as the same rows.
+- **DANGER — never boot the previous build directly on a `0014` file.** The
+  migration runner skips a recorded step and refuses none it does not know, so
+  the `f0abd34` build boots such a file without complaint, reads every
+  `players` row as an account and serves a retained row as a live,
+  **passwordless** player named "Deleted player" with the retained birth date
+  and country (`scripts/testPlayerErasureServer.mjs` proves it on a synthetic
+  copy). Going back is the rollback tool on a copy, never the old build on the
+  live file and never a restore over a live directory.
+
+**Cutover procedure** (the S6b pattern): 1. dry run on a copy of the live
+directory — boot this build with `DATA_DIR` pointing at the copy, check
+`/capabilities` reports `0014_player_erasure` and `players.retained: 0`;
+2. back up (`POST /admin/backup`) and stop the server; 3. start this build —
+the boot records `0014` in its one transaction (a file carrying a
+`playersRetained` blob imports it; a refusal leaves the file untouched and the
+next boot refuses the same way); 4. rollback, if needed, as above.
+
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request
 logs) key on the client address. Behind a platform proxy (Fly, Render, a load
@@ -1449,7 +1531,10 @@ boot second server → login + player list) on every run;
 player, guardian, link, outstanding e-mail code and session hash present on
 the restored server). A restore refuses a snapshot whose identity records are
 invalid (the whole import is rejected, `LEGACY_IMPORT_FAILED`, the file left
-in place) rather than importing part of it.
+in place) rather than importing part of it. Since S4b-R (migration `0014`) a backup
+carries the retained player records under `playersRetained`, imported by the restore;
+the restored server serves nothing of them as accounts, and a backup whose `players`
+lists a retained id as a live player is refused at boot (ids only).
 
 ## Load — measured result (2026-09-09)
 `node scripts/m13Load.mjs` — bounded, isolated, agreed-in-code limits:

@@ -279,18 +279,47 @@ and design changes the Founder explicitly requests.
   the eight audit blobs from every save's serialisation and does NOT meet the
   whole-snapshot-write objective (plan §D.4). Child-status stamping (Q2) and
   the country code (Q1) stay OPEN; the full birth date, D-A/D-B and the
-  legacy-minor stop rule are unchanged; A0–A3, S4b and S8 are not started. The
-  next free migration identifier is `0014`. The correction of 21 October 2026 (review of `c6cf5e1`,
+  legacy-minor stop rule are unchanged; A0–A3 and S8 are not started (S4b-R:
+  below). The
+  next free migration identifier was `0014` (taken by S4b-R, below; `0015` is
+  next). The correction of 21 October 2026 (review of `c6cf5e1`,
   review §11.4) makes `patch` atomic (F1) and stores a nested undefined in an
   audit record as JSON did (F2, opt-in `cloneJson` option; outbox and push keep
   the refusing default); that corrected commit is the accepted one. The two
   intermittent test failures of the `c6cf5e1` review did not recur in any run
   since; their causes are unresolved (not fixed, not disproven; review §11.5).
-  **The next step is S4b-R, the retained player record** (plan §D.6: the
-  retained row and the reader contract only — no foreign key, no additional
-  deletion behaviour, no new age rule; migration `0014` when approved); it
-  needs the Founder's answer to Q1 (the country code) and nothing else. Not
-  started; nothing is implemented, stubbed or reserved for it.
+  **S4b-R, the retained player record, is IMPLEMENTED since 21 October 2026**
+  (one local commit on top of `d16362f`; AWAITING INDEPENDENT ACCEPTANCE — not
+  production, security, legal-compliance or deployment approval; plan §D.6,
+  §D.6.1, §D.6.2; `docs/architecture/s4-readiness-review.md` §12;
+  `scoutbox-server/OPERATIONS.md` "Retained player records"). Built under the
+  Founder's explicit decisions, recorded verbatim and not to be asked again:
+  the **full birth date** (12 October 2026) and **"Keep the country code
+  (Recommended)"** (21 October 2026). Migration `0014_player_erasure`
+  (REGISTERED; a record and the `playersRetained` backup import — no table,
+  no column, no foreign key, no retention period): `deletePlayerData` calls
+  `players.erase` instead of the hard delete — the row stays as the retained
+  record (id, `deleted_at`, `birth_date`, `country`; a fixed placeholder in
+  every other NOT NULL column, never the person's previous value; NULL
+  elsewhere; no facets), the twelve `player_*` child tables and the links are
+  emptied explicitly, every guardian stops listing the id; everything else in
+  the deletion unit is today's behaviour (no further name-copy erasure, no Q6
+  item). A retained row is served by NOTHING that serves accounts and only by
+  the narrow accessors; it survives every snapshot save (the identity replace
+  carries the rows through its rewrite); a retained id is never re-created as
+  a live account (insert, snapshot, backup import refuse it, ids only); the
+  backup exports `playersRetained` and never a retained id inside `players`.
+  Nothing is fabricated for ids deleted before this step (Q4 counted; Q3
+  untouched); no new age rule; Q2 open. The copy-only rollback is
+  `scripts/playerErasureRollback.mjs` (the records moved into the
+  `playersRetained` legacy blob the accepted `f0abd34` build serves to nobody;
+  the erased data restored by nothing; proven by booting the actual `f0abd34`
+  build on the copy) and the S6b tool refuses a file carrying 0014. **Never
+  boot the previous build directly on a 0014 file: it serves a retained row as
+  a passwordless account** (OPERATIONS.md). The next free migration identifier
+  is `0015`. The six historical builds the backend gate boots for real:
+  `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`
+  (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR_SERVER`).
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state

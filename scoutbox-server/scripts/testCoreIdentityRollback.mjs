@@ -24,6 +24,7 @@ import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
 import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
 import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
+import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
 import * as m0005 from '../repositories/migrations/0005_core_identity_live.mjs';
@@ -33,7 +34,7 @@ import {
   s3File, freshFile, openRaw, migrate, applied, isLive, blob, blobText, meta, sessionRows, links, dump, identityDump, filesDigest,
 } from './coreIdentityTestFixtures.mjs';
 // S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(file, out); return path.join(out, 'scoutbox.db'); };
+const preS6b = (file) => { const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(file, s4br); /* S4b-R: the file carries 0014; its rollback goes first */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -122,11 +123,11 @@ test('rollback: the copy holds every post-S4 player, guardian and link in the tw
   assertSourceUntouched(src, srcBefore, logicalBefore, 'after a successful rollback');
   // The result.
   assert.equal(result.output, dbFile(out)); assert.equal(result.recordRemoved, true);
-  assert.equal(result.players, 6, 'five fixture players − the removed adult + the new child + the unit child'); assert.equal(result.guardians, 4); assert.equal(result.links, 6, 'five fixture links + the new child + the co link − the unlink − the ageUp + the unit child'); assert.equal(result.sessions, 4); assert.equal(result.saveSeq, expected.saveSeq + 8, 'the S6b tool advanced the revision once, the S7d tool once, the S7c tool once, the S7b tool once, the S7a tool once, the S6a tool once, the S5 tool once, this tool once more'); assert.ok(true, 'the S5 tool advanced the revision once, this tool once more');
+  assert.equal(result.players, 6, 'five fixture players − the removed adult + the new child + the unit child'); assert.equal(result.guardians, 4); assert.equal(result.links, 6, 'five fixture links + the new child + the co link − the unlink − the ageUp + the unit child'); assert.equal(result.sessions, 4); assert.equal(result.saveSeq, expected.saveSeq + 9, 'the S4b-R tool advanced the revision once, the S6b tool once, the S7d tool once, the S7c tool once, the S7b tool once, the S7a tool once, the S6a tool once, the S5 tool once, this tool once more'); assert.ok(true, 'the S5 tool advanced the revision once, this tool once more');
   assert.deepEqual(fs.readdirSync(out), ['scoutbox.db'], 'one file, no WAL leftovers after VACUUM');
   const o = openRaw(out);
   assert.deepEqual(applied(o), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live']);
-  assert.equal(meta(o, CORE_IDENTITY_INIT_META), undefined); assert.equal(meta(o, m0005.CORE_IDENTITY_CUTOVER_META), undefined); assert.equal(Number(meta(o, 'saveSeq')), expected.saveSeq + 8); // S6b, S7d, S7c, S7b, S7a, S6a, S5 and this tool each advanced it once
+  assert.equal(meta(o, CORE_IDENTITY_INIT_META), undefined); assert.equal(meta(o, m0005.CORE_IDENTITY_CUTOVER_META), undefined); assert.equal(Number(meta(o, 'saveSeq')), expected.saveSeq + 9); // S4b-R, S6b, S7d, S7c, S7b, S7a, S6a, S5 and this tool each advanced it once
   // The blobs: exactly what the repositories served after the history (byte-identical records, childIds in link order).
   const players = blob(o, 'players'); const guardians = blob(o, 'guardians');
   assert.equal(JSON.stringify(players), JSON.stringify(expected.players), 'the players blob equals the live view, record for record');

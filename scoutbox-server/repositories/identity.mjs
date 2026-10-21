@@ -67,6 +67,7 @@
 import { readonlyView, markView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied, transaction } from './database.mjs';
+import { parseStrictDateOnly } from '../temporal.mjs';
 import { requireRuntime } from '../runtime.mjs';
 import { isAdult } from '../domain.mjs';
 import {
@@ -137,6 +138,123 @@ const updateSql = (table, columns) => `UPDATE ${table} SET ${columns.filter((c) 
  * and needs no player at all. The copy is never stored, so the only honest
  * outcomes are "equal" or "refused" — never a silent drop.
  */
+// ---------------------------------------------------------------- S4b-R: the retained player record
+/**
+ * S4b-R (migration plan §D.6/§D.6.1; the Founder's decisions: the full birth date,
+ * 12 October 2026, and the country code KEPT, 21 October 2026). An account deletion
+ * no longer deletes the player row: `players.erase` keeps EXACTLY the agreed record
+ * in the same table — the id, the deletion instant (`deleted_at`), the full birth
+ * date and the two-letter country — with a fixed storage placeholder in every other
+ * NOT NULL column (the column's declared default, never the person's previous value)
+ * and NULL everywhere else, no facets; the twelve child tables and the links are
+ * emptied explicitly in the same transaction. A retained row is served by NOTHING
+ * that serves accounts (the view, byId, byGuardian, count, linksOf, the snapshot read,
+ * the pairing-code and media-queue checks) and only by the narrow accessors below; it
+ * survives every snapshot save (the identity replace captures the rows before its
+ * DELETE and reinserts them byte-identical); a retained id is never re-created as a
+ * live account (insert, the snapshot replace, the backup import refuse it, ids only);
+ * the backup carries the records under `playersRetained`, never inside `players`.
+ * Nothing of this is a retention period, a foreign key or a new age rule.
+ */
+export const PLAYER_ERASURE_MIGRATION = '0014_player_erasure';
+/** `meta` key holding the cutover record: `{ at, imported }`, counts only. */
+export const PLAYER_ERASURE_CUTOVER_META = 'playerErasureCutover';
+/** The backup / snapshot collection the retained records travel in (never inside `players`). */
+export const PLAYERS_RETAINED_COLLECTION = 'playersRetained';
+export const RETAINED_PLAYER_NAME = 'Deleted player';
+/** The fixed storage placeholders of a retained row: the columns' declared defaults — constants the table's constraints need, never read back as facts about the person. */
+export const RETAINED_PLACEHOLDERS = Object.freeze({ name: RETAINED_PLAYER_NAME, academy_plus: 0, first_team_seeker: 0, availability: 'not_seeking', contract_status: 'unknown', level: 'amateur', identity_verified: 0, medical_shared: 0, medical_condition_status: 'unknown' });
+const RETAINED_KEYS = Object.freeze(['id', 'deletedAt', 'birthDate', 'country']);
+/** A retained record `{ id, deletedAt, birthDate, country }` → the full row of the players table (every column; the kept facts, the placeholders, NULL elsewhere). */
+export function retainedRowFor(rec) {
+  const p = {}; for (const c of PLAYER_COLUMNS) p[c] = null;
+  p.id = rec.id; p.birth_date = rec.birthDate; p.country = rec.country; p.deleted_at = rec.deletedAt;
+  return Object.assign(p, RETAINED_PLACEHOLDERS);
+}
+/** A retained row → the record (the four facts; nothing else of the row is a fact). */
+export const retainedRecordFromRow = (r) => ({ id: r.id, deletedAt: r.deleted_at, birthDate: r.birth_date, country: r.country });
+const retainedRefusal = (message) => Object.assign(new Error(`PLAYER_ERASURE_IMPORT_BLOCKED: ${message}`), { code: 'PLAYER_ERASURE_IMPORT_BLOCKED' });
+/** Problems of one retained record (field and reason; never a value): the shape is exactly the four keys. */
+export function validateRetainedRecord(rec, index = null) {
+  const at = `playersRetained ${typeof rec?.id === 'string' && rec.id ? rec.id : `#${index}`}`;
+  if (rec === null || typeof rec !== 'object' || Array.isArray(rec)) return [`${at}: a retained record is an object (got ${describeValue(rec)})`];
+  const problems = [];
+  if (typeof rec.id !== 'string' || !rec.id) problems.push('id is not a non-empty string');
+  if (!Number.isSafeInteger(rec.deletedAt) || rec.deletedAt < 0) problems.push('deletedAt is not a non-negative integer (ms)');
+  if (typeof rec.birthDate !== 'string' || !parseStrictDateOnly(rec.birthDate).ok) problems.push('birthDate is not a YYYY-MM-DD date');
+  if (typeof rec.country !== 'string' || !rec.country) problems.push('country is not a non-empty string');
+  const unknown = Object.keys(rec).filter((k) => !RETAINED_KEYS.includes(k));
+  if (unknown.length) problems.push(`unknown field(s) ${unknown.join(', ')} (a retained record carries exactly id, deletedAt, birthDate, country)`);
+  return problems.map((m) => `${at}: ${m}`);
+}
+/**
+ * Validate a `playersRetained` collection against the live player ids: an array of
+ * well-formed records, no duplicate id, no id that is a live account. Throws
+ * PLAYER_ERASURE_IMPORT_BLOCKED (ids, fields and reasons only — never a date) so the
+ * caller's transaction rolls back with nothing written; returns the frozen records.
+ */
+export function checkRetainedCollection(list, { liveIds = new Set(), label = 'playersRetained' } = {}) {
+  if (!Array.isArray(list)) throw retainedRefusal(`${label}: the playersRetained collection must be an array of retained records (got ${describeValue(list)}); nothing was written`);
+  const problems = []; const seen = new Set(); const records = [];
+  list.forEach((rec, i) => {
+    const p = validateRetainedRecord(rec, i); if (p.length) { problems.push(...p); return; }
+    if (seen.has(rec.id)) { problems.push(`playersRetained ${rec.id}: duplicate id`); return; }
+    seen.add(rec.id);
+    if (liveIds.has(rec.id)) { problems.push(`playersRetained ${rec.id}: the id is a live player; a retained record and an account never share an id`); return; }
+    records.push(Object.freeze({ id: rec.id, deletedAt: rec.deletedAt, birthDate: rec.birthDate, country: rec.country }));
+  });
+  if (problems.length) throw retainedRefusal(`${label}: ${problems.length} retained record(s) refused (${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}); nothing was written`);
+  return records;
+}
+/**
+ * Migration 0014's import: a `playersRetained` blob (a restored backup, a rollback
+ * copy being re-upgraded) becomes retained rows, validated against every players row
+ * the file holds; the blob row is retired. A file without the blob imports nothing.
+ * Returns the count. Runs inside the caller's transaction.
+ */
+export function importPlayersRetainedBlob(sqlite) {
+  if (!sqlite.isTransaction) throw new Error('importPlayersRetainedBlob runs inside the caller\'s transaction');
+  const hasCollections = !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'collections'").get();
+  const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(PLAYERS_RETAINED_COLLECTION) : null;
+  if (!row) return 0;
+  let parsed; try { parsed = JSON.parse(row.value); } catch { throw retainedRefusal('the playersRetained blob is not valid JSON; nothing was written'); }
+  const liveIds = new Set(sqlite.prepare('SELECT id FROM players').all().map((r) => r.id));
+  const records = checkRetainedCollection(parsed, { liveIds, label: 'the playersRetained blob' });
+  const ins = sqlite.prepare(insertSql('players', PLAYER_COLUMNS));
+  for (const rec of records) ins.run(retainedRowFor(rec));
+  sqlite.prepare('DELETE FROM collections WHERE name = ?').run(PLAYERS_RETAINED_COLLECTION);
+  return records.length;
+}
+/**
+ * The retained records as a snapshot collection: read for backups and the persistence
+ * tools (null before migration 0014); `replace` is the snapshot contract — a supplied
+ * collection IS the retained set (validated against the live rows as they stand in the
+ * caller's transaction; a refusal rolls the whole save back), an omitted one keeps the
+ * rows as they are.
+ */
+export const PLAYERS_RETAINED = {
+  name: PLAYERS_RETAINED_COLLECTION,
+  cutOver: (sqlite) => migrationApplied(sqlite, PLAYER_ERASURE_MIGRATION),
+  read(sqlite) {
+    if (!this.cutOver(sqlite)) return null;
+    return sqlite.prepare('SELECT id, deleted_at, birth_date, country FROM players WHERE deleted_at IS NOT NULL ORDER BY deleted_at, id').all().map(retainedRecordFromRow); // listed by deletion instant, then id (rowids are the accounts' creation order, not a fact of the record)
+  },
+  replace(sqlite, list) {
+    if (!this.cutOver(sqlite)) return false;
+    if (!sqlite.isTransaction) throw new Error('playersRetained: replace() runs inside the caller\'s transaction');
+    const liveIds = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NULL').all().map((r) => r.id));
+    const records = checkRetainedCollection(list, { liveIds, label: 'the snapshot' });
+    sqlite.exec('DELETE FROM players WHERE deleted_at IS NOT NULL');
+    const ins = sqlite.prepare(insertSql('players', PLAYER_COLUMNS));
+    for (const rec of records) ins.run(retainedRowFor(rec));
+    return true;
+  },
+};
+/** The UPDATE of an erase: every column but the id and the two kept facts; the parameters come from `retainedRowFor` minus those two. */
+const ERASE_COLUMNS = Object.freeze(PLAYER_COLUMNS.filter((c) => !['id', 'birth_date', 'country'].includes(c)));
+const ERASE_SQL = `UPDATE players SET ${ERASE_COLUMNS.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id AND deleted_at IS NULL`;
+const eraseParamsFor = (rec) => { const full = retainedRowFor(rec); const p = { id: rec.id }; for (const c of ERASE_COLUMNS) p[c] = full[c]; return p; };
+
 export const IDENTITY_SNAPSHOT = {
   names: IDENTITY_COLLECTIONS,
   cutOver: (sqlite) => migrationApplied(sqlite, CORE_IDENTITY_LIVE_MIGRATION),
@@ -152,7 +270,7 @@ export const IDENTITY_SNAPSHOT = {
     // facets carry everything (an S4a file, a rollback copy).
     const players = subrecordsLive(sqlite)
       ? readPlayersWithChildren(sqlite, prepareSubrecordStatements(sqlite), { trials: readTrialsBlob(sqlite) ?? [] }).map((x) => x.record)
-      : sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players ORDER BY rowid`).all().map((r) => playerFromRow(r));
+      : sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NULL ORDER BY rowid`).all().map((r) => playerFromRow(r)); // S4b-R: a retained row is not a player record
     return {
       guardians: sqlite.prepare(`SELECT ${GUARDIAN_COLUMNS.join(', ')} FROM guardians ORDER BY rowid`).all().map((r) => guardianFromRow(r, childIds.get(r.id) ?? [])),
       players,
@@ -202,6 +320,14 @@ export const IDENTITY_SNAPSHOT = {
     // below from the snapshot's records, so the FINAL state holds exactly the
     // arrays the snapshot carries (a record without an array has no rows; an
     // empty array has none and reads back empty; a null stays null).
+    // S4b-R: the retained records are not part of any snapshot's players — they are
+    // captured here, before the DELETE, and reinserted byte-identical after the
+    // candidate; a candidate that lists a retained id as a live player is refused
+    // before any statement (ids only), so a save never re-creates a deleted account.
+    const retainedRows = sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid`).all();
+    const retainedIds = new Set(retainedRows.map((r) => r.id));
+    const resurrected = candidate.players.filter((r) => retainedIds.has(r.id)).map((r) => r.id);
+    if (resurrected.length) throw Object.assign(new Error(`identity snapshot: ${resurrected.length} player record(s) carry the id of a deleted account whose record is retained (${resurrected.slice(0, 20).join(', ')}${resurrected.length > 20 ? ', …' : ''}); a deleted account is not re-created by a save; the save was rolled back and nothing was written`), { code: 'PLAYER_ID_RETAINED' });
     sqlite.exec('DELETE FROM guardian_children');
     sqlite.exec('DELETE FROM players');
     sqlite.exec('DELETE FROM guardians');
@@ -222,6 +348,7 @@ export const IDENTITY_SNAPSHOT = {
       for (const row of candidate.players) writeChildRows(st, playerFromRow(row));
     }
     for (const row of candidate.links) insL.run(row);
+    for (const r of retainedRows) insP.run(r); // S4b-R: the retained rows, exactly as they were
     const broken = sqlite.prepare('PRAGMA foreign_key_check').all();
     if (broken.length) throw new Error(`identity snapshot: foreign_key_check found ${broken.length} broken reference(s) after the write; the save was rolled back`);
     return true;
@@ -256,7 +383,8 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
   if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the identity repositories need the store\'s participant API `unit` ({ active(), join(work) }) or null; a unit without join() could not report an operation\'s failure to the unit of work');
   const inUnit = () => !!unit?.active?.();
   const stmt = {
-    allPlayers: sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players ORDER BY rowid`),
+    allPlayers: sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NULL ORDER BY rowid`), // S4b-R: live rows only
+    allRetained: sqlite.prepare('SELECT id, deleted_at, birth_date, country FROM players WHERE deleted_at IS NOT NULL ORDER BY deleted_at, id'),
     allGuardians: sqlite.prepare(`SELECT ${GUARDIAN_COLUMNS.join(', ')} FROM guardians ORDER BY rowid`),
     allLinks: sqlite.prepare('SELECT guardian_id, player_id, role FROM guardian_children ORDER BY rowid'),
     insertPlayer: sqlite.prepare(insertSql('players', PLAYER_COLUMNS)),
@@ -265,6 +393,8 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     // The column and the row's shape metadata (facets_json.__meta: is guardianId present, is it null) change together.
     setPlayerGuardian: sqlite.prepare('UPDATE players SET guardian_id = @guardian_id, facets_json = @facets_json WHERE id = @id'),
     deletePlayer: sqlite.prepare('DELETE FROM players WHERE id = ?'),
+    erasePlayer: sqlite.prepare(ERASE_SQL),
+    deleteLinksOf: sqlite.prepare('DELETE FROM guardian_children WHERE player_id = ?'),
     insertGuardian: sqlite.prepare(insertSql('guardians', GUARDIAN_COLUMNS)),
     updateGuardian: sqlite.prepare(updateSql('guardians', GUARDIAN_COLUMNS)),
     guardianFacets: sqlite.prepare('UPDATE guardians SET facets_json = @facets_json WHERE id = @id'),
@@ -284,6 +414,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
   const makeDomain = (name) => ({ name, records: [], proxies: [], byId: new Map(), committed: new Map(), pending: new Map() });
   const P = makeDomain('players');
   const G = makeDomain('guardians');
+  const R = new Map(); // S4b-R: id → the retained record (frozen); never a view, never in P
 
   const refuse = (what) => { throw new TypeError(`${what} is written through the identity repositories (players.insert / players.update / players.restore / players.addItem / players.setItems / players.patchItem / guardians.insert / guardians.update / link / unlink / ageUp), never directly on the in-memory view.`); };
   const refuseNested = (domain, key) => refuse(`a ${domain} record (field "${String(key)}", including its nested values)`);
@@ -433,6 +564,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     const children = readAllChildren(stmt.sub);
     // Decoded with an EMPTY derived list so the data value is exactly the record's empty-state shape (absent / null / []); the accessor then serves the live reports. A row whose shape hides existing child rows is refused by the decoder (INCONSISTENT_ROWS): the boot does not attach to it.
     for (const r of stmt.allPlayers.all()) remember(P, deriveTrialReports(playerFromRow(r, { children: children.get(r.id) ?? emptyChildren(), trialReports: [] })), r.facets_json);
+    R.clear(); for (const r of stmt.allRetained.all()) R.set(r.id, Object.freeze(retainedRecordFromRow(r)));
   };
   const readInitState = () => {
     const row = stmt.meta.get(CORE_IDENTITY_INIT_META);
@@ -585,6 +717,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       const rec = clone(fields);
       const v = validatePlayerRecord(rec);
       if (!v.ok) throw new TypeError(`a player record was refused: ${v.problems.join('; ')}`);
+      if (R.has(rec.id)) throw new Error(`player ${rec.id} was deleted and its id is retained; a deleted account is not created again under its id`);
       if (P.byId.has(rec.id)) throw new Error(`player ${rec.id} already exists`);
       // A trialReports array given with the record is a claim about the trials (review of 132eda2, finding 1): equal or refused, never dropped.
       const claim = reconcileTrialReportCopy(rec.id, rec.trialReports, derivedTrialReports(rec.id), { hint: 'the record is not created' });
@@ -778,6 +911,42 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       });
     },
 
+    /**
+     * S4b-R: the account deletion. The row STAYS, reduced to the retained record (the
+     * id, `deleted_at` = `at`, the birth date and the country kept; placeholders;
+     * NULL elsewhere; no facets); the twelve child tables and the link rows are
+     * emptied explicitly; every guardian stops listing the id (the held childIds
+     * arrays spliced in place); the record leaves the view and joins the retained
+     * map. One transaction (or the caller's unit); a failure anywhere leaves memory
+     * and the file as they were. A retained id is refused (never erased twice);
+     * sessions, codes and the media queue are the caller's explicit acts in the same
+     * unit, as before. Not a retention policy: the retained set is the Founder's.
+     */
+    erase(id, { at = now() } = {}) {
+      requireAutocommit('players.erase');
+      if (R.has(id)) throw new Error(`player ${id} was deleted and its id is retained; it cannot be erased again`);
+      const p = P.byId.get(id);
+      if (!p) throw new Error(`player ${id} does not exist`);
+      if (!Number.isSafeInteger(at) || at < 0) throw new TypeError('players.erase: `at` must be a non-negative integer timestamp (ms)');
+      const record = Object.freeze({ id, deletedAt: at, birthDate: p.dob, country: p.country });
+      const params = eraseParamsFor(record);
+      return atomically(() => {
+        deleteChildRows(stmt.sub, id);
+        stmt.deleteLinksOf.run(id);
+        if (stmt.erasePlayer.run(params).changes !== 1) throw new Error(`player ${id} is not in the table as a live row although the view lists it`);
+      }, () => {
+        for (const g of G.records) { const ids = childIdsOf(g); if (ids) { const i = ids.indexOf(id); if (i >= 0) ids.splice(i, 1); } }
+        forget(P, p);
+        R.set(id, record);
+        return { id, deletedAt: at };
+      });
+    },
+    /** The narrow accessors (S4b-R): the deletion unit, the backup, the snapshot writer, the report and the rollback tool. No route serves a retained record. */
+    retained: (id) => (id && R.has(id) ? { ...R.get(id) } : null),
+    isRetained: (id) => R.has(id),
+    retainedRecords: () => [...R.values()].sort((a, b) => a.deletedAt - b.deletedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).map((r) => ({ ...r })), // by deletion instant, then id — the order the backup and the rollback blob use
+    retainedCount: () => R.size,
+
     link: (guardianId, playerId, role) => link(guardianId, playerId, role),
     unlink,
   };
@@ -876,6 +1045,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       P: { proxies: P.proxies.slice(), byId: new Map(P.byId), committed: new Map(P.committed), pending: new Map(P.pending) },
       G: { proxies: G.proxies.slice(), byId: new Map(G.byId), committed: new Map(G.committed), pending: new Map(G.pending) },
       shapes: new Map(trialShape),
+      retained: new Map(R),
     }),
     restoreState(state) {
       if (!state) return;
@@ -888,6 +1058,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       }
       // The empty-state shapes go back with the records (a restore inside the failed unit may have adopted another); the accessor is re-installed with the captured shape.
       trialShape.clear(); for (const [id, shape] of state.shapes ?? []) trialShape.set(id, shape);
+      R.clear(); for (const [id, rec] of state.retained ?? []) R.set(id, rec);
       for (const rec of P.records) if (trialShape.has(rec.id)) deriveTrialReports(rec, trialShape.get(rec.id));
     },
   };
@@ -964,7 +1135,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     },
 
     saveHook: () => ({ flush: () => hook.flush(), commit: () => hook.commit(), rollback: () => hook.rollback(), snapshotState: () => hook.snapshotState(), restoreState: (s) => hook.restoreState(s) }),
-    report: () => ({ players: P.records.length, guardians: G.records.length, links: stmt.countLinks.get().n, initState: readInitState(), uncommittedFacets: players.uncommitted() + guardians.uncommitted() }),
+    report: () => ({ players: P.records.length, retained: R.size, guardians: G.records.length, links: stmt.countLinks.get().n, initState: readInitState(), uncommittedFacets: players.uncommitted() + guardians.uncommitted() }),
   };
   return identity;
 }

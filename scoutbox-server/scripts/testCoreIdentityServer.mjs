@@ -25,7 +25,7 @@ const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6bDir = (dir) => { const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, out], { stdio: 'pipe' }); return out; };
+const preS6bDir = (dir) => { const s4br = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), dir, s4br], { stdio: 'pipe' }); /* S4b-R: the file carries 0014; its rollback (copy-only, the retained records kept as a blob) goes first */ const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), s4br, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -74,7 +74,7 @@ await test('new installation: the seed is initialised once (never again), served
   let S = await boot(dir, nextPort());
   assert.match(S.log(), /initialised from the first installation's records/);
   let cap = (await S.j('GET', '/capabilities')).body;
-  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit']);
+  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure']);
   assert.equal(cap.dataLayer.identity.initState, 'done'); assert.equal(cap.dataLayer.domains.players.mode, 'live');
   assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players); assert.equal(cap.dataLayer.domains.guardians.rows, seedCounts.guardians);
   assert.equal(cap.core_identity_storage?.state ?? cap.dataLayer.domains.players.mode, 'live');
@@ -326,13 +326,13 @@ await test('deletion: the player row, the links, the sessions and the media-remo
   // (a) the clean path: the file is gone right after the response, nothing queued.
   assert.equal((await S.j('DELETE', '/player/account', undefined, a.token)).status, 200);
   assert.equal(fs.existsSync(path.join(dir, 'media', `${a.mediaId}.webm`)), false);
-  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ?', a.id).n, 0); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0);
+  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', a.id).n, 0, 'the live row went (S4b-R: the retained record stays, with deleted_at)'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0);
   assert.equal((await S.j('GET', '/player/me', undefined, a.token)).status, 401, 'the session was revoked in the same unit');
   assert.equal((await S.j('GET', `/media/${a.mediaId}`, undefined, pro)).status, 401, 'no owner: not served');
   // (b) the stuck path: a directory sits where the file was (unlink fails with something other than ENOENT).
   const stuck = path.join(dir, 'media', `${b.mediaId}.webm`); fs.rmSync(stuck); fs.mkdirSync(stuck);
   assert.equal((await S.j('DELETE', '/player/account', undefined, b.token)).status, 200);
-  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ?', b.id).n, 0, 'the row went (the unit committed)');
+  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', b.id).n, 0, 'the live row went (the unit committed; the retained record stays — S4b-R)');
   assert.deepEqual(qAll(dir, 'SELECT media_id, player_id, attempts FROM media_deletions'), [{ media_id: b.mediaId, player_id: b.id, attempts: 1 }], 'the entry stays with the failed attempt');
   assert.match(S.log(), /could not be removed \(attempt 1\)/);
   assert.equal((await S.j('GET', `/media/${b.mediaId}`, undefined, pro)).status, 404, '404 while queued, whatever the session');

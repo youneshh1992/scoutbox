@@ -192,7 +192,7 @@ CREATE TABLE players (
   programme_started_at     INTEGER,
   password_hash            TEXT,
   created_at               INTEGER,
-  deleted_at               INTEGER,                       -- new: tombstone set by account deletion (see §8 of the schema doc)
+  deleted_at               INTEGER,                       -- set by account deletion since migration 0014 (S4b-R): the row stays as the retained record — id, deleted_at, birth_date, country; placeholders and NULL elsewhere (plan §D.6.1)
   facets_json              TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)), -- transitional storage: unknown fields and shape metadata (S5 moved the arrays into the player_* tables)
   CHECK ((lat IS NULL) = (lng IS NULL))
 ) STRICT;

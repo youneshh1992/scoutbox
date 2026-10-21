@@ -68,7 +68,7 @@ test('schema report: names tables and counts, never rows', () => {
   // exactly what exists.
   assert.deepEqual(report, {
     engine: 'sqlite', migrationsApplied: DATA_MIGRATIONS.length, migrationsKnown: DATA_MIGRATIONS.length,
-    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit'],
+    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure'],
     tables: ['blocks', 'channels', 'dispatch_attempts', 'dispatches', 'email_challenges', 'guardian_children', 'guardians', 'idv_queue', 'ledger', 'media_deletions', 'message_attachments', 'messages', 'moderation_log', 'notification_pref_categories', 'notification_prefs', 'notifications', 'ops_events', 'org_notes', 'org_users', 'orgs', 'outbox', 'pairing_codes', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'push_log', 'push_tokens', 'reports', 'sessions', 'source_changes'].sort(),
   });
   // There is no in-memory engine to report on: a missing connection is a programming error, not a mode.

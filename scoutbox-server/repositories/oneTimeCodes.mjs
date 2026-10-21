@@ -206,7 +206,7 @@ const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_mas
 /** Every stored pairing code must name a player that exists NOW; throws PAIRING_CODE_PLAYER_MISSING (ids only). No-op before the cutover. */
 export function assertPairingCodesConsistent(sqlite, { label = 'the pairing codes' } = {}) {
   if (!tableExists(sqlite, 'pairing_codes') || !tableExists(sqlite, 'players')) return [];
-  const missing = sqlite.prepare('SELECT player_id FROM pairing_codes WHERE player_id NOT IN (SELECT id FROM players) ORDER BY player_id').all().map((r) => r.player_id);
+  const missing = sqlite.prepare('SELECT player_id FROM pairing_codes WHERE player_id NOT IN (SELECT id FROM players WHERE deleted_at IS NULL) ORDER BY player_id').all().map((r) => r.player_id); // S4b-R: a retained row is not a player
   if (missing.length) throw Object.assign(new Error(`PAIRING_CODE_PLAYER_MISSING: ${missing.length} pairing code(s) in ${label} name a player that does not exist (${missing.slice(0, 20).join(', ')}${missing.length > 20 ? ', …' : ''}); the write was rolled back and nothing was changed — write the snapshot with its pairingCodes, or without the code`), { code: 'PAIRING_CODE_PLAYER_MISSING', players: missing });
   return missing;
 }
@@ -292,7 +292,7 @@ export function importCodeBlobs(sqlite, { now }) {
   if (codes !== undefined) {
     const { rows, formats } = validateCodeRows('pairingCodes', codes, { label: 'the pairingCodes blob' });
     const live = rows.filter((r) => r.expiresAt > now);
-    const playerExists = sqlite.prepare('SELECT 1 FROM players WHERE id = ?');
+    const playerExists = sqlite.prepare('SELECT 1 FROM players WHERE id = ? AND deleted_at IS NULL'); // S4b-R: a retained row is not a player
     for (const r of live) if (!playerExists.get(r.playerId)) throw blocked(`the pairing code of player ${r.playerId} names a player that does not exist`);
     writePairingCodeRows(sqlite, live);
     counts.pairingCodes = { imported: live.length, droppedExpired: rows.length - live.length, ...formats };

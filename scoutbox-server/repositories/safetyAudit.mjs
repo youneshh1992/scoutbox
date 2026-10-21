@@ -284,6 +284,22 @@ export function unresolvedPlayerReferences(sqlite) {
   }
   return out;
 }
+/**
+ * S4b-R, the companion diagnostic: per collection, how many rows name a player whose
+ * record is RETAINED (an account deleted under the new behaviour). A count beside the
+ * unresolved one — the unresolved count keeps counting the ids that resolve to no row
+ * at all (players deleted before S4b-R, pre-S4a imports, ids that never existed: Q4),
+ * for which nothing is fabricated.
+ */
+export function retainedPlayerReferences(sqlite) {
+  const out = {};
+  const players = tableExists(sqlite, 'players');
+  for (const { name, table, column } of PLAYER_REFERENCE_TABLES) {
+    if (!tableExists(sqlite, table) || !players) { out[name] = 0; continue; }
+    out[name] = sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} IS NOT NULL AND ${column} IN (SELECT id FROM players WHERE deleted_at IS NOT NULL)`).get().n;
+  }
+  return out;
+}
 /** The two Domain P counts of a validated row set against a set of player ids: ids that resolve to nothing; rows with no usable (string) id. */
 function playerReferenceCounts(name, rows, players) {
   const key = DOMAINS[name].playerKey; if (!key) return {};

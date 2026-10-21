@@ -564,7 +564,7 @@ export function readTrialsBlob(sqlite) {
 /** Every player of the live tables as full records (the S5 read path), for snapshot tools and rollback: `[{ record, row }]` in rowid order. */
 export function readPlayersWithChildren(sqlite, st, { trials } = {}) {
   const children = readAllChildren(st);
-  return sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players ORDER BY rowid`).all().map((row) => ({
+  return sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NULL ORDER BY rowid`).all().map((row) => ({ // S4b-R: a retained row is not a player record
     row,
     record: playerFromRow(row, { children: children.get(row.id) ?? emptyChildren(), trialReports: trials === undefined ? undefined : trialReportsFor(trials, row.id) }),
   }));

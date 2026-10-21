@@ -5,7 +5,8 @@ S0 (staff), S1 (core identity shadow, corrected after acceptance review), S2 (se
 live, hashed tokens), S3 (organisations live, `org_users` rebuilt STRICT with its
 foreign key), S4a (players, guardians and `guardian_children` live with the
 transitional `facets_json`; the `media_deletions` queue; the S1 shadow retired), S5, S6a, S7a–S7d
-and S6b (the eight audit tables, 19 October 2026; independently accepted at `f0abd34` on 21 October 2026) done
+S6b (the eight audit tables, 19 October 2026; independently accepted at `f0abd34` on 21 October 2026) and S4b-R
+(the retained player record, migration 0014, 21 October 2026; implemented, awaiting independent acceptance) done
 (§5.0 says exactly which parts are implemented, proposed, or waiting on a decision). Companion
 document: [`sqlite-migration-plan.md`](./sqlite-migration-plan.md). Written 10 October
 2026 on branch `feat/sqlite-schema`.
@@ -124,7 +125,7 @@ them.
 | `users` | persistent | 01 | `org_users` (LIVE since migration 0001) | S0 done |
 | `orgs` | persistent | 01 (+04, 05) | `orgs`; nested `tactical` → `org_tactical_setups/roles/role_criteria/windows`, `squad[]` → `org_squad_members`, `lookingFor[]` → `org_looking_for`, `federationCheck` → `org_federation_checks` (04); `verification.domains[]` → `org_verified_domains` (05); `verification.revokedAt/orgType` → columns on `orgs`; `agencySettings` → 06 | **S3 done** (live; scalars and composites are columns, the nested facets ride in `orgs.facets_json` until S9/S10/S11; blob retired by migration `0004`) |
 | `guardians` | persistent | 01 | `guardians` (LIVE since migration 0005; `coGuardians[]`, `emailCode` and unknown fields in `facets_json`); `childIds[]` → `guardian_children` (LIVE) | **S4a done** (S4b: lifecycle, after O1) |
-| `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`) | S4 (scalars, shadow since S1), S5 (sub-records) |
+| `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`); **since migration 0014 (S4b-R) an account deletion keeps the row as the retained record — `id`, `deleted_at`, `birth_date`, `country`; placeholders and NULL elsewhere — served by no account reader** | S4 (scalars, shadow since S1), S5 (sub-records), S4b-R (the retained record; implemented 21 October 2026, awaiting independent acceptance) |
 | `sessions` | temporary | 01 | `sessions` (token stored as `token_hash`) | **S2 done** (live; blob retired by migration `0003`) |
 | `requests` | persistent | 02 | `recruitment_requests`, `request_trial_slots`; `keys` → `idempotency_keys` | S8 |
 | `trials` | persistent | 02 | `trials`, `trial_schedule_sessions`, `trial_session_evidence`, `trial_schedule_revisions`, `trial_attendance`, `trial_reminders`, `trial_day_staff`, `trial_day_consents`, `trial_day_checkins`, `trial_day_status_events`, `trial_reports` (the one copy; `players[].trialReports` is derived from it), `trial_history`; `keys` → `idempotency_keys` | S8 |
@@ -401,12 +402,12 @@ this branch: 13 checks passed.
 | **Implemented, live** (S4a) | 3 + 1: `guardians`, `players` (scalars and the split composites as columns; since S5 only unknown fields and shape metadata in `facets_json`), `guardian_children` (derived from `childIds`, roles per side) — created live by `0005_core_identity_live` with the two blobs imported through the reviewed preflight and retired; `media_deletions` (the crash-safe media-removal queue, `0006`, file 08). The S1 shadow is retired | migrations `0005`, `0006` (S4a) |
 | **Implemented, live** (S5) | 12: the `player_*` sub-record tables (`player_season_history`, `player_badges`, `player_drills`, `player_attendance`, `player_timeline`, `player_media`, `player_media_tags`, `player_medical_records`, `player_drill_results`, `player_activity_log`, `player_external_ids`, `player_programme_completions`), created by `0007_player_subrecords` from the S4a rows through the one mapping; `trialReports` is derived from the trials, not a table ([`s5-player-subrecords.md`](./s5-player-subrecords.md)) | migration `0007` (S5) |
 | **Proposed** (executable DDL, asserted to load, no migration, no repository) | 302 | files 02–08 |
-| Of the proposed, **blocked on an unresolved decision** | file 02 (55 tables): every `player_id` lacks a foreign key until S4b (not implemented; O1 partially resolved — full birth date chosen, country code and child-status stamp open) ships the tombstone and the file is amended, and `org_id RESTRICT` depends on O2; `webhook_endpoints.secret` and `org_users.mfa_json` depend on O3; `exposure_events`, `webhook_deliveries`, `dispatches`, `outbox` retention depends on O4; `assessments` depends on O6; `second_look_items` key on O7; `representations` on O8; `agent_profile_facets.member_association` sentinel on O10 | §10, §12 |
+| Of the proposed, **blocked on an unresolved decision** | file 02 (55 tables): every `player_id` lacks a foreign key until the foreign-key step after S4b-R (which shipped the retained row on 21 October 2026 with NO foreign key — plan §D.2a and Q3 decide the keys; the child-status stamp open) amends the file, and `org_id RESTRICT` depends on O2; `webhook_endpoints.secret` and `org_users.mfa_json` depend on O3; `exposure_events`, `webhook_deliveries`, `dispatches`, `outbox` retention depends on O4; `assessments` depends on O6; `second_look_items` key on O7; `representations` on O8; `agent_profile_facets.member_association` sentinel on O10 | §10, §12 |
 
-Counts: 19 implemented, 302 proposed, of which 55 (file 02) cannot be cut over until S4b
-(not implemented; O1 partially resolved — the full birth date chosen, the country code and the
-child-status stamp open) has shipped the tombstone and the file has been amended with the player
-foreign keys (plan S8 "Depends on"). The remaining open questions change columns or retention
+Counts: 19 implemented, 302 proposed, of which 55 (file 02) cannot be cut over with their player
+foreign keys until the foreign-key step after S4b-R (the retained row is shipped since 21 October 2026,
+migration 0014, with no foreign key; the keys wait for plan §D.2a and Q3; the child-status stamp is open)
+has amended the file (plan S8 "Depends on"). The remaining open questions change columns or retention
 rules, not table boundaries. The table above predates S6a and S7; the live tables since then are
 listed with their steps in §4's mapping (`email_challenges`, `pairing_codes` — S6a, accepted at
 `2d7ddeb`; `notifications`, `notification_prefs`, `notification_pref_categories` — S7a, accepted at
@@ -795,7 +796,9 @@ DECISIONs:
 - **Personal-data deletion is a tombstone plus erasure, not a row delete.** `players` and
   `guardians` keep their row with `deleted_at` set and every personal column nulled or
   replaced (`name` → `'Deleted player'`, `birth_date`: **the Founder chose the full birth date
-  on 12 October 2026** — `s4-deletion-decision.md` §10; whether `country` stays is OPEN, §12 O1;
+  on 12 October 2026** — `s4-deletion-decision.md` §10; `country`: **kept, the Founder's answer of 21 October 2026**, `s4-deletion-decision.md` §12; **built for
+  players as S4b-R, migration 0014, 21 October 2026 — the retained row WITHOUT the `RESTRICT` keys this paragraph
+  designs (plan §D.2a, Q3), today's name cleanup and nothing more (plan §D.6.1); no guardian deletion route exists**;
   the earlier text "kept only as year-less `'0000-01-01'`? OPEN §12 — alternative: keep
   `birth_date`" is superseded). Owned sub-records (`player_*`, media files, evidence media, prefs,
   sessions, pairing codes, channels and messages, player-audience notifications) are deleted
@@ -937,10 +940,13 @@ catalogue; shadow-then-cutover per domain; no integer keys; no triggers or views
   the Founder chose the full birth date** (`s4-deletion-decision.md` §10; the "keep year only"
   proposal is superseded). Still open by the Founder's choice: whether the country code stays on
   the retained record, and whether future safeguarding rows record that the subject was treated
-  as a child when written. S4b remains unimplemented; today's deletion is unchanged. What remains to build
+  as a child when written. S4b-R (the retained record) is implemented since 21 October 2026 (below); the
+  guardian lifecycle is not built. What remained to build
   for S4b, the treatment of the ids of players deleted before S4b, and the options for each open part are
-  in `sqlite-migration-plan.md` §D.1 and §D.5 (Q1, Q3, Q6; 19 October 2026); the narrowed next step S4b-R and the
-  one question it needs (Q1) are §D.6 (21 October 2026).
+  in `sqlite-migration-plan.md` §D.1 and §D.5 (Q1, Q3, Q6; 19 October 2026). **The country code: answered on
+  21 October 2026 — kept (verbatim "Keep the country code (Recommended)", `s4-deletion-decision.md` §12); the
+  retained record is built as S4b-R (plan §D.6.2, migration 0014; awaiting independent acceptance). Still open: the
+  child-status stamp (Q2); the guardian lifecycle; Q3 and the foreign keys; Q6.**
 - O2. Org deletion policy with open recruitment cases. **Deferred past S3 deliberately**: S3
   cut organisations over without a tombstone column and without a hard-delete path, because
   no route deletes an organisation today and the foreign key from `org_users` (and, from S8,

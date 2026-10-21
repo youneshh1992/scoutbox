@@ -37,7 +37,8 @@ has answered. Earlier wording that "S4 does not start until O1 is answered" is w
 lists what each step may proceed with. *Status, 12 October 2026:* S4a is done and accepted;
 the Founder has answered the birth-date part of O1 (full birth date) and kept the country-code
 and child-status-stamp parts open; the decision record's §10 lists which S4b design items still
-wait on those. S4b has not started.
+wait on those. S4b-R — the retained player record, narrowed as plan §D.6.1 says — is implemented since
+21 October 2026 and awaits independent acceptance (§12); the guardian lifecycle is not built.
 
 Sections: 1 what S4 is and is not · 2 player fields · 3 guardian fields · 4 what moves, what
 stays nested · 5 relationships, minors, duplicates, inconsistencies, invalid records · 6 views
@@ -802,3 +803,86 @@ withdrawn (`s4-deletion-decision.md` §4).
 Recorded, not for decision now: the co-guardian design is reproduced faithfully; the
 `drillResults` signup defect and the export/minor gap are route defects outside S4; the runtime
 metadata alignment (plan §S3) is independent of S4.
+
+## 12. S4b-R as implemented (21 October 2026, one local commit on `feat/sqlite-schema` on top of `d16362f` — IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE)
+
+**Status at the time of writing: IMPLEMENTED, AWAITING INDEPENDENT ACCEPTANCE.** Not production, security,
+legal-compliance or deployment approval; not acceptance of S8, of the foreign keys (plan §D.2a, Q3) or of
+anything Q2, Q6 or Q7 name; no real data, no real provider. The specification is `sqlite-migration-plan.md` §D.6 as
+narrowed by §D.6.1 (the exact column mapping, today's name cleanup and nothing more, the corrected claim about the
+audit rows); the decisions it rests on are the Founder's, recorded verbatim: the **full birth date**
+(`s4-deletion-decision.md` §10, 12 October 2026) and **"Keep the country code (Recommended)"** (§12, 21 October 2026).
+
+### 12.1 What was built
+
+- **`players.erase(id, { at })`** (`repositories/identity.mjs`), called by `deletePlayerData` (`server.mjs`) in place
+  of `players.remove`; one transaction, or the caller's unit: the twelve `player_*` child tables and the
+  `guardian_children` rows are deleted explicitly, the row is UPDATED to the retained record — `id`, `deleted_at = at`,
+  `birth_date` and `country` kept, `name = 'Deleted player'` and the declared defaults in every other `NOT NULL` column
+  as fixed storage placeholders, `NULL` elsewhere, `facets_json` `NULL` — every guardian's held `childIds` is spliced in
+  place, the record leaves the view and joins the retained map. A retained id refuses a second erase, `remove`,
+  `update`, `link` and `insert` before any statement. Everything else in the deletion unit is unchanged (`seam
+  'player.delete.after_erase'` added for the failure proof). `players.remove` (today's hard delete) stays in the
+  repository for the unit suite; the server no longer calls it.
+- **Excluded from every account reader:** the identity load reads live rows only; the snapshot read
+  (`playerSubrecords.mjs readPlayersWithChildren`), the media-queue ownership check (`mediaDeletions.mjs`) and the
+  pairing-code import and final-state check (`oneTimeCodes.mjs`) read `deleted_at IS NULL`. The narrow accessors
+  `players.retained(id)`, `isRetained(id)`, `retainedRecords()` (by deletion instant, then id) and `retainedCount()`
+  serve the deletion unit, the backup, the report and the rollback tool; no route serves a retained record.
+- **Snapshots:** `IDENTITY_SNAPSHOT.replace` captures the retained rows before its DELETE, refuses a candidate that
+  lists a retained id as a live player (`PLAYER_ID_RETAINED`, ids only) and reinserts the rows byte-identical after the
+  candidate; `PLAYERS_RETAINED` (`playersRetained`, table-backed) is read for backups and tools and, when a snapshot
+  supplies it, IS the retained set (validated: exactly `{ id, deletedAt, birthDate, country }`, no duplicate, no live id).
+- **Migration `0014_player_erasure`** (REGISTERED, after 0013): refuses a file in which a `players` row already carries
+  `deleted_at` (`UNEXPECTED_SCHEMA`), imports a `playersRetained` blob (a restored backup, a re-upgraded rollback copy)
+  or nothing, records `meta.playerErasureCutover` `{ at, imported }`. No table, no column, no foreign key.
+- **Backup:** `POST /admin/backup` exports `playersRetained` beside `players` (never inside it) and counts
+  `retainedPlayers` in the manifest; a restore imports it through 0014; a tampered backup listing a retained id as a
+  live player refuses the boot (`PLAYER_ERASURE_IMPORT_BLOCKED`, the id and no birth date, nothing of 0014 written).
+- **Rollback:** `scripts/playerErasureRollback.mjs` / `repositories/playerErasureRollback.mjs` (copy-only; the records
+  moved into the `playersRetained` legacy blob; the record and meta key removed; revalidated; refusals leave no
+  output); the S6b tool refuses a file carrying 0014 and accepts this tool's output; the re-upgrade imports the blob
+  back as the same rows. The erased personal data is restored by nothing.
+- **`/capabilities`:** `dataLayer.domains.players.retained` and `deletion`; `safetyAudit.retainedPlayerReferences`
+  beside the unchanged Q4 `unresolvedPlayerReferences`.
+
+### 12.2 Where it departs from §D.6, and why
+
+Exactly as §D.6.1 narrowed it: the recruitment name-snapshot replacement of §D.6 item 4 is **not** built (an erasure
+extension needing its own authorisation); the step gives a retained record to deletions performed **under the new
+behaviour** only (nothing fabricated for earlier ids); no `wasMinorOn` or any age rule; the retained records are
+listed by deletion instant then id (rowids are the accounts' creation order, not a fact of the record). The
+`guardians.deleted_at` column stays unwritten (no guardian deletion route).
+
+### 12.3 Verification
+
+Node v22.22.0 (SQLite 3.50.4, npm 10.9.4) and Node v24.19.0 (SQLite 3.53.3) in the implementation environment; the
+counts, commands, exits and skips of the final tree are in the handoff's `logs/gates-run.txt` and the PR description.
+
+- **Failing-first on the unchanged `d16362f` tree** (the two suites added, no source change): all eight tests fail on a
+  concrete assertion — no `players.erase`, no `0014` record, no rollback module, a hard-deleted row, a deletion
+  answered 200 under the (then absent) seam (`logs/failing-first-*@d16362f.txt`).
+- **`scripts/testPlayerErasure.mjs`** (5 checks): the exact retained row, column by column, from a verified semi-pro
+  academy player (placeholders are not previous values); child rows and links gone; every reader and the accessors;
+  refusals before any statement; a reopen; an ordinary save, then snapshot-mode saves supplied, supplied twice,
+  omitted and through the identity replace — rows byte-identical, revision advanced; a resurrection and every
+  malformed `playersRetained` refused atomically with ids only; the under-18 refusal unchanged for live records; the
+  stale pairing code refusing the identity-rewriting save until cleared; a unit failing after the writes and at the
+  real COMMIT restoring the row, child rows, links, session, queue, code, the same held view object, the held
+  `childIds` array, the indexes and an unrelated pending edit, the retry landing once, the ledger row untouched;
+  migration 0014 on a 0013 file, on a restored backup, every refusal with nothing written; the rollback copy, its
+  refusals, the S6b tool's refusal and acceptance, the chain, the re-upgrade.
+- **`scripts/testPlayerErasureServer.mjs`** (3 tests, real server): the two deletion routes, the retained row,
+  every reader and authentication path afterwards, the audit rows byte-identical and the Q4 count unchanged, the
+  pairing code refused, repeated deletions refused, SIGKILL and restart; the two failure seams (after the erase; the
+  real COMMIT) for an adult and a child — 500, everything unchanged, the live session, the retry once; the backup's
+  `playersRetained`, the tampered backup refused at boot, the restore, **the danger proven** (the actual `f0abd34`
+  build booted directly on a copy of the live file logs the retained row in as a passwordless account), the rollback
+  copy booted by the actual `f0abd34` build (`SCOUTBOX_PRE_S4BR_SERVER`: nothing served, a signup and a hard delete
+  accepted, the blob kept through its saves and backups) and the re-upgrade with its writes and the retained rows.
+- **The existing suites** were adapted where they asserted the pre-S4b-R state (the migration list, the table-backed
+  list, the rollback chain starting with the new tool, two assertions that the deleted row is gone); no application
+  source was changed to make a suite pass.
+- **Both gates** on the final tree with the six historical builds booted for real, and the fresh extraction of the
+  handoff, as the milestone rule requires; **not run:** browser suites, the demo rebuild, the route-level E2E battery,
+  real older-Node runtimes, real data, real providers.

@@ -195,7 +195,7 @@ await test('player deletion: the child\'s pairing code goes in the deletion unit
     assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ?', childId).n, 1, `${label}: the child is retained`);
   });
   assert.equal((await del()).status, 200);
-  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM pairing_codes').n, 0); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ?', childId).n, 0);
+  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM pairing_codes').n, 0); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM players WHERE id = ? AND deleted_at IS NULL', childId).n, 0, 'the live row went (S4b-R: the retained record stays)');
   assert.equal((await S.j('POST', '/auth/player/pair', { code })).status, 404);
   await S.stop(); rm(dir);
 });

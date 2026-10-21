@@ -61,7 +61,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, players, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
@@ -471,12 +471,17 @@ export function registerEnterprise(ctx) {
       // exported the same way, in their stored row form (code hashes, never a
       // code): a restored server imports them through migration 0008 and the
       // outstanding ones keep working there until they expire.
+      // S4b-R (migration 0014): the retained player records are exported under
+      // `playersRetained` — id, deletedAt, birthDate, country and nothing else — and
+      // NEVER inside `players`: a restore imports them through migration 0014 (an id
+      // that is also a live player refuses the boot), and a previous build restoring
+      // this backup keeps the collection as a blob no route reads, never as accounts.
       // The notifications and preferences (S7a, migration 0009) are exported
       // explicitly in the legacy collection shape, in insertion order — the
       // state in memory, like every blob collection — so a backup restores on
       // any build: a pre-S7a build reads the blobs, this build imports them
       // through migration 0009 with the feed order intact.
-      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes(), notifications: notifications.exportRows(), notificationPrefs: notifications.exportPrefs(), dispatches: dispatches.exportRows(), outbox: outbox.exportRows(), pushLog: pushLog.exportRows(), pushTokens: pushTokens.exportRows(), channels: channels.exportRows(), ...safetyAudit.exportAll() } })); // S7c: the three collections in their legacy shapes (the withheld mail text as stored; tokens with their registered types); S7d: the threads in the legacy shape, insertion order, messages nested in array order, legacy and unknown fields kept
+      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes(), playersRetained: players?.retainedRecords ? players.retainedRecords() : (db.playersRetained ?? []), notifications: notifications.exportRows(), notificationPrefs: notifications.exportPrefs(), dispatches: dispatches.exportRows(), outbox: outbox.exportRows(), pushLog: pushLog.exportRows(), pushTokens: pushTokens.exportRows(), channels: channels.exportRows(), ...safetyAudit.exportAll() } })); // S7c: the three collections in their legacy shapes (the withheld mail text as stored; tokens with their registered types); S7d: the threads in the legacy shape, insertion order, messages nested in array order, legacy and unknown fields kept
       // 2. Media files — except those whose removal is queued: a backup never
       //    carries a file without the intent to remove it. Their ids are in
       //    db.json; on a restored server the entry is cleared once the file is
@@ -497,7 +502,7 @@ export function registerEnterprise(ctx) {
       files.unshift({ path: 'db.json', sha256: fileSha256(snapshotPath), bytes: fs.statSync(snapshotPath).size });
       manifest = {
         contract: 'backup.2026-09.v1', createdAt: Date.now(), engine: 'json-snapshot + media files',
-        counts: { players: db.players.length, orgs: db.orgs.length, notifications: notifications.count(), mediaFiles: files.length - 1 },
+        counts: { players: db.players.length, retainedPlayers: players?.retainedCount ? players.retainedCount() : (db.playersRetained ?? []).length, orgs: db.orgs.length, notifications: notifications.count(), mediaFiles: files.length - 1 },
         media: {
           copied: files.length - 1, queuedForRemoval: leftOut,
           note: 'Files whose removal was committed but not yet completed are left out on purpose: their queue entries are in db.json, and the restored server serves nothing for them and finishes the removal at boot.',

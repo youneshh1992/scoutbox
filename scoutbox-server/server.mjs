@@ -4259,8 +4259,8 @@ function deletePlayerData(playerId) {
   if (!p) return false;
   const at = Date.now();
   const mediaIds = p.media.map((m) => m.id);
-  // ONE unit of work (readiness review §7.4): the player row and its links go
-  // (today's hard delete — O1 is undecided), the removal of the media FILES is
+  // ONE unit of work (readiness review §7.4): the player row becomes the retained
+  // record and its links go (S4b-R), the removal of the media FILES is
   // queued in the same transaction, every session of the person is revoked
   // and every blob collection that names the person is tombstoned — all of it
   // commits or none of it. The files themselves are removed only after COMMIT
@@ -4270,7 +4270,13 @@ function deletePlayerData(playerId) {
   mediaDeletions.enqueue(mediaIds, { playerId, at });
   sessions.revokeFor('player', playerId);
   codes.revokePairingCodesFor(playerId); // S6a: the child's pairing code row goes in this unit (an explicit act, before the player row)
-  players.remove(playerId);
+  // S4b-R (migration 0014; the Founder's decisions: the full birth date, the country
+  // code kept): the row is not deleted — it is reduced to the retained record (id,
+  // deleted_at, birth_date, country; placeholders and NULL elsewhere), the child rows
+  // and links go explicitly, the guardians stop listing the id, and nothing serves
+  // it as an account from here on. Everything else in this unit is today's behaviour.
+  players.erase(playerId, { at });
+  seam('player.delete.after_erase');
   // M23 P4A-D14: requests and trials become id-only tombstones rather than
   // vanishing. A recruitment case that reached a trial keeps the record that
   // the trial happened (and the numbers the club itself filed); the person
@@ -4307,7 +4313,7 @@ function deletePlayerData(playerId) {
   channels.deleteForPlayer(playerId);
   notifications.deleteForAudience('player', playerId); // S7a: the person's rows go in this unit; their preferences are retained (no cascade, by decision)
   // (The pairing code row was revoked above, inside this unit, before the player row went.)
-  // (Every guardian's childIds followed the link rows when the player row went: players.remove cascades.)
+  // (Every guardian's childIds was spliced by players.erase, with the link rows.)
   // Ledger rows stay (append-only audit + attribution) but carry only ids.
   broadcast('players'); // deferred until COMMIT inside the unit
   });
