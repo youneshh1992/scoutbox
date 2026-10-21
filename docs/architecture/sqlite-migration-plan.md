@@ -2574,6 +2574,24 @@ identifier is `0015`** — verified, not reserved and not created here. This sec
 preparation only: nothing below is implemented, stubbed or reserved. It supersedes §D.3, §D.4 Candidate C and the
 §B S8 "player tombstone" bullet where they say S8a waits for S4b; §D.5's Q7 row is superseded by Q7a–Q7c below.
 
+**Correction record (21 October 2026, after the independent review of `a6c40f3`).** The review accepted the S4b-R
+acceptance record and found three P2 design defects in the first version of this brief, each reproduced by its
+script `review-a6c40f3-design-checks.mjs` (the drafted DDL, the unchanged open-day handler run with synthetic
+dependencies, the actual club view — not a real HTTP run, not a defect in any implemented repository; the script
+still reproduces all four hazards against the UNCHANGED draft file 02, by design, because the draft is amended at
+implementation, §D.7.3): **D1** — the documented requests-then-trials order could not insert a new linked pair
+(`recruitment_requests.trial_id` named a trial that did not exist yet) and, deferral or not, could not replace a
+request's trial (`UNIQUE(trials.request_id)` refused the arrival before the departure); **D2** — the drafted partial
+unique index "one pending request per (org, player, type)" would refuse invitations the open-day outcome route
+creates today without that guard; **D3** — `blockedBy` was called a dead field and dropped although `trialClubView`
+reads it and `tombstoneTrial` carries it, and two other draft omissions (`trials.keys.accept`, the tombstone's
+`trialDetails.instructions`) broke the lossless round trip. §D.7.2–§D.7.7 below are corrected in place; the
+corrections are engineering and data-preservation choices and add **no** product decision. The probes
+`probe-s8a-write-algorithm.mjs` (20 checks, with a control that reproduces D1a/D1b under the old order),
+`probe-s8a-open-day-roundtrip.mjs` (5) and `probe-s8a-lossless-fields.mjs` (8) are in the handoff of this correction
+(§D.7.8). **S8a is not started; migration `0015` is not reserved; Q7a, Q7b and Q7c are unanswered; this brief awaits
+independent review before it is put to the Founder.**
+
 #### D.7.1 What S4b-R changed for the recruitment step, and what it did not
 
 A `players` row now outlives an account deletion as the retained record (id, deletion instant, birth date, country;
@@ -2606,9 +2624,16 @@ recruitment player reference, not the schema (§D.7.3).
   Q3 stay where they are), and it does not meet the whole-snapshot-write objective — `recruitmentCases`, contacts,
   offers, signings and every other blob are still rewritten by every save (§D.4).
 
-**Can S8a safely proceed next?** Yes, under the contract of §D.7.3–§D.7.6: no key to `players(id)` or `guardians(id)`
-(so §D.2a does not bind), the request and trial tables written by **upsert-and-prune** (so their own `RESTRICT` and
-`SET NULL` actions never fire on a rewrite — the probe in §D.7.5), and three explicit approvals (Q7a, Q7b, Q7c).
+**Can S8a safely proceed next?** The recommendation stands as **S8a-core**, on this evidence rather than by
+assertion: no key to `players(id)` or `guardians(id)` (so §D.2a does not bind); the request and trial tables written
+by the **six-phase write of §D.7.5** — parent-preserving upserts, the back-reference parked and assigned after the
+trial exists, departures before arrivals for the unique value, explicit prunes, final-state assertions, immediate
+constraints throughout — which the probe `probe-s8a-write-algorithm.mjs` shows constructs a new pair on an empty
+database, re-saves an unchanged graph byte-for-byte, replaces a trial, is order-independent, honours partial
+snapshots and refuses every invalid final state with a rollback (the a6c40f3 order fails its control cases); the
+drafted "one pending request" index **withdrawn** so the open-day route's invitations stay valid (§D.7.3, D2); the
+mapping made lossless (§D.7.3, D3); and three explicit approvals (Q7a, Q7b, Q7c) that this correction neither
+narrows nor infers. "Upsert-and-prune" alone was not a complete solution and is no longer claimed to be one.
 
 #### D.7.3 The recommended scope — S8a-core
 
@@ -2621,22 +2646,55 @@ withdrawn; the number is assigned at approval):
 | `trials` (69 reads in 23 modules + 10 in `server.mjs`; writers `server.mjs:2347` (acceptance), `tombstoneTrial` `:4181`, `m23/trialRoutes.mjs` (schedule, attendance, day, completion, history), the report route, the reminder sweep) | `trials` (:630) | `trial_schedule_sessions` (:715), `trial_session_evidence` (:736), `trial_schedule_revisions` (:766), `trial_attendance` (:792), `trial_reminders` (:810), `trial_day_staff` (:828), `trial_day_consents` (:851), `trial_day_checkins` (:867), `trial_day_status_events` (:882), `trial_reports` (:906, `RESTRICT`), `trial_history` (:933, `RESTRICT`); the trial's `keys` → `idempotency_keys` |
 | `channels` (S7d, live) | rebuilt with `request_id … REFERENCES recruitment_requests(id) ON DELETE RESTRICT` (the D-A conversion) and `contact_channel_id` left as it is (a plain id: contacts are S8c) | — |
 
-Sixteen tables (14 of file 02 plus `idempotency_keys` and the `channels` rebuild). **Lossless mapping**, per the DDL's
-own `-- mapping` notes: every scalar to its column, every nested container to its child table in list order, the
-tombstone shapes exactly (`playerName` NULL, `message` NULL, `notes` `''`, `guardianId` NULL, `recipient` dropped, the
-slots reduced to times and venue name/town, the schedule sessions stripped, the history detail reduced to the keys the
-tombstone keeps — `tombstoneTrial`/`tombstoneRequest` are the specification and stay the writers), `subjectRemovedAt`
-→ `subject_removed_at`, `rev/revAt/revBy`, the `reminders` markers, `trialDetails.altSlots` kept as retained JSON,
-`workflowState` written as `legacy_accepted` where absent (the DDL's rule), `blockedBy` and the tombstone's stray
-`trialDetails.instructions` recorded as dead fields and NOT migrated (documented loss of two never-read keys — stated,
-not hidden), unknown own fields in an `extra_json` per row (the S6b convention), absence preserved (`absent_keys_json`).
-`players[].trialReports` stays derived: the identity repository's `trialReports` accessor (`repositories/index.mjs:272`,
-today `trialReportsFor(db.trials, …)`) reads the `trial_reports` table through the new repository. **Preserved
-behaviour:** every route payload; one pending request per (org, player, type) as the code enforces it — the DDL's
-partial unique index is checked by the dry run against real data and resolved by hand, never by the migration guessing
-(§B S8 "Data transformation"); the idempotency replay/conflict rules exactly (`idempotency_keys` notes); the deletion
-unit's tombstoning of a deleted player's requests and trials in place (today's behaviour, S4b-R unchanged); the
-trial-accept gate and the case links.
+Sixteen tables (14 of file 02 plus `idempotency_keys` and the `channels` rebuild). **Lossless mapping** (corrected,
+D3): every scalar to its column, every nested container to its child table in list order, the tombstone shapes exactly
+(`playerName` NULL, `message` NULL, `notes` `''`, `guardianId` NULL, `recipient` dropped, the slots reduced to times and
+venue name/town, the schedule sessions stripped, the history detail reduced to the keys the tombstone keeps —
+`tombstoneTrial`/`tombstoneRequest` are the specification and stay the writers), `subjectRemovedAt` →
+`subject_removed_at`, `rev/revAt/revBy`, the `reminders` markers, `trialDetails.altSlots` kept as retained JSON, and
+**the presence discipline of S6b/S7d on both tables and inside `trialDetails`**: a row carries `absent_keys_json`
+(the known keys that were ABSENT, dotted for nested keys) and `extra_json` (every key the columns and child tables do
+not hold, kept exactly, `null` included), so present-and-null, absent and non-null all come back as they were, and a
+live `undefined` persists as absence (the blob's JSON rule, as S7d keeps it). **The draft's deliberate omissions are
+withdrawn** — nothing a stored record carries is dropped, derived-ness or an absent creation writer being no reason:
+
+| Draft (file 02, superseded by this table until amended at implementation) | Corrected mapping | Why |
+|---|---|---|
+| `blockedBy` "dead field, not migrated" (trials notes) | kept: `extra_json.blockedBy` when present (a value or `null`); absence recorded | read by `trialClubView` (`m23/trial.mjs:517`) and carried by `tombstoneTrial` (`server.mjs:4224`); with an imported non-null value the actual club view returns it and the a6c40f3 mapping turned it into `null` (the probe's control) |
+| `trials.keys.accept {key: null, fp}` "NOT migrated" (idempotency notes, line 52) | kept exactly in the trial row's retained `keys` JSON (`extra_json.keys.accept`); the other `keys` acts go to `idempotency_keys` as drafted | `idempotency_keys.key` is `NOT NULL CHECK (length … )`, so the row cannot hold it; the writer produces it (`server.mjs:2339`) and the backup/rollback round trip must reproduce it |
+| the tombstone's `trialDetails.instructions: null` "stray key, dead field" (requests notes) | kept as a present-and-null key: `extra_json.trialDetails.instructions` | `tombstoneRequest` writes it (`server.mjs:4246`); presence is data |
+| `recipient.playerId` "derived, not stored" (both tables) | derived AND verified: the import and every write assert `recipient.playerId === player_id`; a mismatch is kept in `extra_json` with ids only, never normalised away | exact round trip, nothing invented |
+| the `day` container "presence is derived" (trials notes) | presence recorded (`absent_keys_json`): a trial without a `day` key comes back without one; the tombstone's shape follows the stored presence | `tombstoneTrial` emits `day` only when the key exists |
+| `workflowState` absent → `'legacy_accepted'`; `rev` absent → `1`; `reminderSent`, `notes`, `org_trusted_partner` and the other `NOT NULL DEFAULT` columns | the column takes the DDL's default and the absence is recorded, so the key comes back absent, not as the default | the probe found this on `reminder_sent` and `org_trusted_partner`: without the record the default would be fabricated into the blob |
+
+The amendment to file 02 at implementation is therefore: add `absent_keys_json` and `extra_json` to `recruitment_requests`
+and `trials` (the S7d `CHECK`s), correct the three mapping notes above, and withdraw the index below; **file 02 is
+unchanged in this correction** (so the reviewer's script still reproduces the hazards against it). `players[].trialReports`
+stays derived: the identity repository's `trialReports` accessor (`repositories/index.mjs:272`, today
+`trialReportsFor(db.trials, …)`) reads the `trial_reports` table through the new repository. **Preserved behaviour:**
+every route payload; the idempotency replay/conflict rules exactly (`idempotency_keys` notes); the deletion unit's
+tombstoning of a deleted player's requests and trials in place (today's behaviour, S4b-R unchanged); the trial-accept
+gate and the case links; **and the two different duplicate rules of the two request writers, exactly as they are
+(D2):** the direct route `POST /org/players/:id/request` refuses a second pending request of the same type in code
+(`REQUEST_PENDING`, `server.mjs:2212`), while the open-day outcome route (`server.mjs:2869–2917`) creates a pending
+trial invitation per successful registration outcome with no such guard — two outcomes for one adult and one club
+produce two valid pending invitations today (`probe-s8a-open-day-roundtrip.mjs`: the unchanged handler, run twice with
+synthetic dependencies). **The drafted partial unique index `recruitment_requests_one_pending` (file 02 line 553) is
+withdrawn from S8a-core**, with its "duplicate pending request" refusal test (§D.7.6): the probe's control shows the
+index cannot even be created over the two valid rows. The non-unique lookup index on `(org_id, player_id, type,
+status)` stays for the route's scan. Nothing is deduplicated, no invitation is deleted or "fixed by hand", no request
+is refused that succeeds today; the registration outcome (an `openTrials` blob edit) and its invitation (a row) are
+written by the same save transaction, so a failed save records neither (the probe). Whether a product-wide
+one-pending rule should exist is a **separate, undecided product question** that this brief does not raise and
+Q7a–Q7c do not answer. The other unique indexes in scope, each checked against its writers: `UNIQUE(trials.request_id)`
+(structural — `issueAcceptedTrial` is the one writer and both respond routes accept a `pending` request only,
+`server.mjs:1573`, `:3428`); `request_trial_slots UNIQUE(request_id, day)` (`validateInvitation` refuses two slots on one
+day, `trialRoutes.mjs:323`); `trials_one_open_per_case` (`trialRoutes.mjs:367–369` refuses a second pending invitation
+and a second open trial per case; the legacy respond routes accept only what that route invited — kept, and the dry
+run counts any legacy exception before cutover, **reported, never resolved by the migration**; if one exists the index
+is withdrawn the same way, not the row); `trial_session_evidence_one_active` (D-12, `trialRoutes.mjs:700`:
+linking twice is a replay); `trial_day_consents_one_per_actor` (checked at implementation against `m12/journeys.mjs`
+the same way, withdrawn if any writer bypasses it); `channels_request_id` (live since S7d).
 
 **Readers and writers:** `db.requests` and `db.trials` become read-only views (insertion order, each trial's
 containers nested in list order) over one participant's mirrors — the S7d/S6b pattern, staged into the route's next
@@ -2661,42 +2719,95 @@ the two recruitment tables.
 | `recruitment_requests.player_id`, `trials.player_id` | no key | **no key**; tolerant historical reference (§D.7.4) | an identity key needs §D.2a; Q3 open — **Q7a** |
 | `recruitment_requests.guardian_id`, `.recipient_guardian_id`, `trials.recipient_guardian_id` | `REFERENCES guardians(id) ON DELETE SET NULL` | **no key**; a **strict** checked reference (the `channels.guardian_id` / Q4b pattern: the writer resolves the guardian, the import refuses an unresolved id with ids only, a final-state assertion runs on every snapshot that writes the tables or rewrites the identity pair); NULL on tombstones as today | `SET NULL` fires at the guardian DELETE of every identity rewrite whatever `defer_foreign_keys` says (§D.2a, verified) — it would null the recipient of every request on every snapshot save; A1–A3 is Candidate F — **Q7c** |
 | `recruitment_requests.case_id`, `trials.case_id` | `REFERENCES recruitment_cases(id) ON DELETE RESTRICT` | **no key**; a **strict** checked reference against the retained `recruitmentCases` blob (the D-A device for `channels.request_id`, a second use) until S8b creates the table and rebuilds | `recruitment_cases` is S8b; D-A approved one column once and does not cover these two — **Q7b**; the alternative is S8a+S8b in one step (13 case tables more) |
-| `trials.request_id` | `REFERENCES recruitment_requests(id) ON DELETE RESTRICT`, UNIQUE | **as drafted** | the parent is written by upsert-and-prune (below), so the key never fires on a rewrite |
-| `recruitment_requests.trial_id` | `REFERENCES trials(id) ON DELETE SET NULL` | **as drafted** | the back-reference of a bidirectional pair; safe only under upsert-and-prune (the probe) |
+| `trials.request_id` | `REFERENCES recruitment_requests(id) ON DELETE RESTRICT`, UNIQUE | **as drafted** | the parent row is upserted (phase 1) before any trial names it and pruned (phase 5) after its dependants are gone, so `RESTRICT` fires only on an intentional removal that forgot a dependant; the UNIQUE value changes hands by departure-then-arrival (phase 2a before 2b), never in place |
+| `recruitment_requests.trial_id` | `REFERENCES trials(id) ON DELETE SET NULL` | **as drafted** | the back-reference of a bidirectional pair: inserted NULL / parked NULL where it changes (phase 1), assigned after the trial exists (phase 3); `SET NULL` fires only at an intentional trial departure (phase 2a) and phase 3 rewrites what it touched — deferral is neither used nor would it stop the action |
 | `channels.request_id` | code-checked (D-A) | **`REFERENCES recruitment_requests(id) ON DELETE RESTRICT`** in the `channels` rebuild of the same migration | the conversion D-A approved "until S8a"; the preflight proves every `request_id` resolves (true by construction if the check has held) |
 | `recruitment_requests.org_id`, `trials.org_id`, `trial_reports.org_id` | `REFERENCES orgs(id) ON DELETE RESTRICT` | **as drafted** | `orgs` is written by upsert-and-prune already (why `channels.org_id RESTRICT` works today); O2 blocks nothing |
 | `recruitment_requests.user_id` | `REFERENCES org_users(id) ON DELETE RESTRICT` | **as drafted** | `org_users` is replaced-and-pruned, parent-preserving |
-| the child tables' `request_id` / `trial_id` | `CASCADE` (`RESTRICT` on `trial_reports`, `trial_history`) | **as drafted** | owned rows, rewritten by their owner's writer; a cascade fires only on an **intentional** prune of the owner |
+| the child tables' `request_id` / `trial_id` | `CASCADE` (`RESTRICT` on `trial_reports`, `trial_history`) | **as drafted** | owned rows, rewritten by their owner's writer (delete + insert in list order); a cascade fires only on an **intentional** departure of the owner, and the two `RESTRICT` children are deleted explicitly, first, in that same departure — a `DELETE FROM trials` that forgot them is refused, which is what `RESTRICT` is for |
 | `recruitment_requests.contact_id`, `.contact_channel_id`, `trial_session_evidence.box_session_id` | no key | no key | contacts are S8c, Box Cam is S12 |
 
-**The snapshot write (the strategy the probe decides).** `probe-request-trial-actions.mjs` (in the handoff, synthetic
-in-memory tables with the drafted actions) shows: deleting and reinserting the same `trials` rows **nulls
-`recruitment_requests.trial_id`** (`SET NULL` fires at the DELETE); deleting and reinserting `recruitment_requests` is
-**refused** by its `RESTRICT` children (the trial, the channel); the same with `PRAGMA defer_foreign_keys` commits but
-**cascades `request_trial_slots` away**; **upsert-and-prune** of both tables with the same rows fires nothing and leaves
-every row intact; and an intentional removal of a request whose channel stays is refused by `RESTRICT` — the right
-answer. So both tables are written like `orgs`: upsert every supplied row, prune the rows the snapshot no longer lists,
-in this order inside `writeTableBacked`: orgs → identity → playersRetained → users/sessions → media queue →
-**requests upserted** → **trials upserted, then pruned** → channels (its own replace; its `request_id` now a key) →
-**requests pruned** (a request still named by a channel or a trial refuses the save — an intentional removal must
-remove its dependants in the same snapshot) → the existing prunes → codes → notifications → the audit group → the
-final-state assertions. **Final-state assertions**, run whenever either side was written or the identity pair was
-rewritten: every `trials.request_id` names a request whose `trial_id` is that trial and vice versa (the bidirectional
-pair), every `case_id` names a case in the final `recruitmentCases` (supplied or retained), every guardian column names
-a guardian in the final `guardians`, every channel's `request_id` resolves (now the key's job, kept as a message-quality
-check). **Omitted collections** keep their rows (the partial-snapshot contract); a snapshot that supplies `trials` and
-omits `requests` is judged against the retained requests table; one that supplies `channels` and omits `requests`
-likewise (today's `readRequestsBlob` becomes a table read). **Parent rewrites:** the identity rewrite touches no
-recruitment row (no identity key); an `orgs` rewrite is upsert-and-prune already.
+**The write algorithm (corrected, D1 — one algorithm for the cutover import, a restore, every route write staged
+into its save, a full snapshot and a partial snapshot).** The first probe, `probe-request-trial-actions.mjs`, showed
+what the drafted actions do (delete-and-reinsert of `trials` nulls `recruitment_requests.trial_id`; delete-and-reinsert
+of requests is refused by its `RESTRICT` children, or with `PRAGMA defer_foreign_keys` commits and cascades
+`request_trial_slots` away) and that re-upserting an **existing** pair fires nothing — but it never tried a **new**
+pair or a **replacement**, and the review's script showed both fail under "requests upserted with their final
+`trial_id`, then trials": the request names a trial that does not exist yet (D1a, `FOREIGN KEY`), and a replacement
+trial arrives while the old one still holds `UNIQUE(trials.request_id)` (D1b, `UNIQUE`, deferral or not — SQLite
+defers foreign-key *checks*, never `UNIQUE`, and never the `SET NULL`/`CASCADE` *actions*). The corrected write runs
+inside the one save transaction (the store's `write()`), with constraints **immediate** throughout — no
+`defer_foreign_keys`, so every refusal names the statement and the row — in six phases:
+
+1. **Requests, back-reference parked.** Every supplied request is upserted (`INSERT … ON CONFLICT(id) DO UPDATE`,
+   parent-preserving). A NEW request is inserted with `trial_id` **NULL**; a SURVIVING request keeps its stored
+   `trial_id` only when it already equals the final value (the unchanged pair), otherwise it is parked NULL. Its owned
+   slots are rewritten (delete, insert in list order).
+2. **Trials.** (a) The **departing** set = stored trials the snapshot no longer lists + stored trials whose supplied
+   `request_id` differs (a unique value changes hands by departure and arrival, never by an in-place re-key): their
+   `RESTRICT` children (`trial_reports`, `trial_history`) are deleted explicitly, then the trial row (`CASCADE` takes the
+   rest; `SET NULL` clears any request that named it — rewritten in phase 3). (b) Every supplied trial is upserted
+   (`request_id` is unchanged for survivors by construction, so the parent exists from phase 1 and the UNIQUE slot is
+   free) and its owned containers rewritten in list order (sessions, evidence, revisions, attendance, reminders, day
+   tables, history, report).
+3. **Requests, back-reference assigned.** `UPDATE recruitment_requests SET trial_id = <final>` for every supplied
+   request — the trial exists now; an id that resolves to nothing is refused here.
+4. **Channels** — the S7d replace, `request_id` now a real key: a channel naming a request outside the final table is
+   refused at its `INSERT`.
+5. **Requests pruned** — stored requests the snapshot no longer lists (`CASCADE` takes the slots); a request still named
+   by a trial or a channel refuses the save by `RESTRICT`: an intentional removal removes its dependants in the same
+   snapshot.
+6. **Final-state assertions** (whenever either table, `channels`, `recruitmentCases` or the identity pair was written):
+   `PRAGMA foreign_key_check` empty; the bidirectional pair (every trial's request names that trial; every request's
+   trial names that request); every `case_id` in the final `recruitmentCases` (Q7b, if approved strict); every guardian
+   column in the final `guardians` (Q7c, if approved strict); every channel's request resolves (the key's job, kept as
+   a message-quality check). A failure throws with ids only and the whole save rolls back.
+
+Inside `writeTableBacked` the order is: orgs → identity → playersRetained → users/sessions → media queue → **phases
+1–5 above** → the existing prunes → codes → notifications → the audit group → **phase 6**. **Omitted collections**
+keep their rows (the partial-snapshot contract) and the retained side judges the supplied one: a snapshot that
+supplies `trials` and omits `requests` is checked against the retained requests (a new trial its retained request does
+not name is refused by the pair assertion; an empty `trials` list prunes every trial, children explicitly, and `SET
+NULL` leaves each request consistent); one that supplies `requests` and omits `trials` likewise (a request naming a
+trial that is not retained is refused in phase 3; removing a request whose trial is retained is refused in phase 5);
+one that supplies `channels` and omits `requests` is checked by the key (today's `readRequestsBlob` becomes a table
+read). **Parent rewrites:** the identity rewrite touches no recruitment row (no identity key); an `orgs` rewrite is
+upsert-and-prune already. **Proof** (`probe-s8a-write-algorithm.mjs`, the drafted DDL for the six request/trial tables
+plus a synthetic `channels` with the proposed key; exact rows of all seven tables compared, and after every refusal the
+canonical dump unchanged and no transaction open): an empty database receiving a complete new request/trial/channel
+graph; the unchanged graph re-saved byte-identically; a valid replacement trial (old trial and children gone, new
+present, `trial_id` moved, the request's slots untouched); the reversed input order (identical dump); partial snapshots
+with either side omitted; deliberate invalid final references (trial → missing request, request → missing trial,
+channel → missing request, a pair mismatch, a request removed while its trial/channel stay, two trials naming one
+request); an intentional removal with its dependants; a swap of two surviving trials; owned children preserved across
+an unrelated change. The **control** runs the a6c40f3 order on the same inputs and reproduces D1a and D1b.
+
+**Two different failure contracts, stated so they are not confused (both already the store's, `store.mjs:200–235`).**
+An **ordinary staged save** (a route's `persist()`/`persistNow()`): the route changed the mirrors (the request's status,
+the new trial) and the SQL waits for the next save; if that save fails anywhere (a phase above, a blob write, COMMIT),
+the transaction rolls back, the hooks discard what they wrote, and **memory is left as it is — the pending state is
+retained and the next save retries everything still different from the committed state**. A **unit of work**
+(`store.unitOfWork`, the deletion unit, the acceptance if it is one): on any failure the transaction rolls back **and
+memory is restored to the pre-unit state in place** (the graph memento; each participating repository restores its
+records and views), so no fragment of the failed operation is persisted later; retrying means running the whole unit
+again. The S8a repository follows the S7d/S6b participant pattern (`snapshotState`/`restoreState`, `flush`, `commit`,
+`rollback`) so both contracts hold for the request/trial mirrors exactly as they hold for channels.
 
 #### D.7.6 Failure, rollback and proof
 
 - **Atomic failure:** every write is staged into the route's next save or the enclosing unit; a failure before COMMIT
   and at the real COMMIT leaves every table, the mirrors (held nested views of a trial's `schedule`, `day`, `history`
-  through the memento) and the revision unchanged; the retry lands once. Negative tests: a request naming a missing
-  guardian (Q7c strict), a case id not in the final cases (Q7b strict), a trial whose request is absent, a channel
-  whose request the snapshot removes, a duplicate pending request, an idempotency replay with a different fingerprint —
-  each refused with ids only and nothing written.
+  through the memento) and the revision unchanged; the retry lands once (the two contracts of §D.7.5). Negative tests:
+  a request naming a missing guardian (Q7c strict), a case id not in the final cases (Q7b strict), a trial whose
+  request is absent, a request whose trial is absent, a channel whose request the snapshot removes, a pair mismatch,
+  two trials naming one request, an idempotency replay with a different fingerprint — each refused with ids only and
+  nothing written. **Withdrawn (D2):** the "duplicate pending request" refusal — the storage step refuses nothing the
+  routes accept today; the direct route's `REQUEST_PENDING` stays a route test, unchanged. **Added (D1, D3):** the
+  positive cases of the write probe as repository tests (new pair, unchanged, replacement, reversed order, partial
+  either side, intentional removal, swap, children preserved) with the a6c40f3 order as a failing control; the
+  presence round trip for `blockedBy` (value / `null` / absent), `keys.accept`, `day` present/absent, the tombstone's
+  `trialDetails.instructions`, and every `NOT NULL DEFAULT` column with its key absent — compared through the actual
+  `trialClubView`, `trialFamilyView`, `tombstoneTrial` and `tombstoneRequest` outputs and the backup shape.
 - **Copy-only rollback** `scripts/recruitmentRollback.mjs`: every row of the sixteen tables written back into the
   `requests` and `trials` blobs in insertion order in the writers' literals (tombstones included, containers nested,
   `keys` reassembled), `channels` rebuilt back to the `0012` definition without the key, the tables dropped, the record
@@ -2723,7 +2834,7 @@ recruitment row (no identity key); an `orgs` rewrite is upsert-and-prune already
 | Category | Items |
 |---|---|
 | **Already approved — not asked again** | the full birth date and the country code on the retained record; Q4 (audit), Q4b, Q5; D-A (`channels.request_id`, including its conversion to a key at S8a) and D-B; the under-18-without-valid-guardian refusal for live records; the copy-only rollback pattern; today's deletion behaviour (tombstones in place) |
-| **Engineering choices — recommended here, decided at implementation, each proven by an exact-row test** | upsert-and-prune for the two tables and the write order above; the final-state assertions; `extra_json`/`absent_keys_json` per row; `workflow_state` `legacy_accepted` where absent; the two dead fields not migrated; the `trialReports` accessor over the table; the partial unique index checked by the dry run; the bench's `trials` fixture; the mirrors' memento participation |
+| **Engineering choices — recommended here, decided at implementation, each proven by an exact-row test** | the six-phase write of §D.7.5 (immediate constraints, no deferral, departure before arrival, explicit prunes) and its final-state assertions; `extra_json`/`absent_keys_json` on both tables with the presence discipline of §D.7.3 (every draft omission withdrawn: `blockedBy`, `keys.accept`, `trialDetails.instructions`, `day` presence, the `NOT NULL DEFAULT` absences, `recipient.playerId` verified); the `trialReports` accessor over the table; the withdrawal of the `one_pending` index and of any other NEW unique index a writer bypasses (counted by the dry run, reported, never resolved by the migration); the bench's `trials` fixture; the mirrors' memento participation. **None of these is a product decision; none was changed by the a6c40f3 review into one.** |
 | **Founder decisions that block S8a-core** | **Q7a, Q7b, Q7c** below. Not needed: Q2, Q3, Q6, O2 (no organisation is deleted; `RESTRICT` encodes nothing new), the whole-snapshot-write objective |
 
 **Q7a — the player references on recruitment rows (refreshed; the "before S4b" wording is gone).** May
@@ -2755,11 +2866,26 @@ does not exist is a defect and is refused, as `idv_queue` and `channels` do toda
 mismatch before the cutover. **approve tolerant** — unresolved guardian ids counted, never refused (weaker; the writer
 always resolves the guardian today, so nothing is gained). **decline** — S8a waits for Candidate F.
 
-**Not asked:** anything about retention, correction or deletion of recruitment data; Q2, Q3, Q6; the organisation
-lifecycle (O2); any UI change. No answer is inferred from this section, from an earlier recommendation or from silence.
+**Not asked:** anything about retention, correction or deletion of recruitment data; a product-wide one-pending
+rule for invitations (the open-day route has none today and keeps none — §D.7.3, D2 — and whether one should exist is
+undecided and outside this brief); Q2, Q3, Q6; the organisation lifecycle (O2); any UI change. No answer is inferred
+from this section, from an earlier recommendation, from the a6c40f3 review or from silence. **This corrected brief is
+itself awaiting independent review and is not yet put to the Founder.**
 
 #### D.7.8 Evidence for this section
 
-`probe-request-trial-actions.mjs` and its output, and the bench report on `9b109dc` (`logs/bench-9b109dc.json`: 1
-blob row, 77 811 bytes serialised per save, median 1.64 ms, on the S6b fixture of 400 requests), are in the handoff of
-the acceptance milestone; both are synthetic and disposable, nothing was added to the tracked source.
+- `probe-request-trial-actions.mjs` and its output, and the bench report on `9b109dc` (`logs/bench-9b109dc.json`: 1
+  blob row, 77 811 bytes serialised per save, median 1.64 ms, on the S6b fixture of 400 requests), in the handoff of
+  the acceptance milestone (`a6c40f3`).
+- The independent review of `a6c40f3`: `review-a6c40f3-design-checks.mjs` (D1a, D1b, D2, D3 reproduced; exit 0 means
+  the hazards are reproduced, not that the design passes) — its output on `a6c40f3` and on this tree are in the
+  handoff of this correction, unchanged.
+- `probe-s8a-write-algorithm.mjs` (20 checks: the six-phase write on the drafted DDL, exact rows, rollbacks, the
+  a6c40f3 order as the control), `probe-s8a-open-day-roundtrip.mjs` (5: the unchanged handler's invitations stored
+  and round-tripped without the withdrawn index, the index's refusal as the control, the one-transaction outcome +
+  invitation), `probe-s8a-lossless-fields.mjs` (8: presence round trips through the actual `trialClubView`,
+  `tombstoneTrial` and `tombstoneRequest`, the a6c40f3 mapping's loss as the control) — run on Node 22 and 24, in the
+  handoff of this correction.
+
+All probes are synthetic and disposable, kept outside the tracked source; nothing was added to the application, the
+schema file, a migration or a test.

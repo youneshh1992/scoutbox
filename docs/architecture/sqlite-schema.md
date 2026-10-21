@@ -556,6 +556,11 @@ implementation. The file adds the partial unique indexes the code enforces by sc
 case, one live offer per case, one live and one completed package per offer, one signing per
 package and per offer) and lists the dead fields it drops (`trials.keys.accept.key`, always
 null; `trials.blockedBy`; `signings.cancelledAt/revokedAt/voidedAt`, read but never written).
+**Superseded for `recruitment_requests` and `trials` by `sqlite-migration-plan.md` §D.7.3 (the correction after the
+review of `a6c40f3`):** `blockedBy` is read by `trialClubView` and carried by `tombstoneTrial`, so it, `keys.accept` and
+the tombstone's `trialDetails.instructions` are kept (presence and value) in the row's retained JSON — nothing is
+dropped as "dead" — and the "one pending request per org/player/type" index is withdrawn because the open-day outcome
+route creates invitations without that guard today. File 02 is amended at S8a implementation, not before.
 Raw client values that are not validated today (`case.deadline`, legacy `dueAt`,
 `trial_day_staff.check.expiresAt`) are kept verbatim in `*_raw` columns and parsed on read, as
 now. The `trials.day.emergency` contact stays restricted to the trial day's staff reads.

@@ -328,9 +328,16 @@ and design changes the Founder explicitly requests.
   (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR_SERVER`). **The next step is
   prepared, not started: S8a-core** (requests and trials, their owned child
   tables, `idempotency_keys`, the `channels.request_id` conversion; no key to
-  `players(id)` or `guardians(id)`; upsert-and-prune for the two tables) —
-  plan §D.7 — which needs the Founder's answers to **Q7a, Q7b and Q7c** and
-  nothing else; nothing of it is implemented, stubbed or reserved.
+  `players(id)` or `guardians(id)`; the six-phase write of plan §D.7.5 —
+  back-reference parked then assigned, departure before arrival for the
+  unique value, explicit prunes, final-state assertions, immediate
+  constraints; the lossless presence mapping of §D.7.3; the drafted
+  `one_pending` index withdrawn so the open-day route's invitations stay
+  valid) — plan §D.7, **corrected after the independent review of
+  `a6c40f3` (D1/D2/D3) and itself awaiting independent review** — which
+  needs the Founder's answers to **Q7a, Q7b and Q7c** and nothing else;
+  nothing of it is implemented, stubbed or reserved; file 02's draft is
+  amended at implementation, not before.
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state
