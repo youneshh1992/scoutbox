@@ -15,10 +15,11 @@ server line numbers predate S4a and S5 and are superseded by the ones here.
 > commit. The one-time-code sub-step proposed in §6 has since been implemented on top of
 > `7fbce74` as migration `0008_one_time_codes`; **§10 records what was actually built**, where it
 > departs from §§5–7 and why, and how it was verified. **The eight audit tables are IMPLEMENTED since
-> 19 October 2026 as S6b (migration `0013_safety_audit`, one local commit on top of `1792fc7`) and PENDING
-> INDEPENDENT ACCEPTANCE — §11 records what was built, the Founder's decisions Q4, Q4b and Q5 it rests on,
+> 19 October 2026 as S6b (migration `0013_safety_audit`, one local commit on top of `1792fc7`) — §11 records what was built, the Founder's decisions Q4, Q4b and Q5 it rests on,
 > where it departs from §§2–7 and plan §D.4, and how it was verified.** §11.4 records the correction after the independent review of `c6cf5e1`
-> (F1 and F2 fixed; two intermittent test failures not reproduced, cause unresolved); S6b is still pending. Not production, security,
+> (F1 and F2 fixed; two intermittent test failures not reproduced, cause unresolved). **S6b is INDEPENDENTLY
+> ACCEPTED at `f0abd34` (21 October 2026) for its bounded storage-migration scope — §11.5**; the "pending" wording
+> of §11 and §11.4 is the dated history of those rounds. Not production, security,
 > legal-compliance or deployment approval; not acceptance of S4b or S8.
 
 Three kinds of statement are kept apart throughout: **code facts** (what runs today, cited),
@@ -29,8 +30,8 @@ Sections: 1 where S6 stands · 2 the ten domains, one by one · 3 deletion paths
 dependencies · 4 append-only, `RESTRICT` and the current hard delete · 5 the one-time codes ·
 6 the smallest safe sub-step · 7 test and rollback design · 8 migration registry · 9 dependency
 table · 10 S6a as implemented (independently accepted at `2d7ddeb`; §10.6 and §10.7 are the two
-review-correction rounds) · 11 S6b as implemented (19 October 2026; §11.4 the correction of 21 October 2026; pending independent
-acceptance).
+review-correction rounds) · 11 S6b as implemented (19 October 2026; §11.4 the correction of 21 October 2026; §11.5 the independent
+acceptance at `f0abd34`, 21 October 2026).
 
 ---
 
@@ -982,7 +983,7 @@ and the `7fbce74` old-build proof. Nothing here is production approval.
 
 ---
 
-## 11. S6b as implemented (19 October 2026, one local commit on `feat/sqlite-schema` on top of `1792fc7` — dated history; PENDING INDEPENDENT ACCEPTANCE)
+## 11. S6b as implemented (19 October 2026, one local commit on `feat/sqlite-schema` on top of `1792fc7` — dated history; written while PENDING INDEPENDENT ACCEPTANCE — **since corrected (§11.4) and independently ACCEPTED at `f0abd34`, §11.5**)
 
 **Status at the time of writing: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE.** Not production, security,
 legal-compliance or deployment approval; not acceptance of S4b, S8 or the whole SQLite migration; nothing pushed,
@@ -1150,7 +1151,7 @@ are in the handoff package (`logs/`), the counts in `logs/gates-summary.txt`.
 - **Not run:** browser suites, demo rebuild, the remaining E2E suites, real older-Node runtimes, real data, real
   providers.
 
-### 11.4 Correction after the independent review of `c6cf5e1` (21 October 2026; S6b still PENDING INDEPENDENT ACCEPTANCE)
+### 11.4 Correction after the independent review of `c6cf5e1` (21 October 2026; written while S6b was still PENDING INDEPENDENT ACCEPTANCE — accepted since, §11.5)
 
 The independent review of `c6cf5e1` reported two findings and two unexplained test failures. This correction is one
 commit on top of `c6cf5e1`. It changes `repositories/safetyAudit.mjs`, adds one opt-in to the shared `cloneJson`
@@ -1198,4 +1199,68 @@ route, schema, migration, rollback tool or Player file changed. Q4, Q4b and Q5 a
   in the handoff's `logs/gates-run.txt` and the fresh-extraction record. `m23BootContract` and `m23Persistence` still
   fail identically on `4f954ad` (pre-existing, outside the gate, not touched).
 
-Not production, security, legal-compliance or deployment approval; S6b awaits independent acceptance.
+Not production, security, legal-compliance or deployment approval; S6b awaited independent acceptance when this
+was written (accepted since, §11.5).
+
+### 11.5 Independent acceptance of S6b at `f0abd34` (21 October 2026)
+
+**Status: S6b is INDEPENDENTLY ACCEPTED at commit `f0abd3459b435774c00b4e384b046eba23813e88` for its bounded
+storage-migration scope** (the review's decision, recorded as given: *"ACCEPTED for the bounded S6b storage-migration
+scope. Both findings from the c6cf5e1 review are closed. This is not approval to merge, deploy or declare the product
+production-ready. S7 acceptance remains unchanged."*). Not production, security, legal-compliance or deployment
+approval; not acceptance of S4b, S8 or the whole SQLite migration; no policy decision is inferred from it. S7 (S7a–S7d)
+stays accepted at `4f954ad`. The §11 heading and §11.4 keep their "pending" wording as the dated history of those
+rounds.
+
+**What the reviewer verified, from the handoff ZIP of `f0abd34` (SHA-256
+`d713b2830f408b3d14f2fe7f1ba2a8cfeee98a7afcfe5acfcf9cf3778af145d3`, all 477 manifest entries verified with traversal
+and symlink checks; the extracted server, Player and architecture trees compared against the `c6cf5e1` handoff show
+exactly the nine declared changed files).** Runtime: Node v24.19.0, SQLite 3.53.3, npm 11.6.0; both projects installed
+from their lockfiles with an offline `npm ci --ignore-scripts`, exit 0 each. One attempt each, no retry:
+
+- `review-c6cf5e1-reproductions.mjs`, **unchanged**, on `f0abd34` with its `1792fc7` control: exit 0, zero
+  reproductions, both corrections confirmed, the baseline control passed. Positive control: the same unchanged script
+  on `c6cf5e1` still reproduces both defects (exit 1, two reproductions).
+- `review-f0abd34-additional-checks.mjs` (the reviewer's supplement): exit 0, three checks — a throwing later getter
+  leaves held and fresh views and the pre-existing queue intact and the later save carries only accepted work; sparse
+  arrays, nested optional properties and an own `__proto__` key keep JSON semantics without prototype pollution; the
+  default, outbox and push validators keep their refusal.
+- Backend `npm test`: exit 0, 29 suites, 379 checks. Player `npm test -- --runInBand`: exit 0, 4 suites, 41 tests.
+- The five historical builds booted for real on the rollback copies, with **one difference from this work's own
+  runs, recorded as it is and not reconciled**: the reviewer's pre-S7a server was the accepted S6a handoff
+  **`2d7ddeb`**, where this work's gates used a checkout of **`812e13b`** (the commit S7a was prepared on); the other
+  four (`0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`) match. Both are pre-S7a builds; the two runs are different
+  evidence, not the same evidence.
+
+**Findings of the `c6cf5e1` review: both CLOSED** (§11.4 has the causes, fixes and regressions). F1: `patch` validates
+and clones every field and builds the SQL parameters from a candidate before touching the live row; the unchanged
+reviewer script confirms a rejected patch leaves the held status, the stored value and the pending queue unchanged and
+a later valid update does not persist the rejected value. F2: the audit clone stores a nested undefined as JSON did
+(property omitted, array entry null) while the outbox/push default stays strict; the unchanged script accepts the
+existing partial Box Cam preferences row against the same passing `1792fc7` control, and the new route regression
+passes inside the complete backend gate with the actual pre-S6b build booting the rollback copy.
+
+**Residual limitations, kept visible (the reviewer's list and this work's own):**
+
+- The two `c6cf5e1` test failures (`testDispatchesServer.mjs` "the ladder resumed after the restart";
+  `testSafetyAuditServer.mjs` "the lifted block row is deleted in the file") **did not recur** in the reviewer's
+  complete run nor in this work's runs (§11.4: Node 22 serial 20 of 20 each, Node 24 serial 4 of 4 each). **Their
+  causes remain unresolved; they are not fixed and not disproven.** The two original failed logs (Node v24.19.0,
+  19 October 2026, the assertions at `testDispatchesServer.mjs:296` and `testSafetyAuditServer.mjs:316`) are preserved
+  in the reviewer's bundle (`evidence/prior-c6cf5e1-independent-backend.log`,
+  `evidence/prior-c6cf5e1-independent-s6b-server.log`), carried in the acceptance handoff; the diagnostics added at
+  both assertions stay; no assertion or timeout was relaxed. A recurrence is to be investigated from its own
+  diagnostics, not met with repetition.
+- This work's evidence covers Node v22.22.0 and v24.19.0 (§11.4); the independent run used Node v24.19.0 only. The
+  real older-runtime checks were skipped on both sides (no extra binaries; the API-masking simulation is a
+  simulation). Browser suites, the demo rebuild, the route-level E2E battery, a minimum-runtime comparison and any
+  production test were not run independently. The `m23BootContract` / `m23Persistence` baseline classification
+  (§11.3) is this work's statement, not a result the review re-verified.
+- The whole-snapshot-write objective (plan §D.4), the later migration stages and the open retention and reference
+  decisions (Q1, Q2, Q3, Q6, Q7; `s4-deletion-decision.md` §8) remain exactly as open as before.
+
+**This acceptance milestone** (documentation only, 21 October 2026, one commit on top of `f0abd34`) changed no
+application source, schema, migration, test or Player file: it records the acceptance here and in plan §S6/§D,
+`sqlite-schema.md`, `OPERATIONS.md` and `CLAUDE.md`, refreshes the plan's next-stage recommendation (§D.6) and updates
+draft PR #2. The two milestone gates were run on its final tree with the five historical builds wired in; the
+commands, versions, exits and totals are in the acceptance handoff (`logs/gates-run.txt`) and the PR description.

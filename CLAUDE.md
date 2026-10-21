@@ -245,10 +245,13 @@ and design changes the Founder explicitly requests.
   nothing lost; proven on the actual `b67bce5` build) and the S7c tool refuses a
   file carrying 0012. Retention stays OPEN (S4b). **The eight safeguarding and
   audit collections are tables since S6b** (IMPLEMENTED 19 October 2026 on top of
-  `1792fc7`, whose next-stage brief the independent review accepted; PENDING
-  INDEPENDENT ACCEPTANCE — not production, security, legal-compliance or
-  deployment approval, not acceptance of S4b or S8; `docs/architecture/s6-readiness-review.md`
-  §11, plan §D.4/§D.5; `repositories/safetyAudit.mjs`, migration
+  `1792fc7`, whose next-stage brief the independent review accepted; corrected
+  once and **independently ACCEPTED at commit
+  `f0abd3459b435774c00b4e384b046eba23813e88` on 21 October 2026** for its
+  bounded storage-migration scope — not production, security, legal-compliance
+  or deployment approval, not acceptance of S4b or S8;
+  `docs/architecture/s6-readiness-review.md` §11, §11.4, the acceptance §11.5;
+  plan §D.4/§D.5; `repositories/safetyAudit.mjs`, migration
   `0013_safety_audit`). Built under the Founder's explicit decisions of
   19 October 2026, recorded verbatim in review §11 and not to be asked again:
   **Q4 "Approve — preserve current behaviour"** — the five historical player
@@ -280,7 +283,14 @@ and design changes the Founder explicitly requests.
   next free migration identifier is `0014`. The correction of 21 October 2026 (review of `c6cf5e1`,
   review §11.4) makes `patch` atomic (F1) and stores a nested undefined in an
   audit record as JSON did (F2, opt-in `cloneJson` option; outbox and push keep
-  the refusing default); S6b stays PENDING INDEPENDENT ACCEPTANCE.
+  the refusing default); that corrected commit is the accepted one. The two
+  intermittent test failures of the `c6cf5e1` review did not recur in any run
+  since; their causes are unresolved (not fixed, not disproven; review §11.5).
+  **The next step is S4b-R, the retained player record** (plan §D.6: the
+  retained row and the reader contract only — no foreign key, no additional
+  deletion behaviour, no new age rule; migration `0014` when approved); it
+  needs the Founder's answer to Q1 (the country code) and nothing else. Not
+  started; nothing is implemented, stubbed or reserved for it.
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state
@@ -436,6 +446,11 @@ the policy; `AGENTS.md` points here and no other rules document restates it.
 - Fix failures the milestone introduced and rerun. Identify independently
   established pre-existing failures as such; never hide them, silently skip
   tests, or call a failing gate green.
+- Wire the actual historical server builds into the rollback proofs of the
+  backend gate (the `SCOUTBOX_PRE_*` variables pointing at real checkouts of
+  the named commits) and name the commits used; a boot the suites skipped is
+  reported as skipped, never as run. Repeat a passing suite only with a stated
+  diagnostic hypothesis, not as a campaign.
 - Record commands, runtime and tool versions, exit codes and totals for both
   gates. Unit tests are required even when browser or API checks also ran; a
   successful build, lint, screenshot or smoke test is not a substitute.

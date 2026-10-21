@@ -1271,7 +1271,7 @@ the account deletion are the only writers.
    <fresh-empty-dir>`, then start the previous build (`b67bce5`) on the output —
    every thread, message and receipt written since the cutover is in it.
 
-### Safeguarding and audit records (live since migration `0013`, S6b — implemented 19 October 2026 on top of `1792fc7` under the Founder's decisions Q4, Q4b and Q5; PENDING INDEPENDENT ACCEPTANCE; not production-approved)
+### Safeguarding and audit records (live since migration `0013`, S6b — implemented 19 October 2026 on top of `1792fc7` under the Founder's decisions Q4, Q4b and Q5; corrected and independently ACCEPTED at `f0abd34` on 21 October 2026 for its bounded storage-migration scope; not production-approved)
 
 The block, report, note, moderation, ledger, ops-event, source-change and IDV
 routes and consoles answer exactly as before; the records behind them are rows

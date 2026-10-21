@@ -1328,7 +1328,8 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
 > references are tolerant historical references (Q4; the per-reference contract in §D.4, corrected after the
 > review of `e7f7692`); the candidate step S6b and the decisions it needs (Q4, Q4b, Q5) are in §D.4–§D.5. S6b
 > does not meet the whole-snapshot-write objective (§D.4). **S6b is implemented since 19 October 2026 under
-> those three decisions (status paragraph below; review §11); pending independent acceptance.**
+> those three decisions (status paragraph below; review §11) and independently ACCEPTED at `f0abd34` on
+> 21 October 2026 (review §11.5).**
 >
 > **Status (S6, the rest): not started.** The readiness review grounded in the code at `2178c5b` is
 > [`s6-readiness-review.md`](./s6-readiness-review.md); where the bullets below differ from it,
@@ -1343,7 +1344,12 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
 > order of approval (review §8; S6a took `0008_one_time_codes`). The smallest technically
 > independent sub-step was the two code tables (review §6), now implemented as S6a.
 >
-> **Status (S6b — the eight audit tables): IMPLEMENTED 19 October 2026, PENDING INDEPENDENT ACCEPTANCE.**
+> **Status (S6b — the eight audit tables): IMPLEMENTED 19 October 2026; corrected 21 October 2026; INDEPENDENTLY
+> ACCEPTED at `f0abd3459b435774c00b4e384b046eba23813e88` on 21 October 2026 for its bounded storage-migration scope
+> (review §11.5 — the reviewer ran the unchanged `review-c6cf5e1-reproductions.mjs`, the full backend gate (29 suites,
+> 379 checks) and the Player gate (4 suites, 41 tests) on Node v24.19.0, one attempt each; both `c6cf5e1` findings
+> closed; the two earlier intermittent test failures not reproduced, causes unresolved). Not production, security,
+> legal-compliance or deployment approval; not acceptance of S4b or S8. The next step is §D.6.**
 > Built as §D.4 Candidate A on top of `1792fc7` (whose brief the independent review accepted), under the
 > Founder's explicit decisions Q4, Q4b and Q5 of 19 October 2026 (recorded verbatim in
 > [`s6-readiness-review.md`](./s6-readiness-review.md) §11 and in §D.5 below): migration `0013_safety_audit`
@@ -1358,7 +1364,7 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
 > security, legal-compliance or deployment approval; not acceptance of S4b or S8. **Correction (21 October 2026,
 > review of `c6cf5e1`):** a refused report or IDV patch no longer changes live state (F1), and a nested undefined in
 > an audit record is stored as JSON stored it, so a partial Box Cam prefs row no longer fails (F2); review §11.4.
-> S6b is still PENDING INDEPENDENT ACCEPTANCE.
+> That correction is the accepted commit.
 
 - **Objective.** Append-only audit tables live with `RESTRICT` references; one-time codes
   hashed with attempt limits; the ledger gets a reversal row instead of truncation on signing
@@ -1604,7 +1610,7 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
   `orgs.verified` boolean becomes derived from claims.
 - **Depends on.** S4, S9 (passport reads evidence/assessments).
 - **Files / tables.** `repositories/verification/*.mjs`, `repositories/passport.mjs`,
-  migration `0012_verification_passport`; `m14/*`, `m15/*`, `m13/transitions.mjs`,
+  migration `0012_verification_passport` (a placeholder: `0012` is `0012_channels`; the real number is assigned at approval, §D.6); `m14/*`, `m15/*`, `m13/transitions.mjs`,
   `server.mjs` vouches 3689/4073.
 - **Data transformation.** `verMigrated` object → `ver_migrations` rows; claim `metadata`
   promoted keys to columns; raw passport dates kept raw.
@@ -1622,7 +1628,7 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
   `orgs.agencySettings` → `org_agency_settings`; the `req.org.settings.jurisdictions` defect
   fixed in the same step.
 - **Depends on.** S8 (handoffs, offers), S10 (verification evidence refs).
-- **Files / tables.** `repositories/agent/*.mjs`, migration `0013_agent_compliance`;
+- **Files / tables.** `repositories/agent/*.mjs`, migration `0013_agent_compliance` (a placeholder: `0013` is `0013_safety_audit`; the real number is assigned at approval, §D.6);
   `m24/*`–`m26/*`, `m27/*`.
 - **Tests and acceptance.** Unit: effective-status uniqueness in code with the partial
   indexes where stored; dual-control publication; consent revocation 1:1; minors refused on
@@ -1640,7 +1646,7 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
   evidence suggestions) become explicit repository upserts.
 - **Depends on.** S5, S8, S9.
 - **Files / tables.** `repositories/development/*.mjs`, `repositories/boxcam/*.mjs`,
-  `repositories/discovery/*.mjs`, migration `0014_development_discovery`; `m12/journeys.mjs`,
+  `repositories/discovery/*.mjs`, migration `0014_development_discovery` (a placeholder; the real number is assigned at approval, §D.6); `m12/journeys.mjs`,
   `m13/insight.mjs`, `m13/planning.mjs`, `m16/*`, `m18/*`, `m19/*`, `m21/*`, `m22/*`.
 - **Data transformation.** `box_sessions.obs_json` retained (normalisation deferred to a
   later, separate step once the observation stream's reader is a repository); `nonce` hashed;
@@ -1661,7 +1667,7 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
   Admin backup becomes `VACUUM INTO` of the file plus media; restore stays "new empty
   DATA_DIR". Production boot with an empty file creates **no demo rows** (C.6).
 - **Depends on.** S3 (orgs), S8 (invoices reference signings).
-- **Files / tables.** `repositories/operations/*.mjs`, migration `0015_operations`;
+- **Files / tables.** `repositories/operations/*.mjs`, migration `0015_operations` (a placeholder; the real number is assigned at approval, §D.6);
   `m13/imports.mjs`, `m13/enterprise.mjs` (backup 428–484), `m13/groups.mjs`,
   `m12/operations.mjs`, `adapters.mjs` (billing), `seed.mjs`, `catalogue.mjs`,
   `m181/capabilities.mjs`, `OPERATIONS.md`.
@@ -1827,7 +1833,9 @@ reading of the code at `4f954ad` against the existing decision records (`s4-dele
 `s4-readiness-review.md` §9/§11, `s6-readiness-review.md` §3–§4/§9, `s7-readiness-review.md` §11.3–§11.4
 and §8.1), narrowed to what is needed to choose the next safe stage. It replaces no earlier record; where an
 earlier section of this plan still says "waits for S4b" without qualification, this section is current.
-**§D.5 is the one Founder decision list; every other document links here rather than restating it.**
+**§D.5 is the one Founder decision list; every other document links here rather than restating it.** **Refreshed
+21 October 2026 after the acceptance of S6b at `f0abd34`: §D.6 is current for the next step and the decision it needs
+(Q1 only); §D–§D.5 stay as the dated record, and §D.6 lists the statements they contain that are superseded.**
 Nothing here decides a retention period, infers compliance from a development choice, or reopens the
 Founder's recorded choices (the full birth date; D-A; D-B; the legacy-minor rule).
 
@@ -2113,7 +2121,8 @@ as approval for the `case_id` or `player_id` devices.
 
 ### D.4 The smallest coherent next implementation milestone — three candidates, one recommendation
 
-The next free migration identifier is **`0013`** (`repositories/index.mjs:53` registers `0001`–`0012`
+The next free migration identifier **was `0013` at `4f954ad`** (taken since by `0013_safety_audit`; **`0014` is the
+next free identifier at `f0abd34`, §D.6**) (`repositories/index.mjs:53` registers `0001`–`0012`
 at `4f954ad`; the plan's older placeholders `0008_safety_audit`, `0010_recruitment`, `0011_scouting` are
 withdrawn, §B). Every candidate below takes `0013` **only when approved**, and every rollback is **copy-only
 and preserves all post-cutover writes** (the S5–S7 pattern: a tool that never touches the source, writes
@@ -2121,7 +2130,8 @@ rows back into the blobs the previous build reads, refuses a later schema, and i
 actual previous build on the copy) — the old plan's "backup + previous commit, audit rows lost" rollback is
 not a path (`s6-readiness-review.md` §7).
 
-> **Update, 19 October 2026 — Candidate A is IMPLEMENTED (pending independent acceptance).** The independent
+> **Update, 19 October 2026 — Candidate A is IMPLEMENTED (pending independent acceptance at the time; corrected at
+> `f0abd34` and independently ACCEPTED on 21 October 2026, review §11.4–§11.5; the next step is §D.6).** The independent
 > review of `1792fc7` accepted this brief; the Founder answered Q4, Q4b and Q5 (§D.5, recorded verbatim in
 > `s6-readiness-review.md` §11); the implementation is one local commit on top of `1792fc7`: migration
 > `0013_safety_audit`, `repositories/safetyAudit.mjs` (the plan's `audit.mjs`), the writers converted, the copy-only
@@ -2251,8 +2261,9 @@ to exist before any permanent key to the identity tables ships.
 Already decided and **not asked again**: the full birth date on the retained record; D-A and D-B (S7d);
 Q4, Q4b and Q5 (S6b, 19 October 2026 — below);
 the legacy-minor rule (under-18 without a valid guardian link stops migration). O2 (organisation deletion)
-blocks nothing now and is not asked. **Only the first three questions are needed for the step proposed next
-(Candidate A); the rest are recorded for the stages that need them and are not required to proceed.** No
+blocks nothing now and is not asked. **Only the first three questions were needed for the step proposed next on
+19 October (Candidate A, since built and accepted); since 21 October 2026 the step proposed next is S4b-R (§D.6),
+which needs Q1 only — the rest are recorded for the stages that need them and are not required to proceed.** No
 approval of an implementation is sought beyond Candidate A's concrete scope in §D.4; nothing is inferred from
 silence.
 
@@ -2284,3 +2295,150 @@ text and excerpts (3); commercial records (4); guardian data after a child's del
 (5); open retention windows (6); deleted-but-referenced media (7); who may delete a child (8); recording the
 deletion event (9, also Q6). No retention period is proposed here, and none of the options above
 establishes compliance.
+
+### D.6 Refreshed after the independent acceptance of S6b at `f0abd34` (21 October 2026, from the code at `f0abd34`) — the one recommendation and the one decision it needs
+
+**Status.** S6b is independently accepted at `f0abd3459b435774c00b4e384b046eba23813e88` (`s6-readiness-review.md`
+§11.5); S7a–S7d stay accepted at `4f954ad`. Thirteen migrations are registered (`repositories/index.mjs:55`,
+`0001`–`0013`); **the next free migration identifier is `0014`** — verified against the registry, not copied from any
+placeholder. §D–§D.5 above are the dated record of 19 October (written at `4f954ad`, corrected twice); this section is
+current where they differ, and it replaces no decision. Statements of §B–§D.5 that are now superseded, listed so no
+reader acts on them: the §D status line "S4b, the eight S6 audit tables and S8 are not started" (S6b is done); §D.4's
+"the next free migration identifier is `0013`" and "every candidate takes `0013`" (now `0014`); Candidate B's
+placeholder `0013_player_tombstones` and its "pre-S4b build (`4f954ad`)" (the build the next step's rollback must be
+proven on is the accepted **`f0abd34`**); §D.3's "the actual `4f954ad` build" for S8a's rollback proof (the build
+accepted immediately before S8a, whichever it is then); and §B's remaining placeholder identifiers
+`0012_verification_passport` (S10), `0013_agent_compliance` (S11), `0014_development_discovery` (S12) and
+`0015_operations` (S13) — `0012` and `0013` are taken by `0012_channels` and `0013_safety_audit`, and every later stage
+takes the next free number when it is approved, as S8a's and S9's notes already say. Candidate A's text and its
+contract stay the specification S6b followed. **Nothing below is implemented, stubbed or reserved; no migration file,
+column, repository method or test exists for it.**
+
+**The three candidates, re-read against the accepted code.** Candidate A is done. Candidate C (S8a, requests and
+trials) is the largest aggregate — 14 tables plus `idempotency_keys`; `db.requests` is read at 150 sites in 34 files
+and `db.trials` at 112 sites in 33 files (textual count at `f0abd34`, `scoutbox-server/`); the tombstone shapes, slots,
+history and day/schedule containers must round-trip losslessly — and needs two approvals (Q7a, Q7b), the A1–A3 choice
+for its five `guardians(id) … SET NULL` columns and an upsert-and-prune replace for `recruitment_requests` (§D.3). It
+is the step that would take the two biggest blobs out of every save; it is not the smallest. Candidate B narrows
+further than §D.4 wrote it, and that narrowed form is the recommendation.
+
+**Recommended next milestone — S4b-R, the retained player record (Candidate B narrowed: the retained row and the
+reader contract only; no foreign key, no additional deletion behaviour, no new age rule).** *Why next, in plain
+language:* it is the one remaining step the Founder has already partly decided (the full birth date,
+`s4-deletion-decision.md` §10), it is the smallest coherent change left (one repository method, one view rule, one
+migration record, one rollback tool, with the readers **re-asserted** rather than rewritten), and it removes
+"fact 1" of §D.2 — account deletion deleting the row — from the path to every permanent `players(id)` key: after it,
+the audit foreign keys wait on engineering (A0) and on Q3 only, and S8a's `player_id` columns can be designed against a
+row that exists. It gives every retained audit row a real subject row, which is what decision O1 is for. *What it does
+not do:* it moves no blob out of the per-save serialisation (`requests`, `trials` and the rest are rewritten by every
+save exactly as today, §D.4) — S8a is the step that does, and it comes after.
+
+*Exact scope (`scoutbox-server/`, line numbers of `f0abd34`).*
+
+1. **`players.erase(id)`** in `repositories/identity.mjs`, called at `server.mjs:4273` inside the deletion unit in
+   place of `players.remove` (`identity.mjs:768–781`, today's hard delete). The row **stays** with `deleted_at` set
+   (the column exists since `0005`, `01_identity.sql:195`, written by nothing today), `name` replaced by one fixed
+   tombstone string, `birth_date` kept (**decided**), `country` kept or nulled per **Q1**, every other personal column
+   NULL (`email` among them, so the address is reusable exactly as after today's hard delete; `guardian_id` NULL),
+   `facets_json` emptied. The twelve `player_*` rows and the `guardian_children` rows are deleted **explicitly** (today
+   they cascade with the row; a retained row cascades nothing) and every guardian's `childIds` is spliced as `remove`
+   does (`:775`). The pairing-code revocation, session revocation, media queue, the request and trial tombstones, the
+   case/assessment/contact/open-trial name nulling, the m24–m29 hooks, the thread deletion (D-B) and the notification
+   deletion stay exactly where they are in the unit (`:4270–4309`). Nothing else about `deletePlayerData` changes.
+2. **The reader contract: a retained row is served by nothing that serves accounts.** `db.players`
+   (`collectionView(P)`, `identity.mjs:370`), `players.byId` (`:571`), `byGuardian` (`:573`), `count` (`:574`),
+   `guardians.linksOf` (`:793`), the identity snapshot read (`IDENTITY_SNAPSHOT.read`, `:143`) and the admin players
+   list exclude retained rows; **one explicit accessor** (`players.retained(id)` / `players.retainedIds()`) exists for
+   the deletion unit, the backup, the snapshot writer and the rollback tool, and nothing else calls it. Every reader
+   then sees what it sees today after a hard delete — a missing row — so the 41 `findPlayer(` sites (`server.mjs:694`:
+   `db.players.find`), the 17 `db.players` reads in `server.mjs`, the 159 `db.players` reads in 14 modules and the
+   101 `players.byId(` sites are **re-asserted, not rewritten**; the dead `deletedAt`/`removedAt` checks
+   (`m27/index.mjs:183, 597`) stay dead because the view never serves a retained row. The S4a allowlist and
+   per-audience view tests (`s4-readiness-review.md` §9 item 11) are the template for the re-assertion.
+3. **The identity snapshot carries retained rows through unchanged.** `IDENTITY_SNAPSHOT.replace` deletes every
+   `players` row and reinserts the candidate (`identity.mjs:205–207`); the retained rows are **captured before the
+   DELETE and reinserted after the candidate, byte-identical** (the S5 child-row precedent, A3 of §D.2a, applied to
+   one row set), or excluded from the DELETE — an engineering choice at implementation, proven by the exact-row check
+   below either way. The preflight (`validateCoreIdentity`, `:167`) never sees a retained row (it is not an account),
+   so **the under-18-without-valid-guardian refusal is unchanged for every live record and is not applied to retained
+   rows** — a retained minor's row has no guardian link by design. A snapshot or restore that lists a retained id
+   **as a live record** is refused (ids only, nothing written): a deleted account is not resurrected by a save.
+4. **Name snapshots on retained recruitment records** (§D.1 item 3; `s4-deletion-decision.md` §5 "Recruitment
+   records": `recruitmentCases.history[].byName`, offer and package guardian names, `applications`,
+   `campaignSubmissions`, `squadInvites`, `transitionCases`, `evidenceSuggestions`) are replaced by the tombstone
+   string **in the same unit** — recommended in scope as an engineering choice (it is the erasure the deletion already
+   performs where today's hooks reach, extended to the copies they miss); **excluded**: the commercial names
+   (`signings`, `invoices`, `vouches`, squad entries — `s4-deletion-decision.md` §8 item 4) and the audit free text,
+   excerpts and `ledger` message-row names (§8 item 3), which stay exactly as today pending qualified review.
+5. **Migration `0014`** (proposed name `0014_player_erasure`; the number is taken only when the step is approved): a
+   cutover record (counts only) and the per-table lifecycle statement for `players`; **no DDL change if Q1 is "keep"**
+   (`deleted_at` exists; `birth_date NOT NULL` is kept); if Q1 is "drop", a rebuild of `players` making `country`
+   nullable with a CHECK that a live row (`deleted_at IS NULL`) still carries it — the S4a/S5 create–copy–drop–rename
+   pattern. The S6b tool `safetyAuditRollback.mjs` refuses a file carrying `0014` (exit 4, the chain rule).
+6. **Failure behaviour.** The erase runs inside the existing deletion unit: a failure before COMMIT (a statement seam,
+   the real COMMIT) leaves the row live, the links, sessions and queue entries unchanged and the files on disk, exactly
+   as today; the retry lands everything once. A retained row is never created by anything but the deletion unit.
+   **A fact the runbook must state:** the migration runner skips recorded migrations and refuses none it does not know
+   (`repositories/database.mjs:31–35`), so the previous build (`f0abd34`) would **boot** a `0014` file and **serve a
+   retained row as a live account** — which is why going back is the copy-only tool, never "run the old build on the
+   file".
+7. **Rollback — copy-only, "preserved, not visible", stated as such** (§D.4 Candidate B): `scripts/playerErasureRollback.mjs`
+   copies the file, moves every retained row out of `players` into one table the previous build does not read,
+   removes the `0014` record, revalidates the copy and never touches the source; the re-upgrade restores the rows
+   exactly; proven by booting the actual **`f0abd34`** build on the copy (the retained ids absent from its routes and
+   its admin list, every live account identical, a new signup and a new deletion accepted there, this build then
+   re-upgrading the copy with the old build's writes and the preserved rows). The erased personal data cannot be
+   restored by any rollback — the deletion is honoured either way (`s4-readiness-review.md` §9, S4b row).
+8. **Backup and restore.** The admin backup carries retained rows under a key the previous build ignores, never inside
+   `players` (a backup restored on the previous build must not resurrect a retained row as an account); a restore into
+   a new directory imports them row for row; a backup listing a retained id inside `players` is refused at boot by
+   name.
+9. **Tests, written first and failing on the unchanged `f0abd34` tree** — a unit suite (`scripts/testPlayerErasure.mjs`):
+   the exact retained column set per Q1; the twelve child tables and the links empty for the id; `childIds` spliced;
+   `db.players`, `byId`, `byGuardian`, `count`, `linksOf`, the admin list and the snapshot read exclude the row and the
+   explicit accessor serves it; an **unchanged** snapshot save (the collection omitted, then supplied and repeated)
+   keeps every retained row byte-identical and advances the revision; a save listing the retained id as a live record
+   is refused atomically; a failure before COMMIT and the real COMMIT leave everything unchanged and the retry lands
+   it; the e-mail reusable after the erase; the under-18 refusal unchanged on live records — and a server suite
+   (`scripts/testPlayerErasureServer.mjs`): the real `DELETE /player/account` and `DELETE /guardian/children/:id`
+   (`server.mjs:4321–4337`) answer as today, every route that answers "removed" today answers the same, the retained
+   audit rows (Q4) are untouched, the admin backup, a restore into a new directory, SIGKILL and restart, the rollback
+   copy booted by the actual `f0abd34` build and the re-upgrade. The shortlist reader's 500 on a deleted player
+   (`s4-deletion-decision.md` §2, a defect in a route) is **unchanged** by this step and stays a separate fix.
+   Acceptance: both suites; both milestone gates with the six historical builds wired (`812e13b` or `2d7ddeb`,
+   `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`); the copy-only chain run in order on a synthetic file.
+
+*Exclusions (each a later, separately approved step):* no `REFERENCES players(id)` or `guardians(id)` anywhere
+(A0–A3 and Q3 untouched); no guardian deletion route; none of Q6's behaviours (push tokens, verification tokens,
+passport shares, dangling media ids, a deletion ledger row); no `wasMinorOn` or any new age rule (no reader needs one
+today; the first reader that does is the step that adds it, under Q1 and Q2); no child-status stamp (Q2); no change
+to any audit row (Q4) or to the block lift (Q5); no retention rule or period; no S8a table; no dirty-collection
+save.
+
+**The three categories, kept apart.**
+
+| Category | Items |
+|---|---|
+| **Already approved — not asked again** | the full birth date on the retained record (`s4-deletion-decision.md` §10); Q4, Q4b, Q5 (S6b); D-A, D-B (S7d); the under-18-without-valid-guardian migration refusal (unchanged for live records); the copy-only, nothing-lost rollback pattern (S5–S7, S6b) |
+| **Ordinary engineering choices — recommended here, decided at implementation, each proven by an exact-row test** | the tombstone string; the view exclusion with one explicit accessor rather than a flag every reader must check; capture-and-reinsert versus exclusion from the DELETE in the snapshot replace; explicit child and link deletion; the recruitment name-snapshot replacement in scope, commercial and audit text out; migration shape per Q1; the "preserved, not visible" rollback table; the backup key for retained rows; `wasMinorOn` deferred to its first reader |
+| **Founder decision required for this scope** | **Q1 only** (below). Q3 is **not** required: no foreign key is added, so the ids of players deleted before S4b stay the tolerant, counted references Q4 approved. Q6 is **not** required: the step excludes every additional behaviour, which is the "none" default of §D.5 as a scope statement, not an answer. Q2, Q7 are not touched |
+
+**Q1 — the one question (unchanged in substance from §D.5, re-asked because this step cannot be finished without it).**
+*May the two-letter country code stay on the retained record of a deleted player?* The erase method writes exactly the
+retained column set; `players.country` is `NOT NULL` (`01_identity.sql:158`); the code must not choose this silently.
+
+- **Keep (recommended).** The retained record is `id`, `deleted_at`, the tombstone name, `birth_date`, `country`.
+  Consequences: no `players` rebuild (the migration is a record and a lifecycle statement); a country-specific
+  majority threshold (18 by default; KR 19, TH 20, EG 21, SG 21 — `domain.mjs:7–14`) can later be applied to the
+  retained birth date without a knowingly wrong inference; one more identifier (two letters) is retained beside the
+  full birth date the Founder already chose, which is the more identifying of the two. Recommended because the chosen
+  full birth date is only usable for the question it was kept for if the threshold that applies to it is known.
+- **Drop.** The retained record omits `country`. Consequences: a `players` rebuild in the migration (`country`
+  nullable for retained rows, still required for live ones); any later status question about a deleted player in
+  KR, TH, EG or SG must **explicitly** answer "unknown" or apply the default of 18 — a product/privacy choice to be
+  made when that reader is added, not by the code; the least data retained.
+- Either way: the answer is a retention choice that the qualified privacy/legal review of `s4-deletion-decision.md` §8
+  still has to see; neither option establishes compliance; nothing here reopens the birth-date choice.
+
+**After S4b-R** (recorded, not proposed now): S8a (Candidate C) with Q7a/Q7b, or the A0 deferral together with the
+first permanent `RESTRICT` key once Q3 is decided — in the order the Founder chooses then.
