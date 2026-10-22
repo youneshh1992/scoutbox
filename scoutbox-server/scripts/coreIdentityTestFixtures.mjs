@@ -73,7 +73,8 @@ export const SESSIONS = (now = NOW) => [
   { token: 'legacy-player-token-000000000000000000000000000', sid: 'sid-player', kind: 'player', refId: 'pl-adult', createdAt: now - DAY },
   { token: 'legacy-staff-token-0000000000000000000000000000', sid: 'sid-staff', kind: 'org', refId: 'org-pro', userId: 'usr-1', createdAt: now - DAY },
 ];
-export const EXTRA = () => ({ requests: [{ id: 'req-1', playerId: 'pl-adult', status: 'pending', history: [] }], ledger: [] });
+/** `vouches`: the unrelated plain blob record the unit-of-work and rollback suites edit (`requests` is table-backed since S8a, migration 0015). */
+export const EXTRA = () => ({ requests: [], vouches: [{ id: 'vch-1', playerId: 'pl-adult', status: 'pending', history: [] }], ledger: [] });
 
 // ------------------------------------------------------------------ databases
 const BASE_DDL = 'CREATE TABLE IF NOT EXISTS collections (name TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);';

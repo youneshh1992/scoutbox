@@ -80,8 +80,13 @@ export const USERS_TABLE = {
    * would silently destroy every staff session whenever a snapshot tool wrote
    * the users collection back. A staff member who is genuinely gone from the
    * snapshot still takes their sessions with them, which is the intent.
+   * `prune: false` (S8a-core) leaves the deletions to a later `prune(sqlite, rows)`
+   * call: since migration 0015 the recruitment_requests rows reference org_users
+   * (RESTRICT), so a snapshot write prunes the requests it no longer lists before
+   * the staff rows they named — the same children-before-parents order every
+   * other prune of the snapshot write follows.
    */
-  replace(sqlite, rows) {
+  replace(sqlite, rows, { prune = true } = {}) {
     if (!cutOver(sqlite)) return false;
     const keep = [];
     const upsert = sqlite.prepare(`INSERT INTO org_users (id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json)
@@ -94,9 +99,15 @@ export const USERS_TABLE = {
       upsert.run(toParams(clone(row)));
       keep.push(row.id);
     }
+    if (prune) USERS_TABLE.prune(sqlite, rows);
+    return true;
+  },
+  /** Delete every staff row whose id is absent from `rows` (the second half of `replace`; the caller owns the transaction). */
+  prune(sqlite, rows) {
+    if (!cutOver(sqlite)) return;
+    const keep = (Array.isArray(rows) ? rows : []).filter(isStaffRow).map((r) => r.id);
     const del = sqlite.prepare('DELETE FROM org_users WHERE id = ?');
     for (const r of sqlite.prepare('SELECT id FROM org_users').all()) if (!keep.includes(r.id)) del.run(r.id);
-    return true;
   },
 };
 

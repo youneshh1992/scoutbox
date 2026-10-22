@@ -32,7 +32,7 @@ const ORGS = () => [
   { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, agencySettings: { licence: 'FIFA-1' } },
 ];
 // Since S4a the players and guardians are table-backed too: the fixture player is a valid record (the identity repositories validate it at the first boot's import).
-const fixtureDb = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2000-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], requests: [{ id: 'req-1', playerId: 'pl-1', status: 'pending', history: [] }] });
+const fixtureDb = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2000-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], vouches: [{ id: 'vch-1', playerId: 'pl-1', status: 'pending', history: [] }] });
 
 /** A cut-over store with the fixture saved once; returns everything a test needs. */
 function boot(dir, db = fixtureDb()) {
@@ -47,18 +47,18 @@ function boot(dir, db = fixtureDb()) {
 /** The multi-collection operation under test: a row insert, a row update, a facet change, blob edits on a held reference, a new blob, a session row. */
 function operation(t, { failBlob = false, afterCommit = null } = {}) {
   const pro = t.db.orgs.find((o) => o.id === 'org-pro');
-  const req1 = t.db.requests[0];
+  const req1 = t.db.vouches[0];
   let token = null;
   const result = t.unit(() => {
     t.layer.orgs.insert({ id: 'org-new', name: 'New FC', type: 'club', plan: 'Pro' });
     t.layer.orgs.update('org-pro', { suspended: true });
     pro.squad.push({ id: 'sq-op', name: 'Op', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
     req1.status = 'accepted'; req1.history.push('accepted');
-    t.db.requests.push({ id: 'req-2', playerId: 'pl-1', status: 'pending', history: [] });
+    t.db.vouches.push({ id: 'vch-2', playerId: 'pl-1', status: 'pending', history: [] });
     t.db.syntheticNotes = [{ id: 'syn-1', playerId: 'pl-1' }]; // a NEW blob collection (S7d: `channels` is the data layer's read-only view, so another name stands in)
     token = t.layer.sessions.create('player', 'pl-1').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
-    if (failBlob) t.db.requests[0].big = 1n; // JSON cannot serialise it: the blob write fails after the rows and facets were written
+    if (failBlob) t.db.vouches[0].big = 1n; // JSON cannot serialise it: the blob write fails after the rows and facets were written
     return 'done';
   });
   return { result, token };
@@ -68,14 +68,14 @@ function assertDatabaseUntouched(t, { unrelatedSaved }) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-new'").n, 0, 'no inserted row');
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0, 'no updated column');
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0, 'no flushed facet');
-  const requests = t.blob('requests');
-  assert.equal(requests.length, 1); assert.equal(requests[0].status, 'pending'); assert.deepEqual(requests[0].history, []);
+  const vouches = t.blob('vouches');
+  assert.equal(vouches.length, 1); assert.equal(vouches[0].status, 'pending'); assert.deepEqual(vouches[0].history, []);
   assert.equal(t.blob('syntheticNotes'), undefined, 'no new blob');
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player'").n, 0, 'no session row');
   const grass = JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-grass'").facets_json);
   assert.deepEqual(grass.lookingFor, unrelatedSaved ? ['GK'] : ['ST']);
   assert.equal(t.blob('players'), undefined, 'players are table-backed since S4a: never a blob');
-  assert.equal(t.blob('requests')[0].note, unrelatedSaved ? 'pending-before' : undefined);
+  assert.equal(t.blob('vouches')[0].note, unrelatedSaved ? 'pending-before' : undefined);
 }
 function assertMemoryRestored(t, refs) {
   const { pro, req1, hist, grass } = refs;
@@ -83,19 +83,19 @@ function assertMemoryRestored(t, refs) {
   assert.equal(pro.suspended, undefined, 'the column write is undone on the held record');
   assert.equal(pro.squad.length, 0, 'the facet push is undone in place');
   assert.equal(t.layer.orgs.byId('org-new'), null); assert.equal(t.db.orgs.length, 3); assert.equal(t.layer.orgs.count(), 3);
-  assert.equal(t.db.requests[0], req1, 'the same blob record object'); assert.equal(req1.status, 'pending');
+  assert.equal(t.db.vouches[0], req1, 'the same blob record object'); assert.equal(req1.status, 'pending');
   assert.equal(req1.history, hist, 'the same nested array object'); assert.equal(hist.length, 0);
-  assert.equal(t.db.requests.length, 1); assert.equal('syntheticNotes' in t.db, false, 'a key added by the operation is gone');
+  assert.equal(t.db.vouches.length, 1); assert.equal('syntheticNotes' in t.db, false, 'a key added by the operation is gone');
   // Unrelated edits made BEFORE the operation are still in memory and still pending.
-  assert.deepEqual(grass.lookingFor, ['GK']); assert.equal(t.db.requests[0].note, 'pending-before');
+  assert.deepEqual(grass.lookingFor, ['GK']); assert.equal(t.db.vouches[0].note, 'pending-before');
   assert.equal(t.layer.orgs.uncommitted(), 1, 'the pre-operation facet change is still eligible for the next save');
 }
 function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-new'").n, 1);
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 1);
-  const requests = t.blob('requests');
-  assert.equal(requests.length, 2); assert.equal(requests[0].status, 'accepted'); assert.deepEqual(requests[0].history, ['accepted']);
+  const vouches = t.blob('vouches');
+  assert.equal(vouches.length, 2); assert.equal(vouches[0].status, 'accepted'); assert.deepEqual(vouches[0].history, ['accepted']);
   assert.deepEqual(t.blob('syntheticNotes'), [{ id: 'syn-1', playerId: 'pl-1' }]);
   assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
   assert.deepEqual(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-grass'").facets_json).lookingFor, ['GK']);
@@ -103,8 +103,8 @@ function assertOperationPersisted(t, token) {
 }
 const prepare = (t) => {
   const pro = t.db.orgs.find((o) => o.id === 'org-pro'); const grass = t.db.orgs.find((o) => o.id === 'org-grass');
-  grass.lookingFor = ['GK']; t.db.requests[0].note = 'pending-before'; // unrelated edits, pending before the operation (players are a repository view since S4a)
-  return { pro, grass, req1: t.db.requests[0], hist: t.db.requests[0].history };
+  grass.lookingFor = ['GK']; t.db.vouches[0].note = 'pending-before'; // unrelated edits, pending before the operation (players are a repository view since S4a)
+  return { pro, grass, req1: t.db.vouches[0], hist: t.db.vouches[0].history };
 };
 
 // ------------------------------------------------------------- the memento itself
@@ -187,7 +187,7 @@ await test('unit of work: a process killed before COMMIT leaves the pre-operatio
   const layer2 = attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.equal(layer2.orgs.byId('org-crash'), null); assert.equal(db2.orgs.length, 3);
   assert.equal(db2.orgs.find((o) => o.id === 'org-pro').squad.length, 0);
-  assert.equal(db2.requests.length, 1); assert.equal(db2.requests[0].status, 'pending');
+  assert.equal(db2.vouches.length, 1); assert.equal(db2.vouches[0].status, 'pending');
   assert.equal(again.sqlite.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -197,12 +197,12 @@ await test('ordinary saves keep the S3 contract: a facet change in a FAILED ordi
   const dir = tempDir('uow-s3'); const t = boot(dir);
   const pro = t.db.orgs.find((o) => o.id === 'org-pro');
   pro.squad.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
-  t.db.requests[0].big = 1n; // a blob record (players are a repository view since S4a)
+  t.db.vouches[0].big = 1n; // a blob record (players are a repository view since S4a)
   assert.throws(() => t.store.save(t.snapshot()), /BigInt/);
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0);
   assert.equal(pro.squad.length, 1, 'an ordinary save failure does NOT undo memory: memory is the intended state, retried by the next save');
   assert.equal(t.layer.orgs.uncommitted(), 1);
-  delete t.db.requests[0].big;
+  delete t.db.vouches[0].big;
   t.store.save(t.snapshot());
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 1);
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
@@ -225,9 +225,9 @@ await test('unit of work: a nested unit joins the enclosing one (an inner failur
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-outer'").n, 0);
   // save() inside a unit does not open a second transaction; its blobs land with the unit.
   const rev = t.store.revision();
-  t.unit(() => { t.db.requests[0].status = 'absorbed'; t.store.save(t.snapshot()); t.layer.orgs.insert({ id: 'org-abs', name: 'Abs', type: 'club', plan: 'Pro' }); });
+  t.unit(() => { t.db.vouches[0].status = 'absorbed'; t.store.save(t.snapshot()); t.layer.orgs.insert({ id: 'org-abs', name: 'Abs', type: 'club', plan: 'Pro' }); });
   assert.equal(t.store.revision(), rev + 1, 'exactly one save revision');
-  assert.equal(t.blob('requests')[0].status, 'absorbed'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-abs'").n, 1);
+  assert.equal(t.blob('vouches')[0].status, 'absorbed'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-abs'").n, 1);
   // Asynchronous work: a SQLite transaction must never span an await.
   err = null;
   try { t.unit(async () => { t.layer.orgs.insert({ id: 'org-async', name: 'Async', type: 'club', plan: 'Pro' }); }); } catch (e) { err = e; }
@@ -273,10 +273,10 @@ await test('unit of work: snapshot mode refuses it (a tool writes whole snapshot
 
 await test('unit of work: capturing the memento of a synthetic snapshot is bounded in time', () => {
   const players = Array.from({ length: 1000 }, (_, i) => ({ id: `pl-${i}`, name: `P${i}`, media: [{ id: `m-${i}`, tags: { pace: 1 } }], attendance: [{ id: `a-${i}`, gps: { lat: 1, lng: 2 } }], stats: { goals: i } }));
-  const db = { players, requests: Array.from({ length: 2000 }, (_, i) => ({ id: `r-${i}`, history: ['a', 'b'] })) };
+  const db = { players, vouches: Array.from({ length: 2000 }, (_, i) => ({ id: `v-${i}`, history: ['a', 'b'] })) };
   const t0 = performance.now(); const m = captureGraph([db]); const captured = performance.now() - t0;
   const t1 = performance.now(); restoreGraph(m); const restored = performance.now() - t1;
-  console.log(`    (memento of 1,000 players + 2,000 requests: capture ${captured.toFixed(1)} ms, restore ${restored.toFixed(1)} ms, ${m.size} objects)`);
+  console.log(`    (memento of 1,000 players + 2,000 vouches: capture ${captured.toFixed(1)} ms, restore ${restored.toFixed(1)} ms, ${m.size} objects)`);
   assert.ok(captured < 2000 && restored < 2000);
 });
 
@@ -295,14 +295,14 @@ await test('review 1: a failure at BEGIN leaves no unit open — the work never 
   const dir = tempDir('uow-begin'); const t = boot(dir);
   const exec = t.store.sqlite.exec.bind(t.store.sqlite);
   let failBegin = true; let invoked = 0;
-  t.store.sqlite.exec = (sql) => { if (sql === 'BEGIN' && failBegin) { failBegin = false; throw new Error('injected BEGIN failure'); } return exec(sql); };
+  t.store.sqlite.exec = (sql) => { if (sql === 'BEGIN IMMEDIATE' && failBegin) { failBegin = false; throw new Error('injected BEGIN failure'); } return exec(sql); };
   assert.throws(() => t.unit(() => { invoked += 1; }), /injected BEGIN failure/);
   assert.equal(invoked, 0, 'the work must not run when the transaction could not start');
   assert.equal(t.store.inUnitOfWork(), false, 'no fictitious unit remains active');
   assert.equal(t.store.unit.active(), false); assert.equal(t.store.sqlite.isTransaction, false);
-  t.db.requests[0].status = 'ordinary edit';
+  t.db.vouches[0].status = 'ordinary edit';
   t.store.save(t.snapshot());
-  assert.equal(t.blob('requests')[0].status, 'ordinary edit', 'a later ordinary save is a real save, not absorbed by a phantom unit');
+  assert.equal(t.blob('vouches')[0].status, 'ordinary edit', 'a later ordinary save is a real save, not absorbed by a phantom unit');
   t.unit(() => { t.layer.orgs.insert({ id: 'org-after-begin', name: 'After', type: 'club', plan: 'Pro' }); });
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-after-begin'").n, 1, 'a later unit works');
   t.store.sqlite.exec = exec;
@@ -310,22 +310,22 @@ await test('review 1: a failure at BEGIN leaves no unit open — the work never 
   let restoreCalls = 0;
   t.store.setSaveHook({ flush() {}, snapshotState: () => 'state', restoreState() { restoreCalls += 1; throw new Error('restore exploded'); } });
   let err = null;
-  try { t.unit(() => { t.db.requests[0].status = 'doomed'; throw new Error('operation failed'); }); } catch (e) { err = e; }
+  try { t.unit(() => { t.db.vouches[0].status = 'doomed'; throw new Error('operation failed'); }); } catch (e) { err = e; }
   assert.match(err.message, /operation failed/, 'the caller sees the operation failure');
   assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(restoreCalls, 1);
   assert.ok(Array.isArray(err.unitOfWorkCleanup) && /restore exploded/.test(err.unitOfWorkCleanup.join(' ')), 'the cleanup failure is attached to the error');
   assert.equal(t.store.inUnitOfWork(), false, 'the unit is closed even though cleanup failed');
   assert.equal(t.store.sqlite.isTransaction, false);
-  assert.equal(t.db.requests[0].status, 'ordinary edit', 'the memento still restored the blob graph (the failing participant came after it)');
+  assert.equal(t.db.vouches[0].status, 'ordinary edit', 'the memento still restored the blob graph (the failing participant came after it)');
   assert.ok(t.store.unitOfWorkState().restoreFailures >= 1);
   t.store.save(t.snapshot());
-  assert.equal(t.blob('requests')[0].status, 'ordinary edit');
+  assert.equal(t.blob('vouches')[0].status, 'ordinary edit');
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
 await test('review 2: a nested (joined) unit that fails poisons the whole unit even when its caller catches the error — nothing commits, nothing is published, memory is restored, a later ordinary save persists no fragment', () => {
   const dir = tempDir('uow-swallow'); const t = boot(dir);
-  const req1 = t.db.requests[0];
+  const req1 = t.db.vouches[0];
   let events = 0; let outer = null; let innerSeen = null; let continued = false;
   try {
     t.unit(() => {
@@ -348,14 +348,14 @@ await test('review 2: a nested (joined) unit that fails poisons the whole unit e
   assert.equal(outer.unitOfWork, 'rolled_back');
   assert.equal(t.store.sqlite.isTransaction, false); assert.equal(t.store.inUnitOfWork(), false);
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0, 'the outer row write did not commit');
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-inner'").n, 0); assert.equal(t.blob('requests')[0].status, 'pending');
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-inner'").n, 0); assert.equal(t.blob('vouches')[0].status, 'pending');
   assert.equal(events, 0, 'no after-commit callback of a failed unit runs');
   assert.equal(t.db.orgs.find((o) => o.id === 'org-pro').suspended, undefined); assert.equal(t.layer.orgs.byId('org-inner'), null); assert.equal(req1.status, 'pending');
   t.store.save(t.snapshot());
-  assert.equal(t.blob('requests')[0].status, 'pending'); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
+  assert.equal(t.blob('vouches')[0].status, 'pending'); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
   // The same operation, retried without the failure, commits whole.
   t.unit(() => { t.layer.orgs.update('org-pro', { suspended: true }); t.unit(() => { req1.status = 'inner ok'; }); t.store.afterCommit(() => { events += 1; }); });
-  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1); assert.equal(t.blob('requests')[0].status, 'inner ok'); assert.equal(events, 1);
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1); assert.equal(t.blob('vouches')[0].status, 'inner ok'); assert.equal(events, 1);
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -398,7 +398,7 @@ await test('review 4: an async function is refused BEFORE it is invoked (top-lev
   const unhandled = await withUnhandled(async () => {
     // Top-level async work: refused before invocation.
     let err = null;
-    try { t.unit(async () => { invoked += 1; await tick(); t.layer.orgs.update('org-pro', { suspended: true }); t.db.requests[0].status = 'escaped'; }); } catch (e) { err = e; }
+    try { t.unit(async () => { invoked += 1; await tick(); t.layer.orgs.update('org-pro', { suspended: true }); t.db.vouches[0].status = 'escaped'; }); } catch (e) { err = e; }
     assert.match(err.message, /async function|synchronous/); assert.equal(invoked, 0, 'an identifiable async function never runs');
     assert.equal(t.store.inUnitOfWork(), false); assert.equal(t.store.sqlite.isTransaction, false);
     // Nested async work: refused before invocation, and the enclosing unit cannot commit.
@@ -407,7 +407,7 @@ await test('review 4: an async function is refused BEFORE it is invoked (top-lev
     assert.ok(err && err.unitOfWork === 'rolled_back'); assert.equal(invoked, 0); assert.equal(t.layer.orgs.byId('org-outer2'), null);
     await tick(); await tick();
     t.store.save(t.snapshot());
-    assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0); assert.equal(t.blob('requests')[0].status, 'pending');
+    assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0); assert.equal(t.blob('vouches')[0].status, 'pending');
     assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-outer2'").n, 0);
     // An UNEXPECTED thenable: a plain function that returns a promise cannot be told apart before it runs.
     // Its synchronous part ran inside the unit and is rolled back; the unit refuses; the promise is observed
@@ -476,11 +476,11 @@ await test('participant API: store.unit.join runs an operation inside the open u
   const boom = new Error('statement failed after a write');
   let caught = null; let outer = null; let published = 0; let result = null; let begins = 0;
   const exec = t.store.sqlite.exec.bind(t.store.sqlite);
-  t.store.sqlite.exec = (sql) => { if (sql === 'BEGIN') begins += 1; return exec(sql); };
+  t.store.sqlite.exec = (sql) => { if (sql === 'BEGIN IMMEDIATE') begins += 1; return exec(sql); };
   try {
     t.unit(() => {
       result = t.store.unit.join(() => { t.layer.orgs.update('org-pro', { suspended: true }); return 'joined'; });
-      try { t.store.unit.join(() => { t.db.requests[0].status = 'half'; throw boom; }); } catch (e) { caught = e; }
+      try { t.store.unit.join(() => { t.db.vouches[0].status = 'half'; throw boom; }); } catch (e) { caught = e; }
       t.store.afterCommit(() => { published += 1; });
     });
   } catch (e) { outer = e; }
@@ -488,7 +488,7 @@ await test('participant API: store.unit.join runs an operation inside the open u
   assert.equal(result, 'joined'); assert.equal(caught, boom, 'the error is rethrown unchanged');
   assert.ok(outer && /cannot commit/.test(outer.message) && outer.cause === boom, 'the unit fails at its end with the joined failure as cause');
   assert.equal(outer.unitOfWork, 'rolled_back'); assert.equal(published, 0); assert.equal(begins, 1, 'join opens no transaction of its own');
-  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0); assert.equal(t.db.requests[0].status, 'pending'); assert.ok(!t.layer.orgs.byId('org-pro').suspended, 'the joined row update is restored in memory too');
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0); assert.equal(t.db.vouches[0].status, 'pending'); assert.ok(!t.layer.orgs.byId('org-pro').suspended, 'the joined row update is restored in memory too');
   assert.equal(t.store.unit.active(), false); assert.equal(t.store.sqlite.isTransaction, false);
   // An asynchronous operation is refused before it is invoked, and that refusal poisons the unit too.
   let invoked = 0; let refusal = null; outer = null;

@@ -121,6 +121,7 @@ import { readonlyView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied, transaction } from './database.mjs';
 import { cloneJson, NON_FINITE_KEPT } from './outboxPush.mjs';
+import { readRequestsCollection } from './recruitment.mjs';
 
 export const CHANNELS_MIGRATION = '0012_channels';
 /** `meta` key holding the cutover record: counts only, never data. */
@@ -435,12 +436,14 @@ function writeChannels(sqlite, rows) {
   }
   return rows.length;
 }
-/** The retained `requests` blob as the file holds it: `undefined` when the collection does not exist, the parsed value otherwise (the callers require an array; `null` when the blob is not valid JSON). */
+/**
+ * The retained `requests` collection as the file holds it: the recruitment_requests
+ * rows once migration 0015 (S8a-core) is recorded, the blob before it — `undefined`
+ * when the collection does not exist, the parsed value otherwise (the callers require
+ * an array; `null` when the blob is not valid JSON).
+ */
 export function readRequestsBlob(sqlite) {
-  if (!tableExists(sqlite, 'collections')) return undefined;
-  const row = sqlite.prepare("SELECT value FROM collections WHERE name = 'requests'").get();
-  if (!row) return undefined;
-  try { return JSON.parse(row.value); } catch { return null; }
+  return readRequestsCollection(sqlite);
 }
 const requestIdsOf = (requests) => { const s = new Set(); for (const r of requests) if (isPlainObject(r) && typeof r.id === 'string') s.add(r.id); return s; };
 const existingIds = (sqlite, table) => (tableExists(sqlite, table) ? new Set(sqlite.prepare(`SELECT id FROM ${table}`).all().map((r) => r.id)) : new Set());

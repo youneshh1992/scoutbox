@@ -199,7 +199,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -2263,7 +2263,7 @@ function issueRecruitmentRequest({
     guardianId: minor ? (guardianId ?? player.guardianId) : null,
     contactChannel: null, // stays null until the player/guardian accepts
   };
-  db.requests.push(request);
+  recruitment.addRequest(request); // S8a-core: a row of recruitment_requests, written by the save below (the former db.requests.push)
   if (persistAfter) persistNow();
   ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: player.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name });
   if (minor) {
@@ -2344,7 +2344,7 @@ function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }
     reminders: {},
     rev: 1, revAt: at, revBy: null,
   };
-  db.trials.push(trial);
+  recruitment.addTrial(trial); // S8a-core: a row of trials with its children, written by the caller's save (the former db.trials.push)
   return trial;
 }
 
@@ -2895,7 +2895,7 @@ orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
         routedTo: minor ? 'guardian' : 'player', guardianId: minor ? p.guardianId : null,
         contactChannel: null,
       };
-      db.requests.push(request);
+      recruitment.addRequest(request); // S8a-core (the former db.requests.push; several pending invitations per player stay allowed — D2)
       ledgerAppend({ type: `trial_request${minor ? '_to_guardian' : ''}`, playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
       if (minor) {
         notify({ kind: 'guardian', id: p.guardianId }, 'open_trial', `Good news: ${req.org.name} would like to invite ${p.name} for a trial after the open day.`, request.id);
@@ -4283,8 +4283,9 @@ function deletePlayerData(playerId) {
   // is gone from it. The case's status is NOT touched here — deletion is not
   // a lifecycle event, and no path other than the lifecycle writer moves a
   // case (M23 P2). The case's copy of the name goes with the person.
-  db.requests = db.requests.map((r) => (r.playerId === playerId ? tombstoneRequest(r, at) : r));
-  db.trials = db.trials.map((t) => (t.playerId === playerId ? tombstoneTrial(t, at) : t));
+  // S8a-core: the tombstones replace the records in place in the recruitment
+  // repository (the former array replacements) and land in this unit's commit.
+  recruitment.tombstoneForPlayer(playerId, { request: (r) => tombstoneRequest(r, at), trial: (t) => tombstoneTrial(t, at) });
   for (const c of db.recruitmentCases ?? []) {
     if (c?.playerId === playerId) { c.playerName = null; c.subjectRemovedAt = at; }
   }
@@ -4637,7 +4638,7 @@ registerM12({
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
   db, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,

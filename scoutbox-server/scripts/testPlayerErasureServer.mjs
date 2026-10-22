@@ -123,7 +123,7 @@ const naming = (dir, pid) => snap(dir, (c) => Object.fromEntries(AUDIT_TABLES.ma
 await test('[cutover] a fresh boot records 0014_player_erasure last; DELETE /player/account and DELETE /guardian/children/:id keep EXACTLY the agreed row (id, the deletion instant, the full birth date, the country; fixed placeholders; NULL elsewhere), remove the child rows, links, session, pairing code and queue the media file as today; afterwards the account is served by no reader — /player/me 401, login PLAYER_NOT_FOUND, the club\'s view and list 404/absent, the guardian\'s children list without the child, the pairing code refused, a second deletion refused — the audit rows naming the person are byte-identical and the Q4 count unchanged while the new retained-reference count names them; /capabilities counts the retained records; a SIGKILL and a restart serve the same', async () => {
   const dir = tempDir('s4br-routes'); let S = await boot(dir);
   let cap = (await S.j('GET', '/capabilities')).body;
-  assert.equal(cap.dataLayer.migrations.at(-1), MIGRATION, `0014 recorded last: ${JSON.stringify(cap.dataLayer.migrations)}`);
+  assert.equal(cap.dataLayer.migrations.at(-2), MIGRATION, `0014 recorded after 0013 (S8a's 0015 follows it): ${JSON.stringify(cap.dataLayer.migrations)}`);
   assert.equal(cap.dataLayer.domains.players.retained, 0, 'the report counts retained records');
   const maria = await orgLogin(S);
   const { pid, token, file } = await signupAdult(S, 'Erased Adult');
@@ -232,18 +232,23 @@ await test('[cutover] the admin backup carries the retained records under player
   assert.equal(auditRows(restored), auditBefore, 'the audit rows restored row for row');
   await S.stop();
   const OLD = process.env.SCOUTBOX_PRE_S4BR_SERVER;
+  // S8a: the live file carries 0015 as well, which the pre-S4b-R build cannot boot at all (its boot-contract check finds the
+  // requests and trials collections absent and exits 1 — the S8a hazard, proven in testRecruitmentServer.mjs); the S4b-R
+  // rollback and the S4b-R hazard below are exercised on the S8a rollback copy, a 0014 file with the retained rows.
+  const s8a = tempDir('s4br-s8a'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), dir, s8a], { stdio: 'pipe' });
   if (OLD && fs.existsSync(OLD)) {
-    // The danger: the previous build booted DIRECTLY on (a copy of) the live file.
-    const direct = tempDir('s4br-direct'); fs.cpSync(dir, direct, { recursive: true });
+    // The danger: the previous build booted DIRECTLY on (a copy of) a 0014 file.
+    const direct = tempDir('s4br-direct'); fs.cpSync(s8a, direct, { recursive: true });
     const wrong = await boot(direct, {}, OLD);
     const served = await wrong.j('POST', '/auth/player/login', { playerId: a.pid });
     assert.equal(served.status, 200, `the previous build serves the retained row as a passwordless account: ${served.text}`); assert.equal(served.body.name, 'Deleted player');
     await wrong.stop(); rm(direct);
-    console.log('    (the pre-S4b-R build booted DIRECTLY on a copy of the live file served the retained row as an account — the documented danger; the rollback tool is the only way back)');
+    console.log('    (the pre-S4b-R build booted DIRECTLY on a copy of a 0014 file served the retained row as an account — the documented danger; the rollback tool is the only way back)');
   }
   // The copy-only rollback.
   const copy = tempDir('s4br-copy');
-  const out = execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), dir, copy], { encoding: 'utf8' });
+  try { execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), dir, tempDir('s4br-refused-0015')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4, 'the S4b-R tool refuses the live file carrying 0015 (a later schema step)'); }
+  const out = execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, copy], { encoding: 'utf8' }); // on the S8a tool's output
   assert.match(out, /2 retained/);
   assert.deepEqual(blobOf(copy, 'playersRetained'), RECORDS, 'the legacy blob: exactly the records'); assert.deepEqual(retainedRowsOf(copy), []); assert.equal(q1(copy, 'SELECT 1 AS one FROM players WHERE id = ?', a.pid), undefined);
   assert.ok(!applied(copy).includes(MIGRATION)); assert.equal(JSON.stringify(retainedRowsOf(dir)), JSON.stringify(retained), 'the source is untouched');
@@ -274,7 +279,7 @@ await test('[cutover] the admin backup carries the retained records under player
   } else {
     console.log('    (SCOUTBOX_PRE_S4BR_SERVER not set: the pre-S4b-R boots of the live copy and of the rollback copy were NOT exercised here)');
   }
-  rm(dir, tampered, restored, copy, bk.body.dir);
+  rm(dir, s8a, tampered, restored, copy, bk.body.dir);
 });
 
 console.log(`\n${passed} player-erasure server checks passed`);

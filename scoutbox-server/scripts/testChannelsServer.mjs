@@ -39,7 +39,7 @@ const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6bDir = (dir) => { const s4br = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), dir, s4br], { stdio: 'pipe' }); /* S4b-R: the file carries 0014; its rollback (copy-only, the retained records kept as a blob) goes first */ const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), s4br, out], { stdio: 'pipe' }); return out; };
+const preS6bDir = (dir) => { const s8a = tempDir('s8a-to-s4br'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), dir, s8a], { stdio: 'pipe' }); /* S8a: the file carries 0015; its rollback (copy-only, requests and trials written back as blobs) goes first */ const s4br = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, s4br], { stdio: 'pipe' }); /* then S4b-R (copy-only, the retained records kept as a blob) */ const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), s4br, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -80,7 +80,9 @@ const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveS
 const blobRows = (c, name) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
 // S6b: the ledger is a table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
 const ledgerRows = (dir) => { const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === 'ledger'); const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const r = s.prepare("SELECT value FROM collections WHERE name = 'ledger'").get(); if (r) return JSON.parse(r.value); return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger'").get() ? t.read(s) : []; } finally { s.close(); } };
-const requestsOf = (dir) => snap(dir, (c) => blobRows(c, 'requests') ?? []);
+// S8a: the requests are rows of recruitment_requests since 0015 — read the columns the assertions need when the blob is retired.
+const requestRows = (c) => blobRows(c, 'requests') ?? (c.get("SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'recruitment_requests'") ? c.all('SELECT id, status, contact_channel_id AS contactChannel FROM recruitment_requests ORDER BY seq') : null);
+const requestsOf = (dir) => snap(dir, (c) => requestRows(c) ?? []);
 const CHANNEL_KEYS = ['id', 'requestId', 'playerId', 'playerName', 'orgId', 'orgName', 'orgVerified', 'scoutName', 'scoutRole', 'counterparty', 'guardianId', 'createdAt', 'messages', 'readBy'];
 const MESSAGE_KEYS = ['id', 'ts', 'sender', 'text', 'attachment', 'clientMsgId'];
 /** Unknown own fields first, then the literal's present keys in the writer's order (the export convention). */
@@ -166,7 +168,7 @@ await test('[compat] both acceptance paths, all three sender kinds, both attachm
   const { requestId: reqG, channel: guardian } = await guardianThread(S, maria, amara);
   assert.equal(guardian.counterparty, 'guardian'); assert.equal(guardian.playerId, 'pl-guni'); assert.equal(Object.hasOwn(guardian, 'orgId'), false); assert.equal(Object.hasOwn(guardian, 'guardianId'), false, 'the guardian\'s view holds no guardianId either');
   // The thread and the request's answer are durable together (the acceptance route's one save).
-  const st = snap(dir, (c) => ({ threads: readStored(c), requests: blobRows(c, 'requests') }));
+  const st = snap(dir, (c) => ({ threads: readStored(c), requests: requestRows(c) }));
   assert.deepEqual(st.threads.map((c) => [c.id, c.requestId, c.playerId, c.orgId, c.counterparty, c.guardianId]), [[adult.id, reqA, 'pl-adeyemi', 'org-eastport', 'player', null], [guardian.id, reqG, 'pl-guni', 'org-eastport', 'guardian', 'gd-amara']], 'stored in insertion order with the ids the views withhold');
   assert.deepEqual(st.requests.filter((r) => [reqA, reqG].includes(r.id)).map((r) => [r.status, r.contactChannel]), [['accepted', adult.id], ['accepted', guardian.id]], 'the request\'s status and contactChannel in the same committed state');
   // The org's view carries orgId; the three audiences post.
@@ -277,7 +279,7 @@ await test('[compat] account deletion reproduces today\'s behaviour (D-B, as app
 await test('[cutover] the cutover and the save points: a fresh boot records 0012_channels after 0011 and creates channels, messages and message_attachments with no blob behind them (the data layer reports the domain); the thread opened by an acceptance is in the SAME revision as the request\'s answer and survives a SIGKILL right after the response; a message is in the file before the sender hears 201 (SIGKILL right after); a FAILED ORDINARY SAVE at the REAL COMMIT (internal:save.sqlite_commit) leaves the message in memory and absent from the table while the route answered 201, and the next save (a receipt) lands the message and the receipt ONCE — a later save does not replay; rows carry seq/position in post order', async () => {
   const dir = tempDir('s7d-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
   assert.ok(live(dir), 'the boot recorded 0012'); // fails on b67bce5: no such record
-  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).slice(-4)), ['0011_outbox_push', MIGRATION, '0013_safety_audit', '0014_player_erasure']); // S6b: 0013 follows on the same boot
+  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).slice(-5)), ['0011_outbox_push', MIGRATION, '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); // S6b: 0013 follows on the same boot; S4b-R and S8a after it
   for (const t of ['channels', 'messages', 'message_attachments']) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
   assert.equal(q1(dir, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0, 'no channels blob');
   const cap = (await S.j('GET', '/capabilities')).body; const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {}; assert.ok(domains.channels, `the data layer reports the channels domain (${Object.keys(domains).join(', ')})`);
@@ -286,7 +288,7 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0012
   const seqBefore = seqOf(dir);
   const ans = await S.j('POST', `/player/requests/${req.body.requestId}/respond`, { accept: true }, kola); assert.equal(ans.status, 200, ans.text);
   await S.kill();
-  const afterKill = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), threads: c.all('SELECT seq, id, request_id FROM channels ORDER BY seq'), request: blobRows(c, 'requests').find((r) => r.id === req.body.requestId) }));
+  const afterKill = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), threads: c.all('SELECT seq, id, request_id FROM channels ORDER BY seq'), request: requestRows(c).find((r) => r.id === req.body.requestId) }));
   assert.equal(afterKill.threads.length, 1, 'the thread is in the file although the process was killed right after the answer'); assert.equal(afterKill.threads[0].request_id, req.body.requestId); assert.equal(afterKill.request.status, 'accepted'); assert.equal(afterKill.request.contactChannel, afterKill.threads[0].id); assert.ok(afterKill.seq > seqBefore, 'one later revision carries both');
   const channelId = afterKill.threads[0].id;
   S = await boot(dir, { M13_FAST_RETRY: '' }); kola = await playerLogin(S, 'pl-adeyemi'); const maria2 = await orgLogin(S);

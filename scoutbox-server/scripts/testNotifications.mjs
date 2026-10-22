@@ -30,6 +30,7 @@ import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
 import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
+import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
 import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
@@ -38,7 +39,7 @@ import { registerDelivery } from '../m13/delivery.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump, filesDigest } from './coreIdentityTestFixtures.mjs';
 // S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(file, s4br); /* S4b-R: the file carries 0014; its rollback goes first */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
+const preS6b = (file) => { const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(file, s8a); /* S8a: the file carries 0015; its rollback (copy-only, requests and trials written back as blobs) goes first */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -66,7 +67,7 @@ const pref = (over = {}) => ({ audienceKind: 'org_user', audienceId: 'usr-1', ca
 
 /** A file at S6a (0001–0008 applied) carrying the notification blobs the way every pre-S7a build wrote them. */
 function s6File(dir, { notifications, notificationPrefs } = {}) {
-  const extra = { requests: [], ledger: [] };
+  const extra = { requests: [], vouches: [], ledger: [] };
   if (notifications !== undefined) extra.notifications = notifications;
   if (notificationPrefs !== undefined) extra.notificationPrefs = notificationPrefs;
   s3File(dir, { extra });
@@ -401,13 +402,13 @@ test('m13 notifyAction: a muted notification (the gate returned null) yields nul
 
 // ============================================================= the staged mode (the server's): a write lands with the blobs it announces
 /** Durable state read through an independent connection. */
-const durable = (dir) => ({ ids: idsOf(dir), rows: rowsOf(dir, 'notifications', 'seq').map((r) => [r.id, r.occurred_at, r.repeat_count, r.read]), prefs: rowsOf(dir, 'notification_pref_categories').map((r) => [r.audience_id, r.category, r.enabled]), requests: blobOf(dir, 'requests'), seq: seqOf(dir) });
+const durable = (dir) => ({ ids: idsOf(dir), rows: rowsOf(dir, 'notifications', 'seq').map((r) => [r.id, r.occurred_at, r.repeat_count, r.read]), prefs: rowsOf(dir, 'notification_pref_categories').map((r) => [r.audience_id, r.category, r.enabled]), requests: blobOf(dir, 'vouches'), seq: seqOf(dir) });
 
 test('staged mode (the server): a standalone create, coalesce, mark-read or preference write is visible in memory at once but is NOT durable ahead of the snapshot save that carries the blob edits made alongside it — the next save lands them together in ONE revision (independent connection); a failed save keeps them pending and the retry lands them; the write-ahead order of the file is the memory order', () => {
   const dir = tempDir('ntf-staged'); s6File(dir);
   const L = live(dir); L.save();
   const before = durable(dir);
-  L.db.requests.push({ id: 'req-announced', status: 'pending' }); // the action…
+  L.db.vouches.push({ id: 'req-announced', status: 'pending' }); // the action…
   const n = L.notifications.create({ audience: ORG_USER, type: 'request', text: 'A request landed.', refId: 'req-announced', category: 'messages', deferredPush: false }); // …and the notification announcing it
   assert.equal(L.notifications.byId(n.id)?.id, n.id, 'visible in memory at once'); assert.equal(L.notifications.pending(), 1);
   assert.deepEqual(durable(dir), before, 'nothing durable yet: the notification does not commit ahead of the request it announces');
@@ -440,7 +441,7 @@ test('staged mode (the server): a standalone create, coalesce, mark-read or pref
 /** Run `work` in a unit of work whose caller swallows the repository error; returns what the caller caught and what the unit threw. */
 const swallowing = (L, work) => {
   let caught = null; let outer = null;
-  try { L.store.unitOfWork(() => { L.db.requests.push({ id: 'unrelated-edit', status: 'pending' }); try { work(); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  try { L.store.unitOfWork(() => { L.db.vouches.push({ id: 'unrelated-edit', status: 'pending' }); try { work(); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
   return { caught, outer };
 };
 
@@ -448,11 +449,11 @@ test('staged mode inside a unit of work: the notification and the blob edit comm
   const dir = tempDir('ntf-unit'); s6File(dir);
   const L = live(dir); L.save();
   const pre = L.notifications.create({ audience: ORG_USER, type: 'case', text: 'pending before the unit', refId: null, category: null, deferredPush: false }); // pending, not yet saved
-  const seq0 = seqOf(dir); const memoryBefore = () => ({ ids: L.notifications.view.map((x) => x.id), requests: JSON.stringify(L.db.requests), unread: L.notifications.unreadCount('org_user', 'usr-1'), prefs: plain(L.notifications.prefsView), pending: L.notifications.pending() });
+  const seq0 = seqOf(dir); const memoryBefore = () => ({ ids: L.notifications.view.map((x) => x.id), requests: JSON.stringify(L.db.vouches), unread: L.notifications.unreadCount('org_user', 'usr-1'), prefs: plain(L.notifications.prefsView), pending: L.notifications.pending() });
   const m0 = memoryBefore();
   let effects = 0;
   const op = (fault) => L.store.unitOfWork(() => {
-    L.db.requests.push({ id: 'req-unit', status: 'pending' });
+    L.db.vouches.push({ id: 'req-unit', status: 'pending' });
     const n = L.notifications.create({ audience: ORG_USER, type: 'request', text: 'In the unit.', refId: 'req-unit', category: 'messages', deferredPush: false });
     L.notifications.updatePrefs('org_user', 'usr-1', { categories: { mentions: false }, emailIntent: true });
     L.notifications.markRead('org_user', 'usr-1');
@@ -477,7 +478,7 @@ test('staged mode inside a unit of work: the notification and the blob edit comm
   // The retry.
   const id = op(null);
   assert.equal(seqOf(dir), seq0 + 1, 'one commit, one revision'); assert.deepEqual(idsOf(dir), [pre.id, id], 'the pre-unit write landed first, inside the unit\'s commit');
-  assert.match(blobOf(dir, 'requests'), /req-unit/); assert.deepEqual(durable(dir).prefs, [['usr-1', 'mentions', 0]]); assert.deepEqual(rowsOf(dir, 'notifications', 'seq').map((r) => r.read), [1, 1]);
+  assert.match(blobOf(dir, 'vouches'), /req-unit/); assert.deepEqual(durable(dir).prefs, [['usr-1', 'mentions', 0]]); assert.deepEqual(rowsOf(dir, 'notifications', 'seq').map((r) => r.read), [1, 1]);
   assert.equal(effects, 1, 'the side effect ran once, after the commit'); assert.equal(L.notifications.pending(), 0);
   // The two-connection read: a brand-new connection sees exactly the committed rows.
   const o = openRaw(dir); assert.deepEqual(bare(o).forAudience('org_user', 'usr-1').map((x) => x.id), [id, pre.id]); o.close();
@@ -509,10 +510,10 @@ test('immediate mode (tools, tests, the migration): a mutation runs in a transac
   L.store.sqlite.exec("CREATE TEMP TRIGGER t_cat_ins BEFORE INSERT ON notification_pref_categories BEGIN SELECT RAISE(ABORT, 'injected category insert failure'); END");
   assert.throws(() => tool.updatePrefs('org_user', 'usr-9', { categories: { mentions: false }, emailIntent: true }), /injected category insert failure/);
   assert.equal(rowsOf(dir, 'notification_prefs').length, 0, 'standalone: the parent row went back with the failed category row'); assert.equal(L.store.sqlite.isTransaction, false);
-  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.requests);
+  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.vouches);
   const { caught, outer } = swallowing(L, () => tool.updatePrefs('org_user', 'usr-9', { categories: { mentions: false }, emailIntent: true }));
   assert.match(caught?.message ?? '', /injected category insert failure/); assert.ok(outer, 'the enclosing unit refused to commit'); assert.match(outer.message, /cannot commit.*injected category insert failure/s); assert.equal(outer.cause, caught); assert.equal(outer.unitOfWork, 'rolled_back');
-  assert.deepEqual(durable(dir), before); assert.equal(JSON.stringify(L.db.requests), memoryBefore); assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false);
+  assert.deepEqual(durable(dir), before); assert.equal(JSON.stringify(L.db.vouches), memoryBefore); assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false);
   L.store.sqlite.exec('DROP TRIGGER t_cat_ins');
   L.store.unitOfWork(() => tool.updatePrefs('org_user', 'usr-9', { categories: { mentions: false }, emailIntent: true }), { snapshot: L.snapshot });
   assert.deepEqual(durable(dir).prefs, [['usr-9', 'mentions', 0]]); assert.equal(seqOf(dir), before.seq + 1);
@@ -757,16 +758,16 @@ test('review of 7655bae, finding 1 — the default immediate participant (factor
 test('review of 7655bae, finding 2 — a participant precondition refused inside a unit of work is a participant FAILURE: an immediate or staged repository given store.unit but no registered save hook refuses a write (and an effect) THROUGH unit.join, so a caller that catches the refusal still cannot commit the unit — the unrelated edit is restored, SQLite, the revision and the mirror unchanged, no transaction open — and uncaught it fails the same way; after store.setSaveHook(repo.saveHook()) the same unit succeeds; outside a unit the standalone refusal (staged) and the own transaction (immediate) are unchanged', () => {
   const dir = tempDir('ntf-rv2-guard'); s6File(dir);
   const L = live(dir); L.save();
-  const seq0 = seqOf(dir); const blob0 = blobOf(dir, 'requests'); const mem0 = JSON.stringify(L.db.requests);
+  const seq0 = seqOf(dir); const blob0 = blobOf(dir, 'vouches'); const mem0 = JSON.stringify(L.db.vouches);
   const imm = createNotificationsRepository({ sqlite: L.store.sqlite, now: () => NOW, nextId, unit: L.store.unit });
   const stg = createNotificationsRepository({ sqlite: L.store.sqlite, now: () => NOW, nextId, unit: L.store.unit, staged: true });
   const row = (text) => ({ audience: PLAYER, type: 'message', text, refId: null, category: null, deferredPush: false });
-  const unchanged = (label) => { assert.equal(seqOf(dir), seq0, `${label}: the revision did not advance`); assert.equal(blobOf(dir, 'requests'), blob0, `${label}: the requests blob is unchanged`); assert.equal(JSON.stringify(L.db.requests), mem0, `${label}: the unrelated edit is restored in memory`); assert.equal(idsOf(dir).length, 0, `${label}: no row`); assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false); };
+  const unchanged = (label) => { assert.equal(seqOf(dir), seq0, `${label}: the revision did not advance`); assert.equal(blobOf(dir, 'vouches'), blob0, `${label}: the requests blob is unchanged`); assert.equal(JSON.stringify(L.db.vouches), mem0, `${label}: the unrelated edit is restored in memory`); assert.equal(idsOf(dir).length, 0, `${label}: no row`); assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false); };
   for (const [label, repo, work] of [['immediate write', imm, () => imm.create(row('guard'))], ['staged write', stg, () => stg.create(row('guard'))], ['staged effect', stg, () => stg.afterDurable(() => {})], ['immediate effect', imm, () => imm.afterDurable(() => {})]]) {
     const { caught, outer } = swallowing(L, work);
     assert.match(caught?.message ?? '', /save hook/, `${label}: the refusal was exercised`); assert.ok(outer, `${label}: the caught refusal still refuses the unit`); assert.equal(outer.unitOfWork, 'rolled_back'); assert.match(outer.message, /cannot commit.*save hook/s);
     unchanged(label); assert.equal(repo.count(), 0); assert.equal(repo.pending(), 0); assert.equal(repo.pendingEffects(), 0);
-    assert.throws(() => L.store.unitOfWork(() => { L.db.requests.push({ id: 'unrelated-edit' }); work(); }, { snapshot: L.snapshot }), /save hook/, `${label}: uncaught`);
+    assert.throws(() => L.store.unitOfWork(() => { L.db.vouches.push({ id: 'unrelated-edit' }); work(); }, { snapshot: L.snapshot }), /save hook/, `${label}: uncaught`);
     unchanged(`${label} (uncaught)`);
   }
   // Outside a unit: the staged instance refuses standalone, the immediate instance runs its own transaction.
@@ -775,8 +776,8 @@ test('review of 7655bae, finding 2 — a participant precondition refused inside
   // The retry after proper registration: the same unit succeeds, the coupled edit and both writes in one revision.
   L.store.setSaveHook(imm.saveHook()); L.store.setSaveHook(stg.saveHook());
   const ran = [];
-  L.store.unitOfWork(() => { L.db.requests.push({ id: 'req-with-notification' }); imm.create(row('imm')); stg.create(row('stg')); stg.afterDurable(() => { ran.push('stg'); }); imm.afterDurable(() => { ran.push('imm'); }); }, { snapshot: L.snapshot });
-  assert.equal(seqOf(dir), seq0 + 1); assert.equal(idsOf(dir).length, 2); assert.deepEqual(ran.sort(), ['imm', 'stg']); assert.ok(JSON.parse(blobOf(dir, 'requests')).some((r) => r.id === 'req-with-notification'));
+  L.store.unitOfWork(() => { L.db.vouches.push({ id: 'req-with-notification' }); imm.create(row('imm')); stg.create(row('stg')); stg.afterDurable(() => { ran.push('stg'); }); imm.afterDurable(() => { ran.push('imm'); }); }, { snapshot: L.snapshot });
+  assert.equal(seqOf(dir), seq0 + 1); assert.equal(idsOf(dir).length, 2); assert.deepEqual(ran.sort(), ['imm', 'stg']); assert.ok(JSON.parse(blobOf(dir, 'vouches')).some((r) => r.id === 'req-with-notification'));
   L.close(); rm(dir);
 });
 

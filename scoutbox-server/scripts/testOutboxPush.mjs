@@ -36,8 +36,10 @@ import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump } from '.
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
 import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
+import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
+import { RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
 // S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(file, s4br); /* S4b-R: the file carries 0014; its rollback goes first */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
+const preS6b = (file) => { const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(file, s8a); /* S8a: the file carries 0015; its rollback (copy-only, requests and trials written back as blobs) goes first */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -81,7 +83,7 @@ const routeRegister = (list, kind, refId, value, ts) => { const kept = list.filt
 
 /** A file at S7b (0001–0010 applied) carrying the three blobs the way the 6ca66ba build wrote them. */
 function s7bFile(dir, { outbox, pushLog, pushTokens, rawBlobs } = {}) {
-  const extra = { requests: [], ledger: [], notifications: [], dispatches: [], opsEvents: [], deliveryCallbacksSeen: [] };
+  const extra = { requests: [], vouches: [], ledger: [], notifications: [], dispatches: [], opsEvents: [], deliveryCallbacksSeen: [] };
   if (outbox !== undefined) extra.outbox = outbox;
   if (pushLog !== undefined) extra.pushLog = pushLog;
   if (pushTokens !== undefined) extra.pushTokens = pushTokens;
@@ -134,10 +136,10 @@ test('[cutover] migration 0011 (legacy blobs): every outbox record is imported i
   const protoToken = JSON.parse('{"kind":"guardian","refId":"gd-primary","token":{"__proto__":{"deviceMarker":"x"},"id":"dev-1"},"ts":5}');
   const pushTokens = [...list, { kind: 'org', refId: 'org-pro', token: 'ExponentPushToken[synthetic]', ts: NOW, extra: 'kept' }, protoToken];
   s7bFile(dir, { outbox, pushLog, pushTokens });
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).slice(-5), ['0010_dispatches', MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure'], '0011_outbox_push is registered after 0010; 0012_channels (S7d) and 0013_safety_audit (S6b) follow it');
-  assert.deepEqual([...TABLE_BACKED].slice(-12, -9), ['outbox', 'pushLog', 'pushTokens']); // followed by channels (S7d) and the eight S6b audit collections
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).slice(-6), ['0010_dispatches', MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment'], '0011_outbox_push is registered after 0010; 0012_channels (S7d), 0013_safety_audit (S6b), 0014 (S4b-R) and 0015 (S8a) follow it');
+  assert.deepEqual([...TABLE_BACKED].slice(-14, -11), ['outbox', 'pushLog', 'pushTokens']); // followed by channels (S7d), the eight S6b audit collections and the two S8a collections
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); assert.ok(applied(s).includes(MIGRATION));
+  assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); assert.ok(applied(s).includes(MIGRATION));
   // The outbox table: order, source, NULL = absent key.
   const o = s.prepare('SELECT seq, id, source, created_at, to_address, subject, text, transport, delivered, channel, provider_message_id, extra_json FROM outbox ORDER BY seq').all().map((r) => ({ ...r }));
   assert.deepEqual(o.map((r) => [r.seq, r.id, r.source]), [[1, 'mail-1', 'mailer'], [2, 'mail-2', 'delivery'], [3, 'mail-3', 'delivery'], [4, 'mail-9', 'mailer']]);
@@ -173,7 +175,7 @@ test('[cutover] migration 0011 (legacy blobs): every outbox record is imported i
 
 test('[cutover] migration 0011: a missing collection, an empty collection, an empty database and a first installation import nothing (never from the seed, never from memory); a rerun does nothing', () => {
   const none = tempDir('obp-mig-none'); s7bFile(none);
-  { const s = openRaw(none); assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); for (const t of ['outbox', 'push_log', 'push_tokens']) assert.equal(s.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0); assert.deepEqual(JSON.parse(meta(s, 'outboxPushCutover')).outbox, { imported: 0, withExtraFields: 0, bySource: {} }); s.close(); }
+  { const s = openRaw(none); assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); for (const t of ['outbox', 'push_log', 'push_tokens']) assert.equal(s.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0); assert.deepEqual(JSON.parse(meta(s, 'outboxPushCutover')).outbox, { imported: 0, withExtraFields: 0, bySource: {} }); s.close(); }
   const empty = tempDir('obp-mig-empty'); s7bFile(empty, { outbox: [], pushLog: [], pushTokens: [] });
   { const s = openRaw(empty); migrate(s); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM outbox').get().n, 0); assert.equal(blob(s, 'pushTokens'), undefined, 'the empty blob row is retired too'); s.close(); }
   const fresh = tempDir('obp-mig-fresh');
@@ -293,12 +295,12 @@ test('[cutover] staged mode (the server): an outbox record, a push record and a 
   const dir = tempDir('obp-staged'); s7bFile(dir, { pushTokens: [token('existing-primitive')] });
   const L = live(dir); L.save();
   const seq0 = seqOf(dir);
-  L.db.requests.push({ id: 'req-1' });
+  L.db.vouches.push({ id: 'req-1' });
   const a = L.repo.outbox.append(mail()); L.repo.pushLog.append(push()); const reg = L.repo.pushTokens.register(token('existing-primitive', { ts: NOW + 1 }));
   assert.equal(reg.removed, 1); assert.equal(L.repo.pending(), 3); assert.deepEqual(outboxIds(dir), [], 'nothing durable before the save'); assert.deepEqual(tokenRows(dir).map((r) => r[3]), [NOW - MIN], 'the old row is still the durable one'); assert.equal(L.db.pushTokens.length, 1, 'memory shows the re-registration at once');
   // A failed ordinary save (statement): pending state retained.
   L.store.sqlite.exec("CREATE TEMP TRIGGER rv_fx BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT, 'synthetic flush failure'); END");
-  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(outboxIds(dir), []); assert.equal(seqOf(dir), seq0); assert.equal(L.repo.pending(), 3); assert.equal(L.db.outbox.length, 1, 'memory is the intended state'); assert.equal(JSON.parse(blobOf(dir, 'requests')).some((r) => r.id === 'req-1'), false, 'the blob did not land without the rows');
+  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(outboxIds(dir), []); assert.equal(seqOf(dir), seq0); assert.equal(L.repo.pending(), 3); assert.equal(L.db.outbox.length, 1, 'memory is the intended state'); assert.equal(JSON.parse(blobOf(dir, 'vouches')).some((r) => r.id === 'req-1'), false, 'the blob did not land without the rows');
   L.store.sqlite.exec('DROP TRIGGER rv_fx');
   // A failed ordinary save (real COMMIT): pending state retained.
   L.store.sqlite.exec('CREATE TEMP TABLE rv_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE rv_child (parent_id TEXT NOT NULL REFERENCES rv_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER rv_commit AFTER INSERT ON push_log BEGIN INSERT INTO rv_child (parent_id) VALUES (\'missing-on-purpose\'); END');
@@ -306,14 +308,14 @@ test('[cutover] staged mode (the server): an outbox record, a push record and a 
   L.store.sqlite.exec('DROP TRIGGER rv_commit');
   // The retry: one revision, everything together, once.
   L.save();
-  assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(outboxIds(dir), ['mail-1']); assert.deepEqual(rowsOf(dir, 'push_log').map((r) => r.id), ['push-1']); assert.deepEqual(tokenRows(dir), [['player', 'pl-adult', '"existing-primitive"', NOW + 1]], 'the old row deleted, the new one last'); assert.ok(JSON.parse(blobOf(dir, 'requests')).some((r) => r.id === 'req-1')); assert.equal(L.repo.pending(), 0);
+  assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(outboxIds(dir), ['mail-1']); assert.deepEqual(rowsOf(dir, 'push_log').map((r) => r.id), ['push-1']); assert.deepEqual(tokenRows(dir), [['player', 'pl-adult', '"existing-primitive"', NOW + 1]], 'the old row deleted, the new one last'); assert.ok(JSON.parse(blobOf(dir, 'vouches')).some((r) => r.id === 'req-1')); assert.equal(L.repo.pending(), 0);
   L.save(); assert.equal(seqOf(dir), seq0 + 2); assert.equal(tokenRows(dir).length, 1, 'a later save does not replay');
   // A unit of work: together or not at all; a caught participant failure still poisons the unit; pre-unit writes survive.
   const pre = L.repo.pushLog.append(push({ id: 'push-pre' })); assert.equal(L.repo.pending(), 1);
-  const state = () => ({ outbox: plain(L.repo.outbox.exportRows()), push: plain(L.repo.pushLog.exportRows()), tokens: plain(L.repo.pushTokens.exportRows()), held: plain(a), requests: JSON.stringify(L.db.requests), durable: [outboxIds(dir), tokenRows(dir), seqOf(dir)] });
+  const state = () => ({ outbox: plain(L.repo.outbox.exportRows()), push: plain(L.repo.pushLog.exportRows()), tokens: plain(L.repo.pushTokens.exportRows()), held: plain(a), requests: JSON.stringify(L.db.vouches), durable: [outboxIds(dir), tokenRows(dir), seqOf(dir)] });
   const before = state();
   const unchanged = (label) => { assert.deepEqual(state(), before, label); assert.equal(L.repo.pending(), 1, `${label}: the pre-unit write is still pending`); assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false); };
-  const work = () => { L.db.requests.push({ id: 'req-u' }); L.repo.outbox.markDelivered('mail-1', false); L.repo.outbox.append(delivery({ id: 'mail-u' })); L.repo.pushTokens.register(token('existing-primitive', { ts: NOW + 9 })); L.repo.pushTokens.register(token({ o: 1 })); };
+  const work = () => { L.db.vouches.push({ id: 'req-u' }); L.repo.outbox.markDelivered('mail-1', false); L.repo.outbox.append(delivery({ id: 'mail-u' })); L.repo.pushTokens.register(token('existing-primitive', { ts: NOW + 9 })); L.repo.pushTokens.register(token({ o: 1 })); };
   assert.throws(() => L.store.unitOfWork(() => { work(); throw new Error('synthetic unit failure'); }, { snapshot: L.snapshot }), /synthetic unit failure/);
   unchanged('thrown'); assert.equal(a.delivered, true, 'the held view is back on the restored row');
   let caught = null; let outer = null;
@@ -329,15 +331,15 @@ test('[cutover] staged mode (the server): an outbox record, a push record and a 
   unchanged('real COMMIT failure');
   L.store.sqlite.exec('DROP TRIGGER rv_commit2');
   L.store.unitOfWork(work, { snapshot: L.snapshot });
-  assert.equal(seqOf(dir), before.durable[2] + 1); assert.deepEqual(outboxIds(dir), ['mail-1', 'mail-u']); assert.equal(rowsOf(dir, 'outbox')[0].delivered, 0); assert.deepEqual(rowsOf(dir, 'push_log').map((r) => r.id), ['push-1', 'push-pre'], 'the pre-unit write landed with the unit'); assert.deepEqual(tokenRows(dir).map((r) => r[2]), ['"existing-primitive"', '{"o":1}']); assert.ok(JSON.parse(blobOf(dir, 'requests')).some((r) => r.id === 'req-u')); assert.equal(L.repo.pending(), 0); assert.ok(pre.id);
+  assert.equal(seqOf(dir), before.durable[2] + 1); assert.deepEqual(outboxIds(dir), ['mail-1', 'mail-u']); assert.equal(rowsOf(dir, 'outbox')[0].delivered, 0); assert.deepEqual(rowsOf(dir, 'push_log').map((r) => r.id), ['push-1', 'push-pre'], 'the pre-unit write landed with the unit'); assert.deepEqual(tokenRows(dir).map((r) => r[2]), ['"existing-primitive"', '{"o":1}']); assert.ok(JSON.parse(blobOf(dir, 'vouches')).some((r) => r.id === 'req-u')); assert.equal(L.repo.pending(), 0); assert.ok(pre.id);
   // Hook registration is a precondition inside the joined boundary.
   const { createOutboxPushRepository } = needModule();
   const bareUnit = createOutboxPushRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit });
   const stagedUnit = createOutboxPushRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, staged: true });
   for (const [label, w] of [['immediate', () => bareUnit.pushLog.append(push({ id: 'push-h' }))], ['staged', () => stagedUnit.pushLog.append(push({ id: 'push-h' }))]]) {
     let c = null; let o = null;
-    try { L.store.unitOfWork(() => { L.db.requests.push({ id: 'req-h' }); try { w(); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; }
-    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(JSON.parse(blobOf(dir, 'requests')).some((r) => r.id === 'req-h'), false);
+    try { L.store.unitOfWork(() => { L.db.vouches.push({ id: 'req-h' }); try { w(); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; }
+    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(JSON.parse(blobOf(dir, 'vouches')).some((r) => r.id === 'req-h'), false);
   }
   assert.throws(() => stagedUnit.pushLog.append(push({ id: 'push-h' })), /save hook/, 'standalone staged write without the hook');
   assert.throws(() => createOutboxPushRepository({ sqlite: L.store.sqlite, staged: true }), /needs the store's participant API/);
@@ -385,10 +387,10 @@ test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file 
   assert.equal(tokenRows(dir).length, 7, 'an omitted collection leaves its table alone'); assert.equal(rowsOf(dir, 'push_log').length, 0, 'an explicit empty array clears'); assert.equal(blobOf(dir, 'pushTokens'), null, 'and never recreates a shadow blob');
   // Malformed: the whole save rolls back.
   const beforeDump = dump(tool.sqlite); const seq1 = tool.revision();
-  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, requests: [{ id: 'req-x' }], outbox: { id: 'x' } } }), /outbox: the snapshot collection must be an array/);
-  assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the save landed (requests included)');
+  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, vouches: [{ id: 'vch-x' }], outbox: { id: 'x' } } }), /outbox: the snapshot collection must be an array/); // vouches: an unrelated plain blob (requests are table-backed since S8a)
+  assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the save landed (vouches included)');
   const SECRET = 'SECRET-ADDRESS-77@example.test';
-  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, requests: [{ id: 'req-x' }], outbox: [mail({ id: 'mail-bad', to: SECRET, at: 5 })] } }), (e) => /OUTBOX_PUSH_IMPORT_BLOCKED/.test(e.message) && /matches both outbox shapes/.test(e.message) && !e.message.includes(SECRET));
+  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, vouches: [{ id: 'vch-x' }], outbox: [mail({ id: 'mail-bad', to: SECRET, at: 5 })] } }), (e) => /OUTBOX_PUSH_IMPORT_BLOCKED/.test(e.message) && /matches both outbox shapes/.test(e.message) && !e.message.includes(SECRET));
   assert.throws(() => tool.save({ ...snap, db: { ...snap.db, pushTokens: [token(SECRET, { kind: '' })] } }), (e) => /OUTBOX_PUSH_IMPORT_BLOCKED/.test(e.message) && /kind must be a non-empty string/.test(e.message) && !e.message.includes(SECRET));
   assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump);
   tool.save({ ...snap, db: { ...snap.db, outbox: [] } }); assert.deepEqual(outboxIds(dir), []); assert.equal(blobOf(dir, 'outbox'), null);
@@ -404,21 +406,21 @@ test('[cutover] rollback (copy-only): every outbox record (each in its writer\'s
   const outbox = [mail(), delivery({ to: null }), special]; const pushLog = [push(), push({ id: 'push-2', audience: { kind: 'org_user', id: 'usr-1' } })];
   s7bFile(src, { outbox, pushLog, pushTokens: list });
   { const s = openRaw(src); migrate(s); const repo = bare(s); repo.outbox.append(delivery({ id: 'mail-after', providerMessageId: 'fm_after' })); repo.pushTokens.register({ kind: 'org', refId: 'org-pro', token: ['after', { cutover: true }], ts: NOW + 50 }); s.close(); }
-  const before = { dump: dump(openRaw(src), { except: ['outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', 'collections', 'meta', 'data_migrations'] }), bytes: fs.statSync(dbFile(src)).size, saveSeq: seqOf(src), notifications: rowsOf(src, 'notifications', 'rowid'), dispatches: rowsOf(src, 'dispatches', 'rowid') };
+  const before = { dump: dump(openRaw(src), { except: ['outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', 'collections', 'meta', 'data_migrations', ...RECRUITMENT_TABLES] }), bytes: fs.statSync(dbFile(src)).size, saveSeq: seqOf(src), notifications: rowsOf(src, 'notifications', 'rowid'), dispatches: rowsOf(src, 'dispatches', 'rowid') };
   const s7cSrc = s7cCopy(src); // the S7d tool first (the file carries 0012); the S7c tool works on its output
   const out = tempDir('obp-rb-out');
   const result = rollbackOutboxPushCopy(dbFile(s7cSrc), out, { now: NOW });
-  assert.equal(result.output, dbFile(out)); assert.deepEqual(result.counts, { outbox: 4, pushLog: 2, pushTokens: 8 }); assert.equal(result.recordRemoved, true); assert.equal(result.saveSeq, before.saveSeq + 4, 'the S4b-R tool advanced the revision once, the S6b tool advanced the revision once, the S7d tool once, this tool once');
+  assert.equal(result.output, dbFile(out)); assert.deepEqual(result.counts, { outbox: 4, pushLog: 2, pushTokens: 8 }); assert.equal(result.recordRemoved, true); assert.equal(result.saveSeq, before.saveSeq + 5, 'the S8a tool advanced the revision once, the S4b-R tool once, the S6b tool once, the S7d tool once, this tool once');
   assert.equal(fs.statSync(dbFile(src)).size, before.bytes, 'the source is untouched'); assert.equal(seqOf(src), before.saveSeq); assert.ok(tableExistsIn(src, 'outbox'));
   const o = openRaw(out);
   assert.ok(!applied(o).includes(MIGRATION)); for (const t of ['outbox', 'push_log', 'push_tokens']) assert.equal(o.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), undefined); assert.equal(meta(o, 'outboxPushCutover'), undefined);
   const back = blob(o, 'outbox');
   assert.equal(JSON.stringify(back), JSON.stringify([mail(), delivery({ to: null }), extrasFirst(special, MAILER_KEYS), delivery({ id: 'mail-after', providerMessageId: 'fm_after' })]), 'every row in order, each in its literal, the post-cutover row included'); assert.ok(Object.hasOwn(back[1], 'to') && back[1].to === null); assert.deepEqual(Object.keys(back[1]), DELIVERY_KEYS);
   assert.deepEqual(blob(o, 'pushLog'), pushLog); const tokensBack = blob(o, 'pushTokens'); assert.deepEqual(tokensBack, [...list, { kind: 'org', refId: 'org-pro', token: ['after', { cutover: true }], ts: NOW + 50 }]); assert.equal(typeof tokensBack[0].token, 'number');
-  assert.equal(dump(o, { except: ['outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', 'collections', 'meta', 'data_migrations'] }), before.dump, 'every other table byte-identical'); assert.deepEqual(rowsOf(out, 'notifications', 'rowid'), before.notifications); assert.deepEqual(rowsOf(out, 'dispatches', 'rowid'), before.dispatches);
+  assert.equal(dump(o, { except: ['outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', 'collections', 'meta', 'data_migrations', ...RECRUITMENT_TABLES] }), before.dump, 'every other table byte-identical'); assert.deepEqual(rowsOf(out, 'notifications', 'rowid'), before.notifications); assert.deepEqual(rowsOf(out, 'dispatches', 'rowid'), before.dispatches);
   assert.equal(o.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   // Re-upgrade: the real migration brings the same rows back.
-  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); assert.deepEqual(rowsOf(out, 'outbox').map((r) => [r.id, r.source, r.to_address]), [['mail-1', 'mailer', ADDRESS], ['mail-2', 'delivery', null], ['mail-proto', 'mailer', 'synthetic@example.test'], ['mail-after', 'delivery', ADDRESS]]); assert.equal(rowsOf(out, 'push_tokens').length, 8); assert.equal(blob(o, 'pushTokens'), undefined);
+  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); assert.deepEqual(rowsOf(out, 'outbox').map((r) => [r.id, r.source, r.to_address]), [['mail-1', 'mailer', ADDRESS], ['mail-2', 'delivery', null], ['mail-proto', 'mailer', 'synthetic@example.test'], ['mail-after', 'delivery', ADDRESS]]); assert.equal(rowsOf(out, 'push_tokens').length, 8); assert.equal(blob(o, 'pushTokens'), undefined);
   o.close();
   // The S7b tool refuses the S7c file.
   const s7bOut = tempDir('obp-rb-s7b'); assert.throws(() => rollbackDispatchesCopy(dbFile(src), s7bOut), (e) => e.code === 'LATER_SCHEMA' && /0011_outbox_push/.test(e.message)); assert.deepEqual(fs.readdirSync(s7bOut), []);
@@ -465,7 +467,7 @@ test('[review of 40aa05c, F2] a mail destination the accepted build persisted as
   s7bFile(dir, { outbox: [mail(), arrayMail, delivery({ to: null }), twoMail, nestedMail] });
   assert.deepEqual(JSON.parse(blobOf(dir, 'outbox'))[1].to, ONE, 'the baseline: the 6ca66ba blob holds the array by value and type');
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure'], 'the array destination imports (the whole step, nothing refused)');
+  assert.deepEqual(migrate(s).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment'], 'the array destination imports (the whole step, nothing refused)');
   const cols = s.prepare('PRAGMA table_info(outbox)').all().map((c) => c.name); assert.ok(cols.includes('to_json'), 'the corrected table carries to_json');
   assert.deepEqual(s.prepare('SELECT id, to_address, to_json FROM outbox ORDER BY seq').all().map((r) => [r.id, r.to_address, r.to_json]), [['mail-1', ADDRESS, null], ['mail-arr', null, JSON.stringify(ONE)], ['mail-2', null, null], ['mail-two', null, JSON.stringify(TWO)], ['mail-nested', null, JSON.stringify(NESTED)]], 'a string in to_address, null as NULL/NULL, any other JSON value in to_json');
   const repo = bare(s);
@@ -489,7 +491,7 @@ test('[review of 40aa05c, F2] a mail destination the accepted build persisted as
   assert.ok(rollbackMod, 'repositories/outboxPushRollback.mjs exists'); const out = tempDir('obp-f2-out');
   assert.equal(rollbackMod.rollbackOutboxPushCopy(dbFile(s7cCopy(dir)), out, { now: NOW }).counts.outbox, 9);
   const back = JSON.parse(blobOf(out, 'outbox')); assert.deepEqual(back.map((m) => m.to), [ADDRESS, ONE, null, TWO, NESTED, ['synthetic-append@example.invalid'], ['synthetic-delivery@example.invalid'], null, ADDRESS]); assert.equal(JSON.stringify(back[1]), JSON.stringify(arrayMail));
-  { const o = openRaw(out); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); assert.deepEqual(o.prepare('SELECT to_json FROM outbox ORDER BY seq').all().map((r) => r.to_json), [null, JSON.stringify(ONE), null, JSON.stringify(TWO), JSON.stringify(NESTED), '["synthetic-append@example.invalid"]', '["synthetic-delivery@example.invalid"]', null, null]); o.close(); }
+  { const o = openRaw(out); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); assert.deepEqual(o.prepare('SELECT to_json FROM outbox ORDER BY seq').all().map((r) => r.to_json), [null, JSON.stringify(ONE), null, JSON.stringify(TWO), JSON.stringify(NESTED), '["synthetic-append@example.invalid"]', '["synthetic-delivery@example.invalid"]', null, null]); o.close(); }
   // A scratch database at the unaccepted 40aa05c build: refused by name, untouched, rolled back by the tool, re-upgraded.
   const stale = tempDir('obp-f2-stale'); s7bFile(stale, { outbox: [mail()], pushLog: [push()], pushTokens: [token('t')] });
   { const x = openRaw(stale); migrate(x); x.exec('BEGIN'); x.exec('DROP TABLE outbox'); x.exec(OUTBOX_DDL_40AA05C); x.prepare("INSERT INTO outbox (id, source, created_at, to_address, subject, text, transport, delivered) VALUES ('mail-1', 'mailer', ?, ?, 'Synthetic subject', 'T', 'dev-outbox', 1)").run(NOW - MIN, ADDRESS); x.exec('COMMIT'); x.close(); }
@@ -500,7 +502,7 @@ test('[review of 40aa05c, F2] a mail destination the accepted build persisted as
   const staleOut = tempDir('obp-f2-stale-out');
   assert.deepEqual(rollbackMod.rollbackOutboxPushCopy(dbFile(s7cCopy(stale)), staleOut, { now: NOW }).counts, { outbox: 1, pushLog: 1, pushTokens: 1 }, 'the rollback tool reads the 40aa05c shape (every destination there is a string or null)');
   assert.equal(JSON.parse(blobOf(staleOut, 'outbox'))[0].to, ADDRESS);
-  { const o = openRaw(staleOut); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); assert.ok(o.prepare('PRAGMA table_info(outbox)').all().some((c) => c.name === 'to_json'), 're-upgraded into the corrected table'); const r = bare(o); assert.equal(r.outbox.count(), 1); assert.equal(r.outbox.exportRows()[0].to, ADDRESS); o.close(); }
+  { const o = openRaw(staleOut); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); assert.ok(o.prepare('PRAGMA table_info(outbox)').all().some((c) => c.name === 'to_json'), 're-upgraded into the corrected table'); const r = bare(o); assert.equal(r.outbox.count(), 1); assert.equal(r.outbox.exportRows()[0].to, ADDRESS); o.close(); }
   rm(dir, out, stale, staleOut);
 });
 
@@ -598,7 +600,7 @@ test('[review of 78c14b9] numeric overflow INSIDE an accepted array destination 
   const tool = openStore(dir); const snap = tool.load(); assert.equal(JSON.stringify(snap.db.outbox.map((m) => m.to)), JSON.stringify([[null, 'synthetic-overflow@example.invalid'], [null, 'synthetic-overflow@example.invalid'], [[null], 'synthetic-nested@example.invalid'], null])); tool.save(snap); tool.sqlite.close();
   assert.ok(rollbackMod); const out = tempDir('obp-f2b-out'); assert.equal(rollbackMod.rollbackOutboxPushCopy(dbFile(s7cCopy(dir)), out, { now: NOW }).counts.outbox, 4);
   assert.equal(JSON.stringify(JSON.parse(blobOf(out, 'outbox')).map((m) => m.to)), JSON.stringify([[null, 'synthetic-overflow@example.invalid'], [null, 'synthetic-overflow@example.invalid'], [[null], 'synthetic-nested@example.invalid'], null]), 'the blob the accepted build reads: its own JSON');
-  { const o = openRaw(out); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure']); assert.deepEqual(rowsOf(out, 'outbox').map((r) => r.to_json), [OVER_JSON, OVER_JSON, NEST_JSON, null]); o.close(); }
+  { const o = openRaw(out); assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [MIGRATION, '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); assert.deepEqual(rowsOf(out, 'outbox').map((r) => r.to_json), [OVER_JSON, OVER_JSON, NEST_JSON, null]); o.close(); }
   rm(dir, out);
 });
 

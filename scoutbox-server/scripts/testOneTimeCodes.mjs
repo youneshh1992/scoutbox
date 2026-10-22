@@ -27,12 +27,13 @@ import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
 import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
 import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
+import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
 import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
 import { openStore } from '../store.mjs';
 import { createMailer, OUTBOX_SECRET_PLACEHOLDER } from '../adapters.mjs';
 import { NOW, TTL, tempDir, s3File, migrate, openRaw, applied, blob, meta, dump, filesDigest } from './coreIdentityTestFixtures.mjs';
 // S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(file, s4br); /* S4b-R: the file carries 0014; its rollback goes first */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
+const preS6b = (file) => { const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(file, s8a); /* S8a: the file carries 0015; its rollback (copy-only, requests and trials written back as blobs) goes first */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -54,7 +55,7 @@ const legacyChallenge = (over = {}) => ({ orgId: 'org-pro', email: 'recruitment@
 const legacyPairing = (over = {}) => ({ code: 'PAIR22', playerId: 'pl-child1', expiresAt: NOW + 10 * MIN, ...over });
 /** A file at S5 (0001–0007 applied) carrying the code blobs the way every pre-S6a build wrote them. */
 function s5File(dir, { emailChallenges, pairingCodes } = {}) {
-  const extra = { requests: [], ledger: [] };
+  const extra = { requests: [], vouches: [], ledger: [] };
   if (emailChallenges !== undefined) extra.emailChallenges = emailChallenges;
   if (pairingCodes !== undefined) extra.pairingCodes = pairingCodes;
   s3File(dir, { extra });
@@ -78,7 +79,7 @@ test('migration 0008 (legacy blobs): every live entry is imported as a hash — 
   const dir = tempDir('otc-mig');
   s5File(dir, { emailChallenges: [legacyChallenge(), legacyChallenge({ orgId: 'org-gone-but-expired', expiresAt: NOW - MIN })], pairingCodes: [legacyPairing(), legacyPairing({ code: 'OLD999', playerId: 'pl-child2', expiresAt: NOW - 1 })] });
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s, { now: NOW }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure'], '0008, then 0009 (S7a), 0010 (S7b) and 0011 (S7c) on the same run');
+  assert.deepEqual(migrate(s, { now: NOW }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment'], '0008, then 0009 (S7a), 0010 (S7b) and 0011 (S7c) on the same run');
   const challenge = s.prepare('SELECT * FROM email_challenges').all().map((r) => ({ ...r }));
   assert.deepEqual(challenge, [{ org_id: 'org-pro', email: 'recruitment@eastport.test', code_hash: hashCode('CHAL22'), expires_at: NOW + 20 * MIN, attempts: 0 }]);
   const pairing = s.prepare('SELECT * FROM pairing_codes').all().map((r) => ({ ...r }));
@@ -250,11 +251,11 @@ test('pairing as one unit of work: a failure after the consumption and a failure
 
 // ============================================================= review of b2a237e: the repository joins the store's unit of work
 /** Durable state read through an independent connection: the pairing rows, the `requests` blob and the save revision. */
-const durable = (dir) => ({ codes: rowsOf(dir, 'pairing_codes').map((r) => r.code_hash), challenges: rowsOf(dir, 'email_challenges').map((r) => [r.org_id, r.attempts]), requests: blobOf(dir, 'requests'), seq: seqOf(dir) });
+const durable = (dir) => ({ codes: rowsOf(dir, 'pairing_codes').map((r) => r.code_hash), challenges: rowsOf(dir, 'email_challenges').map((r) => [r.org_id, r.attempts]), requests: blobOf(dir, 'vouches'), seq: seqOf(dir) });
 /** Run `work` in a unit of work whose caller swallows the repository error; returns what the caller caught and what the unit threw. */
 const swallowing = (L, work) => {
   let caught = null; let outer = null;
-  try { L.store.unitOfWork(() => { L.db.requests.push({ id: 'unrelated-edit', status: 'pending' }); try { work(); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  try { L.store.unitOfWork(() => { L.db.vouches.push({ id: 'unrelated-edit', status: 'pending' }); try { work(); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
   return { caught, outer };
 };
 
@@ -263,7 +264,7 @@ test('review of b2a237e — a caught repository failure cannot commit partial wo
   const L = live(dir);
   const first = L.codes.issuePairingCode('pl-child1');
   L.store.save(L.snapshot());
-  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.requests);
+  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.vouches);
   assert.equal(before.codes.length, 1);
   L.store.sqlite.exec("CREATE TEMP TRIGGER t_pair_insert BEFORE INSERT ON pairing_codes BEGIN SELECT RAISE(ABORT, 'injected pairing insert failure'); END");
   // Standalone: the repository's own transaction rolls the deletion back with the failed insert.
@@ -278,7 +279,7 @@ test('review of b2a237e — a caught repository failure cannot commit partial wo
   assert.equal(outer.cause, caught, 'the unit names the swallowed error as its cause');
   assert.equal(outer.unitOfWork, 'rolled_back');
   assert.deepEqual(durable(dir), before, 'nothing durable changed: the old code, the requests blob and saveSeq');
-  assert.equal(JSON.stringify(L.db.requests), memoryBefore, 'the unrelated in-memory edit was restored');
+  assert.equal(JSON.stringify(L.db.vouches), memoryBefore, 'the unrelated in-memory edit was restored');
   assert.equal(L.store.sqlite.isTransaction, false, 'no transaction left open'); assert.equal(L.store.unitOfWorkState().active, false, 'the unit is closed');
   assert.deepEqual(L.codes.peekPairingCode(first.code), { playerId: 'pl-child1' }, 'the old code still works');
   // Retry, explicitly, once the fault is gone.
@@ -295,7 +296,7 @@ test('review of b2a237e — e-mail side, a multi-statement operation that alread
   const { code } = L.codes.issueEmailChallenge('org-pro', 'x@eastport.test');
   for (let i = 1; i < EMAIL_CHALLENGE_MAX_ATTEMPTS; i++) L.codes.noteFailedEmailAttempt('org-pro');
   L.store.save(L.snapshot());
-  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.requests);
+  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.vouches);
   assert.deepEqual(before.challenges, [['org-pro', EMAIL_CHALLENGE_MAX_ATTEMPTS - 1]]);
   L.store.sqlite.exec("CREATE TEMP TRIGGER t_mail_delete BEFORE DELETE ON email_challenges BEGIN SELECT RAISE(ABORT, 'injected challenge delete failure'); END");
   assert.throws(() => L.codes.noteFailedEmailAttempt('org-pro'), /injected challenge delete failure/);
@@ -305,7 +306,7 @@ test('review of b2a237e — e-mail side, a multi-statement operation that alread
   assert.match(caught?.message ?? '', /injected challenge delete failure/);
   assert.ok(outer, 'the enclosing unit refused to commit'); assert.match(outer.message, /cannot commit.*injected challenge delete failure/s); assert.equal(outer.unitOfWork, 'rolled_back');
   assert.deepEqual(durable(dir), before, 'the count is still nine, the blob and saveSeq unchanged');
-  assert.equal(JSON.stringify(L.db.requests), memoryBefore, 'memory restored');
+  assert.equal(JSON.stringify(L.db.vouches), memoryBefore, 'memory restored');
   assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false);
   assert.deepEqual(L.codes.checkEmailChallenge('org-pro', code), { status: 'ok', email: 'x@eastport.test' }, 'the challenge is still live at nine');
   L.store.sqlite.exec('DROP TRIGGER t_mail_delete');
@@ -320,8 +321,8 @@ test('review of b2a237e — the boundary itself: joined successes commit with th
   L.store.save(L.snapshot());
   // Joined successes.
   const seq0 = seqOf(dir);
-  const issued = L.store.unitOfWork(() => { const p = L.codes.issuePairingCode('pl-child1'); L.db.requests.push({ id: 'edit-ok' }); assert.deepEqual(L.codes.consumePairingCode(p.code), { playerId: 'pl-child1' }); return p; }, { snapshot: L.snapshot });
-  assert.ok(issued.code); assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.match(blobOf(dir, 'requests'), /edit-ok/); assert.equal(seqOf(dir), seq0 + 1, 'one commit, one revision');
+  const issued = L.store.unitOfWork(() => { const p = L.codes.issuePairingCode('pl-child1'); L.db.vouches.push({ id: 'edit-ok' }); assert.deepEqual(L.codes.consumePairingCode(p.code), { playerId: 'pl-child1' }); return p; }, { snapshot: L.snapshot });
+  assert.ok(issued.code); assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.match(blobOf(dir, 'vouches'), /edit-ok/); assert.equal(seqOf(dir), seq0 + 1, 'one commit, one revision');
   // An uncaught failure.
   assert.throws(() => L.store.unitOfWork(() => { L.codes.issuePairingCode('pl-child1'); throw new Error('ordinary failure'); }, { snapshot: L.snapshot }), /ordinary failure/);
   assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.equal(seqOf(dir), seq0 + 1);
@@ -330,13 +331,13 @@ test('review of b2a237e — the boundary itself: joined successes commit with th
     assert.equal(L.codes.consumePairingCode('NOPE22'), null); assert.equal(L.codes.consumeEmailChallenge('org-pro', 'NOPE22'), null);
     assert.deepEqual(L.codes.checkEmailChallenge('org-pro', 'NOPE22'), { status: 'none' }); assert.deepEqual(L.codes.noteFailedEmailAttempt('org-pro'), { attemptsRemaining: 0, invalidated: false });
     assert.equal(L.codes.revokePairingCodesFor('pl-nobody'), 0); assert.equal(L.codes.revokeEmailChallenge('org-pro'), 0); assert.deepEqual(L.codes.sweepExpired(), { emailChallenges: 0, pairingCodes: 0 });
-    L.db.requests.push({ id: 'edit-after-negatives' });
+    L.db.vouches.push({ id: 'edit-after-negatives' });
   }, { snapshot: L.snapshot });
-  assert.match(blobOf(dir, 'requests'), /edit-after-negatives/); assert.equal(seqOf(dir), seq0 + 2);
+  assert.match(blobOf(dir, 'vouches'), /edit-after-negatives/); assert.equal(seqOf(dir), seq0 + 2);
   // Validation is inside the boundary.
   const v = swallowing(L, () => L.codes.issuePairingCode(''));
   assert.match(v.caught?.message ?? '', /player id/); assert.ok(v.outer, 'a caught validation failure still poisons the unit'); assert.match(v.outer.message, /cannot commit.*player id/s);
-  assert.equal(seqOf(dir), seq0 + 2); assert.doesNotMatch(blobOf(dir, 'requests'), /unrelated-edit/);
+  assert.equal(seqOf(dir), seq0 + 2); assert.doesNotMatch(blobOf(dir, 'vouches'), /unrelated-edit/);
   // A raw transaction on the store's connection, outside any unit (a tool, a test): honoured, no BEGIN of its own, no unit inferred.
   L.store.sqlite.exec('BEGIN');
   const raw = L.codes.issuePairingCode('pl-child1');
@@ -465,7 +466,7 @@ test('rollback: the copy-only tool writes the empty code blobs the S5 build read
   assert.equal(applied(o).includes(ONE_TIME_CODES_MIGRATION), false); assert.equal(meta(o, ONE_TIME_CODES_CUTOVER_META), undefined);
   assert.deepEqual([blob(o, 'pairingCodes'), blob(o, 'emailChallenges')], [[], []]);
   for (const t of ['players', 'guardians', 'orgs', 'sessions', 'org_users', 'guardian_children']) assert.equal(JSON.stringify(o.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()), (() => { const s = openRaw(src); try { return JSON.stringify(s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()); } finally { s.close(); } })(), `${t} untouched`);
-  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure'], 're-upgrade: 0008 runs again on the empty blobs (0009, 0010 and 0011 follow, as the S7a, S7b and S7c copies had removed them)'); assert.equal(o.prepare('SELECT COUNT(*) AS n FROM pairing_codes').get().n, 0);
+  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment'], 're-upgrade: 0008 runs again on the empty blobs (0009, 0010 and 0011 follow, as the S7a, S7b and S7c copies had removed them)'); assert.equal(o.prepare('SELECT COUNT(*) AS n FROM pairing_codes').get().n, 0);
   o.close();
   const s5out = tempDir('otc-rb-s5'); const s5out2 = tempDir('otc-rb-s5b');
   assert.throws(() => rollbackPlayerSubrecordsCopy(dbFile(src), s5out), (err) => err.code === 'LATER_SCHEMA' && /0008_one_time_codes/.test(err.message)); assert.deepEqual(fs.readdirSync(s5out), []);

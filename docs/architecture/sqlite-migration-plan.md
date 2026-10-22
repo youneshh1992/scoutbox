@@ -1520,6 +1520,10 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
 
 ### S8 — Recruitment core (file 02: 55 tables)
 
+> **S8a-core is implemented** (22 October 2026, migration `0015_recruitment`, on the design of §D.7 accepted at
+> `d0f0205` under Q7a/Q7b/Q7c) and **awaits independent acceptance** — §D.8. S8b, S8c and S8d are not started. The
+> bullets below are the original plan of the whole step and are kept as written.
+
 - **Objective.** Requests, trials, cases and rooms, decisions and snapshots, contacts,
   offers, signing packages, signings, follow-ups and outcome reports live; the shared
   `idempotency_keys` table replaces every `keys{}` structure; `players[].trialReports`
@@ -2567,6 +2571,12 @@ rule, foreign key, guardian lifecycle change, field or migration identifier was 
 
 ### D.7 After the acceptance of S4b-R at `9b109dc` (21 October 2026, from the code at `9b109dc`) — the next implementation milestone and the decisions it needs
 
+**Superseding note (22 October 2026).** The design below, as corrected three times, was independently accepted at
+`d0f0205`, the Founder answered Q7a, Q7b and Q7c (verbatim in §D.8.1), and S8a-core is **implemented** behind migration
+`0015_recruitment` — **awaiting independent acceptance**. §D.8 is the implementation record; the statements in this
+section that say "not started", "not reserved", "unanswered" and "awaiting independent review" describe the state at
+`d0f0205` and are kept as the record of that state.
+
 **Status.** S4b-R (the retained player record, migration `0014_player_erasure`) and its F1 correction are independently
 accepted at `9b109dc41f44159b082dd261b2de78a2bab13762` (`s4-readiness-review.md` §12.5). S6b stays accepted at `f0abd34`,
 S7 at `4f954ad`. Fourteen migrations are registered (`repositories/index.mjs:56`, `0001`–`0014`); **the next free
@@ -3004,3 +3014,302 @@ itself awaiting independent review and is not yet put to the Founder.**
 
 All probes are synthetic and disposable, kept outside the tracked source; nothing was added to the application, the
 schema file, a migration or a test.
+
+### D.8 S8a-core as implemented (22 October 2026, one commit on `feat/sqlite-schema` on top of `d0f0205`; written while AWAITING INDEPENDENT ACCEPTANCE — implemented, not accepted)
+
+**Status.** S8a-core — `requests` and `trials` as tables (`recruitment_requests`, `request_trial_slots`, `trials` and
+its eleven owned child tables, `idempotency_keys`; `channels` rebuilt with the real `request_id` key) — is
+**implemented** behind migration `0015_recruitment` (REGISTERED, `repositories/index.mjs`), on the design of §D.7 as
+corrected three times and **independently accepted at `d0f0205`** (the review of `d0f0205` accepted the parked-release
+design of §D.7.5 and closed the D1, D2, D3, case-handoff and partial-save findings; nothing in §D.7 is changed by this
+section — it records what was built against it). The implementation is **not independently accepted**; it is not
+production, security, legal-compliance or deployment approval; **S8b is not started; the full migration is not
+complete; the whole-snapshot-write objective is not met** (§D.8.7). The next free migration identifier is `0016`.
+
+#### D.8.1 Authorisation — the three answers, verbatim
+
+Asked after the design acceptance at `d0f0205`, answered by the Founder on 22 October 2026 before any source change,
+recorded here and not to be asked again:
+
+| Decision | The Founder's answer, verbatim | Meaning in the implementation |
+|---|---|---|
+| **Q7a** — the player references on recruitment rows | **"Approve tolerant (Recommended)"** | `recruitment_requests.player_id` and `trials.player_id` carry no key; a live id resolves, a retained id resolves to the retained record, a historically missing id is preserved and **counted** (`meta.recruitmentCutover.players.{live, retained, missing}` at import; `/capabilities` `dataLayer.domains.recruitment.unresolvedPlayerReferences` and `retainedPlayerReferences` live) — never refused, never given a fabricated record, never deleted |
+| **Q7b** — the two case references | **"Approve strict checks (Recommended)"** | `case_id` on both tables carries no key until S8b; every write (`addRequest`, `addTrial`, the flush) and every import or snapshot refuses with ids only (`RECRUITMENT_CASE_MISSING`) a case id that is not in the FINAL `recruitmentCases` collection (the supplied one, or the retained blob), and the final state is asserted on every save that touches either table, the cases blob or the identity pair |
+| **Q7c** — the guardian references | **"Approve strict (Recommended)"** | `guardian_id`, `recipient_guardian_id` (requests) and `recipient_guardian_id` (trials) carry no key (the drafted `SET NULL` would fire at every identity rewrite); a write or import naming a guardian that is not in the `guardians` table is refused with ids only (`RECRUITMENT_GUARDIAN_MISSING`); the final state is asserted on every save that touches either table or rewrites the identity pair — an identity-only rewrite that removes the guardian a minor's invitation names is refused whole |
+
+Preserved, not asked again: D-A (`channels.request_id`, now converted into the real key), D-B (a deleted player's
+threads deleted explicitly), the full birth date and the country code on the retained record, Q4/Q4b/Q5 (the audit
+tables), the legacy-minor stop rule, the copy-only rollback pattern, today's deletion behaviour (tombstones in place).
+Still open, untouched: Q2, Q3, Q6, O2, a product-wide one-pending rule for invitations (the open-day route keeps its
+several pending invitations — D2), the whole-snapshot-write objective.
+
+#### D.8.2 What was built
+
+- `repositories/recruitment.mjs` — the shapes (the writers' literals key for key), the generated DDL
+  (`RECRUITMENT_DDL`, sixteen definitions with `CHANNELS_DDL_WITH_KEY`), the mapping engine (encode/decode with
+  `absent_keys_json`, `offtype_json`, `extra_json`, `raw_json`), the validation (`validateRequest`, `validateTrial`,
+  `validateCollections` — ids only), the six phases (`phases123`, `prune`, `assertRecruitmentConsistent`), the
+  whole-snapshot access (`RECRUITMENT_SNAPSHOT.read/replace/prune`), the import (`importRecruitmentBlobs`) and the
+  repository (`createRecruitmentRepository`: `requestsView`, `trialsView`, `addRequest`, `addTrial`,
+  `tombstoneForPlayer`, `trialReportsFor`, `exportRequests`, `exportTrials`, `counts`, `pending`, the save hook with
+  `flush`/`commit`/`rollback`/`snapshotState`/`restoreState`).
+- `repositories/migrations/0015_recruitment.mjs` — runs after `0014` inside the runner's one transaction with foreign
+  keys OFF (the `channels` rebuild drops a table `messages` references; `PRAGMA foreign_key_check` must be empty before
+  COMMIT): creates the fifteen tables, imports the file's `requests` and `trials` blobs through the repository's own
+  validation (never from the seed, never from memory), rebuilds `channels` with the key (every thread, message and
+  attachment copied back with its seq/position — byte-identical, tested), retires the two blob rows, records counts
+  only in `meta.recruitmentCutover`. Any refusal aborts the step with `RECRUITMENT_IMPORT_BLOCKED` and the specific
+  refusal in the detail (an invalid entry, `PAIR_MISMATCH`, `RECRUITMENT_CASE_MISSING`, `RECRUITMENT_GUARDIAN_MISSING`,
+  `RECRUITMENT_ORG_MISSING`, `RECRUITMENT_USER_MISSING`), ids and positions only; the runner rolls back and the next boot
+  refuses the same way.
+- `repositories/recruitmentRollback.mjs`, `scripts/recruitmentRollback.mjs` (`npm run rollback:recruitment`) — §D.8.6.
+- `repositories/index.mjs` — `0015` registered; `requests` and `trials` in `TABLE_BACKED`; `readTableBacked` reads
+  both from the tables; `writeTableBacked` runs phases 1–3 after the media queue, the channels replace (phase 4), the
+  request prune (phase 5) before the staff and organisation prunes, and phase 6 at the end; `attachDataLayer` attaches
+  the recruitment repository BEFORE the channels repository (so a thread's request row lands in the same save before the
+  thread row), drops the in-memory arrays (a restored backup's blob is what the migration imported; a stale copy is
+  reported and its blob row deleted), defines `db.requests` / `db.trials` as the read-only array views, late-binds the
+  identity repository's `trialReports` accessor to `recruitment.trialReportsFor`, and reports the domain in
+  `/capabilities` (`mode: 'live'`, row counts, pending writes, the two player-reference counts, the reference policy).
+- Callers converted (every route payload unchanged): `server.mjs` — the direct invitation (`recruitment.addRequest`),
+  the open-day outcome route (`addRequest`), `issueAcceptedTrial` (`addTrial`), the deletion unit
+  (`recruitment.tombstoneForPlayer` in place of the two array replacements; `tombstoneRequest`/`tombstoneTrial` stay the
+  writers); `m13/enterprise.mjs` — the backup exports `requests` and `trials` through the repository (detached copies in
+  the legacy shapes). Every other reader and in-place writer (twenty-five modules) is untouched: the records the views
+  hold are the mutable objects those modules edit, and the next save's flush writes the changed ones.
+- `repositories/channels.mjs` — `readRequestsBlob` reads the table once `0015` is recorded (the channel checks keep their
+  meaning); `repositories/identity.mjs` — the trialReports reconciliation reads the trials from the tables
+  (`readTrialsCollection`) once `0015` is recorded; `repositories/users.mjs` — `replace(…, { prune: false })` and
+  `prune()` (§D.8.5); `store.mjs` — `BEGIN IMMEDIATE` (§D.8.5).
+- `docs/architecture/sql/02_recruitment.sql` amended to the implemented sixteen definitions (the rest of the file stays a
+  draft); `03_messaging_safety_audit.sql` carries the `channels` key; `scripts/testSchemaDdl.mjs` compares the sixteen
+  tables with the migration column for column and index for index.
+
+#### D.8.3 The six phases, as implemented (plan §D.7.5, one algorithm for the import, a restore, a flush and a snapshot)
+
+1. **Requests, back-reference parked** — `INSERT … ON CONFLICT(id) DO UPDATE`; `trial_id` NULL on insert; a survivor keeps
+   its stored `trial_id` only when it equals the final one (`CASE WHEN … IS @trial_id THEN … ELSE NULL END`); slots and
+   keys rewritten (delete, insert in list order).
+2. **Trials** — (a) departures = stored trials not supplied or whose `request_id` differs: `trial_reports`,
+   `trial_history` and the owner's `idempotency_keys` rows deleted first, then the row (the cascades take the rest,
+   `SET NULL` clears the request that named it); (b) releases = survivors holding a `trials_one_open_per_case` slot whose
+   final row does not hold that same slot: `UPDATE trials SET case_id = NULL` — never a delete; (c) arrivals: every
+   supplied (or, in a flush, every changed) trial upserted with its final case and state, its children rewritten in list
+   order.
+3. **Requests, back-reference assigned** — `UPDATE … SET trial_id = <final>` for every supplied (or changed) request.
+4. **Channels** — the S7d replace, its key real; in a flush the channels repository's own hook, registered after.
+5. **Requests pruned** — stored requests no longer listed; a thread still naming one is refused first with ids
+   (`CHANNEL_REQUEST_MISSING`, the message the S7d check used), a trial still naming one by the pre-write check
+   (`PAIR_MISMATCH`, ids) or the `RESTRICT` key.
+6. **Final-state assertions** — the pair (`r.trial_id IS NOT t.id` only where the request's `trialId` key is PRESENT:
+   the pre-P4B pair — a request without the key beside its trial — is tolerated and counted as `legacyPairs`), every
+   `case_id` in the final `recruitmentCases` (Q7b), every guardian column in the final `guardians` (Q7c), every org and
+   staff id (ids first, then the keys). A refusal throws with ids only inside the save transaction.
+
+A **flush** (server mode) writes only the records whose committed fingerprint (`JSON.stringify` of the record, taken at
+the last COMMIT) differs, removed ids pruned, then asserts the final state against the live `recruitmentCases`; a failed
+ordinary save keeps the records as they are and the next save lands them once (fingerprints follow COMMIT only); an
+aborted unit of work restores both mirrors through the graph memento — every record, nested object and array by
+identity, so a held `trial.schedule` reads the pre-unit value — and the edits pending before the unit stay pending.
+Proven in `scripts/testRecruitment.mjs` (both trial orders, the unchanged save byte-identical, replacement, swap,
+completion/cancellation then a new open trial in the same case in both orders, re-entry only when the holder leaves,
+every case-only change with `requests` omitted equal to the full save, the deliberate removal, two open trials refused in
+both orders, missing request/trial, pair mismatch, a new trial for a request naming null, reassignment with requests
+omitted, missing case supplied or retained — a cases-only change included —, missing guardian supplied or by an
+identity-only rewrite, a request removed under its trial or its thread, a channel naming a request outside the table, a
+malformed collection; the statement failure, the real COMMIT failure, the joined failure, the caught participant
+refusal; held nested views; the hook-registration precondition).
+
+#### D.8.4 The lossless mapping, as implemented (§D.7.3, D3)
+
+Every scalar of the writer's literal is a column of the same nullability the writer has — no `NOT NULL DEFAULT`, no
+vocabulary or length `CHECK` (a storage step changes no product rule; the identifiers the keys need are `NOT NULL`);
+every known nested object (`trialDetails`, `trialDetails.private`, `recipient`, `schedule`, `schedule.proposedBy`, …,
+`completion`, `lifecycle`, `revBy`, `day`, `day.arrival`, `day.emergency`, `day.collection`) is columns of the same row;
+every list is a child table keyed `(owner…, position)` in list order (`trial_session_evidence` by `(trial_id,
+session_position, position)`), a non-object element kept verbatim in `raw_json`; `reminders` is `trial_reminders`
+(`sent_at` for an integer marker, `value_json` otherwise); `keys` is `idempotency_keys` for the replayable acts (a list
+act's entries; a value act with a string key such as `keys.invite`) with the entry verbatim in `entry_json`, while
+`trials.keys.accept {key: null, fp}` stays on the trial row (`extra_json.keys.accept`) exactly as written. A known key
+that is ABSENT is listed in `absent_keys_json` (dotted for nested keys) and comes back absent; a present `null` is NULL
+and comes back null; a present value the column cannot hold is kept verbatim in `offtype_json` under its path; every
+unknown own key at any level is kept in `extra_json` (nested extras under their known parent key) and spread back first;
+a live `undefined` is absence and a non-finite number persists as JSON `null` (the blob's rules). `blockedBy` is
+`blocked_by_json` (a value, `null` or absent); the tombstone's `trialDetails.instructions: null` is a present-and-null
+column; the `day` container's presence is recorded; `recipient.playerId` is stored and counted when it differs from
+`player_id` (`recipientMismatch`); a trial without a `workflowState` key stays without one (`preP4bShape` counted at
+import; `isLegacyTrial` reads it as before). Round trips proven for every writer shape (the P4B invitation with slots,
+private details, keys and recipient; the contact; the open-day literal with `trustedPartner` absent; the legacy direct
+request; the accepted request; both tombstones; the scheduled, accepted, pre-P4B, worked and cancelled trials; unknown
+fields at record, nested-object and list-entry level; off-type values; a live non-finite number) and through the real
+routes, the backup, a restore and the rollback copy.
+
+#### D.8.5 Constraints against the producers — what was found and what changed around the design
+
+- `recruitment_requests_one_pending`: withdrawn (D2), as designed. `trials_one_open_per_case`,
+  `request_trial_slots_one_per_day` (the drafted `UNIQUE(request_id, day)` as a partial index),
+  `trial_session_evidence_one_active` (over `(trial_id, session_position, box_session_id)`),
+  `trial_day_consents_one_per_actor`, `trial_reminders_marker`, `channels_request_id`: installed; no fixture, route or
+  suite produced a conflict. A legacy file that does is refused at the cutover with the engine's `UNIQUE` message —
+  **reported, never resolved by the migration** (the dry run on a copy lists it; §D.7.3).
+- **The staff key and the snapshot write order.** `recruitment_requests.user_id → org_users` (RESTRICT, as drafted)
+  made the staff prune, which `USERS_TABLE.replace` ran inside itself before the recruitment write, fail on any snapshot
+  that removed a staff member together with their requests. Changed: `replace(…, { prune: false })` upserts only and
+  `USERS_TABLE.prune` runs after the request prune (children before parents, like every other prune of the write); the
+  sessions, which name the staff, are written after that prune, so a session of a staff member the snapshot no longer
+  lists is still refused with its id, as before (`scripts/testSessions.mjs`). `0003_sessions_live` keeps the old
+  one-call form. The organisation and staff ids of supplied requests are checked with ids against the FINAL supplied
+  collections before the keys fire (`RECRUITMENT_ORG_MISSING`, `RECRUITMENT_USER_MISSING`).
+- **`BEGIN IMMEDIATE` for saves and units of work** (`store.mjs`, two lines). The recruitment flush reads before it
+  writes (the final-state assertions). A deferred `BEGIN` whose first statements are reads holds a WAL read snapshot;
+  when another process commits in between, the later upgrade to a write fails at once with "database is locked"
+  (SQLITE_BUSY_SNAPSHOT, which the busy handler never retries) — the S2 busy-timeout test failed that way on the first
+  run. A save is a write transaction; it now takes the write lock at `BEGIN` through the busy handler, and the S2 test
+  proves the wait. The unit-of-work suites' `BEGIN` seams were updated to the new statement.
+- **The channels prune check.** A snapshot that removes a request while a thread still names it was refused by the S7d
+  final-state check (`CHANNEL_REQUEST_MISSING`, ids) when `requests` was a blob; with the key it would be the engine's
+  bare `FOREIGN KEY constraint failed`. The request prune names the threads first with the same code and ids.
+- **The measured behaviour of the previous build on a `0015` file differs from the brief's prediction.** §D.7.6 expected
+  the accepted `9b109dc` build to serve no requests and no trials. Measured on the actual build
+  (`scripts/testRecruitmentServer.mjs`): its boot-contract integrity check finds the two collections ABSENT, logs
+  `INTEGRITY STORE_MISSING requests, trials` and the process exits 1 before listening — nothing served, nothing written.
+  Safer than predicted; the rollback tool is still the only way back (§D.8.6).
+- **A legacy JSON snapshot older than schema 2304.** The snapshot migrations run on the loaded arrays before the data
+  layer attaches; `m230_005_trial_workflow` backfills the P4B containers on every trial in memory and, on a blob file,
+  the next save persisted them. Since `0015` imports the FILE's blob and never the array, a `db.json` from before M23 P4B
+  restored directly onto this build keeps its pre-P4B trials as they were (counted as `preP4bShape`; readable through
+  `isLegacyTrial`; the containers are added by the routes the first time they write). Backups written by any build with
+  the SQLite store are at or beyond 2304 and unaffected. Recorded in OPERATIONS.md; not changed here (the rule "never
+  import from memory" stands).
+- **The M23 batteries' synthetic rows outside the writers' literals.** Running every `m12*`, `m17*`, `m23*`,
+  `connectedE2E` and `apiE2E` script (§D.7.6) on this tree and on the untouched `9b109dc` build found five scripts
+  whose fixtures write, straight into a snapshot, rows no production writer produces: a request without `userId` or
+  with a made-up staff id (`m23ContactPersistence`, `m23RecruitmentJourneyHardeningE2E`, `m23P4AClosureE2E`;
+  `issueRecruitmentRequest` always sets the logged-in staff member and the drafted `user_id` key is `NOT NULL …
+  RESTRICT`), a request naming a staff member that is not in `users` (`m23TrialPersistence`, `m23TemporalIntegrityE2E`;
+  the staff row is created by the dev login later in the script), trials naming requests that do not exist
+  (`m23P4AClosureE2E`'s four "legacy" trials, `m23TemporalIntegrityE2E`'s `trial-p57`, `m23TrialPersistence`'s legacy
+  trial; the drafted `trials.request_id` key), eight trials naming the same request (`m23TrialPersistence` §3;
+  `UNIQUE(request_id)`) and six open-looking trials in one case (the same section; the kept product constraint
+  `trials_one_open_per_case`, which treats every state other than completed/cancelled as open). The accepted design
+  refuses each with ids (`RECRUITMENT_IMPORT_BLOCKED` naming the entry, `RECRUITMENT_USER_MISSING`, `PAIR_MISMATCH`,
+  the engine's `UNIQUE` message) and repairs nothing. Those fixtures are adapted to the writers' literals with the
+  reason stated in each (the staff row and the real id supplied; the invitation each trial came from supplied; one
+  request per trial; the corrupt rows that were open made terminal while their corruption is unchanged). **What this
+  means for a real file:** the P4A guarantee that a trial row with garbage FIELDS never breaks the app still holds
+  (fields are kept losslessly; the routes still name and omit such rows); a trial whose `requestId` names no request,
+  a request naming no staff member, two trials naming one request or two open trials in one case is a legacy
+  inconsistency the cutover REFUSES with ids on a copy (§D.7.3's dry run) and an operator resolves by hand — the
+  migration does not reconstruct, drop or rewrite a row. No production path produces such a row today (requests are
+  tombstoned, never removed; staff are marked `removedAt`, never removed; the routes keep one open trial per case).
+  Every other battery passes on this tree with the same count as on `9b109dc`; the failures of `m23BootContract`,
+  `m23Persistence` and `apiE2E` are identical on `9b109dc` (pre-existing).
+- **Key order.** A record read back from the tables carries its keys in the stored shape's order (`blockedBy`, for
+  one, after `revBy`); the blob kept the writer's insertion order. Every key and value is identical — the route
+  payloads are the same objects — but a textual `JSON.stringify` comparison across a restart is no longer byte-equal;
+  `m23P4AClosureE2E` compared that way and now compares canonically (keys sorted at every level), reason stated.
+- **The P4A tolerance of alien entries ends at the cutover.** `m23TrialPersistence` §3 proved that a `null`, a string
+  and a number in the trials blob were ignored at boot ("never fatal"). Since `0015` imports the blob through the
+  repository's own validation, such an entry is refused with its position and kind (`RECRUITMENT_IMPORT_BLOCKED: trials
+  entry #1 is not an object (null) …`), nothing is imported, the file is not modified and the next boot refuses the
+  same way — an operator fixes a copy by hand (§D.7.3's dry run). The seven corrupt-but-object rows of that section are
+  still stored as they are and still named and omitted by the routes. The section now proves both contracts (§3, §3b).
+- **Not changed, reported:** the direct route's `REQUEST_PENDING` rule and the open-day route's several pending
+  invitations (both kept); the idempotency replay/conflict rules (in the routes, reading the record's `keys`); the
+  trials' 50-entry cap per act (a writer rule kept as data); `players[].trialReports` derived, never stored.
+
+#### D.8.6 Rollback, copy-only, and the chain
+
+`npm run rollback:recruitment -- <data-dir> <fresh-empty-dir>` (`scripts/recruitmentRollback.mjs`,
+`repositories/recruitmentRollback.mjs`): opens the live file read-only and copies it (VACUUM INTO), refuses a copy that
+carries a later step (`LATER_SCHEMA`, exit 4), never applied `0015` (`NOT_CUT_OVER`, exit 5), whose tables are missing
+(`UNEXPECTED_SCHEMA`, exit 10) or whose output directory is not empty (exit 1); writes every request and every trial back
+into the `requests` and `trials` blobs in insertion order in the writers' literals (children nested in list order, keys
+reassembled, every absent/null/off-type/unknown field as recorded); recreates `channels` in its `0012` definition (no
+request key) with every thread, message and attachment row for row; drops the fifteen tables; removes the record and
+`meta.recruitmentCutover`; advances `saveSeq`; checks every foreign key; VACUUMs; revalidates (integrity, the record
+and meta key gone, the tables gone, the key gone, the threads row for row, both blobs holding exactly the counts, every
+other table byte-identical). A failure at any step removes the output. **Nothing written after the cutover is lost.**
+The chain: `playerErasureRollback.mjs` refuses a file carrying `0015` (`LATER_SCHEMA`) and accepts this tool's output;
+every earlier tool and suite that rolls a live file back now starts with this tool (the suites' `preS6b`/`preS4bR`
+helpers). Proof on the **actual `9b109dc` build** (`SCOUTBOX_PRE_S8A_SERVER`; `scripts/testRecruitmentServer.mjs`): the
+rollback copy boots there, serves the same requests, trials and threads in its routes, accepts a new invitation and an
+acceptance into its blobs, and this build re-upgrades the copy with those writes exactly; the same build booted DIRECTLY
+on a copy of the live `0015` file exits 1 at boot (`STORE_MISSING`) and writes nothing.
+
+#### D.8.7 Performance — measured, and what is not claimed
+
+`bench-s8a.mjs` (in the handoff; synthetic fixture of 400 requests — half P4B invitations with slots and keys — and 200
+worked trials with every container, on the fixture players; the accepted `9b109dc` modules against this tree's modules
+on the same file; Node 22.22.0; median of 15 saves):
+
+| | `9b109dc` (blobs), run 1 / run 2 | S8a-core (tables), run 1 / run 2 |
+|---|---|---|
+| one-record save (a trial's status + a pushed attendance row) | 12.2 / 19.6 ms | 13.4 / 17.3 ms |
+| unchanged save | 7.5 / 10.8 ms | 8.9 / 13.1 ms |
+| bytes `JSON.stringify` produced for the two collections per save | 1 422 874 (the two blobs) | 1 429 037 / 1 422 272 (the change-tracking fingerprints) |
+| recruitment statements per one-record save | 0 (one blob row) | 36 (one trial row, its children rewritten, the assertions) |
+| first boot (migrations + attach) / warm reboot | 29 / 20 ms; 28 / 19 ms | 486 / 216 ms; 544 / 197 ms |
+| file size after the runs | 3.1 MB | 3.6 MB |
+
+Two runs on the same machine (the second during the final gates); the save medians moved by more between the runs than
+between the builds, so the save figures say only "within noise of each other".
+
+**Claimed:** the two blobs leave every save; a changed record lands as its own rows; the rollback and the lossless round
+trip. **Not claimed:** a faster save — the fingerprint pass still serialises every record on every flush (the same
+bytes the blob cost), so the save time is unchanged within noise; the boot is slower (sixteen tables decoded into the
+mirrors); the file is larger; **the whole-snapshot-write objective is not met** (every other blob is still rewritten by
+every save). Cheaper change tracking (a version counter the twenty-five in-place writers would have to bump) is a
+separate, undecided piece of work.
+
+#### D.8.8 Tests and evidence
+
+- **Failing-first** (recorded on the unchanged `d0f0205` tree, source-identical to `9b109dc`, before any source edit):
+  `scripts/testRecruitment.mjs` and `scripts/testRecruitmentServer.mjs` fail there on the concrete assertion "the last
+  registered/recorded migration is 0015_recruitment" (logs in the handoff).
+- **New suites, green on the implementation:** `scripts/testRecruitment.mjs` (9 tests: the migration and cutover
+  counts, the lossless mapping of every writer shape, the import refusals with ids only, the repository in staged mode,
+  the two failure contracts with the statement failure and the real COMMIT failure, the six-phase snapshot write with
+  the reviewer's transition matrix as extra coverage, the atomic refusals, the snapshot read and the identity
+  reconciliation against the table, the rollback tool and the chain) and `scripts/testRecruitmentServer.mjs` (3 tests:
+  the real server — boot, the direct invitation and acceptance as rows with no blob behind them, listings, the staff and
+  report routes, `REQUEST_PENDING`, SIGKILL durability, `/capabilities`; two stored open-day invitations and a request
+  of a missing player through the backup/restore path, the deletion unit against a real COMMIT failure and its retry;
+  the backup shapes, a restore row for row, the previous build on the live copy, the rollback copy, the chain, the
+  `9b109dc` boot on the copy and the re-upgrade). Both in the `npm test` chain.
+- **Existing suites adapted** (the reason stated in each): the migration list and the rollback chain (one link longer)
+  in every suite that asserts them; the suites that used `requests` as "the unrelated plain blob" now use `vouches`;
+  `testChannels` and `testChannelsServer` read the request rows; `testPlayerSubrecords` adds its trials through the
+  repository with a request each; the dump exclusion lists; `testSchemaDdl` compares the sixteen tables.
+- **Gates** (CLAUDE.md "Milestone gates"): the backend chain on Node 22 and Node 24 with the **seven** historical builds
+  booted for real (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR/S8A_SERVER` = `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5`,
+  `4f954ad`, `f0abd34`, `9b109dc`), the Player suite — commands, versions, exits, counts and skips in the handoff's gates
+  record. The two intermittent S6b failures of the `c6cf5e1` review remain "not reproduced; cause unresolved".
+- **The batteries of §D.7.6** — every `m12*`, `m17*`, `m23*` script, `connectedE2E` and `apiE2E` (forty-two scripts,
+  outside the `npm test` chain) — run one by one on this tree AND on the untouched `9b109dc` build, so that every
+  failure is classified: the pre-existing failures of `m23BootContract`, `m23Persistence` and `apiE2E` are identical on
+  both; five scripts whose synthetic fixtures write rows outside the writers' literals were adapted (§D.8.5) and pass;
+  every other script passes with the same counts on both builds. The record (both runs per script, the adapted runs,
+  the logs) is in the handoff.
+- **The design-model scripts keep their baseline meaning.** The five synthetic probes of §D.7 and the reviewer's
+  design-model scripts (`a6c40f3`, `cd7dc95`, `f2121b5`, `d0f0205`) model the DRAFTED file 02 and the pre-S8a handler
+  source; they were re-run on an unchanged `d0f0205` checkout (Node 22 and 24) with the recorded results (probes
+  20 / 13 / 20 / 5 / 8; the hazards and the matrix reproduced). On this tree they stop at the first implemented
+  difference (file 02 now carries the implemented definitions; the open-day handler calls the repository) — recorded in
+  the handoff, not rewritten. The retained-record scripts (`6d66655`, `9b109dc`) pass on this tree.
+
+#### D.8.9 Known limitations (nothing hidden)
+
+1. The save-time objective is not met (§D.8.7); boot is slower; the file is larger.
+2. Dirty detection is a serialisation fingerprint per record per flush: correct, not cheap.
+3. A legacy `db.json` older than schema 2304 restored directly keeps pre-P4B trials without the containers (§D.8.5).
+4. `case_id` and the guardian columns are code-checked references until S8b (Q7b) and Candidate F (Q7c); a legacy file
+   with an unresolved case or guardian id refuses the cutover until fixed by hand.
+5. `/capabilities` counts unresolved player references; it does not say why an id is absent (Q3 untouched).
+6. The cutover refuses, with positions and ids, a legacy file the blob store tolerated: an entry in `requests` or
+   `trials` that is not a record, a trial naming no request, a request naming no staff member, two trials naming one
+   request, two open trials in one case (§D.8.5). The P4A "never fatal" tolerance of alien entries ends there; the
+   file is not modified and an operator fixes a copy by hand. No production writer produces such rows.
+7. A record read from the tables carries its keys in the stored shape's order, not the writer's insertion order;
+   values are identical (§D.8.5).
+8. The implementation awaits independent acceptance; S8b (cases, rooms, decisions) is not started.

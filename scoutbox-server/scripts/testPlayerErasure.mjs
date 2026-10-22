@@ -24,6 +24,7 @@ import { runDataMigrations } from '../repositories/database.mjs';
 import { MINOR_WITHOUT_LINK_REASON } from '../repositories/identityPreflight.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
+import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
 import { NOW, TTL, DAY, tempDir, clone, adult, child, seeded, gPrimary, gCo, gSignup, s3File, openRaw, applied, blob, meta, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
@@ -32,6 +33,7 @@ function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed
 let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const MIGRATION = '0014_player_erasure';
+const RECRUITMENT_TABLES = ['recruitment_requests', 'request_trial_slots', 'trials', 'trial_schedule_sessions', 'trial_session_evidence', 'trial_schedule_revisions', 'trial_attendance', 'trial_reminders', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events', 'trial_reports', 'trial_history', 'idempotency_keys']; // S8a (0015) creates these on the same boot
 const META = 'playerErasureCutover';
 const dbFile = (dir) => path.join(dir, 'scoutbox.db');
 let erasureMod = null; let rollbackMod = null;
@@ -276,18 +278,18 @@ test('unit of work: an erase inside a unit that fails after every write — and 
 
 // ------------------------------------------------------------------ migration 0014
 test('migration 0014_player_erasure: registered last; on a file this build\'s predecessor wrote (0001–0013) it records the step and its counts and changes no row and no table; a restored backup\'s playersRetained blob is imported as retained rows exactly and the blob retired; a blob naming a live player, a malformed entry, a duplicate id, or a players row that already carries deleted_at refuses the step with ids only — nothing written, the blob untouched, the next run refuses the same way; a second run is a no-op', () => {
-  assert.equal(DATA_MIGRATIONS.at(-1)?.id, MIGRATION, 'registered after 0013');
+  assert.equal(DATA_MIGRATIONS.map((m) => m.id).at(-2), MIGRATION, 'registered after 0013 (S8a\'s 0015 follows it)');
   const preS4bR = (dir, { rawBlobs = {} } = {}) => { s3File(dir, { extra: { requests: [], channels: [], notifications: [], dispatches: [], blocks: [], reports: [], moderationLog: [], orgNotes: [], ledger: [], opsEvents: [], sourceChanges: [], idvQueue: [] }, rawBlobs }); const s = openRaw(dir); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } }); return s; };
   const tables = (s) => s.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
   // (a) a plain file.
   const a = tempDir('m14-plain'); let s = preS4bR(a);
   const tablesBefore = tables(s); const playersBefore = JSON.stringify(s.prepare('SELECT * FROM players ORDER BY rowid').all());
-  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }).ran, [MIGRATION]);
-  assert.ok(applied(s).includes(MIGRATION)); assert.deepEqual(JSON.parse(meta(s, META)), { at: NOW, imported: 0 }); assert.deepEqual(tables(s), tablesBefore, 'no table created'); assert.equal(JSON.stringify(s.prepare('SELECT * FROM players ORDER BY rowid').all()), playersBefore);
+  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }).ran, [MIGRATION, '0015_recruitment']); // S8a: 0015 follows on the same run
+  assert.ok(applied(s).includes(MIGRATION)); assert.deepEqual(JSON.parse(meta(s, META)), { at: NOW, imported: 0 }); assert.deepEqual(tables(s).filter((t) => !RECRUITMENT_TABLES.includes(t)), tablesBefore, 'no table created by 0014 (the fifteen recruitment tables are 0015\'s, S8a)'); assert.equal(JSON.stringify(s.prepare('SELECT * FROM players ORDER BY rowid').all()), playersBefore);
   assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW + 1 }).ran, [], 'never twice'); s.close();
   // (b) a restored backup carrying retained records.
   const b = tempDir('m14-restore'); s = preS4bR(b, { rawBlobs: { playersRetained: JSON.stringify([RECORD('pl-gone', NOW - DAY, '2001-01-01', 'GB'), RECORD('pl-gone2', NOW - 2 * DAY, '2010-12-31', 'KR')]) } });
-  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }).ran, [MIGRATION]);
+  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }).ran, [MIGRATION, '0015_recruitment']); // S8a: 0015 follows on the same run
   assert.deepEqual(s.prepare('SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid').all().map((r) => ({ ...r })), [RETAINED_ROW('pl-gone', NOW - DAY, '2001-01-01', 'GB'), RETAINED_ROW('pl-gone2', NOW - 2 * DAY, '2010-12-31', 'KR')]);
   assert.equal(blob(s, 'playersRetained'), undefined, 'the blob is retired'); assert.deepEqual(JSON.parse(meta(s, META)), { at: NOW, imported: 2 });
   assert.deepEqual(JSON.parse(JSON.stringify(readTableBacked(s).playersRetained)), [RECORD('pl-gone2', NOW - 2 * DAY, '2010-12-31', 'KR'), RECORD('pl-gone', NOW - DAY, '2001-01-01', 'GB')], 'the snapshot read lists retained records by deletion instant, then id'); s.close();
@@ -316,12 +318,15 @@ test('rollback (copy-only): the retained rows leave the players table of the COP
   const rollbackPlayerErasureCopy = needRollback();
   const dir = tempDir('erase-rb'); const t = boot(dir, FIXTURE());
   t.players.erase('pl-seeded', { at: NOW }); t.unit(() => t.players.erase('pl-child2', { at: NOW + 5 })); t.save(); t.close();
-  const source = dbFile(dir); const sourceBytes = fs.readFileSync(source);
+  // S8a: the live file carries 0015, which this tool refuses outright (LATER_SCHEMA); the S8a rollback (copy-only) goes first and this tool works on ITS output
+  { const o = tempDir('erase-rb-s8a-refused'); let err = null; try { rollbackPlayerErasureCopy(dbFile(dir), o); } catch (e) { err = e; } assert.equal(err?.code, 'LATER_SCHEMA'); assert.match(err.message, /0015_recruitment/); assert.deepEqual(fs.readdirSync(o), []); }
+  const s8a = tempDir('erase-rb-s8a'); rollbackRecruitmentCopy(dbFile(dir), s8a);
+  const source = dbFile(s8a); const sourceBytes = fs.readFileSync(source);
   const out = tempDir('erase-rb-out');
   const result = rollbackPlayerErasureCopy(source, out);
   assert.equal(result.output, dbFile(out)); assert.equal(result.recordRemoved, true); assert.equal(result.retained, 2);
   assert.ok(fs.readFileSync(source).equals(sourceBytes), 'the source file is byte-identical');
-  const s = openRaw(dir); const c = openRaw(out);
+  const s = openRaw(s8a); const c = openRaw(out); // compared with THIS tool's source, the S8a-rolled copy
   assert.ok(!applied(c).includes(MIGRATION)); assert.equal(meta(c, META), undefined); assert.equal(Number(meta(c, 'saveSeq')), Number(meta(s, 'saveSeq')) + 1);
   assert.deepEqual(blob(c, 'playersRetained'), [RECORD('pl-seeded', NOW, '2004-03-14', 'GB'), RECORD('pl-child2', NOW + 5, '2016-08-08', 'GB')], 'the legacy blob: exactly the records');
   assert.equal(c.prepare('SELECT COUNT(*) AS n FROM players WHERE deleted_at IS NOT NULL').get().n, 0); assert.deepEqual(c.prepare("SELECT id FROM players WHERE id IN ('pl-seeded', 'pl-child2')").all(), [], 'no retained row in the copy\'s table');
@@ -342,12 +347,12 @@ test('rollback (copy-only): the retained rows leave the players table of the COP
   { const o = tempDir('erase-rb-s6b'); rollbackSafetyAuditCopy(dbFile(out), o); const x = openRaw(o); assert.ok(!applied(x).includes('0013_safety_audit')); assert.deepEqual(blob(x, 'playersRetained').map((r) => r.id), ['pl-seeded', 'pl-child2'], 'the blob travels down the chain'); x.close(); }
   // Re-upgrade: the real migration imports the blob back, to the same rows.
   const up = openRaw(out);
-  assert.deepEqual(runDataMigrations(up, DATA_MIGRATIONS, { now: NOW + 9, context: { sessionTtlMs: TTL } }).ran, [MIGRATION]);
+  assert.deepEqual(runDataMigrations(up, DATA_MIGRATIONS, { now: NOW + 9, context: { sessionTtlMs: TTL } }).ran, [MIGRATION, '0015_recruitment']); // S8a: 0015 follows on the same run
   assert.equal(JSON.stringify(up.prepare('SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid').all()), JSON.stringify(s.prepare('SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid').all()), 'the retained rows are exactly those of the source');
   assert.equal(blob(up, 'playersRetained'), undefined); assert.deepEqual(JSON.parse(meta(up, META)), { at: NOW + 9, imported: 2 });
   assert.equal(up.prepare("SELECT name FROM players WHERE id = 'pl-seeded'").get().name, 'Deleted player', 'nothing of the person came back');
   up.close(); s.close();
-  for (const d of [dir, out, later]) fs.rmSync(d, { recursive: true, force: true });
+  for (const d of [dir, s8a, out, later]) fs.rmSync(d, { recursive: true, force: true });
 });
 
 console.log(`\n${passed} player-erasure checks passed`);

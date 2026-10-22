@@ -70,7 +70,7 @@ const gCo = () => ({ id: 'gd-co', name: 'Co Parent', email: 'co@example.test', i
 const gSignup = () => ({ id: 'gd-signup', name: 'Signup Parent', email: 'signup@example.test', password: 'scrypt$cc$dd', emailVerified: false, emailCode: 'K7Q2ZP', idVerified: false, disclaimerAccepted: false, childIds: [] });
 const FIXTURE = () => ({ players: [adult(), child('pl-child1', 'gd-primary', '2014-03-03'), seeded(), child('pl-child2', 'gd-primary', '2016-08-08')], guardians: [gPrimary(), gCo(), gSignup()] });
 const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB', squad: [] }];
-const baseDb = (players, guardians) => ({ orgs: ORGS(), users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], sessions: [], players, guardians, requests: [{ id: 'req-1', status: 'pending', history: [] }] });
+const baseDb = (players, guardians) => ({ orgs: ORGS(), users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], sessions: [], players, guardians, vouches: [{ id: 'vch-1', status: 'pending', history: [] }] });
 
 /**
  * A store in server mode on a NEW directory with the data layer attached the way
@@ -314,11 +314,11 @@ test('ordinary save: a facet edit in a FAILED ordinary save stays pending (memor
   const dir = tempDir('idrepo-s3');
   const t = boot(dir, { ...FIXTURE() });
   t.players.byId('pl-adult').pendingNote = 'Pending'; t.guardians.byId('gd-primary').coGuardians.push({ id: 'gd-p', name: 'P', email: 'p@example.test' });
-  t.db.requests[0].big = 1n;
+  t.db.vouches[0].big = 1n;
   assert.throws(() => t.store.save(t.snapshot()), /BigInt/);
   assert.equal(t.facets('players', 'pl-adult').pendingNote, undefined); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 1);
   assert.equal(t.players.byId('pl-adult').pendingNote, 'Pending', 'memory is not undone'); assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 2);
-  delete t.db.requests[0].big;
+  delete t.db.vouches[0].big;
   t.store.save(t.snapshot());
   assert.equal(t.facets('players', 'pl-adult').pendingNote, 'Pending'); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 2); assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 0);
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
@@ -335,10 +335,10 @@ function operation(t, { fail = null, afterCommit = null } = {}) {
     t.players.update('pl-adult', { availability: 'available_now', medical: { shared: true } });
     t.players.addItem('pl-seeded', 'medical.records', { id: 'md-op', type: 'x', title: 'y' });
     t.db.orgs[0].squad.push(squadMember('sq-op'));
-    t.db.requests[0].status = 'accepted'; t.db.requests[0].history.push('accepted');
+    t.db.vouches[0].status = 'accepted'; t.db.vouches[0].history.push('accepted');
     token = t.layer.sessions.create('guardian', 'gd-new').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
-    if (fail === 'blob') t.db.requests[0].big = 1n;
+    if (fail === 'blob') t.db.vouches[0].big = 1n;
     if (fail === 'throw') throw new Error('operation failed late');
     return 'done';
   });
@@ -350,9 +350,9 @@ function assertOperationAbsent(t, { unrelatedSaved }) {
   assert.equal(t.raw("SELECT availability, medical_shared FROM players WHERE id = 'pl-adult'").availability, 'not_seeking'); assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-adult'").medical_shared, 0);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 1);
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0);
-  assert.equal(t.blob('requests')[0].status, 'pending'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'guardian'").n, 0);
+  assert.equal(t.blob('vouches')[0].status, 'pending'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'guardian'").n, 0);
   // Unrelated edits made BEFORE the unit: in the database only after an ordinary save.
-  assert.equal(t.facets('players', 'pl-adult').pendingNote, unrelatedSaved ? 'PreUnit' : undefined); assert.equal(t.blob('requests').length, unrelatedSaved ? 2 : 1);
+  assert.equal(t.facets('players', 'pl-adult').pendingNote, unrelatedSaved ? 'PreUnit' : undefined); assert.equal(t.blob('vouches').length, unrelatedSaved ? 2 : 1);
   assert.equal(t.invariantBreaks(), 0);
 }
 function assertMemoryRestored(t, refs) {
@@ -361,9 +361,9 @@ function assertMemoryRestored(t, refs) {
   assert.equal(t.players.byId('pl-adult'), adultView, 'same view'); assert.equal(adultView.availability, 'not_seeking'); assert.equal(adultView.medical.shared, false);
   assert.equal(t.players.byId('pl-seeded').medical.records, seededRecords, 'same nested array'); assert.equal(seededRecords.length, 1);
   assert.equal(t.guardians.byId('gd-co').childIds, coKids, 'same childIds view'); assert.deepEqual([...coKids], coKidsBefore);
-  assert.equal(t.db.orgs[0].squad.length, 0); assert.equal(t.db.requests[0].status, 'pending'); assert.equal(t.db.requests[0].history.length, 0); assert.equal(t.db.requests[0].big, undefined);
+  assert.equal(t.db.orgs[0].squad.length, 0); assert.equal(t.db.vouches[0].status, 'pending'); assert.equal(t.db.vouches[0].history.length, 0); assert.equal(t.db.vouches[0].big, undefined);
   // Pre-unit edits survive, still pending.
-  assert.equal(adultView.pendingNote, 'PreUnit'); assert.equal(t.db.requests.length, 2); assert.equal(t.players.uncommitted(), 1);
+  assert.equal(adultView.pendingNote, 'PreUnit'); assert.equal(t.db.vouches.length, 2); assert.equal(t.players.uncommitted(), 1);
 }
 function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardians WHERE id = 'gd-new'").n, 1); assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-new'").n, 1);
@@ -371,12 +371,12 @@ function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT availability FROM players WHERE id = 'pl-adult'").availability, 'available_now'); assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-adult'").medical_shared, 1);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 2); assert.equal(t.players.byId('pl-seeded').medical.records.length, 2); assert.equal(t.facets('guardians', 'gd-new').emailCode, 'ABC123');
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 1);
-  assert.equal(t.blob('requests')[0].status, 'accepted'); assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
+  assert.equal(t.blob('vouches')[0].status, 'accepted'); assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
   assert.equal(t.facets('players', 'pl-adult').pendingNote, 'PreUnit', 'the pre-unit edit landed with the unit');
   assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 0); assert.equal(t.invariantBreaks(), 0);
 }
 const prepare = (t) => {
-  const adultView = t.players.byId('pl-adult'); adultView.pendingNote = 'PreUnit'; t.db.requests.push({ id: 'req-2', status: 'pending', history: [] }); // unrelated edits, pending before the unit
+  const adultView = t.players.byId('pl-adult'); adultView.pendingNote = 'PreUnit'; t.db.vouches.push({ id: 'vch-2', status: 'pending', history: [] }); // unrelated edits, pending before the unit
   return { adultView, seededRecords: t.players.byId('pl-seeded').medical.records, coKids: t.guardians.byId('gd-co').childIds, coKidsBefore: [...t.guardians.byId('gd-co').childIds] };
 };
 
@@ -461,13 +461,13 @@ test('unit of work: a process killed before COMMIT leaves the pre-operation data
   assert.equal(r.signal, 'SIGKILL', `the child must die by SIGKILL: status ${r.status} signal ${r.signal} ${r.stderr.slice(-400)}`); assert.match(r.stdout, /ABOUT_TO_CRASH/);
   const again = reopen(dir);
   assert.equal(again.guardians.byId('gd-crash'), null); assert.equal(again.players.byId('pl-crash'), null); assert.equal(again.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE guardian_id = 'gd-crash'").n, 0);
-  assert.equal(again.players.byId('pl-adult').medical.records.length, 0); assert.equal(again.db.requests[0].status, 'pending');
+  assert.equal(again.players.byId('pl-adult').medical.records.length, 0); assert.equal(again.db.vouches[0].status, 'pending');
   assert.equal(again.raw('PRAGMA integrity_check').integrity_check, 'ok'); assert.equal(again.invariantBreaks(), 0);
   again.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('integration: the data layer creates the identity repositories behind the registered migration 0005, players and guardians are table-backed, the test schema helper matches what 0005 leaves behind, and server.mjs reaches the repositories only through the data layer', () => {
-  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'playersRetained', 'users', 'sessions', 'mediaDeletions', 'emailChallenges', 'pairingCodes', 'notifications', 'notificationPrefs', 'dispatches', 'outbox', 'pushLog', 'pushTokens', 'channels', 'blocks', 'reports', 'moderationLog', 'orgNotes', 'ledger', 'opsEvents', 'sourceChanges', 'idvQueue']);
+  assert.deepEqual([...TABLE_BACKED], ['orgs', 'players', 'guardians', 'playersRetained', 'users', 'sessions', 'mediaDeletions', 'emailChallenges', 'pairingCodes', 'notifications', 'notificationPrefs', 'dispatches', 'outbox', 'pushLog', 'pushTokens', 'channels', 'blocks', 'reports', 'moderationLog', 'orgNotes', 'ledger', 'opsEvents', 'sourceChanges', 'idvQueue', 'requests', 'trials']);
   assert.equal(DATA_MIGRATIONS.filter((m) => m.id === CORE_IDENTITY_LIVE_MIGRATION).length, 1);
   const indexSource = fs.readFileSync(path.join(HERE, '..', 'repositories', 'index.mjs'), 'utf8');
   assert.ok(indexSource.includes('createIdentityRepositories') && indexSource.includes('0005_core_identity_live'), 'repositories/index.mjs creates them and registers the migration');
@@ -557,15 +557,15 @@ test('review 2: inside a real unit, a repository operation that fails after its 
   let inner = null; let outer = null; let published = 0;
   try {
     t.unit(() => {
-      t.db.requests[0].status = 'in-unit';
+      t.db.vouches[0].status = 'in-unit';
       try { t.players.insert(child('pl-half', 'gd-primary', '2015-01-01')); } catch (e) { inner = e; }
       t.store.afterCommit(() => { published += 1; });
     });
   } catch (e) { outer = e; }
   assert.match(String(inner?.message), /injected link failure/, 'the mid-operation failure must actually have occurred');
   assert.ok(outer, 'the outer unit must fail'); assert.match(outer.message, /cannot commit/); assert.equal(outer.unitOfWork, 'rolled_back'); assert.equal(published, 0);
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-half'").n, 0); assert.equal(t.blob('requests')[0].status, 'pending');
-  assert.equal(t.players.byId('pl-half'), null); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']); assert.equal(t.db.requests[0].status, 'pending');
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-half'").n, 0); assert.equal(t.blob('vouches')[0].status, 'pending');
+  assert.equal(t.players.byId('pl-half'), null); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']); assert.equal(t.db.vouches[0].status, 'pending');
   assertMemoryRestored(t, refs);
   t.store.save(t.snapshot());
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.facets('players', 'pl-adult').pendingNote, 'PreUnit');

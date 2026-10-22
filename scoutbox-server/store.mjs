@@ -202,7 +202,13 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
    * the committed state. Nothing is undone in memory.
    */
   function write(snapshot, { asSnapshot }) {
-    sqlite.exec('BEGIN');
+    // IMMEDIATE (S8a-core): a save is a write transaction and takes the write lock
+    // at BEGIN, through the busy handler. A deferred BEGIN whose first statements
+    // are reads (the save hooks' final-state assertions read before they write)
+    // holds a read snapshot; if another process commits in between, the later
+    // upgrade to a write fails at once with "database is locked" (SQLITE_BUSY_SNAPSHOT,
+    // which the busy handler never retries). The S2 busy-timeout test proves the wait.
+    sqlite.exec('BEGIN IMMEDIATE');
     try {
       writeBody(snapshot, { asSnapshot });
       sqlite.exec('COMMIT');
@@ -318,8 +324,9 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
     const memento = captureGraph([before.db]);
     const states = hooks.map((hook) => (hook.snapshotState ? hook.snapshotState() : null));
     // BEGIN first: if it fails, no unit was ever open, the work does not run and
-    // the error propagates as it is (nothing to roll back or restore).
-    sqlite.exec('BEGIN');
+    // the error propagates as it is (nothing to roll back or restore). IMMEDIATE,
+    // for the reason given in write(): a unit of work is a write transaction.
+    sqlite.exec('BEGIN IMMEDIATE');
     unit = { afterCommit: [], failure: null };
     let result;
     try {

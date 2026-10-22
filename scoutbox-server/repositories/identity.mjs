@@ -76,10 +76,11 @@ import {
   PLAYER_SUBRECORD_KEYS, PLAYER_COMPOSITE_SUBRECORDS, PLAYER_DERIVED_KEYS,
 } from './identityMapping.mjs';
 import { validateCoreIdentity, writeCandidate, publicReport, playerRowFor, CORE_IDENTITY_LIVE_MIGRATION } from './identityPreflight.mjs';
+import { readTrialsCollection } from './recruitment.mjs';
 import {
   PLAYER_SUBRECORDS_MIGRATION, subrecordsLive, SUBRECORD_KEYS, SUBRECORD_SPECS, SUBRECORD_TABLES, getSubrecords, validateSubrecordArray,
   validatePlayerRecordWithItems as validatePlayerRecord, prepareSubrecordStatements, writeChildRows, writeArrayRows, deleteChildRows,
-  readAllChildren, countChildRows, itemRows, trialReportsFor, readTrialsBlob, readPlayersWithChildren, emptyChildren, reconcileTrialReportCopy,
+  readAllChildren, countChildRows, itemRows, trialReportsFor, readPlayersWithChildren, emptyChildren, reconcileTrialReportCopy,
 } from './playerSubrecords.mjs';
 
 /** `meta` key holding the initialisation state (`pending` | `done`); absent reads as `done`. */
@@ -287,10 +288,11 @@ export const IDENTITY_SNAPSHOT = {
       childIds.get(l.guardian_id).push(l.player_id);
     }
     // S5 (migration 0007 recorded): the arrays come from the child tables and
-    // `trialReports` from the trials blob of the same file; before it the
-    // facets carry everything (an S4a file, a rollback copy).
+    // `trialReports` from the trials collection of the same file (the trials
+    // tables since S8a-core, the blob before); before it the facets carry
+    // everything (an S4a file, a rollback copy).
     const players = subrecordsLive(sqlite)
-      ? readPlayersWithChildren(sqlite, prepareSubrecordStatements(sqlite), { trials: readTrialsBlob(sqlite) ?? [] }).map((x) => x.record)
+      ? readPlayersWithChildren(sqlite, prepareSubrecordStatements(sqlite), { trials: readTrialsCollection(sqlite) ?? [] }).map((x) => x.record)
       : sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE deleted_at IS NULL ORDER BY rowid`).all().map((r) => playerFromRow(r)); // S4b-R: a retained row is not a player record
     return {
       guardians: sqlite.prepare(`SELECT ${GUARDIAN_COLUMNS.join(', ')} FROM guardians ORDER BY rowid`).all().map((r) => guardianFromRow(r, childIds.get(r.id) ?? [])),
@@ -311,7 +313,7 @@ export const IDENTITY_SNAPSHOT = {
     const { candidate } = report;
     // The trialReports claims, judged against the FINAL trials (see above) before any statement runs.
     if (subrecordsLive(sqlite)) {
-      const finalTrials = trials === undefined ? readTrialsBlob(sqlite) : trials;
+      const finalTrials = trials === undefined ? readTrialsCollection(sqlite) : trials; // the tables since S8a-core, the blob before
       const list = Array.isArray(finalTrials) ? finalTrials : null;
       const problems = [];
       for (const row of candidate.players) {

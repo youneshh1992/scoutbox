@@ -19,7 +19,7 @@ store.unitOfWork(() => {
   identity.guardians.insert({ id: 'gd-crash', name: 'Crash Parent', email: 'crash@example.test', password: null, emailVerified: true, emailCode: null, idVerified: true, disclaimerAccepted: true, childIds: [] });
   identity.players.insert({ id: 'pl-crash', name: 'Crash Child', dob: '2014-01-01', country: 'GB', city: '', guardianId: 'gd-crash', stats: null, medical: { shared: false, records: [], conditionStatus: 'unknown' } });
   identity.players.addItem('pl-adult', 'medical.records', { id: 'md-crash', type: 'x', title: 'y' }); // S5: a row of player_medical_records, inside the unit
-  db.requests[0].status = 'crashing';
+  db.vouches[0].status = 'crashing';
   if (store.sqlite.prepare("SELECT COUNT(*) AS n FROM guardian_children WHERE guardian_id = 'gd-crash'").get().n !== 1) throw new Error('fixture: the link should be visible inside the transaction');
   process.stdout.write('ABOUT_TO_CRASH\n');
   process.kill(process.pid, 'SIGKILL');

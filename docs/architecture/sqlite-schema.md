@@ -127,8 +127,8 @@ them.
 | `guardians` | persistent | 01 | `guardians` (LIVE since migration 0005; `coGuardians[]`, `emailCode` and unknown fields in `facets_json`); `childIds[]` → `guardian_children` (LIVE) | **S4a done** (S4b: lifecycle, after O1) |
 | `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`); **since migration 0014 (S4b-R) an account deletion keeps the row as the retained record — `id`, `deleted_at`, `birth_date`, `country`; placeholders and NULL elsewhere — served by no account reader** | S4 (scalars, shadow since S1), S5 (sub-records), S4b-R (the retained record; implemented 21 October 2026, independently accepted at `9b109dc`) |
 | `sessions` | temporary | 01 | `sessions` (token stored as `token_hash`) | **S2 done** (live; blob retired by migration `0003`) |
-| `requests` | persistent | 02 | `recruitment_requests`, `request_trial_slots`; `keys` → `idempotency_keys` | S8 |
-| `trials` | persistent | 02 | `trials`, `trial_schedule_sessions`, `trial_session_evidence`, `trial_schedule_revisions`, `trial_attendance`, `trial_reminders`, `trial_day_staff`, `trial_day_consents`, `trial_day_checkins`, `trial_day_status_events`, `trial_reports` (the one copy; `players[].trialReports` is derived from it), `trial_history`; `keys` → `idempotency_keys` | S8 |
+| `requests` | persistent | 02 | `recruitment_requests`, `request_trial_slots`; `keys` → `idempotency_keys` (LIVE since migration 0015, S8a-core; `player_id` tolerant with no key — Q7a; `case_id` and the guardian columns checked in code — Q7b, Q7c; absent/null/off-type/unknown fields kept) | **S8a-core implemented** (22 October 2026, pending independent acceptance; plan §D.8) |
+| `trials` | persistent | 02 | `trials`, `trial_schedule_sessions`, `trial_session_evidence`, `trial_schedule_revisions`, `trial_attendance`, `trial_reminders`, `trial_day_staff`, `trial_day_consents`, `trial_day_checkins`, `trial_day_status_events`, `trial_reports` (the one copy; `players[].trialReports` is derived from it), `trial_history`; `keys` → `idempotency_keys` (LIVE since migration 0015, S8a-core; `keys.accept {key: null, fp}` kept on the trial row; `blockedBy` kept; the six-phase write of plan §D.7.5) | **S8a-core implemented** (22 October 2026, pending independent acceptance; plan §D.8) |
 | `recruitmentCases` | persistent | 02 | `recruitment_cases` (room columns), `case_tags`, `case_assignments`, `case_tasks`, `case_approvals`, `case_history`, `case_request_links`, `case_trial_links`, `case_decision_drafts`, `case_transaction_handoffs`, `case_budget_scenarios`, `case_budget_lines`, `case_budget_fx_assumptions`, `case_budget_actuals` | S8 |
 | `roomComments` | persistent | 02 | `room_comments`, `room_comment_mentions` | S8 |
 | `roomDecisions` | audit | 02 | `room_decisions`, `room_decision_evidence_refs` (`snapshot` → `snapshot_id`, the copy is not stored twice) | S8 |
@@ -401,13 +401,14 @@ this branch: 13 checks passed.
 | **Implemented, live** (a repository owns the rows; the blob is gone) | 3: `org_users` (rebuilt STRICT with `org_id REFERENCES orgs(id)` and `json_valid` CHECKs in `0004`), `sessions` (`token_hash` only; the table was created by `0002` and became live, with the legacy blob imported and retired, in `0003`), `orgs` (created live by `0004` with the legacy blob imported and retired; scalars and the `location` / `federationRef` composites are columns, the nested facets ride in `facets_json` until S9–S11) | migrations `0001` (S0), `0003` (S2), `0004` (S3) |
 | **Implemented, live** (S4a) | 3 + 1: `guardians`, `players` (scalars and the split composites as columns; since S5 only unknown fields and shape metadata in `facets_json`), `guardian_children` (derived from `childIds`, roles per side) — created live by `0005_core_identity_live` with the two blobs imported through the reviewed preflight and retired; `media_deletions` (the crash-safe media-removal queue, `0006`, file 08). The S1 shadow is retired | migrations `0005`, `0006` (S4a) |
 | **Implemented, live** (S5) | 12: the `player_*` sub-record tables (`player_season_history`, `player_badges`, `player_drills`, `player_attendance`, `player_timeline`, `player_media`, `player_media_tags`, `player_medical_records`, `player_drill_results`, `player_activity_log`, `player_external_ids`, `player_programme_completions`), created by `0007_player_subrecords` from the S4a rows through the one mapping; `trialReports` is derived from the trials, not a table ([`s5-player-subrecords.md`](./s5-player-subrecords.md)) | migration `0007` (S5) |
-| **Proposed** (executable DDL, asserted to load, no migration, no repository) | 302 | files 02–08 |
+| **Implemented, live** (S8a-core, 22 October 2026, pending independent acceptance) | 15 + the `channels` rebuild: `recruitment_requests`, `request_trial_slots`, `trials` and its eleven owned child tables, `idempotency_keys`, created by `0015_recruitment` from the two blobs through the repository's own validation (plan §D.7 as accepted at `d0f0205`, §D.8; Q7a/Q7b/Q7c); `channels` rebuilt with the real `request_id` foreign key | migration `0015` (S8a-core) |
+| **Proposed** (executable DDL, asserted to load, no migration, no repository) | 287 | files 02 (the remaining 40 tables)–08 |
 | Of the proposed, **blocked on an unresolved decision** | file 02 (55 tables): every `player_id` lacks a foreign key until the foreign-key step after S4b-R (which shipped the retained row on 21 October 2026 with NO foreign key — plan §D.2a and Q3 decide the keys; the child-status stamp open) amends the file, and `org_id RESTRICT` depends on O2; `webhook_endpoints.secret` and `org_users.mfa_json` depend on O3; `exposure_events`, `webhook_deliveries`, `dispatches`, `outbox` retention depends on O4; `assessments` depends on O6; `second_look_items` key on O7; `representations` on O8; `agent_profile_facets.member_association` sentinel on O10 | §10, §12 |
 
-Counts: 19 implemented, 302 proposed, of which 55 (file 02) cannot be cut over with their player
-foreign keys until the foreign-key step after S4b-R (the retained row is shipped since 21 October 2026,
-migration 0014, with no foreign key; the keys wait for plan §D.2a and Q3; the child-status stamp is open)
-has amended the file (plan S8 "Depends on"). The remaining open questions change columns or retention
+Counts: 19 implemented at S5, 302 proposed then; since S8a-core (22 October 2026) 15 more are live — the
+requests and trials tables, cut over WITHOUT a player foreign key under Q7a (tolerant, counted) and with the
+case and guardian references checked in code under Q7b/Q7c — and 287 remain proposed, of which the 40 remaining
+tables of file 02 wait for S8b–S8d. The remaining open questions change columns or retention
 rules, not table boundaries. The table above predates S6a and S7; the live tables since then are
 listed with their steps in §4's mapping (`email_challenges`, `pairing_codes` — S6a, accepted at
 `2d7ddeb`; `notifications`, `notification_prefs`, `notification_pref_categories` — S7a, accepted at
@@ -556,11 +557,14 @@ implementation. The file adds the partial unique indexes the code enforces by sc
 case, one live offer per case, one live and one completed package per offer, one signing per
 package and per offer) and lists the dead fields it drops (`trials.keys.accept.key`, always
 null; `trials.blockedBy`; `signings.cancelledAt/revokedAt/voidedAt`, read but never written).
-**Superseded for `recruitment_requests` and `trials` by `sqlite-migration-plan.md` §D.7.3 (the correction after the
-review of `a6c40f3`):** `blockedBy` is read by `trialClubView` and carried by `tombstoneTrial`, so it, `keys.accept` and
-the tombstone's `trialDetails.instructions` are kept (presence and value) in the row's retained JSON — nothing is
-dropped as "dead" — and the "one pending request per org/player/type" index is withdrawn because the open-day outcome
-route creates invitations without that guard today. File 02 is amended at S8a implementation, not before.
+**Implemented for `recruitment_requests`, `request_trial_slots`, `trials`, its eleven child tables and
+`idempotency_keys` (S8a-core, migration `0015`, 22 October 2026 — pending independent acceptance):** file 02 is amended
+to the sixteen definitions the migration creates (`sqlite-migration-plan.md` §D.7.3 as accepted at `d0f0205`, §D.8):
+`blockedBy`, `keys.accept` and the tombstone's `trialDetails.instructions` are kept (presence and value) — nothing is
+dropped as "dead"; the "one pending request per org/player/type" index is withdrawn (the open-day outcome route creates
+invitations without that guard); no vocabulary or length CHECK; `absent_keys_json` / `offtype_json` / `extra_json` on
+every row; the player references tolerant (Q7a), the case and guardian references checked in code (Q7b, Q7c). The
+remaining 40 tables of this file are drafts for S8b–S8d.
 Raw client values that are not validated today (`case.deadline`, legacy `dueAt`,
 `trial_day_staff.check.expiresAt`) are kept verbatim in `*_raw` columns and parsed on read, as
 now. The `trials.day.emergency` contact stays restricted to the trial day's staff reads.
@@ -835,10 +839,11 @@ DECISIONs:
   are unenforced. Resolution, in order: O1 is decided by the Founder (partially resolved on 12
   October 2026 — the full birth date; the country code and the child-status stamp still open, §12);
   **S4b** — not implemented; S4a kept today's hard delete — implements the tombstone
-  (`players.deleted_at`, erasure of personal columns, the per-table lifecycle statements); **S8a**
-  amends `02_recruitment.sql` to add `REFERENCES players(id) ON DELETE RESTRICT` on every
-  `player_id` and ships it in its migration (`0010_recruitment` is a placeholder; `0010` is
-  `0010_dispatches`). Until S8a lands, the file 02 DDL is proposed, not accepted.
+  (`players.deleted_at`, erasure of personal columns, the per-table lifecycle statements). **Resolved
+  differently for S8a-core (22 October 2026):** S4b-R kept the retained row with NO foreign key, and the Founder
+  approved the recruitment `player_id` columns as tolerant, counted references without a key (Q7a) — migration
+  `0015_recruitment` ships `recruitment_requests` and `trials` that way (plan §D.7.4, §D.8); a key to `players(id)`
+  arrives, if ever, through Candidate F and a decided Q3. The remaining file 02 DDL is proposed, not accepted.
 - **Guardian and org deletion.** New routes in S4 (guardian: only when no non-deleted child
   remains) and S3 (org: `suspended` plus `deleted_at`; staff and sessions cascade; recruitment
   rows keep the org tombstone). OPEN: the Founder's policy on org deletion with open
@@ -968,11 +973,13 @@ catalogue; shadow-then-cutover per domain; no integer keys; no triggers or views
   uses `(org, room)`; the schema enforces the engine's; the integrity check needs updating.
 - O8. `representations` (legacy, creation closed with 410): migrate or archive as JSON?
   Proposed: migrate (it is small, and the shape is known from commit `e865531`).
-- O9. Player foreign keys on the recruitment tables (file 02 has none; §10). Proposed: add
-  `RESTRICT` references at S8, after the tombstone exists. The S8a dependencies as the code stands
-  (player tombstones, organisation lifecycle, the two `case_id` references to S8b, the conversion of the
-  approved `channels.request_id` check into a foreign key) are tabulated in `sqlite-migration-plan.md`
-  §D.3; since S4b-R the current S8a brief and its three approvals (Q7a, Q7b, Q7c) are plan §D.7.
+- O9. Player foreign keys on the recruitment tables (file 02 has none; §10). **Decided for S8a-core by
+  Q7a (22 October 2026, "Approve tolerant (Recommended)"):** `recruitment_requests.player_id` and
+  `trials.player_id` ship with NO key as tolerant, counted references; the case references are strict checks
+  in code until S8b (Q7b), the guardian references strict checks in code (Q7c); the approved
+  `channels.request_id` check is converted into the real foreign key by the same migration. The brief is plan
+  §D.7, the implementation record §D.8; a key to `players(id)` for the later recruitment tables stays with
+  Candidate F and Q3.
 - O10. `agent_profile_facets.member_association` cannot be NULL in a STRICT composite primary
   key, so the FIFA-level facet is stored as `'INT'` (the vocabulary's code). Confirm with the
   compliance owner that `INT` is the right sentinel.

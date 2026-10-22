@@ -2,7 +2,7 @@
 -- 03_messaging_safety_audit.sql — ScoutBox target SQLite schema, part 3
 --
 -- Scope (source collections → tables):
---   channels            → channels, messages, message_attachments           (LIVE since migration 0012_channels, S7d, REGISTERED — implemented, pending independent acceptance)
+--   channels            → channels, messages, message_attachments           (LIVE since migration 0012_channels, S7d, REGISTERED — independently accepted at 4f954ad; channels REBUILT by migration 0015_recruitment (S8a-core) with the real request_id foreign key — implemented, pending independent acceptance)
 --   notifications       → notifications                                    (LIVE since migration 0009_notifications, S7a, REGISTERED)
 --   notificationPrefs   → notification_prefs, notification_pref_categories  (LIVE since migration 0009_notifications, S7a, REGISTERED)
 --   dispatches          → dispatches, dispatch_attempts                  (LIVE since migration 0010_dispatches, S7b, REGISTERED — independently accepted at ac50b60)
@@ -58,11 +58,12 @@
 --   (array position) -> seq (the durable thread order every reader sees)
 --   id            -> id (chan-*)
 --   requestId     -> request_id (UNIQUE: a request opens one thread, enforced by the routes and the
---                    repository; NO foreign key — recruitment_requests is an S8 table that does not
---                    exist yet. D-A: the TRANSITIONAL CHECKED REFERENCE — open() refuses a request
---                    that is not in the requests collection, the import refuses a channel whose
---                    request is not in the file's requests blob, every snapshot write validates the
---                    FINAL combined state; S8a rebuilds this table with the foreign key)
+--                    repository; since migration 0015 (S8a-core) a REAL FOREIGN KEY to
+--                    recruitment_requests(id) ON DELETE RESTRICT — the conversion D-A approved; the
+--                    0012 definition had no key and checked the request in code against the requests
+--                    blob. open() still checks the request against the live collection, the import
+--                    and every snapshot write still validate the FINAL combined state, and the prune
+--                    of a request still named by a thread is refused with ids)
 --   playerId      -> player_id (NO foreign key and NO lifecycle clause — D-B, see lifecycle)
 --   playerName    -> player_name (snapshot; nullable; absent recorded in absent_keys_json)
 --   orgId         -> org_id (REFERENCES orgs — kept: organisations are upserted and pruned, never rewritten)
@@ -95,7 +96,7 @@
 CREATE TABLE channels (
   seq                     INTEGER PRIMARY KEY,
   id                      TEXT NOT NULL UNIQUE,
-  request_id              TEXT NOT NULL,
+  request_id              TEXT NOT NULL REFERENCES recruitment_requests(id) ON DELETE RESTRICT,  -- the real key since migration 0015 (S8a-core, D-A converted)
   player_id               TEXT NOT NULL,
   player_name             TEXT,
   org_id                  TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,

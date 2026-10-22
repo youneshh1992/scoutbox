@@ -573,7 +573,13 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
     { id: 'trial-legacy-null', requestId: 'req-legacy-3', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: 'Maria Keane', acceptedAt: Date.now() - 40 * DAY, proposedDate: null, venue: null, notes: '', reportDueAt: null, status: 'awaiting_report' },
     { id: 'trial-legacy-old', requestId: 'req-legacy-4', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: 'Maria Keane', acceptedAt: undefined, proposedDate: '1999-01-01', venue: null, notes: '', status: 'awaiting_report' },
   );
-  snap.db.requests.push({ id: 'req-legacy-5', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, userId: 'u-maria', scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy pending invitation', trialDetails: { proposedDate: 'garbage-day', altSlots: ['also-garbage'], venue: null, notes: '' }, status: 'pending', createdAt: Date.now() - 3 * DAY, routedTo: 'player', guardianId: null, contactChannel: null });
+  // S8a-core: a trial names its request by a real key (trials.request_id → recruitment_requests), so the four legacy
+  // trials get the accepted invitation each of them came from, in the legacy direct-request literal; a trial naming an
+  // absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The garbage this section
+  // proves tolerated lives in the trial rows above, which are unchanged.
+  const mariaId = snap.db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id;
+  for (const n of [1, 2, 3, 4]) snap.db.requests.push({ id: `req-legacy-${n}`, playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, userId: mariaId, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy accepted invitation', trialDetails: { proposedDate: '1999-01-01', altSlots: [], venue: null, notes: '' }, status: 'accepted', createdAt: Date.now() - 41 * DAY, respondedAt: Date.now() - 40 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
+  snap.db.requests.push({ id: 'req-legacy-5', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, userId: mariaId /* S8a-core: the real staff id (a request names its staff member by a key) */, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy pending invitation', trialDetails: { proposedDate: 'garbage-day', altSlots: ['also-garbage'], venue: null, notes: '' }, status: 'pending', createdAt: Date.now() - 3 * DAY, routedTo: 'player', guardianId: null, contactChannel: null });
   store.save(snap);
   server = await boot();
   maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
@@ -640,7 +646,11 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   await restart();
   maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
   const afterRestart = (await orgTrials(maria.token)).filter((t) => t.playerId === 'pl-carvalho');
-  ok(afterRestart.length === legacyAfter.length && JSON.stringify(afterRestart) === JSON.stringify(legacyAfter), 'L8 after a restart the tombstones are byte-identical');
+  // S8a-core: a trial read back from the tables carries its keys in the stored shape's order (the blob kept the
+  // writer's insertion order — e.g. `blockedBy` moved after `revBy`); every value is identical, so the comparison is
+  // canonical (keys sorted at every level) rather than textual.
+  const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((k2) => [k2, x[k2]])) : x));
+  ok(afterRestart.length === legacyAfter.length && canonical(afterRestart) === canonical(legacyAfter), 'L8 after a restart the tombstones are identical (every key and value; key order follows the stored shape)');
   const signedRestart = (await j('GET', `/org/rooms/${MID}`, undefined, maria.token)).body.room;
   ok(signedRestart.status === 'signed' && signedRestart.rev === signedBefore.rev, 'L8b the signed case survives the restart unchanged');
   for (const [st, before] of Object.entries(matrixBefore)) {

@@ -25,7 +25,7 @@ const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6bDir = (dir) => { const s4br = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), dir, s4br], { stdio: 'pipe' }); /* S4b-R: the file carries 0014; its rollback (copy-only, the retained records kept as a blob) goes first */ const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), s4br, out], { stdio: 'pipe' }); return out; };
+const preS6bDir = (dir) => { const s8a = tempDir('s8a-to-s4br'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), dir, s8a], { stdio: 'pipe' }); /* S8a: the file carries 0015; its rollback (copy-only, requests and trials written back as blobs) goes first */ const s4br = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, s4br], { stdio: 'pipe' }); /* then S4b-R (copy-only, the retained records kept as a blob) */ const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), s4br, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -74,7 +74,7 @@ await test('new installation: the seed is initialised once (never again), served
   let S = await boot(dir, nextPort());
   assert.match(S.log(), /initialised from the first installation's records/);
   let cap = (await S.j('GET', '/capabilities')).body;
-  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure']);
+  assert.deepEqual(cap.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']);
   assert.equal(cap.dataLayer.identity.initState, 'done'); assert.equal(cap.dataLayer.domains.players.mode, 'live');
   assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players); assert.equal(cap.dataLayer.domains.guardians.rows, seedCounts.guardians);
   assert.equal(cap.core_identity_storage?.state ?? cap.dataLayer.domains.players.mode, 'live');
@@ -620,9 +620,9 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
   assert.equal((await S.j('GET', `/org/players/${pid}`, undefined, pro)).body.medical.records.length, 1, 'shared: the record is served');
   assert.equal((await S.j('POST', '/player/medical/share', { shared: false }, token)).status, 200);
   assert.deepEqual((await S.j('GET', `/org/players/${pid}`, undefined, pro)).body.medical.records, [], 'unshared again: private');
-  // A SIGKILL and a restart: the same record, from the rows. (The report lives on the trial — a blob collection persisted by the ordinary, debounced save, as before S5 — so its save is awaited before the kill; every sub-record row above was committed before its response.)
+  // A SIGKILL and a restart: the same record, from the rows. (The report lives on the trial — since S8a a row of trial_reports, still persisted by the ordinary, debounced save — so its save is awaited before the kill; every sub-record row above was committed before its response.)
   const snapshotMe = pick(await me());
-  const reportSaved = () => (JSON.parse(q1(dir, "SELECT value FROM collections WHERE name = 'trials'")?.value ?? '[]')).some((t) => t.report?.id === rep.body.report.id);
+  const reportSaved = () => !!q1(dir, 'SELECT 1 AS one FROM trial_reports WHERE id = ?', rep.body.report.id); // S8a: the report is a row of trial_reports (written by the same debounced save that carried the trials blob before)
   for (let i = 0; i < 200 && !reportSaved(); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(reportSaved(), 'the trial report reached the database through the ordinary save');
   await S.kill();

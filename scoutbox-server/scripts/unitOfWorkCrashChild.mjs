@@ -15,8 +15,8 @@ const snapshot = () => ({ savedAt: Date.now(), idCounter: loaded.idCounter, db }
 store.unitOfWork(() => {
   layer.orgs.insert({ id: 'org-crash', name: 'Crash FC', type: 'club', plan: 'Pro' });
   db.orgs.find((o) => o.id === 'org-pro').squad.push({ id: 'sq-crash', name: 'Crash', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
-  db.requests[0].status = 'accepted';
-  db.requests.push({ id: 'req-crash', playerId: 'pl-1', status: 'pending', history: [] });
+  db.vouches[0].status = 'accepted';
+  db.vouches.push({ id: 'vch-crash', playerId: 'pl-1', status: 'pending', history: [] });
   // The row statements have run inside the open transaction; nothing is committed.
   if (store.sqlite.prepare("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-crash'").get().n !== 1) throw new Error('fixture: the row should be visible inside the transaction');
   process.stdout.write('ABOUT_TO_CRASH\n');

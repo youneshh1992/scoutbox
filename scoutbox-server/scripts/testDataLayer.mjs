@@ -11,6 +11,7 @@ import { runDataMigrations, transaction, dataSchemaReport } from '../repositorie
 import { createUsersRepository } from '../repositories/users.mjs';
 import { readonlyView } from '../repositories/readonly.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
 import { openStore } from '../store.mjs';
 
 let passed = 0;
@@ -64,12 +65,12 @@ test('schema report: names tables and counts, never rows', () => {
   const report = dataSchemaReport(s, DATA_MIGRATIONS);
   // The table list grows with every migration (0001 org_users; 0002 the five
   // core identity tables, live one domain at a time; 0006 the media-deletion
-  // queue; 0007 the twelve player sub-record tables; 0013 the eight audit tables); the report must list
+  // queue; 0007 the twelve player sub-record tables; 0013 the eight audit tables; 0015 the fifteen recruitment tables); the report must list
   // exactly what exists.
   assert.deepEqual(report, {
     engine: 'sqlite', migrationsApplied: DATA_MIGRATIONS.length, migrationsKnown: DATA_MIGRATIONS.length,
-    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure'],
-    tables: ['blocks', 'channels', 'dispatch_attempts', 'dispatches', 'email_challenges', 'guardian_children', 'guardians', 'idv_queue', 'ledger', 'media_deletions', 'message_attachments', 'messages', 'moderation_log', 'notification_pref_categories', 'notification_prefs', 'notifications', 'ops_events', 'org_notes', 'org_users', 'orgs', 'outbox', 'pairing_codes', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'push_log', 'push_tokens', 'reports', 'sessions', 'source_changes'].sort(),
+    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment'],
+    tables: ['blocks', 'channels', 'dispatch_attempts', 'dispatches', 'email_challenges', 'guardian_children', 'guardians', 'idv_queue', 'ledger', 'media_deletions', 'message_attachments', 'messages', 'moderation_log', 'notification_pref_categories', 'notification_prefs', 'notifications', 'ops_events', 'org_notes', 'org_users', 'orgs', 'outbox', 'pairing_codes', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'push_log', 'push_tokens', 'reports', 'sessions', 'source_changes', 'recruitment_requests', 'request_trial_slots', 'trials', 'trial_schedule_sessions', 'trial_session_evidence', 'trial_schedule_revisions', 'trial_attendance', 'trial_reminders', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events', 'trial_reports', 'trial_history', 'idempotency_keys'].sort(),
   });
   // There is no in-memory engine to report on: a missing connection is a programming error, not a mode.
   assert.throws(() => dataSchemaReport(null, DATA_MIGRATIONS), /needs a SQLite connection/);
@@ -218,7 +219,7 @@ test('attachDataLayer: db.users becomes the repository view and cannot be replac
   assert.throws(() => { db.users.push({}); }, /repositories/);
   assert.equal(layer.report().domains.users.rows, 1);
   // Every core identity table is live (S0–S4a) and the media-deletion queue exists; there is no shadow to report.
-  assert.deepEqual(layer.report().tables, ['blocks', 'channels', 'dispatch_attempts', 'dispatches', 'email_challenges', 'guardian_children', 'guardians', 'idv_queue', 'ledger', 'media_deletions', 'message_attachments', 'messages', 'moderation_log', 'notification_pref_categories', 'notification_prefs', 'notifications', 'ops_events', 'org_notes', 'org_users', 'orgs', 'outbox', 'pairing_codes', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'push_log', 'push_tokens', 'reports', 'sessions', 'source_changes']);
+  assert.deepEqual(layer.report().tables, ['blocks', 'channels', 'dispatch_attempts', 'dispatches', 'email_challenges', 'guardian_children', 'guardians', 'idv_queue', 'ledger', 'media_deletions', 'message_attachments', 'messages', 'moderation_log', 'notification_pref_categories', 'notification_prefs', 'notifications', 'ops_events', 'org_notes', 'org_users', 'orgs', 'outbox', 'pairing_codes', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'push_log', 'push_tokens', 'reports', 'sessions', 'source_changes', ...RECRUITMENT_TABLES].sort()); // S8a: the fifteen recruitment tables
   assert.equal('shadow' in layer.report(), false, 'the projection is retired');
   assert.deepEqual(layer.report().identity, { initState: 'done', uncommittedFacets: 0 });
   assert.deepEqual(layer.report().mediaDeletions, { queued: 0, conflicts: 0 });

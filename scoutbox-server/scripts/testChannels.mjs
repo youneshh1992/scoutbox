@@ -64,7 +64,10 @@ const guardianChannel = (over = {}) => channel({ id: 'chan-g', requestId: 'req-g
 const message = (over = {}) => ({ id: `msg-${++counter}`, ts: NOW - MIN, sender: { kind: 'org_user', id: 'usr-1', name: 'Maria · Head of Recruitment · Eastport FC' }, text: 'Synthetic message text.', attachment: null, ...over });
 const clip = (over = {}) => ({ kind: 'clip', mediaId: 'med-1', title: 'Highlights', url: null, verifiedClip: false, ...over });
 const trialReport = (over = {}) => ({ kind: 'trial_report', reportId: 'rep-1', orgName: 'Eastport FC', summary: 'accel 7/10 · 31 km/h', ...over });
-const REQUESTS = () => [{ id: 'req-1', playerId: 'pl-adult', status: 'accepted', contactChannel: 'chan-1', history: [] }, { id: 'req-g', playerId: 'pl-child1', status: 'accepted', contactChannel: 'chan-g', history: [] }, { id: 'req-free', playerId: 'pl-adult', status: 'accepted', contactChannel: null, history: [] }, { id: 'req-solo', playerId: 'pl-child2', status: 'accepted', contactChannel: 'chan-solo', history: [] }];
+/** A request in the direct route's literal (S8a: the requests are rows of recruitment_requests since 0015, so the fixture carries the writer's identifiers; `history` is an unknown field kept in extra_json). */
+const REQ = (id, playerId, contactChannel, over = {}) => ({ id, playerId, playerName: playerId === 'pl-adult' ? 'Adult Signup' : `Child ${playerId}`, orgId: 'org-pro', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, trustedPartner: false, userId: 'usr-1', scoutName: 'Maria', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Synthetic invitation.', trialDetails: { proposedDate: '2026-11-01', altSlots: [], venue: 'Eastport Ground', notes: '' }, status: 'accepted', createdAt: NOW - 3 * MIN, routedTo: 'player', guardianId: null, contactChannel, history: [], ...over });
+const REQUESTS = () => [REQ('req-1', 'pl-adult', 'chan-1'), REQ('req-g', 'pl-child1', 'chan-g'), REQ('req-free', 'pl-adult', null), REQ('req-solo', 'pl-child2', 'chan-solo')];
+const requestRow = (dir, id) => (tableExistsIn(dir, 'recruitment_requests') ? rowsOf(dir, 'recruitment_requests').find((r) => r.id === id) : undefined);
 /** A guardian thread naming the fixture's CHILDLESS guardian gd-signup (removing that guardian is valid for the identity snapshot itself, so the channel assertion is what refuses). */
 const soloChannel = (over = {}) => channel({ id: 'chan-solo', requestId: 'req-solo', playerId: 'pl-child2', playerName: 'Child pl-child2', counterparty: 'guardian', guardianId: 'gd-signup', ...over });
 
@@ -241,24 +244,24 @@ test('[cutover] staged mode (the server): a thread, a message and a receipt are 
   const held = L.repo.byId('chan-1'); L.repo.appendMessage('chan-1', message({ id: 'm-1' })); L.repo.markRead('chan-1', 'org', NOW);
   assert.equal(L.repo.pending(), 3); assert.deepEqual(channelIds(dir), ['chan-1'], 'nothing durable before the save'); assert.deepEqual(L.db.channels.map((c) => c.id), ['chan-1', 'chan-2'], 'memory shows the thread at once'); assert.equal(held.messages.length, 2);
   L.store.sqlite.exec("CREATE TEMP TRIGGER rv_fx BEFORE INSERT ON channels BEGIN SELECT RAISE(ABORT, 'synthetic flush failure'); END");
-  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(channelIds(dir), ['chan-1']); assert.equal(seqOf(dir), seq0); assert.equal(L.repo.pending(), 3); assert.equal(JSON.parse(blobOf(dir, 'requests')).find((r) => r.id === 'req-free').contactChannel, null, 'the blob did not land without the rows');
+  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(channelIds(dir), ['chan-1']); assert.equal(seqOf(dir), seq0); assert.equal(L.repo.pending(), 3); assert.equal(requestRow(dir, 'req-free').contact_channel_id, null, 'the request\'s answer (a recruitment_requests row since S8a) did not land without the thread rows');
   L.store.sqlite.exec('DROP TRIGGER rv_fx');
   L.store.sqlite.exec('CREATE TEMP TABLE rv_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE rv_child (parent_id TEXT NOT NULL REFERENCES rv_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER rv_commit AFTER INSERT ON messages BEGIN INSERT INTO rv_child (parent_id) VALUES (\'missing-on-purpose\'); END');
   assert.throws(() => L.save(), /FOREIGN KEY constraint failed/); assert.deepEqual(channelIds(dir), ['chan-1']); assert.equal(seqOf(dir), seq0); assert.equal(L.repo.pending(), 3);
   L.store.sqlite.exec('DROP TRIGGER rv_commit');
   L.save();
-  assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-2']); assert.deepEqual(messageRows(dir).map((r) => r[2]), ['m-0', 'm-1']); assert.equal(rowsOf(dir, 'channels', 'seq')[0].read_by_org_at, NOW); assert.equal(JSON.parse(blobOf(dir, 'requests')).find((r) => r.id === 'req-free').contactChannel, 'chan-2'); assert.equal(L.repo.pending(), 0);
+  assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-2']); assert.deepEqual(messageRows(dir).map((r) => r[2]), ['m-0', 'm-1']); assert.equal(rowsOf(dir, 'channels', 'seq')[0].read_by_org_at, NOW); assert.equal(requestRow(dir, 'req-free').contact_channel_id, 'chan-2'); assert.equal(L.repo.pending(), 0);
   L.save(); assert.equal(seqOf(dir), seq0 + 2); assert.equal(messageRows(dir).length, 2, 'a later save does not replay');
   // A unit of work: together or not at all.
   L.repo.appendMessage('chan-2', message({ id: 'm-pre' })); assert.equal(L.repo.pending(), 1);
   const state = () => ({ export: plain(L.repo.exportRows()), heldMessages: held.messages.map((m) => m.id), heldRead: plain(held.readBy), requests: JSON.stringify(L.db.requests), durable: [channelIds(dir), messageRows(dir), seqOf(dir)] });
   const before = state();
   const unchanged = (label) => { assert.deepEqual(state(), before, label); assert.equal(L.repo.pending(), 1, `${label}: the pre-unit write is still pending`); assert.equal(L.store.sqlite.isTransaction, false); };
-  const work = () => { L.db.requests.push({ id: 'req-u', playerId: 'pl-adult', status: 'accepted' }); L.repo.appendMessage('chan-1', message({ id: 'm-u', attachment: clip() })); L.repo.markRead('chan-1', 'counterparty', NOW + 5); L.repo.open(channel({ id: 'chan-u', requestId: 'req-u' })); L.repo.deleteForPlayer('pl-adult'); };
+  const work = () => { L.layer.recruitment.addRequest(REQ('req-u', 'pl-adult', null)); /* S8a: the former blob push, through the recruitment repository (joins the unit) */ L.repo.appendMessage('chan-1', message({ id: 'm-u', attachment: clip() })); L.repo.markRead('chan-1', 'counterparty', NOW + 5); L.repo.open(channel({ id: 'chan-u', requestId: 'req-u' })); L.repo.deleteForPlayer('pl-adult'); };
   assert.throws(() => L.store.unitOfWork(() => { work(); throw new Error('synthetic unit failure'); }, { snapshot: L.snapshot }), /synthetic unit failure/);
   unchanged('thrown'); assert.deepEqual(held.messages.map((m) => m.id), ['m-0', 'm-1'], 'the nested array is back on the held view'); assert.equal(opened.id, 'chan-2');
   let caught = null; let outer = null;
-  try { L.store.unitOfWork(() => { L.db.requests.push({ id: 'req-u', playerId: 'pl-adult', status: 'accepted' }); L.repo.appendMessage('chan-1', message({ id: 'm-ok' })); L.repo.markRead('chan-1', 'counterparty', NOW + 5); try { L.repo.appendMessage('chan-2', message({ id: 'm-bad', sender: { kind: 'admin', id: 'a', name: 'b' } })); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  try { L.store.unitOfWork(() => { L.layer.recruitment.addRequest(REQ('req-u', 'pl-adult', null)); L.repo.appendMessage('chan-1', message({ id: 'm-ok' })); L.repo.markRead('chan-1', 'counterparty', NOW + 5); try { L.repo.appendMessage('chan-2', message({ id: 'm-bad', sender: { kind: 'admin', id: 'a', name: 'b' } })); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
   assert.match(caught?.message ?? '', /sender\.kind/); assert.ok(outer, 'the caught participant failure still refuses the unit'); assert.equal(outer.unitOfWork, 'rolled_back'); unchanged('caught');
   L.store.sqlite.exec("CREATE TEMP TRIGGER rv_j BEFORE DELETE ON channels BEGIN SELECT RAISE(ABORT, 'synthetic joined failure'); END");
   assert.throws(() => L.store.unitOfWork(work, { snapshot: L.snapshot }), /synthetic joined failure/); unchanged('statement failure at the unit\'s flush');
@@ -267,15 +270,15 @@ test('[cutover] staged mode (the server): a thread, a message and a receipt are 
   assert.throws(() => L.store.unitOfWork(work, { snapshot: L.snapshot }), /FOREIGN KEY constraint failed/); unchanged('real COMMIT failure');
   L.store.sqlite.exec('DROP TRIGGER rv_commit2');
   L.store.unitOfWork(work, { snapshot: L.snapshot });
-  assert.equal(seqOf(dir), before.durable[2] + 1); assert.deepEqual(channelIds(dir), [], 'every thread of pl-adult went (chan-1, chan-2 and the just-opened chan-u)'); assert.deepEqual(messageRows(dir), []); assert.ok(JSON.parse(blobOf(dir, 'requests')).some((r) => r.id === 'req-u')); assert.equal(L.repo.pending(), 0); assert.deepEqual(L.db.channels.map((c) => c.id), []);
+  assert.equal(seqOf(dir), before.durable[2] + 1); assert.deepEqual(channelIds(dir), [], 'every thread of pl-adult went (chan-1, chan-2 and the just-opened chan-u)'); assert.deepEqual(messageRows(dir), []); assert.ok(requestRow(dir, 'req-u'), 'the request added inside the unit landed with it'); assert.equal(L.repo.pending(), 0); assert.deepEqual(L.db.channels.map((c) => c.id), []);
   // Hook registration is a precondition inside the joined boundary.
   const { createChannelsRepository } = needModule();
   const bareUnit = createChannelsRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, requests: () => L.db.requests });
   const stagedUnit = createChannelsRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, staged: true, requests: () => L.db.requests });
   for (const [label, w] of [['immediate', () => bareUnit.open(channel({ id: 'chan-h', requestId: 'req-free' }))], ['staged', () => stagedUnit.open(channel({ id: 'chan-h', requestId: 'req-free' }))]]) {
     let c = null; let o = null;
-    try { L.store.unitOfWork(() => { L.db.requests.push({ id: 'req-h' }); try { w(); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; }
-    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(JSON.parse(blobOf(dir, 'requests')).some((r) => r.id === 'req-h'), false);
+    try { L.store.unitOfWork(() => { L.layer.recruitment.addRequest(REQ('req-h', 'pl-adult', null)); try { w(); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; }
+    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(requestRow(dir, 'req-h'), undefined); assert.equal(L.db.requests.some((r) => r.id === 'req-h'), false, 'the request added inside the refused unit is gone from memory too');
   }
   assert.throws(() => stagedUnit.open(channel({ id: 'chan-h', requestId: 'req-free' })), /save hook/); assert.throws(() => createChannelsRepository({ sqlite: L.store.sqlite, staged: true }), /needs the store's participant API/);
   L.close(); rm(dir);
@@ -344,7 +347,7 @@ test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file 
 test('[cutover] the FINAL-STATE assertion, every direction (review §11.5): channels supplied with requests omitted — valid against the RETAINED requests passes, an orphan refuses (CHANNEL_REQUEST_MISSING, nothing written); requests supplied with channels omitted — a request removed under a retained channel refuses, a set that keeps every referenced id passes; both supplied — a coordinated removal passes, an invalid combination refuses whole with unrelated collections untouched; requests supplied as an EMPTY array with retained channels refuses (absence ≠ empty); a non-array requests collection refuses; and the five guardian cases: identity pair only with a referenced guardian removed refuses atomically (tables, unrelated blobs and saveSeq unchanged), identity pair only with every guardian retained succeeds with channel/message order and content unchanged, identity pair and channels with a guardian and its channel removed together succeeds, an invalid coordinated replacement refuses whole, channels only with an invalid guardian refuses against the retained identity tables; an organisation removed with its channel retained refuses (the org FK at the prune), removed together with its channels succeeds', () => {
   const dir = tempDir('ch-final');
   s7cFile(dir, { channels: [channel({ messages: [message({ id: 'm-1', ts: NOW }), message({ id: 'm-2', ts: NOW })] }), guardianChannel({ messages: [message({ id: 'm-g' })] }), soloChannel()] });
-  { const s = openRaw(dir); migrate(s); s.close(); }
+  { const s = openRaw(dir); runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }); s.close(); } // every registered step: since S8a the requests are rows and the channel key is real, which is the final state this test asserts
   const tool = openStore(dir); const snap = tool.load(); const base = { ...snap.db }; const seqAt = () => tool.revision();
   const ALL = ['chan-1', 'chan-g', 'chan-solo'];
   const unchangedAfter = (fn, re, code, label) => { const before = dump(tool.sqlite); const seq = seqAt(); assert.throws(fn, (e) => re.test(e.message) && (!code || e.code === code), label); assert.equal(seqAt(), seq, `${label}: saveSeq unchanged`); assert.deepEqual(dump(tool.sqlite), before, `${label}: nothing changed`); };
@@ -356,9 +359,9 @@ test('[cutover] the FINAL-STATE assertion, every direction (review §11.5): chan
   // requests supplied, channels omitted
   const { channels: _c1, ...noChannels } = base;
   unchangedAfter(() => save({ ...noChannels, requests: base.requests.filter((r) => r.id !== 'req-g') }), /CHANNEL_REQUEST_MISSING[^;]*chan-g/, 'CHANNEL_REQUEST_MISSING', 'a request removed under a retained channel');
-  save({ ...noChannels, requests: [...base.requests, { id: 'req-new', playerId: 'pl-adult', status: 'pending' }] }); assert.equal(JSON.parse(blobOf(dir, 'requests')).length, 5, 'a request set that keeps every referenced id passes');
-  unchangedAfter(() => save({ ...noChannels, requests: [] }), /CHANNEL_REQUEST_MISSING/, 'CHANNEL_REQUEST_MISSING', 'an explicit empty requests array with retained channels');
-  unchangedAfter(() => save({ ...noChannels, requests: 'not-an-array' }), /CHANNEL_REQUESTS_MALFORMED/, 'CHANNEL_REQUESTS_MALFORMED', 'a non-array requests collection');
+  save({ ...noChannels, requests: [...base.requests, REQ('req-new', 'pl-adult', null, { status: 'pending' })] }); assert.equal(rowsOf(dir, 'recruitment_requests').length, 5, 'a request set that keeps every referenced id passes');
+  unchangedAfter(() => save({ ...noChannels, requests: [] }), /CHANNEL_REQUEST_MISSING/, 'CHANNEL_REQUEST_MISSING', 'an explicit empty requests array with retained channels (S8a: the prune names the threads that still name a request, ids only)');
+  unchangedAfter(() => save({ ...noChannels, requests: 'not-an-array' }), /requests: the snapshot collection must be an array/, undefined, 'a non-array requests collection (S8a: requests are a table-backed collection; the shape check refuses before anything is dispatched)');
   // both supplied
   save({ ...base, requests: base.requests.filter((r) => r.id !== 'req-g'), channels: base.channels.filter((c) => c.id !== 'chan-g'), vouches: [{ id: 'vch-coord' }] }); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-solo'], 'a coordinated removal passes'); assert.equal(JSON.parse(blobOf(dir, 'vouches'))[0].id, 'vch-coord');
   const requestsNow = base.requests.filter((r) => r.id !== 'req-g'); // the current state: chan-1 only, req-1 and req-free
@@ -378,8 +381,8 @@ test('[cutover] the FINAL-STATE assertion, every direction (review §11.5): chan
   assert.deepEqual(JSON.parse(blobOf(dir, 'vouches')), base.vouches, '(iv) the unrelated collection is untouched (the base vouches the previous save wrote, not vch-iv)');
   unchangedAfter(() => save({ ...noRequests, channels: [...base.channels, guardianChannel({ id: 'chan-bad', requestId: 'req-free', guardianId: 'gd-missing' })] }), /CHANNEL_GUARDIAN_MISSING/, undefined, '(v) channels only with an invalid guardian, against the retained identity tables');
   // the organisation
-  unchangedAfter(() => save({ ...noChannels, orgs: [] }), /no longer lists organisation org-pro but other records still reference it/, undefined, 'an organisation removed with its channel retained');
-  save({ ...base, orgs: [], users: [], sessions: [], channels: [], requests: base.requests }); assert.deepEqual(channelIds(dir), []); assert.equal(rowsOf(dir, 'orgs').length, 0, 'an organisation removed together with its channels (and its staff and their sessions, which reference it too)');
+  unchangedAfter(() => save({ ...noChannels, orgs: [] }), /no longer lists organisation org-pro but other records still reference it|RECRUITMENT_ORG_MISSING[\s\S]*organisations org-pro/, undefined, 'an organisation removed with its channel retained (S8a: the requests that name it are refused first, ids only)');
+  save({ ...base, orgs: [], users: [], sessions: [], channels: [], requests: [] }); assert.deepEqual(channelIds(dir), []); assert.equal(rowsOf(dir, 'orgs').length, 0, 'an organisation removed together with its channels (and its staff and their sessions, which reference it too; since S8a the requests, which reference the organisation and its staff, go with it)');
   tool.sqlite.close(); rm(dir);
 });
 

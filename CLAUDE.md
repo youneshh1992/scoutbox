@@ -322,27 +322,61 @@ and design changes the Founder explicitly requests.
   the erased data restored by nothing; proven by booting the actual `f0abd34`
   build on the copy) and the S6b tool refuses a file carrying 0014. **Never
   boot the previous build directly on a 0014 file: it serves a retained row as
-  a passwordless account** (OPERATIONS.md). The next free migration identifier
-  is `0015` (not reserved). The six historical builds the backend gate boots
-  for real: `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`
-  (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR_SERVER`). **The next step is
-  prepared, not started: S8a-core** (requests and trials, their owned child
-  tables, `idempotency_keys`, the `channels.request_id` conversion; no key to
-  `players(id)` or `guardians(id)`; the six-phase write of plan §D.7.5 —
-  back-reference parked then assigned, departure before arrival for a
-  changed `request_id` only, a parent-preserving release (the case slot
-  parked, never a delete) of a survivor leaving its
-  `trials_one_open_per_case` slot before any arrival so a retained request
-  link survives a partial save, explicit prunes, final-state assertions,
-  immediate constraints; the lossless presence mapping of §D.7.3; the
-  drafted `one_pending` index withdrawn so the open-day route's
-  invitations stay valid) — plan §D.7, **corrected after the independent
-  reviews of `a6c40f3` (D1/D2/D3), `cd7dc95` (the D1 order dependence) and
-  `f2121b5` (the partial-save link loss) and itself awaiting independent
-  review** — which
-  needs the Founder's answers to **Q7a, Q7b and Q7c** and nothing else;
-  nothing of it is implemented, stubbed or reserved; file 02's draft is
-  amended at implementation, not before.
+  a passwordless account** (OPERATIONS.md). **S8a-core — requests and trials
+  as tables — is IMPLEMENTED since 22 October 2026 (one commit on top of
+  `d0f0205`) and AWAITS INDEPENDENT ACCEPTANCE** (plan §D.8 the
+  implementation record; §D.7 the design, independently accepted at
+  `d0f0205` after the reviews of `a6c40f3`, `cd7dc95` and `f2121b5`;
+  `scoutbox-server/OPERATIONS.md` "Recruitment requests and accepted
+  trials"; `docs/architecture/sql/02_recruitment.sql` amended to the
+  implemented sixteen definitions). Built under the Founder's three explicit
+  decisions of 22 October 2026, recorded verbatim and not to be asked again:
+  **Q7a "Approve tolerant (Recommended)"** (the player references on both
+  tables carry no key; live, retained and historically missing ids resolve,
+  are counted and never refused, fabricated or deleted), **Q7b "Approve
+  strict checks (Recommended)"** (the two `case_id` columns are checked in
+  code against the `recruitmentCases` collection, ids only, until S8b creates
+  `recruitment_cases`), **Q7c "Approve strict (Recommended)"** (the guardian
+  columns are checked in code, no `SET NULL` key). Migration
+  `0015_recruitment` (REGISTERED): `recruitment_requests`,
+  `request_trial_slots`, `trials` and its eleven owned child tables,
+  `idempotency_keys`, `channels` rebuilt with the real `request_id` key (D-A
+  converted); the blobs imported row for row and retired; the six-phase write
+  of plan §D.7.5 (back-reference parked then assigned, departures only for a
+  removal or a changed `request_id`, a survivor leaving its
+  `trials_one_open_per_case` slot released by an UPDATE that parks `case_id`,
+  explicit prunes, final-state assertions, immediate constraints); the
+  lossless presence mapping of §D.7.3 (absent / null / off-type / unknown
+  fields kept; `blockedBy`, `keys.accept`, the tombstone's
+  `trialDetails.instructions`, the `day` presence, `recipient.playerId`);
+  the drafted `one_pending` index withdrawn (D2); `db.requests` / `db.trials`
+  read-only array views of the mutable records every route edits in place,
+  landing in the same save as before; `recruitment.addRequest` / `addTrial` /
+  `tombstoneForPlayer` the three write entry points; every route payload
+  unchanged. Two changes around the design, both recorded in plan §D.8.5:
+  the staff prune of a snapshot write runs after the request prune
+  (`recruitment_requests.user_id` is a RESTRICT key) and `store.mjs` opens
+  saves and units of work with `BEGIN IMMEDIATE` (a deferred BEGIN whose
+  first statements are reads failed at once under a concurrent writer).
+  Also in §D.8.5: the cutover REFUSES with positions and ids a legacy file
+  the blob store tolerated (an entry that is not a record, a trial naming
+  no request, a request naming no staff member, two trials naming one
+  request, two open trials in one case) — nothing dropped or repaired; five
+  M23 batteries whose synthetic fixtures wrote such rows were adapted to
+  the writers' literals, reason stated in each; a record read from the
+  tables carries its keys in the stored shape's order (values identical). The
+  copy-only rollback is `scripts/recruitmentRollback.mjs` (both blobs written
+  back losslessly, `channels` back to the 0012 definition, nothing lost;
+  proven by booting the actual `9b109dc` build on the copy) and the S4b-R
+  tool refuses a file carrying 0015. **Never boot the previous build directly
+  on a 0015 file: measured, it exits 1 at boot (`STORE_MISSING requests,
+  trials`) and serves nothing** (OPERATIONS.md). Not met and not claimed: a
+  faster save (the change-tracking fingerprint still serialises every record
+  per flush), the whole-snapshot-write objective. The next free migration
+  identifier is `0016` (not reserved). S8b (cases, rooms, decisions) is not
+  started. The seven historical builds the backend gate boots for real:
+  `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`,
+  `9b109dc` (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR/S8A_SERVER`).
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state
