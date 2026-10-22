@@ -334,7 +334,12 @@ and design changes the Founder explicitly requests.
   scope only — not S8 as a whole, not the full migration, not product
   release, security, legal compliance, merge or deployment). S8b (cases,
   rooms, decisions) is PREPARED, NOT IMPLEMENTED (`docs/architecture/
-  s8b-readiness-review.md`, plan §D.9)** (plan §D.8 the implementation
+  s8b-readiness-review.md`, plan §D.9): its write order was corrected after
+  the independent review of `57076a2` (F1 the incoming case links released
+  before the S8a departures and the request prune, F2 explicitly removed
+  room rows pruned before their case; the Q8a strict-option wording) and
+  the corrected design AWAITS INDEPENDENT ACCEPTANCE; Q8a is unanswered
+  and not to be asked before that review; `0016` is not reserved** (plan §D.8 the implementation
   record; §D.7 the design, independently accepted at
   `d0f0205` after the reviews of `a6c40f3`, `cd7dc95` and `f2121b5`;
   `scoutbox-server/OPERATIONS.md` "Recruitment requests and accepted
@@ -383,8 +388,8 @@ and design changes the Founder explicitly requests.
   trials`) and serves nothing** (OPERATIONS.md). Not met and not claimed: a
   faster save (the change-tracking fingerprint still serialises every record
   per flush), the whole-snapshot-write objective. The next free migration
-  identifier is `0016` (not reserved). S8b (cases, rooms, decisions) is not
-  started. The seven historical builds the backend gate boots for real:
+  identifier is `0016` (not reserved). S8b (cases, rooms, decisions) is
+  prepared, not implemented. The seven historical builds the backend gate boots for real:
   `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`,
   `9b109dc` (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR/S8A_SERVER`).
   `trialReports` is not stored: it is derived from

@@ -9,6 +9,13 @@ approved. The drafted DDL in `docs/architecture/sql/02_recruitment.sql` for thes
 implementation, as S8a's was. Everything marked *proposed* below is a proposal for independent review; S8a-core is
 *accepted*; S8b is *not implemented*.
 
+**Corrected on 22 October 2026 after the independent review of `57076a2`**, which accepted the S8a-core acceptance
+record and did NOT accept this design for implementation: its F1 (the incoming case links must be released before the
+S8a trial departures and the request prune) and F2 (explicitly removed room rows must be pruned before their case)
+are corrected in §§5–6 and evidenced by probe 5 beside the reviewer's reproduction script; the strict-option wording
+of Q8a in §9 is corrected (a refusal stops the migration; it authorises no deletion). S8b stays PREPARED, NOT
+IMPLEMENTED, **awaiting independent acceptance of the corrected design**; Q8a stays unanswered and is not asked here.
+
 What this document is for: the survey the independent review of `7a7efc6` asked for ("establish the exact bounded
 collection/table list from current writers and readers"), a concrete migration and write design with its probes, the
 rollback, the test checklist, and the genuine open decision — so that the implementation milestone can start from a
@@ -254,11 +261,23 @@ become checks against the final case TABLE (ids first, the key second — the S8
 - **Save timing.** Unchanged: the routes' `persistNow()` and debounced `persist()` land the dirty records in the same
   save as today; dirty detection by the per-record committed fingerprint (the S8a mechanism; the same cost caveat as
   §D.8.7 — no save-time gain is claimed for S8b either).
-- **Participants.** Four save-hook participants registered in this order: `cases-core` (case rows, non-link children)
-  **before** `recruitment` (S8a, unchanged), then `cases-links` (the two link lists — after the requests and trials
-  exist in the same save: `trialRoutes.mjs:414` creates the request and its link together), then `rooms` (the four
-  room collections, which reference cases only), then `channels` (S7d, unchanged). **Probe 2** proves the order and
-  its control (links before requests fail on the key).
+- **Participants (corrected after the review of `57076a2`, F1).** The cases repository cannot be one save-hook object:
+  the release of incoming link rows (§6 R) must run BEFORE the S8a flush and their reinsert (§6 C) AFTER it, and the
+  case prune (§6 F3) AFTER the room prunes — while `recruitment.flush` (`recruitment.mjs:703`–`:719`) runs its phases
+  1–3 AND its request prune inside one call (`:713`–`:714`). Registering hooks "in order" therefore provides no
+  end-of-save prune phase of its own, and the earlier four-participant list was wrong. Proposed: the cases repository
+  registers THREE hook objects around the existing ones, in this order — `cases-core` (A the case rows and non-link
+  children; R the release) → `recruitment` (S8a, unchanged: B, and F2 inside its own flush) → `cases-links` (C the
+  reinsert; `trialRoutes.mjs:414` creates a request and its link in one save, so the link lands after the request) →
+  `rooms` (D the four room collections; F1 their prunes) → `cases-prune` (F3) → `channels` (S7d, unchanged). The
+  release needs the S8a departure set (`recruitment.mjs:517`: a trial not in the mirror, or whose `requestId` differs
+  from the stored `request_id`) and the pruned-request set (a committed request no longer in the mirror): the
+  recruitment repository exposes both through a read-only accessor (`departures()`, computed from its mirrors and the
+  table by the same criterion as its flush) — **a future addition to `recruitment.mjs` at implementation, not made
+  now**; the alternative, splitting `recruitment.flush` into a write call and a prune call, changes accepted S8a code
+  and is not preferred. In staged mode the mirrors ARE the final graph (no collection is omitted), so the preflight of
+  §6 P reads them. **Probe 5** proves the order over the real `RECRUITMENT_SNAPSHOT.replace`/`prune`; probe 2's
+  "links after requests" control stands.
 - **Graph memento.** The unit-of-work memento covers the five collections' records by identity, every nested object
   (`room`, `decisionDraft`, `transactionHandoff`, `budget`, `decision`, `links`) and array (`history`, `tasks`, …), so
   an aborted unit restores a held `kase.room` or `kase.decisionDraft` to its pre-unit value (the S8a `trial.schedule`
@@ -268,32 +287,77 @@ become checks against the final case TABLE (ids first, the key second — the S8
 
 ---
 
-## 6. The snapshot write — one algorithm for the import, a restore, a flush and a snapshot (proposed; probe 2)
+## 6. The snapshot write — one algorithm for the import, a restore, a flush and a snapshot (proposed; CORRECTED after the review of `57076a2` — F1, F2; probe 5)
 
+The draft order of `57076a2` (A cases → B the S8a phases → C links → D rooms → prunes of requests, then cases, then
+room rows) was wrong. The independent review reproduced four VALID final graphs it refused on a key, each with exact
+rollback (`review-57076a2-write-order.mjs`, four reproductions, four controls): **F1a** removing a linked trial while
+clearing its link (B deletes the trial while the `case_trial_links` row still names it — `trial_id … RESTRICT`);
+**F1b** moving a linked trial to a replacement request (the S8a phases delete and reinsert a trial whose `request_id`
+changes, `recruitment.mjs:517`–`:521`, under the same link row); **F1c** removing a linked request together with its
+case (the S8a request prune precedes the case deletion that would cascade the `case_request_links` row); **F2**
+removing a case together with its comment (`room_comments.room_id … RESTRICT`; the draft pruned cases before room
+rows). Probe 2's eight checks moved cases by `caseId` only and never exercised a trial departure or a request prune
+against a link row; they stand for what they cover (§11), not for the whole graph. The corrected order, every step
+inside the one transaction:
+
+P. **Preflight against the FINAL combined graph** — every supplied collection as supplied, every omitted one as the
+   retained table rows — ids only, before any write: (1) every link of every final case names a request/trial of the
+   final collections (`CASE_LINK_DANGLING`: a retained case whose trial the supplied trials remove is refused, never
+   silently detached — the S8a rule for threads, `CHANNEL_REQUEST_MISSING`); (2) a case the write removes is named by
+   no RETAINED row of an omitted collection (`CASE_STILL_REFERENCED`, naming the table — `recruitment_requests`,
+   `trials`, `room_comments`, `room_snapshots`, `room_decisions`, `room_evidence_states`, the owned children); (3) every
+   final request/trial `caseId` and every final room row's `roomId` names a final case (`CASE_MISSING`); (4) the S8a
+   validations, unchanged.
 A. **Cases, parent-preserving**: every supplied (or changed) case upserted by id (`seq` kept), its non-link children
-   rewritten in list order; no release phase is needed once the one-open index is withdrawn (with it, probe 2 shows a
-   release phase would be needed and still could not order every valid graph — §3).
+   rewritten in list order; no open-room release phase (the one-open index is withdrawn, §3).
+R. **Release, transaction-local**: the incoming link rows B or F2 would hit are deleted now — every link row of the
+   cases this write supplies (rewritten at C) or prunes (gone at F3), and, MEMORISED verbatim (case, position, target,
+   the mapping metadata of the row), the rows of RETAINED cases whose trial is in the S8a departure set (removed, or
+   its `request_id` changing) or whose request is pruned (none can exist after P: it would dangle). Nothing is dropped
+   or detached: a released row of a retained case comes back at C unchanged; a supplied case's rows come back from its
+   final list. The release is a storage step, not a product change — after the save the link lists are what the
+   writers left them.
 B. **The accepted S8a phases 1–3** for `requests`/`trials` (unchanged; the key to `recruitment_cases` is satisfied
    because A ran first; Q7b's case check reads the final case table).
-C. **Case links**: delete-and-reinsert per supplied case (`request_id`/`trial_id` keys satisfied because B ran first).
-D. **The four room collections**: upsert by id, children in list order; the decision chain written in list order with
-   `supersedes_id`/`superseded_by_id` as plain ids.
+C. **Links reinserted**: the supplied cases' final lists in list order (duplicates kept, metadata kept; the
+   `request_id`/`trial_id` keys are satisfied because B ran first — probe 2's control); the memorised rows of the
+   retained cases verbatim.
+D. **The supplied room collections**: upsert by id, children in list order; the decision chain written in list order
+   with `supersedes_id`/`superseded_by_id` as plain ids.
 E. **Channels** (S7d, unchanged).
-F. **Prunes**, children before parents: requests (S8a phase 5, with its thread/trial pre-checks), then **cases no
-   longer listed** — refused first with ids when a retained request or trial still names one
-   (`CASE_STILL_REFERENCED`, probe 2 check 3: nothing is detached, every table and the revision unchanged, no
-   transaction open) and when history/snapshots/decisions still name one; then room rows no longer listed; then the
-   staff and organisation prunes (after every reference to them, the S8a order).
+F. **Prunes against the final graph, dependents before their parents**: **F1** the rows a SUPPLIED room collection no
+   longer lists — decisions (and their evidence refs), evidence states, snapshots (and their source refs), comments
+   (and their mentions) — BEFORE their case; an OMITTED room collection is retained, and a retained row that names a
+   pruned case legitimately blocks F3 — named at P with its table, not discovered on the key; **F2** the S8a request
+   prune (phase 5, its own thread/trial pre-checks; the links to a pruned request were released at R, so the
+   `case_request_links` key no longer fires there); **F3** the cases no longer listed (their own children cascade;
+   every retained reference was named at P — the key is the last guard, not the message); **F4** the staff and
+   organisation prunes (after every reference to them, the S8a order).
 G. **Final assertions**, ids only: the S8a pair checks; every `case_id` of a request/trial in the final cases (the key
-   makes this redundant, kept for the message); every link target in the tables; the decision chain (every
-   `supersedes`/`supersededById` names a row of the same room; at most one head per room is REPORTED, not enforced —
-   `duplicateFinalHeads` is corruption the code names today); `foreign_key_check` empty.
+   makes this redundant, kept for the message); every link target in the tables; the decision chain
+   (`DECISION_CHAIN_BROKEN`: every `supersedes`/`supersededById` names a final row of the same room; at most one head
+   per room is REPORTED, not enforced — `duplicateFinalHeads` is corruption the code names today); `foreign_key_check`
+   empty.
 
-Partial saves: an omitted collection is retained (probe 2: a cases-only save equals the full save with the retained
-collections resent, byte for byte); a valid final graph never depends on array order (probe 2: full saves in both
-orders of cases and of requests/trials persist the same graph); a retained request or trial is never silently deleted
-or detached by rewriting a case (probe 2, check 3). Refusals roll back exactly (every table, the revision, no open
-transaction).
+Partial saves and the two failure contracts: an omitted collection is retained and its rows are part of the final
+graph P checks against; a partial save equals the full save with the retained collections resent (probe 5 check 6:
+cases and the room collections omitted while a retained case's trial is deleted and reinserted — its link rows,
+positions, duplicate and metadata byte-identical; probe 5 check 9 and probe 2 check 2: a cases-only save rewrites only
+the case tables); the result does not depend on the input order (probe 5: every landing case in both orders; probe 2
+check 1); a retained request or trial is never silently deleted or detached by rewriting a case (probe 2 check 3) and
+a retained case is never silently detached by rewriting the trials (probe 5 check 7). A refusal at P, or a failure
+after R or after B, rolls back to every row and the revision with no transaction open (probe 5 checks 7 and 8). The
+ordinary failed save keeps its pending intent in memory; an aborted unit restores the graph through the memento (§5)
+— both unchanged. **How the order applies:** a snapshot restore and the import supply every collection (nothing is
+retained: R releases every link row and C rewrites them all); a staged ordinary or unit save supplies each
+repository's changed records through the hook sequence of §5, with the mirrors as the final graph; a direct
+`replace`/`prune` call (the backup restore, the migration) runs the same steps in one function.
+
+What the corrected order does NOT do: disable foreign keys during a save; drop the two `RESTRICT` link keys; rely on
+the input being sorted; change a route, a role, safeguarding or retention. Refusing a reference that would dangle in
+the final graph is the S8a storage rule, not a retention decision; the retention of comments, snapshots, decisions and
+cases stays as the product has it (§10).
 
 ---
 
@@ -323,16 +387,21 @@ MEASURED at implementation on the actual build, not a guarantee**; the rollback 
    room-less M12 case, an M12-only task, a tombstoned comment, a handoff with `keys: {}`, own prototype-named fields,
    duplicate link entries, absent/null/empty acts; the import refusals with ids; the repository in staged mode with
    every in-place writer of §1 landing in the next save; the two failure contracts; the write order of §6 with
-   probe 2's cases as suite cases, both orders, partial saves, the prunes and refusals; the rollback and the chain) and
+   probe 5's and probe 2's cases as suite cases — F1a/F1b/F1c, F2 for each of the four room collections and all
+   together, the retained refusals with their tables, the release-and-reinsert of a retained case's links while its
+   trial is deleted and reinserted with the cases omitted, both input orders, partial saves equal to full saves, the
+   injected failures after R and after B; the staged hook sequence of §5 over the real store; the rollback and the
+   chain) and
    a server suite (`scripts/testRecruitmentCasesServer.mjs`: the real routes — room creation/adoption, status moves,
    reopen, comments, tasks, decisions (recommendation and formal with replay/conflict), evidence review, budget,
    handoff; backup/restore; SIGKILL; the `7a7efc6` build booted on the rollback copy; the direct boot of the old build
    on a new file MEASURED). Acceptance: both fail on `7a7efc6` on concrete assertions; both green after.
 3. `repositories/recruitmentCases.mjs` (shapes, DDL, mapping, validation, phases A/C/D/F/G, repository, export) and
    `repositories/migrations/0016_*.mjs` (steps 1–7 of §4); `recruitment.mjs` adapted (the case check reads the table;
-   `CONSTRAINTS` gains the two keys; the rebuild helper); `index.mjs` (registration, `TABLE_BACKED`, read/write order,
-   `attachDataLayer` participants, `/capabilities`); the caller conversions of §5; `m13/enterprise.mjs` exports.
-   Acceptance: `scripts/testSchemaDdl.mjs` compares the S8b tables; probes 1–3 pass against the real modules.
+   `CONSTRAINTS` gains the two keys; the rebuild helper; the read-only `departures()` accessor of §5 — its flush
+   unchanged); `index.mjs` (registration, `TABLE_BACKED`, read/write order, the SIX `attachDataLayer` hook objects of
+   §5 in their order, `/capabilities`); the caller conversions of §5; `m13/enterprise.mjs` exports.
+   Acceptance: `scripts/testSchemaDdl.mjs` compares the S8b tables; probes 1–3 and 5 pass against the real modules.
 4. File 02 amended to the implemented definitions (the drafted case/room sections replaced, the superseded notes
    kept as history); `sqlite-schema.md`, `OPERATIONS.md` (cutover, dry run, rollback, the DANGER line), `CLAUDE.md`.
 5. Gates: the backend chain (Node 22 and 24) with EIGHT historical builds booted for real; the Player suite; the
@@ -355,8 +424,9 @@ preserved and counted, never refused, fabricated or deleted** — or must a case
 the cutover (strict)? *Affected data:* every case, snapshot and decision of a player deleted before S4b-R or imported
 before S4a; the deletion unit keeps cases as tombstones today (`playerName` null, `subjectRemovedAt`), so a strict rule
 would refuse exactly the files that behaved correctly. *Alternatives:* tolerant-and-counted (the Q7a form) · strict
-(refuse at cutover; the operator deletes cases by hand — a retention decision the product has not taken) · a key
-(not available before plan §D.2a / Q3). *Recommendation:* tolerant and counted, for the Q7a reasons. *Depends on it:*
+(refuse at the cutover: the migration STOPS with the ids for resolution and nothing is changed — a refusal authorises
+no deletion of retained records; what resolution would mean is a retention question the product has not taken and
+this preparation does not take) · a key (not available before plan §D.2a / Q3). *Recommendation:* tolerant and counted, for the Q7a reasons. *Depends on it:*
 the `player_id` validation branch of the import and the write, `/capabilities` counts; nothing else.
 
 **Engineering choices recorded here, not put to the Founder** (ordinary design within the accepted S8a pattern, each
@@ -376,7 +446,22 @@ deletion/retention behaviour.
 - The old build's behaviour on a new file is predicted, not measured (§7).
 - The probes are design models over the real tables and the real S8a module; they are not the implementation's
   tests (§8.2) and they do not model the S8a mapping engine's treatment of the case fields (that engine is the
-  precedent; its behaviour on S8a shapes is accepted).
+  precedent; its behaviour on S8a shapes is accepted). **Coverage limits:** probe 2's eight write-order checks cover
+  `caseId` moves, a cases-only save, a referenced-case refusal, links-after-requests and the one-open index; they do
+  not cover a trial departure or a request prune against a link row, where the review of `57076a2` found the draft
+  order wrong (F1, F2) — corrected in §6 and covered by probe 5 (nine checks) and the reviewer's script. Probe 5
+  models the link tables and the four room tables with their `RESTRICT` references and plain-id decision chain; it
+  does not model the owned children of the room rows, the mentions/refs lists or the staff/org prunes (F4), which the
+  implementation's suites must cover (§8.2).
+- Evidence preserved from the independent review of `57076a2` (its run, Node v24.19.0 / SQLite 3.53.3, application
+  source byte-identical to `7a7efc6`): the full backend `npm test` stopped at `testOutboxPushServer`'s 12-second
+  push-durability deadline (`elapsedMs` 128341; `pushRowsBefore` 2, `pushRowsNow` 3, `saveSeq` 5 → 7, no pending
+  writes or effects — the row had reached storage); the cause of the elapsed time is not established; one targeted
+  rerun of that suite and the four previously unrun suites exited 0 (28 checks), so all 33 suites / 404 checks
+  completed across the original run and the recovery, which is NOT an uninterrupted exit-0 run. Recorded as it is: not
+  a new S8b regression (nothing of S8b runs in that build), not an explained infrastructure fault, not erased by any
+  later green run; kept separate from the two intermittent S6b failures ("not reproduced; cause unresolved"). This
+  session's own full runs on `57076a2` and on the corrected tree are in the handoff logs with their actual results.
 - Org deletion policy (plan O2) stays open and unchanged; retention of tombstoned comments and of cases stays as the
   product has it; the `transactionHandoff` re-invite overwrite and the budget `actuals[].lineId` dangling reference are
   known defects kept as they are (a storage step changes no product rule).
@@ -386,8 +471,12 @@ deletion/retention behaviour.
 | Probe (`node <probe> <project-root>`) | Checks | What it proves |
 |---|---|---|
 | `probe-s8b-rebuild-case-key.mjs` | 8 | the create-copy-drop-rename of both parents with the real case key on a real `0015` file: rows, children, idempotency rows, threads byte-identical; indexes recreated; the only key change is the new one; `foreign_key_check` empty; a dangling case id refuses with table and rowid and rolls back exactly; `RESTRICT` holds; the tombstoned and legacy pairs travel unchanged |
-| `probe-s8b-write-order.mjs` | 8 | the §6 order against the real S8a phases: both input orders equal; cases-only equals full; a referenced case cannot be removed (ids only, exact rollback); a pair moves between cases; links after requests (and the failing control); the one-open index needs a release phase and still cannot order a valid graph — withdrawn |
+| `probe-s8b-write-order.mjs` | 8 | the DRAFT order of `57076a2` against the real S8a phases: both input orders equal; cases-only equals full; a referenced case cannot be removed (ids only, exact rollback); a pair moves between cases by `caseId`; links after requests (and the failing control); the one-open index needs a release phase and still cannot order a valid graph — withdrawn. **Does not cover** a trial departure or a request prune against a link row (§10); kept unchanged as the record of what it proved |
+| `review-57076a2-write-order.mjs` (the reviewer's, unchanged; `node <script> <project-root> <probe-dir>`) | 4 reproductions + 4 controls, **exit 1 intended** | over probe 2's model and the real S8a writer: F1a, F1b, F1c and F2 refuse under the draft order with exact rollback; the controls that release the incoming link rows first (or prune the room row first) land the same final graphs. A design-model baseline, not a deployed defect and not a post-correction acceptance test — it still exits 1 on this tree because the draft order it models is the control of §6 |
+| `probe-s8b-write-order-corrected.mjs` | 9 | the CORRECTED order of §6 (P A R B C D F1 F2 F3 G) against the real S8a phases, with the draft order kept as the failing control: F1a, F1b (positions, the duplicate and the metadata of the links intact, the back-reference set), F1c, F2 for each of the four room collections (the three omitted ones refuse with their tables) and all four together; a retained case's links released and reinserted byte-identical while its trial is deleted and reinserted with the cases and rooms omitted; partial equals full; every landing case in both input orders; true retained references refuse with ids only (a retained case naming a removed trial, a removed case named by retained requests/trials/room rows — every table named, an unknown case, a broken decision chain); an injected failure after R and after B restores every row and the revision with no transaction open; probe 2's earlier graphs still land |
 | `probe-s8b-idempotency-rebuild.mjs` | 4 | the broadened `owner_table` CHECK by rebuild: the S8a definition refuses a new owner; the rebuild keeps rows, key and index; a failure before COMMIT leaves the S8a definition; the S8a readers unchanged |
 | `probe-s8b-one-open-room-live.mjs` | 5 | the real server: `ROOM_EXISTS` at creation, an archived room returned to `under_review` beside an open room — the drafted index cannot be created over the file this build writes |
 
-Run on 22 October 2026 on the `7a7efc6` tree (Node 22 and Node 24; logs in the handoff).
+Probes 1–4 run on 22 October 2026 on the `7a7efc6` tree and on `57076a2`; the reviewer's script and probe 5 on the
+`57076a2` tree (application source byte-identical to `7a7efc6`) — Node 22 and Node 24; logs in the handoff. The probes
+and the reviewer's scripts live outside the repository (the handoff ZIP), not in `scoutbox-server/scripts`.

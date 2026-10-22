@@ -3401,7 +3401,7 @@ reproduced; cause unresolved"). Q7a/Q7b/Q7c stay as recorded (§D.8.1) and are *
 the S8b tables need their own decision where one is needed (§D.9). The S8b design is preparation only: nothing of S8b
 is implemented, stubbed or reserved.
 
-### D.9 S8b (cases, rooms, decisions) — PREPARED, NOT IMPLEMENTED (22 October 2026, at `7a7efc6`)
+### D.9 S8b (cases, rooms, decisions) — PREPARED, NOT IMPLEMENTED (22 October 2026, at `7a7efc6`; the design corrected after the review of `57076a2`, awaiting independent acceptance)
 
 The bounded S8b design lives in `docs/architecture/s8b-readiness-review.md` and is **preparation only**: no migration
 module, repository, DDL change, test or stub exists; the next free migration identifier is `0016` — **reported, not
@@ -3423,9 +3423,17 @@ reserved**. What it records, in brief:
   so a lossless cutover cannot carry it; `ROOM_EXISTS` stays a code rule. Vocabulary/length CHECKs dropped (the S8a
   rule); position-keyed child tables; staff keys `RESTRICT`, no `SET NULL`; decision-chain self-references and
   `client_key` checked in code; `idempotency_keys` rebuilt with a broadened `owner_table` CHECK (probe 3).
-- **Write order (§6, probe 2):** A cases → B the S8a phases → C case links → D room collections → E channels →
-  F prunes (requests, then cases with a `CASE_STILL_REFERENCED` pre-check, then rooms, staff, orgs) → G assertions;
-  order-independent and consistent after a partial save.
+- **Write order (§6, probe 5; CORRECTED after the independent review of `57076a2`):** P preflight against the FINAL
+  combined graph (ids only: dangling links, retained rows naming a pruned case — with their table —, unknown cases)
+  → A cases → **R release** (transaction-local: the incoming link rows the S8a departures or the request prune would
+  hit, the retained cases' rows memorised verbatim) → B the S8a phases → C links reinserted (supplied lists, retained
+  rows verbatim) → D room collections → E channels → F prunes, dependents first (F1 the room rows a SUPPLIED room
+  collection no longer lists, F2 the S8a request prune, F3 cases, F4 staff and orgs) → G assertions. The draft order
+  of `57076a2` (links and rooms pruned after the cases, no release) refused four valid final graphs on a key (the
+  reviewer's F1a/F1b/F1c and F2, reproduced by `review-57076a2-write-order.mjs`); the corrected order lands them with
+  exact rollback on failure, partial saves equal to full saves, and no dependence on the input order (probe 5, nine
+  checks). In staged mode the cases repository registers three hook objects around the unchanged `recruitment` flush
+  (which prunes internally) and the `rooms` hook (§5); the S8a flush is not split.
 - **Rollback (§7):** copy-only, to the accepted pre-S8b build `7a7efc6`; the old build's behaviour on a new file is
   predicted, to be measured at implementation.
 - **The one genuine product decision (§9, Q8a, the Founder's):** whether the `player_id` columns of the S8b tables
@@ -3433,6 +3441,16 @@ reserved**. What it records, in brief:
   evidence. The preparation is complete without the answer; the implementation of those columns waits for it.
 - **Limitations (§10):** the slower boot, the larger file and the absent save-time gain grow with S8b; the
   whole-snapshot-write objective stays unmet until every blob has moved.
+
+**The independent review of `57076a2` (22 October 2026)** accepted the acceptance record of §D.8.11 and did NOT
+accept the S8b design for implementation: two write-order defects (F1 the incoming case links under the S8a trial
+departures and the request prune; F2 cases pruned before explicitly removed room rows) and one wording defect (the
+strict option of Q8a must not read as an operator deleting cases: a refusal stops the migration and authorises no
+deletion). All three are corrected in `s8b-readiness-review.md` (§§5–6, §9; probe 5; the reviewer's script kept
+unchanged as the baseline, exit 1 intended). The same review's backend run stopped once at `testOutboxPushServer`'s
+12-second deadline with the row durable and the cause unestablished; preserved in the review's §10, not called a
+regression, not called explained. **S8b stays PREPARED, NOT IMPLEMENTED, awaiting independent acceptance of the
+corrected design; Q8a stays unanswered and unasked; `0016` stays unreserved.**
 
 S8c and S8d are not started. Nothing in this section is a production, release, security, legal-compliance, merge or
 deployment approval.
