@@ -980,5 +980,8 @@ handoff (`logs/gates-run.txt`) and the PR description.
 **The independent review of that milestone (`a6c40f3`)** accepted this acceptance record as accurate — S4b-R stays
 accepted at `9b109dc`, no new defect in it is alleged — and found three P2 design defects in the first S8a-core brief
 (D1 the write order, D2 the "one pending request" index, D3 the dropped `blockedBy`). They are corrected in place in
-plan §D.7 (its correction record) by one documentation-only commit on top of `a6c40f3`; the corrected brief awaits
-independent review, S8a is not started, `0015` is not reserved, and Q7a–Q7c stay unanswered.
+plan §D.7 (its correction record) by one documentation-only commit on top of `a6c40f3` (`cd7dc95`). **The independent
+review of `cd7dc95`** closed D2 and D3 and the original D1 cases, and found one P2 remaining in D1 (the retained
+`trials_one_open_per_case` index made a valid snapshot depend on the trial array order); it is corrected in place in
+plan §D.7.5 by one further documentation-only commit. The corrected brief awaits independent review, S8a is not
+started, `0015` is not reserved, and Q7a–Q7c stay unanswered.

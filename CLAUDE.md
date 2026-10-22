@@ -329,12 +329,15 @@ and design changes the Founder explicitly requests.
   prepared, not started: S8a-core** (requests and trials, their owned child
   tables, `idempotency_keys`, the `channels.request_id` conversion; no key to
   `players(id)` or `guardians(id)`; the six-phase write of plan §D.7.5 —
-  back-reference parked then assigned, departure before arrival for the
-  unique value, explicit prunes, final-state assertions, immediate
-  constraints; the lossless presence mapping of §D.7.3; the drafted
-  `one_pending` index withdrawn so the open-day route's invitations stay
-  valid) — plan §D.7, **corrected after the independent review of
-  `a6c40f3` (D1/D2/D3) and itself awaiting independent review** — which
+  back-reference parked then assigned, departure before arrival for a
+  changed unique key (`request_id`, `case_id`), release of a survivor
+  leaving the `trials_one_open_per_case` predicate before any arrival,
+  explicit prunes, final-state assertions, immediate constraints; the
+  lossless presence mapping of §D.7.3; the drafted `one_pending` index
+  withdrawn so the open-day route's invitations stay valid) — plan §D.7,
+  **corrected after the independent reviews of `a6c40f3` (D1/D2/D3) and
+  `cd7dc95` (the remaining D1 order dependence) and itself awaiting
+  independent review** — which
   needs the Founder's answers to **Q7a, Q7b and Q7c** and nothing else;
   nothing of it is implemented, stubbed or reserved; file 02's draft is
   amended at implementation, not before.
