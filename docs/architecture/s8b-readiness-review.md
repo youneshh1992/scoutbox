@@ -1,0 +1,393 @@
+# S8b readiness review — recruitment cases, rooms and decisions as tables
+
+**Status: PREPARATION ONLY — NOT IMPLEMENTED.** Written 22 October 2026 on `feat/sqlite-schema` at `7a7efc6`, the
+commit at which S8a-core was independently accepted (`sqlite-migration-plan.md` §D.8.11). Nothing of S8b is
+implemented, stubbed, registered or reserved: no migration module, no repository, no DDL change, no test. The next free
+migration identifier is **`0016`** (the registry `scoutbox-server/repositories/migrations/` ends at
+`0015_recruitment.mjs`; `DATA_MIGRATIONS` ends at `0015`) — **reported, not reserved**; it is assigned when S8b is
+approved. The drafted DDL in `docs/architecture/sql/02_recruitment.sql` for these tables stays a draft and is amended at
+implementation, as S8a's was. Everything marked *proposed* below is a proposal for independent review; S8a-core is
+*accepted*; S8b is *not implemented*.
+
+What this document is for: the survey the independent review of `7a7efc6` asked for ("establish the exact bounded
+collection/table list from current writers and readers"), a concrete migration and write design with its probes, the
+rollback, the test checklist, and the genuine open decision — so that the implementation milestone can start from a
+reviewed brief, exactly as S8a-core did from plan §D.7.
+
+Standing rules that bind this design: the Founder's recorded decisions Q7a/Q7b/Q7c apply to the S8a tables and are
+**not extended** to the S8b tables (§9 asks the one question they do not cover); the S8a mapping as corrected at
+`7a7efc6` is the required precedent (own prototype-named fields, absent / null / empty distinct, duplicate list entries,
+nested unknown values — all kept); no public route, role, safeguarding or deletion/retention rule changes to make
+storage simpler; nothing is dropped, fabricated, repaired or deduplicated by a migration; no player or guardian
+database key before the identity rewrite plan (plan §D.2a, Q3) permits one.
+
+---
+
+## 1. The bounded scope — five blob collections, one aggregate and four room collections
+
+The roadmap (plan "S8 — Recruitment", sub-step S8b) names "cases + rooms + decisions". Read against the current writers
+and readers, that is exactly these five blobs, no more:
+
+| Blob today | What it holds | Owner module | Writers (verified at `7a7efc6`) |
+|---|---|---|---|
+| `recruitmentCases` | the M12 case, with the M17 **room facet** (`case.room`, an object or `null`), its assignments, tasks, approvals, history, links, the M12 `decision`, the M23 `decisionDraft`, the M27 `transactionHandoff` and the M13 `budget` | m12 (`storeContract.mjs:157`, "the canonical recruitment object (M12); the lifecycle lives on it") | `m12/scouting.mjs:460` (create), `:484`, `:500`, `:548`, `:565`, `:570`, `:590`, `:606`, `:611`, `:617`; `m17/rooms.mjs:579` and `:936` (create or adopt + room facet `:581`/`:938`), `:101` (`applyStatus`, the ONE writer of `room.status`/`stage`/rev), `:646`, `:652`, `:816`–`:820` (reopen), `:1126` (tasks), `:1300` (assignments), `:1376`, `:1383` (links), `:870` (`ctx.applyLifecycleTransition`); `m23/trialRoutes.mjs:414`, `:843` (links) and `:224` (`advanceCase` → lifecycle); `m23/contactRoutes.mjs:217`; `m23/decisionRoutes.mjs:232`, `:255`–`:264`, `:280`, `:411` (`decisionDraft`); `m27/index.mjs:695`, `:697`, `:734`, `:805` (`transactionHandoff`, history); `m13/planning.mjs:246`–`:259`, `:280`–`:291`, `:300`, `:320` (`budget`); every `audit()` / `activity()` / `histAppend()` caller (`m12/shared.mjs:74`–`:77`, `m17/rooms.mjs:141`, `m13/shared.mjs:211`–`:214`); `server.mjs:4289`–`:4291` (subject removal) |
+| `roomComments` | threaded, mentionable, editable, tombstoned comments of a room | m17 (`storeContract.mjs:185`) | `m17/rooms.mjs:1047` (create), `:1073`–`:1075` (edit), `:1088`–`:1089` (tombstone) |
+| `roomSnapshots` | append-only evidence-confidence provenance captured at a status move or a decision | m17 (`:188`) | `m17/rooms.mjs:958`–`:985` (`captureSnapshot`; callers `:735`, `:816`, the decision routes through `ctx.captureRoomSnapshot`) |
+| `roomDecisions` | the append-only decision chain of a room: M17 recommendations and M23 formal decisions | m17 (`:186`) | `m17/rooms.mjs:1173`–`:1185` (`recordDecision`), `m23/decisionRoutes.mjs:371`–`:392` (the formal row; `:392` a rollback `splice`) |
+| `roomEvidenceState` | one review state per (room, evidence), overwritten in place | m17 (`:187`) | `m17/rooms.mjs:1272`–`:1276` |
+
+All five are production-required stores guaranteed by the snapshot migration registry (`m182/migrations.mjs:102`
+`m182_002_collections_present`; `m17/index.mjs:22`–`:26` `migrateM17` adds the four room stores and `case.room ??=
+null`; `m12/shared.mjs:19`). `m182_003_rev_backfill` (`m182/migrations.mjs:112`) gives every room a `rev`.
+
+**Why these five and not the rest of file 02.** Contacts (`recruitmentContacts`, `m23/contactRoutes.mjs`), offers,
+signing packages, signings and follow-ups are S8c/S8d (plan S8 sub-steps); they reference a case by `caseId` (a plain
+id, e.g. `m28/index.mjs:132`, `m29/index.mjs:102`) and keep doing so as blobs: a case the S8b table holds is still found
+by id by every one of them, since `db.recruitmentCases` stays an array view of the same records. The M18 collections
+(`recruitmentBriefs`, `secondLookItems`, `nobodyMissedReviews`), `recruitmentJourneys` (a derived cache read by
+`m23/journey.mjs:53`), `outcomeReports` and `agentTransactions` are other stages. `requests` and `trials` are S8a-core
+(live); S8b touches them only to convert their `case_id` columns into real keys (§4).
+
+**Readers** (so that no field is dropped as "unused"): `m23/journey.mjs:11`–`:12`, `:130`, `:168`, `:248`, `:351`, `:537`
+(the journey projection reads the case, its room, its history and the decision chain); `m23/journeyRoutes.mjs:35`,
+`:86`, `:102` (player/guardian journeys read the case's room status through the projection — the player sees
+lifecycle stages, never notes, comments, snapshots or decisions); `m20/dashboard.mjs:98`, `:105`, `m20/funnels.mjs:69`,
+`:412` (the funnel reads `room_status_changed` / `room_reopened` history entries **whole**, `detail.to` included),
+`m20/metrics.mjs:143`–`:259`; `m18/nobodyMissed.mjs:116`, `:120`, `m18/secondLook.mjs:179`–`:184` (the latest decision
+and its snapshot by `decision.snapshot.snapshotId`), `:214`, `:383`, `:419`, `:446`, `:526`; `m27/index.mjs:559`
+(decision heads), `:753`, `:788`, `:819` (`caseBelongsTo`); `m28/index.mjs:132`, `:237`, `:614`, `:645`, `:757`;
+`m29/index.mjs:102`, `:384`; `m13/enterprise.mjs:337` (the audit export carries every case's `history` for the org),
+`:421` (support tickets reference cases by id); `m13/groups.mjs:118`, `:138` (grants on a case id); `m13/planning.mjs:192`,
+`:215`; `m23/trialRoutes.mjs:255`, `:819`, `:840`, `:859`, `:921`, `:983`; `m23/contactRoutes.mjs:644`; `m12/scouting.mjs:117`,
+`:439`–`:441` (`caseView` returns the record whole, history included, `:436`), `:760`; `m23/lifecycle.mjs:172`, `:280`.
+
+**Deletion and tombstones.** A player's removal (`server.mjs:4289`–`:4291`) nulls `playerName` and sets
+`subjectRemovedAt` on every case of the player; it does not touch the four room collections (their `playerId` stays;
+no name is stored there except `authorName`/`byName`, which are staff). Cases, comments, snapshots, decisions and
+evidence states are **never deleted**; a comment is tombstoned (`deletedAt`, `deletedBy`; the body stays stored and is
+nulled in views, `m17/rooms.mjs:193` `commentView`); a decision draft is HARD-deleted on discard and on finalize
+(`decisionRoutes.mjs:280`, `:411` — its id survives on the formal row's `draftId`); a transaction handoff is
+OVERWRITTEN by a re-invite (`m27/index.mjs:695`; file 02's note records this as a known defect kept as is).
+
+**Backup / import / restore.** The admin backup is the whole `db.json` (every blob); after S8b the five collections are
+exported through their repositories in the legacy shapes (as S8a exports `requests`/`trials`,
+`m13/enterprise.mjs` backup); a restore imports the file's blobs through the S8b migration's validation, never from
+memory or the seed (the S8a rule). The legacy JSON import refuses a null collection before any blob exists
+(`store.mjs` `LEGACY_IMPORT_FAILED`, proven for S8a).
+
+---
+
+## 2. The aggregate, field by field (exact stored shapes from the writers' literals)
+
+Conventions: *storage* follows the S8a engine (`repositories/recruitment.mjs`: every scalar a column of the writer's
+nullability, no vocabulary or length `CHECK` — "a storage step changes no product rule" — every nested object columns
+of the same row, every list a child table keyed `(owner…, position)` in list order with a non-object entry kept in
+`raw_json`, every absent key in `absent_keys_json`, off-type value in `offtype_json`, unknown own field in `extra_json`,
+acts set as own data properties). *Audience*: every row below is **tenant-private club workspace** (`orgRouter` only;
+`restricted` cases readable by owner, assignees and leads, `m17/rooms.mjs:125`); the only personal fields are
+`playerName` (nulled on subject removal) and the staff snapshots (`ownerName`, `byName`, `authorName`, …).
+
+### 2.1 `recruitmentCases[]` — the case row (`recruitment_cases`)
+
+| Field | Writer and shape | Readers | Proposed column | Notes |
+|---|---|---|---|---|
+| `id` | `nextId('case')`, `scouting.mjs:451`, `rooms.mjs:573`, `:930` | everywhere | `id TEXT NOT NULL UNIQUE` (+ `seq INTEGER PRIMARY KEY`, insertion order, as S8a) | |
+| `orgId` | creation | every reader filters by it | `org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT` | orgs are never deleted (S3; plan "Org deletion policy O2" open, unchanged) |
+| `playerId` | creation | every reader | `player_id TEXT NOT NULL`, **no key** (§9, Q8a) | live, retained (S4b-R) or historically missing |
+| `playerName` | creation; `null` after subject removal (`server.mjs:4290`) | views | `player_name TEXT` | |
+| `vacancyId` | `scouting.mjs:452` (`?? null`), `rooms.mjs:574`, `:931` | `scouting.mjs` | `vacancy_id TEXT` no key (vacancies are S9) | |
+| `ownerUserId`, `ownerName` | creation (`req.orgUser`); reassigned `rooms.mjs:656`–`:660` | `caseAccess`, `roomRole` | `owner_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT`, `owner_name TEXT NOT NULL` | staff are never deleted (`removedAt`, `server.mjs:1921`); every producer sets both |
+| `stage` | `scouting.mjs:453` (`stagesFor(org)[0]`), `:548`, `:574`, `:591`; `null` on a room until `applyStatus` derives it (`rooms.mjs:103`) | list filter `:440`, planning `:192`, adoption `:567`, `:926` | `stage TEXT` (nullable; no vocabulary CHECK) | derived from `room.status` whenever a room exists; stored because room-less M12 cases have no room |
+| `priority` | `scouting.mjs:453` (`high\|medium\|low`, default `medium`), `rooms.mjs:575` | views | `priority TEXT NOT NULL` | distinct from `room.priority` |
+| `deadline` | `scouting.mjs:454` raw client value `?? null` | views | `deadline_raw TEXT` / off-type kept | never parsed |
+| `restricted` | `!!restricted` | `findRoom:125`, `caseAccess` | `restricted INTEGER NOT NULL` (0/1) | |
+| `decision` | `null` at creation; `{outcome, reasons, byUserId, byName, at}` `:570`; `{…appr.decision, byUserId, byName, approvedBy, at}` `:590` | `caseView` | nested-object columns `decision_outcome`, `decision_reasons`, `decision_by_user_id`, `decision_by_name`, `decision_approved_by_name`, `decision_at`; the object's presence/null recorded (S8a `day` precedent) | `approvedBy` is a NAME (snapshot) |
+| `links` | `{requestIds: [], trialIds: [], signingId: null}`; ids appended with an `includes()` guard (`scouting.mjs:606`, `:611`, `rooms.mjs:1376`, `:1383`, `trialRoutes.mjs:414`, `:843`); `signingId` set `:617`, `rooms.mjs:1387` | snapshots (`:978`), journey, `trialsFor` | `links.requestIds[]` → `case_request_links (case_id, position, request_id REFERENCES recruitment_requests(id) ON DELETE RESTRICT)`; `links.trialIds[]` → `case_trial_links (…, trial_id REFERENCES trials(id) ON DELETE RESTRICT)`; `links.signingId` → `signing_id TEXT` no key (signings are S8d); the container's presence recorded | position-keyed so a legacy duplicate entry is kept (the drafted `PRIMARY KEY (case_id, request_id)` would dedupe) |
+| `createdAt` | creation | ordering `:441` | `created_at INTEGER NOT NULL` | |
+| `history[]` | `audit()` / `activity()` / `histAppend()` → `{id: 'aud-n', at, byKind, byId, byName, action, detail}`; m27 writes `{id, at, action, by: {kind, userId, name}, detail}` (`m27/index.mjs:697`, `:734`, `:805`) — two literal shapes in one list | `caseView`, journey, M20 funnels (detail whole), the audit export | `case_history (case_id, position, id, at, by_kind, by_id, by_name, by_kind2…)` — both literals mapped key for key (`by.kind`/`by.userId`/`by.name` as nested-object columns beside `byKind`/`byId`/`byName`), `detail` as JSON (string or object, retained whole — M20 reads it whole) | append-only; `by_id` is a staff id for org actors, a player/guardian id for recipients; **no key** |
+| `assignments[]` | `{id: 'asg-n', userId, name, task, dueAt, status: 'open', createdAt}` (`scouting.mjs:483`, `rooms.mjs:1298`) | `roomRole`, readiness | `case_assignments (case_id, position, id, user_id REFERENCES org_users RESTRICT, user_name, task, due_at (off-type kept: the M12 path stores the raw client value), status, created_at)` | `status` is written `'open'` and never changed |
+| `tasks[]` | M12 `{id: 'tsk-n', title, dueAt, assigneeUserId, status: 'open', createdAt}` + `completedAt`, `completedBy` (a NAME, `:512`); M17 `{id, title, description, assigneeUserId, assigneeName, status, dueAt, linkedResourceType, linkedResourceId, createdBy: {userId, name}, createdAt, completedAt}` (`rooms.mjs:1117`–`:1125`); PATCH status/assignee | room list views, needs-attention | `case_tasks (case_id, position, …)` with the union of both literals, absent keys recorded per row | `linkedResourceId` polymorphic, no key |
+| `approvals[]` | `{id: 'apr-n', decision: {outcome, reasons}, requestedBy: {userId, name}, status, requestedAt, resolvedBy: null \| {userId, name, at}}` (`scouting.mjs:564`, `:588`–`:589`) | the decision routes | `case_approvals (…)` nested objects as columns; `resolved_by_*` NULL with the null recorded | |
+| `room` | `null` (M12 case) or the facet below | `isRoom`, everything M17/M23 | columns on the case row (`room_*`), the facet's presence/null recorded | |
+| `room.status` | `applyStatus` only (`rooms.mjs:101`–`:111`; callers `:599`, `:735`, `:816`, `:870`) | lifecycle, M20, journey | `room_status TEXT` | the 18 `ROOM_STATUSES` (`m17/shared.mjs:39`); **no vocabulary CHECK** |
+| `room.priority`, `room.tags[]`, `room.leadScoutUserId`, `room.sourceContext`, `room.sourceRef`, `room.openedBy {userId, name}`, `room.updatedAt`, `room.archivedAt`, `room.closedAt`, `room.rev`, `room.revAt`, `room.revBy {userId, name}\|null` | `:581`–`:591`, `:938`–`:944`; `tags` replaced wholesale `:646`; `leadScoutUserId` may be set `null` `:652`; `sourceRef` free-form (M18 callers); `bumpRev` (`m181/concurrency.mjs:84`–`:88`) | views, M20, M18 | `room_priority`, `room_lead_scout_user_id` (`REFERENCES org_users RESTRICT`, nullable), `room_source_context`, `room_source_ref_json` (retained JSON), `room_opened_by_user_id`/`_name`, `room_updated_at`, `room_archived_at`, `room_closed_at`, `room_rev`, `room_rev_at`, `room_rev_by_user_id`/`_name`; `room.tags[]` → `case_room_tags (case_id, position, raw_json)` (a list of strings: the engine's non-object entry) | `rev` starts at 0 and is bumped to 1 by `applyStatus` at creation (`:589`, `:599`) |
+| `room.reopened` | `{by: {userId, name}, at, from, reasonCodes[], sourceContext, sourceRef}` (`rooms.mjs:818`–`:821`); absent until the first reopen | M20 funnels (`room_reopened` history) | `room_reopened_*` columns, `reason_codes` as a child list or retained JSON, `source_ref_json` retained | presence recorded |
+| `decisionDraft` | `null` or `{id: 'rdraft-n', outcome, reasonCodes[], note, evidenceRefs[] {kind, id, meta}, by {userId, name, role}, createdAt, updatedAt, updatedBy, rev, revAt, keys: {create: {key, fp} \| null}}` (`decisionRoutes.mjs:232`–`:236`; PATCH `:255`–`:268`; HARD-deleted `:280`, `:411`) | the decision routes, `decision.mjs` | `case_decision_drafts` — an object child (one row or none, `case_id UNIQUE` — structural: the field is a single object); `reasonCodes[]` and `evidenceRefs[]` child lists in order; `keys.create` → `idempotency_keys` (owner `case_decision_drafts`) when it carries a string key, held on the row otherwise (the S8a rule) | |
+| `transactionHandoff` | `{id: 'hof-n', caseId, orgId, playerId, status, invitedAt, invitedBy {kind, userId, name}, acceptedAt, withdrawnAt, transactionId, representedAtInvitation, invitedAgencyOrgId, invitedAgentUserId, keys: {invite: {key}} \| {}, rev, revAt}` (`m27/index.mjs:680`–`:694`; status writes `:734`, `:805`) | `GET /org/agent/handoffs` (`:753`) | `case_transaction_handoffs` — an object child (one row or none); `keys.invite {key}` (no `fp`) → `idempotency_keys` owner `case_transaction_handoffs` (a keyed value act); `{}` kept as an empty map | `invitedAgencyOrgId` → `orgs` no key? — it is an org id; **keep as a plain id** (an agency org may not exist in a legacy file; checked by the route) |
+| `budget` | `null` (backfilled by `m13/shared.mjs:42`) or `{scenarios: [...]}`; a scenario `{id: 'scn-n', version, label, currency, termMonths, lines[], fxAssumptions[], approval: null \| {by, byUserId, at, version, superseded}, actuals[], createdBy (name), createdAt, updatedAt}` (`planning.mjs:248`–`:258`; PUT replaces `lines`/`fxAssumptions` `:280`–`:283`; approve `:300`; actuals `:320`) | `GET /cases/:id/budget` (finance-gated) | `case_budget_scenarios (case_id, position, …)` + `case_budget_lines`, `case_budget_fx_assumptions`, `case_budget_actuals` keyed `(case_id, scenario_position, position)`; `rate` kept as the decimal TEXT the route stores | `actuals[].lineId` has no key (a later PUT may renumber lines: known defect kept) |
+| `subjectRemovedAt` | `server.mjs:4291` | journey | `subject_removed_at INTEGER` | |
+
+### 2.2 `roomComments[]` → `room_comments` (+ `room_comment_mentions`)
+
+`{id: 'rcmt-n', roomId, orgId, authorId, authorName, body, replyToId, mentions[] (staff ids, deduped, ≤ 20),
+createdAt, editedAt, editCount, deletedAt}` (`rooms.mjs:1041`–`:1046`); edit sets `body`, `editedAt`, `editCount`
+(`:1073`–`:1075`); tombstone sets `deletedAt`, `deletedBy {userId, name}` (`:1088`–`:1089`). Columns key for key;
+`room_id REFERENCES recruitment_cases(id) ON DELETE RESTRICT` (never deleted); `org_id → orgs RESTRICT`;
+`author_user_id → org_users RESTRICT`; `reply_to_id TEXT` **no key** (checked at write `:1035`; a legacy comment may
+answer a tombstoned one); `mentions[]` → `room_comment_mentions (comment_id, position, user_id)` (a string list);
+`deleted_by_*` columns. The body of a deleted comment stays stored (the view nulls it).
+
+### 2.3 `roomSnapshots[]` → `room_snapshots` (+ source-reference lists)
+
+`{id: 'rsnap-n', roomId, orgId, playerId, at, trigger, trust: null | {score, band, policyVersion, componentLevels
+{component: level}, hash}, sourceRefs: {passportVersion, passportRevision, evidenceIds[], assessmentIds[],
+combineResults[] ('<protocolId>@<version>'), trialIds[]}, note}` (`rooms.mjs:958`–`:985`; `buildRoomSnapshot`
+`m17/shared.mjs:750`). Columns for the scalars; `trust` as nested-object columns with `trust_component_levels_json`
+retained (a small map read whole); the four id lists as position-keyed child rows (`room_snapshot_source_refs (snapshot_id,
+kind, position, ref_id)` keeps the draft's single table); `note` is a constant disclaimer string — **stored as written**
+(the engine keeps every field; "derived, not stored" is a draft note that would drop a field). `room_id → recruitment_cases
+RESTRICT`; `player_id` no key (§9).
+
+### 2.4 `roomDecisions[]` → `room_decisions` (+ `room_decision_evidence_refs`)
+
+Two literals in one list. M17 (`rooms.mjs:1175`–`:1183`): `{id: 'rdec-n', roomId, orgId, playerId, recommendation,
+reasonCodes[], note, by {userId, name, role}, createdAt, trigger, clientKey, supersedes, supersededById, snapshot: null |
+{at, trust, sourceRefs, snapshotId}}`. M23 formal (`decisionRoutes.mjs:371`–`:385`): the same plus `kind: 'formal'`,
+`state: 'final'`, `outcome`, `finalizedAt`, `supersession`, `rev`, `revAt`, `evidenceRefs[] {kind, id, meta}`,
+`assessmentSummary {submitted, withheld, verdicts{…}, assessmentIds[]}`, `keys: {finalize: {key, fp} | null, draft:
+{key, fp} | null}`, `draftId`, `lifecycle: null | {action, from, to, applied, reason?, at}`, `policyVersion`. A new row
+sets `supersededById` on the previous head (`:1184`, `:391`); `decisionRoutes.mjs:392` **splices the row back out** on a
+transport failure (a caller conversion, §5). Storage: columns key for key, absent keys recorded (an M17 row has no
+`kind`/`state`/`outcome`…); `reasonCodes[]`, `evidenceRefs[]`, `assessmentSummary.assessmentIds[]` as child lists;
+`snapshot` as nested-object columns with `snapshot_trust_*`/`snapshot_source_refs_json` retained (an exact copy of the
+snapshot row by design) and `snapshot_id TEXT` **no key** (the copy is the record); `supersedes_id`, `superseded_by_id`,
+`supersession_of_id` as plain ids **checked in code** (a self-referential key would force a two-pass insert order and a
+`RESTRICT` on rows that are never deleted — the chain is asserted at the end of every write instead, ids only);
+`client_key` as a column with **no unique index** (the M17 replay lookup is by `(roomId, clientKey)` in memory;
+uniqueness is a code rule; the dry run reports a duplicate); `keys.finalize`/`keys.draft` → `idempotency_keys` owner
+`room_decisions` when they carry a string key (the S8a rule), held on the row otherwise.
+
+### 2.5 `roomEvidenceState[]` → `room_evidence_states`
+
+`{id: 'rev-n', roomId, orgId, evidenceId, state, note, byId, byName, at}` (`rooms.mjs:1273`), overwritten in place
+(`:1276`). Columns key for key; `room_id → recruitment_cases RESTRICT`; `evidence_id` no key (evidence is S9); the
+`(room, evidence)` uniqueness is a code rule (find-then-assign, `:1271`) — **no unique index** (a legacy duplicate would
+make the cutover refuse; the dry run reports it; nothing deduplicates).
+
+### 2.6 What stays as it is for later stages
+
+`recruitmentContacts` (S8c), `recruitmentOffers`, `signingPackages`, `signings`, `followUps` (S8d), the M18 and M20
+collections, `outcomeReports`, `agentTransactions`: blobs, unchanged, referencing cases by id. `vacancyId`,
+`evidenceId`, `assessmentIds`, `transactionId`, `signingId`, `invitedAgencyOrgId`, `linkedResourceId`: plain ids with no
+key until their tables exist. `recruitmentJourneys` is a derived cache and is not a migration subject.
+
+---
+
+## 3. Producers against the drafted constraints — what was found
+
+Checked against every writer above and, where a route could reach it, against the real server (probe 4).
+
+| Drafted (file 02) | Finding | Proposed |
+|---|---|---|
+| vocabulary and length `CHECK`s (`stage`, `priority`, `room_status`, `room_priority`, `room_source_context`, `decision_outcome`, `outcome`, `recommendation`, `state`, `kind`, `status`, `length(...)`) | the S8a rule: a storage step changes no product rule; the vocabularies live in `m17/shared.mjs` and move with the product (M23 added five statuses) | **none** of them; the engine keeps the value |
+| `NOT NULL DEFAULT` columns (`priority`, `restricted`, `rev`, `edit_count`, `represented_at_invitation`, `reason_codes_json DEFAULT '[]'`, …) | every producer sets them; a legacy absent key must come back absent (the S8a presence rule) | `NOT NULL` only where every writer sets the key (`id`, `org_id`, `player_id`, `owner_user_id`, `owner_name`, `created_at`, `room_id`, `author_user_id`, `body`, …); no `DEFAULT` anywhere; absence recorded |
+| `recruitment_cases_one_open_room` (partial unique on `(org_id, player_id)` over open statuses) | **violated by today's routes**: creation refuses a second open room (`ROOM_EXISTS`, `rooms.mjs:557`), but the status route moves an archived/withdrawn/closed room back to `under_review` (`ROOM_TRANSITIONS`, `m17/shared.mjs:246`–`:248`) without looking for another open room, and so does the Second Look reopen bridge (`ctx.reopenRoom`, `rooms.mjs:789`; caller `m18/secondLook.mjs:532`). Probe 4 does it through the real server: two open rooms for one (org, player); the index cannot be created over that file. Probe 2 shows the index also makes a valid final graph (remove the open case while its pair moves to a new open case) unwritable in any order | **withdrawn** (the D2 precedent); `ROOM_EXISTS` stays a code rule; nothing is deduplicated; a product-wide rule is a separate question not asked here |
+| `case_tags PRIMARY KEY (case_id, tag)`, `case_request_links PRIMARY KEY (case_id, request_id)`, `case_trial_links`, `room_comment_mentions PRIMARY KEY (comment_id, user_id)`, `room_decision_evidence_refs PRIMARY KEY (decision_id, kind, ref_id)`, `room_snapshot_source_refs` | these dedupe; the lossless rule keeps duplicate list entries (a legacy file may hold one; the routes guard with `includes()` / `new Set` today) | position-keyed child tables `(owner, position)` in list order (the S8a convention) |
+| `room_evidence_states UNIQUE (room_id, evidence_id)`, `room_decisions_room_client_key` unique | code rules today (`rooms.mjs:1271`; the M17 replay lookup) | **no unique index**; the dry run lists a duplicate; refused at the cutover only if a structural key fails |
+| `room_decisions.supersedes_id / superseded_by_id / supersession_of_id REFERENCES room_decisions(id)` (self keys) | a forward reference (`supersededById` names a LATER row) needs a two-pass insert; rows are never deleted | plain ids, chain asserted at the end of every write (ids only) |
+| `case_history.case_id … ON DELETE RESTRICT`, `room_snapshots.room_id RESTRICT`, `room_decisions.room_id RESTRICT` | cases are never deleted; a snapshot that removes a case still holding history/snapshots/decisions is an inconsistency | kept (RESTRICT); the pre-write check names the rows with ids before the key would (§6) |
+| `signing_id REFERENCES signings(id) ON DELETE SET NULL`, `decision_by_user_id`/`room_lead_scout_user_id … SET NULL` | signings are S8d; staff are never deleted; a `SET NULL` key would fire at an identity-style rewrite of `org_users` | `signing_id` no key; staff keys `RESTRICT` (the S8a precedent: `user_id → org_users RESTRICT`, with the staff prune after the case prune) |
+| `player_id` columns on `recruitment_cases`, `room_snapshots`, `room_decisions`, `case_transaction_handoffs` | Q7a covers `recruitment_requests.player_id` and `trials.player_id` only | **no key**, tolerant and counted — subject to the Founder's answer to **Q8a** (§9); not inferred |
+| `idempotency_keys.owner_table CHECK IN ('recruitment_requests', 'trials')` | S8b's replayable acts (`decisionDraft.keys.create`, `transactionHandoff.keys.invite`, `roomDecisions[].keys.finalize/draft`) need three more owners; a CHECK cannot be altered in place | the table is **rebuilt with the broadened CHECK, every S8a row copied as it is** (probe 3: rows, primary key, index byte-identical; the S8a readers unchanged); nothing else of the S8a definition changes |
+| the drafted `room_snapshots.note` "derived, not stored", `snapshot {…} → snapshot_id only`, `trust.componentLevels` only | the engine keeps every field a writer wrote | stored as written (`note` a column; the decision's `snapshot` copy as nested columns + retained JSON) |
+
+Incompatibilities a legacy file may carry and the cutover **refuses with positions and ids only** (the S8a rule; the
+dry run on a copy lists them first; nothing is repaired): an entry that is not a record; a case without `id`, `orgId`,
+`playerId`, `ownerUserId` or `createdAt`; a duplicate case id; a room component naming a `roomId` that is not a case;
+a `request_id`/`trial_id` in `links` that is not in the tables; an `orgId` not in `orgs` or a staff id not in
+`org_users` (`owner_user_id`, `author_user_id`, `by_user_id`, …); a `requests`/`trials` `case_id` not in the cases
+(Q7b's check becomes the key at this cutover); the pair checks of S8a.
+
+---
+
+## 4. The migration — one step, one transaction (proposed; the number is `0016` when approved, not reserved)
+
+Runs after `0015` with the runner's `foreignKeysOff` (it rebuilds tables other tables reference; `PRAGMA
+foreign_key_check` must be empty before COMMIT — the runner's rule, `repositories/database.mjs:36`–`:56`):
+
+1. **Preflight on the file's blobs** (never memory, never the seed): parse the five blobs (a genuinely absent blob
+   imports nothing; a present `null`, object, string or number refuses — the F2 rule); validate every entry (ids,
+   duplicates, every reference named above against the file's tables and blobs); count (live / retained / missing
+   player ids, legacy shapes such as room-less cases, M12-only tasks, M17 recommendation rows without `kind`).
+2. **Create the S8b tables** (generated from the writers' shapes, as `RECRUITMENT_DDL` is): `recruitment_cases`,
+   `case_room_tags`, `case_assignments`, `case_tasks`, `case_approvals`, `case_history`, `case_request_links`,
+   `case_trial_links`, `case_decision_drafts` (+ its `reason_codes`/`evidence_refs` lists), `case_transaction_handoffs`,
+   `case_budget_scenarios`, `case_budget_lines`, `case_budget_fx_assumptions`, `case_budget_actuals`, `room_comments`,
+   `room_comment_mentions`, `room_snapshots`, `room_snapshot_source_refs`, `room_decisions`,
+   `room_decision_evidence_refs` (+ `reason_codes`, `assessment_ids` lists), `room_evidence_states`. The exact list
+   and DDL are produced by the implementation's shapes and amended into file 02 then (the S8a practice;
+   `scripts/testSchemaDdl.mjs` compares column for column).
+3. **Import the cases** (rows and children, insertion order → `seq`), **without their link rows**.
+4. **Rebuild `recruitment_requests` and `trials` with the real key** — `case_id TEXT REFERENCES recruitment_cases(id)
+   ON DELETE RESTRICT` on both — by create-copy-drop-rename with `seq` copied and every index recreated (**probe 1**:
+   every recruitment row, child row, idempotency row, thread, message and attachment byte-identical; the children's
+   and `channels`' keys still name the rebuilt tables; `foreign_key_check` empty; a dangling case id names the table
+   and rowid and rolls the whole step back; `NULL` passes). The accepted S8a write phases are unchanged: with cases
+   written first, the key is satisfied by phase 1.
+5. **Import the case links** (after step 4: `request_id`/`trial_id` keys), then the four room collections.
+6. **Rebuild `idempotency_keys`** with the broadened `owner_table` CHECK, every S8a row copied as it is (**probe 3**);
+   then write the S8b acts (string-keyed value acts and non-empty list acts as rows; everything else held on the owner
+   row — the `7a7efc6` rule).
+7. Retire the five blob rows; record counts only in `meta.recruitmentCasesCutover`; `foreign_key_check` empty; COMMIT.
+   Any refusal aborts the whole step (`RECRUITMENT_CASES_IMPORT_BLOCKED` with the specific refusal, positions and ids);
+   the runner rolls back; the next boot refuses the same way; the file is untouched.
+
+Q7b's checks in `repositories/recruitment.mjs` (`RECRUITMENT_CASE_MISSING` against the `recruitmentCases` collection)
+become checks against the final case TABLE (ids first, the key second — the S8a form for `org_id`/`user_id`).
+
+---
+
+## 5. Repository, views, save timing and the graph memento (proposed)
+
+- **Views.** `db.recruitmentCases`, `db.roomComments`, `db.roomSnapshots`, `db.roomDecisions`, `db.roomEvidenceState`
+  become read-only array views of the mutable records every module edits in place (the S8a `db.requests` contract):
+  `push`/`splice`/assignment refused; the records, their nested objects and arrays are the live objects. Every
+  in-place writer listed in §1 keeps working unchanged (`kase.room.status = …`, `history.push`, `tasks.push`,
+  `kase.decisionDraft = …`, `prev.supersededById = …`, `Object.assign(row, …)`).
+- **Write entry points** (the only callers that change): `db.recruitmentCases.push(c)` → `cases.addCase(c)`
+  (`scouting.mjs:460`, `rooms.mjs:579`, `:936`); `db.roomComments.push` → `rooms.addComment` (`:1047`);
+  `db.roomSnapshots.push` → `rooms.addSnapshot` (`:985`); `db.roomDecisions.push` → `rooms.addDecision` (`:1185`,
+  `decisionRoutes.mjs:390`) and the transport-failure rollback `db.roomDecisions.splice(…)` (`:392`) → `rooms.removeDecision(row)`
+  (a record added and removed inside one request before any save lands nothing — the staged repository's pending set);
+  `db.roomEvidenceState.push` → `rooms.addEvidenceState` (`:1274`); the backup export (`m13/enterprise.mjs`) through
+  `exportCases()` etc.; the subject-removal loop (`server.mjs:4289`) stays an in-place edit of the view's records.
+- **Save timing.** Unchanged: the routes' `persistNow()` and debounced `persist()` land the dirty records in the same
+  save as today; dirty detection by the per-record committed fingerprint (the S8a mechanism; the same cost caveat as
+  §D.8.7 — no save-time gain is claimed for S8b either).
+- **Participants.** Four save-hook participants registered in this order: `cases-core` (case rows, non-link children)
+  **before** `recruitment` (S8a, unchanged), then `cases-links` (the two link lists — after the requests and trials
+  exist in the same save: `trialRoutes.mjs:414` creates the request and its link together), then `rooms` (the four
+  room collections, which reference cases only), then `channels` (S7d, unchanged). **Probe 2** proves the order and
+  its control (links before requests fail on the key).
+- **Graph memento.** The unit-of-work memento covers the five collections' records by identity, every nested object
+  (`room`, `decisionDraft`, `transactionHandoff`, `budget`, `decision`, `links`) and array (`history`, `tasks`, …), so
+  an aborted unit restores a held `kase.room` or `kase.decisionDraft` to its pre-unit value (the S8a `trial.schedule`
+  precedent). The two failure contracts stay distinct: a failed ORDINARY save keeps every pending edit in memory and
+  lands it once on the next save; an aborted UNIT restores the pre-unit graph in place. Side effects (notifications,
+  broadcasts, the ledger) stay at their current durability boundary.
+
+---
+
+## 6. The snapshot write — one algorithm for the import, a restore, a flush and a snapshot (proposed; probe 2)
+
+A. **Cases, parent-preserving**: every supplied (or changed) case upserted by id (`seq` kept), its non-link children
+   rewritten in list order; no release phase is needed once the one-open index is withdrawn (with it, probe 2 shows a
+   release phase would be needed and still could not order every valid graph — §3).
+B. **The accepted S8a phases 1–3** for `requests`/`trials` (unchanged; the key to `recruitment_cases` is satisfied
+   because A ran first; Q7b's case check reads the final case table).
+C. **Case links**: delete-and-reinsert per supplied case (`request_id`/`trial_id` keys satisfied because B ran first).
+D. **The four room collections**: upsert by id, children in list order; the decision chain written in list order with
+   `supersedes_id`/`superseded_by_id` as plain ids.
+E. **Channels** (S7d, unchanged).
+F. **Prunes**, children before parents: requests (S8a phase 5, with its thread/trial pre-checks), then **cases no
+   longer listed** — refused first with ids when a retained request or trial still names one
+   (`CASE_STILL_REFERENCED`, probe 2 check 3: nothing is detached, every table and the revision unchanged, no
+   transaction open) and when history/snapshots/decisions still name one; then room rows no longer listed; then the
+   staff and organisation prunes (after every reference to them, the S8a order).
+G. **Final assertions**, ids only: the S8a pair checks; every `case_id` of a request/trial in the final cases (the key
+   makes this redundant, kept for the message); every link target in the tables; the decision chain (every
+   `supersedes`/`supersededById` names a row of the same room; at most one head per room is REPORTED, not enforced —
+   `duplicateFinalHeads` is corruption the code names today); `foreign_key_check` empty.
+
+Partial saves: an omitted collection is retained (probe 2: a cases-only save equals the full save with the retained
+collections resent, byte for byte); a valid final graph never depends on array order (probe 2: full saves in both
+orders of cases and of requests/trials persist the same graph); a retained request or trial is never silently deleted
+or detached by rewriting a case (probe 2, check 3). Refusals roll back exactly (every table, the revision, no open
+transaction).
+
+---
+
+## 7. Copy-only rollback to the accepted pre-S8b build (`7a7efc6`) — proposed
+
+`scripts/recruitmentCasesRollback.mjs` on a COPY (`VACUUM INTO`; the source opened read-only; the C1 boundary test
+reused): refuses a later schema (`LATER_SCHEMA`, exit 4), a file that never applied the S8b step (`NOT_CUT_OVER`, 5), a
+recorded step whose tables are missing (`UNEXPECTED_SCHEMA`, 10), a non-empty output (1); writes the five collections
+back into their blobs in insertion order in the writers' literals (children nested in list order, keys reassembled,
+every absent/null/off-type/unknown field as recorded — **every post-cutover edit preserved**); rebuilds
+`recruitment_requests` and `trials` to the S8a definitions (no case key; probe 1 in reverse: rows byte-identical);
+rebuilds `idempotency_keys` to the S8a CHECK with the S8b owner rows removed (they are inside the blobs); drops the S8b
+tables; removes the record and its meta key; keeps every earlier migration record and every S8a row; advances
+`saveSeq`; `foreign_key_check`; VACUUM; revalidates. The chain: the S8a tool (`recruitmentRollback.mjs`) refuses a
+file carrying the S8b step and accepts this tool's output. **The old build on a new file**: by analogy with the
+measured S8a behaviour (`9b109dc` on a `0015` file exits 1 at boot, `STORE_MISSING requests, trials`), the `7a7efc6`
+build's boot-contract check would find the five collections absent and exit 1 before listening — **a prediction to be
+MEASURED at implementation on the actual build, not a guarantee**; the rollback tool is the only way back either way.
+
+---
+
+## 8. Implementation checklist (ordered; each item with its acceptance criterion)
+
+1. Checkouts: `7a7efc6` as `SCOUTBOX_PRE_S8B_SERVER` beside the seven existing builds; never over the working branch.
+2. Tests first, failing on the unchanged tree: a unit suite (`scripts/testRecruitmentCases.mjs`: the migration and
+   counts; the lossless mapping of every literal in §2 including both history literals, both decision literals, a
+   room-less M12 case, an M12-only task, a tombstoned comment, a handoff with `keys: {}`, own prototype-named fields,
+   duplicate link entries, absent/null/empty acts; the import refusals with ids; the repository in staged mode with
+   every in-place writer of §1 landing in the next save; the two failure contracts; the write order of §6 with
+   probe 2's cases as suite cases, both orders, partial saves, the prunes and refusals; the rollback and the chain) and
+   a server suite (`scripts/testRecruitmentCasesServer.mjs`: the real routes — room creation/adoption, status moves,
+   reopen, comments, tasks, decisions (recommendation and formal with replay/conflict), evidence review, budget,
+   handoff; backup/restore; SIGKILL; the `7a7efc6` build booted on the rollback copy; the direct boot of the old build
+   on a new file MEASURED). Acceptance: both fail on `7a7efc6` on concrete assertions; both green after.
+3. `repositories/recruitmentCases.mjs` (shapes, DDL, mapping, validation, phases A/C/D/F/G, repository, export) and
+   `repositories/migrations/0016_*.mjs` (steps 1–7 of §4); `recruitment.mjs` adapted (the case check reads the table;
+   `CONSTRAINTS` gains the two keys; the rebuild helper); `index.mjs` (registration, `TABLE_BACKED`, read/write order,
+   `attachDataLayer` participants, `/capabilities`); the caller conversions of §5; `m13/enterprise.mjs` exports.
+   Acceptance: `scripts/testSchemaDdl.mjs` compares the S8b tables; probes 1–3 pass against the real modules.
+4. File 02 amended to the implemented definitions (the drafted case/room sections replaced, the superseded notes
+   kept as history); `sqlite-schema.md`, `OPERATIONS.md` (cutover, dry run, rollback, the DANGER line), `CLAUDE.md`.
+5. Gates: the backend chain (Node 22 and 24) with EIGHT historical builds booted for real; the Player suite; the
+   batteries that touch the changed code — `m12E2E`, `m17E2E`, `m17Perf`, `m23E2E`, `m23TrialE2E`, `m23DecisionE2E`,
+   `m23DecisionPersistence`, `m23RecruitmentJourneyE2E`/`Hardening`/`Persistence`, `m23ContactE2E`,
+   `m23AgentTransactionE2E` (handoffs), `m23OfferE2E`, `m23SigningE2E`, `m23TemporalIntegrityE2E`, `m23P4AClosureE2E`,
+   `connectedE2E`, `apiE2E` — each on the final tree and on `7a7efc6`; the bench of §D.8.7 extended with a cases fixture
+   (no save-time gain claimed unless measured); the reviewer scripts of S8a unchanged.
+6. One commit, push, draft PR #2, handoff ZIP with fresh-extraction gates; stop for independent acceptance.
+
+---
+
+## 9. Decisions — what is the Founder's and what is engineering
+
+**Q8a (the Founder's; genuinely new; the preparation is complete without the answer, the implementation of the
+`player_id` columns waits for it).** May the S8b tables (`recruitment_cases.player_id`, `room_snapshots.player_id`,
+`room_decisions.player_id`, `case_transaction_handoffs.player_id`) ship like the S8a ones under Q7a — **no player
+foreign key; a live id resolves, a retained id (S4b-R) resolves to the retained record, a historically missing id is
+preserved and counted, never refused, fabricated or deleted** — or must a case naming a missing player be refused at
+the cutover (strict)? *Affected data:* every case, snapshot and decision of a player deleted before S4b-R or imported
+before S4a; the deletion unit keeps cases as tombstones today (`playerName` null, `subjectRemovedAt`), so a strict rule
+would refuse exactly the files that behaved correctly. *Alternatives:* tolerant-and-counted (the Q7a form) · strict
+(refuse at cutover; the operator deletes cases by hand — a retention decision the product has not taken) · a key
+(not available before plan §D.2a / Q3). *Recommendation:* tolerant and counted, for the Q7a reasons. *Depends on it:*
+the `player_id` validation branch of the import and the write, `/capabilities` counts; nothing else.
+
+**Engineering choices recorded here, not put to the Founder** (ordinary design within the accepted S8a pattern, each
+with its evidence): the vocabulary/length CHECKs dropped (S8a precedent); the one-open-room index withdrawn (probe 2
+and probe 4; the route rule stays); position-keyed children instead of deduplicating primary keys; staff keys
+`RESTRICT` and no `SET NULL` key anywhere; the decision chain's self-references and `client_key` checked in code; the
+shared `idempotency_keys` rebuilt with the broadened CHECK (probe 3) rather than a second table; `snapshot`, `note` and
+the retained JSON fields stored as written. None reopens Q7a/Q7b/Q7c; none changes a route, a role, safeguarding or
+deletion/retention behaviour.
+
+---
+
+## 10. Limitations and what remains open
+
+- The slower boot, the larger file and the absence of a save-time gain (§D.8.7) are expected to grow with S8b's
+  tables; the whole-snapshot-write objective stays unmet until every blob has moved (S8c, S8d and beyond).
+- The old build's behaviour on a new file is predicted, not measured (§7).
+- The probes are design models over the real tables and the real S8a module; they are not the implementation's
+  tests (§8.2) and they do not model the S8a mapping engine's treatment of the case fields (that engine is the
+  precedent; its behaviour on S8a shapes is accepted).
+- Org deletion policy (plan O2) stays open and unchanged; retention of tombstoned comments and of cases stays as the
+  product has it; the `transactionHandoff` re-invite overwrite and the budget `actuals[].lineId` dangling reference are
+  known defects kept as they are (a storage step changes no product rule).
+
+## 11. Evidence in the handoff
+
+| Probe (`node <probe> <project-root>`) | Checks | What it proves |
+|---|---|---|
+| `probe-s8b-rebuild-case-key.mjs` | 8 | the create-copy-drop-rename of both parents with the real case key on a real `0015` file: rows, children, idempotency rows, threads byte-identical; indexes recreated; the only key change is the new one; `foreign_key_check` empty; a dangling case id refuses with table and rowid and rolls back exactly; `RESTRICT` holds; the tombstoned and legacy pairs travel unchanged |
+| `probe-s8b-write-order.mjs` | 8 | the §6 order against the real S8a phases: both input orders equal; cases-only equals full; a referenced case cannot be removed (ids only, exact rollback); a pair moves between cases; links after requests (and the failing control); the one-open index needs a release phase and still cannot order a valid graph — withdrawn |
+| `probe-s8b-idempotency-rebuild.mjs` | 4 | the broadened `owner_table` CHECK by rebuild: the S8a definition refuses a new owner; the rebuild keeps rows, key and index; a failure before COMMIT leaves the S8a definition; the S8a readers unchanged |
+| `probe-s8b-one-open-room-live.mjs` | 5 | the real server: `ROOM_EXISTS` at creation, an archived room returned to `under_review` beside an open room — the drafted index cannot be created over the file this build writes |
+
+Run on 22 October 2026 on the `7a7efc6` tree (Node 22 and Node 24; logs in the handoff).

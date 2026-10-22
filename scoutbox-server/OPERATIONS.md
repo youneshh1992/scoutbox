@@ -1471,7 +1471,7 @@ S8a-core a live file carries `0015` as well:** the S4b-R tool refuses it
 (`LATER_SCHEMA`, exit 4) until `scripts/recruitmentRollback.mjs` has produced
 the 0014-shaped copy it works on (next section).
 
-### Recruitment requests and accepted trials (live since migration `0015`, S8a-core — implemented 22 October 2026 on top of `d0f0205` under the Founder's decisions Q7a "Approve tolerant (Recommended)", Q7b "Approve strict checks (Recommended)" and Q7c "Approve strict (Recommended)" of 22 October 2026, on the design of plan §D.7 independently accepted at `d0f0205`; AWAITING INDEPENDENT ACCEPTANCE; not production-approved)
+### Recruitment requests and accepted trials (live since migration `0015`, S8a-core — implemented 22 October 2026 on top of `d0f0205` under the Founder's decisions Q7a "Approve tolerant (Recommended)", Q7b "Approve strict checks (Recommended)" and Q7c "Approve strict (Recommended)" of 22 October 2026, on the design of plan §D.7 independently accepted at `d0f0205`; corrected at `7a7efc6` after the review of `6d77aa7` and INDEPENDENTLY ACCEPTED at `7a7efc6` within the storage-migration scope — plan §D.8.11; not production-approved)
 
 `db.requests` and `db.trials` were two JSON blobs rewritten whole by every save
 and mutated in place by twenty-five modules. Since migration `0015_recruitment`
@@ -1636,6 +1636,11 @@ two blobs leave every save and a changed record lands as its own rows, but the
 change tracking still serialises every record per save, so the save time is
 unchanged within noise, the boot is slower (sixteen tables decoded) and the
 file is larger (plan §D.8.7); the whole-snapshot-write objective is not met.
+**S8b (cases, rooms, decisions) is prepared, not implemented** — nothing of it
+runs in this build; `docs/architecture/s8b-readiness-review.md` (plan §D.9) is
+the design for independent review; the next free migration identifier is
+`0016`, reported, not reserved; `recruitmentCases` and the four room blobs
+stay blobs, and `case_id` stays the code-checked reference of Q7b.
 
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request

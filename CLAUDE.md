@@ -323,13 +323,19 @@ and design changes the Founder explicitly requests.
   build on the copy) and the S6b tool refuses a file carrying 0014. **Never
   boot the previous build directly on a 0014 file: it serves a retained row as
   a passwordless account** (OPERATIONS.md). **S8a-core — requests and trials
-  as tables — is IMPLEMENTED since 22 October 2026 (one commit on top of
-  `d0f0205`, corrected once after the independent review of `6d77aa7`: F1
-  every idempotency act preserved — an empty list act, an empty object, a
-  null, a prototype-named own act — F2 a present `null` blob refused at the
-  cutover, C1 the rollback test's source-preservation check made real; plan
-  §D.8.10) and AWAITS INDEPENDENT ACCEPTANCE** (plan §D.8 the
-  implementation record; §D.7 the design, independently accepted at
+  as tables — is INDEPENDENTLY ACCEPTED at `7a7efc6` (22 October 2026):
+  implemented at `6d77aa7` on top of `d0f0205`, corrected once at `7a7efc6`
+  after the independent review of `6d77aa7` (F1 every idempotency act
+  preserved — an empty list act, an empty object, a null, a prototype-named
+  own act — F2 a present `null` blob refused at the cutover, C1 the rollback
+  test's source-preservation check made real; plan §D.8.10), and accepted
+  by the independent review of `7a7efc6` with F1/F2/C1 CLOSED (plan §D.8.11
+  the acceptance record; the acceptance covers the bounded storage-migration
+  scope only — not S8 as a whole, not the full migration, not product
+  release, security, legal compliance, merge or deployment). S8b (cases,
+  rooms, decisions) is PREPARED, NOT IMPLEMENTED (`docs/architecture/
+  s8b-readiness-review.md`, plan §D.9)** (plan §D.8 the implementation
+  record; §D.7 the design, independently accepted at
   `d0f0205` after the reviews of `a6c40f3`, `cd7dc95` and `f2121b5`;
   `scoutbox-server/OPERATIONS.md` "Recruitment requests and accepted
   trials"; `docs/architecture/sql/02_recruitment.sql` amended to the

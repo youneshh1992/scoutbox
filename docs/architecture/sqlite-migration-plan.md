@@ -1521,7 +1521,8 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
 ### S8 — Recruitment core (file 02: 55 tables)
 
 > **S8a-core is implemented** (22 October 2026, migration `0015_recruitment`, on the design of §D.7 accepted at
-> `d0f0205` under Q7a/Q7b/Q7c) and **awaits independent acceptance** — §D.8. S8b, S8c and S8d are not started. The
+> `d0f0205` under Q7a/Q7b/Q7c) and is **independently accepted at `7a7efc6`** — §D.8, §D.8.11. S8b is prepared (§D.9,
+> `s8b-readiness-review.md`), not implemented; S8c and S8d are not started. The
 > bullets below are the original plan of the whole step and are kept as written.
 
 - **Objective.** Requests, trials, cases and rooms, decisions and snapshots, contacts,
@@ -3015,7 +3016,7 @@ itself awaiting independent review and is not yet put to the Founder.**
 All probes are synthetic and disposable, kept outside the tracked source; nothing was added to the application, the
 schema file, a migration or a test.
 
-### D.8 S8a-core as implemented (22 October 2026, one commit on `feat/sqlite-schema` on top of `d0f0205`, corrected once after the independent review of `6d77aa7` — §D.8.10; written while AWAITING INDEPENDENT ACCEPTANCE — implemented with review corrections, not accepted)
+### D.8 S8a-core as implemented (22 October 2026, one commit on `feat/sqlite-schema` on top of `d0f0205`, corrected once after the independent review of `6d77aa7` — §D.8.10; written while AWAITING INDEPENDENT ACCEPTANCE — **since INDEPENDENTLY ACCEPTED at `7a7efc6`, §D.8.11**; the text below is the implementation record as written and is kept as history)
 
 **Status.** S8a-core — `requests` and `trials` as tables (`recruitment_requests`, `request_trial_slots`, `trials` and
 its eleven owned child tables, `idempotency_keys`; `channels` rebuilt with the real `request_id` key) — is
@@ -3317,14 +3318,15 @@ separate, undecided piece of work.
    file is not modified and an operator fixes a copy by hand. No production writer produces such rows.
 7. A record read from the tables carries its keys in the stored shape's order, not the writer's insertion order;
    values are identical (§D.8.5).
-8. The implementation awaits independent acceptance; S8b (cases, rooms, decisions) is not started.
+8. ~~The implementation awaits independent acceptance~~ — accepted at `7a7efc6` (§D.8.11); S8b (cases, rooms,
+   decisions) is prepared, not implemented (§D.9, `s8b-readiness-review.md`).
 9. The F1 correction (§D.8.10) preserves every act from the moment it is in place. A database converted by the
    reviewed `6d77aa7` build would already have discarded an empty list act or a prototype-named act at its cutover or
    at a later save; nothing can reconstruct those from the tables — the authoritative original (the pre-cutover file or
    a backup written before the conversion) would be needed. No real database was converted by that build (the
    implementation is not deployed; the Founder authorised review only).
 
-#### D.8.10 Review corrections (the independent review of `6d77aa7`; one commit, implemented, pending independent acceptance)
+#### D.8.10 Review corrections (the independent review of `6d77aa7`; one commit, `7a7efc6` — accepted by the review of `7a7efc6`, §D.8.11)
 
 The review of `6d77aa7` left S8a-core **implemented, not accepted**, with two P2 findings and one ineffective test
 assertion, reproduced by its two scripts (`review-6d77aa7-reproductions.mjs`: six failing cases;
@@ -3367,3 +3369,70 @@ unchanged. Corrected in one bounded commit:
   correction (the unit F1 at the cutover read-back, the unit F2 on "missing expected exception", the server F1 at the
   backup export, the server F2 with the server listening over a null blob); the reviewer's two scripts, unchanged, exit
   1 on `6d77aa7` and 0 on the corrected tree (logs in the handoff).
+
+#### D.8.11 Acceptance record (the independent review of `7a7efc6`, 22 October 2026)
+
+**S8a-core is ACCEPTED as corrected at `7a7efc6be5ff393ecc131bd4eedb0a685420bdbb`** (parent `6d77aa7`, branch
+`feat/sqlite-schema`) within the reviewed storage-migration scope. **F1, F2 and C1 of the review of `6d77aa7` are
+CLOSED.** No new blocking finding. The reviewer's words: "This is not acceptance of the full S8 stage or the complete
+database migration, nor product-release, security/legal-compliance or deployment approval. S8b remains not
+implemented. The whole-snapshot-write objective remains unmet. Prior stage acceptance and recorded Q7a/Q7b/Q7c
+decisions remain unchanged."
+
+What the reviewer verified (their evidence, distinct from the supplier's): the handoff ZIP
+`scoutbox-s8a-core-corrections-handoff-7a7efc6.zip` (SHA-256 `0c739823…0756`, 509 manifest entries matched before and
+after the tests); exactly seven changed files against the preceding handoff (`recruitment.mjs`, the two recruitment
+suites, `CLAUDE.md`, the migration plan, the schema overview, `OPERATIONS.md`); the two unchanged `6d77aa7` scripts
+exit 0 (0 failing cases; 3,150 mapping comparisons, 0 mismatches, 0 refusals); a new `review-7a7efc6-key-transitions.mjs`
+exits 0 on 294 staged key-shape transitions (both collections; `schedule`, `__proto__`, `constructor`; every pair of
+seven value states; failed-save rollback and retry, pending-intent retention, unit-memory restoration). Backend gate:
+33 suites / 404 checks completed, with one recorded infrastructure interruption (a child could not bind a port in
+`testOutboxPushServer`, no assertion failure; the interrupted suite and the four not yet run were re-executed, all five
+exit 0; "not described as one uninterrupted npm test exit-0 run"); Player gate exit 0, 4 suites / 41 tests; Node
+v24.19.0, SQLite 3.53.3, npm 11.6.0; the seven historical rollback servers wired (`PRE_S7A` = `2d7ddeb`). Not run
+independently: Node 22, the browser suites, the full route battery. The real older-Node binary checks were skipped
+(the API-shape simulation ran).
+
+Preserved and still open after this acceptance: the slower boot, the larger file and the absence of a save-time gain
+(§D.8.7); the whole-snapshot-write objective; the limitation that a database converted by the defective `6d77aa7` build
+cannot reconstruct the key values it already discarded (§D.8.9 item 9 — no real database was converted; nothing is
+repaired); `apiE2E` / `m23BootContract` / `m23Persistence` (pre-existing); the two intermittent S6b failures ("not
+reproduced; cause unresolved"). Q7a/Q7b/Q7c stay as recorded (§D.8.1) and are **not extended to any other domain** —
+the S8b tables need their own decision where one is needed (§D.9). The S8b design is preparation only: nothing of S8b
+is implemented, stubbed or reserved.
+
+### D.9 S8b (cases, rooms, decisions) — PREPARED, NOT IMPLEMENTED (22 October 2026, at `7a7efc6`)
+
+The bounded S8b design lives in `docs/architecture/s8b-readiness-review.md` and is **preparation only**: no migration
+module, repository, DDL change, test or stub exists; the next free migration identifier is `0016` — **reported, not
+reserved**. What it records, in brief:
+
+- **Scope (§1 of the review, verified against the writers and readers of this build):** the five blob collections
+  `recruitmentCases` (one aggregate: the case row with its room facet, `assignments`, `tasks`, `approvals`,
+  `history`, `links`, `decision`, `decisionDraft`, `transactionHandoff`, `budget`), `roomComments`, `roomSnapshots`,
+  `roomDecisions` and `roomEvidenceState`. `recruitmentContacts`, offers, packages, signings and follow-ups stay blobs
+  (S8c, S8d).
+- **The S8a mapping as corrected at `7a7efc6` is the precedent** (columns, children by position, absent / null /
+  off-type / unknown kept distinct, own prototype-named fields, the shared `idempotency_keys` table).
+- **Q7b's conversion:** the cutover creates `recruitment_cases` and rebuilds `recruitment_requests` and `trials` with
+  a real `case_id` key (the create-copy-drop-rename pattern of migration 0015, `PRAGMA foreign_key_check` empty before
+  COMMIT); probe 1 shows the rebuild lossless and a dangling id refused with table and rowid. Q7a/Q7b/Q7c are neither
+  reopened nor extended.
+- **Findings against the drafted DDL (§3):** the partial unique index `recruitment_cases_one_open_room` is **withdrawn**
+  — the status route and the Second Look reopen bridge produce two open rooms for one (org, player) today (probe 4),
+  so a lossless cutover cannot carry it; `ROOM_EXISTS` stays a code rule. Vocabulary/length CHECKs dropped (the S8a
+  rule); position-keyed child tables; staff keys `RESTRICT`, no `SET NULL`; decision-chain self-references and
+  `client_key` checked in code; `idempotency_keys` rebuilt with a broadened `owner_table` CHECK (probe 3).
+- **Write order (§6, probe 2):** A cases → B the S8a phases → C case links → D room collections → E channels →
+  F prunes (requests, then cases with a `CASE_STILL_REFERENCED` pre-check, then rooms, staff, orgs) → G assertions;
+  order-independent and consistent after a partial save.
+- **Rollback (§7):** copy-only, to the accepted pre-S8b build `7a7efc6`; the old build's behaviour on a new file is
+  predicted, to be measured at implementation.
+- **The one genuine product decision (§9, Q8a, the Founder's):** whether the `player_id` columns of the S8b tables
+  ship tolerant-and-counted like Q7a (recommended) or strict. Every other choice is engineering, recorded with its
+  evidence. The preparation is complete without the answer; the implementation of those columns waits for it.
+- **Limitations (§10):** the slower boot, the larger file and the absent save-time gain grow with S8b; the
+  whole-snapshot-write objective stays unmet until every blob has moved.
+
+S8c and S8d are not started. Nothing in this section is a production, release, security, legal-compliance, merge or
+deployment approval.

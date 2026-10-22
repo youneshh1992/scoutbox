@@ -34,9 +34,9 @@
 --   never queried per code. Deferred normalisation: a (owner_id, code) table.
 
 -- =============================================================================
--- STATUS (S8a-core, 22 October 2026): the sixteen definitions below marked
--- "LIVE since migration 0015_recruitment (REGISTERED — implemented, pending
--- independent acceptance)" — recruitment_requests, request_trial_slots, trials,
+-- STATUS (S8a-core, 22 October 2026; INDEPENDENTLY ACCEPTED at 7a7efc6 — plan
+-- §D.8.11): the sixteen definitions below marked "LIVE since migration
+-- 0015_recruitment (REGISTERED — accepted at 7a7efc6)" — recruitment_requests, request_trial_slots, trials,
 -- its eleven owned child tables, idempotency_keys, and channels (file 03,
 -- rebuilt with the real request_id key) — are the DDL migration 0015 creates
 -- (repositories/recruitment.mjs generates it from the writers' shapes;
@@ -75,8 +75,8 @@
 -- are DRAFTS, unchanged, for S8b and later.
 -- =============================================================================
 -- =============================================================================
--- idempotency_keys — LIVE since migration 0015_recruitment (S8a-core, REGISTERED — implemented,
---   pending independent acceptance) for the two owners of that step: recruitment_requests and trials.
+-- idempotency_keys — LIVE since migration 0015_recruitment (S8a-core, REGISTERED — independently
+--   accepted at 7a7efc6) for the two owners of that step: recruitment_requests and trials.
 -- =============================================================================
 -- source: every `keys` object / list / map on db.requests and db.trials (the drafted mapping of the
 --         OTHER owners below stays a draft for S8b+; the owner_table CHECK widens with each step).
@@ -527,7 +527,7 @@ CREATE INDEX case_budget_actuals_scenario ON case_budget_actuals(scenario_id);
 
 -- =============================================================================
 -- recruitment_requests, request_trial_slots — LIVE since migration 0015_recruitment (S8a-core,
---   REGISTERED — implemented, pending independent acceptance; repositories/recruitment.mjs)
+--   REGISTERED — independently accepted at 7a7efc6; repositories/recruitment.mjs)
 -- =============================================================================
 -- source: db.requests (the blob every build since M9 wrote; imported row for row and retired by
 --         0015, array position -> seq). Writers unchanged: server.mjs issueRecruitmentRequest (the
@@ -627,7 +627,7 @@ CREATE UNIQUE INDEX request_trial_slots_one_per_day ON request_trial_slots (requ
 
 -- =============================================================================
 -- trials and its eleven owned child tables — LIVE since migration 0015_recruitment (S8a-core,
---   REGISTERED — implemented, pending independent acceptance; repositories/recruitment.mjs)
+--   REGISTERED — independently accepted at 7a7efc6; repositories/recruitment.mjs)
 -- =============================================================================
 -- source: db.trials (the blob every build since M9 wrote; imported row for row and retired by 0015,
 --         array position -> seq). Writers unchanged: server.mjs issueAcceptedTrial (now

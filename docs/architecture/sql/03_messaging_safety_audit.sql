@@ -2,7 +2,7 @@
 -- 03_messaging_safety_audit.sql — ScoutBox target SQLite schema, part 3
 --
 -- Scope (source collections → tables):
---   channels            → channels, messages, message_attachments           (LIVE since migration 0012_channels, S7d, REGISTERED — independently accepted at 4f954ad; channels REBUILT by migration 0015_recruitment (S8a-core) with the real request_id foreign key — implemented, pending independent acceptance)
+--   channels            → channels, messages, message_attachments           (LIVE since migration 0012_channels, S7d, REGISTERED — independently accepted at 4f954ad; channels REBUILT by migration 0015_recruitment (S8a-core) with the real request_id foreign key — independently accepted at 7a7efc6)
 --   notifications       → notifications                                    (LIVE since migration 0009_notifications, S7a, REGISTERED)
 --   notificationPrefs   → notification_prefs, notification_pref_categories  (LIVE since migration 0009_notifications, S7a, REGISTERED)
 --   dispatches          → dispatches, dispatch_attempts                  (LIVE since migration 0010_dispatches, S7b, REGISTERED — independently accepted at ac50b60)
