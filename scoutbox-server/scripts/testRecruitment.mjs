@@ -25,6 +25,7 @@
 // the blobs survive; the modules do not export the repository). The tests marked
 // [compat] exercise behaviour the accepted build already has and pass on both trees.
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,6 +58,8 @@ const tableExistsIn = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE t
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const sortKeys = (v) => (Array.isArray(v) ? v.map(sortKeys) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])])) : v);
 /** The recruitment tables + channels, as an exact canonical dump (rowid order inside each table). */
+/** Every table of the file as a logical dump (the stable source snapshot the rollback test compares across the copy). */
+const fullDump = (s) => JSON.stringify(s.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => [r.name, s.prepare(`SELECT * FROM "${r.name}"`).all().map((x) => ({ ...x }))]));
 const recDump = (s) => JSON.stringify(Object.fromEntries([...TABLES, 'channels', 'messages'].filter((t) => tableExistsIn(s, t)).map((t) => [t, s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all().map((r) => ({ ...r }))])));
 const fkTargets = (s, table) => s.prepare(`PRAGMA foreign_key_list(${table})`).all().map((r) => `${r.from}->${r.table}(${r.to}) ${r.on_delete}`);
 const CHANNEL = (over = {}) => ({ id: 'chan-1', requestId: 'req-p4b', playerId: 'pl-adult', playerName: 'Adult Signup', orgId: 'org-pro', orgName: 'Eastport FC', orgVerified: true, scoutName: 'Maria', scoutRole: 'Head of Recruitment', counterparty: 'player', guardianId: null, createdAt: T.accepted, messages: [{ id: 'msg-1', ts: T.accepted + 1, sender: { kind: 'org_user', id: 'usr-1', name: 'Maria' }, text: 'Welcome.', attachment: null }], readBy: { org: null, counterparty: null }, ...over });
@@ -346,16 +349,87 @@ test('[cutover] the snapshot read serves both collections under their names (nev
   S.close(); rm(d);
 });
 
+// ------------------------------------------------------------- review of 6d77aa7 (F1, F2)
+// FAILING-FIRST NOTE: recorded on the unchanged 6d77aa7 tree before the correction — F1 fails at the cutover read-back
+// (an empty list act comes back absent; a prototype-named own act disappears), F2 fails because a present `null` blob
+// imports as an empty collection and records the migration.
+test('[cutover] F1 (review of 6d77aa7): every idempotency action is preserved losslessly and DISTINCTLY — an empty list act, an empty object act, a null act, a prototype-named own act (`__proto__`) holding a keyed value or a keyed list, `constructor`- and `toString`-named acts, mixed empty and non-empty acts — through the cutover, a whole-snapshot save, the staged repository (in place, and an unchanged save writing nothing), a reopen, the copy-only rollback and the re-upgrade; a non-empty list keeps its order, its duplicates and its fingerprints', () => {
+  const { readRequests, readTrials } = needRec(); const rollback = needRollback();
+  const own = (json) => JSON.parse(json); // JSON.parse creates OWN properties, `__proto__` included — the way every blob is read
+  const KEYS_R = () => own('{"invite":[],"__proto__":{"key":"proto-key","fp":"proto-fp"},"constructor":{"key":"ctor-key","fp":"ctor-fp"},"toString":[{"key":"ts-1","fp":"ts-fp","at":1}],"empty":{},"nothing":null}');
+  const KEYS_T = () => own('{"accept":{"key":null,"fp":"fp-accept"},"schedule":[],"attendance":[{"key":"k-a","fp":"f-a","at":2},{"key":"k-a","fp":"f-a","at":2},{"key":"k-b","fp":"f-b","at":3}],"__proto__":[{"key":"p-1","fp":"p-f"},{"key":"p-1","fp":"p-f"}],"cancel":[],"complete":{}}');
+  const requests = [acceptedRequest(p4bInvitation({ keys: KEYS_R() }), 'trial-1'), legacyTrialRequest({ keys: own('{"__proto__":{"key":"legacy-proto","fp":"lp"}}') })];
+  const trials = [scheduledTrial({ keys: KEYS_T() })];
+  const expectR = persisted(requests); const expectT = persisted(trials);
+  assert.ok(Object.hasOwn(expectR[0].keys, '__proto__') && Object.hasOwn(expectT[0].keys, '__proto__'), 'the fixture carries the prototype-named own act (JSON round trip keeps it)');
+  const checkKeys = (label, r, t) => {
+    assert.deepEqual(r, expectR[0], `${label}: the request`); assert.deepEqual(t, expectT[0], `${label}: the trial`);
+    // presence, not only equality
+    assert.ok(Object.hasOwn(r.keys, 'invite') && Array.isArray(r.keys.invite) && r.keys.invite.length === 0, `${label}: the empty list act is present and empty`);
+    assert.ok(Object.hasOwn(r.keys, '__proto__') && r.keys.__proto__.key === 'proto-key', `${label}: the prototype-named own act`);
+    assert.ok(Object.hasOwn(r.keys, 'constructor') && r.keys.constructor.key === 'ctor-key' && Array.isArray(r.keys.toString) && r.keys.toString[0].key === 'ts-1', `${label}: constructor/toString-named acts`);
+    assert.ok(Object.hasOwn(r.keys, 'empty') && Object.keys(r.keys.empty).length === 0 && Object.hasOwn(r.keys, 'nothing') && r.keys.nothing === null, `${label}: an empty object act and a null act, distinctly`);
+    assert.deepEqual(t.keys.schedule, [], `${label}: schedule []`); assert.deepEqual(t.keys.cancel, [], `${label}: cancel []`); assert.deepEqual(t.keys.complete, {}, `${label}: complete {}`);
+    assert.deepEqual(t.keys.attendance.map((e) => [e.key, e.fp, e.at]), [['k-a', 'f-a', 2], ['k-a', 'f-a', 2], ['k-b', 'f-b', 3]], `${label}: order, duplicates and fingerprints`);
+    assert.ok(Object.hasOwn(t.keys, '__proto__') && Array.isArray(t.keys.__proto__) && t.keys.__proto__.length === 2, `${label}: the prototype-named list act with its duplicate`);
+    assert.deepEqual(t.keys.accept, { key: null, fp: 'fp-accept' }, `${label}: keys.accept as written`);
+  };
+  const dir = tempDir('s8a-f1'); preS8aFile(dir, { requests: expectR, trials: expectT, channels: [] });
+  { const s = openRaw(dir); migrateAll(s); checkKeys('cutover', readRequests(s)[0], readTrials(s)[0]);
+    assert.deepEqual(s.prepare("SELECT key, fp FROM idempotency_keys WHERE owner_id = 'trial-1' AND act = 'attendance' ORDER BY position").all().map((r) => [r.key, r.fp]), [['k-a', 'f-a'], ['k-a', 'f-a'], ['k-b', 'f-b']], 'the list rows in order with the duplicate');
+    assert.deepEqual(readRequests(s)[1].keys, expectR[1].keys, 'cutover: the legacy request\'s prototype-named act'); s.close(); }
+  // a whole-snapshot save with fresh objects
+  { const S = snapshotOpen(dir); S.db.requests[0].keys = KEYS_R(); S.db.trials[0].keys = KEYS_T(); S.save(); S.close(); withRo(dir, (s) => checkKeys('snapshot save', readRequests(s)[0], readTrials(s)[0])); }
+  // the staged repository: in place, then an unchanged save
+  { const L = serverOpen(dir, { cases: CASES() }); L.db.requests[0].keys = KEYS_R(); L.db.trials[0].keys = KEYS_T(); L.save(); withRo(dir, (s) => checkKeys('staged save', readRequests(s)[0], readTrials(s)[0]));
+    const before = withRo(dir, recDump); L.save(); assert.equal(withRo(dir, recDump), before, 'an unchanged save rewrites nothing (the fingerprint sees the prototype-named act)'); L.close();
+    const again = serverOpen(dir, { cases: CASES() }); checkKeys('reopen', plain(again.db.requests[0]), plain(again.db.trials[0])); again.close(); }
+  // the rollback copy carries them in the blobs; the re-upgrade reproduces them
+  const out = tempDir('s8a-f1-out'); rollback(dbFile(dir), out, { now: NOW });
+  withRo(out, (c) => { checkKeys('rollback blob', blob(c, 'requests')[0], blob(c, 'trials')[0]); assert.deepEqual(blob(c, 'requests')[1].keys, expectR[1].keys); });
+  { const up = openRaw(out); migrateAll(up); checkKeys('re-upgrade', readRequests(up)[0], readTrials(up)[0]); up.close(); }
+  rm(dir, out);
+});
+
+test('[cutover] F2 (review of 6d77aa7): a PRESENT null blob — requests or trials — refuses the cutover with RECRUITMENT_IMPORT_BLOCKED like an object, a string or a number: no table created, the blob, the record, saveSeq and every other row untouched, no transaction left open, the next attempt refused the same way; a genuinely ABSENT blob and an explicit [] still import nothing and cut over', () => {
+  needRec();
+  for (const [name, other] of [['requests', 'trials'], ['trials', 'requests']]) {
+    // the null is written AFTER the earlier steps ran (0007 reconciles trialReports against the trials blob and refuses a non-array itself): the file is a valid S4b-R file whose blob row then holds JSON null
+    const dir = tempDir('s8a-f2'); preS8aFile(dir, { requests: undefined, trials: undefined, channels: [], rawBlobs: { [other]: '[]' } });
+    const s = openRaw(dir); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run(name, 'null');
+    assert.equal(blobText(s, name), 'null'); const before = fullDump(s);
+    assert.throws(() => migrateAll(s), (e) => { assert.match(String(e.message), /RECRUITMENT_IMPORT_BLOCKED/, `${name}: refused`); assert.match(String(e.message), new RegExp(`${name} blob.*null`), `${name}: the refusal names the null blob`); return true; });
+    assert.equal(blobText(s, name), 'null', `${name}: the blob is left as it was`); assert.equal(applied(s).includes(MIGRATION), false, `${name}: the migration is not recorded`); for (const t of TABLES) assert.equal(tableExistsIn(s, t), false, `${name}: ${t} not created`);
+    assert.equal(fullDump(s), before, `${name}: every row of every table as before`);
+    s.exec('BEGIN'); s.exec('ROLLBACK'); // the refusal left no transaction open
+    assert.throws(() => migrateAll(s), /RECRUITMENT_IMPORT_BLOCKED/, `${name}: the next attempt refuses the same way`); assert.equal(fullDump(s), before);
+    s.close(); rm(dir);
+  }
+  for (const explicit of [false, true]) {
+    const dir = tempDir('s8a-f2-ok'); preS8aFile(dir, { requests: undefined, trials: undefined, channels: [], ...(explicit ? { rawBlobs: { requests: '[]', trials: '[]' } } : {}) });
+    const s = openRaw(dir); migrateAll(s); assert.ok(applied(s).includes(MIGRATION), explicit ? 'explicit [] blobs cut over' : 'absent blobs cut over'); assert.equal(s.prepare('SELECT count(*) AS n FROM trials').get().n + s.prepare('SELECT count(*) AS n FROM recruitment_requests').get().n, 0); s.close(); rm(dir);
+  }
+});
+
 // ------------------------------------------------------------- the rollback tool
 test('[cutover] the copy-only rollback: the source is never modified; the copy gets the requests and trials blobs back in insertion order in the writers\' literals (presence, absence, unknown fields, keys reassembled), channels rebuilt to the 0012 definition (no request key) with every thread, message and attachment, the fifteen tables dropped, the 0015 record and meta key removed, the revision advanced, every other table untouched; refusals leave no output (a copy that never applied 0015, a non-empty output directory); the S4b-R tool refuses the 0015 file and accepts the rollback output; re-upgrading the copy reproduces the tables exactly', () => {
   const rollback = needRollback(); needRec();
   const d = tempDir('s8a-rb'); preS8aFile(d, FIX()); { const s = openRaw(d); migrateAll(s); s.close(); }
   const L = serverOpen(d, { cases: CASES() }); L.repo.addRequest(legacyTrialRequest({ id: 'req-after', createdAt: NOW, legacyExtra: 1 })); L.save(); const expectedR = plain(L.db.requests); const expectedT = plain(L.db.trials); L.close();
-  const sourceBefore = fs.readFileSync(dbFile(d)); const out = tempDir('s8a-rb-out');
+  // The source-preservation contract (C1 of the review of 6d77aa7), checked at a controlled boundary: every WAL frame is
+  // checkpointed into the main file and the WAL truncated, so the file pair is stable; the bytes of the main file, the
+  // WAL's frame bytes, the logical content of every table and the revision are recorded and must all be the same after
+  // the tool ran (it opens the source read-only; a read-only connection may create an empty -wal/-shm pair, never a frame).
+  { const s = openRaw(d); s.exec('PRAGMA wal_checkpoint(TRUNCATE)'); s.close(); }
+  const sha = (f) => (fs.existsSync(f) ? crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex') : 'absent');
+  const walBytes = () => (fs.existsSync(`${dbFile(d)}-wal`) ? fs.statSync(`${dbFile(d)}-wal`).size : 0);
+  const sourceState = () => ({ main: sha(dbFile(d)), walBytes: walBytes(), logical: withRo(d, fullDump), saveSeq: withRo(d, (s) => meta(s, 'saveSeq')) });
+  const sourceBefore = sourceState(); assert.equal(sourceBefore.walBytes, 0, 'the boundary: no frame outside the main file before the tool runs');
+  const out = tempDir('s8a-rb-out');
   const result = rollback(dbFile(d), out, { now: NOW });
   assert.equal(result.requests, expectedR.length); assert.equal(result.trials, expectedT.length);
-  assert.ok(fs.readFileSync(dbFile(d)).equals(sourceBefore) || true, 'the source file is opened read-only');
-  withRo(d, (s) => assert.ok(tableExistsIn(s, 'trials'), 'the source still carries the tables'));
+  assert.deepEqual(sourceState(), sourceBefore, 'the source is untouched: the same main-file bytes, no WAL frame written, the same logical content of every table, the same revision');
+  withRo(d, (s) => assert.ok(tableExistsIn(s, 'trials'), 'the source still carries the tables (it was never rolled back in place)'));
   const c = new DatabaseSync(dbFile(out), { readOnly: true });
   assert.deepEqual(blob(c, 'requests'), expectedR); assert.deepEqual(blob(c, 'trials'), expectedT);
   for (const t of TABLES) assert.equal(tableExistsIn(c, t), false, `${t} dropped`);
@@ -370,8 +444,10 @@ test('[cutover] the copy-only rollback: the source is never modified; the copy g
   // refusals
   const notCut = tempDir('s8a-notcut'); preS8aFile(notCut, FIX()); const o2 = tempDir('s8a-o2'); assert.throws(() => rollback(dbFile(notCut), o2, { now: NOW }), (e) => e.code === 'NOT_CUT_OVER'); assert.equal(fs.readdirSync(o2).length, 0);
   fs.writeFileSync(path.join(o2, 'x'), ''); assert.throws(() => rollback(dbFile(d), o2, { now: NOW }), (e) => e.code === 'OUTPUT_NOT_EMPTY');
+  // an injected failure before the tool's COMMIT: no output left behind, the source still untouched
+  const o3 = tempDir('s8a-o3'); assert.throws(() => rollback(dbFile(d), o3, { now: NOW, _failBeforeCommit: true }), /synthetic commit failure/); assert.equal(fs.readdirSync(o3).length, 0, 'the failed run removed its output'); assert.deepEqual(sourceState(), sourceBefore, 'after the injected failure the source is still untouched');
   // re-upgrade
   const up = openRaw(out); migrateAll(up); assert.deepEqual(rec.readRequests(up), expectedR); assert.deepEqual(rec.readTrials(up), expectedT); up.close();
-  rm(d, out, chain, notCut, o2);
+  rm(d, out, chain, notCut, o2, o3);
 });
 console.log(`\n${passed} recruitment checks passed`);

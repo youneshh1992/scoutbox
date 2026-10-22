@@ -29,6 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
+import { openStore } from '../store.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -205,6 +206,84 @@ await test('[cutover] the admin backup carries requests and trials in the legacy
     console.log('    (pre-S8a build 9b109dc booted the rollback copy: the same requests and trials in its routes, a new invitation and acceptance written into its blobs; re-upgraded with those writes)');
   } else console.log('    (SCOUTBOX_PRE_S8A_SERVER not set: the pre-S8a boots of the live copy and of the rollback copy were NOT exercised here)');
   rm(dir, restored, copy, bk.body.dir);
+});
+
+// ------------------------------------------------------------- review of 6d77aa7 (F1, F2)
+// FAILING-FIRST NOTE: recorded on the unchanged 6d77aa7 tree before the correction — the F1 test fails once the
+// hand-written acts are read back after the restore (the empty list act and the prototype-named act are gone); the F2
+// test fails because the server LISTENS on a restored backup whose trials collection is a present JSON null.
+const blobTextOf = (dir, name) => snap(dir, (c) => c.get('SELECT value FROM collections WHERE name = ?', name)?.value);
+await test('[cutover] F1 (review of 6d77aa7) through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a trial whose keys carry an empty list act, an empty object act and a prototype-named own act (written into the file by hand — no route produces them today) keeps every act distinctly through a backup, a restore (where the same clientKey still replays), the copy-only rollback (the blob carries them) and the re-upgrade; the pre-S8a build on the rollback copy replays the same clientKey from its blob', async () => {
+  const dir = tempDir('s8a-f1'); let S = await boot(dir); let maria = await orgLogin(S); const a = await signupAdult(S, 'Keyed Adult');
+  const room = await S.j('POST', '/org/rooms', { playerId: a.pid, sourceContext: 'search' }, maria); assert.equal(room.status, 201, room.text); const RID = room.body.room.roomId;
+  const jr = (await S.j('GET', `/org/rooms/${RID}/journey`, undefined, maria)).body; if (jr.lifecycle.currentStage === 'watching') { const mv = await S.j('POST', `/org/rooms/${RID}/lifecycle`, { action: 'startReview', expectedRev: jr.case.rev }, maria); assert.equal(mv.status, 200, mv.text); }
+  const T0 = Date.now(); const H = 3_600_000;
+  const INVITE = (extra = {}) => ({ timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B, Dome Road' }, message: 'Come and train.', instructions: 'Ask for Priya.', slots: [{ startsAt: T0 + 48 * H, endsAt: T0 + 50 * H, kind: 'training' }], clientKey: 'inv-key-1', ...extra });
+  const inv = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE(), maria); assert.equal(inv.status, 201, inv.text);
+  const replay = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE(), maria); assert.equal(replay.status, 200, replay.text); assert.equal(replay.body.idempotent, true, 'the same clientKey and payload: a replay');
+  const conflict = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE({ message: 'A different message.' }), maria); assert.equal(conflict.body.error, 'TRIAL_IDEMPOTENCY_CONFLICT', conflict.text);
+  assert.equal(q1(dir, 'SELECT count(*) AS n FROM recruitment_requests WHERE case_id = ?', RID).n, 1, 'one request row'); assert.equal(q1(dir, "SELECT key FROM idempotency_keys WHERE owner_table = 'recruitment_requests' AND act = 'invite'").key, 'inv-key-1', 'keys.invite as a row');
+  const pending = (await S.j('GET', '/player/inbox', undefined, a.token)).body.find((r) => r.type === 'trial' && r.status === 'pending'); assert.ok(pending, 'the invitation in the inbox');
+  const acc = await S.j('POST', `/player/requests/${pending.id}/respond`, { accept: true, chosenSlot: pending.trialDetails.proposedDate }, a.token); assert.equal(acc.status, 200, acc.text); const TID = acc.body.trialId;
+  const current = async (srv, token) => (await srv.j('GET', `/org/rooms/${RID}/trials/${TID}`, undefined, token)).body;
+  // the revision moves the accepted slot's session (its id is stable, so the payload fingerprint is stable and the clientKey can replay; a NEW session gets a minted id — a route rule outside this step)
+  const SID = q1(dir, 'SELECT id FROM trial_schedule_sessions WHERE trial_id = ? ORDER BY position', TID).id; assert.ok(SID, 'the accepted slot became a session');
+  const RESCHEDULE = (rev) => ({ timezone: 'Europe/London', expectedRev: rev, sessions: [{ id: SID, startsAt: T0 + 72 * H, endsAt: T0 + 74 * H, venue: { name: 'Eastport Dome', town: 'Eastport' }, kind: 'training' }], clientKey: 'sched-key-1' });
+  const t0 = await current(S, maria); const res = await S.j('POST', `/org/rooms/${RID}/trials/${TID}/reschedule`, RESCHEDULE(t0.trial?.rev ?? t0.rev), maria); assert.equal(res.status, 200, res.text);
+  const replayS = async (srv, token, label) => { const t = await srv.j('GET', `/org/rooms/${RID}/trials/${TID}`, undefined, token); const r = await srv.j('POST', `/org/rooms/${RID}/trials/${TID}/reschedule`, RESCHEDULE(t.body.trial?.rev ?? t.body.rev), token); assert.equal(r.status, 200, `${label}: ${r.text}`); assert.equal(r.body.idempotent, true, `${label}: the schedule clientKey replays`); return r; };
+  await replayS(S, maria, 'same process');
+  await S.stop(); S = await boot(dir); maria = await orgLogin(S); await replayS(S, maria, 'after a restart'); await S.stop();
+  // the hand-written acts: an empty list, an empty object and a prototype-named own act beside the real schedule key
+  { const store = openStore(dir); const loaded = store.load(); const t = loaded.db.trials.find((x) => x.id === TID); assert.ok(t && Array.isArray(t.keys.schedule) && t.keys.schedule[0].key === 'sched-key-1');
+    t.keys.cancel = []; t.keys.extraEmpty = {}; Object.defineProperty(t.keys, '__proto__', { value: { key: 'proto-key', fp: 'proto-fp' }, enumerable: true, writable: true, configurable: true });
+    store.save(loaded); store.sqlite.close(); }
+  const expectKeys = (keys, label) => { assert.ok(Object.hasOwn(keys, 'cancel') && Array.isArray(keys.cancel) && keys.cancel.length === 0, `${label}: the empty list act is present and empty`); assert.ok(Object.hasOwn(keys, 'extraEmpty') && Object.keys(keys.extraEmpty).length === 0, `${label}: the empty object act`); assert.ok(Object.hasOwn(keys, '__proto__') && keys.__proto__.key === 'proto-key', `${label}: the prototype-named own act`); assert.equal(keys.schedule[0].key, 'sched-key-1', `${label}: the real key`); };
+  S = await boot(dir); maria = await orgLogin(S); await replayS(S, maria, 'after the hand edit');
+  const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
+  const backup = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')); expectKeys(backup.db.trials.find((x) => x.id === TID).keys, 'the backup export');
+  const restored = tempDir('s8a-f1-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
+  S = await boot(restored); maria = await orgLogin(S); await replayS(S, maria, 'the restore'); await S.stop();
+  { const store = openStore(restored); expectKeys(store.load().db.trials.find((x) => x.id === TID).keys, 'read back from the restored tables'); store.sqlite.close(); }
+  const copy = tempDir('s8a-f1-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), restored, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
+  expectKeys(blobOf(copy, 'trials').find((x) => x.id === TID).keys, 'the rollback blob');
+  const OLD = process.env.SCOUTBOX_PRE_S8A_SERVER;
+  if (OLD && fs.existsSync(OLD)) { const old = await boot(copy, {}, OLD); const mariaO = await orgLogin(old); await replayS(old, mariaO, 'the pre-S8a build on the rollback copy'); await old.stop(); console.log('    (pre-S8a build 9b109dc replayed the same clientKey from the rollback copy\'s blob)'); }
+  else console.log('    (SCOUTBOX_PRE_S8A_SERVER not set: the pre-S8a replay on the rollback copy was NOT exercised here)');
+  S = await boot(copy); assert.ok(live(copy)); maria = await orgLogin(S); await replayS(S, maria, 're-upgraded'); await S.stop();
+  { const store = openStore(copy); expectKeys(store.load().db.trials.find((x) => x.id === TID).keys, 'read back after the re-upgrade'); store.sqlite.close(); }
+  rm(dir, restored, copy, bk.body.dir);
+});
+
+await test('[cutover] F2 (review of 6d77aa7) through a real boot: a pre-S8a file (the rollback tool\'s own output, and a file the pre-S8a build wrote) whose trials — or requests — blob is a present JSON null is REFUSED at boot with RECRUITMENT_IMPORT_BLOCKED naming the null: the server never listens, nothing is imported or seeded in its place, the migration is not recorded, the blob and every table are left as they were and the next boot refuses the same way; control: a db.json whose collection is null is refused earlier by the legacy import (LEGACY_IMPORT_FAILED), never served', async () => {
+  // a fresh file with NO request and NO trial, so that nothing else can refuse the import: on the reviewed source a null
+  // blob imported as an empty collection and the server listened over it
+  const dir = tempDir('s8a-f2'); const S = await boot(dir); const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
+  const stateOf = (where, name) => ({ recorded: applied(where).includes(MIGRATION), tables: TABLES.filter((t) => tableExists(where, t)), blob: blobTextOf(where, name), saveSeq: q1(where, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value, dump: recDump(where), other: blobTextOf(where, name === 'trials' ? 'requests' : 'trials') });
+  const refusedBoot = async (where, name, label) => {
+    const before = stateOf(where, name); const r = await bootRefused(where);
+    assert.equal(r.code, 1, `${label}: the server exits 1 at boot — ${r.log.slice(-600)}`); assert.doesNotMatch(r.log, /listening on/, `${label}: never listened`);
+    assert.match(r.log, /RECRUITMENT_IMPORT_BLOCKED/, `${label}: the refusal — ${r.log.slice(-600)}`); assert.match(r.log, new RegExp(`${name} blob.*null`), `${label}: names the null blob`);
+    const after = stateOf(where, name); assert.deepEqual(after, before, `${label}: the refused boot changed nothing`); assert.equal(after.recorded, false, `${label}: 0015 not recorded`); assert.deepEqual(after.tables, [], `${label}: no recruitment table`); assert.equal(after.blob, 'null', `${label}: the null blob left as it was`);
+    return after;
+  };
+  const setNull = (where, name) => { const s = new DatabaseSync(path.join(where, 'scoutbox.db')); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run(name, 'null'); s.close(); };
+  // a pre-S8a file produced by this build's own rollback tool (no old build needed), one collection set to null
+  for (const name of ['trials', 'requests']) {
+    const pre = tempDir(`s8a-f2-${name}`); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), dir, pre], { stdio: 'pipe' }); assert.equal(live(pre), false); setNull(pre, name);
+    const first = await refusedBoot(pre, name, `${name}: first boot`); const second = await refusedBoot(pre, name, `${name}: second boot`); assert.deepEqual(second, first, `${name}: the next boot refuses the same way`);
+    rm(pre);
+  }
+  // the same on a file the pre-S8a build itself wrote
+  const OLD = process.env.SCOUTBOX_PRE_S8A_SERVER;
+  if (OLD && fs.existsSync(OLD)) {
+    const oldDir = tempDir('s8a-f2-old'); const old = await boot(oldDir, {}, OLD); await old.stop();
+    setNull(oldDir, 'trials'); const first = await refusedBoot(oldDir, 'trials', 'the pre-S8a build\'s file: first boot'); const second = await refusedBoot(oldDir, 'trials', 'the pre-S8a build\'s file: second boot'); assert.deepEqual(second, first);
+    console.log('    (a file the pre-S8a build 9b109dc wrote, its trials blob set to null, is refused at boot by this build and left as it was)'); rm(oldDir);
+  } else console.log('    (SCOUTBOX_PRE_S8A_SERVER not set: the null-blob refusal on a file the pre-S8a build wrote was NOT exercised here)');
+  // control: a null collection in a db.json is refused by the legacy import before any blob exists (the store's existing contract), and never served
+  { const restored = tempDir('s8a-f2-json'); fs.cpSync(bk.body.dir, restored, { recursive: true }); const dbJson = path.join(restored, 'db.json'); const j = JSON.parse(fs.readFileSync(dbJson, 'utf8')); j.db.trials = null; fs.writeFileSync(dbJson, JSON.stringify(j));
+    const r = await bootRefused(restored); assert.equal(r.code, 1, r.log.slice(-400)); assert.doesNotMatch(r.log, /listening on/); assert.match(r.log, /LEGACY_IMPORT_FAILED.*trials.*got null/, 'the legacy import names the null collection'); rm(restored); }
+  rm(dir, bk.body.dir);
 });
 
 console.log(`\n${passed} recruitment server checks passed`);

@@ -1494,7 +1494,10 @@ implementation record; `docs/architecture/sql/02_recruitment.sql` the DDL):
   absent key, present null, off-type value and unknown field kept
   (`absent_keys_json`, `offtype_json`, `extra_json`, `raw_json`) so a record
   comes back exactly as it was written — the tombstone shapes, `blockedBy`,
-  `keys.accept {key: null, fp}` (kept on the trial row), the tombstone's
+  every `keys` act present and distinct (a non-empty list act and a keyed
+  value act as `idempotency_keys` rows; `keys.accept {key: null, fp}`, an
+  empty list act, an empty object, a null and any other act kept on the owner
+  row; an act named `__proto__` is data — the review of `6d77aa7`, F1), the tombstone's
   `trialDetails.instructions: null`, the `day` container's presence, a pre-P4B
   trial without `workflowState` (counted as `preP4bShape`, read by
   `isLegacyTrial` as before) included.
@@ -1573,7 +1576,9 @@ implementation record; `docs/architecture/sql/02_recruitment.sql` the DDL):
   hand on the data (plan §D.7.3), never by the migration. **This refuses a
   file the blob store tolerated** (plan §D.8.5): an entry in `requests` or
   `trials` that is not a record (a `null`, a string, a number — the old boot
-  ignored them), a trial naming no request, a request naming no staff member
+  ignored them), a whole blob that is JSON `null` rather than a list (refused
+  like an object or a string; only a genuinely ABSENT blob imports nothing —
+  the review of `6d77aa7`, F2), a trial naming no request, a request naming no staff member
   or organisation, two trials naming one request, two open trials in one case
   (any state other than completed/cancelled counts as open). No production
   writer produces such rows; nothing is dropped or repaired. The boot log states

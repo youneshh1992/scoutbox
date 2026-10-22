@@ -274,11 +274,18 @@ function encodeLevel(shape, obj, prefix, out, extraHolder) {
     else if (shape.maps?.[k]) {
       if (!isPlainObject(v)) { out.offtype[path] = clone(v, path).value; continue; }
       if (!shape.maps[k].ownerTable) { out.children.push({ spec: shape.maps[k], path, map: v }); continue; }
-      // the idempotency keys: a list act and a value act carrying a string key are rows; a value act WITHOUT a key
-      // (`trials.keys.accept {key: null, fp}`, plan §D.7.3) is not replayable and stays on the owner row, under `keys`
-      // in extra_json, exactly as it is
+      // the idempotency keys: a NON-EMPTY list act and a value act carrying a string key are rows; everything else an
+      // act holds — a value act WITHOUT a key (`trials.keys.accept {key: null, fp}`, plan §D.7.3), an EMPTY list (no row
+      // could carry its presence), an empty object, null, any other value — stays on the owner row under `keys` in
+      // extra_json exactly as it is, so every act comes back present and distinct (review of 6d77aa7, F1). Acts are set
+      // as OWN data properties: an act named `__proto__` (own in the writer's object, own again after JSON.parse)
+      // assigned with `rows[act] =` would set the prototype and vanish.
       const rows = {}; const held = {};
-      for (const [act, entry] of Object.entries(v)) { if (entry === undefined) continue; if (Array.isArray(entry) || (isPlainObject(entry) && typeof entry.key === 'string')) rows[act] = entry; else setOwn(held, act, clone(entry, `${path}.${act}`).value); }
+      for (const [act, entry] of Object.entries(v)) {
+        if (entry === undefined) continue;
+        if ((Array.isArray(entry) && entry.length > 0) || (isPlainObject(entry) && typeof entry.key === 'string')) setOwn(rows, act, entry);
+        else setOwn(held, act, clone(entry, `${path}.${act}`).value);
+      }
       if (Object.keys(held).length) setOwn(extraHolder, k, held);
       out.children.push({ spec: shape.maps[k], path, map: rows });
     }
@@ -379,7 +386,7 @@ function readRecords(sqlite, spec) {
     for (const [k, sub] of Object.entries(shape.object ?? {})) out.set(`${prefix}${k}`, (groups.get(`${sub.table}|${ownerValues.join('|')}`) ?? []).map((r) => decodeChild(sub, r, ownerValues)));
     for (const [k, sub] of Object.entries(shape.maps ?? {})) {
       if (sub.map) { const o = {}; for (const r of reminders.get(ownerValues[0]) ?? []) setOwn(o, r.marker, r.sent_at !== null ? r.sent_at : parseJson(r.value_json, 'value_json')); out.set(`${prefix}${k}`, o); }
-      else { const o = {}; for (const r of keys.get(ownerValues[0]) ?? []) { const v = parseJson(r.entry_json, 'entry_json'); if (r.shape === 'list') { if (!Array.isArray(o[r.act])) setOwn(o, r.act, []); o[r.act].push(v); } else setOwn(o, r.act, v); } out.set(`${prefix}${k}`, o); }
+      else { const o = {}; for (const r of keys.get(ownerValues[0]) ?? []) { const v = parseJson(r.entry_json, 'entry_json'); if (r.shape === 'list') { if (!Object.hasOwn(o, r.act) || !Array.isArray(o[r.act])) setOwn(o, r.act, []); o[r.act].push(v); } else setOwn(o, r.act, v); } out.set(`${prefix}${k}`, o); } // own properties only: an act named __proto__ or constructor is data
     }
     for (const [k, sub] of Object.entries(shape.objects ?? {})) decodeChildren(sub, ownerValues, out, `${prefix}${k}.`);
     return out;
@@ -586,8 +593,11 @@ export const RECRUITMENT_SNAPSHOT = {
  * Returns the counts the migration records (never a value).
  */
 export function importRecruitmentBlobs(sqlite) {
+  // `undefined` is a genuinely ABSENT blob row (nothing to import); a PRESENT row holding JSON `null` is a malformed
+  // collection and refuses like an object, a string or a number (review of 6d77aa7, F2) — never defaulted to []
   const read = (name) => { const row = tableExists(sqlite, 'collections') ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null; if (!row) return undefined; try { return JSON.parse(row.value); } catch { throw blocked(`the ${name} blob is not valid JSON`); } };
-  const requests = read('requests') ?? []; const trials = read('trials') ?? [];
+  const requestsBlob = read('requests'); const trialsBlob = read('trials');
+  const requests = requestsBlob === undefined ? [] : requestsBlob; const trials = trialsBlob === undefined ? [] : trialsBlob;
   if (!Array.isArray(requests)) throw blocked(`the requests blob must be an array of entries (got ${describe(requests)})`);
   if (!Array.isArray(trials)) throw blocked(`the trials blob must be an array of entries (got ${describe(trials)})`);
   const cases = readCasesCollection(sqlite);

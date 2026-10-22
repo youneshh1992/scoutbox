@@ -3015,7 +3015,7 @@ itself awaiting independent review and is not yet put to the Founder.**
 All probes are synthetic and disposable, kept outside the tracked source; nothing was added to the application, the
 schema file, a migration or a test.
 
-### D.8 S8a-core as implemented (22 October 2026, one commit on `feat/sqlite-schema` on top of `d0f0205`; written while AWAITING INDEPENDENT ACCEPTANCE — implemented, not accepted)
+### D.8 S8a-core as implemented (22 October 2026, one commit on `feat/sqlite-schema` on top of `d0f0205`, corrected once after the independent review of `6d77aa7` — §D.8.10; written while AWAITING INDEPENDENT ACCEPTANCE — implemented with review corrections, not accepted)
 
 **Status.** S8a-core — `requests` and `trials` as tables (`recruitment_requests`, `request_trial_slots`, `trials` and
 its eleven owned child tables, `idempotency_keys`; `channels` rebuilt with the real `request_id` key) — is
@@ -3128,9 +3128,12 @@ every known nested object (`trialDetails`, `trialDetails.private`, `recipient`, 
 `completion`, `lifecycle`, `revBy`, `day`, `day.arrival`, `day.emergency`, `day.collection`) is columns of the same row;
 every list is a child table keyed `(owner…, position)` in list order (`trial_session_evidence` by `(trial_id,
 session_position, position)`), a non-object element kept verbatim in `raw_json`; `reminders` is `trial_reminders`
-(`sent_at` for an integer marker, `value_json` otherwise); `keys` is `idempotency_keys` for the replayable acts (a list
-act's entries; a value act with a string key such as `keys.invite`) with the entry verbatim in `entry_json`, while
-`trials.keys.accept {key: null, fp}` stays on the trial row (`extra_json.keys.accept`) exactly as written. A known key
+(`sent_at` for an integer marker, `value_json` otherwise); `keys` is `idempotency_keys` for the replayable acts (a
+NON-EMPTY list act's entries; a value act with a string key such as `keys.invite`) with the entry verbatim in
+`entry_json`, while every other act stays on the owner row under `keys` in `extra_json` exactly as written —
+`trials.keys.accept {key: null, fp}`, an EMPTY list act (no row could carry its presence), an empty object, a null, any
+other value — so every act comes back present and distinct; acts are set as own data properties, so an act named
+`__proto__`, `constructor` or `toString` is data (the review of `6d77aa7`, F1, §D.8.10). A known key
 that is ABSENT is listed in `absent_keys_json` (dotted for nested keys) and comes back absent; a present `null` is NULL
 and comes back null; a present value the column cannot hold is kept verbatim in `offtype_json` under its path; every
 unknown own key at any level is kept in `extra_json` (nested extras under their known parent key) and spread back first;
@@ -3267,7 +3270,8 @@ separate, undecided piece of work.
 - **Failing-first** (recorded on the unchanged `d0f0205` tree, source-identical to `9b109dc`, before any source edit):
   `scripts/testRecruitment.mjs` and `scripts/testRecruitmentServer.mjs` fail there on the concrete assertion "the last
   registered/recorded migration is 0015_recruitment" (logs in the handoff).
-- **New suites, green on the implementation:** `scripts/testRecruitment.mjs` (9 tests: the migration and cutover
+- **New suites, green on the implementation:** `scripts/testRecruitment.mjs` (11 tests since the corrections of
+  §D.8.10 — the nine below plus the F1 and F2 regressions: the migration and cutover
   counts, the lossless mapping of every writer shape, the import refusals with ids only, the repository in staged mode,
   the two failure contracts with the statement failure and the real COMMIT failure, the six-phase snapshot write with
   the reviewer's transition matrix as extra coverage, the atomic refusals, the snapshot read and the identity
@@ -3276,7 +3280,8 @@ separate, undecided piece of work.
   report routes, `REQUEST_PENDING`, SIGKILL durability, `/capabilities`; two stored open-day invitations and a request
   of a missing player through the backup/restore path, the deletion unit against a real COMMIT failure and its retry;
   the backup shapes, a restore row for row, the previous build on the live copy, the rollback copy, the chain, the
-  `9b109dc` boot on the copy and the re-upgrade). Both in the `npm test` chain.
+  `9b109dc` boot on the copy and the re-upgrade; since §D.8.10 five tests: the route-facing replay controls and the
+  null-blob boot refusal added). Both in the `npm test` chain.
 - **Existing suites adapted** (the reason stated in each): the migration list and the rollback chain (one link longer)
   in every suite that asserts them; the suites that used `requests` as "the unrelated plain blob" now use `vouches`;
   `testChannels` and `testChannelsServer` read the request rows; `testPlayerSubrecords` adds its trials through the
@@ -3313,3 +3318,52 @@ separate, undecided piece of work.
 7. A record read from the tables carries its keys in the stored shape's order, not the writer's insertion order;
    values are identical (§D.8.5).
 8. The implementation awaits independent acceptance; S8b (cases, rooms, decisions) is not started.
+9. The F1 correction (§D.8.10) preserves every act from the moment it is in place. A database converted by the
+   reviewed `6d77aa7` build would already have discarded an empty list act or a prototype-named act at its cutover or
+   at a later save; nothing can reconstruct those from the tables — the authoritative original (the pre-cutover file or
+   a backup written before the conversion) would be needed. No real database was converted by that build (the
+   implementation is not deployed; the Founder authorised review only).
+
+#### D.8.10 Review corrections (the independent review of `6d77aa7`; one commit, implemented, pending independent acceptance)
+
+The review of `6d77aa7` left S8a-core **implemented, not accepted**, with two P2 findings and one ineffective test
+assertion, reproduced by its two scripts (`review-6d77aa7-reproductions.mjs`: six failing cases;
+`review-6d77aa7-mapping-matrix.mjs`: 3,150 snapshot round trips, six mismatches, all empty action lists). The accepted design (§D.7)
+is not reopened; Q7a/Q7b/Q7c stay as recorded; the write phases, the reference checks and the product constraints are
+unchanged. Corrected in one bounded commit:
+
+- **F1 — every idempotency act preserved losslessly** (`repositories/recruitment.mjs`, the `keys` branch of
+  `encodeLevel` and the `keys` decode of `readRecords`). Two mechanisms at one boundary: an act whose value was `[]`
+  was placed in the row map but emitted no child row, so its own key disappeared (`keys.schedule: []` came back as no
+  `schedule`); an own act named `__proto__` (own in the writer's object and own again after `JSON.parse`) was assigned
+  with `rows[act] = entry`, which sets the prototype of an ordinary object, so it disappeared too. Now only a NON-EMPTY
+  list act and a value act with a string key become `idempotency_keys` rows; every other act — an empty list, an empty
+  object, a null, `keys.accept {key: null, fp}`, any other value — is held on the owner row under `keys` in
+  `extra_json` exactly as written (the existing presence/extra mapping; no DDL change, no new refusal, nothing renamed),
+  and every act is set and read as an OWN data property (`__proto__`, `constructor`, `toString` are data). Non-empty
+  lists keep their order, duplicates and fingerprints; replay and conflict behaviour, expiry, the routes and the
+  product constraints are untouched. Proven for both collections through the cutover, a whole-snapshot save, the staged
+  repository (in place, an unchanged save writing nothing), a reopen, the copy-only rollback and the re-upgrade
+  (`scripts/testRecruitment.mjs`), and through the real routes — an invitation's `clientKey` replays and conflicts, a
+  reschedule's `clientKey` replays across a restart, a backup, a restore, the rollback copy (the pre-S8a build replays
+  the same key from its blob) and the re-upgrade, with the hand-written acts beside the real key
+  (`scripts/testRecruitmentServer.mjs`). The reviewer's matrix: 3,150 round trips, zero mismatches, zero refusals.
+- **F2 — a present `null` blob refused** (`importRecruitmentBlobs`). `read(name) ?? []` turned a PRESENT row holding
+  JSON `null` into an empty collection before the shape check, so migration `0015` completed, removed the malformed blob
+  and recorded itself. Now only a genuinely ABSENT row defaults to `[]`; a present `null` refuses with
+  `RECRUITMENT_IMPORT_BLOCKED: the <name> blob must be an array of entries (got null)` like an object, a string or a
+  number — no table created, the blob, the record, `saveSeq` and every other row untouched, no transaction left open,
+  the next attempt refused the same way; absent blobs and explicit `[]` still cut over. Proven on both collections in
+  the unit suite and through a real boot on a pre-S8a file (the rollback tool's own output and a file the `9b109dc` build
+  wrote): the server exits 1 before listening and the file is left as it was. Control: a `null` collection in a
+  `db.json` is refused earlier by the legacy import (`LEGACY_IMPORT_FAILED`), never served.
+- **C1 — the rollback test's source-preservation check made real** (`scripts/testRecruitment.mjs`). The assertion
+  `bytesEqual || true` could not fail. The test now establishes a controlled boundary (`PRAGMA wal_checkpoint(TRUNCATE)`
+  with every connection closed, so the file pair is stable and the WAL carries no frame), records the SHA-256 of the
+  main file, the WAL's byte count, the logical content of every table and the revision, and requires all four to be the
+  same after the tool ran and again after an injected failure before the tool's COMMIT (which also leaves no output).
+  The source held on the reviewed tree too (the defect was coverage, not behaviour): the check passed on `6d77aa7`.
+- **Failing first.** The F1 and F2 regressions were recorded failing against the unchanged `6d77aa7` source before the
+  correction (the unit F1 at the cutover read-back, the unit F2 on "missing expected exception", the server F1 at the
+  backup export, the server F2 with the server listening over a null blob); the reviewer's two scripts, unchanged, exit
+  1 on `6d77aa7` and 0 on the corrected tree (logs in the handoff).
