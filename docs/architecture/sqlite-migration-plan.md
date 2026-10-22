@@ -2608,6 +2608,22 @@ kept, not dropped. Proof: `probe-s8a-write-algorithm-cases.mjs` (13 checks, the 
 tables installed from file 02, both input orders for every valid final graph, the cd7dc95 writer as the control). No
 product decision is added or changed; D2 and D3 stay closed as written. **The brief still awaits independent review.**
 
+**Third correction (22 October 2026, after the independent review of `f2121b5`).** That review closed the case-index
+ordering finding (completion, cancellation, re-entry and case handoff in full snapshots) and found **one related P2**:
+under the f2121b5 phases a changed `case_id` was a *departure* (delete + reinsert), so `ON DELETE SET NULL` cleared
+the request's retained back-reference and, with `requests` omitted as the partial-snapshot contract allows, phase 3
+restored nothing and the pair assertion refused a valid case-only change (case-1 → case-2, case-1 → NULL, a swap of
+two open survivors) that committed when the unchanged requests were resent (`review-f2121b5-partial-case.mjs`).
+**Corrected in place (§D.7.5 phase 2):** departures are only trials no longer listed or whose `request_id` changes;
+a survivor leaving its case slot — by state or by key — is **released by a parent-preserving `UPDATE` that parks
+`case_id` to NULL**, never deleted, so no `SET NULL` fires and its retained link, children and request row survive;
+the arrivals then write the final `case_id` and state. No link is reconstructed from a trial alone; an actual
+reassignment, a replacement or new trial a retained request does not name, conflicting supplied back-references and
+two open trials in one case are still refused; a deliberate removal still leaves the back-reference NULL; supplied
+request values stay authoritative. Proof: `probe-s8a-write-algorithm-partial.mjs` (20 checks: every partial save
+compared, as an exact dump, with the equivalent full save in both trial orders; the f2121b5 phases as the control).
+No product decision is added; D2 and D3 stay closed. **The brief still awaits independent review.**
+
 #### D.7.1 What S4b-R changed for the recruitment step, and what it did not
 
 A `players` row now outlives an account deletion as the retained record (id, deletion instant, birth date, country;
@@ -2643,13 +2659,14 @@ recruitment player reference, not the schema (§D.7.3).
 **Can S8a safely proceed next?** The recommendation stands as **S8a-core**, on this evidence rather than by
 assertion: no key to `players(id)` or `guardians(id)` (so §D.2a does not bind); the request and trial tables written
 by the **six-phase write of §D.7.5** — parent-preserving upserts, the back-reference parked and assigned after the
-trial exists, departures before arrivals for a changed unique key (`request_id`, `case_id`), releases of survivors
-leaving the `trials_one_open_per_case` predicate before any arrival, explicit prunes, final-state assertions,
-immediate constraints throughout — which the probes `probe-s8a-write-algorithm.mjs` and
-`probe-s8a-write-algorithm-cases.mjs` show construct a new pair on an empty database, re-save an unchanged graph
-byte-for-byte, replace a trial, complete or cancel a trial and open the next one in the same case **in either input
-order**, honour partial snapshots and refuse every invalid final state with a rollback (the a6c40f3 order and the
-cd7dc95 phases fail their control cases); the
+trial exists, departures before arrivals for a changed `request_id`, parent-preserving releases (the case slot
+parked) of survivors leaving their `trials_one_open_per_case` slot before any arrival, explicit prunes, final-state
+assertions, immediate constraints throughout — which the probes `probe-s8a-write-algorithm.mjs`,
+`probe-s8a-write-algorithm-cases.mjs` and `probe-s8a-write-algorithm-partial.mjs` show construct a new pair on an
+empty database, re-save an unchanged graph byte-for-byte, replace a trial, complete or cancel a trial and open the
+next one in the same case **in either input order**, apply a case-only change **with `requests` omitted** exactly as
+with them supplied, honour partial snapshots and refuse every invalid final state with a rollback (the a6c40f3 order,
+the cd7dc95 phases and the f2121b5 phases fail their control cases); the
 drafted "one pending request" index **withdrawn** so the open-day route's invitations stay valid (§D.7.3, D2); the
 mapping made lossless (§D.7.3, D3); and three explicit approvals (Q7a, Q7b, Q7c) that this correction neither
 narrows nor infers. "Upsert-and-prune" alone was not a complete solution and is no longer claimed to be one.
@@ -2763,23 +2780,32 @@ inside the one save transaction (the store's `write()`), with constraints **imme
    parent-preserving). A NEW request is inserted with `trial_id` **NULL**; a SURVIVING request keeps its stored
    `trial_id` only when it already equals the final value (the unchanged pair), otherwise it is parked NULL. Its owned
    slots are rewritten (delete, insert in list order).
-2. **Trials** (corrected after the review of `cd7dc95`). (a) **Departures** = stored trials the snapshot no longer
-   lists + stored trials whose supplied `request_id` **or `case_id`** differs (a unique-key value — `request_id` under
-   `UNIQUE(request_id)`, `case_id` under the partial index — changes hands by departure and arrival, never by an
-   in-place re-key): their `RESTRICT` children (`trial_reports`, `trial_history`) are deleted explicitly, then the trial
-   row (`CASCADE` takes the rest; `SET NULL` clears any request that named it — rewritten in phase 3). (b) **Releases**
-   = surviving trials (same `request_id`, same `case_id`) whose stored row is inside the predicate of
-   `trials_one_open_per_case` (`case_id` not NULL, `workflow_state` open) and whose final row is outside it (final state
-   `completed` or `cancelled`): a **parent-preserving `UPDATE` of `workflow_state` only** — nothing deleted, children
-   untouched, no `SET NULL` — for every such trial **before any arrival**. (c) **Arrivals and the rest:** every supplied
-   trial is upserted (new rows; departed rows re-inserted; the survivors' remaining columns; a terminal trial
-   re-entering the predicate — no route does that today, a restore may carry it) and its owned containers rewritten in
-   list order (sessions, evidence, revisions, attendance, reminders, day tables, history, report). **Why the input
-   order no longer matters:** when (c) begins, every row still in the table is a survivor whose predicate membership
-   is already its final one (members that leave were released in (b); members that change key were deleted in (a)),
-   so a row holding a case slot at that point holds it in the final graph too, and any `UNIQUE` refusal inside (c) is a
-   genuine conflict of the final graph (two open trials in one case), whatever the array order. A plain sort of the
-   input is not relied on; `defer_foreign_keys` is not used and would not defer a `UNIQUE` check anyway.
+2. **Trials** (corrected after the reviews of `cd7dc95` and `f2121b5`). (a) **Departures** = stored trials the
+   snapshot no longer lists + stored trials whose supplied `request_id` differs — and nothing else. `request_id` is the
+   pair's key: a change of it is a real reassignment or removal, so its request back-reference is *meant* to change
+   (`UNIQUE(request_id)` changes hands by departure and arrival, never by an in-place re-key). Their `RESTRICT`
+   children (`trial_reports`, `trial_history`) are deleted explicitly, then the trial row (`CASCADE` takes the rest;
+   `SET NULL` clears the request that named it — the supplied requests rewrite theirs in phase 3; an omitted request
+   keeps NULL, which is right for a removal and is refused by the pair assertion for a reassignment). **A changed
+   `case_id` is not a departure** (the f2121b5 defect: it deleted a surviving trial, `SET NULL` erased a retained link
+   that was not meant to change, and a partial save was refused). (b) **Releases** = surviving trials whose stored row
+   holds a slot of `trials_one_open_per_case` (`case_id` not NULL, `workflow_state` open) and whose final row does not
+   hold **that same slot** — it is terminal, or in another case, or caseless: a **parent-preserving `UPDATE` that parks
+   `case_id` to NULL** — nothing deleted, children untouched, no `SET NULL`, the request row untouched — for every
+   such trial **before any arrival**. (c) **Arrivals and the rest:** every supplied trial is upserted with its final
+   `case_id` and `workflow_state` (new rows; departed rows re-inserted; parked survivors receive their final case; a
+   terminal trial re-entering the predicate — no route does that today, a restore may carry it) and its owned
+   containers rewritten in list order (sessions, evidence, revisions, attendance, reminders, day tables, history,
+   report). **Why the input order does not matter — stated precisely:** when (c) begins, every row that holds a case
+   slot is a survivor that holds that same slot in the final graph (a *final holder*: members that leave or change case
+   were parked in (b); trials that change request were deleted in (a)); a terminal survivor that will re-enter is **not
+   yet** a member — it becomes one at its own arrival; so any `UNIQUE` refusal inside (c) is a conflict between two
+   rows that both hold the slot in the final graph (two open trials in one case), whatever the array order. A plain
+   sort of the input is not relied on; `defer_foreign_keys` is not used and would not defer a `UNIQUE` check anyway.
+   **Why a retained link survives a partial save:** a case-only change never deletes the trial, so
+   `recruitment_requests.trial_id` is never touched by an action; the pair assertion then finds the unchanged pair
+   intact without any request being resent — and no link is ever *reconstructed* from a trial: a new or replacement
+   trial whose retained request does not name it is refused.
 3. **Requests, back-reference assigned.** `UPDATE recruitment_requests SET trial_id = <final>` for every supplied
    request — the trial exists now; an id that resolves to nothing is refused here.
 4. **Channels** — the S7d replace, `request_id` now a real key: a channel naming a request outside the final table is
@@ -2801,7 +2827,9 @@ not name is refused by the pair assertion; an empty `trials` list prunes every t
 NULL` leaves each request consistent); one that supplies `requests` and omits `trials` likewise (a request naming a
 trial that is not retained is refused in phase 3; removing a request whose trial is retained is refused in phase 5);
 one that supplies `channels` and omits `requests` is checked by the key (today's `readRequestsBlob` becomes a table
-read). **Parent rewrites:** the identity rewrite touches no recruitment row (no identity key); an `orgs` rewrite is
+read). **A case-only change to a surviving trial (case-1 → case-2, case-1 → NULL, NULL → case-1, a swap of two open
+survivors) with `requests` omitted persists exactly what the same change with the unchanged requests supplied
+persists** — the omitted collection is retained, not required (the review of `f2121b5`). **Parent rewrites:** the identity rewrite touches no recruitment row (no identity key); an `orgs` rewrite is
 upsert-and-prune already. **Proof** (`probe-s8a-write-algorithm.mjs`, the drafted DDL for the six request/trial tables
 plus a synthetic `channels` with the proposed key; exact rows of all seven tables compared, and after every refusal the
 canonical dump unchanged and no transaction open): an empty database receiving a complete new request/trial/channel
@@ -2826,15 +2854,28 @@ outside the routes' input contract and handled by the snapshot/restore contract 
 database with two open trials in two cases; the `request_id` replacement and swap; the partial snapshots (a
 trials-only completion lands: the release needs no `requests`); the invalid references including a missing case. The
 **control** runs the cd7dc95 phases (departures by `request_id` only, no releases) and reproduces the reviewer's
-order dependence. **What the model does not exercise and therefore does not claim:** `trial_session_evidence`, the
-revisions, attendance, reminders and day tables, `idempotency_keys`, the full column mapping — it is a design model,
-not a production mapper; those are the implementation's tests (§D.7.6).
+order dependence. **That probe's writer still departed on a changed `case_id`** — the gap the review of `f2121b5`
+found; its full-snapshot results stand, its partial-save results do not cover a case-only change. **Proof of the
+corrected phase 2 across partial saves** (`probe-s8a-write-algorithm-partial.mjs`, the same model; **every
+requests-omitted save compared, as an exact dump of all eight tables, with the equivalent full save on an identically
+seeded database, in both trial orders**): case-1 → case-2, case-1 → NULL, a swap of two open survivors, NULL →
+case-1, a same-case completion — all identical to the full save; the released survivor's history rows and the request
+rows byte-identical (nothing deleted); the controls each refused with the prior rows restored and no open transaction
+— an actual request reassignment with requests omitted, a missing case, a replacement trial and a new trial that the
+retained request does not name, conflicting supplied back-references (supplied values are authoritative), two open
+trials left in one case in both orders; a deliberate trial removal with requests omitted leaves the back-reference
+NULL (the documented prune); and the earlier guarantees re-proven under the corrected phases (completion/cancellation
+then a new open trial in both orders, re-entry accepted only when the holder leaves, the `request_id` swap and
+replacement, the new graph in both orders, the invalid references). The **control** runs the f2121b5 phases and
+reproduces the reviewer's three refusals. **What the model does not exercise and therefore does not claim:**
+`trial_session_evidence`, the revisions, attendance, reminders and day tables, `idempotency_keys`, the full column
+mapping — it is a design model, not a production mapper; those are the implementation's tests (§D.7.6).
 
 **The same category checked for every other retained unique constraint in this write strategy** (a conflict can
 only be an ordering artefact where a unique key is held by a *surviving parent row written by upsert*; children are
 rewritten whole per owner — every row of the owner deleted, then the list inserted — so a child never meets its own
-stale row): `trials.request_id UNIQUE` → departure + arrival (above); `trials_one_open_per_case` → departure for a
-`case_id` change, release for a predicate exit (above); `request_trial_slots UNIQUE(request_id, day)`,
+stale row): `trials.request_id UNIQUE` → departure + arrival (above); `trials_one_open_per_case` → a parked release for
+every exit from a slot, by state or by case key (above; never a departure, which would erase a retained link); `request_trial_slots UNIQUE(request_id, day)`,
 `trial_reports UNIQUE(trial_id)`, `trial_session_evidence_one_active`, `trial_day_consents_one_per_actor`,
 `idempotency_keys` primary key `(owner_table, owner_id, act, key)` → all keyed by their owner and rewritten whole with
 it, no cross-owner handoff possible; `channels_request_id` → the S7d replace deletes every thread before inserting
@@ -2867,7 +2908,8 @@ again. The S8a repository follows the S7d/S6b participant pattern (`snapshotStat
   positive cases of the write probes as repository tests (new pair, unchanged, replacement, reversed order, partial
   either side, intentional removal, swap, children preserved; **completion/cancellation followed by a new open trial
   in the same case in both orders, the released survivor's children untouched, two open trials in one case refused in
-  both orders, a re-entry, the case-key handoffs**) with the a6c40f3 order and the cd7dc95 phases as failing controls; the
+  both orders, a re-entry, the case-key handoffs; every case-only change with `requests` omitted equal to the same
+  change with them supplied**) with the a6c40f3 order, the cd7dc95 phases and the f2121b5 phases as failing controls; the
   presence round trip for `blockedBy` (value / `null` / absent), `keys.accept`, `day` present/absent, the tombstone's
   `trialDetails.instructions`, and every `NOT NULL DEFAULT` column with its key absent — compared through the actual
   `trialClubView`, `trialFamilyView`, `tombstoneTrial` and `tombstoneRequest` outputs and the backup shape.
@@ -2954,6 +2996,11 @@ itself awaiting independent review and is not yet put to the Founder.**
   positive control reproduced — baseline evidence, kept unchanged, its expected failure not rewritten) and
   `probe-s8a-write-algorithm-cases.mjs` (13 checks: the corrected phase 2 with the drafted indexes installed, both
   input orders, the cd7dc95 writer as the control) — run on Node 22 and 24, in the handoff of the second correction.
+- The independent review of `f2121b5`: `review-f2121b5-partial-case.mjs` (the f2121b5 writer unchanged; the three
+  case-only changes refused with `requests` omitted and committed with them supplied; exit 0 means the hazards and
+  controls reproduced — baseline evidence, kept unchanged) and `probe-s8a-write-algorithm-partial.mjs` (20 checks:
+  the parked release, every partial save equal to its full save in both orders, the controls, the earlier guarantees
+  re-proven, the f2121b5 phases as the control) — run on Node 22 and 24, in the handoff of the third correction.
 
 All probes are synthetic and disposable, kept outside the tracked source; nothing was added to the application, the
 schema file, a migration or a test.

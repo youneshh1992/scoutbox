@@ -330,14 +330,16 @@ and design changes the Founder explicitly requests.
   tables, `idempotency_keys`, the `channels.request_id` conversion; no key to
   `players(id)` or `guardians(id)`; the six-phase write of plan §D.7.5 —
   back-reference parked then assigned, departure before arrival for a
-  changed unique key (`request_id`, `case_id`), release of a survivor
-  leaving the `trials_one_open_per_case` predicate before any arrival,
-  explicit prunes, final-state assertions, immediate constraints; the
-  lossless presence mapping of §D.7.3; the drafted `one_pending` index
-  withdrawn so the open-day route's invitations stay valid) — plan §D.7,
-  **corrected after the independent reviews of `a6c40f3` (D1/D2/D3) and
-  `cd7dc95` (the remaining D1 order dependence) and itself awaiting
-  independent review** — which
+  changed `request_id` only, a parent-preserving release (the case slot
+  parked, never a delete) of a survivor leaving its
+  `trials_one_open_per_case` slot before any arrival so a retained request
+  link survives a partial save, explicit prunes, final-state assertions,
+  immediate constraints; the lossless presence mapping of §D.7.3; the
+  drafted `one_pending` index withdrawn so the open-day route's
+  invitations stay valid) — plan §D.7, **corrected after the independent
+  reviews of `a6c40f3` (D1/D2/D3), `cd7dc95` (the D1 order dependence) and
+  `f2121b5` (the partial-save link loss) and itself awaiting independent
+  review** — which
   needs the Founder's answers to **Q7a, Q7b and Q7c** and nothing else;
   nothing of it is implemented, stubbed or reserved; file 02's draft is
   amended at implementation, not before.

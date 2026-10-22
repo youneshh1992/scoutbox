@@ -983,5 +983,8 @@ accepted at `9b109dc`, no new defect in it is alleged — and found three P2 des
 plan §D.7 (its correction record) by one documentation-only commit on top of `a6c40f3` (`cd7dc95`). **The independent
 review of `cd7dc95`** closed D2 and D3 and the original D1 cases, and found one P2 remaining in D1 (the retained
 `trials_one_open_per_case` index made a valid snapshot depend on the trial array order); it is corrected in place in
-plan §D.7.5 by one further documentation-only commit. The corrected brief awaits independent review, S8a is not
-started, `0015` is not reserved, and Q7a–Q7c stay unanswered.
+plan §D.7.5 by one further documentation-only commit (`f2121b5`). **The independent review of `f2121b5`** closed that
+finding and found one related P2 (a case-only trial change was refused when `requests` was omitted, because the
+changed case was treated as a departure and `SET NULL` erased the retained link); it is corrected in place in plan
+§D.7.5 (the case slot is parked by an update, never deleted) by one further documentation-only commit. The corrected
+brief awaits independent review, S8a is not started, `0015` is not reserved, and Q7a–Q7c stay unanswered.
