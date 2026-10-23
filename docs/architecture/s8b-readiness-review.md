@@ -13,8 +13,15 @@ implementation, as S8a's was. Everything marked *proposed* below is a proposal f
 record and did NOT accept this design for implementation: its F1 (the incoming case links must be released before the
 S8a trial departures and the request prune) and F2 (explicitly removed room rows must be pruned before their case)
 are corrected in §§5–6 and evidenced by probe 5 beside the reviewer's reproduction script; the strict-option wording
-of Q8a in §9 is corrected (a refusal stops the migration; it authorises no deletion). S8b stays PREPARED, NOT
-IMPLEMENTED, **awaiting independent acceptance of the corrected design**; Q8a stays unanswered and is not asked here.
+of Q8a in §9 is corrected (a refusal stops the migration; it authorises no deletion). **Corrected again on 23 October
+2026 after the independent review of `86342b8`**, which verified F1, F2 and the Q8a wording and found one remaining
+P2 mismatch (R1): §3 kept `case_history.case_id … RESTRICT` and called a case removal with history inconsistent,
+while §6 F3 assumed every owned child cascades and probe 5 modelled no owned child. Resolved in §3, §6 P/F3 (the
+owner/child inventory) and §8, evidenced by probe 6 beside the reviewer's reproduction script: a case's owned lists go
+with their owner, as the unchanged `store.save` does today; the RESTRICT key is kept and the departing owner's
+history (and the polymorphic key rows of its owned draft/handoff) are removed explicitly before the parent, inside
+the same transaction; an omitted independent room collection still blocks. S8b stays PREPARED, NOT IMPLEMENTED,
+**awaiting independent acceptance of the corrected design**; Q8a stays unanswered and is not asked here.
 
 What this document is for: the survey the independent review of `7a7efc6` asked for ("establish the exact bounded
 collection/table list from current writers and readers"), a concrete migration and write design with its probes, the
@@ -192,7 +199,8 @@ Checked against every writer above and, where a route could reach it, against th
 | `case_tags PRIMARY KEY (case_id, tag)`, `case_request_links PRIMARY KEY (case_id, request_id)`, `case_trial_links`, `room_comment_mentions PRIMARY KEY (comment_id, user_id)`, `room_decision_evidence_refs PRIMARY KEY (decision_id, kind, ref_id)`, `room_snapshot_source_refs` | these dedupe; the lossless rule keeps duplicate list entries (a legacy file may hold one; the routes guard with `includes()` / `new Set` today) | position-keyed child tables `(owner, position)` in list order (the S8a convention) |
 | `room_evidence_states UNIQUE (room_id, evidence_id)`, `room_decisions_room_client_key` unique | code rules today (`rooms.mjs:1271`; the M17 replay lookup) | **no unique index**; the dry run lists a duplicate; refused at the cutover only if a structural key fails |
 | `room_decisions.supersedes_id / superseded_by_id / supersession_of_id REFERENCES room_decisions(id)` (self keys) | a forward reference (`supersededById` names a LATER row) needs a two-pass insert; rows are never deleted | plain ids, chain asserted at the end of every write (ids only) |
-| `case_history.case_id … ON DELETE RESTRICT`, `room_snapshots.room_id RESTRICT`, `room_decisions.room_id RESTRICT` | cases are never deleted; a snapshot that removes a case still holding history/snapshots/decisions is an inconsistency | kept (RESTRICT); the pre-write check names the rows with ids before the key would (§6) |
+| `case_history.case_id … ON DELETE RESTRICT` (an OWNED child: `history[]` is a nested list of the case record) | no route deletes a case (the deletion unit tombstones it); a supplied snapshot, a restore or the import may remove a case, and today's `store.save` removes the case **with its nested history** (the reviewer's baseline against the unchanged build, `review-86342b8-case-history.mjs`); the earlier wording "removing a case still holding history is an inconsistency" contradicted that contract and §6 F3's "its children cascade" contradicted the kept key — corrected after the review of `86342b8` (R1) | **kept (RESTRICT)** as a guard: nothing but the owner-prune step F3 may delete a case row, and F3 removes the owner's history rows explicitly, inside the same transaction, BEFORE the parent (probe 6); the nested list goes with its owner, as it does today; it is never an independent "omitted collection" and never blocks |
+| `room_snapshots.room_id RESTRICT`, `room_decisions.room_id RESTRICT` (and `room_comments`, `room_evidence_states`: RESTRICT by §2, INDEPENDENT collections) | a retained room row naming a case the supplied cases remove is a true reference | kept (RESTRICT); the preflight names the rows with their table and ids before the key would (§6 P); a SUPPLIED room collection that no longer lists the row removes it at F1, before the case (F2 of the review of `57076a2`) |
 | `signing_id REFERENCES signings(id) ON DELETE SET NULL`, `decision_by_user_id`/`room_lead_scout_user_id … SET NULL` | signings are S8d; staff are never deleted; a `SET NULL` key would fire at an identity-style rewrite of `org_users` | `signing_id` no key; staff keys `RESTRICT` (the S8a precedent: `user_id → org_users RESTRICT`, with the staff prune after the case prune) |
 | `player_id` columns on `recruitment_cases`, `room_snapshots`, `room_decisions`, `case_transaction_handoffs` | Q7a covers `recruitment_requests.player_id` and `trials.player_id` only | **no key**, tolerant and counted — subject to the Founder's answer to **Q8a** (§9); not inferred |
 | `idempotency_keys.owner_table CHECK IN ('recruitment_requests', 'trials')` | S8b's replayable acts (`decisionDraft.keys.create`, `transactionHandoff.keys.invite`, `roomDecisions[].keys.finalize/draft`) need three more owners; a CHECK cannot be altered in place | the table is **rebuilt with the broadened CHECK, every S8a row copied as it is** (probe 3: rows, primary key, index byte-identical; the S8a readers unchanged); nothing else of the S8a definition changes |
@@ -305,10 +313,14 @@ P. **Preflight against the FINAL combined graph** — every supplied collection 
    retained table rows — ids only, before any write: (1) every link of every final case names a request/trial of the
    final collections (`CASE_LINK_DANGLING`: a retained case whose trial the supplied trials remove is refused, never
    silently detached — the S8a rule for threads, `CHANNEL_REQUEST_MISSING`); (2) a case the write removes is named by
-   no RETAINED row of an omitted collection (`CASE_STILL_REFERENCED`, naming the table — `recruitment_requests`,
-   `trials`, `room_comments`, `room_snapshots`, `room_decisions`, `room_evidence_states`, the owned children); (3) every
-   final request/trial `caseId` and every final room row's `roomId` names a final case (`CASE_MISSING`); (4) the S8a
-   validations, unchanged.
+   no RETAINED row of an omitted INDEPENDENT collection (`CASE_STILL_REFERENCED`, naming the table —
+   `recruitment_requests`, `trials`, `room_comments`, `room_snapshots`, `room_decisions`, `room_evidence_states`). The
+   case's OWNED children (its `history[]`, `tags`, `assignments`, `tasks`, `approvals`, `links`, `decisionDraft`,
+   `transactionHandoff`, `budget` — the nested lists and objects of the record itself) are never blockers: they belong
+   to the owner and go with it, as today's `store.save` removes a case with its nested history (corrected after the
+   review of `86342b8`, R1; probe 6 check 4: the refusal names the four retained room tables and not the owned rows);
+   (3) every final request/trial `caseId` and every final room row's `roomId` names a final case (`CASE_MISSING`);
+   (4) the S8a validations, unchanged.
 A. **Cases, parent-preserving**: every supplied (or changed) case upserted by id (`seq` kept), its non-link children
    rewritten in list order; no open-room release phase (the one-open index is withdrawn, §3).
 R. **Release, transaction-local**: the incoming link rows B or F2 would hit are deleted now — every link row of the
@@ -331,9 +343,28 @@ F. **Prunes against the final graph, dependents before their parents**: **F1** t
    (and their mentions) — BEFORE their case; an OMITTED room collection is retained, and a retained row that names a
    pruned case legitimately blocks F3 — named at P with its table, not discovered on the key; **F2** the S8a request
    prune (phase 5, its own thread/trial pre-checks; the links to a pruned request were released at R, so the
-   `case_request_links` key no longer fires there); **F3** the cases no longer listed (their own children cascade;
-   every retained reference was named at P — the key is the last guard, not the message); **F4** the staff and
-   organisation prunes (after every reference to them, the S8a order).
+   `case_request_links` key no longer fires there); **F3** the cases no longer listed — **for each departing owner,
+   inside the same transaction and BEFORE its parent row: its RESTRICT-owned children removed explicitly (`case_history`
+   rows) and the polymorphic `idempotency_keys` rows of its owned draft and handoff (`owner_table` `case_decision_drafts`
+   / `case_transaction_handoffs` / `recruitment_cases`; no key of their own — the S8a precedent, `recruitment.mjs:518`),
+   then the parent row, whose CASCADE-owned children follow it** (corrected after the review of `86342b8`, R1: the
+   earlier "their own children cascade" contradicted the kept `case_history` key and refused a valid final graph in
+   both input orders — the reviewer's reproduction; probe 6). The same routine rewrites a SUPPLIED case's owned
+   children at A. Every retained INDEPENDENT reference was named at P — the key is the last guard, not the message;
+   **F4** the staff and organisation prunes (after every reference to them, the S8a order).
+
+   The owner/child inventory behind F3 (the drafted file 02 definitions, §2's amendments; engineering verification,
+   not scope):
+
+   | Owned by `recruitment_cases` | Drafted constraint | At A (rewrite of a supplied case) and F3 (departure) |
+   |---|---|---|
+   | `case_history` | `ON DELETE RESTRICT` (kept) | rows deleted explicitly before the parent; reinserted from the supplied list at A |
+   | `case_tags` (`case_room_tags` in §4), `case_assignments`, `case_tasks`, `case_approvals` | `CASCADE` (their staff references `RESTRICT` → the staff prune is F4) | cascade with the parent at F3; rewritten in list order at A |
+   | `case_request_links`, `case_trial_links` | `CASCADE` | released at R, reinserted at C; nothing left to cascade at F3 |
+   | `case_decision_drafts` (+ its `reason_codes` / `evidence_refs` lists, cascading from the draft), `case_transaction_handoffs` | `CASCADE`, `UNIQUE (case_id)` | cascade with the parent; **their `idempotency_keys` rows deleted explicitly first** (polymorphic owner, no key) |
+   | `case_budget_scenarios` → `case_budget_lines`, `case_budget_fx_assumptions`, `case_budget_actuals` | `CASCADE` from the case, then from the scenario | cascade with the parent |
+   | **Not owned** — independent rows naming a case: `recruitment_requests.case_id`, `trials.case_id` (S8a tables, the real key after §4 step 4), `room_comments`, `room_snapshots`, `room_decisions`, `room_evidence_states` (`RESTRICT`, §2) | `RESTRICT` | a retained row blocks the removal, named at P with its table; a supplied collection removes its rows at F1/F2 first |
+   | Later-stage tables naming a case in the draft (`recruitment_contacts`, `recruitment_offers`, `signing_packages`, `signings`: `RESTRICT`) | not created by S8b | blobs until S8c/S8d; plain ids, checked in code as today |
 G. **Final assertions**, ids only: the S8a pair checks; every `case_id` of a request/trial in the final cases (the key
    makes this redundant, kept for the message); every link target in the tables; the decision chain
    (`DECISION_CHAIN_BROKEN`: every `supersedes`/`supersededById` names a final row of the same room; at most one head
@@ -390,8 +421,12 @@ MEASURED at implementation on the actual build, not a guarantee**; the rollback 
    probe 5's and probe 2's cases as suite cases — F1a/F1b/F1c, F2 for each of the four room collections and all
    together, the retained refusals with their tables, the release-and-reinsert of a retained case's links while its
    trial is deleted and reinserted with the cases omitted, both input orders, partial saves equal to full saves, the
-   injected failures after R and after B; the staged hook sequence of §5 over the real store; the rollback and the
-   chain) and
+   injected failures after R and after B; probe 6's cases — a case removed with its non-empty history, tags, draft
+   and the draft's key row together with its room rows, both orders; a retained case's history preserved with the
+   cases omitted; a surviving case's history untouched by another's removal and by its own rewrite; the retained
+   independent refusals naming the room tables and not the owned rows; the injected failure after the owned
+   children were removed and before the parent, with the retry landing once; the staged hook sequence of §5 over the
+   real store; the rollback and the chain) and
    a server suite (`scripts/testRecruitmentCasesServer.mjs`: the real routes — room creation/adoption, status moves,
    reopen, comments, tasks, decisions (recommendation and formal with replay/conflict), evidence review, budget,
    handoff; backup/restore; SIGKILL; the `7a7efc6` build booted on the rollback copy; the direct boot of the old build
@@ -450,9 +485,15 @@ deletion/retention behaviour.
   `caseId` moves, a cases-only save, a referenced-case refusal, links-after-requests and the one-open index; they do
   not cover a trial departure or a request prune against a link row, where the review of `57076a2` found the draft
   order wrong (F1, F2) — corrected in §6 and covered by probe 5 (nine checks) and the reviewer's script. Probe 5
-  models the link tables and the four room tables with their `RESTRICT` references and plain-id decision chain; it
-  does not model the owned children of the room rows, the mentions/refs lists or the staff/org prunes (F4), which the
-  implementation's suites must cover (§8.2).
+  models the link tables and the four room tables with their `RESTRICT` references and plain-id decision chain, and
+  **no owned child of the case** — so its owner-removal checks could not establish F3 against the kept
+  `case_history` key (the review of `86342b8`, R1). Probe 6 adds the exact drafted `case_history` definition
+  (RESTRICT), one CASCADE child (`case_tags`, standing for every CASCADE-owned child of the inventory in §6) and
+  `case_decision_drafts` with its row of the real `idempotency_keys` table (rebuilt with the broadened CHECK), and
+  proves the corrected F3; the remaining owned children (`assignments`, `tasks`, `approvals`, `transactionHandoff`,
+  the budget tables) are bounded by that inventory — every one is `CASCADE` from the case or from a cascading child —
+  and are not modelled. Neither probe models the owned children of the room rows, the mentions/refs lists or the
+  staff/org prunes (F4). Model evidence is not a substitute for the implementation's suites (§8.2).
 - Evidence preserved from the independent review of `57076a2` (its run, Node v24.19.0 / SQLite 3.53.3, application
   source byte-identical to `7a7efc6`): the full backend `npm test` stopped at `testOutboxPushServer`'s 12-second
   push-durability deadline (`elapsedMs` 128341; `pushRowsBefore` 2, `pushRowsNow` 3, `saveSeq` 5 → 7, no pending
@@ -462,6 +503,12 @@ deletion/retention behaviour.
   a new S8b regression (nothing of S8b runs in that build), not an explained infrastructure fault, not erased by any
   later green run; kept separate from the two intermittent S6b failures ("not reproduced; cause unresolved"). This
   session's own full runs on `57076a2` and on the corrected tree are in the handoff logs with their actual results.
+- Evidence preserved from the independent review of `86342b8` (its run, Node v24.19.0 / SQLite 3.53.3, application
+  source still byte-identical to `7a7efc6`): the full backend `npm test` exited 0 on its first attempt (33 suites /
+  404 checks) and the Player gate exited 0 (4 suites / 41 tests); the supplied live-room probe's first attempt exited
+  1 at its 30-second boot timeout before any assertion (cause unestablished), and one unchanged rerun after the
+  backend gate exited 0 (5 checks). Recorded as it is beside the earlier timing failure: neither erased by a later
+  green run, neither explained, both separate from the two intermittent S6b failures.
 - Org deletion policy (plan O2) stays open and unchanged; retention of tombstoned comments and of cases stays as the
   product has it; the `transactionHandoff` re-invite overwrite and the budget `actuals[].lineId` dangling reference are
   known defects kept as they are (a storage step changes no product rule).
@@ -474,9 +521,12 @@ deletion/retention behaviour.
 | `probe-s8b-write-order.mjs` | 8 | the DRAFT order of `57076a2` against the real S8a phases: both input orders equal; cases-only equals full; a referenced case cannot be removed (ids only, exact rollback); a pair moves between cases by `caseId`; links after requests (and the failing control); the one-open index needs a release phase and still cannot order a valid graph — withdrawn. **Does not cover** a trial departure or a request prune against a link row (§10); kept unchanged as the record of what it proved |
 | `review-57076a2-write-order.mjs` (the reviewer's, unchanged; `node <script> <project-root> <probe-dir>`) | 4 reproductions + 4 controls, **exit 1 intended** | over probe 2's model and the real S8a writer: F1a, F1b, F1c and F2 refuse under the draft order with exact rollback; the controls that release the incoming link rows first (or prune the room row first) land the same final graphs. A design-model baseline, not a deployed defect and not a post-correction acceptance test — it still exits 1 on this tree because the draft order it models is the control of §6 |
 | `probe-s8b-write-order-corrected.mjs` | 9 | the CORRECTED order of §6 (P A R B C D F1 F2 F3 G) against the real S8a phases, with the draft order kept as the failing control: F1a, F1b (positions, the duplicate and the metadata of the links intact, the back-reference set), F1c, F2 for each of the four room collections (the three omitted ones refuse with their tables) and all four together; a retained case's links released and reinserted byte-identical while its trial is deleted and reinserted with the cases and rooms omitted; partial equals full; every landing case in both input orders; true retained references refuse with ids only (a retained case naming a removed trial, a removed case named by retained requests/trials/room rows — every table named, an unknown case, a broken decision chain); an injected failure after R and after B restores every row and the revision with no transaction open; probe 2's earlier graphs still land |
+| `review-86342b8-case-history.mjs` (the reviewer's, unchanged; `node <script> <project-root> <probe-dir>`) | 1 baseline + 2 reproductions + 2 controls, **exit 1 intended** | the unchanged build's `store.save` removes an unreferenced case with its nested history (the contract to preserve); probe 5's model extended with the exact drafted `case_history` table refuses the same removal under the `86342b8` F3 in both input orders with full rollback; a transaction-local control that removes the departing owner's history before its parent commits the same final graph — an ordering witness, not a patch. It still exits 1 on this tree because the F3 it models is the control of §6 |
+| `probe-s8b-write-order-owned-children.mjs` | 6 | the corrected F3 over probe 5's model extended with the exact drafted `case_history` (RESTRICT), `case_tags` (CASCADE) and `case_decision_drafts` (CASCADE) whose `keys.create` is a row of the real `idempotency_keys` table (rebuilt with the broadened CHECK): an owner removed with four history rows, two tags, its draft and key, and its comment, snapshot, decision and evidence state — the `86342b8` F3 fails on the kept key with exact rollback, the corrected F3 lands the identical graph in both input orders with the surviving case's owned rows untouched; cases omitted while a trial is deleted and reinserted — every retained case's history, tags, draft and key byte-identical, the links released and reinserted, partial equals full; a resupplied case keeps its history content and gains an entry in list order, another case's history untouched; the retained INDEPENDENT refusals name the four room tables (not the owned rows), the retained request/trial, the dangling link — before any write; a failure injected after the owned children were removed and before the parent (and after R, and after B) restores every row, key and the revision with no open transaction, the retry lands the intended graph once and a repeat is a no-op; F1a/F1b/F1c still land with history present |
 | `probe-s8b-idempotency-rebuild.mjs` | 4 | the broadened `owner_table` CHECK by rebuild: the S8a definition refuses a new owner; the rebuild keeps rows, key and index; a failure before COMMIT leaves the S8a definition; the S8a readers unchanged |
 | `probe-s8b-one-open-room-live.mjs` | 5 | the real server: `ROOM_EXISTS` at creation, an archived room returned to `under_review` beside an open room — the drafted index cannot be created over the file this build writes |
 
-Probes 1–4 run on 22 October 2026 on the `7a7efc6` tree and on `57076a2`; the reviewer's script and probe 5 on the
-`57076a2` tree (application source byte-identical to `7a7efc6`) — Node 22 and Node 24; logs in the handoff. The probes
-and the reviewer's scripts live outside the repository (the handoff ZIP), not in `scoutbox-server/scripts`.
+Probes 1–4 run on 22 October 2026 on the `7a7efc6` tree and on `57076a2`; the reviewer's write-order script and
+probe 5 on the `57076a2` tree; the reviewer's case-history script and probe 6 on the `86342b8` tree on 23 October
+2026 (application source byte-identical to `7a7efc6` throughout) — Node 22 and Node 24; logs in the handoff. The
+probes and the reviewer's scripts live outside the repository (the handoff ZIP), not in `scoutbox-server/scripts`.

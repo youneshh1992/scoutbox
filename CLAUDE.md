@@ -338,6 +338,10 @@ and design changes the Founder explicitly requests.
   the independent review of `57076a2` (F1 the incoming case links released
   before the S8a departures and the request prune, F2 explicitly removed
   room rows pruned before their case; the Q8a strict-option wording) and
+  again after the review of `86342b8` (R1: a departing case's RESTRICT-owned
+  `case_history` rows and the polymorphic key rows of its owned draft/handoff
+  removed explicitly before the parent; owned lists go with their owner,
+  only an omitted independent collection blocks) and
   the corrected design AWAITS INDEPENDENT ACCEPTANCE; Q8a is unanswered
   and not to be asked before that review; `0016` is not reserved** (plan §D.8 the implementation
   record; §D.7 the design, independently accepted at

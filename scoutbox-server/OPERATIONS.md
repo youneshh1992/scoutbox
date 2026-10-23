@@ -1639,8 +1639,8 @@ file is larger (plan §D.8.7); the whole-snapshot-write objective is not met.
 **S8b (cases, rooms, decisions) is prepared, not implemented** — nothing of it
 runs in this build; `docs/architecture/s8b-readiness-review.md` (plan §D.9) is
 the design for independent review (its write order corrected after the
-independent review of `57076a2`; the corrected design awaits independent
-acceptance); the next free migration identifier is `0016`, reported, not
+independent reviews of `57076a2` and `86342b8`; the corrected design awaits
+independent acceptance); the next free migration identifier is `0016`, reported, not
 reserved; `recruitmentCases` and the four room blobs
 stay blobs, and `case_id` stays the code-checked reference of Q7b.
 

@@ -3401,7 +3401,7 @@ reproduced; cause unresolved"). Q7a/Q7b/Q7c stay as recorded (§D.8.1) and are *
 the S8b tables need their own decision where one is needed (§D.9). The S8b design is preparation only: nothing of S8b
 is implemented, stubbed or reserved.
 
-### D.9 S8b (cases, rooms, decisions) — PREPARED, NOT IMPLEMENTED (22 October 2026, at `7a7efc6`; the design corrected after the review of `57076a2`, awaiting independent acceptance)
+### D.9 S8b (cases, rooms, decisions) — PREPARED, NOT IMPLEMENTED (22 October 2026, at `7a7efc6`; the design corrected after the reviews of `57076a2` and `86342b8`, awaiting independent acceptance)
 
 The bounded S8b design lives in `docs/architecture/s8b-readiness-review.md` and is **preparation only**: no migration
 module, repository, DDL change, test or stub exists; the next free migration identifier is `0016` — **reported, not
@@ -3428,12 +3428,19 @@ reserved**. What it records, in brief:
   → A cases → **R release** (transaction-local: the incoming link rows the S8a departures or the request prune would
   hit, the retained cases' rows memorised verbatim) → B the S8a phases → C links reinserted (supplied lists, retained
   rows verbatim) → D room collections → E channels → F prunes, dependents first (F1 the room rows a SUPPLIED room
-  collection no longer lists, F2 the S8a request prune, F3 cases, F4 staff and orgs) → G assertions. The draft order
-  of `57076a2` (links and rooms pruned after the cases, no release) refused four valid final graphs on a key (the
+  collection no longer lists, F2 the S8a request prune, F3 cases — each departing owner's RESTRICT-owned
+  `case_history` rows and the polymorphic `idempotency_keys` rows of its owned draft/handoff removed explicitly
+  before the parent, the CASCADE children following it —, F4 staff and orgs) → G assertions. The draft order of
+  `57076a2` (links and rooms pruned after the cases, no release) refused four valid final graphs on a key (the
   reviewer's F1a/F1b/F1c and F2, reproduced by `review-57076a2-write-order.mjs`); the corrected order lands them with
   exact rollback on failure, partial saves equal to full saves, and no dependence on the input order (probe 5, nine
-  checks). In staged mode the cases repository registers three hook objects around the unchanged `recruitment` flush
-  (which prunes internally) and the `rooms` hook (§5); the S8a flush is not split.
+  checks). The review of `86342b8` then found F3's "its children cascade" contradicting the kept `case_history`
+  RESTRICT key (R1, reproduced by `review-86342b8-case-history.mjs` against the exact drafted definition): a case's
+  owned lists go with their owner — today's `store.save` contract, proven by that script's baseline against the
+  unchanged build — so F3 removes them explicitly first, the key stays as a guard, and only an omitted INDEPENDENT
+  collection (requests, trials, the four room collections) blocks a removal (probe 6, six checks; the owner/child
+  inventory in the review's §6). In staged mode the cases repository registers three hook objects around the
+  unchanged `recruitment` flush (which prunes internally) and the `rooms` hook (§5); the S8a flush is not split.
 - **Rollback (§7):** copy-only, to the accepted pre-S8b build `7a7efc6`; the old build's behaviour on a new file is
   predicted, to be measured at implementation.
 - **The one genuine product decision (§9, Q8a, the Founder's):** whether the `player_id` columns of the S8b tables
@@ -3449,8 +3456,12 @@ strict option of Q8a must not read as an operator deleting cases: a refusal stop
 deletion). All three are corrected in `s8b-readiness-review.md` (§§5–6, §9; probe 5; the reviewer's script kept
 unchanged as the baseline, exit 1 intended). The same review's backend run stopped once at `testOutboxPushServer`'s
 12-second deadline with the row durable and the cause unestablished; preserved in the review's §10, not called a
-regression, not called explained. **S8b stays PREPARED, NOT IMPLEMENTED, awaiting independent acceptance of the
-corrected design; Q8a stays unanswered and unasked; `0016` stays unreserved.**
+regression, not called explained. **The independent review of `86342b8` (23 October 2026)** verified F1, F2 and the
+Q8a wording and left one P2 mismatch (R1, the owned `case_history` under the kept RESTRICT key), corrected in the
+review's §3/§6/§8 with probe 6; its own run recorded one live-room probe attempt stopped at its 30-second boot
+timeout before any assertion (cause unestablished; an unchanged rerun exited 0), preserved in the review's §10.
+**S8b stays PREPARED, NOT IMPLEMENTED, awaiting independent acceptance of the corrected design; Q8a stays unanswered
+and unasked; `0016` stays unreserved.**
 
 S8c and S8d are not started. Nothing in this section is a production, release, security, legal-compliance, merge or
 deployment approval.
