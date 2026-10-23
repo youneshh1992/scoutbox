@@ -10,7 +10,9 @@ Founder's explicit answer to the one product question of §9, asked and recorded
 rollback tool, the two suites and the amended `docs/architecture/sql/02_recruitment.sql` are the implementation; **§12
 is the implementation record** — what landed, where it departs from the sections below (marked *proposed*, kept as the
 reviewed design), what was measured and what is not claimed, and the correction after the independent review of
-`b7c0dd0` (F1 same-room chains, F2 owned-child key isolation; the review did not accept `b7c0dd0`). The implementation
+`b7c0dd0` (F1 same-room chains, F2 owned-child key isolation; the review did not accept `b7c0dd0`) and after the
+independent review of `2fe05df` (R1: the persisted key-format marker and the fail-closed boundary for files of the two
+superseded builds; that review closed F1 and F2 and did not accept `2fe05df`). The implementation
 awaits its own independent acceptance;
 nothing here is production, release, security, legal-compliance, merge or deployment approval. S8c/S8d are not
 started.
@@ -562,8 +564,8 @@ below); the two old-order scripts keep their intended exit 1.
 
 | Suite (`npm test`, since the implementation) | What it proves |
 |---|---|
-| `scripts/testRecruitmentCases.mjs` (12 checks: the original ten, plus the two `[review b7c0dd0 F1]` / `[review b7c0dd0 F2]` regressions added after that review, failing first on the unchanged `b7c0dd0` tree; failing-first of the ten on the unchanged `4d2c74b` tree: 9 on behavioural assertions — the registry's last id, no `recruitment_cases` table after the migrations, the blob store removing a case a retained comment still names, a view that is not read-only —, 1 `[compat]` check holding on both trees) | migration 0016 end to end on an S8a-core file (the twenty-five tables, the two parents rebuilt with the real case key, the broadened key CHECK, every S8a row and thread byte-identical, the five blobs imported and retired, counts only, reruns no-ops, a blob-less file); the lossless mapping of every writer literal of §2; the import refusals with ids only and the Q8a counts; the staged repository (views, the five entry points, every in-place writer landing in the next save, key rows cleaned, unchanged saves rewriting nothing, exports, reopen); the two failure contracts through the real store; the corrected write of §6 through the real store (F1a/F1b/F1c, F2 per collection and all four, R1, both input orders, partial = full, resupply); the refusals with their tables and the injected failure after the owned children; the `[behaviour]` regression; the copy-only rollback, the chain and the re-upgrade |
-| `scripts/testRecruitmentCasesServer.mjs` (3 checks; failing-first on `4d2c74b`) | the real server: every route of §1 landing as rows the moment it answers, the listings and reads unchanged, a SIGKILL, `/capabilities`; the player's and the guardian's surfaces carrying no note, decision or room; another club's 404; the deletion unit with a real COMMIT failure; a restored backup naming a missing player served and counted; the backup's five legacy shapes, the restore through 0016 row for row, the actual `7a7efc6` build booted DIRECTLY on a 0016 copy (measured) and on the rollback copy (writes into its blobs, re-upgraded exactly), a null blob refused at boot |
+| `scripts/testRecruitmentCases.mjs` (13 checks: the original ten, plus the two `[review b7c0dd0 F1]` / `[review b7c0dd0 F2]` regressions added after that review, failing first on the unchanged `b7c0dd0` tree, plus the `[review 2fe05df R1]` key-format regression, failing first on the unchanged `2fe05df` tree; failing-first of the ten on the unchanged `4d2c74b` tree: 9 on behavioural assertions — the registry's last id, no `recruitment_cases` table after the migrations, the blob store removing a case a retained comment still names, a view that is not read-only —, 1 `[compat]` check holding on both trees) | migration 0016 end to end on an S8a-core file (the twenty-five tables, the two parents rebuilt with the real case key, the broadened key CHECK, every S8a row and thread byte-identical, the five blobs imported and retired, counts only, reruns no-ops, a blob-less file); the lossless mapping of every writer literal of §2; the import refusals with ids only and the Q8a counts; the staged repository (views, the five entry points, every in-place writer landing in the next save, key rows cleaned, unchanged saves rewriting nothing, exports, reopen); the two failure contracts through the real store; the corrected write of §6 through the real store (F1a/F1b/F1c, F2 per collection and all four, R1, both input orders, partial = full, resupply); the refusals with their tables and the injected failure after the owned children; the `[behaviour]` regression; the copy-only rollback, the chain and the re-upgrade |
+| `scripts/testRecruitmentCasesServer.mjs` (4 checks: three failing-first on `4d2c74b`, plus the `[review 2fe05df R1]` boot refusal failing first on the unchanged `2fe05df` tree) | the real server: every route of §1 landing as rows the moment it answers, the listings and reads unchanged, a SIGKILL, `/capabilities`; the player's and the guardian's surfaces carrying no note, decision or room; another club's 404; the deletion unit with a real COMMIT failure; a restored backup naming a missing player served and counted; the backup's five legacy shapes, the restore through 0016 row for row, the actual `7a7efc6` build booted DIRECTLY on a 0016 copy (measured) and on the rollback copy (writes into its blobs, re-upgraded exactly), a null blob refused at boot |
 
 ## 12. Implementation record (23 October 2026, on top of `4d2c74b`)
 
@@ -664,12 +666,11 @@ and the re-upgrade. No id is renamed, no child deduplicated, no owner overwritte
 one shared table, the S8a owner rows and their replay, the shape, order and presence of every act and the held,
 unknown and prototype-named acts are preserved; a draft or handoff without an id of its own now always has an owner
 (the case), so its row-worthy acts are rows rather than held on the row — the same values either way. The final guard
-also refuses (`RECRUITMENT_CASES_KEY_OWNER_UNKNOWN`) a draft/handoff key row owned by no case child. **Compatibility
-boundary, stated honestly:** a `0016` file cut over by the superseded `b7c0dd0` build (synthetic verification files
-only; that build was never deployed and no real data was touched) keys those rows by the child id; this build does not
-read them and refuses the file with that code rather than guess — roll it back with the `b7c0dd0` tool on a copy and
-cut the copy over again; where two cases shared a child id in such a file, that build had already aliased their keys and
-no tool can tell the owners apart. **Evidence:** two regressions written first in `testRecruitmentCases.mjs`
+also refuses (`RECRUITMENT_CASES_KEY_OWNER_UNKNOWN`) a draft/handoff key row owned by no case child — an integrity
+check, NOT a format discriminator (the review of `2fe05df`, below: it runs after a read and cannot tell an old-format
+owner that happens to equal another case's id). The compatibility statement this paragraph made at `2fe05df` ("a
+`0016` file cut over by `b7c0dd0` is refused with that code") was FALSE and is superseded by the persisted key-format
+marker of the next paragraph. **Evidence:** two regressions written first in `testRecruitmentCases.mjs`
 (`[review b7c0dd0 F1]`, `[review b7c0dd0 F2]`: both pointers, retained and supplied decisions, both input orders, the
 guard on its own, the statement and COMMIT failures with the retry, the unchanged save, the restart, the export and
 restore, the rollback and re-upgrade, a departing owner, collisions introduced and removed; empty, absent, null,
@@ -677,6 +678,43 @@ held-only and row-worthy keys on the colliding child), failing on the unchanged 
 the server suite and `m23DecisionPersistence` adapted only in their expected owner id and refusal wording; the
 reviewer's script exit 0; the reviewer's new single-field matrix 2,764 round trips, 8 reference refusals, 0 mismatches;
 the historical S8a matrix and key transitions unchanged.
+
+**Corrected after the independent review of `2fe05df` (23 October 2026; one P2 finding, R1; the original F1 and F2
+closed by that review for newly imported and corrected-format data).** The review's new script
+(`review-2fe05df-format-boundary.mjs`) creates `0016` files with the GENUINE `b7c0dd0` build and reads them with the
+candidate: on `2fe05df` the staged attachment, the snapshot load and the copy-only rollback all succeeded and returned
+EMPTY draft/handoff keys from an ordinary old file, and EXCHANGED keys from an old file whose two cases carried the
+other case's id as their child id (a layout every owner-existence query accepts), while the old build's own reader and
+tool preserved both — six failures of one finding across nine checks, and the actual server LISTENED on such a file.
+The cause: `2fe05df` changed the meaning of `owner_id` without recording which meaning a file uses; an already-applied
+`0016` never runs again, and nothing checked the representation before decoding it. **The correction — a persisted
+format discriminator, fail-closed.** Migration `0016` now records `meta.recruitmentCasesKeyFormat = "case-owned-keys/1"`
+in the same transaction as the rows (a failed step leaves none; the retry records it). Every path that decodes, writes,
+exports or rolls back a cut-over file checks the recorded format FIRST and refuses anything else with
+`RECRUITMENT_CASES_FORMAT_UNSUPPORTED` (the recorded value or "none", the expected value, the recovery route; ids only;
+nothing decoded, published or changed): the record readers (so the staged attachment at boot fails before the data
+layer publishes a view and before the server listens — measured by the server suite: exit 1, never "listening on"),
+the snapshot load, the snapshot write's `begin`, the staged `flushCore`, the final guard, and the rollback tool (its
+own code `FORMAT_UNSUPPORTED`, CLI exit 6, before a single row is read, the output removed). The rollback copy carries
+no marker (a pre-S8b file); the re-upgrade, a backup restore and a fresh cutover record it again. The format is never
+inferred from id spelling, owner existence, key counts or the `0016` record alone, and an unproven file is never
+stamped. **Treatment of existing unmarked files — both `b7c0dd0` (child-owned rows) and `2fe05df` (case-owned rows,
+no marker):** refused alike; this build cannot tell them apart from the rows and does not try. Both were synthetic
+verification files only (neither build was deployed; no real data exists in either layout). The version-matched,
+copy-only recovery route: run the rollback tool OF THE BUILD THAT WROTE THE FILE (`b7c0dd0`'s or `2fe05df`'s
+`scripts/recruitmentCasesRollback.mjs`, which reads its own layout exactly — the review's six old-build controls prove
+`b7c0dd0`'s does, overlapping ids included) on a copy, producing a pre-S8b file with each case's own keys in its
+blobs, then cut that copy over with this build, which records the format. Only a `b7c0dd0` file in which two cases
+shared a child id is beyond recovery: that build had already aliased their keys on write. **Evidence:** the reviewer's
+script on unchanged `2fe05df` (exit 1, 6 of 9) and on the corrected tree (exit 0, 15 CORRECT incl. the six old-build
+controls); regressions written first — `[review 2fe05df R1]` in `testRecruitmentCases.mjs` (the atomic marker with an
+injected failure and the retry; the unmarked ordinary file, the unmarked overlapping-id file, an unmarked file without
+row-worthy keys, unknown/empty/malformed markers: refused by the attachment, the snapshot load, both readers, the
+snapshot write, the guard and the rollback with no output and the source unchanged; the same file reading exactly as
+before once its own marker is back; the rollback copy without a marker; re-upgrade and restore recording it) and
+`[review 2fe05df R1]` in `testRecruitmentCasesServer.mjs` (the real server refusing before listening, the CLI's exit 6,
+the file booting again with its marker) — both failing on the unchanged `2fe05df` tree (no marker recorded); the
+earlier reviewer script still 21 CORRECT; the matrices unchanged.
 
 **Not claimed.** The whole-snapshot-write objective (contacts, offers, packages, signings, follow-ups and the later
 collections are still blobs), release readiness, any performance gain, and the independent acceptance this record

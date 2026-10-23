@@ -36,7 +36,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { copyDatabaseReadOnly } from './database.mjs';
 import { KNOWN_MIGRATIONS as S8A_KNOWN_MIGRATIONS } from './recruitmentRollback.mjs';
 import { idempotencyKeysDdl, S8A_KEY_OWNERS } from './recruitment.mjs';
-import { RECRUITMENT_CASES_MIGRATION, RECRUITMENT_CASES_CUTOVER_META, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_TABLES, readCases, readRoomComments, readRoomSnapshots, readRoomDecisions, readRoomEvidenceStates } from './recruitmentCases.mjs';
+import { RECRUITMENT_CASES_MIGRATION, RECRUITMENT_CASES_CUTOVER_META, RECRUITMENT_CASES_FORMAT_META, RECRUITMENT_CASES_KEY_FORMAT, recordedKeyFormat, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_TABLES, readCases, readRoomComments, readRoomSnapshots, readRoomDecisions, readRoomEvidenceStates } from './recruitmentCases.mjs';
 import { rebuildTable, rebuildRecruitmentParents } from './migrations/0016_recruitment_cases.mjs';
 
 /** The schema steps this tool understands; any other recorded id is a later step it must not touch. */
@@ -66,6 +66,11 @@ export function rollbackRecruitmentCasesCopy(sourceFile, outDir, { _failBeforeCo
     if (!applied.includes(RECRUITMENT_CASES_MIGRATION)) throw refusal('NOT_CUT_OVER', `the database has not applied ${RECRUITMENT_CASES_MIGRATION}; there is nothing to roll back`);
     const missing = [...RECRUITMENT_CASES_TABLES, 'recruitment_requests', 'trials', 'idempotency_keys'].filter((t) => !hasTable(t));
     if (missing.length) throw refusal('UNEXPECTED_SCHEMA', `${RECRUITMENT_CASES_MIGRATION} is recorded but ${missing.join(', ')} do not exist; refusing to guess`);
+    // the persisted key format (review of 2fe05df, R1): checked before a single row is read; a file of another or of no
+    // recorded format is refused — its rows are not this tool's to interpret; the version-matched tool of the build that
+    // wrote it is the copy-only route back
+    const format = recordedKeyFormat(sqlite);
+    if (format !== RECRUITMENT_CASES_KEY_FORMAT) throw refusal('FORMAT_UNSUPPORTED', `RECRUITMENT_CASES_FORMAT_UNSUPPORTED: the copy records ${RECRUITMENT_CASES_MIGRATION} but its draft/handoff key format is ${format === null ? 'not recorded (none)' : `recorded as ${JSON.stringify(String(format))}`}, not the ${JSON.stringify(RECRUITMENT_CASES_KEY_FORMAT)} this tool reads; nothing was read or written and the output was removed. A 0016 file written by the superseded b7c0dd0 or 2fe05df build records no format: run THAT build's scripts/recruitmentCasesRollback.mjs on a copy instead (the version-matched tool reads its own layout), then cut the copy over with this build`);
     // Every other table, as it is: compared again after the rewrite. (The five blob rows this tool writes are excluded
     // from the collections comparison; the two rebuilt parents and the S8a key rows are compared row for row on their own.)
     const snapshotOf = (t) => (t === 'collections'
@@ -92,6 +97,7 @@ export function rollbackRecruitmentCasesCopy(sourceFile, outDir, { _failBeforeCo
       rebuilt.idempotencyKeys = rebuildTable(sqlite, 'idempotency_keys', idempotencyKeysDdl(S8A_KEY_OWNERS));
       recordRemoved = sqlite.prepare('DELETE FROM data_migrations WHERE id = ?').run(RECRUITMENT_CASES_MIGRATION).changes > 0;
       sqlite.prepare('DELETE FROM meta WHERE key = ?').run(RECRUITMENT_CASES_CUTOVER_META);
+      sqlite.prepare('DELETE FROM meta WHERE key = ?').run(RECRUITMENT_CASES_FORMAT_META); // a pre-S8b file records no key format; the re-upgrade records it again
       saveSeq = (Number(sqlite.prepare("SELECT value FROM meta WHERE key = 'saveSeq'").get()?.value) || 0) + 1;
       sqlite.prepare("INSERT INTO meta (key, value) VALUES ('saveSeq', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(saveSeq));
       const broken = sqlite.prepare('PRAGMA foreign_key_check').all();
@@ -113,6 +119,7 @@ export function rollbackRecruitmentCasesCopy(sourceFile, outDir, { _failBeforeCo
     if (sqlite.prepare('PRAGMA foreign_key_check').all().length) problems.push('foreign_key_check is not empty');
     if (sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?').get(RECRUITMENT_CASES_MIGRATION)) problems.push('the 0016 record is still present');
     if (sqlite.prepare('SELECT 1 FROM meta WHERE key = ?').get(RECRUITMENT_CASES_CUTOVER_META)) problems.push('the S8b meta key is still present');
+    if (sqlite.prepare('SELECT 1 FROM meta WHERE key = ?').get(RECRUITMENT_CASES_FORMAT_META)) problems.push('the S8b key-format marker is still present');
     for (const t of RECRUITMENT_CASES_TABLES) if (hasTable(t)) problems.push(`${t} still exists`);
     for (const t of ['recruitment_requests', 'trials']) if (sqlite.prepare(`PRAGMA foreign_key_list(${t})`).all().some((f) => f.table === 'recruitment_cases')) problems.push(`${t}.case_id still carries the foreign key`);
     if (JSON.stringify([sqlite.prepare('SELECT * FROM recruitment_requests ORDER BY seq').all(), sqlite.prepare('SELECT * FROM trials ORDER BY seq').all()]) !== parentsBefore) problems.push('the recruitment_requests or trials rows changed');

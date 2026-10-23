@@ -311,4 +311,24 @@ await test('[cutover] the admin backup carries the five collections in the legac
   rm(dir, restored, copy, nul, bk.body.dir);
 });
 
+// FAILING-FIRST NOTE (recorded on the unchanged 2fe05df tree): that build recorded no key-format marker, so the server
+// booted and LISTENED on a 0016 file the superseded b7c0dd0 build had written, reading empty or exchanged keys.
+await test('[review 2fe05df R1] the real server refuses a 0016 file whose key format is not recorded — the layout of the superseded b7c0dd0 and 2fe05df builds — BEFORE listening (RECRUITMENT_CASES_FORMAT_UNSUPPORTED in the log, exit 1, the file unchanged); the copy-only rollback CLI refuses it (exit 6, no output); the same file with its own marker back boots and serves again', async () => {
+  const dir = tempDir('s8b-fmt-boot'); const S = await boot(dir); await S.stop();
+  const META = 'recruitmentCasesKeyFormat'; const marker = () => q1(dir, 'SELECT value FROM meta WHERE key = ?', META)?.value ?? null; const recorded = marker();
+  assert.ok(typeof recorded === 'string' && recorded.length > 0, 'a fresh boot records the key format');
+  const write = (fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); try { fn(s); } finally { s.close(); } };
+  write((s) => s.prepare('DELETE FROM meta WHERE key = ?').run(META));
+  const stateOf = () => JSON.stringify({ tables: qAll(dir, "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"), keys: qAll(dir, 'SELECT * FROM idempotency_keys ORDER BY rowid'), seq: q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'"), applied: applied(dir), blobs: qAll(dir, 'SELECT name FROM collections ORDER BY name') });
+  const before = stateOf();
+  const r = await bootRefused(dir); assert.equal(r.code, 1, `exit 1 — ${r.log.slice(-600)}`); assert.doesNotMatch(r.log, /listening on/, 'never listened'); assert.match(r.log, /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `the refusal named — ${r.log.slice(-600)}`); assert.doesNotMatch(r.log, /Adult Signup|Harbour Road/);
+  assert.equal(stateOf(), before, 'the refused boot changed nothing');
+  const out = tempDir('s8b-fmt-cli'); let cli = null; try { execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), dir, out], { stdio: 'pipe' }); } catch (e) { cli = e; }
+  assert.equal(cli?.status, 6, `the rollback CLI refuses with exit 6 (${cli?.status}: ${String(cli?.stderr ?? '').slice(-300)})`); assert.match(String(cli?.stderr ?? ''), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/); assert.equal(fs.readdirSync(out).length, 0, 'no output');
+  assert.equal(stateOf(), before, 'the refused rollback changed nothing');
+  write((s) => s.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(META, recorded));
+  const S2 = await boot(dir); const cap = await S2.j('GET', '/capabilities'); assert.equal(cap.status, 200, 'with its own marker back the file boots and serves'); await S2.stop();
+  rm(dir, out);
+});
+
 console.log(`\n${passed} recruitment cases server checks passed`);

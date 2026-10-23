@@ -503,4 +503,51 @@ test('[review b7c0dd0 F2] owned-child replay keys are owned by the CASE: two cas
       S.close(); rm(d); }
   }
 });
+// ------------------------------------------------------------- the independent review of 2fe05df (R1): the persisted key format, written before the correction
+// FAILING-FIRST NOTE (recorded on the unchanged 2fe05df tree): that build recorded no format marker, read the draft and
+// handoff key rows as case-owned on ANY 0016 file, and so returned empty or exchanged keys from a file the superseded
+// b7c0dd0 build had written (child-owned rows) — on attachment, on the snapshot load and in the rollback copy — instead
+// of refusing before any data was decoded.
+test('[review 2fe05df R1] the persisted key format is a recorded discriminator checked before anything is decoded, published, written, exported or rolled back: migration 0016 records meta.recruitmentCasesKeyFormat atomically with its rows (a failed step leaves none, the retry records it); a 0016 file WITHOUT the marker — the layouts of the superseded b7c0dd0 and 2fe05df builds: ordinary, overlapping case/child ids, no row-worthy keys — or with an unknown, empty or malformed marker is refused by the staged load, the snapshot load, the readers, the snapshot write, the final guard and the copy-only rollback (RECRUITMENT_CASES_FORMAT_UNSUPPORTED naming the recorded and the expected format and the version-matched recovery route; the source unchanged; no usable rollback output); the same file reads again once its own marker is back; the rollback copy carries no marker and the re-upgrade, a backup restore and a fresh cutover record it', () => {
+  needRc(); const rollback = needRollback();
+  const META = rc.RECRUITMENT_CASES_FORMAT_META ?? 'recruitmentCasesKeyFormat'; const FORMAT = rc.RECRUITMENT_CASES_KEY_FORMAT ?? null;
+  const marker = (s) => s.prepare('SELECT value FROM meta WHERE key = ?').get(META)?.value ?? null;
+  const setMarker = (d, value) => { const s = openRaw(d); if (value === null) s.prepare('DELETE FROM meta WHERE key = ?').run(META); else s.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(META, value); s.close(); };
+  // the b7c0dd0 layout with overlapping case/child ids: every key row names an existing case that has that child, yet belongs to the other case — a layout no ownership query can tell apart
+  const swapOwners = (d) => { const s = openRaw(d); for (const t of ['case_decision_drafts', 'case_transaction_handoffs']) for (const [from, to] of [['case-1', 'swap-tmp'], ['case-2', 'case-1'], ['swap-tmp', 'case-2']]) s.prepare('UPDATE idempotency_keys SET owner_id = ? WHERE owner_table = ? AND owner_id = ?').run(to, t, from); s.close(); };
+  const expectRefusal = (d, label) => {
+    const before = withRo(d, fullDump);
+    const e1 = refused(() => serverOpen(d), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the staged load (attachment)`);
+    assert.match(e1.message, /recorded/, `${label}: names the recorded format`); assert.match(e1.message, /expected|this build reads/, `${label}: names the expected format`); assert.match(e1.message, /rollback|roll it back/i, `${label}: names the recovery route`); assert.doesNotMatch(e1.message, /Adult Signup|Strong on the left|Harbour Road/);
+    refused(() => snapshotOpen(d), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the snapshot load`);
+    refused(() => withRo(d, (s) => rc.RECRUITMENT_CASES_SNAPSHOT.read(s)), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the snapshot reader`);
+    refused(() => withRo(d, (s) => rc.readCases(s)), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the case reader`);
+    { const s = openRaw(d); s.exec('BEGIN'); refused(() => rc.RECRUITMENT_CASES_SNAPSHOT.begin(s, { recruitmentCases: [] }), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the snapshot write`); refused(() => rc.assertCasesConsistent(s), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the final guard`); s.exec('ROLLBACK'); s.close(); }
+    const out = tempDir('s8b-fmt-rb'); let err = null; try { rollback(dbFile(d), out, { now: NOW }); } catch (e) { err = e; }
+    assert.ok(err && err.code === 'FORMAT_UNSUPPORTED' && /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/.test(err.message), `${label}: the rollback refuses with FORMAT_UNSUPPORTED before reading a row (${err?.code}: ${err?.message})`); assert.equal(fs.readdirSync(out).length, 0, `${label}: no usable rollback output`); rm(out);
+    assert.equal(withRo(d, fullDump), before, `${label}: the source is unchanged`);
+  };
+  // 1. the fresh cutover records the marker atomically with its rows; a failed step leaves none; the retry records it
+  const dA = tempDir('s8b-fmt-a'); preS8bFile(dA);
+  { const s = openRaw(dA);
+    const probe = failRunAt(s, (sql) => /INSERT INTO meta/.test(sql), 1, 'synthetic marker failure'); assert.throws(() => migrateAll(s), /synthetic marker failure/); probe.restore();
+    assert.equal(marker(s), null, 'a failed cutover records no marker'); assert.equal(tableExistsIn(s, 'recruitment_cases'), false, 'nor tables'); assert.equal(s.prepare('SELECT 1 FROM data_migrations WHERE id = ?').get(MIGRATION) ?? null, null, 'nor the record'); assert.equal(s.isTransaction, false);
+    migrateAll(s); assert.ok(typeof marker(s) === 'string' && marker(s).length > 0, 'the cutover records a format marker'); if (FORMAT) assert.equal(marker(s), FORMAT, 'the marker is the format this build reads'); s.close(); }
+  const recorded = withRo(dA, marker); const expectedA = withRo(dA, (s) => rc.readCases(s));
+  { const L = serverOpen(dA); assert.deepEqual(plain(L.db.recruitmentCases), expectedA); L.close(); }
+  // 2. the ordinary file without its marker (the 2fe05df layout); its own marker back, it reads exactly as before
+  setMarker(dA, null); expectRefusal(dA, 'the unmarked ordinary file (the 2fe05df layout)');
+  setMarker(dA, recorded); { const L = serverOpen(dA); assert.deepEqual(plain(L.db.recruitmentCases), expectedA, 'with its own marker back the file reads exactly as before'); L.close(); }
+  // 3. unknown, empty and malformed markers
+  for (const [what, v] of [['an unknown marker', 'garbage'], ['an empty marker', ''], ['a malformed marker', JSON.stringify({ v: 1 })]]) { setMarker(dA, v); expectRefusal(dA, what); }
+  rm(dA);
+  // 4. the b7c0dd0 layout with overlapping case/child ids, unmarked: refused the same way (the marker decides, not the rows)
+  { const dB = tempDir('s8b-fmt-b'); const f = S8B_FIX(); for (const child of ['decisionDraft', 'transactionHandoff']) { f.recruitmentCases[0][child] = { ...f.recruitmentCases[0][child], id: 'case-2', keys: { create: { key: 'key-first', fp: 'fp-first' } } }; f.recruitmentCases[1][child] = { id: 'case-1', keys: { create: { key: 'key-second', fp: 'fp-second' } } }; }
+    preS8bFile(dB, f); { const s = openRaw(dB); migrateAll(s); s.close(); } swapOwners(dB); setMarker(dB, null); expectRefusal(dB, 'the unmarked file with overlapping case/child ids (the b7c0dd0 layout)'); rm(dB); }
+  // 5. a file with no row-worthy key at all, unmarked: refused too (the refusal does not depend on the rows)
+  { const dC = tempDir('s8b-fmt-c'); const f = S8B_FIX(); f.recruitmentCases[0].decisionDraft.keys = {}; f.recruitmentCases[0].transactionHandoff.keys = {}; preS8bFile(dC, f); { const s = openRaw(dC); migrateAll(s); s.close(); } setMarker(dC, null); expectRefusal(dC, 'the unmarked file without row-worthy keys'); rm(dC); }
+  // 6. the rollback copy carries no marker (a pre-S8b file); the re-upgrade and a backup restore record it again
+  { const d = file('fmt-rb'); const out = tempDir('s8b-fmt-out'); rollback(dbFile(d), out, { now: NOW }); const c = openRaw(out); assert.equal(marker(c), null, 'the rollback copy carries no marker'); migrateAll(c); assert.equal(marker(c), recorded, 're-upgraded: recorded again'); c.close();
+    const L = serverOpen(d); const exported = L.repo.exportAll(); L.close(); const r = tempDir('s8b-fmt-restore'); preS8bFile(r, { ...exported }); const rs = openRaw(r); migrateAll(rs); assert.equal(marker(rs), recorded, 'a restore records it'); rs.close(); rm(d, out, r); }
+});
 console.log(`\n${passed} recruitment cases checks passed`);

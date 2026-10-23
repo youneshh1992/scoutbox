@@ -3494,10 +3494,20 @@ so a `supersedes`/`supersededById` could cross rooms against §6 G; **F2** — t
 or deleted another's replay keys. Both corrected in one bounded milestone on the same branch, tests first (review §12,
 "Corrected after the independent review of `b7c0dd0`"): the chain compared by room in both checks over the final
 graph, atomically, ids only; the key rows owned by the CASE id in the writer, reader, cleanup, import, export, rollback
-and re-upgrade, nothing renamed, deduplicated or newly refused; a `0016` file cut over by the superseded `b7c0dd0` build
-(synthetic verification only) is refused with `RECRUITMENT_CASES_KEY_OWNER_UNKNOWN`, not read. The reviewer's script,
-unchanged, exits 0 on the corrected tree. Q8a stays as recorded. **S8b is IMPLEMENTED, PENDING INDEPENDENT
-ACCEPTANCE.**
+and re-upgrade, nothing renamed, deduplicated or newly refused. The reviewer's script, unchanged, exits 0 on the
+corrected tree. **The independent review of `2fe05df` (23 October 2026) closed F1 and F2 and did NOT accept the
+correction** (one P2, R1): `2fe05df` claimed a `b7c0dd0` file would be refused by its owner-existence guard, but that
+guard runs after a read and cannot tell an old-format owner that equals another case's id — the reviewer's new script,
+over files created by the GENUINE `b7c0dd0` build, showed the staged attachment, the snapshot load and the rollback
+returning empty or exchanged keys, and the server listening. Corrected in one bounded milestone, tests first (review
+§12, "Corrected after the independent review of `2fe05df`"): migration `0016` records the key format
+(`meta.recruitmentCasesKeyFormat = "case-owned-keys/1"`) atomically with its rows, and every reader, the snapshot
+write, the staged flush, the final guard and the rollback tool check it FIRST and refuse any other or absent value
+(`RECRUITMENT_CASES_FORMAT_UNSUPPORTED`; rollback exit 6) before decoding, publishing, writing, exporting or copying
+anything. Unmarked `b7c0dd0` and `2fe05df` files (synthetic verification only) are refused alike; the version-matched,
+copy-only route back is the rollback tool of the build that wrote the file, then this build's cutover. Nothing is
+inferred from ids, owner existence or the `0016` record alone; no file is stamped. Q8a stays as recorded. **S8b is
+IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE.**
 
 S8c and S8d are not started. Nothing in this section is a production, release, security, legal-compliance, merge or
 deployment approval.

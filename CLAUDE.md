@@ -370,9 +370,19 @@ and design changes the Founder explicitly requests.
   findings) and the correction followed on the same branch: decision chains
   are checked SAME-ROOM in the preflight and the final SQL guard (F1), and the
   draft's / handoff's `idempotency_keys` rows are owned by the CASE id, never
-  the child id the parent-scoped tables admit twice (F2); a `0016` file cut
-  over by the superseded `b7c0dd0` build (synthetic only) is refused with
-  `RECRUITMENT_CASES_KEY_OWNER_UNKNOWN`, not read (review §12). The
+  the child id the parent-scoped tables admit twice (F2). The independent
+  review of `2fe05df` closed F1 and F2 and did NOT accept that correction
+  either (one P2, R1: it claimed old files would be refused by an owner
+  check that runs after the read and cannot see them); the correction
+  followed: migration `0016` records the key format
+  (`meta.recruitmentCasesKeyFormat`) atomically with its rows, and every
+  reader, the snapshot write, the staged flush, the final guard and the
+  rollback tool check it FIRST — a `0016` file without it (written by the
+  superseded `b7c0dd0` or `2fe05df` build; synthetic only) is refused with
+  `RECRUITMENT_CASES_FORMAT_UNSUPPORTED` before anything is decoded (the
+  server exits before listening; rollback CLI exit 6); the route back is the
+  rollback tool of the build that wrote the file, then this build's cutover
+  (review §12, OPERATIONS.md). The
   eighth historical build the backend gate boots for real is `7a7efc6`
   (`SCOUTBOX_PRE_S8B_SERVER`). S8c/S8d are not started** (plan §D.8 the implementation
   record; §D.7 the design, independently accepted at

@@ -1656,10 +1656,24 @@ tool is the first link of the chain.
   a draft's and a handoff's under the OWNING CASE id (one row per case; their
   own ids are data two cases may share — corrected after the independent
   review of `b7c0dd0`, F2, whose build keyed them by the child id and let one
-  case read or delete another's keys; a `0016` file that build cut over —
-  synthetic verification files only, never real data — is refused by this
-  build with `RECRUITMENT_CASES_KEY_OWNER_UNKNOWN` rather than guessed at: roll
-  it back with that build's tool on a copy and cut the copy over again). On
+  case read or delete another's keys). **The key format is RECORDED** (the
+  independent review of `2fe05df`, R1): migration `0016` writes
+  `meta.recruitmentCasesKeyFormat = "case-owned-keys/1"` in the same
+  transaction as the rows, and every reader (the staged attachment at boot,
+  the snapshot load, the backup export), the snapshot write, the staged flush,
+  the final guard and the copy-only rollback tool check it FIRST and refuse
+  any other or absent value with `RECRUITMENT_CASES_FORMAT_UNSUPPORTED`
+  (rollback CLI exit 6; nothing decoded, published, written or copied; the
+  server exits 1 before listening). A `0016` file written by the superseded
+  `b7c0dd0` build (child-owned rows) or the superseded `2fe05df` build
+  (case-owned rows, no marker) — synthetic verification files only, never
+  real data — is therefore refused alike: this build cannot tell the two
+  layouts apart from the rows and does not guess, infer from ids or stamp the
+  file. The version-matched, copy-only route back: run the rollback tool OF
+  THE BUILD THAT WROTE THE FILE (its own `scripts/recruitmentCasesRollback.mjs`
+  reads its own layout) on a copy, then cut that copy over with this build,
+  which records the format. Only a `b7c0dd0` file in which two cases shared
+  a child id is beyond recovery (that build aliased their keys on write). On
   the same step
   `recruitment_requests.case_id` and `trials.case_id` become REAL keys to
   `recruitment_cases` (Q7b's conversion; the two parents are rebuilt
@@ -1758,7 +1772,10 @@ tool is the first link of the chain.
   and the S8a key rows row for row, every other table exactly as in the
   source). **Nothing written since the cutover is lost.** Exit codes: 0 done,
   1 usage / output not empty, 4 a later schema step, 5 never applied `0016`,
-  10 a recorded `0016` whose tables are missing. To go further back, run
+  6 a recorded `0016` whose key format is not the one this tool reads (a file
+  of the superseded `b7c0dd0` or `2fe05df` build: use THAT build's tool on a
+  copy — nothing is read, the output is removed), 10 a recorded `0016` whose
+  tables are missing. To go further back, run
   `scripts/recruitmentRollback.mjs` on THIS tool's output (it refuses a file
   carrying `0016`), then the S4b-R tool, and so on down the chain.
   Re-upgrading the copy (booting this build on it) imports the blobs back as

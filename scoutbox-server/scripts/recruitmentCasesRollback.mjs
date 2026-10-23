@@ -27,6 +27,8 @@
 // Usage: node scripts/recruitmentCasesRollback.mjs <data-dir> <out-dir> [--json]
 // Exit codes: 0 done, 1 usage error / no source / output directory not empty,
 //             4 the copy carries a later schema step, 5 the copy never applied 0016,
+//             6 the copy records 0016 but not the key format this tool reads (a file written by the superseded
+//               b7c0dd0 or 2fe05df build: use THAT build's tool on a copy, then this build's cutover),
 //             10 a recorded 0016 whose tables are missing.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,6 +48,7 @@ try {
 } catch (err) {
   if (err?.code === 'LATER_SCHEMA') { console.error(`refused: ${err.message}`); process.exit(4); }
   if (err?.code === 'NOT_CUT_OVER') { console.error(`refused: ${err.message}`); process.exit(5); }
+  if (err?.code === 'FORMAT_UNSUPPORTED') { console.error(`refused: ${err.message}`); process.exit(6); }
   if (err?.code === 'UNEXPECTED_SCHEMA') { console.error(`refused: ${err.message}`); process.exit(10); }
   if (err?.code === 'OUTPUT_NOT_EMPTY' || err?.code === 'NO_SOURCE') { console.error(`refused: ${err.message}`); process.exit(1); }
   throw err;

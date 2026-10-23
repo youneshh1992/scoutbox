@@ -104,6 +104,31 @@ export const RECRUITMENT_CASES_COLLECTIONS = Object.freeze(['recruitmentCases', 
 export const S8B_KEY_OWNERS = Object.freeze([...S8A_KEY_OWNERS, 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions']);
 
 export const recruitmentCasesLive = (sqlite) => migrationApplied(sqlite, RECRUITMENT_CASES_MIGRATION);
+/**
+ * The persisted KEY FORMAT (the independent review of 2fe05df, R1): migration 0016 records, in the same transaction as
+ * the rows, which representation the draft's and the handoff's `idempotency_keys` rows use. This build writes and reads
+ * `case-owned-keys/1` (owner_id = the owning case id). A 0016 file WITHOUT that marker — the superseded b7c0dd0 build
+ * keyed those rows by the child id and recorded nothing; the superseded 2fe05df build keyed them by the case id and
+ * recorded nothing either — or with any other value is REFUSED before a row is decoded, published, written, exported or
+ * rolled back: the two layouts cannot be told apart from the rows (both can name existing cases), so nothing is guessed
+ * and nothing is stamped. The recovery route is version-matched and copy-only: that build's own
+ * scripts/recruitmentCasesRollback.mjs on a copy, then this build's cutover, which records the format.
+ */
+export const RECRUITMENT_CASES_FORMAT_META = 'recruitmentCasesKeyFormat';
+export const RECRUITMENT_CASES_KEY_FORMAT = 'case-owned-keys/1';
+/** The recorded key format of a file (null when nothing is recorded; a non-string value is returned as recorded). */
+export function recordedKeyFormat(sqlite) {
+  if (!tableExists(sqlite, 'meta')) return null;
+  const row = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(RECRUITMENT_CASES_FORMAT_META);
+  return row ? row.value : null;
+}
+/** Refuse, before anything is decoded or written, a cut-over file whose recorded key format is not the one this build reads. */
+export function assertKeyFormat(sqlite, { label = 'the read' } = {}) {
+  if (!recruitmentCasesLive(sqlite)) return;
+  const recorded = recordedKeyFormat(sqlite);
+  if (recorded === RECRUITMENT_CASES_KEY_FORMAT) return;
+  throw Object.assign(new Error(`RECRUITMENT_CASES_FORMAT_UNSUPPORTED: the file records migration ${RECRUITMENT_CASES_MIGRATION} but its draft/handoff key format is ${recorded === null ? 'not recorded (none)' : `recorded as ${JSON.stringify(String(recorded))}`}, not the ${JSON.stringify(RECRUITMENT_CASES_KEY_FORMAT)} this build reads (${label}); nothing was decoded, published or changed. A 0016 file written by the superseded b7c0dd0 or 2fe05df build records no format: roll it back with THAT build's scripts/recruitmentCasesRollback.mjs on a copy (the version-matched tool reads its own layout) and cut the copy over with this build, which records the format`), { code: 'RECRUITMENT_CASES_FORMAT_UNSUPPORTED', recorded, expected: RECRUITMENT_CASES_KEY_FORMAT });
+}
 const blocked = (detail, extra = {}) => Object.assign(new Error(`RECRUITMENT_CASES_IMPORT_BLOCKED: ${detail}; nothing was imported`), { code: 'RECRUITMENT_CASES_IMPORT_BLOCKED', ...extra });
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
 const jsonOrNull = (obj) => (Object.keys(obj).length ? JSON.stringify(obj) : null);
@@ -312,6 +337,7 @@ const notLinks = (spec) => !LINK_TABLES.has(spec.table);
 const onlyLinks = (spec) => LINK_TABLES.has(spec.table);
 /** Read every parent record of a collection with its children, in `seq` order: fresh objects from the file. */
 export function readRecords(sqlite, coll) {
+  assertKeyFormat(sqlite, { label: `reading ${coll.name}` }); // before a single row is decoded (review of 2fe05df, R1)
   const S = stmts(sqlite);
   const groups = new Map(); // `${table}|${constants}|${ownerKey}` → rows
   const seen = new Set();
@@ -490,6 +516,7 @@ export function pruneCases(sqlite, gone) { const S = stmts(sqlite); for (const i
 /** G: the final assertions, ids only — every link target present, the decision chain over the final table state, foreign_key_check empty on the tables this step owns and the two it keyed. */
 export function assertCasesConsistent(sqlite, { label = 'the snapshot' } = {}) {
   if (!recruitmentCasesLive(sqlite)) return;
+  assertKeyFormat(sqlite, { label }); // a file of another format is never asserted over, let alone written (review of 2fe05df, R1)
   const danglingR = sqlite.prepare('SELECT l.case_id, l.request_id FROM case_request_links l LEFT JOIN recruitment_requests r ON r.id = l.request_id WHERE l.request_id IS NOT NULL AND r.id IS NULL').all();
   const danglingT = sqlite.prepare('SELECT l.case_id, l.trial_id FROM case_trial_links l LEFT JOIN trials t ON t.id = l.trial_id WHERE l.trial_id IS NOT NULL AND t.id IS NULL').all();
   if (danglingR.length || danglingT.length) throw refusal('CASE_LINK_DANGLING', `${danglingR.length + danglingT.length} case link(s) in ${label} name a request or trial that is not in the final tables (${ids([...danglingR.map((r) => `case ${r.case_id} links request ${r.request_id}`), ...danglingT.map((r) => `case ${r.case_id} links trial ${r.trial_id}`)])}); the write was rolled back and nothing was changed`);
@@ -551,6 +578,7 @@ export const RECRUITMENT_CASES_SNAPSHOT = {
   begin(sqlite, db, { requests, trials, orgs, users, label = 'the snapshot' } = {}) {
     if (!recruitmentCasesLive(sqlite)) return null;
     if (!sqlite.isTransaction) throw new Error('recruitmentCases: begin() runs inside the caller\'s transaction');
+    assertKeyFormat(sqlite, { label }); // before anything is written into a file of another format (review of 2fe05df, R1)
     const supplied = suppliedOf(db);
     const anyCases = RECRUITMENT_CASES_COLLECTIONS.some((n) => supplied[n] !== undefined);
     const anyS8a = requests !== undefined || trials !== undefined;
@@ -674,6 +702,7 @@ export function createRecruitmentCasesRepository({ sqlite, now = Date.now, log =
     /** Hook 1 (before the recruitment hook): the preflight against the mirrors, A for the changed cases, R. */
     flushCore() {
       if (!sqlite.isTransaction) throw new Error('recruitmentCases.flushCore runs inside a save transaction; the store reports its commit or rollback afterwards');
+      assertKeyFormat(sqlite, { label: 'the save' }); // the attached file's format is re-checked before every staged write (review of 2fe05df, R1)
       const changed = {}; const removed = {}; let touched = false;
       for (const n of RECRUITMENT_CASES_COLLECTIONS) { changed[n] = new Set(mirrors[n].filter((r) => committed[n].get(r.id) !== fp(r)).map((r) => r.id)); removed[n] = [...committed[n].keys()].filter((id) => !mirrors[n].some((r) => r.id === id)); if (changed[n].size || removed[n].length) touched = true; }
       const rec = recruitment ? recruitment() : null;

@@ -29,7 +29,7 @@
  */
 import { migrationApplied } from '../database.mjs';
 import { RECRUITMENT_MIGRATION, recruitmentParentDdl, idempotencyKeysDdl } from '../recruitment.mjs';
-import { RECRUITMENT_CASES_MIGRATION, RECRUITMENT_CASES_CUTOVER_META, RECRUITMENT_CASES_DDL, RECRUITMENT_CASES_TABLES, S8B_KEY_OWNERS, importRecruitmentCasesBlobs } from '../recruitmentCases.mjs';
+import { RECRUITMENT_CASES_MIGRATION, RECRUITMENT_CASES_CUTOVER_META, RECRUITMENT_CASES_FORMAT_META, RECRUITMENT_CASES_KEY_FORMAT, RECRUITMENT_CASES_DDL, RECRUITMENT_CASES_TABLES, S8B_KEY_OWNERS, importRecruitmentCasesBlobs } from '../recruitmentCases.mjs';
 
 export const id = RECRUITMENT_CASES_MIGRATION;
 export const note = 'recruitment cases (with the Room facet, decision draft, transaction handoff and budget), room comments, room snapshots, room decisions and room evidence states become their own tables (twenty-five tables; insertion and list order kept; absence, null, off-type and unknown fields kept losslessly; the player references tolerant and counted (Q8a)); recruitment_requests and trials rebuilt with the real case_id key (Q7b); idempotency_keys rebuilt with the broadened owner CHECK';
@@ -59,5 +59,7 @@ export function up(sqlite, { now = Date.now() } = {}) {
   const keyRows = rebuildTable(sqlite, 'idempotency_keys', idempotencyKeysDdl(S8B_KEY_OWNERS));
   let parents = null;
   const counts = importRecruitmentCasesBlobs(sqlite, { rebuildParents: () => { parents = rebuildRecruitmentParents(sqlite, { caseKey: true }); } });
+  // the persisted key format, in the same transaction as the rows (review of 2fe05df, R1): the readers refuse a 0016 file without it
+  sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(RECRUITMENT_CASES_FORMAT_META, RECRUITMENT_CASES_KEY_FORMAT);
   sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(RECRUITMENT_CASES_CUTOVER_META, JSON.stringify({ at: now, ...counts, rebuilt: { ...parents, idempotencyKeys: keyRows } }));
 }
