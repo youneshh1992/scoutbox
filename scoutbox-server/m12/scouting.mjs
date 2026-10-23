@@ -18,6 +18,7 @@ export function registerScouting(ctx) {
     orgRouter, playerRouter, guardianRouter,
     orgCanSee, paginate, audit, isLead, requireLead, moderateOrRefuse, isAdult,
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
+    recruitmentCases, // S8b: the cases live in their tables; a new case enters through the repository, every other change is in place
   } = ctx;
 
   // ------------------------------------------------- template seeds (v1)
@@ -457,7 +458,7 @@ export function registerScouting(ctx) {
       createdAt: Date.now(), history: [],
     };
     audit(c, 'org', req.orgUser.id, req.orgUser.name, 'created', c.stage);
-    db.recruitmentCases.push(c);
+    recruitmentCases.addCase(c); // S8b: the former `db.recruitmentCases.push(c)`; the row lands in the persistNow() below
     persistNow();
     res.status(201).json({ case: caseView(c) });
   });

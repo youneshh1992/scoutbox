@@ -91,9 +91,9 @@ async function inviteAndAccept(S, maria, pid, token, { proposedDate = '2026-11-0
   return { requestId: inv.body.requestId, trialId: acc.body.trialId, channelId: acc.body.contactChannel };
 }
 
-await test('[cutover] a fresh boot records 0015_recruitment last and the fifteen tables exist with channels carrying the real request key; the direct invitation and the adult\'s acceptance land as rows (the request answered, the trial with its history and keys.accept, the thread naming the request through the key) with no blob behind them; /org/requests, /org/trials, /player/inbox and /player/trials answer as before; the report lands in trial_reports and the day staff in trial_day_staff; the direct route still answers REQUEST_PENDING; a SIGKILL right after the acceptance loses nothing; /capabilities counts the rows', async () => {
+await test('[cutover] a fresh boot records 0015_recruitment (followed by S8b\'s 0016 since that step) and the fifteen tables exist with channels carrying the real request key; the direct invitation and the adult\'s acceptance land as rows (the request answered, the trial with its history and keys.accept, the thread naming the request through the key) with no blob behind them; /org/requests, /org/trials, /player/inbox and /player/trials answer as before; the report lands in trial_reports and the day staff in trial_day_staff; the direct route still answers REQUEST_PENDING; a SIGKILL right after the acceptance loses nothing; /capabilities counts the rows', async () => {
   const dir = tempDir('s8a-boot'); const S = await boot(dir);
-  assert.equal(applied(dir).at(-1), MIGRATION, 'the last recorded migration'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
+  assert.equal(applied(dir).at(-2), MIGRATION, 'the S8a migration, recorded before S8b\'s 0016'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   assert.ok(qAll(dir, 'PRAGMA foreign_key_list(channels)').some((r) => r.table === 'recruitment_requests'), 'channels.request_id is a real key');
   const maria = await orgLogin(S); const { pid, token } = await signupAdult(S, 'Invited Adult');
   const dup = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'First.', proposedDate: '2026-11-01', venue: 'G', notes: '' }, maria); assert.equal(dup.status, 201);
@@ -182,13 +182,15 @@ await test('[cutover] the admin backup carries requests and trials in the legacy
     // rows are invisible to it), reports STORE_MISSING and the process exits 1 before listening; nothing is served, nothing is written
     const direct = tempDir('s8a-direct'); fs.cpSync(dir, direct, { recursive: true }); const directBefore = [recDump(direct), q1(direct, "SELECT value FROM meta WHERE key = 'saveSeq'").value];
     const wrong = await bootRefused(direct, {}, OLD);
-    assert.equal(wrong.code, 1, `the pre-S8a build does not boot a 0015 file: ${wrong.log.slice(-400)}`); assert.match(wrong.log, /STORE_MISSING requests, trials/);
+    assert.equal(wrong.code, 1, `the pre-S8a build does not boot a 0015 file: ${wrong.log.slice(-400)}`); assert.match(wrong.log, /STORE_MISSING [^\n]*\brequests\b[^\n]*\btrials\b/); // since 0016 the line lists the five S8b collections too
     assert.deepEqual([recDump(direct), q1(direct, "SELECT value FROM meta WHERE key = 'saveSeq'").value], directBefore, 'the refused boot wrote nothing'); assert.equal(blobOf(direct, 'requests'), undefined);
     rm(direct);
-    console.log('    (the pre-S8a build booted DIRECTLY on a copy of the live file exited 1 at boot — INTEGRITY STORE_MISSING requests, trials — serving nothing and writing nothing; the rollback tool is the only way back)');
+    console.log('    (the pre-S8a build booted DIRECTLY on a copy of the live file exited 1 at boot — INTEGRITY STORE_MISSING naming requests and trials (and, since 0016, the five S8b collections) — serving nothing and writing nothing; the rollback tools are the only way back)');
   }
   // the rollback copy
-  const copy = tempDir('s8a-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), dir, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
+  // since 0016 a live file carries S8b too: the S8b tool runs first (copy-only), then the S8a tool on its output
+  const mid = tempDir('s8a-mid'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), dir, mid], { stdio: 'pipe' });
+  const copy = tempDir('s8a-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), mid, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
   assert.equal(live(copy), false); assert.equal(tableExists(copy, 'trials'), false); assert.equal(blobOf(copy, 'requests').length, 2); assert.equal(blobOf(copy, 'trials').length, 1); assert.deepEqual(blobOf(copy, 'trials'), snapshot.db.trials, 'the blob equals the backup\'s legacy shape');
   assert.equal(qAll(copy, 'PRAGMA foreign_key_list(channels)').some((r) => r.table === 'recruitment_requests'), false, 'channels back to the 0012 definition');
   let refused = null; try { execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), dir, tempDir('s8a-x')], { stdio: 'pipe' }); } catch (e) { refused = e; } assert.equal(refused?.status, 4, 'the S4b-R tool refuses the 0015 file (LATER_SCHEMA)');
@@ -244,7 +246,8 @@ await test('[cutover] F1 (review of 6d77aa7) through the real routes: an invitat
   const restored = tempDir('s8a-f1-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); maria = await orgLogin(S); await replayS(S, maria, 'the restore'); await S.stop();
   { const store = openStore(restored); expectKeys(store.load().db.trials.find((x) => x.id === TID).keys, 'read back from the restored tables'); store.sqlite.close(); }
-  const copy = tempDir('s8a-f1-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), restored, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
+  const mid = tempDir('s8a-f1-mid'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), restored, mid], { stdio: 'pipe' }); // the S8b tool first (a live file carries 0016)
+  const copy = tempDir('s8a-f1-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), mid, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
   expectKeys(blobOf(copy, 'trials').find((x) => x.id === TID).keys, 'the rollback blob');
   const OLD = process.env.SCOUTBOX_PRE_S8A_SERVER;
   if (OLD && fs.existsSync(OLD)) { const old = await boot(copy, {}, OLD); const mariaO = await orgLogin(old); await replayS(old, mariaO, 'the pre-S8a build on the rollback copy'); await old.stop(); console.log('    (pre-S8a build 9b109dc replayed the same clientKey from the rollback copy\'s blob)'); }
@@ -269,7 +272,8 @@ await test('[cutover] F2 (review of 6d77aa7) through a real boot: a pre-S8a file
   const setNull = (where, name) => { const s = new DatabaseSync(path.join(where, 'scoutbox.db')); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run(name, 'null'); s.close(); };
   // a pre-S8a file produced by this build's own rollback tool (no old build needed), one collection set to null
   for (const name of ['trials', 'requests']) {
-    const pre = tempDir(`s8a-f2-${name}`); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), dir, pre], { stdio: 'pipe' }); assert.equal(live(pre), false); setNull(pre, name);
+    const mid = tempDir(`s8a-f2-${name}-mid`); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), dir, mid], { stdio: 'pipe' }); // the S8b tool first (a live file carries 0016)
+    const pre = tempDir(`s8a-f2-${name}`); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), mid, pre], { stdio: 'pipe' }); assert.equal(live(pre), false); setNull(pre, name);
     const first = await refusedBoot(pre, name, `${name}: first boot`); const second = await refusedBoot(pre, name, `${name}: second boot`); assert.deepEqual(second, first, `${name}: the next boot refuses the same way`);
     rm(pre);
   }

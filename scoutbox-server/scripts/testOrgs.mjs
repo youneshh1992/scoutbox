@@ -24,6 +24,7 @@ import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
 import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
 import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
+import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
@@ -39,7 +40,7 @@ const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
 // S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(file, s8a); /* S8a: the file carries 0015; its rollback (copy-only, requests and trials written back as blobs) goes first */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
+const preS6b = (file) => { const s8b = tempDir('s8b-to-s8a'); rollbackRecruitmentCasesCopy(file, s8b); /* S8b: the file carries 0016; its rollback (copy-only, the cases and the four room collections written back as blobs) goes first */ const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(path.join(s8b, 'scoutbox.db'), s8a); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 // TEST_ONLY=<substring> runs the matching checks alone (reproductions and reviews); unset, every check runs.
@@ -657,7 +658,7 @@ await atest('server: an S2 database boots and cuts over; registration, settings,
   // A Room owned by a live organisation: the boot integrity report must still
   // see the organisation on every boot after the cutover (regression: it ran
   // before the data layer attached and called every Room an orphan).
-  seed.recruitmentCases = [{ id: 'case-s3', orgId: 'org-eastport', playerId: seed.players[0].id, room: { status: 'watching', rev: 1 } }];
+  seed.recruitmentCases = [{ id: 'case-s3', orgId: 'org-eastport', playerId: seed.players[0].id, playerName: seed.players[0].name, ownerUserId: 'usr-legacy', ownerName: 'Maria Keane', stage: null, priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: { status: 'watching', rev: 1 } }]; // S8b: a case literal (the identifiers 0016 keys on: ownerUserId → org_users, createdAt)
   // An S2 file: blobs saved by the snapshot store, then migrations 0001–0003 applied.
   openStore(dir).save({ savedAt: Date.now(), idCounter: 1000, db: seed });
   { const s = openRaw(dir); runDataMigrations(s, [m0001, m0002, m0003], { context: { sessionTtlMs: TTL } }); s.close(); }
@@ -683,7 +684,7 @@ await atest('server: an S2 database boots and cuts over; registration, settings,
     const maria = seed.sessions[0].token;
     assert.equal((await j('GET', '/org/notifications', undefined, maria)).status, 200, 'the staff session survived the org_users rebuild');
     const cap = await j('GET', '/capabilities');
-    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']);
+    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases']);
     assert.equal(cap.body.dataLayer.domains.orgs.mode, 'live'); assert.equal(cap.body.dataLayer.domains.orgs.rows, 5);
     assert.equal(cap.body.integrity.ok, true, `the boot integrity report sees the live organisations: ${JSON.stringify(cap.body.integrity.byCode)}`);
     assert.ok(cap.body.integrity.checked >= 6, 'the report counted the organisations and the Room');

@@ -89,7 +89,7 @@ test('migration 0010 (legacy blob): every dispatch is imported with its 18 field
   ];
   s7aFile(dir, { dispatches: legacy });
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s).ran, [DISPATCHES_MIGRATION, '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); // S7c: 0011 follows on the same run
+  assert.deepEqual(migrate(s).ran, [DISPATCHES_MIGRATION, '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases']); // S7c: 0011 follows on the same run
   assert.deepEqual(s.prepare('SELECT seq, id FROM dispatches ORDER BY seq').all().map((r) => [r.seq, r.id]), [[1, 'dsp-1'], [2, 'dsp-2'], [3, 'dsp-3'], [4, 'dsp-4']], 'the array position is the durable ordering key');
   assert.deepEqual(s.prepare('SELECT dispatch_seq, seq, kind, ok, error, note FROM dispatch_attempts ORDER BY dispatch_seq, seq').all().map((r) => [r.dispatch_seq, r.seq, r.kind, r.ok, r.error, r.note]), [
     [2, 0, 'quiet_recheck', null, null, 'quiet hours re-check'], [2, 1, 'send', 0, 'injected provider failure', null], [2, 2, 'send', 1, null, null],
@@ -355,7 +355,7 @@ test('rollback (copy-only): every dispatch and every attempt is written back int
   assert.equal(applied(o).includes(DISPATCHES_MIGRATION), false); assert.equal(meta(o, DISPATCHES_CUTOVER_META), undefined); assert.equal(Number(meta(o, 'saveSeq')), Number(meta(openRaw(src), 'saveSeq')) + 1);
   assert.equal(o.prepare('PRAGMA integrity_check').get().integrity_check, 'ok'); assert.ok(tableExists(o, 'notifications'), 'the S7a tables are untouched');
   // Re-upgrade: the real migration brings the copy back to the same rows.
-  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [DISPATCHES_MIGRATION, '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); // S7c: the rollback copy predates 0011 too
+  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [DISPATCHES_MIGRATION, '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases']); // S7c: the rollback copy predates 0011 too
   assert.equal(JSON.stringify(bare(o).exportRows()), JSON.stringify(back), 'the same rows after the re-upgrade'); assert.equal(JSON.parse(meta(o, DISPATCHES_CUTOVER_META)).dispatches.orphanReferences, 1);
   o.close();
   // The S7a tool refuses a 0010 file: no partial downgrade.

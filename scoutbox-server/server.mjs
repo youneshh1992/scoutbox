@@ -199,7 +199,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -4626,7 +4626,7 @@ function revokeOrgUserAccess(userId) {
 
 registerM12({
   db, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4638,7 +4638,7 @@ registerM12({
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
   db, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4727,7 +4727,7 @@ const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4842,6 +4842,7 @@ const agentIntegration = {};
 const m23Ctx = registerM23({
   agentIntegration,
   recruitmentEvidenceProvider: recruitmentEvidence,
+  recruitmentCases, // S8b: the formal decision row enters through the repository (and leaves it on a transport failure)
   ...m19Ctx,
   isAdult,
   // M17's room seams live on the object registerM17 returned; registerM18

@@ -1520,9 +1520,10 @@ implementation record; `docs/architecture/sql/02_recruitment.sql` the DDL):
   (`/capabilities` → `dataLayer.domains.recruitment.unresolvedPlayerReferences`
   and `retainedPlayerReferences`; `meta.recruitmentCutover.players` at
   import), never refused, fabricated or deleted. `case_id` on both tables:
-  NO key until S8b, STRICT in code (Q7b) — every write, import and snapshot
-  refuses with ids only a case id that is not in the FINAL `recruitmentCases`
-  collection (`RECRUITMENT_CASE_MISSING`). `guardian_id` and
+  since migration `0016` (S8b) a REAL key to `recruitment_cases` (RESTRICT —
+  Q7b's conversion) and still STRICT in code (Q7b) — every write, import and
+  snapshot refuses with ids only a case id that is not in the FINAL
+  `recruitmentCases` collection (`RECRUITMENT_CASE_MISSING`). `guardian_id` and
   `recipient_guardian_id`: NO key, STRICT in code (Q7c) — a guardian that does
   not exist is refused (`RECRUITMENT_GUARDIAN_MISSING`); an identity-only save
   that removes the guardian a minor's invitation names is refused whole.
@@ -1636,13 +1637,155 @@ two blobs leave every save and a changed record lands as its own rows, but the
 change tracking still serialises every record per save, so the save time is
 unchanged within noise, the boot is slower (sixteen tables decoded) and the
 file is larger (plan §D.8.7); the whole-snapshot-write objective is not met.
-**S8b (cases, rooms, decisions) is prepared, not implemented** — nothing of it
-runs in this build; `docs/architecture/s8b-readiness-review.md` (plan §D.9) is
-the design for independent review (its write order corrected after the
-independent reviews of `57076a2` and `86342b8`; the corrected design awaits
-independent acceptance); the next free migration identifier is `0016`, reported, not
-reserved; `recruitmentCases` and the four room blobs
-stay blobs, and `case_id` stays the code-checked reference of Q7b.
+**S8b (cases, rooms, decisions) is implemented on top of this step** — see the
+next section; a live file carries `0016` beside `0015`, and the S8b rollback
+tool is the first link of the chain.
+
+### Recruitment cases, room comments, room snapshots, room decisions and room evidence states (live since migration `0016`, S8b — implemented 23 October 2026 on top of `4d2c74b` under the Founder's decision Q8a "Approve tolerant (Recommended)" of 23 October 2026, on the design of `docs/architecture/s8b-readiness-review.md` independently accepted at `4d2c74b`; IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE; not production-approved)
+
+- **What moved.** The five blob collections `recruitmentCases` (the M12 case
+  with its M17 Room facet, assignments, tasks, approvals, history, links, the
+  M23 decision draft, the M27 transaction handoff and the M13 budget — one
+  aggregate), `roomComments`, `roomSnapshots`, `roomDecisions` and
+  `roomEvidenceState` are twenty-five tables: `recruitment_cases` and its
+  fifteen owned child tables, `room_comments` + `room_comment_mentions`,
+  `room_snapshots` + `room_snapshot_source_refs`, `room_decisions` + three
+  child tables, `room_evidence_states`; the drafts' and handoffs' and formal
+  decisions' `keys` are rows of the ONE shared `idempotency_keys` table, whose
+  owner CHECK migration `0016` broadens. On the same step
+  `recruitment_requests.case_id` and `trials.case_id` become REAL keys to
+  `recruitment_cases` (Q7b's conversion; the two parents are rebuilt
+  create-copy-drop-recreate with every row and its `seq`). Nothing of the
+  routes changed: every reader still reads `db.recruitmentCases` /
+  `db.roomComments` / … (read-only ARRAY views of the plain, mutable records),
+  every in-place edit a route makes lands in the same save it landed in
+  before (a room creation, a status move with its snapshot, a comment, a task,
+  a draft, a formal decision, an evidence review, a budget scenario, a handoff
+  — each in its route's `persistNow()`; the deletion unit's tombstone in the
+  unit's commit), a new record enters through `recruitmentCases.addCase` /
+  `addComment` / `addSnapshot` / `addDecision` / `addEvidenceState` (the former
+  `push` sites) and the finalize route's transport-failure splice through
+  `removeDecision`. Lossless as S8a: every scalar a column of the writer's
+  nullability, nested objects as columns, lists as position-keyed child tables
+  (a legacy duplicate link or tag kept), absent / null / off-type / unknown
+  fields kept on every row, both history literals side by side, the
+  decision's full snapshot copy and the snapshot's note stored as written,
+  `deadline` and `dueAt` as JSON columns (any client value, never parsed).
+- **References (the approved scope).** `player_id` on `recruitment_cases`,
+  `room_snapshots`, `room_decisions` and `case_transaction_handoffs`: NO key,
+  TOLERANT (Q8a, 23 October 2026) — a live id resolves, a retained id resolves
+  to the retained record, a historically missing id is preserved and counted
+  (`/capabilities` → `dataLayer.domains.recruitmentCases
+  .unresolvedPlayerReferences` and `retainedPlayerReferences`, one count per
+  table; `meta.recruitmentCasesCutover.players` at import), never refused,
+  fabricated or deleted. `org_id` → `orgs` and the owner, lead, decision-by,
+  assignee and comment-author staff ids → `org_users`: real RESTRICT keys,
+  named with ids before the engine would (`RECRUITMENT_CASES_ORG_MISSING`,
+  `RECRUITMENT_CASES_USER_MISSING`). The four room tables' `room_id` →
+  `recruitment_cases` RESTRICT: a case still named by a RETAINED comment,
+  snapshot, decision, evidence state, request or trial cannot be removed by a
+  snapshot write (`CASE_STILL_REFERENCED`, the table and ids named at the
+  preflight); a SUPPLIED collection removes its own rows before the case. A
+  case's link to a request or trial outside the final collections is refused
+  (`CASE_LINK_DANGLING`), a room row naming an unknown case too
+  (`ROOM_CASE_MISSING`), a decision chain naming a decision outside the final
+  rows too (`DECISION_CHAIN_BROKEN`). `case_history` keeps its RESTRICT key:
+  the owned history of a departing case is removed explicitly before the
+  parent (every other owned child cascades); an owned child never blocks. The
+  drafted one-open-room index is withdrawn: `ROOM_EXISTS` stays the route's
+  rule and the boot integrity audit keeps `ROOM_OPEN_DUPLICATE`.
+- **The write order** (the review's §6, through four save hooks around the
+  recruitment and channels hooks): the preflight against the FINAL graph →
+  the cases with their owned children → the release of the link rows the S8a
+  phases would hit (memorised verbatim) → the S8a phases → the links back →
+  the room rows → the channels → the removed room rows → the S8a request prune
+  → the removed cases (history and key rows explicitly, then the parent) → the
+  staff and organisations → the final assertions and `foreign_key_check`.
+  Every refusal rolls the whole save back with ids only; a failed ordinary
+  save keeps its pending edits in memory for the next save; an aborted unit of
+  work restores the five mirrors in place (a held room facet, draft or history
+  list reads the pre-unit value).
+- **Cutover (migration `0016`, one transaction, foreign keys off while the two
+  parents and the key table are rebuilt, `foreign_key_check` empty before
+  COMMIT).** Creates the twenty-five tables; broadens the key table's CHECK;
+  imports the five blobs through the same preflight as a snapshot write
+  (every entry's identifiers — id, orgId, ownerUserId, playerId, createdAt on
+  a case; id, roomId, orgId on a room row; authorId on a comment —, no
+  duplicate id, every link naming a request/trial of the S8a tables, every
+  room row naming a case of the file, the decision chain, every organisation
+  and staff id in its table; the player ids counted live / retained / missing
+  and never refused) in array order; rebuilds the two parents with the case
+  key; retires the five blob rows; records counts in
+  `meta.recruitmentCasesCutover`. ANY refusal aborts the whole migration with
+  `RECRUITMENT_CASES_IMPORT_BLOCKED` naming the specific refusal with
+  positions, tables and ids (never a name, a note or a body): the boot stops,
+  the blobs and the revision are untouched, the next boot refuses the same
+  way. A PRESENT `null` blob is refused like an object or a string; only a
+  genuinely absent blob imports nothing. A file whose requests or trials name
+  a case outside the file is refused at `0015` first (Q7b) and never reaches
+  `0016`. No production writer produces a refused row; nothing is dropped or
+  repaired. The boot log states the counts; `/capabilities` reports
+  `dataLayer.domains.recruitmentCases` (`mode: 'live'`, `rows`,
+  `pendingWrites`, the two player-reference counts, the reference policy).
+  The admin backup exports the five collections in their legacy shapes
+  (insertion order, lists in list order, keys reassembled); a restore into a
+  new directory imports them through `0016` row for row.
+- **Rollback — copy-only, and the one way back.** `npm run
+  rollback:recruitment-cases -- <data-dir> <fresh-empty-dir>`
+  (`scripts/recruitmentCasesRollback.mjs`) opens the file read-only, copies
+  it, writes every case, comment, snapshot, decision and evidence state back
+  into the five legacy blobs in insertion order in the writers' literals
+  (every nested list and object in list order, keys reassembled, every
+  absent, null, off-type and unknown field as recorded), recreates
+  `recruitment_requests` and `trials` in their `0015` definitions without the
+  case key (every row with its `seq`) and `idempotency_keys` with the `0015`
+  owner CHECK (the S8b owners' rows live in the blobs' `keys` now), drops the
+  twenty-five tables, removes the `0016` record and its meta key, advances the
+  save revision, checks every foreign key, VACUUMs and revalidates the copy
+  (the five blobs holding exactly the counts the tables held, the two parents
+  and the S8a key rows row for row, every other table exactly as in the
+  source). **Nothing written since the cutover is lost.** Exit codes: 0 done,
+  1 usage / output not empty, 4 a later schema step, 5 never applied `0016`,
+  10 a recorded `0016` whose tables are missing. To go further back, run
+  `scripts/recruitmentRollback.mjs` on THIS tool's output (it refuses a file
+  carrying `0016`), then the S4b-R tool, and so on down the chain.
+  Re-upgrading the copy (booting this build on it) imports the blobs back as
+  the same rows, the writes the previous build made on the copy included —
+  proven on the actual accepted `7a7efc6` build (`SCOUTBOX_PRE_S8B_SERVER`,
+  `scripts/testRecruitmentCasesServer.mjs`: it serves the same room, thread
+  and decision from its blobs, writes a comment and a case into them, and this
+  build re-upgrades the copy with those writes exactly).
+- **DANGER — never boot the previous build directly on a `0016` file.**
+  Measured on the actual `7a7efc6` build: the migration runner skips the
+  record it does not know, the build finds none of the five blobs (the rows
+  are invisible to it), its boot-contract integrity check logs `INTEGRITY
+  STORE_MISSING recruitmentCases, roomComments, roomDecisions,
+  roomEvidenceState, roomSnapshots` — and then it **LISTENS** (unlike the S8a
+  case, its module registration gives it five empty containers): it serves no
+  case (`GET /org/rooms/:id` 404, `/org/rooms` empty), and its boot save writes
+  the five empty containers back as blobs beside the untouched tables (the
+  save revision advances; no table row changes). A club using that server
+  sees no recruitment at all. This build, started on that file again, drops
+  the stale empty blobs at attach and serves the tables again — but there is
+  still no way back to the old build except the rollback tool on a copy.
+  Never a restore over a live directory.
+
+**Cutover procedure** (the S8a pattern): 1. dry run on a copy of the live
+directory — boot this build with `DATA_DIR` pointing at the copy, check the
+boot log's `recruitment cases: cutover imported …` line (the counts per
+collection, the roomless cases, the absent / off-type / unknown counts, the
+player references live / retained / missing, the two parents and the key rows
+rebuilt) and that `/capabilities` reports `0016_recruitment_cases` and
+`domains.recruitmentCases.rows` equal to the blobs' counts; a refusal names
+the positions, tables and ids to fix by hand on the data; 2. back up (`POST
+/admin/backup`) and stop the server; 3. start this build — the boot records
+`0016` in its one transaction; 4. rollback, if needed, as above. **Not
+measured as faster, and not measured at all in this milestone:** the five
+blobs leave every save and a changed record lands as its own rows, but the
+change tracking still serialises every record per save; the bench was not
+run; the whole-snapshot-write objective is not met (contacts, offers,
+packages, signings, follow-ups and the later collections are still blobs —
+S8c, S8d).
 
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request

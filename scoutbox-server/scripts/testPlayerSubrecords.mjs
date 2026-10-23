@@ -33,7 +33,9 @@ import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
 import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
 import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
+import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
 import { readTrialsCollection, RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
+import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.mjs';
 import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
 import { PLAYER_SUBRECORDS_CUTOVER_META, BLOCKED } from '../repositories/migrations/0007_player_subrecords.mjs';
 import { orgPlayerView } from '../views/playerViews.mjs';
@@ -44,7 +46,7 @@ import {
   s3File, freshFile, openRaw, migrate, applied, blob, dump, meta, sessionRows, filesDigest, failRunAt, identityDump,
 } from './coreIdentityTestFixtures.mjs';
 // S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(file, s8a); /* S8a: the file carries 0015; its rollback (copy-only, requests and trials written back as blobs) goes first */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
+const preS6b = (file) => { const s8b = tempDir('s8b-to-s8a'); rollbackRecruitmentCasesCopy(file, s8b); /* S8b: the file carries 0016; its rollback (copy-only, the cases and the four room collections written back as blobs) goes first */ const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(path.join(s8b, 'scoutbox.db'), s8a); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -249,7 +251,7 @@ test('migration 0007 on an S4a file: creates the twelve tables, decodes every ro
   for (const t of SUBRECORD_TABLES) assert.equal(s.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(t), undefined);
   assert.equal(subrecordsLive(s), false);
   const result = migrate(s, { now: NOW });
-  assert.deepEqual(result.ran, [PLAYER_SUBRECORDS_MIGRATION, '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); assert.equal(subrecordsLive(s), true);
+  assert.deepEqual(result.ran, [PLAYER_SUBRECORDS_MIGRATION, '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases']); assert.equal(subrecordsLive(s), true);
   for (const t of SUBRECORD_TABLES) assert.ok(s.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(t), t);
   const record = JSON.parse(meta(s, PLAYER_SUBRECORDS_CUTOVER_META));
   assert.equal(record.players, 8); assert.equal(record.trialReportsCopiesDropped, 2); assert.equal(record.rows.player_media, 4, 'the seeded clip and the three rich ones'); assert.equal(record.rows.player_media_tags, 3); assert.equal(record.trialsBlobPresent, true);
@@ -264,7 +266,7 @@ test('migration 0007 on an S4a file: creates the twelve tables, decodes every ro
     assert.equal(f.medical?.records, undefined);
   }
   assert.equal(JSON.parse(s.prepare("SELECT facets_json FROM players WHERE id = 'pl-rich'").get().facets_json).medical.futureSub, 1, 'an unknown composite sub-key stays a facet');
-  assert.deepEqual(sessionRows(s), sessionsBefore); assert.equal(dump(s, { except: ['players', 'collections', 'meta', 'data_migrations', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', ...SUBRECORD_TABLES, ...RECRUITMENT_TABLES] }), others);
+  assert.deepEqual(sessionRows(s), sessionsBefore); assert.equal(dump(s, { except: ['players', 'collections', 'meta', 'data_migrations', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', ...SUBRECORD_TABLES, ...RECRUITMENT_TABLES, ...RECRUITMENT_CASES_TABLES] }), others);
   assert.deepEqual(readTrialsCollection(s).map((t) => t.id), trials().map((t) => t.id), 'the trials are kept (rows of `trials` since 0015, imported by the same boot)');
   assert.deepEqual(migrate(s, { now: NOW + DAY }).ran, [], 'never twice');
   assert.deepEqual(s.prepare('PRAGMA foreign_key_check').all(), []);
@@ -302,7 +304,7 @@ test('migration 0007 blocks the whole step, leaves the file byte-identical and r
   assert.throws(() => migrate(s, { now: NOW }), /BLOCKED/);
   const row = s.prepare("SELECT facets_json FROM players WHERE id = 'pl-rich'").get(); const f = JSON.parse(row.facets_json); f.media[0].title = 'Fixed by hand';
   s.prepare("UPDATE players SET facets_json = ? WHERE id = 'pl-rich'").run(JSON.stringify(f));
-  assert.deepEqual(migrate(s, { now: NOW }).ran, [PLAYER_SUBRECORDS_MIGRATION, '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']);
+  assert.deepEqual(migrate(s, { now: NOW }).ran, [PLAYER_SUBRECORDS_MIGRATION, '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases']);
   assert.equal(s.prepare("SELECT title FROM player_media WHERE id = 'med-r1'").get().title, 'Fixed by hand');
   s.close(); rm(dir);
 });
@@ -335,7 +337,7 @@ test('migration 0007: a first installation creates the tables and imports nothin
   assert.throws(() => migrate(s, { now: NOW }), /injected failure after the rows/); probe.restore();
   assert.equal(probe.fired, 1, 'the failure must actually have happened');
   assert.equal(dump(s), before, 'byte-identical: the tables, the rows and the first two facets rewrites are all gone');
-  assert.deepEqual(migrate(s, { now: NOW }).ran, [PLAYER_SUBRECORDS_MIGRATION, '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment']); assert.equal(count(s, 'player_media'), 4);
+  assert.deepEqual(migrate(s, { now: NOW }).ran, [PLAYER_SUBRECORDS_MIGRATION, '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases']); assert.equal(count(s, 'player_media'), 4);
   s.close(); rm(inj);
 });
 
@@ -580,7 +582,7 @@ test('rollback: the copy-only tool rebuilds the S4a representation — every arr
   const result = rollbackPlayerSubrecordsCopy(dbFile(s5Copy(src)), out);
   assert.equal(filesDigest(src)['scoutbox.db'], srcBefore['scoutbox.db'], 'the source main file is byte-identical');
   { const sIn2 = openRaw(src); assert.equal(dump(sIn2), logicalBefore, 'the source content is unchanged'); sIn2.close(); }
-  assert.equal(result.output, dbFile(out)); assert.equal(result.recordRemoved, true); assert.equal(result.players, 3); assert.equal(result.saveSeq, expected.saveSeq + 9); // S8a, S4b-R, S6b, S7d, S7c, S7b, S7a, S6a and this tool each advance the revision once assert.deepEqual(result.rows, expected.rows);
+  assert.equal(result.output, dbFile(out)); assert.equal(result.recordRemoved, true); assert.equal(result.players, 3); assert.equal(result.saveSeq, expected.saveSeq + 10); // S8b, S8a, S4b-R, S6b, S7d, S7c, S7b, S7a, S6a and this tool each advanced it once // S8a, S4b-R, S6b, S7d, S7c, S7b, S7a, S6a and this tool each advance the revision once assert.deepEqual(result.rows, expected.rows);
   assert.deepEqual(fs.readdirSync(out), ['scoutbox.db']);
   const o = openRaw(out);
   assert.deepEqual(applied(o), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions']);
@@ -595,7 +597,7 @@ test('rollback: the copy-only tool rebuilds the S4a representation — every arr
   assert.deepEqual(sessionRows(o), expected.sessions); assert.deepEqual(o.prepare('PRAGMA foreign_key_check').all(), []); assert.equal(o.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   assert.equal(count(o, 'media_deletions'), 0, 'the queue table stays (both builds have it)');
   // Round trip: the real migration cuts the copy over again.
-  assert.deepEqual(migrate(o, { now: NOW + DAY }).ran, [PLAYER_SUBRECORDS_MIGRATION, '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment'], 'the real migration brings the copy back (0008 follows, as the S6a copy had removed it)');
+  assert.deepEqual(migrate(o, { now: NOW + DAY }).ran, [PLAYER_SUBRECORDS_MIGRATION, '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases'], 'the real migration brings the copy back (0008 follows, as the S6a copy had removed it)');
   assert.equal(identityDump(o), expected.live, 'players, guardians and links identical to the pre-rollback live state, facets included');
   for (const x of SUBRECORD_TABLES) assert.equal(count(o, x), expected.rows[x], `${x} rows back`);
   const identity = createIdentityRepositories({ sqlite: o, now: () => NOW, trialReports: (id) => trialReportsFor(readTrialsCollection(o), id) }); identity.attach();

@@ -48,6 +48,7 @@ const MIGRATION = '0015_recruitment';
 let rec = null; let rollbackMod = null;
 try { rec = await import('../repositories/recruitment.mjs'); } catch { rec = null; }
 try { rollbackMod = await import('../repositories/recruitmentRollback.mjs'); } catch { rollbackMod = null; }
+const { rollbackRecruitmentCasesCopy } = await import('../repositories/recruitmentCasesRollback.mjs'); // S8b: a live file carries 0016; the S8a tool works on the S8b tool's output (the chain)
 const playerErasureRollbackMod = await import('../repositories/playerErasureRollback.mjs'); // the S4b-R tool: the rollback chain's previous link
 const needRec = () => { assert.ok(rec?.createRecruitmentRepository, 'repositories/recruitment.mjs exports createRecruitmentRepository (the S8a-core repository module)'); return rec; };
 const needRollback = () => { assert.ok(rollbackMod?.rollbackRecruitmentCopy, 'repositories/recruitmentRollback.mjs exports rollbackRecruitmentCopy (the S8a-core rollback module)'); return rollbackMod.rollbackRecruitmentCopy; };
@@ -83,7 +84,7 @@ function serverOpen(dir, { warnings = [], cases } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const loaded = store.load();
   const db = { ...loaded.db, players: [], guardians: [] };
-  if (cases !== undefined) db.recruitmentCases = cases;
+  void cases; // S8b: the cases are a table-backed collection now — the file's recruitmentCases blob (the fixture's CASES()) was imported by 0016 and is served by the repository's view; nothing is assigned on db
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
   const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
   return { store, layer, db, warnings, snapshot, save: () => store.save(snapshot()), revision: () => store.revision(), repo: layer.recruitment, close: () => store.sqlite.close() };
@@ -99,14 +100,14 @@ function snapshotOpen(dir) {
 
 // ------------------------------------------------------------- the migration
 test('[cutover] migration 0015 is registered last and, on an S4b-R file, creates the fifteen recruitment tables and rebuilds channels with the real request key (RESTRICT) while every thread, message and attachment survives byte for byte; imports both blobs row for row and retires them; records counts only; the pre-P4B trial whose request has no trialId key is counted as a legacy pair; reruns are no-ops; a file without the blobs creates the tables and imports nothing — never from the seed or memory', () => {
-  assert.equal(DATA_MIGRATIONS.at(-1)?.id, MIGRATION, 'the last registered migration is 0015_recruitment');
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).slice(-2), [MIGRATION, '0016_recruitment_cases'], '0015_recruitment is registered after 0014; 0016_recruitment_cases (S8b) follows it and runs on the same boot');
   assert.ok(TABLE_BACKED.includes('requests') && TABLE_BACKED.includes('trials'), 'requests and trials are table-backed collections');
   const dir = tempDir('s8a-mig'); preS8aFile(dir, FIX());
   const s = openRaw(dir);
   const channelsBefore = JSON.stringify([s.prepare('SELECT * FROM channels ORDER BY seq').all(), s.prepare('SELECT * FROM messages ORDER BY seq').all(), s.prepare('SELECT * FROM message_attachments ORDER BY message_id').all()]);
   const requestsBlob = blob(s, 'requests'); const trialsBlob = blob(s, 'trials');
   const ran = migrateAll(s);
-  assert.deepEqual(ran.ran, [MIGRATION]);
+  assert.deepEqual(ran.ran, [MIGRATION, '0016_recruitment_cases'], '0016 (S8b) runs on the same boot');
   for (const t of TABLES) assert.ok(tableExistsIn(s, t), `${t} exists`);
   assert.ok(fkTargets(s, 'channels').some((f) => f.startsWith('request_id->recruitment_requests(id) RESTRICT')), `channels.request_id is a real key: ${fkTargets(s, 'channels')}`);
   assert.equal(JSON.stringify([s.prepare('SELECT * FROM channels ORDER BY seq').all(), s.prepare('SELECT * FROM messages ORDER BY seq').all(), s.prepare('SELECT * FROM message_attachments ORDER BY message_id').all()]), channelsBefore, 'the threads survive the rebuild byte for byte');
@@ -138,7 +139,7 @@ test('[cutover] the mapping is lossless for every writer shape: the P4B invitati
   const t4 = workedTrial({ id: 'trial-worked', requestId: 'req-worked', unknownTop: [1, 2], schedule: { ...workedTrial().schedule, unknownInSchedule: 'x', sessions: [{ ...workedTrial().schedule.sessions[0], extraOnSession: true }] }, history: [{ id: 'aud-x', at: 1, action: 'a', by: null, detail: 'a string detail', extraOnEntry: 1 }], reportDueAt: 'soon', completion: { state: 'completed', at: 5, by: { kind: 'system' }, reason: null, phase: 'scheduled' } });
   const t5 = cancelledTrial(); const t6 = { ...scheduledTrial({ id: 'trial-tomb', requestId: 'req-tomb', caseId: 'case-x' }), playerName: null, notes: '', subjectRemovedAt: T.removed }; // case-x: trial-acc already holds case-1's open slot
   const trials = [t1, t2, t3, t4, t5, t6];
-  const dir = tempDir('s8a-map'); preS8aFile(dir, { requests: persisted(requests), trials: persisted(trials), cases: [...CASES(), { id: 'case-x' }], channels: [] });
+  const dir = tempDir('s8a-map'); preS8aFile(dir, { requests: persisted(requests), trials: persisted(trials), cases: [...CASES(), { ...CASES()[0], id: 'case-x', playerId: 'pl-child2', playerName: 'Child pl-child2' }], channels: [] }); // case-x a full case literal: since S8b (0016) the cases blob is imported into recruitment_cases on the same run
   const s = openRaw(dir); migrateAll(s);
   const backR = readRequests(s); const backT = readTrials(s);
   assert.deepEqual(backR, persisted(requests)); assert.deepEqual(backT, persisted(trials));
@@ -385,10 +386,11 @@ test('[cutover] F1 (review of 6d77aa7): every idempotency action is preserved lo
     const before = withRo(dir, recDump); L.save(); assert.equal(withRo(dir, recDump), before, 'an unchanged save rewrites nothing (the fingerprint sees the prototype-named act)'); L.close();
     const again = serverOpen(dir, { cases: CASES() }); checkKeys('reopen', plain(again.db.requests[0]), plain(again.db.trials[0])); again.close(); }
   // the rollback copy carries them in the blobs; the re-upgrade reproduces them
-  const out = tempDir('s8a-f1-out'); rollback(dbFile(dir), out, { now: NOW });
+  const s8bF1 = tempDir('s8a-f1-s8b'); rollbackRecruitmentCasesCopy(dbFile(dir), s8bF1, { now: NOW }); // S8b: the file carries 0016 — its rollback goes first (the chain)
+  const out = tempDir('s8a-f1-out'); rollback(dbFile(s8bF1), out, { now: NOW });
   withRo(out, (c) => { checkKeys('rollback blob', blob(c, 'requests')[0], blob(c, 'trials')[0]); assert.deepEqual(blob(c, 'requests')[1].keys, expectR[1].keys); });
   { const up = openRaw(out); migrateAll(up); checkKeys('re-upgrade', readRequests(up)[0], readTrials(up)[0]); up.close(); }
-  rm(dir, out);
+  rm(dir, out, s8bF1);
 });
 
 test('[cutover] F2 (review of 6d77aa7): a PRESENT null blob — requests or trials — refuses the cutover with RECRUITMENT_IMPORT_BLOCKED like an object, a string or a number: no table created, the blob, the record, saveSeq and every other row untouched, no transaction left open, the next attempt refused the same way; a genuinely ABSENT blob and an explicit [] still import nothing and cut over', () => {
@@ -426,7 +428,11 @@ test('[cutover] the copy-only rollback: the source is never modified; the copy g
   const sourceState = () => ({ main: sha(dbFile(d)), walBytes: walBytes(), logical: withRo(d, fullDump), saveSeq: withRo(d, (s) => meta(s, 'saveSeq')) });
   const sourceBefore = sourceState(); assert.equal(sourceBefore.walBytes, 0, 'the boundary: no frame outside the main file before the tool runs');
   const out = tempDir('s8a-rb-out');
-  const result = rollback(dbFile(d), out, { now: NOW });
+  // S8b: the live file carries 0016; this tool refuses it (LATER_SCHEMA) and works on the S8b rollback copy — the chain — whose five blobs ride along untouched
+  { const o = tempDir('s8a-rb-refused'); assert.throws(() => rollback(dbFile(d), o, { now: NOW }), (e) => e.code === 'LATER_SCHEMA' && /0016_recruitment_cases/.test(e.message)); assert.equal(fs.readdirSync(o).length, 0); }
+  const s8b = tempDir('s8a-rb-s8b'); rollbackRecruitmentCasesCopy(dbFile(d), s8b, { now: NOW }); const s8bState = withRo(s8b, fullDump);
+  const result = rollback(dbFile(s8b), out, { now: NOW });
+  assert.equal(withRo(s8b, fullDump), s8bState, 'the S8b copy (this tool\'s source) is untouched');
   assert.equal(result.requests, expectedR.length); assert.equal(result.trials, expectedT.length);
   assert.deepEqual(sourceState(), sourceBefore, 'the source is untouched: the same main-file bytes, no WAL frame written, the same logical content of every table, the same revision');
   withRo(d, (s) => assert.ok(tableExistsIn(s, 'trials'), 'the source still carries the tables (it was never rolled back in place)'));
@@ -445,9 +451,9 @@ test('[cutover] the copy-only rollback: the source is never modified; the copy g
   const notCut = tempDir('s8a-notcut'); preS8aFile(notCut, FIX()); const o2 = tempDir('s8a-o2'); assert.throws(() => rollback(dbFile(notCut), o2, { now: NOW }), (e) => e.code === 'NOT_CUT_OVER'); assert.equal(fs.readdirSync(o2).length, 0);
   fs.writeFileSync(path.join(o2, 'x'), ''); assert.throws(() => rollback(dbFile(d), o2, { now: NOW }), (e) => e.code === 'OUTPUT_NOT_EMPTY');
   // an injected failure before the tool's COMMIT: no output left behind, the source still untouched
-  const o3 = tempDir('s8a-o3'); assert.throws(() => rollback(dbFile(d), o3, { now: NOW, _failBeforeCommit: true }), /synthetic commit failure/); assert.equal(fs.readdirSync(o3).length, 0, 'the failed run removed its output'); assert.deepEqual(sourceState(), sourceBefore, 'after the injected failure the source is still untouched');
+  const o3 = tempDir('s8a-o3'); assert.throws(() => rollback(dbFile(s8b), o3, { now: NOW, _failBeforeCommit: true }), /synthetic commit failure/); assert.equal(fs.readdirSync(o3).length, 0, 'the failed run removed its output'); assert.deepEqual(sourceState(), sourceBefore, 'after the injected failure the source is still untouched');
   // re-upgrade
   const up = openRaw(out); migrateAll(up); assert.deepEqual(rec.readRequests(up), expectedR); assert.deepEqual(rec.readTrials(up), expectedT); up.close();
-  rm(d, out, chain, notCut, o2, o3);
+  rm(d, out, chain, notCut, o2, o3, s8b);
 });
 console.log(`\n${passed} recruitment checks passed`);

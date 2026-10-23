@@ -26,7 +26,9 @@ import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
 import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
 import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
 import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
+import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
 import { RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
+import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
 import * as m0005 from '../repositories/migrations/0005_core_identity_live.mjs';
@@ -36,7 +38,7 @@ import {
   s3File, freshFile, openRaw, migrate, applied, isLive, blob, blobText, meta, sessionRows, links, dump, identityDump, filesDigest,
 } from './coreIdentityTestFixtures.mjs';
 // S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(file, s8a); /* S8a: the file carries 0015; its rollback (copy-only, requests and trials written back as blobs) goes first */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
+const preS6b = (file) => { const s8b = tempDir('s8b-to-s8a'); rollbackRecruitmentCasesCopy(file, s8b); /* S8b: the file carries 0016; its rollback (copy-only, the cases and the four room collections written back as blobs) goes first */ const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(path.join(s8b, 'scoutbox.db'), s8a); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -94,7 +96,7 @@ function liveDatabaseWithHistory(dir) {
   store.unitOfWork(() => { identity.players.insert({ ...child('pl-unit', 'gd-primary', '2018-02-02'), name: 'Unit Child' }); db.vouches.push({ id: 'vch-2', status: 'in-unit' }); }, { snapshot });
   const minted = layer.sessions.create('guardian', 'gd-new');
   store.save(snapshot());
-  const expected = { players: JSON.parse(JSON.stringify(db.players)), guardians: JSON.parse(JSON.stringify(db.guardians)), live: identityDump(store.sqlite), sessions: sessionRows(store.sqlite), minted: minted.token, others: dump(store.sqlite, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', ...SUBRECORD_TABLES, ...RECRUITMENT_TABLES] }), blobs: Object.fromEntries(['users', 'sessions', 'orgs', 'vouches'].map((n) => [n, blobText(store.sqlite, n)])), saveSeq: Number(meta(store.sqlite, 'saveSeq')) };
+  const expected = { players: JSON.parse(JSON.stringify(db.players)), guardians: JSON.parse(JSON.stringify(db.guardians)), live: identityDump(store.sqlite), sessions: sessionRows(store.sqlite), minted: minted.token, others: dump(store.sqlite, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', ...SUBRECORD_TABLES, ...RECRUITMENT_TABLES, ...RECRUITMENT_CASES_TABLES] }), blobs: Object.fromEntries(['users', 'sessions', 'orgs', 'vouches'].map((n) => [n, blobText(store.sqlite, n)])), saveSeq: Number(meta(store.sqlite, 'saveSeq')) };
   store.sqlite.close();
   return expected;
 }
@@ -125,11 +127,11 @@ test('rollback: the copy holds every post-S4 player, guardian and link in the tw
   assertSourceUntouched(src, srcBefore, logicalBefore, 'after a successful rollback');
   // The result.
   assert.equal(result.output, dbFile(out)); assert.equal(result.recordRemoved, true);
-  assert.equal(result.players, 6, 'five fixture players − the removed adult + the new child + the unit child'); assert.equal(result.guardians, 4); assert.equal(result.links, 6, 'five fixture links + the new child + the co link − the unlink − the ageUp + the unit child'); assert.equal(result.sessions, 4); assert.equal(result.saveSeq, expected.saveSeq + 10, 'the S8a tool advanced the revision once, the S4b-R tool once, the S6b tool once, the S7d tool once, the S7c tool once, the S7b tool once, the S7a tool once, the S6a tool once, the S5 tool once, this tool once more'); assert.ok(true, 'the S5 tool advanced the revision once, this tool once more');
+  assert.equal(result.players, 6, 'five fixture players − the removed adult + the new child + the unit child'); assert.equal(result.guardians, 4); assert.equal(result.links, 6, 'five fixture links + the new child + the co link − the unlink − the ageUp + the unit child'); assert.equal(result.sessions, 4); assert.equal(result.saveSeq, expected.saveSeq + 11, 'the S8b tool advanced the revision once, the S8a tool once, the S4b-R tool once, the S6b tool once, the S7d tool once, the S7c tool once, the S7b tool once, the S7a tool once, the S6a tool once, the S5 tool once, this tool once more'); assert.ok(true, 'the S5 tool advanced the revision once, this tool once more');
   assert.deepEqual(fs.readdirSync(out), ['scoutbox.db'], 'one file, no WAL leftovers after VACUUM');
   const o = openRaw(out);
   assert.deepEqual(applied(o), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live']);
-  assert.equal(meta(o, CORE_IDENTITY_INIT_META), undefined); assert.equal(meta(o, m0005.CORE_IDENTITY_CUTOVER_META), undefined); assert.equal(Number(meta(o, 'saveSeq')), expected.saveSeq + 10); // S8a, S4b-R, S6b, S7d, S7c, S7b, S7a, S6a, S5 and this tool each advanced it once
+  assert.equal(meta(o, CORE_IDENTITY_INIT_META), undefined); assert.equal(meta(o, m0005.CORE_IDENTITY_CUTOVER_META), undefined); assert.equal(Number(meta(o, 'saveSeq')), expected.saveSeq + 11); // S8b, S8a, S4b-R, S6b, S7d, S7c, S7b, S7a, S6a, S5 and this tool each advanced it once
   // The blobs: exactly what the repositories served after the history (byte-identical records, childIds in link order).
   const players = blob(o, 'players'); const guardians = blob(o, 'guardians');
   assert.equal(JSON.stringify(players), JSON.stringify(expected.players), 'the players blob equals the live view, record for record');
@@ -148,7 +150,7 @@ test('rollback: the copy holds every post-S4 player, guardian and link in the tw
   for (const t of ['players', 'guardians', 'guardian_children']) { assert.equal(o.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${t} empty`); assert.equal(isLive(o, t), false, `${t} is the shadow definition`); }
   // Untouched: sessions (the minted one included), staff, organisations, other blobs (the post-S4 blob edit kept).
   assert.deepEqual(sessionRows(o), expected.sessions); assert.ok(o.prepare('SELECT 1 FROM sessions WHERE token_hash = ?').get(sha256(expected.minted)));
-  assert.equal(dump(o, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', ...SUBRECORD_TABLES, ...RECRUITMENT_TABLES] }), expected.others);
+  assert.equal(dump(o, { except: ['players', 'guardians', 'guardian_children', 'collections', 'meta', 'data_migrations', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', 'blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue', ...SUBRECORD_TABLES, ...RECRUITMENT_TABLES, ...RECRUITMENT_CASES_TABLES] }), expected.others);
   for (const [n, text] of Object.entries(expected.blobs)) assert.equal(blobText(o, n), text, `${n} blob untouched`);
   assert.equal(blob(o, 'vouches')[0].status, 'post-s4'); assert.equal(blob(o, 'vouches')[1].id, 'vch-2');
   assert.deepEqual(o.prepare('PRAGMA foreign_key_check').all(), []); assert.equal(o.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');

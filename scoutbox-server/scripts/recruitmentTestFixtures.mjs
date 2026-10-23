@@ -96,7 +96,9 @@ export const workedTrial = (over = {}) => {
 export const cancelledTrial = (over = {}) => scheduledTrial({ id: 'trial-cancelled', requestId: 'req-cancelled', workflowState: 'cancelled', completion: { state: 'cancelled', at: T.accepted + DAY, by: who('player', 'pl-adult', 'Adult Signup'), reason: 'Injured', phase: 'scheduled', cancelledBy: 'player' }, keys: { accept: { key: null, fp: 'fp-x' }, cancel: [{ key: 'k-cancel-1', fp: 'fp-cx', at: T.accepted + DAY }] }, rev: 2, revAt: T.accepted + DAY, revBy: null, ...over });
 
 /** The recruitmentCases blob entries the strict case references (Q7b) resolve against: ids only matter here. */
-export const CASES = () => [{ id: 'case-1', orgId: ORG.id, playerId: 'pl-adult', playerName: 'Adult Signup', stage: 'trial', links: { requestIds: ['req-p4b'], trialIds: ['trial-1'], signingId: null }, history: [] }, { id: 'case-2', orgId: ORG.id, playerId: 'pl-child1', playerName: 'Child pl-child1', stage: 'trial', links: { requestIds: ['req-minor'], trialIds: [], signingId: null }, history: [] }];
+/** The cases the strict case references (Q7b) resolve against: since S8b (migration 0016) a table-backed collection imported on the same run, so each is a full case literal (m12/scouting.mjs:450) with EMPTY links — these fixtures vary the requests and trials freely and a case link would have to name one of them. */
+const caseLiteral = (over) => ({ id: 'case-1', orgId: ORG.id, playerId: 'pl-adult', playerName: 'Adult Signup', vacancyId: null, ownerUserId: SCOUT.userId, ownerName: SCOUT.name, stage: 'trial', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: T.invited - DAY, history: [], room: null, budget: null, ...over });
+export const CASES = () => [caseLiteral({ id: 'case-1' }), caseLiteral({ id: 'case-2', playerId: 'pl-child1', playerName: 'Child pl-child1' })];
 
 /** JSON-persisted shape (what the blob held): a live `undefined` is absence. */
 export const persisted = (v) => JSON.parse(JSON.stringify(v));

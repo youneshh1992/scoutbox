@@ -70,9 +70,29 @@
 --     and a value act with a string key — verbatim in entry_json, keyed
 --     (owner_table, owner_id, position); trials.keys.accept {key: null, fp}
 --     stays on the trial row (extra_json.keys.accept) exactly as written.
--- The remaining tables of this file (recruitment_cases and its children, the
--- Room components, contacts, offers, signing packages, signings, follow-ups)
--- are DRAFTS, unchanged, for S8b and later.
+-- STATUS (S8b, 23 October 2026; IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE —
+-- the design independently accepted at 4d2c74b, docs/architecture/
+-- s8b-readiness-review.md; the Founder's explicit Q8a answer of 23 October 2026,
+-- "Approve tolerant (Recommended)"): the twenty-five definitions below marked
+-- "LIVE since migration 0016_recruitment_cases (REGISTERED — IMPLEMENTED,
+-- PENDING INDEPENDENT ACCEPTANCE)" — recruitment_cases and its fifteen owned
+-- child tables, room_comments, room_comment_mentions, room_snapshots,
+-- room_snapshot_source_refs, room_decisions and its three child tables,
+-- room_evidence_states — are the DDL migration 0016 creates
+-- (repositories/recruitmentCases.mjs generates it from the writers' shapes with
+-- the S8a engine; scripts/testSchemaDdl.mjs checks this file against the
+-- migration column for column and index for index). On the same step
+-- recruitment_requests and trials are REBUILT with the real case_id key to
+-- recruitment_cases (Q7b's conversion, RESTRICT) and idempotency_keys with its
+-- owner CHECK broadened to the S8b owners (recruitment_cases,
+-- case_decision_drafts, case_transaction_handoffs, room_decisions): the
+-- definitions below carry both. The S8a rules above apply unchanged (the same
+-- nullability, the three lossless columns, position-keyed children, raw_json);
+-- what S8b changed against ITS drafts is stated in each section's "draft versus
+-- implemented" note. Player references: NO key, tolerant and counted (Q8a).
+-- The remaining tables of this file (contacts, offers, signing packages,
+-- signings, follow-ups, outcome reports) are DRAFTS, unchanged, for S8c and
+-- later; their drafted keys to recruitment_cases are not created.
 -- =============================================================================
 -- =============================================================================
 -- idempotency_keys — LIVE since migration 0015_recruitment (S8a-core, REGISTERED — independently
@@ -92,7 +112,7 @@
 --   different fp is a conflict. ref_id / actor_id of the drafted seven-column shape are not columns
 --   yet: a later step's owners that need them read them from entry_json or add the columns.
 CREATE TABLE idempotency_keys (
-  owner_table                      TEXT NOT NULL CHECK (owner_table IN ('recruitment_requests', 'trials')),
+  owner_table                      TEXT NOT NULL CHECK (owner_table IN ('recruitment_requests', 'trials', 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions')),
   owner_id                         TEXT NOT NULL,
   position                         INTEGER NOT NULL,
   act                              TEXT NOT NULL,
@@ -105,7 +125,11 @@ CREATE TABLE idempotency_keys (
 ) STRICT;
 CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, owner_id, act, key);
 
--- Drafted mapping notes for the owners of LATER steps (kept for S8b+; not implemented):
+-- Drafted mapping notes for the other owners (the four S8b owners below — room_decisions,
+-- case_decision_drafts, case_transaction_handoffs and, by the CHECK, recruitment_cases — are LIVE since
+-- migration 0016 under the S8a rule: a value act with a string key is a row, keyed (owner_table, owner_id,
+-- position) with the owner's own id; ref_id / actor_id are NOT columns — a decision's draft id is the
+-- draft_id column of room_decisions; the contacts, offers and packages lines stay drafts for S8c+):
 -- source: every `keys` object/list/map on db.recruitmentContacts, db.trials,
 --         db.requests, db.roomDecisions, recruitmentCases[].decisionDraft,
 --         recruitmentCases[].transactionHandoff, db.recruitmentOffers,
@@ -143,387 +167,378 @@ CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, ow
 --   actor_id is an extra column beyond the agreed seven, needed only by 'party'.
 
 -- =============================================================================
--- recruitment_cases  (M12 case + M17 Room facet + M23 additions)
+-- recruitment_cases and its fifteen owned child tables — LIVE since migration 0016_recruitment_cases (S8b,
+--   REGISTERED — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE; repositories/recruitmentCases.mjs generates this
+--   DDL from the writers' shapes; scripts/testSchemaDdl.mjs checks it column for column and index for index)
 -- =============================================================================
--- source: db.recruitmentCases  created at m12/scouting.mjs:450 (plain case),
---         m17/rooms.mjs:571 and :928 (case created with a Room facet);
---         `room` facet attached at m17/rooms.mjs:581 / :938
--- owner/writer: m12/scouting.mjs (stage, decision, approvals, links), m17/rooms.mjs
---         (applyStatus is the ONE writer of room.status / stage / rev), m23
---         lifecycle via ctx.applyLifecycleTransition, m13/planning.mjs (budget),
---         m23/decisionRoutes.mjs (decisionDraft), m27/index.mjs (transactionHandoff)
---         lifecycle: room.status in 18 ROOM_STATUSES (m17/shared.mjs:39), terminal =
---         signed|withdrawn|archived|closed, reopenable; never deleted; subject
---         removal nulls player_name and sets subject_removed_at (server.mjs:3994)
--- mapping:
---   id -> id (case-<n>)               orgId -> org_id              playerId -> player_id
---   playerName -> player_name (snapshot; NULL after subject removal)
---   vacancyId -> vacancy_id (vacancies(id), file 04, no FK)
---   ownerUserId -> owner_user_id      ownerName -> owner_name (snapshot)
---   stage -> stage (PRO_STAGES ∪ GRASSROOTS_STAGES; NULL between room creation and applyStatus;
---            DERIVED from room_status by stageForRoomStatus whenever room_status is set — stored
---            because plain M12 cases have no room and the derivation needs orgs.level)
---   priority -> priority (M12 case priority high|medium|low; distinct from room_priority)
---   deadline -> deadline_raw (unvalidated client value, scouting.mjs:454 / rooms.mjs:669; never parsed)
---   restricted -> restricted
---   assignments[] -> case_assignments        tasks[] -> case_tasks        approvals[] -> case_approvals
---   decision {outcome, reasons, byUserId, byName, approvedBy?, at} -> decision_outcome, decision_reasons,
---            decision_by_user_id, decision_by_name, decision_approved_by_name, decision_at
---   links.requestIds[] -> case_request_links   links.trialIds[] -> case_trial_links   links.signingId -> signing_id
---   createdAt -> created_at            history[] -> case_history
---   budget.scenarios[] -> case_budget_scenarios (+ lines, fx assumptions, actuals)
---   decisionDraft -> case_decision_drafts (one row or none)
---   transactionHandoff -> case_transaction_handoffs (one row or none)
---   subjectRemovedAt -> subject_removed_at
---   room.status -> room_status         room.priority -> room_priority    room.tags[] -> case_tags
---   room.leadScoutUserId -> room_lead_scout_user_id (PATCH may set NULL, rooms.mjs:652)
---   room.sourceContext -> room_source_context
---   room.sourceRef -> room_source_ref_json (free-form by design: supplied by M18 Nobody Missed /
---            Second Look callers of ctx.createRoomForPlayer / ctx.reopenRoom; shape not fixed here)
---   room.openedBy {userId,name} -> room_opened_by_user_id, room_opened_by_name
---   room.updatedAt -> room_updated_at  room.archivedAt -> room_archived_at  room.closedAt -> room_closed_at
---   room.rev/revAt/revBy -> room_rev, room_rev_at, room_rev_by_user_id, room_rev_by_name
---   room.reopened {by{userId,name}, at, from, reasonCodes[], sourceContext?, sourceRef?} ->
---            room_reopened_by_user_id, room_reopened_by_name, room_reopened_at, room_reopened_from,
---            room_reopened_reason_codes_json, room_reopened_source_context, room_reopened_source_ref_json
--- notes: one OPEN room per (org, player) is enforced by code (ROOM_EXISTS,
---   rooms.mjs:557) and audited by integrity code ROOM_OPEN_DUPLICATE — the partial
---   unique index below is NEW and must be checked against existing data first.
---   Room-less cases: room_status IS NULL and every room_* column is NULL.
---   Privacy: tenant-private club workspace; player_name is the only personal
---   field and goes on subject removal. `restricted` gates reads to owner,
---   assignees and leads.
+-- source: db.recruitmentCases (the blob every build since M12 wrote; imported row for row and retired by 0016,
+--         array position -> seq). Writers unchanged: m12/scouting.mjs (the case: now recruitmentCases.addCase; stage,
+--         assignments, tasks, approvals, decision, links in place), m17/rooms.mjs (the room facet, M17 tasks,
+--         assignments, links, the reopen; a room created: addCase), m23/decisionRoutes.mjs (decisionDraft),
+--         m27/index.mjs (transactionHandoff, its history literal), m13/planning.mjs (budget), server.mjs (the
+--         deletion unit's tombstone: player_name NULL, subject_removed_at) — every in-place edit lands in the next
+--         save with the owned children rewritten in list order. Readers unchanged: db.recruitmentCases is a
+--         read-only array view of the same records.
+-- mapping: the writer's literal key for key (CASE_SHAPE): id, orgId, playerId, playerName, vacancyId, ownerUserId,
+--   ownerName, stage, priority, deadline -> deadline_json (the raw client value, any JSON), restricted,
+--   assignments[] -> case_assignments (dueAt -> due_at_json: the M12 path stores the raw client value),
+--   tasks[] -> case_tasks (the union of the M12 and M17 literals; createdBy.{userId,name}; completedBy a NAME),
+--   approvals[] -> case_approvals (decision.{outcome,reasons}, requestedBy.{userId,name}, resolvedBy.{userId,name,at}),
+--   decision.{outcome, reasons, byUserId, byName, approvedBy, at} -> decision_* columns (the object's null recorded),
+--   links.requestIds[] -> case_request_links (request_id: a string entry in the column, any other entry in raw_json,
+--   position-keyed so a duplicate entry is kept), links.trialIds[] -> case_trial_links, links.signingId ->
+--   links_signing_id, createdAt, history[] -> case_history (BOTH literals side by side: byKind/byId/byName and
+--   by.{kind,userId,name} -> actor_kind/actor_user_id/actor_name; detail -> detail_json whole), room.{status,
+--   priority, leadScoutUserId, sourceContext, sourceRef -> room_source_ref_json, openedBy, updatedAt, archivedAt,
+--   closedAt, rev, revAt, revBy, reopened.{by, at, from, reasonCodes -> room_reopened_reason_codes_json,
+--   sourceContext, sourceRef -> room_reopened_source_ref_json}} -> room_* columns (the facet's null recorded),
+--   room.tags[] -> case_room_tags (tag), decisionDraft -> case_decision_drafts (one row or none; reasonCodes[] ->
+--   case_decision_draft_reason_codes, evidenceRefs[] -> case_decision_draft_evidence_refs, keys.create ->
+--   idempotency_keys owner case_decision_drafts when it carries a string key, held on the row otherwise),
+--   transactionHandoff -> case_transaction_handoffs (one row or none; caseId -> handoff_case_id; keys.invite ->
+--   idempotency_keys owner case_transaction_handoffs), budget.scenarios[] -> case_budget_scenarios (approval.{by,
+--   byUserId, at, version, superseded}) + case_budget_lines (conditional.assumption), case_budget_fx_assumptions
+--   (rate the decimal TEXT the route stores), case_budget_actuals keyed (case_id, scenario_position, position),
+--   subjectRemovedAt. Every parent and child row: absent_keys_json, offtype_json, extra_json (the S8a rule).
+-- references: player_id NO key, TOLERANT and counted (Q8a, the Founder's explicit answer of 23 October 2026);
+--   org_id -> orgs (RESTRICT); owner_user_id, room_lead_scout_user_id (nullable), decision_by_user_id and
+--   case_assignments.user_id -> org_users (RESTRICT); case_request_links.request_id -> recruitment_requests and
+--   case_trial_links.trial_id -> trials (RESTRICT: released before the S8a phases of a save and reinserted after
+--   them, never detached); case_history -> recruitment_cases RESTRICT (OWNED: removed explicitly before its owner,
+--   review of 86342b8 R1); every other child CASCADE; vacancy_id, links_signing_id, linked_resource_id,
+--   transaction_id, invited_agency_org_id plain ids (their tables are later steps).
+-- draft versus implemented (the drafted definitions this section replaces, docs/architecture/s8b-readiness-review.md §3):
+--   * the one-open-room partial unique index recruitment_cases_one_open_room is WITHDRAWN (the routes keep their
+--     ROOM_EXISTS rule; the integrity audit keeps ROOM_OPEN_DUPLICATE);
+--   * case_tags PRIMARY KEY (case_id, tag), case_request_links (case_id, request_id), case_trial_links and the
+--     other deduplicating keys are position-keyed (owner, position) instead: a legacy duplicate entry is kept;
+--   * no vocabulary or length CHECK (stage, priority, room_status, outcome, status, currency, schedule …): a
+--     storage step changes no product rule; every literal column is nullable but the identifiers the keys need;
+--   * deadline, due_at and the two sourceRef values are JSON columns (any client value, never parsed or coerced);
+--   * the drafted staff key on case_tasks.assignee_user_id is NOT a key (an assignee may be absent or null; the
+--     route checks the organisation); case_assignments.user_id keeps its RESTRICT key as drafted;
+--   * case_history keeps its drafted RESTRICT (the owned child removed explicitly before the owner, never a
+--     blocker); the budget sub-lists carry case_id and scenario_position instead of a scenario_id.
 CREATE TABLE recruitment_cases (
-  id TEXT PRIMARY KEY,
-  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  player_id TEXT NOT NULL,
-  player_name TEXT,                                  -- snapshot
-  vacancy_id TEXT,
-  owner_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  owner_name TEXT NOT NULL,                          -- snapshot
-  stage TEXT CHECK (stage IN ('identified','review','observation','trial','decision','closed','invited','awaiting_response')),
-  priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high','medium','low')),
-  deadline_raw TEXT,
-  restricted INTEGER NOT NULL DEFAULT 0 CHECK (restricted IN (0,1)),
-  decision_outcome TEXT CHECK (decision_outcome IN ('sign','pass','monitor')),
-  decision_reasons TEXT,
-  decision_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  decision_by_name TEXT,                             -- snapshot
-  decision_approved_by_name TEXT,                    -- snapshot
-  decision_at INTEGER,
-  signing_id TEXT REFERENCES signings(id) ON DELETE SET NULL,
-  created_at INTEGER NOT NULL,
-  subject_removed_at INTEGER,
-  room_status TEXT CHECK (room_status IN ('watching','under_review','contact_planned','contacted','shortlisted','priority','trial_requested','trial_scheduled','trial_completed','offer_consideration','offer_made','offer_accepted','offer_declined','signed','on_hold','withdrawn','archived','closed')),
-  room_priority TEXT CHECK (room_priority IN ('low','normal','high','urgent')),
-  room_lead_scout_user_id TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  room_source_context TEXT CHECK (room_source_context IN ('search','watchlist','shortlist','opportunity','recommendation','campaign','passport','nobody_missed','second_look','matching','dynamic_watchlist','direct')),
-  room_source_ref_json TEXT CHECK (room_source_ref_json IS NULL OR json_valid(room_source_ref_json)),
-  room_opened_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  room_opened_by_name TEXT,                          -- snapshot
-  room_updated_at INTEGER,
-  room_archived_at INTEGER,
-  room_closed_at INTEGER,
-  room_rev INTEGER,
-  room_rev_at INTEGER,
-  room_rev_by_user_id TEXT,
-  room_rev_by_name TEXT,                             -- snapshot
-  room_reopened_by_user_id TEXT,
-  room_reopened_by_name TEXT,                        -- snapshot
-  room_reopened_at INTEGER,
-  room_reopened_from TEXT CHECK (room_reopened_from IS NULL OR room_reopened_from IN ('withdrawn','archived','closed')),
-  room_reopened_reason_codes_json TEXT CHECK (room_reopened_reason_codes_json IS NULL OR json_valid(room_reopened_reason_codes_json)),
-  room_reopened_source_context TEXT,
-  room_reopened_source_ref_json TEXT CHECK (room_reopened_source_ref_json IS NULL OR json_valid(room_reopened_source_ref_json)),
-  CHECK ((room_status IS NULL) = (room_rev IS NULL))
+  seq                              INTEGER PRIMARY KEY,
+  id                               TEXT NOT NULL UNIQUE,
+  org_id                           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id                        TEXT NOT NULL,
+  player_name                      TEXT,
+  vacancy_id                       TEXT,
+  owner_user_id                    TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  owner_name                       TEXT,
+  stage                            TEXT,
+  priority                         TEXT,
+  deadline_json                    TEXT CHECK (deadline_json IS NULL OR json_valid(deadline_json)),
+  restricted                       INTEGER,
+  decision_outcome                 TEXT,
+  decision_reasons                 TEXT,
+  decision_by_user_id              TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  decision_by_name                 TEXT,
+  decision_approved_by_name        TEXT,
+  decision_at                      INTEGER,
+  links_signing_id                 TEXT,
+  created_at                       INTEGER,
+  room_status                      TEXT,
+  room_priority                    TEXT,
+  room_lead_scout_user_id          TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  room_source_context              TEXT,
+  room_source_ref_json             TEXT CHECK (room_source_ref_json IS NULL OR json_valid(room_source_ref_json)),
+  room_opened_by_user_id           TEXT,
+  room_opened_by_name              TEXT,
+  room_updated_at                  INTEGER,
+  room_archived_at                 INTEGER,
+  room_closed_at                   INTEGER,
+  room_rev                         INTEGER,
+  room_rev_at                      INTEGER,
+  room_rev_by_user_id              TEXT,
+  room_rev_by_name                 TEXT,
+  room_reopened_by_user_id         TEXT,
+  room_reopened_by_name            TEXT,
+  room_reopened_at                 INTEGER,
+  room_reopened_from               TEXT,
+  room_reopened_reason_codes_json  TEXT CHECK (room_reopened_reason_codes_json IS NULL OR json_valid(room_reopened_reason_codes_json)),
+  room_reopened_source_context     TEXT,
+  room_reopened_source_ref_json    TEXT CHECK (room_reopened_source_ref_json IS NULL OR json_valid(room_reopened_source_ref_json)),
+  subject_removed_at               INTEGER,
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-CREATE INDEX recruitment_cases_org_created ON recruitment_cases(org_id, created_at);
-CREATE INDEX recruitment_cases_org_player ON recruitment_cases(org_id, player_id);
-CREATE INDEX recruitment_cases_org_room_status_updated ON recruitment_cases(org_id, room_status, room_updated_at);
-CREATE INDEX recruitment_cases_org_stage ON recruitment_cases(org_id, stage);
-CREATE INDEX recruitment_cases_player ON recruitment_cases(player_id);
-CREATE UNIQUE INDEX recruitment_cases_one_open_room ON recruitment_cases(org_id, player_id)
-  WHERE room_status IS NOT NULL AND room_status NOT IN ('signed','withdrawn','archived','closed');
-
--- source: db.recruitmentCases[].room.tags[]  written at m17/rooms.mjs:646 (whole list replaced)
--- owner/writer: m17/rooms.mjs PATCH /rooms/:id   lifecycle: replaced wholesale, <= 20 per room
--- mapping: tag -> tag (<= 40 chars, validateTag refuses protected-trait words)
--- notes: read by list filter `?tag=` and the `q` search (rooms.mjs:471/480).
-CREATE TABLE case_tags (
-  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  tag TEXT NOT NULL CHECK (length(tag) BETWEEN 1 AND 40),
-  PRIMARY KEY (case_id, tag)
-) STRICT;
-CREATE INDEX case_tags_tag ON case_tags(tag);
-
--- source: db.recruitmentCases[].assignments[]  created at m12/scouting.mjs:483 and m17/rooms.mjs:1298
--- owner/writer: m12/scouting.mjs POST /cases/:id/assign, m17/rooms.mjs POST /rooms/:id/assessment-assignments
---         lifecycle: status is written 'open' and NEVER changed by any route
--- mapping: id -> id (asg-<n>)   userId -> user_id   name -> user_name (snapshot)   task -> task (<= 200)
---   dueAt -> due_date | due_at (M17 path stores a YYYY-MM-DD day or integer ms via parseDateOrInstant;
---            the M12 path stores the raw client value unvalidated — the migration parses it with the
---            same helper and logs anything unparseable as a defect)
---   status -> status   createdAt -> created_at
--- notes: read by caseAccess/roomRole (assignee list) and readiness (`/assess/i.test(task)`).
+CREATE INDEX recruitment_cases_org_created ON recruitment_cases (org_id, created_at);
+CREATE INDEX recruitment_cases_org_player ON recruitment_cases (org_id, player_id);
+CREATE INDEX recruitment_cases_org_room_status_updated ON recruitment_cases (org_id, room_status, room_updated_at);
+CREATE INDEX recruitment_cases_org_stage ON recruitment_cases (org_id, stage);
+CREATE INDEX recruitment_cases_player ON recruitment_cases (player_id);
 CREATE TABLE case_assignments (
-  id TEXT PRIMARY KEY,
-  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  user_name TEXT NOT NULL,                           -- snapshot
-  task TEXT NOT NULL,
-  due_date TEXT CHECK (due_date IS NULL OR length(due_date) = 10),
-  due_at INTEGER,
-  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open')),
-  created_at INTEGER NOT NULL,
-  CHECK (due_date IS NULL OR due_at IS NULL)
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  id                               TEXT,
+  user_id                          TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  user_name                        TEXT,
+  task                             TEXT,
+  due_at_json                      TEXT CHECK (due_at_json IS NULL OR json_valid(due_at_json)),
+  status                           TEXT,
+  created_at                       INTEGER,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, position)
 ) STRICT;
-CREATE INDEX case_assignments_case ON case_assignments(case_id);
-CREATE INDEX case_assignments_user ON case_assignments(user_id);
-
--- source: db.recruitmentCases[].tasks[]  created at m12/scouting.mjs:498 (legacy shape) and m17/rooms.mjs:1117 (Room shape)
--- owner/writer: m12/scouting.mjs (create, complete), m17/rooms.mjs (create, PATCH status/assignee)
---         lifecycle: TASK_STATES open|in_progress|done|cancelled with TASK_TRANSITIONS; <= 200 per room
--- mapping: id -> id (tsk-<n>)   title -> title (<= 160 Room, <= 200 legacy)   description -> description (<= 1000, Room only)
---   assigneeUserId -> assignee_user_id   assigneeName -> assignee_name (snapshot; absent on legacy rows)
---   status -> status   dueAt -> due_date | due_at (same rule as case_assignments)
---   linkedResourceType -> linked_resource_type   linkedResourceId -> linked_resource_id (polymorphic, no FK:
---            evidence(04) | assessments(04) | combine_requests | trials | box_assignments | evidence_suggestions | room_comments)
---   createdBy {userId,name} -> created_by_user_id, created_by_name (absent on legacy rows)
---   createdAt -> created_at   completedAt -> completed_at
---   completedBy (legacy M12 complete route writes the user's NAME, scouting.mjs:512) -> completed_by_name
--- notes: read by the room list `view=assigned` / `?assignee=` and needs-attention (overdue = due < now).
+CREATE INDEX case_assignments_user ON case_assignments (user_id);
 CREATE TABLE case_tasks (
-  id TEXT PRIMARY KEY,
-  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
-  description TEXT CHECK (description IS NULL OR length(description) <= 1000),
-  assignee_user_id TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  assignee_name TEXT,                                -- snapshot
-  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_progress','done','cancelled')),
-  due_date TEXT CHECK (due_date IS NULL OR length(due_date) = 10),
-  due_at INTEGER,
-  linked_resource_kind TEXT CHECK (linked_resource_kind IS NULL OR linked_resource_kind IN ('evidence','assessment','combine_request','trial','box_cam_assignment','evidence_request','comment')),
-  linked_resource_id TEXT,
-  created_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  created_by_name TEXT,                              -- snapshot
-  created_at INTEGER NOT NULL,
-  completed_at INTEGER,
-  completed_by_name TEXT,                            -- snapshot
-  CHECK (due_date IS NULL OR due_at IS NULL)
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  id                               TEXT,
+  title                            TEXT,
+  description                      TEXT,
+  due_at_json                      TEXT CHECK (due_at_json IS NULL OR json_valid(due_at_json)),
+  assignee_user_id                 TEXT,
+  assignee_name                    TEXT,
+  status                           TEXT,
+  linked_resource_type             TEXT,
+  linked_resource_id               TEXT,
+  created_by_user_id               TEXT,
+  created_by_name                  TEXT,
+  created_at                       INTEGER,
+  completed_at                     INTEGER,
+  completed_by_name                TEXT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, position)
 ) STRICT;
-CREATE INDEX case_tasks_case_status ON case_tasks(case_id, status);
-CREATE INDEX case_tasks_assignee_status ON case_tasks(assignee_user_id, status);
-
--- source: db.recruitmentCases[].approvals[]  created at m12/scouting.mjs:564
--- owner/writer: m12/scouting.mjs POST /cases/:id/decision (request), POST /cases/:id/approvals/:aid (resolve)
---         lifecycle: pending -> approved | rejected
--- mapping: id -> id (apr-<n>)   decision.outcome -> outcome   decision.reasons -> reasons (<= 500)
---   requestedBy {userId,name} -> requested_by_user_id, requested_by_name   status -> status   requestedAt -> requested_at
---   resolvedBy {userId,name,at}|null -> resolved_by_user_id, resolved_by_name, resolved_at
--- notes: decision.outcome is always 'sign' today (only a non-lead 'sign' needs approval) but the enum is kept whole.
+CREATE INDEX case_tasks_assignee_status ON case_tasks (assignee_user_id, status);
 CREATE TABLE case_approvals (
-  id TEXT PRIMARY KEY,
-  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  outcome TEXT NOT NULL CHECK (outcome IN ('sign','pass','monitor')),
-  reasons TEXT NOT NULL,
-  requested_by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  requested_by_name TEXT NOT NULL,                   -- snapshot
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
-  requested_at INTEGER NOT NULL,
-  resolved_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  resolved_by_name TEXT,                             -- snapshot
-  resolved_at INTEGER
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  id                               TEXT,
+  decision_outcome                 TEXT,
+  decision_reasons                 TEXT,
+  requested_by_user_id             TEXT,
+  requested_by_name                TEXT,
+  status                           TEXT,
+  requested_at                     INTEGER,
+  resolved_by_user_id              TEXT,
+  resolved_by_name                 TEXT,
+  resolved_at                      INTEGER,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, position)
 ) STRICT;
-CREATE INDEX case_approvals_case_status ON case_approvals(case_id, status);
 
--- source: db.recruitmentCases[].history[]  written by m12/shared.mjs:70 audit() (m12, m17, m23 trial/decision/offer/signing
---         hooks) and directly by m27/index.mjs:697/734/805 (shape {by:{kind,userId,name}})
--- owner/writer: every module that touches a case   lifecycle: append-only, never pruned
--- mapping: id -> id (aud-<n>)   at -> at   byKind | by.kind -> by_kind   byId | by.userId -> by_id   byName | by.name -> by_name
---   action -> action (ROOM_EVENT_TYPES, lifecycle `room_status_changed`, M12 verbs, m23/m27/m28/m29 verbs)
---   detail -> detail_json (M12 writes STRINGS here — the stage word, "name: task", JSON text of links —
---            and every later writer writes an object; both are valid JSON values. Retained JSON by design:
---            `room_status_changed` detail carries {from,to,reasonCodes,trigger,lifecycleAction,clientKey,policyVersion,<fk ids>}
---            which M20's funnel reads whole; normalising it is the lifecycle-event table step)
--- notes: ordering is at then numeric id part (roomActivity). by_id is a user id for org actors,
---   a player/guardian id for recipient actors, a reviewer id for 'admin'.
 CREATE TABLE case_history (
-  id TEXT PRIMARY KEY,
-  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
-  at INTEGER NOT NULL,
-  by_kind TEXT CHECK (by_kind IS NULL OR by_kind IN ('org','org_user','player','guardian','admin','system')),
-  by_id TEXT,
-  by_name TEXT,                                      -- snapshot
-  action TEXT NOT NULL,
-  detail_json TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  position                         INTEGER NOT NULL,
+  id                               TEXT,
+  at                               INTEGER,
+  by_kind                          TEXT,
+  by_id                            TEXT,
+  by_name                          TEXT,
+  action                           TEXT,
+  actor_kind                       TEXT,
+  actor_user_id                    TEXT,
+  actor_name                       TEXT,
+  detail_json                      TEXT CHECK (detail_json IS NULL OR json_valid(detail_json)),
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, position)
 ) STRICT;
-CREATE INDEX case_history_case_at ON case_history(case_id, at);
-CREATE INDEX case_history_action_at ON case_history(action, at);
-
--- source: db.recruitmentCases[].links.requestIds[]  written at m12/scouting.mjs:606, m17/rooms.mjs:1383, m23/trialRoutes.mjs:414
--- owner/writer: as above   lifecycle: append-only set (includes() guard)
--- mapping: requestId -> request_id
--- notes: the request must belong to the same org and player (checked at write).
-CREATE TABLE case_request_links (
-  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  request_id TEXT NOT NULL REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
-  PRIMARY KEY (case_id, request_id)
-) STRICT;
-CREATE INDEX case_request_links_request ON case_request_links(request_id);
-
--- source: db.recruitmentCases[].links.trialIds[]  written at m12/scouting.mjs:611, m17/rooms.mjs:1376, m23/trialRoutes.mjs:843
--- owner/writer: as above   lifecycle: append-only set
--- mapping: trialId -> trial_id
--- notes: read by roomSnapshots.sourceRefs.trialIds and trialsFor(linked flag).
-CREATE TABLE case_trial_links (
-  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE RESTRICT,
-  PRIMARY KEY (case_id, trial_id)
-) STRICT;
-CREATE INDEX case_trial_links_trial ON case_trial_links(trial_id);
-
--- source: db.recruitmentCases[].decisionDraft  created at m23/decisionRoutes.mjs:232
--- owner/writer: m23/decisionRoutes.mjs (create, PATCH, DELETE, cleared on finalize)
---         lifecycle: at most one per case; HARD-deleted on discard and on finalize (its id survives on room_decisions.draft_id)
--- mapping: id -> id (rdraft-<n>)   outcome -> outcome   reasonCodes[] -> reason_codes_json   note -> note (<= 2000)
---   evidenceRefs[] {kind,id,meta} -> evidence_refs_json (retained JSON: a transient copy that is discarded and
---            RE-RESOLVED against the case at finalize, decisionRoutes.mjs:325; the durable form is room_decision_evidence_refs)
---   by {userId,name,role} -> by_user_id, by_name, by_role   createdAt -> created_at   updatedAt -> updated_at
---   updatedBy {userId,name,role} -> updated_by_user_id, updated_by_name, updated_by_role   rev -> rev   revAt -> rev_at
---   keys.create -> idempotency_keys
--- notes: UNIQUE(case_id) — one draft per case, enforced by code (DECISION_INVALID_STATE).
+CREATE INDEX case_history_case_at ON case_history (case_id, at);
+CREATE INDEX case_history_id ON case_history (id);
 CREATE TABLE case_decision_drafts (
-  id TEXT PRIMARY KEY,
-  case_id TEXT NOT NULL UNIQUE REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  outcome TEXT CHECK (outcome IS NULL OR outcome IN ('progress','hold','reject')),
-  reason_codes_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(reason_codes_json)),
-  note TEXT CHECK (note IS NULL OR length(note) <= 2000),
-  evidence_refs_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(evidence_refs_json)),
-  by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  by_name TEXT,                                      -- snapshot
-  by_role TEXT,                                      -- snapshot
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  updated_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  updated_by_name TEXT,                              -- snapshot
-  updated_by_role TEXT,                              -- snapshot
-  rev INTEGER NOT NULL DEFAULT 1,
-  rev_at INTEGER
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  id                               TEXT,
+  outcome                          TEXT,
+  note                             TEXT,
+  by_user_id                       TEXT,
+  by_name                          TEXT,
+  by_role                          TEXT,
+  created_at                       INTEGER,
+  updated_at                       INTEGER,
+  updated_by_user_id               TEXT,
+  updated_by_name                  TEXT,
+  updated_by_role                  TEXT,
+  rev                              INTEGER,
+  rev_at                           INTEGER,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id)
+) STRICT;
+CREATE INDEX case_decision_drafts_id ON case_decision_drafts (id);
+CREATE TABLE case_decision_draft_reason_codes (
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  draft_position                   INTEGER NOT NULL,
+  position                         INTEGER NOT NULL,
+  code                             TEXT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, draft_position, position)
 ) STRICT;
 
--- source: db.recruitmentCases[].transactionHandoff  created at m27/index.mjs:680
--- owner/writer: m27/index.mjs (invite, withdraw, bindHandoff accept)
---         lifecycle: invited -> accepted | withdrawn; 'expired' is DERIVED (invitedAt + 30 d, effectiveHandoffStatus)
---         and never stored; a withdrawn/expired one may be re-invited, which OVERWRITES the object
--- mapping: id -> id (hof-<n>)   caseId -> case_id   orgId -> org_id   playerId -> player_id   status -> status
---   invitedAt -> invited_at   invitedBy {kind:'org',userId,name} -> invited_by_user_id, invited_by_name
---   acceptedAt -> accepted_at   withdrawnAt -> withdrawn_at
---   transactionId -> transaction_id (agent_transactions(id), file 06, no FK)
---   representedAtInvitation -> represented_at_invitation
---   invitedAgencyOrgId -> invited_agency_org_id   invitedAgentUserId -> invited_agent_user_id
---   keys.invite {key} -> idempotency_keys   rev -> rev   revAt -> rev_at
--- notes: UNIQUE(case_id) mirrors today's one-object-per-case; a re-invite today DROPS the previous
---   handoff record (only case_history keeps it) — known defect, kept as-is for a faithful migration.
---   Read by GET /org/agent/handoffs: scan on (invited_agent_user_id, status).
+CREATE TABLE case_decision_draft_evidence_refs (
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  draft_position                   INTEGER NOT NULL,
+  position                         INTEGER NOT NULL,
+  kind                             TEXT,
+  ref_id                           TEXT,
+  meta_json                        TEXT CHECK (meta_json IS NULL OR json_valid(meta_json)),
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, draft_position, position)
+) STRICT;
+
 CREATE TABLE case_transaction_handoffs (
-  id TEXT PRIMARY KEY,
-  case_id TEXT NOT NULL UNIQUE REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  player_id TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('invited','accepted','withdrawn')),
-  invited_at INTEGER NOT NULL,
-  invited_by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  invited_by_name TEXT,                              -- snapshot
-  accepted_at INTEGER,
-  withdrawn_at INTEGER,
-  transaction_id TEXT,
-  represented_at_invitation INTEGER NOT NULL DEFAULT 0 CHECK (represented_at_invitation IN (0,1)),
-  invited_agency_org_id TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  invited_agent_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  rev INTEGER NOT NULL DEFAULT 1,
-  rev_at INTEGER
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  id                               TEXT,
+  handoff_case_id                  TEXT,
+  org_id                           TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id                        TEXT,
+  status                           TEXT,
+  invited_at                       INTEGER,
+  invited_by_kind                  TEXT,
+  invited_by_user_id               TEXT,
+  invited_by_name                  TEXT,
+  accepted_at                      INTEGER,
+  withdrawn_at                     INTEGER,
+  transaction_id                   TEXT,
+  represented_at_invitation        INTEGER,
+  invited_agency_org_id            TEXT,
+  invited_agent_user_id            TEXT,
+  rev                              INTEGER,
+  rev_at                           INTEGER,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id)
 ) STRICT;
-CREATE INDEX case_transaction_handoffs_agent_status ON case_transaction_handoffs(invited_agent_user_id, status);
+CREATE INDEX case_transaction_handoffs_id ON case_transaction_handoffs (id);
+CREATE INDEX case_transaction_handoffs_agency_status ON case_transaction_handoffs (invited_agency_org_id, status);
+CREATE INDEX case_transaction_handoffs_player ON case_transaction_handoffs (player_id);
+CREATE TABLE case_request_links (
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  request_id                       TEXT REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, position)
+) STRICT;
+CREATE INDEX case_request_links_request ON case_request_links (request_id);
+CREATE TABLE case_trial_links (
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  trial_id                         TEXT REFERENCES trials(id) ON DELETE RESTRICT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, position)
+) STRICT;
+CREATE INDEX case_trial_links_trial ON case_trial_links (trial_id);
+CREATE TABLE case_room_tags (
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  tag                              TEXT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, position)
+) STRICT;
 
--- source: db.recruitmentCases[].budget.scenarios[]  created at m13/planning.mjs:248
--- owner/writer: m13/planning.mjs (create, PUT, approve, actuals)   lifecycle: <= 8 per case; never deleted;
---         version bumps on every PUT; approval is version-specific and reads `superseded` after a later edit
--- mapping: id -> id (scn-<n>)   version -> version   label -> label (<= 80)   currency -> currency   termMonths -> term_months (1-72)
---   lines[] -> case_budget_lines   fxAssumptions[] -> case_budget_fx_assumptions   actuals[] -> case_budget_actuals
---   approval {by (name), byUserId, at, version, superseded} -> approved_by_name, approved_by_user_id, approved_at,
---            approved_version, approval_superseded (all NULL when approval is null)
---   createdBy (name) -> created_by_name   createdAt -> created_at   updatedAt -> updated_at
--- notes: totals (computeScenarioTotals) are derived, not stored. Finance-role gated (canViewFinance).
 CREATE TABLE case_budget_scenarios (
-  id TEXT PRIMARY KEY,
-  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
-  label TEXT NOT NULL CHECK (length(label) <= 80),
-  currency TEXT NOT NULL CHECK (length(currency) = 3),
-  term_months INTEGER NOT NULL CHECK (term_months BETWEEN 1 AND 72),
-  approved_by_name TEXT,                             -- snapshot
-  approved_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  approved_at INTEGER,
-  approved_version INTEGER,
-  approval_superseded INTEGER CHECK (approval_superseded IS NULL OR approval_superseded IN (0,1)),
-  created_by_name TEXT NOT NULL,                     -- snapshot
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  CHECK ((approved_at IS NULL) = (approved_version IS NULL))
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  id                               TEXT,
+  version                          INTEGER,
+  label                            TEXT,
+  currency                         TEXT,
+  term_months                      INTEGER,
+  approval_by_name                 TEXT,
+  approval_by_user_id              TEXT,
+  approval_at                      INTEGER,
+  approval_version                 INTEGER,
+  approval_superseded              INTEGER,
+  created_by_name                  TEXT,
+  created_at                       INTEGER,
+  updated_at                       INTEGER,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, position)
 ) STRICT;
-CREATE INDEX case_budget_scenarios_case ON case_budget_scenarios(case_id);
-
--- source: db.recruitmentCases[].budget.scenarios[].lines[]  written at m13/planning.mjs:252 (create) and :280 (PUT replaces the whole list)
--- owner/writer: m13/planning.mjs   lifecycle: replaced wholesale on PUT; <= 30 per scenario
--- mapping: id -> line_id (`ln-<i>` minted per scenario, OR a client-supplied id kept on PUT — scoped to the scenario, not global)
---   kind -> kind   label -> label (<= 80)   amountMinor -> amount_minor   currency -> currency   schedule -> schedule
---   confirmed -> confirmed   conditional {assumption}|null -> conditional_assumption (<= 200; NULL = unconditional)
--- notes: ordinal `seq` keeps the client's order (occurrence math is order-independent).
+CREATE INDEX case_budget_scenarios_id ON case_budget_scenarios (id);
 CREATE TABLE case_budget_lines (
-  scenario_id TEXT NOT NULL REFERENCES case_budget_scenarios(id) ON DELETE CASCADE,
-  line_id TEXT NOT NULL,
-  seq INTEGER NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('wage','fee','bonus','expense')),
-  label TEXT NOT NULL CHECK (length(label) <= 80),
-  amount_minor INTEGER NOT NULL CHECK (amount_minor >= 0),
-  currency TEXT NOT NULL CHECK (length(currency) = 3),
-  schedule TEXT NOT NULL CHECK (schedule IN ('one_off','weekly','monthly','annual')),
-  confirmed INTEGER NOT NULL DEFAULT 0 CHECK (confirmed IN (0,1)),
-  conditional_assumption TEXT CHECK (conditional_assumption IS NULL OR length(conditional_assumption) <= 200),
-  PRIMARY KEY (scenario_id, line_id)
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  scenario_position                INTEGER NOT NULL,
+  position                         INTEGER NOT NULL,
+  id                               TEXT,
+  kind                             TEXT,
+  label                            TEXT,
+  amount_minor                     INTEGER,
+  currency                         TEXT,
+  schedule                         TEXT,
+  confirmed                        INTEGER,
+  conditional_assumption           TEXT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, scenario_position, position)
 ) STRICT;
 
--- source: db.recruitmentCases[].budget.scenarios[].fxAssumptions[]  written at m13/planning.mjs:253 and :282
--- owner/writer: m13/planning.mjs   lifecycle: replaced wholesale on PUT; <= 6 per scenario
--- mapping: from -> from_currency   to -> to_currency   rate (decimal TEXT, up to 6 dp — kept as text, never a float)
---   -> rate   source -> source (<= 80)   date -> rate_date (YYYY-MM-DD, defaulted to today)   manual (always true) -> manual
--- notes: no uniqueness on (from,to) today; `seq` is the list position.
 CREATE TABLE case_budget_fx_assumptions (
-  scenario_id TEXT NOT NULL REFERENCES case_budget_scenarios(id) ON DELETE CASCADE,
-  seq INTEGER NOT NULL,
-  from_currency TEXT NOT NULL CHECK (length(from_currency) = 3),
-  to_currency TEXT NOT NULL CHECK (length(to_currency) = 3),
-  rate TEXT NOT NULL,
-  source TEXT NOT NULL CHECK (length(source) <= 80),
-  rate_date TEXT NOT NULL CHECK (length(rate_date) = 10),
-  manual INTEGER NOT NULL DEFAULT 1 CHECK (manual IN (0,1)),
-  PRIMARY KEY (scenario_id, seq)
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  scenario_position                INTEGER NOT NULL,
+  position                         INTEGER NOT NULL,
+  from_currency                    TEXT,
+  to_currency                      TEXT,
+  rate                             TEXT,
+  source                           TEXT,
+  date                             TEXT,
+  manual                           INTEGER,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, scenario_position, position)
 ) STRICT;
 
--- source: db.recruitmentCases[].budget.scenarios[].actuals[]  created at m13/planning.mjs:314
--- owner/writer: m13/planning.mjs POST .../actuals   lifecycle: append-only
--- mapping: id -> id (act-<n>)   lineId -> line_id   amountMinor -> amount_minor   at -> at   recordedBy (name) -> recorded_by_name
--- notes: line_id has NO FK to case_budget_lines — a later PUT may renumber or drop the line the
---   actual was recorded against (known defect: dangling lineId), so the reference is kept loosely.
 CREATE TABLE case_budget_actuals (
-  id TEXT PRIMARY KEY,
-  scenario_id TEXT NOT NULL REFERENCES case_budget_scenarios(id) ON DELETE CASCADE,
-  line_id TEXT NOT NULL,
-  amount_minor INTEGER NOT NULL,
-  at INTEGER NOT NULL,
-  recorded_by_name TEXT NOT NULL                     -- snapshot
+  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  scenario_position                INTEGER NOT NULL,
+  position                         INTEGER NOT NULL,
+  id                               TEXT,
+  line_id                          TEXT,
+  amount_minor                     INTEGER,
+  at                               INTEGER,
+  recorded_by_name                 TEXT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (case_id, scenario_position, position)
 ) STRICT;
-CREATE INDEX case_budget_actuals_scenario ON case_budget_actuals(scenario_id);
+
 
 -- =============================================================================
 -- recruitment_requests, request_trial_slots — LIVE since migration 0015_recruitment (S8a-core,
@@ -584,7 +599,7 @@ CREATE TABLE recruitment_requests (
   routed_to                        TEXT,
   guardian_id                      TEXT,
   contact_channel_id               TEXT,
-  case_id                          TEXT,
+  case_id                          TEXT REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
   trial_id                         TEXT REFERENCES trials(id) ON DELETE SET NULL,
   recipient_type                   TEXT,
   recipient_player_id              TEXT,
@@ -595,6 +610,7 @@ CREATE TABLE recruitment_requests (
   offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
   extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
+
 CREATE INDEX recruitment_requests_org_player_type_status ON recruitment_requests (org_id, player_id, type, status);
 CREATE INDEX recruitment_requests_player ON recruitment_requests (player_id, created_at);
 CREATE INDEX recruitment_requests_routed_guardian ON recruitment_requests (routed_to, guardian_id);
@@ -665,7 +681,7 @@ CREATE TABLE trials (
   seq                              INTEGER PRIMARY KEY,
   id                               TEXT NOT NULL UNIQUE,
   request_id                       TEXT NOT NULL UNIQUE REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
-  case_id                          TEXT,
+  case_id                          TEXT REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
   player_id                        TEXT NOT NULL,
   player_name                      TEXT,
   org_id                           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
@@ -736,6 +752,7 @@ CREATE TABLE trials (
   offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
   extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
+
 CREATE INDEX trials_org_status ON trials (org_id, status);
 CREATE INDEX trials_org_player_case ON trials (org_id, player_id, case_id);
 CREATE INDEX trials_player ON trials (player_id);
@@ -955,194 +972,218 @@ CREATE INDEX trial_history_trial_at ON trial_history (trial_id, at);
 CREATE INDEX trial_history_id ON trial_history (id);
 
 -- =============================================================================
--- Room components: comments, snapshots, decisions, evidence review state
+-- room_comments, room_snapshots, room_decisions, room_evidence_states and their child tables — LIVE since
+--   migration 0016_recruitment_cases (S8b, REGISTERED — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE;
+--   repositories/recruitmentCases.mjs)
 -- =============================================================================
--- source: db.roomComments  created at m17/rooms.mjs:1041
--- owner/writer: m17/rooms.mjs (create, author edit, delete = tombstone)   lifecycle: deleted_at set, never erased;
---         20 per room per minute (rate limit, not schema)
--- mapping: id -> id (rcmt-<n>)   roomId -> room_id (= recruitment_cases.id)   orgId -> org_id
---   authorId -> author_user_id   authorName -> author_name (snapshot)   body -> body (<= 4000, inert text; NULL in views once deleted but kept stored)
---   replyToId -> reply_to_id (same room, checked at write)   mentions[] -> room_comment_mentions
---   createdAt -> created_at   editedAt -> edited_at   editCount -> edit_count
---   deletedAt -> deleted_at   deletedBy {userId,name} -> deleted_by_user_id, deleted_by_name
--- notes: tenant-private; never visible to players. Read newest-first by room with an id cursor.
+-- source: db.roomComments, db.roomSnapshots, db.roomDecisions, db.roomEvidenceState (the four blobs every build
+--         since M17 wrote; imported row for row and retired by 0016, array position -> seq). Writers unchanged:
+--         m17/rooms.mjs (a comment: now recruitmentCases.addComment; the edit and the tombstone in place; a status
+--         snapshot: addSnapshot; an M17 recommendation: addDecision; an evidence review: addEvidenceState, then
+--         overwritten in place), m23/decisionRoutes.mjs (the formal decision: addDecision; its transport-failure
+--         splice: removeDecision; the predecessor's supersededById in place). Readers unchanged: read-only array views.
+-- mapping (key for key; absent_keys_json / offtype_json / extra_json on every row):
+--   room_comments: id, roomId -> room_id, orgId, authorId -> author_user_id, authorName, body (stored as written,
+--     the view nulls a tombstone's), replyToId -> reply_to_id (no key: a legacy comment may answer a tombstoned
+--     one), mentions[] -> room_comment_mentions (user_id), createdAt, editedAt, editCount, deletedAt,
+--     deletedBy.{userId,name};
+--   room_snapshots: id, roomId, orgId, playerId, at, trigger, trust.{score, band, policyVersion, componentLevels
+--     -> trust_component_levels_json, hash} (null recorded), sourceRefs.{passportVersion, passportRevision} and
+--     its four id lists -> room_snapshot_source_refs (snapshot_id, kind in evidence|assessment|combine|trial,
+--     position, ref_id — one table, four lists), note STORED AS WRITTEN (the draft's "derived, not stored" would
+--     drop a field);
+--   room_decisions (both literals in one list: the M17 recommendation and the M23 formal row — an M17 row has no
+--     kind/state/outcome…: absent keys recorded): id, roomId, orgId, playerId, kind, state, outcome, recommendation,
+--     reasonCodes[] -> room_decision_reason_codes, note, by.{userId,name,role}, createdAt, finalizedAt, trigger,
+--     clientKey -> client_key (no unique index: the replay lookup is a code rule), supersedes -> supersedes_id,
+--     supersededById -> superseded_by_id, supersession.{of -> supersession_of_id, reason}, rev, revAt,
+--     evidenceRefs[] -> room_decision_evidence_refs (kind, ref_id, meta_json), assessmentSummary.{submitted,
+--     withheld, verdicts -> assessment_verdicts_json, assessmentIds[] -> room_decision_assessment_ids}, snapshot.{at,
+--     trust.* -> snapshot_trust_*, sourceRefs -> snapshot_source_refs_json, snapshotId -> snapshot_id} (the FULL
+--     COPY, stored as written — the draft's "snapshot_id only" would drop the record), keys.finalize / keys.draft
+--     -> idempotency_keys owner room_decisions when they carry a string key (held on the row otherwise), draftId,
+--     lifecycle.{action, from, to, applied, reason, at}, policyVersion;
+--   room_evidence_states: id, roomId, orgId, evidenceId, state, note, byId -> by_user_id, byName, at (one row per
+--     (room, evidence) by the route's find-then-assign — a code rule, no unique index).
+-- references: room_id -> recruitment_cases (RESTRICT, every room table: a retained row names a case the preflight
+--   refuses to remove — CASE_STILL_REFERENCED with the table and ids; a supplied collection removes its rows before
+--   the case); org_id -> orgs (RESTRICT); room_comments.author_user_id -> org_users (RESTRICT); player_id
+--   (snapshots, decisions) NO key, tolerant and counted (Q8a); supersedes_id / superseded_by_id / supersession_of_id
+--   plain ids, the chain asserted at the end of every write (DECISION_CHAIN_BROKEN); evidence_id, assessment ids,
+--   snapshot_id and ref_id plain ids (their tables are later steps).
+-- draft versus implemented: the drafted self keys of room_decisions, the drafted UNIQUE (room_id, evidence_id),
+--   the drafted room_decisions_room_client_key unique index, the deduplicating PRIMARY KEYs of
+--   room_comment_mentions / room_decision_evidence_refs / room_snapshot_source_refs, every vocabulary and length
+--   CHECK and the drafted NOT NULL on literal columns are not implemented (readiness review §3); the drafted
+--   by_user_id key of room_evidence_states is a plain id (the route checks the organisation).
 CREATE TABLE room_comments (
-  id TEXT PRIMARY KEY,
-  room_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  author_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  author_name TEXT NOT NULL,                         -- snapshot
-  body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 4000),
-  reply_to_id TEXT REFERENCES room_comments(id) ON DELETE SET NULL,
-  created_at INTEGER NOT NULL,
-  edited_at INTEGER,
-  edit_count INTEGER NOT NULL DEFAULT 0,
-  deleted_at INTEGER,
-  deleted_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  deleted_by_name TEXT                               -- snapshot
+  seq                              INTEGER PRIMARY KEY,
+  id                               TEXT NOT NULL UNIQUE,
+  room_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  org_id                           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  author_user_id                   TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  author_name                      TEXT,
+  body                             TEXT,
+  reply_to_id                      TEXT,
+  created_at                       INTEGER,
+  edited_at                        INTEGER,
+  edit_count                       INTEGER,
+  deleted_at                       INTEGER,
+  deleted_by_user_id               TEXT,
+  deleted_by_name                  TEXT,
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-CREATE INDEX room_comments_room_created ON room_comments(room_id, created_at);
-
--- source: db.roomComments[].mentions[]  written at m17/rooms.mjs:1037 (user ids in this org, <= 20, deduped)
--- owner/writer: m17/rooms.mjs   lifecycle: immutable with the comment
--- mapping: userId -> user_id
--- notes: a departed colleague renders as 'Former colleague' (name is resolved live, never stored).
+CREATE INDEX room_comments_room_created ON room_comments (room_id, created_at);
+CREATE INDEX room_comments_author ON room_comments (author_user_id);
 CREATE TABLE room_comment_mentions (
-  comment_id TEXT NOT NULL REFERENCES room_comments(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  PRIMARY KEY (comment_id, user_id)
+  comment_id                       TEXT NOT NULL REFERENCES room_comments(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  user_id                          TEXT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (comment_id, position)
 ) STRICT;
 
--- source: db.roomSnapshots  created at m17/rooms.mjs:963 (captureSnapshot; triggers status:<to>, decision, decision:finalize)
--- owner/writer: m17/rooms.mjs   lifecycle: append-only, never deleted
--- mapping: id -> id (rsnap-<n>)   roomId -> room_id   orgId -> org_id   playerId -> player_id   at -> at   trigger -> trigger
---   trust (NULL = none: all trust_* NULL)   trust.score -> trust_score   trust.band -> trust_band
---   trust.policyVersion -> trust_policy_version   trust.componentLevels {component: level} -> trust_component_levels_json
---            (retained JSON: a small map of component -> level word, read whole for display; keys are the M16.2 component registry)
---   trust.hash -> trust_hash
---   sourceRefs.passportVersion -> passport_version   sourceRefs.passportRevision -> passport_revision
---   sourceRefs.evidenceIds[] / assessmentIds[] / combineResults[] / trialIds[] -> room_snapshot_source_refs
---   note (constant disclaimer string) -> derived, not stored
--- notes: copied by reference onto room_decisions.snapshot_id (the decision's `snapshot` object is an exact copy of this row).
 CREATE TABLE room_snapshots (
-  id TEXT PRIMARY KEY,
-  room_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
-  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  player_id TEXT NOT NULL,
-  at INTEGER NOT NULL,
-  trigger TEXT NOT NULL,
-  trust_score REAL,
-  trust_band TEXT,
-  trust_policy_version INTEGER,
-  trust_component_levels_json TEXT CHECK (trust_component_levels_json IS NULL OR json_valid(trust_component_levels_json)),
-  trust_hash TEXT,
-  passport_version INTEGER,
-  passport_revision INTEGER
+  seq                              INTEGER PRIMARY KEY,
+  id                               TEXT NOT NULL UNIQUE,
+  room_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  org_id                           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id                        TEXT,
+  at                               INTEGER,
+  trigger                          TEXT,
+  trust_score                      REAL,
+  trust_band                       TEXT,
+  trust_policy_version             INTEGER,
+  trust_component_levels_json      TEXT CHECK (trust_component_levels_json IS NULL OR json_valid(trust_component_levels_json)),
+  trust_hash                       TEXT,
+  source_passport_version          INTEGER,
+  source_passport_revision         INTEGER,
+  note                             TEXT,
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-CREATE INDEX room_snapshots_room_at ON room_snapshots(room_id, at);
-
--- source: db.roomSnapshots[].sourceRefs.{evidenceIds,assessmentIds,combineResults,trialIds}[]  m17/rooms.mjs:969-981
--- owner/writer: m17/rooms.mjs   lifecycle: immutable with the snapshot; capped 40/20/20/10
--- mapping: evidenceIds[i] -> ('evidence', id: evidence(04))   assessmentIds[i] -> ('assessment', id: assessments(04))
---   combineResults[i] (`<protocolId>@<version>` strings) -> ('combine_result', text)   trialIds[i] -> ('trial', trials.id)
--- notes: polymorphic (kind, ref_id), no FK; `seq` preserves list order.
+CREATE INDEX room_snapshots_room_at ON room_snapshots (room_id, at);
+CREATE INDEX room_snapshots_player ON room_snapshots (player_id);
 CREATE TABLE room_snapshot_source_refs (
-  snapshot_id TEXT NOT NULL REFERENCES room_snapshots(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN ('evidence','assessment','combine_result','trial')),
-  seq INTEGER NOT NULL,
-  ref_id TEXT NOT NULL,
-  PRIMARY KEY (snapshot_id, kind, seq)
+  snapshot_id                      TEXT NOT NULL REFERENCES room_snapshots(id) ON DELETE CASCADE,
+  kind                             TEXT NOT NULL,
+  position                         INTEGER NOT NULL,
+  ref_id                           TEXT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (snapshot_id, kind, position)
 ) STRICT;
 
--- source: db.roomDecisions  created at m17/rooms.mjs:1175 (advisory recommendation, recordDecision) and
---         m23/decisionRoutes.mjs:371 (formal decision)
--- owner/writer: m17/rooms.mjs, m23/decisionRoutes.mjs   lifecycle: append-only chain per room; a new row sets
---         supersededById on the previous head; the head is the row with no successor; formal rows bump their
---         own rev when superseded; never deleted
--- mapping: id -> id (rdec-<n>)   roomId -> room_id   orgId -> org_id   playerId -> player_id
---   kind ('formal' | absent) -> kind (absent rows migrate as 'recommendation', which is how decisionKind reads them)
---   state ('final' | absent) -> state ('final' always; DECISION_STATES also names 'draft' but no stored row is a draft)
---   outcome -> outcome (formal only)   recommendation -> recommendation
---   reasonCodes[] -> reason_codes_json   note -> note (<= 2000, club-private)
---   by {userId,name,role} -> by_user_id, by_name, by_role   createdAt -> created_at   finalizedAt -> finalized_at (formal)
---   trigger -> trigger ('decision' | 'status:<to>' | 'decision:finalize')
---   clientKey -> client_key (the M17 per-room replay key, searched by (roomId, clientKey); also the formal row's key.key)
---   supersedes -> supersedes_id   supersededById -> superseded_by_id
---   supersession {of, reason} -> supersession_of_id, supersession_reason (<= 500)
---   rev -> rev   revAt -> rev_at (formal only; legacy rows read rev 1)
---   evidenceRefs[] -> room_decision_evidence_refs
---   assessmentSummary {submitted, withheld, verdicts{sign,monitor,pass,none}, assessmentIds[] <= 20} ->
---            assessment_submitted, assessment_withheld, assessment_verdict_sign/_monitor/_pass/_none,
---            assessment_ids_json (retained JSON: immutable list of cited assessment ids read whole; deferred junction)
---   snapshot {at, trust, sourceRefs, snapshotId} -> snapshot_id (the rest is derived, not stored: exact copy of room_snapshots)
---   keys.finalize / keys.draft -> idempotency_keys   draftId -> draft_id (the draft row is deleted on finalize; no FK)
---   lifecycle {action, from, to, applied, reason?, at} -> lifecycle_action, lifecycle_from, lifecycle_to, lifecycle_applied,
---            lifecycle_reason, lifecycle_at
---   policyVersion -> policy_version
--- notes: more than one formal head per room is corruption (duplicateFinalHeads), not a constraint.
---   UNIQUE (room_id, client_key) is what the M17 replay lookup assumes — enforced by code today.
---   Read by room (chain order createdAt, id) and by the Second Look / handoff readers (head only).
 CREATE TABLE room_decisions (
-  id TEXT PRIMARY KEY,
-  room_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
-  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  player_id TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'recommendation' CHECK (kind IN ('recommendation','formal')),
-  state TEXT NOT NULL DEFAULT 'final' CHECK (state IN ('final')),
-  outcome TEXT CHECK (outcome IS NULL OR outcome IN ('progress','hold','reject')),
-  recommendation TEXT NOT NULL CHECK (recommendation IN ('no_decision','continue_watching','shortlist','priority','trial','offer','archive')),
-  reason_codes_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(reason_codes_json)),
-  note TEXT CHECK (note IS NULL OR length(note) <= 2000),
-  by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  by_name TEXT,                                      -- snapshot
-  by_role TEXT,                                      -- snapshot
-  created_at INTEGER NOT NULL,
-  finalized_at INTEGER,
-  trigger TEXT NOT NULL,
-  client_key TEXT CHECK (client_key IS NULL OR length(client_key) <= 64),
-  supersedes_id TEXT REFERENCES room_decisions(id) ON DELETE RESTRICT,
-  superseded_by_id TEXT REFERENCES room_decisions(id) ON DELETE RESTRICT,
-  supersession_of_id TEXT REFERENCES room_decisions(id) ON DELETE RESTRICT,
-  supersession_reason TEXT CHECK (supersession_reason IS NULL OR length(supersession_reason) <= 500),
-  rev INTEGER NOT NULL DEFAULT 1,
-  rev_at INTEGER,
-  assessment_submitted INTEGER,
-  assessment_withheld INTEGER,
-  assessment_verdict_sign INTEGER,
-  assessment_verdict_monitor INTEGER,
-  assessment_verdict_pass INTEGER,
-  assessment_verdict_none INTEGER,
-  assessment_ids_json TEXT CHECK (assessment_ids_json IS NULL OR json_valid(assessment_ids_json)),
-  snapshot_id TEXT REFERENCES room_snapshots(id) ON DELETE RESTRICT,
-  draft_id TEXT,
-  lifecycle_action TEXT,
-  lifecycle_from TEXT,
-  lifecycle_to TEXT,
-  lifecycle_applied INTEGER CHECK (lifecycle_applied IS NULL OR lifecycle_applied IN (0,1)),
-  lifecycle_reason TEXT,
-  lifecycle_at INTEGER,
-  policy_version INTEGER,
-  CHECK (kind = 'formal' OR outcome IS NULL)
+  seq                              INTEGER PRIMARY KEY,
+  id                               TEXT NOT NULL UNIQUE,
+  room_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  org_id                           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id                        TEXT,
+  kind                             TEXT,
+  state                            TEXT,
+  outcome                          TEXT,
+  recommendation                   TEXT,
+  note                             TEXT,
+  by_user_id                       TEXT,
+  by_name                          TEXT,
+  by_role                          TEXT,
+  created_at                       INTEGER,
+  finalized_at                     INTEGER,
+  trigger                          TEXT,
+  client_key                       TEXT,
+  supersedes_id                    TEXT,
+  superseded_by_id                 TEXT,
+  supersession_of_id               TEXT,
+  supersession_reason              TEXT,
+  rev                              INTEGER,
+  rev_at                           INTEGER,
+  assessments_submitted            INTEGER,
+  assessments_withheld             INTEGER,
+  assessment_verdicts_json         TEXT CHECK (assessment_verdicts_json IS NULL OR json_valid(assessment_verdicts_json)),
+  snapshot_at                      INTEGER,
+  snapshot_trust_score             REAL,
+  snapshot_trust_band              TEXT,
+  snapshot_trust_policy_version    INTEGER,
+  snapshot_trust_component_levels_json TEXT CHECK (snapshot_trust_component_levels_json IS NULL OR json_valid(snapshot_trust_component_levels_json)),
+  snapshot_trust_hash              TEXT,
+  snapshot_source_refs_json        TEXT CHECK (snapshot_source_refs_json IS NULL OR json_valid(snapshot_source_refs_json)),
+  snapshot_id                      TEXT,
+  draft_id                         TEXT,
+  lifecycle_action                 TEXT,
+  lifecycle_from                   TEXT,
+  lifecycle_to                     TEXT,
+  lifecycle_applied                INTEGER,
+  lifecycle_reason                 TEXT,
+  lifecycle_at                     INTEGER,
+  policy_version                   INTEGER,
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
-CREATE INDEX room_decisions_room_created ON room_decisions(room_id, created_at);
-CREATE INDEX room_decisions_room_head ON room_decisions(room_id, superseded_by_id);
-CREATE UNIQUE INDEX room_decisions_room_client_key ON room_decisions(room_id, client_key)
-  WHERE client_key IS NOT NULL;
+CREATE INDEX room_decisions_room_created ON room_decisions (room_id, created_at);
+CREATE INDEX room_decisions_room_client_key ON room_decisions (room_id, client_key);
+CREATE INDEX room_decisions_player ON room_decisions (player_id);
+CREATE INDEX room_decisions_draft ON room_decisions (draft_id);
+CREATE TABLE room_decision_reason_codes (
+  decision_id                      TEXT NOT NULL REFERENCES room_decisions(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  code                             TEXT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (decision_id, position)
+) STRICT;
 
--- source: db.roomDecisions[].evidenceRefs[]  created at m23/decisionRoutes.mjs:378 (resolveEvidenceRefs output)
--- owner/writer: m23/decisionRoutes.mjs   lifecycle: immutable with the row; <= 50; deduped by (kind, id)
--- mapping: kind -> kind   id -> ref_id (polymorphic: assessments(04) | trials | box_sessions(07) | evidence(04); no FK)
---   meta -> meta_json (retained JSON by design: per-kind immutable metadata captured at decision time — assessment
---            {scoutName, submittedAt, verdict, trialId}, trial {workflowState, completedAt}, box_cam_session
---            {trialId, trialSessionId, verificationState, simulated}, passport_evidence {claimType, provenance};
---            <= 4 scalar keys, never queried)
--- notes: evidence of this case only (resolved against the case at finalize).
 CREATE TABLE room_decision_evidence_refs (
-  decision_id TEXT NOT NULL REFERENCES room_decisions(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN ('assessment','trial','box_cam_session','passport_evidence')),
-  ref_id TEXT NOT NULL,
-  meta_json TEXT CHECK (meta_json IS NULL OR json_valid(meta_json)),
-  PRIMARY KEY (decision_id, kind, ref_id)
+  decision_id                      TEXT NOT NULL REFERENCES room_decisions(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  kind                             TEXT,
+  ref_id                           TEXT,
+  meta_json                        TEXT CHECK (meta_json IS NULL OR json_valid(meta_json)),
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (decision_id, position)
+) STRICT;
+CREATE INDEX room_decision_evidence_refs_ref ON room_decision_evidence_refs (kind, ref_id);
+CREATE TABLE room_decision_assessment_ids (
+  decision_id                      TEXT NOT NULL REFERENCES room_decisions(id) ON DELETE CASCADE,
+  position                         INTEGER NOT NULL,
+  assessment_id                    TEXT,
+  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  PRIMARY KEY (decision_id, position)
 ) STRICT;
 
--- source: db.roomEvidenceState  created at m17/rooms.mjs:1273
--- owner/writer: m17/rooms.mjs POST /rooms/:id/evidence/:eid/review   lifecycle: one row per (room, evidence), overwritten in place
--- mapping: id -> id (`rev-<n>` — prefix collides with the `rev` field name, kept as-is)   roomId -> room_id   orgId -> org_id
---   evidenceId -> evidence_id (evidence(id), file 04, no FK)   state -> state   note -> note (<= 1000; an edit without a note keeps the old one)
---   byId -> by_user_id   byName -> by_name (snapshot)   at -> at
--- notes: UNIQUE (room_id, evidence_id) enforced by code today (find-then-assign).
 CREATE TABLE room_evidence_states (
-  id TEXT PRIMARY KEY,
-  room_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE,
-  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  evidence_id TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('not_reviewed','reviewing','reviewed','needs_follow_up')),
-  note TEXT CHECK (note IS NULL OR length(note) <= 1000),
-  by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  by_name TEXT NOT NULL,                             -- snapshot
-  at INTEGER NOT NULL,
-  UNIQUE (room_id, evidence_id)
+  seq                              INTEGER PRIMARY KEY,
+  id                               TEXT NOT NULL UNIQUE,
+  room_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  org_id                           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  evidence_id                      TEXT,
+  state                            TEXT,
+  note                             TEXT,
+  by_user_id                       TEXT,
+  by_name                          TEXT,
+  at                               INTEGER,
+  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
+  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
+  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
 ) STRICT;
+CREATE INDEX room_evidence_states_room_evidence ON room_evidence_states (room_id, evidence_id);
 
 -- =============================================================================
 -- recruitment_contacts  (the club's internal record of one communication process)

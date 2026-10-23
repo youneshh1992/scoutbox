@@ -387,9 +387,9 @@ export function registerDecision(ctx) {
       // ---- The case, through the ONE validator, which now sees this row as the evidence a progress needs.
       const from = kase.room.status;
       const prevSupersededById = head ? head.supersededById : null;
-      db.roomDecisions.push(row);
+      ctx.recruitmentCases.addDecision(row); // S8b: the former `db.roomDecisions.push(row)`; the row lands in the persistNow() below
       if (head) head.supersededById = row.id;
-      const rollback = () => { db.roomDecisions.splice(db.roomDecisions.indexOf(row), 1); if (head) head.supersededById = prevSupersededById; };
+      const rollback = () => { ctx.recruitmentCases.removeDecision(row); if (head) head.supersededById = prevSupersededById; }; // S8b: the former splice — the uncommitted record leaves the mirror and lands nowhere
       let lifecycle;
       if (from === LIFECYCLE_ACTIONS[map.action].to) {
         lifecycle = { action: map.action, from, to: from, applied: false, reason: 'already_there', at };

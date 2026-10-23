@@ -40,7 +40,7 @@ async function test(name, fn) { if (only && !name.includes(only)) return; await 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
 // S4b-R: a file this build wrote carries 0014 too; the S4b-R tool (copy-only, the retained records kept as a blob) goes first and the S6b tool works on its output.
-const preS4bR = (dir) => { const s8a = tempDir('s8a-to-s4br'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), dir, s8a], { stdio: 'pipe' }); /* S8a: the file carries 0015; its rollback goes first */ const out = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, out], { stdio: 'pipe' }); return out; };
+const preS4bR = (dir) => { const s8b = tempDir('s8b-to-s8a'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), dir, s8b], { stdio: 'pipe' }); /* S8b: the file carries 0016; its rollback goes first */ const s8a = tempDir('s8a-to-s4br'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), s8b, s8a], { stdio: 'pipe' }); /* then S8a */ const out = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, out], { stdio: 'pipe' }); return out; };
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -275,7 +275,7 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
 await test('[cutover] the cutover and the save points: a fresh boot records 0013_safety_audit after 0012 and creates the eight tables with no blob behind them (the data layer reports the domain); a player\'s block and its ledger row land together in ONE revision with the next save; the IDV entry commits with the guardian\'s column before the 200 — both failure seams and the real COMMIT leave nothing, the retry lands, a SIGKILL right after the response loses nothing, a restart serves it; a failed ordinary save at the REAL COMMIT keeps a report in memory and lands it ONCE with the next save; the block lift is durable in its route\'s save', async () => {
   const dir = tempDir('s6b-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
   assert.ok(live(dir), 'the boot recorded 0013'); // fails on 1792fc7: no such record
-  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).slice(-4)), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment']); // S4b-R and S8a registered after this step
+  assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).slice(-5)), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases']); // S4b-R and S8a registered after this step
   for (const t of Object.values(TABLES)) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
   assert.equal(q1(dir, `SELECT COUNT(*) AS n FROM collections WHERE name IN (${COLLECTIONS.map((n) => `'${n}'`).join(', ')})`).n, 0, 'no audit blob');
   const cap = (await S.j('GET', '/capabilities')).body; const domains = cap?.persistence?.dataLayer?.domains ?? cap?.dataLayer?.domains ?? {}; assert.ok(domains.safetyAudit, `the data layer reports the safetyAudit domain (${Object.keys(domains).join(', ')})`);

@@ -1,13 +1,17 @@
 # S8b readiness review — recruitment cases, rooms and decisions as tables
 
-**Status: PREPARATION ONLY — NOT IMPLEMENTED.** Written 22 October 2026 on `feat/sqlite-schema` at `7a7efc6`, the
-commit at which S8a-core was independently accepted (`sqlite-migration-plan.md` §D.8.11). Nothing of S8b is
-implemented, stubbed, registered or reserved: no migration module, no repository, no DDL change, no test. The next free
-migration identifier is **`0016`** (the registry `scoutbox-server/repositories/migrations/` ends at
-`0015_recruitment.mjs`; `DATA_MIGRATIONS` ends at `0015`) — **reported, not reserved**; it is assigned when S8b is
-approved. The drafted DDL in `docs/architecture/sql/02_recruitment.sql` for these tables stays a draft and is amended at
-implementation, as S8a's was. Everything marked *proposed* below is a proposal for independent review; S8a-core is
-*accepted*; S8b is *not implemented*.
+**Status: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (23 October 2026).** Written 22 October 2026 on
+`feat/sqlite-schema` at `7a7efc6`, the commit at which S8a-core was independently accepted (`sqlite-migration-plan.md`
+§D.8.11), corrected twice after the independent reviews of `57076a2` and `86342b8` (below), and **independently
+accepted as a design at `4d2c74b`** (the review of `4d2c74b`, 23 October 2026: the corrected S8b design accepted for
+implementation; S8a-core still accepted at `7a7efc6`). The implementation followed on the same day under the
+Founder's explicit answer to the one product question of §9, asked and recorded verbatim: **Q8a — "Approve tolerant
+(Recommended)"**. Migration **`0016_recruitment_cases`** is REGISTERED; `repositories/recruitmentCases.mjs`, its
+rollback tool, the two suites and the amended `docs/architecture/sql/02_recruitment.sql` are the implementation; **§12
+is the implementation record** — what landed, where it departs from the sections below (marked *proposed*, kept as the
+reviewed design), what was measured and what is not claimed. The implementation awaits its own independent acceptance;
+nothing here is production, release, security, legal-compliance, merge or deployment approval. S8c/S8d are not
+started.
 
 **Corrected on 22 October 2026 after the independent review of `57076a2`**, which accepted the S8a-core acceptance
 record and did NOT accept this design for implementation: its F1 (the incoming case links must be released before the
@@ -20,8 +24,8 @@ while §6 F3 assumed every owned child cascades and probe 5 modelled no owned ch
 owner/child inventory) and §8, evidenced by probe 6 beside the reviewer's reproduction script: a case's owned lists go
 with their owner, as the unchanged `store.save` does today; the RESTRICT key is kept and the departing owner's
 history (and the polymorphic key rows of its owned draft/handoff) are removed explicitly before the parent, inside
-the same transaction; an omitted independent room collection still blocks. S8b stays PREPARED, NOT IMPLEMENTED,
-**awaiting independent acceptance of the corrected design**; Q8a stays unanswered and is not asked here.
+the same transaction; an omitted independent room collection still blocks. **The independent review of `4d2c74b`
+(23 October 2026) accepted the corrected design**; Q8a was then asked and answered (§9, §12).
 
 What this document is for: the survey the independent review of `7a7efc6` asked for ("establish the exact bounded
 collection/table list from current writers and readers"), a concrete migration and write design with its probes, the
@@ -412,6 +416,10 @@ MEASURED at implementation on the actual build, not a guarantee**; the rollback 
 
 ## 8. Implementation checklist (ordered; each item with its acceptance criterion)
 
+*Status at implementation (23 October 2026): items 1–6 done; where the implementation departs from an item's wording
+(four hook objects instead of three; the bench not run; the direct old-build boot measured as a LISTENING server, not
+an exit) §12 records it.*
+
 1. Checkouts: `7a7efc6` as `SCOUTBOX_PRE_S8B_SERVER` beside the seven existing builds; never over the working branch.
 2. Tests first, failing on the unchanged tree: a unit suite (`scripts/testRecruitmentCases.mjs`: the migration and
    counts; the lossless mapping of every literal in §2 including both history literals, both decision literals, a
@@ -464,6 +472,15 @@ no deletion of retained records; what resolution would mean is a retention quest
 this preparation does not take) · a key (not available before plan §D.2a / Q3). *Recommendation:* tolerant and counted, for the Q7a reasons. *Depends on it:*
 the `player_id` validation branch of the import and the write, `/capabilities` counts; nothing else.
 
+**Answered by the Founder on 23 October 2026, after the design's acceptance at `4d2c74b` — verbatim: "Approve
+tolerant (Recommended)".** Implemented as the tolerant-and-counted form: no player foreign key on
+`recruitment_cases`, `room_snapshots`, `room_decisions` or `case_transaction_handoffs`; a live id resolves, a retained
+id resolves to the retained record, a historically missing id is preserved and counted (`meta.recruitmentCasesCutover
+.players {live, retained, missing}` at the cutover; `/capabilities` → `dataLayer.domains.recruitmentCases
+.unresolvedPlayerReferences` / `retainedPlayerReferences`, one count per table) and never refused, fabricated or
+deleted. The deletion unit's tombstone (`playerName` null, `subjectRemovedAt`) is unchanged and lands in the unit's
+commit as an in-place edit of the case row.
+
 **Engineering choices recorded here, not put to the Founder** (ordinary design within the accepted S8a pattern, each
 with its evidence): the vocabulary/length CHECKs dropped (S8a precedent); the one-open-room index withdrawn (probe 2
 and probe 4; the route rule stays); position-keyed children instead of deduplicating primary keys; staff keys
@@ -478,7 +495,12 @@ deletion/retention behaviour.
 
 - The slower boot, the larger file and the absence of a save-time gain (§D.8.7) are expected to grow with S8b's
   tables; the whole-snapshot-write objective stays unmet until every blob has moved (S8c, S8d and beyond).
-- The old build's behaviour on a new file is predicted, not measured (§7).
+- The old build's behaviour on a new file was predicted at `7a7efc6`–`4d2c74b` (§7: "STORE_MISSING and exit 1",
+  the S8a measurement extrapolated) and is now MEASURED (§12, `scripts/testRecruitmentCasesServer.mjs` on the actual
+  `7a7efc6` build): the prediction was wrong in one respect — that build LISTENS after logging `INTEGRITY
+  STORE_MISSING` for the five collections, serves no case (`GET /org/rooms/:id` 404, `/org/rooms` empty), writes its
+  empty `??= []` containers back as five empty blobs with its boot save, and changes no table row; this build then
+  drops those stale blobs at attach and serves the tables again. The DANGER line of OPERATIONS.md says exactly this.
 - The probes are design models over the real tables and the real S8a module; they are not the implementation's
   tests (§8.2) and they do not model the S8a mapping engine's treatment of the case fields (that engine is the
   precedent; its behaviour on S8a shapes is accepted). **Coverage limits:** probe 2's eight write-order checks cover
@@ -530,3 +552,92 @@ Probes 1–4 run on 22 October 2026 on the `7a7efc6` tree and on `57076a2`; the 
 probe 5 on the `57076a2` tree; the reviewer's case-history script and probe 6 on the `86342b8` tree on 23 October
 2026 (application source byte-identical to `7a7efc6` throughout) — Node 22 and Node 24; logs in the handoff. The
 probes and the reviewer's scripts live outside the repository (the handoff ZIP), not in `scoutbox-server/scripts`.
+At implementation (§12) the six probes and the reviewer's owned-case matrix were run again on the implemented tree as
+MODEL evidence (they model the design over the real S8a module; the implementation's own evidence is the two suites
+below); the two old-order scripts keep their intended exit 1.
+
+| Suite (`npm test`, since the implementation) | What it proves |
+|---|---|
+| `scripts/testRecruitmentCases.mjs` (10 checks; failing-first on the unchanged `4d2c74b` tree: 9 on behavioural assertions — the registry's last id, no `recruitment_cases` table after the migrations, the blob store removing a case a retained comment still names, a view that is not read-only —, 1 `[compat]` check holding on both trees) | migration 0016 end to end on an S8a-core file (the twenty-five tables, the two parents rebuilt with the real case key, the broadened key CHECK, every S8a row and thread byte-identical, the five blobs imported and retired, counts only, reruns no-ops, a blob-less file); the lossless mapping of every writer literal of §2; the import refusals with ids only and the Q8a counts; the staged repository (views, the five entry points, every in-place writer landing in the next save, key rows cleaned, unchanged saves rewriting nothing, exports, reopen); the two failure contracts through the real store; the corrected write of §6 through the real store (F1a/F1b/F1c, F2 per collection and all four, R1, both input orders, partial = full, resupply); the refusals with their tables and the injected failure after the owned children; the `[behaviour]` regression; the copy-only rollback, the chain and the re-upgrade |
+| `scripts/testRecruitmentCasesServer.mjs` (3 checks; failing-first on `4d2c74b`) | the real server: every route of §1 landing as rows the moment it answers, the listings and reads unchanged, a SIGKILL, `/capabilities`; the player's and the guardian's surfaces carrying no note, decision or room; another club's 404; the deletion unit with a real COMMIT failure; a restored backup naming a missing player served and counted; the backup's five legacy shapes, the restore through 0016 row for row, the actual `7a7efc6` build booted DIRECTLY on a 0016 copy (measured) and on the rollback copy (writes into its blobs, re-upgraded exactly), a null blob refused at boot |
+
+## 12. Implementation record (23 October 2026, on top of `4d2c74b`)
+
+**What landed.** `repositories/recruitmentCases.mjs` (the shapes of §2 as specs over the S8a engine, whose pure
+primitives — `encode`, `decodeLevel`, the DDL helpers, the column rules — `recruitment.mjs` now exports; the generic
+writer/reader; the preflight P; the stages A, R, C, D, F1, F3, G; the import; the staged repository with its five
+views, five entry points and `removeDecision`; the exports); `repositories/migrations/0016_recruitment_cases.mjs`
+(registered; the twenty-five tables; `idempotency_keys` rebuilt with the broadened CHECK first — the room decisions'
+key rows need it —, the five blobs imported in the order A → the two parents rebuilt with the real case key → C → D,
+the blob rows retired, counts only in `meta.recruitmentCasesCutover`); `repositories/recruitmentCasesRollback.mjs` and
+`scripts/recruitmentCasesRollback.mjs` (`npm run rollback:recruitment-cases`; §7 as designed, the two parents
+rebuilt without the key and the key table narrowed again); `repositories/index.mjs` (`DATA_MIGRATIONS`,
+`TABLE_BACKED`, `readTableBacked`, the snapshot write order P A R | B | C D | E | F1 F2 F3 | G, the hook
+registration, the `/capabilities` domain `recruitmentCases`); `recruitment.mjs` (`readCasesCollection` reads the table
+once 0016 is recorded; `departures()`; the parametrised parent DDL and key-table DDL; no change to its phases);
+the caller conversions (`m12/scouting.mjs` `addCase`; `m17/rooms.mjs` `addCase` ×2, `addSnapshot`, `addComment`,
+`addDecision`, `addEvidenceState`; `m23/decisionRoutes.mjs` `addDecision` and `removeDecision` for the transport-
+failure splice; the repository passed to the M12, M13, M17 and M23 contexts); `m13/enterprise.mjs` exports the five
+collections into the backup; file 02 amended (the drafted case/room sections replaced by the generated definitions
+with "draft versus implemented" notes; the two parents and the key table shown as 0016 leaves them). Every public
+route, permission, audience, lifecycle, safeguarding and retention rule is unchanged; the route payloads are unchanged.
+
+**Departures from the proposed sections, each recorded here.**
+- §5 proposed THREE hook objects around the recruitment flush; the implementation registers FOUR: hook 1 (P, A, R)
+  before the recruitment hook, hook 2 (C) after it, hook 3 (D, F1) before the channels hook, hook 4 (F3, G) after it —
+  because the recruitment hook's flush prunes the requests internally (F2) and F3 must follow F2 and the channels, while
+  D/F1 must precede the channels; the order of §6 is kept exactly.
+- §2 proposed `deadline_raw` / `due_at` "off-type kept"; implemented as JSON columns (`deadline_json`, `due_at_json`:
+  the raw client value of any JSON type, never parsed). `case_tags` is `case_room_tags`; the draft's `reasonCodes` /
+  `evidenceRefs` and the decision's `reasonCodes` / `assessmentSummary.assessmentIds` are child tables (four more
+  tables than the draft's count); the four snapshot id lists share `room_snapshot_source_refs` with a `kind` column; a
+  scalar list entry sits in its column (`request_id`, `trial_id`, `tag`, `user_id`, `code`, `ref_id`, `assessment_id`),
+  any other entry in `raw_json`; the two history literals sit side by side (`by_kind`/`by_id`/`by_name` and
+  `actor_kind`/`actor_user_id`/`actor_name`). The draft's `case_id UNIQUE` on the two object children is their
+  primary key.
+- The keys rule needs an owner id: a draft or handoff record WITHOUT a string `id` (no writer produces one) keeps
+  its row-worthy acts on its own row under `extra_json.keys` instead of minting an owner — nothing is lost, nothing
+  is invented.
+- A request or trial naming a case outside the file never reaches 0016: the S8a import refuses the file at 0015 first
+  (Q7b, `RECRUITMENT_CASE_MISSING`), so the key rebuild meets no dangling case id; the suite records this instead of a
+  0016 refusal.
+- The cutover's `withAbsentKeys` counts every record lacking ANY known key (an M12 case lacks `decisionDraft`,
+  `transactionHandoff` and `subjectRemovedAt`; every case lacks `subjectRemovedAt` before a removal): the fixture's
+  four cases count 4, the S8a precedent's rule, nothing backfilled.
+- Item 5's bench was not extended or run: no boot, file-size or save-time figure is measured or claimed here.
+
+**Measured, not assumed (the actual `7a7efc6` build, `SCOUTBOX_PRE_S8B_SERVER`).** Booted DIRECTLY on a copy of a
+0016 file it LISTENS: the migration runner skips the record it does not know, the boot-contract check logs `INTEGRITY
+STORE_MISSING recruitmentCases, roomComments, roomDecisions, roomEvidenceState, roomSnapshots`, the module
+registration's `??= []` gives it five empty containers, `GET /org/rooms/:id` answers 404 and `/org/rooms` lists nothing,
+its boot save writes the five empty arrays back as blobs beside the untouched tables (the save revision advances by
+one; no table row changes), and this build, started on that copy, drops the stale blobs at attach and serves the same
+rooms, thread and decision from the tables. The S8a measurement (exit 1 on a 0015 file) does not transfer: those two
+collections had no `??=` container at the point the check ran. The rollback tool on a copy remains the only way back;
+booted on the rollback copy, the old build serves the same rooms, thread and decision from its blobs, writes a comment
+and a case into them, and this build re-upgrades the copy with those writes exactly.
+
+**Adjustments outside the new modules (each stated in its file).** The seventeen suites that walk the rollback chain
+now run the S8b tool before the S8a tool (a live file carries 0016); the registry lists and the "last recorded
+migration" assertions of the S8a and S4b-R server suites allow for `0016` (the pre-S8a build's `STORE_MISSING` line
+now names the five S8b collections too); the S8a fixture's
+`CASES()` became full case literals with empty links (0016 imports them on the same run; the S8a tests vary the
+requests and trials freely); `testOrgs.mjs`'s seeded room became a case literal; the untouched-table dumps of two
+suites exclude the twenty-five tables as they exclude the fifteen; the chained rollback revision counts gained one;
+`testCoreSchema.mjs`'s pre-cutover slice skips `0016` as it skips `0015` (0016 needs 0015 first) and its and
+`testIdentityRepositories.mjs`'s `TABLE_BACKED` lists gain the five names. Of the route batteries of item 5, one differed
+between the final tree and the untouched build: `m23DecisionPersistence.mjs` seeded a case whose owner had no staff row
+(refused at 0016 with the id, `RECRUITMENT_CASES_USER_MISSING`, as the sibling Trial and Contact persistence batteries
+never did), compared snapshots by key order (the documented table-read limitation; now key-order-insensitive, every key
+and value still compared), and planted three alien entries and eight rows whose chain pointer named a decision that does
+not exist (the blob store tolerated them; the cutover refuses the file with the positions and ids and leaves it exactly as
+it was — the battery now asserts that contract on two files and keeps the eight row defects, superseded by the real head,
+carried losslessly and judged on read as before). 52 checks on the final tree; the unchanged battery still passes on the
+old build; the adapted one fails on the old build only the two refusal checks. No product behaviour was changed for a
+constraint; the batteries' other results are identical on both trees (`apiE2E` pre-existing on both).
+
+**Not claimed.** The whole-snapshot-write objective (contacts, offers, packages, signings, follow-ups and the later
+collections are still blobs), release readiness, any performance gain, and the independent acceptance this record
+awaits. The gates of the handoff (`gates-run.txt`): the backend chain on Node 22 and Node 24 with the EIGHT historical
+builds booted for real, the Player suite, the batteries of item 5 on the final tree, the six probes and the reviewer's
+owned-case matrix on both runtimes, the two old-order scripts with their intended exit 1.

@@ -39,6 +39,7 @@ export function registerRooms(ctx) {
     db, orgRouter, adminRouter, nextId, persistNow, notify, ledgerAppend, broadcast,
     findPlayer, moderateOrRefuse, playerViewForOrg, orgCanSee, isLead, audit, vmetric,
     faults = null,
+    recruitmentCases, // S8b: the cases and the four room collections live in their tables; a new record enters through the repository, every other change is in place
   } = ctx;
 
   // ------------------------------------------------------------- utilities
@@ -576,7 +577,7 @@ export function registerRooms(ctx) {
         links: { requestIds: [], trialIds: [], signingId: null },
         createdAt: now(), history: [],
       };
-      db.recruitmentCases.push(room);
+      recruitmentCases.addCase(room); // S8b: the former `db.recruitmentCases.push(room)`; the row lands in the persistNow() below
     }
     room.room = {
       status: INITIAL_ROOM_STATUS,
@@ -933,7 +934,7 @@ export function registerRooms(ctx) {
         links: { requestIds: [], trialIds: [], signingId: null },
         createdAt: now(), history: [],
       };
-      db.recruitmentCases.push(room);
+      recruitmentCases.addCase(room); // S8b: the former `db.recruitmentCases.push(room)`
     }
     room.room = {
       status: INITIAL_ROOM_STATUS, priority: 'normal', tags: [], leadScoutUserId: req.orgUser.id,
@@ -982,7 +983,7 @@ export function registerRooms(ctx) {
         },
       }),
     };
-    db.roomSnapshots.push(snap);
+    recruitmentCases.addSnapshot(snap); // S8b: the former `db.roomSnapshots.push(snap)`
     return snap;
   }
 
@@ -1044,7 +1045,7 @@ export function registerRooms(ctx) {
       body, replyToId, mentions,
       createdAt: now(), editedAt: null, editCount: 0, deletedAt: null,
     };
-    db.roomComments.push(c);
+    recruitmentCases.addComment(c); // S8b: the former `db.roomComments.push(c)`
     activity(room, req, 'room_comment_added', { commentId: c.id, replyToId });
     room.room.updatedAt = now();
     vmetric('room_comment_added');
@@ -1182,7 +1183,7 @@ export function registerRooms(ctx) {
     };
     // Append-only: a revision SUPERSEDES its predecessor, it never rewrites it.
     if (prev) prev.supersededById = d.id;
-    db.roomDecisions.push(d);
+    recruitmentCases.addDecision(d); // S8b: the former `db.roomDecisions.push(d)`
     activity(room, req, 'room_decision_recorded', { decisionId: d.id, recommendation, reasonCodes });
     vmetric('room_decision_recorded');
     if (['archived', 'closed', 'withdrawn'].includes(room.room.status)) {
@@ -1271,7 +1272,7 @@ export function registerRooms(ctx) {
     let row = db.roomEvidenceState.find((x) => x.roomId === room.id && x.evidenceId === evidence.id);
     if (!row) {
       row = { id: nextId('rev'), roomId: room.id, orgId: req.org.id, evidenceId: evidence.id, state, note, byId: req.orgUser.id, byName: req.orgUser.name, at: now() };
-      db.roomEvidenceState.push(row);
+      recruitmentCases.addEvidenceState(row); // S8b: the former `db.roomEvidenceState.push(row)`
     } else {
       Object.assign(row, { state, note: note ?? row.note, byId: req.orgUser.id, byName: req.orgUser.name, at: now() });
     }

@@ -332,18 +332,42 @@ and design changes the Founder explicitly requests.
   by the independent review of `7a7efc6` with F1/F2/C1 CLOSED (plan §D.8.11
   the acceptance record; the acceptance covers the bounded storage-migration
   scope only — not S8 as a whole, not the full migration, not product
-  release, security, legal compliance, merge or deployment). S8b (cases,
-  rooms, decisions) is PREPARED, NOT IMPLEMENTED (`docs/architecture/
-  s8b-readiness-review.md`, plan §D.9): its write order was corrected after
-  the independent review of `57076a2` (F1 the incoming case links released
+  release, security, legal compliance, merge or deployment). **S8b (cases,
+  rooms, decisions) is IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (23
+  October 2026, on top of `4d2c74b`):** its design (`docs/architecture/
+  s8b-readiness-review.md`, plan §D.9; the write order corrected after the
+  independent review of `57076a2` — F1 the incoming case links released
   before the S8a departures and the request prune, F2 explicitly removed
-  room rows pruned before their case; the Q8a strict-option wording) and
-  again after the review of `86342b8` (R1: a departing case's RESTRICT-owned
+  room rows pruned before their case, the Q8a strict-option wording — and
+  again after the review of `86342b8` — R1 a departing case's RESTRICT-owned
   `case_history` rows and the polymorphic key rows of its owned draft/handoff
   removed explicitly before the parent; owned lists go with their owner,
-  only an omitted independent collection blocks) and
-  the corrected design AWAITS INDEPENDENT ACCEPTANCE; Q8a is unanswered
-  and not to be asked before that review; `0016` is not reserved** (plan §D.8 the implementation
+  only an omitted independent collection blocks) was INDEPENDENTLY ACCEPTED
+  at `4d2c74b`; the Founder then answered the one product question,
+  recorded verbatim and not to be asked again: **Q8a "Approve tolerant
+  (Recommended)"** (the `player_id` columns of `recruitment_cases`,
+  `room_snapshots`, `room_decisions` and `case_transaction_handoffs` carry no
+  key; live, retained and historically missing ids resolve, are counted and
+  never refused, fabricated or deleted). Migration `0016_recruitment_cases`
+  (REGISTERED): the twenty-five case and room tables, the five blobs imported
+  row for row and retired, `recruitment_requests` and `trials` rebuilt with
+  the REAL `case_id` key (Q7b's conversion), `idempotency_keys` rebuilt with
+  the broadened owner CHECK; `repositories/recruitmentCases.mjs` the
+  repository (five read-only array views of mutable records; `addCase` /
+  `addComment` / `addSnapshot` / `addDecision` / `addEvidenceState` /
+  `removeDecision` the entry points; four save hooks around the recruitment
+  and channels hooks carrying the review's §6 order; the S8a lossless
+  mapping; the deletion unit's tombstone an in-place edit); the copy-only
+  rollback `scripts/recruitmentCasesRollback.mjs` (chained ahead of the S8a
+  tool; proven by booting the actual `7a7efc6` build on the copy). **Never
+  boot the previous build directly on a 0016 file: measured, it LISTENS after
+  `STORE_MISSING` for the five collections, serves no case and writes five
+  empty blobs beside the untouched tables** (OPERATIONS.md). The review's
+  §12 is the implementation record (departures from the proposed sections,
+  the measurements, what is not claimed: the whole-snapshot-write objective,
+  release readiness, any performance gain — the bench was not run). The
+  eighth historical build the backend gate boots for real is `7a7efc6`
+  (`SCOUTBOX_PRE_S8B_SERVER`). S8c/S8d are not started** (plan §D.8 the implementation
   record; §D.7 the design, independently accepted at
   `d0f0205` after the reviews of `a6c40f3`, `cd7dc95` and `f2121b5`;
   `scoutbox-server/OPERATIONS.md` "Recruitment requests and accepted
@@ -354,8 +378,9 @@ and design changes the Founder explicitly requests.
   tables carry no key; live, retained and historically missing ids resolve,
   are counted and never refused, fabricated or deleted), **Q7b "Approve
   strict checks (Recommended)"** (the two `case_id` columns are checked in
-  code against the `recruitmentCases` collection, ids only, until S8b creates
-  `recruitment_cases`), **Q7c "Approve strict (Recommended)"** (the guardian
+  code against the `recruitmentCases` collection, ids only; since S8b's
+  migration 0016 they are REAL keys to `recruitment_cases` as well — the
+  conversion the decision anticipated), **Q7c "Approve strict (Recommended)"** (the guardian
   columns are checked in code, no `SET NULL` key). Migration
   `0015_recruitment` (REGISTERED): `recruitment_requests`,
   `request_trial_slots`, `trials` and its eleven owned child tables,
@@ -391,11 +416,12 @@ and design changes the Founder explicitly requests.
   on a 0015 file: measured, it exits 1 at boot (`STORE_MISSING requests,
   trials`) and serves nothing** (OPERATIONS.md). Not met and not claimed: a
   faster save (the change-tracking fingerprint still serialises every record
-  per flush), the whole-snapshot-write objective. The next free migration
-  identifier is `0016` (not reserved). S8b (cases, rooms, decisions) is
-  prepared, not implemented. The seven historical builds the backend gate boots for real:
-  `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`,
-  `9b109dc` (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR/S8A_SERVER`).
+  per flush), the whole-snapshot-write objective. S8b (cases, rooms,
+  decisions) is implemented on top of it (migration `0016`, above); the next
+  free migration identifier is `0017` (not reserved). The eight historical
+  builds the backend gate boots for real: `812e13b`, `0641b2c`, `6ca66ba`,
+  `b67bce5`, `4f954ad`, `f0abd34`, `9b109dc`, `7a7efc6`
+  (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR/S8A/S8B_SERVER`).
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state

@@ -46,8 +46,10 @@ import * as m0012 from './migrations/0012_channels.mjs';
 import * as m0013 from './migrations/0013_safety_audit.mjs';
 import * as m0014 from './migrations/0014_player_erasure.mjs';
 import * as m0015 from './migrations/0015_recruitment.mjs';
+import * as m0016 from './migrations/0016_recruitment_cases.mjs';
 import { trialReportsFor } from './playerSubrecords.mjs';
 import { createRecruitmentRepository, RECRUITMENT_SNAPSHOT, RECRUITMENT_COLLECTIONS, RECRUITMENT_MIGRATION, RECRUITMENT_CUTOVER_META, CASES_COLLECTION, assertRecruitmentConsistent, unresolvedPlayerReferences as unresolvedRecruitmentPlayers, retainedPlayerReferences as retainedRecruitmentPlayers } from './recruitment.mjs';
+import { createRecruitmentCasesRepository, RECRUITMENT_CASES_SNAPSHOT, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_MIGRATION, RECRUITMENT_CASES_CUTOVER_META, unresolvedPlayerReferences as unresolvedCasePlayers, retainedPlayerReferences as retainedCasePlayers } from './recruitmentCases.mjs';
 import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, NOTIFICATIONS_MIGRATION, NOTIFICATIONS_CUTOVER_META } from './notifications.mjs';
 import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCHES_MIGRATION, DISPATCHES_CUTOVER_META } from './dispatches.mjs';
@@ -55,7 +57,7 @@ import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MI
 import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, CHANNELS_CUTOVER_META, assertChannelReferencesConsistent } from './channels.mjs';
 import { createSafetyAuditRepository, AUDIT_COLLECTIONS, AUDIT_SNAPSHOT_TABLES, SAFETY_AUDIT_MIGRATION, SAFETY_AUDIT_CUTOVER_META, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -94,8 +96,14 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
  * with their eleven owned child tables and the idempotency keys, each record in
  * its writer's literal, in insertion order, children in list order, with absence,
  * null, off-type and unknown fields kept losslessly (repositories/recruitment.mjs).
+ * `recruitmentCases`, `roomComments`, `roomSnapshots`, `roomDecisions` and
+ * `roomEvidenceState` (S8b, migration 0016) are the recruitment cases — the M12
+ * case with its M17 Room facet, M23 decision draft, M27 transaction handoff and
+ * M13 budget — and the four room collections, twenty-five tables, each record in
+ * its writer's literal, in insertion order, children in list order, absence,
+ * null, off-type and unknown fields kept losslessly (repositories/recruitmentCases.mjs).
  */
-export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS]);
+export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS, ...RECRUITMENT_CASES_COLLECTIONS]);
 /** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
 /** The notification, dispatch, outbox and push tables: no reference to any other table (polymorphic audiences; the dispatch's notification reference is indexed, not a foreign key; the outbox and push rows reference nothing), dispatched last. */
@@ -127,6 +135,8 @@ export function readTableBacked(sqlite) {
   }
   const recruitment = RECRUITMENT_SNAPSHOT.read(sqlite); // S8a-core: requests and trials from their tables (null before the 0015 record: the blobs stay)
   if (recruitment) Object.assign(out, recruitment);
+  const cases = RECRUITMENT_CASES_SNAPSHOT.read(sqlite); // S8b: the five collections from their tables (null before the 0016 record)
+  if (cases) Object.assign(out, cases);
   return out;
 }
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
@@ -190,6 +200,15 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   const requestsSupplied = Object.hasOwn(db, 'requests') && db.requests !== undefined;
   const trialsSupplied = Object.hasOwn(db, 'trials') && db.trials !== undefined;
   const casesSupplied = Object.hasOwn(db, CASES_COLLECTION) && db[CASES_COLLECTION] !== undefined;
+  // S8b (readiness review §6, P A R | B | C D | E | F1 F2 F3 | G): the preflight
+  // of the five case collections against the FINAL combined graph (the supplied
+  // requests/trials included), A the supplied cases with their owned children,
+  // R the release of the link rows the S8a phases or the request prune would
+  // hit — BEFORE the S8a phases (the recruitment_requests/trials case key is
+  // satisfied because the cases are in place). `null` before the 0016 record:
+  // the caller writes the five blobs.
+  const casesPlan = RECRUITMENT_CASES_SNAPSHOT.begin(sqlite, db, { requests: requestsSupplied ? db.requests : undefined, trials: trialsSupplied ? db.trials : undefined, orgs: present.includes('orgs') ? db.orgs : undefined, users: present.includes('users') ? db.users : undefined, label: 'the snapshot (cases, rooms, requests and trials)' });
+  if (casesPlan) written.push(...casesPlan.written);
   // S8a-core (plan §D.7.5): phases 1–3 of the recruitment write — the supplied
   // requests upserted with the back-reference parked, the trials' departures,
   // releases and arrivals, the final trial_id assigned — go after the identity
@@ -198,18 +217,30 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // collection is retained: a case-only change persists what the same change
   // with the unchanged requests persists. The strict case references resolve
   // against the recruitmentCases collection the snapshot supplies, or the retained
-  // blob (Q7b); false before the 0015 record: the caller writes the blobs.
+  // table rows (since 0016; the blob before, Q7b); false before the 0015 record:
+  // the caller writes the blobs.
   if (requestsSupplied || trialsSupplied) written.push(...RECRUITMENT_SNAPSHOT.replace(sqlite, { requests: requestsSupplied ? db.requests : undefined, trials: trialsSupplied ? db.trials : undefined }, { cases: casesSupplied ? db[CASES_COLLECTION] : undefined, orgs: present.includes('orgs') ? db.orgs : undefined, users: present.includes('users') ? db.users : undefined, label: 'the snapshot (requests and trials)' }));
+  // S8b C and D: the supplied cases' link rows (their request/trial keys are
+  // satisfied now) with the released rows of the retained cases back verbatim;
+  // the supplied room collections.
+  RECRUITMENT_CASES_SNAPSHOT.links(sqlite, casesPlan);
+  RECRUITMENT_CASES_SNAPSHOT.rooms(sqlite, casesPlan);
   if (present.includes(CHANNELS_TABLE.name) && CHANNELS_TABLE.replace(sqlite, db[CHANNELS_TABLE.name], { requests: requestsSupplied ? db.requests : undefined })) written.push(CHANNELS_TABLE.name);
   // Rows the snapshot no longer lists go last, children before parents, so a
   // parent that is still referenced makes the foreign key refuse the save
   // instead of the row disappearing under its dependants. (The identity pair
-  // prunes inside its own replace, players before guardians.) S8a-core phase 5:
-  // the requests no longer listed go first — after the channels (a thread still
-  // naming one refuses the save; an intentional removal removes the thread in the
-  // same snapshot) and before the staff and organisations they reference.
+  // prunes inside its own replace, players before guardians.) S8b F1: the room
+  // rows a supplied room collection no longer lists go first (before their
+  // case). S8a-core phase 5 (S8b F2): the requests no longer listed — after the
+  // channels (a thread still naming one refuses the save; an intentional removal
+  // removes the thread in the same snapshot) and before the staff and
+  // organisations they reference. S8b F3: the cases no longer listed (each
+  // departing owner's history and key rows explicitly, then the parent) — after
+  // every request, trial and room row that named them, before the staff.
+  RECRUITMENT_CASES_SNAPSHOT.pruneRooms(sqlite, casesPlan);
   if (written.includes('requests')) RECRUITMENT_SNAPSHOT.prune(sqlite, { requests: db.requests, label: 'the snapshot (requests and channels together)' });
-  if (written.includes('users')) single('users').prune(sqlite, db.users); // the staff no longer listed (their sessions cascade), after the requests that named them
+  RECRUITMENT_CASES_SNAPSHOT.pruneCases(sqlite, casesPlan);
+  if (written.includes('users')) single('users').prune(sqlite, db.users); // the staff no longer listed (their sessions cascade), after the requests and cases that named them
   if (present.includes('sessions') && single('sessions').replace(sqlite, db.sessions)) written.push('sessions'); // against the FINAL staff rows
   for (const name of ['sessions', 'orgs']) {
     if (written.includes(name)) single(name).prune?.(sqlite, db[name]);
@@ -270,6 +301,9 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   if (written.some((n) => RECRUITMENT_COLLECTIONS.includes(n)) || casesSupplied || written.some((n) => IDENTITY_COLLECTIONS.includes(n))) {
     assertRecruitmentConsistent(sqlite, { cases: casesSupplied ? db[CASES_COLLECTION] : undefined, label: 'the snapshot (requests, trials, recruitmentCases and guardians together)' });
   }
+  // S8b G: whenever this snapshot touched the case graph — every link target in
+  // the final tables, the decision chain, foreign_key_check empty.
+  if (casesPlan) RECRUITMENT_CASES_SNAPSHOT.assert(sqlite, { label: 'the snapshot (cases, rooms, requests and trials together)' });
   return written;
 }
 
@@ -501,9 +535,52 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   // containers, the snapshot migrations' `??= []`), reported when it is not empty,
   // dropped, and its blob row deleted so no save can bring it back. The
   // repository never imports from memory.
+  // S8b (migration 0016) — the recruitment cases and the four room collections,
+  // twenty-five tables, one participant with FOUR save hooks placed around the
+  // recruitment and channels hooks (readiness review §5–§6): hook 1 (the
+  // preflight against the mirrors, A the changed cases, R the release of the
+  // link rows the S8a phases would hit) BEFORE the recruitment hook — a case
+  // row is in place before a request or trial names it through the real key;
+  // hook 2 (C, the link rows back) AFTER it — their request/trial keys are
+  // satisfied; hook 3 (D the changed room rows, F1 the removed ones) before the
+  // channels; hook 4 (F3 the removed cases, G the final assertions) after the
+  // channels and the request prune the recruitment hook runs internally. STAGED
+  // mode (see repositories/recruitmentCases.mjs): the five views are read-only
+  // ARRAYS of plain, mutable records; every in-place change a route makes (a
+  // status move, a history entry, a task, a budget scenario, the draft, the
+  // handoff, a comment edit or tombstone, an evidence state, a superseded
+  // decision) lands in the next save's flush; a new record enters through
+  // addCase / addComment / addSnapshot / addDecision / addEvidenceState, the
+  // finalize route's transport-failure splice through removeDecision; the
+  // deletion unit's tombstones are in-place edits landing in the unit's commit.
+  // The player references are tolerant (Q8a); the organisation and staff keys
+  // are real. A `recruitmentCases` / `room*` array the caller holds in memory
+  // is either the blob the migration just imported from the file (a restored
+  // backup, a pre-S8b file: dropped, the tables are the record) or a stale copy
+  // (the seed's empty containers, the snapshot migrations' `??= []`), reported
+  // when it is not empty, dropped, and its blob row deleted so no save can bring
+  // it back. The repository never imports from memory.
+  const recruitmentCases = createRecruitmentCasesRepository({ sqlite, log, now, unit: store.unit, staged: true, recruitment: () => recruitment });
+  const recruitmentCasesBoot = recruitmentCases.attach();
+  store.setSaveHook?.(recruitmentCases.coreHook());
   recruitment = createRecruitmentRepository({ sqlite, log, now, unit: store.unit, staged: true, cases: () => db[CASES_COLLECTION] });
   const recruitmentBoot = recruitment.attach();
   store.setSaveHook?.(recruitment.saveHook());
+  store.setSaveHook?.(recruitmentCases.linksHook());
+  store.setSaveHook?.(recruitmentCases.roomsHook());
+  if (migrations.ran.includes(RECRUITMENT_CASES_MIGRATION)) {
+    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(RECRUITMENT_CASES_CUTOVER_META)?.value;
+    if (record) { const c = JSON.parse(record); log(`recruitment cases: cutover imported ${RECRUITMENT_CASES_COLLECTIONS.map((n) => `${c[n]?.imported ?? 0} ${n}`).join(', ')} (${c.recruitmentCases?.roomless ?? 0} case(s) without a room facet; ${RECRUITMENT_CASES_COLLECTIONS.reduce((a, n) => a + (c[n]?.withExtraFields ?? 0), 0)} with unknown fields kept, ${RECRUITMENT_CASES_COLLECTIONS.reduce((a, n) => a + (c[n]?.withAbsentKeys ?? 0), 0)} with absent keys preserved, ${RECRUITMENT_CASES_COLLECTIONS.reduce((a, n) => a + (c[n]?.withOfftypeValues ?? 0), 0)} with off-type values kept); player references: ${c.players?.live ?? 0} live, ${c.players?.retained ?? 0} retained, ${c.players?.missing ?? 0} not in the players table (counted, never refused — Q8a); recruitment_requests and trials rebuilt with the real case key (${c.rebuilt?.requests ?? 0} request(s), ${c.rebuilt?.trials ?? 0} trial(s)), idempotency_keys rebuilt with the broadened owner CHECK (${c.rebuilt?.idempotencyKeys ?? 0} S8a key row(s))`); }
+  }
+  for (const name of RECRUITMENT_CASES_COLLECTIONS) {
+    if (Object.hasOwn(db, name)) {
+      const given = db[name];
+      if (!migrations.ran.includes(RECRUITMENT_CASES_MIGRATION) && Array.isArray(given) && given.length) warn(`recruitment cases: an in-memory ${name} array with ${given.length} entr${given.length === 1 ? 'y' : 'ies'} was ignored; the ${{ recruitmentCases: 'recruitment_cases', roomComments: 'room_comments', roomSnapshots: 'room_snapshots', roomDecisions: 'room_decisions', roomEvidenceState: 'room_evidence_states' }[name]} table is authoritative`);
+      delete db[name];
+      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
+    }
+    Object.defineProperty(db, name, { value: recruitmentCases.views[name], writable: false, configurable: false, enumerable: true });
+  }
   if (migrations.ran.includes(RECRUITMENT_MIGRATION)) {
     const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(RECRUITMENT_CUTOVER_META)?.value;
     if (record) { const c = JSON.parse(record); log(`recruitment: cutover imported ${c.requests.imported} request(s) (${c.requests.withExtraFields} with unknown fields kept, ${c.requests.withAbsentKeys} with absent keys preserved, ${c.requests.withOfftypeValues} with off-type values kept) and ${c.trials.imported} trial(s) (${c.trials.withExtraFields} with unknown fields kept, ${c.trials.withAbsentKeys} with absent keys preserved, ${c.trials.withOfftypeValues} with off-type values kept; ${c.trials.legacyPairs} pre-P4B legacy pair(s) whose request carries no trialId key, kept as they are; ${c.trials.preP4bShape} trial(s) without the P4B containers, kept as they are); player references: ${c.players.live} live, ${c.players.retained} retained, ${c.players.missing} not in the players table (counted, never refused); channels rebuilt with the real request key (${c.channels.channels} thread(s), ${c.channels.messages} message(s), ${c.channels.attachments} attachment(s))`); }
@@ -521,6 +598,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   const channels = createChannelsRepository({ sqlite, log, now, unit: store.unit, staged: true, requests: () => db.requests });
   const channelsBoot = channels.attach();
   store.setSaveHook?.(channels.saveHook());
+  store.setSaveHook?.(recruitmentCases.pruneHook()); // S8b hook 4: F3 and G, after the channels and the request prune
   if (migrations.ran.includes(CHANNELS_MIGRATION)) {
     const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(CHANNELS_CUTOVER_META)?.value;
     if (record) { const c = JSON.parse(record); log(`channels: cutover imported ${c.imported} thread(s) (${c.byCounterparty?.player ?? 0} with a player, ${c.byCounterparty?.guardian ?? 0} with a guardian) with ${c.messages} message(s) and ${c.attachments} attachment(s); ${c.withExtraFields} with legacy or unknown fields kept, ${c.withAbsentKeys} with absent optional keys preserved`); }
@@ -597,8 +675,9 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     channels,
     safetyAudit,
     recruitment,
+    recruitmentCases,
     migrations,
-    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot, safetyAudit: safetyAuditBoot, recruitment: recruitmentBoot },
+    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot, safetyAudit: safetyAuditBoot, recruitment: recruitmentBoot, recruitmentCases: recruitmentCasesBoot },
     /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
     report: () => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
@@ -613,7 +692,8 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         dispatches: { mode: 'live', rows: dispatches.count(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: dispatches.pending(), writeMode: 'staged: a sweep\'s rows, attempts and status changes land in the next snapshot save with the outbox row, the injection counter and the ops/webhook rows written alongside; an acknowledgment lands in its unit\'s commit', notificationReference: 'indexed, no foreign key, no cascade (orphans after an ordinary deletion are retained; retention is an open decision)' },
         outboxPush: { mode: 'live', rows: outboxPush.counts(), pendingWrites: outboxPush.pending(), writeMode: 'staged: a mailer record lands in the save its route would have carried the blob in; a delivery record in the sweep\'s save with the dispatch rows; a push record — written after the notification\'s save committed — in the later save the sender\'s nextId() already schedules; a token in the route\'s persist()', tokens: 'any JSON value the route accepted, stored losslessly as JSON text; no uniqueness constraint (primitives collapse by strict equality on the live value, objects never — the route\'s rule); a non-finite number (JSON 1e400) is kept live and persists as null, as before', destinations: 'a string in to_address, null, or any other JSON value in to_json (what a coercing route handed the mailer: an array), decoded on read' },
         channels: { mode: 'live', rows: channels.counts(), pendingWrites: channels.pending(), writeMode: 'staged: a thread lands in the acceptance route\'s save with the request\'s answer; a message in postMessage\'s save before the sender hears 201; a receipt in its route\'s save; a deletion in the account-deletion unit', references: 'request_id unique and, since migration 0015 (S8a-core), a real foreign key to recruitment_requests (RESTRICT) — the D-A conversion — still checked in code at open; guardian_id checked in code at open and on every snapshot\'s final state (no foreign key, by bounded choice); org_id a foreign key (RESTRICT); player_id no lifecycle clause — the deleted player\'s threads are deleted explicitly, as before (D-B); messages and attachments cascade with their thread' },
-        recruitment: { mode: 'live', rows: recruitment.counts(), pendingWrites: recruitment.pending(), unresolvedPlayerReferences: unresolvedRecruitmentPlayers(sqlite), retainedPlayerReferences: retainedRecruitmentPlayers(sqlite), writeMode: 'staged: a record\'s in-place changes land in the next save\'s flush (the same save that carried its blob before: an invitation in its route\'s persistNow(), the answer, the thread and the trial in the respond route\'s save, a report, a schedule, an attendance row or a day change in its route\'s save); a new record through addRequest / addTrial; the deletion unit\'s tombstones in the unit\'s commit. Six phases per write (plan §D.7.5): requests with the back-reference parked, trials\' departures, releases and arrivals, the final trial_id, the channels, the prune, the final-state assertions', references: 'player_id (both tables) no foreign key, TOLERANT (Q7a): live, retained and historically missing ids resolve, are counted here and never refused, fabricated or deleted. case_id (both tables) no foreign key until S8b creates recruitment_cases, STRICT in code (Q7b): checked against the recruitmentCases collection at every write and on every snapshot\'s final state. guardian_id and recipient_guardian_id no foreign key, STRICT in code (Q7c): checked at every write and on every snapshot\'s final state. trials.request_id NOT NULL UNIQUE → recruitment_requests (RESTRICT); recruitment_requests.trial_id → trials (SET NULL); org_id and user_id → orgs / org_users (RESTRICT); the child tables cascade with their owner except trial_reports and trial_history (RESTRICT, deleted explicitly first). The recruitment_requests_one_pending index is withdrawn (D2): the direct route keeps its REQUEST_PENDING rule, the open-day route its several pending invitations' },
+        recruitment: { mode: 'live', rows: recruitment.counts(), pendingWrites: recruitment.pending(), unresolvedPlayerReferences: unresolvedRecruitmentPlayers(sqlite), retainedPlayerReferences: retainedRecruitmentPlayers(sqlite), writeMode: 'staged: a record\'s in-place changes land in the next save\'s flush (the same save that carried its blob before: an invitation in its route\'s persistNow(), the answer, the thread and the trial in the respond route\'s save, a report, a schedule, an attendance row or a day change in its route\'s save); a new record through addRequest / addTrial; the deletion unit\'s tombstones in the unit\'s commit. Six phases per write (plan §D.7.5): requests with the back-reference parked, trials\' departures, releases and arrivals, the final trial_id, the channels, the prune, the final-state assertions', references: 'player_id (both tables) no foreign key, TOLERANT (Q7a): live, retained and historically missing ids resolve, are counted here and never refused, fabricated or deleted. case_id (both tables): since migration 0016 (S8b) a REAL foreign key to recruitment_cases (RESTRICT) — Q7b\'s conversion — still checked in code at every write and on every snapshot\'s final state. guardian_id and recipient_guardian_id no foreign key, STRICT in code (Q7c): checked at every write and on every snapshot\'s final state. trials.request_id NOT NULL UNIQUE → recruitment_requests (RESTRICT); recruitment_requests.trial_id → trials (SET NULL); org_id and user_id → orgs / org_users (RESTRICT); the child tables cascade with their owner except trial_reports and trial_history (RESTRICT, deleted explicitly first). The recruitment_requests_one_pending index is withdrawn (D2): the direct route keeps its REQUEST_PENDING rule, the open-day route its several pending invitations' },
+        recruitmentCases: { mode: 'live', rows: recruitmentCases.counts(), pendingWrites: recruitmentCases.pending(), unresolvedPlayerReferences: unresolvedCasePlayers(sqlite), retainedPlayerReferences: retainedCasePlayers(sqlite), writeMode: 'staged: a record\'s in-place changes land in the next save\'s flush (the same save that carried its blob before: a room creation, a status move with its snapshot, a comment, a task, a decision draft, a formal decision, an evidence review, a budget scenario or a handoff in its route\'s persistNow(); an M12 case change in its route\'s save); a new record through addCase / addComment / addSnapshot / addDecision / addEvidenceState; the finalize route\'s transport-failure splice through removeDecision; the deletion unit\'s tombstones in the unit\'s commit. The write order of the readiness review §6 (P A R | the S8a phases | C D | the channels | F1 F2 F3 | G) through four save hooks placed around the recruitment and channels hooks', references: 'player_id (recruitment_cases, room_snapshots, room_decisions, case_transaction_handoffs) no foreign key, TOLERANT (Q8a, 23 October 2026): live, retained and historically missing ids resolve, are counted here and never refused, fabricated or deleted. org_id → orgs (RESTRICT) on every table that carries one; owner_user_id, room_lead_scout_user_id, decision_by_user_id, case_assignments.user_id and room_comments.author_user_id → org_users (RESTRICT). room_id (the four room tables) → recruitment_cases (RESTRICT): a retained room row names a case at the preflight with its table (CASE_STILL_REFERENCED), a supplied collection removes its rows before the case. recruitment_requests.case_id and trials.case_id → recruitment_cases (RESTRICT, rebuilt by 0016); case_request_links.request_id → recruitment_requests and case_trial_links.trial_id → trials (RESTRICT; released before the S8a phases and reinserted after them, never detached). case_history → recruitment_cases (RESTRICT, owned: removed explicitly before its owner); every other child cascades. The decision chain (supersedes / supersededById / supersession.of), client keys, vacancy, evidence, assessment, signing, transaction and agency ids are plain ids checked in code. The drafted recruitment_cases_one_open_room index is withdrawn: the routes keep their one-open-room rule' },
         safetyAudit: { mode: 'live', rows: safetyAudit.counts(), pendingWrites: safetyAudit.pending(), unresolvedPlayerReferences: unresolvedPlayerReferences(sqlite), retainedPlayerReferences: retainedPlayerReferences(sqlite), writeMode: 'staged: a block with its ledger row, a report with its suspension blocks, a note and a moderation hit land in the next save; a source change in its writer\'s save; an ops event in its caller\'s save; the IDV entry and the admin toggle land in their units\' commits', references: 'no foreign key on any of the eight tables. The five player references (blocks, reports, org_notes, ledger, source_changes) are tolerant historical references (Q4): an id that resolves to no player is counted here, never refused, never given a fabricated parent, never deleted; a count, not a claim about why it is absent. idv_queue.guardian_id is strict (Q4b): a write or import naming a missing guardian is refused and every snapshot that touches the queue or the identity pair is checked against the FINAL guardians table. A lifted block is deleted, as before (Q5). Organisation and staff references are historical pointers the routes never checked' },
       },
       identity: { initState: identity.initState(), uncommittedFacets: identity.report().uncommittedFacets },

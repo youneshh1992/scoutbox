@@ -127,23 +127,25 @@ export const RECRUITMENT_COLLECTIONS = Object.freeze(['requests', 'trials']);
 /** The collections the strict references resolve against and the identity table they are checked in. */
 export const CASES_COLLECTION = 'recruitmentCases';
 
-const EXTRA_CHECK = (col) => `CHECK (${col} IS NULL OR (json_valid(${col}) AND json_type(${col}) = 'object'))`;
-const ABSENT_CHECK = "CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array'))";
-const JSON_CHECK = (col) => `CHECK (${col} IS NULL OR json_valid(${col}))`;
+export const EXTRA_CHECK = (col) => `CHECK (${col} IS NULL OR (json_valid(${col}) AND json_type(${col}) = 'object'))`;
+export const ABSENT_CHECK = "CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array'))";
+export const JSON_CHECK = (col) => `CHECK (${col} IS NULL OR json_valid(${col}))`;
 
 export const recruitmentLive = (sqlite) => migrationApplied(sqlite, RECRUITMENT_MIGRATION);
-const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
+/** S8b (migration 0016): once recorded, the recruitmentCases collection is the recruitment_cases table, not a blob (the id is a constant here so this module needs no import of its sibling). */
+const CASES_MIGRATION = '0016_recruitment_cases';
+export const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
 const blocked = (detail, extra = {}) => Object.assign(new Error(`RECRUITMENT_IMPORT_BLOCKED: ${detail}; nothing was imported`), { code: 'RECRUITMENT_IMPORT_BLOCKED', ...extra });
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
-const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
-const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
+export const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+export const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
+export const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+export const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
 /** The blob's JSON rules: a non-finite number is kept live (persisted as null), a nested undefined is stored as JSON.stringify stored it. */
 const JSON_RULES = Object.freeze({ nonFinite: 'keep', undefinedNested: 'json' });
-const clone = (v, at) => cloneJson(v, at, JSON_RULES);
-const parseJson = (text, at) => clone(JSON.parse(text), at).value;
-const ids = (list) => list.slice(0, 20).join(', ') + (list.length > 20 ? ', …' : '');
+export const clone = (v, at) => cloneJson(v, at, JSON_RULES);
+export const parseJson = (text, at) => clone(JSON.parse(text), at).value;
+export const ids = (list) => list.slice(0, 20).join(', ') + (list.length > 20 ? ', …' : '');
 const jsonOrNull = (obj) => (Object.keys(obj).length ? JSON.stringify(obj) : null);
 const TERMINAL = Object.freeze(['completed', 'cancelled']);
 const inSlot = (caseId, state) => typeof caseId === 'string' && !TERMINAL.includes(state);
@@ -194,23 +196,40 @@ const TRIAL_SHAPE = {
 const REQUESTS = { table: 'recruitment_requests', shape: REQUEST_SHAPE };
 const TRIALS = { table: 'trials', shape: TRIAL_SHAPE };
 /** The child tables of a parent, in write order (a sub-child after its owner). */
-const childSpecs = (shape, out = []) => { for (const s of Object.values(shape.lists ?? {})) { out.push(s); childSpecs(s.shape, out); } for (const s of Object.values(shape.object ?? {})) out.push(s); for (const s of Object.values(shape.objects ?? {})) childSpecs(s, out); return out; };
+export const childSpecs = (shape, out = []) => { for (const s of Object.values(shape.lists ?? {})) { out.push(s); childSpecs(s.shape, out); } for (const s of Object.values(shape.object ?? {})) { out.push(s); childSpecs(s.shape, out); } for (const s of Object.values(shape.objects ?? {})) childSpecs(s, out); return out; };
 const REQUEST_CHILDREN = Object.freeze(childSpecs(REQUEST_SHAPE));
 const TRIAL_CHILDREN = Object.freeze(childSpecs(TRIAL_SHAPE));
 export const RECRUITMENT_TABLES = Object.freeze(['recruitment_requests', ...REQUEST_CHILDREN.map((c) => c.table), 'trials', ...TRIAL_CHILDREN.map((c) => c.table), 'trial_reminders', 'idempotency_keys']);
 /** The unique indexes the write strategy retains (plan §D.7.3): structural, or enforced by every writer. */
 
 // ------------------------------------------------------------------ the DDL (generated from the shapes; amended into docs/architecture/sql/02_recruitment.sql at this step)
-const sqlType = (kind) => (kind === 'int' || kind === 'bool' ? 'INTEGER' : kind === 'num' ? 'REAL' : 'TEXT');
-const columnsOf = (shape, out = []) => { for (const k of shape.keys) { if (shape.cols?.[k]) out.push(shape.cols[k]); else if (shape.objects?.[k]) columnsOf(shape.objects[k], out); } return out; };
+export const sqlType = (kind) => (kind === 'int' || kind === 'bool' ? 'INTEGER' : kind === 'num' ? 'REAL' : 'TEXT');
+export const columnsOf = (shape, out = []) => { for (const k of shape.keys) { if (shape.cols?.[k]) out.push(shape.cols[k]); else if (shape.objects?.[k]) columnsOf(shape.objects[k], out); } return out; };
 const CONSTRAINTS = {
   recruitment_requests: { id: 'TEXT NOT NULL UNIQUE', player_id: 'TEXT NOT NULL', org_id: 'TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT', user_id: 'TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT', trial_id: 'TEXT REFERENCES trials(id) ON DELETE SET NULL' },
   trials: { id: 'TEXT NOT NULL UNIQUE', request_id: 'TEXT NOT NULL UNIQUE REFERENCES recruitment_requests(id) ON DELETE RESTRICT', player_id: 'TEXT NOT NULL', org_id: 'TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT' },
   trial_reports: { org_id: 'TEXT REFERENCES orgs(id) ON DELETE RESTRICT' },
 };
-function parentDdl(spec, indexes) {
-  const cols = columnsOf(spec.shape).map(([col, kind]) => `  ${col.padEnd(32)} ${CONSTRAINTS[spec.table]?.[col] ?? sqlType(kind)}${kind === 'json' && !CONSTRAINTS[spec.table]?.[col] ? ` ${JSON_CHECK(col)}` : ''}`);
+/** S8b (migration 0016, Q7b's conversion): the two parents' `case_id` becomes a REAL key to recruitment_cases (RESTRICT: a case still named by a request or a trial is never deleted under it). */
+const CASE_KEY = 'TEXT REFERENCES recruitment_cases(id) ON DELETE RESTRICT';
+function parentDdl(spec, indexes, { caseKey = false } = {}) {
+  const constraintOf = (col) => (caseKey && col === 'case_id' ? CASE_KEY : CONSTRAINTS[spec.table]?.[col]);
+  const cols = columnsOf(spec.shape).map(([col, kind]) => `  ${col.padEnd(32)} ${constraintOf(col) ?? sqlType(kind)}${kind === 'json' && !constraintOf(col) ? ` ${JSON_CHECK(col)}` : ''}`);
   return `CREATE TABLE ${spec.table} (\n  seq                              INTEGER PRIMARY KEY,\n${cols.join(',\n')},\n  absent_keys_json                 TEXT ${ABSENT_CHECK},\n  offtype_json                     TEXT ${EXTRA_CHECK('offtype_json')},\n  extra_json                       TEXT ${EXTRA_CHECK('extra_json')}\n) STRICT;\n${indexes.map((ix) => `${ix};`).join('\n')}`;
+}
+const REQUEST_INDEXES = ['CREATE INDEX recruitment_requests_org_player_type_status ON recruitment_requests (org_id, player_id, type, status)', 'CREATE INDEX recruitment_requests_player ON recruitment_requests (player_id, created_at)', 'CREATE INDEX recruitment_requests_routed_guardian ON recruitment_requests (routed_to, guardian_id)', 'CREATE INDEX recruitment_requests_case_type_created ON recruitment_requests (case_id, type, created_at)', 'CREATE INDEX recruitment_requests_contact ON recruitment_requests (contact_id)', 'CREATE INDEX recruitment_requests_trial ON recruitment_requests (trial_id)'];
+const TRIAL_INDEXES = ['CREATE INDEX trials_org_status ON trials (org_id, status)', 'CREATE INDEX trials_org_player_case ON trials (org_id, player_id, case_id)', 'CREATE INDEX trials_player ON trials (player_id)', 'CREATE INDEX trials_case ON trials (case_id)', 'CREATE INDEX trials_status_report_due ON trials (status, report_due_at)', 'CREATE INDEX trials_workflow_confirmed ON trials (workflow_state, schedule_confirmed_at)', "CREATE UNIQUE INDEX trials_one_open_per_case ON trials (case_id) WHERE case_id IS NOT NULL AND workflow_state NOT IN ('completed', 'cancelled')"];
+/** The DDL of one of the two parents (table and its indexes), with or without the S8b case key: 0015 creates them without, 0016 rebuilds them with, the S8b rollback rebuilds them without again. */
+export function recruitmentParentDdl(table, { caseKey = false } = {}) {
+  const spec = table === 'recruitment_requests' ? REQUESTS : table === 'trials' ? TRIALS : null;
+  if (!spec) throw new TypeError(`recruitmentParentDdl: ${table} is not a recruitment parent`);
+  const indexes = spec === REQUESTS ? REQUEST_INDEXES : TRIAL_INDEXES;
+  return { table: parentDdl(spec, [], { caseKey }), indexes };
+}
+/** The ONE shared idempotency_keys table: its owner CHECK names the owner tables that exist (0015: the two S8a parents; 0016 broadens it to the S8b owners; the S8b rollback narrows it again). */
+export const S8A_KEY_OWNERS = Object.freeze(['recruitment_requests', 'trials']);
+export function idempotencyKeysDdl(owners = S8A_KEY_OWNERS) {
+  return { table: `CREATE TABLE idempotency_keys (\n  owner_table                      TEXT NOT NULL CHECK (owner_table IN (${owners.map((o) => `'${o}'`).join(', ')})),\n  owner_id                         TEXT NOT NULL,\n  position                         INTEGER NOT NULL,\n  act                              TEXT NOT NULL,\n  shape                            TEXT NOT NULL CHECK (shape IN ('list', 'value')),\n  key                              TEXT,\n  fp                               TEXT,\n  at                               INTEGER,\n  entry_json                       TEXT NOT NULL ${JSON_CHECK('entry_json')},\n  PRIMARY KEY (owner_table, owner_id, position)\n) STRICT;`, indexes: ['CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, owner_id, act, key)'] };
 }
 function childDdl(spec) {
   const owner = spec.ownerCols.map((c, i) => `  ${c.padEnd(32)} ${i === 0 ? `TEXT NOT NULL REFERENCES ${spec.ownerCols[0] === 'trial_id' ? 'trials' : 'recruitment_requests'}(id) ON DELETE ${spec.restrict ? 'RESTRICT' : 'CASCADE'}` : 'INTEGER NOT NULL'}`);
@@ -219,12 +238,12 @@ function childDdl(spec) {
   return `CREATE TABLE ${spec.table} (\n${owner.join(',\n')},\n  position                         INTEGER NOT NULL,\n${cols.join(',\n')},\n  raw_json                         TEXT ${JSON_CHECK('raw_json')},\n  absent_keys_json                 TEXT ${ABSENT_CHECK},\n  offtype_json                     TEXT ${EXTRA_CHECK('offtype_json')},\n  extra_json                       TEXT ${EXTRA_CHECK('extra_json')},\n  ${pk}\n) STRICT;\n${(spec.indexes ?? []).map((ix) => `${ix};`).join('\n')}`;
 }
 export const RECRUITMENT_DDL = [
-  parentDdl(REQUESTS, ['CREATE INDEX recruitment_requests_org_player_type_status ON recruitment_requests (org_id, player_id, type, status)', 'CREATE INDEX recruitment_requests_player ON recruitment_requests (player_id, created_at)', 'CREATE INDEX recruitment_requests_routed_guardian ON recruitment_requests (routed_to, guardian_id)', 'CREATE INDEX recruitment_requests_case_type_created ON recruitment_requests (case_id, type, created_at)', 'CREATE INDEX recruitment_requests_contact ON recruitment_requests (contact_id)', 'CREATE INDEX recruitment_requests_trial ON recruitment_requests (trial_id)']),
+  parentDdl(REQUESTS, REQUEST_INDEXES),
   ...REQUEST_CHILDREN.map(childDdl),
-  parentDdl(TRIALS, ['CREATE INDEX trials_org_status ON trials (org_id, status)', 'CREATE INDEX trials_org_player_case ON trials (org_id, player_id, case_id)', 'CREATE INDEX trials_player ON trials (player_id)', 'CREATE INDEX trials_case ON trials (case_id)', 'CREATE INDEX trials_status_report_due ON trials (status, report_due_at)', 'CREATE INDEX trials_workflow_confirmed ON trials (workflow_state, schedule_confirmed_at)', "CREATE UNIQUE INDEX trials_one_open_per_case ON trials (case_id) WHERE case_id IS NOT NULL AND workflow_state NOT IN ('completed', 'cancelled')"]),
+  parentDdl(TRIALS, TRIAL_INDEXES),
   ...TRIAL_CHILDREN.map(childDdl),
   `CREATE TABLE trial_reminders (\n  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,\n  position                         INTEGER NOT NULL,\n  marker                           TEXT NOT NULL,\n  sent_at                          INTEGER,\n  value_json                       TEXT ${JSON_CHECK('value_json')},\n  PRIMARY KEY (trial_id, position)\n) STRICT;\nCREATE UNIQUE INDEX trial_reminders_marker ON trial_reminders (trial_id, marker);`,
-  `CREATE TABLE idempotency_keys (\n  owner_table                      TEXT NOT NULL CHECK (owner_table IN ('recruitment_requests', 'trials')),\n  owner_id                         TEXT NOT NULL,\n  position                         INTEGER NOT NULL,\n  act                              TEXT NOT NULL,\n  shape                            TEXT NOT NULL CHECK (shape IN ('list', 'value')),\n  key                              TEXT,\n  fp                               TEXT,\n  at                               INTEGER,\n  entry_json                       TEXT NOT NULL ${JSON_CHECK('entry_json')},\n  PRIMARY KEY (owner_table, owner_id, position)\n) STRICT;\nCREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, owner_id, act, key);`,
+  `${idempotencyKeysDdl().table}\n${idempotencyKeysDdl().indexes.map((ix) => `${ix};`).join('\n')}`,
 ].join('\n');
 /** `channels` as migration 0015 rebuilds it: the 0012 definition with the REAL request key (messages and attachments unchanged). */
 export const CHANNELS_DDL_WITH_KEY = `
@@ -260,7 +279,7 @@ const fromCol = (kind, v, col) => (v === null ? null : kind === 'bool' ? v === 1
  * Encode one object against a shape level: columns, absent paths, off-type values, extras (nested extras under their
  * known key), and the children to write (`{ spec, path, items | map }`).
  */
-function encodeLevel(shape, obj, prefix, out, extraHolder) {
+export function encodeLevel(shape, obj, prefix, out, extraHolder) {
   for (const k of Object.keys(obj)) { if (shape.keys.includes(k) || obj[k] === undefined) continue; const c = clone(obj[k], `${prefix}${k}`); if (c.reason) throw new TypeError(c.reason); setOwn(extraHolder, k, c.value); }
   for (const k of shape.keys) {
     const path = `${prefix}${k}`;
@@ -292,13 +311,13 @@ function encodeLevel(shape, obj, prefix, out, extraHolder) {
     else { const [col, kind] = shape.cols[k]; if (v === null) out.cols[col] = null; else if (columnHolds(kind, v)) out.cols[col] = toCol(kind, v); else { out.cols[col] = null; out.offtype[path] = clone(v, path).value; } }
   }
 }
-function encode(shape, obj) {
+export function encode(shape, obj) {
   const out = { cols: {}, absent: [], offtype: {}, extra: {}, children: [] };
   encodeLevel(shape, obj, '', out, out.extra);
   return out;
 }
 /** Decode one shape level from a row (its columns, the parsed absent/offtype/extra of the record) and the children already decoded by path. */
-function decodeLevel(shape, row, prefix, extraHolder, absent, offtype, children) {
+export function decodeLevel(shape, row, prefix, extraHolder, absent, offtype, children) {
   const obj = {};
   for (const k of Object.keys(extraHolder)) if (!shape.keys.includes(k)) setOwn(obj, k, extraHolder[k]);
   for (const k of shape.keys) {
@@ -313,8 +332,12 @@ function decodeLevel(shape, row, prefix, extraHolder, absent, offtype, children)
   }
   return obj;
 }
-const rowMeta = (enc) => ({ absent_keys_json: enc.absent.length ? JSON.stringify(enc.absent) : null, offtype_json: jsonOrNull(enc.offtype), extra_json: jsonOrNull(enc.extra) });
-const metaOf = (r) => ({ absent: new Set(r.absent_keys_json ? JSON.parse(r.absent_keys_json) : []), offtype: r.offtype_json ? parseJson(r.offtype_json, 'offtype_json') : {}, extra: r.extra_json ? parseJson(r.extra_json, 'extra_json') : {} });
+export const rowMeta = (enc) => ({ absent_keys_json: enc.absent.length ? JSON.stringify(enc.absent) : null, offtype_json: jsonOrNull(enc.offtype), extra_json: jsonOrNull(enc.extra) });
+export const metaOf = (r) => ({ absent: new Set(r.absent_keys_json ? JSON.parse(r.absent_keys_json) : []), offtype: r.offtype_json ? parseJson(r.offtype_json, 'offtype_json') : {}, extra: r.extra_json ? parseJson(r.extra_json, 'extra_json') : {} });
+/** Column admission and conversion, shared with the S8b engine (repositories/recruitmentCases.mjs). */
+export const columnAdmits = (kind, v) => columnHolds(kind, v);
+export const toColumn = (kind, v) => toCol(kind, v);
+export const fromColumn = (kind, v, col) => fromCol(kind, v, col);
 
 // ------------------------------------------------------------------ statements (lazily prepared per connection; re-prepared when the connection's `prepare` is replaced — the suites' statement-failure seam wraps it)
 const stmtCache = new WeakMap();
@@ -410,7 +433,9 @@ export function readRequestsCollection(sqlite) {
   if (!row) return undefined;
   try { return JSON.parse(row.value); } catch { return null; }
 }
+/** The recruitmentCases collection as the file holds it, for the strict case references (ids are what the callers need): the recruitment_cases table once 0016 is recorded (S8b), the blob before (`[]` when there is none; `null` when the blob is not valid JSON or not an array). */
 export function readCasesCollection(sqlite) {
+  if (migrationApplied(sqlite, CASES_MIGRATION)) return sqlite.prepare('SELECT id FROM recruitment_cases ORDER BY seq').all().map((r) => ({ id: r.id }));
   if (!tableExists(sqlite, 'collections')) return [];
   const row = sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(CASES_COLLECTION);
   if (!row) return [];
@@ -610,7 +635,7 @@ export function importRecruitmentBlobs(sqlite) {
 }
 
 // ------------------------------------------------------------------ detached copies (the export)
-const copyRecord = (r) => { const c = {}; for (const k of Object.keys(r)) setOwn(c, k, clone(r[k], k).value); return c; };
+export const copyRecord = (r) => { const c = {}; for (const k of Object.keys(r)) setOwn(c, k, clone(r[k], k).value); return c; };
 
 // ------------------------------------------------------------------ the repository
 /**
@@ -695,6 +720,20 @@ export function createRecruitmentRepository({ sqlite, now = Date.now, log = () =
     },
     /** The derived `players[].trialReports`: the reports filed on the player's trials, in filing order (S5's rule), read from the mirror. */
     trialReportsFor: (playerId) => trialReportsOf(trials, playerId),
+    /**
+     * S8b: what the next flush's phases 2(a) and 5 will remove or reinsert, measured against the tables — the trials no
+     * longer in the mirror or whose requestId changed (deleted and reinserted under their link rows, recruitment.mjs
+     * phase 2a) and the requests no longer in the mirror (pruned). The recruitment-cases repository releases the link
+     * rows naming them before this repository's flush runs and puts them back after it (readiness review §6, R/C).
+     */
+    departures() {
+      if (!recruitmentLive(sqlite)) return { trials: [], requests: [] };
+      const byId = new Map(trials.map((t) => [t.id, t]));
+      const trialsOut = sqlite.prepare('SELECT id, request_id FROM trials').all().filter((st) => { const t = byId.get(st.id); return !t || t.requestId !== st.request_id; }).map((st) => st.id);
+      const keep = new Set(requests.map((r) => r.id));
+      const requestsOut = sqlite.prepare('SELECT id FROM recruitment_requests').all().map((r) => r.id).filter((id) => !keep.has(id));
+      return { trials: trialsOut, requests: requestsOut };
+    },
     /** Every record in its legacy shape, detached (the admin backup). */
     exportRequests: () => requests.map(copyRecord),
     exportTrials: () => trials.map(copyRecord),

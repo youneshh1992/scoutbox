@@ -3401,11 +3401,34 @@ reproduced; cause unresolved"). Q7a/Q7b/Q7c stay as recorded (§D.8.1) and are *
 the S8b tables need their own decision where one is needed (§D.9). The S8b design is preparation only: nothing of S8b
 is implemented, stubbed or reserved.
 
-### D.9 S8b (cases, rooms, decisions) — PREPARED, NOT IMPLEMENTED (22 October 2026, at `7a7efc6`; the design corrected after the reviews of `57076a2` and `86342b8`, awaiting independent acceptance)
+### D.9 S8b (cases, rooms, decisions) — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (23 October 2026, on top of `4d2c74b`; the design independently accepted at `4d2c74b`; the Founder's Q8a "Approve tolerant (Recommended)")
 
-The bounded S8b design lives in `docs/architecture/s8b-readiness-review.md` and is **preparation only**: no migration
-module, repository, DDL change, test or stub exists; the next free migration identifier is `0016` — **reported, not
-reserved**. What it records, in brief:
+**Implementation record (23 October 2026).** The design below (prepared at `7a7efc6`, corrected after the reviews of
+`57076a2` and `86342b8`) was **independently accepted at `4d2c74b`**; the Founder then answered the one product
+question, Q8a, verbatim **"Approve tolerant (Recommended)"**, and the bounded step was implemented on top of
+`4d2c74b`: migration **`0016_recruitment_cases`** (REGISTERED) creates the twenty-five case and room tables, imports
+the five blobs row for row and retires them, rebuilds `recruitment_requests` and `trials` with the real `case_id` key
+(Q7b's conversion) and `idempotency_keys` with the broadened owner CHECK; `repositories/recruitmentCases.mjs` is the
+repository (five read-only array views of mutable records, the entry points `addCase` / `addComment` / `addSnapshot`
+/ `addDecision` / `addEvidenceState` / `removeDecision`, four save hooks around the recruitment and channels hooks
+carrying the write order of the review's §6, the lossless S8a mapping over every literal of its §2, the tolerant
+counted player references of Q8a); the copy-only rollback is `scripts/recruitmentCasesRollback.mjs`
+(`rollback:recruitment-cases`), chained ahead of the S8a tool; file 02 is amended to the implemented definitions
+with "draft versus implemented" notes; `OPERATIONS.md` has the cutover, rollback and DANGER lines. The review's **§12**
+is the full record — what landed, the departures from the proposed sections (four hook objects, JSON columns for the
+raw client values, the extra child tables, the owner-less keys rule, the 0015-first refusal, the `withAbsentKeys`
+semantics, the bench not run), what was MEASURED (the actual `7a7efc6` build booted directly on a 0016 copy listens,
+serves no case, writes five empty blobs and changes no table row — not the exit 1 the S8a measurement suggested;
+booted on the rollback copy it serves and writes, and this build re-upgrades the copy with those writes) and what is
+not claimed (the whole-snapshot-write objective, release readiness, any performance gain, the independent acceptance
+this record awaits). The evidence is `scripts/testRecruitmentCases.mjs` and `scripts/testRecruitmentCasesServer.mjs`
+(failing-first on the unchanged `4d2c74b` tree on behavioural assertions, green after) and the handoff's gates
+(backend on Node 22 and Node 24 with EIGHT historical builds booted for real — `7a7efc6` added as
+`SCOUTBOX_PRE_S8B_SERVER` —, the Player suite, the batteries, the probes and the reviewer's scripts). S8c and S8d are
+not started.
+
+The design as reviewed and accepted (the text that follows is the preparation's summary, kept as the record of what
+was accepted; where the implementation departs from it the review's §12 says so):
 
 - **Scope (§1 of the review, verified against the writers and readers of this build):** the five blob collections
   `recruitmentCases` (one aggregate: the case row with its room facet, `assignments`, `tasks`, `approvals`,
@@ -3439,10 +3462,11 @@ reserved**. What it records, in brief:
   owned lists go with their owner — today's `store.save` contract, proven by that script's baseline against the
   unchanged build — so F3 removes them explicitly first, the key stays as a guard, and only an omitted INDEPENDENT
   collection (requests, trials, the four room collections) blocks a removal (probe 6, six checks; the owner/child
-  inventory in the review's §6). In staged mode the cases repository registers three hook objects around the
-  unchanged `recruitment` flush (which prunes internally) and the `rooms` hook (§5); the S8a flush is not split.
-- **Rollback (§7):** copy-only, to the accepted pre-S8b build `7a7efc6`; the old build's behaviour on a new file is
-  predicted, to be measured at implementation.
+  inventory in the review's §6). In staged mode the cases repository registers hook objects around the unchanged
+  `recruitment` flush (which prunes internally) and the channels hook (§5; three proposed, four implemented — the
+  review's §12); the S8a flush is not split.
+- **Rollback (§7):** copy-only, to the accepted pre-S8b build `7a7efc6`; the old build's behaviour on a new file was
+  predicted here and measured at implementation (the review's §10 and §12: it listens and serves nothing).
 - **The one genuine product decision (§9, Q8a, the Founder's):** whether the `player_id` columns of the S8b tables
   ship tolerant-and-counted like Q7a (recommended) or strict. Every other choice is engineering, recorded with its
   evidence. The preparation is complete without the answer; the implementation of those columns waits for it.
@@ -3460,8 +3484,9 @@ regression, not called explained. **The independent review of `86342b8` (23 Octo
 Q8a wording and left one P2 mismatch (R1, the owned `case_history` under the kept RESTRICT key), corrected in the
 review's §3/§6/§8 with probe 6; its own run recorded one live-room probe attempt stopped at its 30-second boot
 timeout before any assertion (cause unestablished; an unchanged rerun exited 0), preserved in the review's §10.
-**S8b stays PREPARED, NOT IMPLEMENTED, awaiting independent acceptance of the corrected design; Q8a stays unanswered
-and unasked; `0016` stays unreserved.**
+**The independent review of `4d2c74b` (23 October 2026) accepted the corrected design for implementation; Q8a was
+then asked and answered "Approve tolerant (Recommended)"; `0016` is assigned and registered; the implementation record
+is at the top of this section and in the review's §12. S8b is IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE.**
 
 S8c and S8d are not started. Nothing in this section is a production, release, security, legal-compliance, merge or
 deployment approval.
