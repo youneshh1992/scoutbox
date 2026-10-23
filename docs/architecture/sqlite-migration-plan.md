@@ -3486,7 +3486,18 @@ review's §3/§6/§8 with probe 6; its own run recorded one live-room probe atte
 timeout before any assertion (cause unestablished; an unchanged rerun exited 0), preserved in the review's §10.
 **The independent review of `4d2c74b` (23 October 2026) accepted the corrected design for implementation; Q8a was
 then asked and answered "Approve tolerant (Recommended)"; `0016` is assigned and registered; the implementation record
-is at the top of this section and in the review's §12. S8b is IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE.**
+is at the top of this section and in the review's §12.** **The independent review of `b7c0dd0` (23 October 2026) did
+NOT accept the implementation** (the full backend and Player gates passed independently; its new script reproduced
+twenty cases of two P2 findings): **F1** — the preflight and the final guard checked only that a chain target exists,
+so a `supersedes`/`supersededById` could cross rooms against §6 G; **F2** — the draft's and the handoff's
+`idempotency_keys` rows were owned by the child id, which the parent-scoped tables admit on two cases, so one case read
+or deleted another's replay keys. Both corrected in one bounded milestone on the same branch, tests first (review §12,
+"Corrected after the independent review of `b7c0dd0`"): the chain compared by room in both checks over the final
+graph, atomically, ids only; the key rows owned by the CASE id in the writer, reader, cleanup, import, export, rollback
+and re-upgrade, nothing renamed, deduplicated or newly refused; a `0016` file cut over by the superseded `b7c0dd0` build
+(synthetic verification only) is refused with `RECRUITMENT_CASES_KEY_OWNER_UNKNOWN`, not read. The reviewer's script,
+unchanged, exits 0 on the corrected tree. Q8a stays as recorded. **S8b is IMPLEMENTED, PENDING INDEPENDENT
+ACCEPTANCE.**
 
 S8c and S8d are not started. Nothing in this section is a production, release, security, legal-compliance, merge or
 deployment approval.

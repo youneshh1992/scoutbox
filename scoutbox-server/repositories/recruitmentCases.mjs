@@ -112,7 +112,9 @@ const jsonOrNull = (obj) => (Object.keys(obj).length ? JSON.stringify(obj) : nul
 // kinds: text | int | num | bool | json | id (as the S8a engine). A child spec: { table, ownerCols, shape, scalar?: [col, kind]
 // (a list of scalars: a matching entry in the column, any other entry in raw_json), constant?: { col: value } (several
 // lists sharing one table), single?: true (an object child: one row), restrict?: true (deleted explicitly before its owner),
-// indexes?: [...] }. A `maps` entry with `ownerTable` is the idempotency_keys rule, owner_id the record's own id.
+// indexes?: [...] }. A `maps` entry with `ownerTable` is the idempotency_keys rule: owner_id is the record's own id (a case, a
+// decision) or, with `ownerKey: 'case'`, the OWNING CASE id (the draft and the handoff — one per case, their primary key the
+// case id; their own ids are data the parent-scoped tables admit twice; the review of b7c0dd0, F2).
 const EMPTY = { keys: [], cols: {} };
 const BY2 = (p) => ({ keys: ['userId', 'name'], cols: { userId: [`${p}_user_id`, 'text'], name: [`${p}_name`, 'text'] } });
 const BY3 = (p) => ({ keys: ['kind', 'userId', 'name'], cols: { kind: [`${p}_kind`, 'text'], userId: [`${p}_user_id`, 'text'], name: [`${p}_name`, 'text'] } });
@@ -128,8 +130,8 @@ const REQUEST_LINKS = scalarList('case_request_links', ['case_id'], ['request_id
 const TRIAL_LINKS = scalarList('case_trial_links', ['case_id'], ['trial_id', 'text'], { indexes: ['CREATE INDEX case_trial_links_trial ON case_trial_links (trial_id)'] });
 const DRAFT_REASONS = scalarList('case_decision_draft_reason_codes', ['case_id', 'draft_position'], ['code', 'text']);
 const DRAFT_REFS = { table: 'case_decision_draft_evidence_refs', ownerCols: ['case_id', 'draft_position'], shape: { keys: ['kind', 'id', 'meta'], cols: { kind: ['kind', 'text'], id: ['ref_id', 'text'], meta: ['meta_json', 'json'] } } };
-const DRAFT = { table: 'case_decision_drafts', ownerCols: ['case_id'], single: true, shape: { keys: ['id', 'outcome', 'reasonCodes', 'note', 'evidenceRefs', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'rev', 'revAt', 'keys'], cols: { id: ['id', 'text'], outcome: ['outcome', 'text'], note: ['note', 'text'], createdAt: ['created_at', 'int'], updatedAt: ['updated_at', 'int'], rev: ['rev', 'int'], revAt: ['rev_at', 'int'] }, objects: { by: BY_ROLE('by'), updatedBy: BY_ROLE('updated_by') }, lists: { reasonCodes: DRAFT_REASONS, evidenceRefs: DRAFT_REFS }, maps: { keys: { table: 'idempotency_keys', ownerTable: 'case_decision_drafts' } } }, indexes: ['CREATE INDEX case_decision_drafts_id ON case_decision_drafts (id)'] };
-const HANDOFF = { table: 'case_transaction_handoffs', ownerCols: ['case_id'], single: true, shape: { keys: ['id', 'caseId', 'orgId', 'playerId', 'status', 'invitedAt', 'invitedBy', 'acceptedAt', 'withdrawnAt', 'transactionId', 'representedAtInvitation', 'invitedAgencyOrgId', 'invitedAgentUserId', 'keys', 'rev', 'revAt'], cols: { id: ['id', 'text'], caseId: ['handoff_case_id', 'text'], orgId: ['org_id', 'text'], playerId: ['player_id', 'text'], status: ['status', 'text'], invitedAt: ['invited_at', 'int'], acceptedAt: ['accepted_at', 'int'], withdrawnAt: ['withdrawn_at', 'int'], transactionId: ['transaction_id', 'text'], representedAtInvitation: ['represented_at_invitation', 'bool'], invitedAgencyOrgId: ['invited_agency_org_id', 'text'], invitedAgentUserId: ['invited_agent_user_id', 'text'], rev: ['rev', 'int'], revAt: ['rev_at', 'int'] }, objects: { invitedBy: BY3('invited_by') }, maps: { keys: { table: 'idempotency_keys', ownerTable: 'case_transaction_handoffs' } } }, indexes: ['CREATE INDEX case_transaction_handoffs_id ON case_transaction_handoffs (id)', 'CREATE INDEX case_transaction_handoffs_agency_status ON case_transaction_handoffs (invited_agency_org_id, status)', 'CREATE INDEX case_transaction_handoffs_player ON case_transaction_handoffs (player_id)'] };
+const DRAFT = { table: 'case_decision_drafts', ownerCols: ['case_id'], single: true, shape: { keys: ['id', 'outcome', 'reasonCodes', 'note', 'evidenceRefs', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'rev', 'revAt', 'keys'], cols: { id: ['id', 'text'], outcome: ['outcome', 'text'], note: ['note', 'text'], createdAt: ['created_at', 'int'], updatedAt: ['updated_at', 'int'], rev: ['rev', 'int'], revAt: ['rev_at', 'int'] }, objects: { by: BY_ROLE('by'), updatedBy: BY_ROLE('updated_by') }, lists: { reasonCodes: DRAFT_REASONS, evidenceRefs: DRAFT_REFS }, maps: { keys: { table: 'idempotency_keys', ownerTable: 'case_decision_drafts', ownerKey: 'case' } } }, indexes: ['CREATE INDEX case_decision_drafts_id ON case_decision_drafts (id)'] };
+const HANDOFF = { table: 'case_transaction_handoffs', ownerCols: ['case_id'], single: true, shape: { keys: ['id', 'caseId', 'orgId', 'playerId', 'status', 'invitedAt', 'invitedBy', 'acceptedAt', 'withdrawnAt', 'transactionId', 'representedAtInvitation', 'invitedAgencyOrgId', 'invitedAgentUserId', 'keys', 'rev', 'revAt'], cols: { id: ['id', 'text'], caseId: ['handoff_case_id', 'text'], orgId: ['org_id', 'text'], playerId: ['player_id', 'text'], status: ['status', 'text'], invitedAt: ['invited_at', 'int'], acceptedAt: ['accepted_at', 'int'], withdrawnAt: ['withdrawn_at', 'int'], transactionId: ['transaction_id', 'text'], representedAtInvitation: ['represented_at_invitation', 'bool'], invitedAgencyOrgId: ['invited_agency_org_id', 'text'], invitedAgentUserId: ['invited_agent_user_id', 'text'], rev: ['rev', 'int'], revAt: ['rev_at', 'int'] }, objects: { invitedBy: BY3('invited_by') }, maps: { keys: { table: 'idempotency_keys', ownerTable: 'case_transaction_handoffs', ownerKey: 'case' } } }, indexes: ['CREATE INDEX case_transaction_handoffs_id ON case_transaction_handoffs (id)', 'CREATE INDEX case_transaction_handoffs_agency_status ON case_transaction_handoffs (invited_agency_org_id, status)', 'CREATE INDEX case_transaction_handoffs_player ON case_transaction_handoffs (player_id)'] };
 const BUDGET_LINES = { table: 'case_budget_lines', ownerCols: ['case_id', 'scenario_position'], shape: { keys: ['id', 'kind', 'label', 'amountMinor', 'currency', 'schedule', 'confirmed', 'conditional'], cols: { id: ['id', 'text'], kind: ['kind', 'text'], label: ['label', 'text'], amountMinor: ['amount_minor', 'int'], currency: ['currency', 'text'], schedule: ['schedule', 'text'], confirmed: ['confirmed', 'bool'] }, objects: { conditional: { keys: ['assumption'], cols: { assumption: ['conditional_assumption', 'text'] } } } } };
 const BUDGET_FX = { table: 'case_budget_fx_assumptions', ownerCols: ['case_id', 'scenario_position'], shape: { keys: ['from', 'to', 'rate', 'source', 'date', 'manual'], cols: { from: ['from_currency', 'text'], to: ['to_currency', 'text'], rate: ['rate', 'text'], source: ['source', 'text'], date: ['date', 'text'], manual: ['manual', 'bool'] } } };
 const BUDGET_ACTUALS = { table: 'case_budget_actuals', ownerCols: ['case_id', 'scenario_position'], shape: { keys: ['id', 'lineId', 'amountMinor', 'at', 'recordedBy'], cols: { id: ['id', 'text'], lineId: ['line_id', 'text'], amountMinor: ['amount_minor', 'int'], at: ['at', 'int'], recordedBy: ['recorded_by_name', 'text'] } } };
@@ -237,8 +239,6 @@ function stmts(sqlite) {
     parents: Object.fromEntries(ALL_COLLECTIONS.map((c) => [c.name, parentFor(c)])),
     children,
     keys: { insert: insertFor('idempotency_keys', ['owner_table', 'owner_id', 'position', 'act', 'shape', 'key', 'fp', 'at', 'entry_json']), deleteOwner: sqlite.prepare('DELETE FROM idempotency_keys WHERE owner_table = ? AND owner_id = ?'), select: sqlite.prepare('SELECT * FROM idempotency_keys WHERE owner_table = ? ORDER BY owner_id, position') },
-    draftIdsOf: sqlite.prepare('SELECT id FROM case_decision_drafts WHERE case_id = ?'),
-    handoffIdsOf: sqlite.prepare('SELECT id FROM case_transaction_handoffs WHERE case_id = ?'),
     historyOf: sqlite.prepare('DELETE FROM case_history WHERE case_id = ?'),
     deleteCase: sqlite.prepare('DELETE FROM recruitment_cases WHERE id = ?'),
     linkRowsNaming: { requests: (n) => sqlite.prepare(`SELECT * FROM case_request_links WHERE request_id IN (${Array(n).fill('?').join(', ')})`), trials: (n) => sqlite.prepare(`SELECT * FROM case_trial_links WHERE trial_id IN (${Array(n).fill('?').join(', ')})`) },
@@ -249,11 +249,17 @@ function stmts(sqlite) {
 }
 
 // ------------------------------------------------------------------ the mapping engine (record ↔ row + child rows), generic over the specs above
-/** Idempotency rows need an owner id: a child record without a string id keeps its row-worthy acts on the row too (held under `keys` in extra_json), so nothing is lost and no row is minted. */
+/**
+ * Idempotency rows need an owner id. A record whose key rows are owned by ITS OWN id (a decision, a case) and that has no
+ * string id keeps its row-worthy acts on the row instead (held under `keys` in extra_json), so nothing is lost and no id is
+ * minted. A child whose rows are owned by the CASE id (`ownerKey: 'case'` — the draft and the handoff, one per case, their
+ * primary key the case id; the review of b7c0dd0, F2) always has an owner, whatever its own id: two cases may carry the
+ * same child id and each keeps exactly its own rows.
+ */
 function foldKeysWithoutOwner(enc, item) {
   if (nonEmpty(item?.id)) return;
   enc.children = enc.children.filter((ch) => {
-    if (!ch.spec.ownerTable) return true;
+    if (!ch.spec.ownerTable || ch.spec.ownerKey === 'case') return true;
     const held = isPlainObject(enc.extra.keys) ? enc.extra.keys : {}; for (const [act, v] of Object.entries(ch.map)) setOwn(held, act, clone(v, `keys.${act}`).value); setOwn(enc.extra, 'keys', held); return false;
   });
 }
@@ -265,11 +271,11 @@ function writeKeyRows(S, ownerTable, ownerId, map) {
     else { const c = clone(v, `keys.${act}`).value; S.keys.insert.run({ owner_table: ownerTable, owner_id: ownerId, position: i++, act, shape: 'value', key: isPlainObject(c) && typeof c.key === 'string' ? c.key : null, fp: isPlainObject(c) && typeof c.fp === 'string' ? c.fp : null, at: null, entry_json: JSON.stringify(c === undefined ? null : c) }); }
   }
 }
-/** Write the children of one encoded level: `ownerValues` the owner key so far, `owner` the record at this level (its id owns the key rows), `include(spec)` the stage filter. */
+/** Write the children of one encoded level: `ownerValues` the owner key so far (the case id first), `owner` the record at this level (its id owns its key rows unless the spec says the CASE does), `include(spec)` the stage filter. */
 function writeChildren(sqlite, children, ownerValues, owner, include) {
   const S = stmts(sqlite);
   for (const ch of children) {
-    if (ch.spec.ownerTable) { if (include(ch.spec)) writeKeyRows(S, ch.spec.ownerTable, owner.id, ch.map); continue; }
+    if (ch.spec.ownerTable) { if (include(ch.spec)) writeKeyRows(S, ch.spec.ownerTable, ch.spec.ownerKey === 'case' ? ownerValues[0] : owner.id, ch.map); continue; }
     if (!include(ch.spec)) continue;
     const st = S.children[ch.spec.table]; const constants = ch.spec.constant ?? {};
     ch.items.forEach((item, position) => {
@@ -283,14 +289,10 @@ function writeChildren(sqlite, children, ownerValues, owner, include) {
     });
   }
 }
-/** The idempotency rows a parent record's owned key owners hold in the tables now (by the stored child ids), deleted before the children are rewritten or the owner departs. */
+/** The idempotency rows a parent record owns (its own rows and its draft's / handoff's, all keyed by the record's id), deleted before the children are rewritten or the owner departs; another case's rows are never touched. */
 function deleteOwnedKeyRows(sqlite, coll, recordId) {
   const S = stmts(sqlite);
-  for (const owner of coll.keyOwners) {
-    if (owner.self) { S.keys.deleteOwner.run(owner.table, recordId); continue; }
-    const q = owner === DRAFT ? S.draftIdsOf : S.handoffIdsOf;
-    for (const r of q.all(recordId)) S.keys.deleteOwner.run(owner.table, r.id);
-  }
+  for (const owner of coll.keyOwners) S.keys.deleteOwner.run(owner.table, recordId);
 }
 /**
  * Write one parent record: its row by upsert (seq kept), every child row of the included stage deleted and reinserted in
@@ -321,7 +323,7 @@ export function readRecords(sqlite, coll) {
   const decodeChildren = (shape, ownerValues, ownerId, out = new Map(), prefix = '') => {
     for (const [k, sub] of Object.entries(shape.lists ?? {})) out.set(`${prefix}${k}`, rowsOf(sub, ownerValues).map((r) => decodeChild(sub, r, ownerValues)));
     for (const [k, sub] of Object.entries(shape.object ?? {})) out.set(`${prefix}${k}`, rowsOf(sub, ownerValues).map((r) => decodeChild(sub, r, ownerValues)));
-    for (const [k, sub] of Object.entries(shape.maps ?? {})) { const o = {}; for (const r of keys.get(`${sub.ownerTable}|${ownerId}`) ?? []) { const v = parseJson(r.entry_json, 'entry_json'); if (r.shape === 'list') { if (!Object.hasOwn(o, r.act) || !Array.isArray(o[r.act])) setOwn(o, r.act, []); o[r.act].push(v); } else setOwn(o, r.act, v); } out.set(`${prefix}${k}`, o); } // own properties only: an act named __proto__ is data
+    for (const [k, sub] of Object.entries(shape.maps ?? {})) { const o = {}; for (const r of keys.get(`${sub.ownerTable}|${sub.ownerKey === 'case' ? ownerValues[0] : ownerId}`) ?? []) { const v = parseJson(r.entry_json, 'entry_json'); if (r.shape === 'list') { if (!Object.hasOwn(o, r.act) || !Array.isArray(o[r.act])) setOwn(o, r.act, []); o[r.act].push(v); } else setOwn(o, r.act, v); } out.set(`${prefix}${k}`, o); } // own properties only: an act named __proto__ is data
     for (const [k, sub] of Object.entries(shape.objects ?? {})) decodeChildren(sub, ownerValues, ownerId, out, `${prefix}${k}.`);
     return out;
   };
@@ -415,10 +417,16 @@ export function preflight(sqlite, supplied, { stored, s8a, orgs, users, only = n
   const missingRoom = [];
   for (const coll of ROOM_COLLECTIONS) if (supplied[coll.name] !== undefined) for (const r of supplied[coll.name]) if (!finalCaseIds.has(r.roomId)) missingRoom.push([coll.table, r.id, r.roomId]);
   if (missingRoom.length) throw refusal('ROOM_CASE_MISSING', `${missingRoom.length} room row(s) in ${label} name a case that is not in the final recruitmentCases collection (${ids(missingRoom.map((m) => `${m[0]} ${m[1]} → ${m[2]}`))}); the write was rolled back and nothing was changed`, { rows: missingRoom.map((m) => `${m[0]} ${m[1]}`) });
-  // the decision chain over the final decisions, ids only
-  const finalDecisions = final(DECISIONS).filter(isPlainObject); const decIds = idSet(finalDecisions); const broken = [];
-  for (const d of finalDecisions) for (const k of ['supersedes', 'supersededById']) if (nonEmpty(d[k]) && !decIds.has(d[k])) broken.push(`${d.id} names ${d[k]} (${k})`);
-  if (broken.length) throw refusal('DECISION_CHAIN_BROKEN', `${broken.length} decision chain reference(s) in ${label} name a decision that is not in the final roomDecisions collection (${ids(broken)}); the write was rolled back and nothing was changed`, { links: broken });
+  // the decision chain over the final decisions, ids only: every supersedes / supersededById names a final decision OF THE
+  // SAME ROOM (readiness review §6 G; the review of b7c0dd0, F1 — existence alone let a chain cross rooms). The duplicate-head
+  // condition stays a matter judged on read, not a refusal.
+  const finalDecisions = final(DECISIONS).filter(isPlainObject); const roomOf = new Map(); for (const d of finalDecisions) if (nonEmpty(d.id) && !roomOf.has(d.id)) roomOf.set(d.id, d.roomId); const broken = [];
+  for (const d of finalDecisions) for (const k of ['supersedes', 'supersededById']) {
+    if (!nonEmpty(d[k])) continue;
+    if (!roomOf.has(d[k])) broken.push(`${d.id} (room ${d.roomId}) names ${d[k]} (${k}): no such decision`);
+    else if (roomOf.get(d[k]) !== d.roomId) broken.push(`${d.id} (room ${d.roomId}) names ${d[k]} (${k}) of room ${roomOf.get(d[k])}`);
+  }
+  if (broken.length) throw refusal('DECISION_CHAIN_BROKEN', `${broken.length} decision chain reference(s) in ${label} do not name a decision of the same room in the final roomDecisions collection (${ids(broken)}); the write was rolled back and nothing was changed`, { links: broken });
   // the organisation and staff keys (RESTRICT): named here with ids, against the FINAL collections when the snapshot supplies them, the tables otherwise
   const orgIds = orgs !== undefined ? idSet(orgs) : tableExists(sqlite, 'orgs') ? new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id)) : null;
   const userIds = users !== undefined ? idSet(users) : tableExists(sqlite, 'org_users') ? new Set(sqlite.prepare('SELECT id FROM org_users').all().map((r) => r.id)) : null;
@@ -485,8 +493,12 @@ export function assertCasesConsistent(sqlite, { label = 'the snapshot' } = {}) {
   const danglingR = sqlite.prepare('SELECT l.case_id, l.request_id FROM case_request_links l LEFT JOIN recruitment_requests r ON r.id = l.request_id WHERE l.request_id IS NOT NULL AND r.id IS NULL').all();
   const danglingT = sqlite.prepare('SELECT l.case_id, l.trial_id FROM case_trial_links l LEFT JOIN trials t ON t.id = l.trial_id WHERE l.trial_id IS NOT NULL AND t.id IS NULL').all();
   if (danglingR.length || danglingT.length) throw refusal('CASE_LINK_DANGLING', `${danglingR.length + danglingT.length} case link(s) in ${label} name a request or trial that is not in the final tables (${ids([...danglingR.map((r) => `case ${r.case_id} links request ${r.request_id}`), ...danglingT.map((r) => `case ${r.case_id} links trial ${r.trial_id}`)])}); the write was rolled back and nothing was changed`);
-  const chain = sqlite.prepare('SELECT d.id, d.supersedes_id, d.superseded_by_id FROM room_decisions d WHERE (d.supersedes_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM room_decisions x WHERE x.id = d.supersedes_id)) OR (d.superseded_by_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM room_decisions x WHERE x.id = d.superseded_by_id))').all();
-  if (chain.length) throw refusal('DECISION_CHAIN_BROKEN', `${chain.length} decision chain reference(s) in ${label} name a decision that is not in the final room_decisions table (${ids(chain.map((d) => `${d.id} names ${d.supersedes_id ?? d.superseded_by_id}`))}); the write was rolled back and nothing was changed`);
+  // the chain over the FINAL table state: each pointer names a decision of the SAME room (review of b7c0dd0, F1), checked here independently of the preflight
+  const chain = sqlite.prepare("SELECT d.id, d.room_id, d.supersedes_id, d.superseded_by_id, (SELECT x.room_id FROM room_decisions x WHERE x.id = d.supersedes_id) AS s_room, (SELECT x.room_id FROM room_decisions x WHERE x.id = d.superseded_by_id) AS b_room FROM room_decisions d WHERE (d.supersedes_id IS NOT NULL AND (SELECT x.room_id FROM room_decisions x WHERE x.id = d.supersedes_id) IS NOT d.room_id) OR (d.superseded_by_id IS NOT NULL AND (SELECT x.room_id FROM room_decisions x WHERE x.id = d.superseded_by_id) IS NOT d.room_id)").all();
+  if (chain.length) throw refusal('DECISION_CHAIN_BROKEN', `${chain.length} decision chain reference(s) in ${label} do not name a decision of the same room in the final room_decisions table (${ids(chain.flatMap((d) => [d.supersedes_id !== null && d.s_room !== d.room_id ? `${d.id} (room ${d.room_id}) names ${d.supersedes_id} (supersedes)${d.s_room === null ? ': no such decision' : ` of room ${d.s_room}`}` : null, d.superseded_by_id !== null && d.b_room !== d.room_id ? `${d.id} (room ${d.room_id}) names ${d.superseded_by_id} (supersededById)${d.b_room === null ? ': no such decision' : ` of room ${d.b_room}`}` : null].filter(Boolean)))}); the write was rolled back and nothing was changed`);
+  // the owned key rows (review of b7c0dd0, F2): every draft / handoff key row is owned by a case that has that child; a row owned by nothing (a file written by the superseded b7c0dd0 build keyed them by the child id) is refused, never guessed at
+  const orphanKeys = sqlite.prepare("SELECT k.owner_table, k.owner_id FROM idempotency_keys k WHERE (k.owner_table = 'case_decision_drafts' AND NOT EXISTS (SELECT 1 FROM case_decision_drafts c WHERE c.case_id = k.owner_id)) OR (k.owner_table = 'case_transaction_handoffs' AND NOT EXISTS (SELECT 1 FROM case_transaction_handoffs c WHERE c.case_id = k.owner_id)) GROUP BY k.owner_table, k.owner_id").all();
+  if (orphanKeys.length) throw refusal('RECRUITMENT_CASES_KEY_OWNER_UNKNOWN', `${orphanKeys.length} idempotency_keys owner(s) in ${label} name no case child (${ids(orphanKeys.map((k) => `${k.owner_table} ${k.owner_id}`))}); since the correction of b7c0dd0 the draft's and the handoff's rows are owned by the CASE id — a file cut over by the b7c0dd0 build is not read: roll it back with that build's tool on a copy and cut the copy over again`, { rows: orphanKeys.map((k) => `${k.owner_table} ${k.owner_id}`) });
   const broken = [...RECRUITMENT_CASES_TABLES, 'recruitment_requests', 'trials'].flatMap((t) => sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all());
   if (broken.length) throw refusal('RECRUITMENT_CASES_KEY_VIOLATION', `foreign_key_check found ${broken.length} broken reference(s) in ${label} (first: ${broken[0].table} rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back and nothing was changed`);
 }

@@ -128,7 +128,11 @@ CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, ow
 -- Drafted mapping notes for the other owners (the four S8b owners below — room_decisions,
 -- case_decision_drafts, case_transaction_handoffs and, by the CHECK, recruitment_cases — are LIVE since
 -- migration 0016 under the S8a rule: a value act with a string key is a row, keyed (owner_table, owner_id,
--- position) with the owner's own id; ref_id / actor_id are NOT columns — a decision's draft id is the
+-- position) with the OWNING ROW's key — the record's own id for recruitment_requests, trials,
+-- recruitment_cases and room_decisions, and the CASE id for case_decision_drafts and
+-- case_transaction_handoffs (one row per case, primary key case_id; their own `id` columns are data the
+-- parent-scoped tables admit twice — corrected after the independent review of b7c0dd0, F2, whose
+-- build keyed them by the child id); ref_id / actor_id are NOT columns — a decision's draft id is the
 -- draft_id column of room_decisions; the contacts, offers and packages lines stay drafts for S8c+):
 -- source: every `keys` object/list/map on db.recruitmentContacts, db.trials,
 --         db.requests, db.roomDecisions, recruitmentCases[].decisionDraft,

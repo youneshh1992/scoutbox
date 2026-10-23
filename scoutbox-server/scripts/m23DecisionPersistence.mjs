@@ -222,7 +222,7 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
       ok(kept && stableJson(kept.roomDecisions) === stableJson(fixture.roomDecisions) && stableJson(kept.recruitmentCases) === stableJson(fixture.recruitmentCases), `${label}: the file is exactly as it was — nothing deleted, nothing repaired, no table created`);
     };
     await refused('three alien entries (null, a string, a number)', [null, 'string', 42], /roomDecisions entry #2 is not an object \(null\); roomDecisions entry #3 is not an object \(a string\); roomDecisions entry #4 is not an object \(a number\)/);
-    await refused('eight corrupt rows whose chain pointer names a decision that does not exist', bad, /DECISION_CHAIN_BROKEN: 8 decision chain reference\(s\).*rdec-bad-outcome names x1 \(supersededById\)/);
+    await refused('eight corrupt rows whose chain pointer names a decision that does not exist', bad, /DECISION_CHAIN_BROKEN: 8 decision chain reference\(s\).*rdec-bad-outcome \(room case-x\) names x1 \(supersededById\): no such decision/);
   }
   // The same eight defects, each row superseded by the real head, are carried losslessly and judged on read as before.
   for (const r of bad) r.supersededById = 'rdec-formal-2';

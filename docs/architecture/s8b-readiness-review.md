@@ -9,7 +9,9 @@ Founder's explicit answer to the one product question of §9, asked and recorded
 (Recommended)"**. Migration **`0016_recruitment_cases`** is REGISTERED; `repositories/recruitmentCases.mjs`, its
 rollback tool, the two suites and the amended `docs/architecture/sql/02_recruitment.sql` are the implementation; **§12
 is the implementation record** — what landed, where it departs from the sections below (marked *proposed*, kept as the
-reviewed design), what was measured and what is not claimed. The implementation awaits its own independent acceptance;
+reviewed design), what was measured and what is not claimed, and the correction after the independent review of
+`b7c0dd0` (F1 same-room chains, F2 owned-child key isolation; the review did not accept `b7c0dd0`). The implementation
+awaits its own independent acceptance;
 nothing here is production, release, security, legal-compliance, merge or deployment approval. S8c/S8d are not
 started.
 
@@ -350,7 +352,9 @@ F. **Prunes against the final graph, dependents before their parents**: **F1** t
    `case_request_links` key no longer fires there); **F3** the cases no longer listed — **for each departing owner,
    inside the same transaction and BEFORE its parent row: its RESTRICT-owned children removed explicitly (`case_history`
    rows) and the polymorphic `idempotency_keys` rows of its owned draft and handoff (`owner_table` `case_decision_drafts`
-   / `case_transaction_handoffs` / `recruitment_cases`; no key of their own — the S8a precedent, `recruitment.mjs:518`),
+   / `case_transaction_handoffs` / `recruitment_cases`, **`owner_id` the CASE id** — the draft's and the handoff's own ids
+   are data the parent-scoped tables admit twice (corrected after the review of `b7c0dd0`, F2); no key of their own — the
+   S8a precedent, `recruitment.mjs:518`),
    then the parent row, whose CASCADE-owned children follow it** (corrected after the review of `86342b8`, R1: the
    earlier "their own children cascade" contradicted the kept `case_history` key and refused a valid final graph in
    both input orders — the reviewer's reproduction; probe 6). The same routine rewrites a SUPPLIED case's owned
@@ -365,7 +369,7 @@ F. **Prunes against the final graph, dependents before their parents**: **F1** t
    | `case_history` | `ON DELETE RESTRICT` (kept) | rows deleted explicitly before the parent; reinserted from the supplied list at A |
    | `case_tags` (`case_room_tags` in §4), `case_assignments`, `case_tasks`, `case_approvals` | `CASCADE` (their staff references `RESTRICT` → the staff prune is F4) | cascade with the parent at F3; rewritten in list order at A |
    | `case_request_links`, `case_trial_links` | `CASCADE` | released at R, reinserted at C; nothing left to cascade at F3 |
-   | `case_decision_drafts` (+ its `reason_codes` / `evidence_refs` lists, cascading from the draft), `case_transaction_handoffs` | `CASCADE`, `UNIQUE (case_id)` | cascade with the parent; **their `idempotency_keys` rows deleted explicitly first** (polymorphic owner, no key) |
+   | `case_decision_drafts` (+ its `reason_codes` / `evidence_refs` lists, cascading from the draft), `case_transaction_handoffs` | `CASCADE`, `UNIQUE (case_id)` | cascade with the parent; **their `idempotency_keys` rows deleted explicitly first** (polymorphic owner keyed by the CASE id since the correction of `b7c0dd0`, no key) |
    | `case_budget_scenarios` → `case_budget_lines`, `case_budget_fx_assumptions`, `case_budget_actuals` | `CASCADE` from the case, then from the scenario | cascade with the parent |
    | **Not owned** — independent rows naming a case: `recruitment_requests.case_id`, `trials.case_id` (S8a tables, the real key after §4 step 4), `room_comments`, `room_snapshots`, `room_decisions`, `room_evidence_states` (`RESTRICT`, §2) | `RESTRICT` | a retained row blocks the removal, named at P with its table; a supplied collection removes its rows at F1/F2 first |
    | Later-stage tables naming a case in the draft (`recruitment_contacts`, `recruitment_offers`, `signing_packages`, `signings`: `RESTRICT`) | not created by S8b | blobs until S8c/S8d; plain ids, checked in code as today |
@@ -558,7 +562,7 @@ below); the two old-order scripts keep their intended exit 1.
 
 | Suite (`npm test`, since the implementation) | What it proves |
 |---|---|
-| `scripts/testRecruitmentCases.mjs` (10 checks; failing-first on the unchanged `4d2c74b` tree: 9 on behavioural assertions — the registry's last id, no `recruitment_cases` table after the migrations, the blob store removing a case a retained comment still names, a view that is not read-only —, 1 `[compat]` check holding on both trees) | migration 0016 end to end on an S8a-core file (the twenty-five tables, the two parents rebuilt with the real case key, the broadened key CHECK, every S8a row and thread byte-identical, the five blobs imported and retired, counts only, reruns no-ops, a blob-less file); the lossless mapping of every writer literal of §2; the import refusals with ids only and the Q8a counts; the staged repository (views, the five entry points, every in-place writer landing in the next save, key rows cleaned, unchanged saves rewriting nothing, exports, reopen); the two failure contracts through the real store; the corrected write of §6 through the real store (F1a/F1b/F1c, F2 per collection and all four, R1, both input orders, partial = full, resupply); the refusals with their tables and the injected failure after the owned children; the `[behaviour]` regression; the copy-only rollback, the chain and the re-upgrade |
+| `scripts/testRecruitmentCases.mjs` (12 checks: the original ten, plus the two `[review b7c0dd0 F1]` / `[review b7c0dd0 F2]` regressions added after that review, failing first on the unchanged `b7c0dd0` tree; failing-first of the ten on the unchanged `4d2c74b` tree: 9 on behavioural assertions — the registry's last id, no `recruitment_cases` table after the migrations, the blob store removing a case a retained comment still names, a view that is not read-only —, 1 `[compat]` check holding on both trees) | migration 0016 end to end on an S8a-core file (the twenty-five tables, the two parents rebuilt with the real case key, the broadened key CHECK, every S8a row and thread byte-identical, the five blobs imported and retired, counts only, reruns no-ops, a blob-less file); the lossless mapping of every writer literal of §2; the import refusals with ids only and the Q8a counts; the staged repository (views, the five entry points, every in-place writer landing in the next save, key rows cleaned, unchanged saves rewriting nothing, exports, reopen); the two failure contracts through the real store; the corrected write of §6 through the real store (F1a/F1b/F1c, F2 per collection and all four, R1, both input orders, partial = full, resupply); the refusals with their tables and the injected failure after the owned children; the `[behaviour]` regression; the copy-only rollback, the chain and the re-upgrade |
 | `scripts/testRecruitmentCasesServer.mjs` (3 checks; failing-first on `4d2c74b`) | the real server: every route of §1 landing as rows the moment it answers, the listings and reads unchanged, a SIGKILL, `/capabilities`; the player's and the guardian's surfaces carrying no note, decision or room; another club's 404; the deletion unit with a real COMMIT failure; a restored backup naming a missing player served and counted; the backup's five legacy shapes, the restore through 0016 row for row, the actual `7a7efc6` build booted DIRECTLY on a 0016 copy (measured) and on the rollback copy (writes into its blobs, re-upgraded exactly), a null blob refused at boot |
 
 ## 12. Implementation record (23 October 2026, on top of `4d2c74b`)
@@ -635,6 +639,44 @@ it was — the battery now asserts that contract on two files and keeps the eigh
 carried losslessly and judged on read as before). 52 checks on the final tree; the unchanged battery still passes on the
 old build; the adapted one fails on the old build only the two refusal checks. No product behaviour was changed for a
 constraint; the batteries' other results are identical on both trees (`apiE2E` pre-existing on both).
+
+**Corrected after the independent review of `b7c0dd0` (23 October 2026; two P2 findings, not accepted).** The
+review's script, unchanged (`review-b7c0dd0-reproductions.mjs`, over a frozen helper prefix of the unit suite and the
+real migration, store and repository), reproduced twenty cases of two findings on `b7c0dd0` and exits 0 on the
+corrected tree. **F1 — same-room chains.** The preflight built a global set of decision ids and the final guard asked
+only whether a target EXISTS, so a decision of one room naming a decision of another room imported, committed in a
+snapshot and in a staged save, and passed the guard — against §6 G. Both checks now compare the target's room with the
+referring row's room over the FINAL combined graph (the preflight over the supplied or retained decisions, the guard
+over the table state, independently), and refuse with `DECISION_CHAIN_BROKEN` naming the decision, its room, the
+pointer and the target's room (or "no such decision"), ids only, atomically — at the cutover (file unmodified, not
+recorded, a repeated boot refusing the same way), in full and partial snapshots in both input orders, in a staged save
+(the pending edit kept for correction, the corrected retry landing once). Valid same-room chains, the missing-target
+refusal and the duplicate-head policy (judged on read, never a refusal) are unchanged; no lifecycle, cycle,
+reciprocity, deletion or retention rule was added. **F2 — owned-child key isolation.** `case_decision_drafts` and
+`case_transaction_handoffs` are keyed by `case_id` (one row per case) and admit the same child `id` on different cases,
+but their `idempotency_keys` rows were written, read and deleted by `(owner_table, child.id)`: two cases whose drafts
+(or handoffs) shared an id read the first case's keys on both, and a later unrelated rewrite of either removed the
+other's rows. The rows are now owned by the **case id** — the child's primary key, the S8a precedent of the request and
+trial rows (`owner_id` = the owning row's key) — in the writer, the reader, the cleanup (by the case id alone, so a
+rewrite or departure of one case never touches another's rows, both pending in one transaction included), the import,
+the snapshot and staged writes, the backup export, the rollback (which reads the rows back through the same reader)
+and the re-upgrade. No id is renamed, no child deduplicated, no owner overwritten, no new uniqueness refusal added; the
+one shared table, the S8a owner rows and their replay, the shape, order and presence of every act and the held,
+unknown and prototype-named acts are preserved; a draft or handoff without an id of its own now always has an owner
+(the case), so its row-worthy acts are rows rather than held on the row — the same values either way. The final guard
+also refuses (`RECRUITMENT_CASES_KEY_OWNER_UNKNOWN`) a draft/handoff key row owned by no case child. **Compatibility
+boundary, stated honestly:** a `0016` file cut over by the superseded `b7c0dd0` build (synthetic verification files
+only; that build was never deployed and no real data was touched) keys those rows by the child id; this build does not
+read them and refuses the file with that code rather than guess — roll it back with the `b7c0dd0` tool on a copy and
+cut the copy over again; where two cases shared a child id in such a file, that build had already aliased their keys and
+no tool can tell the owners apart. **Evidence:** two regressions written first in `testRecruitmentCases.mjs`
+(`[review b7c0dd0 F1]`, `[review b7c0dd0 F2]`: both pointers, retained and supplied decisions, both input orders, the
+guard on its own, the statement and COMMIT failures with the retry, the unchanged save, the restart, the export and
+restore, the rollback and re-upgrade, a departing owner, collisions introduced and removed; empty, absent, null,
+held-only and row-worthy keys on the colliding child), failing on the unchanged `b7c0dd0` tree for the stated reasons;
+the server suite and `m23DecisionPersistence` adapted only in their expected owner id and refusal wording; the
+reviewer's script exit 0; the reviewer's new single-field matrix 2,764 round trips, 8 reference refusals, 0 mismatches;
+the historical S8a matrix and key transitions unchanged.
 
 **Not claimed.** The whole-snapshot-write objective (contacts, offers, packages, signings, follow-ups and the later
 collections are still blobs), release readiness, any performance gain, and the independent acceptance this record

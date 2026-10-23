@@ -1652,7 +1652,15 @@ tool is the first link of the chain.
   `room_snapshots` + `room_snapshot_source_refs`, `room_decisions` + three
   child tables, `room_evidence_states`; the drafts' and handoffs' and formal
   decisions' `keys` are rows of the ONE shared `idempotency_keys` table, whose
-  owner CHECK migration `0016` broadens. On the same step
+  owner CHECK migration `0016` broadens — a decision's rows under its own id,
+  a draft's and a handoff's under the OWNING CASE id (one row per case; their
+  own ids are data two cases may share — corrected after the independent
+  review of `b7c0dd0`, F2, whose build keyed them by the child id and let one
+  case read or delete another's keys; a `0016` file that build cut over —
+  synthetic verification files only, never real data — is refused by this
+  build with `RECRUITMENT_CASES_KEY_OWNER_UNKNOWN` rather than guessed at: roll
+  it back with that build's tool on a copy and cut the copy over again). On
+  the same step
   `recruitment_requests.case_id` and `trials.case_id` become REAL keys to
   `recruitment_cases` (Q7b's conversion; the two parents are rebuilt
   create-copy-drop-recreate with every row and its `seq`). Nothing of the
@@ -1688,8 +1696,12 @@ tool is the first link of the chain.
   preflight); a SUPPLIED collection removes its own rows before the case. A
   case's link to a request or trial outside the final collections is refused
   (`CASE_LINK_DANGLING`), a room row naming an unknown case too
-  (`ROOM_CASE_MISSING`), a decision chain naming a decision outside the final
-  rows too (`DECISION_CHAIN_BROKEN`). `case_history` keeps its RESTRICT key:
+  (`ROOM_CASE_MISSING`), a decision chain pointer (`supersedes` /
+  `supersededById`) naming anything but a decision OF THE SAME ROOM among the
+  final rows too (`DECISION_CHAIN_BROKEN`, the decision, its room, the pointer
+  and the target's room named; checked at the preflight and again by the final
+  SQL guard — corrected after the independent review of `b7c0dd0`, F1, whose
+  build checked existence only). `case_history` keeps its RESTRICT key:
   the owned history of a departing case is removed explicitly before the
   parent (every other owned child cascades); an owned child never blocks. The
   drafted one-open-room index is withdrawn: `ROOM_EXISTS` stays the route's

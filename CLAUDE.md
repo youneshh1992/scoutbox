@@ -366,6 +366,13 @@ and design changes the Founder explicitly requests.
   §12 is the implementation record (departures from the proposed sections,
   the measurements, what is not claimed: the whole-snapshot-write objective,
   release readiness, any performance gain — the bench was not run). The
+  independent review of `b7c0dd0` did NOT accept the implementation (two P2
+  findings) and the correction followed on the same branch: decision chains
+  are checked SAME-ROOM in the preflight and the final SQL guard (F1), and the
+  draft's / handoff's `idempotency_keys` rows are owned by the CASE id, never
+  the child id the parent-scoped tables admit twice (F2); a `0016` file cut
+  over by the superseded `b7c0dd0` build (synthetic only) is refused with
+  `RECRUITMENT_CASES_KEY_OWNER_UNKNOWN`, not read (review §12). The
   eighth historical build the backend gate boots for real is `7a7efc6`
   (`SCOUTBOX_PRE_S8B_SERVER`). S8c/S8d are not started** (plan §D.8 the implementation
   record; §D.7 the design, independently accepted at

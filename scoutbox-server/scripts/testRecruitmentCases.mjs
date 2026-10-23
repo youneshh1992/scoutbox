@@ -70,7 +70,7 @@ const canon = (s) => JSON.stringify(Object.fromEntries(Object.entries(JSON.parse
 const fkTargets = (s, table) => s.prepare(`PRAGMA foreign_key_list(${table})`).all().map((r) => `${r.from}->${r.table}(${r.to}) ${r.on_delete}`);
 const ddlOf = (s, t) => s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t)?.sql ?? null;
 const content = (s, t, where = '1') => JSON.stringify(s.prepare(`SELECT * FROM "${t}" WHERE ${where} ORDER BY rowid`).all().map(({ seq, ...r }) => r));
-const ownedOf = (s, caseId) => ({ history: content(s, 'case_history', `case_id = '${caseId}'`), tags: content(s, 'case_room_tags', `case_id = '${caseId}'`), tasks: content(s, 'case_tasks', `case_id = '${caseId}'`), draft: content(s, 'case_decision_drafts', `case_id = '${caseId}'`), handoff: content(s, 'case_transaction_handoffs', `case_id = '${caseId}'`), budget: content(s, 'case_budget_lines', `case_id = '${caseId}'`), keys: content(s, 'idempotency_keys', `owner_table IN ('case_decision_drafts', 'case_transaction_handoffs') AND owner_id IN (SELECT id FROM case_decision_drafts WHERE case_id = '${caseId}' UNION SELECT id FROM case_transaction_handoffs WHERE case_id = '${caseId}')`), links: { r: content(s, 'case_request_links', `case_id = '${caseId}'`), t: content(s, 'case_trial_links', `case_id = '${caseId}'`) } });
+const ownedOf = (s, caseId) => ({ history: content(s, 'case_history', `case_id = '${caseId}'`), tags: content(s, 'case_room_tags', `case_id = '${caseId}'`), tasks: content(s, 'case_tasks', `case_id = '${caseId}'`), draft: content(s, 'case_decision_drafts', `case_id = '${caseId}'`), handoff: content(s, 'case_transaction_handoffs', `case_id = '${caseId}'`), budget: content(s, 'case_budget_lines', `case_id = '${caseId}'`), keys: content(s, 'idempotency_keys', `owner_table IN ('case_decision_drafts', 'case_transaction_handoffs') AND owner_id = '${caseId}'`), links: { r: content(s, 'case_request_links', `case_id = '${caseId}'`), t: content(s, 'case_trial_links', `case_id = '${caseId}'`) } });
 const CHANNEL = (over = {}) => ({ id: 'chan-1', requestId: 'req-p4b', playerId: 'pl-adult', playerName: 'Adult Signup', orgId: 'org-pro', orgName: 'Eastport FC', orgVerified: true, scoutName: 'Maria', scoutRole: 'Head of Recruitment', counterparty: 'player', guardianId: null, createdAt: T.accepted, messages: [{ id: 'msg-1', ts: T.accepted + 1, sender: { kind: 'org_user', id: 'usr-1', name: 'Maria' }, text: 'Welcome.', attachment: null }], readBy: { org: null, counterparty: null }, ...over });
 const S8A_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
 
@@ -158,7 +158,7 @@ test('[cutover] the mapping is lossless for every writer shape: the room case (t
   assert.equal(s.prepare("SELECT room_status FROM recruitment_cases WHERE id = 'case-1'").get().room_status, 'trial_requested'); assert.equal(s.prepare("SELECT room_status FROM recruitment_cases WHERE id = 'case-2'").get().room_status, null);
   assert.deepEqual(s.prepare("SELECT position, trial_id FROM case_trial_links WHERE case_id = 'case-1' ORDER BY position").all().map((x) => [x.position, x.trial_id]), [[0, 'trial-1'], [1, 'trial-1']]); assert.equal(s.prepare("SELECT request_id FROM case_request_links WHERE case_id = 'case-2'").get().request_id, 'req-minor');
   assert.equal(s.prepare("SELECT count(*) AS n FROM case_history").get().n, 5 + 4 + 1 + 1 + 1 + 0, 'every history entry a row (the room case, the M12 case, the legacy case, the tombstoned case, the odd case; the draft-odd case has none)'); assert.equal(s.prepare("SELECT count(*) AS n FROM case_room_tags WHERE case_id = 'case-1'").get().n, 2); assert.equal(s.prepare("SELECT count(*) AS n FROM case_budget_lines").get().n, 2); assert.equal(s.prepare("SELECT count(*) AS n FROM case_budget_actuals").get().n, 1);
-  assert.equal(s.prepare("SELECT key FROM idempotency_keys WHERE owner_table = 'case_decision_drafts' AND owner_id = 'rdraft-1' AND act = 'create'").get().key, 'draft-key-1', 'the draft\'s keys.create as a row'); assert.equal(s.prepare("SELECT key FROM idempotency_keys WHERE owner_table = 'case_transaction_handoffs' AND owner_id = 'hof-1' AND act = 'invite'").get().key, 'invite-key-1'); assert.equal(s.prepare("SELECT count(*) AS n FROM idempotency_keys WHERE owner_id = 'rdraft-odd'").get().n, 0, 'a draft whose acts carry no string key holds them on the row');
+  assert.equal(s.prepare("SELECT key FROM idempotency_keys WHERE owner_table = 'case_decision_drafts' AND owner_id = 'case-1' AND act = 'create'").get().key, 'draft-key-1', 'the draft\'s keys.create as a row, owned by the CASE id (review of b7c0dd0, F2)'); assert.equal(s.prepare("SELECT key FROM idempotency_keys WHERE owner_table = 'case_transaction_handoffs' AND owner_id = 'case-1' AND act = 'invite'").get().key, 'invite-key-1'); assert.equal(s.prepare("SELECT count(*) AS n FROM idempotency_keys WHERE owner_id IN ('rdraft-1', 'hof-1', 'rdraft-odd', 'case-odd2')").get().n, 0, 'never the child id; a draft whose acts carry no string key holds them on the row');
   assert.deepEqual(s.prepare("SELECT act, key FROM idempotency_keys WHERE owner_table = 'room_decisions' AND owner_id = 'rdec-2' ORDER BY position").all().map((x) => [x.act, x.key]), [['draft', 'draft-key-1']], 'the formal decision\'s string-keyed act as a row; the null finalize act held on the row');
   assert.equal(s.prepare("SELECT count(*) AS n FROM room_snapshot_source_refs WHERE snapshot_id = 'rsnap-2'").get().n, 3 + 1 + 2 + 1); assert.equal(s.prepare("SELECT count(*) AS n FROM room_comment_mentions").get().n, 1); assert.equal(s.prepare("SELECT deleted_by_user_id FROM room_comments WHERE id = 'rcmt-3'").get().deleted_by_user_id, 'usr-1');
   s.close(); rm(dir);
@@ -221,7 +221,7 @@ test('[cutover] the repository: the five views are read-only ARRAYS of plain mut
   withRo(dir, (s) => {
     assert.equal(s.prepare("SELECT room_status, stage FROM recruitment_cases WHERE id = 'case-1'").get().room_status, 'shortlisted'); assert.equal(s.prepare("SELECT count(*) AS n FROM case_history WHERE case_id = 'case-1'").get().n, 6); assert.equal(s.prepare("SELECT title FROM case_tasks WHERE case_id = 'case-1' AND position = 1").get().title, 'Second viewing');
     assert.equal(s.prepare("SELECT count(*) AS n FROM case_budget_scenarios WHERE case_id = 'case-1'").get().n, 2); assert.equal(s.prepare("SELECT id FROM case_decision_drafts WHERE case_id = 'case-1'").get().id, 'rdraft-2');
-    assert.deepEqual(s.prepare("SELECT owner_id, key FROM idempotency_keys WHERE owner_table = 'case_decision_drafts' ORDER BY owner_id").all().map((x) => [x.owner_id, x.key]), [['rdraft-2', 'draft-key-2']], 'the replaced draft\'s key row is gone, the new one present');
+    assert.deepEqual(s.prepare("SELECT owner_id, key FROM idempotency_keys WHERE owner_table = 'case_decision_drafts' ORDER BY owner_id").all().map((x) => [x.owner_id, x.key]), [['case-1', 'draft-key-2']], 'the replaced draft\'s key row is gone, the new one present under the case id');
     assert.ok(s.prepare("SELECT 1 FROM recruitment_cases WHERE id = 'case-new'").get()); assert.equal(s.prepare("SELECT body FROM room_comments WHERE id = 'rcmt-new'").get().body, 'A new comment.'); assert.ok(s.prepare("SELECT 1 FROM room_snapshots WHERE id = 'rsnap-new'").get()); assert.ok(s.prepare("SELECT 1 FROM room_evidence_states WHERE id = 'rev-new'").get());
     assert.equal(s.prepare("SELECT superseded_by_id FROM room_decisions WHERE id = 'rdec-2'").get().superseded_by_id, 'rdec-3'); assert.equal(s.prepare("SELECT supersedes_id FROM room_decisions WHERE id = 'rdec-3'").get().supersedes_id, 'rdec-2');
   });
@@ -391,5 +391,116 @@ test('[cutover] the copy-only rollback: the source is never modified (the main f
   assert.equal(canon(up), withRo(d, canon), 're-upgrading the copy reproduces the live tables exactly');
   up.close(); void expectedR; void expectedT;
   rm(d, out, chain, notCut, o2, o3);
+});
+
+// ------------------------------------------------------------- the independent review of b7c0dd0 (F1, F2): regressions written before the correction
+// FAILING-FIRST NOTE (recorded on the unchanged b7c0dd0 tree): F1 — the preflight and the final guard checked only that
+// a chain target EXISTS, so a decision of case-1 naming a decision of case-2 imported and committed; F2 — the draft and
+// handoff key rows were owned by the CHILD id, which the parent-scoped tables admit twice, so a second case with the same
+// child id read the first case's keys and a later rewrite of either removed the other's rows.
+test('[review b7c0dd0 F1] decision chains are SAME-ROOM: a supersedes / supersededById naming a decision of another room is refused with DECISION_CHAIN_BROKEN and ids only — at the cutover (file unmodified, not recorded, a repeated boot refuses the same way), in a full and a partial snapshot (both input orders), in a staged save (the pending edit kept, the corrected retry landing once), and by the final SQL guard called directly; the fixture\'s same-room chain, a missing target and the duplicate-head policy are unchanged', () => {
+  needRc();
+  const other = () => recommendation({ id: 'rdec-other', roomId: 'case-2', playerId: 'pl-child1', supersedes: null, supersededById: null });
+  const crossed = (rows, key) => { const ds = plain(rows); ds.find((d) => d.id === 'rdec-2')[key] = 'rdec-other'; ds.push(other()); return ds; };
+  const idsOnly = (e) => { assert.match(e.message, /DECISION_CHAIN_BROKEN/); assert.match(e.message, /rdec-2/); assert.match(e.message, /rdec-other/); assert.match(e.message, /case-1|case-2/, 'the rooms are named'); assert.doesNotMatch(e.message, /Adult Signup|Strong on the left|Harbour Road/); return e; };
+  const recorded = (s) => !!s.prepare('SELECT 1 FROM data_migrations WHERE id = ?').get(MIGRATION);
+  for (const key of ['supersedes', 'supersededById']) {
+    // the cutover: refused, nothing written, not recorded, the blobs intact, the next boot refuses the same way
+    { const d = tempDir('s8b-f1-import'); const f = S8B_FIX(); f.roomDecisions = crossed(f.roomDecisions, key); preS8bFile(d, f); const s = openRaw(d); const before = fullDump(s); const blobs = blob(s, 'roomDecisions');
+      const e1 = idsOnly(refused(() => migrateAll(s), /RECRUITMENT_CASES_IMPORT_BLOCKED: DECISION_CHAIN_BROKEN/, `import ${key}`));
+      assert.equal(fullDump(s), before, 'nothing written'); assert.equal(recorded(s), false, 'not recorded'); assert.deepEqual(blob(s, 'roomDecisions'), blobs, 'the blob as it was'); assert.equal(s.isTransaction, false);
+      const e2 = refused(() => migrateAll(s), /DECISION_CHAIN_BROKEN/, `import ${key} again`); assert.equal(e2.message, e1.message, 'the next boot refuses the same way'); assert.equal(fullDump(s), before); assert.equal(recorded(s), false);
+      s.close(); rm(d); }
+    // the snapshot write: full (both input orders) and partial (the cases supplied beside the decisions)
+    for (const order of ['forward', 'reversed']) { const d = file('f1-snap'); const S = snapshotOpen(d); const before = withRo(d, fullDump); const rev = S.revision();
+      const ds = crossed(S.db.roomDecisions, key); const supplied = order === 'reversed' ? [...ds].reverse() : ds;
+      idsOnly(refused(() => S.save({ roomDecisions: supplied }), /DECISION_CHAIN_BROKEN/, `snapshot ${key} ${order}`));
+      idsOnly(refused(() => S.save({ roomDecisions: supplied, recruitmentCases: plain(S.db.recruitmentCases) }), /DECISION_CHAIN_BROKEN/, `partial ${key} ${order}`));
+      assert.equal(withRo(d, fullDump), before, 'nothing written'); assert.equal(S.revision(), rev); assert.equal(S.store.sqlite.isTransaction, false);
+      S.close(); rm(d); }
+    // the staged save: refused, the pending edits kept for the caller to correct, the corrected retry lands once
+    { const d = file('f1-staged'); const L = serverOpen(d); const before = withRo(d, fullDump); const rev = L.revision(); const col = key === 'supersedes' ? 'supersedes_id' : 'superseded_by_id';
+      L.repo.addDecision(other()); const target = L.db.roomDecisions.find((r) => r.id === 'rdec-2'); const original = target[key]; target[key] = 'rdec-other';
+      idsOnly(refused(() => L.save(), /DECISION_CHAIN_BROKEN/, `staged ${key}`)); assert.equal(withRo(d, fullDump), before, 'nothing written'); assert.equal(L.revision(), rev); assert.equal(L.store.sqlite.isTransaction, false);
+      assert.equal(target[key], 'rdec-other', 'memory keeps the refused state for the caller to correct'); assert.ok(L.db.roomDecisions.some((r) => r.id === 'rdec-other'), 'the pending addition stays pending');
+      target[key] = original; L.save(); withRo(d, (s) => { assert.ok(s.prepare("SELECT 1 FROM room_decisions WHERE id = 'rdec-other' AND room_id = 'case-2'").get(), 'the corrected retry lands the other room\'s decision'); assert.notEqual(s.prepare('SELECT * FROM room_decisions WHERE id = ?').get('rdec-2')[col], 'rdec-other'); });
+      const landed = withRo(d, allDump); L.save(); assert.equal(withRo(d, allDump), landed, 'landed once');
+      L.close(); rm(d); }
+    // the final SQL guard on its own: a preflight correction must not hide a deficient final check
+    { const d = file('f1-guard'); const s = openRaw(d); s.exec('BEGIN'); rc.writeRecord(s, rc.DECISIONS, other()); const col = key === 'supersedes' ? 'supersedes_id' : 'superseded_by_id';
+      rc.assertCasesConsistent(s, { label: 'the guard control' }); // the fixture's same-room chain and the other room's head pass
+      s.prepare(`UPDATE room_decisions SET ${col} = ? WHERE id = ?`).run('rdec-other', 'rdec-2'); idsOnly(refused(() => rc.assertCasesConsistent(s, { label: 'the guard' }), /DECISION_CHAIN_BROKEN/, `guard ${key}`));
+      s.prepare(`UPDATE room_decisions SET ${col} = ? WHERE id = ?`).run('rdec-missing', 'rdec-2'); refused(() => rc.assertCasesConsistent(s), /DECISION_CHAIN_BROKEN[^\n]*rdec-missing/, 'guard missing target');
+      s.exec('ROLLBACK'); s.close(); rm(d); }
+  }
+  // controls: the fixture's same-room chain lands; a missing target is refused; two heads in one room stay a condition judged on read, not a refusal
+  { const d = file('f1-controls'); const S = snapshotOpen(d); S.save({ roomDecisions: plain(S.db.roomDecisions) }); const before = withRo(d, fullDump);
+    const missing = plain(S.db.roomDecisions); missing.find((x) => x.id === 'rdec-2').supersedes = 'rdec-missing'; refused(() => S.save({ roomDecisions: missing }), /DECISION_CHAIN_BROKEN[^\n]*rdec-missing/, 'missing'); assert.equal(withRo(d, fullDump), before);
+    const heads = plain(S.db.roomDecisions); heads.push(formalDecision({ id: 'rdec-head-b', supersedes: null, supersededById: null, clientKey: 'fin-b', keys: {} })); S.save({ roomDecisions: heads });
+    withRo(d, (s) => assert.equal(s.prepare("SELECT count(*) AS n FROM room_decisions WHERE room_id = 'case-1' AND superseded_by_id IS NULL").get().n, 2, 'two heads stored; the duplicate-head policy (judged on read) is unchanged'));
+    S.close(); rm(d); }
+});
+
+test('[review b7c0dd0 F2] owned-child replay keys are owned by the CASE: two cases whose decisionDraft (or transactionHandoff) carry the SAME child id each keep exactly their own keys — at the cutover (both input orders; empty, absent, null, held-only and row-worthy keys on the colliding child), in the snapshot and the staged write (a later edit introducing and removing the collision; two populated maps pending in one transaction; an unrelated rewrite of either owner; an unchanged save; a restart; a statement failure and a real COMMIT failure with the retry landing once; the backup export and a restore; the copy-only rollback and the re-upgrade), and when one owner departs; the key rows are stored under the owning case id, never under the child id', () => {
+  needRc(); const rollback = needRollback();
+  const variants = { empty: { keys: {} }, absent: {}, null: { keys: null }, held: { keys: { create: { key: null, fp: 'held-fp' } } }, rows: { keys: { create: { key: 'k-second', fp: 'f-second' }, extra: [{ key: 'l1', fp: 'lf1' }] } } };
+  const table = { decisionDraft: 'case_decision_drafts', transactionHandoff: 'case_transaction_handoffs' };
+  const keyRows = (s, t) => s.prepare('SELECT owner_id, act, key FROM idempotency_keys WHERE owner_table = ? ORDER BY owner_id, position').all(t).map((r) => [r.owner_id, r.act, r.key]);
+  const keysOf = (records, caseId, child) => records.find((c) => c.id === caseId)[child].keys;
+  for (const child of ['decisionDraft', 'transactionHandoff']) {
+    const t = table[child];
+    for (const [name, v] of Object.entries(variants)) for (const reverse of [false, true]) {
+      const d = tempDir('s8b-f2-import'); const f = S8B_FIX(); f.recruitmentCases[1][child] = { id: f.recruitmentCases[0][child].id, ...v }; if (reverse) f.recruitmentCases.reverse();
+      preS8bFile(d, f); const s = openRaw(d); const expected = blob(s, 'recruitmentCases');
+      migrateAll(s); assert.deepEqual(rc.readCases(s), expected, `${child} ${name} ${reverse ? 'reversed' : 'forward'}: both owners read back exactly`);
+      const rows = keyRows(s, t); assert.ok(rows.length && rows.every((r) => r[0] === 'case-1' || r[0] === 'case-2'), `${child} ${name}: the key rows are owned by the case id (${JSON.stringify(rows)})`); assert.ok(rows.some((r) => r[0] === 'case-1'), 'case-1\'s own key row');
+      if (name === 'rows') assert.deepEqual(rows.filter((r) => r[0] === 'case-2').map((r) => r[2]), ['k-second', 'l1'], 'case-2\'s own rows'); else assert.equal(rows.some((r) => r[0] === 'case-2'), false, `${name}: no row for case-2`);
+      s.close(); rm(d);
+    }
+    for (const mode of ['snapshot', 'staged']) {
+      const d = file(`f2-${mode}`); const L = mode === 'snapshot' ? snapshotOpen(d) : serverOpen(d);
+      const expected = plain(L.db.recruitmentCases); const one = expected.find((c) => c.id === 'case-1');
+      const save = (mutate) => { if (mode === 'staged') { mutate(L.db.recruitmentCases); L.save(); } else { mutate(expected); L.save({ recruitmentCases: expected }); } };
+      const read = () => rc.readCases(L.store.sqlite); const firstKeys = plain(one[child].keys);
+      // the collision introduced by a later edit
+      save((cs) => { cs.find((c) => c.id === 'case-2')[child] = { id: one[child].id, keys: {} }; });
+      assert.deepEqual(keysOf(read(), 'case-1', child), firstKeys, `${mode} ${child}: case-1 keeps its keys`); assert.deepEqual(keysOf(read(), 'case-2', child), {}, 'case-2 has its own (empty) keys');
+      // two populated maps, both pending in one transaction
+      save((cs) => { cs.find((c) => c.id === 'case-2')[child].keys = { create: { key: 'k-two', fp: 'f-two' } }; const k1 = cs.find((c) => c.id === 'case-1')[child]; k1.keys = { ...plain(k1.keys), again: { key: 'k-one-b', fp: 'f-one-b' } }; });
+      assert.deepEqual(keysOf(read(), 'case-2', child), { create: { key: 'k-two', fp: 'f-two' } }); assert.deepEqual(keysOf(read(), 'case-1', child), { ...firstKeys, again: { key: 'k-one-b', fp: 'f-one-b' } });
+      const oneKeys = plain(keysOf(read(), 'case-1', child));
+      // an unrelated rewrite of case-2, then of case-1
+      save((cs) => { cs.find((c) => c.id === 'case-2').priority = 'high'; }); assert.deepEqual(keysOf(read(), 'case-1', child), oneKeys, 'rewriting case-2 leaves case-1\'s keys');
+      save((cs) => { cs.find((c) => c.id === 'case-1').priority = 'high'; }); assert.deepEqual(keysOf(read(), 'case-2', child), { create: { key: 'k-two', fp: 'f-two' } }, 'rewriting case-1 leaves case-2\'s keys');
+      // an unchanged save writes nothing; a restart reads the same
+      const landed = withRo(d, canon); save(() => {}); assert.equal(withRo(d, canon), landed, 'an unchanged save writes nothing');
+      { const again = mode === 'snapshot' ? snapshotOpen(d) : serverOpen(d); assert.deepEqual(plain(again.db.recruitmentCases.map((c) => [c.id, c[child]?.keys ?? null])), plain(read().map((c) => [c.id, c[child]?.keys ?? null])), 'a restart reads the same keys'); again.close(); }
+      // the collision removed again, then back
+      save((cs) => { cs.find((c) => c.id === 'case-2')[child].id = 'child-two-distinct'; }); assert.deepEqual(keysOf(read(), 'case-1', child), oneKeys); assert.deepEqual(keysOf(read(), 'case-2', child), { create: { key: 'k-two', fp: 'f-two' } });
+      save((cs) => { cs.find((c) => c.id === 'case-2')[child].id = one[child].id; }); assert.deepEqual(keysOf(read(), 'case-1', child), oneKeys);
+      if (mode === 'staged') {
+        // a statement failure and a real COMMIT failure while both owners are pending; the retry lands once
+        const before = withRo(d, allDump); const rev = L.revision();
+        L.db.recruitmentCases.find((c) => c.id === 'case-2')[child].keys = { create: { key: 'k-two-b', fp: 'f-two-b' } }; L.db.recruitmentCases.find((c) => c.id === 'case-1')[child].keys = { ...oneKeys, third: { key: 'k-one-c', fp: 'f-one-c' } };
+        const probe = failRunAt(L.store.sqlite, (sql) => /INTO idempotency_keys/.test(sql), 2, 'synthetic key statement failure'); assert.throws(() => L.save(), /synthetic key statement failure/); probe.restore();
+        assert.equal(withRo(d, allDump), before, 'the statement failure: nothing landed'); assert.equal(L.revision(), rev); assert.equal(L.store.sqlite.isTransaction, false);
+        let arm = true; L.store.setSaveHook(() => { if (arm) { arm = false; L.store.failCommitOfOpenTransaction(); } }); assert.throws(() => L.save(), /FOREIGN KEY constraint failed/); assert.equal(withRo(d, allDump), before, 'the COMMIT failure: nothing landed'); assert.equal(L.store.sqlite.isTransaction, false);
+        L.save(); assert.deepEqual(keysOf(read(), 'case-2', child), { create: { key: 'k-two-b', fp: 'f-two-b' } }); assert.deepEqual(keysOf(read(), 'case-1', child), { ...oneKeys, third: { key: 'k-one-c', fp: 'f-one-c' } }); const l2 = withRo(d, allDump); L.save(); assert.equal(withRo(d, allDump), l2, 'landed once');
+        // the backup export and a restore into a fresh file
+        const exported = L.repo.exportAll(); assert.deepEqual(exported.recruitmentCases, read(), 'the export equals the rows');
+        const r = tempDir('s8b-f2-restore'); preS8bFile(r, { ...exported }); const rs = openRaw(r); migrateAll(rs); assert.deepEqual(rc.readCases(rs), exported.recruitmentCases, 'the restore reads the same cases and keys'); rs.close(); rm(r);
+      }
+      L.close();
+      // the copy-only rollback and the re-upgrade keep each owner's keys
+      { const live = withRo(d, (s) => rc.readCases(s)); const out = tempDir('s8b-f2-rb'); rollback(dbFile(d), out, { now: NOW }); const c = openRaw(out); const back = blob(c, 'recruitmentCases');
+        assert.deepEqual(back.map((x) => [x.id, x[child]?.keys ?? null]), live.map((x) => [x.id, x[child]?.keys ?? null]), 'the rollback copy carries each case\'s own keys'); migrateAll(c); assert.deepEqual(rc.readCases(c), live, 're-upgraded: identical'); c.close(); rm(out); }
+      rm(d);
+    }
+    // one owner departs: the other's keys stay (a third case, named by nothing, sharing case-1's child id)
+    { const d = file('f2-depart'); const S = snapshotOpen(d); const cases = plain(S.db.recruitmentCases); const extra = legacyCase({ id: 'case-3' }); extra[child] = { ...plain(cases.find((c) => c.id === 'case-1')[child]), keys: { create: { key: 'k-three', fp: 'f-three' } } }; cases.push(extra);
+      S.save({ recruitmentCases: cases }); const one = plain(keysOf(rc.readCases(S.store.sqlite), 'case-1', child)); assert.deepEqual(keysOf(rc.readCases(S.store.sqlite), 'case-3', child), { create: { key: 'k-three', fp: 'f-three' } });
+      S.save({ recruitmentCases: cases.filter((c) => c.id !== 'case-3') }); assert.deepEqual(keysOf(rc.readCases(S.store.sqlite), 'case-1', child), one, 'case-3 gone, case-1\'s keys intact'); assert.equal(S.store.sqlite.prepare("SELECT count(*) AS n FROM idempotency_keys WHERE owner_id = 'case-3'").get().n, 0, 'no orphan row');
+      S.close(); rm(d); }
+  }
 });
 console.log(`\n${passed} recruitment cases checks passed`);

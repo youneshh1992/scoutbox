@@ -160,7 +160,7 @@ await test('[cutover] a fresh boot records 0016_recruitment_cases last; the twen
   // the decision: draft, replay, conflict, patch, finalize, replay
   const DRAFT = { outcome: 'hold', reasonCodes: ['technical_fit'], note: INTERNAL_NOTE, clientKey: 'draft-key-a' };
   const dr = await S.j('POST', `/org/rooms/${RID}/decision/draft`, DRAFT, maria); assert.equal(dr.status, 201, dr.text); const DID = dr.body.draft.id;
-  assert.equal(q1(dir, 'SELECT id, outcome, note FROM case_decision_drafts WHERE case_id = ?', RID).id, DID); assert.equal(q1(dir, "SELECT key FROM idempotency_keys WHERE owner_table = 'case_decision_drafts' AND owner_id = ? AND act = 'create'", DID).key, 'draft-key-a', 'keys.create as a row');
+  assert.equal(q1(dir, 'SELECT id, outcome, note FROM case_decision_drafts WHERE case_id = ?', RID).id, DID); assert.equal(q1(dir, "SELECT key FROM idempotency_keys WHERE owner_table = 'case_decision_drafts' AND owner_id = ? AND act = 'create'", RID).key, 'draft-key-a', 'keys.create as a row owned by the CASE id (review of b7c0dd0, F2)'); assert.equal(q1(dir, 'SELECT count(*) AS n FROM idempotency_keys WHERE owner_id = ?', DID).n, 0, 'never under the draft id');
   assert.deepEqual(qAll(dir, 'SELECT code FROM case_decision_draft_reason_codes WHERE case_id = ? ORDER BY position', RID).map((r) => r.code), ['technical_fit']);
   const replay = await S.j('POST', `/org/rooms/${RID}/decision/draft`, DRAFT, maria); assert.equal(replay.status, 200, replay.text); assert.equal(replay.body.idempotent, true, '[compat] the same clientKey replays');
   const conflict = await S.j('POST', `/org/rooms/${RID}/decision/draft`, { ...DRAFT, note: 'Different.' }, maria); assert.equal(conflict.body.error, 'DECISION_IDEMPOTENCY_CONFLICT', conflict.text);
