@@ -1521,9 +1521,10 @@ findings from the code at `4f954ad` and the one list of decisions the Founder is
 ### S8 — Recruitment core (file 02: 55 tables)
 
 > **S8a-core is implemented** (22 October 2026, migration `0015_recruitment`, on the design of §D.7 accepted at
-> `d0f0205` under Q7a/Q7b/Q7c) and is **independently accepted at `7a7efc6`** — §D.8, §D.8.11. S8b is prepared (§D.9,
-> `s8b-readiness-review.md`), not implemented; S8c and S8d are not started. The
-> bullets below are the original plan of the whole step and are kept as written.
+> `d0f0205` under Q7a/Q7b/Q7c) and is **independently accepted at `7a7efc6`** — §D.8, §D.8.11. **S8b is implemented
+> (migration `0016_recruitment_cases`) and independently accepted at `7072dd9`** — §D.9. **S8c is PREPARED, NOT
+> IMPLEMENTED** (§D.10, `s8c-readiness-review.md`; the next free identifier `0017` is not reserved); S8d is not started.
+> The bullets below are the original plan of the whole step and are kept as written.
 
 - **Objective.** Requests, trials, cases and rooms, decisions and snapshots, contacts,
   offers, signing packages, signings, follow-ups and outcome reports live; the shared
@@ -2691,7 +2692,7 @@ withdrawn; the number is assigned at approval):
 |---|---|---|
 | `requests` (39 reads in 13 modules + 15 in `server.mjs`; writers `server.mjs:2266`, `:2898`, the accept/decline/suspend routes, `tombstoneRequest` `:4234`, the m23 trial-invitation routes, m12/m17 case links) | `recruitment_requests` (:509) | `request_trial_slots` (:563); the request's `keys.invite` → `idempotency_keys` (:74) |
 | `trials` (69 reads in 23 modules + 10 in `server.mjs`; writers `server.mjs:2347` (acceptance), `tombstoneTrial` `:4181`, `m23/trialRoutes.mjs` (schedule, attendance, day, completion, history), the report route, the reminder sweep) | `trials` (:630) | `trial_schedule_sessions` (:715), `trial_session_evidence` (:736), `trial_schedule_revisions` (:766), `trial_attendance` (:792), `trial_reminders` (:810), `trial_day_staff` (:828), `trial_day_consents` (:851), `trial_day_checkins` (:867), `trial_day_status_events` (:882), `trial_reports` (:906, `RESTRICT`), `trial_history` (:933, `RESTRICT`); the trial's `keys` → `idempotency_keys` |
-| `channels` (S7d, live) | rebuilt with `request_id … REFERENCES recruitment_requests(id) ON DELETE RESTRICT` (the D-A conversion) and `contact_channel_id` left as it is (a plain id: contacts are S8c) | — |
+| `channels` (S7d, live) | rebuilt with `request_id … REFERENCES recruitment_requests(id) ON DELETE RESTRICT` (the D-A conversion); `recruitment_requests.contact_channel_id` left as it is (a plain id — CORRECTED by the S8c preparation, §D.10: it is the THREAD the acceptance opens, `server.mjs:1608-1609`, the back-reference of the keyed pair, not a contact reference; nothing in S8c keys it) | — |
 
 Sixteen tables (14 of file 02 plus `idempotency_keys` and the `channels` rebuild). **Lossless mapping** (corrected,
 D3): every scalar to its column, every nested container to its child table in list order, the tombstone shapes exactly
@@ -2773,7 +2774,7 @@ the two recruitment tables.
 | `recruitment_requests.org_id`, `trials.org_id`, `trial_reports.org_id` | `REFERENCES orgs(id) ON DELETE RESTRICT` | **as drafted** | `orgs` is written by upsert-and-prune already (why `channels.org_id RESTRICT` works today); O2 blocks nothing |
 | `recruitment_requests.user_id` | `REFERENCES org_users(id) ON DELETE RESTRICT` | **as drafted** | `org_users` is replaced-and-pruned, parent-preserving |
 | the child tables' `request_id` / `trial_id` | `CASCADE` (`RESTRICT` on `trial_reports`, `trial_history`) | **as drafted** | owned rows, rewritten by their owner's writer (delete + insert in list order); a cascade fires only on an **intentional** departure of the owner, and the two `RESTRICT` children are deleted explicitly, first, in that same departure — a `DELETE FROM trials` that forgot them is refused, which is what `RESTRICT` is for |
-| `recruitment_requests.contact_id`, `.contact_channel_id`, `trial_session_evidence.box_session_id` | no key | no key | contacts are S8c, Box Cam is S12 |
+| `recruitment_requests.contact_id`, `.contact_channel_id`, `trial_session_evidence.box_session_id` | no key | no key | `contact_id` is the contact reference (S8c leaves it a plain column by design — the pair is keyed from the contact's side, §D.10); `contact_channel_id` is the acceptance THREAD, not a contact (corrected, §D.10); Box Cam is S12 |
 
 **The write algorithm (corrected, D1 — one algorithm for the cutover import, a restore, every route write staged
 into its save, a full snapshot and a partial snapshot).** The first probe, `probe-request-trial-actions.mjs`, showed
@@ -3401,7 +3402,7 @@ reproduced; cause unresolved"). Q7a/Q7b/Q7c stay as recorded (§D.8.1) and are *
 the S8b tables need their own decision where one is needed (§D.9). The S8b design is preparation only: nothing of S8b
 is implemented, stubbed or reserved.
 
-### D.9 S8b (cases, rooms, decisions) — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (23 October 2026, on top of `4d2c74b`; the design independently accepted at `4d2c74b`; the Founder's Q8a "Approve tolerant (Recommended)")
+### D.9 S8b (cases, rooms, decisions) — IMPLEMENTED AND INDEPENDENTLY ACCEPTED at `7072dd9` (23 October 2026, on top of `4d2c74b`; the design independently accepted at `4d2c74b`; the Founder's Q8a "Approve tolerant (Recommended)"; the acceptance record at the end of this section)
 
 **Implementation record (23 October 2026).** The design below (prepared at `7a7efc6`, corrected after the reviews of
 `57076a2` and `86342b8`) was **independently accepted at `4d2c74b`**; the Founder then answered the one product
@@ -3424,8 +3425,8 @@ not claimed (the whole-snapshot-write objective, release readiness, any performa
 this record awaits). The evidence is `scripts/testRecruitmentCases.mjs` and `scripts/testRecruitmentCasesServer.mjs`
 (failing-first on the unchanged `4d2c74b` tree on behavioural assertions, green after) and the handoff's gates
 (backend on Node 22 and Node 24 with EIGHT historical builds booted for real — `7a7efc6` added as
-`SCOUTBOX_PRE_S8B_SERVER` —, the Player suite, the batteries, the probes and the reviewer's scripts). S8c and S8d are
-not started.
+`SCOUTBOX_PRE_S8B_SERVER` —, the Player suite, the batteries, the probes and the reviewer's scripts). S8c and S8d were
+not started when this record was written (S8c has since been PREPARED, not implemented — §D.10).
 
 The design as reviewed and accepted (the text that follows is the preparation's summary, kept as the record of what
 was accepted; where the implementation departs from it the review's §12 says so):
@@ -3506,8 +3507,86 @@ write, the staged flush, the final guard and the rollback tool check it FIRST an
 (`RECRUITMENT_CASES_FORMAT_UNSUPPORTED`; rollback exit 6) before decoding, publishing, writing, exporting or copying
 anything. Unmarked `b7c0dd0` and `2fe05df` files (synthetic verification only) are refused alike; the version-matched,
 copy-only route back is the rollback tool of the build that wrote the file, then this build's cutover. Nothing is
-inferred from ids, owner existence or the `0016` record alone; no file is stamped. Q8a stays as recorded. **S8b is
-IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE.**
+inferred from ids, owner existence or the `0016` record alone; no file is stamped. Q8a stays as recorded. **The
+independent review of `7072dd92fbe5a36a7fd7e56c2dae49b339544c14` (23 October 2026) ACCEPTED S8b:** F1, F2 and R1
+closed; the reviewer's unchanged checks pass; genuine `b7c0dd0` and `2fe05df` files refused before any incompatible
+read or rollback; both version-matched recovery paths preserve all five collections; a failure after the marker is
+written rolls back the marker and the rows together. The acceptance covers the reviewed storage milestone only — not
+the full database migration, release, security or legal compliance, merge or deployment. Under it stand unchanged: Q8a
+as recorded, the accepted S8a-core and S8b contracts, the unmarked-file boundary (that build's own rollback tool on a
+copy, then a fresh marked cutover; no file is ever stamped; keys aliased on write by `b7c0dd0` are not recoverable),
+and the unresolved whole-snapshot-write objective and unmeasured performance (`s8b-readiness-review.md` §12, last
+paragraph).
 
-S8c and S8d are not started. Nothing in this section is a production, release, security, legal-compliance, merge or
-deployment approval.
+**S8c (contacts, offers) is PREPARED, NOT IMPLEMENTED (§D.10, `s8c-readiness-review.md`); S8d is not started.**
+Nothing in this section is a production, release, security, legal-compliance, merge or deployment approval.
+
+### D.10 S8c (contacts, offers) — PREPARED, NOT IMPLEMENTED (23 October 2026, from the code at `7072dd9`)
+
+The design is [`s8c-readiness-review.md`](./s8c-readiness-review.md) — the survey of both collections from their
+producers and consumers (its §1–§2, line-level references verified at `7072dd9`), the drafted constraints judged
+against what the current writers produce and the readers keep (§3), the references in both directions (§4), the
+repository, hooks, snapshot positions and memento participation (§5), the write algorithm proved on a design model in
+both input orders with partial saves, departures and exact rollback (§6, probe 2), the durability boundaries of every
+side effect (§7), the copy-only rollback to the accepted pre-S8c build `7072dd9` (§8), the two product questions and
+the engineering choices (§9), the ordered checklist, slices and test plan with the existing suites named from source
+(§10), the evidence (§11) and the limitations (§12). In one paragraph:
+
+- **Scope:** the two blob collections `recruitmentContacts` (written only by `m23/contactRoutes.mjs` and the response
+  hook the two respond routes call) and `recruitmentOffers` (written only by `m28/index.mjs`), as nine tables —
+  `recruitment_contacts`, `contact_attempts`, `contact_history`; `recruitment_offers`, `offer_revisions`,
+  `offer_revision_documents`, `offer_responses`, `offer_read_receipts`, `offer_history` — plus the ONE shared
+  `idempotency_keys` table rebuilt with its owner CHECK broadened (the `0016` precedent). **No other live table is
+  rebuilt**: `recruitment_requests.contact_id` stays a plain indexed column and the request–contact pair is carried by
+  the one NEW real key `recruitment_contacts.request_id → recruitment_requests RESTRICT` plus a pair guard; both
+  parents take real RESTRICT keys to `recruitment_cases`, `orgs` and the staff rows. Packages, signings, follow-ups,
+  outcome reports (S8d), the agency tables (file 06), the vault (file 05) and the outbox stay plain ids.
+- **Two naming corrections from source (review §1.1):** `recruitment_requests.contact_channel_id` is the THREAD the
+  acceptance opens (`server.mjs:1608-1609`, `:3456-3457`), not a contact reference — the notes in §D.7's tables below
+  (lines "`contact_channel_id` left as it is (a plain id: contacts are S8c)" and "`recruitment_requests.contact_id`,
+  `.contact_channel_id` … contacts are S8c") are corrected in place: only `contact_id` waits for S8c, and S8c leaves it
+  a plain column by design. `contact_id` is the contact that created the request (`server.mjs:2257`), read by the
+  response hook together with the contact's own `requestId`.
+- **Findings against the drafted DDL (review §3):** every vocabulary / length / shape CHECK, the drafted partial unique
+  index `recruitment_offers_one_live_per_case` (it REFUSES a state the routes produce: a withdrawn offer revised into a
+  draft beside another issued offer — probe 2 S3a), the unique revision id / one-response-per-revision / document /
+  receipt uniqueness (each refuses a record `offerIntegrity` reports and KEEPS today), the contacts' unique request
+  index (redundant with the pair guard), the `SET NULL` keys to `guardians` and `room_decisions` (silent rewrites of a
+  snapshot and of provenance), the parent→child key `current_revision_id → offer_revisions` (a cycle) and the
+  within-offer revision/response keys are withdrawn; the history tables keep RESTRICT and are removed explicitly before
+  their owner; NOT NULL only on `id`, `org_id`, `case_id`, `player_id`; staff ids RESTRICT keys, nullable. **S8d
+  note:** `offer_revisions.id` is indexed, not unique — S8d's drafted key to it needs a decision then.
+- **Write order (review §6; probe 2, 31 checks on Node 22 and 24):** P preflight over the final graph → F0 the
+  departed contacts/offers (history and key rows explicitly, then the parent) BEFORE the S8b core and the S8a phases →
+  the S8b and S8a writes → A′/D′ the changed contacts (the request back-reference parked only in snapshot mode) and
+  offers AFTER the S8a phases → the S8b prunes → G (pair agreement; every revision pointer resolving within its own
+  offer — the F1 lesson of `b7c0dd0` applied from the start; `foreign_key_check` empty). Both input orders, partial
+  saves, departures under RESTRICT, a statement failure and a guard failure with byte-identical tables; no retained
+  unique predicate exists to release.
+- **Mapping (review §2; probe 1, 32 checks on Node 22 and 24 through the REAL S8a engine):** every writer literal of
+  both modules and the legacy / kept-corrupt / prototype-named / off-type variants round-trip key for key; the
+  null-key send act and the empty list acts are held on the row; a legacy non-array `keys.issue` comes back as the
+  object it was; `EXPIRED` is never stored (read-time, `m28/offer.mjs:254-258`). One OBSERVED engine property recorded:
+  the act ORDER inside a `keys` map is not the writer's when held and row acts interleave (values and presence are;
+  every reader looks acts up by name; shared with S8a/S8b).
+- **Durability (review §7):** every side effect mapped to the save that carries it today; the S8c hooks write the rows
+  in the SAME `persistNow()` save as the blob they replace, so nothing is published before its persistence and no
+  notification is sent twice; the pre-save courtesy e-mail and agent notifications are today's behaviour, recorded and
+  unchanged. This is a storage design, not authorisation to change routes, permissions, recipient selection,
+  safeguarding, lifecycle or retention.
+- **Rollback (review §8):** copy-only to `7072dd9` through the S8b tool's contract; the S8c key rows back into the
+  blobs, `idempotency_keys` rebuilt with the S8b CHECK (probe 2 S5: the S8a/S8b rows byte-identical, the S8b key-format
+  marker untouched); the old build on a `0017` file PREDICTED to listen and re-create two empty blobs — to be measured
+  at implementation (`SCOUTBOX_PRE_S8C_SERVER`).
+- **The Founder's questions (review §9; a brief to be put to the Founder only after the independent review of the
+  design):** Q8c-a the player references on the nine tables (tolerant-and-counted recommended, the Q7a/Q8a pattern, or
+  strict in code) and Q8c-b the guardian references (strict in code recommended for consistency with Q7c, or tolerant).
+  Q7a/Q7b/Q7c and Q8a are neither reopened nor extended. Everything else is engineering, recorded with its evidence.
+- **Slices (review §10):** one migration (the next free identifier is **`0017`** — confirmed from
+  `repositories/index.mjs:60` and `repositories/migrations/`; NOT reserved, no stub) and one module for both
+  collections recommended; the natural split (S8c-i contacts, S8c-ii offers) and its costs stated if the review prefers
+  it. Tests first on the unchanged `7072dd9` tree: a unit suite and a real-server suite, the existing `m23Contact*`,
+  `m23Offer*`, journey, signing and agent batteries named from `scoutbox-server/scripts/`.
+
+Nothing of S8c is implemented, stubbed or reserved. This preparation awaits independent review; S8d is not started.
+Nothing in this section is a production, release, security, legal-compliance, merge or deployment approval.

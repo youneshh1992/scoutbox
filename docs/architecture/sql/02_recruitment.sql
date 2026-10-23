@@ -70,12 +70,12 @@
 --     and a value act with a string key — verbatim in entry_json, keyed
 --     (owner_table, owner_id, position); trials.keys.accept {key: null, fp}
 --     stays on the trial row (extra_json.keys.accept) exactly as written.
--- STATUS (S8b, 23 October 2026; IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE —
+-- STATUS (S8b, 23 October 2026; IMPLEMENTED, INDEPENDENTLY ACCEPTED at 7072dd9 —
 -- the design independently accepted at 4d2c74b, docs/architecture/
 -- s8b-readiness-review.md; the Founder's explicit Q8a answer of 23 October 2026,
 -- "Approve tolerant (Recommended)"): the twenty-five definitions below marked
 -- "LIVE since migration 0016_recruitment_cases (REGISTERED — IMPLEMENTED,
--- PENDING INDEPENDENT ACCEPTANCE)" — recruitment_cases and its fifteen owned
+-- INDEPENDENTLY ACCEPTED at 7072dd9)" — recruitment_cases and its fifteen owned
 -- child tables, room_comments, room_comment_mentions, room_snapshots,
 -- room_snapshot_source_refs, room_decisions and its three child tables,
 -- room_evidence_states — are the DDL migration 0016 creates
@@ -92,7 +92,12 @@
 -- implemented" note. Player references: NO key, tolerant and counted (Q8a).
 -- The remaining tables of this file (contacts, offers, signing packages,
 -- signings, follow-ups, outcome reports) are DRAFTS, unchanged, for S8c and
--- later; their drafted keys to recruitment_cases are not created.
+-- later; their drafted keys to recruitment_cases are not created. S8c
+-- (contacts, offers) is PREPARED, NOT IMPLEMENTED (23 October 2026):
+-- docs/architecture/s8c-readiness-review.md §3 states, constraint by
+-- constraint, which of the contact and offer drafts below would be kept,
+-- relaxed or withdrawn at implementation; the drafts themselves are not
+-- changed by the preparation and nothing of S8c is registered.
 -- =============================================================================
 -- =============================================================================
 -- idempotency_keys — LIVE since migration 0015_recruitment (S8a-core, REGISTERED — independently
@@ -176,7 +181,7 @@ CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, ow
 
 -- =============================================================================
 -- recruitment_cases and its fifteen owned child tables — LIVE since migration 0016_recruitment_cases (S8b,
---   REGISTERED — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE; repositories/recruitmentCases.mjs generates this
+--   REGISTERED — IMPLEMENTED, INDEPENDENTLY ACCEPTED at 7072dd9; repositories/recruitmentCases.mjs generates this
 --   DDL from the writers' shapes; scripts/testSchemaDdl.mjs checks it column for column and index for index)
 -- =============================================================================
 -- source: db.recruitmentCases (the blob every build since M12 wrote; imported row for row and retired by 0016,
@@ -981,7 +986,7 @@ CREATE INDEX trial_history_id ON trial_history (id);
 
 -- =============================================================================
 -- room_comments, room_snapshots, room_decisions, room_evidence_states and their child tables — LIVE since
---   migration 0016_recruitment_cases (S8b, REGISTERED — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE;
+--   migration 0016_recruitment_cases (S8b, REGISTERED — IMPLEMENTED, INDEPENDENTLY ACCEPTED at 7072dd9;
 --   repositories/recruitmentCases.mjs)
 -- =============================================================================
 -- source: db.roomComments, db.roomSnapshots, db.roomDecisions, db.roomEvidenceState (the four blobs every build
@@ -1196,6 +1201,9 @@ CREATE INDEX room_evidence_states_room_evidence ON room_evidence_states (room_id
 -- =============================================================================
 -- recruitment_contacts  (the club's internal record of one communication process)
 -- =============================================================================
+-- S8c DRAFT — PREPARED, NOT IMPLEMENTED (23 October 2026): the verdict on every constraint below (kept, relaxed,
+--   withdrawn) is docs/architecture/s8c-readiness-review.md §3; the proposed form is position-keyed children, no
+--   vocabulary/length CHECKs, no guardian key, request_id a real RESTRICT key, the unique request index withdrawn.
 -- source: db.recruitmentContacts  created at m23/contactRoutes.mjs:319 (draft) and :598 (attested external record)
 -- owner/writer: m23/contactRoutes.mjs (draft, edit, cancel, send, external record, ctx.onRequestResponded),
 --         server.mjs:3998 (subject removal nulls response.message)
@@ -1320,6 +1328,10 @@ CREATE INDEX contact_history_contact_at ON contact_history(contact_id, at);
 -- =============================================================================
 -- recruitment_offers  (M23 P6 canonical Offer: container + exact revisions + responses)
 -- =============================================================================
+-- S8c DRAFT — PREPARED, NOT IMPLEMENTED (23 October 2026): the verdict on every constraint below is
+--   docs/architecture/s8c-readiness-review.md §3 — the one-live-per-case index, the unique revision id, the
+--   one-response-per-revision and receipt keys, the decision SET NULL key and the current_revision_id key are
+--   withdrawn there; children position-keyed; EXPIRED never stored.
 -- source: db.recruitmentOffers  created at m28/index.mjs:334 (store created by the module at boot, no migration)
 -- owner/writer: m28/index.mjs (draft, edit, issue, withdraw, revise, recipient accept/decline, share-agent, read receipts,
 --         onPlayerDeleted)   lifecycle: `status` mirrors the CURRENT revision's STORED status (DRAFT|ISSUED|ACCEPTED|

@@ -333,8 +333,11 @@ and design changes the Founder explicitly requests.
   the acceptance record; the acceptance covers the bounded storage-migration
   scope only — not S8 as a whole, not the full migration, not product
   release, security, legal compliance, merge or deployment). **S8b (cases,
-  rooms, decisions) is IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (23
-  October 2026, on top of `4d2c74b`):** its design (`docs/architecture/
+  rooms, decisions) is IMPLEMENTED AND INDEPENDENTLY ACCEPTED at `7072dd9`
+  (23 October 2026, on top of `4d2c74b`; the acceptance covers the reviewed
+  storage milestone only — not the full migration, release, security, legal
+  compliance, merge or deployment; `s8b-readiness-review.md` §12 the
+  acceptance record):** its design (`docs/architecture/
   s8b-readiness-review.md`, plan §D.9; the write order corrected after the
   independent review of `57076a2` — F1 the incoming case links released
   before the S8a departures and the request prune, F2 explicitly removed
@@ -384,7 +387,17 @@ and design changes the Founder explicitly requests.
   rollback tool of the build that wrote the file, then this build's cutover
   (review §12, OPERATIONS.md). The
   eighth historical build the backend gate boots for real is `7a7efc6`
-  (`SCOUTBOX_PRE_S8B_SERVER`). S8c/S8d are not started** (plan §D.8 the implementation
+  (`SCOUTBOX_PRE_S8B_SERVER`). **S8c (contacts, offers) is PREPARED, NOT
+  IMPLEMENTED** (23 October 2026, from the code at `7072dd9`:
+  `docs/architecture/s8c-readiness-review.md`, plan §D.10 — nine proposed
+  tables, the shared `idempotency_keys` CHECK broadened, no other live table
+  rebuilt, the drafted vocabulary CHECKs / partial unique indexes / SET NULL
+  keys withdrawn with evidence, the write order and mapping proved on two
+  design probes; its two product questions Q8c-a (player references) and
+  Q8c-b (guardian references) are a brief for the Founder AFTER the
+  independent review of the design — Q7a/Q7b/Q7c/Q8a are not extended to
+  the S8c tables; the next free migration identifier `0017` is NOT
+  reserved and no stub exists). S8d is not started** (plan §D.8 the implementation
   record; §D.7 the design, independently accepted at
   `d0f0205` after the reviews of `a6c40f3`, `cd7dc95` and `f2121b5`;
   `scoutbox-server/OPERATIONS.md` "Recruitment requests and accepted

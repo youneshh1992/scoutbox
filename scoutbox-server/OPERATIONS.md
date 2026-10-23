@@ -1641,7 +1641,7 @@ file is larger (plan §D.8.7); the whole-snapshot-write objective is not met.
 next section; a live file carries `0016` beside `0015`, and the S8b rollback
 tool is the first link of the chain.
 
-### Recruitment cases, room comments, room snapshots, room decisions and room evidence states (live since migration `0016`, S8b — implemented 23 October 2026 on top of `4d2c74b` under the Founder's decision Q8a "Approve tolerant (Recommended)" of 23 October 2026, on the design of `docs/architecture/s8b-readiness-review.md` independently accepted at `4d2c74b`; IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE; not production-approved)
+### Recruitment cases, room comments, room snapshots, room decisions and room evidence states (live since migration `0016`, S8b — implemented 23 October 2026 on top of `4d2c74b` under the Founder's decision Q8a "Approve tolerant (Recommended)" of 23 October 2026, on the design of `docs/architecture/s8b-readiness-review.md` independently accepted at `4d2c74b`; the implementation INDEPENDENTLY ACCEPTED at `7072dd9` after two correction rounds, review §12; not production-approved)
 
 - **What moved.** The five blob collections `recruitmentCases` (the M12 case
   with its M17 Room facet, assignments, tasks, approvals, history, links, the
@@ -1814,7 +1814,10 @@ blobs leave every save and a changed record lands as its own rows, but the
 change tracking still serialises every record per save; the bench was not
 run; the whole-snapshot-write objective is not met (contacts, offers,
 packages, signings, follow-ups and the later collections are still blobs —
-S8c, S8d).
+S8c, S8d). **S8c (contacts and offers) is PREPARED, NOT IMPLEMENTED:** the
+design, its rollback contract and the DANGER line to be measured for the
+`7072dd9` build on a cut-over file are in `docs/architecture/
+s8c-readiness-review.md` (§8); no migration, tool or route exists for it yet.
 
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request

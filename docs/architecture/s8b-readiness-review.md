@@ -1,6 +1,7 @@
 # S8b readiness review — recruitment cases, rooms and decisions as tables
 
-**Status: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (23 October 2026).** Written 22 October 2026 on
+**Status: IMPLEMENTED AND INDEPENDENTLY ACCEPTED at `7072dd9` (23 October 2026; the acceptance record at the end of
+§12 — the reviewed storage milestone only).** Written 22 October 2026 on
 `feat/sqlite-schema` at `7a7efc6`, the commit at which S8a-core was independently accepted (`sqlite-migration-plan.md`
 §D.8.11), corrected twice after the independent reviews of `57076a2` and `86342b8` (below), and **independently
 accepted as a design at `4d2c74b`** (the review of `4d2c74b`, 23 October 2026: the corrected S8b design accepted for
@@ -12,10 +13,10 @@ is the implementation record** — what landed, where it departs from the sectio
 reviewed design), what was measured and what is not claimed, and the correction after the independent review of
 `b7c0dd0` (F1 same-room chains, F2 owned-child key isolation; the review did not accept `b7c0dd0`) and after the
 independent review of `2fe05df` (R1: the persisted key-format marker and the fail-closed boundary for files of the two
-superseded builds; that review closed F1 and F2 and did not accept `2fe05df`). The implementation
-awaits its own independent acceptance;
-nothing here is production, release, security, legal-compliance, merge or deployment approval. S8c/S8d are not
-started.
+superseded builds; that review closed F1 and F2 and did not accept `2fe05df`). **The independent review of `7072dd9`
+(23 October 2026) ACCEPTED the implementation** (§12, last paragraph);
+nothing here is production, release, security, legal-compliance, merge or deployment approval. S8c (contacts, offers)
+is PREPARED, NOT IMPLEMENTED (`s8c-readiness-review.md`, plan §D.10); S8d is not started.
 
 **Corrected on 22 October 2026 after the independent review of `57076a2`**, which accepted the S8a-core acceptance
 record and did NOT accept this design for implementation: its F1 (the incoming case links must be released before the
@@ -717,7 +718,22 @@ the file booting again with its marker) — both failing on the unchanged `2fe05
 earlier reviewer script still 21 CORRECT; the matrices unchanged.
 
 **Not claimed.** The whole-snapshot-write objective (contacts, offers, packages, signings, follow-ups and the later
-collections are still blobs), release readiness, any performance gain, and the independent acceptance this record
-awaits. The gates of the handoff (`gates-run.txt`): the backend chain on Node 22 and Node 24 with the EIGHT historical
-builds booted for real, the Player suite, the batteries of item 5 on the final tree, the six probes and the reviewer's
-owned-case matrix on both runtimes, the two old-order scripts with their intended exit 1.
+collections are still blobs), release readiness, any performance gain. The gates of the handoff (`gates-run.txt`): the
+backend chain on Node 22 and Node 24 with the EIGHT historical builds booted for real, the Player suite, the batteries
+of item 5 on the final tree, the six probes and the reviewer's owned-case matrix on both runtimes, the two old-order
+scripts with their intended exit 1.
+
+**Independently ACCEPTED at `7072dd92fbe5a36a7fd7e56c2dae49b339544c14` (23 October 2026).** The independent review of
+`7072dd9` accepts S8b: the original F1/F2 findings and R1 (the persisted key-format boundary) are closed; the
+reviewer's unchanged checks pass; genuine `b7c0dd0` and `2fe05df` files are refused before any incompatible read or
+rollback; both version-matched recovery paths (that build's own rollback tool on a copy, then this build's marked
+cutover) preserve all five collections; a failure after the marker is written rolls back the marker and the rows
+together. **Limits of the acceptance, as stated by the review:** it accepts the reviewed storage milestone only — not
+the full database migration, not release, not security or legal compliance, not merge, not deployment. What stands
+unchanged under it: the recorded Q8a answer; the accepted S8a-core and S8b contracts; the unmarked-file boundary (a
+`0016` file of `b7c0dd0` or `2fe05df` — synthetic only, neither deployed — needs ITS build's rollback tool on a copy
+and then a fresh marked cutover; no file is stamped); the statement that keys irreversibly aliased on write by
+`b7c0dd0` (two cases sharing a child id) are NOT recoverable; the unresolved whole-snapshot-write objective and the
+unmeasured performance. The implementation history above (b7c0dd0 → 2fe05df → 7072dd9, the two rejected revisions
+and their correction evidence) is preserved as written. The next bounded step is prepared, not implemented:
+`s8c-readiness-review.md` (contacts and offers), plan §D.10.
