@@ -399,7 +399,13 @@ and design changes the Founder explicitly requests.
   target owned only by another offer is refused, put forward for
   confirmation), F2 the model made to execute the documented order P → F0
   → R → B1 → A′ → D′ → F2 → G against the accepted S8a/S8b phase
-  boundaries (review §13) — the corrected design PENDING INDEPENDENT
+  boundaries (review §13); CORRECTED AGAIN on 24 October 2026 after the
+  independent review of `a5a7ed9` — R1 the model's preflight merged the
+  rows of offers a supplied collection no longer listed into the final
+  graph; "retained" is by COLLECTION for a partial snapshot, never by
+  omitted row (omitted → the whole stored collection; a supplied array,
+  `[]` included, IS the final collection; explicit `null` refused) —
+  review §13.1 — the corrected design PENDING INDEPENDENT
   ACCEPTANCE; its two product questions Q8c-a (player references) and
   Q8c-b (guardian references) are a brief for the Founder AFTER the
   independent review of the design — Q7a/Q7b/Q7c/Q8a are not extended to

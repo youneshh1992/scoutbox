@@ -3521,7 +3521,22 @@ paragraph).
 **S8c (contacts, offers) is PREPARED, NOT IMPLEMENTED (§D.10, `s8c-readiness-review.md`); S8d is not started.**
 Nothing in this section is a production, release, security, legal-compliance, merge or deployment approval.
 
-### D.10 S8c (contacts, offers) — PREPARED, NOT IMPLEMENTED; CORRECTED DESIGN PENDING INDEPENDENT ACCEPTANCE (23 October 2026 from the code at `7072dd9`; corrected 24 October 2026 after the independent review of `854d035`)
+### D.10 S8c (contacts, offers) — PREPARED, NOT IMPLEMENTED; CORRECTED DESIGN PENDING INDEPENDENT ACCEPTANCE (23 October 2026 from the code at `7072dd9`; corrected 24 October 2026 after the independent reviews of `854d035` and `a5a7ed9`)
+
+**The independent review of `a5a7ed9` (24 October 2026)** found one further P2 design-model finding, **R1**: the model's
+P preflight merged the rows of stored offers that a SUPPLIED `recruitmentOffers` array no longer listed into the final
+graph while F0 deleted them, so a valid partial snapshot (offer B dropped, offer A pointing at a row B used to own) was
+refused as a foreign-owner pointer. Corrected in place (the review's §13.1; §6 now states the collection semantics
+before the algorithm): **"retained" is by COLLECTION for a partial snapshot, never by omitted row** — a collection
+omitted from the save is retained whole; a collection supplied as an array IS the entire final collection (an unlisted
+stored record departs at F0 and owns nothing; `[]` empties it); an explicit `null` or non-array collection is refused,
+not an omission; a staged dirty subset is not a snapshot collection (the staged mirror is complete and P classifies over
+it). The model's final-graph derivation follows the supplied array alone when one is supplied; the five S8 checks that
+encoded the merge are replaced by the full-collection result with real retained-collection controls, and S10 adds both
+directions for all five pointer kinds, true foreign-owner refusals with both owners retained in the final collection,
+`[]` versus omitted and the `null` refusal (probe 2, 103 checks; failing-first against the `a5a7ed9` model through the
+adapter; the reviewer's unchanged script with `--expect-corrected` exits 0 with ten corrected cases and twelve
+controls on Node 22 and 24). No source change; S8c stays prepared, not implemented.
 
 **The independent review of `854d035` (24 October 2026)** accepted the S8b acceptance record (S8b stays accepted at
 `7072dd9`) and did NOT accept the S8c design: **F1** — the design said a `currentRevisionId` naming no revision is
@@ -3572,11 +3587,14 @@ the engineering choices (§9), the ordered checklist, slices and test plan with 
   nullable. **The pointer rule (review §6, corrected after `854d035`):** the five offer pointers are stored as written;
   a target resolving within the same offer is valid; a target naming NO known row anywhere is an unresolved historical
   pointer — kept verbatim, counted, never refused (the actual store keeps such an offer today; `offerIntegrity` stays
-  the judge); a target that exists ONLY under another offer is refused (`OFFER_CHAIN_BROKEN`, ids and owner named) —
-  the one statement beyond today's storage, put forward for confirmation. **S8d note:** `offer_revisions.id` is
+  the judge); a target that exists ONLY under another offer OF THE FINAL COLLECTION is refused (`OFFER_CHAIN_BROKEN`,
+  ids and owner named) — the one statement beyond today's storage, put forward for confirmation; after `a5a7ed9` (R1)
+  "the final collection" is the supplied array when offers are supplied (an unlisted offer departs and owns nothing)
+  and the whole stored collection when they are omitted. **S8d note:** `offer_revisions.id` is
   indexed, not unique — S8d's drafted key to it needs a decision then.
-- **Write order (review §6, corrected after `854d035`; probe 2, 75 checks on Node 22 and 24):** P preflight over the
-  final graph (the pointer rule included) → F0 the departed contacts/offers (history and key rows explicitly, then the
+- **Write order (review §6, corrected after `854d035` and `a5a7ed9`; probe 2, 103 checks on Node 22 and 24):** P
+  preflight over the final graph — each collection either supplied (the array IS the collection) or omitted (the whole
+  stored collection retained); the pointer rule over the final offer collection — → F0 the departed contacts/offers (history and key rows explicitly, then the
   parent) and R the release of a surviving contact's OLD request pointer, both BEFORE any request work → the S8b core,
   then B1 the S8a request create/update (phases 1–3, no prune), the S8b links/rooms, the channels → A′/D′ the changed
   contacts (their final `request_id`; nothing parked) and offers → the S8b room prune, F2 the S8a request prune (phase
@@ -3584,7 +3602,8 @@ the engineering choices (§9), the ordered checklist, slices and test plan with 
   the case/staff/org prunes → G (pair agreement; the pointer rule over the tables; `foreign_key_check` empty). Proved on
   the design model executing exactly this order: both input orders, partial saves with either collection retained, the
   joint contact/request departure, the retarget with the old request departing, new pairs, retained-dependant refusals
-  with unchanged rows, every pointer kind under the rule, failures at each phase with byte-identical rollback and the
+  with unchanged rows, every pointer kind under the rule, the final collection deciding ownership in both directions
+  for every pointer kind (R1), `[]` versus omitted, failures at each phase with byte-identical rollback and the
   unchanged retry; no retained unique predicate exists to release.
 - **Mapping (review §2; probe 1, 32 checks on Node 22 and 24 through the REAL S8a engine):** every writer literal of
   both modules and the legacy / kept-corrupt / prototype-named / off-type variants round-trip key for key; the
