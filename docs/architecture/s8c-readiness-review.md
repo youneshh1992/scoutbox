@@ -1,6 +1,9 @@
 # S8c readiness review — recruitment contacts and offers as tables
 
-**Status: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (24 October 2026, one commit on top of `19f5ca8`).** The design
+**Status: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (24 October 2026, one commit on top of `19f5ca8`; CORRECTED on
+24 October 2026 after the independent review of `535e247` — three P2 implementation findings F1, F2, F3, §14.1 the
+correction record; the design, the earlier F1/F2/R1 pointer corrections, the S8b acceptance and the two Founder answers
+unchanged).** The design
 below was written on `feat/sqlite-schema` at `7072dd9`, the commit at which S8b was independently accepted
 (`sqlite-migration-plan.md` §D.9; `s8b-readiness-review.md` §12), corrected on 24 October 2026 after the independent
 review of `854d035` (F1 the offer-pointer contract, F2 the model's order and guard) and again after the independent
@@ -944,3 +947,73 @@ same boots. Player `cd scoutbox-player && npm test -- --runInBand` on Node v22.2
 Skipped inside the backend gate, by design and reported as such: the real older-Node runtime checks
 (`SCOUTBOX_TEST_NODE_BINS` unset, simulated only). Not run: the browser suites, the demo rebuild, the Player E2E,
 the bench.
+
+### 14.1 Correction — after the independent review of `535e247` (24 October 2026, one commit on top of `535e247`)
+
+The independent review of `535e247` (its verdict, run record, logs, the unchanged reproduction script
+`review-535e247-reproductions.mjs` and its frozen harness travel verbatim in the handoff) found S8c **IMPLEMENTED, NOT
+ACCEPTED**: three P2 findings, four reproduced cases, each against the REAL store and repository through a frozen copy of
+this suite's fixture prefix. The design accepted at `19f5ca8`, the F1/F2/R1 offer-pointer corrections, the S8b
+acceptance at `7072dd9` and the Founder's answers (Q8c-a tolerant and counted; Q8c-b strict) stand; nothing of the
+audiences, the deletion policy, the routes' side-effect timing or the idempotency contracts changes; no player or
+guardian database key is introduced; no new migration number. The reviewer's script run unchanged against `535e247`:
+exit 1, four reproductions (both runtimes); `--expect-corrected`: exit 2 at the first F1 assertion. The regressions
+below were written first and fail on the unchanged `535e247` tree on the behavioural assertions (the one-save guardian
+departure refused; a request-only save NOT refused; the live counts 0/0 against a cutover count of 6), then the source
+was corrected; the reviewer's unchanged script then exits 0 in both modes on Node 22 and Node 24.
+
+- **F1 — the final guardian references exclude departing owners.** `CONTACTS_OFFERS_SNAPSHOT.begin` built the
+  retained guardian references for a snapshot that rewrites the guardians from the stored rows of a collection that
+  was OMITTED **or** whose owner id a SUPPLIED array no longer listed. The latter rows depart at F0 and own nothing in
+  the final graph — the collection-versus-row mistake of R1 repeated in the guardian path. One save that removed a
+  guardian (`gd-signup`, no children) together with every contact/offer naming it was refused before F0 with
+  `CONTACTS_OFFERS_GUARDIAN_MISSING`; the same final state in two saves succeeded. Corrected: only an omitted
+  collection contributes stored references; a supplied array contributes its final supplied rows, which the preflight
+  already checks. Strict checks on genuinely surviving references are untouched. The regression (`[review 535e247 F1]`)
+  covers a contact recipient, an offer revision recipient, a guardian response actor and receipt viewer; each collection
+  supplied or omitted independently (the omitted one still refused with the retained row named, the departing one never
+  named); `[]` versus a replacement; same-id rows that still name the guardian (refused) and same-id rows with the
+  reference moved (landing); every refusal atomic with the revision unchanged and the corrected retry landing; the
+  reviewer's two-save control and the one-save path compared table for table.
+- **F2 — a request-only staged change cannot bypass the pair guard.** `flushPre` returned `plan: null` when no contact
+  or offer was dirty and no request departed, and `flushWrite` then skipped G; a request whose `contactId` changed in
+  the staged S8a mirror committed a disagreeing pair that `assertContactsOffersConsistent` itself rejects. Corrected
+  within the accepted hook boundaries, without rewriting unchanged S8c rows: at α the repository asks the recruitment
+  repository whether any request is pending or departing; if so it applies the pair guard at P over the COMPLETE
+  contact mirror against the final requests (`assertPairsAgree`, ids only, before any write) and marks the save for the
+  final guard; at β, G (`assertContactsOffersConsistent`) runs after the S8a request create/update whether or not an
+  S8c row was written. The regression (`[review 535e247 F2]`, through `attachDataLayer` and the real store hooks): the
+  request-only mismatch refused with the ids, every table and the revision unchanged, a separate connection seeing the
+  committed pair, the intended value kept in memory and a plain retry refused again, the correction landing, a valid
+  request-only edit landing without rewriting an S8c row, a unit of work retargeting the request alone refused at its
+  commit with the request memory restored, and the contact and request moved TOGETHER landing. The contact
+  send/response coupling, the joint departure and retarget cases and every existing hook and COMMIT test are unchanged
+  and still pass. No public route retargets a request's `contactId` today; this is the staged record contract.
+- **F3 — the live counts cover every player-reference occurrence of Q8c-a.** `unresolvedPlayerReferences` and
+  `retainedPlayerReferences` inspected the two parents' `player_id` only, while the cutover's `playerIdsOf` counted the
+  contact recipient, the revision recipients, the responses' for-player and player actor ids and the player receipt
+  viewers. Corrected: one SQL per collection (`PLAYER_REFS_SQL`) lists the same occurrences from the tables; the two
+  counters count those naming no player / a retained record; the per-collection, count-only report shape is unchanged
+  (`/capabilities` → `dataLayer.domains.recruitmentContactsOffers`); `playerIdsOf` counts a nested id only when it is a
+  non-empty string, so the cutover record and the live report count alike. The reviewer's fixture (live parents, five
+  missing nested references) now reports `{ recruitmentContacts: 1, recruitmentOffers: 4 }`. The regression (`[review
+  535e247 F3]`): field by field for missing, live and retained accounts, a duplicate occurrence counted twice, a
+  guardian-typed actor or viewer never counted as a player reference, the counts equal to the cutover's, updated after
+  a staged save, a restore and a restart, no id in the aggregate report; `retainedPlayerReferences` the same fields.
+  Three existing expectations written against the parent-only counter were raised to the per-occurrence counts with
+  the occurrences named in each (the tolerant import fixture 1 / 3 — equal to the cutover's 4 missing —, the behaviour
+  test 1 / 2, the server suite's retained person 2 / 4). Nothing is dropped, fabricated or repaired; no name or id
+  enters the aggregate report.
+
+**Preserved and re-run.** The real-store five-pointer cases, the mapping and shape tests, the exact rollback and
+retry, the read-only views, the unit mementos, the strict-guardian and tolerant-player fixtures, backup and restore,
+and the genuine `7072dd9` boot on the rollback copy, the re-upgrade and the MEASURED direct boot (the S8c unit suite
+now 12 checks, the server suite 3). The earlier reviewers' scripts as in §14, with the same two S8b-bundle exits
+(`LATER_SCHEMA` on a `0017` file: the S8c tool is the first link) stated as before and not relabelled; no chained
+wrapper was added in this milestone. The twenty-four §10 batteries, each on the corrected tree and on the untouched
+`7072dd9` checkout: the same result as at `535e247` — twenty pass alike with the same counts, the four pre-existing
+failures identical on both trees (`m23Persistence`, `m23BootContract`, `m23SigningPersistence`,
+`m23AgentTransactionPersistence`), the two adapted persistence batteries 70 and 94 checks. The gates after the final
+edits of this correction (backend `npm test` on Node 22 and Node 24 with the nine historical builds booted for real,
+the Player suite, the reviewer scripts on both runtimes) are recorded with versions, counts and exits in the handoff
+(`logs/gates/gates-run.txt`, `REVIEW-START-HERE.md`) and in the draft pull request.

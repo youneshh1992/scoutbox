@@ -391,7 +391,15 @@ and design changes the Founder explicitly requests.
   PENDING INDEPENDENT ACCEPTANCE** (24 October 2026, one commit on top of
   `19f5ca8`; `docs/architecture/s8c-readiness-review.md` §14 the
   implementation record, plan §D.10, `scoutbox-server/OPERATIONS.md`
-  "Recruitment contacts and offers"): its design — prepared 23 October 2026
+  "Recruitment contacts and offers"; the independent review of `535e247`
+  did NOT accept the implementation — three P2 findings, corrected on the
+  same branch in one commit, review §14.1: F1 a snapshot's retained guardian
+  references are the OMITTED collections' stored rows only, a supplied
+  array's departing rows own nothing; F2 a save in which only a request
+  changed still runs the pair guard at the preflight and the final guard at
+  the end, through the real hooks; F3 the live unresolved/retained player
+  counts cover every Q8c-a reference occurrence, as the cutover counts do):
+  its design — prepared 23 October 2026
   from the code at `7072dd9`, CORRECTED after the independent review of
   `854d035` (F1 one pointer rule for the five offer pointers; F2 the model
   made to execute the documented order P → F0 → R → B1 → A′ → D′ → F2 → G

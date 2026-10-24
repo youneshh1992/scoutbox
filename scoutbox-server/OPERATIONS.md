@@ -1823,7 +1823,7 @@ S8c, S8d). **S8c (contacts and offers) is implemented on top of this step**
 — the next section; a live file carries `0017` beside `0016`, and the S8c
 rollback tool is the first link of the chain.
 
-### Recruitment contacts and offers (live since migration `0017`, S8c — implemented 24 October 2026 on top of `19f5ca8` under the Founder's decisions Q8c-a "Approve tolerant (Recommended)" and Q8c-b "Approve strict checks (Recommended)" of 24 October 2026, on the design of `docs/architecture/s8c-readiness-review.md` independently accepted at `19f5ca8`; IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE — review §14; not production-approved)
+### Recruitment contacts and offers (live since migration `0017`, S8c — implemented 24 October 2026 on top of `19f5ca8` under the Founder's decisions Q8c-a "Approve tolerant (Recommended)" and Q8c-b "Approve strict checks (Recommended)" of 24 October 2026, on the design of `docs/architecture/s8c-readiness-review.md` independently accepted at `19f5ca8`; corrected after the independent review of `535e247` (F1 departing owners' guardian references, F2 the pair guard on a request-only save, F3 the per-occurrence player counts — review §14.1); IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE — review §14; not production-approved)
 
 - **What moved.** The two blob collections `recruitmentContacts` (written
   only by `m23/contactRoutes.mjs` and the response hook the two respond
@@ -1861,8 +1861,13 @@ rollback tool is the first link of the chain.
   key, TOLERANT (Q8c-a, 24 October 2026) — a live id resolves, a retained id
   resolves to the retained record, a historically missing id is preserved and
   counted (`/capabilities` → `dataLayer.domains.recruitmentContactsOffers
-  .unresolvedPlayerReferences` and `retainedPlayerReferences`;
-  `meta.recruitmentContactsOffersCutover.players` at import), never refused,
+  .unresolvedPlayerReferences` and `retainedPlayerReferences`, one count per
+  collection over EVERY reference occurrence — the parent's `player_id`, the
+  contact recipient, the revision recipients, the responses' for-player and
+  player actor ids, the player receipt viewers, a duplicate counted twice, a
+  guardian-typed actor or viewer never; the same occurrences
+  `meta.recruitmentContactsOffersCutover.players` counts at import — corrected
+  after the independent review of `535e247`, F3), never refused,
   fabricated or deleted. Guardian ids (`recipient_guardian_id` of a contact
   and of a revision snapshot, the guardian actor and viewer ids): NO key,
   STRICT in code (Q8c-b, 24 October 2026) — a cutover or snapshot write naming
@@ -1905,9 +1910,19 @@ rollback tool is the first link of the chain.
   S8b core and the S8a request create/update → the changed contacts (their
   final `request_id`) and offers → the S8a request prune → the final
   assertions (the pairs agree, the pointer rule, `foreign_key_check` empty).
-  Every refusal rolls the whole save back with ids only; a failed ordinary
-  save keeps its pending edits in memory for the next save; an aborted unit
-  of work restores both mirrors in place.
+  A save in which only a REQUEST changed (its `contactId` edited in the
+  staged mirror, a new or departing request) is checked too: the pair guard
+  runs at the preflight over the complete contact mirror against the final
+  requests, and the final assertions run after the request write whether or
+  not a contact or offer row was written (no unchanged row is rewritten;
+  corrected after the independent review of `535e247`, F2). When a snapshot
+  rewrites the guardians, the stored guardian references of an OMITTED
+  collection must still resolve; a SUPPLIED collection is judged on its final
+  rows only, so one save may remove a guardian together with every record
+  naming it (corrected after the same review, F1). Every refusal rolls the
+  whole save back with ids only; a failed ordinary save keeps its pending
+  edits in memory for the next save; an aborted unit of work restores both
+  mirrors in place.
 - **Cutover (migration `0017`, one transaction, foreign keys off while the key
   table is rebuilt, `foreign_key_check` empty before COMMIT).** Requires
   `0016` and the S8b key-format marker; creates the nine tables; rebuilds the

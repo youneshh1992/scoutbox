@@ -162,7 +162,7 @@ test('[cutover] the import refuses with ids only — nothing written, the blobs,
   // tolerated and counted
   const d = file('tolerant', { recruitmentOffers: [legacyOffer(), draftOffer({ playerId: 'pl-never-existed' })], recruitmentContacts: [legacyContact()] }); const s = openRaw(d);
   const cut = JSON.parse(meta(s, 'recruitmentContactsOffersCutover')); assert.equal(cut.unresolvedPointers.current_revision_id, 1); assert.equal(cut.players.missing, 4); assert.equal(col(s, "SELECT current_revision_id FROM recruitment_offers WHERE id = 'rof-4'"), 'rofr-missing');
-  assert.deepEqual(rco.unresolvedPlayerReferences(s), { recruitmentContacts: 1, recruitmentOffers: 2 }); assert.deepEqual(rco.unresolvedPointerReferences(s).current_revision_id, 1); s.close(); rm(d);
+  assert.deepEqual(rco.unresolvedPlayerReferences(s), { recruitmentContacts: 1, recruitmentOffers: 3 }, 'every occurrence, as the cutover counts (the review of 535e247, F3): the legacy contact\'s parent; the legacy offer\'s parent and its revision recipient, the pl-never-existed parent'); assert.equal(1 + 3, cut.players.missing, 'the live counts and the cutover count agree'); assert.deepEqual(rco.unresolvedPointerReferences(s).current_revision_id, 1); s.close(); rm(d);
 });
 
 // ------------------------------------------------------------- the repository
@@ -315,8 +315,107 @@ test('[behaviour] a whole-snapshot save that removes a request a RETAINED contac
   const dumpG = withRo(d, s8cDump); const gs = plain(L.db.guardians).filter((x) => x.id !== 'gd-signup');
   refused(() => L.save({ players: plain(L.db.players), guardians: gs }, { omit: [...COLLECTIONS, 'requests', 'trials'] }), /CONTACTS_OFFERS_GUARDIAN_MISSING.*recruitment_contacts rct-g → gd-signup/, 'Q8c-b against the FINAL guardians of the same snapshot: a RETAINED contact naming a guardian the identity snapshot removes');
   assert.equal(withRo(d, s8cDump), dumpG); assert.ok(withRo(d, (s) => s.prepare("SELECT 1 FROM guardians WHERE id = 'gd-signup'").get()), 'the guardian row stays (the whole save rolled back)');
-  L.save({ recruitmentContacts: [legacyContact()] }, { omit: ['recruitmentOffers', 'requests', 'trials'] }); withRo(d, (s) => { assert.equal(col(s, "SELECT player_id FROM recruitment_contacts WHERE id = 'rct-5'"), 'pl-gone-long-ago', 'Q8c-a: written as it is'); assert.deepEqual(rco.unresolvedPlayerReferences(s), { recruitmentContacts: 1, recruitmentOffers: 1 }); });
+  L.save({ recruitmentContacts: [legacyContact()] }, { omit: ['recruitmentOffers', 'requests', 'trials'] }); withRo(d, (s) => { assert.equal(col(s, "SELECT player_id FROM recruitment_contacts WHERE id = 'rct-5'"), 'pl-gone-long-ago', 'Q8c-a: written as it is'); assert.deepEqual(rco.unresolvedPlayerReferences(s), { recruitmentContacts: 1, recruitmentOffers: 2 }, 'per occurrence (the review of 535e247, F3): the legacy contact\'s parent; the legacy offer\'s parent and its revision recipient'); });
   L.close(); rm(d);
+});
+
+// ------------------------------------------------------------- the independent review of 535e247 (F1, F2, F3): regressions written before the correction
+// FAILING-FIRST NOTE (recorded on the unchanged 535e247 tree): F1 — the snapshot write's retained guardian references
+// included the stored rows of records a SUPPLIED collection no longer listed (departing at F0), so one save that removed
+// a guardian together with every contact/offer naming it was refused; F2 — a save in which only a request's contactId
+// changed in the staged S8a mirror committed a disagreeing pair (flushPre saw no S8c change and no departure, flushWrite
+// skipped the final guard); F3 — the live unresolved/retained player counts inspected the two parents' player_id only,
+// while the cutover (and Q8c-a) count every player-reference occurrence.
+test('[review 535e247 F1 — ported to the REAL store] the FINAL guardian references exclude the owners a supplied collection departs: one save removing a guardian and every contact (recipient) / offer (revision recipient; guardian response actor and receipt viewer) naming it succeeds for each kind and reaches the same state as the reviewer\'s two-save control; the omitted collection is still retained (refused with the retained row named, never the departing one); a replacement or same-id row still naming the guardian is refused; same-id rows with the reference changed land; every refusal is atomic and the corrected retry lands', () => {
+  needRco();
+  const guardianRef = { type: 'guardian', playerId: 'pl-adult', guardianId: 'gd-signup', minor: false };
+  const refContact = (over = {}) => draftContact({ id: 'rct-depart', recipient: guardianRef, ...over });
+  const refOffer = (over = {}) => draftOffer({ id: 'rof-depart', revisions: [revision({ recipientSnapshot: { ...guardianRef, at: NOW } })], ...over });
+  const actorOffer = () => draftOffer({ id: 'rof-actor', responses: [{ id: 'resp-g', revisionId: 'rofr-1', responseType: 'declined', actorType: 'guardian', actorId: 'gd-signup', actorName: null, forPlayerId: 'pl-adult', occurredAt: TX.accepted, reason: null, clientKey: null }], readReceipts: [{ revisionId: 'rofr-1', viewerKind: 'guardian', viewerId: 'gd-signup', firstViewedAt: NOW }] });
+  const withoutSignup = (L) => plain(L.db.guardians).filter((g) => g.id !== 'gd-signup');
+  const signupGone = (d) => withRo(d, (s) => s.prepare("SELECT count(*) AS n FROM guardians WHERE id = 'gd-signup'").get().n === 0);
+  const s8cRows = (d) => withRo(d, (s) => s.prepare('SELECT count(*) AS n FROM recruitment_contacts').get().n + s.prepare('SELECT count(*) AS n FROM recruitment_offers').get().n);
+  for (const [kind, records] of [['contact recipient', { recruitmentContacts: [refContact()], recruitmentOffers: [] }], ['offer revision recipient', { recruitmentContacts: [], recruitmentOffers: [refOffer()] }], ['guardian response actor and receipt viewer', { recruitmentContacts: [], recruitmentOffers: [actorOffer()] }]]) {
+    const d = file(`f1-${kind.replace(/\W+/g, '-')}`, records); const L = snapshotOpen(d); const before = withRo(d, fullDump); const rev = L.revision();
+    // control: the guardian departs while the referring collection is OMITTED (retained whole) → refused, atomic
+    refused(() => L.save({ players: plain(L.db.players), guardians: withoutSignup(L) }, { omit: [...COLLECTIONS, 'requests', 'trials'] }), /CONTACTS_OFFERS_GUARDIAN_MISSING[\s\S]*gd-signup/, `${kind}: retained`);
+    assert.equal(withRo(d, fullDump), before, `${kind}: nothing written`); assert.equal(L.revision(), rev); assert.equal(L.store.sqlite.isTransaction, false);
+    // F1: the departure in ONE save — both collections supplied as [] and the guardian removed: the final graph names no guardian
+    L.save({ players: plain(L.db.players), guardians: withoutSignup(L), recruitmentContacts: [], recruitmentOffers: [] }, { omit: ['requests', 'trials'] });
+    assert.ok(signupGone(d), `${kind}: the guardian departed`); assert.equal(s8cRows(d), 0, `${kind}: the referring records departed`); assert.equal(L.store.sqlite.isTransaction, false);
+    L.close(); rm(d);
+  }
+  // the reviewer's two-save control (the referring collections emptied first, the guardian second) reaches the same final state as the one-save path
+  { const d1 = file('f1-one', { recruitmentContacts: [refContact()], recruitmentOffers: [refOffer()] }); const d2 = file('f1-two', { recruitmentContacts: [refContact()], recruitmentOffers: [refOffer()] });
+    const L1 = snapshotOpen(d1); L1.save({ players: plain(L1.db.players), guardians: withoutSignup(L1), recruitmentContacts: [], recruitmentOffers: [] }, { omit: ['requests', 'trials'] }); L1.close();
+    const L2 = snapshotOpen(d2); L2.save({ recruitmentContacts: [], recruitmentOffers: [] }, { omit: ['requests', 'trials'] }); L2.save({ players: plain(L2.db.players), guardians: withoutSignup(L2) }, { omit: [...COLLECTIONS, 'requests', 'trials'] }); L2.close();
+    const state = (d) => withRo(d, (s) => JSON.stringify([canon(s), s.prepare('SELECT id FROM guardians ORDER BY id').all().map((r) => r.id)]));
+    assert.equal(state(d1), state(d2), 'one save and two saves reach the same final tables'); rm(d1, d2); }
+  // the collections supplied / omitted independently; [] versus a replacement; same ids with changed references
+  { const d = file('f1-mixed', { recruitmentContacts: [refContact()], recruitmentOffers: [refOffer()] }); const L = snapshotOpen(d); const before = withRo(d, fullDump); const players = plain(L.db.players);
+    // contacts supplied [] but offers OMITTED: the retained offer still names gd-signup → refused with the OFFER named; the departing contact is not a reference any more and is not named
+    const e1 = refused(() => L.save({ players, guardians: withoutSignup(L), recruitmentContacts: [] }, { omit: ['recruitmentOffers', 'requests', 'trials'] }), /CONTACTS_OFFERS_GUARDIAN_MISSING[\s\S]*recruitment_offers rof-depart → gd-signup/, 'the omitted collection is retained');
+    assert.doesNotMatch(e1.message, /rct-depart/, 'a departing owner is not a final reference'); assert.equal(withRo(d, fullDump), before, 'atomic');
+    // offers supplied [] but contacts OMITTED: the mirror case
+    const e2 = refused(() => L.save({ players, guardians: withoutSignup(L), recruitmentOffers: [] }, { omit: ['recruitmentContacts', 'requests', 'trials'] }), /CONTACTS_OFFERS_GUARDIAN_MISSING[\s\S]*recruitment_contacts rct-depart → gd-signup/, 'the omitted contacts are retained');
+    assert.doesNotMatch(e2.message, /rof-depart/); assert.equal(withRo(d, fullDump), before, 'atomic');
+    // a REPLACEMENT that still names the guardian is a genuine surviving reference → refused; so is a same-id row that still names it
+    refused(() => L.save({ players, guardians: withoutSignup(L), recruitmentContacts: [refContact({ id: 'rct-new' })], recruitmentOffers: [] }, { omit: ['requests', 'trials'] }), /CONTACTS_OFFERS_GUARDIAN_MISSING[\s\S]*recruitment_contacts rct-new → gd-signup/, 'a replacement still naming the guardian');
+    refused(() => L.save({ players, guardians: withoutSignup(L), recruitmentContacts: [], recruitmentOffers: [refOffer({ revisions: [revision({ recipientSnapshot: { ...guardianRef, at: NOW + 1 } })] })] }, { omit: ['requests', 'trials'] }), /CONTACTS_OFFERS_GUARDIAN_MISSING[\s\S]*recruitment_offers rof-depart → gd-signup/, 'a same-id offer still naming the guardian');
+    assert.equal(withRo(d, fullDump), before, 'every refusal atomic');
+    // the same ids with the reference moved to a guardian that stays: the guardian departs, both rows land with the new reference (the corrected retry)
+    L.save({ players, guardians: withoutSignup(L), recruitmentContacts: [refContact({ recipient: { ...guardianRef, guardianId: 'gd-primary' } })], recruitmentOffers: [refOffer({ revisions: [revision({ recipientSnapshot: { ...guardianRef, guardianId: 'gd-primary', at: NOW } })] })] }, { omit: ['requests', 'trials'] });
+    assert.ok(signupGone(d)); withRo(d, (s) => { assert.equal(col(s, "SELECT recipient_guardian_id FROM recruitment_contacts WHERE id = 'rct-depart'"), 'gd-primary'); assert.equal(col(s, "SELECT recipient_guardian_id FROM offer_revisions WHERE offer_id = 'rof-depart'"), 'gd-primary'); });
+    L.close(); rm(d); }
+});
+
+test('[review 535e247 F2 — through the REAL store hooks] a save in which ONLY a request\'s contactId changes in the staged S8a mirror (no contact or offer dirty, no departure) is refused by the pair guard with the ids: every table and the revision unchanged, a separate connection sees the committed pair, the request keeps its intended (refused) value in memory and a plain retry is refused again; the corrected value lands; a valid request-only edit lands without rewriting any S8c row; a unit of work that retargets the request alone is refused at its commit and the request memory is restored; the contact and request moved TOGETHER land', () => {
+  needRco();
+  const d = file('f2', { recruitmentContacts: [draftContact({ requestId: 'req-c' })], recruitmentOffers: [], requests: [...S8A_FIX().requests, contactRequest('req-c', 'rct-1')] });
+  const L = serverOpen(d); L.save(); const before = withRo(d, allDump); const rev = L.revision();
+  const findReq = () => L.db.requests.find((x) => x.id === 'req-c');
+  findReq().contactId = 'rct-other';
+  refused(() => L.save(), /CONTACT_REQUEST_MISMATCH[\s\S]*contact rct-1 → request req-c → contact rct-other/, 'a request-only staged change');
+  assert.equal(withRo(d, allDump), before, 'every table unchanged'); assert.equal(L.revision(), rev, 'the revision unchanged'); assert.equal(L.store.sqlite.isTransaction, false);
+  assert.deepEqual(withRo(d, (s) => ({ ...s.prepare("SELECT c.request_id, r.contact_id FROM recruitment_contacts c JOIN recruitment_requests r ON r.id = c.request_id WHERE c.id = 'rct-1'").get() })), { request_id: 'req-c', contact_id: 'rct-1' }, 'a separate connection sees the committed pair');
+  assert.equal(findReq().contactId, 'rct-other', 'memory keeps the intended state for the caller to correct');
+  refused(() => L.save(), /CONTACT_REQUEST_MISMATCH/, 'a plain retry is refused again'); assert.equal(withRo(d, allDump), before);
+  findReq().contactId = 'rct-1'; L.save(); assert.equal(withRo(d, allDump), before, 'the correction lands (nothing differs from the committed state)');
+  const s8cBefore = withRo(d, s8cDump); findReq().message = 'edited message'; L.save();
+  assert.equal(withRo(d, s8cDump), s8cBefore, 'a valid request-only edit rewrites no S8c row'); assert.equal(withRo(d, (s) => col(s, "SELECT message FROM recruitment_requests WHERE id = 'req-c'")), 'edited message');
+  const landed = withRo(d, allDump);
+  assert.throws(() => L.store.unitOfWork(() => { findReq().contactId = 'rct-other'; }, { snapshot: L.snapshot }), /CONTACT_REQUEST_MISMATCH/, 'a unit of work retargeting the request alone');
+  assert.equal(findReq().contactId, 'rct-1', 'the unit memento restored the request'); assert.equal(withRo(d, allDump), landed); assert.equal(L.store.sqlite.isTransaction, false);
+  // the pair moved TOGETHER (the contact released, a new contact takes the request, the request names it) lands and passes the guard
+  L.repo.addContact(draftContact({ id: 'rct-9', requestId: 'req-c' })); L.db.recruitmentContacts.find((x) => x.id === 'rct-1').requestId = null; findReq().contactId = 'rct-9'; L.save();
+  withRo(d, (s) => { assert.equal(col(s, "SELECT request_id FROM recruitment_contacts WHERE id = 'rct-1'"), null); assert.equal(col(s, "SELECT request_id FROM recruitment_contacts WHERE id = 'rct-9'"), 'req-c'); assert.equal(col(s, "SELECT contact_id FROM recruitment_requests WHERE id = 'req-c'"), 'rct-9'); rco.assertContactsOffersConsistent(s); });
+  L.close(); rm(d);
+});
+
+test('[review 535e247 F3 — the live counts cover every Q8c-a reference occurrence, as the cutover does] parent player_id, contact recipient_player_id, revision recipient_player_id, response for_player_id, the PLAYER response actor and the PLAYER receipt viewer are counted per occurrence (a duplicate twice; a guardian-typed actor or viewer never); the per-collection shape and count-only output stay; the counts equal the cutover\'s, follow a staged save, a restore and a restart; retainedPlayerReferences covers the same fields', () => {
+  needRco();
+  const missing = (playerId) => ({ type: 'player', playerId, guardianId: null, minor: false });
+  const offer = draftOffer({
+    revisions: [revision({ recipientSnapshot: { ...missing('missing-offer-recipient'), at: NOW } }), revision({ id: 'rofr-dup', revisionNumber: 2, recipientSnapshot: { ...missing('missing-offer-recipient'), at: NOW } })],
+    responses: [{ id: 'resp-p', revisionId: 'rofr-1', responseType: 'accepted', actorType: 'player', actorId: 'missing-actor', actorName: null, forPlayerId: 'missing-subject', occurredAt: TX.accepted, reason: null, clientKey: null }, { id: 'resp-g', revisionId: 'rofr-1', responseType: 'declined', actorType: 'guardian', actorId: 'gd-primary', actorName: null, forPlayerId: 'pl-adult', occurredAt: TX.accepted, reason: null, clientKey: null }],
+    readReceipts: [{ revisionId: 'rofr-1', viewerKind: 'player', viewerId: 'missing-viewer', firstViewedAt: NOW }, { revisionId: 'rofr-1', viewerKind: 'guardian', viewerId: 'gd-primary', firstViewedAt: NOW }],
+  });
+  const d = file('f3', { recruitmentContacts: [draftContact({ recipient: missing('missing-contact-recipient') })], recruitmentOffers: [offer] });
+  // the cutover: parents live (2) + resp-g's forPlayerId (1) = 3 live; the contact recipient + two revision recipients + the player actor + forPlayerId + the player viewer = 6 missing; the guardian actor and viewer are not player references
+  withRo(d, (s) => { const cut = JSON.parse(meta(s, 'recruitmentContactsOffersCutover')); assert.deepEqual(cut.players, { live: 3, retained: 0, missing: 6 }); assert.deepEqual(rco.unresolvedPlayerReferences(s), { recruitmentContacts: 1, recruitmentOffers: 5 }, 'the live counts equal the cutover\'s, per collection'); assert.deepEqual(rco.retainedPlayerReferences(s), { recruitmentContacts: 0, recruitmentOffers: 0 }); });
+  // after a staged save: a new contact with a missing recipient and a receipt pushed onto the offer in place
+  const L = serverOpen(d); assert.deepEqual(L.layer.report().domains.recruitmentContactsOffers.unresolvedPlayerReferences, { recruitmentContacts: 1, recruitmentOffers: 5 });
+  L.repo.addContact(draftContact({ id: 'rct-n', recipient: missing('missing-contact-recipient-2') })); L.db.recruitmentOffers[0].readReceipts.push({ revisionId: 'rofr-1', viewerKind: 'player', viewerId: 'missing-viewer-2', firstViewedAt: NOW }); L.save();
+  assert.deepEqual(L.layer.report().domains.recruitmentContactsOffers.unresolvedPlayerReferences, { recruitmentContacts: 2, recruitmentOffers: 6 }, 'after the staged save');
+  for (const v of Object.values(L.layer.report().domains.recruitmentContactsOffers.unresolvedPlayerReferences)) assert.equal(typeof v, 'number', 'count-only output');
+  assert.doesNotMatch(JSON.stringify(L.layer.report().domains.recruitmentContactsOffers), /missing-contact-recipient|missing-viewer|missing-actor/, 'no id in the aggregate report');
+  L.close();
+  // after a restart and after a restore (every record re-supplied)
+  { const L2 = serverOpen(d); assert.deepEqual(L2.layer.report().domains.recruitmentContactsOffers.unresolvedPlayerReferences, { recruitmentContacts: 2, recruitmentOffers: 6 }, 'after a restart'); L2.close(); }
+  { const S = snapshotOpen(d); S.save({ recruitmentContacts: plain(S.db.recruitmentContacts), recruitmentOffers: plain(S.db.recruitmentOffers) }, { omit: ['requests', 'trials'] }); S.close(); withRo(d, (s) => assert.deepEqual(rco.unresolvedPlayerReferences(s), { recruitmentContacts: 2, recruitmentOffers: 6 }, 'after a restore')); }
+  // retained (S4b-R) references, field by field: pl-adult retained → the two parents, rct-n's parent and resp-g's forPlayerId
+  { const s = openRaw(d); s.prepare("UPDATE players SET deleted_at = ? WHERE id = 'pl-adult'").run(NOW); assert.deepEqual(rco.retainedPlayerReferences(s), { recruitmentContacts: 2, recruitmentOffers: 2 }, 'retained occurrences'); assert.deepEqual(rco.unresolvedPlayerReferences(s), { recruitmentContacts: 2, recruitmentOffers: 6 }, 'a retained id is not unresolved'); s.prepare("UPDATE players SET deleted_at = NULL WHERE id = 'pl-adult'").run(); s.close(); }
+  rm(d);
 });
 
 // ------------------------------------------------------------- the rollback

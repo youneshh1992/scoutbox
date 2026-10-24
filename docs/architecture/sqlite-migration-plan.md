@@ -3527,6 +3527,22 @@ legal-compliance, merge or deployment approval.
 
 ### D.10 S8c (contacts, offers) — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (the design prepared 23 October 2026 from the code at `7072dd9`, corrected 24 October 2026 after the independent reviews of `854d035` and `a5a7ed9`, independently accepted for implementation at `19f5ca8`; implemented 24 October 2026 on top of `19f5ca8` under the Founder's decisions Q8c-a and Q8c-b of 24 October 2026)
 
+**Correction (24 October 2026, one commit on top of `535e247`; the review's §14.1).** The independent review of `535e247`
+found the implementation NOT accepted: three P2 findings, four reproduced cases against the real store. **F1** — the
+snapshot write's retained guardian references included the stored rows of records a SUPPLIED collection no longer
+listed (departing at F0), so one save removing a guardian with every contact/offer naming it was refused; corrected:
+only an OMITTED collection contributes stored references, a supplied array its final rows (strict checks on surviving
+references untouched). **F2** — a save in which only a request's `contactId` changed in the staged S8a mirror
+committed a disagreeing pair because the S8c hooks saw no change of their own; corrected within the accepted hook
+boundaries: when the recruitment repository has a pending or departing request, the pair guard runs at P over the
+complete contact mirror against the final requests and the final guard G runs at β whether or not an S8c row was
+written (no unchanged S8c row is rewritten). **F3** — the live `unresolvedPlayerReferences` / `retainedPlayerReferences`
+counted the two parents' `player_id` only; corrected to every Q8c-a occurrence (contact recipient, revision recipients,
+response for-player and player actor ids, player receipt viewers) per collection, count-only, equal to the cutover's
+count. Regressions written first on the unchanged tree; the reviewer's unchanged script exits 0 with
+`--expect-corrected` on Node 22 and 24. The design, the pointer corrections, the S8b acceptance and the two Founder
+answers are unchanged; no key, no new migration number, no route or policy change.
+
 **Implementation record (24 October 2026, one commit on top of `19f5ca8`; the full record is the review's §14).** The
 independent review of `19f5ca8` closed R1 and accepted the corrected design for implementation "subject to the
 Founder's explicit Q8c-a and Q8c-b decisions" (the design, not an implemented repository), and confirmed the narrow

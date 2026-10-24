@@ -308,12 +308,24 @@ function guardianIdsOf(coll, r) {
   else { for (const rv of listOf(r.revisions)) if (isPlainObject(rv.recipientSnapshot) && nonEmpty(rv.recipientSnapshot.guardianId)) out.push(rv.recipientSnapshot.guardianId); for (const x of listOf(r.responses)) if (x.actorType === 'guardian' && nonEmpty(x.actorId)) out.push(x.actorId); for (const x of listOf(r.readReceipts)) if (x.viewerKind === 'guardian' && nonEmpty(x.viewerId)) out.push(x.viewerId); }
   return out;
 }
+/**
+ * Every player-reference OCCURRENCE of a record (Q8c-a): the parent's player_id; a contact's recipient player id; an
+ * offer's revision recipient player ids, the responses' for-player ids and PLAYER actor ids, the PLAYER receipt viewer
+ * ids — a string id each time it occurs (a duplicate counts twice; a guardian-typed actor or viewer is not a player
+ * reference; an absent or null id is no reference). The live counters below (`PLAYER_REFS_SQL`) read the same
+ * occurrences from the tables, so the cutover record and the running report count alike (the review of 535e247, F3).
+ */
 function playerIdsOf(coll, r) {
   const out = [r.playerId];
-  if (coll === CONTACTS) { if (isPlainObject(r.recipient) && presentKey(r.recipient, 'playerId')) out.push(r.recipient.playerId); }
-  else { for (const rv of listOf(r.revisions)) if (isPlainObject(rv.recipientSnapshot) && presentKey(rv.recipientSnapshot, 'playerId')) out.push(rv.recipientSnapshot.playerId); for (const x of listOf(r.responses)) { if (presentKey(x, 'forPlayerId')) out.push(x.forPlayerId); if (x.actorType === 'player' && presentKey(x, 'actorId')) out.push(x.actorId); } for (const x of listOf(r.readReceipts)) if (x.viewerKind === 'player' && presentKey(x, 'viewerId')) out.push(x.viewerId); }
+  if (coll === CONTACTS) { if (isPlainObject(r.recipient) && nonEmpty(r.recipient.playerId)) out.push(r.recipient.playerId); }
+  else { for (const rv of listOf(r.revisions)) if (isPlainObject(rv.recipientSnapshot) && nonEmpty(rv.recipientSnapshot.playerId)) out.push(rv.recipientSnapshot.playerId); for (const x of listOf(r.responses)) { if (nonEmpty(x.forPlayerId)) out.push(x.forPlayerId); if (x.actorType === 'player' && nonEmpty(x.actorId)) out.push(x.actorId); } for (const x of listOf(r.readReceipts)) if (x.viewerKind === 'player' && nonEmpty(x.viewerId)) out.push(x.viewerId); }
   return out;
 }
+/** The same occurrences over the tables, per collection (one row per occurrence, `pid` the referenced id). */
+const PLAYER_REFS_SQL = {
+  recruitmentContacts: 'SELECT player_id AS pid FROM recruitment_contacts UNION ALL SELECT recipient_player_id FROM recruitment_contacts WHERE recipient_player_id IS NOT NULL',
+  recruitmentOffers: "SELECT player_id AS pid FROM recruitment_offers UNION ALL SELECT recipient_player_id FROM offer_revisions WHERE recipient_player_id IS NOT NULL UNION ALL SELECT for_player_id FROM offer_responses WHERE for_player_id IS NOT NULL UNION ALL SELECT actor_id FROM offer_responses WHERE actor_type = 'player' AND actor_id IS NOT NULL UNION ALL SELECT viewer_id FROM offer_read_receipts WHERE viewer_kind = 'player' AND viewer_id IS NOT NULL",
+};
 const STAFF_OF = {
   recruitmentContacts: (r) => [['created_by_user_id', r.createdBy], ['sent_by_user_id', r.sentBy], ['recorded_by_user_id', r.recordedBy], ['cancelled_by_user_id', r.cancelledBy]].map(([c, o]) => [c, isPlainObject(o) ? o.userId : null]).concat([['routing_agent_user_id', isPlainObject(r.routingSnapshot) && isPlainObject(r.routingSnapshot.agent) ? r.routingSnapshot.agent.agentUserId : null]]),
   recruitmentOffers: (r) => [['created_by_user_id', isPlainObject(r.createdBy) ? r.createdBy.id : null], ['agent_share_user_id', isPlainObject(r.agentShare) ? r.agentShare.agentUserId : null]],
@@ -414,6 +426,13 @@ export function releaseRequests(sqlite, contacts, { only = null } = {}) {
 }
 /** A′ / D′: the supplied (or changed) records upserted with their children in list order. */
 export function stageRecords(sqlite, coll, records, { only = null } = {}) { for (const r of records) if (!only || only.has(r.id)) writeRecord(sqlite, coll, r); }
+/** The pair guard over records (ids only): every contact naming a request of `requests` whose contactId names another contact is a refusal. */
+export function assertPairsAgree(contacts, requests, label = 'the save') {
+  const reqById = new Map(listOf(requests).map((r) => [r.id, r]));
+  const mismatched = [];
+  for (const c of listOf(contacts)) { if (!nonEmpty(c.requestId)) continue; const r = reqById.get(c.requestId); if (r && nonEmpty(r.contactId) && r.contactId !== c.id) mismatched.push(`contact ${c.id} → request ${c.requestId} → contact ${r.contactId}`); }
+  if (mismatched.length) throw refusal('CONTACT_REQUEST_MISMATCH', `${mismatched.length} contact/request pair(s) in ${label} disagree — the request names another contact (${ids(mismatched)}); the write was rolled back and nothing was changed`, { links: mismatched });
+}
 /** G: the final assertions over the tables, ids only — the pairs agree, the pointer rule, foreign_key_check empty. */
 export function assertContactsOffersConsistent(sqlite, { label = 'the snapshot' } = {}) {
   if (!recruitmentContactsOffersLive(sqlite)) return;
@@ -427,14 +446,20 @@ export function assertContactsOffersConsistent(sqlite, { label = 'the snapshot' 
   const fk = RECRUITMENT_CONTACTS_OFFERS_TABLES.flatMap((t) => sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all());
   if (fk.length) throw refusal('CONTACTS_OFFERS_KEY_VIOLATION', `foreign_key_check found ${fk.length} broken reference(s) in ${label} (first: ${fk[0].table} rowid ${fk[0].rowid} → ${fk[0].parent}); the write was rolled back and nothing was changed`);
 }
-/** The admin report's counts (Q8c-a: counted, never refused): parents naming a player not in the players table / a retained record; unresolved pointers per kind over the tables; dangling decision ids. */
+/**
+ * The admin report's counts (Q8c-a: counted, never refused), per collection and count-only: every player-reference
+ * OCCURRENCE (the parent's player_id, the contact recipient, the revision recipients, the responses' for-player and
+ * PLAYER actor ids, the PLAYER receipt viewers — `PLAYER_REFS_SQL`, the fields `playerIdsOf` counts at the cutover) that
+ * names no player at all (unresolved) or a retained (S4b-R) record; unresolved pointers per kind over the tables;
+ * dangling decision ids.
+ */
 export function unresolvedPlayerReferences(sqlite) {
   if (!recruitmentContactsOffersLive(sqlite)) return null;
-  return Object.fromEntries(ALL.map((c) => [c.name, sqlite.prepare(`SELECT count(*) AS n FROM ${c.table} x WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.player_id)`).get().n]));
+  return Object.fromEntries(ALL.map((c) => [c.name, sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL[c.name]}) x WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid)`).get().n]));
 }
 export function retainedPlayerReferences(sqlite) {
   if (!recruitmentContactsOffersLive(sqlite)) return null;
-  return Object.fromEntries(ALL.map((c) => [c.name, sqlite.prepare(`SELECT count(*) AS n FROM ${c.table} x WHERE EXISTS (SELECT 1 FROM players p WHERE p.id = x.player_id AND p.deleted_at IS NOT NULL)`).get().n]));
+  return Object.fromEntries(ALL.map((c) => [c.name, sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL[c.name]}) x WHERE EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid AND p.deleted_at IS NOT NULL)`).get().n]));
 }
 export function unresolvedPointerReferences(sqlite) {
   if (!recruitmentContactsOffersLive(sqlite)) return null;
@@ -480,7 +505,11 @@ export const CONTACTS_OFFERS_SNAPSHOT = {
     const finalCases = cases !== undefined ? idSet(cases) : tableCaseIds(sqlite);
     const departingRequests = requests === undefined ? [] : (() => { const keep = idSet(requests); return sqlite.prepare('SELECT id FROM recruitment_requests').all().map((r) => r.id).filter((id) => !keep.has(id)); })();
     const departingCases = cases === undefined ? [] : [...tableCaseIds(sqlite)].filter((id) => !finalCases.has(id));
-    const retainedGuardianRefs = guardians === undefined ? [] : storedGuardianRefs(sqlite).filter(([table, id]) => supplied[table === 'recruitment_contacts' ? 'recruitmentContacts' : 'recruitmentOffers'] === undefined || !idSet(supplied[table === 'recruitment_contacts' ? 'recruitmentContacts' : 'recruitmentOffers']).has(id));
+    // Q8c-b over the FINAL graph when the snapshot rewrites the guardians: the stored references of a collection OMITTED
+    // from the save (retained whole) take part; a SUPPLIED collection contributes its final supplied rows only — a stored
+    // row the array no longer lists departs at F0 and is no reference (the review of 535e247, F1: "retained" is by
+    // collection, never by departing row, in the guardian path as in the pointer path).
+    const retainedGuardianRefs = guardians === undefined ? [] : storedGuardianRefs(sqlite).filter(([table]) => supplied[table === 'recruitment_contacts' ? 'recruitmentContacts' : 'recruitmentOffers'] === undefined);
     const { counts, departing } = preflight(sqlite, supplied, { stored, cases: finalCases, requests: finalRequests, departingRequests, departingCases, orgs, users, guardians, retainedGuardianRefs, label });
     stageDepartures(sqlite, departing); // F0
     const released = supplied.recruitmentContacts === undefined ? 0 : releaseRequests(sqlite, supplied.recruitmentContacts); // R
@@ -575,23 +604,31 @@ export function createRecruitmentContactsOffersRepository({ sqlite, now = Date.n
       const { changed, removed, touched } = changes();
       const rec = recruitment ? recruitment() : null;
       const departingRequests = rec ? rec.departures().requests : [];
-      if (!touched && !departingRequests.length) { inFlight = { changed, removed, plan: null }; return 0; }
+      // The requests this save changes (the S8a staged mirror: an edited or new request, a departure) are part of the
+      // FINAL combined graph even when no contact or offer is dirty (the review of 535e247, F2): the pair guard is applied
+      // at P over the COMPLETE contact mirror against the final requests, ids only, before any write — and G runs at β.
+      const requestsDirty = !!rec && (rec.pending().requests > 0 || departingRequests.length > 0);
+      if (!touched && !requestsDirty) { inFlight = { changed, removed, plan: null, assert: false }; return 0; }
+      const requests = rec ? rec.requestsView : tableRequests(sqlite);
+      if (requestsDirty) assertPairsAgree(mirrors.recruitmentContacts, requests, 'the save (a changed request against the complete contact mirror)');
+      if (!touched) { inFlight = { changed, removed, plan: null, assert: true }; return 0; } // nothing of S8c to write; the final guard still runs
       // the FINAL graph of a flush is the complete mirrors (a staged dirty subset is not a snapshot collection): every collection "supplied"
       const supplied = Object.fromEntries(RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((n) => [n, mirrors[n]]));
       for (const n of RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS) for (const id of changed[n]) { const v = validateEntry(byName[n], mirrors[n].find((x) => x.id === id)); if (!v.ok) throw new TypeError(`recruitmentContactsOffers: a ${n} record cannot be saved: ${v.reason}`); }
       const stored = storedRefs(sqlite);
-      const requests = rec ? rec.requestsView : tableRequests(sqlite);
       preflight(sqlite, supplied, { stored, cases: caseIdsNow(), requests, departingRequests, only: changed, label: 'the save' });
       stageDepartures(sqlite, removed); // F0
       releaseRequests(sqlite, mirrors.recruitmentContacts, { only: changed.recruitmentContacts }); // R
-      inFlight = { changed, removed, plan: true };
+      inFlight = { changed, removed, plan: true, assert: true };
       return RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.reduce((a, n) => a + changed[n].size + removed[n].length, 0);
     },
     flushWrite() {
-      if (!inFlight?.plan) return;
-      stageRecords(sqlite, CONTACTS, mirrors.recruitmentContacts, { only: inFlight.changed.recruitmentContacts }); // A′
-      stageRecords(sqlite, OFFERS, mirrors.recruitmentOffers, { only: inFlight.changed.recruitmentOffers }); // D′
-      assertContactsOffersConsistent(sqlite, { label: 'the save (contacts, offers, requests and cases together)' }); // G
+      if (!inFlight?.plan && !inFlight?.assert) return;
+      if (inFlight.plan) {
+        stageRecords(sqlite, CONTACTS, mirrors.recruitmentContacts, { only: inFlight.changed.recruitmentContacts }); // A′
+        stageRecords(sqlite, OFFERS, mirrors.recruitmentOffers, { only: inFlight.changed.recruitmentOffers }); // D′
+      }
+      assertContactsOffersConsistent(sqlite, { label: 'the save (contacts, offers, requests and cases together)' }); // G — after the S8a request create/update, whether or not an S8c row was written
     },
     commit() { if (!inFlight) return; for (const n of RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS) { for (const id of inFlight.changed[n]) committed[n].set(id, fp(mirrors[n].find((x) => x.id === id))); for (const id of inFlight.removed[n]) committed[n].delete(id); } inFlight = null; },
     rollback() { inFlight = null; },
