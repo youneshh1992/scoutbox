@@ -387,30 +387,50 @@ and design changes the Founder explicitly requests.
   rollback tool of the build that wrote the file, then this build's cutover
   (review §12, OPERATIONS.md). The
   eighth historical build the backend gate boots for real is `7a7efc6`
-  (`SCOUTBOX_PRE_S8B_SERVER`). **S8c (contacts, offers) is PREPARED, NOT
-  IMPLEMENTED** (23 October 2026, from the code at `7072dd9`:
-  `docs/architecture/s8c-readiness-review.md`, plan §D.10 — nine proposed
-  tables, the shared `idempotency_keys` CHECK broadened, no other live table
-  rebuilt, the drafted vocabulary CHECKs / partial unique indexes / SET NULL
-  keys withdrawn with evidence, the write order and mapping proved on two
-  design probes; CORRECTED on 24 October 2026 after the independent review
-  of `854d035` — F1 one pointer rule for the five offer pointers (an
-  unresolved historical target is kept and counted, never refused; a
-  target owned only by another offer is refused, put forward for
-  confirmation), F2 the model made to execute the documented order P → F0
-  → R → B1 → A′ → D′ → F2 → G against the accepted S8a/S8b phase
-  boundaries (review §13); CORRECTED AGAIN on 24 October 2026 after the
-  independent review of `a5a7ed9` — R1 the model's preflight merged the
-  rows of offers a supplied collection no longer listed into the final
-  graph; "retained" is by COLLECTION for a partial snapshot, never by
-  omitted row (omitted → the whole stored collection; a supplied array,
-  `[]` included, IS the final collection; explicit `null` refused) —
-  review §13.1 — the corrected design PENDING INDEPENDENT
-  ACCEPTANCE; its two product questions Q8c-a (player references) and
-  Q8c-b (guardian references) are a brief for the Founder AFTER the
-  independent review of the design — Q7a/Q7b/Q7c/Q8a are not extended to
-  the S8c tables; the next free migration identifier `0017` is NOT
-  reserved and no stub exists). S8d is not started** (plan §D.8 the implementation
+  (`SCOUTBOX_PRE_S8B_SERVER`). **S8c (contacts, offers) is IMPLEMENTED AND
+  PENDING INDEPENDENT ACCEPTANCE** (24 October 2026, one commit on top of
+  `19f5ca8`; `docs/architecture/s8c-readiness-review.md` §14 the
+  implementation record, plan §D.10, `scoutbox-server/OPERATIONS.md`
+  "Recruitment contacts and offers"): its design — prepared 23 October 2026
+  from the code at `7072dd9`, CORRECTED after the independent review of
+  `854d035` (F1 one pointer rule for the five offer pointers; F2 the model
+  made to execute the documented order P → F0 → R → B1 → A′ → D′ → F2 → G
+  against the accepted S8a/S8b phase boundaries — review §13) and AGAIN after
+  the review of `a5a7ed9` (R1 "retained" is by COLLECTION for a partial
+  snapshot, never by omitted row: omitted → the whole stored collection; a
+  supplied array, `[]` included, IS the final collection; explicit `null`
+  refused — review §13.1) — was INDEPENDENTLY ACCEPTED for implementation at
+  `19f5ca8` (R1 CLOSED; the narrow foreign-owner pointer refusal confirmed
+  as the reviewed ownership protection); the Founder then answered the two
+  product questions on 24 October 2026, explicitly for these tables,
+  recorded verbatim and not to be asked again: **Q8c-a "Approve tolerant
+  (Recommended)"** (the player references on the nine tables carry no key;
+  live, retained and historically missing ids resolve, are counted and
+  never refused, fabricated or deleted) and **Q8c-b "Approve strict checks
+  (Recommended)"** (the guardian references are checked in code against the
+  FINAL guardians table, ids only, no key; no account is created, unlinked
+  or deleted to satisfy a refusal) — Q7a/Q7b/Q7c/Q8a are not extended to
+  the S8c tables. Migration `0017_recruitment_contacts_offers` (REGISTERED):
+  the nine contact and offer tables, the two blobs imported row for row and
+  retired, `idempotency_keys` rebuilt with the owner CHECK broadened to the
+  two parents (the S8b key-format marker read, never written);
+  `repositories/recruitmentContactsOffers.mjs` the repository (two read-only
+  array views of mutable records; `addContact` / `addOffer` the entry
+  points; two save hooks — before the S8b core hook and after the
+  recruitment hook — carrying the review's §6 order; the S8a lossless
+  mapping; the five offer pointers stored as written under the
+  final-collection pointer rule; the deletion unit's nulled words an in-place
+  edit); the copy-only rollback `scripts/recruitmentContactsOffersRollback.mjs`
+  (the first link of the chain, ahead of the S8b and S8a tools; proven by
+  booting the actual `7072dd9` build on the copy). **Never boot the previous
+  build directly on a 0017 file: measured, it LISTENS after `STORE_MISSING
+  recruitmentContacts`, answers 500 for a contact and an empty list for the
+  offers, and writes ONE empty blob (`recruitmentOffers`) beside the
+  untouched tables** (OPERATIONS.md). The ninth historical build the backend
+  gate boots for real is `7072dd9` (`SCOUTBOX_PRE_S8C_SERVER`). Not met and
+  not claimed: a faster save, the whole-snapshot-write objective. S8d is not
+  started; the next free migration identifier is `0018` (not reserved).**
+  (plan §D.8 the implementation
   record; §D.7 the design, independently accepted at
   `d0f0205` after the reviews of `a6c40f3`, `cd7dc95` and `f2121b5`;
   `scoutbox-server/OPERATIONS.md` "Recruitment requests and accepted
@@ -460,11 +480,13 @@ and design changes the Founder explicitly requests.
   trials`) and serves nothing** (OPERATIONS.md). Not met and not claimed: a
   faster save (the change-tracking fingerprint still serialises every record
   per flush), the whole-snapshot-write objective. S8b (cases, rooms,
-  decisions) is implemented on top of it (migration `0016`, above); the next
-  free migration identifier is `0017` (not reserved). The eight historical
-  builds the backend gate boots for real: `812e13b`, `0641b2c`, `6ca66ba`,
-  `b67bce5`, `4f954ad`, `f0abd34`, `9b109dc`, `7a7efc6`
-  (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR/S8A/S8B_SERVER`).
+  decisions) is implemented on top of it (migration `0016`, above), and S8c
+  (contacts, offers) on top of S8b (migration `0017`, above; pending
+  independent acceptance); the next free migration identifier is `0018` (not
+  reserved). The nine historical builds the backend gate boots for real:
+  `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`,
+  `9b109dc`, `7a7efc6`, `7072dd9`
+  (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR/S8A/S8B/S8C_SERVER`).
   `trialReports` is not stored: it is derived from
   `trials[].report` in filing order and served read-only on EVERY record,
   whatever shape it was saved with (absent, null or an array; the empty-state

@@ -106,11 +106,13 @@ try { rollbackMod = await import('../repositories/safetyAuditRollback.mjs'); } c
 // S4b-R: a file this build writes carries 0014 too; the S4b-R tool (copy-only, the retained records kept as a blob) goes first and the S6b tool works on its output.
 let erasureRollbackMod = null;
 try { erasureRollbackMod = await import('../repositories/playerErasureRollback.mjs'); } catch { erasureRollbackMod = null; }
-const preS4bR = (file) => { if (!erasureRollbackMod) return file; const s8b = tempDir('sa-s8b-to-s8a'); recruitmentCasesRollbackMod.rollbackRecruitmentCasesCopy(file, s8b); /* S8b: the file carries 0016; its rollback goes first */ const s8a = tempDir('sa-s8a-to-s4br'); recruitmentRollbackMod.rollbackRecruitmentCopy(dbFile(s8b), s8a); /* then S8a */ const out = tempDir('sa-s4br-to-s6b'); erasureRollbackMod.rollbackPlayerErasureCopy(dbFile(s8a), out); return dbFile(out); };
+const preS4bR = (file) => { if (!erasureRollbackMod) return file; const s8c = tempDir('sa-s8c-to-s8b'); recruitmentContactsOffersRollbackMod.rollbackRecruitmentContactsOffersCopy(file, s8c); /* S8c: the file carries 0017; its rollback goes first */ const s8b = tempDir('sa-s8b-to-s8a'); recruitmentCasesRollbackMod.rollbackRecruitmentCasesCopy(dbFile(s8c), s8b); /* then S8b */ const s8a = tempDir('sa-s8a-to-s4br'); recruitmentRollbackMod.rollbackRecruitmentCopy(dbFile(s8b), s8a); /* then S8a */ const out = tempDir('sa-s4br-to-s6b'); erasureRollbackMod.rollbackPlayerErasureCopy(dbFile(s8a), out); return dbFile(out); };
 const recruitmentRollbackMod = await import('../repositories/recruitmentRollback.mjs');
 const recruitmentCasesRollbackMod = await import('../repositories/recruitmentCasesRollback.mjs');
+const recruitmentContactsOffersRollbackMod = await import('../repositories/recruitmentContactsOffersRollback.mjs');
 const { RECRUITMENT_TABLES } = await import('../repositories/recruitment.mjs'); // S8a: the fifteen tables the S8a rollback drops
-const { RECRUITMENT_CASES_TABLES } = await import('../repositories/recruitmentCases.mjs'); // S8b: the twenty-five tables the S8b rollback (the chain's first link) drops
+const { RECRUITMENT_CASES_TABLES } = await import('../repositories/recruitmentCases.mjs'); // S8b: the twenty-five tables the S8b rollback drops
+const { RECRUITMENT_CONTACTS_OFFERS_TABLES } = await import('../repositories/recruitmentContactsOffers.mjs'); // S8c: the nine tables the S8c rollback (the chain's first link) drops
 const needModule = () => { assert.ok(mod, 'repositories/safetyAudit.mjs exists (the S6b repository module)'); return mod; };
 /** A live server-mode store with the data layer attached: the repository in its STAGED mode, as the server runs it. */
 function live(dir, { now = () => NOW } = {}) {
@@ -155,7 +157,7 @@ test('[cutover] migration 0013 is registered after 0012 and imports the eight bl
   assert.ok(!applied(s).includes(MIGRATION)); for (const n of COLLECTIONS) assert.ok(blob(s, n), `${n} blob before`);
   const ran = migrate(s);
   assert.ok(ran.ran.includes(MIGRATION), `0013 ran (${ran.ran.join(', ')})`); // fails on 1792fc7: the id is not registered
-  assert.deepEqual(applied(s).slice(-5), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases']); // S4b-R and S8a registered after this step
+  assert.deepEqual(applied(s).slice(-6), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers']); // S4b-R, S8a, S8b and S8c registered after this step
   for (const t of Object.values(TABLES)) assert.ok(s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), `${t} exists`);
   for (const n of COLLECTIONS) assert.equal(blob(s, n), undefined, `the ${n} blob row is retired`);
   // Columns and order.
@@ -396,18 +398,18 @@ test('[cutover] rollback (copy-only): every row of the eight tables is written b
   s7dFile(src, { blobs, rawBlobs: { channels: JSON.stringify([{ id: 'chan-1', requestId: 'req-1', playerId: 'pl-adult', playerName: 'Adult Signup', orgId: 'org-pro', orgName: 'Eastport FC', orgVerified: true, scoutName: 'Maria', scoutRole: 'Head of Recruitment', counterparty: 'player', guardianId: null, createdAt: T, messages: [], readBy: { org: null, counterparty: null } }]), requests: JSON.stringify([{ id: 'req-1', playerId: 'pl-adult', playerName: 'Adult Signup', orgId: 'org-pro', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, trustedPartner: false, userId: 'usr-1', scoutName: 'Maria', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Synthetic.', trialDetails: { proposedDate: '2026-11-01', altSlots: [], venue: 'G', notes: '' }, status: 'accepted', createdAt: T, routedTo: 'player', guardianId: null, contactChannel: 'chan-1', history: [] }]) } }); // S8a: the request in the writer's literal (a row of recruitment_requests since 0015)
   { const s = openRaw(src); migrate(s); const repo = bare(s); repo.blocks.append(block({ id: 'blk-after' })); repo.blocks.remove('blk-1'); repo.reports.patch('rep-1', { status: 'resolved', resolvedAt: NOW, outcome: 'Synthetic.' }); repo.ledger.append(led({ id: 'led-after' })); repo.idvQueue.append(idv({ id: 'idv-after', status: 'revoked' })); s.close(); }
   const AUDIT_T = Object.values(TABLES);
-  const before = { dump: dump(openRaw(src), { except: [...AUDIT_T, 'collections', 'meta', 'data_migrations', ...RECRUITMENT_TABLES, ...RECRUITMENT_CASES_TABLES] }), bytes: fs.statSync(dbFile(src)).size, saveSeq: seqOf(src), stored: stored(openRaw(src)) };
+  const before = { dump: dump(openRaw(src), { except: [...AUDIT_T, 'collections', 'meta', 'data_migrations', ...RECRUITMENT_TABLES, ...RECRUITMENT_CASES_TABLES, ...RECRUITMENT_CONTACTS_OFFERS_TABLES] }), bytes: fs.statSync(dbFile(src)).size, saveSeq: seqOf(src), stored: stored(openRaw(src)) };
   const out = tempDir('sa-rb-out');
   const s4brCopy = preS4bR(dbFile(src));
   const result = rollbackSafetyAuditCopy(s4brCopy, out, { now: NOW });
-  assert.equal(result.output, dbFile(out)); assert.deepEqual(result.counts, { blocks: 2, reports: 2, moderationLog: 1, orgNotes: 1, ledger: 3, opsEvents: 1, sourceChanges: 1, idvQueue: 2 }); assert.equal(result.recordRemoved, true); assert.equal(result.saveSeq, before.saveSeq + 4, 'the S8b tool advanced the revision once, the S8a tool once, the S4b-R tool once, this tool once more');
+  assert.equal(result.output, dbFile(out)); assert.deepEqual(result.counts, { blocks: 2, reports: 2, moderationLog: 1, orgNotes: 1, ledger: 3, opsEvents: 1, sourceChanges: 1, idvQueue: 2 }); assert.equal(result.recordRemoved, true); assert.equal(result.saveSeq, before.saveSeq + 5, 'the S8c tool advanced the revision once, the S8b tool once, the S8a tool once, the S4b-R tool once, this tool once more');
   assert.equal(fs.statSync(dbFile(src)).size, before.bytes, 'the source is untouched'); assert.equal(seqOf(src), before.saveSeq); assert.ok(tableExistsIn(src, 'ledger'));
   const o = openRaw(out);
   assert.ok(!applied(o).includes(MIGRATION)); for (const t of AUDIT_T) assert.equal(o.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), undefined, `${t} dropped`); assert.equal(meta(o, META), undefined);
   for (const n of COLLECTIONS) assert.equal(JSON.stringify(blob(o, n)), JSON.stringify(before.stored[n]), `${n} blob equals the rows the tables held`);
   const back = blob(o, 'blocks'); assert.deepEqual(back.map((b) => b.id), ['blk-2', 'blk-after'], 'the lifted block is gone, the post-cutover block is there'); assert.deepEqual(back[0].orgId, { odd: 1 });
   assert.deepEqual(blob(o, 'reports').map((r) => [r.id, r.status, Object.hasOwn(r, 'targetPlayerId')]), [['rep-1', 'resolved', true], ['rep-auto', 'pending_review', false]]); assert.deepEqual(blob(o, 'ledger').map((l) => l.id), ['led-1', 'led-2', 'led-after']); assert.deepEqual(blob(o, 'idvQueue').map((q) => [q.id, q.status]), [['idv-1', 'approved'], ['idv-after', 'revoked']]);
-  assert.equal(dump(o, { except: [...AUDIT_T, 'collections', 'meta', 'data_migrations', ...RECRUITMENT_TABLES, ...RECRUITMENT_CASES_TABLES] }), before.dump, 'every other table byte-identical (channels, messages, notifications, dispatches, outbox, … included)');
+  assert.equal(dump(o, { except: [...AUDIT_T, 'collections', 'meta', 'data_migrations', ...RECRUITMENT_TABLES, ...RECRUITMENT_CASES_TABLES, ...RECRUITMENT_CONTACTS_OFFERS_TABLES] }), before.dump, 'every other table byte-identical (channels, messages, notifications, dispatches, outbox, … included)');
   // Re-upgrade: the same rows.
   const beforeUp = JSON.stringify(before.stored); migrate(o); assert.ok(applied(o).includes(MIGRATION)); assert.equal(JSON.stringify(stored(o)), beforeUp, 're-upgraded to the same rows'); for (const n of COLLECTIONS) assert.equal(blob(o, n), undefined);
   o.close();

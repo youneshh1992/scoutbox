@@ -199,7 +199,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -4843,6 +4843,7 @@ const m23Ctx = registerM23({
   agentIntegration,
   recruitmentEvidenceProvider: recruitmentEvidence,
   recruitmentCases, // S8b: the formal decision row enters through the repository (and leaves it on a transport failure)
+  recruitmentContactsOffers, // S8c: a new contact enters through the repository (addContact); every other write is an in-place edit
   ...m19Ctx,
   isAdult,
   // M17's room seams live on the object registerM17 returned; registerM18
@@ -4956,6 +4957,7 @@ Object.assign(agentIntegration, m27Ctx.seam);
 // (an agent's basis and scope) and P5.6D's readiness seam, by reference.
 m28Ctx = registerOffers({
   ...m19Ctx,
+  recruitmentContactsOffers, // S8c: a new offer enters through the repository (addOffer); every other write is an in-place edit
   faults: faultLayer, // M23 P8.1 — the development fault seam after an answer moved the case
   isAdult,
   storage,

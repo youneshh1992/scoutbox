@@ -42,6 +42,9 @@ export function registerContact(ctx) {
   const {
     db, orgRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked, isAdult,
     rateLimit, mailer, isLead, moderateOrRefuse, issueRecruitmentRequest,
+    // S8c: the recruitment contacts/offers repository (storage only). A NEW contact enters through `addContact` (the
+    // former `push` sites below); every other write stays an in-place edit of the record and lands in the next save.
+    recruitmentContactsOffers,
     // M23 P5.6E — the ONE cross-app integration seam. It is a HOLDER: M23 is
     // registered before the Agent, Compliance and Integration layers, so the
     // methods arrive later. Until they do, `agentRoute` is absent and every
@@ -335,7 +338,7 @@ export function registerContact(ctx) {
     };
     record(c, 'contact_created', by, { channel: 'in_app', contactMode: mode }, at);
     bumpRev(c, { by: req.orgUser, at });
-    s.push(c);
+    recruitmentContactsOffers.addContact(c); // S8c: the record itself is kept; its row lands in persistNow()'s save
     // NOTHING ELSE. No case history, no notification, no request row, no
     // outbox entry, no delivery state, and — even where an agent would be a
     // valid party — no agent is told anything. A draft is a record of intent.
@@ -611,7 +614,7 @@ export function registerContact(ctx) {
     };
     record(c, 'contact_external_recorded', by, { channel: check.channel, occurredAt: check.occurredAt, recipientType: routing.recipient.type }, at);
     bumpRev(c, { by: req.orgUser, at });
-    s.push(c);
+    recruitmentContactsOffers.addContact(c); // S8c
     const moved = advanceCase(req, room, c, at);
     persistNow();
     broadcast('contact_external_recorded', { orgId: room.orgId, roomId: room.id, contactId: c.id });

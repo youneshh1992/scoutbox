@@ -1638,8 +1638,10 @@ change tracking still serialises every record per save, so the save time is
 unchanged within noise, the boot is slower (sixteen tables decoded) and the
 file is larger (plan §D.8.7); the whole-snapshot-write objective is not met.
 **S8b (cases, rooms, decisions) is implemented on top of this step** — see the
-next section; a live file carries `0016` beside `0015`, and the S8b rollback
-tool is the first link of the chain.
+next section; a live file carries `0016` beside `0015`. **S8c (contacts,
+offers) is implemented on top of S8b** (the section after it); a live file
+carries `0017` too, so the S8c rollback tool is the first link of the chain,
+the S8b tool the second, this step's tool the third.
 
 ### Recruitment cases, room comments, room snapshots, room decisions and room evidence states (live since migration `0016`, S8b — implemented 23 October 2026 on top of `4d2c74b` under the Founder's decision Q8a "Approve tolerant (Recommended)" of 23 October 2026, on the design of `docs/architecture/s8b-readiness-review.md` independently accepted at `4d2c74b`; the implementation INDEPENDENTLY ACCEPTED at `7072dd9` after two correction rounds, review §12; not production-approved)
 
@@ -1775,7 +1777,10 @@ tool is the first link of the chain.
   6 a recorded `0016` whose key format is not the one this tool reads (a file
   of the superseded `b7c0dd0` or `2fe05df` build: use THAT build's tool on a
   copy — nothing is read, the output is removed), 10 a recorded `0016` whose
-  tables are missing. To go further back, run
+  tables are missing. Since S8c a live file carries `0017`, which THIS tool
+  refuses outright (`LATER_SCHEMA`, exit 4): run
+  `scripts/recruitmentContactsOffersRollback.mjs` first and this tool on ITS
+  output. To go further back, run
   `scripts/recruitmentRollback.mjs` on THIS tool's output (it refuses a file
   carrying `0016`), then the S4b-R tool, and so on down the chain.
   Re-upgrading the copy (booting this build on it) imports the blobs back as
@@ -1814,12 +1819,178 @@ blobs leave every save and a changed record lands as its own rows, but the
 change tracking still serialises every record per save; the bench was not
 run; the whole-snapshot-write objective is not met (contacts, offers,
 packages, signings, follow-ups and the later collections are still blobs —
-S8c, S8d). **S8c (contacts and offers) is PREPARED, NOT IMPLEMENTED (a
-corrected design pending independent acceptance since 24 October 2026 — the
-reviews of `854d035` and `a5a7ed9`, review §13 and §13.1):** the
-design, its rollback contract and the DANGER line to be measured for the
-`7072dd9` build on a cut-over file are in `docs/architecture/
-s8c-readiness-review.md` (§8); no migration, tool or route exists for it yet.
+S8c, S8d). **S8c (contacts and offers) is implemented on top of this step**
+— the next section; a live file carries `0017` beside `0016`, and the S8c
+rollback tool is the first link of the chain.
+
+### Recruitment contacts and offers (live since migration `0017`, S8c — implemented 24 October 2026 on top of `19f5ca8` under the Founder's decisions Q8c-a "Approve tolerant (Recommended)" and Q8c-b "Approve strict checks (Recommended)" of 24 October 2026, on the design of `docs/architecture/s8c-readiness-review.md` independently accepted at `19f5ca8`; IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE — review §14; not production-approved)
+
+- **What moved.** The two blob collections `recruitmentContacts` (written
+  only by `m23/contactRoutes.mjs` and the response hook the two respond
+  routes call) and `recruitmentOffers` (written only by `m28/index.mjs`) are
+  nine tables: `recruitment_contacts` + `contact_attempts` + `contact_history`;
+  `recruitment_offers` + `offer_revisions` + `offer_revision_documents` +
+  `offer_responses` + `offer_read_receipts` + `offer_history`; the contacts'
+  and offers' `keys` are rows of the ONE shared `idempotency_keys` table under
+  the record's OWN id, whose owner CHECK migration `0017` broadens to the two
+  parents (every S8a/S8b key row and the S8b key-format marker
+  `meta.recruitmentCasesKeyFormat` byte for byte — the marker is read, never
+  written, by anything of S8c; a `0016` file that records anything else or
+  nothing is refused by S8b's own checks before `0017` runs). **No other
+  live table is rebuilt**: `recruitment_requests.contact_id` stays a plain
+  indexed column; the request–contact pair is carried by the one NEW real key
+  `recruitment_contacts.request_id → recruitment_requests` (RESTRICT) plus a
+  pair guard. Nothing of the routes changed: every reader still reads
+  `db.recruitmentContacts` / `db.recruitmentOffers` (read-only ARRAY views of
+  the plain, mutable records), every in-place edit a route makes lands in the
+  same save it landed in before (a draft, an edit, a cancel, a send with its
+  request and its case move, the reply through the respond route, the
+  e-mail-copy outcome in its own later save, an offer created, edited, issued,
+  withdrawn, revised, answered, viewed or shared — each in its route's
+  `persistNow()`; the deletion unit's nulled words in the unit's commit), a
+  new record enters through `recruitmentContactsOffers.addContact` /
+  `addOffer` (the former `push` sites). Lossless as S8a and S8b: every scalar
+  a column of the writer's nullability, nested objects as columns, lists as
+  position-keyed child tables (duplicates kept), absent / null / off-type /
+  unknown fields kept on every row, a prototype-named own key kept, the
+  legacy non-array `keys.issue` kept as the object it was, `EXPIRED` never
+  stored (read-time, as today). Every public route, permission, audience,
+  lifecycle, safeguarding and retention rule is unchanged.
+- **References (the approved scope).** Player ids (`player_id`,
+  `recipient_player_id`, `for_player_id`, the player actor and viewer ids): NO
+  key, TOLERANT (Q8c-a, 24 October 2026) — a live id resolves, a retained id
+  resolves to the retained record, a historically missing id is preserved and
+  counted (`/capabilities` → `dataLayer.domains.recruitmentContactsOffers
+  .unresolvedPlayerReferences` and `retainedPlayerReferences`;
+  `meta.recruitmentContactsOffersCutover.players` at import), never refused,
+  fabricated or deleted. Guardian ids (`recipient_guardian_id` of a contact
+  and of a revision snapshot, the guardian actor and viewer ids): NO key,
+  STRICT in code (Q8c-b, 24 October 2026) — a cutover or snapshot write naming
+  a guardian that is not in the FINAL guardians table is refused with ids
+  (`CONTACTS_OFFERS_GUARDIAN_MISSING`); no account is created, unlinked or
+  deleted to satisfy it. `org_id` → `orgs` and `case_id` → `recruitment_cases`
+  (RESTRICT) on both parents; `request_id` → `recruitment_requests`
+  (RESTRICT); the staff ids → `org_users` (RESTRICT, nullable) — each named
+  with ids before the engine would (`CONTACTS_OFFERS_ORG_MISSING`,
+  `CONTACT_OFFER_CASE_MISSING`, `CONTACT_REQUEST_DANGLING`,
+  `CONTACTS_OFFERS_USER_MISSING`). A case or request still named by a
+  RETAINED contact or offer cannot be removed by a snapshot write
+  (`CASE_STILL_REFERENCED`, `CONTACT_STILL_REFERENCED`, the table and ids
+  named at the preflight); a contact and its request must agree
+  (`CONTACT_REQUEST_MISMATCH`). The five offer pointers
+  (`current_revision_id`, `response_id`, `supersedes_revision_id`,
+  `superseded_by_revision_id`, `discarded_by_response_id`) are plain columns
+  stored AS WRITTEN under one rule over the FINAL offer collection: a target
+  within the same offer is valid; a target naming no row of its kind under
+  any offer of the final collection is an unresolved historical pointer —
+  kept verbatim, counted (`unresolvedPointerReferences`, per kind), never
+  refused (the read-time integrity report stays the judge); a target that
+  exists only under ANOTHER offer of the final collection is refused
+  (`OFFER_CHAIN_BROKEN`, ids and owner named — confirmed by the independent
+  review of `19f5ca8` as the reviewed ownership protection). `decision_id`,
+  `transaction_id`, the agreement, outbox and evidence ids are plain; the
+  dangling decision ids are counted. `contact_history` and `offer_history`
+  keep RESTRICT (removed explicitly before their owner); every other child
+  cascades. The drafted vocabulary CHECKs, the one-live-offer index, the
+  unique revision / response / document / receipt keys and the `SET NULL`
+  keys are withdrawn (review §3).
+- **Collection semantics and the write order** (review §6, through two save
+  hooks placed before the S8b core hook and after the recruitment hook): a
+  collection OMITTED from a save is retained whole; a collection SUPPLIED as
+  an array IS the entire final collection (an unlisted stored record departs;
+  `[]` empties it); a present `null` or non-array collection is refused,
+  never treated as an omission. The order: the preflight over the FINAL graph
+  → the departed contacts/offers (history and key rows explicitly, then the
+  parent) and the release of a surviving contact's OLD request pointer → the
+  S8b core and the S8a request create/update → the changed contacts (their
+  final `request_id`) and offers → the S8a request prune → the final
+  assertions (the pairs agree, the pointer rule, `foreign_key_check` empty).
+  Every refusal rolls the whole save back with ids only; a failed ordinary
+  save keeps its pending edits in memory for the next save; an aborted unit
+  of work restores both mirrors in place.
+- **Cutover (migration `0017`, one transaction, foreign keys off while the key
+  table is rebuilt, `foreign_key_check` empty before COMMIT).** Requires
+  `0016` and the S8b key-format marker; creates the nine tables; rebuilds the
+  key table's CHECK; imports the two blobs through the same preflight as a
+  snapshot write (identifiers, the case and request of every contact, the
+  pair, every organisation and staff id in its table, every guardian id in
+  the guardians table (Q8c-b), the pointer rule; the player ids counted live
+  / retained / missing and never refused) in array order; retires the two
+  blob rows; records counts in `meta.recruitmentContactsOffersCutover`. ANY
+  refusal aborts the whole migration with `CONTACTS_OFFERS_IMPORT_BLOCKED`
+  naming the specific refusal with positions, tables and ids (never a
+  subject, a body, a note, a message or a name): the boot stops, the blobs
+  and the revision are untouched, the next boot refuses the same way. A
+  PRESENT `null` blob is refused like an object or a string; only a genuinely
+  absent blob imports nothing. No production writer produces a refused row;
+  nothing is dropped or repaired. The boot log states the counts
+  (`recruitment contacts/offers: cutover imported …`); `/capabilities`
+  reports `dataLayer.domains.recruitmentContactsOffers` (`mode: 'live'`,
+  `rows`, `pendingWrites`, the player-reference counts, the pointer counts
+  per kind, the reference policy naming Q8c-a and Q8c-b). The admin backup
+  carries the two collections in their legacy shapes (insertion order, lists
+  in list order, keys reassembled); a restore into a new directory imports
+  them through `0017` row for row.
+- **Rollback — copy-only, and the one way back.** `npm run
+  rollback:recruitment-contacts-offers -- <data-dir> <fresh-empty-dir>`
+  (`scripts/recruitmentContactsOffersRollback.mjs`) opens the file read-only,
+  copies it, checks the S8b key-format marker FIRST and leaves it alone,
+  writes every contact and offer back into the two legacy blobs in insertion
+  order in the writers' literals (every nested list and object in list order,
+  keys reassembled, every absent, null, off-type and unknown field and every
+  pointer as recorded), removes the S8c owners' key rows and recreates
+  `idempotency_keys` with the `0016` owner CHECK, drops the nine tables,
+  removes the `0017` record and its meta key, advances the save revision,
+  checks every foreign key, VACUUMs and revalidates the copy (the two blobs
+  holding exactly the counts the tables held, the S8a/S8b key rows row for
+  row, the marker present, every other table exactly as in the source).
+  **Nothing written since the cutover is lost.** Exit codes: 0 done, 1 usage
+  / output not empty, 4 a later schema step, 5 never applied `0017`, 6 a
+  recorded `0016` whose key format is not the one this build reads (the S8b
+  boundary: use the writing build's S8b tool on a copy — nothing is read, the
+  output is removed), 10 a recorded `0017` whose tables are missing. To go
+  further back, run `scripts/recruitmentCasesRollback.mjs` on THIS tool's
+  output (it refuses a file carrying `0017`), then the S8a tool, and so on
+  down the chain. Re-upgrading the copy (booting this build on it) imports
+  the blobs back as the same rows, the writes the previous build made on the
+  copy included — proven on the actual accepted `7072dd9` build
+  (`SCOUTBOX_PRE_S8C_SERVER`, `scripts/testRecruitmentContactsOffersServer.mjs`:
+  it serves the same contact and offer from its blobs, writes a contact and
+  an offer revision into them, and this build re-upgrades the copy with those
+  writes exactly).
+- **DANGER — never boot the previous build directly on a `0017` file.**
+  Measured on the actual `7072dd9` build: the migration runner skips the
+  record it does not know; its boot-contract integrity check logs `INTEGRITY
+  STORE_MISSING recruitmentContacts — required collection(s) absent after
+  migration; nothing was repaired.` — and then it **LISTENS**: `GET
+  /org/rooms/:id/contacts/:cid` answers 500 (its contact routes find no
+  container — the legacy `m230_004` step is already recorded in the file, so
+  that build does not re-create `recruitmentContacts`), `GET
+  /org/rooms/:id/offers` answers 200 with no offer (its offers module gives
+  itself an empty container), and its saves write ONE empty blob
+  (`recruitmentOffers []`) back beside the untouched tables (the save
+  revision advances; no table row changes). A club using that server sees no
+  contact and no offer. This build, started on that file again, drops the
+  stale empty blob at attach and serves the tables again — but there is still
+  no way back to the old build except the rollback tool on a copy. Never a
+  restore over a live directory.
+
+**Cutover procedure** (the S8a/S8b pattern): 1. dry run on a copy of the live
+directory — boot this build with `DATA_DIR` pointing at the copy, check the
+boot log's `recruitment contacts/offers: cutover imported …` line (the counts
+per collection, the absent / off-type / unknown counts, the player references
+live / retained / missing, the unresolved pointers per kind, the key rows
+rebuilt) and that `/capabilities` reports `0017_recruitment_contacts_offers`
+and `domains.recruitmentContactsOffers.rows` equal to the blobs' counts; a
+refusal names the positions, tables and ids to fix by hand on the data; 2.
+back up (`POST /admin/backup`) and stop the server; 3. start this build — the
+boot records `0017` in its one transaction; 4. rollback, if needed, as above.
+**Not measured as faster, and not measured at all in this milestone:** the two
+blobs leave every save and a changed record lands as its own rows, but the
+change tracking still serialises every record per save; the bench was not
+run; the whole-snapshot-write objective is not met (packages, signings,
+follow-ups and the later collections are still blobs — S8d). S8d is not
+started; the next free migration identifier is `0018` (not reserved).
 
 ## Reverse proxy and client addresses
 Per-IP controls (the `/auth` brute-force limiter, sharing-link limits, request

@@ -93,7 +93,7 @@ async function inviteAndAccept(S, maria, pid, token, { proposedDate = '2026-11-0
 
 await test('[cutover] a fresh boot records 0015_recruitment (followed by S8b\'s 0016 since that step) and the fifteen tables exist with channels carrying the real request key; the direct invitation and the adult\'s acceptance land as rows (the request answered, the trial with its history and keys.accept, the thread naming the request through the key) with no blob behind them; /org/requests, /org/trials, /player/inbox and /player/trials answer as before; the report lands in trial_reports and the day staff in trial_day_staff; the direct route still answers REQUEST_PENDING; a SIGKILL right after the acceptance loses nothing; /capabilities counts the rows', async () => {
   const dir = tempDir('s8a-boot'); const S = await boot(dir);
-  assert.equal(applied(dir).at(-2), MIGRATION, 'the S8a migration, recorded before S8b\'s 0016'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
+  assert.equal(applied(dir).at(-3), MIGRATION, 'the S8a migration, recorded before S8b\'s 0016 and S8c\'s 0017'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   assert.ok(qAll(dir, 'PRAGMA foreign_key_list(channels)').some((r) => r.table === 'recruitment_requests'), 'channels.request_id is a real key');
   const maria = await orgLogin(S); const { pid, token } = await signupAdult(S, 'Invited Adult');
   const dup = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'First.', proposedDate: '2026-11-01', venue: 'G', notes: '' }, maria); assert.equal(dup.status, 201);
@@ -189,7 +189,8 @@ await test('[cutover] the admin backup carries requests and trials in the legacy
   }
   // the rollback copy
   // since 0016 a live file carries S8b too: the S8b tool runs first (copy-only), then the S8a tool on its output
-  const mid = tempDir('s8a-mid'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), dir, mid], { stdio: 'pipe' });
+  const pre = tempDir('s8a-pre'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentContactsOffersRollback.mjs'), dir, pre], { stdio: 'pipe' }); // the S8c tool first (a live file carries 0017)
+  const mid = tempDir('s8a-mid'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), pre, mid], { stdio: 'pipe' });
   const copy = tempDir('s8a-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), mid, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
   assert.equal(live(copy), false); assert.equal(tableExists(copy, 'trials'), false); assert.equal(blobOf(copy, 'requests').length, 2); assert.equal(blobOf(copy, 'trials').length, 1); assert.deepEqual(blobOf(copy, 'trials'), snapshot.db.trials, 'the blob equals the backup\'s legacy shape');
   assert.equal(qAll(copy, 'PRAGMA foreign_key_list(channels)').some((r) => r.table === 'recruitment_requests'), false, 'channels back to the 0012 definition');
@@ -246,7 +247,8 @@ await test('[cutover] F1 (review of 6d77aa7) through the real routes: an invitat
   const restored = tempDir('s8a-f1-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); maria = await orgLogin(S); await replayS(S, maria, 'the restore'); await S.stop();
   { const store = openStore(restored); expectKeys(store.load().db.trials.find((x) => x.id === TID).keys, 'read back from the restored tables'); store.sqlite.close(); }
-  const mid = tempDir('s8a-f1-mid'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), restored, mid], { stdio: 'pipe' }); // the S8b tool first (a live file carries 0016)
+  const pre = tempDir('s8a-f1-pre'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentContactsOffersRollback.mjs'), restored, pre], { stdio: 'pipe' }); // the S8c tool first (a live file carries 0017)
+  const mid = tempDir('s8a-f1-mid'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), pre, mid], { stdio: 'pipe' }); // then the S8b tool
   const copy = tempDir('s8a-f1-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), mid, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
   expectKeys(blobOf(copy, 'trials').find((x) => x.id === TID).keys, 'the rollback blob');
   const OLD = process.env.SCOUTBOX_PRE_S8A_SERVER;
@@ -272,7 +274,8 @@ await test('[cutover] F2 (review of 6d77aa7) through a real boot: a pre-S8a file
   const setNull = (where, name) => { const s = new DatabaseSync(path.join(where, 'scoutbox.db')); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run(name, 'null'); s.close(); };
   // a pre-S8a file produced by this build's own rollback tool (no old build needed), one collection set to null
   for (const name of ['trials', 'requests']) {
-    const mid = tempDir(`s8a-f2-${name}-mid`); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), dir, mid], { stdio: 'pipe' }); // the S8b tool first (a live file carries 0016)
+    const pre0 = tempDir(`s8a-f2-${name}-pre`); execFileSync(process.execPath, [path.join(HERE, 'recruitmentContactsOffersRollback.mjs'), dir, pre0], { stdio: 'pipe' }); // the S8c tool first (a live file carries 0017)
+    const mid = tempDir(`s8a-f2-${name}-mid`); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), pre0, mid], { stdio: 'pipe' }); // then the S8b tool
     const pre = tempDir(`s8a-f2-${name}`); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), mid, pre], { stdio: 'pipe' }); assert.equal(live(pre), false); setNull(pre, name);
     const first = await refusedBoot(pre, name, `${name}: first boot`); const second = await refusedBoot(pre, name, `${name}: second boot`); assert.deepEqual(second, first, `${name}: the next boot refuses the same way`);
     rm(pre);

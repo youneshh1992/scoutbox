@@ -1,29 +1,40 @@
 # S8c readiness review — recruitment contacts and offers as tables
 
-**Status: PREPARED, NOT IMPLEMENTED — CORRECTED DESIGN, PENDING INDEPENDENT ACCEPTANCE (23–24 October 2026).** Written
-on `feat/sqlite-schema` at `7072dd9`, the commit at which S8b was independently accepted (`sqlite-migration-plan.md`
-§D.9; `s8b-readiness-review.md` §12), **corrected on 24 October 2026 after the independent review of `854d035`**
-(which accepted the S8b acceptance record and did NOT accept this design: two P2 findings — F1 the offer-pointer
-contract contradicted itself between §2.2 and §6 G; F2 the design model executed another order than §6 and its guard
-omitted one pointer) **and corrected again on 24 October 2026 after the independent review of `a5a7ed9`** (one P2
-finding, R1: the design model's P preflight merged stored offers that a supplied collection no longer listed into the
-final graph while F0 deleted them, so a valid partial snapshot was refused as foreign — the final offer COLLECTION, not
-the omitted row, now decides; §13 is the correction record, §6 the single pointer rule, the collection semantics and
-the order as corrected). Nothing of S8c is
-implemented, stubbed or reserved: no migration, no repository module, no change to a route, a registered definition or
-a test. The next free migration identifier is **`0017`** (`repositories/index.mjs:60` ends at `m0016`;
-`repositories/migrations/` holds `0001`–`0016`); it is **not reserved** here. S8d (signing packages, signings,
-follow-ups, outcome reports) is not started. This document awaits its own independent review; the one genuine product
-decision it isolates (§9) is a brief to be put to the Founder only after that review. Nothing here is production,
-release, security, legal-compliance, merge or deployment approval, and nothing here authorises a change to a route, a
-permission, the recipient selection, safeguarding, the lifecycle or retention.
+**Status: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (24 October 2026, one commit on top of `19f5ca8`).** The design
+below was written on `feat/sqlite-schema` at `7072dd9`, the commit at which S8b was independently accepted
+(`sqlite-migration-plan.md` §D.9; `s8b-readiness-review.md` §12), corrected on 24 October 2026 after the independent
+review of `854d035` (F1 the offer-pointer contract, F2 the model's order and guard) and again after the independent
+review of `a5a7ed9` (R1 the final offer COLLECTION decides, never the omitted row) — §13 and §13.1 are the correction
+records, §6 the single pointer rule, the collection semantics and the order as corrected — and **independently
+accepted for implementation at `19f5ca8` on 24 October 2026**: "R1 CLOSED. No remaining actionable finding … The
+corrected S8c design is accepted for implementation subject to the Founder's explicit Q8c-a and Q8c-b decisions. This
+accepts the design, not an implemented S8c repository." That review also confirmed the one engineering statement §9
+put forward — the narrow refusal of a string pointer whose target exists only under ANOTHER offer of the FINAL
+collection — as the reviewed ownership protection (not a product decision; access, retention and deletion unchanged).
+**The Founder then answered the two product questions on 24 October 2026**, recorded verbatim in §9 and §14 and not to
+be asked again: **Q8c-a "Approve tolerant (Recommended)"** (the player references on the nine tables carry no key;
+live, retained and historically missing ids resolve, are counted and never refused, fabricated or deleted) and
+**Q8c-b "Approve strict checks (Recommended)"** (the guardian references are checked in code against the FINAL
+guardians table, ids only, no key; no account is created, unlinked or deleted to satisfy a refusal). The
+implementation landed in one commit on top of `19f5ca8`: migration **`0017_recruitment_contacts_offers`**
+(REGISTERED — `repositories/index.mjs` ends at `m0017`, `repositories/migrations/` holds `0001`–`0017`),
+`repositories/recruitmentContactsOffers.mjs`, the copy-only rollback tool, the two failing-first suites and the
+adaptations the chain and registry tests needed. **§14 is the implementation record**: what landed, every departure
+from the proposed sections, the MEASURED behaviour of the actual `7072dd9` build on a `0017` file (§8 predicted it;
+§14 states what happened), the adjustments outside the new modules, the batteries on the final tree and on the
+untouched `7072dd9` checkout, and the gates. S8d (signing packages, signings, follow-ups, outcome reports) is not
+started; the next free migration identifier is `0018` (not reserved). This implementation awaits its own independent
+review. Nothing here is production, release, security, legal-compliance, merge or deployment approval, and nothing
+here authorises a change to a route, a permission, the recipient selection, safeguarding, the lifecycle or retention.
 
 What this document is for: the survey the acceptance of S8b asked for ("establish the exact bounded collection/table
 list from current producers and consumers before proposing implementation"), the field-by-field record of the two
 collections from their writers' literals, the drafted constraints judged against what the current code accepts and
 keeps, a concrete migration / write / rollback design with two synthetic design probes, the ordered checklist and the
-acceptance tests — so that the implementation milestone can start from a reviewed brief, as S8b did from the design
-accepted at `4d2c74b`.
+acceptance tests — so that the implementation milestone could start from a reviewed brief, as S8b did from the design
+accepted at `4d2c74b`. It did: §1–§13 are kept as the accepted design (the text the review of `19f5ca8` accepted,
+unchanged except where a sentence stated a prediction or an open question that §14 now closes, each marked in place);
+§14 is the record of the implementation against them.
 
 Standing rules that bind this design: the Founder's recorded decisions Q7a/Q7b/Q7c (the S8a tables) and Q8a (the S8b
 tables) apply to those tables and are **not extended** to the S8c tables (§9 asks the questions they do not cover);
@@ -46,7 +57,9 @@ the review of `a5a7ed9` received is kept beside it as `probes/baseline/` and is 
 `review-a5a7ed9-final-graph.mjs` reproduces R1 against; the ORIGINAL 31-check model as `probes/baseline-854d035/`, the
 subject of `review-854d035-design-reproductions.mjs`). Both exit 0 on Node v22.22.0 and v24.19.0; source and results
 travel with the handoff (§11). A design model
-proves the design's own consistency; it is not evidence about an implemented S8c repository or the real server.
+proves the design's own consistency; it is not evidence about an implemented S8c repository or the real server — that
+evidence is the implementation's own suites (§14), to which the R1 and F1/F2 cases of the two reviewer scripts were
+ported against the REAL repository and store.
 
 ## 1. The bounded scope — two blob collections, nine tables, one shared table broadened
 
@@ -435,7 +448,7 @@ success is published before the required persistence and no notification is sent
 that exist today (the courtesy e-mail before the save; the agent notification before the save) are today's behaviour,
 recorded here and not redesigned — a change there is a product/engineering decision outside a storage step.
 
-## 8. Copy-only rollback to the accepted pre-S8c build (`7072dd9`) — proposed
+## 8. Copy-only rollback to the accepted pre-S8c build (`7072dd9`) — proposed; implemented as written (§14)
 
 `scripts/recruitmentContactsOffersRollback.mjs` (`rollback:recruitment-contacts-offers`), the S8b tool's contract
 (`repositories/recruitmentCasesRollback.mjs:1-36`) applied: the source file opened read-only and copied with `VACUUM
@@ -455,18 +468,31 @@ re-upgrade (migration `0017` on the copy) imports the blobs back as the same row
 the two collections through `readTableBacked` / `writeTableBacked` and a restore into a new directory imports them
 through `0017`.
 
-**The old build on a `0017` file — predicted, NOT measured here.** `7072dd9` booted directly on a cut-over file
-would find no `recruitmentContacts` blob and no `recruitmentOffers` blob; its migration registry (`m230_004`,
-`m182/migrations.mjs:333`) and `registerOffers` (`m28/index.mjs:63`) would CREATE both as empty arrays, the server
-would listen, serve no contact and no offer, and write two empty blobs beside the untouched tables — the S8b
-measurement for the five case collections (`s8b-readiness-review.md` §12) repeated for two collections the old build
-re-creates by itself. The implementation measures it on the actual build (`SCOUTBOX_PRE_S8C_SERVER = 7072dd9`) and
-writes the DANGER line into `OPERATIONS.md`; the rollback chain becomes S8c tool → S8b tool → S8a tool.
+**The old build on a `0017` file — predicted here, MEASURED by the implementation (§14).** The prediction as written
+at design time: `7072dd9` booted directly on a cut-over file would find no `recruitmentContacts` blob and no
+`recruitmentOffers` blob; its migration registry (`m230_004`, `m182/migrations.mjs:333`) and `registerOffers`
+(`m28/index.mjs:63`) would CREATE both as empty arrays, the server would listen, serve no contact and no offer, and
+write two empty blobs beside the untouched tables. **What the actual build did** (`SCOUTBOX_PRE_S8C_SERVER = 7072dd9`,
+`scripts/testRecruitmentContactsOffersServer.mjs`, the MEASURED line printed on every run): it LISTENED; its boot log
+reads `INTEGRITY STORE_MISSING recruitmentContacts — required collection(s) absent after migration; nothing was
+repaired.`; `GET /org/rooms/:id/contacts/:cid` answered **500** (the contact routes find no container — the legacy
+`m230_004` step is already recorded in the file's schema version, so that build does NOT re-create
+`recruitmentContacts`), `GET /org/rooms/:id/offers` answered 200 with **0 offers** (`registerOffers`'s `??= []` gives
+it an empty container); the nine tables were untouched; the save revision advanced 16 → 18; **ONE blob was written,
+`recruitmentOffers []`** — not two as predicted; this build, started on that copy, drops the stale empty blob at attach
+and serves the contact and the offer from the tables again. The DANGER line in `OPERATIONS.md` states the measured
+behaviour; the rollback chain is S8c tool → S8b tool → S8a tool.
 
 ## 9. Decisions — what is the Founder's and what is engineering
 
-**The brief below is NOT to be put to the Founder until this design has been independently reviewed.** It reuses no
-earlier approval beyond its recorded scope: Q7a/Q7c covered the S8a tables, Q8a the S8b tables.
+**Answered (24 October 2026).** The independent review of `19f5ca8` cleared this brief to ask ("the brief in readiness
+review §9 is now cleared to ask"); the Founder answered both questions on 24 October 2026, explicitly for these
+tables, recorded verbatim and not to be asked again: **Q8c-a "Approve tolerant (Recommended)"** — option (1) below;
+**Q8c-b "Approve strict checks (Recommended)"** — option (1) below. Both are implemented as the options describe (§14;
+`repositories/recruitmentContactsOffers.mjs` header; `/capabilities` → `dataLayer.domains.recruitmentContactsOffers
+.references`). No database key to a player or guardian account is implied by either answer. The brief as it was put,
+kept as the record: it reuses no earlier approval beyond its recorded scope — Q7a/Q7c covered the S8a tables, Q8a the
+S8b tables.
 
 **Q8c-a — the player references on the S8c tables (product policy).** Affected: `recruitment_contacts.player_id` and
 `recipient_player_id`; `recruitment_offers.player_id`; `offer_revisions.recipient_player_id`;
@@ -499,9 +525,18 @@ id uniqueness (§3). **Put forward for the review's explicit confirmation (an en
 today's storage, not a product question and not assumed authorised):** the refusal of a KNOWN FOREIGN-OWNER offer
 pointer (§6, the pointer rule) — the blob store would save it, no writer can produce it, and the accepted S8b applies
 the same ownership protection to decision chains; every other pointer state, the unresolved historical one included,
-imports and is kept exactly as today.
+imports and is kept exactly as today. **Confirmed by the independent review of `19f5ca8` (24 October 2026)** as the
+reviewed ownership protection: "a target unresolved everywhere is retained verbatim and counted, while existing
+read-time corruption handling remains in place; an own target remains valid even if another offer uses the same target
+id"; implemented so (§14).
 
 ## 10. Implementation checklist (ordered; each item with its acceptance criterion) and the test plan
+
+**Carried out on 24 October 2026 in this order (§14 the record):** one migration and one module for both collections
+(the recommended slice); items 1–3 tests-first on the unchanged `19f5ca8` tree (the suites fail there on concrete
+assertions — the imports of the absent modules and the `0017` registration; the logs travel with the handoff), items
+4–10 as listed; the existing suites named below were run on the final tree and on the untouched `7072dd9` checkout
+and classified (§14).
 
 **Slices.** One migration (`0017`, when approved) and one repository module for both collections are recommended: the
 two collections are independent of each other (no reference either way), each depends only on tables already live
@@ -588,28 +623,42 @@ untouched `7072dd9` checkout, classified (the S8b battery record is the template
 - The reviewer's unchanged bundle for `7072dd9` re-run on the accepted tree (recovery with the genuine `b7c0dd0` and
   `2fe05df` creators, the two format-boundary runs, the reproductions, the two matrices, the key transitions, the
   old-format probe and the boot refusal), Node 22 and 24, all exit 0 (`logs/reviewer/`).
-- The gates after the final edits of this milestone: backend `npm test` on Node 22 and 24 with the eight historical
-  builds booted for real, the Player suite (`logs/gates/`).
+- The gates after the final edits of the design milestones: backend `npm test` on Node 22 and 24 with the eight
+  historical builds booted for real, the Player suite (`logs/gates/` of those handoffs).
 - The line-level references of §1–§7 were verified against `7072dd9` on 23 October 2026.
+- **The implementation milestone (§14; its handoff):** the independent review of `19f5ca8` verbatim (the verdict, its
+  run record and logs; its manifest re-verified); the two Founder answers as given; the failing-first logs of the two
+  new suites on the unchanged `19f5ca8` tree (the implementation files moved aside; `logs/failing-first/`); the final
+  runs of the two suites with the genuine `7072dd9` build wired (the MEASURED line); the reviewer's unchanged
+  `review-a5a7ed9-final-graph.mjs` and `review-854d035-design-reproductions.mjs` with `--expect-corrected` against the
+  corrected model, both probes and the baselines unchanged; the battery record (every §10 battery on the final tree and
+  on the untouched `7072dd9` checkout, classified); the gates after the final edits — backend `npm test` on Node 22 and
+  Node 24 with the NINE historical builds booted for real (`7072dd9` added as `SCOUTBOX_PRE_S8C_SERVER`), the Player
+  suite — with versions, SQLite versions, counts, exits captured immediately, skips and `EADDRINUSE` counts; the
+  fresh-extraction record on both runtimes.
 
 ## 12. Limitations and what remains open
 
 - The whole-snapshot-write objective is NOT met by S8c: packages, signings, follow-ups, outcome reports (S8d) and every
   later collection are still blobs rewritten by each save; no performance gain is claimed or measured.
-- The old build's behaviour on a `0017` file is predicted (§8), not measured; the implementation measures it.
+- The old build's behaviour on a `0017` file was predicted (§8) and is now MEASURED (§8, §14): it listens, serves no
+  contact (500) and no offer (an empty list), writes ONE empty blob (`recruitmentOffers`), touches no table row; the
+  prediction of two blobs was wrong by one, the conclusion (the rollback tool on a copy is the only way back) stands.
 - The `keys` act order inside a map is not the writer's after a round trip when held and row acts interleave (probe 1,
   OBSERVED): an engine property shared with S8a/S8b, harmless to every reader, recorded so a reviewer comparing raw
   JSON byte for byte is not surprised; a canonical (key-order-insensitive) comparison is the right test, as
-  `m23DecisionPersistence` already uses.
+  `m23DecisionPersistence` already uses and as the new suites use (`canon`, `recCanon`).
 - `offer_revisions.id` is indexed, not unique (§3); S8d's drafted key to it needs a decision then (§3, S8d note).
-- The two product questions of §9 are open until the Founder answers them after the independent review of this
-  design; everything else can be implemented without them. The brief is NOT cleared: it waits for the independent
-  acceptance of the corrected design.
+- The two product questions of §9 are ANSWERED (24 October 2026, after the independent acceptance of the design at
+  `19f5ca8`): Q8c-a tolerant, Q8c-b strict; implemented (§14).
 - The refusal of a known foreign-owner offer pointer (§6) is the one statement of this design that goes beyond today's
-  storage; it is put forward for confirmation (§9), not assumed. After the review of `a5a7ed9` it is narrower than the
-  first correction stated: "known" means owned by an offer OF THE FINAL COLLECTION; an offer the supplied collection no
-  longer lists owns nothing, and a partial snapshot that drops it imports (§6, §13).
+  storage; it was put forward for confirmation (§9) and CONFIRMED by the review of `19f5ca8`. After the review of
+  `a5a7ed9` it is narrower than the first correction stated: "known" means owned by an offer OF THE FINAL COLLECTION;
+  an offer the supplied collection no longer lists owns nothing, and a partial snapshot that drops it imports (§6, §13).
 - Today's pre-save side effects (the courtesy e-mail, the agent notifications) are recorded in §7 and unchanged.
+- Not measured, not claimed: a faster save or a smaller file (the change-tracking fingerprint still serialises every
+  record per flush; the bench of item 10 was not run); the whole-snapshot-write objective is still not met (S8d and
+  the later collections are blobs).
 
 ## 13. Correction record — after the independent reviews of `854d035` and `a5a7ed9` (24 October 2026)
 
@@ -699,3 +748,199 @@ implemented-repository evidence for S8c exists, because S8c is not implemented.
 not implemented, not accepted; `0017` not reserved and no stub; S8d not started; Q8c-a and Q8c-b unanswered and the
 brief not cleared; the foreign-owner refusal (now explicitly over the final collection) still put forward for
 confirmation, not assumed.
+
+**Status after the independent review of `19f5ca8` (24 October 2026):** R1 CLOSED; "the corrected S8c design is
+accepted for implementation subject to the Founder's explicit Q8c-a and Q8c-b decisions" (the design, not an
+implemented repository); the foreign-owner refusal confirmed as the reviewed ownership protection; the brief cleared
+and then answered (Q8c-a tolerant, Q8c-b strict — §9). Implemented on top of `19f5ca8` — §14.
+
+## 14. Implementation record (24 October 2026, one commit on top of `19f5ca8`)
+
+**Preconditions, recorded.** The design acceptance: the independent review of `19f5ca8` (its verdict, run record and
+logs travel verbatim in the handoff) — R1 CLOSED, the design accepted for implementation subject to Q8c-a/Q8c-b; the
+reviewer's unchanged scripts exit 0 with `--expect-corrected` against the corrected model and reproduce their
+findings against the baselines; the backend gate of that review passed independently on Node 24 after a sandbox
+permission (35 suites / 421 checks, eight historical builds). The Founder's explicit answers of 24 October 2026, given
+for these tables (no earlier answer and no recommendation was treated as consent): **Q8c-a "Approve tolerant
+(Recommended)"**; **Q8c-b "Approve strict checks (Recommended)"**. The starting tree: `19f5ca8` (parent `a5a7ed9`),
+clean; `0017` verified free (`repositories/index.mjs` ended at `m0016`, `repositories/migrations/` at `0016`) before
+it was registered. The S8b acceptance at `7072dd9` is untouched: no S8b file's behaviour changed; the S8b key-format
+marker is read, never written, by anything of S8c.
+
+**What landed.** `repositories/recruitmentContactsOffers.mjs` (the shapes of §2 as specs over the S8a engine, which
+`recruitment.mjs` exports — `encode`, `decodeLevel`, the DDL helpers, `idempotencyKeysDdl`; the two collection
+descriptors `CONTACTS` / `OFFERS` with the nine tables, the indexes and the §3 constraints — `org_id` and `case_id`
+RESTRICT on both parents, `request_id → recruitment_requests` RESTRICT, the staff ids RESTRICT and nullable, NOT NULL
+only on `id`, `org_id`, `case_id`, `player_id`, the history tables RESTRICT and every other child CASCADE; the generic
+writer / reader / deleter; `validateEntry` (the table dispatcher's contract: a present collection must be an array of
+records with the identifying strings); `classifyPointers` — the pointer rule of §6 over the FINAL offer collection for
+`POINTER_KINDS` (`current_revision_id`, `response_id`, `supersedes_revision_id`, `superseded_by_revision_id`,
+`discarded_by_response_id`); `preflight` (P, ids only, over the final combined graph: cases, requests, departing
+requests and cases, organisations, staff, guardians, the retained rows); `stageDepartures` (F0), `releaseRequests` (R),
+`stageRecords` (A′/D′); `assertContactsOffersConsistent` (G: the pair agreement, the five pointers by SQL over the
+tables, `foreign_key_check` empty); the counters `unresolvedPlayerReferences`, `retainedPlayerReferences`,
+`unresolvedPointerReferences` (per kind, plus the dangling decision ids); `CONTACTS_OFFERS_SNAPSHOT` (`read`, `begin`,
+`write`, `assert` — the positions of §5 inside `writeTableBacked`); `importRecruitmentContactsOffersBlobs`;
+`createRecruitmentContactsOffersRepository` — the two read-only ARRAY views of plain mutable records (`markView`,
+mutation refused), `addContact` / `addOffer`, the committed fingerprints and the staged flush, the graph memento
+(`snapshotState` / `restoreState`) the store's unit of work takes and restores, the two save hooks `preHook` (α: P,
+F0, R) and `writeHook` (β: A′, D′, G), the hook-registration check (a staged mutation before both hooks are taken is
+refused), `exportContacts` / `exportOffers` / `exportAll`). `repositories/migrations/0017_recruitment_contacts_offers.mjs`
+(registered; requires `0016` and the S8b key-format marker first — `assertKeyFormat`, the marker read and left as it
+is; refuses pre-existing tables; creates the nine tables; rebuilds `idempotency_keys` with the owner CHECK broadened to
+the two parents — `rebuildTable(sqlite, 'idempotency_keys', idempotencyKeysDdl(S8C_KEY_OWNERS))`, the `0016` helper,
+every S8a/S8b row byte for byte; imports the two blobs through the same preflight as a snapshot write, in array order;
+retires the two blob rows; records counts only in `meta.recruitmentContactsOffersCutover`, the rebuild named). Any
+refusal aborts the whole migration with `CONTACTS_OFFERS_IMPORT_BLOCKED` naming the specific refusal —
+`CONTACT_OFFER_CASE_MISSING`, `CONTACT_REQUEST_DANGLING`, `CONTACT_REQUEST_MISMATCH`, `CONTACTS_OFFERS_ORG_MISSING`,
+`CONTACTS_OFFERS_USER_MISSING`, `CONTACTS_OFFERS_GUARDIAN_MISSING` (Q8c-b), `OFFER_CHAIN_BROKEN`,
+`CONTACTS_OFFERS_KEY_VIOLATION`, and at a snapshot write `CASE_STILL_REFERENCED` / `CONTACT_STILL_REFERENCED` — with
+collections, positions, tables and ids, never a subject, a body, a note, a message or a name; a present `null` or
+non-array blob is refused like a malformed entry, only an absent blob imports nothing.
+`repositories/recruitmentContactsOffersRollback.mjs` and `scripts/recruitmentContactsOffersRollback.mjs`
+(`npm run rollback:recruitment-contacts-offers -- <data-dir> <fresh-empty-dir>`; §8 as designed: `VACUUM INTO` a copy,
+the refusals `LATER_SCHEMA` (exit 4), `NOT_CUT_OVER` (5), `FORMAT_UNSUPPORTED` for the S8b marker checked FIRST and
+left alone (6, the message `RECRUITMENT_CASES_FORMAT_UNSUPPORTED` as the S8b tool's), `UNEXPECTED_SCHEMA` (10),
+`OUTPUT_NOT_EMPTY` / `NO_SOURCE` (1); in one transaction the two blobs written back in insertion order in the
+writers' literals, the S8c owners' key rows removed and the key table rebuilt with the S8b owner CHECK, the nine tables
+dropped, the `0017` record and meta key removed, `saveSeq` advanced; revalidated before reporting, the untouched
+tables compared to the source). `repositories/index.mjs` (`DATA_MIGRATIONS` + `m0017`; `TABLE_BACKED` + the two
+collections; `readTableBacked` reads the S8c snapshot; `writeTableBacked`: `CONTACTS_OFFERS_SNAPSHOT.begin` BEFORE the
+S8b snapshot's begin — P, F0, R —, `.write` after `RECRUITMENT_SNAPSHOT.replace` — A′, D′ —, `.assert` after the S8b G;
+`attachDataLayer`: the repository created with accessors to the recruitment repository and the cases view, `preHook`
+registered before `recruitmentCases.coreHook()`, `writeHook` after `recruitment.saveHook()`, the cutover log line
+`recruitment contacts/offers: cutover imported …`, the stale in-memory arrays dropped at attach with a warning, the two
+views published, the boot entry; the `/capabilities` domain `recruitmentContactsOffers` — `mode`, `rows`,
+`pendingWrites`, `unresolvedPlayerReferences`, `retainedPlayerReferences`, `unresolvedPointerReferences`, `writeMode`,
+`references` naming Q8c-a and Q8c-b). The caller conversions, storage only: `m23/contactRoutes.mjs` (the two `push`
+sites — the create route and the external record — → `recruitmentContactsOffers.addContact`), `m28/index.mjs` (the
+`push` → `addOffer`), `server.mjs` (the repository passed into the M23 and M28 contexts); `m23/index.mjs` and
+`m182/migrations.mjs` keep their comments truthful (the data layer publishes the view since `0017`). The admin backup is
+unchanged (`m13/enterprise.mjs` serialises the two views — the mirrors — as it serialised the arrays; the writers'
+literals, insertion order, keys reassembled); a restore into a new directory imports them through `0017`. File 02
+amended (the drafted contact and offer sections replaced by the generated definitions with "draft versus implemented"
+notes — the §3 verdicts —, the key table's CHECK shown as `0017` leaves it, a two-line status block); `package.json`
+(the two suites chained — `testRecruitmentContactsOffers` after `testRecruitmentCases`,
+`testRecruitmentContactsOffersServer` at the end — and the rollback script). The fixtures
+`scripts/recruitmentContactsOffersTestFixtures.mjs` (every literal of §2: the draft, the sent and answered contact, the
+null-key send, the external record, the pre-P5.6E contact, the off-type contact, the draft / issued-and-accepted /
+declined / legacy offers with the legacy non-array `keys.issue`, the missing `readReceipts`, the unresolved
+`currentRevisionId` and `decisionId`, prototype-named own keys, the request literals of the pair) and the two suites
+`scripts/testRecruitmentContactsOffers.mjs` (9 checks) and `scripts/testRecruitmentContactsOffersServer.mjs` (3
+checks). Every public route, permission, audience, lifecycle, safeguarding and retention rule is unchanged; the route
+payloads are unchanged; nothing is deduplicated, repaired, fabricated or dropped.
+
+**Departures from the proposed sections, each recorded here.**
+- §5 proposed two hooks (α before the S8b core hook, β after the recruitment hook): implemented exactly so; the
+  snapshot positions of §5 likewise (begin before the S8b begin, write after the S8a replace, assert after the S8b G).
+- Q8c-b is applied to the FINAL graph, not only to supplied records: when a snapshot write supplies the guardians (the
+  identity pair rewritten), a RETAINED contact or revision snapshot naming a guardian that leaves the final guardians
+  table is refused too (`CONTACTS_OFFERS_GUARDIAN_MISSING`, ids), so no committed graph names a missing guardian; §6
+  P spoke of the supplied records' guardian ids only. No account is created, unlinked or deleted to satisfy it.
+- The cutover record's `withAbsentKeys` and `withOfftypeValues` follow the S8a/S8b rule — absence is recorded at EVERY
+  level and a null nested object is an off-type value — so the fixture's four contacts and four offers count 4 / 4 and
+  6 off-type; nothing is backfilled.
+- The refusal names are as listed above; §6 named them generically.
+- The reviewer scripts' R1 and F1/F2 cases were ported to the REAL repository and store rather than re-run against a
+  model only: for each of the five pointer kinds both R1 directions, the true foreign-owner refusal with both owners
+  present (rows and counts unchanged, the unchanged retry landing), `[]` versus omitted, and the explicit-`null`
+  refusal; the model probes and their baselines are unchanged and still run.
+- Item 10's bench was not run: no boot, file-size or save-time figure is measured or claimed.
+
+**Measured, not assumed (the actual `7072dd9` build, `SCOUTBOX_PRE_S8C_SERVER`).** Booted DIRECTLY on a copy of a
+`0017` file it LISTENS: the migration runner skips the record it does not know; the boot-contract check logs
+`INTEGRITY STORE_MISSING recruitmentContacts — required collection(s) absent after migration; nothing was repaired.`
+(the legacy `m230_004` step is recorded in the schema version, so that build does NOT re-create the contacts
+container — §8 predicted it would); `GET /org/rooms/:id/contacts/:cid` answers 500 and `GET /org/rooms/:id/offers`
+200 with no offer (`registerOffers`'s `??= []` gives it an empty container); the save revision advances 16 → 18; ONE
+blob is written back — `recruitmentOffers []` — beside the untouched tables; no table row changes; this build, started
+on that copy, drops the stale blob at attach and serves the contact and the offer from the tables. The §8 prediction
+("two empty blobs") was wrong by one blob; its conclusion stands — a club using that server sees no contact and no
+offer, and the rollback tool on a copy is the only way back. On the rollback copy the old build serves the same
+contact and offer from its blobs, writes a contact (into a second player's planned room — the first room is at
+`offer_made`, where `planContact` is required first) and a revision into them, and this build re-upgrades the copy with
+those writes exactly.
+
+**Adjustments outside the new modules (each stated in its file).** Every suite that walks the rollback chain runs the
+S8c tool before the S8b tool (a live file carries `0017`): the module chains in `testRecruitment.mjs`,
+`testSafetyAudit.mjs`, `testNotifications.mjs`, `testPlayerSubrecords.mjs`, `testOneTimeCodes.mjs`,
+`testCoreIdentityRollback.mjs`, `testMediaDeletions.mjs`, `testOrgs.mjs`, `testOutboxPush.mjs`, `testSessions.mjs`; the
+CLI chains in `testChannelsServer.mjs`, `testCoreIdentityServer.mjs`, `testDispatchesServer.mjs`,
+`testNotificationsServer.mjs`, `testOutboxPushServer.mjs`, `testSafetyAuditServer.mjs`, `testPlayerErasureServer.mjs`,
+`testRecruitmentServer.mjs`, `testRecruitmentCasesServer.mjs`; `testRecruitmentCases.mjs` exercises the S8b tool
+through the S8c tool (the S8b tool refuses a `0017` file with `LATER_SCHEMA`) and its owner-CHECK regex accepts the
+two S8c owners (0017 runs on the same boot). The registry lists, the "last recorded migration" positions and the
+`TABLE_BACKED` lists allow for `0017` and the two collections (`testCoreSchema.mjs`, `testIdentityRepositories.mjs`,
+`testDataLayer.mjs`, `testCoreIdentityMigration.mjs`, fourteen list tails, the two server-suite slices); the
+untouched-table dumps exclude the nine tables as they exclude the fifteen and the twenty-five; the chained revision
+counts gained one; `testSchemaDdl.mjs` covers the nine definitions, the `0017` header and the broadened CHECK. The S8c
+server suite's restore check compares the tables by CONTENT (a rewrite reinserts a record's children; rowid order is
+not a property of the data) and boots the live server twice before the backup: M13's boot-time normaliser
+(`m13/shared.mjs`, a case without a budget gets `budget: null`) is an in-place change the S8b staged flush lands in the
+next save, and the restore's import boot applies it to the imported cases too — an S8b property observed here, not an
+S8c one, recorded so that a reviewer comparing a single-boot live file to a restore is not surprised.
+
+**The §10 batteries (every one named there), each run on the final tree and on the untouched genuine `7072dd9`
+checkout, one attempt, classified (`logs/battery/` in the handoff).** Twenty of the twenty-four pass on both trees with
+the same counts (`m23ContactE2E` 428, `m23OfferE2E` 447, `m23OfferHardeningE2E` 259, `m23E2E` 382,
+`m23RecruitmentJourneyE2E` 168, `m23RecruitmentJourneyHardeningE2E` 248, `m23RecruitmentJourneyPersistence` 139,
+`m23TrialE2E` 535, `m23TrialPersistence` 41, `m23SigningE2E` 260, `m23SigningHardeningE2E` 212,
+`m23AgentIntegrationE2E` 535, `m23AgentTransactionE2E` 404, `m23AgentFinalHardeningE2E` 286, `m23DecisionPersistence`
+52, the three perf batteries exit 0 on both). Four fail IDENTICALLY on both trees — pre-existing, not of this
+milestone, each with the same failing lines on `7072dd9`: `m23Persistence` (5 of 50: the required-store count of the
+legacy store contract), `m23BootContract` (7 of 58: the contract's store count against the scan), `m23SigningPersistence`
+(exit 1 on both: its fixture seeds a case without `ownerUserId`, refused at `0016` with the id —
+`RECRUITMENT_CASES_IMPORT_BLOCKED`, the S8b precedent) and `m23AgentTransactionPersistence` (1 of 57: a 2306-derived
+snapshot boot). Two DIFFERED before adaptation, exactly the two §10 named as storage-inspecting: `m23ContactPersistence`
+— its byte-faithful-restore fixture gave TWO contacts the same request (`rct-1` and `rct-4` → `req-1`), a state no
+production writer produces (the send creates the request for that contact) and the cutover refuses with the ids
+(`CONTACT_REQUEST_MISMATCH: contact rct-4 → request req-1 → contact rct-1`); its corruption fixture planted a `null`
+entry, a second record with an id already present and sent rows naming one shared request — the blob store tolerated
+them, the table cannot hold them. Adapted along the S8b precedent, reason stated in the file: the responded contact
+carries its own request; each sent row of the corruption file its own request (the pair, as the writer produces; the
+foreign row's organisation present, since `org_id` is a real key); the null entry, the duplicated id and a dangling
+request became an explicit refusal contract asserted on three copies (the cutover refuses at boot naming the entry or
+the ids, the two collections exactly as they were in every key and value, the next boot refusing the same way); every
+row defect the tables CARRY losslessly (the unknown status word, the missing recipient, the off-type history and
+timestamp, the prototype-named channel, the impossible state, the unknown history event) is still planted and still
+omitted-and-counted on read as before; the byte-identity comparisons became key-order-insensitive (every key and value
+still compared — the documented table-read property). 70 checks on the final tree; the adapted battery on `7072dd9`
+fails ONLY the six refusal checks (that build's blob store accepts those files). `m23OfferPersistence` — its check 5.22
+compared the nine planted rows byte for byte across two boots and two stops; the rows read back from the tables with
+every key and value identical in the stored shape's key order; the comparison is key-order-insensitive now (the ids,
+values, presence and list order still compared). 94 checks on the final tree and on `7072dd9` alike. No product
+behaviour was changed for a constraint; the pre-adaptation runs are kept beside the final ones in the handoff.
+
+**The earlier reviewers' scripts on the final tree, unchanged (Node 22 and Node 24).** The two S8c design scripts:
+`review-a5a7ed9-final-graph.mjs` exits 1 against the `a5a7ed9` model (ten reproductions, twelve controls) and 0 with
+`--expect-corrected` against the corrected model (ten corrected cases, twelve controls); `review-854d035-design-
+reproductions.mjs` exits 1 against the original model (three cases) and 0 against the corrected one; probe 2 (103),
+probe 1 (32) and the two baselines (75, 31) unchanged; the failing-first adapter run still fails 21 of 103 on the
+`a5a7ed9` model. The `7072dd9` S8b bundle: `review-b7c0dd0-reproductions.mjs` (21 checks), the two mapping matrices
+(2,764 round trips / 8 refusals / 0 mismatches; 3,150 / 0 / 0), `review-7a7efc6-key-transitions.mjs` (294), the
+old-format probe and `review-7072dd9-boot-refusal.mjs` (the server never listened; format refusal) all exit 0.
+**Two of that bundle's scripts now exit 1 on the final tree for ONE reason, recorded here and not worked around:**
+`review-7072dd9-recovery.mjs` (after its CONTROL passed) and the single "new-format rollback" check of
+`review-2fe05df-format-boundary.mjs` (its eight genuine `b7c0dd0` / `2fe05df` compatibility checks — staged, snapshot
+and rollback refusals with `RECRUITMENT_CASES_FORMAT_UNSUPPORTED`, the new-format staged and snapshot reads — all
+CORRECT on both creators and both runtimes) call the S8b rollback tool DIRECTLY on a file the candidate build has just
+cut over. That file now carries `0017`, which the S8b tool refuses by design — `LATER_SCHEMA: the database carries
+schema step(s) this tool does not know (0017_recruitment_contacts_offers); a partial downgrade is not attempted` — the
+same contract every earlier tool of the chain has for a later step; the scripts were written when `0016` was the last
+step and assume the S8b tool is the first link. The reviewer's scripts were not edited. The round trip they intended —
+the candidate's cutover, a staged export and save, a rollback and a re-upgrade — runs through the chain (the S8c tool
+first, the S8b tool on its output) in `testRecruitmentCases.mjs`, `testRecruitmentCasesServer.mjs` and
+`testRecruitmentContactsOffersServer.mjs`, and the format-boundary refusals those scripts exist for are unchanged
+(above). Nothing of the S8b key-format boundary or of S8b's acceptance is affected: a `0016` file of the superseded
+builds is still refused before `0017` runs, on every path.
+
+**Gates (after the final edits; one attempt each, no retries, exits captured immediately; `logs/gates/gates-run.txt`
+in the handoff, with versions, elapsed times and the per-build boot counts).** Backend `cd scoutbox-server && npm
+test` on Node v22.22.0 (SQLite 3.50.4, npm 10.9.4): exit 0, 37 suites, 433 checks, 0 assertion failures, 0 `EADDRINUSE`
+lines, 0 skipped old-build boots — the nine historical builds booted for real (`812e13b`, `0641b2c`, `6ca66ba`,
+`b67bce5`, `4f954ad`, `f0abd34`, `9b109dc`, `7a7efc6`, `7072dd9`), the S4b-R, S8a, S8b and S8c danger boots and the
+MEASURED line among them. The same on Node v24.19.0 (SQLite 3.53.3): exit 0, 37 suites, 433 checks, 0 / 0 / 0, the
+same boots. Player `cd scoutbox-player && npm test -- --runInBand` on Node v22.22.0: exit 0, 4 suites, 41 tests.
+Skipped inside the backend gate, by design and reported as such: the real older-Node runtime checks
+(`SCOUTBOX_TEST_NODE_BINS` unset, simulated only). Not run: the browser suites, the demo rebuild, the Player E2E,
+the bench.

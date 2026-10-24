@@ -134,8 +134,8 @@ them.
 | `roomDecisions` | audit | 02 | `room_decisions` (both literals — the M17 recommendation and the M23 formal row — in one table; the decision's `snapshot` copy STORED AS WRITTEN in `snapshot_*` columns beside `snapshot_id` — the drafted "`snapshot` → `snapshot_id`, the copy is not stored twice" is withdrawn: the engine keeps every field a writer wrote; `supersedes` / `supersededById` / `supersession.of` plain ids checked in code), `room_decision_reason_codes`, `room_decision_evidence_refs`, `room_decision_assessment_ids`; `keys.finalize` / `keys.draft` → `idempotency_keys` (LIVE since migration 0016, S8b; `player_id` tolerant — Q8a) | **S8b — IMPLEMENTED, INDEPENDENTLY ACCEPTED at `7072dd9`** (23 October 2026; `s8b-readiness-review.md` §12; plan §D.9) |
 | `roomSnapshots` | audit | 02 | `room_snapshots` (`trust` as `trust_*` columns with `trust_component_levels_json`; the `note` stored as written), `room_snapshot_source_refs` (the four id lists in one table keyed `(snapshot_id, kind, position)`) (LIVE since migration 0016, S8b; `player_id` tolerant — Q8a) | **S8b — IMPLEMENTED, INDEPENDENTLY ACCEPTED at `7072dd9`** (23 October 2026; `s8b-readiness-review.md` §12; plan §D.9) |
 | `roomEvidenceState` | persistent | 02 | `room_evidence_states` (LIVE since migration 0016, S8b; the `(room, evidence)` uniqueness stays the route's rule, no unique index) | **S8b — IMPLEMENTED, INDEPENDENTLY ACCEPTED at `7072dd9`** (23 October 2026; `s8b-readiness-review.md` §12; plan §D.9) |
-| `recruitmentContacts` | persistent | 02 | `recruitment_contacts`, `contact_attempts` (CASCADE, position-keyed), `contact_history` (RESTRICT, removed explicitly before its owner); `keys` → `idempotency_keys` under the contact's own id; the one NEW real key `request_id → recruitment_requests RESTRICT`; `case_id`, `org_id`, staff ids real RESTRICT keys; player / guardian / outbox / agreement ids plain (proposed — `s8c-readiness-review.md` §2.1, §3) | **S8c — PREPARED, NOT IMPLEMENTED; corrected design pending independent acceptance** (23–24 October 2026, `s8c-readiness-review.md` §13–§13.1; plan §D.10; `0017` not reserved) |
-| `recruitmentOffers` | persistent | 02 | `recruitment_offers`, `offer_revisions` (position-keyed, `id` indexed not unique — the S8d note), `offer_revision_documents`, `offer_responses`, `offer_read_receipts` (CASCADE, position-keyed; the drafted deduplicating keys withdrawn), `offer_history` (RESTRICT); `keys` → `idempotency_keys` under the offer's own id; `current_revision_id` and the revision/response pointers plain and stored as written under ONE pointer rule (own target valid; an unresolved historical target kept verbatim and counted, never refused; a target owned only by another offer OF THE FINAL COLLECTION refused — corrected after the reviews of `854d035` and `a5a7ed9`: an offer a supplied collection no longer lists departs and owns nothing; "retained" is by collection, not by omitted row); `decision_id` plain and counted (the drafted `SET NULL` withdrawn); `EXPIRED` never stored (proposed — `s8c-readiness-review.md` §2.2–§2.3, §3, §6) | **S8c — PREPARED, NOT IMPLEMENTED; corrected design pending independent acceptance** (23–24 October 2026, `s8c-readiness-review.md` §13–§13.1; plan §D.10; `0017` not reserved) |
+| `recruitmentContacts` | persistent | 02 | `recruitment_contacts`, `contact_attempts` (CASCADE, position-keyed), `contact_history` (RESTRICT, removed explicitly before its owner); `keys` → `idempotency_keys` under the contact's own id; the one NEW real key `request_id → recruitment_requests RESTRICT` with the pair guard; `case_id`, `org_id`, staff ids real RESTRICT keys; player ids plain, tolerant and counted (Q8c-a); guardian ids plain, strict in code (Q8c-b); outbox / agreement ids plain (LIVE since migration `0017`, S8c — `s8c-readiness-review.md` §2.1, §3, §14) | **S8c — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE** (24 October 2026, on the design independently accepted at `19f5ca8` under Q8c-a "Approve tolerant" / Q8c-b "Approve strict checks" of 24 October 2026; `s8c-readiness-review.md` §14; plan §D.10) |
+| `recruitmentOffers` | persistent | 02 | `recruitment_offers`, `offer_revisions` (position-keyed, `id` indexed not unique — the S8d note), `offer_revision_documents`, `offer_responses`, `offer_read_receipts` (CASCADE, position-keyed; the drafted deduplicating keys withdrawn), `offer_history` (RESTRICT); `keys` → `idempotency_keys` under the offer's own id; `current_revision_id` and the revision/response pointers plain and stored as written under ONE pointer rule (own target valid; an unresolved historical target kept verbatim and counted, never refused; a target owned only by another offer OF THE FINAL COLLECTION refused — corrected after the reviews of `854d035` and `a5a7ed9`, confirmed by the review of `19f5ca8`: an offer a supplied collection no longer lists departs and owns nothing; "retained" is by collection, not by omitted row); `decision_id` plain and counted (the drafted `SET NULL` withdrawn); `EXPIRED` never stored; player ids tolerant and counted (Q8c-a), guardian ids strict in code (Q8c-b) (LIVE since migration `0017`, S8c — `s8c-readiness-review.md` §2.2–§2.3, §3, §6, §14) | **S8c — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE** (24 October 2026, on the design independently accepted at `19f5ca8` under Q8c-a / Q8c-b of 24 October 2026; `s8c-readiness-review.md` §14; plan §D.10) |
 | `signingPackages` | persistent | 02 | `signing_packages`, `signing_revisions`, `signing_documents`, `signing_revision_parties`, `signing_history` | S8 |
 | `signings` | persistent | 02 | `signings`, `signing_parties` (single writer `recordCompletedSigning`; `firstQualifyingInteraction` → ledger id, at, type) | S8 |
 | `followUps` | persistent | 02 | `follow_ups` (UNIQUE signing + milestone) | S8 |
@@ -410,9 +410,11 @@ requests and trials tables, cut over WITHOUT a player foreign key under Q7a (tol
 case and guardian references checked in code under Q7b/Q7c —; since S8b (23 October 2026, independently accepted at
 `7072dd9`) 25 more — the case and room tables, cut over WITHOUT a player foreign key under Q8a
 (tolerant, counted), with real organisation and staff keys and the two S8a parents' `case_id` made real keys —; file
-02 now holds 59 tables (four child tables beyond the draft's count), of which the 18 remaining (contacts, offers,
-packages, signings, follow-ups, outcome reports) wait for S8c–S8d (S8c — nine of them — is PREPARED, not implemented:
-`s8c-readiness-review.md`). The remaining open questions change columns or retention
+02 now holds 59 tables (four child tables beyond the draft's count); since S8c (24 October 2026, migration `0017`,
+IMPLEMENTED and pending independent acceptance — `s8c-readiness-review.md` §14) nine more are live — the contact and
+offer tables, player references tolerant and counted under Q8c-a, guardian references strict in code under Q8c-b,
+the one new real key `request_id` —, and the 9 remaining (packages, signings, follow-ups, outcome reports) wait for
+S8d. The remaining open questions change columns or retention
 rules, not table boundaries. The table above predates S6a and S7; the live tables since then are
 listed with their steps in §4's mapping (`email_challenges`, `pairing_codes` — S6a, accepted at
 `2d7ddeb`; `notifications`, `notification_prefs`, `notification_pref_categories` — S7a, accepted at
@@ -585,7 +587,24 @@ full snapshot copy and the snapshot's `note` are stored as written** (the engine
 the `*_raw` TEXT columns for raw client values (`deadline`, `dueAt`) — JSON columns instead, any client value kept
 verbatim and never parsed. The player references on the S8b tables are tolerant and counted (the Founder's Q8a,
 23 October 2026); `org_id` and the staff references are real RESTRICT keys; `case_history` keeps its RESTRICT and is
-removed explicitly before its owner. The remaining 18 tables of this file are drafts for S8c–S8d.
+removed explicitly before its owner.
+**Implemented for `recruitment_contacts`, `contact_attempts`, `contact_history`, `recruitment_offers`,
+`offer_revisions`, `offer_revision_documents`, `offer_responses`, `offer_read_receipts`, `offer_history` (S8c, migration
+`0017`, 24 October 2026 — the design independently accepted at `19f5ca8`; IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE;
+`s8c-readiness-review.md` §14):** the nine definitions the migration generates with the S8a engine; on the same step
+the `idempotency_keys` owner CHECK is broadened to the two parents (a contact's and an offer's rows under the record's
+OWN id). What S8c withdrew from the draft (review §3): every vocabulary / length / shape CHECK; the partial unique index
+`recruitment_offers_one_live_per_case` (the routes produce a withdrawn offer revised into a draft beside an issued
+one); the unique revision id, one-response-per-revision, document and receipt keys (each would refuse a record
+`offerIntegrity` reports and keeps today); the contacts' unique request index (the pair guard `CONTACT_REQUEST_MISMATCH`
+instead); the `SET NULL` keys to `guardians` and `room_decisions`; the parent→child key `current_revision_id →
+offer_revisions` (a cycle) and the within-offer revision/response keys — the five offer pointers are plain columns
+stored as written under the one pointer rule over the FINAL offer collection. Kept: `org_id` and `case_id` RESTRICT on
+both parents, `request_id → recruitment_requests` RESTRICT (the one new real key), the staff ids RESTRICT and nullable,
+the history tables RESTRICT (removed explicitly before their owner), every other child CASCADE; NOT NULL only on `id`,
+`org_id`, `case_id`, `player_id`. The player references are tolerant and counted (the Founder's Q8c-a, 24 October
+2026); the guardian references are checked in code against the final guardians table (Q8c-b, no key). The remaining 9
+tables of this file are drafts for S8d.
 Raw client values that are not validated today (`trial_day_staff.check.expiresAt`, the S8b
 `deadline` and `dueAt`) are kept verbatim (a `*_raw` TEXT column for S8a, a JSON column for
 S8b) and parsed on read, as now. The `trials.day.emergency` contact stays restricted to the

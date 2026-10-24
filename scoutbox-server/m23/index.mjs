@@ -205,5 +205,8 @@ export function migrateM23() {
   // migration registry (m182/migrations.mjs, `m230_004_recruitment_contacts`)
   // so it survives an arbitrary restore — not here, where it would exist only
   // after this module registered. `db.recruitmentOffers` still arrives with
-  // the phase that actually writes offers.
+  // the phase that actually writes offers. Since migration 0017 (S8c) the data
+  // layer publishes both names as read-only views over the contact and offer
+  // tables (repositories/recruitmentContactsOffers.mjs) before any module
+  // registers; the registry's `??= []` is a no-op on a cut-over file.
 }

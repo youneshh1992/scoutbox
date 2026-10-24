@@ -32,6 +32,7 @@ import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs
 import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
 import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
 import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
+import { rollbackRecruitmentContactsOffersCopy } from '../repositories/recruitmentContactsOffersRollback.mjs';
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
 import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
@@ -40,7 +41,7 @@ import { registerDelivery } from '../m13/delivery.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump, filesDigest } from './coreIdentityTestFixtures.mjs';
 // S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s8b = tempDir('s8b-to-s8a'); rollbackRecruitmentCasesCopy(file, s8b); /* S8b: the file carries 0016; its rollback (copy-only, the cases and the four room collections written back as blobs) goes first */ const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(path.join(s8b, 'scoutbox.db'), s8a); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
+const preS6b = (file) => { const s8c = tempDir('s8c-to-s8b'); rollbackRecruitmentContactsOffersCopy(file, s8c); /* S8c: the file carries 0017; its rollback (copy-only, the contacts and offers written back as blobs) goes first */ const s8b = tempDir('s8b-to-s8a'); rollbackRecruitmentCasesCopy(path.join(s8c, 'scoutbox.db'), s8b); /* then S8b: the file carries 0016; its rollback (copy-only, the cases and the four room collections written back as blobs) goes first */ const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(path.join(s8b, 'scoutbox.db'), s8a); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

@@ -16,7 +16,9 @@ independent review of `2fe05df` (R1: the persisted key-format marker and the fai
 superseded builds; that review closed F1 and F2 and did not accept `2fe05df`). **The independent review of `7072dd9`
 (23 October 2026) ACCEPTED the implementation** (§12, last paragraph);
 nothing here is production, release, security, legal-compliance, merge or deployment approval. S8c (contacts, offers)
-is PREPARED, NOT IMPLEMENTED (`s8c-readiness-review.md`, plan §D.10); S8d is not started.
+has since been implemented on top of this acceptance and is pending its own independent acceptance
+(`s8c-readiness-review.md` §14, plan §D.10; migration `0017` broadens the shared key table's owner CHECK again and
+reads this step's key-format marker without writing it); S8d is not started.
 
 **Corrected on 22 October 2026 after the independent review of `57076a2`**, which accepted the S8a-core acceptance
 record and did NOT accept this design for implementation: its F1 (the incoming case links must be released before the

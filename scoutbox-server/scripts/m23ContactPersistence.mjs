@@ -150,17 +150,29 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
     soundContact(),
     soundContact({ id: 'rct-2', status: 'draft', recipient: null, sentBy: null, sentAt: null, deliveredAt: null, attempts: [], requestId: null, keys: { create: null, send: null, record: null }, history: [{ id: 'aud-20', at: 3000, action: 'contact_created', by: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, detail: { channel: 'in_app' } }], rev: 1, revAt: 3000 }),
     soundContact({ id: 'rct-3', status: 'recorded', channel: 'phone', body: null, subject: null, summary: 'Called.', occurredAt: 3500, recordedAt: 3600, recordedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, sentBy: null, sentAt: null, deliveredAt: null, attempts: [], requestId: null, keys: { create: null, send: null, record: { key: 'rk-1', fp: 'x' } }, history: [{ id: 'aud-30', at: 3600, action: 'contact_external_recorded', by: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, detail: { channel: 'phone', occurredAt: 3500, recipientType: 'player' } }] }),
-    soundContact({ id: 'rct-4', status: 'responded', respondedAt: 4000, response: { kind: 'accepted', message: 'Yes', by: 'player', at: 4000 }, history: [{ id: 'aud-40', at: 2001, action: 'contact_sent', by: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, detail: {} }, { id: 'aud-41', at: 4000, action: 'contact_responded', by: { kind: 'player', name: 'Player' }, detail: { kind: 'accepted' } }], rev: 3 }),
+    // S8c (migration 0017): a sent contact and its request are a PAIR (recruitment_contacts.request_id is a real key and the
+    // request names its contact back); two contacts naming ONE request is a state the production writer never produces
+    // (the send creates the request for that contact) and the cutover refuses it with the ids (CONTACT_REQUEST_MISMATCH),
+    // never repairs it. The responded contact therefore carries its own request, as a real one would.
+    soundContact({ id: 'rct-4', status: 'responded', requestId: 'req-4', respondedAt: 4000, response: { kind: 'accepted', message: 'Yes', by: 'player', at: 4000 }, history: [{ id: 'aud-40', at: 2001, action: 'contact_sent', by: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, detail: {} }, { id: 'aud-41', at: 4000, action: 'contact_responded', by: { kind: 'player', name: 'Player' }, detail: { kind: 'accepted' } }], rev: 3 }),
   ];
   db.recruitmentContacts = rows;
   // S8a-core: the request row carries the staff member the production writer (issueRecruitmentRequest) always sets;
   // a row without userId is refused at the cutover with its id, never repaired.
-  db.requests = [{ id: 'req-1', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactId: 'rct-1', contactChannel: null }];
+  db.requests = [
+    { id: 'req-1', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactId: 'rct-1', contactChannel: null },
+    { id: 'req-4', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'accepted', createdAt: 2001, respondedAt: 4000, respondedBy: 'player', routedTo: 'player', guardianId: null, contactId: 'rct-4', contactChannel: null },
+  ];
   openStore(RESTORE_DIR).save({ savedAt: Date.now(), idCounter: 500, db });
-  const before = JSON.stringify(rows);
+  // S8c: the rows are read back from the tables, every key and value identical, the keys in the stored shape's order (the
+  // documented table-read property; m23DecisionPersistence compares the same way since S8b) — key-order-insensitive here.
+  const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+  const stable = (v) => JSON.stringify(canon(v));
+  const before = stable(rows);
 
   const s = await bootOn(RESTORE_DIR, PORT);
   ok(s.up, 'the server boots on the restored snapshot');
+  if (!s.up) { console.error(`   the server did not come up; its log ends:\n${s.log().slice(-1500)}`); process.exit(1); }
   const health = (await s.j('GET', '/healthz')).body;
   ok(health.schemaVersion === SCHEMA_VERSION, `and reports schema ${SCHEMA_VERSION}`);
   neg(!/STORE_MISSING|INTEGRITY/.test(s.log()), 'no missing store and no integrity violation was logged');
@@ -177,7 +189,7 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
   neg(expect422(await s.j('POST', '/org/rooms/case-x/contacts', { subject: 'Other', body: 'Different.', clientKey: 'ck-1' }, owner.token)), 'and the same key with a different payload is a 409 CONTACT_IDEMPOTENCY_CONFLICT, from the snapshot');
   const after = await s.stop();
   ok(after !== null, 'the server shut down and wrote the snapshot back');
-  neg(JSON.stringify(after.recruitmentContacts) === before, 'the four Contact rows came back BYTE-IDENTICAL — reads, replays and a boot rewrote nothing');
+  neg(stable(after.recruitmentContacts) === before, 'the four Contact rows came back IDENTICAL in every key and value — reads, replays and a boot rewrote nothing');
   neg(after.schema.migrations.length === MIGRATIONS.length, 'and the migration record did not churn');
 }
 function expect422(r) { return r.status === 409 && r.body?.error === 'CONTACT_IDEMPOTENCY_CONFLICT'; }
@@ -186,7 +198,36 @@ function expect422(r) { return r.status === 409 && r.body?.error === 'CONTACT_ID
 section('§143 — corrupt Contact rows are named and omitted, never fabricated, and never take the server down');
 const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
 {
+  // S8c (migration 0017): the contacts are rows of a table. Two of the entries this section used to plant are states the
+  // TABLE cannot hold and the blob store merely tolerated — an entry that is not a record (`null`) and a second record
+  // with an id the collection already has — and a contact naming a request that is not in the file is a dangling key. The
+  // cutover REFUSES such a file with CONTACTS_OFFERS_IMPORT_BLOCKED naming the position or id, leaves it exactly as it
+  // was (the next boot refuses the same way) and repairs nothing; asserted below on three copies. Every row defect the
+  // tables CARRY losslessly (an unknown status word, a missing recipient, an off-type history, an off-type timestamp, a
+  // prototype-named channel, an impossible state, an unknown history event) is still planted and still judged on read.
+  const REQ = { playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactChannel: null };
+  const refusedAtCutover = async (label, port, contacts, requests, pattern) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'sbx-cp-refused-'));
+    const fixture = baseDb(); fixture.recruitmentContacts = contacts; fixture.requests = requests;
+    openStore(dir).save({ savedAt: Date.now(), idCounter: 500, db: fixture });
+    // the two collections compared in every key and value (the earlier steps of the same boot, 0015 among them, commit
+    // before 0017 refuses, so the requests read back from their tables in the stored shape's key order)
+    const canonK = (v) => (Array.isArray(v) ? v.map(canonK) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonK(v[k])])) : v);
+    const kept = () => { const d = openStore(dir).load()?.db; return JSON.stringify(canonK([d?.recruitmentContacts, d?.requests])); };
+    const was = kept();
+    const s = await bootOn(dir, port);
+    neg(!s.up && /CONTACTS_OFFERS_IMPORT_BLOCKED/.test(s.log()) && pattern.test(s.log()), `${label}: the cutover refuses the file at boot and names the entry (${(pattern.exec(s.log()) ?? ['NOT named'])[0]})`);
+    if (s.up || !pattern.test(s.log())) console.error(`   ${label}: up=${s.up}; the log ends:\n${s.log().slice(-700)}`);
+    neg(kept() === was, `${label}: the file is exactly as it was — nothing imported, dropped or repaired`);
+    const s2 = await bootOn(dir, port);
+    neg(!s2.up && pattern.test(s2.log()), `${label}: the next boot refuses the same way`);
+  };
+  await refusedAtCutover('a null entry', PORT + 4, [soundContact(), null], [{ ...REQ, id: 'req-1', contactId: 'rct-1' }], /recruitmentContacts entry #1 is not an object \(null\)/);
+  await refusedAtCutover('a duplicated id', PORT + 5, [soundContact(), soundContact({ id: 'rct-1', requestId: null })], [{ ...REQ, id: 'req-1', contactId: 'rct-1' }], /duplicates the id of an earlier entry \(rct-1\)/);
+  await refusedAtCutover('a request that is not in the file', PORT + 6, [soundContact({ requestId: 'req-ghost' })], [], /CONTACT_REQUEST_DANGLING[^\n]*rct-1 → req-ghost/);
+
   const db = baseDb();
+  db.orgs.push({ id: 'org-other', name: 'Other FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, squad: [], location: { lat: 51.5, lng: -0.1 } }); // the foreign row's organisation exists (org_id is a real key); the tenant filter below is unchanged
   db.recruitmentContacts = [
     soundContact(),                                                                  // sound
     soundContact({ id: 'rct-badstatus', status: 'sent' }),                           // invalid status
@@ -194,13 +235,12 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
     soundContact({ id: 'rct-wrongorg', orgId: 'org-other' }),                         // another org's row on this case id
     soundContact({ id: 'rct-wrongplayer', playerId: 'pl-other' }),                    // wrong player (still this org/case) — sound structurally, reported by case? no: playerId is free
     soundContact({ id: 'rct-nohist', history: 'not-a-list' }),                        // malformed history
-    soundContact({ id: 'rct-1' }),                                                    // DUPLICATE id
     soundContact({ id: 'rct-badts', deliveredAt: 'yesterday' }),                      // malformed timestamp
     soundContact({ id: 'rct-badchan', channel: 'constructor' }),                      // prototype-key channel
     soundContact({ id: 'rct-impossible', status: 'responded', deliveredAt: null, respondedAt: 5 }), // impossible: responded but never delivered
-    null,                                                                             // not an object
     { id: 'rct-unknownevent', orgId: 'org-x', caseId: 'case-x', playerId: 'pl-x', status: 'draft', channel: 'in_app', history: [{ id: 'aud-99', at: 1, action: '__teleported__', by: null, detail: null }], rev: 1 }, // unknown history event on a sound draft
-  ];
+  ].map((c, i) => (c.requestId === 'req-1' ? { ...c, requestId: `rq-${i + 1}` } : c)); // each sent row with its OWN request (the pair), as the writer produces; the request ids carry no contact id (the journey check below looks for the corrupt ids)
+  db.requests = db.recruitmentContacts.filter((c) => c.requestId).map((c) => ({ ...REQ, id: c.requestId, contactId: c.id, orgId: c.orgId, playerId: c.playerId }));
   // `rct-wrongorg` is NOT in this list: a row carrying another organisation's
   // id is that organisation's row, whatever case id it names. It is filtered
   // by tenant before the shape check, never listed, never counted and, by id,
@@ -211,12 +251,14 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   const named = db.recruitmentContacts.filter((c) => c && expectedOmitted.includes(c.id)).map((c) => [c.id, contactIntegrity(c, { orgId: 'org-x', caseId: 'case-x' })]);
   ok(named.every(([, p]) => p.length > 0), `the integrity check names a problem on every one of the ${named.length} corrupt rows`);
   neg(contactIntegrity(soundContact({ id: 'rct-wrongplayer', playerId: 'pl-other' }), { orgId: 'org-x', caseId: 'case-x' }).length === 0, 'a row whose player disagrees with its case is structurally sound — the case check, not the shape check, is where that is caught (below)');
-  ok(contactIntegrity(db.recruitmentContacts[11]).length === 0, 'a sound draft with an unknown history event is not corrupt — the event is simply not a milestone');
+  ok(contactIntegrity(db.recruitmentContacts[9]).length === 0, 'a sound draft with an unknown history event is not corrupt — the event is simply not a milestone');
 
   openStore(CORRUPT_DIR).save({ savedAt: Date.now(), idCounter: 500, db });
-  const before = JSON.stringify(db.recruitmentContacts);
+  const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+  const before = JSON.stringify(canon(db.recruitmentContacts));
   const s = await bootOn(CORRUPT_DIR, PORT + 1);
-  ok(s.up, 'the server boots with twelve rows, six of them corrupt, one foreign and one null');
+  ok(s.up, 'the server boots with ten rows, six of them corrupt and one foreign');
+  if (!s.up) { console.error(`   the server did not come up; its log ends:\n${s.log().slice(-1500)}`); process.exit(1); }
   const owner = (await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })).body;
   const list = await s.j('GET', '/org/rooms/case-x/contacts', undefined, owner.token);
   ok(list.status === 200, 'the contact list still answers (200)');
@@ -224,7 +266,7 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   neg(expectedOmitted.every((id) => !ids.includes(id)), 'every corrupt row is omitted from the list');
   neg(list.body.omitted === expectedOmitted.length, `and the omission is COUNTED (${list.body.omitted}) — partial projection, never a silent one`);
   ok(ids.includes('rct-1') && ids.includes('rct-wrongplayer') && ids.includes('rct-unknownevent'), 'the sound rows beside them still show');
-  neg(ids.filter((id) => id === 'rct-1').length === 2, 'a duplicated id is shown twice, not silently merged — a person must decide which is real');
+  neg(ids.filter((id) => id === 'rct-1').length === 1, 'the sound row is listed once (a duplicated id can no longer reach a boot: the cutover refused it above, with the id, for a person to decide which is real)');
   for (const id of expectedOmitted) {
     const one = await s.j('GET', `/org/rooms/case-x/contacts/${id}`, undefined, owner.token);
     neg(one.status === 500 && one.body?.error === 'CONTACT_STATE_UNKNOWN', `${id} by id answers 500 CONTACT_STATE_UNKNOWN — corruption reads as corruption`);
@@ -244,7 +286,7 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   const ev2 = createEvidenceProvider({ signings: [], recruitmentContacts: db.recruitmentContacts }).check('contact_delivered', { kase: db.recruitmentCases[0] });
   ok(ev2.satisfied === true && ev2.sourceId === 'rct-1', 'the sound row beside them is');
   const after = await s.stop();
-  neg(JSON.stringify(after.recruitmentContacts) === before, 'shutdown wrote the corrupt rows back UNCHANGED — reported, never repaired');
+  neg(JSON.stringify(canon(after.recruitmentContacts)) === before, 'shutdown wrote the corrupt rows back UNCHANGED in every key and value — reported, never repaired (the off-type history and timestamp, the unknown status word and the impossible state carried as written)');
   // Boot-time integrity: contacts are not part of the M18.2 report's subject, and must not make it lie.
   const rep = integrityReport(after);
   ok(rep.stores.ok === true, 'the boot integrity report still finds every required store present');
