@@ -51,7 +51,7 @@ export function registerCompliance(rawCtx) {
   const {
     db, app, orgRouter, playerRouter, adminRouter, tsRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isBlocked, isAdult, orgCanSee, moderateOrRefuse, rateLimit,
-    hashPassword, verifyPassword, createSession, sessionFor, devLogins, agent, verificationProvider,
+    hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins, agent, verificationProvider,
   } = rawCtx;
 
   const provider = verificationProvider ?? createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
@@ -136,7 +136,7 @@ export function registerCompliance(rawCtx) {
     if (session?.kind !== 'ts_reviewer') return sendComplianceError(res, { error: 'REVIEWER_AUTH_REQUIRED', message: 'An authenticated Trust & Safety reviewer session is required. The shared admin key is not a reviewer.' }, 'reviewerAuth');
     const r = reviewerById(session.refId);
     if (!r || r.status !== 'active') {
-      db.sessions = db.sessions.filter((s) => s !== session);
+      sessions.revokeSid(session.sid);
       return sendComplianceError(res, { error: 'REVIEWER_REVOKED', message: 'This reviewer\'s access has been revoked.' }, 'reviewerAuth');
     }
     req.reviewer = r;
@@ -147,7 +147,7 @@ export function registerCompliance(rawCtx) {
     sendComplianceError(res, { error: 'REVIEWER_ROLE_REQUIRED', role, message: `This action needs the ${role} role.` }, 'role');
     return false;
   };
-  const revokeReviewerSessions = (id) => { db.sessions = db.sessions.filter((s) => !(s.kind === 'ts_reviewer' && s.refId === id)); };
+  const revokeReviewerSessions = (id) => { sessions.revokeFor('ts_reviewer', id); };
 
   tsRouter.get('/me', (req, res) => res.json({ reviewer: publicReviewer(req.reviewer), attribution: 'authenticated_reviewer', note: 'Every authoritative compliance action is recorded against this identity.' }));
   tsRouter.get('/reviewers', (req, res) => {

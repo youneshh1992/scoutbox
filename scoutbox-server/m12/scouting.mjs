@@ -14,10 +14,11 @@ const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision',
 
 export function registerScouting(ctx) {
   const {
-    db, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    db, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter,
     orgCanSee, paginate, audit, isLead, requireLead, moderateOrRefuse, isAdult,
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
+    recruitmentCases, // S8b: the cases live in their tables; a new case enters through the repository, every other change is in place
   } = ctx;
 
   // ------------------------------------------------- template seeds (v1)
@@ -457,7 +458,7 @@ export function registerScouting(ctx) {
       createdAt: Date.now(), history: [],
     };
     audit(c, 'org', req.orgUser.id, req.orgUser.name, 'created', c.stage);
-    db.recruitmentCases.push(c);
+    recruitmentCases.addCase(c); // S8b: the former `db.recruitmentCases.push(c)`; the row lands in the persistNow() below
     persistNow();
     res.status(201).json({ case: caseView(c) });
   });
@@ -633,8 +634,7 @@ export function registerScouting(ctx) {
     const u = db.users.find((x) => x.id === req.params.userId && x.orgId === req.org.id);
     if (!u) return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
     if (u.removedAt) return res.status(409).json({ error: 'ALREADY_REMOVED' });
-    u.removedAt = Date.now();
-    u.removedBy = req.orgUser.name;
+    users.update(u.id, { removedAt: Date.now(), removedBy: req.orgUser.name });
     revokeOrgUserAccess(u.id);
     ledgerAppend({ type: 'staff_removed', orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
     res.json({ removed: { id: u.id, name: u.name, removedAt: u.removedAt }, note: 'Sessions revoked, event streams silenced, media links dead on next fetch. History stays attributed to the named person.' });

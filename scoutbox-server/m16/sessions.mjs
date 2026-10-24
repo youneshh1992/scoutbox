@@ -455,11 +455,13 @@ export function registerBoxCamSessions(ctx) {
     }
     const media = (req.player.media ?? []).find((m) => m.id === req.body?.mediaId);
     if (!media) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
-    media.capturedBy = 'box_cam';
-    media.boxSessionId = s.id;
-    s.clipMediaId = media.id;
-    ctx.ledgerAppend?.({ type: 'box_clip_saved', playerId: req.player.id, orgId: null, detail: { sessionId: s.id, mediaId: media.id } });
-    persistNow();
+    // ONE unit of work (S5): the media row's Box Cam provenance, the session's
+    // clip reference (a blob) and the ledger row commit together.
+    ctx.unit(() => {
+      ctx.players.patchItem(req.player.id, 'media', { id: media.id }, { capturedBy: 'box_cam', boxSessionId: s.id });
+      s.clipMediaId = media.id;
+      ctx.ledgerAppend?.({ type: 'box_clip_saved', playerId: req.player.id, orgId: null, detail: { sessionId: s.id, mediaId: media.id } });
+    });
     res.json({ session: sessionView(s), note: 'Clip kept with your media. Saving a clip never makes it public — its visibility follows your existing media privacy.' });
   });
 

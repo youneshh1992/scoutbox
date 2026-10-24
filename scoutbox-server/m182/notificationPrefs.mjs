@@ -198,10 +198,13 @@ export function defaultPrefs() {
 }
 
 export function registerNotificationPrefs(ctx) {
-  const { db, orgRouter, playerRouter, guardianRouter, persist } = ctx;
-  db.notificationPrefs ??= [];
+  const { notifications, orgRouter, playerRouter, guardianRouter, persist } = ctx;
+  // S7a: the stored preferences are rows of notification_prefs /
+  // notification_pref_categories (repositories/notifications.mjs); this module
+  // keeps the vocabulary, the validation, the effective view and the gate.
+  if (!notifications || typeof notifications.prefsFor !== 'function') throw new TypeError('registerNotificationPrefs needs the notifications repository (ctx.notifications)');
 
-  const find = (kind, id) => db.notificationPrefs.find((p) => p.audienceKind === kind && p.audienceId === id) ?? null;
+  const find = (kind, id) => notifications.prefsFor(kind, id);
 
   /** Effective preferences: stored over defaults, mandatory always on. */
   function effective(kind, id) {
@@ -258,11 +261,15 @@ export function registerNotificationPrefs(ctx) {
         return res.status(400).json({ error: 'PREF_CATEGORY_MANDATORY', category: k, message: 'Security and account notices cannot be turned off.' });
       }
     }
-    let row = find(kind, id);
-    if (!row) { row = { audienceKind: kind, audienceId: id, categories: {}, emailIntent: false, updatedAt: null }; db.notificationPrefs.push(row); }
-    for (const [k, v] of Object.entries(incoming ?? {})) row.categories[k] = !!v;
-    if (body?.emailIntent !== undefined) row.emailIntent = !!body.emailIntent;
-    row.updatedAt = Date.now();
+    // The values are coerced exactly as before S7a (`!!v`): a numeric zero on a
+    // mandatory category passes the check above and is stored false; the
+    // effective view and the gate force it on. The repository stores what it
+    // is given and refuses anything but booleans and known categories.
+    const categories = {};
+    for (const [k, v] of Object.entries(incoming ?? {})) categories[k] = !!v;
+    const patch = { categories };
+    if (body?.emailIntent !== undefined) patch.emailIntent = !!body.emailIntent;
+    notifications.updatePrefs(kind, id, patch, { at: Date.now() });
     persist();
     res.json({ preferences: view(kind, id) });
   }

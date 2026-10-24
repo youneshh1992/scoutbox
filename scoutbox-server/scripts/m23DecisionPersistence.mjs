@@ -70,12 +70,15 @@ const BY = { userId: 'usr-owner', name: 'Owner', role: 'Head of Recruitment' };
 
 // ------------------------------------------------------------- fixtures
 
-/** A minimal, sound database: one verified club, one adult player, one case at shortlisted. */
+/** A minimal, sound database: one verified club, one adult player, its owner on the staff table, one case at shortlisted.
+ *  S8b (migration 0016): the case's owner and lead scout are staff keys of the real table, so the fixture carries the
+ *  staff row the case names (as m23TrialPersistence and m23ContactPersistence always did); a file naming an unknown
+ *  staff member is refused at the cutover with the id, never repaired. */
 function baseDb() {
   const db = {
     players: [{ id: 'pl-x', name: 'Xavier Adult', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } }],
     orgs: [{ id: 'org-x', name: 'X FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, squad: [], location: { lat: 51.5, lng: -0.1 } }],
-    guardians: [], users: [], sessions: [], ledger: [], notifications: [],
+    guardians: [], users: [{ id: 'usr-owner', orgId: 'org-x', name: 'Owner', role: 'Head of Recruitment', createdAt: 1 }], sessions: [], ledger: [], notifications: [],
     recruitmentCases: [{
       id: 'case-x', orgId: 'org-x', playerId: 'pl-x', playerName: 'Xavier Adult', ownerUserId: 'usr-owner', ownerName: 'Owner', stage: 'review',
       priority: 'medium', restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null },
@@ -118,7 +121,10 @@ const draftRow = (over = {}) => ({
   ...over,
 });
 
-const stableJson = (v) => JSON.stringify(v);
+// Key-order-insensitive: since S8b (migration 0016) the five collections are read back from tables in the stored shape's
+// column order, not the writer's insertion order (the documented S8a/S8b limitation); every key and value is compared.
+const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+const stableJson = (v) => JSON.stringify(canon(v));
 const lead = (s) => s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' }).then((r) => r.body);
 
 // ======================================================= 1 — no migration
@@ -175,7 +181,11 @@ section('2 — a snapshot with legacy + formal rows and a draft restores byte-fa
   const jr = await s.j('GET', '/org/rooms/case-x/journey', undefined, L.token);
   ok(jr.status === 200 && jr.body.decisions.formal?.id === 'rdec-formal-2' && jr.body.decisions.draft?.id === 'rdraft-3' && jr.body.lifecycle.currentStage === 'on_hold', 'the journey projects the formal head, the draft and the case stage');
   const after = await s.stop();
-  ok(after && after.roomDecisions.map(stableJson).join('\n') === beforeRows.join('\n') && stableJson(after.recruitmentCases[0].decisionDraft) === beforeDraft, 'after a boot, reads, refused writes and a graceful stop, every row and the draft are byte-identical — nothing rewritten, re-ordered or "repaired"');
+  if (!after || after.roomDecisions.map(stableJson).join('\n') !== beforeRows.join('\n') || stableJson(after.recruitmentCases[0].decisionDraft) !== beforeDraft) {
+    for (let i = 0; i < beforeRows.length; i += 1) if (stableJson(after?.roomDecisions?.[i]) !== beforeRows[i]) console.error(`   row ${i} before ${beforeRows[i]}\n   row ${i} after  ${stableJson(after?.roomDecisions?.[i])}`);
+    if (stableJson(after?.recruitmentCases?.[0]?.decisionDraft) !== beforeDraft) console.error(`   draft before ${beforeDraft}\n   draft after  ${stableJson(after?.recruitmentCases?.[0]?.decisionDraft)}`);
+  }
+  ok(after && after.roomDecisions.map(stableJson).join('\n') === beforeRows.join('\n') && stableJson(after.recruitmentCases[0].decisionDraft) === beforeDraft, 'after a boot, reads, refused writes and a graceful stop, every row and the draft are identical in every key and value — nothing rewritten, re-ordered or "repaired"');
   neg(!s.log().includes('DECISION integrity'), 'no integrity warning was logged for sound rows');
 }
 
@@ -194,16 +204,38 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
     formalRow({ id: 'rdec-bad-refs', evidenceRefs: {}, supersedes: null, supersededById: 'x1', createdAt: T0 + 6 }),
     formalRow({ id: 'rdec-bad-rev', rev: 0, supersedes: null, supersededById: 'x1', createdAt: T0 + 7 }),
   ];
-  db.roomDecisions.push(legacyRow({ supersededById: 'rdec-formal-2' }), headRow({ supersedes: 'rdec-legacy' }), ...bad, null, 'string', 42);
+  // S8b (migration 0016): roomDecisions is a table. The cutover imports the blob through the repository's validation and
+  // REFUSES a file the blob store tolerated — an entry that is not a record (positions named) or a chain pointer naming a
+  // decision that does not exist (ids named) — with the file left exactly as it was: nothing deleted, nothing repaired,
+  // an operator fixes a copy by hand. The old contract ("tolerated on disk, omitted on read") is kept below for the
+  // corrupt rows the cutover does carry losslessly: every row defect but the dangling chain pointer.
+  {
+    const refused = async (label, rows, pattern) => {
+      const D = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-refused-'));
+      const fixture = baseDb(); fixture.roomDecisions.push(legacyRow({ supersededById: 'rdec-formal-2' }), headRow({ supersedes: 'rdec-legacy' }), ...rows);
+      openStore(D).save({ db: fixture });
+      const r = await bootOn(D, PORT + 1);
+      const refusal = r.log().split('\n').find((l) => /0016_recruitment_cases failed/.test(l)) ?? '';
+      if (r.up) await r.stop();
+      ok(!r.up && pattern.test(refusal), `${label}: the boot is REFUSED at the S8b cutover, the refusal names the entries (${refusal.replace(/^.*failed: /, '').slice(0, 160)}…)`);
+      const kept = openStore(D).load()?.db ?? null;
+      ok(kept && stableJson(kept.roomDecisions) === stableJson(fixture.roomDecisions) && stableJson(kept.recruitmentCases) === stableJson(fixture.recruitmentCases), `${label}: the file is exactly as it was — nothing deleted, nothing repaired, no table created`);
+    };
+    await refused('three alien entries (null, a string, a number)', [null, 'string', 42], /roomDecisions entry #2 is not an object \(null\); roomDecisions entry #3 is not an object \(a string\); roomDecisions entry #4 is not an object \(a number\)/);
+    await refused('eight corrupt rows whose chain pointer names a decision that does not exist', bad, /DECISION_CHAIN_BROKEN: 8 decision chain reference\(s\).*rdec-bad-outcome \(room case-x\) names x1 \(supersededById\): no such decision/);
+  }
+  // The same eight defects, each row superseded by the real head, are carried losslessly and judged on read as before.
+  for (const r of bad) r.supersededById = 'rdec-formal-2';
+  db.roomDecisions.push(legacyRow({ supersededById: 'rdec-formal-2' }), headRow({ supersedes: 'rdec-legacy' }), ...bad);
   openStore(DIR).save({ db });
   const s = await bootOn(DIR, PORT + 1);
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
-  ok(s.up, 'the server boots with eight corrupt formal rows and three alien entries in the store');
+  ok(s.up, 'the server boots with eight corrupt formal rows in the store');
   const L = await lead(s);
   const sf = await s.j('GET', '/org/rooms/case-x/decision', undefined, L.token);
   if (sf.status !== 200) console.error('   surface', sf.status, JSON.stringify(sf.body).slice(0, 300), s.log().split('\n').filter((l) => /Error|TypeError/.test(l)).slice(0, 4).join(' | '));
   ok(sf.status === 200 && sf.body.current?.id === 'rdec-formal-2' && sf.body.history.length === 2, 'the surface serves the sound head and the legacy row');
-  neg(sf.body.omitted === 8, `eight corrupt formal rows are counted as omitted (${sf.body.omitted}); the alien entries are ignored`);
+  neg(sf.body.omitted === 8, `eight corrupt formal rows are counted as omitted (${sf.body.omitted})`);
   const log = s.log();
   neg(bad.every((r) => log.includes(`DECISION integrity ${r.id}`)), 'every corrupt row is NAMED in the server log with its problems');
   neg(bad.every((r) => decisionIntegrity(r, { orgId: 'org-x', caseId: 'case-x' }).length > 0) && decisionIntegrity(headRow(), { orgId: 'org-x', caseId: 'case-x' }).length === 0, 'the pure integrity check agrees row by row');
@@ -212,7 +244,7 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
   const after = await s.stop();
   neg(after.roomDecisions.filter((x) => x && typeof x === 'object').length === 10 && after.roomDecisions.some((x) => x?.id === 'rdec-bad-outcome' && x.outcome === 'accept'), 'the corrupt rows are still in the snapshot exactly as they were — omitted on read, never deleted or "repaired" on write');
   if (stableJson(after.roomDecisions) !== stableJson(db.roomDecisions)) console.error('   store changed', stableJson(after.roomDecisions).slice(0, 300));
-  ok(stableJson(after.roomDecisions) === stableJson(db.roomDecisions), 'the whole store is byte-identical');
+  ok(stableJson(after.roomDecisions) === stableJson(db.roomDecisions), 'the whole store is identical in every key and value');
 
   // Duplicate final heads.
   const DIR2 = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-dup-'));
@@ -254,7 +286,7 @@ section('4 — legacy M17 rows read as advisory and keep their chain; P5 judges 
   const byHand = await s.j('POST', '/org/rooms/case-x/lifecycle', { action: 'considerOffer', expectedRev: 2 }, L.token);
   neg(byHand.status === 422 && byHand.body.error === 'LIFECYCLE_EVIDENCE_REQUIRED' && byHand.body.evidenceReason === 'no_finalized_progress_decision', 'and the advisory "offer" does not evidence offer_consideration');
   const after = await s.stop();
-  ok(stableJson(after.roomDecisions) === stableJson(db.roomDecisions), 'the legacy rows are byte-identical after the boot');
+  ok(stableJson(after.roomDecisions) === stableJson(db.roomDecisions), 'the legacy rows are identical in every key and value after the boot');
 }
 
 // ======================================================= 5 — clean boot, live flow, restart

@@ -54,7 +54,14 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   archetypes: { guarantee: 'migration', owner: 'core', reason: 'product configuration, restored from catalogue.mjs; empty is a lie with consequences (D2)' },
   assessmentTemplates: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   assessments: { guarantee: 'migration', owner: 'm12', reason: 'declared required by the M23 journey projection and guaranteed by nothing but a module ??= until the sweep found it' },
-  blocks: { guarantee: 'migration', owner: 'core', reason: 'read by isBlocked() inside every visibility check — a missing container crashed the safeguarding path (D2)' },
+  // blocks, reports, moderationLog, orgNotes, ledger, opsEvents, sourceChanges, idvQueue: no longer blob collections since S6b —
+  // the rows live in blocks / reports / moderation_log / org_notes / ledger / ops_events / source_changes / idv_queue (migration
+  // 0013_safety_audit, repositories/safetyAudit.mjs). The entries stay because seed.mjs, the snapshot migrations m230_001 / m230_003
+  // and m13/shared.mjs still create the containers before the data layer attaches (they must keep upgrading a pre-S6b file); at attach
+  // the data layer drops the array and defines the name as the repository's read-only view, so the guarantee the registry gives is
+  // "the name exists", and the record is the table. Writes go through `safetyAudit` only (ledgerAppend, moderateOrRefuse, handleReport,
+  // the block / lift / note / IDV / resolve routes, the m13 ops events, m181's source changes).
+  blocks: { guarantee: 'migration', owner: 'core', reason: 'read by isBlocked() inside every visibility check — a missing container crashed the safeguarding path (D2); since S6b a read-only view over the blocks table, written only through the safetyAudit repository (Q5: a lift deletes the row)' },
   boxAssignments: { guarantee: 'module', owner: 'm16', reason: 'Box Cam feature collection, created at registration' },
   boxCamCvResults: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
   boxCamDisputes: { guarantee: 'module', owner: 'm16', reason: 'Box Cam feature collection, created at registration' },
@@ -66,7 +73,11 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   calibrationSessions: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   campaignSubmissions: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   campaigns: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
-  channels: { guarantee: 'migration', owner: 'core', reason: 'moderated message threads, opened on acceptance (D2)' },
+  // channels: no longer a blob collection since S7d — the threads live in channels / messages / message_attachments
+  // (migration 0012, repositories/channels.mjs); the data layer defines a read-only view at db.channels (insertion
+  // order, messages nested in array order), written only through the channels repository (the acceptance routes'
+  // openChannel, postMessage, the three receipt routes, the account deletion).
+  channels: { guarantee: 'migration', owner: 'core', reason: 'moderated message threads, opened on acceptance (D2); container guaranteed by the migration registry before the data layer attaches; since S7d a read-only view over the channels table, written only through the channels repository' },
   coachAffiliations: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   combineAttempts: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
   combineRequests: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
@@ -81,10 +92,15 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   developmentGoals: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
   developmentPlans: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
   developmentReviews: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
-  dispatches: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
+  // dispatches: no longer a blob collection since S7b — the rows live in dispatches / dispatch_attempts (migration 0010,
+  // repositories/dispatches.mjs); the data layer defines a read-only view at db.dispatches (insertion order, attempts
+  // nested) and m13/delivery.mjs writes through the repository. (notifications is the precedent.)
+  dispatches: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by migrateM13 (??= []) before the data layer attaches; since S7b a read-only view over the dispatches table, written only through the dispatches repository' },
   drillGuidance: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   dynamicWatchlists: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
-  emailChallenges: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  // emailChallenges: no longer a production db.* read since S6a — the rows live in email_challenges (migration 0008,
+  // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free
+  // read-only view at db.emailChallenges, like the other table-backed collections. (mediaDeletions is the precedent.)
   evidence: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   evidenceSuggestions: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   exposureEvents: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
@@ -95,25 +111,36 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   groups: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   guardians: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   identityReviews: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  idvQueue: { guarantee: 'migration', owner: 'core', reason: 'guardian identity-verification queue; was created by ??= inside a request handler, so it existed only after the first write' },
+  idvQueue: { guarantee: 'migration', owner: 'core', reason: 'guardian identity-verification queue; was created by ??= inside a request handler, so it existed only after the first write; since S6b a read-only view over the idv_queue table, written only through the safetyAudit repository (Q4b: every entry names an existing guardian, checked in code)' },
   importBatches: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   invoices: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
-  ledger: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
+  ledger: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore; since S6b a read-only view over the ledger table (insertion order), written only through ledgerAppend → the safetyAudit repository (userId / scoutName verbatim)' },
   matchdays: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   mediaBlobs: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
-  moderationLog: { guarantee: 'migration', owner: 'core', reason: 'moderation hits, counted on the T&S dashboard (D2)' },
+  moderationLog: { guarantee: 'migration', owner: 'core', reason: 'moderation hits, counted on the T&S dashboard (D2); since S6b a read-only view over the moderation_log table, written only through moderateOrRefuse → the safetyAudit repository' },
   nobodyMissedReviews: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
-  notificationPrefs: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
-  notifications: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
+  // notificationPrefs / notifications: since S7a the rows live in notification_prefs / notification_pref_categories and
+  // notifications (migration 0009, repositories/notifications.mjs) and every production reader and writer goes through the
+  // repository. The entries stay because the snapshot migrations m182_002 / m182_004 / m182_005 still name the containers
+  // (they run before the data layer attaches and must keep upgrading a pre-S7a file); at attach the data layer replaces the
+  // container with its read-only view, so the guarantee the registry gives is "the name exists", and the record is the table.
+  notificationPrefs: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by the migration registry (m182_004); since S7a a read-only view over notification_prefs, written only through the notifications repository' },
+  notifications: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by the migration registry (m182_002); since S7a a read-only view over the notifications table, written only through the notifications repository' },
   openTrials: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   opportunities: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
-  opsEvents: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
+  opsEvents: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration; since S6b a read-only view over the ops_events table, written only through the safetyAudit repository (every kind an ordinary row)' },
   orgInvites: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  orgNotes: { guarantee: 'migration', owner: 'core', reason: 'a club private notes on a player; same first-write defect as idvQueue' },
+  orgNotes: { guarantee: 'migration', owner: 'core', reason: 'a club private notes on a player; same first-write defect as idvQueue; since S6b a read-only view over the org_notes table, written only through the safetyAudit repository' },
   orgs: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
-  outbox: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  // outbox, pushLog, pushTokens: no longer blob collections since S7c — the rows live in outbox / push_log / push_tokens
+  // (migration 0011, repositories/outboxPush.mjs); the data layer defines read-only views at db.outbox, db.pushLog and
+  // db.pushTokens (insertion order), written only through the repository (the mailer, the delivery centre's fake
+  // provider, the push sender and POST /push/register).
+  outbox: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the outbox table (defined by attachDataLayer), written only through the outbox repository' },
   outcomeReports: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
-  pairingCodes: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  // pairingCodes: no longer a production db.* read since S6a — the rows live in pairing_codes (migration 0008,
+  // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free
+  // read-only view at db.pairingCodes, like the other table-backed collections. (mediaDeletions is the precedent.)
   passportAchievements: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
   passportCareerEntries: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
   passportCorrections: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
@@ -124,8 +151,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   players: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   playlists: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   prospects: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  pushLog: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
-  pushTokens: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  pushLog: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_log table (defined by attachDataLayer), written only through the push log repository' },
+  pushTokens: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_tokens table (defined by attachDataLayer), written only through the push tokens repository' },
   recruitmentBriefs: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
   recruitmentCases: { guarantee: 'migration', owner: 'm12', reason: 'the canonical recruitment object (M12); the lifecycle lives on it' },
   recruitmentContacts: { guarantee: 'migration', owner: 'm23', reason: 'M23 P3 Contact workflow: the club-internal record of a communication process. A draft must live where no recipient route reads, and delivery truth must not become a case state' },
@@ -135,7 +162,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // reinterpreted as an Offer (P6 §4, §60–§62). ONE writer in the repository:
   // scoutbox-server/m28. The evidence provider and the journey read it.
   recruitmentOffers: { guarantee: 'module', owner: 'm28', reason: 'M23 P6 canonical Offer workflow: drafts, immutable issued revisions, recipient responses. Created by registerOffers at registration; written only by m28' },
-  reports: { guarantee: 'migration', owner: 'core', reason: 'report-user/scout/club submissions (D2)' },
+  reports: { guarantee: 'migration', owner: 'core', reason: 'report-user/scout/club submissions (D2); since S6b a read-only view over the reports table, written only through handleReport / moderateOrRefuse and the resolve route → the safetyAudit repository (a report naming an unknown player is accepted, Q4)' },
   representations: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   // M23 P5.6B — ScoutBox Agent core. Guaranteed by migration 2305 so a
   // restored older snapshot has them before any Agent route can run.
@@ -166,7 +193,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   signings: { guarantee: 'migration', owner: 'core', reason: 'the evidence the signed lifecycle state rests on; exactly one writer in the repository — recordCompletedSigning in m29 since P7' },
   // M23 P7 — the signing workflow. Guaranteed by migration 2308 (m280_001_signing_workflow).
   signingPackages: { guarantee: 'migration', owner: 'm29', reason: 'P7: the signing workflow record — immutable signing revisions (document digest, required parties, contract days), party completion evidence, keys, history and rev; distinct from db.signings, the completed-signing record' },
-  sourceChanges: { guarantee: 'migration', owner: 'm18.1', reason: 'M18.1 source-change clock, guaranteed by the migration registry' },
+  sourceChanges: { guarantee: 'migration', owner: 'm18.1', reason: 'M18.1 source-change clock, guaranteed by the migration registry; since S6b a read-only view over the source_changes table, written only through recordSourceChange → the safetyAudit repository (the 20 000 cap deletes the oldest rows)' },
   squadInvites: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   ssoConfigs: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   ssoStates: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
@@ -175,7 +202,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   transitionCases: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   trials: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   uploadSessions: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
-  users: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
+  users: { guarantee: 'migration', owner: 'core', reason: 'staff accounts. Guaranteed by the migration registry in memory; since the data layer the rows live in the org_users table (repositories/users.mjs) and db.users is the repository\'s read-only view after attachDataLayer' },
   vacancies: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   verAdmins: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
   verClaims: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },

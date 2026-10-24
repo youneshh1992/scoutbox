@@ -57,7 +57,16 @@ export function registerSigning(rawCtx) {
     db, orgRouter, playerRouter, guardianRouter, adminRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, audit, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null, isAdult = null,
     agent = null, integration = null, evidence = null, faults = null,
+    // S4a: the player's level / contractStatus / availability are columns written through the identity repository;
+    // `unit` runs one unit of work (rows, facets, blobs commit together); `afterCommit` defers a side effect until COMMIT returned.
+    players, unit, afterCommit,
   } = ctx;
+  if (typeof players?.update !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
+
+  /** A refusal raised INSIDE the completion unit: the unit rolls back, the route answers with this code (never a 500). */
+  class SigningAbort extends Error {
+    constructor(code, message, { why = code, moved = null } = {}) { super(why); this.code = code; this.userMessage = message; this.moved = moved; }
+  }
 
   // The store is migration-guaranteed (m280_001_signing_workflow, schema 2308);
   // the `??=` is the boot-order guard every module keeps, never a backfill.
@@ -246,7 +255,10 @@ export function registerSigning(rawCtx) {
    *
    * Idempotent per package: a second call for the same package returns the
    * existing row and performs nothing. Authoritative writes happen first and
-   * synchronously; the caller persists; notifications and broadcasts run after,
+   * synchronously INSIDE the caller's unit of work (the ledger row, the
+   * signings row, the player's level / contract columns, the timeline facet and
+   * the grassroots squad entry commit together or not at all); the success-fee
+   * invoice is issued after COMMIT; notifications and broadcasts run after,
    * each under `safe()`.
    */
   function recordCompletedSigning({ player, org, actor, at, pkg = null, rev = null, legacy = null }) {
@@ -271,19 +283,23 @@ export function registerSigning(rawCtx) {
         method: 'LEGACY_RECORDED', note: legacy?.note ?? null, signingPackageId: null, signingRevisionId: null, offerId: null, caseId: null, documentSha256: null, contract: null, policyVersion: SIGNING_POLICY_VERSION,
       };
     db.signings.push(signing);
-    // The revenue event: a signing inside the attribution window issues the success-fee invoice through the billing adapter — once per signing.
-    if (signing.insideAttributionWindow && billing?.invoiceForSigning && !(db.invoices ?? []).some((i) => i?.signingId === signing.id)) void billing.invoiceForSigning(signing, org);
+    // The revenue event: a signing inside the attribution window issues the success-fee invoice through the billing adapter — once per
+    // signing, AFTER the signing committed (an external provider call never runs inside the transaction; the dev ledger's row is saved
+    // right after it is issued). A rolled-back completion therefore never issues an invoice.
+    if (signing.insideAttributionWindow && billing?.invoiceForSigning && !(db.invoices ?? []).some((i) => i?.signingId === signing.id)) {
+      afterCommit(() => Promise.resolve(billing.invoiceForSigning(signing, org)).then(() => persistNow()));
+    }
     // A signing moves the player's level: grassroots signings make semi-pros, academy/pro signings make pros.
     const levelBefore = player.level ?? 'amateur';
-    player.level = playerLevelAfterSigning(org.level);
-    player.timeline ??= [];
+    players.update(player.id, { level: playerLevelAfterSigning(org.level) });
+    // S5: the timeline is rows of player_timeline, appended through the repository inside this unit.
     const year = String(new Date(ts).getFullYear());
     const levelLines = [];
     if (levelBefore === 'amateur' && player.level === 'semi_pro') {
-      player.timeline.push({ year, event: `Levelled up: amateur → semi-pro with ${org.name}` });
+      players.addItem(player.id, 'timeline', { year, event: `Levelled up: amateur → semi-pro with ${org.name}` });
       levelLines.push([`⬆️ You're semi-pro. ${org.name} signed you — one step up the ladder, recorded forever on your pathway.`, `${player.name} levelled up: amateur → semi-pro with ${org.name}.`]);
     } else if (levelBefore !== 'pro' && player.level === 'pro') {
-      player.timeline.push({ year, event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${org.name}` });
+      players.addItem(player.id, 'timeline', { year, event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${org.name}` });
       levelLines.push([`⬆️ Academy/pro level reached with ${org.name}. Your grassroots journey got you here.`, `${player.name} reached academy/pro level with ${org.name}.`]);
     }
     if (org.level === 'grassroots') {
@@ -291,9 +307,8 @@ export function registerSigning(rawCtx) {
       if (!org.squad.some((e) => e.playerId === player.id)) org.squad.push({ id: nextId('sq'), playerId: player.id, name: player.name, position: player.position ?? '', source: 'signing', addedAt: ts });
     }
     // `under_contract` means a real contract was executed (M23_P7_CONTRACT_STATUS_SEMANTICS.md): written here and nowhere else for a recruitment signing.
-    player.contractStatus = 'under_contract';
-    player.availability = 'not_seeking';
-    player.timeline.push({ year, event: pkg ? `Signed with ${org.name} — signing completed in ScoutBox` : `Signed by ${org.name} — discovered on ScoutBox` });
+    players.update(player.id, { contractStatus: 'under_contract', availability: 'not_seeking' });
+    players.addItem(player.id, 'timeline', { year, event: pkg ? `Signed with ${org.name} — signing completed in ScoutBox` : `Signed by ${org.name} — discovered on ScoutBox` });
     const effects = () => {
       safe('refreshJourneyBadges', () => refreshJourneyBadges?.(player));
       for (const [pText, gText] of levelLines) {
@@ -607,43 +622,39 @@ export function registerSigning(rawCtx) {
     const player = findPlayer(pkg.playerId); const org = orgOf(pkg.orgId);
     if (!player || !org) return err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be completed.');
     if (limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
-    // ---- the unit of work
-    // M23 P8 — the case part of the snapshot is the lifecycle writer's own
-    // (status, stage, rev, instants, history length, links), not a bare status.
-    const snapshot = { pkg: JSON.stringify(pkg), signingsLen: db.signings.length, ledgerLen: (db.ledger ?? []).length, invoicesLen: (db.invoices ?? []).length, player: JSON.stringify(player), squad: JSON.stringify(org.squad ?? null), caseStatus: kase.room.status, lifecycle: ctx.lifecycleSnapshot(kase) };
-    const rollback = (why) => {
-      console.error(`SIGNING completion_rolled_back ${pkg.id}: ${why}`);
-      Object.assign(pkg, JSON.parse(snapshot.pkg));
-      db.signings.length = snapshot.signingsLen;
-      if (Array.isArray(db.ledger)) db.ledger.length = snapshot.ledgerLen;
-      if (Array.isArray(db.invoices)) db.invoices.length = snapshot.invoicesLen;
-      Object.assign(player, JSON.parse(snapshot.player));
-      if (snapshot.squad !== 'null') org.squad = JSON.parse(snapshot.squad);
-      ctx.restoreLifecycle(kase, snapshot.lifecycle);
-    };
+    // ---- the unit of work (S4a: store.unitOfWork)
+    // The package, the ledger row, the signings row, the player's level and
+    // contract columns, the timeline facet, the squad entry, the case lifecycle
+    // (status, stage, rev, instants, history, links) and the blobs commit
+    // together: a refusal (SigningAbort) or a throw anywhere — a statement,
+    // COMMIT itself — rolls the transaction back and restores every record and
+    // held reference; nothing is persisted and no invoice is issued.
     const by = byOrg(req);
     let effects = null; let moved = null; let signing = null;
     try {
-      rev.status = 'COMPLETED'; rev.completedAt = at; rev.completedBy = by;
-      pkg.status = 'COMPLETED';
-      const written = recordCompletedSigning({ player, org, actor: req.orgUser, at, pkg, rev });
-      if (written.duplicate) { rollback('duplicate_row'); return err(res, 'SIGNING_ALREADY_COMPLETED', 'A completed signing record already exists for this package.'); }
-      signing = written.signing; effects = written.effects;
-      if (faults?.shouldFail?.('signing.complete.after_row')) throw new Error('simulated failure after the db.signings row (development fault layer)');
-      pkg.completion = { signingId: signing.id, completedAt: at, completedBy: by, contract: rev.contract, documentSha256: rev.document.sha256, lifecycle: null };
-      // The lifecycle asks the ONE validator with the real evidence provider — which now finds the row this completion just wrote.
-      moved = advanceCase({ req, room: kase, action: 'confirmSignedOutcome', at, trigger: `signing:complete:${pkg.id}`, keyDetail: { signingPackageId: pkg.id, signingId: signing.id } });
-      if (!moved.applied) { rollback(`lifecycle_${moved.reason}`); return err(res, 'SIGNING_LIFECYCLE_CONFLICT', moved.message ?? 'The case could not be moved to Signed; nothing was recorded.', { lifecycle: moved, current: { status: kase.room.status } }); }
-      pkg.completion.lifecycle = { from: moved.from, to: moved.to, at };
-      if (faults?.shouldFail?.('signing.complete.after_lifecycle')) throw new Error('simulated failure after the lifecycle moved (development fault layer)');
-      kase.links ??= {}; kase.links.signingId = signing.id;
-      if (key) keyList(pkg, 'complete').push({ key, fp, signingId: signing.id, at });
-      hist(pkg, 'signing_completed', by, { revisionId: rev.id, signingId: signing.id, sha256: rev.document.sha256 }, at);
-      audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_completed', { signingPackageId: pkg.id, signingId: signing.id, to: moved.to });
-      touch(pkg, req, at);
-      persistNow();
+      unit(() => {
+        rev.status = 'COMPLETED'; rev.completedAt = at; rev.completedBy = by;
+        pkg.status = 'COMPLETED';
+        const written = recordCompletedSigning({ player, org, actor: req.orgUser, at, pkg, rev });
+        if (written.duplicate) throw new SigningAbort('SIGNING_ALREADY_COMPLETED', 'A completed signing record already exists for this package.', { why: 'duplicate_row' });
+        signing = written.signing; effects = written.effects;
+        if (faults?.shouldFail?.('signing.complete.after_row')) throw new Error('simulated failure after the db.signings row (development fault layer)');
+        pkg.completion = { signingId: signing.id, completedAt: at, completedBy: by, contract: rev.contract, documentSha256: rev.document.sha256, lifecycle: null };
+        // The lifecycle asks the ONE validator with the real evidence provider — which now finds the row this completion just wrote.
+        moved = advanceCase({ req, room: kase, action: 'confirmSignedOutcome', at, trigger: `signing:complete:${pkg.id}`, keyDetail: { signingPackageId: pkg.id, signingId: signing.id } });
+        if (!moved.applied) throw new SigningAbort('SIGNING_LIFECYCLE_CONFLICT', moved.message ?? 'The case could not be moved to Signed; nothing was recorded.', { why: `lifecycle_${moved.reason}`, moved });
+        pkg.completion.lifecycle = { from: moved.from, to: moved.to, at };
+        if (faults?.shouldFail?.('signing.complete.after_lifecycle')) throw new Error('simulated failure after the lifecycle moved (development fault layer)');
+        kase.links ??= {}; kase.links.signingId = signing.id;
+        if (key) keyList(pkg, 'complete').push({ key, fp, signingId: signing.id, at });
+        hist(pkg, 'signing_completed', by, { revisionId: rev.id, signingId: signing.id, sha256: rev.document.sha256 }, at);
+        audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_completed', { signingPackageId: pkg.id, signingId: signing.id, to: moved.to });
+        touch(pkg, req, at);
+        if (faults?.shouldFail?.('signing.complete.at_commit')) throw new Error('simulated failure at the commit of the completion unit (development fault layer)');
+      });
     } catch (e) {
-      rollback(`threw ${e?.message ?? e}`);
+      console.error(`SIGNING completion_rolled_back ${pkg.id}: ${e instanceof SigningAbort ? e.message : `threw ${e?.message ?? e}`}`);
+      if (e instanceof SigningAbort) return err(res, e.code, e.userMessage, e.moved ? { lifecycle: e.moved, current: { status: kase.room.status } } : {});
       return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be completed; nothing was recorded.');
     }
     safe('effects', () => { if (faults?.shouldFail?.('signing.complete.effects')) throw new Error('simulated failure in the after-effects (development fault layer)'); effects?.(); });

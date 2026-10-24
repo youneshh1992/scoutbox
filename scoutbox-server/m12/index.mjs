@@ -9,7 +9,7 @@ import { registerJourneys } from './journeys.mjs';
 import { registerOperations } from './operations.mjs';
 
 export function registerM12(ctx) {
-  migrateM12(ctx.db);
+  migrateM12(ctx.db, ctx.players);
   const shared = buildShared(ctx);
   const full = { ...ctx, ...shared };
   registerPassport(full);   // F1 evidence · F10 coach identity

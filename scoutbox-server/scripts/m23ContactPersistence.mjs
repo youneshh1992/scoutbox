@@ -80,7 +80,11 @@ function baseDb() {
   const db = {
     players: [{ id: 'pl-x', name: 'Xavier Adult', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } }],
     orgs: [{ id: 'org-x', name: 'X FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, squad: [], location: { lat: 51.5, lng: -0.1 } }],
-    guardians: [], users: [], sessions: [], ledger: [], notifications: [],
+    guardians: [],
+    // S8a-core: a request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
+    // fixture carries the staff row the case and the request name (the dev login below finds it by org and name).
+    users: [{ id: 'usr-owner', orgId: 'org-x', name: 'Owner', role: 'Head of Recruitment', createdAt: 1 }],
+    sessions: [], ledger: [], notifications: [],
     recruitmentCases: [{
       id: 'case-x', orgId: 'org-x', playerId: 'pl-x', playerName: 'Xavier Adult', ownerUserId: 'usr-owner', ownerName: 'Owner', stage: 'review',
       priority: 'medium', restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null },
@@ -149,7 +153,9 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
     soundContact({ id: 'rct-4', status: 'responded', respondedAt: 4000, response: { kind: 'accepted', message: 'Yes', by: 'player', at: 4000 }, history: [{ id: 'aud-40', at: 2001, action: 'contact_sent', by: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, detail: {} }, { id: 'aud-41', at: 4000, action: 'contact_responded', by: { kind: 'player', name: 'Player' }, detail: { kind: 'accepted' } }], rev: 3 }),
   ];
   db.recruitmentContacts = rows;
-  db.requests = [{ id: 'req-1', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactId: 'rct-1', contactChannel: null }];
+  // S8a-core: the request row carries the staff member the production writer (issueRecruitmentRequest) always sets;
+  // a row without userId is refused at the cutover with its id, never repaired.
+  db.requests = [{ id: 'req-1', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactId: 'rct-1', contactChannel: null }];
   openStore(RESTORE_DIR).save({ savedAt: Date.now(), idCounter: 500, db });
   const before = JSON.stringify(rows);
 

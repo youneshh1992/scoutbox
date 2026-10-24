@@ -650,8 +650,9 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   neg(statusWriters.length === 1 && statusWriters[0] === 'm17/rooms.mjs', `Z1 exactly one file assigns room.status on a live case: ${statusWriters.join(', ')}`);
   const stageWriters = serverFiles.filter((f) => /(?:kase|room|c|k)\.stage\s*=[^=]/.test(strip(src(f))));
   neg(stageWriters.every((f) => ['m17/rooms.mjs', 'm12/scouting.mjs'].includes(f)), `Z2 case.stage is written only by the ONE writer and the room-guarded M12 routes: ${stageWriters.join(', ')}`);
-  const ucWriters = serverFiles.filter((f) => /contractStatus\s*=\s*'under_contract'/.test(strip(src(f))));
-  neg(ucWriters.length === 1 && ucWriters[0] === 'm29/index.mjs', `#26 Z3 'under_contract' is assigned in exactly one file: ${ucWriters.join(', ')}`);
+  // S4a: the column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record; the one writer is still m29.
+  const ucWriters = serverFiles.filter((f) => /contractStatus\s*=\s*'under_contract'|players\.update\([^\n]*contractStatus: 'under_contract'/.test(strip(src(f))));
+  neg(ucWriters.length === 1 && ucWriters[0] === 'm29/index.mjs', `#26 Z3 'under_contract' is written in exactly one file: ${ucWriters.join(', ')}`);
   const csWriters = serverFiles.filter((f) => /\.contractStatus\s*=[^=]/.test(strip(src(f))));
   neg(csWriters.every((f) => ['m29/index.mjs', 'server.mjs'].includes(f)) && /CONTRACT_STATUS_NOT_SELF_DECLARABLE/.test(src('server.mjs')) && /CONTRACT_STATUS_CANONICAL/.test(src('server.mjs')) && /canonicalContractFor\(p\.id, Date\.now\(\), \{ exceptOrgId: req\.org\.id \}\)/.test(src('server.mjs')), `#26 Z4 every other contractStatus assignment sits behind the two refusals or the release guard: ${csWriters.join(', ')}`);
   neg(!/applyLifecycleTransition|room\.status|recordCompletedSigning/.test(strip(src('m19/index.mjs'))) && files('m22').every((f) => !/applyLifecycleTransition|room\.status|rejectCase|archived/.test(strip(src(f)))) && !/applyLifecycleTransition|room\.status/.test(strip(src('m162/shared.mjs'))), '#15 #16 #17 Z5 matching (M19), Box Cam / CV (M22) and Trust (M16.2) never touch the lifecycle');
@@ -661,7 +662,10 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   neg(!/\.push\(|\.splice\(|\s=\s(?!==)/.test(strip(src('m23/journeyModel.mjs')).replace(/const |let |\w+\s*=\s*\(|=>|===|!==|<=|>=|\?\?=/g, '')) || true, 'Z9 the model is read-only by construction (no store access)');
   neg(!/\bdb\b/.test(strip(src('m23/journeyModel.mjs'))), 'Z9b the model never receives a database');
   neg(/registerJourneyRoutes/.test(src('server.mjs')) && !/\.push\(|persist/.test(strip(src('m23/journeyRoutes.mjs')).replace(/items\.push|out\.push|grants\.push/g, '')), 'Z10 the journey routes write nothing');
-  neg(/lifecycleSnapshot|restoreLifecycle/.test(src('m17/rooms.mjs')) && /restoreLifecycle/.test(src('m29/index.mjs')) && !/kase\.room\.status = snapshot\.caseStatus;\n/.test(src('m29/index.mjs').replace(/else \{ kase\.room\.status = snapshot\.caseStatus;/, '')), 'Z11 the signing rollback restores through the lifecycle writer\'s own snapshot');
+  // S4a: the completion is one unit of work (store.unitOfWork) — the case lifecycle, the signings row, the player's
+  // columns and the blobs roll back together through the store's memento and participants, never by a hand-written
+  // restore in the signing module; the lifecycle writer keeps its own snapshot for its own failures (M17).
+  neg(/lifecycleSnapshot|restoreLifecycle/.test(src('m17/rooms.mjs')) && /unit\(\(\) => \{[\s\S]{0,400}recordCompletedSigning\(/.test(src('m29/index.mjs')) && !/kase\.room\.status = snapshot/.test(src('m29/index.mjs')) && !/restoreLifecycle/.test(src('m29/index.mjs')), 'Z11 the signing completion rolls back as one unit of work (S4a), not through a hand-written restore');
   neg(/pkg\.caseId !== kase\.id/.test(src('m23/evidence.mjs')) && /ts < opened/.test(src('m23/evidence.mjs')), 'Z12 the signed rule names the case (canonical) and the opening (legacy)');
   neg(/ROOM_NOT_REOPENABLE/.test(src('m17/rooms.mjs')) && /namingActions/.test(src('m17/rooms.mjs')), 'Z13 the reopen guard and the role parity are in the M17 source');
   neg(/currentSigningForOffer\(rows, at\)/.test(src('m29/index.mjs')), '#53 Z14 the Offer\'s signing summary uses the ONE current-package rule');
