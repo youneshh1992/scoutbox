@@ -3521,7 +3521,21 @@ paragraph).
 **S8c (contacts, offers) is PREPARED, NOT IMPLEMENTED (§D.10, `s8c-readiness-review.md`); S8d is not started.**
 Nothing in this section is a production, release, security, legal-compliance, merge or deployment approval.
 
-### D.10 S8c (contacts, offers) — PREPARED, NOT IMPLEMENTED (23 October 2026, from the code at `7072dd9`)
+### D.10 S8c (contacts, offers) — PREPARED, NOT IMPLEMENTED; CORRECTED DESIGN PENDING INDEPENDENT ACCEPTANCE (23 October 2026 from the code at `7072dd9`; corrected 24 October 2026 after the independent review of `854d035`)
+
+**The independent review of `854d035` (24 October 2026)** accepted the S8b acceptance record (S8b stays accepted at
+`7072dd9`) and did NOT accept the S8c design: **F1** — the design said a `currentRevisionId` naming no revision is
+corruption KEPT by storage while its final guard refused it (the actual store keeps such an offer; the cutover would
+have been blocked); **F2** — the design model executed another order than the document (contacts before requests with
+a parked back-reference; request upsert and prune combined; departed contacts pruned last, so a valid joint
+contact/request departure failed) and its guard omitted `discarded_by_response_id`. Both corrected in place (the
+review's §13, §6 the ONE pointer rule and the order P → F0 → R → B1 → A′ → D′ → F2 → G against the accepted S8a/S8b
+phase boundaries; the parking / B′ / C′ descriptions removed; the model rewritten to execute that order, 75 checks,
+with failing-first regressions against the original model kept as a baseline; the reviewer's unchanged script with
+`--expect-corrected` exits 0). The one statement beyond today's storage — refusing a pointer that names a row owned by
+ANOTHER offer — is put forward for confirmation, not assumed. The bullets below are updated where the correction
+changed them. S8c stays prepared, not implemented; `0017` unreserved; S8d not started; Q8c-a/Q8c-b unanswered and the
+brief not cleared.
 
 The design is [`s8c-readiness-review.md`](./s8c-readiness-review.md) — the survey of both collections from their
 producers and consumers (its §1–§2, line-level references verified at `7072dd9`), the drafted constraints judged
@@ -3552,17 +3566,26 @@ the engineering choices (§9), the ordered checklist, slices and test plan with 
   draft beside another issued offer — probe 2 S3a), the unique revision id / one-response-per-revision / document /
   receipt uniqueness (each refuses a record `offerIntegrity` reports and KEEPS today), the contacts' unique request
   index (redundant with the pair guard), the `SET NULL` keys to `guardians` and `room_decisions` (silent rewrites of a
-  snapshot and of provenance), the parent→child key `current_revision_id → offer_revisions` (a cycle) and the
-  within-offer revision/response keys are withdrawn; the history tables keep RESTRICT and are removed explicitly before
-  their owner; NOT NULL only on `id`, `org_id`, `case_id`, `player_id`; staff ids RESTRICT keys, nullable. **S8d
-  note:** `offer_revisions.id` is indexed, not unique — S8d's drafted key to it needs a decision then.
-- **Write order (review §6; probe 2, 31 checks on Node 22 and 24):** P preflight over the final graph → F0 the
-  departed contacts/offers (history and key rows explicitly, then the parent) BEFORE the S8b core and the S8a phases →
-  the S8b and S8a writes → A′/D′ the changed contacts (the request back-reference parked only in snapshot mode) and
-  offers AFTER the S8a phases → the S8b prunes → G (pair agreement; every revision pointer resolving within its own
-  offer — the F1 lesson of `b7c0dd0` applied from the start; `foreign_key_check` empty). Both input orders, partial
-  saves, departures under RESTRICT, a statement failure and a guard failure with byte-identical tables; no retained
-  unique predicate exists to release.
+  snapshot and of provenance), the parent→child key `current_revision_id → offer_revisions` (a cycle; the column
+  nullable) and the within-offer revision/response keys are withdrawn; the history tables keep RESTRICT and are removed
+  explicitly before their owner; NOT NULL only on `id`, `org_id`, `case_id`, `player_id`; staff ids RESTRICT keys,
+  nullable. **The pointer rule (review §6, corrected after `854d035`):** the five offer pointers are stored as written;
+  a target resolving within the same offer is valid; a target naming NO known row anywhere is an unresolved historical
+  pointer — kept verbatim, counted, never refused (the actual store keeps such an offer today; `offerIntegrity` stays
+  the judge); a target that exists ONLY under another offer is refused (`OFFER_CHAIN_BROKEN`, ids and owner named) —
+  the one statement beyond today's storage, put forward for confirmation. **S8d note:** `offer_revisions.id` is
+  indexed, not unique — S8d's drafted key to it needs a decision then.
+- **Write order (review §6, corrected after `854d035`; probe 2, 75 checks on Node 22 and 24):** P preflight over the
+  final graph (the pointer rule included) → F0 the departed contacts/offers (history and key rows explicitly, then the
+  parent) and R the release of a surviving contact's OLD request pointer, both BEFORE any request work → the S8b core,
+  then B1 the S8a request create/update (phases 1–3, no prune), the S8b links/rooms, the channels → A′/D′ the changed
+  contacts (their final `request_id`; nothing parked) and offers → the S8b room prune, F2 the S8a request prune (phase
+  5 — in staged mode it runs inside the recruitment hook, between the two S8c hooks, which is what F0 and R are for),
+  the case/staff/org prunes → G (pair agreement; the pointer rule over the tables; `foreign_key_check` empty). Proved on
+  the design model executing exactly this order: both input orders, partial saves with either collection retained, the
+  joint contact/request departure, the retarget with the old request departing, new pairs, retained-dependant refusals
+  with unchanged rows, every pointer kind under the rule, failures at each phase with byte-identical rollback and the
+  unchanged retry; no retained unique predicate exists to release.
 - **Mapping (review §2; probe 1, 32 checks on Node 22 and 24 through the REAL S8a engine):** every writer literal of
   both modules and the legacy / kept-corrupt / prototype-named / off-type variants round-trip key for key; the
   null-key send act and the empty list acts are held on the row; a legacy non-array `keys.issue` comes back as the
@@ -3588,5 +3611,5 @@ the engineering choices (§9), the ordered checklist, slices and test plan with 
   it. Tests first on the unchanged `7072dd9` tree: a unit suite and a real-server suite, the existing `m23Contact*`,
   `m23Offer*`, journey, signing and agent batteries named from `scoutbox-server/scripts/`.
 
-Nothing of S8c is implemented, stubbed or reserved. This preparation awaits independent review; S8d is not started.
-Nothing in this section is a production, release, security, legal-compliance, merge or deployment approval.
+Nothing of S8c is implemented, stubbed or reserved. The corrected design awaits independent acceptance; S8d is not
+started. Nothing in this section is a production, release, security, legal-compliance, merge or deployment approval.

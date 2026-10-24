@@ -1,7 +1,11 @@
 # S8c readiness review — recruitment contacts and offers as tables
 
-**Status: PREPARED, NOT IMPLEMENTED (23 October 2026).** Written on `feat/sqlite-schema` at `7072dd9`, the commit at
-which S8b was independently accepted (`sqlite-migration-plan.md` §D.9; `s8b-readiness-review.md` §12). Nothing of S8c is
+**Status: PREPARED, NOT IMPLEMENTED — CORRECTED DESIGN, PENDING INDEPENDENT ACCEPTANCE (23–24 October 2026).** Written
+on `feat/sqlite-schema` at `7072dd9`, the commit at which S8b was independently accepted (`sqlite-migration-plan.md`
+§D.9; `s8b-readiness-review.md` §12), and **corrected on 24 October 2026 after the independent review of `854d035`**
+(which accepted the S8b acceptance record and did NOT accept this design: two P2 findings — F1 the offer-pointer
+contract contradicted itself between §2.2 and §6 G; F2 the design model executed another order than §6 and its guard
+omitted one pointer; §13 is the correction record, §6 the single pointer rule and the order as corrected). Nothing of S8c is
 implemented, stubbed or reserved: no migration, no repository module, no change to a route, a registered definition or
 a test. The next free migration identifier is **`0017`** (`repositories/index.mjs:60` ends at `m0016`;
 `repositories/migrations/` holds `0001`–`0016`); it is **not reserved** here. S8d (signing packages, signings,
@@ -30,9 +34,13 @@ build that wrote it).
 
 Design probes (synthetic, labelled design models — they import the real S8a engine and the real `0016` rebuild helper
 READ-ONLY and change nothing in the repository): `s8c-probe-1-mapping.mjs` (32 checks: the proposed shapes through the
-real encoder/decoder) and `s8c-probe-2-constraints-order.mjs` (31 checks: the constraints against real inputs, the
-write order in both input orders and as partial saves, the drafted-constraint controls, exact rollback, the shared key
-table's rollback model). Both exit 0 on Node v22.22.0 and v24.19.0; source and results travel with the handoff (§11).
+real encoder/decoder) and `s8c-probe-2-constraints-order.mjs` (as corrected after the review of `854d035`: 75 checks —
+the constraints against real inputs, the write order of §6 in both input orders and as partial saves, the
+request/contact transitions, the pointer rule for all five offer pointers, the drafted-constraint controls, exact
+rollback at every phase, the shared key table's rollback model; the ORIGINAL 31-check model is kept beside it as
+`probes/baseline/` and is what the reviewer's `review-854d035-design-reproductions.mjs` reproduces the findings
+against). Both exit 0 on Node v22.22.0 and v24.19.0; source and results travel with the handoff (§11). A design model
+proves the design's own consistency; it is not evidence about an implemented S8c repository or the real server.
 
 ## 1. The bounded scope — two blob collections, nine tables, one shared table broadened
 
@@ -145,7 +153,7 @@ One literal creates an offer (`m28/index.mjs:334-340`) with revision 1 (`:326-33
 | `decisionId` | create: `dp.sourceId ?? null` (`:336`), the FINALIZED progress decision the evidence provider named | club view only (`offer.mjs:505`); never the recipient | string or `null`; a decision row can leave only through the finalize route's transport-failure splice (`decisionRoutes.mjs:392`, uncommitted) — no writer removes a committed decision | `decision_id TEXT` plain, indexed, dangling COUNTED at the cutover and in `/capabilities` (the drafted `SET NULL` key is withdrawn — §3, probe 2 S3e) |
 | `transactionId` | create: the verified workspace id or `null` (`:315-321`) | club view; the issue re-evaluates readiness from it (`:448-453`); the signing package copies it (`m29/index.mjs:420`) | string or `null` | `transaction_id TEXT` plain (file 06 is not live) |
 | `status` | create `DRAFT`; issue `ISSUED` (`:466`); withdraw `WITHDRAWN` (`:517`); revise `DRAFT` (`:579`); response `ACCEPTED`/`DECLINED` (`:754`) — the CURRENT revision's STORED status | the journey's canonical status derives from the revisions (`canonicalOfferStatus`); the signing module reads `offer.status === 'ACCEPTED'` directly (`m29/signing.mjs:245`) | one of five stored words; `EXPIRED` and `SUPERSEDED` are never stored on the container | `status TEXT` (no CHECK) |
-| `currentRevisionId` | create (`:336`), revise (`:578`), response discarding a draft (`:753`) | `currentRevision()` (`offer.mjs:260`); integrity requires it to name a revision of this offer AND the latest non-discarded one (`offer.mjs:388-396`) | string; a pointer to no revision is `current_revision` corruption, kept | `current_revision_id TEXT` plain; the final guard checks it resolves WITHIN the offer (§6 G, probe 2 S4) — the drafted key to `offer_revisions(id)` is withdrawn (§3) |
+| `currentRevisionId` | create (`:336`), revise (`:578`), response discarding a draft (`:753`) | `currentRevision()` (`offer.mjs:260`); integrity requires it to name a revision of this offer AND the latest non-discarded one (`offer.mjs:388-396`) | string; a pointer to no revision is `current_revision` corruption — KEPT by the current store (the review of `854d035` proved it on the actual migrated store: saved and reloaded unchanged; `offerIntegrity` reports `current_revision` and nothing else) and omitted from projections on read | `current_revision_id TEXT` plain, stored as written; under the ONE pointer rule of §6: a target that resolves within this offer is valid; a target that names NO known revision anywhere (an unresolved historical pointer) is kept verbatim, counted, never refused — the read-time report stays the judge; a target that exists ONLY under another offer is refused (§6 G, probe 2 S8). The drafted key to `offer_revisions(id)` is withdrawn (§3) |
 | `revisions[]` | create, revise; in-place edits of the current draft (`:384-393`), the freeze (`:460-466`), supersession (`:465`), withdrawal (`:516`), response (`:751-753`) | club view all; recipient view the issued ones (`offer.mjs:521-542`); agent view without documents (`:545-556`); the signing module finds the ACCEPTED revision (`m29/index.mjs:351`, `:392`) | list in revision order; ≤ 20 by rule (`OFFER_LIMITS.revisions`) — kept as data; duplicate ids or numbers are corruption, kept | `offer_revisions (offer_id, position, …)` CASCADE, `id` INDEXED (not unique — §3) — see 2.3 |
 | `responses[]` | the respond handler appends `{id:'rofa-<n>', revisionId, responseType, actorType, actorId, actorName, forPlayerId, occurredAt, reason, clientKey}` (`:742`, `:750`); the deletion unit nulls `actorName` and `reason` on player rows (`:894`) | club view (`offer.mjs:502`), recipient view (`:537`), the evidence (`responderMatches`, `:331-337`), replay by `clientKey` within the offer (`:709`) | append-only; one per revision by the gate; a duplicate is `duplicate_response` corruption, kept | `offer_responses (offer_id, position, …)` CASCADE, index `(offer_id, client_key)` |
 | `readReceipts[]` | `markViewed` (`:649-658`): `{revisionId, viewerKind, viewerId, firstViewedAt}`, write-once per (revision, viewer) by the code check (`:653`) | club view `firstViewedAt = MIN` (`offer.mjs:503`) | append-only; `readReceipts` ABSENT on rows created before the receipt code ran (`:652` `??=`) | `offer_read_receipts (offer_id, position, …)` CASCADE (the drafted deduplicating primary key is withdrawn — position-keyed, §3) |
@@ -165,7 +173,7 @@ One literal creates an offer (`m28/index.mjs:334-340`) with revision 1 (`:326-33
 | `recipientMessage`, `internalNote` | create/edit/revise | `internalNote` is club-private: never the recipient or agent view (`offer.mjs:521`, `:545`) | `recipient_message`, `internal_note` |
 | `documents[]` | `resolveDocuments` (`:174-182`): `{id:'rofd-<n>', evidenceId, label, mime, bytes}`; replaced wholesale on edit (`:388`); copied with NEW ids on revise (`:565`) | the recipient document route re-reads the vault row by `evidenceId` and the offer's org (`:828`); no bytes here | `offer_revision_documents (offer_id, revision_position, position, id, evidence_id (plain), label, mime, bytes, raw_json, …)` |
 | `expiresAt` | validated instant in ms or `null` on a draft (`:329`, `:387`) | required at issue; read-time expiry (above) | `expires_at INTEGER` |
-| `createdAt/By`, `updatedAt/By`, `issuedAt/By`, `withdrawnAt/By`, `withdrawReason`, `respondedAt`, `response:{id}\|null`, `supersedesRevisionId`, `supersededByRevisionId`, `supersededAt`, `discardedByResponseId` | the respective writers; `discardedByResponseId` is set by assignment (`:753`) and DELETED on the route's in-memory rollback (`:755`) — absent on every other revision | `by` objects are `byOrg(req)` or `null`; `response` is `{id}` or `null` | columns as drafted (`response_id`, `supersedes_revision_id`, `superseded_by_revision_id`, `discarded_by_response_id` all PLAIN — the drafted self-keys and response keys are withdrawn in favour of the same-offer guard, §3/§6) |
+| `createdAt/By`, `updatedAt/By`, `issuedAt/By`, `withdrawnAt/By`, `withdrawReason`, `respondedAt`, `response:{id}\|null`, `supersedesRevisionId`, `supersededByRevisionId`, `supersededAt`, `discardedByResponseId` | the respective writers; `discardedByResponseId` is set by assignment (`:753`) and DELETED on the route's in-memory rollback (`:755`) — absent on every other revision | `by` objects are `byOrg(req)` or `null`; `response` is `{id}` or `null` | columns as drafted (`response_id`, `supersedes_revision_id`, `superseded_by_revision_id`, `discarded_by_response_id` all PLAIN, stored as written — a string in its column, `null` as NULL, an absent key in `absent_keys_json`, an off-type value in `offtype_json`; the drafted self-keys and response keys are withdrawn in favour of the ONE pointer rule of §6: own target valid, unresolved historical target kept and counted, known foreign-owner target refused — probe 2 S8 covers each of the four together with `current_revision_id`) |
 | `recipientSnapshot` | issue: `{type, playerId, guardianId, minor, at}` (`:463`); `null` on drafts | the recipient and agent reads filter by it (`:629-631`, `journey.mjs:488-490`, `journeyRoutes.mjs:177-181`); `responderMatches` re-checks the answerer against it | `recipient_type`, `recipient_player_id` (stored), `recipient_guardian_id` (plain — §9), `recipient_minor`, `recipient_at` |
 | `readinessSnapshot` | issue: `{transactionId, evaluatedAt, status, blockers:[]}` or `null` (`:452`, `:464`) | club view only | `readiness_transaction_id`, `readiness_evaluated_at`, `readiness_status`, `readiness_blockers_json` |
 | `rev`, `revAt`, `revBy` | the revision's own `bumpRev` (`:390`, `:476`, `:525`, `:769`) | the view's `rev` | `rev`, `rev_at`, `rev_by_user_id`, `rev_by_name` |
@@ -200,9 +208,9 @@ without a named refusal.
 | `email_copy_outbox_id` → `outbox` (drafted "no FK") | **plain, as drafted** — the outbox rows are rewritten wholesale by a snapshot (`outboxPush.mjs:409`) and their retention is open (O4); the id is a courtesy pointer the club view shows | — |
 | contact `CHECK (channel = 'in_app' OR status = 'recorded')`, every status/channel/mode/state vocabulary CHECK, every `length(...)` CHECK, `recipient_minor IN (0,1)`-style CHECKs, `contact_mode NOT NULL DEFAULT 'player_only'` | **withdrawn** — the S8a/S8b rule: the routes validate and the readers report; a kept-corrupt record (an unknown status, an over-long body from an older limit) must import. `contact_mode` is nullable with absence recorded (a pre-P5.6E row stays distinguishable from an explicit `player_only`) | `recruitmentCases.mjs:220-230` (no vocabulary CHECKs); probe 1 rct-5/rct-8 |
 | `recruitment_offers.decision_id REFERENCES room_decisions ON DELETE SET NULL` | **withdrawn** — `SET NULL` erases provenance silently; plain indexed id, dangling counted at the cutover and in `/capabilities` (the only decision removal is an uncommitted splice) | probe 2 S3e |
-| `current_revision_id NOT NULL REFERENCES offer_revisions(id) RESTRICT` | **withdrawn as a key** — a parent→child key is a cycle with the child's CASCADE key back (insert order impossible without parking or deferral; S8a's rule is IMMEDIATE constraints). Plain column; the final guard refuses a pointer that does not resolve WITHIN THE SAME OFFER (`OFFER_CHAIN_BROKEN`, ids only) — the S8b same-room lesson (F1) applied from the start | probe 2 S4 (a pointer into another offer refused, tables unchanged) |
+| `current_revision_id NOT NULL REFERENCES offer_revisions(id) RESTRICT` | **withdrawn as a key, and nullable** — a parent→child key is a cycle with the child's CASCADE key back (insert order impossible without parking or deferral; S8a's rule is IMMEDIATE constraints), and NOT NULL would refuse a record the store keeps. Plain column under the ONE pointer rule (§6): an unresolved historical target is KEPT and counted (the compatibility promise of §2.2 — a corrupt-but-kept offer never blocks the cutover); a target that exists ONLY under another offer is refused (`OFFER_CHAIN_BROKEN`, ids and the owning offer named) — the S8b same-room lesson (F1 of `b7c0dd0`). **The foreign-owner refusal is the ONE compatibility statement of this design that goes beyond today's storage** (the blob store would save such a pointer; no writer can produce it — every pointer is set within one offer in one tick; `offerIntegrity` would report it as unresolved and omit the offer): it is put forward for the review's confirmation, not assumed (§9, §13) | probe 2 S8 (every pointer kind × own / unresolved / foreign / null / off-type / duplicate), S4; the reviewer's `review-854d035-design-reproductions.mjs --expect-corrected` (F1 kept verbatim, F2b refused) |
 | `offer_revisions.id PRIMARY KEY`, `UNIQUE (offer_id, revision_number)`; `offer_responses.revision_id UNIQUE`; `offer_revision_documents UNIQUE (revision_id, evidence_id)`; `offer_read_receipts PRIMARY KEY (revision_id, viewer_kind, viewer_id)` | **withdrawn** — each would REFUSE a record `offerIntegrity` reports and KEEPS today (`revision_id`, `revision_number`, `duplicate_response`; a repeated document; a repeated receipt). Position-keyed children, duplicates kept and counted at the cutover; `offer_revisions.id` INDEXED. **S8d dependency:** `signing_packages.offer_revision_id → offer_revisions(id)` (file 02 drafts it as a key) needs a UNIQUE revision id; S8d must either add the unique index after a cutover preflight proves no duplicates exist in that file, or key by `(offer_id, position)`. Recorded here so S8d does not inherit an unexamined assumption | probe 2 S3b/S3c |
-| `offer_revisions.response_id`, `supersedes_revision_id`, `superseded_by_revision_id`, `discarded_by_response_id` as keys (RESTRICT) | **withdrawn as keys** — within-aggregate pointers written in one tick with their targets; kept as plain columns and checked by the same-offer guard (§6 G) | probe 2 S4 |
+| `offer_revisions.response_id`, `supersedes_revision_id`, `superseded_by_revision_id`, `discarded_by_response_id` as keys (RESTRICT) | **withdrawn as keys** — within-aggregate pointers written in one tick with their targets; kept as plain columns under the SAME pointer rule as `current_revision_id` (§6 G: own valid, unresolved kept and counted, known foreign owner refused) — the review of `854d035` found the model's guard omitted `discarded_by_response_id`; the rule now names all five pointers and the model checks all five | probe 2 S8 (all five), S4 |
 | `CREATE UNIQUE INDEX recruitment_offers_one_live_per_case ON (case_id) WHERE status IN ('DRAFT','ISSUED')` (drafted as "NEW") | **withdrawn** — it refuses a state the routes PRODUCE: `canRevise` (`offer.mjs:289-296`) consults the offer's own status only, so an offer withdrawn, a second offer created and issued (`liveOfferOf` saw none live, `:312`), and the first revised into a DRAFT gives two live offers on one case. `OFFER_LIVE` stays the create route's code check | probe 2 S3a |
 | `CHECK ((agent_share_user_id IS NULL) = (agent_share_at IS NULL))`, `type … CHECK (… IN ('direct_recruitment'))`, `term_start_date < term_end_date` | **withdrawn** — route rules | — |
 | `contact_history` / `offer_history` `ON DELETE RESTRICT` | **kept** — the owned history never disappears under its owner; a departing owner's history is removed explicitly before the parent (S8b R1 of `86342b8`) | probe 1 (the rewrite), probe 2 S2 (departure and the control) |
@@ -217,7 +225,7 @@ nullable so that a record the blob store holds and the readers report-and-keep i
 
 | Direction | Meaning | Proposed treatment |
 |---|---|---|
-| contact → request (`requestId`) | the request row the send created as the recipient's mailbox object | real RESTRICT key; parked NULL only when the request arrives in the SAME save and is not yet in the table (`A′`), assigned at `C′` (§6) |
+| contact → request (`requestId`) | the request row the send created as the recipient's mailbox object | real RESTRICT key; the contact row is written AFTER the S8a request create/update and BEFORE the S8a request prune (§6: no parking, no deferral); a surviving contact that changes request has its old pointer released at R before any prune can reach it; a departing contact goes at F0 before its request departs at F2 |
 | request → contact (`contactId` = `contact_id`) | which contact created the request (internal link, stripped from recipient views) | plain indexed column (S8a, unchanged, no rebuild); pair guard: a request a contact names must name that contact back or none (`CONTACT_REQUEST_MISMATCH`); a request naming a contact that is not in the final graph is COUNTED, not refused (today `onRequestResponded` returns `null` for it, `contactRoutes.mjs:630-632`) |
 | request → channel (`contactChannel` = `contact_channel_id`) | the thread opened at acceptance (NOT a contact) | unchanged, plain; the plan's two notes corrected (§1.1) |
 | contact → case, offer → case | the room | real RESTRICT keys; the S8b preflight's retained-dependants check extended to `recruitment_contacts` and `recruitment_offers` so a case pruned under one is named (`CASE_STILL_REFERENCED` with the table) before the key fires |
@@ -225,7 +233,7 @@ nullable so that a record the blob store holds and the readers report-and-keep i
 | contact → agent (`routingSnapshot.agent.agentUserId`, `agreementId`) | who was validly routed at the send | user id: RESTRICT key to `org_users`; agreement id: plain (file 06) |
 | offer → decision (`decisionId`) | provenance of the progress decision | plain, indexed, counted |
 | offer → transaction (`transactionId`) | the agent-workspace link | plain (file 06) |
-| offer → current revision; revision → response; revision ↔ revision (supersedes / superseded by); draft → discarding response | within one offer, written in one tick | plain columns; same-offer guard at G |
+| offer → current revision; revision → response; revision ↔ revision (supersedes / superseded by); draft → discarding response | within one offer, written in one tick | plain columns, stored as written; the ONE pointer rule at P and G (§6): own target valid; unresolved historical target kept verbatim and counted; a target that exists only under another offer refused with the owner named |
 | revision document → evidence (`evidenceId`) | the vault row | plain (file 05) |
 | response / receipt → player or guardian (`actorId`, `viewerId`, `forPlayerId`) | the person | plain; mode per §9 |
 | signing package → offer, → accepted revision (S8d) | the later stage | plain ids today; S8d's keys need `offer_revisions.id` unique (§3) |
@@ -257,17 +265,26 @@ shapes of §2 (probe 1 is their first draft), the constraints of §3, and:
   (`memento.mjs:29`, `:55`), joined through the store's participant API exactly as S8b (`recruitmentCases.mjs:732-733`).
   The deletion unit's edits (§2.4) are captured this way.
 - **Hooks (staged mode).** Two, registered around the existing six (S8b core → recruitment → S8b links → S8b rooms →
-  channels → S8b prune): **α** `contactsOffersPreHook` BEFORE the S8b core hook — the preflight P over the final graph
-  (the mirrors, the cases view, the requests view) and F0, the prune of departed contacts/offers (history and key rows
-  explicitly, then the parent; none expected in staged mode, since no writer removes); **β** `contactsOffersHook`
-  AFTER the recruitment hook — A′/D (the changed records; the request back-reference needs no parking here because
-  the recruitment hook has already written the requests) and G. Registration order is the data layer's
-  responsibility, as for S8b (`hookRefusal`, `recruitmentCases.mjs:662`).
-- **Snapshot mode** (`writeTableBacked`, `readTableBacked`): `CONTACTS_OFFERS_SNAPSHOT.begin` (P, F0) immediately
-  before `RECRUITMENT_CASES_SNAPSHOT.begin` (`index.mjs:210`); `.write` (A′, B′ assign, D) after
-  `RECRUITMENT_SNAPSHOT.replace` (`:222`) and before the channels; `.assert` (G) with the other final assertions
-  (`:306`). `readTableBacked` adds the two collections after the cases (`:138-139`). The export for the admin backup is
-  the published views themselves (`m13/enterprise.mjs:484` spreads `db`), as for every table-backed collection.
+  channels → S8b prune). The reference point is the ACCEPTED S8a flush: the recruitment hook performs the request
+  create/update (phases 1–3) AND the request prune (phase 5) inside its own `flush` (`repositories/recruitment.mjs`,
+  the staged `flush()` calling `prune(...)` for the requests no longer in its mirror), so in staged mode the request
+  prune falls BETWEEN the two S8c hooks. **α** `contactsOffersPreHook`, BEFORE the S8b core hook: the preflight P over
+  the final graph (the mirrors, the cases view, the requests view); F0, the prune of departed contacts/offers (history
+  and key rows explicitly, then the parent); R, the release — a surviving contact whose stored `request_id` this save
+  changes has its table row's `request_id` set to NULL now, so the recruitment hook's prune can never hit it. **β**
+  `contactsOffersHook`, AFTER the recruitment hook: A′/D′ (the changed contacts and offers — the requests exist, so
+  the contact row carries its final `request_id`; nothing is parked) and G. In staged mode the writers produce none of
+  the departures or retargets (no code path removes a contact, an offer or a request; a contact's `requestId` is
+  written once, at the send — §2.1); α's F0 and R are therefore no-ops on the live server and exist so that the ONE
+  algorithm is correct wherever the request prune runs. Registration order is the data layer's responsibility, as for
+  S8b (`hookRefusal`, `recruitmentCases.mjs:662`).
+- **Snapshot mode** (`writeTableBacked`, `readTableBacked`): `CONTACTS_OFFERS_SNAPSHOT.begin` (P, F0, R) immediately
+  before `RECRUITMENT_CASES_SNAPSHOT.begin` (`index.mjs:210`); `.write` (A′, D′) after `RECRUITMENT_SNAPSHOT.replace`
+  (`:222`, the S8a phases 1–3 — the request create/update) and before the channels; the S8a request prune stays where
+  it is (`RECRUITMENT_SNAPSHOT.prune`, `:241`, after the room prunes) — after every contact that named a pruned request
+  has departed at F0 or been rewritten at A′; `.assert` (G) with the other final assertions (`:306`). `readTableBacked`
+  adds the two collections after the cases (`:138-139`). The export for the admin backup is the published views
+  themselves (`m13/enterprise.mjs:484` spreads `db`), as for every table-backed collection.
 - **`/capabilities`** gains `domains.recruitmentContactsOffers` (counts, pending writes, the unresolved and retained
   player references, the counted guardian / decision / request-contact references, the key format of the S8b marker
   unchanged) beside `recruitmentCases` (`index.mjs:696`).
@@ -295,39 +312,75 @@ P   preflight over the FINAL combined graph (supplied or retained, by collection
       contact/request pair agreement over the final graph                     → CONTACT_REQUEST_MISMATCH
       org_id and the staff ids against the final orgs / org_users             → CONTACTS_OFFERS_ORG_MISSING /
                                                                                  _USER_MISSING
+      the five offer pointers over the final graph (THE POINTER RULE, below)      → OFFER_CHAIN_BROKEN for a
+                                                                                 known foreign-owner target only
       counted, never refused: player ids (per §9), guardian ids (per §9), decision ids, request→contact ids,
-        outbox ids, duplicate revision / response / document / receipt entries
+        outbox ids, UNRESOLVED offer pointers, duplicate revision / response / document / receipt entries
 F0  prune: each contact/offer no longer listed in a SUPPLIED collection — its history rows and its key rows
-      explicitly, then the parent (the CASCADE children follow)
-    ── the S8b core (P A R), the S8a phases 1–3 (B), the S8b links and rooms (C D), the channels (E) ──
-A′  the supplied contacts: owned history and key rows deleted, parent upserted (seq kept) with request_id PARKED
-      NULL only where the named request is not yet in the table (snapshot mode: the requests arrive at B after P;
-      staged mode: β runs after the recruitment hook, so nothing parks), children reinserted in list order
-B′  the parked request_id assigned (snapshot mode only)
-D′  the supplied offers likewise (history and keys explicit; revisions, documents, responses, receipts reinserted)
-    ── the S8b prunes F1 F2 F3, the staff and organisations ──
-G   guard: contact/request pairs agree in the tables; every offer's current_revision_id, every revision's
-      response_id / supersedes / superseded_by / discarded_by resolves WITHIN THE SAME OFFER (OFFER_CHAIN_BROKEN,
-      ids only); PRAGMA foreign_key_check empty
+      explicitly, then the parent (the CASCADE children follow) — BEFORE any request work
+R   release: a surviving contact whose stored request_id this save changes → its table row's request_id set to
+      NULL now (a later request prune can never hit it; the final value arrives at A′)
+    ── the S8b core (P A R), the S8a phases 1–3 = B1 the request CREATE/UPDATE (no prune), the S8b links and rooms
+       (C D), the channels (E) ──
+A′  the supplied contacts: owned history and key rows deleted, parent upserted (seq kept) with its FINAL request_id
+      (the request exists: nothing is parked, nothing is deferred), children reinserted in list order
+D′  the supplied offers likewise (history and keys explicit; revisions, documents, responses, receipts reinserted;
+      every pointer stored as written)
+    ── the S8b room prune F1, then F2 = the S8a request PRUNE (phase 5: after every contact that named a pruned
+       request has departed at F0 or been rewritten at A′), then F3 the cases, the staff and organisations ──
+G   guard: contact/request pairs agree in the tables; THE POINTER RULE over the tables (foreign → refused,
+      unresolved → counted); PRAGMA foreign_key_check empty
 ```
 
-Placement of F0 before the recruitment hook / the S8a phases is what lets a departing contact and its departing
-request leave in one save under the RESTRICT key; placement of A′/D′ after the S8a phases is what makes the request
-key satisfiable without deferral. Probe 2 proves on the design model: the same valid final graph commits identically
-in both input orders (S1); a partial save equals the full save (S1); the four refusals above fire before any write
-with the tables byte-identical (S1); an owner departure removes its RESTRICT history explicitly and the control
-(parent first) is refused (S2); a statement failure between A′ and B and a failure at G both roll back to byte-identical
-tables and the unchanged retry lands once (S4); a revision pointer into another offer is refused at G (S4). There is
-no retained unique predicate in S8c to release before an arrival (every drafted partial unique index is withdrawn,
-§3; probe 2 S3 asserts none is installed), so the S8a "release before arrival" device is not needed.
+**THE POINTER RULE — one rule for `currentRevisionId`, `response.id`, `supersedesRevisionId`, `supersededByRevisionId`
+and `discardedByResponseId` (corrected after the review of `854d035`, F1).** Every pointer is stored exactly as
+written: a string in its column; `null` as NULL; an absent key recorded in `absent_keys_json`; an off-type value (a
+number, an object, a list) with the column NULL and the value in `offtype_json`; duplicates (two revisions naming one
+target; two rows sharing an id) kept as rows. Only a STRING value is a pointer, and it is classified at P (over the
+final graph: the supplied offers' literals plus the retained offers' rows) and again at G (over the tables) by where its
+target exists — a revision pointer against the revision ids, a response pointer against the response ids:
+
+| The target … | Classification | What happens | Example |
+|---|---|---|---|
+| resolves to a row of the SAME offer | valid | stored | `rof-1.currentRevisionId = 'rof-1-r2'`, a revision of `rof-1` |
+| names NO known row of that kind under ANY offer (final graph / tables) | **unresolved historical pointer** | stored verbatim; COUNTED in the cutover record and `/capabilities`; never refused; the read-time integrity report stays the judge (`offerIntegrity` → `current_revision`, `response`, …; the offer omitted from projections, as today) | `rof-1.currentRevisionId = 'revision-missing'` (the review's F1 case: the actual store keeps it) |
+| exists ONLY under ANOTHER offer | **known foreign-owner pointer** | refused — `OFFER_CHAIN_BROKEN`, ids only (the offer, the row, the pointer, the target, the owning offer), nothing written, the tables unchanged; equally when the owning offer is retained rather than supplied | `rof-1-r2.supersedesRevisionId = 'rof-2-r1'` while `rof-2` owns `rof-2-r1`; the review's F2b case (`discarded_by_response_id` naming `rof-2`'s response) |
+| exists under the own offer AND another (ids repeated across offers) | valid | stored (ownership satisfied by the own row; the repetition is reported on read) | two offers each carrying a revision `shared-id` and pointing at it |
+| is `null`, absent or off-type | not a pointer | stored as data, never refused | `discardedByResponseId` absent on every revision but the discarded one; a legacy `42` |
+
+Why the asymmetry is the compatibility promise and not a new refusal in disguise: the current fully migrated store
+saves and reloads an offer whose `currentRevisionId` names no revision (the review of `854d035` proved it on the actual
+store, migrations and `offerIntegrity`), and §2.2 promised to keep such a record — the unresolved class is that promise,
+byte for byte, with the existing read-time refusal/reporting untouched (no pointer cleared, no revision fabricated,
+no offer deleted, no audience widened). The foreign-owner class is a pointer the writers cannot produce (every pointer
+is set within one offer in one tick) and the S8b ownership lesson (a decision chain crossing rooms, F1 of `b7c0dd0`);
+refusing it IS a statement beyond today's storage, stated as such in §3 and §9 and put forward for confirmation — it
+is not a blanket legacy-data refusal: a legacy file whose pointers are merely unresolved imports whole.
+
+Placement of F0 and R before any request work, and of A′/D′ after the request create/update and before the request
+prune, is what lets (a) a departing contact and its departing request leave in one save, (b) a surviving contact move
+to a new request while its old request departs, and (c) a new pair arrive, all under the RESTRICT key with IMMEDIATE
+constraints and no parking. Probe 2 (corrected) proves on the design model, executing exactly this order: the same
+valid final graph commits identically in both input orders and a partial save equals the full save (S1); the four P
+refusals fire before any write with the tables byte-identical (S1); an owner departure removes its RESTRICT history
+explicitly and the control (parent first) is refused (S2); the joint contact/request departure, the retarget with the
+old request departing (in one save and as three partial saves), a new pair across two partial saves, and the
+retained-dependant refusals with unchanged rows (S7); the pointer rule for each of the five pointers × own / unresolved
+/ foreign (supplied or retained owner) / null / off-type / duplicate, the review's F1 and F2b cases included (S8); a
+failure injected after F0/R, after B1, after the writes and at G, each rolling back to byte-identical tables, and the
+unchanged retry landing the whole transition once (S9). There is no retained unique predicate in S8c to release before
+an arrival (every drafted partial unique index is withdrawn, §3; probe 2 S3 asserts none is installed). The reviewer's
+own script, unchanged, run with `--expect-corrected` against the corrected model exits 0 (F1 kept verbatim, F2a the
+joint departure commits, F2b refused), and against the original model still reproduces the three cases (§13).
 
 **The cutover (migration `0017`, when approved; one transaction, `foreignKeysOff` like `0016`):** refuse if any of the
 nine tables exists without the record; require `0015` and `0016` recorded and `assertKeyFormat` to pass (the S8b
 marker is read, never written); create the nine tables; rebuild `idempotency_keys` with the broadened CHECK (every
 existing row copied back, probe 2 S5); import the two blobs through P and A′/D′ against the file's own tables (the
 S8b import pattern, `recruitmentCases.mjs:615-630`: an absent blob imports nothing, a present `null` or non-array blob
-refuses the step); retire the two blob rows; record `meta.recruitmentContactsOffersCutover` (counts only: per
-collection, children, key rows, the counted references, the duplicates). No new format marker: the S8c key rows are
+refuses the step; a known foreign-owner pointer refuses the step with ids; an unresolved pointer imports and is
+counted); retire the two blob rows; record `meta.recruitmentContactsOffersCutover` (counts only: per collection,
+children, key rows, the counted references including the unresolved pointers per kind, the duplicates). No new format marker: the S8c key rows are
 owned by the record's own id — the S8a representation, never the child-owned ambiguity R1 was about; should a later
 build change that representation, the R1 rule applies to it (a persisted discriminator, fail-closed).
 
@@ -362,7 +415,8 @@ INTO`; on the copy only — refuse `LATER_SCHEMA` (a recorded step this tool doe
 exactly as the S8b tool does (the S8c tool reads S8b rows? It does not — but it must not touch a file the S8b tool
 would refuse, so it checks the marker first and leaves it alone); then, in one transaction: read every contact and
 offer back through the S8c readers (every record in its writer's literal, children nested in list order, the keys
-reassembled — absent / null / off-type / unknown exactly as recorded) and write the two blobs; delete the S8c owners'
+reassembled — absent / null / off-type / unknown exactly as recorded, every pointer including an unresolved historical
+one byte for byte) and write the two blobs; delete the S8c owners'
 rows from `idempotency_keys` and rebuild it with the S8b owner CHECK (`idempotencyKeysDdl(S8B_KEY_OWNERS)`, probe 2
 S5: the S8a and S8b rows byte-identical, the S8b marker untouched); drop the nine tables; delete the `0017` record and
 `meta.recruitmentContactsOffersCutover`; advance `meta.saveSeq`. Nothing else: the S8a/S8b tables, threads, identity
@@ -412,7 +466,11 @@ the one new real key and the pair guard (§4, probe 2 S1); the staff ids as REST
 historically missing staff id (the S8b precedent — if the review prefers tolerance here, it is a one-line change in
 `CONSTRAINTS` and the preflight, not a product question); the write order (§6); the rollback (§8); one module and one
 migration for both collections (§10); the `contact_channel_id` naming correction (§1.1); the S8d note on the revision
-id uniqueness (§3).
+id uniqueness (§3). **Put forward for the review's explicit confirmation (an engineering statement that goes beyond
+today's storage, not a product question and not assumed authorised):** the refusal of a KNOWN FOREIGN-OWNER offer
+pointer (§6, the pointer rule) — the blob store would save it, no writer can produce it, and the accepted S8b applies
+the same ownership protection to decision chains; every other pointer state, the unresolved historical one included,
+imports and is kept exactly as today.
 
 ## 10. Implementation checklist (ordered; each item with its acceptance criterion) and the test plan
 
@@ -432,8 +490,11 @@ way the development is tests-first per collection on the unchanged `7072dd9` tre
    `testRecruitmentCases.mjs`): `[cutover]` the `0017` record, the nine tables, the broadened CHECK, the two blobs
    retired, the counts, every refusal with ids; `[mapping]` the round trip of every fixture, presence/absence/null/
    off-type/unknown/list order, the held acts; `[write]` both input orders, partial snapshots with omitted collections
-   retained, F0 departures with RESTRICT history, the four P refusals and G, an injected statement failure and a real
-   COMMIT failure (`failCommitOfOpenTransaction`) with byte-identical tables and the retry landing once; `[repo]`
+   retained, F0 departures with RESTRICT history, the joint contact/request departure, the retarget with the old
+   request departing, the four P refusals and G, the pointer rule for each of the five pointers (own / unresolved kept
+   and counted / known foreign owner refused / null / off-type / duplicate), an injected statement failure at each
+   phase and a real COMMIT failure (`failCommitOfOpenTransaction`) with byte-identical tables and the retry landing
+   once; `[repo]`
    in-place edits landing in the next save, an unchanged save writing nothing, the unit memento restoring both mirrors,
    the entry points refusing a direct push; `[rollback]` the copy-only tool, the refusals, the re-upgrade, a restore
    through `0017`, the S8b marker untouched. *Criterion:* fails on the unchanged `7072dd9` tree on concrete assertions.
@@ -481,8 +542,14 @@ untouched `7072dd9` checkout, classified (the S8b battery record is the template
 
 ## 11. Evidence in the handoff
 
-- `probes/s8c-probe-1-mapping.mjs` and `probes/s8c-probe-2-constraints-order.mjs` with their results on Node 22 and
-  Node 24 (`probes/results/`): 32 + 31 checks, exit 0; probe 1's OBSERVED line (the act order inside a `keys` map).
+- `probes/s8c-probe-1-mapping.mjs` (32 checks, unchanged) and `probes/s8c-probe-2-constraints-order.mjs` (75 checks,
+  corrected after the review of `854d035`) with their results on Node 22 and Node 24 (`probes/results/`), exit 0;
+  probe 1's OBSERVED line (the act order inside a `keys` map); `probes/baseline/s8c-probe-2-constraints-order.mjs`,
+  the ORIGINAL 31-check model unchanged, with the reviewer's `review-854d035-design-reproductions.mjs` against it
+  (exit 1: F1, F2a, F2b reproduced; the two controls pass) and against the corrected model with `--expect-corrected`
+  (exit 0 on Node 22 and 24); the corrected probe's regressions run against the baseline model through its
+  `S8C_PROBE_MODEL` adapter (failing-first: 30 of 75 checks fail on the baseline — 27 of them the F1/F2 cases, 3 the
+  S4 checks whose injected phase or owner-naming message the baseline does not have, labelled as such in the output).
 - The reviewer's unchanged bundle for `7072dd9` re-run on the accepted tree (recovery with the genuine `b7c0dd0` and
   `2fe05df` creators, the two format-boundary runs, the reproductions, the two matrices, the key transitions, the
   old-format probe and the boot refusal), Node 22 and 24, all exit 0 (`logs/reviewer/`).
@@ -501,5 +568,53 @@ untouched `7072dd9` checkout, classified (the S8b battery record is the template
   `m23DecisionPersistence` already uses.
 - `offer_revisions.id` is indexed, not unique (§3); S8d's drafted key to it needs a decision then (§3, S8d note).
 - The two product questions of §9 are open until the Founder answers them after the independent review of this
-  design; everything else can be implemented without them.
+  design; everything else can be implemented without them. The brief is NOT cleared: it waits for the independent
+  acceptance of the corrected design.
+- The refusal of a known foreign-owner offer pointer (§6) is the one statement of this design that goes beyond today's
+  storage; it is put forward for confirmation (§9), not assumed.
 - Today's pre-save side effects (the courtesy e-mail, the agent notifications) are recorded in §7 and unchanged.
+
+## 13. Correction record — after the independent review of `854d035` (24 October 2026)
+
+The review accepted the S8b acceptance record and did not accept this design: two P2 findings demonstrated by three
+reproducible cases (`review-854d035-design-reproductions.mjs`, run unchanged against the ORIGINAL design model: exit 1;
+its two controls — the actual migrated store keeping the F1 offer unchanged, and the documented F0-first order
+succeeding with immediate keys — pass). Both findings are design/evidence findings about a prepared design; neither is
+a defect in an implemented S8c repository, and nothing in the S8b acceptance is touched.
+
+**F1 — the offer-pointer contract contradicted itself.** §2.2 said a `currentRevisionId` naming no revision is
+corruption KEPT by storage; §6 G refused every pointer that did not resolve within the offer, so one such legacy
+offer — which the actual store saves and reloads unchanged, `offerIntegrity` reporting only `current_revision` — would
+have blocked the cutover. Corrected by ONE pointer rule for all five pointers (§6): own target valid; unresolved
+historical target kept verbatim, counted, never refused, the read-time report unchanged; a target that exists only
+under another offer refused with the owner named. §2.2, §2.3, §3 (the two pointer rows, `current_revision_id` now
+nullable), §4, §6 P/G, the cutover and rollback paragraphs, §9, §10, §11, §12 and plan §D.10 are reconciled with it.
+The foreign-owner refusal is stated as the one compatibility statement beyond today's storage and put forward for
+confirmation (§3, §9); it is not assumed authorised and no blanket legacy refusal is introduced.
+
+**F2 — the model executed another order than the document, and its guard omitted a pointer.** The original model wrote
+contacts before requests with a parked back-reference, combined the request upsert and prune at one step, and pruned
+departed contacts last, so a valid joint contact/request departure failed on the key; its guard's UNION omitted
+`discarded_by_response_id`, so a pointer to another offer's response was admitted. Corrected by (a) fixing the ONE
+order against the accepted S8a/S8b boundaries — the S8a request create/update (phases 1–3) and the S8a request prune
+(phase 5) are separate steps, and in staged mode both run inside the recruitment hook between the two S8c hooks (the
+accepted `recruitment.mjs` flush prunes internally) — as P → F0 → R → B1 → A′ → D′ → F2 → G (§6), with the obsolete
+parking / B′ / C′ descriptions removed from §4, §5 and §6 and the hook/snapshot placements restated (§5); (b) the model
+rewritten to execute exactly that order and to check all five pointers (probe 2, 75 checks), with the failing-first
+regressions the review asked for — joint departure, retarget with the old request departing, new pairs and partial
+saves with either collection retained, retained-dependant refusals with unchanged rows, every pointer kind under the
+rule, failures at each intermediate phase and at G with byte-identical rollback and the unchanged retry — run first
+against the ORIGINAL model through a transparent adapter (`S8C_PROBE_MODEL`: the baseline's functions imported from its
+own prefix, the reviewer's technique; 30 failures, 27 of them the F1/F2 cases) and then green on the corrected model;
+(c) the reviewer's unchanged script run with `--expect-corrected` against the corrected model: exit 0 on Node 22 and
+24 (F1 preserved verbatim; F2a the joint departure succeeds; F2b refused atomically). The original model is kept as
+`probes/baseline/` beside the corrected one; the S1 section boundary and the `openModel / write / dump / CON / REQ /
+OFF` interface are unchanged, so the reviewer's script runs against either without modification. What is a model and
+what is not: probe 2 is a design model of the proposed tables and the documented order; the only actual-store
+evidence in this milestone is the reviewer's own F1 control (the candidate's migrations, store and `offerIntegrity` on
+a synthetic file); no real-server or implemented-repository evidence for S8c exists, because S8c is not implemented.
+
+**Status after the correction:** S8c is a CORRECTED DESIGN, PENDING INDEPENDENT ACCEPTANCE — not implemented, not
+accepted; `0017` not reserved; S8d not started; Q8c-a and Q8c-b unanswered and the brief not cleared. The gates of the
+milestone (the backend chain on Node 22 and Node 24 with the eight historical builds booted for real, the Player
+suite, the unchanged `7072dd9` reviewer scripts, the `854d035` script and both probes) are recorded in the handoff.

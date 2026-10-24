@@ -393,7 +393,14 @@ and design changes the Founder explicitly requests.
   tables, the shared `idempotency_keys` CHECK broadened, no other live table
   rebuilt, the drafted vocabulary CHECKs / partial unique indexes / SET NULL
   keys withdrawn with evidence, the write order and mapping proved on two
-  design probes; its two product questions Q8c-a (player references) and
+  design probes; CORRECTED on 24 October 2026 after the independent review
+  of `854d035` — F1 one pointer rule for the five offer pointers (an
+  unresolved historical target is kept and counted, never refused; a
+  target owned only by another offer is refused, put forward for
+  confirmation), F2 the model made to execute the documented order P → F0
+  → R → B1 → A′ → D′ → F2 → G against the accepted S8a/S8b phase
+  boundaries (review §13) — the corrected design PENDING INDEPENDENT
+  ACCEPTANCE; its two product questions Q8c-a (player references) and
   Q8c-b (guardian references) are a brief for the Founder AFTER the
   independent review of the design — Q7a/Q7b/Q7c/Q8a are not extended to
   the S8c tables; the next free migration identifier `0017` is NOT

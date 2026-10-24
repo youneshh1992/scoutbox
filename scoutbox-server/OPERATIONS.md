@@ -1814,7 +1814,8 @@ blobs leave every save and a changed record lands as its own rows, but the
 change tracking still serialises every record per save; the bench was not
 run; the whole-snapshot-write objective is not met (contacts, offers,
 packages, signings, follow-ups and the later collections are still blobs —
-S8c, S8d). **S8c (contacts and offers) is PREPARED, NOT IMPLEMENTED:** the
+S8c, S8d). **S8c (contacts and offers) is PREPARED, NOT IMPLEMENTED (a
+corrected design pending independent acceptance since 24 October 2026):** the
 design, its rollback contract and the DANGER line to be measured for the
 `7072dd9` build on a cut-over file are in `docs/architecture/
 s8c-readiness-review.md` (§8); no migration, tool or route exists for it yet.
