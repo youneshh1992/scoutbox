@@ -37,6 +37,11 @@ and design changes the Founder explicitly requests.
   `main`, because they are the only proof the existing chain works; they go with the merge.
 - The first real users, and what has to be true for them, are the Founder's questions to answer; the migration plan
   does not assume a date.
+- **Fidelity rule from S8d onwards (the Founder's decision of 30 October 2026):** preserve API behaviour for valid
+  input only. Each field is stored in a properly typed column; no `absent_keys_json`, `offtype_json` or `extra_json`
+  columns on new tables. Where the old code accepted junk (a wrong type, an unknown field), the route validates and
+  rejects it with an error, and the migration of existing data reports what it dropped or normalised, with ids.
+  The tables of S0–S8c keep their lossless columns as accepted; nothing is rewritten for this rule.
 
 ### Server structure
 
