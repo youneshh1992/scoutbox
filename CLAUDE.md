@@ -27,569 +27,56 @@ Until the data-layer rebuild below is complete, no new product features are
 started. Work in scope: defects, security, the rebuild itself, test coverage,
 and design changes the Founder explicitly requests.
 
+### Facts about the data (30 October 2026)
+
+- **There is no production data and no deployment.** Every database in existence is seed or test data and can be
+  thrown away. Rollback means "restore a backup or re-seed".
+- From S8d onwards, therefore: no new copy-only rollback tools; no new historical-build boots in the gate; no
+  compatibility work for files written by earlier development builds; no operator warnings for deployments that do
+  not exist. The nine existing rollback tools and their boots stay in the gate until this branch is merged to
+  `main`, because they are the only proof the existing chain works; they go with the merge.
+- The first real users, and what has to be true for them, are the Founder's questions to answer; the migration plan
+  does not assume a date.
+
 ### Server structure
 
-- No new top-level `db.<collection>` arrays and no new `migrateMxx` collection
-  lines. New persistent state is a table owned by a domain repository under
-  `scoutbox-server/repositories/`, created by a versioned migration in
-  `repositories/migrations/`, written per row inside a transaction. Every
-  write to a migrated domain goes through its repository; the old
-  `db.<collection>` is that repository's read-only view (a direct write
-  throws), which existing readers may keep using until the domain's readers
-  move to repository queries. Unmigrated domains keep working as they are
-  until their turn. Migrated so far: `users` (staff accounts, `org_users`,
-  STRICT with a real `org_id → orgs` foreign key since S3), `sessions`
-  (`repositories/sessions.mjs`: tokens stored only as `token_hash`, returned to
-  the client once; every session read, creation and revocation goes through
-  the repository, never through `db.sessions`) and `orgs`
-  (`repositories/orgs.mjs`: identity, plan, verification flags, suspension,
-  password hash, e-mail domain, MFA policy, location and federation reference
-  are columns and change only through `orgs.insert` / `orgs.update`; the
-  nested facets `tactical`, `squad`, `lookingFor`, `federationCheck`,
-  `agencySettings`, the `verification` object and any unknown field live in
-  the row's `facets_json` until their own steps and are still mutated in place
-  on the record `db.orgs` serves, persisted by the repository's flush inside
-  every save and counted as persisted only once that save committed;
-  assigning a column-backed field on that record throws, nested values of
-  `location` / `federationRef` included; a first installation is initialised
-  once from explicit state (`meta.orgsInit`), never inferred from an empty
-  table, and `attach` never imports an in-memory array; no org deletion route
-  exists and none is to be added before O2 is decided);
-  `players`, `guardians` and `guardian_children` are live since S4a
-  (`repositories/identity.mjs`, migration `0005_core_identity_live`, registered
-  and attached at boot between the organisations and the staff): scalars and
-  the split composites are columns changed only through `players.insert` /
-  `players.update` / `players.ageUp` / `players.remove` and `guardians.insert`
-  / `guardians.update`; `childIds` derives from the link rows; `coGuardians`,
-  the outstanding guardian `emailCode` (plain, not hashed until S6) and
-  unknown fields ride in `facets_json` and are still mutated in place on the
-  records `db.players` / `db.guardians` serve; assigning a column-backed field
-  or `childIds` on a view throws. **Player sub-records are live since S5**
-  (`repositories/playerSubrecords.mjs`, migration `0007_player_subrecords`,
-  note `docs/architecture/s5-player-subrecords.md`): `media` (+ tags),
-  `attendance`, `timeline`, `badges`, `drills`, `drillResults`, `activityLog`,
-  `externalIds`, `seasonHistory`, `medical.records` and `programme.completed`
-  are rows of the twelve `player_*` tables, keyed by `(player_id, position)`
-  where no client-visible id exists (nothing is minted; order and legal
-  duplicates are kept; unknown item fields ride in the row's `extra_json`);
-  the record keeps every array in place, read-only, items included, and the
-  ONLY writers are `players.addItem` / `players.setItems` / `players.patchItem`
-  (and `insert` / `restore`, which write a record's arrays as rows) — a route
-  that writes a child row together with a blob, an audit row or a column runs
-  in one unit of work. **One-time codes are live since S6a** (independently
-  accepted at `2d7ddeb` within the reviewed backend development scope; not
-  production-approved; `repositories/oneTimeCodes.mjs`, migration
-  `0008_one_time_codes`):
-  the club e-mail challenge and the child pairing code are rows of
-  `email_challenges` / `pairing_codes` stored only as sha256 hashes of the
-  normalised code; `db.emailChallenges` / `db.pairingCodes` are hash-free
-  read-only views; issuance is durable before the code is sent; the
-  confirmation and the pairing exchange each consume the code in ONE unit of
-  work with the organisation's verification / the session; every mutation of
-  the repository joins an open unit of work through the store's participant
-  API (`unit.join`), so a failure after a statement poisons the unit even when
-  its caller catches the error, runs in a transaction of its own outside a
-  unit, and runs inside a raw transaction a tool opened without a BEGIN of
-  its own (an open transaction is never taken for a unit); wrong codes are
-  counted (ten cancel a challenge; a row at the limit is never redeemed, and
-  a stored-format entry must carry a count from 0 to 9) and rate-limited; the
-  challenge mail is sent with `secrets: [code]` so the persisted outbox record
-  withholds the code (dev transport: full text in process memory only, for
-  `/admin/outbox`); a backup exports the
-  hashed rows and a legacy plain-code backup is hashed on import; the
-  copy-only rollback is `scripts/oneTimeCodesRollback.mjs` (outstanding codes
-  invalidated and counted) and the S5 tool refuses a file carrying 0008. The
-  guardian e-mail code stays plain. **Notifications and category notification
-  preferences are live since S7a** (independently accepted at commit
-  `0641b2c600cd1f082436b4b24dbb052b98ee00d7` for the bounded migration
-  milestone — not production approval; `repositories/notifications.mjs`,
-  migration `0009_notifications`; `docs/architecture/s7-readiness-review.md`
-  §8.6):
-  `db.notifications` / `db.notificationPrefs` are read-only views over the
-  repository's in-memory mirror of the three tables; the ONLY writers are
-  `notifications.create` / `coalesce` / `markRead` / `ack` / `deleteForAudience`
-  / `updatePrefs` (server.mjs `notify`, m13 delivery, m182 preferences, the
-  deletion unit); the feed is reverse INSERTION order (`seq`), never timestamp
-  order; coalescing is the pre-S7a reverse scan kept verbatim; a mandatory
-  category stored false is kept as stored and forced on by the effective view;
-  in the running server a write is STAGED — visible at once, durable inside the
-  next snapshot save together with the blob edits made alongside it, or inside
-  the enclosing unit of work's commit, never ahead of the action it announces;
-  its push and its `notify` live event are effects of that write
-  (`notifications.afterDurable`) and run only once the save that carried the
-  row COMMITTED — never before, never after a failed save (they wait for the
-  retry), never for a rolled-back unit; `notify()` requests the save, no
-  effect ever does. Inside an open unit of work an effect is queued in EITHER
-  mode, whatever runner the instance was given, and runs only on the unit's
-  commit report (discarded with its rollback). In immediate mode (tools,
-  tests) an owned transaction that fails restores the repository's memory in
-  place, and an instance given the participant API joins a unit only once its
-  save hook is registered — that precondition, like every other, is checked
-  inside `unit.join`, so a caught refusal still poisons the unit. Unknown
-  fields are copied as own properties (an own `"__proto__"` key is data, never
-  assigned), and an audience, acknowledgment contract or category map with an
-  unknown field refuses the whole migration or snapshot write;
-  the acknowledgment and the dispatch rows commit in one unit; the copy-only
-  rollback is `scripts/notificationsRollback.mjs` (every row written back in
-  order; nothing lost) and the S6a tool refuses a file carrying 0009.
-  Since the review of `ac50b60` the notification repository detaches unknown
-  NESTED data exactly as the dispatch repository does (a prototype-safe JSON
-  clone at ingress, export and snapshot; a value JSON cannot carry refuses the
-  write) — independently accepted at `6ca66ba` for that bounded correction.
-  **Delivery dispatch records and their attempts are tables since S7b**
-  (independently accepted at commit
-  `ac50b60257b89387aa1dec44bad7f571e61aa74e` for the bounded migration
-  milestone and its three corrections — not production approval;
-  `repositories/dispatches.mjs`, migration `0010_dispatches`;
-  `docs/architecture/s7-readiness-review.md` §9 as corrected, §9.7–§9.9): `db.dispatches` is a read-only view over
-  the repository's mirror (insertion order, attempts nested); the ONLY writers
-  are `dispatches.create` / `recordAttempt` / `patch` (m13/delivery.mjs sweep,
-  acknowledgment and callback); the eighteen-key literal is required whole and
-  never normalised; `notification_id` is an indexed reference with NO foreign
-  key and NO cascade (an ordinary deletion keeps its dispatch rows; orphans are
-  imported and counted, never refused, pruned or re-parented; retention stays
-  OPEN); the attempt-shape CHECK is total (`ok IS NOT NULL` on a send row); a
-  note row never counts as a send; `delivered_at` / `opened_at` are REAL
-  columns holding the callback route's finite number exactly, fractional or
-  not (a non-finite callback clock is kept in memory for the process as the
-  previous build did — no later event replaces it — and stored null), every
-  server-written clock an INTEGER; EVERY refusal of create / recordAttempt /
-  patch is a participant failure raised inside the joined boundary (a caught
-  refusal still poisons the unit); unknown nested data is a detached
-  prototype-safe JSON clone at ingress, export and snapshot (a value JSON
-  cannot carry refuses the write); the callback lookup is the FIRST row in insertion order whose
-  providerMessageId strictly equals the event's (explicit null matches the
-  first null row, an omitted id matches nothing); writes are STAGED into the
-  same save as the outbox row, the injection counter and the ops/webhook rows
-  of the pass, the acknowledgment joined in the notification's unit; there is
-  NO effects queue (a dispatch has no push and no live event); the copy-only
-  rollback is `scripts/dispatchesRollback.mjs` (every row and attempt written
-  back; nothing lost) and the S7a tool refuses a file carrying 0010.
-  **The mail outbox, the push log and the device push tokens are tables since
-  S7c** (independently ACCEPTED at commit
-  `911918749687a3acdca430fe011d6c868ee640df` on 17 October 2026 for its bounded
-  storage-migration scope — not production, security, legal-compliance or
-  deployment approval, and not acceptance of S7d, S4b, the remaining S6 tables
-  or S8; implemented on top of `6ca66ba`, corrected after the independent
-  reviews of `40aa05c` and `78c14b9`, both dated history;
-  `repositories/outboxPush.mjs`, migration `0011_outbox_push` with its DDL
-  amended in place before acceptance; `docs/architecture/s7-readiness-review.md`
-  §10 as corrected by the review of `6ca66ba`, §10.8, §10.10, §10.11, the
-  acceptance §10.12): `db.outbox`, `db.pushLog` and `db.pushTokens` are
-  read-only views over one participant's three mirrors (insertion order); the
-  ONLY writers are `outbox.append` / `outbox.markDelivered` (adapters.mjs mailer
-  — the record before the provider call, the live answer on the caller's
-  record AND the row), `outbox.append` (m13/delivery.mjs `fakeSend`, `to` as the
-  dispatch holds it — null included), `pushLog.append` (the push sender, run by
-  the notification's after-durable effect AFTER the notification's save: the
-  row lands with the later save the sender's `nextId()`/`persist()` already
-  schedules — nothing new scheduled, no guarantee implied) and
-  `pushTokens.register` (`POST /push/register`: any truthy JSON value is the
-  token, stored LOSSLESSLY as JSON text and decoded on read; the route's `===`
-  rule — a primitive collapses an earlier row of the same value and type,
-  objects and arrays never — reproduced; NO uniqueness constraint). The two
-  outbox literals are told apart structurally (`source`, a total CHECK: NULL is
-  "absent key"); the destination is ANY JSON value — a string in `to_address`,
-  null, any other value (the ARRAY the coercing invite routes hand the mailer)
-  in `to_json`, decoded on read (review of `40aa05c`, F2), a non-finite number
-  inside that array kept live and persisted as the old JSON null (review of
-  `78c14b9`, §10.11); a non-finite token
-  value (JSON `1e400`) is kept live and persisted as null, a replacement
-  deleting by row seq (review of `40aa05c`, F1); a scratch file at `40aa05c`
-  (outbox without `to_json`) is refused by name, rolled back by the tool and
-  re-upgraded; the two fire-and-forget mail sites observe their promise;
-  vocabularies are open; unknown and nested data are detached clones; a failed ordinary staged save keeps its
-  pending state for the next save, an aborted unit restores the pre-unit
-  state; the copy-only rollback is `scripts/outboxPushRollback.mjs` (every
-  row written back in its writer's literal; nothing lost; proven on the actual
-  `6ca66ba` build) and the S7b tool refuses a file carrying 0011. The staff
-  push identity, the plain-code mail sites and retention are carried through
-  unchanged, not decided. **Message threads are tables since S7d** (independently
-  ACCEPTED at commit `4f954ad92cda6ca5178cc6c3d5485265684e0c03` on 18 October
-  2026 for its bounded backend storage-migration scope — not production,
-  security, legal-compliance or deployment approval, and not acceptance of S4b,
-  the remaining S6 tables or S8; implemented on top of `b67bce5` and corrected
-  once after the independent review of `62e9c1a`, both dated history —
-  `docs/architecture/s7-readiness-review.md` §11.9, §11.10, the acceptance
-  §11.11; approved by the Founder's explicit decisions D-A and D-B, recorded
-  verbatim in §11.9; `repositories/channels.mjs`, migration `0012_channels`).
-  **All four S7 sub-steps are accepted; that completes the communications
-  storage stage, not the migration** — the `ledger`, `requests`, `trials`,
-  `recruitmentCases` and every other remaining blob are still rewritten by
-  every save (review §7.3); the next stage's findings and the Founder's
-  decision list are `docs/architecture/sqlite-migration-plan.md` §D (the one
-  list: §D.5; Q4/Q4b/Q5 answered and S6b built since — below). S7d: `db.channels` is a read-only view in insertion
-  order with each thread's `messages` nested in array order; the ONLY writers
-  are `channels.open` (the two acceptance routes' `openChannel` — the literal
-  unchanged, the request checked against the live `requests` collection, the
-  organisation and the guardian checked by name, one thread per request),
-  `channels.appendMessage` (`postMessage`; the duplicate-`clientMsgId` answer
-  stays the writer's rule), `channels.markRead` (the three receipt routes) and
-  `channels.deleteForPlayer` (`deletePlayerData`, inside the deletion unit:
-  today's deletion of the deleted player's threads, guardian–club threads
-  included — D-B, a scope confirmation, not a retention decision). The tables
-  carry `request_id NOT NULL UNIQUE` with no foreign key (D-A, the §2.3
-  transitional code-checked reference until S8a), `player_id` with no
-  lifecycle clause, `guardian_id` code-validated at open and against the FINAL
-  guardians table on every identity, channel or request snapshot write (§11.8),
-  `org_id RESTRICT`, the internal message/attachment cascades, `seq`/`position`
-  order, `absent_keys_json` (absence preserved as absence) and `extra_json` at
-  every level (`orgUserIdForNotify` and unknown fields preserved exactly);
-  a failed ordinary staged save keeps its pending state, an aborted unit
-  restores the pre-unit state IN PLACE through the graph memento
-  (`repositories/memento.mjs`) — every object of the mirror by identity, so a
-  held nested view (`channels.byId(id).readBy`, a message's `sender` or
-  `attachment`, an unknown nested field) reads the pre-unit value afterwards
-  and follows the next committed write (the review of `62e9c1a`); the copy-only rollback is
-  `scripts/channelsRollback.mjs` (every thread and message written back;
-  nothing lost; proven on the actual `b67bce5` build) and the S7c tool refuses a
-  file carrying 0012. Retention stays OPEN (S4b). **The eight safeguarding and
-  audit collections are tables since S6b** (IMPLEMENTED 19 October 2026 on top of
-  `1792fc7`, whose next-stage brief the independent review accepted; corrected
-  once and **independently ACCEPTED at commit
-  `f0abd3459b435774c00b4e384b046eba23813e88` on 21 October 2026** for its
-  bounded storage-migration scope — not production, security, legal-compliance
-  or deployment approval, not acceptance of S4b or S8;
-  `docs/architecture/s6-readiness-review.md` §11, §11.4, the acceptance §11.5;
-  plan §D.4/§D.5; `repositories/safetyAudit.mjs`, migration
-  `0013_safety_audit`). Built under the Founder's explicit decisions of
-  19 October 2026, recorded verbatim in review §11 and not to be asked again:
-  **Q4 "Approve — preserve current behaviour"** — the five historical player
-  references (`blocks`, `reports`, `org_notes`, `ledger`, `source_changes`) stay
-  when the player is absent, unresolved ids are counted and never refused,
-  invented or deleted, no parent-existence rule on any writer (`handleReport`
-  still stores a truthy `targetPlayerId` of any type as received); **Q4b
-  "Approve — move with strict guardian checks"** — `idv_queue` moved with the
-  application check that the guardian exists (new writes, the import, every
-  snapshot write that carries the queue or rewrites the identity pair; an
-  identity-only replacement removing a referenced guardian is refused
-  atomically, ids only); the database foreign key is a later step; **Q5 "Keep
-  today's removal behaviour"** — lifting a block deletes its row. NO foreign key
-  on any of the eight (the organisation and staff ids are historical pointers
-  because the block and report routes accept them unchecked — a stated
-  shape-compatibility decision); no vocabulary CHECK; `seq` order;
-  `absent_keys_json` / `offtype_json` / `extra_json` keep every writer's literal
-  (absence as absence, a numeric or object `targetPlayerId` as received); the
-  ledger's `userId` / `scoutName` verbatim, no actor kind; the moderation
-  context whole; every ops-event kind a row; writes staged into the route's
-  next save or the enclosing unit (the IDV row commits with the guardian's
-  columns); the copy-only rollback is `scripts/safetyAuditRollback.mjs` (every
-  row written back in its writer's literal; nothing lost; proven on the actual
-  `4f954ad` build) and the S7d tool refuses a file carrying 0013. S6b removes
-  the eight audit blobs from every save's serialisation and does NOT meet the
-  whole-snapshot-write objective (plan §D.4). Child-status stamping (Q2) and
-  the country code (Q1) stay OPEN; the full birth date, D-A/D-B and the
-  legacy-minor stop rule are unchanged; A0–A3 and S8 are not started (S4b-R:
-  below). The
-  next free migration identifier was `0014` (taken by S4b-R, below; `0015` is
-  next). The correction of 21 October 2026 (review of `c6cf5e1`,
-  review §11.4) makes `patch` atomic (F1) and stores a nested undefined in an
-  audit record as JSON did (F2, opt-in `cloneJson` option; outbox and push keep
-  the refusing default); that corrected commit is the accepted one. The two
-  intermittent test failures of the `c6cf5e1` review did not recur in any run
-  since; their causes are unresolved (not fixed, not disproven; review §11.5).
-  **S4b-R, the retained player record, is IMPLEMENTED since 21 October 2026
-  and independently ACCEPTED at commit
-  `9b109dc41f44159b082dd261b2de78a2bab13762`** (one commit on top of `d16362f`,
-  corrected once after the independent review of `6d66655`; bounded
-  development acceptance — not production, security, legal-compliance or
-  deployment approval; plan §D.6, §D.6.1, §D.6.2, §D.6.3;
-  `docs/architecture/s4-readiness-review.md` §12, the acceptance §12.5;
-  `scoutbox-server/OPERATIONS.md` "Retained player records"). Built under the
-  Founder's explicit decisions, recorded verbatim and not to be asked again:
-  the **full birth date** (12 October 2026) and **"Keep the country code
-  (Recommended)"** (21 October 2026). Migration `0014_player_erasure`
-  (REGISTERED; a record and the `playersRetained` backup import — no table,
-  no column, no foreign key, no retention period): `deletePlayerData` calls
-  `players.erase` instead of the hard delete — the row stays as the retained
-  record (id, `deleted_at`, `birth_date`, `country`; a fixed placeholder in
-  every other NOT NULL column, never the person's previous value; NULL
-  elsewhere; no facets), the twelve `player_*` child tables and the links are
-  emptied explicitly, every guardian stops listing the id; everything else in
-  the deletion unit is today's behaviour (no further name-copy erasure, no Q6
-  item). A retained row is served by NOTHING that serves accounts and only by
-  the narrow accessors; it survives every snapshot save (the identity replace
-  carries the rows through its rewrite, and a supplied `playersRetained`
-  collection may only ADD records — a stored record not listed, or listed with
-  a changed fact, refuses the whole save, ids only: the protected contract,
-  corrected after the independent review of `6d66655`, review §12.4); a retained id is never re-created as
-  a live account (insert, snapshot, backup import refuse it, ids only); the
-  backup exports `playersRetained` and never a retained id inside `players`.
-  Nothing is fabricated for ids deleted before this step (Q4 counted; Q3
-  untouched); no new age rule; Q2 open. The copy-only rollback is
-  `scripts/playerErasureRollback.mjs` (the records moved into the
-  `playersRetained` legacy blob the accepted `f0abd34` build serves to nobody;
-  the erased data restored by nothing; proven by booting the actual `f0abd34`
-  build on the copy) and the S6b tool refuses a file carrying 0014. **Never
-  boot the previous build directly on a 0014 file: it serves a retained row as
-  a passwordless account** (OPERATIONS.md). **S8a-core — requests and trials
-  as tables — is INDEPENDENTLY ACCEPTED at `7a7efc6` (22 October 2026):
-  implemented at `6d77aa7` on top of `d0f0205`, corrected once at `7a7efc6`
-  after the independent review of `6d77aa7` (F1 every idempotency act
-  preserved — an empty list act, an empty object, a null, a prototype-named
-  own act — F2 a present `null` blob refused at the cutover, C1 the rollback
-  test's source-preservation check made real; plan §D.8.10), and accepted
-  by the independent review of `7a7efc6` with F1/F2/C1 CLOSED (plan §D.8.11
-  the acceptance record; the acceptance covers the bounded storage-migration
-  scope only — not S8 as a whole, not the full migration, not product
-  release, security, legal compliance, merge or deployment). **S8b (cases,
-  rooms, decisions) is IMPLEMENTED AND INDEPENDENTLY ACCEPTED at `7072dd9`
-  (23 October 2026, on top of `4d2c74b`; the acceptance covers the reviewed
-  storage milestone only — not the full migration, release, security, legal
-  compliance, merge or deployment; `s8b-readiness-review.md` §12 the
-  acceptance record):** its design (`docs/architecture/
-  s8b-readiness-review.md`, plan §D.9; the write order corrected after the
-  independent review of `57076a2` — F1 the incoming case links released
-  before the S8a departures and the request prune, F2 explicitly removed
-  room rows pruned before their case, the Q8a strict-option wording — and
-  again after the review of `86342b8` — R1 a departing case's RESTRICT-owned
-  `case_history` rows and the polymorphic key rows of its owned draft/handoff
-  removed explicitly before the parent; owned lists go with their owner,
-  only an omitted independent collection blocks) was INDEPENDENTLY ACCEPTED
-  at `4d2c74b`; the Founder then answered the one product question,
-  recorded verbatim and not to be asked again: **Q8a "Approve tolerant
-  (Recommended)"** (the `player_id` columns of `recruitment_cases`,
-  `room_snapshots`, `room_decisions` and `case_transaction_handoffs` carry no
-  key; live, retained and historically missing ids resolve, are counted and
-  never refused, fabricated or deleted). Migration `0016_recruitment_cases`
-  (REGISTERED): the twenty-five case and room tables, the five blobs imported
-  row for row and retired, `recruitment_requests` and `trials` rebuilt with
-  the REAL `case_id` key (Q7b's conversion), `idempotency_keys` rebuilt with
-  the broadened owner CHECK; `repositories/recruitmentCases.mjs` the
-  repository (five read-only array views of mutable records; `addCase` /
-  `addComment` / `addSnapshot` / `addDecision` / `addEvidenceState` /
-  `removeDecision` the entry points; four save hooks around the recruitment
-  and channels hooks carrying the review's §6 order; the S8a lossless
-  mapping; the deletion unit's tombstone an in-place edit); the copy-only
-  rollback `scripts/recruitmentCasesRollback.mjs` (chained ahead of the S8a
-  tool; proven by booting the actual `7a7efc6` build on the copy). **Never
-  boot the previous build directly on a 0016 file: measured, it LISTENS after
-  `STORE_MISSING` for the five collections, serves no case and writes five
-  empty blobs beside the untouched tables** (OPERATIONS.md). The review's
-  §12 is the implementation record (departures from the proposed sections,
-  the measurements, what is not claimed: the whole-snapshot-write objective,
-  release readiness, any performance gain — the bench was not run). The
-  independent review of `b7c0dd0` did NOT accept the implementation (two P2
-  findings) and the correction followed on the same branch: decision chains
-  are checked SAME-ROOM in the preflight and the final SQL guard (F1), and the
-  draft's / handoff's `idempotency_keys` rows are owned by the CASE id, never
-  the child id the parent-scoped tables admit twice (F2). The independent
-  review of `2fe05df` closed F1 and F2 and did NOT accept that correction
-  either (one P2, R1: it claimed old files would be refused by an owner
-  check that runs after the read and cannot see them); the correction
-  followed: migration `0016` records the key format
-  (`meta.recruitmentCasesKeyFormat`) atomically with its rows, and every
-  reader, the snapshot write, the staged flush, the final guard and the
-  rollback tool check it FIRST — a `0016` file without it (written by the
-  superseded `b7c0dd0` or `2fe05df` build; synthetic only) is refused with
-  `RECRUITMENT_CASES_FORMAT_UNSUPPORTED` before anything is decoded (the
-  server exits before listening; rollback CLI exit 6); the route back is the
-  rollback tool of the build that wrote the file, then this build's cutover
-  (review §12, OPERATIONS.md). The
-  eighth historical build the backend gate boots for real is `7a7efc6`
-  (`SCOUTBOX_PRE_S8B_SERVER`). **S8c (contacts, offers) is IMPLEMENTED AND
-  PENDING INDEPENDENT ACCEPTANCE** (24 October 2026, one commit on top of
-  `19f5ca8`; `docs/architecture/s8c-readiness-review.md` §14 the
-  implementation record, plan §D.10, `scoutbox-server/OPERATIONS.md`
-  "Recruitment contacts and offers"; the independent review of `535e247`
-  did NOT accept the implementation — three P2 findings, corrected on the
-  same branch in one commit, review §14.1: F1 a snapshot's retained guardian
-  references are the OMITTED collections' stored rows only, a supplied
-  array's departing rows own nothing; F2 a save in which only a request
-  changed still runs the pair guard at the preflight and the final guard at
-  the end, through the real hooks; F3 the live unresolved/retained player
-  counts cover every Q8c-a reference occurrence, as the cutover counts do;
-  corrected again 30 October 2026 for the empty-string id finding, review
-  §14.2 — THE ONE REFERENCE RULE for the nested player and guardian ids of
-  the nine tables, stated there once: a string id, empty included, is a
-  reference occurrence; an absent or null id is none — so an empty-string
-  player id is counted at the cutover as the live report counts it, an
-  empty-string guardian id is refused under Q8c-b with the id rendered
-  quoted, and a cutover record written before the rule is left as the count
-  its import saw):
-  its design — prepared 23 October 2026
-  from the code at `7072dd9`, CORRECTED after the independent review of
-  `854d035` (F1 one pointer rule for the five offer pointers; F2 the model
-  made to execute the documented order P → F0 → R → B1 → A′ → D′ → F2 → G
-  against the accepted S8a/S8b phase boundaries — review §13) and AGAIN after
-  the review of `a5a7ed9` (R1 "retained" is by COLLECTION for a partial
-  snapshot, never by omitted row: omitted → the whole stored collection; a
-  supplied array, `[]` included, IS the final collection; explicit `null`
-  refused — review §13.1) — was INDEPENDENTLY ACCEPTED for implementation at
-  `19f5ca8` (R1 CLOSED; the narrow foreign-owner pointer refusal confirmed
-  as the reviewed ownership protection); the Founder then answered the two
-  product questions on 24 October 2026, explicitly for these tables,
-  recorded verbatim and not to be asked again: **Q8c-a "Approve tolerant
-  (Recommended)"** (the player references on the nine tables carry no key;
-  live, retained and historically missing ids resolve, are counted and
-  never refused, fabricated or deleted) and **Q8c-b "Approve strict checks
-  (Recommended)"** (the guardian references are checked in code against the
-  FINAL guardians table, ids only, no key; no account is created, unlinked
-  or deleted to satisfy a refusal) — Q7a/Q7b/Q7c/Q8a are not extended to
-  the S8c tables. Migration `0017_recruitment_contacts_offers` (REGISTERED):
-  the nine contact and offer tables, the two blobs imported row for row and
-  retired, `idempotency_keys` rebuilt with the owner CHECK broadened to the
-  two parents (the S8b key-format marker read, never written);
-  `repositories/recruitmentContactsOffers.mjs` the repository (two read-only
-  array views of mutable records; `addContact` / `addOffer` the entry
-  points; two save hooks — before the S8b core hook and after the
-  recruitment hook — carrying the review's §6 order; the S8a lossless
-  mapping; the five offer pointers stored as written under the
-  final-collection pointer rule; the deletion unit's nulled words an in-place
-  edit); the copy-only rollback `scripts/recruitmentContactsOffersRollback.mjs`
-  (the first link of the chain, ahead of the S8b and S8a tools; proven by
-  booting the actual `7072dd9` build on the copy). **Never boot the previous
-  build directly on a 0017 file: measured, it LISTENS after `STORE_MISSING
-  recruitmentContacts`, answers 500 for a contact and an empty list for the
-  offers, and writes ONE empty blob (`recruitmentOffers`) beside the
-  untouched tables** (OPERATIONS.md). The ninth historical build the backend
-  gate boots for real is `7072dd9` (`SCOUTBOX_PRE_S8C_SERVER`). Not met and
-  not claimed: a faster save, the whole-snapshot-write objective. S8d is not
-  started; the next free migration identifier is `0018` (not reserved).**
-  (plan §D.8 the implementation
-  record; §D.7 the design, independently accepted at
-  `d0f0205` after the reviews of `a6c40f3`, `cd7dc95` and `f2121b5`;
-  `scoutbox-server/OPERATIONS.md` "Recruitment requests and accepted
-  trials"; `docs/architecture/sql/02_recruitment.sql` amended to the
-  implemented sixteen definitions). Built under the Founder's three explicit
-  decisions of 22 October 2026, recorded verbatim and not to be asked again:
-  **Q7a "Approve tolerant (Recommended)"** (the player references on both
-  tables carry no key; live, retained and historically missing ids resolve,
-  are counted and never refused, fabricated or deleted), **Q7b "Approve
-  strict checks (Recommended)"** (the two `case_id` columns are checked in
-  code against the `recruitmentCases` collection, ids only; since S8b's
-  migration 0016 they are REAL keys to `recruitment_cases` as well — the
-  conversion the decision anticipated), **Q7c "Approve strict (Recommended)"** (the guardian
-  columns are checked in code, no `SET NULL` key). Migration
-  `0015_recruitment` (REGISTERED): `recruitment_requests`,
-  `request_trial_slots`, `trials` and its eleven owned child tables,
-  `idempotency_keys`, `channels` rebuilt with the real `request_id` key (D-A
-  converted); the blobs imported row for row and retired; the six-phase write
-  of plan §D.7.5 (back-reference parked then assigned, departures only for a
-  removal or a changed `request_id`, a survivor leaving its
-  `trials_one_open_per_case` slot released by an UPDATE that parks `case_id`,
-  explicit prunes, final-state assertions, immediate constraints); the
-  lossless presence mapping of §D.7.3 (absent / null / off-type / unknown
-  fields kept; `blockedBy`, `keys.accept`, the tombstone's
-  `trialDetails.instructions`, the `day` presence, `recipient.playerId`);
-  the drafted `one_pending` index withdrawn (D2); `db.requests` / `db.trials`
-  read-only array views of the mutable records every route edits in place,
-  landing in the same save as before; `recruitment.addRequest` / `addTrial` /
-  `tombstoneForPlayer` the three write entry points; every route payload
-  unchanged. Two changes around the design, both recorded in plan §D.8.5:
-  the staff prune of a snapshot write runs after the request prune
-  (`recruitment_requests.user_id` is a RESTRICT key) and `store.mjs` opens
-  saves and units of work with `BEGIN IMMEDIATE` (a deferred BEGIN whose
-  first statements are reads failed at once under a concurrent writer).
-  Also in §D.8.5: the cutover REFUSES with positions and ids a legacy file
-  the blob store tolerated (an entry that is not a record, a trial naming
-  no request, a request naming no staff member, two trials naming one
-  request, two open trials in one case) — nothing dropped or repaired; five
-  M23 batteries whose synthetic fixtures wrote such rows were adapted to
-  the writers' literals, reason stated in each; a record read from the
-  tables carries its keys in the stored shape's order (values identical). The
-  copy-only rollback is `scripts/recruitmentRollback.mjs` (both blobs written
-  back losslessly, `channels` back to the 0012 definition, nothing lost;
-  proven by booting the actual `9b109dc` build on the copy) and the S4b-R
-  tool refuses a file carrying 0015. **Never boot the previous build directly
-  on a 0015 file: measured, it exits 1 at boot (`STORE_MISSING requests,
-  trials`) and serves nothing** (OPERATIONS.md). Not met and not claimed: a
-  faster save (the change-tracking fingerprint still serialises every record
-  per flush), the whole-snapshot-write objective. S8b (cases, rooms,
-  decisions) is implemented on top of it (migration `0016`, above), and S8c
-  (contacts, offers) on top of S8b (migration `0017`, above; pending
-  independent acceptance); the next free migration identifier is `0018` (not
-  reserved). The nine historical builds the backend gate boots for real:
-  `812e13b`, `0641b2c`, `6ca66ba`, `b67bce5`, `4f954ad`, `f0abd34`,
-  `9b109dc`, `7a7efc6`, `7072dd9`
-  (`SCOUTBOX_PRE_S7A/S7B/S7C/S7D/S6B/S4BR/S8A/S8B/S8C_SERVER`).
-  `trialReports` is not stored: it is derived from
-  `trials[].report` in filing order and served read-only on EVERY record,
-  whatever shape it was saved with (absent, null or an array; the empty-state
-  shape is kept until a report exists); the trial report route writes the
-  trial only. A `trialReports` array written WITH a record (snapshot
-  replacement, `initialize`, `insert`, `restore`) is a claim and must equal
-  the trials entry for entry, else the whole write is refused — never dropped;
-  absent or null is no claim. `players.update(id, { medical: null })` /
-  `programme: null` is refused while the composite's child rows exist (clear
-  them with `setItems(..., [])` first); a file whose row says a composite is
-  null over existing rows is refused by the boot, the backup and the rollback
-  (`INCONSISTENT_ROWS`). Migration 0007 decodes every S4a row through
-  the one mapping, validates every item, reconciles every `trialReports` copy
-  with the trials and blocks the whole step with
-  `PLAYER_SUBRECORDS_CUTOVER_BLOCKED` (ids, fields, indexes, reasons) on any
-  discrepancy; nothing is coerced, deduplicated or dropped. Media ownership is
-  judged on `player_media` once 0007 is recorded. The copy-only rollback to the
-  S4a build is `scripts/playerSubrecordsRollback.mjs`; the S4a→S3 tool refuses
-  a file carrying 0007 (`LATER_SCHEMA`). The cutover validates every record and relationship through
-  the reviewed preflight (`repositories/identityPreflight.mjs`) and a legacy
-  minor with no guardian link refuses it until resolved by hand (the Founder's
-  decision); a first installation initialises once from explicit state
-  (`meta.coreIdentityInit`), `attach` never imports an in-memory array, and
-  the S1 shadow projection is retired. Every operation that writes a row and
-  a blob or a facet (sign-up, child creation, verification, aging-up, the
-  signing completion, deletion, a medical record, programme selection,
-  Academy+, stats, squad release) runs in one unit of work; deletion queues
-  the media removals in `media_deletions` (migration `0006`) inside the same
-  transaction and the files go after COMMIT; a backup exports that queue as
-  `mediaDeletions` and never copies a queued file, and a restore imports it
-  (migration `0006`) and finishes the removal at boot; the queue never deletes
-  a file a live player still references (the identity records' `media[].id`
-  through the mapping are the authority, never the entry's own `player_id`):
-  a conflicting restore or snapshot is refused whole with
-  `MEDIA_QUEUE_OWNERSHIP_CONFLICT`, a stored conflicting entry is retained with
-  a diagnostic at every sweep, and the backup answers 409 rather than omit the
-  clip; player and guardian responses come from the
-  allowlists in `views/playerViews.mjs`; the copy-only rollback tool is
-  `scripts/coreIdentityRollback.mjs` (refuses a pending initialisation and a
-  non-empty media queue). **Registration in source is development work, not
-  authorization for a real-data cutover**: the operator procedure in
-  `scoutbox-server/OPERATIONS.md` ("Players and guardians") is the gate, and
-  a preflight report is never an approval. Never log,
-  report or export a plain bearer token. `node:sqlite` with transaction state
-  is required (Node 22.16+ on the 22 line, or 24.0+; `runtime.mjs` is the one
-  definition, checked before the data directory is touched and refused with
-  `NODE_UNSUPPORTED`); there is no JSON or in-memory fallback, and whether a
-  table is authoritative
-  is decided by its record in `data_migrations`, never by the table existing.
-  Snapshot writes check every table-backed collection's shape, then every row,
-  and reject the whole save on the first problem; an existing but invalid
-  legacy `db.json` is a fatal import error, never "no snapshot". Never put a
-  whole-collection
-  re-projection in the default save path. An operation that writes a
-  table-backed collection and the blob together runs inside
-  `store.unitOfWork(() => …)` — and so does a route that changes a column AND
-  a facet of the same record, a blob, an audit entry or another domain (a
-  repository write followed by an in-place edit left to the delayed save is
-  the half-saved operation the review of `9656a4b` reproduced); a provider
-  call is made before the unit, never inside it; a failed unit is answered as
-  a failure (500), never as success. The store's `unitOfWork`: synchronous work (an `async function` is
-  refused before it runs; never schedule asynchronous work inside a unit, the
-  store cannot cancel a continuation), one transaction, all-or-nothing with the
-  in-memory graph restored on failure; a nested unit joins and its failure
-  fails the whole even if caught; side effects (broadcasts, pushes) go through
-  `store.afterCommit` — return the promise, never `void` it — so a failed
-  operation publishes nothing and a failed delivery is counted, not a crash; a
-  repository that cannot roll its memory back (`org_users` today) refuses
-  writes inside a unit rather than joining half-way (contract:
-  `scoutbox-server/OPERATIONS.md`, "Units of work"). The target schema and the step
-  order are `docs/architecture/sqlite-schema.md` and
-  `docs/architecture/sqlite-migration-plan.md`; a new table must appear in the
-  matching `docs/architecture/sql/*.sql` file as well as in its migration.
-  The runtime data directory is `scoutbox-server/data/` and is never a
-  source directory.
-- No new milestone-named modules (`m30/…`). New server code lives in a
-  directory named after its domain (`scoutbox-server/domains/<domain>/`), and
-  moving code out of a milestone directory happens with the domain migration.
-- One definition per rule. Shared rules (`roles.mjs`, `domain.mjs`,
-  `temporal.mjs`) are imported, never copied. If a check is needed in a second
-  place, export it from the first.
-- Every environment-driven setting is registered in
-  `scoutbox-server/m181/capabilities.mjs` (capability state and, where unsafe,
-  a production boot refusal) and documented in `OPERATIONS.md`. Secrets have no
-  default values.
-- Responses are built from explicit allowlists of fields, never by spreading a
-  stored record.
+- New persistent state is a table owned by a domain repository under `scoutbox-server/repositories/`, created by a
+  numbered migration in `repositories/migrations/` and declared in the matching `docs/architecture/sql/*.sql` file.
+  No new top-level `db.<collection>` arrays, no new `migrateMxx` collection lines, no new milestone-named modules
+  (`m30/…`); new server code lives in `scoutbox-server/domains/<domain>/`.
+- Whether a table is authoritative is decided by its record in `data_migrations`, never by the table existing.
+  `node:sqlite` with transaction state is required (`runtime.mjs`, refused with `NODE_UNSUPPORTED`); there is no JSON
+  or in-memory fallback. The runtime data directory is `scoutbox-server/data/` and is never a source directory.
+- Every write to a migrated domain goes through its repository, inside `store.unitOfWork(() => …)` when it touches
+  more than one row, a blob, a facet, an audit entry or another domain: synchronous work, one transaction,
+  all-or-nothing, the in-memory graph restored on failure; a nested unit joins and its failure fails the whole even
+  if caught. Side effects go through `store.afterCommit` (return the promise). A provider call is made before the
+  unit, never inside it. A failed unit is answered as a failure, never as success. The old `db.<collection>` is the
+  repository's read-only view (a direct write throws). Contract: `OPERATIONS.md`, "Units of work".
+- Snapshot writes validate every table-backed collection and reject the whole save on the first problem; never put a
+  whole-collection re-projection in the default save path.
+- Responses are built from explicit allowlists of fields, never by spreading a stored record. Never log, report or
+  export a plain bearer token. Secrets have no default values; every environment-driven setting is registered in
+  `scoutbox-server/m181/capabilities.mjs` and documented in `OPERATIONS.md`.
+- One definition per rule: shared rules (`roles.mjs`, `domain.mjs`, `temporal.mjs`) are imported, never copied; a
+  check needed in a second place is exported from the first.
+- **Status of every step, the migrations, the repositories, the acceptances and the Founder's decisions in force:
+  the table in `docs/architecture/sqlite-migration-plan.md` §E.** Operating contracts per domain: `OPERATIONS.md`.
+  Registration in source is development work, not authorisation for a real-data cutover.
+- Target schema and step order: `docs/architecture/sqlite-schema.md` and `sqlite-migration-plan.md`.
+
+### Independent review — scope (30 October 2026)
+
+- One review per step, on the implementation, not the design. A design note of one or two pages (the tables, the
+  decisions, how behaviour differs from the old code, the tests) goes to the Founder for the product questions
+  without a review cycle.
+- A blocking finding is a problem reachable through a real route with data the current build can produce, where a
+  real user could lose or corrupt data. Files from superseded development builds, synthetic-only states and
+  hypothetical operators are out of scope; anything below that bar is a note, not a finding.
+- Questions put to the Founder lead with the product consequence, then the storage mechanism, and say when a
+  question does not need the Founder.
+- Commit messages: a subject line and a few bullets. Design notes: two to four thousand words. `OPERATIONS.md` does
+  not grow until there is something to operate.
 
 ### Shared code
 
@@ -638,6 +125,11 @@ the policy; `AGENTS.md` points here and no other rules document restates it.
   end each milestone free of conflicting active instructions.
 
 **B. Run the backend server AND the Player app unit tests.**
+
+*Amendment, the Founder's decision of 30 October 2026:* gate B applies to a milestone that changes anything under
+`scoutbox-server/`, `scoutbox-player/` or another package. A milestone that changes only Markdown outside those
+packages runs gate A and the privacy sweep, not gate B; its handoff says so. The sentence above about
+documentation-only milestones is superseded for gate B and stands for gate A.
 
 - Discover and record the actual commands and working directories from the
   current packages: the backend is `cd scoutbox-server && npm test` (the full

@@ -1040,7 +1040,7 @@ way in and refused later, with a refusal that read as a blank (`rct-1 → `).
 the empty string on both sides: the live count is right. Include the guardian side under the same rule, with the empty
 id rendered unmistakably in the refusal. Leave existing cutover records untouched and document what they mean.
 
-**THE ONE REFERENCE RULE** (stated here once; plan §D.10, `OPERATIONS.md` and `CLAUDE.md` refer to it):
+**THE ONE REFERENCE RULE** (stated here once; plan §D.10 and §E, and `OPERATIONS.md`, refer to it):
 > **A string id, empty included, is a reference occurrence; an absent or null id is none.**
 
 It applies to the nested account ids of the nine tables — the player ids of Q8c-a (`recipient_player_id` of a contact

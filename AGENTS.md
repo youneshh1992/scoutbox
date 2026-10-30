@@ -1,6 +1,8 @@
 # ScoutBox project instructions
 
-Read `CLAUDE.md` before changing UI. It contains the persistent Founder approvals
+Read `CLAUDE.md` first: it holds the rules. The status of every storage-migration step, the
+acceptances and the Founder's decisions in force are the table in
+`docs/architecture/sqlite-migration-plan.md` §E. Read `CLAUDE.md` before changing UI. It contains the persistent Founder approvals
 for Pro, Player and Grassroots; preserve subsequent explicitly authorized changes.
 
 After every milestone, apply the two gates in `CLAUDE.md` → "Milestone gates —
