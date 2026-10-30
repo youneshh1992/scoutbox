@@ -3742,7 +3742,7 @@ domain contracts it carried are §E.3.
 | S8a-core | recruitment requests and accepted trials | `0015_recruitment` | `repositories/recruitment.mjs`; `scripts/recruitmentRollback.mjs` | independently accepted at `7a7efc6` (22 Oct; Founder decisions Q7a, Q7b, Q7c) | plan §D.7, §D.8, §D.8.11; OPERATIONS "Recruitment requests and accepted trials" |
 | S8b | recruitment cases, rooms, decisions | `0016_recruitment_cases` (records `meta.recruitmentCasesKeyFormat`) | `repositories/recruitmentCases.mjs`; `scripts/recruitmentCasesRollback.mjs` | independently accepted at `7072dd9` (23 Oct; Founder decision Q8a) | `s8b-readiness-review.md` §12; plan §D.9 |
 | S8c | recruitment contacts and offers | `0017_recruitment_contacts_offers` | `repositories/recruitmentContactsOffers.mjs`; `scripts/recruitmentContactsOffersRollback.mjs` | **IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE** — implemented at `535e247`, corrected at `9fb1bc6` (§14.1) and again on 30 Oct for the empty-string id rule (§14.2); Founder decisions Q8c-a, Q8c-b | `s8c-readiness-review.md` §14, §14.1, §14.2; plan §D.10; OPERATIONS "Recruitment contacts and offers" |
-| S8d | packages, signings, follow-ups, outcome reports | `0018` is the next free identifier (not reserved) | — | not started | — |
+| S8d | signing packages, signings, follow-ups, outcome reports | `0018` is the next free identifier (not reserved) | — | design note written 30 Oct under the rules of 30 Oct; one question open (the write model); not started | `s8d-design-note.md` |
 | S9–S13 | the remaining domains | — | — | not started | plan §D |
 
 The nine historical builds the backend gate boots for real (`SCOUTBOX_PRE_S7A … S8C_SERVER`): `812e13b`, `0641b2c`,
