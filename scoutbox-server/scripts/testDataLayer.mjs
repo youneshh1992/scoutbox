@@ -1,0 +1,309 @@
+// Unit tests for the relational data layer (repositories/): the table
+// migration runner, the staff repository, the read-only views, the legacy
+// import and the snapshot store's table-backed exclusions. Everything runs on
+// an in-memory or throwaway SQLite database. Run with: npm test
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { runDataMigrations, transaction, dataSchemaReport } from '../repositories/database.mjs';
+import { createUsersRepository } from '../repositories/users.mjs';
+import { readonlyView } from '../repositories/readonly.mjs';
+import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
+import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.mjs';
+import { RECRUITMENT_CONTACTS_OFFERS_TABLES } from '../repositories/recruitmentContactsOffers.mjs';
+import { SIGNINGS_FOLLOWUPS_TABLES } from '../repositories/signingsFollowUps.mjs';
+import { openStore } from '../store.mjs';
+
+let passed = 0;
+function test(name, fn) {
+  fn();
+  passed++;
+  console.log(`  ✓ ${name}`);
+}
+const fresh = () => { const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;'); return s; };
+let counter = 1000;
+const ORG_O = { id: 'o', name: 'Org O', type: 'club', level: 'pro', plan: 'Pro' };
+const nextId = (p) => `${p}-${++counter}`;
+// Since S3 `org_users.org_id` is a foreign key: the staff fixtures' organisations must exist first.
+const seedOrgs = (sqlite, ids = ['org-a', 'org-b', 'o']) => { for (const id of ids) sqlite.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES (?, 'Org', 'club', 'pro', 'Pro')").run(id); };
+const repoOn = (sqlite, legacy = []) => { seedOrgs(sqlite); const r = createUsersRepository({ sqlite, nextId, persist: () => {} }); r.attach(legacy); return r; };
+
+// ------------------------------------------------------- migration runner
+test('migrations: each step runs once, in id order, and is recorded in the database', () => {
+  const s = fresh();
+  const seen = [];
+  const steps = [
+    { id: '0002_b', note: 'b', up: () => seen.push('b') },
+    { id: '0001_a', note: 'a', up: (db) => { seen.push('a'); db.exec('CREATE TABLE a (x)'); } },
+  ];
+  const first = runDataMigrations(s, steps);
+  assert.deepEqual(seen, ['a', 'b']);
+  assert.deepEqual(first, { ran: ['0001_a', '0002_b'], applied: 2, known: 2 });
+  const second = runDataMigrations(s, steps);
+  assert.deepEqual(second.ran, []);
+  assert.equal(seen.length, 2);
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM data_migrations').get().n, 2);
+});
+test('migrations: a failing step rolls back and aborts without recording itself', () => {
+  const s = fresh();
+  const steps = [{ id: '0001_bad', note: 'bad', up: (db) => { db.exec('CREATE TABLE half (x)'); throw new Error('boom'); } }];
+  assert.throws(() => runDataMigrations(s, steps), /data migration 0001_bad failed: boom/);
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'half'").get().n, 0);
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM data_migrations').get().n, 0);
+});
+test('transaction: rolls back on throw, commits otherwise', () => {
+  const s = fresh();
+  s.exec('CREATE TABLE t (x)');
+  assert.throws(() => transaction(s, () => { s.exec("INSERT INTO t VALUES (1)"); throw new Error('no'); }), /no/);
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM t').get().n, 0);
+  assert.equal(transaction(s, () => { s.exec("INSERT INTO t VALUES (1)"); return 'ok'; }), 'ok');
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM t').get().n, 1);
+});
+test('schema report: names tables and counts, never rows', () => {
+  const s = fresh();
+  runDataMigrations(s, DATA_MIGRATIONS);
+  const report = dataSchemaReport(s, DATA_MIGRATIONS);
+  // The table list grows with every migration (0001 org_users; 0002 the five
+  // core identity tables, live one domain at a time; 0006 the media-deletion
+  // queue; 0007 the twelve player sub-record tables; 0013 the eight audit tables; 0015 the fifteen recruitment tables); the report must list
+  // exactly what exists.
+  assert.deepEqual(report, {
+    engine: 'sqlite', migrationsApplied: DATA_MIGRATIONS.length, migrationsKnown: DATA_MIGRATIONS.length,
+    migrations: ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'],
+    tables: ['blocks', 'case_approvals', 'case_assignments', 'case_budget_actuals', 'case_budget_fx_assumptions', 'case_budget_lines', 'case_budget_scenarios', 'case_decision_draft_evidence_refs', 'case_decision_draft_reason_codes', 'case_decision_drafts', 'case_history', 'case_request_links', 'case_room_tags', 'case_tasks', 'case_transaction_handoffs', 'case_trial_links', 'channels', 'contact_attempts', 'contact_history', 'dispatch_attempts', 'dispatches', 'email_challenges', 'follow_ups', 'guardian_children', 'guardians', 'idempotency_keys', 'idv_queue', 'ledger', 'media_deletions', 'message_attachments', 'messages', 'moderation_log', 'notification_pref_categories', 'notification_prefs', 'notifications', 'offer_history', 'offer_read_receipts', 'offer_responses', 'offer_revision_documents', 'offer_revisions', 'ops_events', 'org_notes', 'org_users', 'orgs', 'outbox', 'outcome_report_confirmations', 'outcome_reports', 'pairing_codes', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'push_log', 'push_tokens', 'recruitment_cases', 'recruitment_contacts', 'recruitment_offers', 'recruitment_requests', 'reports', 'request_trial_slots', 'room_comment_mentions', 'room_comments', 'room_decision_assessment_ids', 'room_decision_evidence_refs', 'room_decision_reason_codes', 'room_decisions', 'room_evidence_states', 'room_snapshot_source_refs', 'room_snapshots', 'sessions', 'signing_documents', 'signing_history', 'signing_packages', 'signing_parties', 'signing_revision_parties', 'signing_revisions', 'signings', 'source_changes', 'trial_attendance', 'trial_day_checkins', 'trial_day_consents', 'trial_day_staff', 'trial_day_status_events', 'trial_history', 'trial_reminders', 'trial_reports', 'trial_schedule_revisions', 'trial_schedule_sessions', 'trial_session_evidence', 'trials'].sort(),
+  });
+  // There is no in-memory engine to report on: a missing connection is a programming error, not a mode.
+  assert.throws(() => dataSchemaReport(null, DATA_MIGRATIONS), /needs a SQLite connection/);
+});
+
+// --------------------------------------------------------- read-only views
+test('views: reads work as before; every write throws and names the repository', () => {
+  const target = { id: 'u1', name: 'A', mfa: { recoveryHashes: ['h'] } };
+  const rows = [target];
+  const view = readonlyView(rows, 'a staff record');
+  assert.equal(view.length, 1);
+  assert.equal(view.find((u) => u.id === 'u1').name, 'A');
+  assert.equal(JSON.stringify(view), JSON.stringify(rows));
+  assert.ok(Array.isArray(view));
+  assert.deepEqual({ ...view[0] }, target);
+  assert.throws(() => { view[0].name = 'B'; }, /staff record.*repositories/);
+  assert.throws(() => { view[0].mfa.recoveryHashes.splice(0, 1); }, /repositories/);
+  assert.throws(() => { view[0].mfa.enabledAt = 1; }, /repositories/);
+  assert.throws(() => { view.push({ id: 'u2' }); }, /repositories/);
+  assert.throws(() => { delete view[0].name; }, /repositories/);
+  assert.equal(target.name, 'A', 'the target is untouched');
+  assert.equal(readonlyView(target), readonlyView(target), 'one view per target');
+});
+
+// -------------------------------------------------------- staff repository
+test('repository: insert assigns the id, stores the row and refreshes the view', () => {
+  const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS);
+  const repo = repoOn(s);
+  const u = repo.insert({ orgId: 'org-a', name: 'Maria Keane', role: 'Head of Recruitment', id: 'ignored' });
+  assert.match(u.id, /^usr-\d+$/);
+  assert.equal(u.orgId, 'org-a');
+  assert.ok(typeof u.createdAt === 'number');
+  assert.equal(repo.view.length, 1);
+  assert.equal(repo.view[0], u, 'the view holds the same object the caller got');
+  const stored = s.prepare('SELECT id, org_id, name, role, email FROM org_users').all().map((r) => ({ ...r }));
+  assert.deepEqual(stored, [{ id: u.id, org_id: 'org-a', name: 'Maria Keane', role: 'Head of Recruitment', email: null }]);
+  assert.deepEqual(Object.keys({ ...u }).sort(), ['createdAt', 'id', 'name', 'orgId', 'role'], 'unset fields are absent, not null');
+});
+test('repository: insert refuses incomplete records', () => {
+  const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS);
+  const repo = repoOn(s);
+  assert.throws(() => repo.insert({ name: 'X', role: 'Scout' }), /orgId/);
+  assert.throws(() => repo.insert({ orgId: 'o', role: 'Scout' }), /name/);
+  assert.throws(() => repo.insert({ orgId: 'o', name: 'X', role: ' ' }), /role/);
+  assert.equal(repo.view.length, 0);
+});
+test('repository: update changes the row in place, null clears, undefined leaves alone, nested values are replaced whole', () => {
+  const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS);
+  const repo = repoOn(s);
+  const u = repo.insert({ orgId: 'org-a', name: 'Dee', role: 'Scout' });
+  const same = repo.update(u.id, { role: 'Manager', email: 'dee@example.com', mfa: { secretB32: 'S', enabledAt: null, recoveryHashes: ['a', 'b'] }, name: undefined });
+  assert.equal(same, u, 'callers holding the view see the change');
+  assert.equal(u.role, 'Manager');
+  assert.equal(u.email, 'dee@example.com');
+  assert.deepEqual({ ...u.mfa }, { secretB32: 'S', enabledAt: null, recoveryHashes: ['a', 'b'] });
+  repo.update(u.id, { mfa: { ...u.mfa, recoveryHashes: u.mfa.recoveryHashes.filter((h) => h !== 'a') } });
+  assert.deepEqual([...u.mfa.recoveryHashes], ['b']);
+  repo.update(u.id, { mfa: null, email: null });
+  assert.equal('mfa' in { ...u }, false);
+  assert.equal('email' in { ...u }, false);
+  const stored = { ...s.prepare('SELECT role, email, mfa_json FROM org_users WHERE id = ?').get(u.id) };
+  assert.deepEqual(stored, { role: 'Manager', email: null, mfa_json: null });
+  assert.throws(() => repo.update('usr-nope', { role: 'x' }), /does not exist/);
+  assert.throws(() => repo.update(u.id, { id: 'other' }), /never changes/);
+});
+test('repository: lookups by id, by organisation and by case-insensitive name', () => {
+  const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS);
+  const repo = repoOn(s);
+  const a = repo.insert({ orgId: 'org-a', name: 'Maria Keane', role: 'Scout' });
+  repo.insert({ orgId: 'org-b', name: 'Maria Keane', role: 'Scout' });
+  assert.equal(repo.byId(a.id), a);
+  assert.equal(repo.byId('missing'), null);
+  assert.equal(repo.byId(undefined), null);
+  assert.equal(repo.byOrgAndName('org-a', '  maria keane '), a);
+  assert.equal(repo.byOrgAndName('org-c', 'Maria Keane'), null);
+  assert.equal(repo.byOrgAndName('org-a', ''), null);
+  assert.equal(repo.listByOrg('org-a').length, 1);
+  assert.equal(repo.count(), 2);
+});
+test('repository: a table row survives a new process while the id counter is behind — ids are skipped, never reused', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-users-'));
+  const file = path.join(dir, 'x.db');
+  let s = new DatabaseSync(file); runDataMigrations(s, DATA_MIGRATIONS); seedOrgs(s);
+  let local = 1000; const ids = (p) => `${p}-${++local}`;
+  let repo = createUsersRepository({ sqlite: s, nextId: ids, persist: () => {} }); repo.attach([]);
+  const first = repo.insert({ orgId: 'o', name: 'One', role: 'Scout' });
+  s.close();
+  // "Restart" with the counter reset, as after an abrupt stop before the snapshot saved it.
+  s = new DatabaseSync(file); local = 1000;
+  repo = createUsersRepository({ sqlite: s, nextId: ids, persist: () => {} });
+  const boot = repo.attach([]);
+  assert.deepEqual(boot, { engine: 'sqlite', loaded: 1, imported: 0 });
+  assert.equal(repo.view[0].name, 'One');
+  const second = repo.insert({ orgId: 'o', name: 'Two', role: 'Scout' });
+  assert.notEqual(second.id, first.id);
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 2);
+  s.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('repository: the legacy blob array is imported once, with every field kept, and ignored once the table has rows', () => {
+  const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS); seedOrgs(s);
+  const legacy = [
+    { id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 5, email: 'a@x', ssoSubject: 'idp-1', mfa: { secretB32: 'S', enabledAt: 7, recoveryHashes: [] }, deliveryPrefs: { quietStart: '22:00' }, removedAt: 9, removedBy: 'B', oddField: { kept: true } },
+    { id: 'usr-2', orgId: 'o', name: 'B', role: 'Manager', createdAt: 6 },
+    null, { notARow: true },
+  ];
+  const warnings = [];
+  const repo = createUsersRepository({ sqlite: s, nextId, persist: () => {}, warn: (m) => warnings.push(m) });
+  const boot = repo.attach(legacy);
+  assert.deepEqual(boot, { engine: 'sqlite', loaded: 2, imported: 2 });
+  assert.deepEqual(JSON.parse(JSON.stringify(repo.view[0])), legacy[0]);
+  assert.deepEqual(JSON.parse(JSON.stringify(repo.view[1])), legacy[1]);
+  assert.equal(s.prepare('SELECT extra_json FROM org_users WHERE id = ?').get('usr-1').extra_json, '{"oddField":{"kept":true}}');
+  // A blob whose rows the table already holds is superseded (S2's cutover
+  // imports it into the table a moment before attach): a log line, no warning.
+  const logs = [];
+  const again = createUsersRepository({ sqlite: s, nextId, persist: () => {}, warn: (m) => warnings.push(m), log: (m) => logs.push(m) });
+  assert.deepEqual(again.attach(legacy), { engine: 'sqlite', loaded: 2, imported: 0 });
+  assert.ok(!warnings.some((w) => /stale users blob/.test(w)), 'a superseded blob is not stale');
+  assert.ok(logs.some((m) => /superseded by the table/.test(m)));
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 2);
+  // A blob naming a row the table does not hold is stale: it is warned about,
+  // never imported over the table.
+  const third = createUsersRepository({ sqlite: s, nextId, persist: () => {}, warn: (m) => warnings.push(m) });
+  assert.deepEqual(third.attach([...legacy, { id: 'usr-ghost', orgId: 'o', name: 'Ghost', role: 'Scout', createdAt: 1 }]), { engine: 'sqlite', loaded: 2, imported: 0 });
+  assert.ok(warnings.some((w) => /stale users blob with 1 row\(s\)/.test(w)));
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 2);
+  assert.equal(third.byId('usr-ghost'), null);
+});
+test('repository: without sqlite there is no in-memory mode — construction refuses with a clear error before any data is touched', () => {
+  // S2 removed the JSON/in-memory fallback: sessions cannot be kept outside a
+  // table without storing plain tokens again, so the whole data layer requires
+  // node:sqlite and says so (store.mjs refuses to open at all without it).
+  assert.throws(() => createUsersRepository({ sqlite: null, nextId }), /needs a SQLite connection/);
+  assert.throws(() => attachDataLayer({ db: { users: [] }, store: { sqlite: null }, nextId, sessionTtlMs: 1000 }), /needs a store with a SQLite connection/);
+});
+
+// ------------------------------------------------------ attach + store
+test('attachDataLayer: db.users becomes the repository view and cannot be replaced', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-layer-'));
+  const store = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = { players: [], guardians: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] };
+  const layer = attachDataLayer({ db, store, nextId, persist: () => {} });
+  assert.deepEqual(layer.boot.users, { engine: 'sqlite', loaded: 1, imported: 1 });
+  assert.equal(db.users.length, 1);
+  assert.throws(() => { db.users = []; }, TypeError);
+  assert.throws(() => { db.users.push({}); }, /repositories/);
+  assert.equal(layer.report().domains.users.rows, 1);
+  // Every core identity table is live (S0–S4a) and the media-deletion queue exists; there is no shadow to report.
+  assert.deepEqual(layer.report().tables, ['blocks', 'channels', 'dispatch_attempts', 'dispatches', 'email_challenges', 'guardian_children', 'guardians', 'idv_queue', 'ledger', 'media_deletions', 'message_attachments', 'messages', 'moderation_log', 'notification_pref_categories', 'notification_prefs', 'notifications', 'ops_events', 'org_notes', 'org_users', 'orgs', 'outbox', 'pairing_codes', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'push_log', 'push_tokens', 'reports', 'sessions', 'source_changes', ...RECRUITMENT_TABLES, ...RECRUITMENT_CASES_TABLES, ...RECRUITMENT_CONTACTS_OFFERS_TABLES, ...SIGNINGS_FOLLOWUPS_TABLES].sort()); // S8a: the fifteen recruitment tables; S8b: the twenty-five case and room tables; S8c: the nine contact and offer tables
+  assert.equal('shadow' in layer.report(), false, 'the projection is retired');
+  assert.deepEqual(layer.report().identity, { initState: 'done', uncommittedFacets: 0 });
+  assert.deepEqual(layer.report().mediaDeletions, { queued: 0, conflicts: 0 });
+  for (const name of ['players', 'guardians']) {
+    assert.throws(() => { db[name] = []; }, TypeError, `${name} cannot be replaced`);
+    assert.throws(() => { db[name].push({ id: 'x' }); }, /repositories/, `${name} is a read-only view`);
+  }
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('store (server mode): a table-backed collection is never written as a blob again, and a stale blob row is deleted on the next save', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-store-'));
+  let store = openStore(dir);
+  // (A snapshot that carries players carries guardians: the identity pair is coupled, see checkTableBackedShapes.)
+  store.save({ savedAt: 1, idCounter: 1000, db: { players: [{ id: 'p' }], guardians: [], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
+  assert.throws(() => store.save({ savedAt: 1, idCounter: 1000, db: { players: [{ id: 'p' }], users: [] } }), /players: a snapshot that carries players must carry guardians too/);
+  store.sqlite.close();
+  store = openStore(dir, { tableBacked: ['users'] });
+  const loaded = store.load();
+  assert.equal(loaded.db.users.length, 1, 'the old blob is still handed back for the one-time import');
+  store.save({ savedAt: 2, idCounter: 1001, db: { players: [{ id: 'p' }], guardians: [], users: [{ id: 'usr-1' }] } });
+  const names = store.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name);
+  assert.deepEqual(names, ['guardians', 'players']);
+  assert.equal(store.load().db.users, undefined);
+  store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('store (snapshot mode): load merges table-backed collections in from their tables and save writes them back there', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-snap-'));
+  // A server boot: the table exists and holds one row; the blob is gone.
+  const server = openStore(dir, { tableBacked: TABLE_BACKED });
+  const PLAYER = { id: 'p', name: 'P', dob: '2001-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } };
+  const db = { players: [PLAYER], guardians: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }], notes: [{ id: 'n1' }] };
+  attachDataLayer({ db, store: server, nextId, persist: () => {} });
+  server.save({ savedAt: 1, idCounter: 1000, db });
+  server.sqlite.close();
+  // A tool reading the file as one snapshot sees the staff rows as before, and the players from their table (S4a).
+  const tool = openStore(dir);
+  const snap = tool.load();
+  assert.deepEqual(snap.db.users, [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }]);
+  assert.deepEqual(snap.db.players, [PLAYER]);
+  assert.deepEqual(snap.db.guardians, []);
+  // Writing a changed snapshot lands in the table, not in a blob.
+  snap.db.users.push({ id: 'usr-2', orgId: 'o', name: 'B', role: 'Manager', createdAt: 2, mfa: { secretB32: 'S', enabledAt: 3, recoveryHashes: [] } });
+  snap.db.users[0].role = 'Director';
+  tool.save(snap);
+  assert.deepEqual(tool.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), ['notes'], 'players, guardians, orgs, users and sessions are tables; only the other collections are blobs');
+  assert.deepEqual(tool.sqlite.prepare('SELECT id, role, mfa_json FROM org_users ORDER BY rowid').all().map((r) => ({ ...r })),
+    [{ id: 'usr-1', role: 'Director', mfa_json: null }, { id: 'usr-2', role: 'Manager', mfa_json: '{"secretB32":"S","enabledAt":3,"recoveryHashes":[]}' }]);
+  tool.sqlite.close();
+  // And the next server boot reads exactly that.
+  const again = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db2 = { players: [], guardians: [], users: [] };
+  const layer = attachDataLayer({ db: db2, store: again, nextId, persist: () => {} });
+  assert.deepEqual(layer.boot.users, { engine: 'sqlite', loaded: 2, imported: 0 });
+  assert.equal(db2.users[0].role, 'Director');
+  assert.equal(db2.users[1].mfa.enabledAt, 3);
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 1, guardians: 0, links: 0, imported: 0 }, 'the player row attached from the table; the empty array in memory imported nothing');
+  assert.equal(db2.players[0].name, 'P');
+  again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+test('store (snapshot mode): before any boot there is no table, so a fixture is written as a blob and imported by the first boot', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-fixture-'));
+  const tool = openStore(dir);
+  tool.save({ savedAt: 1, idCounter: 1000, db: { players: [], guardians: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
+  assert.deepEqual(tool.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), ['guardians', 'orgs', 'players', 'users']);
+  tool.sqlite.close();
+  const server = openStore(dir, { tableBacked: TABLE_BACKED });
+  const db = { ...server.load().db };
+  const layer = attachDataLayer({ db, store: server, nextId, persist: () => {} });
+  // Since S2 the sessions cutover migration imports the users blob into the
+  // table inside its own transaction (org sessions reference staff rows), so by
+  // the time the repository attaches the table already holds the row and the
+  // blob is retired: loaded from the table, nothing left to import.
+  assert.deepEqual(layer.boot.users, { engine: 'sqlite', loaded: 1, imported: 0 });
+  assert.equal(server.sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
+  assert.equal(server.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'users'").get().n, 0);
+  assert.equal(db.users[0].name, 'A');
+  // The saved (empty) players and guardians blobs were cut over by migration 0005 the same way: imported, retired, done.
+  assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 });
+  assert.equal(layer.report().identity.initState, 'done');
+  assert.equal(server.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('players', 'guardians')").get().n, 0, 'the blobs are retired');
+  server.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+console.log(`\n${passed} data-layer checks passed`);

@@ -61,10 +61,12 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, players, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR,
   } = ctx;
+  // S6b: an ops event is a row of ops_events (repositories/safetyAudit.mjs), staged into the persist() that follows each one; a bare context without the repository keeps the array push.
+  const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
 
   const DEV = (process.env.NODE_ENV ?? 'development') !== 'production' || process.env.ALLOW_DEV_LOGINS === '1';
 
@@ -85,7 +87,9 @@ export function registerEnterprise(ctx) {
       expiresAt: Date.now() + 7 * 86_400_000, acceptedAt: null, revokedAt: null,
     };
     db.orgInvites.push(inv);
-    void mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} invited you to join ${req.org.name} on ScoutBox as ${inv.role}.\n\nAccept with invite code: ${inv.token}\n\nThe code expires in 7 days.` });
+    // A rejected send (a refused record, a failed provider call) is observed here: logged by id, never an unhandled
+    // rejection ending the process; the invite stands as it always did (review of 40aa05c, F2).
+    mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} invited you to join ${req.org.name} on ScoutBox as ${inv.role}.\n\nAccept with invite code: ${inv.token}\n\nThe code expires in 7 days.` }).catch((err) => console.error(`staff invite ${inv.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`));
     persistNow();
     res.status(201).json({ invite: { ...inv, token: undefined }, note: 'The invite code went to their email (dev outbox in this environment).' });
   });
@@ -111,11 +115,8 @@ export function registerEnterprise(ctx) {
     const org = db.orgs.find((o) => o.id === inv.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
     let user = db.users.find((u) => u.orgId === org.id && u.name.toLowerCase() === inv.name.toLowerCase() && !u.removedAt);
-    if (!user) {
-      user = { id: nextId('usr'), orgId: org.id, name: scoutName?.trim() || inv.name, role: inv.role, createdAt: Date.now() };
-      db.users.push(user);
-    }
-    user.email = inv.email; // email is bound by the invite — the basis for SSO linking
+    if (!user) user = users.insert({ orgId: org.id, name: scoutName?.trim() || inv.name, role: inv.role });
+    users.update(user.id, { email: inv.email }); // email is bound by the invite — the basis for SSO linking
     inv.status = 'accepted';
     inv.acceptedAt = Date.now();
     inv.userId = user.id;
@@ -164,7 +165,7 @@ export function registerEnterprise(ctx) {
   orgRouter.post('/mfa/setup', (req, res) => {
     if (req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_ALREADY_ENABLED' });
     const secretB32 = b32encode(crypto.randomBytes(20));
-    req.orgUser.mfa = { secretB32, enabledAt: null, recoveryHashes: [] };
+    users.update(req.orgUser.id, { mfa: { secretB32, enabledAt: null, recoveryHashes: [] } });
     persistNow();
     res.json({
       secret: secretB32,
@@ -178,9 +179,8 @@ export function registerEnterprise(ctx) {
     if (!m?.secretB32 || m.enabledAt) return res.status(409).json({ error: 'MFA_NOT_PENDING' });
     if (mfaLocked(req.orgUser.id)) return res.status(429).json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
     if (!totpValid(m.secretB32, req.body?.code)) { mfaFail(req.orgUser.id); return res.status(401).json({ error: 'MFA_CODE_WRONG' }); }
-    m.enabledAt = Date.now();
     const plain = Array.from({ length: 10 }, () => crypto.randomBytes(5).toString('hex'));
-    m.recoveryHashes = plain.map((c) => crypto.createHash('sha256').update(c).digest('hex'));
+    users.update(req.orgUser.id, { mfa: { ...m, enabledAt: Date.now(), recoveryHashes: plain.map((c) => crypto.createHash('sha256').update(c).digest('hex')) } });
     persistNow();
     res.json({ enabled: true, recoveryCodes: plain, note: 'Store these recovery codes now — each works once and they are never shown again.' });
   });
@@ -190,31 +190,32 @@ export function registerEnterprise(ctx) {
     const m = req.orgUser.mfa;
     if (!m?.enabledAt) return res.status(409).json({ error: 'MFA_NOT_ENABLED' });
     if (!totpValid(m.secretB32, req.body?.code)) return res.status(401).json({ error: 'MFA_CODE_WRONG' });
-    req.orgUser.mfa = null;
+    users.update(req.orgUser.id, { mfa: null });
     persistNow();
     res.json({ enabled: false });
   });
 
   orgRouter.put('/security', (req, res) => {
     if (!requireLead(req, res)) return;
-    req.org.mfaRequiredForLeads = req.body?.mfaRequiredForLeads === true;
+    orgs.update(req.org.id, { mfaRequiredForLeads: req.body?.mfaRequiredForLeads === true });
     persistNow();
     res.json({ mfaRequiredForLeads: req.org.mfaRequiredForLeads, note: 'Enforced at login: leads without MFA are asked to set it up before privileged actions.' });
   });
 
   // Session/device management (own sessions only).
+  // S2: sessions are table-backed and hold token hashes; "current" is decided
+  // by hashing the presented bearer token, never by comparing stored tokens.
   orgRouter.get('/sessions', (req, res) => {
-    const mine = db.sessions.filter((s) => s.kind === 'org' && s.userId === req.orgUser.id);
+    const mine = sessions.listOrgUser(req.orgUser.id);
     const currentToken = (req.headers.authorization ?? '').slice(7);
-    res.json({ items: mine.map((s) => ({ sid: s.sid, createdAt: s.createdAt, current: s.token === currentToken, via: s.via ?? 'password' })) });
+    res.json({ items: mine.map((s) => ({ sid: s.sid, createdAt: s.createdAt, current: sessions.isCurrent(s, currentToken), via: s.via ?? 'password' })) });
   });
 
   orgRouter.post('/sessions/revoke', (req, res) => {
     const sid = String(req.body?.sid ?? '');
-    const before = db.sessions.length;
-    db.sessions = db.sessions.filter((s) => !(s.kind === 'org' && s.userId === req.orgUser.id && s.sid === sid));
-    persistNow();
-    res.json({ revoked: before - db.sessions.length });
+    // Own sessions only: the delete is scoped to this staff member's id.
+    const revoked = sid ? sessions.revokeOwn(req.orgUser.id, sid) : 0;
+    res.json({ revoked });
   });
 
   // ================================================== B2. SSO (local test IdP)
@@ -244,7 +245,12 @@ export function registerEnterprise(ctx) {
     res.json({ config: cfg });
   });
 
-  const IDP_SECRET = process.env.TEST_IDP_SECRET || 'local-test-idp-secret';
+  // The local test IdP signs its codes with TEST_IDP_SECRET. There is no
+  // fallback value any more: with the variable unset a fresh random secret is
+  // drawn at boot, so a code minted against a publicly known string never
+  // verifies anywhere. The callback below is also refused outside
+  // development, because the test IdP is the only issuer that exists.
+  const IDP_SECRET = process.env.TEST_IDP_SECRET || crypto.randomBytes(32).toString('hex');
   const signToken = (payload) => {
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const sig = crypto.createHmac('sha256', IDP_SECRET).update(body).digest('base64url');
@@ -259,7 +265,14 @@ export function registerEnterprise(ctx) {
   };
 
   // Start: mint state+nonce, hand back the authorisation URL.
+  const testIdpOnly = (res) => {
+    if (DEV) return false;
+    res.status(403).json({ error: 'SSO_PROVIDER_UNAVAILABLE', message: 'Only the local test identity provider exists, and it is disabled outside development. Staff sign in with their organisation credentials.' });
+    return true;
+  };
+
   app.post('/auth/sso/start', (req, res) => {
+    if (testIdpOnly(res)) return;
     const org = db.orgs.find((o) => o.id === req.body?.orgId);
     const cfg = org && db.ssoConfigs.find((c) => c.orgId === org.id);
     if (!cfg) return res.status(404).json({ error: 'SSO_NOT_CONFIGURED', message: 'This organisation has no identity provider configured.' });
@@ -284,6 +297,7 @@ export function registerEnterprise(ctx) {
   }
 
   app.post('/auth/sso/callback', (req, res) => {
+    if (testIdpOnly(res)) return;
     const { code, state } = req.body ?? {};
     const st = db.ssoStates.find((s) => s.state === String(state ?? ''));
     if (!st || st.usedAt || st.expiresAt < Date.now()) {
@@ -302,7 +316,7 @@ export function registerEnterprise(ctx) {
     if (!user) {
       return res.status(403).json({ error: 'SSO_NOT_LINKED', message: 'No staff account with this email exists in the organisation. Ask a lead for an invitation — SSO never creates accounts by itself.' });
     }
-    user.ssoSubject = tok.sub; // link (or confirm) sub ↔ user
+    users.update(user.id, { ssoSubject: tok.sub }); // link (or confirm) sub ↔ user
     // SSO group claims NEVER grant ScoutBox privileges: role, verification and
     // safeguarding approval only change through ScoutBox's own flows.
     persistNow();
@@ -326,7 +340,7 @@ export function registerEnterprise(ctx) {
       grantsReceived: db.groupGrants.filter((g) => g.toOrgIds?.includes(orgId)),
       supportAccess: db.supportAccessGrants.filter((g) => g.orgId === orgId),
     };
-    db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'audit_export', detail: { orgId, by: req.orgUser.name } });
+    opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'audit_export', detail: { orgId, by: req.orgUser.name } });
     persist();
     res.json(scoped);
   });
@@ -419,34 +433,97 @@ export function registerEnterprise(ctx) {
   adminRouter.post('/backup', (req, res) => {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const dir = path.join(DATA_DIR, 'backups', stamp);
-    fs.mkdirSync(dir, { recursive: true });
     // 1. A consistent snapshot: the same shape store.load() imports on first
     //    boot (db.json legacy path) — a restore is simply "point a fresh
-    //    DATA_DIR at a copy of this directory".
+    //    DATA_DIR at a copy of this directory". Flushed first, so the queue is
+    //    judged against every live reference, pending facet edits included.
     persistNow();
-    const snapshotPath = path.join(dir, 'db.json');
-    fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db }));
-    // 2. Media files.
-    const mediaSrc = path.join(DATA_DIR, 'media');
-    const mediaDst = path.join(dir, 'media');
-    const files = [];
-    if (fs.existsSync(mediaSrc)) {
-      fs.mkdirSync(mediaDst, { recursive: true });
-      for (const f of fs.readdirSync(mediaSrc)) {
-        fs.copyFileSync(path.join(mediaSrc, f), path.join(mediaDst, f));
-        files.push({ path: `media/${f}`, sha256: fileSha256(path.join(mediaDst, f)), bytes: fs.statSync(path.join(mediaDst, f)).size });
-      }
+    // The ownership invariant (review of 4ef9345): a queued removal that names a
+    // clip a live player still carries is a conflict to resolve, not a file to
+    // leave out of the backup as if it had been backed up. Refused before any
+    // directory exists; ids only, never a record.
+    const conflicts = mediaDeletions.conflicts();
+    if (conflicts.length) {
+      opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_refused', detail: { dir: stamp, error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflicts: conflicts.map((c) => ({ mediaId: c.media_id, owners: c.owners })) } });
+      persistNow();
+      return res.status(409).json({
+        error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT',
+        message: `${conflicts.length} queued media removal(s) name a clip a live player still references; the backup was refused because it could neither copy the file as the player's nor leave it out as removed. Resolve the queue entry or the player's reference first.`,
+        conflicts: conflicts.map((c) => ({ mediaId: c.media_id, owners: c.owners })),
+      });
     }
-    files.unshift({ path: 'db.json', sha256: fileSha256(snapshotPath), bytes: fs.statSync(snapshotPath).size });
-    const manifest = {
-      contract: 'backup.2026-09.v1', createdAt: Date.now(), engine: 'json-snapshot + media files',
-      counts: { players: db.players.length, orgs: db.orgs.length, notifications: db.notifications.length },
-      files,
-      secretsNote: 'Backups contain NO server secrets (ADMIN_KEY, signing secrets live in env, never in the DB). Store backups with the same care as the live data directory.',
-      restore: 'Copy this directory to a NEW empty DATA_DIR and start the server with DATA_DIR pointing at it. Never restore over a live data directory.',
-    };
-    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-    db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'backup_created', detail: { dir: stamp, files: files.length } });
+    let manifest;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const snapshotPath = path.join(dir, 'db.json');
+      // Sessions are exported in their stored form (token hashes, never tokens):
+      // the in-memory `db.sessions` view is hash-free by design and could not be
+      // restored, so a restore would have refused or lost every session. The
+      // hashes are exactly what the database file holds, under the same care.
+      // The media-removal queue (migration 0006) lives only in its table and is
+      // exported the same way, in its stored row form: a restored server imports
+      // it, serves nothing for those ids and finishes the removal at boot. The
+      // queue is read ONCE here and decides both the export and which files are
+      // left out below (review of 9656a4b, finding 2).
+      const queued = mediaDeletions.pending();
+      const queuedIds = new Set(queued.map((r) => r.media_id));
+      // The one-time codes (S6a, migration 0008) live only in their tables and are
+      // exported the same way, in their stored row form (code hashes, never a
+      // code): a restored server imports them through migration 0008 and the
+      // outstanding ones keep working there until they expire.
+      // S4b-R (migration 0014): the retained player records are exported under
+      // `playersRetained` — id, deletedAt, birthDate, country and nothing else — and
+      // NEVER inside `players`: a restore imports them through migration 0014 (an id
+      // that is also a live player refuses the boot), and a previous build restoring
+      // this backup keeps the collection as a blob no route reads, never as accounts.
+      // The notifications and preferences (S7a, migration 0009) are exported
+      // explicitly in the legacy collection shape, in insertion order — the
+      // state in memory, like every blob collection — so a backup restores on
+      // any build: a pre-S7a build reads the blobs, this build imports them
+      // through migration 0009 with the feed order intact.
+      fs.writeFileSync(snapshotPath, JSON.stringify({ savedAt: Date.now(), idCounter: ctx.currentIdCounter(), db: { ...db, sessions: sessions.exportRows(), mediaDeletions: queued, emailChallenges: codes.exportEmailChallenges(), pairingCodes: codes.exportPairingCodes(), playersRetained: players?.retainedRecords ? players.retainedRecords() : (db.playersRetained ?? []), notifications: notifications.exportRows(), notificationPrefs: notifications.exportPrefs(), dispatches: dispatches.exportRows(), outbox: outbox.exportRows(), pushLog: pushLog.exportRows(), pushTokens: pushTokens.exportRows(), channels: channels.exportRows(), ...safetyAudit.exportAll(), ...(recruitment ? { requests: recruitment.exportRequests(), trials: recruitment.exportTrials() } : {}), ...(recruitmentCases ? recruitmentCases.exportAll() : {}) } })); // S8b: the cases (the room facet, draft, handoff and budget nested) and the four room collections in their legacy shapes, insertion order, lists in list order, every field kept; S8a-core: the requests and trials in their legacy shapes, insertion order, children nested in list order, every field kept; S7c: the three collections in their legacy shapes (the withheld mail text as stored; tokens with their registered types); S7d: the threads in the legacy shape, insertion order, messages nested in array order, legacy and unknown fields kept
+      // 2. Media files — except those whose removal is queued: a backup never
+      //    carries a file without the intent to remove it. Their ids are in
+      //    db.json; on a restored server the entry is cleared once the file is
+      //    confirmed absent, and a file an operator copies back by hand is
+      //    removed by the boot sweep.
+      const mediaSrc = path.join(DATA_DIR, 'media');
+      const mediaDst = path.join(dir, 'media');
+      const files = [];
+      let leftOut = 0;
+      if (fs.existsSync(mediaSrc)) {
+        fs.mkdirSync(mediaDst, { recursive: true });
+        for (const f of fs.readdirSync(mediaSrc)) {
+          if (queuedIds.has(f.replace(/\.[^.]+$/, ''))) { leftOut += 1; continue; }
+          fs.copyFileSync(path.join(mediaSrc, f), path.join(mediaDst, f));
+          files.push({ path: `media/${f}`, sha256: fileSha256(path.join(mediaDst, f)), bytes: fs.statSync(path.join(mediaDst, f)).size });
+        }
+      }
+      files.unshift({ path: 'db.json', sha256: fileSha256(snapshotPath), bytes: fs.statSync(snapshotPath).size });
+      manifest = {
+        contract: 'backup.2026-09.v1', createdAt: Date.now(), engine: 'json-snapshot + media files',
+        counts: { players: db.players.length, retainedPlayers: players?.retainedCount ? players.retainedCount() : (db.playersRetained ?? []).length, orgs: db.orgs.length, notifications: notifications.count(), mediaFiles: files.length - 1 },
+        media: {
+          copied: files.length - 1, queuedForRemoval: leftOut,
+          note: 'Files whose removal was committed but not yet completed are left out on purpose: their queue entries are in db.json, and the restored server serves nothing for them and finishes the removal at boot.',
+        },
+        files,
+        secretsNote: 'Backups contain NO server secrets (ADMIN_KEY, signing secrets live in env, never in the DB). Store backups with the same care as the live data directory.',
+        restore: 'Copy this directory to a NEW empty DATA_DIR and start the server with DATA_DIR pointing at it. Never restore over a live data directory.',
+      };
+      // The manifest is written LAST: a directory without one is not a backup
+      // (/admin/backups shows it with manifest: null; /admin/backup/verify answers 404).
+      fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    } catch (err) {
+      // Nothing half-made is left behind as if it were usable, and the response
+      // never claims a backup that does not exist.
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      console.error(`backup failed (${stamp}): ${err?.message ?? err}`);
+      opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_failed', detail: { dir: stamp, error: String(err?.message ?? err).slice(0, 200) } });
+      persistNow();
+      return res.status(500).json({ error: 'BACKUP_FAILED', message: 'The backup could not be completed; the partial directory was removed.' });
+    }
+    opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_created', detail: { dir: stamp, files: manifest.files.length, queuedForRemoval: manifest.media.queuedForRemoval } });
     persistNow();
     res.status(201).json({ dir, manifest });
   });
@@ -498,7 +575,7 @@ export function registerEnterprise(ctx) {
       ...metrics,
       deliveryFailures: db.opsEvents.filter((e) => e.kind === 'delivery_failed').length,
       webhookFailures: db.opsEvents.filter((e) => e.kind === 'webhook_failed').length,
-      dispatchBacklog: db.dispatches.filter((d) => ['queued', 'retrying'].includes(d.status)).length,
+      dispatchBacklog: dispatches.backlogCount(), // S7b: queued or retrying, the same definition as before, counted on the repository's mirror
       webhookBacklog: db.webhookDeliveries.filter((d) => ['queued', 'retrying'].includes(d.status)).length,
       opsEvents: db.opsEvents.slice(-50).reverse(),
       note: 'Counters cover this process since boot. Local development metrics — not a production SLA measurement.',

@@ -92,9 +92,13 @@ async function offline(mutate) {
   await down(server, 'SIGTERM');
   const store = openStore(DATA_DIR); const snap = store.load();
   await mutate(snap.db, snap);
-  store.save({ ...snap, db: snap.db });
+  // S8d: the signing tables hold typed columns only, so a planted value a column cannot hold is REFUSED at the save
+  // (nothing lands); the refusal is returned and the server comes back on the untouched file.
+  let refused = null;
+  try { store.save({ ...snap, db: snap.db }); } catch (err) { refused = err; }
   server = await boot();
   await relogin();
+  return refused;
 }
 /** A plain restart (SIGTERM saves; nothing edited). */
 async function restart() { await down(server, 'SIGTERM'); server = await boot(); await relogin(); }
@@ -530,7 +534,9 @@ const G = {};
     // G2: a completed Trial on a case whose history never reached trial_completed.
     const k2 = kase(G.trial);
     db.trials.push({ id: 'trial-drift-2', orgId: 'org-eastport', playerId: k2.playerId, caseId: k2.id, requestId: 'req-drift-2', status: 'reported', workflowState: 'completed', acceptedAt: now - 3 * H, acceptedBy: 'player', recipient: { type: 'player' }, schedule: { timezone: 'Europe/London', confirmedAt: now - 2 * H, revision: 1, sessions: [{ id: 's-d2', startsAt: now - 2 * H, endsAt: now - H, kind: 'training' }] }, completion: { state: 'completed', at: now - H }, history: [], attendance: [], rev: 2, keys: {} });
-    db.requests.push({ id: 'req-drift-2', type: 'trial', orgId: 'org-eastport', playerId: k2.playerId, caseId: k2.id, status: 'accepted', createdAt: now - 4 * H, routedTo: 'player', trialDetails: { proposedDate: '2027-01-01' } });
+    // S8a-core: a request names its staff member by a real key, as the production writer always does (the fixture row
+    // names the lead the suite logged in as); a row without userId is refused at the write with its id.
+    db.requests.push({ id: 'req-drift-2', type: 'trial', orgId: 'org-eastport', playerId: k2.playerId, caseId: k2.id, userId: db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id, scoutName: 'Maria Keane', status: 'accepted', createdAt: now - 4 * H, routedTo: 'player', trialDetails: { proposedDate: '2027-01-01' } });
     // G3: an ISSUED revision on a case whose history never reached offer_made.
     const mkOffer = (k, status, respond) => ({ id: `rof-drift-${k.id}`, orgId: 'org-eastport', caseId: k.id, playerId: k.playerId, type: 'direct_recruitment', status, createdAt: now - H, updatedAt: now, rev: 2, currentRevisionId: `rofr-drift-${k.id}`, revisions: [{ id: `rofr-drift-${k.id}`, revisionNumber: 1, status, issuedAt: now - H, respondedAt: respond ? now : null, expiresAt: now + 30 * DAY, terms: { role: 'x', startDate: '2027-07-01', endDate: '2029-06-30' }, recipientSnapshot: { type: 'player', playerId: k.playerId }, documents: [], rev: 1, response: respond ? { id: 'resp-d' } : null }], responses: respond ? [{ id: 'resp-d', revisionId: `rofr-drift-${k.id}`, responseType: 'accepted', actorType: 'player', actorId: k.playerId, occurredAt: now }] : [], history: [], keys: {} });
     db.recruitmentOffers.push(mkOffer(kase(G.offer), 'ISSUED', false));
@@ -789,13 +795,19 @@ section('M — minors through the chain; malformed DOB fails closed (§23, §24)
   neg(s.status === 200 && (gInbox ?? []).some((r) => r.type === 'contact') && !(kInbox ?? []).some((r) => r.orgId === 'org-eastport' && r.type === 'contact' && r.routedTo === 'player'), 'M2 a Contact to a minor routes to the guardian, never to the child');
   const gj = await j('GET', '/guardian/children/pl-guni/journeys', undefined, amara.token);
   neg(gj.status === 200 && !has(gj.body, 'offer') || gj.status === 200, 'M4 the guardian\'s view of the child carries no Offer (none may exist)');
-  // A minor with a malformed DOB is still a minor to every route.
-  await offline((db) => { const p = db.players.find((x) => x.id === 'pl-guni'); p.dob = 'not-a-date'; });
+  // S4a: a malformed DOB can no longer be STORED. Players are table-backed and the snapshot write validates every
+  // record, so the offline edit that used to plant `dob: 'not-a-date'` is refused as a whole (the save rolls back
+  // naming the player and the field; the stored record stays the readable minor it was). The route-level claims
+  // (an unreadable age is never an adult) are kept by the sign-up refusals of §24 and by the wall below.
+  await down(server, 'SIGTERM');
+  let refusal = null;
+  { const store = openStore(DATA_DIR); const snap = store.load(); snap.db.players.find((x) => x.id === 'pl-guni').dob = 'not-a-date'; try { store.save({ ...snap, db: snap.db }); } catch (e) { refusal = e; } store.sqlite.close(); }
+  server = await boot(); await relogin();
+  neg(/players pl-guni: dob is not a valid YYYY-MM-DD date/.test(String(refusal?.message)) && (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob === '2012-02-10', 'M8a (S4a) a malformed DOB cannot be stored: the snapshot save is refused naming the player and the field, the stored date is unchanged');
   const wall2 = await j('GET', '/org/players/pl-guni', undefined, alex.token);
-  neg(wall2.status === 403 && wall2.body?.error === 'UNDER_18_WALL', 'M8 a malformed DOB: still the wall for an agency (unknown is not adult)');
+  neg(wall2.status === 403 && wall2.body?.error === 'UNDER_18_WALL', 'M8 the wall for an agency holds (the minor is still a minor)');
   const av = await j('POST', '/player/availability', { availability: 'available_now' }, P['pl-guni'].token);
-  neg(av.status === 403 || av.status === 401, `M9 a guardian-managed minor with a malformed DOB cannot act as an adult (${av.status})`);
-  await offline((db) => { const p = db.players.find((x) => x.id === 'pl-guni'); p.dob = '2012-02-10'; });
+  neg(av.status === 403 || av.status === 401, `M9 a guardian-managed minor cannot act as an adult (${av.status})`);
   // Guardian block names its child (D-P81-7).
   const wrong = await j('POST', '/guardian/block', { orgId: 'org-harbour', playerId: 'pl-adeyemi' }, amara.token);
   neg(expect(wrong, 404, 'CHILD_NOT_FOUND'), 'M13 a guardian block naming another guardian\'s child: CHILD_NOT_FOUND');
@@ -907,9 +919,10 @@ section('Q — restart: idempotency converges, nothing duplicates (§33, §34)')
 section('R — corrupt current pointers and unknown states fail closed (§35, §36)');
 {
   const Hh = globalThis.__H; const K = globalThis.__K;
+  // S8d: the package's status is a CHECKed column — the unknown word is refused at the save, naming the package; it is planted in its own save so the two other corruptions land
+  let bogusPkg = null; const bogus = await offline((db) => { const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); bogusPkg = pkg?.id ?? null; if (pkg) pkg.status = 'BOGUS'; });
   await offline((db) => {
     const o = db.recruitmentOffers.find((x) => x.id === K.OID); o.currentRevisionId = 'rofr-gone';
-    const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); if (pkg) pkg.status = 'BOGUS';
     const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); if (k) k.room.status = 'SIGNEDX';
   });
   const jK = await jb(K.RID);
@@ -917,14 +930,13 @@ section('R — corrupt current pointers and unknown states fail closed (§35, §
   const issue = await j('POST', `/org/offers/${K.OID}/issue`, { expectedRev: 1, clientKey: key() }, maria.token, at(T0));
   neg(issue.status >= 400, `R1b the domain route refuses the corrupt Offer (${issue.status} ${issue.body?.error})`);
   const jN = await jb(Hh.R5);
-  neg(jN.resources.signingPackageId === null || jN.stage === 'signed', `R2 a package with an unknown status is never live (${jN.stage}, ${jN.resources.signingPackageId})`);
+  neg(bogusPkg === null || (bogus && /SIGNINGS_IMPORT_BLOCKED/.test(bogus.message) && bogus.message.includes(bogusPkg) && bogus.message.includes('status must be one of') && jN.classification !== 'integrity_error'), `R2 (S8d) an unknown status word cannot be stored: the save refuses it, naming the package; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`);
   const j4 = await jb(globalThis.__B.R4);
   neg(j4.nextAction.code === 'STATE_UNKNOWN' && j4.classification === 'integrity_error' && j4.integrity.includes('LIFECYCLE_STATE_UNKNOWN'), 'R3 an unknown lifecycle word: STATE_UNKNOWN, integrity_error');
   const mv = await lifecycle(globalThis.__B.R4, 'startReview');
   neg(mv.status >= 400 && /LIFECYCLE_STATE_UNKNOWN|ROOM|LIFECYCLE/.test(mv.body?.error ?? ''), `R3b the lifecycle refuses to move an unknown state (${mv.status} ${mv.body?.error})`);
   await offline((db) => {
     const o = db.recruitmentOffers.find((x) => x.id === K.OID); o.currentRevisionId = o.revisions[o.revisions.length - 1].id;
-    const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); if (pkg) pkg.status = 'COMPLETED';
     const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); if (k) k.room.status = 'archived';
   });
   ok((await jb(K.RID)).classification !== 'integrity_error', 'R4 restored, the case reads sound again (nothing was repaired on read: the store was put right)');
@@ -949,7 +961,7 @@ section('S — partial legacy / canonical mixes: nothing invented (§37)');
     // S1: legacy contacted + a canonical completed Trial (a Trial row that names the case, with an accepted request).
     const k1 = plant(S1, ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed'], { trialId: 'trial-p81-s1' });
     const now = Date.now();
-    db.requests.push({ id: 'req-p81-s1', type: 'trial', orgId: 'org-eastport', playerId: k1.playerId, caseId: k1.id, status: 'accepted', createdAt: now - 4 * H, routedTo: 'player', trialDetails: { proposedDate: '2027-01-01' } });
+    db.requests.push({ id: 'req-p81-s1', type: 'trial', orgId: 'org-eastport', playerId: k1.playerId, caseId: k1.id, userId: db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id, scoutName: 'Maria Keane', status: 'accepted', createdAt: now - 4 * H, routedTo: 'player', trialDetails: { proposedDate: '2027-01-01' } }); // S8a-core: the staff key, as above
     db.trials.push({ id: 'trial-p81-s1', orgId: 'org-eastport', playerId: k1.playerId, caseId: k1.id, requestId: 'req-p81-s1', status: 'reported', workflowState: 'completed', acceptedAt: now - 3 * H, acceptedBy: 'player', recipient: { type: 'player' }, schedule: { timezone: 'Europe/London', confirmedAt: now - 2 * H, revision: 1, sessions: [{ id: 's-s1', startsAt: now - 2 * H, endsAt: now - H, kind: 'training' }] }, completion: { state: 'completed', at: now - H }, history: [], attendance: [], rev: 2, keys: {} });
     // S2: canonical Contact lifecycle claim + legacy trial_completed (no Trial).
     const k2 = plant(S2, ['contact_planned', 'contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);

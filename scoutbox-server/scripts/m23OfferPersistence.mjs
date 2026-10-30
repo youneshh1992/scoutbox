@@ -348,8 +348,13 @@ section('5 — P6.1: lazy expiry, temporal corruption, unknown statuses, legacy 
   ok((await s2.j('GET', `/org/agent/clients/${REP}/offers`, undefined, ana2.token, at(Date.now()))).body.items?.length === 1, '5.20 the share survived the restart for Ana');
   neg((await s2.j('GET', `/org/agent/clients/${REP}/offers`, undefined, bea2.token, at(Date.now()))).status === 404, '5.21 and Bea still gets NOT FOUND after the restart');
   const db4 = await s2.stop();
-  const planted = (d) => JSON.stringify(d.recruitmentOffers.filter((o) => /^rof-(lazy|t\d)$/.test(o.id)));
-  neg(planted(db4) === planted(db3) && planted(db4) === JSON.stringify(JSON.parse(rowsBefore).filter((o) => /^rof-(lazy|t\d)$/.test(o.id))), '5.22 none of the planted rows was repaired, reordered or dropped by two boots and two stops');
+  // S8c (migration 0017): the offers are read from the tables, and a record read from the tables carries its keys in the
+  // stored shape's order (every key and value identical — the documented table-read property, as m23DecisionPersistence
+  // compares since S8b). The comparison is therefore key-order-insensitive; the ids, every value, the list order of the
+  // planted rows and their presence are still compared, so "repaired, reordered or dropped" is still what it asserts.
+  const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+  const planted = (rows) => JSON.stringify(canon(rows.filter((o) => /^rof-(lazy|t\d)$/.test(o.id))));
+  neg(planted(db4.recruitmentOffers) === planted(db3.recruitmentOffers) && planted(db4.recruitmentOffers) === planted(JSON.parse(rowsBefore)), '5.22 none of the planted rows was repaired, reordered or dropped by two boots and two stops (every key and value compared, key order aside)');
   neg(JSON.stringify(db4.recruitmentCases.filter((c) => c.id !== R.kim.RID).map((c) => [c.id, c.room?.status ?? null])) === JSON.stringify(JSON.parse(casesBefore).filter(([id]) => id !== R.kim.RID)), '5.23 no case moved because of a planted row');
 }
 

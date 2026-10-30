@@ -1,12 +1,14 @@
 // M12 shared: additive migrations + helpers used by every feature module.
 import { isAdult, visibleToOrg, haversineKm } from '../domain.mjs';
 import { ageOrNull } from '../temporal.mjs';
+import { isLeadUser } from '../roles.mjs';
 
 // ------------------------------------------------------------- migrations
 // Same non-destructive convention as server.mjs: every new collection is
 // created empty if absent; nothing existing is renamed, retyped or deleted.
 // Versioned by the commit that introduces each line.
-export function migrateM12(db) {
+/** `players` (S5): the identity repository, for the media caption default (a row write). */
+export function migrateM12(db, players) {
   db.evidence ??= [];            // F1 — evidence passport records
   db.coachAffiliations ??= [];   // F10 — club-confirmed coach affiliations
   db.squadInvites ??= [];        // F10 — restricted squad invitations (approval-gated)
@@ -28,8 +30,11 @@ export function migrateM12(db) {
     o.tactical ??= null;         // F4 — formation + role definitions
     o.squad ??= [];              // F4 — shadow/current squad exists for every org now
   }
-  for (const p of db.players) {
-    for (const m of p.media ?? []) m.captions ??= null; // F12E — caption track (vtt text) or null
+  // F12E — caption track (vtt text) or null. Since S5 a media item is a row of
+  // player_media: the default is written through the repository only where the
+  // stored item lacks the field (an existing null stays as it is).
+  for (const p of [...db.players]) {
+    for (const m of [...(p.media ?? [])]) if (m.captions === undefined) players.patchItem(p.id, 'media', { id: m.id }, { captions: null });
   }
   for (const v of db.vouches ?? []) {
     // F10 honesty audit: an email-code reference confirms mailbox control,
@@ -46,8 +51,9 @@ export function buildShared(ctx) {
   const { db, nextId } = ctx;
 
   // Lead = the privileged org role tier for approvals, staff management and
-  // restricted cases. Rule-based on the stated role (documented, not hidden).
-  const isLead = (user) => /head|director|lead|manager|owner|chief/i.test(user?.role ?? '');
+  // restricted cases. Rule-based on the stated role (documented, not hidden);
+  // the one definition lives in roles.mjs.
+  const isLead = isLeadUser;
   const requireLead = (req, res) => {
     if (isLead(req.orgUser)) return true;
     res.status(403).json({ error: 'LEAD_REQUIRED', message: 'This action needs a recruitment lead (role containing Head/Director/Lead/Manager).' });

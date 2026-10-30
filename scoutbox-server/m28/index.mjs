@@ -55,11 +55,16 @@ export function registerOffers(rawCtx) {
     db, orgRouter, playerRouter, guardianRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, audit, orgCanSee, isAdult, storage,
     agent = null, integration = null, transactions = null, faults = null,
+    recruitmentContactsOffers, // S8c: a NEW offer enters through `addOffer` (the former `push` below); every other write is an in-place edit
   } = ctx;
 
   // The store is created HERE, at registration, on every boot (the M12–M16
   // "module" guarantee in storeContract.mjs). No migration: nothing is
   // backfilled and no lifecycle state is reinterpreted as an Offer (§60–§62).
+  // Since migration 0017 (S8c) the data layer publishes `db.recruitmentOffers`
+  // as a read-only view over the offer tables before this module registers, so
+  // the `??=` below is a no-op there; it still creates the container on a file
+  // that has not cut over.
   db.recruitmentOffers ??= [];
 
   const err = (res, error, message, extra = {}) => sendOfferError(res, { error, message, ...extra }, 'offer');
@@ -339,7 +344,7 @@ export function registerOffers(rawCtx) {
       lifecycle: null, history: [], createdAt: at, createdBy: by, updatedAt: at, rev: 1, revAt: at, revBy: null, policyVersion: OFFER_POLICY_VERSION,
     };
     hist(offer, 'offer_draft_created', by, { revisionId: rev.id, revisionNumber: 1 }, at);
-    db.recruitmentOffers.push(offer);
+    recruitmentContactsOffers.addOffer(offer); // S8c: the record itself is kept; its row lands in persistNow()'s save
     audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id });
     persistNow();
     safe('offer_draft_created', () => broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));

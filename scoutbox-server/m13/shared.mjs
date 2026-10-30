@@ -3,9 +3,11 @@
 // deleted; every helper enforces at the server, never in a client.
 import crypto from 'node:crypto';
 import { isAdult, ageOn, adultAgeFor, visibleToOrg, haversineKm } from '../domain.mjs';
+import { isLeadUser } from '../roles.mjs';
 
 // ------------------------------------------------------------- migrations
-export function migrateM13(db) {
+/** `players` (S5): the identity repository, for the external-ids default (a row write). */
+export function migrateM13(db, players) {
   db.importBatches ??= [];        // F1 — CSV import batches (draft→validated→committed→reversed)
   db.prospects ??= [];            // F1 — org-PRIVATE imported records; never platform accounts
   db.identityReviews ??= [];      // F1 — ambiguous identity matches awaiting review
@@ -23,7 +25,7 @@ export function migrateM13(db) {
   db.coverageAssignments ??= [];  // F7 — scout↔fixture assignments → observations
   db.groups ??= [];               // F8 — parent organisations / federations
   db.groupGrants ??= [];          // F8 — explicit, expiring, revocable sharing grants
-  db.dispatches ??= [];           // F11 — per-channel delivery records for notifications
+  db.dispatches ??= [];           // F11 — per-channel delivery records for notifications (S7b: a table; attachDataLayer replaces this container with the repository's read-only view before m13 registers)
   db.deliveryCallbacksSeen ??= [];// F11 — processed provider callback ids (idempotency)
   db.orgInvites ??= [];           // F12 — staff invitations
   db.ssoConfigs ??= [];           // F12 — per-org identity-provider configuration
@@ -38,12 +40,16 @@ export function migrateM13(db) {
   // sweep is ever made lazy.
   db.reviewLater ??= [];
   for (const c of db.recruitmentCases ?? []) c.budget ??= null; // F9 — deal scenarios live on the case
-  for (const u of db.users ?? []) {
-    u.mfa ??= null;               // F12 — { secretB32, enabledAt, recoveryHashes: [] }
-    u.deliveryPrefs ??= null;     // F11 — { quietStart, quietEnd, channels: {email: bool} }
-  }
-  for (const p of db.players ?? []) {
-    p.externalIds ??= [];         // F1 — [{provider, externalId, source, at}] provenance kept
+  // Staff records (`db.users`) are owned by the users repository
+  // (repositories/users.mjs) and are read-only here: an unset `mfa` or
+  // `deliveryPrefs` is simply absent, and every reader already treats
+  // absent and null alike (`u.mfa?.enabledAt`, `u.deliveryPrefs?.channels`).
+  // F1 — [{provider, externalId, source, at}] provenance kept. Since S5 the
+  // external ids are rows of player_external_ids: a record that lacks the key
+  // (absent or null, as the in-place `??=` treated it) gains an empty list
+  // through the repository, once.
+  for (const p of [...(db.players ?? [])]) {
+    if (p.externalIds == null) players.setItems(p.id, 'externalIds', []);
   }
 }
 
@@ -207,8 +213,8 @@ export function buildSharedM13(ctx) {
     record.history.push({ id: nextId('aud'), at: Date.now(), byKind, byId, byName, action, detail });
   };
 
-  // Lead tier — identical rule to m12 (documented role heuristic).
-  const isLead = (user) => /head|director|lead|manager|owner|chief/i.test(user?.role ?? '');
+  // Lead tier — the same rule as m12, from the one definition in roles.mjs.
+  const isLead = isLeadUser;
   const requireLead = (req, res) => {
     if (isLead(req.orgUser)) return true;
     res.status(403).json({ error: 'LEAD_REQUIRED', message: 'This action needs a recruitment lead (role containing Head/Director/Lead/Manager).' });

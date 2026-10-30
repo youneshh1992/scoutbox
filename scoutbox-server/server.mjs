@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
+import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
 import { registerM12 } from './m12/index.mjs';
 import { registerM13 } from './m13/index.mjs';
 import { registerM14 } from './m14/index.mjs';
@@ -51,6 +52,8 @@ import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
 import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './m181/rateLimit.mjs';
 import { buildCapabilityReport, productionConfigProblems } from './m181/capabilities.mjs';
+import { isLeadRole } from './roles.mjs';
+import { parseTrustProxy } from './httpTrust.mjs';
 import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './m182/eventRegistry.mjs';
 import { runMigrations, schemaReport, SCHEMA_VERSION } from './m182/migrations.mjs';
 import { registerNotificationPrefs } from './m182/notificationPrefs.mjs';
@@ -58,6 +61,7 @@ import { registerAudit } from './m182/audit.mjs';
 import { createFaultLayer } from './m182/faults.mjs';
 import { httpContractMiddleware } from './m182/httpContract.mjs';
 import { integrityReport, integritySummary } from './m182/integrity.mjs';
+import { orgPlayerView, guardianChildView, guardianSelfView, adminGuardianView } from './views/playerViews.mjs';
 import { validateContactReply } from './m23/contact.mjs';
 import { icsLocal as trialIcsLocal, icsText as trialIcsText } from './m23/trial.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
@@ -120,20 +124,33 @@ const db = buildSeed();
 const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
-const store = openStore(DATA_DIR);
+const store = openStore(DATA_DIR, { tableBacked: TABLE_BACKED });
 let snapshotLoaded = false;
 let snapshotIdCounter = 0; // applied when the id counter initialises below
 
 function loadSnapshot() {
   try {
     const raw = store.load();
-    if (!raw || !Array.isArray(raw.db?.players)) return;
+    // `null` means nothing was ever saved here (and no legacy db.json): a first
+    // installation, run from the seed. Anything else is a saved snapshot and is
+    // never mistaken for a new installation — since S4a the players and
+    // guardians are table-backed and are NOT in the blobs, so their absence
+    // says nothing; the identity repositories decide authority from the cutover
+    // record and the explicit initialisation state (repositories/identity.mjs).
+    // A snapshot that carries a players collection that is not an array is a
+    // malformed file and is refused loudly, never read as "no snapshot".
+    if (!raw) return;
+    if (raw.db?.players !== undefined && !Array.isArray(raw.db.players)) throw Object.assign(new Error(`SNAPSHOT_INVALID: the saved players collection is ${raw.db.players === null ? 'null' : typeof raw.db.players}, not an array; refusing to run from the seed over a saved snapshot`), { code: 'SNAPSHOT_INVALID' });
     for (const key of Object.keys(db)) delete db[key];
     Object.assign(db, raw.db);
     snapshotIdCounter = Number(raw.idCounter) || 0;
     snapshotLoaded = true;
-    console.log(`snapshot loaded (${store.engine}): ${db.players.length} players, ${db.ledger.length} ledger rows`);
+    console.log(`snapshot loaded (${store.engine}): ${Array.isArray(db.players) ? `${db.players.length} players in the blob` : 'players table-backed'}, ${Array.isArray(db.ledger) ? `${db.ledger.length} ledger rows in the blob` : 'ledger table-backed'}`);
   } catch (err) {
+    if (err?.code === 'SNAPSHOT_INVALID') throw err;
+    // A legacy db.json that could not be imported is a snapshot that exists
+    // and must not be overwritten by a seed save on first boot: stop here.
+    if (err?.code === 'LEGACY_IMPORT_FAILED') throw err;
     console.error('snapshot load failed — running from seed:', err.message);
   }
 }
@@ -172,10 +189,53 @@ loadSnapshot();
 // fine: they are the same idempotent shape this registry now records.
 const migrationResult = runMigrations(db, { log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); } });
 if (migrationResult.ran.length) console.log(`schema ${migrationResult.from} → ${migrationResult.to}: applied ${migrationResult.ran.join(', ')}`);
+// The relational data layer (repositories/): table migrations, then each migrated
+// domain's repository takes over its collection. From here on `db.users` is
+// the staff repository's read-only view; writes go through `users`. The id
+// generator is passed lazily because it is initialised further down.
+const dataLayer = attachDataLayer({
+  db, store, persist,
+  nextId: (prefix) => nextId(prefix),
+  sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
+  log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
+});
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps } = dataLayer;
+if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
+if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
+
+/**
+ * One UNIT OF WORK (store.unitOfWork): every repository row write, facet edit,
+ * blob edit and session change inside `work` commits or rolls back together,
+ * memory included; a side effect registered with store.afterCommit runs only
+ * after COMMIT. `work` must be synchronous — prepare asynchronous things
+ * before, publish after.
+ */
+// Development-only failure seams inside units of work (the m182 fault layer's
+// `internal:<step>` rules; the layer is created further down and cannot exist in
+// production, so until then — and in production — no seam ever fires).
+const seams = { shouldFail: () => false };
+function unit(work) {
+  return store.unitOfWork(() => {
+    const result = work();
+    // `internal:unit.sqlite_commit`: the REAL COMMIT of this unit fails (store.failCommitOfOpenTransaction).
+    if (seams.shouldFail('unit.sqlite_commit')) store.failCommitOfOpenTransaction();
+    return result;
+  }, { snapshot: () => ({ savedAt: Date.now(), idCounter: currentIdCounter(), db }) });
+}
+/** A named seam inside a unit: throws when a development fault rule names it, so the rollback path is proven with a real failure after a real write. */
+function seam(step) {
+  if (seams.shouldFail(step)) throw new Error(`simulated failure at ${step} (development fault layer)`);
+}
+// Sessions are table-backed (S2): rows carry hashed tokens and a sid; there is
+// nothing to backfill on the in-memory copy, which is a read-only view now.
+
 // M18.2 — integrity is reported at boot, never repaired. A violation is
 // logged as codes and ids (no names) and counted on /capabilities; the
 // process still starts, because a running server that says "two open Rooms
 // for one player" is more useful than a dead one that says nothing.
+// Runs AFTER the data layer attached (S3): `db.orgs` is a table-backed view
+// from here on, so a report taken earlier would see no organisations on any
+// boot after the cutover and call every Room an orphan.
 const integrity = integrityReport(db);
 for (const v of integrity.violations) console.error(`INTEGRITY ${v.code} key=${v.key} ids=${v.ids.join(',')}`);
 if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations.length} violation(s) in the loaded snapshot — nothing was repaired.`);
@@ -185,44 +245,72 @@ if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations
 if (!integrity.stores.ok) {
   console.error(`INTEGRITY STORE_MISSING ${integrity.stores.missing.join(', ')} — required collection(s) absent after migration; nothing was repaired.`);
 }
-for (const sess of db.sessions) sess.sid ??= crypto.randomBytes(6).toString('hex');
 
-// Normalise media items (older shapes) + load the seeded sample clips.
-for (const p of db.players) {
-  for (const m of p.media) {
-    m.views ??= 0;
-    m.tags ??= {};       // tag → count (from scouts, aggregated anonymously)
-    m.verifiedClip ??= null; // attendance id when footage is provably from a confirmed fixture
-    m.url ??= null;
+// Normalise media items (older shapes) + load the seeded sample clips. Since
+// S5 the media items and the season history are rows of their tables: a
+// default is written through the repository only where the stored item lacks
+// the field (as the in-place `??=` did: absent or null), one row per item; the
+// column-backed defaults (notificationPrefs, firstTeamSeeker, programme) go
+// through the repository the same way, only where the stored record lacks the
+// field — an existing value, null included, is left alone.
+for (const p of [...db.players]) {
+  for (const m of [...(p.media ?? [])]) {
+    const patch = {};
+    if (m.views == null) patch.views = 0;
+    if (m.tags == null) patch.tags = {};          // tag → count (from scouts, aggregated anonymously)
+    if (m.verifiedClip == null) patch.verifiedClip = null; // attendance id when footage is provably from a confirmed fixture
+    if (m.url == null) patch.url = null;
+    if (Object.keys(patch).length) players.patchItem(p.id, 'media', { id: m.id }, patch);
   }
-  p.notificationPrefs ??= null;
-  p.seasonHistory ??= [];
+  if (p.seasonHistory == null) players.setItems(p.id, 'seasonHistory', []);
+}
+for (const p of [...db.players]) {
+  const patch = {};
+  if (p.notificationPrefs === undefined) patch.notificationPrefs = null;
+  if (p.firstTeamSeeker === undefined) patch.firstTeamSeeker = false;
+  if (p.programme === undefined) patch.programme = null;
+  if (Object.keys(patch).length) players.update(p.id, patch);
 }
 db.savedSearches ??= [];
 db.signings ??= [];
-db.pairingCodes ??= [];
-db.sessions ??= [];        // bearer-token sessions (all roles)
+// db.pairingCodes: the data layer's hash-free read-only view since S6a (rows of pairing_codes; repositories/oneTimeCodes.mjs) — never assigned here.
+// db.notifications, db.notificationPrefs: the data layer's read-only views since S7a (rows of notifications / notification_prefs; repositories/notifications.mjs) — never assigned here; writes go through `notifications`.
+db.sessions ??= [];        // bearer-token sessions (all roles): already the data layer's read-only view since S2, so this never assigns; kept as the store's inventory line
+// S7c: db.outbox, db.pushLog and db.pushTokens are read-only views over the
+// outbox / push_log / push_tokens tables (repositories/outboxPush.mjs, migration
+// 0011) since attachDataLayer ran above; the three `??=` below are no-ops on
+// this build and stay as the containers every earlier build created.
 db.outbox ??= [];          // mailer dev transport (+ delivery audit when live)
 db.pushLog ??= [];         // push dev transport (+ delivery audit when live)
 db.pushTokens ??= [];      // device push tokens, registered per user
+// S7d: db.channels is a read-only view over the channels / messages /
+// message_attachments tables (repositories/channels.mjs, migration 0012) since
+// attachDataLayer ran above — never assigned here; writes go through `channels`
+// (openChannel, postMessage, the receipt routes, deletePlayerData).
+// S6b: db.blocks, db.reports, db.moderationLog, db.orgNotes, db.ledger,
+// db.opsEvents, db.sourceChanges and db.idvQueue are read-only views over the
+// blocks / reports / moderation_log / org_notes / ledger / ops_events /
+// source_changes / idv_queue tables (repositories/safetyAudit.mjs, migration
+// 0013) since attachDataLayer ran above — never assigned here; writes go through
+// `safetyAudit` (ledgerAppend, moderateOrRefuse, handleReport, the block, note,
+// IDV, resolve and lift routes, the m13 ops events and m181's source changes).
 db.invoices ??= [];        // billing records (success fees)
-db.emailChallenges ??= []; // club email-domain verification codes
+// db.emailChallenges: the data layer's hash-free read-only view since S6a (rows of email_challenges) — never assigned here.
 db.openTrials ??= [];      // grassroots open trial days + registrations
 db.vouches ??= [];         // coach references (email-code verified)
 db.matchdays ??= [];       // grassroots match-day logs (squad-wide attendance)
 db.friendlies ??= [];      // club-to-club friendly-match board (local)
 db.mediaBlobs ??= {};
-for (const p of db.players) {
-  p.firstTeamSeeker ??= false;
-  p.programme ??= null;
-}
 for (const o of db.orgs) {
   if (o.level === 'grassroots') o.squad ??= [];
 }
 
 // ---------------------------------------------------- production adapters
-const mailer = createMailer(db, (p) => nextId(p));
-const pushSender = createPushSender(db, (p) => nextId(p));
+// S7c: the records go through the repositories (staged into the next save, as
+// the blob entries were); the provider calls, the `secrets` withholding, the
+// dev full-text memory and `nextId`'s persist() are unchanged.
+const mailer = createMailer(db, (p) => nextId(p), { outbox });
+const pushSender = createPushSender(db, (p) => nextId(p), { pushLog, pushTokens });
 const idv = createIdvProvider();
 const billing = createBilling(db, (p) => nextId(p));
 const storage = createStorage(DATA_DIR);
@@ -232,6 +320,10 @@ const storage = createStorage(DATA_DIR);
 for (const [id, blob] of Object.entries(db.mediaBlobs)) {
   if (blob?.dataUrl) storage.saveDataUrl(id, blob.dataUrl);
 }
+// Media files whose removal was committed but not completed (a crash between
+// COMMIT and the unlink, a storage error): retried at boot and every minute.
+mediaDeletions.process(storage);
+setInterval(() => { try { mediaDeletions.process(storage); } catch (err) { console.error(`media deletions sweep failed: ${err?.message ?? err}`); } }, 60_000).unref();
 db.mediaBlobs = {};
 
 if (!snapshotLoaded) {
@@ -248,8 +340,7 @@ if (!snapshotLoaded) {
       const media = player?.media.find((m) => m.title === sample.title);
       if (!media) continue;
       storage.saveDataUrl(media.id, `data:video/webm;base64,${data.toString('base64')}`);
-      media.url = `/media/${media.id}`;
-      if (sample.verify && player.attendance[0]) media.verifiedClip = player.attendance[0].id;
+      players.patchItem(player.id, 'media', { id: media.id }, { url: `/media/${media.id}`, ...(sample.verify && player.attendance[0] ? { verifiedClip: player.attendance[0].id } : {}) });
     } catch {
       // assets optional — Film Room just starts empty without them
     }
@@ -257,6 +348,14 @@ if (!snapshotLoaded) {
 }
 
 const app = express();
+
+// Reverse-proxy trust is explicit and per deployment (see httpTrust.mjs).
+// Without it a server behind a platform proxy keys every per-IP limit on the
+// proxy's own address; with it set carelessly a direct client could pick its
+// own. The parsed setting is reported in /capabilities and an invalid value
+// refuses to boot in production.
+const TRUST_PROXY = parseTrustProxy(process.env.SCOUTBOX_TRUST_PROXY);
+app.set('trust proxy', TRUST_PROXY.setting);
 
 // M18.1 — CORS is an allowlist, not a wildcard.
 //
@@ -309,6 +408,14 @@ app.use(express.json({ limit: '20mb' }));
 // there is a no-op middleware and no /__faults route.
 const faultLayer = createFaultLayer();
 faultLayer.install(app);
+seams.shouldFail = (step) => faultLayer.shouldFail(step); // always false in production (the layer is disabled there)
+// `internal:save.sqlite_commit`: the REAL COMMIT of the next ordinary snapshot
+// save fails (store.failCommitOfOpenTransaction), after every data-layer hook
+// flushed — the way a notification's save fails after its row was written and
+// before it is durable. A development seam like the unit's; registered after
+// the data layer's hooks so it runs last inside the save transaction. In
+// production the rule can never be set, so the hook is a no-op.
+store.setSaveHook({ flush() { if (seams.shouldFail('save.sqlite_commit')) store.failCommitOfOpenTransaction(); } });
 // M13: correlation ids, structured request logs (redacted), request metrics,
 // and the exposure-capture hook. Installed before every route on purpose.
 app.use(requestInstrumentation());
@@ -496,7 +603,25 @@ function broadcast(event, rawPayload = {}) {
     if ((process.env.NODE_ENV ?? 'development') !== 'production') throw new Error(msg);
     console.error(`EVENT ${msg} — stripped`);
   }
+  // Inside a unit of work the state change is not committed yet: the event is
+  // published only once COMMIT returned, and never for a rolled-back operation.
+  // (The registry check above still runs now, so a bad call site fails the unit.)
+  if (store.inUnitOfWork?.()) { store.afterCommit(() => broadcast(event, rawPayload)); return; }
   if (event !== 'typing') persist(); // every broadcast (bar ephemeral typing) follows a state change
+  publishEvent(event, payload);
+}
+
+/**
+ * Write one already-minimised event to the replay log and the live streams —
+ * the transport half of broadcast(), with no registry check and no save of
+ * its own. notify() hands this to the notifications repository as an effect
+ * of the row it wrote (S7a, corrected): the repository runs it only once the
+ * snapshot save that carried the row committed, so a `notify` frame is never
+ * on a stream or in the replay log for a row the file does not hold. The
+ * payload must already have passed minimizePayload (broadcast does that at the
+ * call site, before the effect is registered).
+ */
+function publishEvent(event, payload) {
   const row = { id: ++eventSeq, event, payload, ts: Date.now() };
   if (event !== 'typing') {
     // typing is transient by design — never buffered, never replayed
@@ -514,7 +639,8 @@ app.post('/events/ticket', (req, res) => {
   if (!sseIdentityFor(session)) return res.status(401).json({ error: 'AUTH_REQUIRED', message: 'Log in first — live sync is scoped to your account.' });
   for (const [t, v] of sseTickets) if (v.expiresAt < Date.now()) sseTickets.delete(t);
   const ticket = newToken();
-  sseTickets.set(ticket, { token: session.token, expiresAt: Date.now() + SSE_TICKET_TTL_MS });
+  // The ticket names the session by its sid; no bearer token is held anywhere.
+  sseTickets.set(ticket, { sid: session.sid, expiresAt: Date.now() + SSE_TICKET_TTL_MS });
   res.json({ ticket, expiresInMs: SSE_TICKET_TTL_MS });
 });
 
@@ -525,8 +651,7 @@ app.get('/events', (req, res) => {
   }
   // Identity resolves at connect time from the live session, so logout or
   // suspension invalidates streams even inside a ticket's lifetime.
-  const found = db.sessions.find((s) => s.token === t.token);
-  const session = sessionLive(found) ? found : null;
+  const session = sessions.bySid(t.sid); // live sessions only; a revoked or expired one yields null
   const identity = sseIdentityFor(session);
   if (!identity) return res.status(401).json({ error: 'SESSION_INVALID', message: 'Log in again — this session is no longer valid.' });
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -572,9 +697,10 @@ function findPlayer(id) {
 
 function ledgerAppend(entry) {
   // Discovery Ledger is append-only; nothing in this file ever mutates or
-  // deletes an entry after this push.
-  const row = { id: nextId('led'), ts: Date.now(), ...entry };
-  db.ledger.push(row);
+  // deletes an entry after this append. S6b: a row of the ledger table, written
+  // through the repository in the caller's unit or staged into its next save;
+  // userId / scoutName are stored verbatim, exactly as the caller passes them.
+  const row = safetyAudit.ledger.append({ id: nextId('led'), ts: Date.now(), ...entry });
   broadcast('ledger', { type: row.type, playerId: row.playerId });
   return row;
 }
@@ -614,42 +740,30 @@ function canonicalContractFor(playerId, now = Date.now(), { exceptOrgId = null }
 // in ONE place (`sessionLive`) and applied wherever a session is resolved:
 // the bearer lookup, the event-stream connect and a signed media link. A
 // session with no valid creation time is treated as expired (fail closed).
-const SESSION_TTL_MS = (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000;
-function sessionLive(s, now = Date.now()) {
-  if (!s) return false;
-  const born = Number(s.createdAt);
-  return Number.isFinite(born) && born > 0 && now - born < SESSION_TTL_MS;
-}
-function pruneExpiredSessions(now = Date.now()) {
-  const before = db.sessions.length;
-  db.sessions = db.sessions.filter((x) => sessionLive(x, now));
-  return before - db.sessions.length;
-}
+// S2: sessions live in the `sessions` table (repositories/sessions.mjs). The
+// lifetime rule is unchanged and lives in the repository; the bearer token is
+// never stored — the table holds its hash and `sessionFor` hashes what the
+// client presents. `createSession` is the only place a token exists server
+// side, and only as the value it returns to the login handler.
+const SESSION_TTL_MS = sessions.ttlMs;
+function sessionLive(s, now = Date.now()) { return sessions.isLive(s, now); }
+function pruneExpiredSessions(now = Date.now()) { return sessions.prune(now); }
 function createSession(kind, refId, extra = {}) {
-  pruneExpiredSessions();
-  const token = newToken();
   // sid: a non-secret session identifier that media URLs are bound to — the
   // URL dies with the session (logout) and is re-checked against the
   // session's CURRENT entitlement on every fetch.
-  db.sessions.push({ token, sid: crypto.randomBytes(6).toString('hex'), kind, refId, ...extra, createdAt: Date.now() });
-  persist();
-  return token;
+  return sessions.create(kind, refId, extra).token;
 }
 
 function sessionFor(req) {
   const header = req.headers.authorization ?? '';
   if (!header.startsWith('Bearer ')) return null;
-  const found = db.sessions.find((s) => s.token === header.slice(7)) ?? null;
-  if (found && !sessionLive(found)) { db.sessions = db.sessions.filter((s) => s !== found); persist(); return null; }
-  return found;
+  return sessions.byToken(header.slice(7));
 }
 
 app.post('/auth/logout', (req, res) => {
   const session = sessionFor(req);
-  if (session) {
-    db.sessions = db.sessions.filter((s) => s !== session);
-    persist();
-  }
+  if (session) sessions.revokeSid(session.sid);
   res.json({ ok: true });
 });
 
@@ -741,8 +855,9 @@ function pushDeferred(audience, now = new Date()) {
   return false;
 }
 
-// M18.1 — how long an identical UNREAD notification stays coalescible.
-const NOTIFY_COALESCE_MS = 6 * 60 * 60 * 1000;
+// M18.1 — how long an identical UNREAD notification stays coalescible: six
+// hours, now the repository's `coalesceMs` (repositories/notifications.mjs,
+// S7a), which also owns the scan that decides what coalesces.
 
 // M18.2 — the preference gate. Assigned once the preference module has
 // registered (below); until then everything is allowed, which is the safe
@@ -752,7 +867,26 @@ let m182Ctx = null; // assigned when the M18.2 modules register, below
 let m24Ctx = null; // M23 P5.6B — assigned when the Agent module registers, below
 const notificationsSuppressed = { count: 0 };
 
-function notify(audience, type, text, refId = null) {
+/**
+ * Create (or coalesce) one notification. S7a: the row is a row of the
+ * `notifications` table, written through the repository in its staged mode —
+ * visible in memory at once, durable inside the next snapshot save together
+ * with the blob edits the caller made alongside it (the message, the request,
+ * the case), or inside the enclosing unit of work's commit. It is never
+ * durable ahead of the action it announces. `actionRequired: { deadline }`
+ * attaches an acknowledgment contract in the same write (M13 notifyAction).
+ * Returns the row (read-only) or null when the person's preferences mute it.
+ *
+ * Its external effects — the push and the `notify` event on the live streams
+ * and in the replay log — are registered with the repository as effects of
+ * that write (notifications.afterDurable) and run only once the save that
+ * carries the row COMMITTED: never before it, never after a save that failed
+ * (the row and its effects wait for the retry and go out exactly once with
+ * it), never for a unit of work that rolled back. A save is requested here
+ * (persist), never from inside an effect. A provider error after COMMIT is a
+ * delivery failure, counted by the store, never a rollback.
+ */
+function notify(audience, type, text, refId = null, { actionRequired = null } = {}) {
   // M18.2: a category the person has turned off is never CREATED — not
   // created and hidden, not created and un-pushed. The mandatory
   // security_account category cannot be turned off, so it never lands here.
@@ -766,17 +900,25 @@ function notify(audience, type, text, refId = null) {
   // unread row is refreshed and counted rather than duplicated — and crucially
   // no second push is sent. Once the recipient has READ it, a new occurrence is
   // genuinely new and gets its own row; coalescing a notification someone has
-  // already dealt with would hide the fact that it happened again.
-  const cutoff = Date.now() - NOTIFY_COALESCE_MS;
-  for (let i = db.notifications.length - 1; i >= 0; i--) {
-    const c = db.notifications[i];
-    if (c.ts < cutoff) break; // the array is append-ordered by time
-    if (c.read) continue;
-    if (c.audience.kind !== audience.kind || c.audience.id !== audience.id) continue;
-    if (c.type !== type || c.text !== text || (c.refId ?? null) !== (refId ?? null)) continue;
-    c.ts = Date.now();
-    c.repeatCount = (c.repeatCount ?? 1) + 1;
-    broadcast('notify', { audienceKind: audience.kind, audienceId: audience.id });
+  // already dealt with would hide the fact that it happened again. The scan
+  // (newest first, six hours, a stop at the first older row) is the
+  // repository's and is unchanged from M18.1; the refreshed row keeps its
+  // position in the feed.
+  const at = Date.now();
+  // The event the feed listeners get; minimised through the registry NOW (a
+  // bad call site fails here, inside the unit if there is one), delivered by
+  // the repository once the row's save committed. No second push: a coalesce
+  // refreshes news the recipient's phone already carried.
+  const announce = () => {
+    const { payload, dropped, unregistered } = minimizePayload('notify', { audienceKind: audience.kind, audienceId: audience.id });
+    if (unregistered || dropped.length) { eventPayloadDrops.count += 1; eventPayloadDrops.lastEvent = 'notify'; throw new Error(`notify: the 'notify' event ${unregistered ? 'is not in the event registry' : `carried unregistered payload keys: ${dropped.join(', ')}`}`); }
+    notifications.afterDurable(() => publishEvent('notify', payload));
+  };
+  const existing = notifications.findCoalescible({ audience, type, text, refId, at });
+  if (existing) {
+    const c = notifications.coalesce(existing.id, { at, actionRequired });
+    announce();
+    persist();
     return c;
   }
 
@@ -784,38 +926,48 @@ function notify(audience, type, text, refId = null) {
   // same record ("status moved", "task assigned", "decision recorded" on one
   // Room) into "3 changes in …" rather than three rows, without the server
   // deciding presentation. `category` is what the preference gate matched.
-  const n = {
-    id: nextId('ntf'), ts: Date.now(), audience, type, text, refId, read: false, repeatCount: 1,
-    groupKey: refId ? `${type}:${refId}` : null,
+  const n = notifications.create({
+    audience, type, text, refId, at, actionRequired,
     category: m182Ctx?.notificationCategoryOf?.(type, text) ?? null,
     deferredPush: pushDeferred(audience),
-  };
-  db.notifications.push(n);
+  });
   // Push delivery honours quiet hours / school-hours mute; the in-app feed
-  // above always keeps the record either way.
-  if (!n.deferredPush) void pushSender.send(audience, 'ScoutBox', text);
-  broadcast('notify', { audienceKind: audience.kind, audienceId: audience.id });
+  // above always keeps the record either way. The push is an external
+  // delivery and goes out only once the row it announces is committed — an
+  // effect of the write, run by the repository after the carrying save's
+  // COMMIT (standalone or unit of work alike). The promise is RETURNED so the
+  // store observes it: a rejected delivery is counted and logged instead of
+  // becoming an unhandled rejection, and is never mistaken for a rollback.
+  if (!n.deferredPush) notifications.afterDurable(() => pushSender.send(audience, 'ScoutBox', text));
+  announce();
+  persist();
   return n;
 }
 
 function notificationsFor(kind, id) {
   // M23 P8 §30 — each row is decorated at READ time with the current,
   // authorized resource its refId points to (or null). Nothing is stored.
+  // S7a: the feed is the repository's (newest insertion first).
   const resolve = journeyCtx?.notificationTargetFor;
-  return db.notifications.filter((n) => n.audience.kind === kind && n.audience.id === id).slice().reverse()
+  return notifications.forAudience(kind, id)
     .map((n) => (resolve ? { ...n, target: resolve(n, { kind, id }) } : n));
 }
 
 function markNotificationsRead(kind, id) {
-  for (const n of db.notifications) {
-    if (n.audience.kind === kind && n.audience.id === id) n.read = true;
-  }
+  notifications.markRead(kind, id);
 }
 
 // ---------------------------------------------------------------- channels
 // A channel is the ONLY conversation surface, and it exists solely because a
 // request was accepted. For minors the counterparty is the guardian — the
 // child is never in the thread. Every message is moderated and logged.
+// S7d: the thread is a row of the `channels` table (repositories/channels.mjs,
+// migration 0012), written through the repository in its staged mode — it lands
+// in the acceptance route's own persistNow() with the request's answer, exactly
+// where the blob entry landed before. The repository checks the request against
+// the live requests collection (the transitional reference, D-A), the
+// organisation and the guardian, and refuses a second thread for one request.
+// The literal below is unchanged; what comes back is the read-only view of it.
 function openChannel(request) {
   const channel = {
     id: nextId('chan'),
@@ -834,8 +986,7 @@ function openChannel(request) {
     // Read receipts: last time each side opened the thread.
     readBy: { org: null, counterparty: null },
   };
-  db.channels.push(channel);
-  return channel;
+  return channels.open(channel);
 }
 
 // Resolve a message attachment reference into a safe, shareable summary.
@@ -866,8 +1017,10 @@ function postMessage(channel, sender, text, attachment = null, clientMsgId = nul
     const dup = channel.messages.find((m) => m.clientMsgId === clientMsgId && m.sender.kind === sender.kind && m.sender.id === sender.id);
     if (dup) return dup;
   }
-  const msg = { id: nextId('msg'), ts: Date.now(), sender, text, attachment, ...(clientMsgId ? { clientMsgId } : {}) };
-  channel.messages.push(msg);
+  // S7d: the message is a row of the `messages` table (its attachment a row of
+  // `message_attachments`), appended at the end of the thread through the
+  // repository; it lands in the persistNow() below, before the sender hears 201.
+  const msg = channels.appendMessage(channel.id, { id: nextId('msg'), ts: Date.now(), sender, text, attachment, ...(clientMsgId ? { clientMsgId } : {}) });
   ledgerAppend({ type: 'message', playerId: channel.playerId, orgId: channel.orgId, orgName: channel.orgName, userId: sender.kind === 'org_user' ? sender.id : null, scoutName: sender.name });
   const recipient = sender.kind === 'org_user'
     ? channel.counterparty === 'guardian'
@@ -918,9 +1071,9 @@ function channelViewFor(channel, viewer) {
 }
 
 // Football activity feeds the streak/weekly-goal habit loop.
+// (S5: the activity log and the badges are rows of their tables, appended through the repository — inside the caller's unit of work when there is one.)
 function recordActivity(player) {
-  player.activityLog ??= [];
-  player.activityLog.push(Date.now());
+  players.addItem(player.id, 'activityLog', Date.now());
   refreshJourneyBadges(player);
 }
 
@@ -930,8 +1083,8 @@ function refreshJourneyBadges(player) {
   if (player.level === 'pro') return;
   const earned = earnedGrassrootsBadges(player, { streak: computeStreak(player.activityLog) });
   for (const badge of earned) {
-    if (!player.badges.includes(badge)) {
-      player.badges.push(badge);
+    if (!(player.badges ?? []).includes(badge)) {
+      players.addItem(player.id, 'badges', badge);
       notify({ kind: 'player', id: player.id }, 'badge', `🏅 Badge earned: ${badge}. It's on your profile — recognition that never depends on being scouted.`, player.id);
     }
   }
@@ -1003,11 +1156,11 @@ function insightsFor(playerId) {
 function moderateOrRefuse(res, text, context) {
   const check = moderateText(text);
   if (!check.ok) {
-    db.moderationLog.push({ id: nextId('mod'), ts: Date.now(), context, flags: check.flags, severity: check.severity, excerpt: String(text).slice(0, 140) });
+    safetyAudit.moderationLog.append({ id: nextId('mod'), ts: Date.now(), context, flags: check.flags, severity: check.severity, excerpt: String(text).slice(0, 140) });
     // Grooming-pattern hits don't just block — they escalate to a human
     // immediately as an urgent auto-report against the sender.
     if (check.severity === 'grooming') {
-      db.reports.push({
+      safetyAudit.reports.append({
         id: nextId('rep'), ts: Date.now(), by: 'system', byId: 'moderation',
         targetKind: context.orgId ? 'club' : 'player', targetOrgId: context.orgId ?? null,
         reason: `Automatic escalation: grooming-pattern language blocked (${check.flags.join(', ')}) in ${context.kind}.`,
@@ -1025,52 +1178,16 @@ function moderateOrRefuse(res, text, context) {
   return true;
 }
 
-// Public view of a player for a given org. Applies minor-visibility rules,
-// guardian-managed contact, and player/guardian-controlled medical sharing.
+// Public view of a player for a given org (readiness review §6.1): a positive
+// allowlist (views/playerViews.mjs), never a spread of the record. Applies the
+// minor-visibility rules, guardian-managed contact, player/guardian-controlled
+// medical sharing, the grassroots platform rules; serves attendance without
+// GPS and only this organisation's own trial reports; never the date of
+// birth, coordinates, programme, guardian id, password hash, activity log,
+// notification preferences, import claims or drill results.
+const VIEW_HELPERS = { visibleToOrg, isBlocked, isAdult, ageOn, computeTrustScore, publishedVouchesFor, haversineKm, trustBreakdown };
 function playerViewForOrg(player, org) {
-  if (!visibleToOrg(player, org)) return null;
-  if (isBlocked(player.id, org.id)) return null;
-  const { medical, guardianId, password, activityLog, ...rest } = player;
-  const minor = !isAdult(player);
-  const view = {
-    ...rest,
-    age: ageOn(player.dob),
-    // M18.1 — this number is PROFILE COMPLETENESS: identity flag, recorded
-    // attendance, filed trial reports, uploaded clips and a filled-in profile.
-    // It is NOT the ScoutBox Trust Score (M16.2 evidence confidence), and the
-    // two were both being rendered as "Trust" in the same product. `trustScore`
-    // stays on the wire as a deprecated alias so nothing breaks.
-    profileSignal: computeTrustScore(player),
-    trustScore: computeTrustScore(player),
-    guardianManaged: minor,
-    medical: medical.shared
-      ? medical
-      : { shared: false, records: [], conditionStatus: 'not_shared', note: 'Medical data is player-controlled and has not been shared.' },
-  };
-  // M18.1 — an exact date of birth is not shipped to clubs at all. Age is what
-  // every club surface displays and the only thing eligibility needs; sending
-  // the DOB as well was data a club received purely because the UI hid it.
-  delete view.dob;
-  if (minor) {
-    // Privacy for minors: no city, no direct channel (DOB already removed).
-    view.city = '';
-    view.contactPolicy = 'guardian_only';
-  }
-  if ((org.level ?? null) === 'grassroots') {
-    // Grassroots is semi-pro and below: the pro-market surface (Academy+
-    // cohort, market value, agents) does not exist on this platform.
-    delete view.academyPlus;
-    delete view.marketValueRange;
-    delete view.agentName;
-    delete view.contractUntil;
-    view.distanceKm = Math.round(haversineKm(org.location, player.location) * 10) / 10;
-    view.firstTeamSeeker = !!player.firstTeamSeeker; // Grassroots' own cohort
-  }
-  // Coach references travel with grassroots-journey players everywhere.
-  if (player.level !== 'pro') view.vouches = publishedVouchesFor(player.id);
-  delete view.programme;
-  delete view.location; // coordinates never leave the server
-  return view;
+  return orgPlayerView(player, org, VIEW_HELPERS);
 }
 
 // -------------------------------------------------------------------- meta
@@ -1154,11 +1271,22 @@ app.post('/auth/player/signup', (req, res) => {
       ? { lat: req.body.lat, lng: req.body.lng } : null,
     medical: { shared: false, records: [], conditionStatus: 'unknown' },
   };
-  db.players.push(p);
-  checkSavedSearches(p);
-  broadcast('players');
-  const { password: _pw, ...safe } = p;
-  res.status(201).json({ playerId: p.id, player: safe, token: createSession('player', p.id) });
+  // One unit of work: the player row, the saved-search notifications and the
+  // session; the broadcast and any push go out after COMMIT.
+  let created; let token;
+  try {
+    unit(() => {
+      created = players.insert(p);
+      checkSavedSearches(created);
+      token = createSession('player', created.id);
+      broadcast('players');
+    });
+  } catch (e) {
+    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    throw e;
+  }
+  const { password: _pw, ...safe } = JSON.parse(JSON.stringify(created));
+  res.status(201).json({ playerId: created.id, player: safe, token });
 });
 
 app.post('/auth/player/login', (req, res) => {
@@ -1170,7 +1298,7 @@ app.post('/auth/player/login', (req, res) => {
   if (p.password) {
     const check = verifyPassword(req.body?.password ?? '', p.password);
     if (!check) { noteLoginFailure(`player:${p.id}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This profile is password-protected.' }); }
-    if (check === 'upgrade') p.password = hashPassword(req.body.password); // migrate legacy plain-text
+    if (check === 'upgrade') players.update(p.id, { password: hashPassword(req.body.password) }); // migrate legacy plain-text
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
   }
@@ -1213,7 +1341,7 @@ app.post('/auth/guardian/signup', async (req, res) => {
   if (db.guardians.some((x) => x.email.toLowerCase() === email.toLowerCase())) {
     return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists — log in instead.' });
   }
-  const g = {
+  const record = {
     id: nextId('gd'),
     name,
     email,
@@ -1224,7 +1352,13 @@ app.post('/auth/guardian/signup', async (req, res) => {
     disclaimerAccepted: false,
     childIds: [],
   };
-  db.guardians.push(g);
+  // The row commits on its own (one transaction); the e-mail is sent afterwards, never inside a transaction.
+  let g;
+  try { g = guardians.insert(record); } catch (e) {
+    if (/EMAIL_IN_USE/.test(String(e?.message))) return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists — log in instead.' });
+    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'GUARDIAN_INVALID', message: String(e.message) });
+    throw e;
+  }
   await mailer.send({
     to: email,
     subject: 'Verify your ScoutBox guardian account',
@@ -1247,9 +1381,8 @@ app.post('/auth/guardian/verify-email', (req, res) => {
   if (!code || String(code).trim().toUpperCase() !== g.emailCode) {
     return res.status(400).json({ error: 'CODE_INVALID', message: 'That code doesn\'t match — check the email we sent you.' });
   }
-  g.emailVerified = true;
-  g.emailCode = null;
-  persist();
+  // The column (emailVerified) and the facet (the code goes) commit together.
+  unit(() => { guardians.update(g.id, { emailVerified: true }); g.emailCode = null; });
   res.json({ emailVerified: true });
 });
 
@@ -1272,7 +1405,7 @@ app.post('/auth/guardian/login', (req, res) => {
       if (aliased) noteLoginFailure(canonical);
       return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This account is password-protected.' });
     }
-    if (check === 'upgrade') g.password = hashPassword(req.body.password);
+    if (check === 'upgrade') guardians.update(g.id, { password: hashPassword(req.body.password) });
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
   }
@@ -1293,7 +1426,7 @@ app.use('/guardian', guardianAuth, guardianRouter);
 
 // Prototype ID verification: an attestation endpoint. Production integrates a
 // document + liveness IDV provider behind this same call.
-guardianRouter.post('/verify-id', async (req, res) => {
+guardianRouter.post('/verify-id', async (req, res, next) => {
   const { documentType, documentRef } = req.body || {};
   if (!documentType || !documentRef) {
     return res.status(400).json({ error: 'DOCUMENT_REQUIRED', message: 'ID verification needs a document type and reference.' });
@@ -1304,14 +1437,25 @@ guardianRouter.post('/verify-id', async (req, res) => {
   if (!result.approved) {
     return res.status(422).json({ error: 'IDV_REJECTED', message: 'Identity verification did not pass — check the document details.' });
   }
-  req.guardian.idVerified = true;
-  req.guardian.idvReference = result.reference;
-  // Every check lands in the admin IDV queue for audit — and can be revoked there.
-  db.idvQueue.push({
-    id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name,
-    documentType, documentRef: result.document.refLast4, provider: result.provider,
-    reference: result.reference, ts: Date.now(), status: 'approved',
-  });
+  // ONE unit of work, entered only after the provider answered (a transaction
+  // never spans the await): the column and the audit-queue entry (a blob)
+  // commit together before the response (review of 9656a4b).
+  try {
+    unit(() => {
+      guardians.update(req.guardian.id, { idVerified: true, idvReference: result.reference });
+      seam('guardian.verify_id.after_row');
+      // Every check lands in the admin IDV queue for audit — and can be revoked there.
+      // S6b: a row of idv_queue in the same unit as the guardian's column (Domain G:
+      // the repository refuses an entry naming a guardian that does not exist).
+      safetyAudit.idvQueue.append({
+        id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name,
+        documentType, documentRef: result.document.refLast4, provider: result.provider,
+        reference: result.reference, ts: Date.now(), status: 'approved',
+      });
+    });
+  } catch (e) {
+    return next(e); // an async handler: a failed unit reaches the error handler (500), never an unhandled rejection
+  }
   res.json({ idVerified: true, reference: result.reference });
 });
 
@@ -1319,14 +1463,12 @@ guardianRouter.post('/disclaimer', (req, res) => {
   if (req.body?.accepted !== true) {
     return res.status(400).json({ error: 'DISCLAIMER_NOT_ACCEPTED' });
   }
-  req.guardian.disclaimerAccepted = true;
+  guardians.update(req.guardian.id, { disclaimerAccepted: true });
   res.json({ disclaimerAccepted: true });
 });
 
-function guardianView(g) {
-  const { password, emailCode, ...safe } = g;
-  return safe;
-}
+// §6.3 — the guardian's own record: minus the password hash and the e-mail code.
+const guardianView = (g) => guardianSelfView(g);
 
 guardianRouter.get('/me', (req, res) => res.json(guardianView(req.guardian)));
 
@@ -1335,7 +1477,7 @@ guardianRouter.get('/children', (req, res) => {
     req.guardian.childIds
       .map((id) => findPlayer(id))
       .filter(Boolean)
-      .map(({ password, ...p }) => ({ ...p, age: ageOn(p.dob), trustScore: computeTrustScore(p), trust: trustBreakdown(p) }))
+      .map((p) => guardianChildView(p, VIEW_HELPERS))
   );
 });
 
@@ -1394,11 +1536,21 @@ guardianRouter.post('/children', (req, res) => {
       ? { lat: req.body.lat, lng: req.body.lng } : null,
     medical: { shared: false, records: [], conditionStatus: 'unknown' },
   };
-  db.players.push(p);
-  req.guardian.childIds.push(p.id);
-  checkSavedSearches(p);
-  broadcast('players');
-  res.status(201).json({ playerId: p.id, player: p });
+  // One unit of work: the child row and its primary link (the guardian's
+  // childIds follow from the link), the saved-search notifications; the
+  // broadcast and any push go out after COMMIT.
+  let child;
+  try {
+    unit(() => {
+      child = players.insert(p);
+      checkSavedSearches(child);
+      broadcast('players');
+    });
+  } catch (e) {
+    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    throw e;
+  }
+  res.status(201).json({ playerId: child.id, player: guardianChildView(child, VIEW_HELPERS) });
 });
 
 // Scout Inbox for minors lives with the GUARDIAN. Club-first identity:
@@ -1501,7 +1653,7 @@ guardianRouter.post('/channels/:id/messages', (req, res) => {
 guardianRouter.post('/channels/:id/read', (req, res) => {
   const channel = db.channels.find((c) => c.id === req.params.id && c.guardianId === req.guardian.id);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  channel.readBy.counterparty = Date.now();
+  channels.markRead(channel.id, 'counterparty', Date.now()); // S7d: the receipt column, in this route's save
   persistNow();
   broadcast('messages', { channelId: channel.id });
   res.json({ readBy: channel.readBy });
@@ -1545,7 +1697,7 @@ guardianRouter.post('/children/:id/availability', (req, res) => {
   const AV = ['available_now', 'end_of_season', 'not_seeking'];
   const { availability } = req.body || {};
   if (!AV.includes(availability)) return res.status(400).json({ error: 'BAD_AVAILABILITY', allowed: AV });
-  child.availability = availability;
+  players.update(child.id, { availability });
   broadcast('players', { playerId: child.id });
   res.json({ availability: child.availability });
 });
@@ -1563,8 +1715,17 @@ guardianRouter.post('/coguardian', (req, res) => {
     childIds: [...req.guardian.childIds],
     coGuardianOf: req.guardian.id,
   };
-  db.guardians.push(co);
-  req.guardian.coGuardians = [...(req.guardian.coGuardians ?? []), { id: co.id, name, email }];
+  // One unit of work: the co-guardian's row and its co links (one per child), and the primary's coGuardians facet.
+  try {
+    unit(() => {
+      guardians.insert(co);
+      req.guardian.coGuardians = [...(req.guardian.coGuardians ?? []), { id: co.id, name, email }];
+    });
+  } catch (e) {
+    if (/EMAIL_IN_USE/.test(String(e?.message))) return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists.' });
+    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'GUARDIAN_INVALID', message: String(e.message) });
+    throw e;
+  }
   res.status(201).json({ guardianId: co.id, note: 'The co-guardian must verify their ID and accept the disclaimer before they can act.' });
 });
 
@@ -1593,7 +1754,7 @@ guardianRouter.get('/log', (req, res) => {
 guardianRouter.post('/children/:id/medical/share', (req, res) => {
   const child = findPlayer(req.params.id);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  child.medical.shared = !!req.body?.shared;
+  players.update(child.id, { medical: { shared: !!req.body?.shared } });
   broadcast('players', { playerId: child.id });
   res.json({ shared: child.medical.shared });
 });
@@ -1608,7 +1769,7 @@ guardianRouter.post('/block', (req, res) => {
   const childId = playerId || (req.guardian.childIds.length === 1 ? req.guardian.childIds[0] : null);
   if (!orgId || !childId) return res.status(400).json({ error: 'ORG_AND_CHILD_REQUIRED', message: playerId ? undefined : 'Name which child the block is for (playerId).' });
   if (!db.orgs.some((o) => o.id === orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-  db.blocks.push({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
+  safetyAudit.blocks.append({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
   ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'guardian' });
   broadcast('players');
   res.status(201).json({ blocked: true });
@@ -1636,7 +1797,9 @@ function handleReport(req, res, actor) {
     outcome: null,
     resolvedAt: null,
   };
-  db.reports.push(report);
+  // S6b: a row of the reports table, stored as built here — a truthy
+  // targetPlayerId of any type is kept as received (Domain P: no player check).
+  safetyAudit.reports.append(report);
   // Reports now land in the REAL review queue: the trust-and-safety admin
   // console resolves them (POST /admin/reports/:id/resolve) and the reporter
   // is notified with the outcome. No more auto-resolve timer.
@@ -1647,7 +1810,7 @@ function handleReport(req, res, actor) {
       ? db.guardians.find((g) => g.id === actor.byId)?.childIds ?? []
       : actor.by === 'player' ? [actor.byId] : [];
     for (const pid of playerIds) {
-      db.blocks.push({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
+      safetyAudit.blocks.append({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
       for (const r of db.requests) {
         if (r.playerId === pid && r.orgId === targetOrgId && r.status === 'pending') r.status = 'suspended';
       }
@@ -1694,7 +1857,9 @@ app.post('/auth/org/register-grassroots', (req, res) => {
     return res.status(400).json({ error: 'LOCATION_REQUIRED', message: 'The 50km scouting radius is measured from your ground — a location is required.' });
   }
   if (!reqText(scoutName, 120)) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' }); // PRE-M24 (PM-10)
-  const org = {
+  // S3: the organisation is a table row from the first byte; the repository
+  // returns the record the rest of this handler (and db.orgs) reads.
+  const org = orgs.insert({
     id: nextId('org'),
     name: name.trim(),
     type: 'club',
@@ -1708,10 +1873,8 @@ app.post('/auth/org/register-grassroots', (req, res) => {
     verifiedDomain: null,
     safeguardingContractSigned: false,
     ...(password ? { password: hashPassword(String(password)) } : {}),
-  };
-  db.orgs.push(org);
-  const user = { id: nextId('usr'), orgId: org.id, name: scoutName.trim(), role: (role || 'Manager').trim(), createdAt: Date.now() };
-  db.users.push(user);
+  });
+  const user = users.insert({ orgId: org.id, name: scoutName.trim(), role: (role || 'Manager').trim() });
   persist();
   broadcast('orgs');
   res.status(201).json({
@@ -1751,11 +1914,11 @@ app.post('/auth/org/login', (req, res) => {
   if (org.password) {
     const check = verifyPassword(req.body?.password ?? '', org.password);
     if (!check) { noteLoginFailure(`org:${orgId}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' }); }
-    if (check === 'upgrade') org.password = hashPassword(req.body.password);
+    if (check === 'upgrade') orgs.update(org.id, { password: hashPassword(req.body.password) });
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
   }
-  let user = db.users.find((u) => u.orgId === orgId && u.name.toLowerCase() === scoutName.trim().toLowerCase());
+  let user = users.byOrgAndName(orgId, scoutName);
   if (user?.removedAt) {
     // Departed staff don't come back by typing their old name.
     return res.status(403).json({ error: 'USER_REMOVED', message: 'This staff member\'s access was removed by the organisation.' });
@@ -1772,7 +1935,10 @@ app.post('/auth/org/login', (req, res) => {
     else if (recoveryCode) {
       const hash = crypto.createHash('sha256').update(String(recoveryCode)).digest('hex');
       const idx = user.mfa.recoveryHashes.indexOf(hash);
-      if (idx >= 0) { user.mfa.recoveryHashes.splice(idx, 1); second = true; } // each code works exactly once
+      if (idx >= 0) { // each code works exactly once
+        users.update(user.id, { mfa: { ...user.mfa, recoveryHashes: user.mfa.recoveryHashes.filter((_, i) => i !== idx) } });
+        second = true;
+      }
     }
     if (!second) {
       if (mfaCode || recoveryCode) m13Ctx?.mfaGuards?.mfaFail(user.id);
@@ -1783,19 +1949,60 @@ app.post('/auth/org/login', (req, res) => {
     }
     m13Ctx?.mfaGuards?.clear(user.id);
   }
+  // Roles are assigned by the organisation, never by the person logging in.
+  //
+  // An organisation that holds real credentials (its password was set at
+  // registration or provisioned by Trust & Safety) gets staff accounts only
+  // through server-controlled flows: the registering administrator, a lead's
+  // invitation, or — exactly once — the first login with the organisation
+  // password, which bootstraps the administrator account for organisations
+  // provisioned without one. The role sent with a login is ignored on such an
+  // organisation; the stored role answers. Anyone else typing a new name with
+  // the shared password used to become staff with whatever role they chose,
+  // and anyone typing an existing name used to overwrite that person's role.
+  //
+  // Unprovisioned (seeded demo) organisations keep the development shortcut:
+  // a login names its own role. That path is refused outside development
+  // above (`devLoginRefused`), so it is never reachable in production.
+  const credentialed = !!org.password;
+  let roleNote;
   if (!user) {
-    user = { id: nextId('usr'), orgId, name: scoutName.trim(), role: (role || 'Scout').trim(), createdAt: Date.now() };
-    db.users.push(user);
-  } else if (role) {
-    user.role = role.trim();
+    if (credentialed) {
+      const staff = users.listByOrg(orgId).filter((u) => !u.removedAt);
+      if (staff.length) {
+        return res.status(403).json({
+          error: 'STAFF_NOT_PROVISIONED',
+          message: 'No staff account with this name exists in the organisation. Ask a lead for an invitation — the organisation password does not create accounts.',
+        });
+      }
+      // First account on a credentialed organisation: the administrator. A
+      // lead-tier role is required so the organisation can invite its staff.
+      const requested = (role || '').trim();
+      user = users.insert({
+        orgId, name: scoutName.trim(),
+        role: isLeadRole(requested) ? requested : 'Manager',
+        provenance: 'org_password_bootstrap',
+      });
+      safetyAudit.opsEvents.append({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: user.id, by: user.name } });
+      persist();
+    } else {
+      user = users.insert({ orgId, name: scoutName.trim(), role: (role || 'Scout').trim() });
+    }
+  } else if (role && role.trim() && role.trim() !== user.role) {
+    if (credentialed) {
+      roleNote = 'Roles are assigned by your organisation; the role entered at sign-in was not applied.';
+    } else {
+      users.update(user.id, { role: role.trim() }); // development shortcut only — see above
+    }
   }
   res.json({
     userId: user.id, role: user.role,
     org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
     token: createSession('org', org.id, { userId: user.id }),
+    ...(roleNote ? { roleNote } : {}),
     // Organisation policy nudge, never a lockout: existing users keep access
     // and are steered through MFA setup.
-    mfaSetupRequired: !!(org.mfaRequiredForLeads && user && /head|director|lead|manager|owner|chief/i.test(user.role ?? '') && !user.mfa?.enabledAt) || undefined,
+    mfaSetupRequired: !!(org.mfaRequiredForLeads && user && isLeadRole(user.role) && !user.mfa?.enabledAt) || undefined,
   });
 });
 
@@ -1807,8 +2014,8 @@ function orgAuth(req, res, next) {
   if (session?.kind !== 'org') return res.status(401).json({ error: 'ORG_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
   const org = db.orgs.find((o) => o.id === session.refId);
   if (!org) return res.status(401).json({ error: 'ORG_AUTH_REQUIRED' });
-  const user = db.users.find((u) => u.id === session.userId && u.orgId === org.id);
-  if (!user) return res.status(401).json({ error: 'USER_UNKNOWN' });
+  const user = users.byId(session.userId);
+  if (!user || user.orgId !== org.id) return res.status(401).json({ error: 'USER_UNKNOWN' });
   if (user.removedAt) return res.status(401).json({ error: 'USER_REMOVED', message: 'Your access to this organisation has been removed.' });
   if (org.suspended) {
     return res.status(403).json({ error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review.' });
@@ -1915,7 +2122,7 @@ orgRouter.post('/players/:id/notes', (req, res) => {
   const { text } = req.body || {};
   if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   const note = { id: nextId('note'), orgId: req.org.id, playerId: p.id, userId: req.orgUser.id, scoutName: req.orgUser.name, text: text.trim(), ts: Date.now() };
-  db.orgNotes.push(note);
+  safetyAudit.orgNotes.append(note);
   broadcast('players', { playerId: p.id });
   res.status(201).json(note);
 });
@@ -1944,7 +2151,8 @@ for (const action of ['save', 'shortlist']) {
 
 orgRouter.get('/shortlist', (req, res) => {
   const ids = new Set(db.ledger.filter((l) => l.orgId === req.org.id && l.type === 'shortlist').map((l) => l.playerId));
-  res.json([...ids].map((id) => playerViewForOrg(findPlayer(id), req.org)).filter(Boolean));
+  // A shortlisted player who has since deleted their account is simply absent (the ledger row stays, id only).
+  res.json([...ids].map((id) => findPlayer(id)).filter(Boolean).map((p) => playerViewForOrg(p, req.org)).filter(Boolean));
 });
 
 // ------------------------------------------------------- contact & trials
@@ -2055,7 +2263,7 @@ function issueRecruitmentRequest({
     guardianId: minor ? (guardianId ?? player.guardianId) : null,
     contactChannel: null, // stays null until the player/guardian accepts
   };
-  db.requests.push(request);
+  recruitment.addRequest(request); // S8a-core: a row of recruitment_requests, written by the save below (the former db.requests.push)
   if (persistAfter) persistNow();
   ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: player.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name });
   if (minor) {
@@ -2136,7 +2344,7 @@ function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }
     reminders: {},
     rev: 1, revAt: at, revBy: null,
   };
-  db.trials.push(trial);
+  recruitment.addTrial(trial); // S8a-core: a row of trials with its children, written by the caller's save (the former db.trials.push)
   return trial;
 }
 
@@ -2205,7 +2413,7 @@ orgRouter.post('/channels/:id/messages', (req, res) => {
 orgRouter.post('/channels/:id/read', (req, res) => {
   const channel = db.channels.find((c) => c.id === req.params.id && c.orgId === req.org.id);
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  channel.readBy.org = Date.now();
+  channels.markRead(channel.id, 'org', Date.now()); // S7d: the receipt column, in this route's save
   persistNow();
   broadcast('messages', { channelId: channel.id });
   res.json({ readBy: channel.readBy });
@@ -2255,9 +2463,10 @@ orgRouter.post('/players/:pid/media/:mid/view', (req, res) => {
   if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'NOT_FOUND' });
   const m = p.media.find((x) => x.id === req.params.mid);
   if (!m) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
-  m.views = (m.views ?? 0) + 1;
+  const views = (m.views ?? 0) + 1;
+  players.patchItem(p.id, 'media', { id: m.id }, { views }); // S5: one row UPDATE, committed before the response
   broadcast('players', { playerId: p.id });
-  res.json({ views: m.views });
+  res.json({ views });
 });
 
 // "What scouts noticed": structured tags, aggregated anonymously for the player.
@@ -2270,10 +2479,14 @@ orgRouter.post('/players/:pid/media/:mid/tags', (req, res) => {
   if (!Array.isArray(tags) || tags.length === 0) return res.status(400).json({ error: 'TAGS_REQUIRED', allowed: SCOUT_TAGS });
   const invalid = tags.filter((t) => !SCOUT_TAGS.includes(t));
   if (invalid.length) return res.status(400).json({ error: 'UNKNOWN_TAGS', invalid, allowed: SCOUT_TAGS });
-  m.tags ??= {};
-  for (const t of tags) m.tags[t] = (m.tags[t] ?? 0) + 1;
-  ledgerAppend({ type: 'clip_tagged', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-  broadcast('players', { playerId: p.id });
+  const next = { ...(m.tags ?? {}) };
+  for (const t of tags) next[t] = (next[t] ?? 0) + 1;
+  // ONE unit of work (S5): the clip's tag rows and the ledger row commit together.
+  unit(() => {
+    players.patchItem(p.id, 'media', { id: m.id }, { tags: next });
+    ledgerAppend({ type: 'clip_tagged', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+    broadcast('players', { playerId: p.id });
+  });
   res.json({ tags: m.tags });
 });
 
@@ -2499,10 +2712,11 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
   trial.status = 'reported';
   trial.report = report;
 
-  // Filed reports sync to the player profile and raise Trust Score
-  // (institutional corroboration).
+  // Filed reports raise Trust Score (institutional corroboration). Since S5 the
+  // player's `trialReports` is DERIVED from the trials: the report written on
+  // the trial above is what the profile serves, in filing order — no copy is
+  // pushed onto the player (docs/architecture/s5-player-subrecords.md §2.5).
   const p = findPlayer(trial.playerId);
-  p.trialReports.push(report);
   ledgerAppend({ type: 'trial_report', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   // P4B (D-16): the mandatory report closes the club's obligation even while
   // the family has blocked the club, but the block stands — no notification
@@ -2531,7 +2745,7 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   // An agency has no squad to sign a player into, and a scout could not
   // complete the canonical workflow either; the same authority applies here.
   if (req.org.type === 'agency' || req.org.level === 'agent') return res.status(403).json({ error: 'SIGNING_NOT_PERMITTED', message: 'Only a club records a signing.' });
-  if (!/head|director|lead|manager|owner|chief/i.test(req.orgUser?.role ?? '')) return res.status(403).json({ error: 'LEAD_REQUIRED', message: 'Only recruitment leads and directors can record a signing.' });
+  if (!isLeadRole(req.orgUser?.role)) return res.status(403).json({ error: 'LEAD_REQUIRED', message: 'Only recruitment leads and directors can record a signing.' });
   const p = findPlayer(req.params.id);
   if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
@@ -2548,8 +2762,18 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   if (standing) return res.status(409).json({ ok: false, error: 'SIGNING_ALREADY_RECORDED', message: 'A signing of this player by your club is already on record.', signingId: standing.id });
   if (rateLimit.limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
   if (!m29Ctx?.recordCompletedSigning) return res.status(500).json({ error: 'SIGNING_STORE_MISSING' });
-  const { signing, effects } = m29Ctx.recordCompletedSigning({ player: p, org: req.org, actor: req.orgUser, at: Date.now(), legacy: { note: typeof req.body?.note === 'string' ? req.body.note.slice(0, 400) : null } });
-  persistNow();
+  // S4a: the ledger row, the signings row and the player's level / contract columns commit as one unit of work.
+  // S8d: typed input only — a note is text of at most 400 characters, or absent; never sliced.
+  const legacyNote = req.body?.note;
+  if (legacyNote !== undefined && legacyNote !== null && legacyNote !== '' && (typeof legacyNote !== 'string' || legacyNote.length > 400)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'note', message: 'The note is text of at most 400 characters.' });
+  let written;
+  try {
+    written = unit(() => m29Ctx.recordCompletedSigning({ player: p, org: req.org, actor: req.orgUser, at: Date.now(), legacy: { note: typeof legacyNote === 'string' && legacyNote ? legacyNote : null } }));
+  } catch (e) {
+    console.error(`SIGNING legacy_recording_rolled_back ${p.id}: ${e?.message ?? e}`);
+    return res.status(500).json({ ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'The signing could not be recorded; nothing was recorded.' });
+  }
+  const { signing, effects } = written;
   try { effects?.(); } catch (e) { console.error(`SIGNING legacy side_effect_failed: ${e?.message ?? e}`); }
   res.status(201).json({ ok: true, signing });
 });
@@ -2674,7 +2898,7 @@ orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
         routedTo: minor ? 'guardian' : 'player', guardianId: minor ? p.guardianId : null,
         contactChannel: null,
       };
-      db.requests.push(request);
+      recruitment.addRequest(request); // S8a-core (the former db.requests.push; several pending invitations per player stay allowed — D2)
       ledgerAppend({ type: `trial_request${minor ? '_to_guardian' : ''}`, playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
       if (minor) {
         notify({ kind: 'guardian', id: p.guardianId }, 'open_trial', `Good news: ${req.org.name} would like to invite ${p.name} for a trial after the open day.`, request.id);
@@ -2743,32 +2967,35 @@ orgRouter.post('/squad/:entryId/release', (req, res) => {
   if (!entry) return res.status(404).json({ error: 'SQUAD_ENTRY_NOT_FOUND' });
   const { referenceText } = req.body || {};
   if (referenceText && !moderateOrRefuse(res, referenceText, { kind: 'release_reference', orgId: req.org.id })) return;
-  req.org.squad = req.org.squad.filter((e) => e !== entry);
-  const p = entry.playerId ? findPlayer(entry.playerId) : null;
-  if (p) {
-    // M23 P8 (§27): releasing a player from THIS club's squad does not speak
-    // for a contract another club completed in ScoutBox. The squad row goes;
-    // the canonical contract truth stays with its writer.
-    const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
-    if (!other) {
-      p.availability = 'available_now';
-      p.contractStatus = 'free_agent';
+  // ONE unit of work (review of 9656a4b): the organisation's squad (a facet),
+  // the player's availability and contract columns, the published reference,
+  // the ledger row and the notifications commit together; the pushes and the
+  // broadcast go out after COMMIT.
+  unit(() => {
+    req.org.squad = req.org.squad.filter((e) => e !== entry);
+    const p = entry.playerId ? findPlayer(entry.playerId) : null;
+    if (p) {
+      // M23 P8 (§27): releasing a player from THIS club's squad does not speak
+      // for a contract another club completed in ScoutBox. The squad row goes;
+      // the canonical contract truth stays with its writer.
+      const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
+      if (!other) players.update(p.id, { availability: 'available_now', contractStatus: 'free_agent' });
+      seam('squad.release.after_row');
+      if (referenceText) {
+        db.vouches.push({
+          id: nextId('vch'), playerId: p.id, playerName: p.name,
+          coachName: req.orgUser.name, coachEmail: null, role: `${req.orgUser.role || 'Manager'}, ${req.org.name}`,
+          status: 'published', code: null, text: String(referenceText).trim().slice(0, 400),
+          seasons: null, ts: Date.now(), publishedAt: Date.now(),
+        });
+      }
+      ledgerAppend({ type: 'released_by_club', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+      notify({ kind: 'player', id: p.id }, 'released',
+        `${req.org.name} has released you${referenceText ? ' — with a reference now on your profile' : ''}. You're marked available to every local club; the First Team Seeker flag is yours to switch on.`, p.id);
+      if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'released', `${req.org.name} released ${p.name}${referenceText ? ' with a reference' : ''}. Their profile is marked available again.`, p.id);
+      broadcast('players', { playerId: p.id });
     }
-    if (referenceText) {
-      db.vouches.push({
-        id: nextId('vch'), playerId: p.id, playerName: p.name,
-        coachName: req.orgUser.name, coachEmail: null, role: `${req.orgUser.role || 'Manager'}, ${req.org.name}`,
-        status: 'published', code: null, text: String(referenceText).trim().slice(0, 400),
-        seasons: null, ts: Date.now(), publishedAt: Date.now(),
-      });
-    }
-    ledgerAppend({ type: 'released_by_club', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-    notify({ kind: 'player', id: p.id }, 'released',
-      `${req.org.name} has released you${referenceText ? ' — with a reference now on your profile' : ''}. You're marked available to every local club; the First Team Seeker flag is yours to switch on.`, p.id);
-    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'released', `${req.org.name} released ${p.name}${referenceText ? ' with a reference' : ''}. Their profile is marked available again.`, p.id);
-    broadcast('players', { playerId: p.id });
-  }
-  persist();
+  });
   res.json(squadView(req.org));
 });
 
@@ -2780,26 +3007,30 @@ orgRouter.post('/matchday', (req, res) => {
   const ids = Array.isArray(playerIds) ? playerIds : [];
   const onSquad = new Set((req.org.squad ?? []).map((e) => e.playerId).filter(Boolean));
   const credited = [];
-  for (const pid of ids) {
-    if (!onSquad.has(pid)) continue; // only your own rostered players
-    const p = findPlayer(pid);
-    if (!p || !visibleToOrg(p, req.org)) continue;
-    p.attendance.push({
-      id: nextId('att'), fixture: String(fixture), venue: String(venue || req.org.location?.city || ''),
-      date: String(date), gps: req.org.location ? { lat: req.org.location.lat, lng: req.org.location.lng } : null,
-      verified: true, corroboratedBy: req.org.name, // coach counter-signature
+  // ONE unit of work (S5): every credited player's attendance row and activity,
+  // the match-day record (a blob) and the ledger row commit together.
+  unit(() => {
+    for (const pid of ids) {
+      if (!onSquad.has(pid)) continue; // only your own rostered players
+      const p = findPlayer(pid);
+      if (!p || !visibleToOrg(p, req.org)) continue;
+      players.addItem(p.id, 'attendance', {
+        id: nextId('att'), fixture: String(fixture), venue: String(venue || req.org.location?.city || ''),
+        date: String(date), gps: req.org.location ? { lat: req.org.location.lat, lng: req.org.location.lng } : null,
+        verified: true, corroboratedBy: req.org.name, // coach counter-signature
+      });
+      recordActivity(p);
+      notify({ kind: 'player', id: p.id }, 'matchday', `📍 ${req.org.name} logged your appearance in "${fixture}" — verified, coach-signed attendance on your profile.`, p.id);
+      credited.push(p.id);
+      broadcast('players', { playerId: p.id });
+    }
+    db.matchdays.push({
+      id: nextId('md'), orgId: req.org.id, fixture: String(fixture), venue: String(venue || ''),
+      date: String(date), result: result ? String(result).slice(0, 20) : null,
+      playerIds: credited, loggedByUserId: req.orgUser.id, ts: Date.now(),
     });
-    recordActivity(p);
-    notify({ kind: 'player', id: p.id }, 'matchday', `📍 ${req.org.name} logged your appearance in "${fixture}" — verified, coach-signed attendance on your profile.`, p.id);
-    credited.push(p.id);
-    broadcast('players', { playerId: p.id });
-  }
-  db.matchdays.push({
-    id: nextId('md'), orgId: req.org.id, fixture: String(fixture), venue: String(venue || ''),
-    date: String(date), result: result ? String(result).slice(0, 20) : null,
-    playerIds: credited, loggedByUserId: req.orgUser.id, ts: Date.now(),
+    ledgerAppend({ type: 'matchday_logged', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   });
-  ledgerAppend({ type: 'matchday_logged', playerId: null, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
   persist();
   res.status(201).json({ credited: credited.length, matchdays: db.matchdays.filter((m) => m.orgId === req.org.id).length });
 });
@@ -2955,31 +3186,58 @@ orgRouter.post('/verification/email', async (req, res) => {
       message: 'Free email providers don\'t prove domain control. No club domain? Use federation verification instead — your federation registration is checked by Trust & Safety.',
     });
   }
-  const code = randomCode(6);
-  db.emailChallenges = db.emailChallenges.filter((c) => c.orgId !== req.org.id);
-  db.emailChallenges.push({ orgId: req.org.id, email, code, expiresAt: Date.now() + 30 * 60 * 1000 });
+  // S6a: every request sends a mail, so requests are bounded per organisation.
+  if (rateLimit.limited('email_challenge_request', req.org.id)) return res.status(429).json(rateLimitedBody('email_challenge_request'));
+  // S6a: the challenge is a row of email_challenges (stored as a hash; 30-minute
+  // lifetime; one live challenge per organisation, the previous one replaced),
+  // durable BEFORE the mail is sent. The plain code exists in the issue result
+  // and in the mail only: `secrets` makes the persisted outbox record withhold
+  // it (review of e020aba, finding 1) while the recipient's mail carries it. A
+  // mail that fails to send leaves the row (it expires; a re-request replaces
+  // it) — the same outcome as before S6a.
+  const { code } = codes.issueEmailChallenge(req.org.id, email);
   await mailer.send({
     to: email,
     subject: `Verify ${req.org.name} on ScoutBox`,
     text: `Your ScoutBox club verification code is ${code}.\n\nEntering it confirms ${req.org.name} controls this company mailbox — one of the safeguarding requirements before a club can see under-18 players.`,
+    secrets: [code],
   });
-  persist();
+  persist(); // the outbox record (its code withheld) is saved with the next debounced save, as before S6a
   res.status(201).json({ sent: true, note: 'Enter the code from the mailbox to confirm domain control.' });
 });
 
 orgRouter.post('/verification/email/confirm', (req, res) => {
   const { code } = req.body || {};
-  const challenge = db.emailChallenges.find((c) => c.orgId === req.org.id);
-  if (!challenge || challenge.expiresAt < Date.now()) {
+  // S6a: a wrong code is charged against the organisation's confirm budget (a
+  // correct one costs nothing) and counted on the challenge itself, which is
+  // cancelled after EMAIL_CHALLENGE_MAX_ATTEMPTS wrong codes; the budget is
+  // tested before the code is judged, so a correct guess after it is gone is
+  // refused rather than rewarded (the login-failure wiring, M23 P5.6F).
+  if (rateLimit.peek('email_challenge_confirm', req.org.id).remaining === 0) return res.status(429).json(rateLimitedBody('email_challenge_confirm')); // exactly `max` wrong codes are judged; the next attempt is refused
+  const check = codes.checkEmailChallenge(req.org.id, code);
+  if (check.status === 'none') {
+    rateLimit.limited('email_challenge_confirm', req.org.id);
     return res.status(404).json({ error: 'CHALLENGE_NOT_FOUND', message: 'Request a fresh code — none is active for this club.' });
   }
-  if (String(code ?? '').trim().toUpperCase() !== challenge.code) {
-    return res.status(400).json({ error: 'CODE_INVALID', message: 'That code doesn\'t match — check the email.' });
+  if (check.status === 'invalid') {
+    rateLimit.limited('email_challenge_confirm', req.org.id);
+    const { attemptsRemaining, invalidated } = codes.noteFailedEmailAttempt(req.org.id);
+    return res.status(400).json({
+      error: 'CODE_INVALID',
+      message: invalidated ? 'That code doesn\'t match, and this challenge is now cancelled after too many wrong codes — request a fresh one.' : 'That code doesn\'t match — check the email.',
+      attemptsRemaining,
+    });
   }
-  db.emailChallenges = db.emailChallenges.filter((c) => c !== challenge);
-  req.org.emailDomain = challenge.email.split('@')[1];
-  req.org.emailDomainVerified = true;
-  persist();
+  // ONE unit of work: the challenge is consumed (its row deleted) and the
+  // organisation's domain columns written together — a failure anywhere, the
+  // real COMMIT included, keeps the challenge live and the organisation
+  // unverified, and the retry lands both.
+  unit(() => {
+    const consumed = codes.consumeEmailChallenge(req.org.id, code);
+    if (!consumed) throw new Error('email challenge: the challenge changed between the check and the confirmation');
+    seam('email_challenge.confirm.after_consume');
+    orgs.update(req.org.id, { emailDomain: consumed.email.split('@')[1], emailDomainVerified: true });
+  });
   broadcast('orgs');
   res.json({ emailDomainVerified: true, emailDomain: req.org.emailDomain });
 });
@@ -3068,15 +3326,17 @@ playerRouter.post('/aging-up/complete', (req, res) => {
   if (!isAdult(req.player)) return res.status(403).json({ error: 'STILL_A_MINOR', message: 'The transition unlocks on your 18th birthday (age of majority in your country).' });
   if (!req.player.guardianId) return res.status(400).json({ error: 'ALREADY_OWNED', message: 'You already own this account.' });
   const guardian = db.guardians.find((g) => g.id === req.player.guardianId);
-  if (guardian) {
-    guardian.childIds = guardian.childIds.filter((id) => id !== req.player.id);
-    notify({ kind: 'guardian', id: guardian.id }, 'aging_up', `${req.player.name} is 18 — their account is now their own. Their history stays intact, and thank you for keeping it safe.`, req.player.id);
-  }
-  req.player.guardianId = null;
-  req.player.timeline.push({ year: String(new Date().getFullYear()), event: 'Turned 18 — took ownership of this ScoutBox account' });
-  ledgerAppend({ type: 'account_transitioned', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
-  notify({ kind: 'player', id: req.player.id }, 'aging_up', 'Your account is now fully yours. Availability, medical sharing and club contact are your calls from here.', req.player.id);
-  broadcast('players', { playerId: req.player.id });
+  // One unit of work: the primary link goes on both sides (players.ageUp), the
+  // timeline entry, the ledger row and the two notifications commit together;
+  // the pushes and the broadcast go out after COMMIT.
+  unit(() => {
+    players.ageUp(req.player.id);
+    if (guardian) notify({ kind: 'guardian', id: guardian.id }, 'aging_up', `${req.player.name} is 18 — their account is now their own. Their history stays intact, and thank you for keeping it safe.`, req.player.id);
+    players.addItem(req.player.id, 'timeline', { year: String(new Date().getFullYear()), event: 'Turned 18 — took ownership of this ScoutBox account' });
+    ledgerAppend({ type: 'account_transitioned', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
+    notify({ kind: 'player', id: req.player.id }, 'aging_up', 'Your account is now fully yours. Availability, medical sharing and club contact are your calls from here.', req.player.id);
+    broadcast('players', { playerId: req.player.id });
+  });
   res.json({ ok: true, owned: true });
 });
 
@@ -3239,7 +3499,7 @@ playerRouter.post('/channels/:id/read', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
   const channel = db.channels.find((c) => c.id === req.params.id && c.playerId === req.player.id && c.counterparty === 'player');
   if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  channel.readBy.counterparty = Date.now();
+  channels.markRead(channel.id, 'counterparty', Date.now()); // S7d: the receipt column, in this route's save
   persistNow();
   broadcast('messages', { channelId: channel.id });
   res.json({ readBy: channel.readBy });
@@ -3269,17 +3529,21 @@ playerRouter.get('/reports', (req, res) => {
 // Academy+ is opt-in only and player-controlled (guardian-managed for minors).
 playerRouter.post('/academyplus', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
-  req.player.academyPlus = !!req.body?.enabled;
-  if (req.player.academyPlus && !req.player.badges.includes('Fresh Start')) req.player.badges.push('Fresh Start');
-  if (!req.player.academyPlus) req.player.badges = req.player.badges.filter((b) => b !== 'Fresh Start');
-  broadcast('players', { playerId: req.player.id });
+  // ONE unit of work: the column and the badge (a row of player_badges since S5) commit together (review of 9656a4b).
+  unit(() => {
+    players.update(req.player.id, { academyPlus: !!req.body?.enabled });
+    seam('academyplus.after_row');
+    if (req.player.academyPlus && !(req.player.badges ?? []).includes('Fresh Start')) players.addItem(req.player.id, 'badges', 'Fresh Start');
+    if (!req.player.academyPlus && (req.player.badges ?? []).includes('Fresh Start')) players.setItems(req.player.id, 'badges', req.player.badges.filter((b) => b !== 'Fresh Start'));
+    broadcast('players', { playerId: req.player.id });
+  });
   res.json({ academyPlus: req.player.academyPlus, badges: req.player.badges });
 });
 
 playerRouter.post('/badges', (req, res) => {
   const { badges } = req.body || {};
   if (!Array.isArray(badges)) return res.status(400).json({ error: 'BADGES_MUST_BE_ARRAY' });
-  req.player.badges = badges.slice(0, 6).map(String);
+  players.setItems(req.player.id, 'badges', badges.slice(0, 6).map(String)); // S5: the whole list rewritten as rows, duplicates kept as given
   broadcast('players', { playerId: req.player.id });
   res.json({ badges: req.player.badges });
 });
@@ -3309,9 +3573,19 @@ playerRouter.post('/media', (req, res) => {
     if (!item.url) return res.status(400).json({ error: 'FILE_REQUIRED_FOR_VERIFIED_CLIP', message: 'Attach the actual footage to claim the Verified Clip seal.' });
     item.verifiedClip = att.id;
   }
-  req.player.media.push(item);
-  recordActivity(req.player);
-  broadcast('players', { playerId: req.player.id });
+  // ONE unit of work (S5): the clip row and the activity it records (the log
+  // entry, any badge, its notification) commit together before the 201.
+  try {
+    unit(() => {
+      players.addItem(req.player.id, 'media', item);
+      seam('media.after_row');
+      recordActivity(req.player);
+      broadcast('players', { playerId: req.player.id });
+    });
+  } catch (e) {
+    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    throw e;
+  }
   res.status(201).json({ media: item, trustScore: computeTrustScore(req.player) });
 });
 
@@ -3319,7 +3593,7 @@ playerRouter.post('/media', (req, res) => {
 // For a minor, that control sits with the guardian.
 playerRouter.post('/medical/share', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
-  req.player.medical.shared = !!req.body?.shared;
+  players.update(req.player.id, { medical: { shared: !!req.body?.shared } });
   broadcast('players', { playerId: req.player.id });
   res.json({ shared: req.player.medical.shared });
 });
@@ -3331,11 +3605,22 @@ playerRouter.post('/medical/records', (req, res) => {
   for (const [f, v, max] of [['type', type, 40], ['title', title, 160], ['conditionStatus', conditionStatus, 40]]) if (!optText(v, max)) return badField(res, f);
   if (layoffWeeks != null && !(typeof layoffWeeks === 'number' && Number.isFinite(layoffWeeks) && layoffWeeks >= 0 && layoffWeeks <= 520)) return badField(res, 'layoffWeeks');
   if (cleared != null && typeof cleared !== 'boolean') return badField(res, 'cleared');
-  if (conditionStatus) req.player.medical.conditionStatus = conditionStatus;
-  if (title) {
-    req.player.medical.records.push({ id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
+  // ONE unit of work (review of 9656a4b): the condition column and the record
+  // (a facet of the same player) commit together before the response, so a
+  // crash after the answer can never leave the column without its record.
+  try {
+    unit(() => {
+      if (conditionStatus) players.update(req.player.id, { medical: { conditionStatus } });
+      seam('medical.records.after_row');
+      if (title) {
+        players.addItem(req.player.id, 'medical.records', { id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
+      }
+      broadcast('players', { playerId: req.player.id });
+    });
+  } catch (e) {
+    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    throw e;
   }
-  broadcast('players', { playerId: req.player.id });
   res.status(201).json(req.player.medical);
 });
 
@@ -3346,7 +3631,7 @@ playerRouter.post('/location', (req, res) => {
   if (typeof lat !== 'number' || typeof lng !== 'number' || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
     return res.status(400).json({ error: 'BAD_COORDINATES' });
   }
-  req.player.location = { lat, lng };
+  players.update(req.player.id, { location: { lat, lng } });
   persist();
   broadcast('players', { playerId: req.player.id });
   res.json({ ok: true });
@@ -3376,8 +3661,7 @@ playerRouter.post('/availability', (req, res) => {
       return res.status(409).json({ error: 'CONTRACT_STATUS_CANONICAL', message: 'Your contract status is set by a signing completed in ScoutBox and cannot be changed here while that contract stands.', contractStatus: req.player.contractStatus, endDate: canonical.endDate ?? null });
     }
   }
-  if (availability) req.player.availability = availability;
-  if (contractStatus) req.player.contractStatus = contractStatus;
+  if (availability || contractStatus) players.update(req.player.id, { ...(availability ? { availability } : {}), ...(contractStatus ? { contractStatus } : {}) });
   persist();
   broadcast('players', { playerId: req.player.id });
   res.json({ availability: req.player.availability, contractStatus: req.player.contractStatus });
@@ -3395,10 +3679,21 @@ playerRouter.post('/attendance', (req, res) => {
   }
   if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: verified attendance on a day that exists
   const item = { id: nextId('att'), fixture, venue, date, gps, deviceConfirmed: true, verified: true };
-  req.player.attendance.push(item);
-  recordActivity(req.player);
-  ledgerAppend({ type: 'attendance_verified', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
-  broadcast('players', { playerId: req.player.id });
+  // ONE unit of work (S5): the attendance row, the activity it records and the
+  // ledger row commit together before the 201. A fixture or venue the table
+  // cannot hold (not text) is refused by the repository and answered 400.
+  try {
+    unit(() => {
+      players.addItem(req.player.id, 'attendance', item);
+      seam('attendance.after_row');
+      recordActivity(req.player);
+      ledgerAppend({ type: 'attendance_verified', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
+      broadcast('players', { playerId: req.player.id });
+    });
+  } catch (e) {
+    if (/was refused/.test(String(e?.message))) return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+    throw e;
+  }
   res.status(201).json({ attendance: item, trustScore: computeTrustScore(req.player) });
 });
 
@@ -3406,7 +3701,7 @@ playerRouter.post('/timeline', (req, res) => {
   const { year, event } = req.body || {};
   if (!year || !event) return res.status(400).json({ error: 'YEAR_AND_EVENT_REQUIRED' });
   if (!moderateOrRefuse(res, event, { kind: 'timeline_event', playerId: req.player.id })) return;
-  req.player.timeline.push({ year: String(year), event: String(event) });
+  players.addItem(req.player.id, 'timeline', { year: String(year), event: String(event) }); // S5: one row, committed before the response
   broadcast('players', { playerId: req.player.id });
   res.status(201).json({ timeline: req.player.timeline });
 });
@@ -3425,17 +3720,26 @@ playerRouter.post('/stats', (req, res) => {
     }
   }
   const season = typeof req.body?.season === 'string' && req.body.season.trim() ? req.body.season.trim() : null;
-  if (season) {
-    req.player.seasonHistory ??= [];
-    const existing = req.player.seasonHistory.find((s) => s.season === season);
-    if (existing) Object.assign(existing, updates);
-    else req.player.seasonHistory.push({ season, appearances: 0, goals: 0, assists: 0, ...updates });
-    req.player.seasonHistory.sort((a, b) => (a.season < b.season ? 1 : -1));
-  } else {
-    req.player.stats = { appearances: 0, goals: 0, assists: 0, ...req.player.stats, ...updates };
-  }
-  recordActivity(req.player);
-  broadcast('players', { playerId: req.player.id });
+  // ONE unit of work: the stat columns (or the season facet) and the activity
+  // bookkeeping — the activity log, any badge it earns and its notification —
+  // commit together (review of 9656a4b).
+  unit(() => {
+    if (season) {
+      // S5: the season history is rows of player_season_history; the whole
+      // (sorted) list is rewritten, as the in-place sort used to do.
+      const history = (req.player.seasonHistory ?? []).map((s) => ({ ...s }));
+      const existing = history.find((s) => s.season === season);
+      if (existing) Object.assign(existing, updates);
+      else history.push({ season, appearances: 0, goals: 0, assists: 0, ...updates });
+      history.sort((a, b) => (a.season < b.season ? 1 : -1));
+      players.setItems(req.player.id, 'seasonHistory', history);
+    } else {
+      players.update(req.player.id, { stats: { appearances: 0, goals: 0, assists: 0, ...JSON.parse(JSON.stringify(req.player.stats ?? {})), ...updates } });
+    }
+    seam('stats.after_row');
+    recordActivity(req.player);
+    broadcast('players', { playerId: req.player.id });
+  });
   res.json({ stats: req.player.stats, seasonHistory: req.player.seasonHistory ?? [] });
 });
 
@@ -3453,8 +3757,11 @@ playerRouter.get('/drills', (req, res) => {
   res.json(
     DRILLS.map((d) => ({
       ...d,
-      completed: req.player.drills.includes(d.id),
-      best: req.player.drillResults
+      completed: (req.player.drills ?? []).includes(d.id),
+      // A player who has never completed a drill has no `drillResults` yet (a
+      // sign-up creates none; the first completion appends the array). Read as
+      // empty — before S5 this answered 500 for every new player.
+      best: (req.player.drillResults ?? [])
         .filter((r) => r.drillId === d.id)
         .sort((a, b) => (d.lowerIsBetter ? a.value - b.value : b.value - a.value))[0] ?? null,
     }))
@@ -3467,22 +3774,26 @@ playerRouter.post('/drills/:id/complete', (req, res) => {
   const { value, videoDataUrl } = req.body || {};
   const numeric = value !== undefined && value !== null && value !== '' ? Number(value) : null;
   if (numeric !== null && (Number.isNaN(numeric) || numeric < 0)) return res.status(400).json({ error: 'BAD_VALUE' });
-  if (!req.player.drills.includes(drill.id)) req.player.drills.push(drill.id);
-  if (numeric !== null) {
-    req.player.drillResults.push({
-      id: nextId('combine'),
-      drillId: drill.id,
-      drillName: drill.name,
-      metric: drill.metric,
-      unit: drill.unit,
-      value: numeric,
-      verified: !!videoDataUrl, // video-backed = combine-verified
-      ts: Date.now(),
-    });
-  }
-  recordActivity(req.player);
-  broadcast('players', { playerId: req.player.id });
-  res.json({ drills: req.player.drills, drillResults: req.player.drillResults });
+  // ONE unit of work (S5): the drill row, the result row and the activity commit together.
+  unit(() => {
+    if (!(req.player.drills ?? []).includes(drill.id)) players.addItem(req.player.id, 'drills', drill.id);
+    if (numeric !== null) {
+      players.addItem(req.player.id, 'drillResults', {
+        id: nextId('combine'),
+        drillId: drill.id,
+        drillName: drill.name,
+        metric: drill.metric,
+        unit: drill.unit,
+        value: numeric,
+        verified: !!videoDataUrl, // video-backed = combine-verified
+        ts: Date.now(),
+      });
+    }
+    seam('drills.complete.after_row');
+    recordActivity(req.player);
+    broadcast('players', { playerId: req.player.id });
+  });
+  res.json({ drills: req.player.drills, drillResults: req.player.drillResults ?? [] });
 });
 
 // ---------------------------------------------- the Grassroots journey
@@ -3509,9 +3820,15 @@ playerRouter.post('/programme', (req, res) => {
   if (grassrootsOnly(req, res)) return;
   const track = PROGRAMME_TRACKS[req.body?.track];
   if (!track) return res.status(400).json({ error: 'TRACK_NOT_FOUND' });
-  req.player.programme = { track: track.key, startedAt: Date.now(), completed: [] };
-  persist();
-  broadcast('players', { playerId: req.player.id });
+  // track and startedAt are columns; `completed` is rows of
+  // player_programme_completions (S5). ONE unit of work: the new track and the
+  // reset of the completed sessions commit together (review of 9656a4b).
+  unit(() => {
+    players.update(req.player.id, { programme: { track: track.key, startedAt: Date.now() } });
+    seam('programme.select.after_row');
+    players.setItems(req.player.id, 'programme.completed', []);
+    broadcast('players', { playerId: req.player.id });
+  });
   res.status(201).json({ current: programmeProgress(req.player) });
 });
 
@@ -3521,9 +3838,12 @@ playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
   const track = PROGRAMME_TRACKS[req.player.programme.track];
   const session = track?.sessions.find((x) => x.id === req.params.id);
   if (!session) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-  req.player.programme.completed.push({ sessionId: session.id, ts: Date.now() });
-  recordActivity(req.player); // programme work feeds streaks + the weekly goal
-  broadcast('players', { playerId: req.player.id });
+  // ONE unit of work (S5): the completion row and the activity commit together.
+  unit(() => {
+    players.addItem(req.player.id, 'programme.completed', { sessionId: session.id, ts: Date.now() });
+    recordActivity(req.player); // programme work feeds streaks + the weekly goal
+    broadcast('players', { playerId: req.player.id });
+  });
   res.json({ current: programmeProgress(req.player) });
 });
 
@@ -3608,7 +3928,7 @@ playerRouter.post('/open-trials/:id/register', (req, res) => {
 playerRouter.post('/first-team-seeker', (req, res) => {
   if (grassrootsOnly(req, res)) return;
   if (guardianManagedOnly(req, res)) return;
-  req.player.firstTeamSeeker = !!req.body?.enabled;
+  players.update(req.player.id, { firstTeamSeeker: !!req.body?.enabled });
   persist();
   broadcast('players', { playerId: req.player.id });
   res.json({ firstTeamSeeker: req.player.firstTeamSeeker });
@@ -3627,7 +3947,7 @@ function createVouchRequest(player, { coachName, coachEmail, role }, res) {
     status: 'pending', code: randomCode(8), text: null, seasons: null, ts: Date.now(), publishedAt: null,
   };
   db.vouches.push(vouch);
-  void mailer.send({
+  mailer.send({
     to: vouch.coachEmail,
     subject: `Reference request for ${player.name} on ScoutBox`,
     text: `Hi ${vouch.coachName},
@@ -3637,7 +3957,7 @@ ${player.name} has asked you for a coach reference on ScoutBox Grassroots.
 Your one-time reference code is ${vouch.code}. Submitting with it confirms this mailbox is yours; your name and role will appear with the reference on ${player.name}'s profile.
 
 References are screened by moderation and reviewed by Trust & Safety.`,
-  });
+  }).catch((err) => console.error(`reference request ${vouch.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`)); // observed, never an unhandled rejection (review of 40aa05c, F2)
   persist();
   res.status(201).json({ requested: true, vouchId: vouch.id });
 }
@@ -3683,7 +4003,7 @@ playerRouter.post('/report', (req, res) => handleReport(req, res, { by: 'player'
 playerRouter.post('/block', (req, res) => {
   const { orgId, reason } = req.body || {};
   if (!orgId) return res.status(400).json({ error: 'ORG_REQUIRED' });
-  db.blocks.push({ id: nextId('blk'), playerId: req.player.id, orgId, by: 'player', reason: reason || '', ts: Date.now() });
+  safetyAudit.blocks.append({ id: nextId('blk'), playerId: req.player.id, orgId, by: 'player', reason: reason || '', ts: Date.now() });
   ledgerAppend({ type: 'org_blocked_by_player', playerId: req.player.id, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'player' });
   broadcast('players');
   res.status(201).json({ blocked: true });
@@ -3695,21 +4015,40 @@ playerRouter.post('/block', (req, res) => {
 guardianRouter.post('/children/:id/pairing-code', (req, res) => {
   const child = findPlayer(req.params.id);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  // Random, not id-derived: pairing codes must never be guessable.
-  const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  const code = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => ALPHABET[b % ALPHABET.length]).join('');
-  db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== child.id); // one live code per child
-  db.pairingCodes.push({ code, playerId: child.id, expiresAt: Date.now() + 15 * 60 * 1000 });
-  res.status(201).json({ code, expiresAt: Date.now() + 15 * 60 * 1000 });
+  if (rateLimit.limited('pairing_code_mint', req.guardian.id)) return res.status(429).json(rateLimitedBody('pairing_code_mint'));
+  // S6a: a row of pairing_codes — random (CSPRNG, never id-derived), stored as a
+  // hash, 15-minute lifetime, one live code per child (the previous one
+  // replaced) — durable BEFORE the response is sent. The plain code exists in
+  // this response only; the response shape is unchanged.
+  const { code, expiresAt } = codes.issuePairingCode(child.id);
+  res.status(201).json({ code, expiresAt });
 });
 
 app.post('/auth/player/pair', (req, res) => {
   const { code } = req.body || {};
-  const entry = db.pairingCodes.find((c) => c.code === String(code ?? '').toUpperCase());
-  if (!entry || entry.expiresAt < Date.now()) return res.status(404).json({ error: 'CODE_INVALID', message: 'That pairing code is wrong or expired — ask your parent/guardian for a fresh one.' });
-  db.pairingCodes = db.pairingCodes.filter((c) => c !== entry);
-  const p = findPlayer(entry.playerId);
-  res.json({ playerId: p.id, name: p.name, token: createSession('player', p.id) });
+  // S6a: a wrong code is charged per client address (a correct one costs
+  // nothing), on top of the per-IP /auth limiter; the budget is tested first.
+  const source = req.ip ?? req.socket?.remoteAddress ?? '?';
+  if (rateLimit.peek('pairing_attempt', source).remaining === 0) return res.status(429).json(rateLimitedBody('pairing_attempt')); // exactly `max` wrong codes are judged; the next attempt is refused
+  const live = codes.peekPairingCode(code);
+  const p = live ? findPlayer(live.playerId) : null;
+  if (!live || !p) {
+    if (live && !p) codes.revokePairingCodesFor(live.playerId); // a code whose player is gone (never written by this server) is dead
+    rateLimit.limited('pairing_attempt', source);
+    return res.status(404).json({ error: 'CODE_INVALID', message: 'That pairing code is wrong or expired — ask your parent/guardian for a fresh one.' });
+  }
+  // ONE unit of work: the code is consumed (its row deleted) and the child's
+  // session created together — a failure anywhere, the real COMMIT included,
+  // keeps the code live and creates no session; a crash between the two can
+  // no longer leave a committed session beside a still-live code.
+  let token = null;
+  unit(() => {
+    const consumed = codes.consumePairingCode(code);
+    if (!consumed || consumed.playerId !== p.id) throw new Error('pairing: the code changed between the check and the exchange');
+    seam('pairing.after_consume');
+    token = createSession('player', p.id);
+  });
+  res.json({ playerId: p.id, name: p.name, token });
 });
 
 // Device push-token registration (used when EXPO_ACCESS_TOKEN switches the
@@ -3719,8 +4058,14 @@ app.post('/push/register', (req, res) => {
   if (!session) return res.status(401).json({ error: 'AUTH_REQUIRED' });
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ error: 'TOKEN_REQUIRED' });
-  db.pushTokens = db.pushTokens.filter((t) => !(t.kind === session.kind && t.refId === session.refId && t.token === token));
-  db.pushTokens.push({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
+  // S7c: the same filter-then-push on the push_tokens table (repositories/outboxPush.mjs
+  // `register`): any truthy JSON value is the token, stored losslessly; an earlier
+  // row of this session holding the same primitive goes, an object never matches;
+  // the new row is last. The record lands with the debounced save, as before.
+  // A non-finite number JSON syntax can produce (1e400 → Infinity) is kept as the
+  // live value for this process and persists as null, as the blob's JSON did
+  // (review of 40aa05c, F1).
+  pushTokens.register({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
   persist();
   res.status(201).json({ registered: true });
 });
@@ -3769,7 +4114,7 @@ guardianRouter.post('/children/:id/first-team-seeker', (req, res) => {
   const child = findPlayer(req.params.id);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
   if (child.level === 'pro') return res.status(403).json({ error: 'GRASSROOTS_ONLY' });
-  child.firstTeamSeeker = !!req.body?.enabled;
+  players.update(child.id, { firstTeamSeeker: !!req.body?.enabled });
   persist();
   broadcast('players', { playerId: child.id });
   res.json({ firstTeamSeeker: child.firstTeamSeeker });
@@ -3793,13 +4138,15 @@ function prefsHandler(getTarget) {
       const qs = hhmm(quietStart); const qe = hhmm(quietEnd);
       if (qs === undefined || qe === undefined) return res.status(400).json({ error: 'TIME_INVALID', message: 'Quiet hours are written HH:MM (24-hour).', expected: 'HH:MM' });
       if (timezone != null && timezone !== '' && !validateIanaZone(timezone).ok) return res.status(400).json({ error: 'TIMEZONE_INVALID', message: 'timezone must be an IANA time zone name, for example Europe/London.' });
-      target.notificationPrefs = {
+      const notificationPrefs = {
         quietStart: quietStart === undefined ? target.notificationPrefs?.quietStart ?? null : qs,
         quietEnd: quietEnd === undefined ? target.notificationPrefs?.quietEnd ?? null : qe,
         schoolHoursMute: schoolHoursMute ?? target.notificationPrefs?.schoolHoursMute ?? null,
         timezone: timezone === undefined ? target.notificationPrefs?.timezone ?? null : (timezone || null),
       };
-      persist();
+      // A column-backed composite on both records: through the owning repository.
+      if (players.byId(target.id)) players.update(target.id, { notificationPrefs });
+      else guardians.update(target.id, { notificationPrefs });
     }
     res.json({ prefs: target.notificationPrefs ?? null, note: 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.' });
   };
@@ -3914,17 +4261,34 @@ function deletePlayerData(playerId) {
   const p = findPlayer(playerId);
   if (!p) return false;
   const at = Date.now();
-  for (const m of p.media) storage.delete(m.id);
-  db.sessions = db.sessions.filter((s) => !(s.kind === 'player' && s.refId === playerId));
-  db.players = db.players.filter((x) => x.id !== playerId);
+  const mediaIds = p.media.map((m) => m.id);
+  // ONE unit of work (readiness review §7.4): the player row becomes the retained
+  // record and its links go (S4b-R), the removal of the media FILES is
+  // queued in the same transaction, every session of the person is revoked
+  // and every blob collection that names the person is tombstoned — all of it
+  // commits or none of it. The files themselves are removed only after COMMIT
+  // (and again at every boot and sweep until they are gone); while an entry is
+  // queued, /media/:id never serves the file.
+  unit(() => {
+  mediaDeletions.enqueue(mediaIds, { playerId, at });
+  sessions.revokeFor('player', playerId);
+  codes.revokePairingCodesFor(playerId); // S6a: the child's pairing code row goes in this unit (an explicit act, before the player row)
+  // S4b-R (migration 0014; the Founder's decisions: the full birth date, the country
+  // code kept): the row is not deleted — it is reduced to the retained record (id,
+  // deleted_at, birth_date, country; placeholders and NULL elsewhere), the child rows
+  // and links go explicitly, the guardians stop listing the id, and nothing serves
+  // it as an account from here on. Everything else in this unit is today's behaviour.
+  players.erase(playerId, { at });
+  seam('player.delete.after_erase');
   // M23 P4A-D14: requests and trials become id-only tombstones rather than
   // vanishing. A recruitment case that reached a trial keeps the record that
   // the trial happened (and the numbers the club itself filed); the person
   // is gone from it. The case's status is NOT touched here — deletion is not
   // a lifecycle event, and no path other than the lifecycle writer moves a
   // case (M23 P2). The case's copy of the name goes with the person.
-  db.requests = db.requests.map((r) => (r.playerId === playerId ? tombstoneRequest(r, at) : r));
-  db.trials = db.trials.map((t) => (t.playerId === playerId ? tombstoneTrial(t, at) : t));
+  // S8a-core: the tombstones replace the records in place in the recruitment
+  // repository (the former array replacements) and land in this unit's commit.
+  recruitment.tombstoneForPlayer(playerId, { request: (r) => tombstoneRequest(r, at), trial: (t) => tombstoneTrial(t, at) });
   for (const c of db.recruitmentCases ?? []) {
     if (c?.playerId === playerId) { c.playerName = null; c.subjectRemovedAt = at; }
   }
@@ -3946,14 +4310,19 @@ function deletePlayerData(playerId) {
   // M23 P6.1: Offers keep ids, states and times and lose the person's name and words.
   m28Ctx?.onPlayerDeleted?.(playerId, at);
   m29Ctx?.onPlayerDeleted?.(playerId, at);
-  db.channels = db.channels.filter((c) => c.playerId !== playerId);
-  db.notifications = db.notifications.filter((n) => !(n.audience.kind === 'player' && n.audience.id === playerId));
-  db.pairingCodes = db.pairingCodes.filter((c) => c.playerId !== playerId);
-  db.savedSearches = db.savedSearches; // org data unaffected
-  for (const g of db.guardians) g.childIds = g.childIds.filter((id) => id !== playerId);
+  // S7d (D-B, approved for this storage-only step): today's behaviour, reproduced
+  // — every thread of the player goes, guardian–club threads included, with its
+  // messages, attachments and receipts, inside this unit. No retention rule is
+  // introduced here; the retention question stays open for S4b.
+  channels.deleteForPlayer(playerId);
+  notifications.deleteForAudience('player', playerId); // S7a: the person's rows go in this unit; their preferences are retained (no cascade, by decision)
+  // (The pairing code row was revoked above, inside this unit, before the player row went.)
+  // (Every guardian's childIds was spliced by players.erase, with the link rows.)
   // Ledger rows stay (append-only audit + attribution) but carry only ids.
-  broadcast('players');
-  persistNow();
+  broadcast('players'); // deferred until COMMIT inside the unit
+  });
+  // After COMMIT: the filesystem boundary. A failure here keeps the queue entry; the next boot or sweep retries.
+  mediaDeletions.process(storage);
   return true;
 }
 
@@ -4057,6 +4426,13 @@ let m29Ctx = null; // M23 P7 — assigned when the Signing module registers, bel
 const tsRouter = express.Router();
 app.use('/ts', (req, res, next) => (m25Ctx ? m25Ctx.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
 
+// The data-layer report with row-level detail: ids of rows the target schema
+// refused and why, and the last projection error. Public /capabilities carries
+// the counts and statuses only.
+adminRouter.get('/data-layer', (_req, res) => {
+  res.json(dataLayer.report({ details: true }));
+});
+
 adminRouter.get('/overview', (_req, res) => {
   res.json({
     players: db.players.length,
@@ -4070,7 +4446,7 @@ adminRouter.get('/overview', (_req, res) => {
     invoices: db.invoices.length,
     emailsSent: db.outbox.length,
     pushesSent: db.pushLog.length,
-    sessions: db.sessions.length,
+    sessions: sessions.count(),
     storageEngine: store.engine,
     groomingEscalations: db.moderationLog.filter((m) => m.severity === 'grooming').length,
     persisted: snapshotLoaded,
@@ -4083,7 +4459,9 @@ adminRouter.get('/reports', (_req, res) => {
   res.json(db.reports.slice().sort((a, b) => rank(a) - rank(b) || (rank(a) < 2 ? a.ts - b.ts : b.ts - a.ts)));
 });
 
-adminRouter.get('/outbox', (_req, res) => res.json(db.outbox.slice().reverse()));
+// S6a: on the dev transport the outbox is the delivery, so a mail whose one-time code the persisted record withholds is shown
+// with its full text while this process holds it (mailer.devDeliveredText; never saved, never backed up).
+adminRouter.get('/outbox', (_req, res) => res.json(db.outbox.slice().reverse().map((m) => { const full = mailer.devDeliveredText(m.id); return full ? { ...m, text: full } : m; })));
 adminRouter.get('/push-log', (_req, res) => res.json(db.pushLog.slice(-200).reverse()));
 adminRouter.get('/invoices', (_req, res) => res.json(db.invoices.slice().reverse()));
 adminRouter.get('/vouches', (_req, res) => res.json(db.vouches.map(({ code, ...v }) => v).reverse()));
@@ -4102,12 +4480,12 @@ adminRouter.post('/reports/:id/resolve', (req, res) => {
   if (report.status !== 'pending_review') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
   const { outcome, action } = req.body || {};
   if (!outcome || !String(outcome).trim()) return res.status(400).json({ error: 'OUTCOME_REQUIRED' });
-  report.status = action === 'dismiss' ? 'resolved' : 'resolved';
-  report.resolvedAt = Date.now();
-  report.outcome = String(outcome).trim();
+  // S6b: the three fields the route always changed, updated by row id (the view
+  // `report` reflects the change; the row lands in the persist() below).
+  safetyAudit.reports.patch(report.id, { status: action === 'dismiss' ? 'resolved' : 'resolved', resolvedAt: Date.now(), outcome: String(outcome).trim() });
   if (action === 'suspend_org' && report.targetOrgId) {
     const org = db.orgs.find((o) => o.id === report.targetOrgId);
-    if (org) org.suspended = true;
+    if (org) orgs.update(org.id, { suspended: true });
   }
   const audienceKind = report.by === 'org_user' ? 'org_user' : report.by;
   notify({ kind: audienceKind, id: report.byId }, 'report_resolved', `Your report was reviewed: ${report.outcome}`, report.id);
@@ -4129,7 +4507,7 @@ adminRouter.post('/clubs/:id/credentials', (req, res) => {
   if (!password || String(password).length < 8) {
     return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
   }
-  org.password = hashPassword(String(password));
+  orgs.update(org.id, { password: hashPassword(String(password)) });
   persistNow();
   res.json({ ok: true, note: 'Credentials provisioned — the organisation signs in with this password from now on.' });
 });
@@ -4138,10 +4516,12 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
   const org = db.orgs.find((o) => o.id === req.params.id);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   const { verified, safeguardingContractSigned, verifiedDomain, suspended } = req.body || {};
-  if (verified !== undefined) org.verified = !!verified;
-  if (safeguardingContractSigned !== undefined) org.safeguardingContractSigned = !!safeguardingContractSigned;
-  if (verifiedDomain !== undefined) org.verifiedDomain = verifiedDomain || null;
-  if (suspended !== undefined) org.suspended = !!suspended;
+  orgs.update(org.id, {
+    verified: verified !== undefined ? !!verified : undefined,
+    safeguardingContractSigned: safeguardingContractSigned !== undefined ? !!safeguardingContractSigned : undefined,
+    verifiedDomain: verifiedDomain !== undefined ? (verifiedDomain || null) : undefined,
+    suspended: suspended !== undefined ? !!suspended : undefined,
+  });
   // M14: the legacy toggle stays functional, but its changes now carry
   // claim-level provenance so the boolean and the claim engine never drift.
   m14Ctx?.syncLegacyOrgVerification?.(org, req.body);
@@ -4150,26 +4530,31 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
   res.json({ ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) });
 });
 
+// §6.5 — Trust & Safety sees an allowlist of each guardian: never the password hash, never the e-mail code.
 adminRouter.get('/guardians', (_req, res) => {
-  res.json({ guardians: db.guardians, idvQueue: db.idvQueue ?? [] });
+  res.json({ guardians: db.guardians.map(adminGuardianView), idvQueue: db.idvQueue ?? [] });
 });
 
 adminRouter.post('/guardians/:id/idv', (req, res) => {
   const g = db.guardians.find((x) => x.id === req.params.id);
   if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
-  g.idVerified = !!req.body?.approved;
-  const entry = (db.idvQueue ?? []).find((q) => q.guardianId === g.id);
-  if (entry) entry.status = g.idVerified ? 'approved' : 'revoked';
-  persist();
-  res.json(g);
+  const approved = !!req.body?.approved;
+  // One unit of work: the column and the review-queue row commit together
+  // (S6b: the FIRST entry of the guardian in insertion order, as before).
+  unit(() => {
+    guardians.update(g.id, { idVerified: approved });
+    const entry = safetyAudit.idvQueue.firstForGuardian(g.id);
+    if (entry) safetyAudit.idvQueue.patch(entry.id, { status: approved ? 'approved' : 'revoked' });
+  });
+  res.json(adminGuardianView(g));
 });
 
 adminRouter.get('/blocks', (_req, res) => res.json(db.blocks.slice().reverse()));
 
 adminRouter.post('/blocks/:id/lift', (req, res) => {
-  const idx = db.blocks.findIndex((b) => b.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'BLOCK_NOT_FOUND' });
-  const [lifted] = db.blocks.splice(idx, 1);
+  // Q5 (19 October 2026): lifting a block deletes its row, as it always did.
+  const lifted = safetyAudit.blocks.remove(req.params.id);
+  if (!lifted) return res.status(404).json({ error: 'BLOCK_NOT_FOUND' });
   persist();
   broadcast('players');
   res.json({ lifted });
@@ -4202,14 +4587,16 @@ function sessionMayAccessMedia(session, mediaId) {
 app.get('/media/:id', (req, res) => {
   const id = req.params.id;
   if (!/^[a-z0-9-]+$/i.test(id)) return res.status(400).json({ error: 'BAD_MEDIA_ID' });
+  // A file whose owner was deleted is never served, whether or not the removal
+  // of the file itself has happened yet (the queue entry is the decision).
+  if (mediaDeletions.isQueued(id)) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
   // Path 1: a signed URL. The signature binds media id + expiry + the minting
   // session; the session must still exist AND still be entitled right now.
   const exp = Number(req.query.e ?? 0);
   const sid = String(req.query.v ?? '');
   let session = null;
   if (sid && exp > Date.now() && String(req.query.s ?? '') === mediaSig(id, exp, sid)) {
-    session = db.sessions.find((x) => x.sid === sid) ?? null;
-    if (!sessionLive(session)) session = null;
+    session = sessions.bySid(sid); // null unless the session still exists and is live
   }
   // Path 2: a direct bearer fetch (native clients, tests).
   session ??= sessionFor(req);
@@ -4230,7 +4617,7 @@ function revokeOrgUserAccess(userId) {
   // Immediate, structural: sessions die (API + media on the next byte) and
   // any open SSE stream for that user goes silent via shouldDeliver's live
   // user check. The user ROW is kept (removedAt) so history stays attributed.
-  db.sessions = db.sessions.filter((s) => !(s.kind === 'org' && s.userId === userId));
+  sessions.revokeOrgUser(userId);
   for (const client of [...sseClients]) {
     if (client.identity?.kind === 'org' && client.identity.userId === userId) {
       try { client.res.end(); } catch { /* already gone */ }
@@ -4241,8 +4628,9 @@ function revokeOrgUserAccess(userId) {
 }
 
 registerM12({
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  db, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases,
+  signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4253,8 +4641,8 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  db, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4267,8 +4655,8 @@ const m13Ctx = registerM13({
 // under m14/. Returns its context so the legacy admin verification route can
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  db, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4279,18 +4667,18 @@ const m14Ctx = registerM14({
 // write to it (M15 preferences) and the system that reads it (M18 Second Look),
 // so a change carries the clock of the moment it happened rather than one
 // borrowed from a record describing a different event.
-const srcCtx = { db, nextId, persistNow };
+const srcCtx = { db, nextId, persistNow, safetyAudit }; // S6b: source changes are rows of source_changes, written through the repository
 registerSourceChanges(srcCtx);
 
 // M18.2 — preferences, audit and fault injection. Registered here, after the
 // routers exist and before the milestone modules that emit notifications, so
 // the preference gate is in place for every notify() call that follows.
 m182Ctx = {
-  db, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
+  db, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
   // The same standing-gate composition M12's shared helpers use.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
-    if (/head|director|lead|manager|owner|chief/i.test(req.orgUser?.role ?? '')) return true;
+    if (isLeadRole(req.orgUser?.role)) return true;
     res.status(403).json({ error: 'LEAD_REQUIRED', message: 'Only recruitment leads and directors can do this.' });
     return false;
   },
@@ -4309,7 +4697,7 @@ const rateLimit = createRateLimiter();
 // receives the same context and adds no new authorization surface.
 const m15Ctx = registerM15({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
   recordSourceChange: srcCtx.recordSourceChange,
@@ -4317,8 +4705,9 @@ const m15Ctx = registerM15({
 const m16Ctx = registerM16({
   rateLimit,
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
+  players, unit, // S5: a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
 });
 
 // M16.2 — ScoutBox Trust Score: a DERIVED evidence-confidence summary over
@@ -4327,7 +4716,7 @@ const m16Ctx = registerM16({
 // authorization surface (a Trust Score grants nothing).
 const m162Ctx = registerM162({
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
   testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
@@ -4342,7 +4731,7 @@ const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4375,7 +4764,7 @@ const m17Ctx = registerM17({
 const m18Ctx = registerM18({
   rateLimit,
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, sessionFor, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4400,6 +4789,8 @@ const m18Ctx = registerM18({
 // deliberately no second matching engine and no second Room-creation path.
 const m19Ctx = {
   ...m18Ctx,
+  users,
+  notifications, // S7a: the Agent module's inbox and unread count read the repository
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),
 };
 registerMatching(m19Ctx);
@@ -4455,6 +4846,8 @@ const agentIntegration = {};
 const m23Ctx = registerM23({
   agentIntegration,
   recruitmentEvidenceProvider: recruitmentEvidence,
+  recruitmentCases, // S8b: the formal decision row enters through the repository (and leaves it on a transport failure)
+  recruitmentContactsOffers, // S8c: a new contact enters through the repository (addContact); every other write is an in-place edit
   ...m19Ctx,
   isAdult,
   // M17's room seams live on the object registerM17 returned; registerM18
@@ -4507,7 +4900,7 @@ m24Ctx = registerAgent({
 m25Ctx = registerCompliance({
   ...m19Ctx,
   isAdult, tsRouter, verificationProvider,
-  hashPassword, verifyPassword, createSession, sessionFor, devLogins: DEV_LOGINS,
+  hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins: DEV_LOGINS,
   agent: m24Ctx,
 });
 // The Agent core's hooks into the compliance lane (review items for
@@ -4568,6 +4961,7 @@ Object.assign(agentIntegration, m27Ctx.seam);
 // (an agent's basis and scope) and P5.6D's readiness seam, by reference.
 m28Ctx = registerOffers({
   ...m19Ctx,
+  recruitmentContactsOffers, // S8c: a new offer enters through the repository (addOffer); every other write is an in-place edit
   faults: faultLayer, // M23 P8.1 — the development fault seam after an answer moved the case
   isAdult,
   storage,
@@ -4590,6 +4984,9 @@ m29Ctx = registerSigning({
   isAdult,
   storage,
   ledgerAppend,
+  // S4a: the player's level, contract status and availability are columns written through the identity repository; a completion is one unit of work.
+  players, unit, afterCommit: (fn) => store.afterCommit(fn),
+  signingsFollowUps, // S8d: packages and signings are explicit repository writes
   billing,
   refreshJourneyBadges,
   findRoomForRequest: m17Ctx.findRoomForRequest,
@@ -4632,9 +5029,11 @@ app.get('/capabilities', (_req, res) => {
   res.json(buildCapabilityReport({
     rateLimit,
     providers: m16Ctx.providerStatus?.() ?? [],
+    trustProxy: TRUST_PROXY,
     // M18.2 — states only, as before. Counts are counts, never subjects.
     extra: {
       schema: schemaReport(db),
+      dataLayer: { ...dataLayer.report(), note: 'Collections that have moved from the snapshot blob into tables of their own. Counts are counts, never subjects.' },
       integrity: { ...integritySummary(integrity), note: 'Checked once at boot; violations are reported, never repaired.' },
       events: {
         registered: EVENT_NAMES.length,

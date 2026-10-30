@@ -87,6 +87,8 @@ section('1 — the migration: 2307 → 2308 exactly once, fresh boot 2308, repla
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23sp-1-'));
   const s1 = await bootOn(DIR, PORT);
   ok(s1.up && (await s1.j('GET', '/healthz')).body.schemaVersion === 2308 && /applied .*m280_001_signing_workflow/.test(s1.log()), '1.3 a fresh store boots at 2308 with the signing step applied once');
+  // the legacy case below needs a real owner row (S8b: recruitment_cases.owner_user_id is a key to org_users): Maria logs in once so her row exists
+  await s1.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' });
   const db1 = await s1.stop();
   ok(Array.isArray(db1.signingPackages) && db1.signingPackages.length === 0, '1.4 the snapshot carries an empty signingPackages list');
   // A 2307 snapshot: the store absent and the schema record at 2307 without the step.
@@ -94,7 +96,7 @@ section('1 — the migration: 2307 → 2308 exactly once, fresh boot 2308, repla
   db1.schema.version = 2307;
   db1.schema.migrations = db1.schema.migrations.filter((m) => m.id !== 'm280_001_signing_workflow');
   // A legacy world: a case at signed with a legacy signing row, and a player under_contract with no signing at all.
-  const maria = db1.users.find((u) => u.orgId === 'org-eastport');
+  const maria = db1.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane');
   const legacyCase = { id: 'case-legacy-signed', orgId: 'org-eastport', playerId: 'pl-svensson', ownerUserId: maria?.id ?? null, createdAt: T0 - 30 * DAY, room: { id: 'case-legacy-signed', status: 'signed', rev: 3, leadScoutUserId: null, restricted: false }, history: [{ id: 'aud-legacy-1', at: T0 - 29 * DAY, action: 'room_status_changed', detail: { from: 'offer_made', to: 'signed' }, byKind: 'org', byId: maria?.id ?? null, byName: 'Legacy Lead' }], links: { requestIds: [], trialIds: [], signingId: 'sign-legacy-p7' } };
   db1.recruitmentCases.push({ ...db1.recruitmentCases[0], ...legacyCase });
   db1.signings.push({ id: 'sign-legacy-p7', playerId: 'pl-svensson', playerName: 'Elias Svensson', orgId: 'org-eastport', orgName: 'Eastport FC', userId: maria?.id ?? null, scoutName: 'Legacy Lead', ts: T0 - 29 * DAY, insideAttributionWindow: false });
@@ -111,7 +113,10 @@ section('1 — the migration: 2307 → 2308 exactly once, fresh boot 2308, repla
   const jr = (await s2.j('GET', '/org/rooms/case-legacy-signed/journey', undefined, m.token)).body;
   neg(jr.lifecycle?.currentStage === 'signed' && jr.outcome?.signing?.id === 'sign-legacy-p7' && jr.outcome.signing.method === 'LEGACY_RECORDED' && jr.outcome.signingPackages.length === 0, '1.7 the journey: signed, the legacy row a fact with no package behind it');
   const db2 = await s2.stop();
-  neg(db2.signingPackages.length === 0 && JSON.stringify(db2.signings) === signingsBefore && JSON.stringify(db2.recruitmentCases.map((c) => [c.id, c.room?.status ?? null])) === casesBefore && db2.players.find((p) => p.id === 'pl-kim').contractStatus === 'under_contract', '1.8 after the upgrade: no package, the legacy row and every case untouched, the under_contract player untouched — nothing inferred');
+  // S8d: the legacy row is a typed row now — its facts are kept as written and the typed shape adds only what the
+  // columns need (method LEGACY_RECORDED, the absent fields as null); nothing is inferred about a package or a case
+  const legacyKept = (() => { const before = JSON.parse(signingsBefore); const after = db2.signings; return before.length === after.length && before.every((b) => { const a = after.find((x) => x.id === b.id); return !!a && Object.entries(b).every(([k, v]) => JSON.stringify(a[k]) === JSON.stringify(v)) && (b.method !== undefined || a.method === 'LEGACY_RECORDED') && a.signingPackageId === (b.signingPackageId ?? null); }); })();
+  neg(db2.signingPackages.length === 0 && legacyKept && JSON.stringify(db2.recruitmentCases.map((c) => [c.id, c.room?.status ?? null])) === casesBefore && db2.players.find((p) => p.id === 'pl-kim').contractStatus === 'under_contract', '1.8 after the upgrade: no package, the legacy row kept fact for fact (S8d: typed, method LEGACY_RECORDED, no package), every case untouched, the under_contract player untouched — nothing inferred');
   const s3 = await bootOn(DIR, PORT);
   ok(s3.up && !/applied/.test(s3.log()) && (await s3.j('GET', '/healthz')).body.schemaVersion === 2308, '1.9 a second boot applies nothing: replay-safe');
   await s3.stop();
@@ -266,29 +271,41 @@ section('4 — planted corruption is named, refused, omitted, never repaired; a 
 {
   const db = R.db;
   const base = db.signingPackages.find((p) => p.id === R.kim.SID);
-  const clone = (id, patch) => ({ ...JSON.parse(JSON.stringify(base)), id, keys: { start: null, ready: [], party: [], cancel: [], void: [], supersede: [], complete: [] }, ...patch });
+  // S8d: revisions, documents and history entries are rows with their own ids, so a clone gets fresh ones (the planted
+  // corruption is the field named for each row, never a duplicated child id)
+  const clone = (id, patch) => { const c = { ...JSON.parse(JSON.stringify(base)), id, keys: { start: null, ready: [], party: [], cancel: [], void: [], supersede: [], complete: [] }, ...patch }; for (const r of c.revisions) { r.id = `${r.id}-${id}`; for (const d of [r.document, r.executedDocument]) if (d) d.id = `${d.id}-${id}`; } c.currentRevisionId = `${c.currentRevisionId}-${id}`; c.history = c.history.map((h) => ({ ...h, id: `${h.id}-${id}` })); return c; };
   const revOf = (p) => p.revisions[0];
   const c1 = clone('spk-t1', { status: 'SIGNED' });
   const c2 = clone('spk-t2', {}); c2.status = 'COMPLETED'; c2.completion = null;
-  const c3 = clone('spk-t3', {}); revOf(c3).requiredParties[0].completedBy = { kind: 'org', id: 'agent-x', name: 'Ana' };
-  const c4 = clone('spk-t4', {}); c4.revisions.push({ ...JSON.parse(JSON.stringify(revOf(c4))), id: 'spr-t4b', revisionNumber: 2 }); // pointer at revision 1 while 2 exists
-  const c5 = clone('spk-t5', {}); revOf(c5).requiredParties[0].completedAt = revOf(c5).readyAt - 1;
+  const open = (c) => { c.status = 'IN_PROGRESS'; c.completion = null; revOf(c).status = 'IN_PROGRESS'; revOf(c).completedAt = null; revOf(c).completedBy = null; return c; }; // S8d: a second COMPLETED package on Kim's offer is refused by the column rule; the corruptions below are about other fields
+  const c3 = open(clone('spk-t3', {})); revOf(c3).requiredParties[0].completedBy = { kind: 'org', id: 'agent-x', name: 'Ana' };
+  const c4 = open(clone('spk-t4', {})); c4.revisions.push({ ...JSON.parse(JSON.stringify(revOf(c4))), id: 'spr-t4b', revisionNumber: 2, document: null, executedDocument: null }); // pointer at revision 1 while 2 exists
+  const c5 = open(clone('spk-t5', {})); revOf(c5).requiredParties[0].completedAt = revOf(c5).readyAt - 1;
   const c6 = clone('spk-t6', { caseId: R.chi.RID, offerId: R.chi.OID }); // a COMPLETED package on a case that is at offer_accepted (Okafor's)
-  const c7 = clone('spk-t7', {}); revOf(c7).document = null; // presented without a document
-  const c8 = clone('spk-t8', { offerId: R.chi.OID }); // #5 an Offer that names another player (Okafor's)
-  const c9 = clone('spk-t9', { caseId: R.chi.RID }); // #6 a case that names another player
-  const c10 = clone('spk-t10', { offerRevisionId: 'rofr-stale' }); // #7 bound to an Offer revision the Offer does not hold
-  db.signingPackages.push(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10);
+  const c7 = open(clone('spk-t7', {})); revOf(c7).document = null; // presented without a document
+  const c8 = open(clone('spk-t8', { offerId: R.chi.OID })); // #5 an Offer that names another player (Okafor's)
+  const c9 = open(clone('spk-t9', { caseId: R.chi.RID })); // #6 a case that names another player
+  const c10 = open(clone('spk-t10', { offerRevisionId: 'rofr-stale' })); // #7 bound to an Offer revision the Offer does not hold
+  // S8d: each planted row goes in its own save; a row the typed columns cannot hold is REFUSED there, naming the id
+  // (nothing lands); the rows the columns can hold land and are named on read, as before
+  const refusedAtSave = new Map(); const planted = [];
+  for (const c of [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10]) {
+    const st = openStore(DIR); const snap = st.load(); snap.db.signingPackages.push(c);
+    try { st.save({ ...snap, db: snap.db }); planted.push(c.id); } catch (err) { refusedAtSave.set(c.id, String(err?.message ?? err)); }
+  }
+  neg([...refusedAtSave.entries()].every(([id, m]) => /SIGNINGS_(IMPORT_BLOCKED|UNIQUENESS|REFERENCE_MISSING)/.test(m) && m.includes(id)), `4.0 (S8d) the rows the columns cannot hold are refused at the save, each naming its id: ${[...refusedAtSave.keys()].join(', ') || 'none'}; landed: ${planted.join(', ')}`);
+  neg(refusedAtSave.has('spk-t1') && refusedAtSave.has('spk-t2'), '4.0b (S8d) an unknown status word and a COMPLETED package without its completion record cannot be stored at all');
+  { const st = openStore(DIR); const snap = st.load(); db.signingPackages = snap.db.signingPackages; }
   const rowsBefore = JSON.stringify(db.signingPackages.filter((p) => /^spk-t/.test(p.id)));
   const signingsBefore = JSON.stringify(db.signings);
   const chiStage = db.recruitmentCases.find((c) => c.id === R.chi.RID).room.status;
-  openStore(DIR).save({ db });
   const s = await bootOn(DIR, PORT);
-  ok(s.up, '4.1 the server boots with ten corrupt rows present — corruption is not fatal to the process');
+  ok(s.up, `4.1 the server boots with ${planted.length} corrupt row(s) present — corruption is not fatal to the process`);
   const { j } = s;
   const maria = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
   const kim = (await j('POST', '/auth/player/login', { playerId: 'pl-kim' })).body.token;
   for (const [id, why] of [['spk-t1', 'an unknown status word'], ['spk-t2', 'COMPLETED without its completion record'], ['spk-t3', 'a PLAYER party completed by an org actor'], ['spk-t4', 'a pointer at a non-latest revision'], ['spk-t5', 'a party completed before the revision was presented'], ['spk-t6', 'a COMPLETED package on a case that is not signed'], ['spk-t7', 'presented without a document'], ['spk-t8', 'an Offer that names another player'], ['spk-t9', 'a case that names another player'], ['spk-t10', 'a stale Offer revision']]) {
+    if (refusedAtSave.has(id)) { neg(true, `4.2 ${id} (${why}): never stored — the save refused it (${refusedAtSave.get(id).slice(0, 80)}…)`); continue; }
     const r = await j('GET', `/org/signings/${id}`, undefined, maria.token);
     neg(r.status === 500 && r.body.error === 'SIGNING_STATE_UNKNOWN' && !has(r.body, 'revisions') && !has(r.body, 'stack'), `4.2 ${id} (${why}): 500 SIGNING_STATE_UNKNOWN, nothing internal in the body`);
     const m = await j('POST', `/org/signings/${id}/complete`, { expectedRev: 1, clientKey: key() }, maria.token);
@@ -296,12 +313,13 @@ section('4 — planted corruption is named, refused, omitted, never repaired; a 
   }
   neg(!(await j('GET', '/player/signings', undefined, kim, at(T0 + 3 * H))).body.items.some((p) => /^spk-t/.test(p.id)), '4.4 the recipient list omits every planted row');
   const room = await j('GET', `/org/rooms/${R.chi.RID}/signing`, undefined, maria.token);
-  neg(room.body.packages.find((p) => p.id === 'spk-t6')?.integrity.includes('COMPLETED_BUT_CASE_NOT_SIGNED') && (await j('GET', `/org/rooms/${R.chi.RID}/journey`, undefined, maria.token)).body.lifecycle.currentStage === chiStage, '4.5 the case surface names the disagreement and the case did not move to match the planted row');
+  neg((refusedAtSave.has('spk-t6') || room.body.packages.find((p) => p.id === 'spk-t6')?.integrity.includes('COMPLETED_BUT_CASE_NOT_SIGNED')) && (await j('GET', `/org/rooms/${R.chi.RID}/journey`, undefined, maria.token)).body.lifecycle.currentStage === chiStage, '4.5 the case surface names the disagreement and the case did not move to match the planted row');
   neg(!(await j('GET', `/org/rooms/${R.chi.RID}/journey`, undefined, maria.token)).body.outcome.signingPackages.some((p) => p.id === 'spk-t6'), '4.6 the journey omits it');
   neg((await j('POST', `/org/rooms/${R.chi.RID}/lifecycle`, { action: 'confirmSignedOutcome', expectedRev: (await j('GET', `/org/rooms/${R.chi.RID}/journey`, undefined, maria.token)).body.case.rev }, maria.token)).status >= 400, '4.7 a fabricated COMPLETED package is not signing evidence: the lifecycle refuses');
   ok((await j('GET', `/org/signings/${R.kim.SID}`, undefined, maria.token, at(T0 + 3 * H))).body.signing.status === 'COMPLETED', '4.8 a sound neighbour still reads');
   const db2 = await s.stop();
   neg(JSON.stringify(db2.signingPackages.filter((p) => /^spk-t/.test(p.id))) === rowsBefore && JSON.stringify(db2.signings) === signingsBefore, '4.9 nothing was repaired, dropped or written on boot or on stop');
+  R.refusedAtSave = refusedAtSave;
 }
 
 // --------------------------------------------------------- 5 — P7.1 hardening (§76)
@@ -315,8 +333,11 @@ section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a
   const originalBytes = readFileSync(mediaFile(kimEv.mediaId));
   const kimRow = db.signings.find((x) => x.signingPackageId === R.kim.SID);
   const login = async (j) => (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body.token;
+  // S8d: a planted row the typed columns cannot hold is REFUSED at the save (nothing lands); `refused` carries the error into the check
+  let refused = null;
   const cycle = async (label, mutate, check) => {
-    const snap = store.load(); await mutate(snap.db); store.save({ ...snap, db: snap.db });
+    const snap = store.load(); await mutate(snap.db); refused = null;
+    try { store.save({ ...snap, db: snap.db }); } catch (err) { refused = err; }
     const s = await bootOn(DIR, PORT);
     ok(s.up, `5.${label} the server boots`);
     const tok = await login(s.j);
@@ -324,6 +345,7 @@ section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a
     const after = await s.stop();
     return after;
   };
+  const refusedNaming = (...ids) => !!refused && /SIGNINGS_(IMPORT_BLOCKED|UNIQUENESS|REFERENCE_MISSING|STILL_REFERENCED)/.test(refused.message) && ids.every((id) => refused.message.includes(id));
   // 5.1 the vault bytes swapped after a restart: the document is not served, the completed record and package still read
   await cycle('1a', () => { writeFileSync(mediaFile(kimEv.mediaId), DOC2); }, async (s, tok) => {
     const kim = (await s.j('POST', '/auth/player/login', { playerId: 'pl-kim' })).body.token;
@@ -336,27 +358,28 @@ section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a
   });
   // 5.2 a duplicate completion row on disk
   await cycle('2', (d) => { d.signings.push({ ...kimRow, id: 'sign-dup-p' }); }, async (s, tok) => {
-    neg((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN' && (await s.j('GET', `/org/rooms/${R.kim.RID}/signing`, undefined, tok, at(T0 + 3 * H))).body.packages.find((p) => p.id === R.kim.SID)?.integrity.includes('DUPLICATE_SIGNING_ROWS'), '5.2 two rows for one package after a restart: corruption, named DUPLICATE_SIGNING_ROWS');
+    neg(refusedNaming(R.kim.SID) && (await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200 && (await s.j('GET', `/org/rooms/${R.kim.RID}/signing`, undefined, tok, at(T0 + 3 * H))).body.packages.find((p) => p.id === R.kim.SID)?.integrity.length === 0, `5.2 (S8d) a second row for one package is refused at the save, naming the package; the one row reads sound (${String(refused?.message).slice(0, 70)}…)`);
   });
-  await cycle('2b', (d) => { d.signings = d.signings.filter((x) => x.id !== 'sign-dup-p'); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200, '5.2b removed: readable'); });
+  await cycle('2b', (d) => { d.signings = d.signings.filter((x) => x.id !== 'sign-dup-p'); }, async (s, tok) => { ok(!refused && (await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200, '5.2b still readable (nothing to remove)'); });
   // 5.3 corrupted party evidence on disk
-  await cycle('3', (d) => { const p = d.signingPackages.find((x) => x.id === R.kim.SID); p.__bk = JSON.stringify(p); p.revisions[0].requiredParties[0].evidenceRef.documentSha256 = SHA2; }, async (s, tok) => {
+  let kimBackup = null; // S8d: the backup lives here (an unknown field on the record is not a column)
+  await cycle('3', (d) => { const p = d.signingPackages.find((x) => x.id === R.kim.SID); kimBackup = JSON.stringify(p); p.revisions[0].requiredParties[0].evidenceRef.documentSha256 = SHA2; }, async (s, tok) => {
     neg((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN', '5.3 an evidence reference edited to another digest: corruption');
   });
-  await cycle('3b', (d) => { const p = d.signingPackages.find((x) => x.id === R.kim.SID); const bk = JSON.parse(p.__bk); for (const k of Object.keys(p)) delete p[k]; Object.assign(p, bk); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200, '5.3b restored'); });
+  await cycle('3b', (d) => { const p = d.signingPackages.find((x) => x.id === R.kim.SID); const bk = JSON.parse(kimBackup); for (const k of Object.keys(p)) delete p[k]; Object.assign(p, bk); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200, '5.3b restored'); });
   // 5.4 a completed package whose row is gone
   await cycle('4', (d) => { d.signings = d.signings.filter((x) => x.id !== kimRow.id); }, async (s, tok) => {
-    neg((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN' && (await s.j('GET', `/org/rooms/${R.kim.RID}/signing`, undefined, tok, at(T0 + 3 * H))).body.packages.find((p) => p.id === R.kim.SID)?.integrity.includes('COMPLETED_WITHOUT_ROW') && (await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing === null, '5.4 COMPLETED without its row: corruption, the journey shows no signing, nothing is fabricated to fill the gap');
-    neg((await s.j('POST', `/org/signings/${R.kim.SID}/complete`, { expectedRev: 99, clientKey: key() }, tok, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN', '5.4b a "completion" cannot recreate the row');
+    neg(refusedNaming(R.kim.SID, kimRow.id) && (await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).status === 200 && (await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing?.id === kimRow.id, `5.4 (S8d) a COMPLETED package cannot lose its row: the save is refused with the package and the row named; the journey still shows it (${String(refused?.message).slice(0, 70)}…)`);
+    neg((await s.j('POST', `/org/signings/${R.kim.SID}/complete`, { expectedRev: 99, clientKey: key() }, tok, at(T0 + 3 * H))).status >= 400 && (await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing?.id === kimRow.id, '5.4b a "completion" of the completed package writes no second row');
   });
-  await cycle('4b', (d) => { d.signings.push(kimRow); }, async (s, tok) => { ok((await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing?.id === kimRow.id, '5.4c the row back: the journey shows it again'); });
+  await cycle('4b', () => {}, async (s, tok) => { ok((await s.j('GET', `/org/rooms/${R.kim.RID}/journey`, undefined, tok)).body.outcome.signing?.id === kimRow.id, '5.4c the one row stands'); });
   // 5.5 a row naming a package that never completed (Kola's DRAFT)
   await cycle('5', (d) => { d.signings.push({ ...kimRow, id: 'sign-forged-p', signingPackageId: R.kola.SID, playerId: 'pl-adeyemi', caseId: R.kola.RID, offerId: R.kola.OID }); }, async (s, tok) => {
     neg((await s.j('GET', `/org/signings/${R.kola.SID}`, undefined, tok)).body?.error === 'SIGNING_STATE_UNKNOWN' && (await s.j('GET', `/org/rooms/${R.kola.RID}/signing`, undefined, tok)).body.packages.find((p) => p.id === R.kola.SID)?.integrity.includes('ROW_WITHOUT_COMPLETION'), '5.5 a row for a DRAFT package: ROW_WITHOUT_COMPLETION, corruption');
     const rev = (await s.j('GET', `/org/rooms/${R.kola.RID}/journey`, undefined, tok)).body.case.rev;
     neg((await s.j('POST', `/org/rooms/${R.kola.RID}/lifecycle`, { action: 'confirmSignedOutcome', expectedRev: rev }, tok)).status === 422 && (await s.j('GET', `/org/rooms/${R.kola.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'offer_accepted', '5.5b the forged row is not evidence for signed: the case stays at offer_accepted');
   });
-  await cycle('5b', (d) => { d.signings = d.signings.filter((x) => x.id !== 'sign-forged-p'); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kola.SID}`, undefined, tok)).status === 200, '5.5c removed: readable'); });
+  await cycle('5b', (d) => { d.signings = d.signings.filter((x) => x.id !== 'sign-forged-p'); d.followUps = (d.followUps ?? []).filter((f) => f.signingId !== 'sign-forged-p'); d.outcomeReports = (d.outcomeReports ?? []).filter((r) => r.signingId !== 'sign-forged-p'); }, async (s, tok) => { ok((await s.j('GET', `/org/signings/${R.kola.SID}`, undefined, tok)).status === 200, '5.5c removed: readable'); });
   // 5.6 lazy expiry across the restart: the stored word is still READY, the read is EXPIRED
   {
     const snap = store.load();
@@ -405,7 +428,7 @@ section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a
   // 5.8 planted corruption from section 4 is STILL there and still refused: nothing repaired it across five restarts
   {
     const snap = store.load();
-    neg(snap.db.signingPackages.filter((p) => /^spk-t/.test(p.id)).length === 10, '5.8 the ten planted rows survived every restart untouched — never repaired, never dropped');
+    neg(snap.db.signingPackages.filter((p) => /^spk-t/.test(p.id)).length === 10 - R.refusedAtSave.size, `5.8 the ${10 - R.refusedAtSave.size} planted rows that the columns could hold survived every restart untouched — never repaired, never dropped (S8d: ${R.refusedAtSave.size} never landed)`);
   }
 }
 

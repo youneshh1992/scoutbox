@@ -22,11 +22,20 @@
  * This store is append-only and holds no player content: a type, the canonical
  * source identity, when it happened, and a small structured detail used for
  * copy. It is not a second copy of anything.
+ *
+ * S6b: the store is the source_changes table (repositories/safetyAudit.mjs,
+ * migration 0013); `db.sourceChanges` is the repository's read-only view in
+ * insertion order and a recorded change is a row appended through the
+ * repository, then the cap deletes the OLDEST rows beyond 20 000 (the same
+ * splice the array had), both staged into the persistNow() that follows. A bare
+ * context without the repository (a reviewer feasibility script built around an
+ * array) keeps the array push exactly as before the cutover.
  */
 
 export function registerSourceChanges(ctx) {
-  const { db, nextId, persistNow } = ctx;
+  const { db, nextId, persistNow, safetyAudit } = ctx;
   db.sourceChanges ??= [];
+  const CAP = 20_000;
 
   /**
    * Append a canonical source change. `occurredAt` must be the moment the fact
@@ -41,10 +50,15 @@ export function registerSourceChanges(ctx) {
       occurredAt,
       detail: detail ?? null,
     };
-    db.sourceChanges.push(row);
     // Bounded: this is a change LOG, not history of record. The canonical rows
     // it points at are the history.
-    if (db.sourceChanges.length > 20_000) db.sourceChanges.splice(0, db.sourceChanges.length - 20_000);
+    if (safetyAudit) {
+      safetyAudit.sourceChanges.append(row);
+      safetyAudit.sourceChanges.trimTo(CAP);
+    } else {
+      db.sourceChanges.push(row);
+      if (db.sourceChanges.length > CAP) db.sourceChanges.splice(0, db.sourceChanges.length - CAP);
+    }
     persistNow();
     return row;
   };

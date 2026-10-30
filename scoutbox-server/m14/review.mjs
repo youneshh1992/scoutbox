@@ -48,7 +48,7 @@ export function lookupCredential({ providerId, identifier, holderName }) {
 
 export function registerVerificationReview(ctx) {
   const {
-    db, orgRouter, adminRouter, nextId, persist, persistNow, notify, idx,
+    db, users, orgs, orgRouter, adminRouter, nextId, persist, persistNow, notify, idx,
     verEvent, createClaim, transition, addEvidence, storeEvidenceFile,
     effectiveStatus, vmetric, requireVer, hasVerLevel,
   } = ctx;
@@ -379,15 +379,16 @@ export function registerVerificationReview(ctx) {
     // Organisation: attach to the matched existing org, or create a new one.
     let org = r.existingOrgId ? orgOf(r.existingOrgId) : null;
     if (!org) {
-      org = {
+      // S3: created through the organisations repository (a table row from the
+      // first byte); the record it returns is what db.orgs holds.
+      org = orgs.insert({
         id: nextId('org'), name: r.orgName, type: r.orgType === 'agency' ? 'agency' : 'club',
         level: r.orgType === 'grassroots club' ? 'grassroots' : null,
         plan: r.orgType === 'grassroots club' ? 'Grassroots' : 'Pro', trustedPartner: false,
         country: r.country, verified: false, verifiedDomain: null, safeguardingContractSigned: false,
         ...(r.orgType === 'grassroots club' ? { location: { lat: 51.5, lng: -0.1, city: '' }, federationRef: r.federation ? { federation: r.federation, registrationId: 'pending' } : null, squad: [] } : {}),
         verification: { domains: [], revokedAt: null, orgType: r.orgType },
-      };
-      db.orgs.push(org);
+      });
     }
     org.verification ??= { domains: [], revokedAt: null, orgType: r.orgType };
     // Applicant → account linking (M14.1 P0). Identity is NEVER established
@@ -426,11 +427,10 @@ export function registerVerificationReview(ctx) {
       });
     }
     if (!user) {
-      user = { id: nextId('usr'), orgId: org.id, name: r.applicantName, role: r.applicantRole, email: r.workEmail, createdAt: Date.now() };
-      db.users.push(user);
+      user = users.insert({ orgId: org.id, name: r.applicantName, role: r.applicantRole, email: r.workEmail });
       identityLink ??= 'provisioned_new_user';
     }
-    user.email ??= r.workEmail;
+    if (!user.email) users.update(user.id, { email: r.workEmail });
     r.identityLink = identityLink;
     // …organisation identity claim: established by Trust & Safety review.
     createClaim({
@@ -441,7 +441,7 @@ export function registerVerificationReview(ctx) {
     });
     // Keep the LEGACY effective flag in sync — same standing meaning: minors
     // still additionally need the safeguarding contract (unchanged).
-    org.verified = true;
+    orgs.update(org.id, { verified: true });
     // Domain claim only where the mailbox proof aligns with the stated domain.
     if (r.emailProved && r.domain && domainCovered(domainOfEmail(r.workEmail), r.domain)) {
       org.verification.domains.push({ domain: r.domain, status: 'verified', method: 'official_domain_email', verifiedAt: Date.now(), addedBy: 'root_request' });
@@ -607,8 +607,8 @@ export function registerVerificationReview(ctx) {
     const org = orgOf(req.params.id);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     if (!reasonRequired(req, res)) return;
-    org.verification.revokedAt = Date.now();
-    org.verified = false; // effective flag follows immediately
+    org.verification.revokedAt = Date.now(); // facet (transitional storage), persisted by the next save
+    orgs.update(org.id, { verified: false }); // effective flag follows immediately
     for (const c of idx.claimsFor('org', org.id)) {
       if (c.status === 'verified') adminTransition(c, 'revoked', req, { reason: req.body.reason });
     }

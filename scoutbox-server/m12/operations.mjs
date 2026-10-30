@@ -6,6 +6,12 @@
 // Every scheduled behaviour is a PERSISTED record examined by an idempotent
 // sweep (on boot + every 60 s). Restarts lose nothing and re-send nothing:
 // the marker that a reminder went out lives in the database, not in a timer.
+//
+// S8d (migration 0018): `db.followUps` and `db.outcomeReports` are read-only views of deep-frozen records over the
+// typed tables; every write is an explicit operation of the signings/follow-ups repository (followUps.schedule /
+// patch, outcomeReports.file / addConfirmation) that writes its rows at once — inside the route's unit of work, or in
+// a transaction of its own from the sweep — and returns the fresh record. Junk a client sends (a non-integer
+// matchesPlayed, an over-long note) is refused with the field named, where the blob store once sliced or nulled it.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,8 +26,12 @@ export function registerOperations(ctx) {
     db, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     paginate, guardianOwnsChild, orgCanSee, moderateOrRefuse,
-    storage, sessionFor, isBlocked, DATA_DIR,
+    storage, sessionFor, isBlocked, DATA_DIR, players, unit, signingsFollowUps,
   } = ctx;
+  if (typeof signingsFollowUps?.followUps?.schedule !== 'function' || typeof signingsFollowUps?.outcomeReports?.file !== 'function') throw new TypeError('registerOperations needs the signings/follow-ups repository (S8d) from the data layer');
+  const fu = signingsFollowUps.followUps; const outcomes = signingsFollowUps.outcomeReports;
+  const LIMITS = { progression: 200, endReason: 200, note: 300 };
+  const tooLong = (res, field, value, max) => { if (value === undefined || value === null) return false; if (typeof value !== 'string') { res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be text.` }); return true; } if (value.length > max) { res.status(400).json({ error: 'FIELD_TOO_LONG', field, max, message: `Keep ${field} under ${max} characters.` }); return true; } return false; };
 
   const usersOf = (orgId) => db.users.filter((u) => u.orgId === orgId && !u.removedAt);
 
@@ -30,7 +40,7 @@ export function registerOperations(ctx) {
     let added = 0;
     for (const [milestone, days] of Object.entries(MILESTONES)) {
       if (db.followUps.some((f) => f.signingId === signing.id && f.milestone === milestone)) continue; // idempotent
-      db.followUps.push({
+      fu.schedule({
         id: nextId('fup'), signingId: signing.id, playerId: signing.playerId, orgId: signing.orgId,
         milestone, dueAt: (signing.signedAt ?? signing.ts ?? Date.now()) + days * 86_400_000,
         status: 'scheduled', notifiedAt: null, createdAt: Date.now(),
@@ -65,25 +75,25 @@ export function registerOperations(ctx) {
     if (!['registered', 'released', 'left', 'unknown'].includes(registrationStatus)) {
       return res.status(400).json({ error: 'REGISTRATION_STATUS_INVALID', allowed: ['registered', 'released', 'left', 'unknown'] });
     }
+    // S8d: typed input only — a non-integer or negative matchesPlayed and an over-long text are refused, never sliced or nulled.
+    if (matchesPlayed !== undefined && matchesPlayed !== null && !(Number.isSafeInteger(matchesPlayed) && matchesPlayed >= 0)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'matchesPlayed', message: 'matchesPlayed must be a whole number of matches, or omitted when not evidenced.' });
+    if (tooLong(res, 'progression', progression, LIMITS.progression) || tooLong(res, 'endReason', endReason, LIMITS.endReason) || tooLong(res, 'note', note, LIMITS.note)) return;
     if (note && !moderateOrRefuse(res, note, { kind: 'outcome_report', playerId: f.playerId, orgId: req.org.id })) return;
     const report = {
       id: nextId('out'), followUpId: f.id, signingId: f.signingId, playerId: f.playerId, orgId: f.orgId,
       by: { kind: 'org', id: req.orgUser.id, name: req.orgUser.name },
       registrationStatus,
       matchesPlayed: typeof matchesPlayed === 'number' ? matchesPlayed : null, // evidence-based where it exists, null otherwise
-      progression: progression ? String(progression).slice(0, 200) : null,
-      endReason: endReason ? String(endReason).slice(0, 200) : null,
-      note: note ? String(note).slice(0, 300) : null,
+      progression: progression || null, endReason: endReason || null, note: note || null,
       status: 'reported', confirmations: [], at: Date.now(),
     };
-    db.outcomeReports.push(report);
-    f.status = 'complete';
     const p = findPlayer(f.playerId);
     const text = `📊 ${req.org.name} filed the ${f.milestone} follow-up on the signing — please confirm or dispute it.`;
-    if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'outcome', text, f.id);
-    else if (p) notify({ kind: 'player', id: p.id }, 'outcome', text, f.id);
-    persistNow();
-    res.status(201).json({ followUp: followUpView(f) });
+    // S8d: the report row, the follow-up's status and the notification commit as one unit of work.
+    let done;
+    try { done = unit(() => { outcomes.file(report); const fresh = fu.patch(f.id, { status: 'complete' }); if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'outcome', text, f.id); else if (p) notify({ kind: 'player', id: p.id }, 'outcome', text, f.id); return fresh; }); }
+    catch (e) { console.error(`OUTCOME report_rolled_back ${f.id}: ${e?.message ?? e}`); return res.status(500).json({ error: 'OUTCOME_STATE_UNKNOWN', message: 'The report could not be filed; nothing was recorded.' }); }
+    res.status(201).json({ followUp: followUpView(done) });
   });
 
   function respondOutcome(req, res, playerIds, actor) {
@@ -93,14 +103,12 @@ export function registerOperations(ctx) {
     if (report.confirmations.some((c) => c.by.id === actor.id)) return res.status(409).json({ error: 'ALREADY_RESPONDED' });
     const { agree, note, experienceRating } = req.body ?? {};
     if (typeof agree !== 'boolean') return res.status(400).json({ error: 'AGREE_REQUIRED' });
+    if (tooLong(res, 'note', note, LIMITS.note)) return;
+    if (experienceRating !== undefined && experienceRating !== null && ![1, 2, 3, 4, 5].includes(experienceRating)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'experienceRating', message: 'experienceRating is 1 to 5, or omitted.' });
     if (note && !moderateOrRefuse(res, note, { kind: 'outcome_response', playerId: f.playerId })) return;
-    report.confirmations.push({
-      by: actor, agree, note: note ? String(note).slice(0, 300) : null,
-      experienceRating: [1, 2, 3, 4, 5].includes(experienceRating) ? experienceRating : null,
-      at: Date.now(),
-    });
-    report.status = agree ? 'confirmed' : 'disputed';
-    persistNow();
+    // S8d: the confirmation row and the report's status commit as one unit of work.
+    try { unit(() => outcomes.addConfirmation(report.id, { by: actor, agree, note: note || null, experienceRating: experienceRating ?? null, at: Date.now() }, { status: agree ? 'confirmed' : 'disputed' })); }
+    catch (e) { console.error(`OUTCOME response_rolled_back ${report.id}: ${e?.message ?? e}`); return res.status(500).json({ error: 'OUTCOME_STATE_UNKNOWN', message: 'The answer could not be recorded; nothing was recorded.' }); }
     res.json({ followUp: followUpView(f) });
   }
 
@@ -221,13 +229,16 @@ export function registerOperations(ctx) {
     const item = { id: nextId('media'), title: up.title, kind: up.mime.startsWith('video') ? 'video' : 'image', uploadedAt: new Date().toISOString(), url: null, views: 0, tags: {}, verifiedClip: null, captions: null, sizeBytes: up.size };
     storage.saveDataUrl(item.id, `data:${up.mime};base64,${buf.toString('base64')}`);
     item.url = `/media/${item.id}`;
-    req.player.media.push(item);
-    up.status = 'finalised';
-    up.finalisedMediaId = item.id;
+    // ONE unit of work (S5): the clip row, the upload session's state (a blob)
+    // and the activity commit together before the 201; the chunks go after.
+    unit(() => {
+      players.addItem(req.player.id, 'media', item);
+      up.status = 'finalised';
+      up.finalisedMediaId = item.id;
+      ctx.recordActivity(req.player);
+      broadcast('players', { playerId: req.player.id });
+    });
     fs.rmSync(chunkDir(up.id), { recursive: true, force: true });
-    ctx.recordActivity(req.player);
-    persistNow();
-    broadcast('players', { playerId: req.player.id });
     res.status(201).json({ upload: up, media: item });
   });
 
@@ -251,8 +262,7 @@ export function registerOperations(ctx) {
     const vtt = String(req.body?.vtt ?? '');
     if (!vtt.trim().startsWith('WEBVTT')) return res.status(400).json({ error: 'VTT_REQUIRED', message: 'Captions are a WebVTT track (starts with "WEBVTT").' });
     if (vtt.length > 200_000) return res.status(413).json({ error: 'CAPTIONS_TOO_LARGE' });
-    m.captions = vtt;
-    persistNow();
+    players.patchItem(req.player.id, 'media', { id: m.id }, { captions: vtt }); // S5: one row UPDATE, committed before the response
     broadcast('players', { playerId: req.player.id });
     res.json({ media: { id: m.id, captions: true } });
   });
@@ -277,8 +287,8 @@ export function registerOperations(ctx) {
   playerRouter.post('/football-category', (req, res) => {
     const c = req.body?.category;
     if (!['mens', 'womens', 'boys', 'girls', 'mixed', null].includes(c)) return res.status(400).json({ error: 'CATEGORY_INVALID' });
-    req.player.footballCategory = c;
-    persistNow();
+    // S4a: a column-backed field goes through the repository (one row UPDATE, committed before the response).
+    players.update(req.player.id, { footballCategory: c });
     res.json({ footballCategory: c });
   });
 
@@ -292,13 +302,13 @@ export function registerOperations(ctx) {
     // F11: backfill follow-ups for every signing (covers pre-M12 signings
     // and new ones without touching the signing endpoint), then mark due.
     for (const s of db.signings) { if (scheduleFollowUps(s) > 0) changed = true; }
-    for (const f of db.followUps) {
+    for (let f of db.followUps.slice()) {
       if (f.status === 'scheduled' && f.dueAt <= now) {
-        f.status = 'due';
+        f = fu.patch(f.id, { status: 'due' }); // S8d: committed at once (a transaction of its own)
         changed = true;
       }
       if (f.status === 'due' && !f.notifiedAt) {
-        f.notifiedAt = now; // persisted BEFORE anything else → restart cannot double-send
+        f = fu.patch(f.id, { notifiedAt: now }); // committed BEFORE anything else → restart cannot double-send
         const org = db.orgs.find((o) => o.id === f.orgId);
         const p = findPlayer(f.playerId);
         const lead = usersOf(f.orgId)[0];
@@ -397,10 +407,10 @@ export function registerOperations(ctx) {
   adminRouter.post('/followups/:id', (req, res) => {
     const f = db.followUps.find((x) => x.id === req.params.id);
     if (!f) return res.status(404).json({ error: 'FOLLOWUP_NOT_FOUND' });
-    if (!Number.isFinite(Number(req.body?.dueAt))) return res.status(400).json({ error: 'DUE_AT_REQUIRED' });
-    f.dueAt = Number(req.body.dueAt);
-    persistNow();
-    res.json({ followUp: followUpView(f) });
+    if (!Number.isSafeInteger(req.body?.dueAt)) return res.status(400).json({ error: 'DUE_AT_REQUIRED', message: 'dueAt is an integer instant (milliseconds).' });
+    let fresh;
+    try { fresh = fu.patch(f.id, { dueAt: req.body.dueAt }); } catch (e) { console.error(`OUTCOME due_at_rolled_back ${f.id}: ${e?.message ?? e}`); return res.status(500).json({ error: 'OUTCOME_STATE_UNKNOWN' }); }
+    res.json({ followUp: followUpView(fresh) });
   });
 
   sweep(); // boot pass — catches everything that came due while down

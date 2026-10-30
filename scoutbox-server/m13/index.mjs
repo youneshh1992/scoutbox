@@ -16,7 +16,7 @@ import { registerPlanning } from './planning.mjs';
 import { registerGroups } from './groups.mjs';
 
 export function registerM13(ctx) {
-  migrateM13(ctx.db);
+  migrateM13(ctx.db, ctx.players);
   const full = { ...ctx, ...buildSharedM13(ctx) };
   registerImports(full);     // F1  imports · identity · API keys · webhooks
   registerDelivery(full);    // F11 dispatch centre · callbacks · acks (exposes notifyAction)

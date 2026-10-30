@@ -711,7 +711,8 @@ section('AD — reference mismatches, a voided package, and a completion that fa
   // #48 (HTTP, §87): a completion that fails AFTER the db.signings row, and one that fails AFTER the case moved, both leave NOTHING behind.
   const setFaults = (rules) => j('POST', '/__faults', { rules });
   const plKey = (p) => { const x = p?.player ?? p ?? {}; return JSON.stringify([x.contractStatus ?? null, x.availability ?? null, x.level ?? null, (x.timeline ?? []).length]); };
-  for (const [who, playerId, seam] of [['after the db.signings row was written', 'pl-imani', 'signing.complete.after_row'], ['after the case moved to signed', 'pl-martin', 'signing.complete.after_lifecycle']]) {
+  // S4a: the completion is one unit of work; a third seam fires at the unit's last statement, just before COMMIT (the row, the lifecycle and the player's columns are all written by then).
+  for (const [who, playerId, seam] of [['after the db.signings row was written', 'pl-imani', 'signing.complete.after_row'], ['after the case moved to signed', 'pl-martin', 'signing.complete.after_lifecycle'], ['at the last statement of the unit, before COMMIT', 'pl-nowak', 'signing.complete.at_commit']]) {
     const F = await presented(rita.token, playerId);
     const fs1 = await pSign(F.SID, { revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() }, P[playerId].token);
     const fRev = async () => (await sGet(F.SID, rita.token)).body.signing.rev;
@@ -739,10 +740,12 @@ section('Z — the boundary: ONE writer of db.signings, signed and under_contrac
   const walk = (d) => { for (const f of readdirSync(d)) { const p = path.join(d, f); if (f === 'node_modules' || f === 'scripts' || f.startsWith('.')) continue; if (statSync(p).isDirectory()) walk(p); else if (f.endsWith('.mjs')) files.push(p); } };
   walk(root);
   const src = Object.fromEntries(files.map((f) => [path.relative(root, f), readFileSync(f, 'utf8')]));
-  const pushes = Object.entries(src).filter(([, s]) => /db\.signings\.push\(/.test(s)).map(([f]) => f);
-  neg(pushes.length === 1 && pushes[0] === 'm29/index.mjs', `#23 Z1 db.signings.push occurs in exactly one file: ${pushes.join(', ')}`);
-  const uc = Object.entries(src).filter(([, s]) => /contractStatus\s*=\s*'under_contract'/.test(s)).map(([f]) => f);
-  neg(uc.length === 1 && uc[0] === 'm29/index.mjs', `#25 Z2 contractStatus = 'under_contract' is written in exactly one file: ${uc.join(', ')}`);
+  // S8d: the signing row is written through the domain repository (`signings.record(...)`), never pushed on the view; the ONE writer is still m29/index.mjs.
+  const pushes = Object.entries(src).filter(([, s]) => /db\.signings\.push\(|signings\.record\(/.test(s)).map(([f]) => f).filter((f) => !f.startsWith('repositories/'));
+  neg(pushes.length === 1 && pushes[0] === 'm29/index.mjs', `#23 Z1 the signing row is written (signings.record / db.signings.push) in exactly one file outside the repositories: ${pushes.join(', ')}`);
+  // S4a: the column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record.
+  const uc = Object.entries(src).filter(([, s]) => /contractStatus\s*=\s*'under_contract'|players\.update\([^\n]*contractStatus: 'under_contract'/.test(s)).map(([f]) => f);
+  neg(uc.length === 1 && uc[0] === 'm29/index.mjs', `#25 Z2 contractStatus 'under_contract' is written in exactly one file: ${uc.join(', ')}`);
   neg(!/db\.signings\.push|contractStatus = 'under_contract'|playerLevelAfterSigning\(/.test(src['server.mjs'].slice(src['server.mjs'].indexOf("orgRouter.post('/players/:id/signing'"), src['server.mjs'].indexOf("orgRouter.get('/signings'"))), 'Z3 the legacy route itself writes nothing: it delegates to the ONE writer');
   neg(!/status\s*=\s*'signed'|room\.status\s*=\s*['"]signed/.test(src['m29/index.mjs']) && /confirmSignedOutcome/.test(src['m29/index.mjs']) && /applyLifecycleTransition/.test(src['m29/index.mjs']), '#24 Z4 m29 never assigns the status word: signed is reached through the ONE validator and the ONE lifecycle writer');
   neg(!/docusign|adobe\s*sign|hellosign|pandadoc|qualified electronic signature/i.test(src['m29/index.mjs'] + src['m29/signing.mjs']), 'Z5 no external provider is named or faked');

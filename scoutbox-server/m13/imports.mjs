@@ -42,8 +42,11 @@ export function registerImports(ctx) {
   const {
     db, orgRouter, adminRouter, app, nextId, persist, persistNow, notify,
     requireLead, isLead, orgCanSee, paginate, histAppend, webhookUrlProblem,
-    signBody, timingSafeEq, findPlayer,
+    signBody, timingSafeEq, findPlayer, players, unit, safetyAudit,
   } = ctx;
+  // S6b: an exhausted webhook delivery's ops event is a row of ops_events (repositories/safetyAudit.mjs),
+  // staged into the save that follows the webhook sweep; a bare context without the repository keeps the array push.
+  const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
 
   // ------------------------------------------------------------- templates
   orgRouter.get('/imports/template', (req, res) => {
@@ -217,12 +220,15 @@ export function registerImports(ctx) {
       const p = findPlayer(r.candidatePlayerId);
       if (!p || !orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE', message: 'You can only link identities on players currently visible to your organisation.' });
       // Provenance is PRESERVED, never overwritten: external ids accumulate,
-      // and player-owned profile fields are untouched by the claim.
-      p.externalIds ??= [];
-      if (!p.externalIds.some((e) => e.provider === r.record.provider && e.externalId === r.record.externalId)) {
-        p.externalIds.push({ provider: r.record.provider, externalId: r.record.externalId, source: `import:${r.batchId}`, by: req.orgUser.name, at: Date.now(), claim: r.record });
-      }
-      r.resolution = 'linked';
+      // and player-owned profile fields are untouched by the claim. ONE unit of
+      // work (S5): the external-id row and the review's resolution (a blob)
+      // commit together.
+      unit(() => {
+        if (!(p.externalIds ?? []).some((e) => e.provider === r.record.provider && e.externalId === r.record.externalId)) {
+          players.addItem(p.id, 'externalIds', { provider: r.record.provider, externalId: r.record.externalId, source: `import:${r.batchId}`, by: req.orgUser.name, at: Date.now(), claim: r.record });
+        }
+        r.resolution = 'linked';
+      });
     } else if (action === 'separate') {
       const pr = {
         id: nextId('prs'), orgId: req.org.id, batchId: r.batchId,
@@ -410,7 +416,7 @@ export function registerImports(ctx) {
     }
     if (d.attempts.length >= MAX_ATTEMPTS) {
       d.status = 'failed';
-      db.opsEvents.push({ id: nextId('ops'), at: Date.now(), kind: 'webhook_failed', detail: { deliveryId: d.id, endpointId: d.endpointId } });
+      opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'webhook_failed', detail: { deliveryId: d.id, endpointId: d.endpointId } });
     } else {
       d.status = 'retrying';
       d.nextAt = Date.now() + RETRY_MS[d.attempts.length];

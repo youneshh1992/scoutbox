@@ -34,6 +34,10 @@ import { ageOn, isAdult, adultAgeFor } from '../domain.mjs';
 import { POLICY, secondLookStatus, secondLookExpired, briefIsLiveOn, validateRecruitmentBrief } from '../m18/shared.mjs';
 import { PROVENANCE } from '../m15/shared.mjs';
 import { openStore } from '../store.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { runDataMigrations } from '../repositories/database.mjs';
+import { DATA_MIGRATIONS } from '../repositories/index.mjs';
+import { createNotificationsRepository } from '../repositories/notifications.mjs';
 import { pickPort } from './testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -61,12 +65,15 @@ section('§1 — every event the server emits is in the registry, and the source
   const listSrc = src.slice(src.indexOf('export const EMITTED_EVENTS'), src.indexOf(']);', src.indexOf('export const EMITTED_EVENTS')));
   const declared = [...listSrc.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1]);
   ok(declared.length >= 18, `${declared.length} emitted event names declared in server.mjs`);
-  // Grep every broadcast('name' call site in the server tree.
+  // Grep every broadcast('name' call site in the server tree — and, since the S7a correction
+  // (review of ba6956d, finding 1), every publishEvent('name' site: the transport half of
+  // broadcast() that notify() reaches through the notifications repository's effects queue, with
+  // the payload minimised through the registry at the call site. Both are emissions.
   const files = [];
   const walk = (d) => { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (f === 'node_modules' || f === 'scripts' || f === 'public') continue; if (fs.statSync(p).isDirectory()) walk(p); else if (p.endsWith('.mjs')) files.push(p); } };
   walk(SERVER_DIR);
   const called = new Set();
-  for (const f of files) for (const m of fs.readFileSync(f, 'utf8').matchAll(/broadcast\??\.?\(\s*'([A-Za-z_]+)'/g)) called.add(m[1]);
+  for (const f of files) for (const m of fs.readFileSync(f, 'utf8').matchAll(/(?:broadcast|publishEvent)\??\.?\(\s*'([A-Za-z_]+)'/g)) called.add(m[1]);
   const missing = [...called].filter((n) => !declared.includes(n));
   const stale = declared.filter((n) => !called.has(n));
   ok(missing.length === 0, `every broadcast() call site is in EMITTED_EVENTS (${called.size} names)${missing.length ? `: missing ${missing.join(', ')}` : ''}`);
@@ -204,21 +211,28 @@ section('§9 — defaults are conservative without muting an obligation, and the
     neg(TYPE_CATEGORY[t] !== 'discovery_nudges', `${t} is an obligation or a request, never a nudge that defaults off`);
   }
   neg(d.emailIntent === false, 'nobody is opted into email they never asked for');
-  // In-process enforcement with stub routers.
-  const db = { notificationPrefs: [] };
+  // In-process enforcement with stub routers. S7a: the stored preferences are
+  // rows of the notification tables, so the module is given a real repository
+  // on a temporary in-memory database (migrations 0001–0009 applied); the
+  // stored "security_account: false" is planted as a stored row — the
+  // repository stores what it is given, the effective view forces it on.
+  const prefsDb = new DatabaseSync(':memory:'); prefsDb.exec('PRAGMA foreign_keys = ON;');
+  runDataMigrations(prefsDb, DATA_MIGRATIONS, { now: Date.now(), log: () => {} });
+  const notifications = createNotificationsRepository({ sqlite: prefsDb, now: Date.now });
   const stub = { get() {}, put() {} };
-  const { allows, effective } = registerNotificationPrefs({ db, orgRouter: stub, playerRouter: stub, guardianRouter: stub, persist() {} });
+  const { allows, effective } = registerNotificationPrefs({ db: {}, notifications, orgRouter: stub, playerRouter: stub, guardianRouter: stub, persist() {} });
   const tom = { kind: 'org_user', id: 'u-tom' }; const maria = { kind: 'org_user', id: 'u-maria' };
   ok(allows(tom, 'recruitment_room', 'Maria mentioned you'), 'a mention is delivered by default');
-  db.notificationPrefs.push({ audienceKind: 'org_user', audienceId: 'u-tom', categories: { mentions: false, security_account: false }, emailIntent: false });
+  notifications.updatePrefs('org_user', 'u-tom', { categories: { mentions: false, security_account: false }, emailIntent: false });
   neg(allows(tom, 'recruitment_room', 'Maria mentioned you') === false, 'once mentions are off, a mention is not created for Tom');
   neg(allows(maria, 'recruitment_room', 'Tom mentioned you') === true, "Tom's preference does not touch Maria (isolation)");
   neg(allows(tom, 'verification', 'x') === true && effective('org_user', 'u-tom').categories.security_account === true,
     'a stored "security_account: false" is ignored — the mandatory category is always on');
   ok(allows(tom, 'never_seen_type', 'x') === true, 'an unknown type is delivered rather than silently lost');
-  db.notificationPrefs.push({ audienceKind: 'guardian', audienceId: 'g-1', categories: { combine: false }, emailIntent: false });
+  notifications.updatePrefs('guardian', 'g-1', { categories: { combine: false }, emailIntent: false });
   neg(allows({ kind: 'guardian', id: 'g-1' }, 'combine', 'x') === false && allows({ kind: 'player', id: 'g-1' }, 'combine', 'x') === true,
     'a guardian preference is keyed by kind AND id — a player with the same id string is untouched');
+  prefsDb.close();
 }
 
 // ================================================== §10 migrations (unit)

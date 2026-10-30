@@ -427,6 +427,14 @@ await stop(server);
   const store = openStore(DATA_DIR);
   const snap = store.load();
   snap.db.trials ??= [];
+  // S8a-core: a trial names its request by a real key and a request names its staff member by a real key, so the
+  // fixture carries the staff row and the accepted invitation trial-p57 came from (the legacy direct-request literal);
+  // a trial naming an absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The trial
+  // row and the staff checks it carries are unchanged.
+  snap.db.users ??= [];
+  if (!snap.db.users.some((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane')) snap.db.users.push({ id: 'usr-p57-maria', orgId: 'org-eastport', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 });
+  snap.db.requests ??= [];
+  snap.db.requests.push({ id: 'req-p57', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, userId: snap.db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: T.utcDayOf(Date.now() + 10 * DAY), altSlots: [], venue: 'Training ground', notes: '' }, status: 'accepted', createdAt: Date.now() - 4 * DAY, respondedAt: Date.now() - 3 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
   snap.db.trials.push({
     id: 'trial-p57', requestId: 'req-p57', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: 'Maria Keane',
     acceptedAt: Date.now() - 3 * DAY, proposedDate: T.utcDayOf(Date.now() + 10 * DAY), venue: 'Training ground', notes: '', reportDueAt: Date.now() + 17 * DAY, status: 'awaiting_report',
@@ -448,7 +456,8 @@ server = await boot();
 
 section('Q/live — sign-up: every bad date of birth refused at the door, both doors');
 {
-  const signup = (dob) => j('POST', '/auth/player/signup', { name: `Probe ${Math.random().toString(36).slice(2, 6)}`, dob, country: 'GB', position: 'ST', foot: 'Right', password: 'a-long-enough-password' });
+  // (S4a: `foot` is a column with CHECK (left|right|null); a sign-up with any other value is refused 400 PLAYER_INVALID, so the probe sends the valid form.)
+  const signup = (dob) => j('POST', '/auth/player/signup', { name: `Probe ${Math.random().toString(36).slice(2, 6)}`, dob, country: 'GB', position: 'ST', foot: 'right', password: 'a-long-enough-password' });
   for (const dob of ['2000-02-30', '1999-04-31', '1997-02-29', '1998-13-01', '1998-00-10', '1998-01-00', '1998-01-32', '02/03/1998']) neg(expect(await signup(dob), 400, 'DOB_INVALID'), `Q1 self sign-up with dob ${dob} → 400 DOB_INVALID`);
   neg(expect(await signup('2030-01-01'), 400, 'DOB_INVALID'), 'Q1b a date of birth in the future → 400 DOB_INVALID (§24)');
   neg(expect(await signup('1890-01-01'), 400, 'DOB_INVALID'), 'Q1c a 136-year-old → 400 DOB_INVALID (§24)');

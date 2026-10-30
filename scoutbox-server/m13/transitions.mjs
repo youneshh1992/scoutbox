@@ -8,7 +8,7 @@ export function registerTransitions(ctx) {
   const {
     db, orgRouter, playerRouter, guardianRouter, adminRouter, nextId,
     persistNow, notify, notifyAction, ledgerAppend, findPlayer, isAdult,
-    orgCanSee, histAppend, paginate, emitWebhook,
+    orgCanSee, histAppend, paginate, emitWebhook, players, unit,
   } = ctx;
 
   // ============================================================ F2 helpers
@@ -199,9 +199,11 @@ export function registerTransitions(ctx) {
     if (!['amateur', 'semi_pro', 'pro'].includes(level)) return res.status(400).json({ error: 'BAD_LEVEL' });
     if (!req.body?.reason?.trim()) return res.status(400).json({ error: 'REASON_REQUIRED', message: 'Level reviews are audited — record the basis for the change.' });
     const from = p.level;
-    p.level = level;
-    ledgerAppend({ type: 'level_review', playerId: p.id, orgId: null, orgName: 'Trust & Safety', userId: null, scoutName: 'T&S level review', detail: { from, to: level, reason: String(req.body.reason).slice(0, 300) } });
-    persistNow();
+    // S4a: the level column and the ledger entry commit together or not at all.
+    unit(() => {
+      players.update(p.id, { level });
+      ledgerAppend({ type: 'level_review', playerId: p.id, orgId: null, orgName: 'Trust & Safety', userId: null, scoutName: 'T&S level review', detail: { from, to: level, reason: String(req.body.reason).slice(0, 300) } });
+    });
     res.json({ playerId: p.id, from, to: level, note: 'Recorded in the append-only ledger. An academy departure never changes level automatically — this review is the deliberate, audited path.' });
   });
 

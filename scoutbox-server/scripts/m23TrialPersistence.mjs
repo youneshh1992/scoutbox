@@ -83,7 +83,11 @@ function baseDb() {
   const db = {
     players: [{ id: 'pl-x', name: 'Xavier Adult', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } }],
     orgs: [{ id: 'org-x', name: 'X FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, squad: [], location: { lat: 51.5, lng: -0.1 } }],
-    guardians: [], users: [], sessions: [], ledger: [], notifications: [],
+    guardians: [],
+    // S8a-core: a request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
+    // fixture carries the staff row the case and the request name (the dev login below finds it by org and name).
+    users: [{ id: 'usr-owner', orgId: 'org-x', name: 'Owner', role: 'Head of Recruitment', createdAt: 1 }],
+    sessions: [], ledger: [], notifications: [],
     recruitmentCases: [{
       id: 'case-x', orgId: 'org-x', playerId: 'pl-x', playerName: 'Xavier Adult', ownerUserId: 'usr-owner', ownerName: 'Owner', stage: 'review',
       priority: 'medium', restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null },
@@ -179,13 +183,23 @@ section('2 — a snapshot with P4B trial rows restores byte-faithfully through a
   const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-restore-'));
   const db = baseDb();
   db.trials.push(soundTrial(), legacyTrial());
-  db.requests = [{ id: 'req-1', orgId: 'org-x', orgName: 'X FC', playerId: 'pl-x', userId: 'usr-owner', scoutName: 'Owner', type: 'trial', message: 'Come.', status: 'accepted', routedTo: 'player', createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', caseId: 'case-x', trialId: 'trial-1', recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false }, keys: { invite: { key: 'ik-1', fp: 'fp-i' } }, trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '', slots: [{ id: 'tslot-1', day: '2027-01-15', kind: 'training', startsAt: T0 + 2 * H, endsAt: T0 + 4 * H, timezone: 'Europe/London', venue: { name: 'Dome', town: 'London' } }], private: { venueAddress: '1 Dome Road', instructions: null } } }];
+  // The legacy trial carries a filed report; before S5 the report route wrote the player's
+  // `trialReports` copy together with `trial.report`, so a sound snapshot carries both. Since S5
+  // (migration 0007) the copy is reconciled with the trials at the cut-over and a player who would
+  // GAIN a report is refused by design — the fixture is the consistent pre-S5 state.
+  db.players[0].trialReports = [legacyTrial().report];
+  // S8a-core: a trial names its request by a real key (trials.request_id → recruitment_requests), so the legacy trial
+  // gets the accepted invitation it came from (req-0, the legacy direct-request literal) beside the P4B pair; a trial
+  // naming an absent request is refused at the cutover with its id (PAIR_MISMATCH), never repaired. The legacy trial
+  // row itself is unchanged.
+  db.requests = [{ id: 'req-0', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: '2026-12-01', altSlots: [], venue: 'Old Ground', notes: 'Bring boots' }, status: 'accepted', createdAt: T0 - 401 * H, respondedAt: T0 - 400 * H, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null }, { id: 'req-1', orgId: 'org-x', orgName: 'X FC', playerId: 'pl-x', userId: 'usr-owner', scoutName: 'Owner', type: 'trial', message: 'Come.', status: 'accepted', routedTo: 'player', createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', caseId: 'case-x', trialId: 'trial-1', recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false }, keys: { invite: { key: 'ik-1', fp: 'fp-i' } }, trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '', slots: [{ id: 'tslot-1', day: '2027-01-15', kind: 'training', startsAt: T0 + 2 * H, endsAt: T0 + 4 * H, timezone: 'Europe/London', venue: { name: 'Dome', town: 'London' } }], private: { venueAddress: '1 Dome Road', instructions: null } } }];
   db.recruitmentCases[0].room.status = 'trial_scheduled';
   db.recruitmentCases[0].links.trialIds.push('trial-1');
   const written = openStore(RESTORE_DIR);
   written.save({ db });
   const beforeSound = stableJson(db.trials[0]); const beforeLegacy = stableJson(db.trials[1]);
   const s = await bootOn(RESTORE_DIR, PORT);
+  if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
   ok(s.up, 'the server boots on the snapshot');
   const lead = (await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })).body;
   const list = await s.j('GET', '/org/rooms/case-x/trials', undefined, lead.token);
@@ -209,26 +223,41 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
 {
   const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-corrupt-'));
   const db = baseDb();
+  // S8a-core: every trial names its own accepted invitation (trials.request_id is a UNIQUE key to recruitment_requests;
+  // eight rows naming req-1 cannot be stored) and only the sound trial is OPEN in case-x: the product constraint
+  // trials_one_open_per_case (kept at the cutover) allows one trial per case whose state is not completed/cancelled,
+  // so the corrupt rows that used to be open are cancelled — their corruption (a ghost session, a Martian timezone, an
+  // off-type `sessions`, rev 0, an unknown completion) is unchanged and each still adds a state mismatch — and the
+  // unknown-state row ('flying' is neither terminal nor known) carries no caseId of its own (the room still reaches
+  // it through its invitation's case and omits it like the other six). A legacy file shaped like the old fixture is
+  // refused at the cutover with the engine's UNIQUE message, listed by the dry run, never resolved by the migration
+  // (plan §D.8.5).
+  const invitation = (id, trialId) => ({ id, orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come.', trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '' }, status: 'accepted', createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null, caseId: 'case-x', trialId });
   db.trials.push(
     soundTrial(),
-    soundTrial({ id: 'trial-bad-state', workflowState: 'flying' }),
-    soundTrial({ id: 'trial-bad-mismatch', workflowState: 'completed' }),
-    soundTrial({ id: 'trial-bad-att', attendance: [{ sessionId: 'ghost', state: 'attended' }] }),
-    soundTrial({ id: 'trial-bad-tz', schedule: { ...soundTrial().schedule, timezone: 'Mars/Olympus' } }),
-    soundTrial({ id: 'trial-bad-sessions', schedule: { ...soundTrial().schedule, sessions: 'two' } }),
-    soundTrial({ id: 'trial-bad-rev', rev: 0 }),
-    soundTrial({ id: 'trial-bad-completion', completion: { state: 'done', at: 1 } }),
-    null, 'string', 42,
+    soundTrial({ id: 'trial-bad-state', requestId: 'req-bad-state', caseId: null, workflowState: 'flying' }),
+    soundTrial({ id: 'trial-bad-mismatch', requestId: 'req-bad-mismatch', workflowState: 'completed' }),
+    soundTrial({ id: 'trial-bad-att', requestId: 'req-bad-att', workflowState: 'cancelled', attendance: [{ sessionId: 'ghost', state: 'attended' }] }),
+    soundTrial({ id: 'trial-bad-tz', requestId: 'req-bad-tz', workflowState: 'cancelled', schedule: { ...soundTrial().schedule, timezone: 'Mars/Olympus' } }),
+    soundTrial({ id: 'trial-bad-sessions', requestId: 'req-bad-sessions', workflowState: 'cancelled', schedule: { ...soundTrial().schedule, sessions: 'two' } }),
+    soundTrial({ id: 'trial-bad-rev', requestId: 'req-bad-rev', workflowState: 'cancelled', rev: 0 }),
+    soundTrial({ id: 'trial-bad-completion', requestId: 'req-bad-completion', workflowState: 'cancelled', completion: { state: 'done', at: 1 } }),
   );
+  db.requests = db.trials.map((t) => invitation(t.requestId, t.id));
+  // S8a-core: the seven corrupt rows above are OBJECTS the lossless mapping stores as they are (a vocabulary the
+  // routes reject, a ghost session, an off-type `sessions`, rev 0 …) and the routes still name and omit them; the three
+  // ALIEN entries this section used to add (null, 'string', 42) are not rows and the cutover refuses the file with
+  // their positions instead of ignoring them — proven in section 3b below, the superseded P4A tolerance recorded in
+  // the migration plan (§D.8.5).
   openStore(CORRUPT_DIR).save({ db });
   const s = await bootOn(CORRUPT_DIR, PORT + 1);
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
-  ok(s.up, 'the server boots with eleven bad or alien entries in the trials store');
+  ok(s.up, 'the server boots with eight entries in the trials store, seven of them corrupt rows');
   const lead = (await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })).body;
   const list = await s.j('GET', '/org/rooms/case-x/trials', undefined, lead.token);
   if (list.status !== 200) console.error('   list', list.status, JSON.stringify(list.body).slice(0, 300), s.log().split('\n').filter((l) => /Error|TypeError/.test(l)).slice(0, 4).join(' | '));
   ok(list.status === 200 && list.body.items.length === 1 && list.body.items[0].id === 'trial-1', 'the room serves the one sound trial');
-  neg(list.body.omitted === 7, `seven corrupt rows are counted as omitted (${list.body.omitted}), the three alien entries are ignored`);
+  neg(list.body.omitted === 7, `seven corrupt rows are counted as omitted (${list.body.omitted}) — the unknown-state row through its invitation's case`);
   const one = await s.j('GET', '/org/rooms/case-x/trials/trial-bad-state', undefined, lead.token);
   neg(one.status === 500 && one.body.error === 'TRIAL_STATE_UNKNOWN', 'reading a corrupt row by id is TRIAL_STATE_UNKNOWN (500), never a fabricated view');
   const mut = await s.j('POST', '/org/rooms/case-x/trials/trial-bad-tz/cancel', { expectedRev: 5, reason: 'x' }, lead.token);
@@ -240,6 +269,30 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
   const after = await s.stop();
   neg(after.trials.filter((x) => x && typeof x === 'object').length === 8 && after.trials.some((x) => x?.id === 'trial-bad-state' && x.workflowState === 'flying'), 'the corrupt rows are still in the snapshot exactly as they were — omitted on read, never deleted or "repaired" on write');
   if (stableJson(after.trials) !== stableJson(db.trials)) { for (let i = 0; i < db.trials.length; i += 1) if (stableJson(after.trials[i]) !== stableJson(db.trials[i])) console.error('   changed row', i, JSON.stringify(after.trials[i]).slice(0, 200)); }
+}
+
+// ======================================================= 3b — alien entries (S8a-core)
+section('3b — alien entries in the trials store refuse the cutover with their positions; the file is not modified');
+{
+  // Before S8a-core the boot ignored a null, a string or a number in the trials blob; since migration 0015 imports the
+  // blob into rows through the repository's own validation, an entry that is not a record is refused with its position
+  // and ids only, nothing is imported and the next boot refuses the same way (plan §D.7.3, §D.8.5) — an operator fixes
+  // a COPY by hand; nothing is dropped or repaired silently.
+  const ALIEN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-alien-'));
+  const db = baseDb();
+  db.trials.push(soundTrial(), null, 'string', 42);
+  db.requests = [{ id: 'req-1', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come.', trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '' }, status: 'accepted', createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null, caseId: 'case-x', trialId: 'trial-1' }];
+  openStore(ALIEN_DIR).save({ db });
+  const beforeBlob = stableJson(openStore(ALIEN_DIR).load().db.trials);
+  const s = await bootOn(ALIEN_DIR, PORT + 2);
+  neg(!s.up, 'the server does not boot on a trials store holding a null, a string and a number');
+  const log = s.log();
+  neg(/RECRUITMENT_IMPORT_BLOCKED/.test(log) && /trials entry #1 is not an object \(null\)/.test(log) && /trials entry #2 is not an object \(a string\)/.test(log) && /trials entry #3 is not an object \(a number\)/.test(log), 'the refusal names each alien entry by its position and kind, nothing else');
+  neg(/Boot aborted; the database was not modified/.test(log), 'the boot is aborted and the database is not modified');
+  const afterBlob = openStore(ALIEN_DIR).load();
+  neg(stableJson(afterBlob.db.trials) === beforeBlob && afterBlob.db.trials.length === 4, 'the trials blob still holds the four entries exactly as written — nothing imported, dropped or "repaired"');
+  const again = await bootOn(ALIEN_DIR, PORT + 3);
+  neg(!again.up && /RECRUITMENT_IMPORT_BLOCKED/.test(again.log()), 'the next boot refuses the same way');
 }
 
 // ======================================================= 4 — clean boot, live flow, restart

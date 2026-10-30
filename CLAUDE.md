@@ -1,5 +1,174 @@
 # ScoutBox — approved Agent, Pro, Player and Grassroots UI
 
+## Architecture rules — 9 October 2026
+
+These rules follow the Founder's acceptance of the October 2026 architecture
+review. They apply to every tool and person working in this repository and sit
+alongside the design approvals below, which they do not change.
+
+### Trunk, branches and approvals
+
+- `main` is the trunk and is always the current product. Every change branches
+  from `main`, is named after the change (`fix/org-login-roles`,
+  `refactor/data-layer-users`), merges back through a pull request with green
+  CI, and is deleted afterwards. Nobody continues another tool's branch; the
+  pull request is the handoff.
+- Approved baselines are annotated tags (`<app>-ui-approved-<date>`,
+  `<app>-baseline-<date>`), not commit hashes in prose. Pushes, merges to
+  `main`, tags and deployments happen only on the Founder's explicit
+  instruction, and never with a force-push.
+- Scratch files, backups and generated bundles stay out of Git. Do not add new
+  top-level milestone report files; record durable decisions in the relevant
+  README, `scoutbox-server/OPERATIONS.md` or this file.
+
+### Feature freeze
+
+Until the data-layer rebuild below is complete, no new product features are
+started. Work in scope: defects, security, the rebuild itself, test coverage,
+and design changes the Founder explicitly requests.
+
+### Facts about the data (30 October 2026)
+
+- **There is no production data and no deployment.** Every database in existence is seed or test data and can be
+  thrown away. Rollback means "restore a backup or re-seed".
+- From S8d onwards, therefore: no new copy-only rollback tools; no new historical-build boots in the gate; no
+  compatibility work for files written by earlier development builds; no operator warnings for deployments that do
+  not exist. The nine existing rollback tools and their boots stay in the gate until this branch is merged to
+  `main`, because they are the only proof the existing chain works; they go with the merge. (S8d added the one
+  link that keeps that chain provable from a file the current build writes — `scripts/rollbackToPreS8c.mjs`, a
+  test-chain tool, not an operator procedure; it goes with the chain.)
+- The first real users, and what has to be true for them, are the Founder's questions to answer; the migration plan
+  does not assume a date.
+- **Fidelity rule from S8d onwards (the Founder's decision of 30 October 2026):** preserve API behaviour for valid
+  input only. Each field is stored in a properly typed column; no `absent_keys_json`, `offtype_json` or `extra_json`
+  columns on new tables. Where the old code accepted junk (a wrong type, an unknown field), the route validates and
+  rejects it with an error, and the migration of existing data reports what it dropped or normalised, with ids.
+  The tables of S0–S8c keep their lossless columns as accepted; nothing is rewritten for this rule.
+
+### Server structure
+
+- New persistent state is a table owned by a domain repository under `scoutbox-server/repositories/`, created by a
+  numbered migration in `repositories/migrations/` and declared in the matching `docs/architecture/sql/*.sql` file.
+  No new top-level `db.<collection>` arrays, no new `migrateMxx` collection lines, no new milestone-named modules
+  (`m30/…`); new server code lives in `scoutbox-server/domains/<domain>/`.
+- Whether a table is authoritative is decided by its record in `data_migrations`, never by the table existing.
+  `node:sqlite` with transaction state is required (`runtime.mjs`, refused with `NODE_UNSUPPORTED`); there is no JSON
+  or in-memory fallback. The runtime data directory is `scoutbox-server/data/` and is never a source directory.
+- Every write to a migrated domain goes through its repository, inside `store.unitOfWork(() => …)` when it touches
+  more than one row, a blob, a facet, an audit entry or another domain: synchronous work, one transaction,
+  all-or-nothing, the in-memory graph restored on failure; a nested unit joins and its failure fails the whole even
+  if caught. Side effects go through `store.afterCommit` (return the promise). A provider call is made before the
+  unit, never inside it. A failed unit is answered as a failure, never as success. The old `db.<collection>` is the
+  repository's read-only view (a direct write throws). Contract: `OPERATIONS.md`, "Units of work".
+- Snapshot writes validate every table-backed collection and reject the whole save on the first problem; never put a
+  whole-collection re-projection in the default save path.
+- Responses are built from explicit allowlists of fields, never by spreading a stored record. Never log, report or
+  export a plain bearer token. Secrets have no default values; every environment-driven setting is registered in
+  `scoutbox-server/m181/capabilities.mjs` and documented in `OPERATIONS.md`.
+- One definition per rule: shared rules (`roles.mjs`, `domain.mjs`, `temporal.mjs`) are imported, never copied; a
+  check needed in a second place is exported from the first.
+- **Status of every step, the migrations, the repositories, the acceptances and the Founder's decisions in force:
+  the table in `docs/architecture/sqlite-migration-plan.md` §E.** Operating contracts per domain: `OPERATIONS.md`.
+  Registration in source is development work, not authorisation for a real-data cutover.
+- Target schema and step order: `docs/architecture/sqlite-schema.md` and `sqlite-migration-plan.md`.
+
+### Independent review — scope (30 October 2026)
+
+- One review per step, on the implementation, not the design. A design note of one or two pages (the tables, the
+  decisions, how behaviour differs from the old code, the tests) goes to the Founder for the product questions
+  without a review cycle.
+- A blocking finding is a problem reachable through a real route with data the current build can produce, where a
+  real user could lose or corrupt data. Files from superseded development builds, synthetic-only states and
+  hypothetical operators are out of scope; anything below that bar is a note, not a finding.
+- Questions put to the Founder lead with the product consequence, then the storage mechanism, and say when a
+  question does not need the Founder.
+- Commit messages: a subject line and a few bullets. Design notes: two to four thousand words. `OPERATIONS.md` does
+  not grow until there is something to operate.
+
+### Shared code
+
+- Do not add another copy of an API type or client to an app. The server is
+  the source of truth for shapes; a shared types and API-client package is the
+  next structural step after the data layer, and new client code should be
+  written so it can move there.
+- `scoutbox-club` and `scoutbox-grassroots` share their business logic; a fix
+  in one is a fix in both until they are merged.
+
+### Tests and CI
+
+- Every server change ships with a test: unit tests in
+  `scoutbox-server/scripts/test*.mjs` (run by `npm test`) and, for route
+  behaviour, the matching end-to-end script. The existing end-to-end scripts
+  are the behavioural specification for the rebuild; a migrated domain must
+  pass them unchanged, apart from assertions that exist only to describe the
+  old storage.
+- CI must be green on `main`. A red step is a defect to fix, not a step to
+  skip.
+
+### Milestone gates — documentation housekeeping and unit tests (Founder requirement, 14 October 2026)
+
+These two gates apply **after every milestone for the rest of the project**,
+documentation-only milestones included. They override any earlier suggestion
+that a documentation change needs no test run. Every handoff and every
+next-step prompt restates them and reports their result; they are not a
+one-round instruction. This section is the single authoritative statement of
+the policy; `AGENTS.md` points here and no other rules document restates it.
+
+**A. Keep the Markdown current; remove what is obsolete.**
+
+- At every milestone, inspect the relevant Markdown files for outdated
+  duplicates, abandoned plans, superseded drafts and conflicting guidance.
+- Remove files that are genuinely no longer needed. Before removing a
+  superseded file, move any still-relevant decision, requirement or
+  operational guidance into the current authoritative document and repair
+  every link and reference to the removed file.
+- Preserve active architecture, schema and migration documents, unresolved
+  decision records, required project instructions, current runbooks, and the
+  evidence needed to understand or reproduce accepted work. Age alone does not
+  make a file obsolete. Do not blanket-delete Markdown, and do not move
+  everything into an ever-growing archive instead of cleaning up.
+- The milestone handoff lists every deleted or consolidated file with the
+  reason; if the review found none, it says so explicitly. The repository must
+  end each milestone free of conflicting active instructions.
+
+**B. Run the backend server AND the Player app unit tests.**
+
+*Amendment, the Founder's decision of 30 October 2026:* gate B applies to a milestone that changes anything under
+`scoutbox-server/`, `scoutbox-player/` or another package. A milestone that changes only Markdown outside those
+packages runs gate A and the privacy sweep, not gate B; its handoff says so. The sentence above about
+documentation-only milestones is superseded for gate B and stands for gate A.
+
+- Discover and record the actual commands and working directories from the
+  current packages: the backend is `cd scoutbox-server && npm test` (the full
+  chain in `scoutbox-server/package.json`); the Player app is
+  `cd scoutbox-player && npm test` (Jest with the `jest-expo` preset, tests
+  under `scoutbox-player/src/__tests__/`). Do not guess a path or invent a
+  passing command. The Agent, Pro and Grassroots apps are not substitutes for
+  testing Player.
+- Run both suites against the **final** changed tree of the milestone. If code
+  or configuration changes after a run, repeat the affected checks and record
+  the tested commit or file state accurately.
+- If the Player unit-test setup is ever missing or unrunnable, establish the
+  smallest suitable setup with the app's existing stack and meaningful tests
+  of real behaviour — never an empty suite or tautological tests — and report
+  that supporting change separately. If required source or dependencies are
+  unavailable, report the precise blocker and mark Player testing **NOT RUN**;
+  never "passed" or "complete".
+- Fix failures the milestone introduced and rerun. Identify independently
+  established pre-existing failures as such; never hide them, silently skip
+  tests, or call a failing gate green.
+- Wire the actual historical server builds into the rollback proofs of the
+  backend gate (the `SCOUTBOX_PRE_*` variables pointing at real checkouts of
+  the named commits) and name the commits used; a boot the suites skipped is
+  reported as skipped, never as run. Repeat a passing suite only with a stated
+  diagnostic hypothesis, not as a campaign.
+- Record commands, runtime and tool versions, exit codes and totals for both
+  gates. Unit tests are required even when browser or API checks also ran; a
+  successful build, lint, screenshot or smoke test is not a substitute.
+- A milestone is not "fully verified" while either gate is missing or failing.
+  Preserve the evidence and report any blocker plainly. Synthetic fixtures
+  only; never real user data or live external delivery services.
+
 ## Latest approval — Agent, 6 October 2026
 
 The Founder approved the finished ScoutBox Agent UI at `7ee9ecb` on
@@ -94,8 +263,11 @@ from unrelated feature or bug-fix work.
 Keep existing authentication, tenant isolation, safeguarding, guardian-managed
 minor contact, consent acknowledgements, state transitions and action handlers.
 Never expose internal club notes. Offer acceptance is not signing; Box Cam is
-not assessment; evidence confidence is not a talent score. Do not invent data,
-presence or verification. Preserve five-category navigation and no authored emoji.
+not assessment; evidence confidence is not a talent score; Nobody Missed is
+evaluation coverage, never a ranking. Do not invent data, presence or
+verification. Preserve five-category navigation and no authored emoji. The
+self-contained demo bundles make no runtime external requests (fonts and
+assets are bundled).
 
 For changes, run relevant checks and inspect affected screens in dark mode
 and narrow layouts, including a previously saved light preference. Do not use superseded minimalism tests as a reason to

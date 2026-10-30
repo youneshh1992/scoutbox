@@ -14,6 +14,7 @@ export function registerJourneys(ctx) {
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, requireLead, isLead, moderateOrRefuse, isAdult,
     checkEligibility, distanceBand, guardianOwnsChild, recordActivity, DRILLS,
+    players, unit,
   } = ctx;
 
   // ================================================================== F5
@@ -678,6 +679,10 @@ export function registerJourneys(ctx) {
     }
     if (t.day.checkins.some((c) => c.playerId === t.playerId)) return res.status(409).json({ error: 'ALREADY_CHECKED_IN' });
     const checkedInAt = Date.now();
+    // ONE unit of work (S5): the check-in and the attendance records on the
+    // trial (a blob), the player's attendance row and activity, and the ledger
+    // row commit together before the response.
+    unit(() => {
     t.day.checkins.push({ playerId: t.playerId, at: checkedInAt, byUserId: req.orgUser.id, byName: req.orgUser.name });
     // M23 P4B (D-8): a check-in is the strongest attendance source. If the
     // trial carries a confirmed P4B schedule, the session whose window holds
@@ -695,7 +700,7 @@ export function registerJourneys(ctx) {
     }
     // Feed the existing attendance record — once, coach-signed, no duplicate.
     if (p && !(p.attendance ?? []).some((a) => a.trialId === t.id)) {
-      p.attendance.push({
+      players.addItem(p.id, 'attendance', {
         id: nextId('att'), trialId: t.id, fixture: `Trial day · ${t.orgName}`,
         venue: t.venue ?? '', date: t.proposedDate ?? new Date().toISOString().slice(0, 10),
         gps: null, verified: true, corroboratedBy: t.orgName,
@@ -703,7 +708,7 @@ export function registerJourneys(ctx) {
       recordActivity(p);
     }
     ledgerAppend({ type: 'trial_checkin', playerId: t.playerId, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-    persistNow();
+    });
     res.json({ trial: trialDayView(t, 'org') });
   });
 
