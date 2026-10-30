@@ -398,7 +398,15 @@ and design changes the Founder explicitly requests.
   array's departing rows own nothing; F2 a save in which only a request
   changed still runs the pair guard at the preflight and the final guard at
   the end, through the real hooks; F3 the live unresolved/retained player
-  counts cover every Q8c-a reference occurrence, as the cutover counts do):
+  counts cover every Q8c-a reference occurrence, as the cutover counts do;
+  corrected again 30 October 2026 for the empty-string id finding, review
+  §14.2 — THE ONE REFERENCE RULE for the nested player and guardian ids of
+  the nine tables, stated there once: a string id, empty included, is a
+  reference occurrence; an absent or null id is none — so an empty-string
+  player id is counted at the cutover as the live report counts it, an
+  empty-string guardian id is refused under Q8c-b with the id rendered
+  quoted, and a cutover record written before the rule is left as the count
+  its import saw):
   its design — prepared 23 October 2026
   from the code at `7072dd9`, CORRECTED after the independent review of
   `854d035` (F1 one pointer rule for the five offer pointers; F2 the model

@@ -1823,7 +1823,7 @@ S8c, S8d). **S8c (contacts and offers) is implemented on top of this step**
 — the next section; a live file carries `0017` beside `0016`, and the S8c
 rollback tool is the first link of the chain.
 
-### Recruitment contacts and offers (live since migration `0017`, S8c — implemented 24 October 2026 on top of `19f5ca8` under the Founder's decisions Q8c-a "Approve tolerant (Recommended)" and Q8c-b "Approve strict checks (Recommended)" of 24 October 2026, on the design of `docs/architecture/s8c-readiness-review.md` independently accepted at `19f5ca8`; corrected after the independent review of `535e247` (F1 departing owners' guardian references, F2 the pair guard on a request-only save, F3 the per-occurrence player counts — review §14.1); IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE — review §14; not production-approved)
+### Recruitment contacts and offers (live since migration `0017`, S8c — implemented 24 October 2026 on top of `19f5ca8` under the Founder's decisions Q8c-a "Approve tolerant (Recommended)" and Q8c-b "Approve strict checks (Recommended)" of 24 October 2026, on the design of `docs/architecture/s8c-readiness-review.md` independently accepted at `19f5ca8`; corrected after the independent review of `535e247` (F1 departing owners' guardian references, F2 the pair guard on a request-only save, F3 the per-occurrence player counts — review §14.1) and again on 30 October 2026 for the empty-string id finding (the one reference rule — review §14.2); IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE — review §14; not production-approved)
 
 - **What moved.** The two blob collections `recruitmentContacts` (written
   only by `m23/contactRoutes.mjs` and the response hook the two respond
@@ -1873,7 +1873,17 @@ rollback tool is the first link of the chain.
   STRICT in code (Q8c-b, 24 October 2026) — a cutover or snapshot write naming
   a guardian that is not in the FINAL guardians table is refused with ids
   (`CONTACTS_OFFERS_GUARDIAN_MISSING`); no account is created, unlinked or
-  deleted to satisfy it. `org_id` → `orgs` and `case_id` → `recruitment_cases`
+  deleted to satisfy it. **The one reference rule for these nested ids**
+  (review §14.2, 30 October 2026): a string id, empty included, is a
+  reference occurrence; an absent or null id is none — so a nested
+  empty-string player id is a missing reference, counted at the cutover and
+  live alike, stored verbatim; an empty-string guardian id is refused like
+  any guardian id that is not there, the id rendered quoted in the refusal
+  (`recruitment_contacts rct-1 → ""`). No writer produces an empty id. A
+  cutover record written by the `9fb1bc6` build before this rule is left as
+  it is: it is the count that import saw under its build's rule; the live
+  `/capabilities` report is the current figure; no meta key is edited and
+  no migration re-runs. `org_id` → `orgs` and `case_id` → `recruitment_cases`
   (RESTRICT) on both parents; `request_id` → `recruitment_requests`
   (RESTRICT); the staff ids → `org_users` (RESTRICT, nullable) — each named
   with ids before the engine would (`CONTACTS_OFFERS_ORG_MISSING`,

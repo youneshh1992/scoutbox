@@ -301,27 +301,41 @@ export function classifyPointers(finalOffers) {
   }
   return { broken, unresolved };
 }
-/** The guardian ids a record names (Q8c-b, strict) and the player ids (Q8c-a, counted). */
+/**
+ * THE ONE REFERENCE RULE for the nested account ids of these tables (the review's §14.2): a string id, EMPTY INCLUDED,
+ * is a reference occurrence; an absent or null id is none. It is what the tables hold — a nested id column is `text`,
+ * so `''` is stored verbatim and NULL means absent-or-null — and what the SQL below reads (`IS NOT NULL`). Under Q8c-a
+ * an empty-string player id is therefore a missing reference, COUNTED at the cutover exactly as the live report counts
+ * it; under Q8c-b an empty-string guardian id is a reference that names no guardian and is REFUSED with the id (rendered
+ * quoted by `shownId`, so it never reads as a blank). No production writer produces an empty id (every nested id is a
+ * live account's id or the parent's); the rule decides synthetic, hand-edited and corrupt files, nothing more. The
+ * parent `player_id` is required and non-empty (`validateEntry`), outside this rule.
+ */
+const isRef = (v) => typeof v === 'string';
+/** An id as a refusal renders it: an empty or whitespace-only id JSON-quoted (`""`), any other id as it is. */
+const shownId = (v) => (typeof v === 'string' && v.trim() === '' ? JSON.stringify(v) : v);
+/** The guardian ids a record names (Q8c-b, strict) and the player ids (Q8c-a, counted), under the one reference rule. */
 function guardianIdsOf(coll, r) {
   const out = [];
-  if (coll === CONTACTS) { if (isPlainObject(r.recipient) && nonEmpty(r.recipient.guardianId)) out.push(r.recipient.guardianId); }
-  else { for (const rv of listOf(r.revisions)) if (isPlainObject(rv.recipientSnapshot) && nonEmpty(rv.recipientSnapshot.guardianId)) out.push(rv.recipientSnapshot.guardianId); for (const x of listOf(r.responses)) if (x.actorType === 'guardian' && nonEmpty(x.actorId)) out.push(x.actorId); for (const x of listOf(r.readReceipts)) if (x.viewerKind === 'guardian' && nonEmpty(x.viewerId)) out.push(x.viewerId); }
+  if (coll === CONTACTS) { if (isPlainObject(r.recipient) && isRef(r.recipient.guardianId)) out.push(r.recipient.guardianId); }
+  else { for (const rv of listOf(r.revisions)) if (isPlainObject(rv.recipientSnapshot) && isRef(rv.recipientSnapshot.guardianId)) out.push(rv.recipientSnapshot.guardianId); for (const x of listOf(r.responses)) if (x.actorType === 'guardian' && isRef(x.actorId)) out.push(x.actorId); for (const x of listOf(r.readReceipts)) if (x.viewerKind === 'guardian' && isRef(x.viewerId)) out.push(x.viewerId); }
   return out;
 }
 /**
  * Every player-reference OCCURRENCE of a record (Q8c-a): the parent's player_id; a contact's recipient player id; an
  * offer's revision recipient player ids, the responses' for-player ids and PLAYER actor ids, the PLAYER receipt viewer
- * ids — a string id each time it occurs (a duplicate counts twice; a guardian-typed actor or viewer is not a player
- * reference; an absent or null id is no reference). The live counters below (`PLAYER_REFS_SQL`) read the same
- * occurrences from the tables, so the cutover record and the running report count alike (the review of 535e247, F3).
+ * ids — a string id each time it occurs, empty included (a duplicate counts twice; a guardian-typed actor or viewer is
+ * not a player reference; an absent or null id is no reference). The live counters below (`PLAYER_REFS_SQL`) read the
+ * same occurrences from the tables, so the cutover record and the running report count alike (the review of 535e247,
+ * F3; the empty string corrected in §14.2 — F3's `nonEmpty` dropped it at the cutover while the SQL counted it).
  */
 function playerIdsOf(coll, r) {
   const out = [r.playerId];
-  if (coll === CONTACTS) { if (isPlainObject(r.recipient) && nonEmpty(r.recipient.playerId)) out.push(r.recipient.playerId); }
-  else { for (const rv of listOf(r.revisions)) if (isPlainObject(rv.recipientSnapshot) && nonEmpty(rv.recipientSnapshot.playerId)) out.push(rv.recipientSnapshot.playerId); for (const x of listOf(r.responses)) { if (nonEmpty(x.forPlayerId)) out.push(x.forPlayerId); if (x.actorType === 'player' && nonEmpty(x.actorId)) out.push(x.actorId); } for (const x of listOf(r.readReceipts)) if (x.viewerKind === 'player' && nonEmpty(x.viewerId)) out.push(x.viewerId); }
+  if (coll === CONTACTS) { if (isPlainObject(r.recipient) && isRef(r.recipient.playerId)) out.push(r.recipient.playerId); }
+  else { for (const rv of listOf(r.revisions)) if (isPlainObject(rv.recipientSnapshot) && isRef(rv.recipientSnapshot.playerId)) out.push(rv.recipientSnapshot.playerId); for (const x of listOf(r.responses)) { if (isRef(x.forPlayerId)) out.push(x.forPlayerId); if (x.actorType === 'player' && isRef(x.actorId)) out.push(x.actorId); } for (const x of listOf(r.readReceipts)) if (x.viewerKind === 'player' && isRef(x.viewerId)) out.push(x.viewerId); }
   return out;
 }
-/** The same occurrences over the tables, per collection (one row per occurrence, `pid` the referenced id). */
+/** The same occurrences over the tables, per collection (one row per occurrence, `pid` the referenced id; `IS NOT NULL` is the one reference rule in SQL). */
 const PLAYER_REFS_SQL = {
   recruitmentContacts: 'SELECT player_id AS pid FROM recruitment_contacts UNION ALL SELECT recipient_player_id FROM recruitment_contacts WHERE recipient_player_id IS NOT NULL',
   recruitmentOffers: "SELECT player_id AS pid FROM recruitment_offers UNION ALL SELECT recipient_player_id FROM offer_revisions WHERE recipient_player_id IS NOT NULL UNION ALL SELECT for_player_id FROM offer_responses WHERE for_player_id IS NOT NULL UNION ALL SELECT actor_id FROM offer_responses WHERE actor_type = 'player' AND actor_id IS NOT NULL UNION ALL SELECT viewer_id FROM offer_read_receipts WHERE viewer_kind = 'player' AND viewer_id IS NOT NULL",
@@ -398,7 +412,7 @@ export function preflight(sqlite, supplied, { stored, cases, requests, departing
     const noGuardian = []; for (const coll of ALL) for (const r of supplied[coll.name] ?? []) for (const g of guardianIdsOf(coll, r)) if (!guardianIds.has(g)) noGuardian.push([coll.table, r.id, g]);
     // the FINAL combined state (the S8a Q7c rule applied to these tables): when the snapshot rewrites the guardians, every RETAINED contact/offer must still name an existing one
     if (guardians !== undefined) for (const [table, id, g] of retainedGuardianRefs) if (!guardianIds.has(g)) noGuardian.push([table, id, g]);
-    if (noGuardian.length) throw refusal('CONTACTS_OFFERS_GUARDIAN_MISSING', `${noGuardian.length} row(s) in ${label} name a guardian that does not exist in the final guardians table (${ids(noGuardian.map((x) => `${x[0]} ${x[1]} → ${x[2]}`))}; Q8c-b: strict); the write was rolled back and nothing was changed — no account is created, unlinked or deleted to satisfy this`, { rows: noGuardian.map((x) => `${x[0]} ${x[1]}`) });
+    if (noGuardian.length) throw refusal('CONTACTS_OFFERS_GUARDIAN_MISSING', `${noGuardian.length} row(s) in ${label} name a guardian that does not exist in the final guardians table (${ids(noGuardian.map((x) => `${x[0]} ${x[1]} → ${shownId(x[2])}`))}; Q8c-b: strict); the write was rolled back and nothing was changed — no account is created, unlinked or deleted to satisfy this`, { rows: noGuardian.map((x) => `${x[0]} ${x[1]}`) });
   }
   // (8) THE POINTER RULE over the FINAL offer collection: the supplied array alone when supplied (a departing offer owns nothing), the stored collection when omitted
   const finalOffers = final(OFFERS);

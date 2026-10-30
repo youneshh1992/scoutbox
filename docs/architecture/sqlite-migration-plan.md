@@ -3525,7 +3525,22 @@ paragraph).
 `s8c-readiness-review.md` §14); S8d is not started.** Nothing in this section is a production, release, security,
 legal-compliance, merge or deployment approval.
 
-### D.10 S8c (contacts, offers) — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (the design prepared 23 October 2026 from the code at `7072dd9`, corrected 24 October 2026 after the independent reviews of `854d035` and `a5a7ed9`, independently accepted for implementation at `19f5ca8`; implemented 24 October 2026 on top of `19f5ca8` under the Founder's decisions Q8c-a and Q8c-b of 24 October 2026)
+### D.10 S8c (contacts, offers) — IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (the design prepared 23 October 2026 from the code at `7072dd9`, corrected 24 October 2026 after the independent reviews of `854d035` and `a5a7ed9`, independently accepted for implementation at `19f5ca8`; implemented 24 October 2026 on top of `19f5ca8` under the Founder's decisions Q8c-a and Q8c-b of 24 October 2026; corrected 24 October 2026 after the independent review of `535e247` and again 30 October 2026 for the empty-string id finding)
+
+**Correction (30 October 2026, one commit on top of `9fb1bc6`; the review's §14.2, which states THE ONE REFERENCE RULE
+once — "a string id, empty included, is a reference occurrence; an absent or null id is none" — for the nested account
+ids of the nine tables).** The 27 October read-only probe found the live player counters (`PLAYER_REFS_SQL`, `IS NOT
+NULL`) counting a nested empty-string player id as unresolved while the cutover count (`playerIdsOf`, gated on
+`nonEmpty` since F3) skipped it; the survey found the same split on the strict side (`guardianIdsOf` accepting an
+empty-string guardian id that `storedGuardianRefs` later refused as a blank). The Founder decided on 30 October 2026,
+on the decision brief: count the empty string on both sides (the live count is right, the S8b precedent and Q8c-a's
+"preserved and counted"); apply the same rule to the guardian ids, so under Q8c-b an empty-string guardian id is
+refused at the cutover and at a snapshot write with the id rendered quoted (`rct-1 → ""`); leave existing cutover
+records untouched — a record is the count the import saw under its build's rule, the live report is the current
+figure, no meta key is edited and no migration re-runs. No production writer produces an empty nested id. Tests first
+on the unchanged tree (the S8c unit suite 12 → 14 checks); no table, column, key, migration number, route or policy
+change; Q8c-a and Q8c-b not reopened; S8b's mirror-image `null` edge and the offer pointers' empty-string edge
+observed and left out of scope (§14.2).
 
 **Correction (24 October 2026, one commit on top of `535e247`; the review's §14.1).** The independent review of `535e247`
 found the implementation NOT accepted: three P2 findings, four reproduced cases against the real store. **F1** — the

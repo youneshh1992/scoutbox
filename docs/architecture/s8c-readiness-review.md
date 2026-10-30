@@ -2,8 +2,9 @@
 
 **Status: IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE (24 October 2026, one commit on top of `19f5ca8`; CORRECTED on
 24 October 2026 after the independent review of `535e247` — three P2 implementation findings F1, F2, F3, §14.1 the
-correction record; the design, the earlier F1/F2/R1 pointer corrections, the S8b acceptance and the two Founder answers
-unchanged).** The design
+correction record; CORRECTED AGAIN on 30 October 2026 for the empty-string id finding of the 27 October read-only
+probe — §14.2 the correction record and THE ONE REFERENCE RULE for the nested account ids; the design, the earlier
+F1/F2/R1 pointer corrections, the S8b acceptance and the two Founder answers unchanged).** The design
 below was written on `feat/sqlite-schema` at `7072dd9`, the commit at which S8b was independently accepted
 (`sqlite-migration-plan.md` §D.9; `s8b-readiness-review.md` §12), corrected on 24 October 2026 after the independent
 review of `854d035` (F1 the offer-pointer contract, F2 the model's order and guard) and again after the independent
@@ -996,7 +997,9 @@ was corrected; the reviewer's unchanged script then exits 0 in both modes on Nod
   counters count those naming no player / a retained record; the per-collection, count-only report shape is unchanged
   (`/capabilities` → `dataLayer.domains.recruitmentContactsOffers`); `playerIdsOf` counts a nested id only when it is a
   non-empty string, so the cutover record and the live report count alike. The reviewer's fixture (live parents, five
-  missing nested references) now reports `{ recruitmentContacts: 1, recruitmentOffers: 4 }`. The regression (`[review
+  missing nested references) now reports `{ recruitmentContacts: 1, recruitmentOffers: 4 }`. *(Correction of 30 October
+  2026, §14.2: "non-empty" was one edge too far — the `nonEmpty` gate dropped a nested EMPTY string at the cutover while
+  the SQL counted it; the rule is now "a string id, empty included".)* The regression (`[review
   535e247 F3]`): field by field for missing, live and retained accounts, a duplicate occurrence counted twice, a
   guardian-typed actor or viewer never counted as a player reference, the counts equal to the cutover's, updated after
   a staged save, a restore and a restart, no id in the aggregate report; `retainedPlayerReferences` the same fields.
@@ -1017,3 +1020,98 @@ failures identical on both trees (`m23Persistence`, `m23BootContract`, `m23Signi
 edits of this correction (backend `npm test` on Node 22 and Node 24 with the nine historical builds booted for real,
 the Player suite, the reviewer scripts on both runtimes) are recorded with versions, counts and exits in the handoff
 (`logs/gates/gates-run.txt`, `REVIEW-START-HERE.md`) and in the draft pull request.
+
+### 14.2 Correction — the empty-string id finding (30 October 2026, one commit on top of `9fb1bc6`)
+
+**The finding.** Reproduced read-only on 27 October 2026 (the kit's `milestones/upload/probe/probe.mjs`, `[probe
+empty-id]`) and confirmed from source on 30 October: the live player counters (`PLAYER_REFS_SQL`, the nested columns
+selected `WHERE … IS NOT NULL`) counted a nested empty-string player id as an unresolved reference, while the cutover
+count (`playerIdsOf`, after F3 gated on `nonEmpty`) skipped it, so `meta.recruitmentContactsOffersCutover.players
+.missing` and `/capabilities → dataLayer.domains.recruitmentContactsOffers.unresolvedPlayerReferences` disagreed by
+one per occurrence. §14.1's F3 sentence "`playerIdsOf` counts a nested id only when it is a non-empty string, so the
+cutover record and the live report count alike" was right for `null` (which `535e247`'s `presentKey` had counted and
+the SQL never did) and wrong for `''`: F3 closed one edge and opened this one. The survey for the decision brief found
+the same split on the strict side, present since `535e247`: `guardianIdsOf` (`nonEmpty`) let a supplied record with an
+empty-string guardian id through the Q8c-b check at the cutover and at every snapshot write, while `storedGuardianRefs`
+(`IS NOT NULL`) named that same stored `''` as missing once a snapshot rewrote the guardians — a value accepted on the
+way in and refused later, with a refusal that read as a blank (`rct-1 → `).
+
+**The decision (the Founder, 30 October 2026, on the decision brief; recorded here and not to be asked again).** Count
+the empty string on both sides: the live count is right. Include the guardian side under the same rule, with the empty
+id rendered unmistakably in the refusal. Leave existing cutover records untouched and document what they mean.
+
+**THE ONE REFERENCE RULE** (stated here once; plan §D.10, `OPERATIONS.md` and `CLAUDE.md` refer to it):
+> **A string id, empty included, is a reference occurrence; an absent or null id is none.**
+
+It applies to the nested account ids of the nine tables — the player ids of Q8c-a (`recipient_player_id` of a contact
+and of a revision snapshot, `for_player_id`, the player `actor_id`, the player `viewer_id`) and the guardian ids of
+Q8c-b (`recipient_guardian_id` of a contact and of a revision snapshot, the guardian `actor_id`, the guardian
+`viewer_id`). It is what the tables hold (a nested id column is `text`: `''` is stored verbatim, NULL means absent or
+null) and what the SQL reads (`IS NOT NULL`); the code now says the same (`isRef`, `typeof v === 'string'`). The parent
+`player_id` is required and non-empty (`validateEntry`) and outside the rule; the five offer pointers keep the §6
+pointer rule; request and staff ids are unchanged.
+
+**Why this side.** (1) The accepted S8b precedent (`recruitmentCases.mjs`: the cutover's `presentKey`, the live SQL's
+`IS NOT NULL`) counts an empty-string `playerId` on both sides, and S8c did so at `535e247`. (2) Q8c-a as recorded: "a
+historically missing id is preserved and counted"; the table provably holds a string that names no player. (3) Making
+the SQL ignore `''` instead would report a stored value that resolves to nothing as nothing wrong. (4) No production
+writer can produce an empty nested id: a contact's recipient and an offer's revision recipient come only from
+`resolveContactRecipient` (`m23/contact.mjs:261`, `:280`), which sets a found live player's id and fails closed
+otherwise; `forPlayerId` is the parent id (`m28/index.mjs:747`); the player actor and viewer ids are the authenticated
+`req.player.id`; a guardian id is `null` or a found guardian's id; a player or guardian id is never `''`
+(`identity.mjs:183`, `identityPreflight.mjs:190`). The rule decides synthetic, hand-edited and corrupt files only.
+
+**What changed (`repositories/recruitmentContactsOffers.mjs`; no table, column, key, migration number, route or
+policy; Q8c-a and Q8c-b not reopened).**
+- `playerIdsOf` counts a nested value when it is a string, empty included (`isRef`), as `PLAYER_REFS_SQL` reads it.
+  `PLAYER_REFS_SQL`, `unresolvedPlayerReferences` and `retainedPlayerReferences` are unchanged. An empty string is
+  stored verbatim (never null, never off-type, never repaired) and is never refused.
+- `guardianIdsOf` names a guardian id when it is a string, empty included. Under Q8c-b an empty-string guardian id is
+  therefore a reference that names no guardian: the cutover and every snapshot write (a supplied record, or a retained
+  row when the guardians are rewritten) refuse it with `CONTACTS_OFFERS_GUARDIAN_MISSING`, atomically, ids only. In
+  that refusal an empty or whitespace-only id is rendered JSON-quoted (`shownId`): `recruitment_contacts rct-1 → "";
+  Q8c-b: strict`. Any other id renders as before, so the reviewers' expectations (`rct-ghost → gd-ghost`) hold. No
+  account is created, unlinked or deleted to satisfy it; a null or absent guardian id stays accepted.
+- Nothing is dropped, fabricated or repaired; no name or id enters the aggregate report.
+
+**The cutover record of an already-migrated file.** `meta.recruitmentContactsOffersCutover` is written once, by the
+import, and is never rewritten: it is the count the import saw under the rule of the build that ran it. A file cut over
+by the `9fb1bc6` build whose blobs held nested empty-string player ids records a `players.missing` lower than this
+build's live report by exactly those occurrences; the live report is the current figure. No meta key is edited and no
+migration re-runs. No real file has been cut over at `0017`; such records are synthetic. A file cut over by `9fb1bc6`
+holding an empty-string guardian id (never produced by a writer) is served as it is until a snapshot write rewrites the
+guardians, which refuses it with the quoted id, as before this correction but legibly; the rollback tool writes every
+`''` back verbatim either way.
+
+**Tests first (`scripts/testRecruitmentContactsOffers.mjs`, 12 → 14 checks).** Two tests written on the unchanged
+`9fb1bc6` source and failing there on behavioural assertions (the captured output is in the handoff,
+`milestones/s8c-empty-ids/failing-first/`): `[empty-string ids — the ONE reference rule, Q8c-a]` — the reviewer's
+fixture (an empty-string contact recipient; an offer with an empty-string revision recipient, for-player id, player
+actor and player viewer) plus null and absent controls on every field: the empty strings are in their columns, the
+cutover records `players { live: 5, retained: 0, missing: 5 }` (on `9fb1bc6`: `missing: 0`), the live report
+`{ recruitmentContacts: 1, recruitmentOffers: 4 }` equals it, the retained counts are 0, the null and absent ids count
+on neither side, a staged save re-validating the records lands and a restore counts alike. `[empty-string ids — the
+ONE reference rule, Q8c-b]` — for each of the four guardian kinds (contact recipient, offer revision recipient, guardian
+response actor, guardian receipt viewer): the cutover refuses with the quoted id, nothing written, the next boot
+refusing the same way (on `9fb1bc6`: imported unrefused); the snapshot write of the same record to a live file refuses
+atomically with the revision unchanged; a null guardian id and an absent guardian id import and land on both paths.
+The twelve existing checks are unchanged and pass.
+
+**Observed, out of scope, no change.** (a) S8b (`recruitmentCases.mjs`, accepted at `7072dd9`) has the mirror-image
+edge for `null`: its cutover's `presentKey` counts a present `null` snapshot or decision `playerId` as missing, its live
+SQL excludes NULL. Noted for S8b's record; S8b is accepted and is not changed here. (b) The five offer pointers:
+`classifyPointers` gates on `nonEmpty`, `unresolvedPointerReferences` reads `IS NOT NULL`, so an empty-string pointer
+is counted live and not at the cutover; no refusal path is affected (an owner match needs a real id). Not part of the
+Founder's decision of 30 October; recorded for a later decision.
+
+**Gates (run by the Founder on the Mac, Darwin arm64, after the final edits; `evidence/scripts/run-gates.sh`, logs
+`gates-20261030T164747Z`, one attempt).** Backend `cd scoutbox-server && npm test` on Node v22.23.4 (SQLite 3.53.4,
+npm 10.9.9): exit 0, 37 suites, **438 checks** (the 30 October baseline at `9fb1bc6`, `gates-20261030T160049Z`: 436 —
+the two new tests account for the difference), the nine historical builds booted for real with the same boot counts
+as the baseline, 0 assertion failures, 0 `EADDRINUSE`, 581 s. The same on Node v24.19.0 (SQLite 3.53.3): exit 0, 438
+checks, 575 s. Player `cd scoutbox-player && npm test -- --runInBand`: exit 0, 4 suites, 41 tests. Every reviewer
+script and probe on both runtimes with the same exit and counts as the baseline, the two S8b-bundle scripts included
+(exit 1 for the known `LATER_SCHEMA` reason of §14). Skipped by design, as in the baseline: the real older-Node runtime
+checks (`SCOUTBOX_TEST_NODE_BINS` unset). Not run: the browser suites, the demo rebuild, the Player E2E, the bench. The
+S8c unit suite alone was also run in the desktop sandbox before and after the fix (the failing-first and after-fix
+captures in `milestones/s8c-empty-ids/`).
