@@ -92,9 +92,13 @@ async function offline(mutate) {
   await down(server, 'SIGTERM');
   const store = openStore(DATA_DIR); const snap = store.load();
   await mutate(snap.db, snap);
-  store.save({ ...snap, db: snap.db });
+  // S8d: the signing tables hold typed columns only, so a planted value a column cannot hold is REFUSED at the save
+  // (nothing lands); the refusal is returned and the server comes back on the untouched file.
+  let refused = null;
+  try { store.save({ ...snap, db: snap.db }); } catch (err) { refused = err; }
   server = await boot();
   await relogin();
+  return refused;
 }
 /** A plain restart (SIGTERM saves; nothing edited). */
 async function restart() { await down(server, 'SIGTERM'); server = await boot(); await relogin(); }
@@ -915,9 +919,10 @@ section('Q — restart: idempotency converges, nothing duplicates (§33, §34)')
 section('R — corrupt current pointers and unknown states fail closed (§35, §36)');
 {
   const Hh = globalThis.__H; const K = globalThis.__K;
+  // S8d: the package's status is a CHECKed column — the unknown word is refused at the save, naming the package; it is planted in its own save so the two other corruptions land
+  let bogusPkg = null; const bogus = await offline((db) => { const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); bogusPkg = pkg?.id ?? null; if (pkg) pkg.status = 'BOGUS'; });
   await offline((db) => {
     const o = db.recruitmentOffers.find((x) => x.id === K.OID); o.currentRevisionId = 'rofr-gone';
-    const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); if (pkg) pkg.status = 'BOGUS';
     const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); if (k) k.room.status = 'SIGNEDX';
   });
   const jK = await jb(K.RID);
@@ -925,14 +930,13 @@ section('R — corrupt current pointers and unknown states fail closed (§35, §
   const issue = await j('POST', `/org/offers/${K.OID}/issue`, { expectedRev: 1, clientKey: key() }, maria.token, at(T0));
   neg(issue.status >= 400, `R1b the domain route refuses the corrupt Offer (${issue.status} ${issue.body?.error})`);
   const jN = await jb(Hh.R5);
-  neg(jN.resources.signingPackageId === null || jN.stage === 'signed', `R2 a package with an unknown status is never live (${jN.stage}, ${jN.resources.signingPackageId})`);
+  neg(bogusPkg === null || (bogus && /SIGNINGS_IMPORT_BLOCKED/.test(bogus.message) && bogus.message.includes(bogusPkg) && bogus.message.includes('status must be one of') && jN.classification !== 'integrity_error'), `R2 (S8d) an unknown status word cannot be stored: the save refuses it, naming the package; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`);
   const j4 = await jb(globalThis.__B.R4);
   neg(j4.nextAction.code === 'STATE_UNKNOWN' && j4.classification === 'integrity_error' && j4.integrity.includes('LIFECYCLE_STATE_UNKNOWN'), 'R3 an unknown lifecycle word: STATE_UNKNOWN, integrity_error');
   const mv = await lifecycle(globalThis.__B.R4, 'startReview');
   neg(mv.status >= 400 && /LIFECYCLE_STATE_UNKNOWN|ROOM|LIFECYCLE/.test(mv.body?.error ?? ''), `R3b the lifecycle refuses to move an unknown state (${mv.status} ${mv.body?.error})`);
   await offline((db) => {
     const o = db.recruitmentOffers.find((x) => x.id === K.OID); o.currentRevisionId = o.revisions[o.revisions.length - 1].id;
-    const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); if (pkg) pkg.status = 'COMPLETED';
     const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); if (k) k.room.status = 'archived';
   });
   ok((await jb(K.RID)).classification !== 'integrity_error', 'R4 restored, the case reads sound again (nothing was repaired on read: the store was put right)');

@@ -740,8 +740,9 @@ section('Z — the boundary: ONE writer of db.signings, signed and under_contrac
   const walk = (d) => { for (const f of readdirSync(d)) { const p = path.join(d, f); if (f === 'node_modules' || f === 'scripts' || f.startsWith('.')) continue; if (statSync(p).isDirectory()) walk(p); else if (f.endsWith('.mjs')) files.push(p); } };
   walk(root);
   const src = Object.fromEntries(files.map((f) => [path.relative(root, f), readFileSync(f, 'utf8')]));
-  const pushes = Object.entries(src).filter(([, s]) => /db\.signings\.push\(/.test(s)).map(([f]) => f);
-  neg(pushes.length === 1 && pushes[0] === 'm29/index.mjs', `#23 Z1 db.signings.push occurs in exactly one file: ${pushes.join(', ')}`);
+  // S8d: the signing row is written through the domain repository (`signings.record(...)`), never pushed on the view; the ONE writer is still m29/index.mjs.
+  const pushes = Object.entries(src).filter(([, s]) => /db\.signings\.push\(|signings\.record\(/.test(s)).map(([f]) => f).filter((f) => !f.startsWith('repositories/'));
+  neg(pushes.length === 1 && pushes[0] === 'm29/index.mjs', `#23 Z1 the signing row is written (signings.record / db.signings.push) in exactly one file outside the repositories: ${pushes.join(', ')}`);
   // S4a: the column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record.
   const uc = Object.entries(src).filter(([, s]) => /contractStatus\s*=\s*'under_contract'|players\.update\([^\n]*contractStatus: 'under_contract'/.test(s)).map(([f]) => f);
   neg(uc.length === 1 && uc[0] === 'm29/index.mjs', `#25 Z2 contractStatus 'under_contract' is written in exactly one file: ${uc.join(', ')}`);

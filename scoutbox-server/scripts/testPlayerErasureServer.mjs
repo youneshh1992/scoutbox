@@ -123,7 +123,7 @@ const naming = (dir, pid) => snap(dir, (c) => Object.fromEntries(AUDIT_TABLES.ma
 await test('[cutover] a fresh boot records 0014_player_erasure last; DELETE /player/account and DELETE /guardian/children/:id keep EXACTLY the agreed row (id, the deletion instant, the full birth date, the country; fixed placeholders; NULL elsewhere), remove the child rows, links, session, pairing code and queue the media file as today; afterwards the account is served by no reader — /player/me 401, login PLAYER_NOT_FOUND, the club\'s view and list 404/absent, the guardian\'s children list without the child, the pairing code refused, a second deletion refused — the audit rows naming the person are byte-identical and the Q4 count unchanged while the new retained-reference count names them; /capabilities counts the retained records; a SIGKILL and a restart serve the same', async () => {
   const dir = tempDir('s4br-routes'); let S = await boot(dir);
   let cap = (await S.j('GET', '/capabilities')).body;
-  assert.equal(cap.dataLayer.migrations.at(-4), MIGRATION, `0014 recorded after 0013 (S8a's 0015, S8b's 0016 and S8c's 0017 follow it: ${cap.dataLayer.migrations.slice(-4).join(', ')})`);
+  assert.equal(cap.dataLayer.migrations.at(-5), MIGRATION, `0014 recorded after 0013 (S8a's 0015, S8b's 0016, S8c's 0017 and S8d's 0018 follow it: ${cap.dataLayer.migrations.slice(-5).join(', ')})`);
   assert.equal(cap.dataLayer.domains.players.retained, 0, 'the report counts retained records');
   const maria = await orgLogin(S);
   const { pid, token, file } = await signupAdult(S, 'Erased Adult');
@@ -235,7 +235,7 @@ await test('[cutover] the admin backup carries the retained records under player
   // S8a: the live file carries 0015 as well, which the pre-S4b-R build cannot boot at all (its boot-contract check finds the
   // requests and trials collections absent and exits 1 — the S8a hazard, proven in testRecruitmentServer.mjs); the S4b-R
   // rollback and the S4b-R hazard below are exercised on the S8a rollback copy, a 0014 file with the retained rows.
-  const s8c = tempDir('s4br-s8c'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentContactsOffersRollback.mjs'), dir, s8c], { stdio: 'pipe' }); // S8c: the live file carries 0017 too; its rollback goes first
+  const s8c = tempDir('s4br-s8c'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, s8c], { stdio: 'pipe' }); // S8c: the live file carries 0017 too; its rollback goes first
   const s8b = tempDir('s4br-s8b'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), s8c, s8b], { stdio: 'pipe' }); // then S8b
   const s8a = tempDir('s4br-s8a'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), s8b, s8a], { stdio: 'pipe' });
   if (OLD && fs.existsSync(OLD)) {

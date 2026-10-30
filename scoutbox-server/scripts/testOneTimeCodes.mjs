@@ -29,7 +29,7 @@ import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs
 import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
 import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
 import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
-import { rollbackRecruitmentContactsOffersCopy } from '../repositories/recruitmentContactsOffersRollback.mjs';
+import { rollbackToPreS8c as rollbackRecruitmentContactsOffersCopy } from '../repositories/rollbackChain.mjs'; // S8d: the S8d step-back then the S8c tool, as one link (a live file carries 0018)
 import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
 import { openStore } from '../store.mjs';
 import { createMailer, OUTBOX_SECRET_PLACEHOLDER } from '../adapters.mjs';
@@ -81,7 +81,7 @@ test('migration 0008 (legacy blobs): every live entry is imported as a hash — 
   const dir = tempDir('otc-mig');
   s5File(dir, { emailChallenges: [legacyChallenge(), legacyChallenge({ orgId: 'org-gone-but-expired', expiresAt: NOW - MIN })], pairingCodes: [legacyPairing(), legacyPairing({ code: 'OLD999', playerId: 'pl-child2', expiresAt: NOW - 1 })] });
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s, { now: NOW }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers'], '0008, then 0009 (S7a), 0010 (S7b) and 0011 (S7c) on the same run');
+  assert.deepEqual(migrate(s, { now: NOW }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], '0008, then 0009 (S7a), 0010 (S7b) and 0011 (S7c) on the same run');
   const challenge = s.prepare('SELECT * FROM email_challenges').all().map((r) => ({ ...r }));
   assert.deepEqual(challenge, [{ org_id: 'org-pro', email: 'recruitment@eastport.test', code_hash: hashCode('CHAL22'), expires_at: NOW + 20 * MIN, attempts: 0 }]);
   const pairing = s.prepare('SELECT * FROM pairing_codes').all().map((r) => ({ ...r }));
@@ -468,7 +468,7 @@ test('rollback: the copy-only tool writes the empty code blobs the S5 build read
   assert.equal(applied(o).includes(ONE_TIME_CODES_MIGRATION), false); assert.equal(meta(o, ONE_TIME_CODES_CUTOVER_META), undefined);
   assert.deepEqual([blob(o, 'pairingCodes'), blob(o, 'emailChallenges')], [[], []]);
   for (const t of ['players', 'guardians', 'orgs', 'sessions', 'org_users', 'guardian_children']) assert.equal(JSON.stringify(o.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()), (() => { const s = openRaw(src); try { return JSON.stringify(s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()); } finally { s.close(); } })(), `${t} untouched`);
-  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers'], 're-upgrade: 0008 runs again on the empty blobs (0009, 0010 and 0011 follow, as the S7a, S7b and S7c copies had removed them)'); assert.equal(o.prepare('SELECT COUNT(*) AS n FROM pairing_codes').get().n, 0);
+  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], 're-upgrade: 0008 runs again on the empty blobs (0009, 0010 and 0011 follow, as the S7a, S7b and S7c copies had removed them)'); assert.equal(o.prepare('SELECT COUNT(*) AS n FROM pairing_codes').get().n, 0);
   o.close();
   const s5out = tempDir('otc-rb-s5'); const s5out2 = tempDir('otc-rb-s5b');
   assert.throws(() => rollbackPlayerSubrecordsCopy(dbFile(src), s5out), (err) => err.code === 'LATER_SCHEMA' && /0008_one_time_codes/.test(err.message)); assert.deepEqual(fs.readdirSync(s5out), []);

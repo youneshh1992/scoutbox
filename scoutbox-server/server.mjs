@@ -199,7 +199,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps } = dataLayer;
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -2763,9 +2763,12 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   if (rateLimit.limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
   if (!m29Ctx?.recordCompletedSigning) return res.status(500).json({ error: 'SIGNING_STORE_MISSING' });
   // S4a: the ledger row, the signings row and the player's level / contract columns commit as one unit of work.
+  // S8d: typed input only — a note is text of at most 400 characters, or absent; never sliced.
+  const legacyNote = req.body?.note;
+  if (legacyNote !== undefined && legacyNote !== null && legacyNote !== '' && (typeof legacyNote !== 'string' || legacyNote.length > 400)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'note', message: 'The note is text of at most 400 characters.' });
   let written;
   try {
-    written = unit(() => m29Ctx.recordCompletedSigning({ player: p, org: req.org, actor: req.orgUser, at: Date.now(), legacy: { note: typeof req.body?.note === 'string' ? req.body.note.slice(0, 400) : null } }));
+    written = unit(() => m29Ctx.recordCompletedSigning({ player: p, org: req.org, actor: req.orgUser, at: Date.now(), legacy: { note: typeof legacyNote === 'string' && legacyNote ? legacyNote : null } }));
   } catch (e) {
     console.error(`SIGNING legacy_recording_rolled_back ${p.id}: ${e?.message ?? e}`);
     return res.status(500).json({ ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'The signing could not be recorded; nothing was recorded.' });
@@ -4627,6 +4630,7 @@ function revokeOrgUserAccess(userId) {
 registerM12({
   db, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases,
+  signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4982,6 +4986,7 @@ m29Ctx = registerSigning({
   ledgerAppend,
   // S4a: the player's level, contract status and availability are columns written through the identity repository; a completion is one unit of work.
   players, unit, afterCommit: (fn) => store.afterCommit(fn),
+  signingsFollowUps, // S8d: packages and signings are explicit repository writes
   billing,
   refreshJourneyBadges,
   findRoomForRequest: m17Ctx.findRoomForRequest,

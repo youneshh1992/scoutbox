@@ -124,7 +124,7 @@ const moveStatus = async (S, token, id, status, extra = {}) => S.j('POST', `/org
 
 await test('[cutover] a fresh boot records 0016_recruitment_cases last; the twenty-five tables exist, recruitment_requests and trials carry the REAL case key, idempotency_keys the broadened CHECK, no blob behind any of the five; a room created, a comment (edited, tombstoned), a task, a status move with its snapshot, an archive and a reopen, an evidence review overwritten in place, a draft replayed/conflicted/patched/finalized with its key rows, an M12 case with its budget and a room adopting it land as rows the moment the route answers; the handoff readiness route, the listing and reading routes answer as before; a SIGKILL right after a comment loses nothing; /capabilities counts the rows; [compat] another club gets 404, the player\'s and the guardian\'s surfaces carry no internal note, no decision and no room', async () => {
   const dir = tempDir('s8b-boot'); let S = await boot(dir);
-  assert.equal(applied(dir).at(-2), MIGRATION, 'the recorded migration (0017_recruitment_contacts_offers, S8c, follows it on the same boot)'); assert.equal(applied(dir).at(-1), '0017_recruitment_contacts_offers'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
+  assert.equal(applied(dir).at(-3), MIGRATION, 'the recorded migration (0017_recruitment_contacts_offers, S8c, and 0018_signings_follow_ups, S8d, follow it on the same boot)'); assert.equal(applied(dir).at(-2), '0017_recruitment_contacts_offers'); assert.equal(applied(dir).at(-1), '0018_signings_follow_ups'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   for (const t of ['recruitment_requests', 'trials']) assert.ok(fkOf(dir, t).includes('case_id->recruitment_cases(id) RESTRICT'), `${t}.case_id is a real key: ${fkOf(dir, t)}`);
   assert.match(ddlOf(dir, 'idempotency_keys') ?? '', /'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions'/, 'the broadened owner CHECK');
   for (const n of COLLECTIONS) assert.equal(blobOf(dir, n), undefined, `${n}: no blob`);
@@ -281,7 +281,7 @@ await test('[cutover] the admin backup carries the five collections in the legac
     rm(direct);
   }
   // the rollback copy
-  const s8cCopy = tempDir('s8b-copy-s8c'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentContactsOffersRollback.mjs'), dir, s8cCopy], { stdio: 'pipe' }); // S8c: a live file carries 0017; its tool goes first
+  const s8cCopy = tempDir('s8b-copy-s8c'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, s8cCopy], { stdio: 'pipe' }); // S8c: a live file carries 0017; its tool goes first
   const copy = tempDir('s8b-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), s8cCopy, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
   assert.equal(live(copy), false); for (const t of TABLES) assert.equal(tableExists(copy, t), false, `${t} dropped`); assert.ok(tableExists(copy, 'trials'), 'the S8a tables stay');
   for (const n of COLLECTIONS) assert.deepEqual(blobOf(copy, n), snapshot.db[n], `${n} blob equals the backup's legacy shape`);
@@ -304,7 +304,7 @@ await test('[cutover] the admin backup carries the five collections in the legac
     console.log('    (pre-S8b build booted the rollback copy: the same room, thread and decision in its routes, a comment and a case written into its blobs; re-upgraded with those writes)');
   } else console.log('    (SCOUTBOX_PRE_S8B_SERVER not set: the pre-S8b boots of the live copy and of the rollback copy were NOT exercised here)');
   // a null blob on a rollback copy is refused at boot
-  const nulPre = tempDir('s8b-null-s8c'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentContactsOffersRollback.mjs'), dir, nulPre], { stdio: 'pipe' }); // S8c first
+  const nulPre = tempDir('s8b-null-s8c'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, nulPre], { stdio: 'pipe' }); // S8c first
   const nul = tempDir('s8b-null'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), nulPre, nul], { stdio: 'pipe' });
   { const s = new DatabaseSync(path.join(nul, 'scoutbox.db')); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run('roomComments', 'null'); s.close(); }
   const stateOf = () => ({ recorded: applied(nul).includes(MIGRATION), tables: TABLES.filter((t) => tableExists(nul, t)), blob: blobTextOf(nul, 'roomComments'), saveSeq: q1(nul, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value, dump: recDump(nul) });
@@ -325,7 +325,7 @@ await test('[review 2fe05df R1] the real server refuses a 0016 file whose key fo
   const before = stateOf();
   const r = await bootRefused(dir); assert.equal(r.code, 1, `exit 1 — ${r.log.slice(-600)}`); assert.doesNotMatch(r.log, /listening on/, 'never listened'); assert.match(r.log, /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `the refusal named — ${r.log.slice(-600)}`); assert.doesNotMatch(r.log, /Adult Signup|Harbour Road/);
   assert.equal(stateOf(), before, 'the refused boot changed nothing');
-  const out = tempDir('s8b-fmt-cli'); let cli = null; try { execFileSync(process.execPath, [path.join(HERE, 'recruitmentContactsOffersRollback.mjs'), dir, out], { stdio: 'pipe' }); } catch (e) { cli = e; } // the S8c tool (the first link of the chain on a 0017 file) checks the S8b marker before reading anything
+  const out = tempDir('s8b-fmt-cli'); let cli = null; try { execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, out], { stdio: 'pipe' }); } catch (e) { cli = e; } // the S8c tool (the first link of the chain on a 0017 file) checks the S8b marker before reading anything
   assert.equal(cli?.status, 6, `the rollback CLI refuses with exit 6 (${cli?.status}: ${String(cli?.stderr ?? '').slice(-300)})`); assert.match(String(cli?.stderr ?? ''), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/); assert.equal(fs.readdirSync(out).length, 0, 'no output');
   assert.equal(stateOf(), before, 'the refused rollback changed nothing');
   write((s) => s.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(META, recorded));

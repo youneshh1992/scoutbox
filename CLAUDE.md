@@ -34,7 +34,9 @@ and design changes the Founder explicitly requests.
 - From S8d onwards, therefore: no new copy-only rollback tools; no new historical-build boots in the gate; no
   compatibility work for files written by earlier development builds; no operator warnings for deployments that do
   not exist. The nine existing rollback tools and their boots stay in the gate until this branch is merged to
-  `main`, because they are the only proof the existing chain works; they go with the merge.
+  `main`, because they are the only proof the existing chain works; they go with the merge. (S8d added the one
+  link that keeps that chain provable from a file the current build writes — `scripts/rollbackToPreS8c.mjs`, a
+  test-chain tool, not an operator procedure; it goes with the chain.)
 - The first real users, and what has to be true for them, are the Founder's questions to answer; the migration plan
   does not assume a date.
 - **Fidelity rule from S8d onwards (the Founder's decision of 30 October 2026):** preserve API behaviour for valid

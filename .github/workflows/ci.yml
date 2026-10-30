@@ -33,11 +33,12 @@ jobs:
       - name: Connected-mode end-to-end (isolated servers, SIGKILL durability, prod gate)
         run: node scripts/connectedE2E.mjs
       - name: Migrated-domain end-to-end batteries (each spawns its own server)
-        # The batteries that pass on the current tree (s8c-readiness-review.md §14). Four fail identically on the
-        # accepted 7072dd9 tree and today (m23Persistence, m23BootContract, m23SigningPersistence,
-        # m23AgentTransactionPersistence): pre-existing defects to fix before they join this step, not to skip here.
+        # The batteries that pass on the current tree (s8c-readiness-review.md §14; m23SigningPersistence joined at
+        # S8d, its fixture fixed). Three fail identically on the accepted 7072dd9 tree and today (m23Persistence,
+        # m23BootContract, m23AgentTransactionPersistence): pre-existing defects to fix before they join this step,
+        # not to skip here.
         run: |
-          for s in m13E2E m23ContactPersistence m23OfferPersistence m23DecisionPersistence m23TrialPersistence m23RecruitmentJourneyPersistence; do
+          for s in m13E2E m23ContactPersistence m23OfferPersistence m23DecisionPersistence m23TrialPersistence m23RecruitmentJourneyPersistence m23SigningPersistence; do
             echo "== $s"; node "scripts/$s.mjs" || exit 1
           done
 

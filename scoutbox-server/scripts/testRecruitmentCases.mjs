@@ -57,7 +57,7 @@ try { rc = await import('../repositories/recruitmentCases.mjs'); } catch { rc = 
 try { rollbackMod = await import('../repositories/recruitmentCasesRollback.mjs'); } catch { rollbackMod = null; }
 const s8aRollbackMod = await import('../repositories/recruitmentRollback.mjs'); // the S8a tool: the rollback chain's previous link
 const needRc = () => { assert.ok(rc?.createRecruitmentCasesRepository, 'repositories/recruitmentCases.mjs exports createRecruitmentCasesRepository (the S8b repository module)'); return rc; };
-const s8cRollbackMod = await import('../repositories/recruitmentContactsOffersRollback.mjs'); // S8c: a live file of this build carries 0017, which the S8b tool refuses outright (LATER_SCHEMA); the chain runs the S8c tool (copy-only) first and the S8b tool on ITS output
+const s8cRollbackMod = { rollbackRecruitmentContactsOffersCopy: (await import('../repositories/rollbackChain.mjs')).rollbackToPreS8c }; // S8d: the S8d step-back then the S8c tool, as one link (a live file carries 0018); // S8c: a live file of this build carries 0017, which the S8b tool refuses outright (LATER_SCHEMA); the chain runs the S8c tool (copy-only) first and the S8b tool on ITS output
 const viaS8c = (file, out, opts = {}) => { const s8c = tempDir('s8b-via-s8c'); s8cRollbackMod.rollbackRecruitmentContactsOffersCopy(file, s8c, { now: opts.now }); return rollbackMod.rollbackRecruitmentCasesCopy(dbFile(s8c), out, opts); };
 const needRollback = () => { assert.ok(rollbackMod?.rollbackRecruitmentCasesCopy, 'repositories/recruitmentCasesRollback.mjs exports rollbackRecruitmentCasesCopy (the S8b rollback module)'); return viaS8c; };
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
@@ -110,17 +110,17 @@ const reversed = (over) => Object.fromEntries(Object.entries(over).map(([k, v]) 
 
 // ------------------------------------------------------------- the migration
 test('[cutover] migration 0016 is registered last and, on an S8a-core file, creates the twenty-five case and room tables, rebuilds recruitment_requests and trials with the REAL case_id key (RESTRICT — Q7b\'s conversion) and idempotency_keys with the broadened owner CHECK while every S8a row, key row, thread, message and attachment survives byte for byte; imports the five blobs row for row and retires them; records counts only (the Q8a player counts included); reruns are no-ops; a file without the blobs creates the tables and imports nothing — never from the seed or memory', () => {
-  assert.equal(DATA_MIGRATIONS.at(-2)?.id, MIGRATION, 'migration 0016_recruitment_cases is registered after 0015; 0017_recruitment_contacts_offers (S8c) follows it'); assert.equal(DATA_MIGRATIONS.at(-1)?.id, '0017_recruitment_contacts_offers');
+  assert.equal(DATA_MIGRATIONS.at(-3)?.id, MIGRATION, 'migration 0016_recruitment_cases is registered after 0015; 0017_recruitment_contacts_offers (S8c) follows it'); assert.equal(DATA_MIGRATIONS.at(-2)?.id, '0017_recruitment_contacts_offers'); assert.equal(DATA_MIGRATIONS.at(-1)?.id, '0018_signings_follow_ups');
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is a table-backed collection`);
   const dir = tempDir('s8b-mig'); preS8bFile(dir);
   const s = openRaw(dir);
   const s8aBefore = JSON.stringify(S8A_TABLES.map((t) => s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all())); const threadsBefore = JSON.stringify([s.prepare('SELECT * FROM channels ORDER BY seq').all(), s.prepare('SELECT * FROM messages ORDER BY seq').all()]);
   const blobs = Object.fromEntries(COLLECTIONS.map((n) => [n, blob(s, n)]));
   const ran = migrateAll(s);
-  assert.deepEqual(ran.ran, [MIGRATION, '0017_recruitment_contacts_offers'], '0017 (S8c) runs on the same boot');
+  assert.deepEqual(ran.ran, [MIGRATION, '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], '0017 (S8c) runs on the same boot');
   for (const t of TABLES) assert.ok(tableExistsIn(s, t), `${t} exists`);
   for (const t of ['recruitment_requests', 'trials']) assert.ok(fkTargets(s, t).includes('case_id->recruitment_cases(id) RESTRICT'), `${t}.case_id is a real key: ${fkTargets(s, t)}`);
-  assert.match(ddlOf(s, 'idempotency_keys'), /owner_table IN \('recruitment_requests', 'trials', 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions', 'recruitment_contacts', 'recruitment_offers'\)/, 'the broadened owner CHECK (0016 adds the four S8b owners; 0017, on the same boot, the two S8c owners)');
+  assert.match(ddlOf(s, 'idempotency_keys'), /owner_table IN \('recruitment_requests', 'trials', 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions', 'recruitment_contacts', 'recruitment_offers', 'signing_packages'\)/, 'the broadened owner CHECK (0016 adds the four S8b owners; 0017, on the same boot, the two S8c owners; 0018 the S8d one)');
   assert.equal(JSON.stringify(S8A_TABLES.map((t) => s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all().filter((r) => !['case_decision_drafts', 'case_transaction_handoffs', 'room_decisions', 'recruitment_cases', 'recruitment_contacts', 'recruitment_offers'].includes(r.owner_table)))), s8aBefore, 'every S8a row (the key rows of the two S8a owners included) survives the rebuilds byte for byte');
   assert.equal(JSON.stringify([s.prepare('SELECT * FROM channels ORDER BY seq').all(), s.prepare('SELECT * FROM messages ORDER BY seq').all()]), threadsBefore);
   assert.equal(s.prepare('PRAGMA foreign_key_check').all().length, 0);

@@ -127,7 +127,7 @@ const TERMS = { role: 'Central midfielder', squad: 'Under-23s', startDate: '2027
 
 await test('[cutover] a fresh boot records 0017_recruitment_contacts_offers last; the nine tables exist with the real keys, idempotency_keys the broadened CHECK, no blob behind either collection; a contact drafted, edited, sent with one injected transport failure (the failed attempt a row) and then delivered — its request row, its send key and its history landing in the route\'s own save — answered through the real respond route; an external record; an offer created, edited, issued, revised (a draft beside the issued revision), viewed by the recipient (a receipt row) and accepted with the draft discarded (discarded_by_response_id on it only); /capabilities counts the rows; a SIGKILL right after a send loses nothing; [compat] another club gets 404; the recipient\'s surfaces carry no internal note, no decision id and no contact body; the journey carries no body', async () => {
   const dir = tempDir('s8c-boot'); let S = await boot(dir);
-  assert.equal(applied(dir).at(-1), MIGRATION, 'the last recorded migration'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
+  assert.equal(applied(dir).at(-2), MIGRATION, 'the recorded migration (0018_signings_follow_ups, S8d, follows it)'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   assert.ok(fkOf(dir, 'recruitment_contacts').includes('request_id->recruitment_requests(id) RESTRICT'), `the one new real key: ${fkOf(dir, 'recruitment_contacts')}`); assert.ok(fkOf(dir, 'recruitment_offers').includes('case_id->recruitment_cases(id) RESTRICT'));
   assert.match(ddlOf(dir, 'idempotency_keys') ?? '', /'recruitment_contacts', 'recruitment_offers'/, 'the broadened owner CHECK'); for (const n of COLLECTIONS) assert.equal(blobOf(dir, n), undefined, `${n}: no blob`);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Contact Adult'); const RID = await plannedRoom(S, maria, a.pid);
@@ -254,7 +254,7 @@ await test('[cutover] the admin backup carries the two collections in the legacy
     rm(direct);
   }
   // the rollback copy
-  const copy = tempDir('s8c-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentContactsOffersRollback.mjs'), dir, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
+  const copy = tempDir('s8c-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs'), dir, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
   assert.equal(live(copy), false); for (const t of TABLES) assert.equal(tableExists(copy, t), false, `${t} dropped`); assert.ok(tableExists(copy, 'recruitment_cases'), 'the S8b tables stay'); assert.ok(tableExists(copy, 'trials'));
   for (const n of COLLECTIONS) assert.deepEqual(blobOf(copy, n), snapshot.db[n], `${n} blob equals the backup's legacy shape`);
   assert.doesNotMatch(ddlOf(copy, 'idempotency_keys'), /recruitment_contacts|recruitment_offers/, 'idempotency_keys back to the S8b CHECK'); assert.match(ddlOf(copy, 'idempotency_keys'), /'room_decisions'/); assert.equal(q1(copy, "SELECT count(*) AS n FROM idempotency_keys WHERE owner_table IN ('recruitment_contacts', 'recruitment_offers')").n, 0); assert.equal(q1(copy, "SELECT value FROM meta WHERE key = 'recruitmentCasesKeyFormat'").value, 'case-owned-keys/1', 'the S8b marker untouched');
@@ -275,7 +275,7 @@ await test('[cutover] the admin backup carries the two collections in the legacy
     await up.stop();
     console.log('    (pre-S8c build 7072dd9 booted the rollback copy: the same contact and offer in its routes, a contact and a revision written into its blobs; re-upgraded with those writes)');
   } else console.log('    (SCOUTBOX_PRE_S8C_SERVER not set: the pre-S8c boots of the live copy and of the rollback copy were NOT exercised here)');
-  const nul = tempDir('s8c-null'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentContactsOffersRollback.mjs'), dir, nul], { stdio: 'pipe' });
+  const nul = tempDir('s8c-null'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs'), dir, nul], { stdio: 'pipe' });
   { const s2 = new DatabaseSync(path.join(nul, 'scoutbox.db')); s2.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run('recruitmentOffers', 'null'); s2.close(); }
   const stateOf = () => ({ recorded: applied(nul).includes(MIGRATION), tables: TABLES.filter((t) => tableExists(nul, t)), blob: blobTextOf(nul, 'recruitmentOffers'), saveSeq: q1(nul, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value, dump: recDump(nul) });
   const nb = stateOf(); const r = await bootRefused(nul); assert.equal(r.code, 1, `the null blob: exit 1 — ${r.log.slice(-500)}`); assert.doesNotMatch(r.log, /listening on/); assert.match(r.log, /CONTACTS_OFFERS_IMPORT_BLOCKED/); assert.match(r.log, /recruitmentOffers blob.*null/);

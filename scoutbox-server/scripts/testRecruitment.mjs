@@ -49,7 +49,7 @@ let rec = null; let rollbackMod = null;
 try { rec = await import('../repositories/recruitment.mjs'); } catch { rec = null; }
 try { rollbackMod = await import('../repositories/recruitmentRollback.mjs'); } catch { rollbackMod = null; }
 const { rollbackRecruitmentCasesCopy } = await import('../repositories/recruitmentCasesRollback.mjs'); // S8b: a live file carries 0016; the S8a tool works on the S8b tool's output (the chain)
-const { rollbackRecruitmentContactsOffersCopy } = await import('../repositories/recruitmentContactsOffersRollback.mjs'); // S8c: a live file carries 0017; its tool goes first, the S8b tool works on its output
+const rollbackRecruitmentContactsOffersCopy = (await import('../repositories/rollbackChain.mjs')).rollbackToPreS8c; // S8d: the S8d step-back then the S8c tool, as one link (a live file carries 0018); // S8c: a live file carries 0017; its tool goes first, the S8b tool works on its output
 const playerErasureRollbackMod = await import('../repositories/playerErasureRollback.mjs'); // the S4b-R tool: the rollback chain's previous link
 const needRec = () => { assert.ok(rec?.createRecruitmentRepository, 'repositories/recruitment.mjs exports createRecruitmentRepository (the S8a-core repository module)'); return rec; };
 const needRollback = () => { assert.ok(rollbackMod?.rollbackRecruitmentCopy, 'repositories/recruitmentRollback.mjs exports rollbackRecruitmentCopy (the S8a-core rollback module)'); return rollbackMod.rollbackRecruitmentCopy; };
@@ -101,14 +101,14 @@ function snapshotOpen(dir) {
 
 // ------------------------------------------------------------- the migration
 test('[cutover] migration 0015 is registered last and, on an S4b-R file, creates the fifteen recruitment tables and rebuilds channels with the real request key (RESTRICT) while every thread, message and attachment survives byte for byte; imports both blobs row for row and retires them; records counts only; the pre-P4B trial whose request has no trialId key is counted as a legacy pair; reruns are no-ops; a file without the blobs creates the tables and imports nothing — never from the seed or memory', () => {
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).slice(-3), [MIGRATION, '0016_recruitment_cases', '0017_recruitment_contacts_offers'], '0015_recruitment is registered after 0014; 0016_recruitment_cases (S8b) and 0017_recruitment_contacts_offers (S8c) follow it and run on the same boot');
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).slice(-4), [MIGRATION, '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], '0015_recruitment is registered after 0014; 0016_recruitment_cases (S8b) and 0017_recruitment_contacts_offers (S8c) follow it and run on the same boot');
   assert.ok(TABLE_BACKED.includes('requests') && TABLE_BACKED.includes('trials'), 'requests and trials are table-backed collections');
   const dir = tempDir('s8a-mig'); preS8aFile(dir, FIX());
   const s = openRaw(dir);
   const channelsBefore = JSON.stringify([s.prepare('SELECT * FROM channels ORDER BY seq').all(), s.prepare('SELECT * FROM messages ORDER BY seq').all(), s.prepare('SELECT * FROM message_attachments ORDER BY message_id').all()]);
   const requestsBlob = blob(s, 'requests'); const trialsBlob = blob(s, 'trials');
   const ran = migrateAll(s);
-  assert.deepEqual(ran.ran, [MIGRATION, '0016_recruitment_cases', '0017_recruitment_contacts_offers'], '0016 (S8b) and 0017 (S8c) run on the same boot');
+  assert.deepEqual(ran.ran, [MIGRATION, '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], '0016 (S8b) and 0017 (S8c) run on the same boot');
   for (const t of TABLES) assert.ok(tableExistsIn(s, t), `${t} exists`);
   assert.ok(fkTargets(s, 'channels').some((f) => f.startsWith('request_id->recruitment_requests(id) RESTRICT')), `channels.request_id is a real key: ${fkTargets(s, 'channels')}`);
   assert.equal(JSON.stringify([s.prepare('SELECT * FROM channels ORDER BY seq').all(), s.prepare('SELECT * FROM messages ORDER BY seq').all(), s.prepare('SELECT * FROM message_attachments ORDER BY message_id').all()]), channelsBefore, 'the threads survive the rebuild byte for byte');

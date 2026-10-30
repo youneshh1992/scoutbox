@@ -25,7 +25,7 @@ import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs
 import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
 import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
 import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
-import { rollbackRecruitmentContactsOffersCopy } from '../repositories/recruitmentContactsOffersRollback.mjs';
+import { rollbackToPreS8c as rollbackRecruitmentContactsOffersCopy } from '../repositories/rollbackChain.mjs'; // S8d: the S8d step-back then the S8c tool, as one link (a live file carries 0018)
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
