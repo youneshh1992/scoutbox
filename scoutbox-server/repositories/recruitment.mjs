@@ -452,6 +452,7 @@ function typeActor(v, label, field) {
   const a = obj(v, ['kind', 'userId', 'id', 'name'], label, field);
   if (!a) return null;
   const kind = oneOf(a.kind, ACTOR_KINDS, label, `${field}.kind`);
+  if (absent(a.userId) && absent(a.id) && absent(a.name)) return { kind }; // a tombstone keeps the kind alone
   if (kind === 'org') { if (!absent(a.id)) fail(label, `${field}.id`, 'is not stored for an organisation actor (userId is)'); return { kind, userId: str(a.userId, label, `${field}.userId`), name: str(a.name, label, `${field}.name`) }; }
   if (!absent(a.userId)) fail(label, `${field}.userId`, 'is only stored for an organisation actor');
   return { kind, id: str(a.id, label, `${field}.id`), name: str(a.name, label, `${field}.name`) };
@@ -633,8 +634,8 @@ export function typeTrial(raw, at = 'trials') {
 // ------------------------------------------------------------------ rows
 const b = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
 const flagOut = (v) => (v === null ? null : v === 1);
-const actorRow = (p, a) => ({ [`${p}_kind`]: a?.kind ?? null, [`${p}_user_id`]: a?.kind === 'org' ? a.userId : null, [`${p}_actor_id`]: a && a.kind !== 'org' ? a.id : null, [`${p}_name`]: a?.name ?? null });
-const actorOut = (row, p) => (row[`${p}_kind`] === null ? null : row[`${p}_kind`] === 'org' ? { kind: 'org', userId: row[`${p}_user_id`], name: row[`${p}_name`] } : { kind: row[`${p}_kind`], id: row[`${p}_actor_id`], name: row[`${p}_name`] });
+const actorRow = (p, a) => ({ [`${p}_kind`]: a?.kind ?? null, [`${p}_user_id`]: a?.kind === 'org' ? a.userId ?? null : null, [`${p}_actor_id`]: a && a.kind !== 'org' ? a.id ?? null : null, [`${p}_name`]: a?.name ?? null });
+const actorOut = (row, p) => (row[`${p}_kind`] === null ? null : row[`${p}_user_id`] === null && row[`${p}_actor_id`] === null && row[`${p}_name`] === null ? { kind: row[`${p}_kind`] } : row[`${p}_kind`] === 'org' ? { kind: 'org', userId: row[`${p}_user_id`], name: row[`${p}_name`] } : { kind: row[`${p}_kind`], id: row[`${p}_actor_id`], name: row[`${p}_name`] });
 const venueRow = (p, v) => ({ [`${p}_name`]: v?.name ?? null, [`${p}_town`]: v?.town ?? null, [`${p}_address`]: v?.address ?? null });
 const venueOut = (row, p) => (row[`${p}_name`] === null ? null : { name: row[`${p}_name`], town: row[`${p}_town`], address: row[`${p}_address`] });
 const sessionRow = (s) => ({ id: s.id, kind: s.kind, starts_at: s.startsAt, ends_at: s.endsAt, ...venueRow('venue', s.venue), instructions: s.instructions });

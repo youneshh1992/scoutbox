@@ -566,20 +566,35 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
     snap.db.recruitmentCases.push(clone);
   }
   snap.db.signings.push({ id: 'sign-legacy-1', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', userId: 'u-maria', scoutName: 'Maria Keane', ts: Date.now() - 5 * DAY });
-  // legacy trial rows written before the validator existed
+  // legacy trial rows written before the validator existed. S8a (§4.3): a typed row holds a day-shaped value only, so
+  // the bad dates planted here are the ones a row can still carry — an impossible month, an impossible day, a day
+  // outside the accepted range, no date — and the read side must still defend against each. The shapes a row cannot
+  // hold (free text, a NaN deadline, no acceptance instant) are refused by the save with their ids (L1b below).
+  const legacyTrial = (over) => ({ playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: 'Maria Keane', acceptedAt: Date.now() - 40 * DAY, venue: null, notes: '', reportDueAt: null, status: 'awaiting_report', workflowState: 'legacy_accepted', rev: 1, ...over });
+  const unstorable = [
+    legacyTrial({ id: 'trial-junk-text', requestId: 'req-legacy-1', proposedDate: 'next tuesday-ish' }),
+    legacyTrial({ id: 'trial-junk-nan', requestId: 'req-legacy-2', reportDueAt: NaN }),
+    legacyTrial({ id: 'trial-junk-accepted', requestId: 'req-legacy-3', acceptedAt: undefined }),
+  ];
   snap.db.trials.push(
-    { id: 'trial-legacy-garbage', requestId: 'req-legacy-1', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: 'Maria Keane', acceptedAt: Date.now() - 40 * DAY, proposedDate: 'next tuesday-ish', venue: 'x', notes: '', reportDueAt: null, status: 'awaiting_report' },
-    { id: 'trial-legacy-nan', requestId: 'req-legacy-2', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: 'Maria Keane', acceptedAt: Date.now() - 40 * DAY, proposedDate: '2026-02-31', venue: null, notes: '', reportDueAt: NaN, status: 'awaiting_report' },
-    { id: 'trial-legacy-null', requestId: 'req-legacy-3', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: 'Maria Keane', acceptedAt: Date.now() - 40 * DAY, proposedDate: null, venue: null, notes: '', reportDueAt: null, status: 'awaiting_report' },
-    { id: 'trial-legacy-old', requestId: 'req-legacy-4', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: 'Maria Keane', acceptedAt: undefined, proposedDate: '1999-01-01', venue: null, notes: '', status: 'awaiting_report' },
+    legacyTrial({ id: 'trial-legacy-garbage', requestId: 'req-legacy-1', proposedDate: '2026-13-01', venue: 'x' }),
+    legacyTrial({ id: 'trial-legacy-nan', requestId: 'req-legacy-2', proposedDate: '2026-02-31' }),
+    legacyTrial({ id: 'trial-legacy-null', requestId: 'req-legacy-3', proposedDate: null }),
+    legacyTrial({ id: 'trial-legacy-old', requestId: 'req-legacy-4', proposedDate: '1999-01-01' }),
   );
   // S8a-core: a trial names its request by a real key (trials.request_id → recruitment_requests), so the four legacy
   // trials get the accepted invitation each of them came from, in the legacy direct-request literal; a trial naming an
   // absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The garbage this section
   // proves tolerated lives in the trial rows above, which are unchanged.
   const mariaId = snap.db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id;
-  for (const n of [1, 2, 3, 4]) snap.db.requests.push({ id: `req-legacy-${n}`, playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, userId: mariaId, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy accepted invitation', trialDetails: { proposedDate: '1999-01-01', altSlots: [], venue: null, notes: '' }, status: 'accepted', createdAt: Date.now() - 41 * DAY, respondedAt: Date.now() - 40 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
-  snap.db.requests.push({ id: 'req-legacy-5', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, userId: mariaId /* S8a-core: the real staff id (a request names its staff member by a key) */, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy pending invitation', trialDetails: { proposedDate: 'garbage-day', altSlots: ['also-garbage'], venue: null, notes: '' }, status: 'pending', createdAt: Date.now() - 3 * DAY, routedTo: 'player', guardianId: null, contactChannel: null });
+  for (const n of [1, 2, 3, 4]) snap.db.requests.push({ id: `req-legacy-${n}`, playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy accepted invitation', trialDetails: { proposedDate: '1999-01-01', altSlots: [], venue: null, notes: '' }, status: 'accepted', createdAt: Date.now() - 41 * DAY, respondedAt: Date.now() - 40 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
+  snap.db.requests.push({ id: 'req-legacy-5', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId /* S8a-core: the real staff id (a request names its staff member by a key) */, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy pending invitation', trialDetails: { proposedDate: '2026-13-01', altSlots: ['2026-02-30'], venue: null, notes: '' }, status: 'pending', createdAt: Date.now() - 3 * DAY, routedTo: 'player', guardianId: null, contactChannel: null });
+  for (const junk of unstorable) {
+    const copy = { ...snap, db: { ...snap.db, trials: [...snap.db.trials.filter((t) => t.requestId !== junk.requestId), junk] } };
+    let refused = null; const rev = store.revision();
+    try { store.save(copy); } catch (e) { refused = e; }
+    neg(refused?.code === 'RECRUITMENT_INPUT_INVALID' && refused.message.includes(junk.id) && store.revision() === rev, `L1b a trial the typed row cannot hold (${junk.id}) is refused by the save with its id; nothing written`);
+  }
   store.save(snap);
   server = await boot();
   maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
@@ -605,7 +620,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   const overdue = findMetric((await j('GET', '/org/recruitment-analytics', undefined, maria.token)).body, 'overdue_trial_reports');
   neg(overdue && !overdue.rows.some((r) => r.trialId.startsWith('trial-legacy')), 'L4c a null deadline is "unknown", not "overdue since 1970" — none of the legacy rows is counted late');
   const mpend = (await j('GET', '/player/inbox', undefined, mateus.token)).body.find((r) => r.id === 'req-legacy-5');
-  neg(expect(await j('POST', '/player/requests/req-legacy-5/respond', { accept: true, chosenSlot: 'also-garbage' }, mateus.token), 200, null), 'L5 a legacy invitation with garbage days can still be accepted (the family is not blocked by the club\'s old data)');
+  neg(expect(await j('POST', '/player/requests/req-legacy-5/respond', { accept: true, chosenSlot: '2026-02-30' }, mateus.token), 200, null), 'L5 a legacy invitation with garbage days can still be accepted (the family is not blocked by the club\'s old data)');
   const lt = (await orgTrials(maria.token)).find((t) => t.requestId === 'req-legacy-5');
   neg(lt.proposedDate === null && lt.reportDueAt === lt.acceptedAt + 7 * DAY, 'L5b the trial it creates has NO date (never the garbage, never an invented day) and a deadline from the acceptance clock');
   ok(!!mpend && mpend.status === 'pending', 'L5c (control) the legacy invitation was pending before the answer');
