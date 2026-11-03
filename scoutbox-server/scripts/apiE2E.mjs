@@ -1,13 +1,50 @@
-// Live API end-to-end. Run against a FRESHLY SEEDED server (delete data/
-// first): `node server.mjs & node scripts/apiE2E.mjs`. Exercises the full
-// M6+M7 surface: token auth, safeguarding gates, trials, exports, billing,
-// verification, moderation escalation and persistence.
+// Live API end-to-end. Exercises the full M6+M7 surface: token auth,
+// safeguarding gates, trials, exports, billing, verification, moderation
+// escalation and persistence.
+//
+// `npm run e2e` (no API_URL): starts its own freshly seeded server on a free
+// port and a temporary DATA_DIR, checks that same directory, and removes it.
+// Nothing to start or delete first.
+//
+// `API_URL=… DATA_DIR=… npm run e2e`: runs against a server you started on a
+// freshly seeded DATA_DIR. DATA_DIR is required, and must be the server's own:
+// the persistence checks read it.
 import fs from 'node:fs';
+import os from 'node:os';
+import net from 'node:net';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const API = process.env.API_URL || 'http://localhost:4000';
 const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const { API, DATA_DIR } = await serverUnderTest();
+
+async function serverUnderTest() {
+  if (process.env.API_URL) {
+    if (!process.env.DATA_DIR) {
+      console.error('apiE2E: API_URL is set but DATA_DIR is not. Pass the DATA_DIR the server at API_URL was started with (its persistence is checked on disk), or unset API_URL to let this script start its own server.');
+      process.exit(2);
+    }
+    return { API: process.env.API_URL, DATA_DIR: path.resolve(process.env.DATA_DIR) };
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-api-e2e-'));
+  const port = await new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => resolve(p)); }); });
+  const { API_URL: _u, ...env } = process.env;
+  const child = spawn(process.execPath, [path.join(SERVER_DIR, 'server.mjs')], { env: { ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let log = '';
+  child.stdout.on('data', (d) => { log += d; }); child.stderr.on('data', (d) => { log += d; });
+  // `ok` exits the process on the first failure: the server and its directory go with it.
+  process.on('exit', () => { child.kill('SIGKILL'); fs.rmSync(dir, { recursive: true, force: true }); });
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(130));
+  const api = `http://127.0.0.1:${port}`;
+  for (let i = 0; i < 60; i++) {
+    if (child.exitCode !== null) break;
+    try { if ((await fetch(`${api}/orgs/directory`)).ok) return { API: api, DATA_DIR: dir }; } catch { /* not listening yet */ }
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  console.error(`apiE2E: the server did not start:\n${log.slice(-1500)}`);
+  process.exit(1);
+}
 let passed = 0;
 const ok = (cond, name) => {
   if (!cond) { console.error(`✗ ${name}`); process.exit(1); }
@@ -439,10 +476,7 @@ r = await j('/org/friendlies', {}, bearer(HACKNEY));
 ok(r.body.find((f) => f.id === friendlyId)?.responses.some((x) => /happy to travel/.test(x.message)), 'the poster sees who is up for it');
 
 // ---- 14. storage + SQLite persistence on disk
-// The server under test honours DATA_DIR; so does this check (M23 P4A
-// closure — harness hygiene: in a fresh clone there is no default `data/`
-// directory, and the check must look where the server actually writes).
-const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(SERVER_DIR, 'data');
+// DATA_DIR is the server's own directory (see serverUnderTest), never a guess.
 let stored = false;
 for (let i = 0; i < 20 && !stored; i++) {
   stored = fs.existsSync(path.join(DATA_DIR, 'scoutbox.db'));
@@ -452,3 +486,4 @@ ok(stored, 'snapshot persisted to scoutbox.db (node:sqlite is required; there is
 ok(fs.existsSync(path.join(DATA_DIR, 'media')), 'media blobs live on object storage (disk), outside the database');
 
 console.log(`\n${passed} API checks passed`);
+process.exit(0); // stops the server this script started, if any
