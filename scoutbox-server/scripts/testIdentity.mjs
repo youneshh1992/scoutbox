@@ -228,7 +228,7 @@ await test('first boot (real server): production starts with no people or clubs,
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(proc); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code) => reject(new Error(`server exited ${code}: ${log}`)));
-    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000);
+    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000).unref();
   });
   const stop = (proc) => new Promise((resolve) => { proc.removeAllListeners('exit'); proc.on('exit', resolve); proc.kill('SIGTERM'); });
   const health = async () => (await fetch(`http://127.0.0.1:${port}/health`)).json();

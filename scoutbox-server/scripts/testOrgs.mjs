@@ -670,7 +670,7 @@ await atest('server: an S2 database boots and cuts over; registration, settings,
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve({ proc, log: () => log }); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code, signal) => reject(new Error(`server exited ${code} (${signal}) on port ${port}: ${log}`)));
-    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000);
+    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000).unref();
   });
   const stop = (S) => new Promise((resolve) => { S.proc.on('exit', () => resolve()); S.proc.kill('SIGTERM'); });
   const j = async (method, p, body, token, headers = {}) => {
@@ -746,7 +746,7 @@ await atest('server: an S2 database boots and cuts over; registration, settings,
   const restored = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port2), DATA_DIR: restoreDir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log2 = ''; restored.stdout.on('data', (d) => { log2 += d; }); restored.stderr.on('data', (d) => { log2 += d; });
   try {
-    await new Promise((resolve, reject) => { restored.stdout.on('data', () => { if (/listening on/.test(log2)) resolve(); }); restored.on('exit', (c) => reject(new Error(`restored server exited ${c}: ${log2}`))); setTimeout(() => reject(new Error(`restore timeout: ${log2}`)), 20_000); });
+    await new Promise((resolve, reject) => { restored.stdout.on('data', () => { if (/listening on/.test(log2)) resolve(); }); restored.on('exit', (c) => reject(new Error(`restored server exited ${c}: ${log2}`))); setTimeout(() => reject(new Error(`restore timeout: ${log2}`)), 20_000).unref(); });
     const r = await fetch(`http://127.0.0.1:${port2}/admin/clubs`, { headers: A });
     const clubs = await r.json();
     assert.equal(clubs.length, 6); assert.equal(clubs.find((o) => o.id === newOrgId).verifiedDomain, 'rovers.example'); assert.equal(clubs.find((o) => o.id === 'org-eastport').squad[0].name, 'Seeded');

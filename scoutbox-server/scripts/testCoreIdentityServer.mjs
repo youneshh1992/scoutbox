@@ -48,7 +48,7 @@ function boot(dir, port, env = {}) {
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(S); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code, signal) => reject(Object.assign(new Error(`server exited ${code} (${signal}) on port ${port}: ${log.slice(-1200)}`), { code, log })));
-    setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000);
+    setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
 /** Boot and expect the process to refuse (exit before listening); returns { code, log }. */

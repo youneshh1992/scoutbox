@@ -50,7 +50,7 @@ async function boot(dir) {
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(S); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code, signal) => reject(Object.assign(new Error(`server exited ${code} (${signal}) on port ${port}: ${log.slice(-1200)}`), { code, log })));
-    setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000);
+    setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
 // Every database read below goes through a SECOND connection (read-only), never the server's: what it sees is what is committed.

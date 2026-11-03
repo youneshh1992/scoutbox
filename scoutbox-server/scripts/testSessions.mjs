@@ -661,7 +661,7 @@ await atest('server: legacy bearer tokens survive the cutover and a restart, med
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve({ proc, log: () => log }); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code, signal) => reject(new Error(`server exited ${code} (${signal}) on port ${port}: ${log}`)));
-    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000);
+    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000).unref();
   });
   const stop = (S) => new Promise((resolve) => { S.proc.on('exit', () => resolve()); S.proc.kill('SIGTERM'); });
   const j = async (method, p, body, token) => {
@@ -741,7 +741,7 @@ await atest('server: media links are signed with MEDIA_SECRET only — a link su
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve({ proc }); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code, signal) => reject(new Error(`server exited ${code} (${signal}) on port ${port}: ${log}`)));
-    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000);
+    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000).unref();
   });
   const stop = (S) => new Promise((resolve) => { S.proc.on('exit', () => resolve()); S.proc.kill('SIGTERM'); });
   const status = async (url) => (await fetch(`http://127.0.0.1:${port}${url}`)).status;
@@ -785,7 +785,7 @@ await atest('server (review correction 2): a legacy db.json with a staff member 
   await new Promise((resolve, reject) => {
     proc.stdout.on('data', () => { if (/listening on/.test(log)) resolve(); });
     proc.on('exit', (code, signal) => reject(new Error(`server exited ${code} (${signal}): ${log}`)));
-    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000);
+    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000).unref();
   });
   try {
     const status = async (p, token) => (await fetch(`http://127.0.0.1:${port}${p}`, { headers: token ? { authorization: `Bearer ${token}` } : {} })).status;
@@ -811,7 +811,7 @@ await atest('server (review correction 2): a legacy db.json with a staff member 
       await new Promise((resolve, reject) => {
         restored.stdout.on('data', () => { if (/listening on/.test(log2)) resolve(); });
         restored.on('exit', (code, signal) => reject(new Error(`restored server exited ${code} (${signal}): ${log2}`)));
-        setTimeout(() => reject(new Error(`restore boot timeout: ${log2}`)), 20_000);
+        setTimeout(() => reject(new Error(`restore boot timeout: ${log2}`)), 20_000).unref();
       });
       const status2 = async (p, token) => (await fetch(`http://127.0.0.1:${port2}${p}`, { headers: token ? { authorization: `Bearer ${token}` } : {} })).status;
       assert.equal(await status2('/player/me', seed.sessions[0].token), 200, 'the player session survives backup and restore');
@@ -957,7 +957,7 @@ await atest('server (review correction 6): a malformed or invalid db.json stops 
     let log = ''; proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
     const exit = await new Promise((resolve, reject) => {
       proc.on('exit', (code) => resolve(code));
-      setTimeout(() => { proc.kill('SIGKILL'); reject(new Error(`${name}: the server did not stop: ${log}`)); }, 20_000);
+      setTimeout(() => { proc.kill('SIGKILL'); reject(new Error(`${name}: the server did not stop: ${log}`)); }, 20_000).unref();
     });
     assert.notEqual(exit, 0, `${name}: the process ends with a failure code`);
     assert.match(log, /LEGACY_IMPORT_FAILED/, `${name}: the failure is the import error`);

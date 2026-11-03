@@ -64,7 +64,7 @@ async function boot(dir, env = {}, server = SERVER) {
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(S); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code, signal) => reject(Object.assign(new Error(`server exited ${code} (${signal}): ${log.slice(-1500)}`), { code, log })));
-    setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000);
+    setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
 /** Boot and MEASURE: resolves with { code, log } on exit, or { code: 'listening', log, S } when the build listens (the caller stops it). */
@@ -83,7 +83,7 @@ async function bootMeasured(dir, env = {}, server = SERVER) {
     proc.stdout.on('data', (d) => { log += d; if (!settled && /listening on/.test(log)) { settled = true; resolve({ code: 'listening', log, S }); } });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code) => { if (!settled) { settled = true; resolve({ code, log }); } });
-    setTimeout(() => { if (!settled) { settled = true; proc.kill('SIGKILL'); resolve({ code: 'timeout', log }); } }, 30_000);
+    setTimeout(() => { if (!settled) { settled = true; proc.kill('SIGKILL'); resolve({ code: 'timeout', log }); } }, 30_000).unref();
   });
 }
 async function bootRefused(dir, env = {}, server = SERVER) {

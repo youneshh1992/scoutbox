@@ -62,7 +62,7 @@ async function boot(dir, env = {}, server = SERVER) {
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(S); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code, signal) => reject(Object.assign(new Error(`server exited ${code} (${signal}): ${log.slice(-1500)}`), { code, log })));
-    setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000);
+    setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
 /** A boot expected to FAIL: resolves with { code, log } once the child exited. */
@@ -73,7 +73,7 @@ async function bootRefused(dir, env = {}) {
     children.add(proc); let log = '';
     proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code) => { children.delete(proc); resolve({ code, log }); });
-    setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* gone */ } }, 30_000);
+    setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* gone */ } }, 30_000).unref();
   });
 }
 /** Every read of the file goes through a second, read-only connection; `snap` pins ONE read transaction. */

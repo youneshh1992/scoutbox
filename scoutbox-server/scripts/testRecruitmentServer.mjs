@@ -63,7 +63,7 @@ async function boot(dir, env = {}, server = SERVER) {
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(S); });
     proc.stderr.on('data', (d) => { log += d; });
     proc.on('exit', (code, signal) => reject(Object.assign(new Error(`server exited ${code} (${signal}): ${log.slice(-1500)}`), { code, log })));
-    setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000);
+    setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
 async function bootRefused(dir, env = {}, server = SERVER) {
@@ -71,7 +71,7 @@ async function bootRefused(dir, env = {}, server = SERVER) {
   return new Promise((resolve) => {
     const proc = spawn(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = ''; proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
-    proc.on('exit', (code) => resolve({ code, log })); setTimeout(() => { proc.kill('SIGKILL'); resolve({ code: 'timeout', log }); }, 30_000);
+    proc.on('exit', (code) => resolve({ code, log })); setTimeout(() => { proc.kill('SIGKILL'); resolve({ code: 'timeout', log }); }, 30_000).unref();
   });
 }
 const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { s.exec('BEGIN'); try { return fn({ get: (sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; }, all: (sql, ...p) => s.prepare(sql).all(...p).map((r) => ({ ...r })) }); } finally { s.exec('COMMIT'); } } finally { s.close(); } };
