@@ -137,9 +137,10 @@ module registration → integrity report → listen.
 - **Responses use allowlists.** Player and guardian responses are built in
   `views/playerViews.mjs`. Add a field to an allowlist on purpose. Never serialise a raw
   record.
-- **Typed columns, valid input only** (from S8d on). Each field is a typed column. Routes
+- **Typed columns, valid input only**. Each field is a typed column. Routes
   reject junk input; there are no `absent_keys_json` / `offtype_json` / `extra_json` side
-  columns on new tables. The S6b–S8c tables still carry them from the old lossless rule.
+  columns. The S8a–S8c recruitment tables still carry them from the old lossless rule until they are
+  rewritten (migration plan §4.2).
   List order is kept with `seq` / `position`.
 - **Refusals name ids, not content.** Validation errors from repositories and migrations
   carry codes, ids and reasons. They never include a name, e-mail, message body, token or

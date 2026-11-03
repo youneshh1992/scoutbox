@@ -1022,11 +1022,10 @@ function postMessage(channel, sender, text, attachment = null, clientMsgId = nul
   // repository; it lands in the persistNow() below, before the sender hears 201.
   const msg = channels.appendMessage(channel.id, { id: nextId('msg'), ts: Date.now(), sender, text, attachment, ...(clientMsgId ? { clientMsgId } : {}) });
   ledgerAppend({ type: 'message', playerId: channel.playerId, orgId: channel.orgId, orgName: channel.orgName, userId: sender.kind === 'org_user' ? sender.id : null, scoutName: sender.name });
-  const recipient = sender.kind === 'org_user'
-    ? channel.counterparty === 'guardian'
-      ? { kind: 'guardian', id: channel.guardianId }
-      : { kind: 'player', id: channel.playerId }
-    : { kind: 'org_user', id: channel.orgUserIdForNotify ?? null };
+  // The counterparty an org user's message notifies (a player's or guardian's message notifies the org users below).
+  const recipient = channel.counterparty === 'guardian'
+    ? { kind: 'guardian', id: channel.guardianId }
+    : { kind: 'player', id: channel.playerId };
   if (sender.kind !== 'org_user') {
     // notify every org user who has messaged or created the request
     const userIds = new Set([...channel.messages.filter((m) => m.sender.kind === 'org_user').map((m) => m.sender.id)]);
@@ -1430,6 +1429,7 @@ guardianRouter.post('/verify-id', async (req, res, next) => {
   if (!documentType || !documentRef) {
     return res.status(400).json({ error: 'DOCUMENT_REQUIRED', message: 'ID verification needs a document type and reference.' });
   }
+  if (!reqText(documentType, 60)) return badField(res, 'documentType'); // stored in the IDV queue's text column
   // Runs through the IDV adapter (adapters.mjs): today the dev attestation; a
   // document + liveness provider slots in behind the same call.
   const result = await idv.verify({ name: req.guardian.name, documentType, documentRef });
@@ -1641,7 +1641,7 @@ guardianRouter.post('/channels/:id/messages', (req, res) => {
   const closed = channelClosedForCounterparty(channel, channel.playerId);
   if (closed) return res.status(403).json(closed);
   const { text } = req.body || {};
-  if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   if (!moderateOrRefuse(res, text, { kind: 'guardian_message', channelId: channel.id })) return;
   const att = buildAttachment(channel, req.body, 'guardian');
   if (!att.ok) return res.status(400).json({ error: att.error });
@@ -1767,6 +1767,7 @@ guardianRouter.post('/block', (req, res) => {
   if (playerId && !req.guardian.childIds.includes(playerId)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
   const childId = playerId || (req.guardian.childIds.length === 1 ? req.guardian.childIds[0] : null);
   if (!orgId || !childId) return res.status(400).json({ error: 'ORG_AND_CHILD_REQUIRED', message: playerId ? undefined : 'Name which child the block is for (playerId).' });
+  if (!optText(reason)) return badField(res, 'reason');
   if (!db.orgs.some((o) => o.id === orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   safetyAudit.blocks.append({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
   ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'guardian' });
@@ -1782,6 +1783,8 @@ function handleReport(req, res, actor) {
     return res.status(400).json({ error: 'TARGET_KIND_REQUIRED', allowed: ['club', 'scout', 'player'] });
   }
   if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
+  // The report's references are text columns: an id of another type is refused, never stored.
+  for (const [field, v] of [['targetOrgId', targetOrgId], ['targetScoutName', targetScoutName], ['targetPlayerId', targetPlayerId]]) if (!optText(v, 200)) return badField(res, field);
   const report = {
     id: nextId('rep'),
     ts: Date.now(),
@@ -1796,8 +1799,8 @@ function handleReport(req, res, actor) {
     outcome: null,
     resolvedAt: null,
   };
-  // S6b: a row of the reports table, stored as built here — a truthy
-  // targetPlayerId of any type is kept as received (Domain P: no player check).
+  // S6b: a row of the reports table, stored as built here (Domain P: the
+  // targetPlayerId is not checked against the players).
   safetyAudit.reports.append(report);
   // Reports now land in the REAL review queue: the trust-and-safety admin
   // console resolves them (POST /admin/reports/:id/resolve) and the reporter
@@ -2119,7 +2122,7 @@ orgRouter.post('/players/:id/notes', (req, res) => {
   // on every discovery route, exactly as the profile read already answers.
   if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
   const { text } = req.body || {};
-  if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   const note = { id: nextId('note'), orgId: req.org.id, playerId: p.id, userId: req.orgUser.id, scoutName: req.orgUser.name, text: text.trim(), ts: Date.now() };
   safetyAudit.orgNotes.append(note);
   broadcast('players', { playerId: p.id });
@@ -2403,7 +2406,7 @@ orgRouter.post('/channels/:id/messages', (req, res) => {
   const closed = channelClosedForOrg(channel, req.org);
   if (closed) return res.status(403).json(closed);
   const { text } = req.body || {};
-  if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   if (!moderateOrRefuse(res, text, { kind: 'org_message', channelId: channel.id })) return;
   const att = buildAttachment(channel, req.body, 'org');
   if (!att.ok) return res.status(400).json({ error: att.error });
@@ -3484,7 +3487,7 @@ playerRouter.post('/channels/:id/messages', (req, res) => {
   const closed = channelClosedForCounterparty(channel, req.player.id);
   if (closed) return res.status(403).json(closed);
   const { text } = req.body || {};
-  if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   if (!moderateOrRefuse(res, text, { kind: 'player_message', channelId: channel.id })) return;
   const att = buildAttachment(channel, req.body, 'player');
   if (!att.ok) return res.status(400).json({ error: att.error });
@@ -3675,7 +3678,9 @@ playerRouter.post('/attendance', (req, res) => {
     return res.status(400).json({ error: 'ATTENDANCE_UNVERIFIABLE', message: 'Verified attendance needs fixture, venue, date, GPS and device data.', missing });
   }
   if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: verified attendance on a day that exists
-  const item = { id: nextId('att'), fixture, venue, date, gps, deviceConfirmed: true, verified: true };
+  // The attendance row stores gps as two columns: a gps carrying anything else is refused, not silently trimmed.
+  if (Object.keys(gps).some((k) => k !== 'lat' && k !== 'lng')) return res.status(400).json({ error: 'GPS_INVALID', message: 'gps is { lat, lng } and nothing else.' });
+  const item = { id: nextId('att'), fixture, venue, date, gps: { lat: gps.lat, lng: gps.lng }, deviceConfirmed: true, verified: true };
   // ONE unit of work (S5): the attendance row, the activity it records and the
   // ledger row commit together before the 201. A fixture or venue the table
   // cannot hold (not text) is refused by the repository and answered 400.
@@ -4000,6 +4005,8 @@ playerRouter.post('/report', (req, res) => handleReport(req, res, { by: 'player'
 playerRouter.post('/block', (req, res) => {
   const { orgId, reason } = req.body || {};
   if (!orgId) return res.status(400).json({ error: 'ORG_REQUIRED' });
+  if (!reqText(orgId, 200)) return badField(res, 'orgId');
+  if (!optText(reason)) return badField(res, 'reason');
   safetyAudit.blocks.append({ id: nextId('blk'), playerId: req.player.id, orgId, by: 'player', reason: reason || '', ts: Date.now() });
   ledgerAppend({ type: 'org_blocked_by_player', playerId: req.player.id, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'player' });
   broadcast('players');
@@ -4055,13 +4062,12 @@ app.post('/push/register', (req, res) => {
   if (!session) return res.status(401).json({ error: 'AUTH_REQUIRED' });
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ error: 'TOKEN_REQUIRED' });
-  // S7c: the same filter-then-push on the push_tokens table (repositories/outboxPush.mjs
-  // `register`): any truthy JSON value is the token, stored losslessly; an earlier
-  // row of this session holding the same primitive goes, an object never matches;
-  // the new row is last. The record lands with the debounced save, as before.
-  // A non-finite number JSON syntax can produce (1e400 → Infinity) is kept as the
-  // live value for this process and persists as null, as the blob's JSON did
-  // (review of 40aa05c, F1).
+  // A device token is a string (Expo's ExponentPushToken[…]); a number (JSON 1e400
+  // included), an object or an array is refused rather than stored.
+  if (typeof token !== 'string') return res.status(400).json({ error: 'TOKEN_INVALID' });
+  // S7c: the filter-then-push on the push_tokens table (repositories/outboxPush.mjs
+  // `register`): an earlier row of this session holding the same token goes; the
+  // new row is last. The record lands with the debounced save, as before.
   pushTokens.register({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
   persist();
   res.status(201).json({ registered: true });

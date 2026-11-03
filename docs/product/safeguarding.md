@@ -82,6 +82,10 @@ These are the product's first principles for under-18s. Everything below refines
 - Account deletion leaves every audit row naming the person in place.
 - Player references in audit rows are tolerant: unknown or deleted ids are kept and
   counted, never refused. A report naming an unknown player is accepted.
+- The report, block, note and ID-check routes take text where they store text: a
+  report's target ids and scout name, a block's organisation and reason, an ID check's
+  document type. Anything else (a number, an object, a list) gets `400 FIELD_INVALID`
+  naming the field; a note that is not text gets `400 TEXT_REQUIRED`. Nothing is stored.
 - An IDV-queue entry must name an existing guardian (strict). An operation that would
   orphan one is refused whole.
 - A block and its ledger row land together. An IDV submission commits together with the

@@ -66,7 +66,7 @@ function plant(dir, rows) {
   const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA busy_timeout = 5000;');
   try {
     if (live(dir)) {
-      const ins = s.prepare('INSERT INTO notifications (id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required, extra_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)');
+      const ins = s.prepare('INSERT INTO notifications (id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)');
       for (const n of rows) ins.run(n.id, n.ts, n.audience.kind, n.audience.id, n.type, n.text, n.refId ?? null, n.read ? 1 : 0, n.repeatCount ?? 1, n.groupKey ?? null, n.category ?? null, n.deferredPush ? 1 : 0);
     } else {
       const arr = JSON.parse(s.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value);

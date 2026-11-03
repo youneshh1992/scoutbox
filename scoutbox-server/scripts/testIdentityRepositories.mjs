@@ -17,6 +17,7 @@ import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS } from '../repositories/
 import { runDataMigrations } from '../repositories/database.mjs';
 import { createIdentityRepositories, CORE_IDENTITY_INIT_META } from '../repositories/identity.mjs';
 import { CORE_IDENTITY_LIVE_MIGRATION, MINOR_WITHOUT_LINK_REASON } from '../repositories/identityPreflight.mjs';
+import { placeSubrecords } from '../repositories/playerSubrecords.mjs';
 import { prepareLiveIdentitySchema } from './identityLiveTestSchema.mjs';
 
 let passed = 0;
@@ -163,7 +164,7 @@ test('persistence: every creation shape — adult signup, guardian-created child
   t.close();
   const r = reopen(dir);
   const want = FIXTURE();
-  for (const p of want.players) sameShape(p, r.players.byId(p.id), `player ${p.id} after reopen`);
+  for (const p of want.players) sameShape(placeSubrecords(clone(p)), r.players.byId(p.id), `player ${p.id} after reopen`); // the sub-record arrays as their tables hold them (every array, after the other keys)
   for (const g of want.guardians) sameShape(g, r.guardians.byId(g.id), `guardian ${g.id} after reopen`);
   assert.deepEqual([...r.guardians.byId('gd-primary').childIds], ['pl-child1', 'pl-child2'], 'order from the link rows');
   assert.deepEqual(r.links(), [{ guardian_id: 'gd-primary', player_id: 'pl-child1', role: 'primary' }, { guardian_id: 'gd-primary', player_id: 'pl-child2', role: 'primary' }, { guardian_id: 'gd-co', player_id: 'pl-child1', role: 'co' }, { guardian_id: 'gd-co', player_id: 'pl-child2', role: 'co' }]);

@@ -4,9 +4,9 @@
 // written AFTER the notification's save committed and lands in a LATER save that
 // the sender's nextId()/persist() already schedules (normal mode: about two
 // seconds, zero delivery sweeps; accelerated mode: a sweep's save may carry it
-// first — never the notification's own save); (D2) POST /push/register keeps
-// accepting any truthy JSON token, primitives collapse by strict equality,
-// structurally equal objects and arrays are separate rows, values and types are
+// first — never the notification's own save); (D2) POST /push/register accepts
+// a string token only (400 TOKEN_INVALID for a number — raw JSON 1e400 included —
+// an object or an array), a repeated token replaces its earlier row, tokens are
 // preserved through storage, backup and restore; (to:null) an accepted
 // queued dispatch without a destination is swept into a delivery outbox record
 // with to: null that survives restart and backup — plus the cutover
@@ -18,15 +18,10 @@
 // once), a SIGKILL between the notification's commit and the push save (no push
 // row, no re-send), an ordinary deletion leaving the three collections alone, the
 // admin backup carrying the three collections in their legacy shapes and a
-// restore importing them (migration 0011).
+// restore importing them (migration 0011); POST /org/invites and the m14 player
+// invite refusing a non-string e-mail (it used to reach the mailer as an array).
 // Every database read goes through a second read-only connection. Nothing here
 // touches DATA_DIR or real data; no real provider is called. Run with: npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged 6ca66ba tree before the implementation):
-// [compat] tests read the collections through a storage adapter (the tables after the
-// cutover, the blobs before it) and PASS on both trees — they are the review's
-// observations, preserved; [cutover] tests assert the tables, the absence of the
-// blobs and the migration record and FAIL on 6ca66ba on concrete assertions.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -49,9 +44,8 @@ const freePort = () => new Promise((resolve, reject) => { const s = net.createSe
 const children = new Set();
 process.on('exit', () => { for (const p of children) { try { p.kill('SIGKILL'); } catch { /* gone */ } } });
 const PLACEHOLDER = '[code withheld — delivered to the recipient only]';
-/** The nine registrations of the independent baseline: 7 persisted rows (1 number, 1 string, 1 boolean, 2 objects, 2 arrays). */
-const BASELINE_TOKENS = [424242, 424242, '424242', true, true, { review: 'synthetic' }, { review: 'synthetic' }, ['synthetic'], ['synthetic']];
-const typeCounts = (tokens) => ({ numbers: tokens.filter((t) => typeof t === 'number').length, strings: tokens.filter((t) => typeof t === 'string').length, booleans: tokens.filter((t) => typeof t === 'boolean').length, objects: tokens.filter((t) => t && typeof t === 'object' && !Array.isArray(t)).length, arrays: tokens.filter(Array.isArray).length });
+/** Five registrations with repeats: three persisted rows (a repeated token removes its earlier row and is appended last). */
+const BASELINE_TOKENS = ['ExponentPushToken[synthetic-a]', 'ExponentPushToken[synthetic-a]', 'ExponentPushToken[synthetic-b]', 'ExponentPushToken[synthetic-c]', 'ExponentPushToken[synthetic-b]'];
 
 async function boot(dir, env = {}, server = SERVER) {
   const port = await freePort();
@@ -84,17 +78,15 @@ const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
 const live = (dir) => !!q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'");
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
 const blobRows = (c, name) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
-/** The destination as the row holds it: a string in to_address, any other JSON value in to_json (review of 40aa05c, F2), NULL/NULL = null. */
-const destinationOf = (r) => (r.to_json != null ? JSON.parse(r.to_json) : r.to_address);
-const outboxFromRow = (r) => (r.source === 'mailer' ? { id: r.id, ts: r.created_at, to: destinationOf(r), subject: r.subject, text: r.text, transport: r.transport, delivered: r.delivered === 1 } : { id: r.id, at: r.created_at, channel: r.channel, to: destinationOf(r), text: r.text, providerMessageId: r.provider_message_id, provider: r.transport });
+const outboxFromRow = (r) => (r.source === 'mailer' ? { id: r.id, ts: r.created_at, to: r.to_address, subject: r.subject, text: r.text, transport: r.transport, delivered: r.delivered === 1 } : { id: r.id, at: r.created_at, channel: r.channel, to: r.to_address, text: r.text, providerMessageId: r.provider_message_id, provider: r.transport });
 /** The three collections as the DATABASE holds them, in insertion order: the tables after the cutover, the blobs before it (so a check reads the same way on both builds). */
 const readStored = (c) => {
   const cut = !!c.get("SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'");
   if (!cut) return { outbox: blobRows(c, 'outbox') ?? [], pushLog: blobRows(c, 'pushLog') ?? [], pushTokens: blobRows(c, 'pushTokens') ?? [], seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0 };
   return {
-    outbox: c.all(`SELECT seq, id, source, created_at, to_address, to_json, subject, text, transport, delivered, channel, provider_message_id FROM outbox ORDER BY seq`).map(outboxFromRow),
+    outbox: c.all(`SELECT seq, id, source, created_at, to_address, subject, text, transport, delivered, channel, provider_message_id FROM outbox ORDER BY seq`).map(outboxFromRow),
     pushLog: c.all('SELECT id, created_at, audience_kind, audience_id, title, body, transport FROM push_log ORDER BY seq').map((r) => ({ id: r.id, ts: r.created_at, audience: { kind: r.audience_kind, id: r.audience_id }, title: r.title, body: r.body, transport: r.transport })),
-    pushTokens: c.all('SELECT ref_kind, ref_id, token_json, registered_at FROM push_tokens ORDER BY seq').map((r) => ({ kind: r.ref_kind, refId: r.ref_id, token: JSON.parse(r.token_json), ts: r.registered_at })),
+    pushTokens: c.all('SELECT ref_kind, ref_id, token, registered_at FROM push_tokens ORDER BY seq').map((r) => ({ kind: r.ref_kind, refId: r.ref_id, token: r.token, ts: r.registered_at })),
     seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0,
   };
 };
@@ -157,24 +149,24 @@ await test('[compat] D1, accelerated mode (M13_FAST_RETRY=1, a 400 ms sweep): th
   await S.stop(); rm(dir);
 });
 
-// ============================================================= [compat] D2 — the registration route's acceptance and matching rule
-await test('[compat] D2 through the real route: nine registrations of number, string, boolean, structurally equal objects and equal arrays are all answered 201 and persist 7 rows (1/1/1/2/2) with their types in registration order; re-registering a primitive removes its earlier row and appends it LAST with a new ts, 424242 and "424242" are different tokens; an object registered again is a new row; the admin backup carries the tokens with their values and types; unauthenticated and token-less requests are refused as before', async () => {
+// ============================================================= D2 — the registration route's acceptance and matching rule
+await test('D2 through the real route: five string registrations with repeats are all answered 201 and persist 3 rows in registration order (a repeated token removes its earlier row and is appended LAST with a new ts); a number, a boolean, an object, an array and raw JSON 1e400 / -1e400 / {"n":1e400} / [1e400] are refused with 400 TOKEN_INVALID and store nothing; unauthenticated and token-less requests are refused as before; the admin backup carries the tokens', async () => {
   const dir = tempDir('s7c-d2'); const S = await boot(dir);
   const kola = await playerLogin(S, 'pl-adeyemi');
   for (const token of BASELINE_TOKENS) { const r = await S.j('POST', '/push/register', { token }, kola); assert.equal(r.status, 201, r.text); assert.deepEqual(r.body, { registered: true }); }
-  const seven = await until(async () => { const t = playerTokens(dir); return t.length === 7 ? t : null; }, 8000); assert.ok(seven, 'seven rows persisted');
-  assert.deepEqual(typeCounts(seven.map((t) => t.token)), { numbers: 1, strings: 1, booleans: 1, objects: 2, arrays: 2 });
-  assert.deepEqual(seven.map((t) => t.token), [424242, '424242', true, { review: 'synthetic' }, { review: 'synthetic' }, ['synthetic'], ['synthetic']], 'registration order after the collapses');
-  const tsBefore = seven[0].ts; await sleep(5);
-  assert.equal((await S.j('POST', '/push/register', { token: 424242 }, kola)).status, 201);
-  const moved = await until(async () => { const t = playerTokens(dir); return t.length === 7 && t.at(-1).token === 424242 && t.at(-1).ts > tsBefore ? t : null; }, 8000); assert.ok(moved, 'the primitive moved last with a later ts, the count unchanged');
-  assert.deepEqual(moved.map((t) => t.token), ['424242', true, { review: 'synthetic' }, { review: 'synthetic' }, ['synthetic'], ['synthetic'], 424242]);
-  assert.equal((await S.j('POST', '/push/register', { token: { review: 'synthetic' } }, kola)).status, 201);
-  const eight = await until(async () => { const t = playerTokens(dir); return t.length === 8 ? t : null; }, 8000); assert.ok(eight, 'an object is always a new row'); assert.deepEqual(eight.at(-1).token, { review: 'synthetic' });
-  assert.equal((await S.j('POST', '/push/register', { token: 'x' })).status, 401); assert.equal((await S.j('POST', '/push/register', {}, kola)).status, 400); assert.equal((await S.j('POST', '/push/register', { token: 0 }, kola)).status, 400, 'a falsy token is refused as before');
+  const three = await until(async () => { const t = playerTokens(dir); return t.length === 3 ? t : null; }, 8000); assert.ok(three, 'three rows persisted');
+  assert.deepEqual(three.map((t) => t.token), ['ExponentPushToken[synthetic-a]', 'ExponentPushToken[synthetic-c]', 'ExponentPushToken[synthetic-b]'], 'registration order after the collapses');
+  const tsBefore = three[0].ts; await sleep(5);
+  assert.equal((await S.j('POST', '/push/register', { token: 'ExponentPushToken[synthetic-a]' }, kola)).status, 201);
+  const moved = await until(async () => { const t = playerTokens(dir); return t.length === 3 && t.at(-1).token === 'ExponentPushToken[synthetic-a]' && t.at(-1).ts > tsBefore ? t : null; }, 8000); assert.ok(moved, 'the token moved last with a later ts, the count unchanged');
+  for (const token of [424242, true, { review: 'synthetic' }, ['synthetic']]) { const r = await S.j('POST', '/push/register', { token }, kola); assert.equal(r.status, 400, `${JSON.stringify(token)}: ${r.text}`); assert.deepEqual(r.body, { error: 'TOKEN_INVALID' }); }
+  for (const b of ['{"token":1e400}', '{"token":-1e400}', '{"token":{"n":1e400}}', '{"token":[1e400]}']) { const r = await S.raw('POST', '/push/register', b, kola); assert.equal(r.status, 400, b); assert.equal(r.body.error, 'TOKEN_INVALID'); }
+  for (const b of ['{"token":0}', '{"token":null}', '{"token":""}', '{"token":false}', '{}']) { const r = await S.raw('POST', '/push/register', b, kola); assert.equal(r.status, 400, b); assert.equal(r.body.error, 'TOKEN_REQUIRED', `falsy token refused as before: ${b}`); }
+  assert.equal((await S.j('POST', '/push/register', { token: 'x' })).status, 401);
+  await sleep(2600); assert.deepEqual(playerTokens(dir), moved, 'nothing stored by a refusal'); assert.equal(S.proc.exitCode, null);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
   const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.deepEqual(snapshot.db.pushTokens.filter((t) => t.kind === 'player' && t.refId === 'pl-adeyemi'), eight, 'the backup carries values and types');
+  assert.deepEqual(snapshot.db.pushTokens.filter((t) => t.kind === 'player' && t.refId === 'pl-adeyemi'), moved, 'the backup carries the tokens');
   await S.stop(); rm(dir, bk.body.dir);
 });
 
@@ -260,10 +252,10 @@ await test('[cutover] a failed ordinary save (internal:save.sqlite_commit at the
 });
 
 // ============================================================= [cutover] deletion, backup/restore
-await test('[cutover] an ordinary account deletion leaves the three tables alone (the deleted player\'s token rows and push rows stay); the admin backup exports outbox, pushLog and pushTokens in their legacy shapes (both outbox literals, the null destination, token values and types); a restore into a NEW directory imports them (migration 0011) row for row; a backup whose outbox entry matches both shapes is refused at boot (OUTBOX_PUSH_IMPORT_BLOCKED, no address in the log) and creates no table', async () => {
+await test('[cutover] an ordinary account deletion leaves the three tables alone (the deleted player\'s token rows and push rows stay); the admin backup exports outbox, pushLog and pushTokens in their legacy shapes (both outbox literals, the null destination, the tokens); a restore into a NEW directory imports them (migration 0011) row for row; a backup whose outbox entry matches both shapes is refused at boot (OUTBOX_PUSH_IMPORT_BLOCKED, no address in the log) and creates no table', async () => {
   const dir = tempDir('s7c-backup'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara'); let kola = await playerLogin(S, 'pl-adeyemi');
-  for (const token of BASELINE_TOKENS) assert.equal((await S.j('POST', '/push/register', { token }, kola)).status, 201);
+  for (const token of [...BASELINE_TOKENS, 'ExponentPushToken[synthetic-d]', 'ExponentPushToken[synthetic-e]', 'ExponentPushToken[synthetic-f]', 'ExponentPushToken[synthetic-g]']) assert.equal((await S.j('POST', '/push/register', { token }, kola)).status, 201);
   assert.equal((await S.j('POST', '/push/register', { token: 'ExponentPushToken[synthetic-guardian]' }, amara)).status, 201);
   assert.equal((await S.j('POST', '/org/invites', { email: 'synthetic-invitee-3@example.invalid', name: 'Synthetic Three', role: 'Scout' }, maria)).status, 201);
   const req = await S.j('POST', '/org/players/pl-guni/request', { type: 'contact', message: 'Synthetic contact request.' }, maria); assert.equal(req.status, 201);
@@ -287,15 +279,15 @@ await test('[cutover] an ordinary account deletion leaves the three tables alone
   // The backup.
   const all = stored(dir); const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
   const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.deepEqual(snapshot.db.outbox, all.outbox, 'both outbox literals, the null destination present'); assert.deepEqual(snapshot.db.pushLog, all.pushLog); assert.deepEqual(snapshot.db.pushTokens, all.pushTokens, 'tokens with values and types');
+  assert.deepEqual(snapshot.db.outbox, all.outbox, 'both outbox literals, the null destination present'); assert.deepEqual(snapshot.db.pushLog, all.pushLog); assert.deepEqual(snapshot.db.pushTokens, all.pushTokens, 'the tokens');
   assert.ok(snapshot.db.outbox.some((m) => Object.hasOwn(m, 'to') && m.to === null)); assert.ok(snapshot.db.outbox.some((m) => Object.hasOwn(m, 'subject')) && snapshot.db.outbox.some((m) => !Object.hasOwn(m, 'subject') && Object.hasOwn(m, 'providerMessageId')));
-  assert.deepEqual(typeCounts(snapshot.db.pushTokens.filter((t) => t.kind === 'player').map((t) => t.token)), { numbers: 1, strings: 1, booleans: 1, objects: 2, arrays: 2 });
+  assert.equal(snapshot.db.pushTokens.filter((t) => t.kind === 'player').length, 7);
   await S.stop();
   const restored = tempDir('s7c-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored), 'the restore imported through 0011');
   const back = stored(restored); assert.deepEqual([back.outbox, back.pushLog, back.pushTokens], [all.outbox, all.pushLog, all.pushTokens], 'imported row for row');
   for (const n of ['outbox', 'pushLog', 'pushTokens']) assert.equal(q1(restored, 'SELECT COUNT(*) AS n FROM collections WHERE name = ?', n).n, 0, 'no blob left behind');
-  const record = JSON.parse(q1(restored, "SELECT value FROM meta WHERE key = 'outboxPushCutover'").value); assert.equal(record.outbox.imported, all.outbox.length); assert.equal(record.pushTokens.imported, all.pushTokens.length); assert.doesNotMatch(JSON.stringify(record), /example\.invalid|ExponentPushToken|424242/);
+  const record = JSON.parse(q1(restored, "SELECT value FROM meta WHERE key = 'outboxPushCutover'").value); assert.equal(record.outbox.imported, all.outbox.length); assert.equal(record.pushTokens.imported, all.pushTokens.length); assert.doesNotMatch(JSON.stringify(record), /example\.invalid|ExponentPushToken/);
   await S.stop();
   const bad = tempDir('s7c-bad'); fs.cpSync(bk.body.dir, bad, { recursive: true });
   { const j = JSON.parse(fs.readFileSync(path.join(bad, 'db.json'), 'utf8')); j.db.outbox[0].channel = 'email'; j.db.outbox[0].providerMessageId = 'fm_x'; fs.writeFileSync(path.join(bad, 'db.json'), JSON.stringify(j)); }
@@ -304,115 +296,49 @@ await test('[cutover] an ordinary account deletion leaves the three tables alone
   rm(dir, bk.body.dir, restored, bad);
 });
 
-// ============================================================= review of 40aa05c — two independently reproduced compatibility defects, through the real routes
-await test('[review of 40aa05c, F2] POST /org/invites with a destination the route COERCES (email given as a JSON array: RegExp.test coerces it, the invite stores String(email), the mailer receives the ORIGINAL array — the accepted build persisted that array): the response is the same 201, the process stays alive, the invite row and its mail record are durable in the route\'s one save with the array destination; a two-element array the regular expression also passes, an ordinary string and an object (400, unchanged) behave as before; the admin view, a restart, the backup and a restore keep the array by value and type; on the live transport (provider intercepted locally) the provider receives the same JSON as before and the row records its answer', async () => {
-  const dir = tempDir('s7c-f2'); let S = await boot(dir);
-  const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const seq0 = seqOf(dir); const logBefore = S.log().length;
-  const ONE = ['synthetic-review@example.invalid']; const TWO = ['synthetic-second@example.invalid', 'x'];
-  const r = await S.j('POST', '/org/invites', { email: ONE, name: 'Synthetic Reviewer', role: 'Scout' }, maria);
-  assert.equal(r.status, 201, r.text); assert.equal(r.body.invite.email, ONE[0], 'the invite stores String(email), as before');
-  await sleep(600); assert.equal(S.proc.exitCode, null, 'the process is alive (no unobserved rejection)'); assert.doesNotMatch(S.log().slice(logBefore), /to must be a string or null|cannot be stored as JSON|UnhandledPromiseRejection|not recorded/, 'no refusal in the log');
-  const after = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mail: readStored(c).outbox.find((m) => m.subject && /invited you/.test(m.subject) && /Hi Synthetic Reviewer/.test(m.text)), inviteRow: (blobRows(c, 'orgInvites') ?? []).some((i) => i.id === r.body.invite.id) }));
-  assert.equal(after.seq, seq0 + 1, 'one save (the route\'s persistNow)'); assert.ok(after.inviteRow, 'the invite row is durable'); assert.ok(after.mail, 'the mail record is durable in that same save'); assert.deepEqual(after.mail.to, ONE, 'with the array the mailer received'); assert.equal(after.mail.transport, 'dev-outbox'); assert.equal(after.mail.delivered, true);
-  assert.equal((await S.j('POST', '/org/invites', { email: TWO, name: 'Synthetic Second', role: 'Scout' }, maria)).status, 201, 'a two-element array the regular expression also passes');
-  assert.equal((await S.j('POST', '/org/invites', { email: 'synthetic-plain@example.invalid', name: 'Synthetic Plain', role: 'Scout' }, maria)).status, 201);
-  assert.equal((await S.j('POST', '/org/invites', { email: { a: 1 }, name: 'Synthetic Object', role: 'Scout' }, maria)).status, 400, 'an object never passed the route\'s regular expression (unchanged)');
-  await sleep(300); assert.equal(S.proc.exitCode, null);
-  const view = (await S.j('GET', '/admin/outbox', undefined, null, A)).body; const byName = (list, n) => list.find((m) => typeof m.text === 'string' && m.text.includes(`Hi ${n},`));
-  assert.deepEqual(byName(view, 'Synthetic Reviewer').to, ONE, 'the admin view returns the array, as the accepted build did'); assert.deepEqual(byName(view, 'Synthetic Second').to, TWO); assert.equal(byName(view, 'Synthetic Plain').to, 'synthetic-plain@example.invalid');
-  const idsBefore = view.map((m) => m.id);
-  // Restart, backup, restore.
-  await S.stop(); S = await boot(dir);
-  const viewAfter = (await S.j('GET', '/admin/outbox', undefined, null, A)).body; assert.deepEqual(viewAfter.map((m) => m.id), idsBefore, 'same ids, same order after a restart'); assert.deepEqual(byName(viewAfter, 'Synthetic Reviewer').to, ONE, 'the array after a restart');
-  const all = stored(dir); const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')); assert.deepEqual(snapshot.db.outbox, all.outbox, 'the backup carries the arrays'); assert.ok(snapshot.db.outbox.some((m) => Array.isArray(m.to) && m.to.length === 2));
-  await S.stop();
-  const restored = tempDir('s7c-f2-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true }); S = await boot(restored); assert.ok(live(restored)); assert.deepEqual(stored(restored).outbox, all.outbox, 'restored row for row (migration 0011)'); await S.stop();
+// ============================================================= valid input only: a non-string e-mail never reaches the mailer
+await test('[valid input only] POST /org/invites and POST /org/verification/player-invites refuse an e-mail that is not a string — a JSON array (which RegExp.test / emailProblem used to coerce, handing the ORIGINAL array to the mailer), an array holding raw JSON 1e400, an object, a number — with 400 (EMAIL_INVALID / EMAIL_SYNTAX), storing no invite and no mail record; an ordinary string is answered 201 with its mail record in the route\'s one save, as before; on the live transport (provider intercepted locally) the provider receives the string and the row records its answer with the next save', async () => {
+  const dir = tempDir('s7c-email'); const S = await boot(dir);
+  const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const logBefore = S.log().length;
+  const counts = () => snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mails: readStored(c).outbox.length, invites: (blobRows(c, 'orgInvites') ?? []).length, playerInvites: (blobRows(c, 'verPlayerInvites') ?? []).length }));
+  const before = counts();
+  for (const email of [['synthetic-review@example.invalid'], ['synthetic-second@example.invalid', 'x'], { a: 1 }, 7]) {
+    const r = await S.j('POST', '/org/invites', { email, name: 'Synthetic Reviewer', role: 'Scout' }, maria); assert.equal(r.status, 400, `${JSON.stringify(email)}: ${r.text}`); assert.equal(r.body.error, 'EMAIL_INVALID');
+    const p = await S.j('POST', '/org/verification/player-invites', { email, name: 'Synthetic Player' }, maria); assert.equal(p.status, 400, `${JSON.stringify(email)}: ${p.text}`); assert.equal(p.body.error, 'EMAIL_SYNTAX');
+  }
+  for (const b of ['{"email":[1e400,"synthetic-overflow@example.invalid"],"name":"Synthetic Overflow","role":"Scout"}', '{"email":[[-1e400],"synthetic-nested@example.invalid"],"name":"Synthetic Nested","role":"Scout"}']) { const r = await S.raw('POST', '/org/invites', b, maria); assert.equal(r.status, 400, b); assert.equal(r.body.error, 'EMAIL_INVALID'); }
+  await sleep(600); assert.deepEqual(counts(), before, 'no invite, no mail record, no save'); assert.equal(S.proc.exitCode, null); assert.doesNotMatch(S.log().slice(logBefore), /UnhandledPromiseRejection|not recorded/);
+  const ok = await S.j('POST', '/org/invites', { email: 'synthetic-plain@example.invalid', name: 'Synthetic Plain', role: 'Scout' }, maria); assert.equal(ok.status, 201, ok.text);
+  const after = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mail: readStored(c).outbox.find((m) => /Hi Synthetic Plain,/.test(m.text)) }));
+  assert.equal(after.seq, before.seq + 1, 'one save (the route\'s persistNow)'); assert.equal(after.mail?.to, 'synthetic-plain@example.invalid');
+  const pOk = await S.j('POST', '/org/verification/player-invites', { email: 'synthetic-player@example.invalid', name: 'Synthetic Player' }, maria); assert.equal(pOk.status, 201, pOk.text);
+  assert.ok(await until(async () => stored(dir).outbox.some((m) => m.to === 'synthetic-player@example.invalid'), 6000), 'the player invite\'s mail record');
+  await S.stop(); rm(dir);
   // Live transport, provider intercepted locally (never a real request).
-  const liveDir = tempDir('s7c-f2-live'); const stubLog = path.join(liveDir, '..', `${path.basename(liveDir)}-sendgrid.log`);
+  const liveDir = tempDir('s7c-email-live'); const stubLog = path.join(liveDir, '..', `${path.basename(liveDir)}-sendgrid.log`);
   const SL = await boot(liveDir, { SENDGRID_API_KEY: 'synthetic-not-a-real-key', SENDGRID_STUB_LOG: stubLog, NODE_OPTIONS: `--import=${path.join(HERE, 'testSendgridStub.mjs')}` });
   const lm = await orgLogin(SL, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
-  assert.equal((await SL.j('POST', '/org/invites', { email: ONE, name: 'Synthetic Live', role: 'Scout' }, lm)).status, 201); await sleep(600); assert.equal(SL.proc.exitCode, null);
-  const providerBody = JSON.parse(fs.readFileSync(stubLog, 'utf8').trim().split('\n').at(-1)); assert.deepEqual(providerBody.personalizations[0].to[0].email, ONE, 'the provider input is the original value, as before');
-  const liveMem = byName((await SL.j('GET', '/admin/outbox', undefined, null, A)).body, 'Synthetic Live'); assert.deepEqual([liveMem.transport, liveMem.delivered, liveMem.to], ['sendgrid', true, ONE], 'the provider\'s answer on the record at once (memory), the array kept');
-  assert.equal(byName(stored(liveDir).outbox, 'Synthetic Live').delivered, false, 'the route\'s save carried the record before the provider answered; the answer lands with the NEXT save, as the mutated blob entry did (§10.8 reading ii)');
-  assert.equal((await SL.j('POST', '/org/invites', { email: 'synthetic-live-2@example.invalid', name: 'Synthetic Live Two', role: 'Scout' }, lm)).status, 201); // that next save
-  const liveRow = byName(stored(liveDir).outbox, 'Synthetic Live'); assert.deepEqual([liveRow.transport, liveRow.delivered, liveRow.to], ['sendgrid', true, ONE], 'the provider\'s answer recorded on the row, the array kept');
-  await SL.stop(); rm(liveDir); fs.rmSync(stubLog, { force: true });
-  rm(dir, bk.body.dir, restored);
-});
-
-await test('[review of 40aa05c, F1] POST /push/register with RAW JSON bodies (1e400 twice, -1e400, {"n":1e400}, [1e400] — JSON.stringify would pre-normalise them): five 201 responses as the accepted build answered; four rows persisted [null,null,{"n":null},[null]] with the debounced save (a repeated positive Infinity collapses by strict equality on the live value, negative Infinity is a separate row); the same five again collapse only their own live rows; falsy tokens are still 400; the backup carries null; after a restart every non-finite value reads null and a new live Infinity removes none of them; finite primitives and structurally equal objects behave as before; the push sender hands the live provider (intercepted locally) the same JSON payload as the accepted build (null for Infinity)', async () => {
-  const dir = tempDir('s7c-f1'); let S = await boot(dir, { M13_FAST_RETRY: '' }); let kola = await playerLogin(S, 'pl-adeyemi');
-  const RAW = ['{"token":1e400}', '{"token":1e400}', '{"token":-1e400}', '{"token":{"n":1e400}}', '{"token":[1e400]}'];
-  const statuses = []; for (const b of RAW) statuses.push((await S.raw('POST', '/push/register', b, kola)).status);
-  assert.deepEqual(statuses, [201, 201, 201, 201, 201], 'five 201 responses, as the accepted build answered'); assert.equal(S.proc.exitCode, null);
-  const four = await until(async () => { const t = playerTokens(dir); return t.length === 4 ? t : null; }, 8000); assert.ok(four, `four rows persisted with the debounced save (${playerTokens(dir).length})`);
-  assert.deepEqual(four.map((t) => t.token), [null, null, { n: null }, [null]], 'the accepted build\'s persisted values: +Infinity collapsed, -Infinity separate, nested nulls'); assert.ok(four[0].ts <= four[1].ts && four[1].ts <= four[2].ts && four[2].ts <= four[3].ts, 'registration order');
-  for (const b of RAW) assert.equal((await S.raw('POST', '/push/register', b, kola)).status, 201);
-  const six = await until(async () => { const t = playerTokens(dir); return t.length === 6 ? t : null; }, 8000); assert.ok(six, 'six rows: the two live primitives replaced their own rows, the object and the array are new');
-  assert.deepEqual(six.map((t) => t.token), [{ n: null }, [null], null, null, { n: null }, [null]]);
-  for (const b of ['{"token":0}', '{"token":null}', '{"token":""}', '{"token":false}', '{}']) assert.equal((await S.raw('POST', '/push/register', b, kola)).status, 400, `falsy token refused as before: ${b}`);
-  const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.deepEqual(snapshot.db.pushTokens.filter((t) => t.kind === 'player' && t.refId === 'pl-adeyemi').map((t) => t.token), six.map((t) => t.token), 'the backup carries null');
-  // Restart: null for every non-finite value; a new live Infinity removes none of them.
-  await S.stop(); S = await boot(dir, { M13_FAST_RETRY: '' }); kola = await playerLogin(S, 'pl-adeyemi');
-  assert.equal((await S.raw('POST', '/push/register', '{"token":1e400}', kola)).status, 201);
-  const seven = await until(async () => { const t = playerTokens(dir); return t.length === 7 ? t : null; }, 8000); assert.ok(seven, 'a persisted null from the previous process is not removed by the new live Infinity'); assert.deepEqual(seven.slice(0, 6).map((t) => t.ts), six.map((t) => t.ts), 'the earlier rows untouched');
-  assert.equal((await S.raw('POST', '/push/register', '{"token":1e400}', kola)).status, 201); await sleep(2600);
-  const again = playerTokens(dir); assert.equal(again.length, 7, 'the repeated live Infinity collapsed only its own row'); assert.deepEqual(again.slice(0, 6).map((t) => t.ts), six.map((t) => t.ts)); assert.ok(again[6].ts > seven[6].ts);
-  for (const b of ['{"token":424242}', '{"token":424242}', '{"token":{"n":1e400}}']) assert.equal((await S.raw('POST', '/push/register', b, kola)).status, 201);
-  const nine = await until(async () => { const t = playerTokens(dir); return t.length === 9 ? t : null; }, 8000); assert.ok(nine, 'one number row (collapsed) and one more object row'); assert.deepEqual(nine.slice(-2).map((t) => t.token), [424242, { n: null }]);
-  await S.stop();
-  // The provider payload (the live push transport, intercepted locally): JSON.stringify of the live values.
-  const payloads = async (server) => {
-    const d = tempDir('s7c-f1-expo'); const stubLog = path.join(d, '..', `${path.basename(d)}-expo.log`);
-    const X = await boot(d, { M13_FAST_RETRY: '', EXPO_ACCESS_TOKEN: 'synthetic-not-a-real-token', EXPO_STUB_LOG: stubLog, NODE_OPTIONS: `--import=${path.join(HERE, 'testExpoStub.mjs')}` }, server);
-    const m = await orgLogin(X, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const k = await playerLogin(X, 'pl-adeyemi');
-    for (const b of ['{"token":1e400}', '{"token":{"n":1e400}}', '{"token":"ExponentPushToken[synthetic]"}']) assert.equal((await X.raw('POST', '/push/register', b, k)).status, 201);
-    const channel = await adultChannel(X, m, k); fs.writeFileSync(stubLog, '');
-    assert.equal((await X.j('POST', `/org/channels/${channel.id}/messages`, { text: 'Synthetic payload message' }, m)).status, 201);
-    const lines = await until(async () => { const l = fs.readFileSync(stubLog, 'utf8').trim().split('\n').filter(Boolean); return l.length >= 3 ? l : null; }, 8000); assert.ok(lines, 'one provider call per registered token');
-    await sleep(300); const parsed = fs.readFileSync(stubLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    await X.stop(); rm(d); fs.rmSync(stubLog, { force: true });
-    return parsed.map((l) => ({ to: l.to, title: l.title }));
-  };
-  const mine = await payloads(SERVER);
-  assert.deepEqual(mine, [{ to: null, title: 'ScoutBox' }, { to: { n: null }, title: 'ScoutBox' }, { to: 'ExponentPushToken[synthetic]', title: 'ScoutBox' }], 'null for Infinity in the provider payload, as JSON.stringify always wrote');
-  rm(dir, bk.body.dir);
-});
-
-await test('[review of 78c14b9] POST /org/invites with RAW JSON destinations the route coerces and accepts — ["…"] (control), [1e400,"…"] and [[-1e400],"…"] (the elements parse to ±Infinity): three 201 responses, the process alive, three invite rows and THREE mail records in the routes\' own saves with the array structure kept and the accepted build\'s JSON in the overflow positions (null, nested null); no refusal logged; the admin view, a restart, the backup, a restore and the live transport\'s provider payload (intercepted locally) all match', async () => {
-  const dir = tempDir('s7c-f2b'); let S = await boot(dir);
-  const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const seq0 = seqOf(dir); const logBefore = S.log().length;
-  const RAW = ['{"email":["synthetic-control@example.invalid"],"name":"Synthetic Control","role":"Scout"}', '{"email":[1e400,"synthetic-overflow@example.invalid"],"name":"Synthetic Overflow","role":"Scout"}', '{"email":[[-1e400],"synthetic-nested@example.invalid"],"name":"Synthetic Nested","role":"Scout"}'];
-  const EXPECTED = [['synthetic-control@example.invalid'], [null, 'synthetic-overflow@example.invalid'], [[null], 'synthetic-nested@example.invalid']]; // the accepted build's persisted JSON
-  const statuses = []; for (const b of RAW) statuses.push((await S.raw('POST', '/org/invites', b, maria)).status);
-  assert.deepEqual(statuses, [201, 201, 201]); await sleep(600); assert.equal(S.proc.exitCode, null, 'the process is alive');
-  assert.doesNotMatch(S.log().slice(logBefore), /non-finite|cannot be stored as JSON|not recorded/, 'no refusal logged after a 201');
   const byName = (list, n) => list.find((m) => typeof m.text === 'string' && m.text.includes(`Hi ${n},`));
-  const after = snap(dir, (c) => { const st = readStored(c); return { seq: st.seq, mails: ['Control', 'Overflow', 'Nested'].map((n) => byName(st.outbox, `Synthetic ${n}`)), invites: (blobRows(c, 'orgInvites') ?? []).filter((i) => /^Synthetic (Control|Overflow|Nested)$/.test(i.name)).length }; });
-  assert.equal(after.seq, seq0 + 3, 'three saves (one persistNow per invite)'); assert.equal(after.invites, 3, 'three invite rows');
-  assert.deepEqual(after.mails.map((m) => m?.to), EXPECTED, 'three mail records, the array structure kept, the old JSON in the overflow positions');
-  assert.deepEqual(snap(dir, (c) => c.all("SELECT to_json FROM outbox WHERE text LIKE 'Hi Synthetic %' ORDER BY seq").map((r) => r.to_json)), EXPECTED.map((v) => JSON.stringify(v)), 'the stored JSON text');
-  const view = (await S.j('GET', '/admin/outbox', undefined, null, A)).body; assert.deepEqual(['Control', 'Overflow', 'Nested'].map((n) => byName(view, `Synthetic ${n}`).to), EXPECTED, 'the admin view serialises the live array as the accepted build did');
-  const idsBefore = view.map((m) => m.id);
-  await S.stop(); S = await boot(dir);
-  const viewAfter = (await S.j('GET', '/admin/outbox', undefined, null, A)).body; assert.deepEqual(viewAfter.map((m) => m.id), idsBefore); assert.deepEqual(['Control', 'Overflow', 'Nested'].map((n) => byName(viewAfter, `Synthetic ${n}`).to), EXPECTED, 'after a restart');
-  const all = stored(dir); const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')); assert.deepEqual(snapshot.db.outbox, all.outbox, 'the backup carries the arrays with the nulls');
-  await S.stop();
-  const restored = tempDir('s7c-f2b-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true }); S = await boot(restored); assert.ok(live(restored)); assert.deepEqual(stored(restored).outbox, all.outbox, 'restored row for row'); await S.stop();
-  // Live transport, provider intercepted locally: the provider receives JSON.stringify of the live array (null in the overflow position), as before.
-  const liveDir = tempDir('s7c-f2b-live'); const stubLog = path.join(liveDir, '..', `${path.basename(liveDir)}-sendgrid.log`);
-  const SL = await boot(liveDir, { SENDGRID_API_KEY: 'synthetic-not-a-real-key', SENDGRID_STUB_LOG: stubLog, NODE_OPTIONS: `--import=${path.join(HERE, 'testSendgridStub.mjs')}` });
-  const lm = await orgLogin(SL, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
-  assert.equal((await SL.raw('POST', '/org/invites', RAW[1], lm)).status, 201); await sleep(600); assert.equal(SL.proc.exitCode, null);
-  const providerBody = JSON.parse(fs.readFileSync(stubLog, 'utf8').trim().split('\n').at(-1)); assert.deepEqual(providerBody.personalizations[0].to[0].email, EXPECTED[1], 'the provider payload, as before');
-  assert.equal((await SL.j('POST', '/org/invites', { email: 'synthetic-live-3@example.invalid', name: 'Synthetic Live Three', role: 'Scout' }, lm)).status, 201); // the next save carries the provider's answer
-  const liveRow = byName(stored(liveDir).outbox, 'Synthetic Overflow'); assert.deepEqual([liveRow.transport, liveRow.delivered, liveRow.to], ['sendgrid', true, EXPECTED[1]]);
+  assert.equal((await SL.j('POST', '/org/invites', { email: 'synthetic-live@example.invalid', name: 'Synthetic Live', role: 'Scout' }, lm)).status, 201); await sleep(600); assert.equal(SL.proc.exitCode, null);
+  const providerBody = JSON.parse(fs.readFileSync(stubLog, 'utf8').trim().split('\n').at(-1)); assert.equal(providerBody.personalizations[0].to[0].email, 'synthetic-live@example.invalid');
+  const liveMem = byName((await SL.j('GET', '/admin/outbox', undefined, null, A)).body, 'Synthetic Live'); assert.deepEqual([liveMem.transport, liveMem.delivered], ['sendgrid', true], 'the provider\'s answer on the record at once (memory)');
+  assert.equal(byName(stored(liveDir).outbox, 'Synthetic Live').delivered, false, 'the route\'s save carried the record before the provider answered; the answer lands with the NEXT save');
+  assert.equal((await SL.j('POST', '/org/invites', { email: 'synthetic-live-2@example.invalid', name: 'Synthetic Live Two', role: 'Scout' }, lm)).status, 201); // that next save
+  const liveRow = byName(stored(liveDir).outbox, 'Synthetic Live'); assert.deepEqual([liveRow.transport, liveRow.delivered, liveRow.to], ['sendgrid', true, 'synthetic-live@example.invalid'], 'the provider\'s answer recorded on the row');
   await SL.stop(); rm(liveDir); fs.rmSync(stubLog, { force: true });
-  rm(dir, bk.body.dir, restored);
+});
+
+await test('the push sender hands the live provider (intercepted locally) each registered string token of the audience, one call per token', async () => {
+  const d = tempDir('s7c-expo'); const stubLog = path.join(d, '..', `${path.basename(d)}-expo.log`);
+  const X = await boot(d, { M13_FAST_RETRY: '', EXPO_ACCESS_TOKEN: 'synthetic-not-a-real-token', EXPO_STUB_LOG: stubLog, NODE_OPTIONS: `--import=${path.join(HERE, 'testExpoStub.mjs')}` });
+  const m = await orgLogin(X, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const k = await playerLogin(X, 'pl-adeyemi');
+  for (const token of ['ExponentPushToken[synthetic-1]', 'ExponentPushToken[synthetic-2]']) assert.equal((await X.j('POST', '/push/register', { token }, k)).status, 201);
+  const channel = await adultChannel(X, m, k); fs.writeFileSync(stubLog, '');
+  assert.equal((await X.j('POST', `/org/channels/${channel.id}/messages`, { text: 'Synthetic payload message' }, m)).status, 201);
+  const lines = await until(async () => { const l = fs.readFileSync(stubLog, 'utf8').trim().split('\n').filter(Boolean); return l.length >= 2 ? l : null; }, 8000); assert.ok(lines, 'one provider call per registered token');
+  await sleep(300); const parsed = fs.readFileSync(stubLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  assert.deepEqual(parsed.map((l) => ({ to: l.to, title: l.title })), [{ to: 'ExponentPushToken[synthetic-1]', title: 'ScoutBox' }, { to: 'ExponentPushToken[synthetic-2]', title: 'ScoutBox' }]);
+  await X.stop(); rm(d); fs.rmSync(stubLog, { force: true });
 });
 
 console.log(`\n${passed} outbox/push server checks passed`);

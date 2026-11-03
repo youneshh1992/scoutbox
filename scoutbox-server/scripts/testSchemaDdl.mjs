@@ -102,14 +102,13 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
   assert.match(header03, /dispatches\s+→ dispatches, dispatch_attempts[^\n]*0010_dispatches[^\n]*REGISTERED/, 'the scope header of 03 states that the dispatch tables are live since 0010');
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'dispatch_attempts'").get().sql, /ok IS NOT NULL/, 'the documented attempt CHECK rejects a NULL send outcome');
   assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(dispatches)').all(), [], 'the documented dispatches table has no foreign key (option A: an indexed reference, no cascade)');
-  // S7c: the outbox and push tables (review of 6ca66ba): the structural source CHECK, a nullable destination, a JSON token column, no uniqueness on tokens, no vocabulary CHECK.
+  // S7c: the outbox and push tables (review of 6ca66ba): the structural source CHECK, a nullable string destination, a string token column, no side columns, no uniqueness on tokens, no vocabulary CHECK.
   for (const t of ['outbox', 'push_log', 'push_tokens']) assert.match(header03, new RegExp(`${t}[^\\n]*0011_outbox_push[^\\n]*REGISTERED`), `the scope header of 03 states that ${t} is live since 0011`);
   const outboxSql = docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'outbox'").get().sql;
   assert.match(outboxSql, /source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL/, 'the documented outbox CHECK ties each source to its columns');
   assert.equal(docs.prepare("PRAGMA table_info(outbox)").all().find((c) => c.name === 'to_address').notnull, 0, 'the documented destination is nullable');
-  const toJson = docs.prepare("PRAGMA table_info(outbox)").all().find((c) => c.name === 'to_json'); assert.ok(toJson && toJson.notnull === 0, 'review of 40aa05c, F2: the documented to_json column exists and is nullable');
-  assert.match(outboxSql, /to_json IS NULL OR \(json_valid\(to_json\) AND json_type\(to_json\) NOT IN \('text', 'null'\)\)/, 'to_json holds any JSON value that is not a JSON string or JSON null'); assert.match(outboxSql, /CHECK \(to_address IS NULL OR to_json IS NULL\)/, 'a destination is in one column or null');
-  assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'push_tokens'").get().sql, /token_json\s+TEXT NOT NULL CHECK \(json_valid\(token_json\)\)/, 'the documented token column is JSON text');
+  for (const t of ['outbox', 'push_log', 'push_tokens']) assert.equal(docs.prepare(`PRAGMA table_info(${t})`).all().filter((c) => /_json$/.test(c.name)).length, 0, `${t}: typed columns only, no JSON side column`);
+  assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'push_tokens'").get().sql, /token\s+TEXT NOT NULL CHECK \(length\(token\) > 0\)/, 'the documented token column is a non-empty string');
   assert.equal(docs.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'index' AND tbl_name = 'push_tokens' AND sql LIKE '%UNIQUE%'").get().n, 0, 'no unique index on the documented tokens');
   for (const t of ['outbox', 'push_log', 'push_tokens']) { assert.doesNotMatch(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /transport IN \(|audience_kind IN \(|ref_kind IN \(|channel IN \(/, `${t}: no vocabulary CHECK`); assert.deepEqual(docs.prepare(`PRAGMA foreign_key_list(${t})`).all(), [], `${t} references nothing`); }
   // S7d (review §11.5 as corrected by the reviews of 46e5afe and 8330f08; D-A, D-B): the thread tables.
@@ -120,9 +119,9 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
   assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(message_attachments)').all().map((f) => [f.from, f.table, f.on_delete]), [['message_id', 'messages', 'CASCADE']]);
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'channels_request_id'").get().sql, /UNIQUE/, 'one thread per request');
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'messages_channel_position'").get().sql, /UNIQUE/, 'one message per position in a thread');
-  for (const t of ['channels', 'messages']) assert.ok(docs.prepare(`PRAGMA table_info(${t})`).all().some((c) => c.name === 'absent_keys_json'), `${t}: the documented absent-keys column (absence preserved as absence)`);
+  for (const t of ['channels', 'messages', 'message_attachments']) for (const d of [docs, mig]) assert.deepEqual(d.prepare(`PRAGMA table_info(${t})`).all().filter((c) => /^(extra|absent_keys|offtype)_json$/.test(c.name)).map((c) => c.name), [], `${t}: typed columns only, no side columns`);
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_attachments'").get().sql, /kind = 'clip' AND media_id IS NOT NULL AND verified_clip IS NOT NULL AND report_id IS NULL/, 'the documented attachment CHECK ties each kind to its columns');
-  // S6b (plan §D.4 Candidate A as accepted at 1792fc7; Q4, Q4b, Q5): the eight audit tables — no foreign key on any (the five player references tolerant, the organisation/staff references historical pointers, the IDV guardian reference checked in code), no vocabulary CHECK, every literal column nullable, seq order, the three lossless columns, the documented indexes (reports_target_player_id included).
+  // S6b (plan §D.4 Candidate A as accepted at 1792fc7; Q4, Q4b, Q5): the eight audit tables — no foreign key on any (the five player references tolerant, the organisation/staff references historical pointers, the IDV guardian reference checked in code), no vocabulary CHECK, every literal column nullable, seq order, typed columns only (no side columns), the documented indexes (reports_target_player_id included).
   for (const t of AUDIT_TABLES) {
     assert.match(header03, new RegExp(`${t}[^\\n]*0013_safety_audit[^\\n]*REGISTERED`), `the scope header of 03 states that ${t} is live since 0013`);
     const sql = docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
@@ -130,8 +129,8 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
     assert.doesNotMatch(sql, /\bIN \(/, `${t}: no vocabulary CHECK`);
     const cols = docs.prepare(`PRAGMA table_info(${t})`).all();
     assert.deepEqual(cols.slice(0, 2).map((c) => [c.name, c.type, c.notnull, c.pk]), [['seq', 'INTEGER', 0, 1], ['id', 'TEXT', 1, 0]], `${t}: seq is the order, id the writer's id`);
-    for (const c of ['absent_keys_json', 'offtype_json', 'extra_json']) assert.ok(cols.some((x) => x.name === c && x.notnull === 0), `${t}: the lossless column ${c}`);
-    for (const c of cols) if (!['id', 'guardian_id'].includes(c.name)) assert.equal(c.notnull, 0, `${t}.${c.name}: every literal column is nullable (absence is absence)`);
+    for (const d of [docs, mig]) assert.deepEqual(d.prepare(`PRAGMA table_info(${t})`).all().filter((c) => /^(extra|absent_keys|offtype)_json$/.test(c.name)).map((c) => c.name), [], `${t}: typed columns only, no side columns`);
+    for (const c of cols) if (!['id', 'guardian_id'].includes(c.name)) assert.equal(c.notnull, 0, `${t}.${c.name}: every literal column is nullable (an absent key is NULL)`);
     assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name = ?").get(t, 'sqlite_autoindex_' + t + '_1')?.sql ?? 'UNIQUE', /UNIQUE|^$/, `${t}: id is UNIQUE`);
   }
   assert.equal(docs.prepare('PRAGMA table_info(idv_queue)').all().find((c) => c.name === 'guardian_id').notnull, 1, 'idv_queue.guardian_id is NOT NULL (Domain G, strict)');

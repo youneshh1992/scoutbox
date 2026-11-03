@@ -5,16 +5,19 @@
 // IDV queue, source changes, ops events), every reader (the admin triage, lists and
 // counts, the reporters' own lists, the guardian's log, the org ledger and notes, the
 // data-layer report), the admin actions (report resolution, the block lift — Q5: the
-// row is deleted as today — and the IDV toggle on the FIRST entry), the shapes a route
-// stores without checking (a report naming an unknown player, a numeric targetPlayerId,
-// a block naming an organisation that does not exist), a REAL adult account deletion
+// row is deleted as today — and the IDV toggle on the FIRST entry), what a route stores
+// without a lookup (a report naming an unknown player, a block naming an organisation
+// that does not exist) and the junk it refuses (400 FIELD_INVALID for a numeric
+// targetPlayerId, an object orgId or reason, an object documentType; TEXT_REQUIRED for
+// a non-text note), a REAL adult account deletion
 // that retains every audit row with its now-unresolved id — through an unchanged save,
 // the admin backup and a restore into a new directory — plus the cutover
 // itself: migration 0013 recorded at boot, the eight tables with no blob behind them, a
 // block and its ledger row durable together in one save, the IDV entry committed with
 // the guardian's column (both failure seams, real COMMIT failure, SIGKILL, retry), a
-// failed ordinary save keeping the row and landing it once, legacy and unknown shapes
-// through the import, and a backup whose IDV entry names a missing guardian refused
+// failed ordinary save keeping the row and landing it once, a hand-edited backup typed
+// on import (unknown fields dropped, off-type values normalised or dropped, reported by
+// id), and a backup whose IDV entry names a missing guardian refused
 // at boot (STRICT, Q4b) with the blobs untouched. Every database read goes through a
 // second read-only connection. Nothing here touches DATA_DIR or real data. Run with: npm test
 //
@@ -96,29 +99,15 @@ const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
 const blobRows = (c, name) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
-const setOwn = (o, k, v) => Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
-/** Unknown own fields first, then the literal's present keys in the writer's order (the export convention). */
-const ordered = (row, keys) => { const o = {}; for (const k of Object.keys(row)) if (!keys.includes(k)) setOwn(o, k, row[k]); for (const k of keys) if (Object.hasOwn(row, k)) o[k] = row[k]; return o; };
+/** The typed record: every key of the collection in the writer's order, an absent key null. */
+const ordered = (row, keys) => Object.fromEntries(keys.map((k) => [k, row[k] === undefined ? null : row[k]]));
 /**
- * The rows as the DATABASE holds them, in insertion order and in the legacy (export)
- * shape: the table after the cutover, the blob before it — so a check reads the same
- * way on both builds. Absent keys stay absent (absent_keys_json); values of a known
- * key that were not the column's type come back from offtype_json; unknown fields come
- * back from extra_json, first.
+ * The rows as the DATABASE holds them, in insertion order, as typed records: the table
+ * after the cutover, the blob before it.
  */
 function readStored(c, name) {
   if (!c.get('SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION)) return (blobRows(c, name) ?? []).map((r) => ordered(r, KEYS[name]));
-  return c.all(`SELECT * FROM ${TABLES[name]} ORDER BY seq`).map((r) => {
-    const extra = r.extra_json ? JSON.parse(r.extra_json) : {}; const absent = r.absent_keys_json ? JSON.parse(r.absent_keys_json) : []; const off = r.offtype_json ? JSON.parse(r.offtype_json) : {};
-    const row = {}; for (const k of Object.keys(extra)) setOwn(row, k, extra[k]);
-    for (const [col, key, kind] of COLS[name]) {
-      if (absent.includes(key)) continue;
-      if (Object.hasOwn(off, key)) { row[key] = off[key]; continue; }
-      const v = r[col];
-      row[key] = v === null ? null : kind === 'bool' ? v === 1 : kind === 'json' ? JSON.parse(v) : v;
-    }
-    return row;
-  });
+  return c.all(`SELECT * FROM ${TABLES[name]} ORDER BY seq`).map((r) => Object.fromEntries(COLS[name].map(([col, key, kind]) => { const v = r[col]; return [key, v === null ? null : kind === 'bool' ? v === 1 : kind === 'json' ? JSON.parse(v) : v]; })));
 }
 const stored = (dir, name) => snap(dir, (c) => readStored(c, name));
 const storedAll = (dir) => Object.fromEntries(COLLECTIONS.map((n) => [n, stored(dir, n)]));
@@ -143,7 +132,7 @@ async function audited(S, maria) {
 }
 
 // ============================================================= [compat] the behaviour the storage move must preserve
-await test('[compat] every writer through its route and every reader: a guardian\'s block and report (urgent → the suspension block and the frozen request), an adult\'s block naming an organisation that does not exist and reports naming an unknown player and a NUMERIC targetPlayerId (accepted and stored as received), an organisation\'s report and private note, two moderation hits (a contact hit; a grooming hit that escalates to an automatic urgent report with no targetPlayerId key), the IDV entry, a source change, a backup ops event, the ledger rows the blocks write; the admin triage order, the reporters\' own lists, the guardian\'s log, the org ledger, the data; report resolution, the block lift (Q5: the row is deleted and returned once), the IDV toggle (the FIRST entry); the stored rows equal the views; a restart serves the same', async () => {
+await test('[compat] every writer through its route and every reader: a guardian\'s block and report (urgent → the suspension block and the frozen request), an adult\'s block naming an organisation that does not exist and a report naming an unknown player (accepted: no lookup), the junk the routes refuse (a NUMERIC targetPlayerId, an object targetOrgId, an object orgId or reason on a block, a non-text note, an object documentType — 400, nothing stored), an organisation\'s report and private note, two moderation hits (a contact hit; a grooming hit that escalates to an automatic urgent report with no targetPlayerId key), the IDV entry, a source change, a backup ops event, the ledger rows the blocks write; the admin triage order, the reporters\' own lists, the guardian\'s log, the org ledger, the data; report resolution, the block lift (Q5: the row is deleted and returned once), the IDV toggle (the FIRST entry); the stored rows equal the views; a restart serves the same', async () => {
   const dir = tempDir('s6b-compat'); let S = await boot(dir);
   const maria = await orgLogin(S); const amara = await guardianLogin(S, 'gd-amara'); const { pid, token: adult } = await signupAdult(S, 'Audit Adult');
   // Guardian: a block of the child, then an urgent report against the club that suspends the pending request.
@@ -154,7 +143,17 @@ await test('[compat] every writer through its route and every reader: a guardian
   // Adult: a block naming an organisation that does not exist (the route checks truthiness only), reports naming an unknown player and a numeric id (handleReport stores what it received).
   assert.equal((await S.j('POST', '/player/block', { orgId: 'org-does-not-exist', reason: 'synthetic' }, adult)).status, 201, 'a block naming an unknown organisation is accepted, as before');
   const pRep1 = await S.j('POST', '/player/report', { targetKind: 'player', targetPlayerId: 'pl-nobody', reason: 'Synthetic report naming an unknown player.' }, adult); assert.equal(pRep1.status, 201, pRep1.text);
-  const pRep2 = await S.j('POST', '/player/report', { targetKind: 'scout', targetScoutName: 'Synthetic Scout', targetPlayerId: 123, reason: 'Synthetic report with a numeric id.' }, adult); assert.equal(pRep2.status, 201, pRep2.text);
+  // Junk the text columns cannot hold is refused at the route (400 FIELD_INVALID, naming the field), and nothing is stored.
+  for (const [route, body, field, token] of [
+    ['/player/report', { targetKind: 'player', targetPlayerId: 123, reason: 'Synthetic report with a numeric id.' }, 'targetPlayerId', adult],
+    ['/org/report', { targetKind: 'club', targetOrgId: { id: 'org-harbour' }, reason: 'Synthetic report with an object org id.' }, 'targetOrgId', maria],
+    ['/guardian/report', { targetKind: 'scout', targetScoutName: ['Synthetic Scout'], reason: 'Synthetic report with an array name.' }, 'targetScoutName', amara],
+    ['/player/block', { orgId: { id: 'org-harbour' } }, 'orgId', adult],
+    ['/player/block', { orgId: 'org-harbour', reason: 42 }, 'reason', adult],
+    ['/guardian/block', { orgId: 'org-harbour', playerId: 'pl-guni', reason: { why: 'object' } }, 'reason', amara],
+  ]) { const r = await S.j('POST', route, body, token); assert.equal(r.status, 400, `${route} ${field}: ${r.text}`); assert.deepEqual([r.body.error, r.body.field], ['FIELD_INVALID', field], `${route}: the field is named`); }
+  const badNote = await S.j('POST', `/org/players/${pid}/notes`, { text: ['Synthetic note as an array.'] }, maria); assert.equal(badNote.status, 400, badNote.text); assert.equal(badNote.body.error, 'TEXT_REQUIRED');
+  const pRep2 = await S.j('POST', '/player/report', { targetKind: 'scout', targetScoutName: 'Synthetic Scout', reason: 'Synthetic report about a scout.' }, adult); assert.equal(pRep2.status, 201, pRep2.text);
   // Org: a report and a private note on the adult.
   const oRep = await S.j('POST', '/org/report', { targetKind: 'player', targetPlayerId: pid, reason: 'Synthetic org report.' }, maria); assert.equal(oRep.status, 201, oRep.text);
   const noteRes = await S.j('POST', `/org/players/${pid}/notes`, { text: 'Synthetic private note.' }, maria); assert.equal(noteRes.status, 201, noteRes.text); assert.deepEqual(Object.keys(noteRes.body), ['id', 'orgId', 'playerId', 'userId', 'scoutName', 'text', 'ts']);
@@ -165,6 +164,7 @@ await test('[compat] every writer through its route and every reader: a guardian
   const { gid, token: gtok } = await signupGuardian(S, 'Audit Parent', 'audit-parent@example.test');
   assert.equal((await S.j('POST', '/guardian/verify-id', { documentType: 'passport', documentRef: 'P1234567' }, gtok)).status, 200);
   assert.equal((await S.j('POST', '/guardian/verify-id', { documentType: 'licence', documentRef: 'L7654321' }, gtok)).status, 200);
+  const badIdv = await S.j('POST', '/guardian/verify-id', { documentType: { kind: 'passport' }, documentRef: 'P1234567' }, gtok); assert.equal(badIdv.status, 400, badIdv.text); assert.deepEqual([badIdv.body.error, badIdv.body.field], ['FIELD_INVALID', 'documentType']);
   // A source change (the passport primary position) and an ops event (the backup).
   const prefs = await S.j('PATCH', '/player/football-passport/prefs', { positions: { primary: 'ST', secondary: [] } }, adult); assert.equal(prefs.status, 200, prefs.text);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
@@ -172,8 +172,8 @@ await test('[compat] every writer through its route and every reader: a guardian
   const reports = await adminReports(S);
   const rank = (r) => (r.status === 'pending_review' ? (r.urgent ? 0 : 1) : 2);
   assert.ok(reports.every((r, i) => i === 0 || rank(reports[i - 1]) <= rank(r)), 'triage order: urgent pending first'); assert.equal(reports.length, 5);
-  const auto = reports.find((r) => r.by === 'system'); assert.ok(auto, 'the grooming hit escalated'); assert.equal(auto.urgent, true); assert.equal(Object.hasOwn(auto, 'targetPlayerId'), false, 'the automatic report has no targetPlayerId key'); assert.equal(auto.targetKind, 'player'); assert.equal(auto.targetOrgId, null);
-  assert.equal(reports.find((r) => r.id === pRep1.body.reportId).targetPlayerId, 'pl-nobody'); assert.equal(reports.find((r) => r.id === pRep2.body.reportId).targetPlayerId, 123, 'the numeric id is served as received'); assert.equal(reports.find((r) => r.id === oRep.body.reportId).byOrgId, 'org-eastport');
+  const auto = reports.find((r) => r.by === 'system'); assert.ok(auto, 'the grooming hit escalated'); assert.equal(auto.urgent, true); assert.equal(auto.targetPlayerId, null, 'the automatic report has no player target'); assert.equal(auto.targetKind, 'player'); assert.equal(auto.targetOrgId, null);
+  assert.equal(reports.find((r) => r.id === pRep1.body.reportId).targetPlayerId, 'pl-nobody'); assert.equal(reports.find((r) => r.id === pRep2.body.reportId).targetScoutName, 'Synthetic Scout'); assert.equal(reports.find((r) => r.id === pRep2.body.reportId).targetPlayerId, null); assert.equal(reports.find((r) => r.id === oRep.body.reportId).byOrgId, 'org-eastport');
   assert.deepEqual((await S.j('GET', '/player/reports', undefined, adult)).body.map((r) => r.id), [pRep2.body.reportId, pRep1.body.reportId], 'the reporter\'s own list, newest first'); assert.deepEqual((await S.j('GET', '/guardian/reports', undefined, amara)).body.map((r) => r.id), [gRep.body.reportId]); assert.deepEqual((await S.j('GET', '/org/reports', undefined, maria)).body.map((r) => r.id), [oRep.body.reportId]);
   const blocks = await adminBlocks(S); assert.deepEqual(blocks.map((b) => [b.playerId, b.orgId, b.by, b.reason]), [[pid, 'org-does-not-exist', 'player', 'synthetic'], ['pl-guni', 'org-eastport', 'guardian', 'suspended_pending_review'], ['pl-guni', 'org-harbour', 'guardian', 'synthetic guardian block']], 'newest first');
   const moderation = await adminModeration(S); assert.deepEqual(moderation.map((m) => [m.severity, m.flags, m.context.kind, m.context.playerId]), [['grooming', ['secrecy'], 'timeline_event', pid], ['contact', ['phone_number'], 'timeline_event', pid]]); assert.equal(moderation[1].excerpt, 'Call me on +44 7700 900123 please');
@@ -197,7 +197,7 @@ await test('[compat] every writer through its route and every reader: a guardian
   assert.equal(JSON.stringify(stored(dir, 'moderationLog').slice().reverse()), JSON.stringify(canon('moderationLog', all.moderation)));
   assert.equal(JSON.stringify(stored(dir, 'idvQueue')), JSON.stringify(canon('idvQueue', all.idv)));
   assert.equal(JSON.stringify(stored(dir, 'reports').find((r) => r.id === gRep.body.reportId)), JSON.stringify(ordered(all.reports.find((r) => r.id === gRep.body.reportId), KEYS.reports)), 'the resolved report, resolution fields included');
-  assert.equal(stored(dir, 'reports').find((r) => r.id === pRep2.body.reportId).targetPlayerId, 123, 'the numeric id is stored as received');
+  assert.equal(stored(dir, 'reports').some((r) => typeof r.targetPlayerId === 'number' || /numeric id|object org id|array name/.test(r.reason)), false, 'the refused reports were never stored');
   assert.equal(JSON.stringify(stored(dir, 'ledger').filter((l) => l.orgId === 'org-eastport').slice().reverse()), JSON.stringify(canon('ledger', all.ledger)), 'the org ledger equals the stored rows');
   // A restart serves the same.
   await S.stop(); S = await boot(dir); const maria2 = await orgLogin(S);
@@ -294,7 +294,7 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0013
   await S.stop(); rm(dir);
 });
 
-await test('[cutover] legacy and unknown shapes through the import, the admin backup, a restore, and the STRICT boot refusal: an admin backup edited by hand (unknown fields at row and nested level, an absent key, an object orgId, a numeric targetPlayerId, a ledger row naming a player that never existed, a backup_refused ops event) is imported row for row by this build and served unchanged; the backup equals the stored rows and a restore imports them again; a backup whose IDV entry names a guardian that does not exist refuses the WHOLE boot (IDV_GUARDIAN_MISSING: ids only), records nothing and leaves every blob as it was', async () => {
+await test('[cutover] legacy and unknown shapes through the import, the admin backup, a restore, and the STRICT boot refusal: an admin backup edited by hand (unknown fields at row level, an unknown key inside a context, an absent key, an object orgId, a numeric reason, a numeric targetPlayerId, a ledger row naming a player that never existed, a backup_refused ops event) is imported TYPED by this build — unknown fields dropped, an absent key null, the numbers normalised to text, the object dropped, each change reported by id in the cutover record (never a value) — and served as typed; the backup equals the stored rows and a restore imports them again; a backup whose IDV entry names a guardian that does not exist refuses the WHOLE boot (IDV_GUARDIAN_MISSING: ids only), records nothing and leaves every blob as it was', async () => {
   const dir = tempDir('s6b-legacy'); let S = await boot(dir);
   const maria = await orgLogin(S); const { pid, token: adult } = await signupAdult(S, 'Legacy Adult');
   assert.equal((await S.j('POST', '/player/block', { orgId: 'org-eastport', reason: 'synthetic' }, adult)).status, 201);
@@ -314,16 +314,21 @@ await test('[cutover] legacy and unknown shapes through the import, the admin ba
     db.moderationLog.push({ id: 'mod-legacy', ts: 5, context: { kind: 'org_message', channelId: 'chan-x', futureContextField: 1 }, flags: ['url'], severity: 'contact', excerpt: 'synthetic excerpt' });
   });
   const legacy = Object.fromEntries(COLLECTIONS.map((n) => [n, canon(n, edited[n])]));
+  legacy.blocks = legacy.blocks.map((b) => (b.id === 'blk-legacy' ? { ...b, orgId: null, reason: '7' } : b));
+  legacy.reports = legacy.reports.map((r) => (r.id === 'rep-legacy' ? { ...r, targetPlayerId: '123' } : r));
   // This build imports the hand-edited copy.
   const up = tempDir('s6b-up'); fs.cpSync(copy, up, { recursive: true });
   S = await boot(up); assert.ok(live(up), 'imported through 0013');
   assert.equal(q1(up, `SELECT COUNT(*) AS n FROM collections WHERE name IN (${COLLECTIONS.map((n) => `'${n}'`).join(', ')})`).n, 0, 'the blobs are retired');
-  const record = JSON.parse(q1(up, "SELECT value FROM meta WHERE key = 'safetyAuditCutover'").value); assert.equal(record.blocks.withExtraFields, 1); assert.equal(record.blocks.withOfftypeValues, 1); assert.equal(record.reports.withOfftypeValues, 1); assert.equal(record.ledger.unresolvedPlayerIds, 1); assert.equal(record.blocks.unresolvedPlayerIds, 1); assert.doesNotMatch(JSON.stringify(record) + S.log(), new RegExp(SECRET), 'never a text');
-  for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(up, n)), JSON.stringify(legacy[n]), `${n}: the tables read back the legacy blob exactly (extras first, absence preserved, odd values restored)`);
-  const blocks = await adminBlocks(S); assert.deepEqual(blocks[0].orgId, { odd: 'object' }); assert.equal(blocks[0].reason, 7); assert.deepEqual(blocks[1].futureBlockField, { nested: [SECRET] });
-  const reports = await adminReports(S); assert.equal(reports.find((r) => r.id === 'rep-legacy').targetPlayerId, 123); assert.equal(Object.hasOwn(reports.find((r) => r.id !== 'rep-legacy'), 'targetScoutName'), false, 'the absent key stays absent in the view');
+  const record = JSON.parse(q1(up, "SELECT value FROM meta WHERE key = 'safetyAuditCutover'").value);
+  assert.deepEqual([record.blocks.normalised, record.reports.normalised, record.ledger.normalised, record.moderationLog.normalised], [2, 1, 1, 0], 'rows the import changed');
+  assert.deepEqual(record.notes, [`blocks ${edited.blocks[0].id}: unknown field futureBlockField dropped`, 'blocks blk-legacy: orgId was an object, dropped', 'blocks blk-legacy: reason was a number, normalised', 'reports rep-legacy: targetPlayerId was a number, normalised', 'ledger led-legacy: unknown field futureLedgerField dropped'], 'every change reported by id and field');
+  assert.equal(record.ledger.unresolvedPlayerIds, 1); assert.equal(record.blocks.unresolvedPlayerIds, 1); assert.doesNotMatch(JSON.stringify(record) + S.log(), new RegExp(SECRET), 'never a text'); assert.doesNotMatch(JSON.stringify(record), /odd|object'/, 'never a value');
+  for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(up, n)), JSON.stringify(legacy[n]), `${n}: the tables read back the typed records`);
+  const blocks = await adminBlocks(S); assert.equal(blocks[0].orgId, null); assert.equal(blocks[0].reason, '7'); assert.equal(Object.hasOwn(blocks[1], 'futureBlockField'), false, 'the unknown field is gone');
+  const reports = await adminReports(S); assert.equal(reports.find((r) => r.id === 'rep-legacy').targetPlayerId, '123'); assert.equal(reports.find((r) => r.id !== 'rep-legacy').targetScoutName, null, 'the absent key reads as null');
   assert.ok((await adminModeration(S)).some((m) => m.context.futureContextField === 1)); assert.ok((await S.j('GET', '/admin/metrics', undefined, null, A)).body.opsEvents.some((e) => e.kind === 'backup_refused'));
-  // The admin backup carries the legacy and unknown fields exactly; a restore imports them again.
+  // The admin backup carries the typed records exactly; a restore imports them again.
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
   const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
   // The backup's own `backup_created` event is appended AFTER the file is written (as every build did), so it is the one stored row the file cannot hold.

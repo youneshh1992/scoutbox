@@ -185,7 +185,7 @@ await atest('cutover: a pre-S0 database (staff still in the users blob) cuts ove
     const s = new DatabaseSync(path.join(dir, 'scoutbox.db'));
     s.exec('CREATE TABLE collections (name TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
     const put = s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)');
-    put.run('users', JSON.stringify([{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1 }, { id: 'bogus' }]));
+    put.run('users', JSON.stringify([{ id: 'usr-1', orgId: 'org-a', name: 'Staff', role: 'Scout', createdAt: 1, oddField: { secret: 'never-reported' } }, { id: 'bogus' }]));
     put.run('orgs', JSON.stringify([ORG_A])); // the staff row names it (S3 foreign key)
     put.run('sessions', JSON.stringify(sessions));
     s.prepare("INSERT INTO meta (key, value) VALUES ('idCounter', '1000'), ('savedAt', '1')").run();
@@ -196,6 +196,9 @@ await atest('cutover: a pre-S0 database (staff still in the users blob) cuts ove
   const s = openRaw(dir);
   assert.deepEqual(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, ['0001_org_users', '0002_core_identity_shadow', SESSIONS_CUTOVER_MIGRATION, ORGS_CUTOVER_MIGRATION]);
   assert.deepEqual(s.prepare('SELECT id FROM org_users').all().map((r) => r.id), ['usr-1'], 'the staff row was imported by the same rule S0 uses; the non-staff entry was not');
+  const staffCut = JSON.parse(s.prepare("SELECT value FROM meta WHERE key = 'sessionsCutover'").get().value).staff;
+  assert.deepEqual(staffCut, { imported: 1, skipped: 1, normalised: 1, notes: ['staff usr-1: unknown field oddField dropped'] }, 'the unknown staff field is dropped and reported by row id and field name, never by value');
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('org_users') WHERE name = 'extra_json'").get().n, 0, 'org_users has no side column');
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 5);
   assert.deepEqual(s.prepare("SELECT name FROM collections ORDER BY name").all().map((r) => r.name), [], 'both legacy blobs are retired');
   // The S0 repository then attaches without re-importing and without a stale-blob warning.
@@ -383,6 +386,8 @@ test('snapshot mode (review correction 3): an invalid or conflicting session row
   attempt((s) => { s.db.sessions.push({ ...s.db.sessions[0], sid: 'sid-dup-hash' }); }, /duplicate token/);
   // A staff relationship the snapshot itself contradicts: usr-2 is gone from users but their session is still listed.
   attempt((s) => { s.db.users = s.db.users.filter((u) => u.id !== 'usr-2'); }, /staff member usr-2 does not exist|FOREIGN KEY/);
+  // A staff field of the wrong type refuses the whole snapshot write by code, id and field (typed columns, valid input only).
+  attempt((s) => { s.db.users[0].email = ['not', 'text']; }, /ORG_USERS_SNAPSHOT_INVALID: staff usr-\S+: email must be text/);
   // Nothing was removed by any refused save; the plain error text names sids and reasons, never a token or hash.
   try { const s = tool.load(); s.db.sessions[0].createdAt = -1; tool.save(s); assert.fail('unreachable'); } catch (err) {
     assert.ok(!err.message.includes(a.token) && !err.message.includes(sha256(a.token)) && !err.message.includes(b.token), 'the error carries no token or hash');

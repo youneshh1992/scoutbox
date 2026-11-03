@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction, dataSchemaReport } from '../repositories/database.mjs';
-import { createUsersRepository } from '../repositories/users.mjs';
+import { createUsersRepository, USERS_TABLE } from '../repositories/users.mjs';
 import { readonlyView } from '../repositories/readonly.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
@@ -172,7 +172,7 @@ test('repository: a table row survives a new process while the id counter is beh
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 2);
   s.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('repository: the legacy blob array is imported once, with every field kept, and ignored once the table has rows', () => {
+test('repository: the legacy blob array is imported once, every typed field kept and an unknown field dropped and reported by id, and ignored once the table has rows', () => {
   const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS); seedOrgs(s);
   const legacy = [
     { id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 5, email: 'a@x', ssoSubject: 'idp-1', mfa: { secretB32: 'S', enabledAt: 7, recoveryHashes: [] }, deliveryPrefs: { quietStart: '22:00' }, removedAt: 9, removedBy: 'B', oddField: { kept: true } },
@@ -183,9 +183,11 @@ test('repository: the legacy blob array is imported once, with every field kept,
   const repo = createUsersRepository({ sqlite: s, nextId, persist: () => {}, warn: (m) => warnings.push(m) });
   const boot = repo.attach(legacy);
   assert.deepEqual(boot, { engine: 'sqlite', loaded: 2, imported: 2 });
-  assert.deepEqual(JSON.parse(JSON.stringify(repo.view[0])), legacy[0]);
+  const { oddField: _dropped, ...typed } = legacy[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(repo.view[0])), typed, 'every typed field kept; the unknown field is not stored');
   assert.deepEqual(JSON.parse(JSON.stringify(repo.view[1])), legacy[1]);
-  assert.equal(s.prepare('SELECT extra_json FROM org_users WHERE id = ?').get('usr-1').extra_json, '{"oddField":{"kept":true}}');
+  assert.ok(warnings.some((w) => w === 'org_users: staff usr-1: unknown field oddField dropped'), 'the drop is reported with the row id and field name');
+  assert.ok(!warnings.some((w) => /kept/.test(w)), 'the report never carries the value');
   // A blob whose rows the table already holds is superseded (S2's cutover
   // imports it into the table a moment before attach): a log line, no warning.
   const logs = [];
@@ -201,6 +203,31 @@ test('repository: the legacy blob array is imported once, with every field kept,
   assert.ok(warnings.some((w) => /stale users blob with 1 row\(s\)/.test(w)));
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 2);
   assert.equal(third.byId('usr-ghost'), null);
+});
+test('repository: typed fields only — an unknown key is not stored, a wrong-typed value is refused by name and nothing is written', () => {
+  const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS);
+  const repo = repoOn(s);
+  const u = repo.insert({ orgId: 'org-a', name: 'Dee', role: 'Scout', colour: 'red' });
+  assert.equal('colour' in { ...u }, false, 'an unknown key on insert is not stored');
+  repo.update(u.id, { colour: 'blue', email: 'dee@example.com' });
+  assert.equal('colour' in { ...u }, false, 'an unknown key on update is not stored');
+  assert.equal(u.email, 'dee@example.com', 'the known field in the same patch is');
+  assert.throws(() => repo.insert({ orgId: 'org-a', name: 'Eve', role: 'Scout', email: ['eve@example.com'] }), /email must be text/);
+  assert.throws(() => repo.update(u.id, { createdAt: '5' }), /createdAt must be an integer/);
+  assert.throws(() => repo.update(u.id, { mfa: 'on' }), /mfa must be an object/);
+  assert.equal(repo.view.length, 1); assert.equal(typeof u.createdAt, 'number');
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
+});
+test('snapshot write and blob import: the snapshot write stores no unknown key and refuses a wrong-typed field by code, id and field; the blob import drops it and reports it', () => {
+  const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS); seedOrgs(s);
+  assert.equal(USERS_TABLE.replace(s, [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1, futureField: { x: 1 } }]), true);
+  assert.deepEqual(USERS_TABLE.read(s), [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }]);
+  assert.throws(() => USERS_TABLE.replace(s, [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'o', name: 'B', email: 42 }]), (e) => /^ORG_USERS_SNAPSHOT_INVALID: staff usr-2: email must be text$/.test(e.message));
+  assert.deepEqual(USERS_TABLE.read(s).map((u) => u.id), ['usr-1'], 'nothing of the refused write landed');
+  s.prepare('DELETE FROM org_users').run();
+  const r = USERS_TABLE.importLegacy(s, [{ id: 'usr-3', orgId: 'o', name: 'C', role: 7, createdAt: 2, oddField: 1 }, { id: 'usr-4', orgId: 'o', name: 'D', role: 'Scout' }, { id: 'usr-3', orgId: 'o', name: 'C2' }, { name: 'no id' }]);
+  assert.deepEqual(r, { imported: 2, skipped: 2, normalised: 1, notes: ['staff usr-3: role must be text; dropped', 'staff usr-3: unknown field oddField dropped', 'staff usr-3: duplicate id; the later entry skipped'] });
+  assert.deepEqual(USERS_TABLE.read(s), [{ id: 'usr-3', orgId: 'o', name: 'C', createdAt: 2 }, { id: 'usr-4', orgId: 'o', name: 'D', role: 'Scout' }]);
 });
 test('repository: without sqlite there is no in-memory mode — construction refuses with a clear error before any data is touched', () => {
   // S2 removed the JSON/in-memory fallback: sessions cannot be kept outside a
@@ -261,7 +288,7 @@ test('store (snapshot mode): load merges table-backed collections in from their 
   const tool = openStore(dir);
   const snap = tool.load();
   assert.deepEqual(snap.db.users, [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }]);
-  assert.deepEqual(snap.db.players, [PLAYER]);
+  assert.deepEqual(snap.db.players, [{ ...PLAYER, media: [], attendance: [], timeline: [], badges: [], drills: [], drillResults: [], activityLog: [], externalIds: [], seasonHistory: [] }]); // every sub-record array is on every record (S5 typed tables)
   assert.deepEqual(snap.db.guardians, []);
   // Writing a changed snapshot lands in the table, not in a blob.
   snap.db.users.push({ id: 'usr-2', orgId: 'o', name: 'B', role: 'Manager', createdAt: 2, mfa: { secretB32: 'S', enabledAt: 3, recoveryHashes: [] } });

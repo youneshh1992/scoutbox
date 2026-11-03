@@ -7,10 +7,11 @@
  *   1. Create `dispatches` and `dispatch_attempts` (DISPATCHES_DDL).
  *   2. Import the `dispatches` blob if the file holds it — the eighteen-key
  *      literal every build since M13 wrote, attempts nested — through the
- *      repository's own validation: every entry is checked, nothing is coerced
- *      or normalised; the array position becomes the durable ordering key and
- *      each attempt's position its key; unknown own fields are kept in
- *      `extra_json`; a finite fractional callback timestamp is stored exactly;
+ *      repository's own validation: every entry is checked, nothing is coerced;
+ *      the array position becomes the durable ordering key and each attempt's
+ *      position its key; an unknown field (top level, audience or attempt) is
+ *      DROPPED and reported by dispatch id and field name (typed columns, valid
+ *      input only); a finite fractional callback timestamp is stored exactly;
  *      a dispatch whose notification no longer exists (an ordinary deletion
  *      left it behind) is imported unchanged and COUNTED as an orphan
  *      reference — never refused, pruned or re-parented. ANY refusal aborts
@@ -18,7 +19,8 @@
  *      reasons, never an address or a provider text): the runner rolls back,
  *      the blob and saveSeq are untouched, the next boot refuses the same way.
  *   3. Retire the blob row; record the counts in `meta.dispatchesCutover`
- *      (imported, attempts, withExtraFields, orphanReferences, byStatus).
+ *      (imported, attempts, unknownFieldsDropped, orphanReferences, byStatus,
+ *      notes — ids and field names, never a value).
  * A file without the blob (a first installation, a database saved before M13)
  * creates the tables and imports nothing — never from the seed, never from
  * memory. The step never runs twice (recorded) and refuses to run before 0009

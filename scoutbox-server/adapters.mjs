@@ -149,7 +149,7 @@ export function createMailer(db, nextId, stores = null) {
  * passes them in `stores`; a plain `db` with arrays keeps the array behaviour
  * (the review of 6ca66ba's feasibility check calls this adapter that way). The
  * filter is the same in both: every token registered under exactly this
- * (kind, id), its value with the type it was registered with.
+ * (kind, id), its token string.
  */
 const pushStores = (db, stores) => ({
   append: stores?.pushLog ? (record) => stores.pushLog.append(record) : (record) => db.pushLog.push(record),

@@ -65,7 +65,7 @@
 --                    and every snapshot write still validate the FINAL combined state, and the prune
 --                    of a request still named by a thread is refused with ids)
 --   playerId      -> player_id (NO foreign key and NO lifecycle clause — D-B, see lifecycle)
---   playerName    -> player_name (snapshot; nullable; absent recorded in absent_keys_json)
+--   playerName    -> player_name (snapshot; nullable)
 --   orgId         -> org_id (REFERENCES orgs — kept: organisations are upserted and pruned, never rewritten)
 --   orgName       -> org_name (snapshot)
 --   orgVerified   -> org_verified (snapshot of the org's verified flag at open time; nullable)
@@ -80,14 +80,10 @@
 --   messages[]    -> messages table (child, position = array index)
 --   readBy.org          -> read_by_org_at
 --   readBy.counterparty -> read_by_counterparty_at
---   (absent optional keys: playerName, orgVerified, scoutName, scoutRole, guardianId, readBy.org,
---    readBy.counterparty) -> absent_keys_json (a JSON array of the ABSENT keys; NULL when every key
---                    was present — absence is preserved as absence, a NULL column alone cannot tell
---                    present-and-null from absent)
---   orgUserIdForNotify and every other unknown own field -> extra_json (a JSON object; the unknown
---                    keys INSIDE readBy are nested under "readBy"); spread back FIRST on export.
---                    orgUserIdForNotify is never written by the current creator but is read by
---                    postMessage and observable through the spread views and the export — preserved exactly.
+--   Typed columns only (the S8d fidelity rule): a record reads back with every key present (a NULL
+--   optional column reads as null, as openChannel writes it). Unknown fields are not stored: writes
+--   drop them, the 0012 import drops them and notes each with the thread id in
+--   meta.channelsCutover.notes; the never-written legacy orgUserIdForNotify is one of them.
 -- notes: tenant = org_id; minors: the child is never a party — counterparty is
 --   the guardian. Admin /admin/channels returns every channel with ids.
 --   Reads: by org_id, by guardian_id, by player_id+counterparty, by id+owner (all
@@ -108,9 +104,7 @@ CREATE TABLE channels (
   guardian_id             TEXT,
   created_at              INTEGER NOT NULL,
   read_by_org_at          INTEGER,
-  read_by_counterparty_at INTEGER,
-  absent_keys_json        TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  extra_json              TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  read_by_counterparty_at INTEGER
 ) STRICT;
 
 CREATE UNIQUE INDEX channels_request_id ON channels (request_id);          -- one thread per request
@@ -135,14 +129,13 @@ CREATE INDEX channels_player_id_counterparty ON channels (player_id, counterpart
 --   sender.kind   -> sender_kind ('player' | 'guardian' | 'org_user' — the three kinds the routes produce)
 --   sender.id     -> sender_id (polymorphic: players.id / guardians.id / org_users.id; no FK)
 --   sender.name   -> sender_name (snapshot; for org_user it is "Name · Role · Org" composed by the route;
---                    nullable; an absent key is recorded as "sender.name" in absent_keys_json)
+--                    nullable)
 --   text          -> text (moderated before write; moderation hits are refused, never stored here)
---   attachment    -> message_attachments table (0..1 row per message; the key is always present and null
---                    when the writer sends no attachment; an ABSENT key — a legacy record — is recorded in
---                    absent_keys_json)
+--   attachment    -> message_attachments table (0..1 row per message; the key always reads back, null
+--                    when there is no row)
 --   clientMsgId   -> client_msg_id (present only when the client sent one — the writer omits the key
 --                    otherwise, never null; the route bounds it to 64 chars)
---   every unknown own field -> extra_json (the unknown keys INSIDE sender nested under "sender")
+--   unknown fields are not stored (dropped by writes; dropped and noted with ids by the 0012 import)
 -- notes: ordering is array order = position (oldest→newest). Idempotency: a resend
 --   with the same (clientMsgId, sender.kind, sender.id) inside the same channel
 --   returns the existing message — postMessage reads the thread's view first, as before;
@@ -159,9 +152,7 @@ CREATE TABLE messages (
   sender_id        TEXT NOT NULL,
   sender_name      TEXT,
   text             TEXT NOT NULL,
-  client_msg_id    TEXT,
-  absent_keys_json TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  extra_json       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  client_msg_id    TEXT
 ) STRICT;
 
 CREATE UNIQUE INDEX messages_channel_position ON messages (channel_id, position);
@@ -183,7 +174,8 @@ CREATE UNIQUE INDEX messages_channel_position ON messages (channel_id, position)
 --   trial_report.reportId -> report_id (players[].trialReports[].id = trials.report.id, rep-*; no FK)
 --   trial_report.orgName  -> org_name (snapshot; nullable)
 --   trial_report.summary  -> summary (pre-rendered metrics line, snapshot; nullable)
---   every unknown own field -> extra_json
+--   unknown fields are not stored; the 0012 import drops an unusable attachment (neither shape, no
+--   mediaId/reportId) and notes it with the message id, and records a non-boolean verifiedClip as false
 -- notes: an org sender may only attach a trial report its own org wrote (the route's rule).
 -- -----------------------------------------------------------------------------
 CREATE TABLE message_attachments (
@@ -196,7 +188,6 @@ CREATE TABLE message_attachments (
   report_id     TEXT,
   org_name      TEXT,
   summary       TEXT,
-  extra_json    TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
   CHECK ((kind = 'clip' AND media_id IS NOT NULL AND verified_clip IS NOT NULL AND report_id IS NULL AND org_name IS NULL AND summary IS NULL)
       OR (kind = 'trial_report' AND report_id IS NOT NULL AND media_id IS NULL AND title IS NULL AND url IS NULL AND verified_clip IS NULL))
 ) STRICT;
@@ -242,8 +233,8 @@ CREATE TABLE message_attachments (
 --   actionRequired.deadline -> action_deadline_at
 --   actionRequired.ackedAt  -> action_acked_at
 --   actionRequired.ackedBy  -> action_acked_by (the audience_id that acked; same kind as audience_kind)
---   (unknown fields)        -> extra_json (NEW: kept as given — every own key of the entry, an own
---                              "__proto__" key included — and spread back onto the row on read)
+--   (unknown fields)        -> not stored (typed columns only): dropped at a snapshot write, dropped
+--                              and reported by row id at the migration (unknownFieldsDropped)
 --   target        -> derived, not stored: resolved at read time (notificationsFor)
 -- notes: writes are STAGED in the running server: visible in memory at once, durable inside the
 --   next snapshot save together with the blob edits made alongside (a message, a request), or
@@ -252,7 +243,7 @@ CREATE TABLE message_attachments (
 --   committed (review of ba6956d, finding 1). Backups
 --   export the rows in the legacy collection shape in seq order; a backup from any build restores
 --   through migration 0009. An entry the validators refuse (no coercion) refuses the whole import
---   (NOTIFICATIONS_IMPORT_BLOCKED, entry index and reason, never the text).
+--   (NOTIFICATIONS_IMPORT_BLOCKED, entry index, row id and reason, never the text).
 -- -----------------------------------------------------------------------------
 CREATE TABLE notifications (
   seq                INTEGER PRIMARY KEY,
@@ -272,7 +263,6 @@ CREATE TABLE notifications (
   action_deadline_at INTEGER,
   action_acked_at    INTEGER,
   action_acked_by    TEXT,
-  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
   CHECK (action_required = 1 OR (action_deadline_at IS NULL AND action_acked_at IS NULL AND action_acked_by IS NULL))
 ) STRICT;
 CREATE INDEX notifications_audience_seq ON notifications (audience_kind, audience_id, seq);
@@ -372,7 +362,10 @@ CREATE TABLE notification_pref_categories (
 --   failedAt           -> failed_at (INTEGER or NULL: the sweep's / callback's Date.now())
 --   failReason         -> fail_reason (UNTRUNCATED at storage: the sweep writes the provider error as it is;
 --                         only the callback route truncates its own input to 120 characters before writing)
---   (unknown own keys) -> extra_json (JSON object; spread back first on export; an own "__proto__" key is data)
+--   (unknown keys)     -> not stored (typed columns, valid input only): the 0010 import drops an unknown field
+--                         (top level, audience or attempt) and reports it by dispatch id and field name in
+--                         meta.dispatchesCutover; create / a snapshot replace drop an unknown top-level field
+--                         and refuse an unknown audience or attempt field
 -- timestamp contract (review of dc4b559, finding 2): every clock this server
 --   writes itself is an integer in an INTEGER column (a fraction is refused by
 --   the repository and by STRICT); delivered_at / opened_at are the callback
@@ -408,8 +401,7 @@ CREATE TABLE dispatches (
   opened_at           REAL,
   actioned_at         INTEGER,
   failed_at           INTEGER,
-  fail_reason         TEXT,
-  extra_json          TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  fail_reason         TEXT
 ) STRICT;
 CREATE INDEX dispatches_notification ON dispatches (notification_id);
 CREATE INDEX dispatches_provider_message ON dispatches (provider_message_id);
@@ -474,14 +466,13 @@ CREATE TABLE dispatch_attempts (
 --   id                 -> id (mail-*; UNIQUE)
 --   (shape)            -> source ('mailer' for (a), 'delivery' for (b))
 --   ts | at            -> created_at (source field is `ts` in (a), `at` in (b))
---   to                 -> to_address  -- personal data; NULL is a VALUE a writer produces: the real
---                                        boot sweep over an accepted queued dispatch with to:null writes
---                                        a delivery record with to:null (review of 6ca66ba) — kept as
---                                        present-and-null on the way back; a STRING goes here
---   to (not a string)  -> to_json  -- the value JSON-encoded, to_address NULL, decoded on read: POST /org/invites
---                                   (RegExp.test coerces, the invite stores String(email), the mailer gets the
---                                   ORIGINAL value) and the m14 player invite (emailProblem coerces) hand the
---                                   mailer an ARRAY, which the accepted build persisted (review of 40aa05c, F2)
+--   to                 -> to_address  -- personal data; a string address or NULL. NULL is a value a writer
+--                                        produces: the boot sweep over an accepted queued dispatch with
+--                                        to:null writes a delivery record with to:null (review of 6ca66ba).
+--                                        A non-string is refused at a write; POST /org/invites and the m14
+--                                        player invite refuse a non-string e-mail with 400 (they used to
+--                                        coerce an array through RegExp.test); the 0011 import stores a
+--                                        non-string destination as NULL and reports it by row id
 --   subject            -> subject ((a) only; NULL = the key is absent in (b))
 --   text               -> text (the withheld mail text in (a) — S6a: every `secrets` value replaced by the
 --                                placeholder; the dev full text lives in process memory only, never here;
@@ -491,7 +482,8 @@ CREATE TABLE dispatch_attempts (
 --   delivered          -> delivered ((a) only, 0/1 from the boolean; NULL = the key is absent in (b))
 --   channel            -> channel ((b) only, as written; NULL = absent in (a); OPEN vocabulary)
 --   providerMessageId  -> provider_message_id ((b) only; NULL = absent in (a))
---   (unknown own keys) -> extra_json (detached JSON, spread back FIRST on export)
+--   (unknown own keys) -> not stored (typed columns only): dropped at a write, dropped and reported by
+--                         row id at the 0011 import (meta.outboxPushCutover.notes)
 -- notes: the structural CHECK below is total: a mailer row carries subject and delivered and no
 --   channel/provider_message_id; a delivery row carries channel and provider_message_id and no
 --   subject/delivered — so NULL always means "absent key" and the way back rebuilds exactly the
@@ -505,16 +497,13 @@ CREATE TABLE outbox (
   id                  TEXT NOT NULL UNIQUE,
   source              TEXT NOT NULL CHECK (source IN ('mailer', 'delivery')),
   created_at          INTEGER NOT NULL,
-  to_address          TEXT,                                                -- personal data; NULL accepted (an accepted queued dispatch)
-  to_json             TEXT CHECK (to_json IS NULL OR (json_valid(to_json) AND json_type(to_json) NOT IN ('text', 'null'))),  -- any OTHER JSON destination value, losslessly (review of 40aa05c, F2)
+  to_address          TEXT,                                                -- personal data; a string address, NULL accepted (an accepted queued dispatch)
   subject             TEXT,
   text                TEXT NOT NULL,                                       -- withheld where the writer withheld; may contain a one-time code elsewhere (carried through)
   transport           TEXT NOT NULL,
   delivered           INTEGER,
   channel             TEXT,
   provider_message_id TEXT,
-  extra_json          TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  CHECK (to_address IS NULL OR to_json IS NULL),                          -- a destination is in one column, or null
   CHECK ((source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL AND delivered IN (0, 1) AND channel IS NULL AND provider_message_id IS NULL)
       OR (source = 'delivery' AND subject IS NULL AND delivered IS NULL AND channel IS NOT NULL AND provider_message_id IS NOT NULL))
 ) STRICT;
@@ -544,7 +533,7 @@ CREATE INDEX outbox_created_at ON outbox (created_at);
 --   title         -> title (always 'ScoutBox' today)
 --   body          -> body (= notification text)
 --   transport     -> transport ('expo' | 'dev-log' as written; OPEN, no CHECK)
---   (unknown own keys) -> extra_json
+--   (unknown own keys) -> not stored: dropped at a write, dropped and reported by id at the 0011 import
 -- notes: the row is written whether or not any device token matched (the staff-push
 --   identity mismatch — tokens registered under 'org', pushes addressed to 'org_user' — is
 --   carried through unchanged). Reads: /admin/push-log (last 200, newest first), /admin/overview count.
@@ -557,8 +546,7 @@ CREATE TABLE push_log (
   audience_id   TEXT NOT NULL,
   title         TEXT NOT NULL,
   body          TEXT NOT NULL,
-  transport     TEXT NOT NULL,
-  extra_json    TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  transport     TEXT NOT NULL
 ) STRICT;
 
 CREATE INDEX push_log_created_at ON push_log (created_at);
@@ -576,19 +564,15 @@ CREATE INDEX push_log_audience_seq ON push_log (audience_kind, audience_id, seq)
 --   (position)    -> seq
 --   kind   -> ref_kind (the session kind as written: 'player' | 'guardian' | 'org' | 'ts_reviewer' today; OPEN, no CHECK)
 --   refId  -> ref_id (session.refId — polymorphic, no FK)
---   token  -> token_json: ANY JSON value the route accepted (it checks truthiness only — the review
---             of 6ca66ba registered a number, a string, a boolean, objects and arrays), stored
---             LOSSLESSLY as JSON text and decoded on read to the value and type it was registered
---             with (a consumer never sees the encoded string; the sender hands Expo the same value)
+--   token  -> token: a non-empty string (the Expo device token). The route refuses anything else
+--             with 400 TOKEN_INVALID (it used to accept any truthy JSON value, 1e400 included); the
+--             0011 import stores a finite numeric token as its string and drops (and reports) an
+--             entry whose token is neither
 --   ts     -> registered_at (source field is literally `ts`)
---   (unknown own keys) -> extra_json
--- notes: NO uniqueness constraint. The route's rule is JavaScript `===` on the token: a primitive
---   collapses an earlier row of the same (kind, refId) holding the same value of the same type
---   (424242 and '424242' are different tokens); an object or an array NEVER matches an existing
---   row (every request body is freshly parsed), so structurally equal objects are separate rows.
---   `register` reproduces exactly that (in SQL: equality of the JSON text, which for primitives is
---   the same relation; objects and arrays excluded). A UNIQUE on the JSON text would collapse the
---   object/array rows — rejected. The token is NOT hashed: it is the delivery address handed to
+--   (unknown own keys) -> not stored: dropped at a write, dropped and reported at the 0011 import
+-- notes: NO uniqueness constraint. Re-registering the same token for the same (kind, refId)
+--   deletes the earlier rows and appends a new one, so `seq` stays "last registration last";
+--   no UNIQUE index, because a file the old route wrote may hold duplicates. The token is NOT hashed: it is the delivery address handed to
 --   Expo, not a credential for ScoutBox. Treat as a device identifier (personal data).
 --   KNOWN DEFECT, carried through: org sessions register ref_kind='org' with ref_id=orgs.id while
 --   the sender filters on the notification audience ('org_user', org_users.id) → org-staff pushes
@@ -598,9 +582,8 @@ CREATE TABLE push_tokens (
   seq           INTEGER PRIMARY KEY,
   ref_kind      TEXT NOT NULL,
   ref_id        TEXT NOT NULL,
-  token_json    TEXT NOT NULL CHECK (json_valid(token_json)),              -- personal data (device identifier), any JSON type
-  registered_at INTEGER NOT NULL,
-  extra_json    TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  token         TEXT NOT NULL CHECK (length(token) > 0),                  -- personal data (device identifier)
+  registered_at INTEGER NOT NULL
 ) STRICT;
 
 CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
@@ -617,11 +600,11 @@ CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
 -- The eight tables below are the IMPLEMENTED DDL (SAFETY_AUDIT_DDL), column for column:
 -- NO foreign key on any of them (the player references are tolerant per Q4; the
 -- organisation and staff references are historical pointers, because POST /player/block
--- and handleReport accept an unchecked orgId / targetOrgId / byOrgId today and that
--- shape is preserved — stated as a shape-compatibility decision, not a design goal),
+-- and handleReport accept an organisation id they do not look up — a text value, the
+-- routes refuse any other type with 400 FIELD_INVALID),
 -- NO vocabulary CHECK (open sets: by_kind, status, kind, type, severity, provider…
 -- are stored as the writers pass them), every literal column nullable (an absent key
--- is absence, recorded in absent_keys_json), `seq INTEGER PRIMARY KEY` as the durable
+-- is NULL and reads back as null), `seq INTEGER PRIMARY KEY` as the durable
 -- order and `id TEXT NOT NULL UNIQUE` as the writer's id. The target-model constraints
 -- the earlier drafts of this file proposed (NOT NULL, CHECK vocabularies, RESTRICT
 -- references, a derived actor kind) are NOT what 0013 creates; they remain OPEN for the
@@ -636,7 +619,7 @@ CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
 --         m230_001 before the data layer attaches; attachDataLayer drops that array and
 --         defines db.blocks as a read-only view over the mirror (insertion order).
 -- owner/writer: safetyAudit.blocks.append from server.mjs — the guardian block route, the
---         player block route (an UNCHECKED orgId: stored as received) and handleReport's
+--         player block route (an orgId that is not looked up; text only) and handleReport's
 --         urgent suspension (reason 'suspended_pending_review'); safetyAudit.blocks.remove
 --         from the admin lift route (Q5: the row is deleted, as it always was; no lifted_at).
 -- lifecycle: append + delete-on-lift; KEPT after player deletion with the now-unresolved
@@ -647,16 +630,15 @@ CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
 --   playerId -> player_id (NO foreign key — Q4, tolerant historical reference; indexed)
 --   orgId    -> org_id (NO foreign key — the player route accepts an unchecked id)
 --   by       -> by_kind ('guardian' | 'player' today; the auto path reuses the reporter's kind; open)
---   reason   -> reason ('' allowed; an off-type value kept in offtype_json)
+--   reason   -> reason ('' allowed; text only)
 --   ts       -> created_at (source field is literally `ts`)
---   (every S6b table also carries the three lossless columns of the writers' literals:
---   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
---   (absence is restored as absence, never as null); offtype_json — a JSON object of the
---   known keys whose value is not the column's type, kept exactly (a numeric or object
---   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
---   unknown own fields, restored first, in their order. `seq` is the array position at
---   the import and the insertion order afterwards: every list, export, backup and the
---   rollback read the rows in `seq` order, exactly as the array was read.)
+--   (every S6b table is typed columns only — valid input only, migration.md §1 rule 3: a
+--   write drops an unknown key and refuses a known key of the wrong type by name; the
+--   0013 import drops an unknown field, normalises an obvious off-type value (a number in
+--   a text column → its text, a fractional time → rounded, 0/1 → a boolean) or drops it,
+--   and reports each change by row id in meta.safetyAuditCutover. A NULL column reads
+--   back as null. `seq` is the array position at the import and the insertion order
+--   afterwards: every list, export and backup reads the rows in `seq` order.)
 -- notes: NO uniqueness — the same (player, org) can be blocked several times; isBlocked is
 --   `some()` on the view, lift removes one row. (player_id, org_id) is the hottest read.
 -- -----------------------------------------------------------------------------
@@ -667,10 +649,7 @@ CREATE TABLE blocks (
   org_id             TEXT,
   by_kind            TEXT,
   reason             TEXT,
-  created_at         INTEGER,
-  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  created_at         INTEGER
 ) STRICT;
 CREATE INDEX blocks_player_id_org_id ON blocks (player_id, org_id);
 
@@ -687,31 +666,30 @@ CREATE INDEX blocks_player_id_org_id ON blocks (player_id, org_id);
 -- lifecycle: 'pending_review' → 'resolved' (dismiss and every other action); never deleted;
 --         KEPT after player deletion (Q4). A report about a club, a scout or an automatic
 --         escalation has no player target; a report naming an UNKNOWN player is accepted
---         (handleReport stores a truthy targetPlayerId as received, any type — not narrowed).
+--         (handleReport stores a text targetPlayerId without a player check; another type is a 400).
 -- mapping (the handleReport literal, key for key):
 --   (array position) -> seq
 --   id              -> id (rep-*)
 --   ts              -> created_at (source field is literally `ts`)
 --   by              -> by_kind ('guardian' | 'player' | 'org_user' | 'system'; open)
 --   byId            -> by_id (polymorphic; no FK)
---   byOrgId         -> by_org_id (org_user reports only; absent otherwise → absent_keys_json; no FK)
+--   byOrgId         -> by_org_id (org_user reports only; NULL otherwise; no FK)
 --   targetKind      -> target_kind ('club' | 'scout' | 'player'; open)
 --   targetOrgId     -> target_org_id (NO foreign key — accepted unchecked)
 --   targetScoutName -> target_scout_name (free text typed by the reporter)
---   targetPlayerId  -> target_player_id (NO foreign key — Q4; a non-string value kept in offtype_json; indexed)
+--   targetPlayerId  -> target_player_id (NO foreign key — Q4; text only; indexed)
 --   reason          -> reason
---   urgent          -> urgent (0/1; a non-boolean kept in offtype_json)
+--   urgent          -> urgent (0/1)
 --   status          -> status
 --   outcome         -> outcome
 --   resolvedAt      -> resolved_at
---   (every S6b table also carries the three lossless columns of the writers' literals:
---   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
---   (absence is restored as absence, never as null); offtype_json — a JSON object of the
---   known keys whose value is not the column's type, kept exactly (a numeric or object
---   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
---   unknown own fields, restored first, in their order. `seq` is the array position at
---   the import and the insertion order afterwards: every list, export, backup and the
---   rollback read the rows in `seq` order, exactly as the array was read.)
+--   (every S6b table is typed columns only — valid input only, migration.md §1 rule 3: a
+--   write drops an unknown key and refuses a known key of the wrong type by name; the
+--   0013 import drops an unknown field, normalises an obvious off-type value (a number in
+--   a text column → its text, a fractional time → rounded, 0/1 → a boolean) or drops it,
+--   and reports each change by row id in meta.safetyAuditCutover. A NULL column reads
+--   back as null. `seq` is the array position at the import and the insertion order
+--   afterwards: every list, export and backup reads the rows in `seq` order.)
 -- notes: an urgent report naming an org creates blocks for the reporter's players and
 --   suspends their pending requests (same request, next save). safeguardingCertified scans
 --   (target_org_id, urgent, status) on every org view → index; admin triage sorts by status
@@ -732,10 +710,7 @@ CREATE TABLE reports (
   urgent             INTEGER,
   status             TEXT,
   outcome            TEXT,
-  resolved_at        INTEGER,
-  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  resolved_at        INTEGER
 ) STRICT;
 CREATE INDEX reports_by_kind_by_id ON reports (by_kind, by_id);
 CREATE INDEX reports_target_org_id_urgent_status ON reports (target_org_id, urgent, status);
@@ -762,14 +737,13 @@ CREATE INDEX reports_target_player_id ON reports (target_player_id);
 --   severity -> severity ('contact' | 'grooming'; open)
 --   excerpt  -> excerpt (first 140 chars of the BLOCKED text — sensitive; never printed in a
 --               log or an error by the repository)
---   (every S6b table also carries the three lossless columns of the writers' literals:
---   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
---   (absence is restored as absence, never as null); offtype_json — a JSON object of the
---   known keys whose value is not the column's type, kept exactly (a numeric or object
---   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
---   unknown own fields, restored first, in their order. `seq` is the array position at
---   the import and the insertion order afterwards: every list, export, backup and the
---   rollback read the rows in `seq` order, exactly as the array was read.)
+--   (every S6b table is typed columns only — valid input only, migration.md §1 rule 3: a
+--   write drops an unknown key and refuses a known key of the wrong type by name; the
+--   0013 import drops an unknown field, normalises an obvious off-type value (a number in
+--   a text column → its text, a fractional time → rounded, 0/1 → a boolean) or drops it,
+--   and reports each change by row id in meta.safetyAuditCutover. A NULL column reads
+--   back as null. `seq` is the array position at the import and the insertion order
+--   afterwards: every list, export and backup reads the rows in `seq` order.)
 -- notes: a 'grooming' hit also creates an urgent system report (same request). Reads: the
 --   admin list newest first, the dashboard counts (total, by severity) → index.
 -- -----------------------------------------------------------------------------
@@ -780,10 +754,7 @@ CREATE TABLE moderation_log (
   context_json       TEXT CHECK (context_json IS NULL OR json_valid(context_json)),
   flags_json         TEXT CHECK (flags_json IS NULL OR json_valid(flags_json)),
   severity           TEXT,
-  excerpt            TEXT,
-  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  excerpt            TEXT
 ) STRICT;
 CREATE INDEX moderation_log_severity ON moderation_log (severity);
 CREATE INDEX moderation_log_created_at ON moderation_log (created_at);
@@ -805,14 +776,13 @@ CREATE INDEX moderation_log_created_at ON moderation_log (created_at);
 --   scoutName -> scout_name (snapshot)
 --   text      -> text (moderation is NOT applied to notes — TEXT_REQUIRED only, unchanged)
 --   ts        -> created_at (source field is literally `ts`)
---   (every S6b table also carries the three lossless columns of the writers' literals:
---   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
---   (absence is restored as absence, never as null); offtype_json — a JSON object of the
---   known keys whose value is not the column's type, kept exactly (a numeric or object
---   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
---   unknown own fields, restored first, in their order. `seq` is the array position at
---   the import and the insertion order afterwards: every list, export, backup and the
---   rollback read the rows in `seq` order, exactly as the array was read.)
+--   (every S6b table is typed columns only — valid input only, migration.md §1 rule 3: a
+--   write drops an unknown key and refuses a known key of the wrong type by name; the
+--   0013 import drops an unknown field, normalises an obvious off-type value (a number in
+--   a text column → its text, a fractional time → rounded, 0/1 → a boolean) or drops it,
+--   and reports each change by row id in meta.safetyAuditCutover. A NULL column reads
+--   back as null. `seq` is the array position at the import and the insertion order
+--   afterwards: every list, export and backup reads the rows in `seq` order.)
 -- notes: tenant = org_id; org-private (never visible to the player or other orgs). Read:
 --   by (org_id, player_id) newest first.
 -- -----------------------------------------------------------------------------
@@ -824,10 +794,7 @@ CREATE TABLE org_notes (
   user_id            TEXT,
   scout_name         TEXT,
   text               TEXT,
-  created_at         INTEGER,
-  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  created_at         INTEGER
 ) STRICT;
 CREATE INDEX org_notes_org_id_player_id_created_at ON org_notes (org_id, player_id, created_at);
 
@@ -848,7 +815,7 @@ CREATE INDEX org_notes_org_id_player_id_created_at ON org_notes (org_id, player_
 --   id        -> id (led-*)
 --   ts        -> occurred_at (source field is literally `ts`)
 --   type      -> type (open set, template literals included — no CHECK)
---   playerId  -> player_id (NO foreign key — Q4; NULL/absent for org-only events; indexed)
+--   playerId  -> player_id (NO foreign key — Q4; NULL for org-only events; indexed)
 --   orgId     -> org_id (NO foreign key — historical pointer; NULL for platform events)
 --   orgName   -> org_name (snapshot; the org id when the org was unknown, as the routes do)
 --   userId    -> user_id (VERBATIM — whatever the caller passed, null included; NO actor kind
@@ -856,14 +823,13 @@ CREATE INDEX org_notes_org_id_player_id_created_at ON org_notes (org_id, player_
 --   scoutName -> actor_name (VERBATIM — the pseudo-actors 'guardian', 'player', 'system',
 --                'open day', 'T&S level review' stay as text)
 --   detail    -> detail_json (m13/m15/m16 rows only; per-type small objects, kept whole)
---   (every S6b table also carries the three lossless columns of the writers' literals:
---   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
---   (absence is restored as absence, never as null); offtype_json — a JSON object of the
---   known keys whose value is not the column's type, kept exactly (a numeric or object
---   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
---   unknown own fields, restored first, in their order. `seq` is the array position at
---   the import and the insertion order afterwards: every list, export, backup and the
---   rollback read the rows in `seq` order, exactly as the array was read.)
+--   (every S6b table is typed columns only — valid input only, migration.md §1 rule 3: a
+--   write drops an unknown key and refuses a known key of the wrong type by name; the
+--   0013 import drops an unknown field, normalises an obvious off-type value (a number in
+--   a text column → its text, a fractional time → rounded, 0/1 → a boolean) or drops it,
+--   and reports each change by row id in meta.safetyAuditCutover. A NULL column reads
+--   back as null. `seq` is the array position at the import and the insertion order
+--   afterwards: every list, export and backup reads the rows in `seq` order.)
 -- notes: reads — by player_id + type (insightsFor), by player_id (the guardian log, the export),
 --   by (player_id, org_id) ordered (the org's player timeline, m29), by org_id (the org ledger,
 --   enterprise, audit), by org_id + type 'shortlist'/'save' (planning, groups, nobodyMissed,
@@ -879,10 +845,7 @@ CREATE TABLE ledger (
   org_name           TEXT,
   user_id            TEXT,
   actor_name         TEXT,
-  detail_json        TEXT CHECK (detail_json IS NULL OR json_valid(detail_json)),
-  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  detail_json        TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
 ) STRICT;
 CREATE INDEX ledger_player_id_type ON ledger (player_id, type);
 CREATE INDEX ledger_player_id_org_id_occurred_at ON ledger (player_id, org_id, occurred_at);
@@ -908,14 +871,13 @@ CREATE INDEX ledger_occurred_at ON ledger (occurred_at);
 --   at     -> occurred_at (source field is literally `at`)
 --   kind   -> kind (open set)
 --   detail -> detail_json (per-kind object, kept whole; operator display only)
---   (every S6b table also carries the three lossless columns of the writers' literals:
---   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
---   (absence is restored as absence, never as null); offtype_json — a JSON object of the
---   known keys whose value is not the column's type, kept exactly (a numeric or object
---   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
---   unknown own fields, restored first, in their order. `seq` is the array position at
---   the import and the insertion order afterwards: every list, export, backup and the
---   rollback read the rows in `seq` order, exactly as the array was read.)
+--   (every S6b table is typed columns only — valid input only, migration.md §1 rule 3: a
+--   write drops an unknown key and refuses a known key of the wrong type by name; the
+--   0013 import drops an unknown field, normalises an obvious off-type value (a number in
+--   a text column → its text, a fractional time → rounded, 0/1 → a boolean) or drops it,
+--   and reports each change by row id in meta.safetyAuditCutover. A NULL column reads
+--   back as null. `seq` is the array position at the import and the insertion order
+--   afterwards: every list, export and backup reads the rows in `seq` order.)
 -- notes: reads — counts by kind and the last 50 newest first (enterprise metrics). The
 --   admin backup writes its db.json BEFORE appending its own backup_created event (as every
 --   build did), so that one row is never inside the backup it describes.
@@ -925,10 +887,7 @@ CREATE TABLE ops_events (
   id                 TEXT NOT NULL UNIQUE,
   occurred_at        INTEGER,
   kind               TEXT,
-  detail_json        TEXT CHECK (detail_json IS NULL OR json_valid(detail_json)),
-  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  detail_json        TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
 ) STRICT;
 CREATE INDEX ops_events_kind ON ops_events (kind);
 CREATE INDEX ops_events_occurred_at ON ops_events (occurred_at);
@@ -953,14 +912,13 @@ CREATE INDEX ops_events_occurred_at ON ops_events (occurred_at);
 --   sourceId     -> source_id (polymorphic; no FK)
 --   occurredAt   -> occurred_at (the moment the fact changed)
 --   detail       -> detail_json (small structured copy input, kept whole)
---   (every S6b table also carries the three lossless columns of the writers' literals:
---   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
---   (absence is restored as absence, never as null); offtype_json — a JSON object of the
---   known keys whose value is not the column's type, kept exactly (a numeric or object
---   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
---   unknown own fields, restored first, in their order. `seq` is the array position at
---   the import and the insertion order afterwards: every list, export, backup and the
---   rollback read the rows in `seq` order, exactly as the array was read.)
+--   (every S6b table is typed columns only — valid input only, migration.md §1 rule 3: a
+--   write drops an unknown key and refuses a known key of the wrong type by name; the
+--   0013 import drops an unknown field, normalises an obvious off-type value (a number in
+--   a text column → its text, a fractional time → rounded, 0/1 → a boolean) or drops it,
+--   and reports each change by row id in meta.safetyAuditCutover. A NULL column reads
+--   back as null. `seq` is the array position at the import and the insertion order
+--   afterwards: every list, export and backup reads the rows in `seq` order.)
 -- notes: holds no player content. Read: by player_id ordered occurred_at asc.
 -- -----------------------------------------------------------------------------
 CREATE TABLE source_changes (
@@ -971,10 +929,7 @@ CREATE TABLE source_changes (
   source_system      TEXT,
   source_id          TEXT,
   occurred_at        INTEGER,
-  detail_json        TEXT CHECK (detail_json IS NULL OR json_valid(detail_json)),
-  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  detail_json        TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
 ) STRICT;
 CREATE INDEX source_changes_player_id_occurred_at ON source_changes (player_id, occurred_at);
 
@@ -1082,14 +1037,13 @@ CREATE INDEX pairing_codes_expires_at ON pairing_codes (expires_at);
 --   reference    -> reference (provider check reference; same value as guardians.idvReference)
 --   ts           -> created_at (source field is literally `ts`)
 --   status       -> status (open; 'approved' | 'revoked' today)
---   (every S6b table also carries the three lossless columns of the writers' literals:
---   absent_keys_json — a JSON array of the known keys the writer's object did NOT carry
---   (absence is restored as absence, never as null); offtype_json — a JSON object of the
---   known keys whose value is not the column's type, kept exactly (a numeric or object
---   targetPlayerId, an object orgId, a numeric reason); extra_json — a JSON object of the
---   unknown own fields, restored first, in their order. `seq` is the array position at
---   the import and the insertion order afterwards: every list, export, backup and the
---   rollback read the rows in `seq` order, exactly as the array was read.)
+--   (every S6b table is typed columns only — valid input only, migration.md §1 rule 3: a
+--   write drops an unknown key and refuses a known key of the wrong type by name; the
+--   0013 import drops an unknown field, normalises an obvious off-type value (a number in
+--   a text column → its text, a fractional time → rounded, 0/1 → a boolean) or drops it,
+--   and reports each change by row id in meta.safetyAuditCutover. A NULL column reads
+--   back as null. `seq` is the array position at the import and the insertion order
+--   afterwards: every list, export and backup reads the rows in `seq` order.)
 -- notes: a guardian may verify more than once → several rows; the admin toggle updates only
 --   the FIRST row for the guardian (the known behaviour, preserved). Reads: the admin list,
 --   first by guardian_id. Logs and refusals name ids only — never a name or a document value.
@@ -1104,10 +1058,7 @@ CREATE TABLE idv_queue (
   provider           TEXT,
   reference          TEXT,
   created_at         INTEGER,
-  status             TEXT,
-  absent_keys_json   TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json       TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  status             TEXT
 ) STRICT;
 CREATE INDEX idv_queue_guardian_id_created_at ON idv_queue (guardian_id, created_at);
 

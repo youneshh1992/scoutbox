@@ -20,28 +20,27 @@
  * WHAT THE ROWS ARE. Each collection was a JSON blob every build wrote through the
  * literals above (server.mjs ledgerAppend, handleReport, moderateOrRefuse, the block
  * and note routes, the IDV route; m13 delivery/enterprise/imports for the ops events;
- * m181 recordSourceChange). The mapping is key for key, in the writer's order.
+ * m181 recordSourceChange). One column per key, in the writer's order.
  *
- * LOSSLESS, BY CONSTRUCTION. Nothing a blob held is coerced, narrowed or dropped:
- *   - every unknown own field of a record is kept in `extra_json` and spread back FIRST
- *     (the S7 export convention; own "__proto__" keys are data, never assigned);
- *   - a known key that is ABSENT is recorded in `absent_keys_json` and comes back absent
- *     (the automatic report has no targetPlayerId key; a user report has no byOrgId; an
- *     org-only ledger row may have no playerId key); a present null comes back null;
- *   - a known key whose value is NOT the column's type — handleReport stores the
- *     `targetPlayerId` it received (a number, an object), the player block route stores
- *     any truthy `orgId` and `reason`, a legacy `ts` may be a float — is kept as JSON in
- *     `offtype_json` under its key and comes back exactly; the column stays NULL;
- *   - nested values (`context`, `flags`, `detail`) are whole JSON values;
+ * TYPED COLUMNS, VALID INPUT ONLY (docs/architecture/migration.md §1 rule 3; the S8d
+ * fidelity rule, 3 November 2026). A record is exactly its typed columns:
+ *   - text columns hold a string or NULL, the time columns a safe integer or NULL,
+ *     `urgent` a boolean, `context` / `flags` / `detail` a whole JSON value (stored the
+ *     way JSON.stringify stores it: a nested undefined omitted, a non-finite number null);
+ *   - a record read back carries every key of its literal; a NULL column is `null`;
+ *   - a write (append, patch, a snapshot replace) DROPS an unknown key and REFUSES a
+ *     known key of the wrong type by name (collection, field, id — never the value);
+ *   - the import (migration 0013) drops an unknown key, normalises a value whose meaning
+ *     is obvious (a number in a text column → its decimal text, a fractional time →
+ *     rounded, 0/1 → a boolean) and drops any other off-type value; every change is a
+ *     note with the row id in the cutover record (ids and field names, never a value);
  *   - vocabularies are OPEN (no CHECK on `by`, `severity`, `provider`, `status`, `kind`,
- *     `type`, `sourceSystem`, `targetKind`): the writers' sets are not narrowed and the
- *     two ops-event kinds the first DDL draft forgot (backup_refused, backup_failed) are
- *     ordinary rows;
- *   - a non-finite number in live data is kept live and persisted as the blob's JSON
- *     would have written it (null; the S7c rule).
- * The only refusals: an entry that is not an object, an `id` that is not a non-empty
- * string, a duplicate id within a collection, a value JSON cannot carry, and — for the
- * IDV queue only — a `guardianId` that is not a non-empty string or names no guardian.
+ *     `type`, `sourceSystem`, `targetKind`): the writers' sets are not narrowed.
+ * The routes validate what they store (server.mjs handleReport, the block, note and IDV
+ * routes answer 400 FIELD_INVALID for a non-text field). The import refuses only what is
+ * unusable: an entry that is not an object, an `id` that is not a non-empty string, a
+ * duplicate id within a collection, and — for the IDV queue — a `guardianId` that is not
+ * a non-empty string or names no guardian.
  *
  * REFERENCES — THE APPROVED CONTRACT (plan §D.4, Q4/Q4b/Q5):
  *   Domain P (TOLERANT, historical): blocks.player_id, reports.target_player_id,
@@ -69,7 +68,7 @@
  * outcome, resolvedAt; idvQueue.patch: status). Everything else is append-only.
  *
  * THE ORDERING KEY. Each table has `seq INTEGER PRIMARY KEY`: array position at import,
- * the next value at append, preserved by backup/restore and the rollback. Every reader
+ * the next value at append, preserved by backup/restore. Every reader
  * (newest-first lists are `slice().reverse()` of the view) sees insertion order.
  *
  * WHERE A ROW BECOMES DURABLE (nothing new). STAGED mode in the server: a mutation
@@ -91,21 +90,19 @@
 import { readonlyView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied, transaction } from './database.mjs';
-import { cloneJson } from './outboxPush.mjs';
 
 export const SAFETY_AUDIT_MIGRATION = '0013_safety_audit';
-/** `meta` key holding the cutover record: counts only, never data. */
+/** `meta` key holding the cutover record: counts and notes (ids and field names), never data. */
 export const SAFETY_AUDIT_CUTOVER_META = 'safetyAuditCutover';
 
-const EXTRA_CHECK = (col) => `CHECK (${col} IS NULL OR (json_valid(${col}) AND json_type(${col}) = 'object'))`;
-const ABSENT_CHECK = "CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array'))";
 const JSON_CHECK = (col) => `CHECK (${col} IS NULL OR json_valid(${col}))`;
 
 /**
  * The eight domains: the table, the writer's literal as [column, key, kind] in the
  * writer's order (`id` first), the player reference key (Domain P) or the guardian
- * reference key (Domain G), the indexes. Kinds: text (a string in the column, anything
- * else in offtype_json), int (a safe integer), bool (0/1), json (any JSON value).
+ * reference key (Domain G), the indexes. Kinds: id / guardian (a non-empty string),
+ * text (a string), int (a safe integer), bool (a boolean, stored 0/1), json (any JSON
+ * value). Every column but id / guardian may be NULL.
  */
 const DOMAINS = Object.freeze({
   blocks: { table: 'blocks', playerKey: 'playerId', cols: [['id', 'id', 'id'], ['player_id', 'playerId', 'text'], ['org_id', 'orgId', 'text'], ['by_kind', 'by', 'text'], ['reason', 'reason', 'text'], ['created_at', 'ts', 'int']], indexes: [['blocks_player_id_org_id', 'player_id, org_id']] },
@@ -122,14 +119,14 @@ export const AUDIT_COLLECTIONS = Object.freeze(Object.keys(DOMAINS));
 export const AUDIT_TABLE_NAMES = Object.freeze(AUDIT_COLLECTIONS.map((n) => DOMAINS[n].table));
 /** The five tolerant player references (Domain P), by collection → the table and column. */
 export const PLAYER_REFERENCE_TABLES = Object.freeze(AUDIT_COLLECTIONS.filter((n) => DOMAINS[n].playerKey).map((n) => ({ name: n, table: DOMAINS[n].table, column: DOMAINS[n].cols.find((c) => c[1] === DOMAINS[n].playerKey)[0] })));
-/** The literal keys of each collection, in the writer's order (the export convention's second half). */
+/** The keys of each collection's record, in the writer's order. */
 export const AUDIT_KEYS = Object.freeze(Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, Object.freeze(DOMAINS[n].cols.map((c) => c[1]))])));
 
 const sqlType = (kind) => (kind === 'int' || kind === 'bool' ? 'INTEGER' : 'TEXT');
 function tableDdl(name) {
   const d = DOMAINS[name];
   const cols = d.cols.filter((c) => c[2] !== 'id').map(([col, , kind]) => `  ${col.padEnd(18)} ${sqlType(kind)}${kind === 'guardian' ? ' NOT NULL' : ''}${kind === 'json' ? ` ${JSON_CHECK(col)}` : ''}`);
-  return `CREATE TABLE ${d.table} (\n  seq                INTEGER PRIMARY KEY,\n  id                 TEXT NOT NULL UNIQUE,\n${cols.join(',\n')},\n  absent_keys_json   TEXT ${ABSENT_CHECK},\n  offtype_json       TEXT ${EXTRA_CHECK('offtype_json')},\n  extra_json         TEXT ${EXTRA_CHECK('extra_json')}\n) STRICT;\n${d.indexes.map(([idx, on]) => `CREATE INDEX ${idx} ON ${d.table} (${on});`).join('\n')}`;
+  return `CREATE TABLE ${d.table} (\n  seq                INTEGER PRIMARY KEY,\n  id                 TEXT NOT NULL UNIQUE,\n${cols.join(',\n')}\n) STRICT;\n${d.indexes.map(([idx, on]) => `CREATE INDEX ${idx} ON ${d.table} (${on});`).join('\n')}`;
 }
 export const SAFETY_AUDIT_DDL = AUDIT_COLLECTIONS.map(tableDdl).join('\n');
 
@@ -140,111 +137,99 @@ const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}:
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
 const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
-const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
-/**
- * A detached, prototype-safe clone with the pre-S6b blob's JSON rules: a non-finite number in live data is kept live
- * (persisted as JSON null), and a NESTED undefined is stored as JSON.stringify stored it — an object property omitted,
- * an array entry null (review of c6cf5e1, F2: the Box Cam prefs writer's `detail.share` on a partial prefs row). A
- * function, a symbol, a BigInt, a non-plain object or a cycle is still refused by name.
- */
-const AUDIT_JSON = Object.freeze({ nonFinite: 'keep', undefinedNested: 'json' });
-const clone = (v, at) => cloneJson(v, at, AUDIT_JSON);
-const parseJson = (text, at) => clone(JSON.parse(text), at).value;
 const ids = (list) => list.slice(0, 20).join(', ') + (list.length > 20 ? ', …' : '');
-/** A mirror object: extras first (the export convention), then the literal's present keys in the writer's order. */
-function assemble(extra, literal) { const row = {}; for (const k of Object.keys(extra)) setOwn(row, k, extra[k]); for (const [k, v] of literal) row[k] = v; return row; }
-const columnHolds = (kind, v) => (kind === 'text' || kind === 'guardian' || kind === 'id' ? typeof v === 'string' : kind === 'int' ? Number.isSafeInteger(v) : kind === 'bool' ? typeof v === 'boolean' : true);
 
-// ------------------------------------------------------------------ validation (no coercion; every refusal names the reason, never a value)
 /**
- * Validate one entry of `name`: `{ ok: true, row, absent, hasExtra, hasOfftype }` (the
- * mirror row, detached, extras first) or `{ ok: false, reason }`. A present `undefined`
- * is absent (JSON could not have carried it).
+ * Why `v` cannot be stored as a JSON column, or null when it can. JSON.stringify's own
+ * rules apply to what it can carry (a nested undefined omitted or null in an array, a
+ * non-finite number null — review of c6cf5e1, F2: the Box Cam prefs writer's
+ * `detail.share`); a function, a symbol, a BigInt, a non-plain object or a cycle is refused.
  */
-export function validateAuditEntry(name, raw, at = name) {
+function jsonProblem(v, at, path = new Set()) {
+  if (v === null || v === undefined || typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number') return null;
+  if (typeof v !== 'object') return `${at} (${typeof v}) cannot be stored as JSON`;
+  if (path.has(v)) return `${at} is cyclic and cannot be stored as JSON`;
+  if (!Array.isArray(v)) { const proto = Object.getPrototypeOf(v); if (proto !== Object.prototype && proto !== null) return `${at} is not a plain object and cannot be stored as JSON`; }
+  path.add(v);
+  try {
+    for (const k of Object.keys(v)) { const p = jsonProblem(v[k], Array.isArray(v) ? `${at}[${k}]` : `${at}.${k}`, path); if (p) return p; }
+  } finally { path.delete(v); }
+  return null;
+}
+const columnHolds = (kind, v) => (kind === 'text' ? typeof v === 'string' : kind === 'int' ? Number.isSafeInteger(v) : kind === 'bool' ? typeof v === 'boolean' : true);
+const KIND_TEXT = { text: 'a string or null', int: 'an integer or null', bool: 'a boolean or null' };
+/** The import's normalisation of an off-type value whose meaning is obvious; undefined when there is none (the value is dropped). */
+function normalise(kind, v) {
+  if (kind === 'text' && typeof v === 'number' && Number.isFinite(v)) return String(v);
+  if (kind === 'int' && typeof v === 'number' && Number.isFinite(v)) { const n = Math.round(v); return Number.isSafeInteger(n) ? n : undefined; }
+  if (kind === 'bool' && (v === 0 || v === 1)) return v === 1;
+  return undefined;
+}
+
+// ------------------------------------------------------------------ typing (every refusal and note names the field and the id, never a value)
+/**
+ * Type one entry of `name` into its columns: `{ ok: true, cols, notes }` or `{ ok: false, reason }`.
+ * An unknown key is dropped (a note in `lenient` mode); an absent or undefined key is NULL. A known key of the wrong
+ * type is refused — or, in `lenient` mode (the import), normalised when its meaning is obvious and otherwise dropped,
+ * with a note.
+ */
+export function typeAuditEntry(name, raw, at = name, { lenient = false } = {}) {
   const d = DOMAINS[name]; if (!d) return { ok: false, reason: `${at}: unknown audit collection` };
   if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
   if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
-  if (d.guardianKey && !nonEmpty(raw[d.guardianKey])) return { ok: false, reason: `${at}.${d.guardianKey} must be a non-empty string (the IDV queue names an existing guardian)` };
-  const known = d.cols.map((c) => c[1]);
-  const extra = {}; let hasExtra = false;
-  for (const k of Object.keys(raw)) {
-    if (known.includes(k) || raw[k] === undefined) continue;
-    const c = clone(raw[k], `${at}.${k}`); if (c.reason) return { ok: false, reason: c.reason };
-    setOwn(extra, k, c.value); hasExtra = true;
+  if (d.guardianKey && !nonEmpty(raw[d.guardianKey])) return { ok: false, reason: `${at}.${d.guardianKey} must be a non-empty string (the IDV queue names an existing guardian; id ${raw.id})` };
+  const cols = {}; const notes = [];
+  for (const [col, key, kind] of d.cols) {
+    const v = Object.hasOwn(raw, key) ? raw[key] : undefined;
+    if (v === undefined || v === null) { cols[col] = null; continue; }
+    if (kind === 'id' || kind === 'guardian') { cols[col] = v; continue; }
+    if (kind === 'json') { const p = jsonProblem(v, `${at}.${key}`); if (p) return { ok: false, reason: `${p} (id ${raw.id})` }; cols[col] = JSON.stringify(v) ?? null; continue; }
+    if (columnHolds(kind, v)) { cols[col] = kind === 'bool' ? (v ? 1 : 0) : v; continue; }
+    if (!lenient) return { ok: false, reason: `${at}.${key} must be ${KIND_TEXT[kind]} (got ${describe(v)}; id ${raw.id})` };
+    const n = normalise(kind, v);
+    if (n === undefined) { cols[col] = null; notes.push(`${raw.id}: ${key} was ${describe(v)}, dropped`); } else { cols[col] = kind === 'bool' ? (n ? 1 : 0) : n; notes.push(`${raw.id}: ${key} was ${describe(v)}, normalised`); }
   }
-  const literal = []; const absent = []; let hasOfftype = false;
-  for (const [, key, kind] of d.cols) {
-    if (!Object.hasOwn(raw, key) || raw[key] === undefined) { absent.push(key); continue; }
-    const c = clone(raw[key], `${at}.${key}`); if (c.reason) return { ok: false, reason: c.reason };
-    if (c.value !== null && !columnHolds(kind, c.value)) hasOfftype = true;
-    literal.push([key, c.value]);
-  }
-  return { ok: true, row: assemble(extra, literal), absent, hasExtra, hasOfftype };
+  if (lenient) for (const k of Object.keys(raw)) if (raw[k] !== undefined && !d.cols.some((c) => c[1] === k)) notes.push(`${raw.id}: unknown field ${k} dropped`);
+  return { ok: true, cols, notes };
 }
-/** Validate a whole collection (unique ids); throws SAFETY_AUDIT_IMPORT_BLOCKED. Returns `{ rows, counts }`. */
-export function validateAuditRows(name, rows, { label = name } = {}) {
+/** The record a row of columns stands for (the mirror, a read, an export): every key of the literal, in order; NULL is null. */
+function fromDb(name, r) {
+  const out = {};
+  for (const [col, key, kind] of DOMAINS[name].cols) { const v = r[col]; out[key] = v === null || v === undefined ? null : kind === 'bool' ? v === 1 : kind === 'json' ? JSON.parse(v) : v; }
+  return out;
+}
+/**
+ * Type a whole collection (unique ids); throws SAFETY_AUDIT_IMPORT_BLOCKED. Returns `{ entries: [{ cols, row }], counts,
+ * notes }` — `counts` per collection { imported, normalised } (rows the import changed), `notes` the changes by id.
+ */
+export function validateAuditRows(name, rows, { label = name, lenient = false } = {}) {
   if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
-  const out = []; const problems = []; const seen = new Set();
-  const counts = { imported: 0, withExtraFields: 0, withAbsentKeys: 0, withOfftypeValues: 0 };
+  const entries = []; const problems = []; const notes = []; const seen = new Set(); let normalised = 0;
   rows.forEach((raw, i) => {
-    const v = validateAuditEntry(name, raw, `${label} entry #${i}`);
-    if (!v.ok) { problems.push(v.reason); return; }
-    if (seen.has(v.row.id)) { problems.push(`${label} entry #${i}: duplicates the id of an earlier entry (${v.row.id})`); return; }
-    seen.add(v.row.id);
-    if (v.hasExtra) counts.withExtraFields += 1; if (v.absent.length) counts.withAbsentKeys += 1; if (v.hasOfftype) counts.withOfftypeValues += 1;
-    out.push(v.row);
+    const t = typeAuditEntry(name, raw, `${label} entry #${i}`, { lenient });
+    if (!t.ok) { problems.push(t.reason); return; }
+    if (seen.has(t.cols.id)) { problems.push(`${label} entry #${i}: duplicates the id of an earlier entry (${t.cols.id})`); return; }
+    seen.add(t.cols.id);
+    if (t.notes.length) { normalised += 1; notes.push(...t.notes.map((n) => `${name} ${n}`)); }
+    entries.push({ cols: t.cols, row: fromDb(name, t.cols) });
   });
   if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  counts.imported = out.length;
-  return { rows: out, counts };
+  return { entries, counts: { imported: entries.length, normalised }, notes };
 }
 
 // ------------------------------------------------------------------ rows ↔ the tables
-const jsonOrNull = (obj) => (Object.keys(obj).length ? JSON.stringify(obj) : null);
-/** The INSERT/UPDATE parameters of a mirror row: the column holds the value when it is of the column's type, offtype_json keeps it otherwise; absent keys and extras recorded. */
-function params(name, row) {
-  const d = DOMAINS[name]; const known = d.cols.map((c) => c[1]);
-  const out = {}; const absent = []; const off = {}; const extra = {};
-  for (const k of Object.keys(row)) if (!known.includes(k)) setOwn(extra, k, row[k]);
-  for (const [col, key, kind] of d.cols) {
-    if (!Object.hasOwn(row, key)) { absent.push(key); out[col] = null; continue; }
-    const v = row[key];
-    if (v === null) { out[col] = null; continue; }
-    if (!columnHolds(kind, v)) { setOwn(off, key, v); out[col] = null; continue; }
-    out[col] = kind === 'bool' ? (v ? 1 : 0) : kind === 'json' ? JSON.stringify(v) : v;
-  }
-  out.absent_keys_json = absent.length ? JSON.stringify(absent) : null;
-  out.offtype_json = jsonOrNull(off);
-  out.extra_json = jsonOrNull(extra);
-  return out;
-}
-function fromDb(name, r) {
-  const d = DOMAINS[name];
-  const extra = r.extra_json ? parseJson(r.extra_json, 'extra_json') : {};
-  const absent = r.absent_keys_json ? JSON.parse(r.absent_keys_json) : [];
-  const off = r.offtype_json ? parseJson(r.offtype_json, 'offtype_json') : {};
-  const literal = [];
-  for (const [col, key, kind] of d.cols) {
-    if (absent.includes(key)) continue;
-    if (Object.hasOwn(off, key)) { literal.push([key, off[key]]); continue; }
-    const v = r[col];
-    literal.push([key, v === null ? null : kind === 'bool' ? v === 1 : kind === 'json' ? parseJson(v, col) : v]);
-  }
-  return assemble(extra, literal);
-}
 const SELECT = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, `SELECT * FROM ${DOMAINS[n].table}`]));
-const INSERT = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => { const cols = [...DOMAINS[n].cols.map((c) => c[0]), 'absent_keys_json', 'offtype_json', 'extra_json']; return [n, `INSERT INTO ${DOMAINS[n].table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`]; }));
-const UPDATE = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => { const cols = [...DOMAINS[n].cols.map((c) => c[0]).filter((c) => c !== 'id'), 'absent_keys_json', 'offtype_json', 'extra_json']; return [n, `UPDATE ${DOMAINS[n].table} SET ${cols.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`]; }));
+const INSERT = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => { const cols = DOMAINS[n].cols.map((c) => c[0]); return [n, `INSERT INTO ${DOMAINS[n].table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`]; }));
+const UPDATE = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => { const cols = DOMAINS[n].cols.map((c) => c[0]).filter((c) => c !== 'id'); return [n, `UPDATE ${DOMAINS[n].table} SET ${cols.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`]; }));
 const DELETE_BY_ID = Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, `DELETE FROM ${DOMAINS[n].table} WHERE id = ?`]));
 /** Every row of a collection in `seq` order: fresh objects from the file. */
 function readRows(sqlite, name) { return sqlite.prepare(`${SELECT[name]} ORDER BY seq`).all().map((r) => fromDb(name, r)); }
-/** Write the validated mirror rows in array order (the array position is the durable order). */
-function writeRows(sqlite, name, rows) {
+/** Write the typed entries in array order (the array position is the durable order). */
+function writeRows(sqlite, name, entries) {
   sqlite.exec(`DELETE FROM ${DOMAINS[name].table};`);
   const ins = sqlite.prepare(INSERT[name]);
-  for (const row of rows) ins.run(params(name, row));
-  return rows.length;
+  for (const { cols } of entries) ins.run(cols);
+  return entries.length;
 }
 const existingIds = (sqlite, table) => (tableExists(sqlite, table) ? new Set(sqlite.prepare(`SELECT id FROM ${table}`).all().map((r) => r.id)) : new Set());
 
@@ -312,8 +297,8 @@ function playerReferenceCounts(name, rows, players) {
  * Whole-table access for the tools that treat the file as one snapshot (backups,
  * restores, the persistence suites), one entry per collection in dispatch order. Before
  * the cutover record both methods decline (`null` / `false`): the caller keeps the legacy
- * blob. Afterwards `read` returns the rows in the legacy shape, in insertion order;
- * `replace` validates every entry, checks an incoming IDV queue against the guardians
+ * blob. Afterwards `read` returns the typed records in insertion order; `replace`
+ * types every entry (an unknown key dropped, an off-type value refused by name), checks an incoming IDV queue against the guardians
  * table as it stands (the identity pair is dispatched first), rewrites the table inside
  * the caller's transaction and refuses the whole write on the first problem. The caller
  * then runs `assertIdvQueueGuardiansConsistent` on the FINAL state.
@@ -326,39 +311,42 @@ export const AUDIT_SNAPSHOT_TABLES = Object.freeze(AUDIT_COLLECTIONS.map((name) 
     if (!safetyAuditLive(sqlite)) return false;
     if (!sqlite.isTransaction) throw new Error(`${name}: replace() runs inside the caller's transaction`);
     const v = validateAuditRows(name, rows, { label: `the ${name} snapshot collection` });
-    if (DOMAINS[name].guardianKey) checkIncomingGuardians(sqlite, v.rows, { label: `the ${name} snapshot collection` });
-    writeRows(sqlite, name, v.rows);
+    if (DOMAINS[name].guardianKey) checkIncomingGuardians(sqlite, v.entries.map((e) => e.row), { label: `the ${name} snapshot collection` });
+    writeRows(sqlite, name, v.entries);
     return true;
   },
 })));
 
 /**
- * Import the eight legacy (or exported) blobs into the tables, inside the migration's
- * transaction: validation of every entry, the strict guardian check for the IDV queue,
+ * Import the eight legacy blobs into the tables, inside the migration's transaction:
+ * every entry typed leniently (an unknown field dropped, an off-type value normalised or
+ * dropped — each a note with the row id), the strict guardian check for the IDV queue,
  * insertion in array order, the blob rows retired, the Domain P counts taken against the
  * players table. An absent blob imports nothing; an empty array imports nothing; a
- * non-array or non-JSON blob refuses the step. Returns the counts the migration records
- * in `meta` (never a value).
+ * non-array or non-JSON blob, an entry without an id or a duplicate id refuses the step.
+ * Returns the counts and notes the migration records in `meta` (never a value).
  */
 export function importSafetyAuditBlobs(sqlite) {
   const hasCollections = tableExists(sqlite, 'collections');
   const players = existingIds(sqlite, 'players');
-  const counts = {};
+  const counts = {}; const notes = [];
   for (const name of AUDIT_COLLECTIONS) {
     const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null;
-    if (!row) { counts[name] = { imported: 0, withExtraFields: 0, withAbsentKeys: 0, withOfftypeValues: 0, ...playerReferenceCounts(name, [], players) }; continue; }
+    if (!row) { counts[name] = { imported: 0, normalised: 0, ...playerReferenceCounts(name, [], players) }; continue; }
     let parsed; try { parsed = JSON.parse(row.value); } catch { throw blocked(`the ${name} blob is not valid JSON`); }
-    const v = validateAuditRows(name, parsed, { label: `the ${name} blob` });
-    if (DOMAINS[name].guardianKey) checkIncomingGuardians(sqlite, v.rows, { label: `the ${name} blob` });
-    writeRows(sqlite, name, v.rows);
+    const v = validateAuditRows(name, parsed, { label: `the ${name} blob`, lenient: true });
+    const typed = v.entries.map((e) => e.row);
+    if (DOMAINS[name].guardianKey) checkIncomingGuardians(sqlite, typed, { label: `the ${name} blob` });
+    writeRows(sqlite, name, v.entries);
     sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    counts[name] = { ...v.counts, ...playerReferenceCounts(name, v.rows, players) };
+    counts[name] = { ...v.counts, ...playerReferenceCounts(name, typed, players) };
+    notes.push(...v.notes);
   }
-  return counts;
+  return { ...counts, notes };
 }
 
 // ------------------------------------------------------------------ detached copies (the export)
-const copyRow = (row) => { const c = {}; for (const k of Object.keys(row)) setOwn(c, k, clone(row[k], k).value); return c; };
+const copyRow = (row) => JSON.parse(JSON.stringify(row));
 
 // ------------------------------------------------------------------ the repository
 /**
@@ -413,35 +401,34 @@ export function createSafetyAuditRepository({ sqlite, now = Date.now, log = () =
   };
   const label = (n) => `an audit record (${n})`;
 
-  /** The append shared by every collection: validated exactly like an import; the IDV queue's guardian checked strictly. */
+  const invalid = (n, reason) => Object.assign(new TypeError(`${n}: ${reason}`), { code: 'AUDIT_RECORD_INVALID' });
+  /** The append shared by every collection: typed like a snapshot write (unknown keys dropped, an off-type value refused by name); the IDV queue's guardian checked strictly. */
   const append = (n, raw) => operation((exec) => {
-    const v = validateAuditEntry(n, raw, n); if (!v.ok) throw new TypeError(`${n}: an entry needs the writer's literal: ${v.reason}`);
-    const row = v.row;
+    const t = typeAuditEntry(n, raw, n); if (!t.ok) throw invalid(n, t.reason);
+    const row = fromDb(n, t.cols);
     if (byId[n].has(row.id)) throw new Error(`${n}: a row with id ${row.id} already exists`);
     if (DOMAINS[n].guardianKey && !stmt.guardian.get(row.guardianId)) throw refusal('IDV_GUARDIAN_MISSING', `${n}: guardian ${row.guardianId} does not exist; an IDV entry names an existing guardian`);
     rows[n].push(row); byId[n].set(row.id, row);
-    const p = params(n, row);
-    exec(() => { stmt.insert[n].run(p); });
+    exec(() => { stmt.insert[n].run(t.cols); });
     return readonlyView(row, label(n));
   });
   /**
-   * Change exactly `allowed` keys of a row by id (the routes' status updates); the values become present keys.
-   * ATOMIC (review of c6cf5e1, F1): every field is validated and cloned, and the UPDATE parameters computed from a
-   * candidate copy, BEFORE anything is published — a refusal at any field leaves the row (and so every held or fresh
-   * view), the queue and the file untouched. Only then are the values assigned to the live row (its identity, and so
-   * every held view, is kept) and the statement queued.
+   * Change exactly `allowed` keys of a row by id (the routes' status updates).
+   * ATOMIC (review of c6cf5e1, F1): the candidate record is typed, and the UPDATE parameters computed, BEFORE anything
+   * is published — a refusal at any field leaves the row (and so every held or fresh view), the queue and the file
+   * untouched. Only then are the typed values assigned to the live row (its identity, and so every held view, is kept)
+   * and the statement queued.
    */
   const patch = (n, id, fields, allowed) => operation((exec) => {
     const row = byId[n].get(id); if (!row) throw new Error(`${n}: no ${n === 'reports' ? 'report' : 'entry'} ${id}`);
     if (!isPlainObject(fields)) throw new TypeError(`${n}: patch takes an object of fields`);
     const keys = Object.keys(fields);
     if (!keys.length || keys.some((k) => !allowed.includes(k))) throw new TypeError(`${n}: patch changes ${allowed.length === 1 ? allowed[0] : `${allowed.slice(0, -1).join(', ')} and ${allowed.at(-1)}`} only`);
-    const prepared = [];
-    for (const k of keys) { const c = clone(fields[k], `${n}.${k}`); if (c.reason) throw new TypeError(`${n}: ${c.reason}`); prepared.push([k, c.value]); }
-    const candidate = {}; for (const k of Object.keys(row)) setOwn(candidate, k, row[k]); for (const [k, v] of prepared) candidate[k] = v;
-    const p = params(n, candidate);
-    for (const [k, v] of prepared) row[k] = v;
-    exec(() => { stmt.update[n].run(p); });
+    for (const k of keys) if (fields[k] === undefined) throw invalid(n, `${n}.${k} needs a value (null clears it; id ${id})`);
+    const t = typeAuditEntry(n, { ...row, ...fields }, n); if (!t.ok) throw invalid(n, t.reason);
+    const next = fromDb(n, t.cols);
+    for (const k of keys) row[k] = next[k];
+    exec(() => { stmt.update[n].run(t.cols); });
     return readonlyView(row, label(n));
   });
   /** Delete one row by id; returns a detached copy of what was removed, or null. */
@@ -476,7 +463,7 @@ export function createSafetyAuditRepository({ sqlite, now = Date.now, log = () =
     pending: () => pending.length,
     /** Domain P, the diagnostic: per collection, rows whose player id (a string) is not in the players table. Never a refusal. */
     unresolvedPlayerReferences: () => unresolvedPlayerReferences(sqlite),
-    /** Every collection in its legacy shape (extras first, then the literal's keys in the writer's order), detached (the admin backup). */
+    /** Every collection's typed records (the literal's keys in the writer's order), detached (the admin backup). */
     exportAll: () => Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, rows[n].map(copyRow)])),
     views,
 
@@ -507,7 +494,7 @@ export function createSafetyAuditRepository({ sqlite, now = Date.now, log = () =
     rollback() { inFlight = 0; },
     /**
      * Unit-of-work participation: the graph memento of every mirror (each row, its
-     * nested context/detail/flags and unknown fields — by identity, restored IN PLACE so
+     * nested context/detail/flags — by identity, restored IN PLACE so
      * every held view reads the pre-unit state) and the queue length when the unit began.
      */
     snapshotState: () => ({ pendingLength: pending.length, graph: captureGraph(AUDIT_COLLECTIONS.map((n) => rows[n])) }),

@@ -23,7 +23,9 @@ These replace the old plan's principles where they conflict.
    by earlier development builds, no operator procedures.
 2. **Better models are welcome.** `sql/*.sql` is a starting point. A step may redesign its tables (names,
    columns, keys, splitting or merging tables) when that gives a cleaner model. Update the `sql/*.sql` file to
-   match (`scripts/testSchemaDdl.mjs` compares them column by column) and say what changed in the PR.
+   match (`scripts/testSchemaDdl.mjs` compares them column by column) and say what changed in the PR. Until
+   S14, an already-registered migration's DDL may also be amended in place (its id doesn't change): re-seed
+   afterwards. Don't write a migration just to drop or rename columns.
 3. **Valid input only.** Each field is a properly typed column. No `absent_keys_json`, `offtype_json` or
    `extra_json` side columns. Where the old code accepted junk (wrong types, unknown fields), the route
    validates and rejects it. The import of existing blob data normalises or drops what doesn't fit and reports
@@ -88,7 +90,8 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S13 | operations and integrations | | | | not started |
 | S14 | retire the blob | | | | not started |
 
-S6b, S7d and S8a–S8c carry the lossless side columns (`*_json`) of the old fidelity rule.
+The lossless side columns (`extra_json`, `absent_keys_json`, `offtype_json`) of the old fidelity rule were dropped
+from S0–S7 and S6b on 3 November. S8a–S8c still carry them; they go in §4.2.
 
 ## 4. The order of work
 
@@ -114,9 +117,8 @@ a second pass:
    place.
 2. Move the hot recruitment reads (case lists, the Room, contacts, offers) to SQL queries with pagination, and drop
    those mirrors.
-3. **Proposed, needs the Founder's OK:** drop the lossless `*_json` side columns from the S6b–S8c tables with a
-   migration plus a re-seed. His decision of 30 October kept them; with no real data they protect nothing and
-   account for much of the size of these repositories (`recruitmentContactsOffers.mjs` is about 80 KB).
+3. Drop the lossless `*_json` side columns from the S8a–S8c tables as part of step 1 (decided 3 November; the
+   other domains lost theirs then).
 4. Measure with `scripts/dataLayerPerf.mjs` at 100k synthetic players.
 
 Doing the same for players and guardians (S4a's whole-snapshot identity replace) would also settle the A0–A3

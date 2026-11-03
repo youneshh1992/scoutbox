@@ -96,7 +96,7 @@ function legacyCoalesceTarget(list, audience, type, text, refId, now) {
 }
 
 // ============================================================= migration 0009
-test('migration 0009 (legacy blobs): every notification is imported with its id, fields, array position (the feed order) and acknowledgment contract; a pre-M18.2 row without repeatCount/groupKey/category/deferredPush is normalised exactly as the snapshot migration m182_005 did (repeatCount 1) and the other absent fields default (counted, never silently); an unknown field is kept and round-trips; the preferences are imported as stored — a mandatory category stored false included; the blob rows are retired; the cutover record carries counts only', () => {
+test('migration 0009 (legacy blobs): every notification is imported with its id, fields, array position (the feed order) and acknowledgment contract; a pre-M18.2 row without repeatCount/groupKey/category/deferredPush is normalised exactly as the snapshot migration m182_005 did (repeatCount 1) and the other absent fields default (counted, never silently); an unknown field is dropped and the row id reported; the preferences are imported as stored — a mandatory category stored false included; the blob rows are retired; the cutover record carries counts only', () => {
   const dir = tempDir('ntf-mig');
   const legacy = [
     ntf({ id: 'ntf-1', ts: NOW - 3 * HOUR }),
@@ -112,7 +112,7 @@ test('migration 0009 (legacy blobs): every notification is imported with its id,
   const r2 = s.prepare('SELECT * FROM notifications WHERE id = ?').get('ntf-2');
   assert.equal(r2.repeat_count, 1); assert.equal(r2.read, 1); assert.equal(r2.group_key, null); assert.equal(r2.category, null); assert.equal(r2.deferred_push, 0); assert.equal(r2.action_required, 0);
   const r3 = s.prepare('SELECT * FROM notifications WHERE id = ?').get('ntf-3');
-  assert.equal(r3.action_required, 1); assert.equal(r3.action_deadline_at, NOW + 7 * 86_400_000); assert.equal(r3.action_acked_at, null); assert.deepEqual(JSON.parse(r3.extra_json), { future: { nested: [1, 2] } });
+  assert.equal(r3.action_required, 1); assert.equal(r3.action_deadline_at, NOW + 7 * 86_400_000); assert.equal(r3.action_acked_at, null); assert.equal(Object.hasOwn(r3, 'extra_json'), false, 'no side column');
   assert.equal(s.prepare('SELECT repeat_count FROM notifications WHERE id = ?').get('ntf-4').repeat_count, 3);
   assert.deepEqual(s.prepare('SELECT * FROM notification_prefs ORDER BY rowid').all().map((r) => ({ ...r })), [
     { audience_kind: 'org_user', audience_id: 'usr-1', email_intent: 0, updated_at: NOW - HOUR },
@@ -121,13 +121,14 @@ test('migration 0009 (legacy blobs): every notification is imported with its id,
   assert.deepEqual(s.prepare('SELECT audience_id, category, enabled FROM notification_pref_categories ORDER BY rowid').all().map((r) => [r.audience_id, r.category, r.enabled]), [['usr-1', 'mentions', 0], ['pl-adult', 'compliance', 0], ['pl-adult', 'discovery_nudges', 1]], 'a stored mandatory false is imported as it was stored (the effective view forces it on; nothing is rewritten silently)');
   assert.equal(blob(s, 'notifications'), undefined); assert.equal(blob(s, 'notificationPrefs'), undefined);
   const record = JSON.parse(meta(s, NOTIFICATIONS_CUTOVER_META));
-  assert.deepEqual(record, { at: NOW, notifications: { imported: 4, normalised: { repeatCount: 1, read: 0, groupKey: 1, category: 1, deferredPush: 1 }, withExtraFields: 1, withActionRequired: 1 }, notificationPrefs: { imported: 2, categories: 3, normalised: { emailIntent: 0, updatedAt: 0 } } });
+  assert.deepEqual(record, { at: NOW, notifications: { imported: 4, normalised: { repeatCount: 1, read: 0, groupKey: 1, category: 1, deferredPush: 1 }, unknownFieldsDropped: ['ntf-3'], withActionRequired: 1 }, notificationPrefs: { imported: 2, categories: 3, normalised: { emailIntent: 0, updatedAt: 0 } } });
   assert.doesNotMatch(JSON.stringify(record), /sent a message|withdrawn|Badge/, 'the record carries no notification text');
-  // The export reproduces the legacy shape, position for position, the unknown field included.
+  // The export reproduces the legacy shape, position for position, the unknown field dropped.
   const repo = bare(s);
   const exported = repo.exportRows();
   assert.deepEqual(exported.map((n) => n.id), ['ntf-1', 'ntf-2', 'ntf-3', 'ntf-4']);
-  assert.deepEqual(exported[2], plain(legacy[2]));
+  const { future: _dropped, ...known3 } = legacy[2];
+  assert.deepEqual(exported[2], plain(known3));
   assert.deepEqual(exported[1], { ...legacy[1], repeatCount: 1, groupKey: null, category: null, deferredPush: false }, 'the normalised row in its exported shape');
   assert.deepEqual(exported[0], plain(legacy[0]));
   assert.deepEqual(repo.exportPrefs(), plain(prefs));
@@ -548,17 +549,18 @@ test('boot: the data layer attaches to the tables as they are — an in-memory n
 });
 
 // ============================================================= snapshots (backups, restores, persistence suites)
-test('snapshot dispatcher: after the cutover a tool reads both collections in the legacy shape (position order, acknowledgment contracts, unknown fields) and writes them back through the tables; a collection the snapshot omits leaves its table alone; a malformed entry, a duplicate id, an unknown category or a non-array collection refuses the WHOLE save (nothing written, the revision not advanced, the unrelated edit not written); no blob row is ever written for them; before 0009 the tool writes the blobs and the migration imports them', () => {
+test('snapshot dispatcher: after the cutover a tool reads both collections in the legacy shape (position order, acknowledgment contracts; an unknown field dropped) and writes them back through the tables, an unknown field of a written entry not stored; a collection the snapshot omits leaves its table alone; a malformed entry, a duplicate id, an unknown category or a non-array collection or a wrong-typed field (named with the row id) refuses the WHOLE save (nothing written, the revision not advanced, the unrelated edit not written); no blob row is ever written for them; before 0009 the tool writes the blobs and the migration imports them', () => {
   const dir = tempDir('ntf-snap'); s6File(dir, { notifications: [ntf({ id: 'ntf-1', extra: 'kept' }), ntf({ id: 'ntf-2', ts: NOW - 9 * HOUR, actionRequired: { deadline: null, ackedAt: NOW, ackedBy: 'usr-1' } })], notificationPrefs: [pref()] });
   { const s = openRaw(dir); migrate(s); s.close(); }
   const tool = openStore(dir);
   let snap = tool.load();
-  assert.deepEqual(snap.db.notifications.map((n) => n.id), ['ntf-1', 'ntf-2']); assert.equal(snap.db.notifications[0].extra, 'kept'); assert.deepEqual(snap.db.notifications[1].actionRequired, { deadline: null, ackedAt: NOW, ackedBy: 'usr-1' });
+  assert.deepEqual(snap.db.notifications.map((n) => n.id), ['ntf-1', 'ntf-2']); assert.equal(Object.hasOwn(snap.db.notifications[0], 'extra'), false, 'dropped at the import'); assert.deepEqual(snap.db.notifications[1].actionRequired, { deadline: null, ackedAt: NOW, ackedBy: 'usr-1' });
   assert.deepEqual(snap.db.notificationPrefs, [pref()]);
-  snap.db.notifications.push({ id: 'ntf-3', ts: NOW, audience: PLAYER, type: 'badge', text: 'B', refId: 'pl-adult', read: false }); // a legacy-shaped entry
+  snap.db.notifications.push({ id: 'ntf-3', ts: NOW, audience: PLAYER, type: 'badge', text: 'B', refId: 'pl-adult', read: false, futureField: { x: 1 } }); // a legacy-shaped entry with an unknown field
   snap.db.notificationPrefs.push(pref({ audienceKind: 'player', audienceId: 'pl-adult', categories: { combine: false } }));
   tool.save(snap);
   assert.deepEqual(idsOf(dir), ['ntf-1', 'ntf-2', 'ntf-3']); assert.equal(rowsOf(dir, 'notifications', 'seq')[2].repeat_count, 1);
+  assert.equal(Object.hasOwn(tool.load().db.notifications[2], 'futureField'), false, 'an unknown field of a snapshot entry is not stored');
   assert.deepEqual(rowsOf(dir, 'notification_pref_categories').map((r) => [r.audience_id, r.category]), [['usr-1', 'mentions'], ['pl-adult', 'combine']]);
   assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('notifications', 'notificationPrefs')").get().n, 0, 'never a blob once the tables are live');
   // Omitted collections leave the tables alone.
@@ -571,6 +573,7 @@ test('snapshot dispatcher: after the cutover a tool reads both collections in th
     assert.equal(tool.sqlite.isTransaction, false); assert.equal(dump(tool.sqlite), before, `${label}: nothing changed, the unrelated edit included`); assert.equal(tool.revision(), seq, `${label}: the revision did not advance`);
   };
   refused('a malformed entry', (d) => { d.notifications[0].ts = 'yesterday'; }, /NOTIFICATIONS_IMPORT_BLOCKED.*ts must be/);
+  refused('a wrong-typed field, named with the row id', (d) => { d.notifications[1].read = 'yes'; }, /NOTIFICATIONS_IMPORT_BLOCKED.*entry #1 \(ntf-2\): read must be a boolean/);
   refused('a duplicate id', (d) => { d.notifications.push({ ...d.notifications[0] }); }, /duplicates the id/);
   refused('an unknown category', (d) => { d.notificationPrefs[0].categories.gossip = true; }, /categories\.gossip is not a notification category/);
   refused('a non-boolean preference', (d) => { d.notificationPrefs[0].categories.mentions = 'no'; }, /must be a boolean/);
@@ -765,31 +768,23 @@ test('review of 7655bae, finding 2 — a participant precondition refused inside
   L.close(); rm(dir);
 });
 
-test('review of ba6956d, finding 3 — unknown data is never lost silently: an own "__proto__" key and nested unknown fields on a legacy notification survive the migration, the mirror, a unit rollback that restores the row in place, the export and a snapshot round trip; an audience that carries a field this schema has no column for refuses the whole migration and the whole snapshot write before anything is written or retired (blob and saveSeq unchanged, diagnostic text-free)', () => {
+test('review of ba6956d, finding 3 (under the S8d fidelity rule) — unknown data is dropped, never stored: an own "__proto__" key and nested unknown fields on a legacy notification are dropped by the migration and reported by row id (the prototype never touched); an audience or acknowledgment contract that carries a field this schema has no column for refuses the whole migration and the whole snapshot write before anything is written or retired (blob and saveSeq unchanged, diagnostic text-free)', () => {
   const SECRET = 'SECRET-TEXT-RV3';
   const special = JSON.parse('{"id":"ntf-proto","ts":1,"audience":{"kind":"player","id":"pl-adult"},"type":"message","text":"Synthetic","read":false,"__proto__":{"legacyMarker":"keep-me"},"nested":{"a":[1,{"b":null}]}}');
   const dir = tempDir('ntf-rv-extra'); s6File(dir, { notifications: [special, ntf({ id: 'ntf-plain' })] });
   const s = openRaw(dir); assert.deepEqual(migrate(s).ran, [NOTIFICATIONS_MIGRATION]);
+  assert.deepEqual(JSON.parse(meta(s, NOTIFICATIONS_CUTOVER_META)).notifications.unknownFieldsDropped, ['ntf-proto'], 'reported by id');
+  assert.doesNotMatch(meta(s, NOTIFICATIONS_CUTOVER_META), /keep-me|legacyMarker|nested/, 'ids only, never content or field names');
   const repo = bare(s);
   const exported = repo.exportRows()[0];
-  assert.ok(Object.hasOwn(exported, '__proto__') && exported.__proto__.legacyMarker === 'keep-me', 'the own __proto__ key is an own key of the export'); assert.deepEqual(exported.nested, { a: [1, { b: null }] });
-  assert.ok(Object.hasOwn(repo.byId('ntf-proto'), '__proto__'), 'and of the mirror row'); assert.equal(Object.getPrototypeOf(repo.exportRows()[0]), Object.prototype, 'the prototype itself was never touched');
-  assert.equal(JSON.parse(s.prepare('SELECT extra_json FROM notifications WHERE id = ?').get('ntf-proto').extra_json).__proto__.legacyMarker, 'keep-me');
+  assert.equal(Object.hasOwn(exported, '__proto__'), false); assert.equal(Object.hasOwn(exported, 'nested'), false); assert.equal(Object.getPrototypeOf(exported), Object.prototype, 'the prototype itself was never touched');
+  assert.deepEqual(Object.keys(exported), ['id', 'ts', 'audience', 'type', 'text', 'refId', 'read', 'repeatCount', 'groupKey', 'category', 'deferredPush']);
   s.close();
-  // A unit rollback restores the row in place, the special key included.
-  const L = live(dir); L.save();
-  const row = L.notifications.byId('ntf-proto');
-  assert.throws(() => L.store.unitOfWork(() => { L.notifications.coalesce('ntf-proto', { at: NOW }); throw new Error('rolled back'); }, { snapshot: L.snapshot }), /rolled back/);
-  assert.ok(Object.hasOwn(row, '__proto__') && row.__proto__.legacyMarker === 'keep-me'); assert.equal(row.repeatCount, 1); assert.deepEqual(plain(row.nested), { a: [1, { b: null }] });
-  L.close();
-  // Snapshot round trip.
-  const tool = openStore(dir); const snap = tool.load(); assert.ok(Object.hasOwn(snap.db.notifications[0], '__proto__')); tool.save(snap);
-  assert.ok(Object.hasOwn(tool.load().db.notifications[0], '__proto__'), 'round-tripped through replace'); tool.sqlite.close();
   // An audience with an unknown field: refused whole, nothing written or retired.
   const bad = tempDir('ntf-rv-aud'); s6File(bad, { notifications: [ntf({ id: 'ntf-aud', text: SECRET, audience: { kind: 'org_user', id: 'usr-1', name: 'Maria' } })] });
   const b = openRaw(bad); const blobBefore = b.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value; const seqBefore = meta(b, 'saveSeq');
   let err = null; try { migrate(b); } catch (e) { err = e; }
-  assert.match(err?.message ?? '', /NOTIFICATIONS_IMPORT_BLOCKED.*entry #0: audience carries unknown field\(s\) name/); assert.equal(err.message.includes(SECRET), false);
+  assert.match(err?.message ?? '', /NOTIFICATIONS_IMPORT_BLOCKED.*entry #0 \(ntf-aud\): audience carries unknown field\(s\) name/); assert.equal(err.message.includes(SECRET), false);
   assert.equal(tableExists(b, 'notifications'), false); assert.equal(b.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value, blobBefore); assert.equal(meta(b, 'saveSeq'), seqBefore);
   b.close();
   const snapDir = tempDir('ntf-rv-aud-snap'); s6File(snapDir); { const x = openRaw(snapDir); migrate(x); x.close(); }
@@ -800,45 +795,35 @@ test('review of ba6956d, finding 3 — unknown data is never lost silently: an o
   rm(dir, bad, snapDir);
 });
 
-// ============================================================= review of ac50b60 — the notification extras follow-up (the S7b finding-2 class)
-test('review of ac50b60 — nested unknown data on a notification is DETACHED at ingress, export and transaction snapshots: a legacy row imported with futureField { labels: [...] } and own prototype-like keys at depth exports a copy (mutating an export, or a second export, never changes the mirror or the stored JSON); an export mutation inside an aborted unit does not survive the rollback; a repository write inside an aborted unit and a real COMMIT failure leave the held view on the restored row; a reload (restart) and the snapshot dispatcher reproduce the stored JSON; unsupported non-JSON values refuse the import and the snapshot write whole; coalescing, preferences and the acknowledgment are unchanged', () => {
+// ============================================================= review of ac50b60 — restores in place (the extras parts retired with extra_json, S8d fidelity rule)
+test('review of ac50b60 — a repository write inside an aborted unit and a real COMMIT failure leave the held view on the restored row; a reload (restart) and the snapshot dispatcher reproduce the stored row; coalescing, preferences and the acknowledgment work on an imported row; a wrong-typed or non-JSON value for a known field refuses the import and the snapshot write whole, by row id and field, never the text', () => {
   const dir = tempDir('ntf-rv-extras');
-  const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me","inner":{"__proto__":["deep"],"toString":null}},"constructor":{"toString":[1,{"__proto__":{"x":false}}]},"futureField":{"labels":["original"],"n":null,"b":true,"list":[[1,2],{"k":"v"}]}}');
-  const expectedExtras = plain(special); // a JSON round-trip keeps the own "__proto__" key an own key
-  const extrasOf = (row) => { const o = {}; for (const k of Object.keys(row)) if (!['id', 'ts', 'audience', 'type', 'text', 'refId', 'read', 'repeatCount', 'groupKey', 'category', 'deferredPush', 'actionRequired'].includes(k)) Object.defineProperty(o, k, { value: row[k], enumerable: true, writable: true, configurable: true }); return plain(o); };
-  const legacy = JSON.parse(JSON.stringify({ ...ntf({ id: 'x' }), id: 'ntf-x', category: 'messages', text: 'Synthetic.', actionRequired: { deadline: NOW + HOUR, ackedAt: null, ackedBy: null } }).replace('"id":"ntf-x"', `${JSON.stringify(special).slice(1, -1)},"id":"ntf-x"`));
-  assert.ok(Object.hasOwn(legacy, '__proto__'), 'the fixture carries an own __proto__ key');
+  const legacy = { ...ntf({ id: 'ntf-x' }), category: 'messages', text: 'Synthetic.', actionRequired: { deadline: NOW + HOUR, ackedAt: null, ackedBy: null } };
   s6File(dir, { notifications: [legacy, ntf({ id: 'plain' })] });
   const L = live(dir); L.save();
   const held = L.notifications.byId('ntf-x');
-  assert.deepEqual(extrasOf(held), expectedExtras, 'the mirror carries every nested extra after the import');
-  // Export aliasing: an export is a detached copy; so is the next one.
-  const exported = L.notifications.exportRows()[0]; exported.futureField.labels.push('export-alias'); exported.__proto__.inner.__proto__.push('export-alias'); exported.futureField.list[0].push(3);
-  assert.deepEqual(extrasOf(held), expectedExtras, 'the mirror is detached from an export'); assert.deepEqual(extrasOf(L.notifications.exportRows()[0]), expectedExtras, 'a later export is detached from an earlier one');
-  assert.throws(() => { held.futureField.labels.push('view'); }, /written through its domain repository/, 'the view refuses a nested write');
-  // An aborted unit: an export edit inside it changes nothing; a repository write inside it is restored, the held view included.
-  assert.throws(() => L.store.unitOfWork(() => { L.notifications.exportRows()[0].futureField.labels.push('aborted-unit'); L.notifications.coalesce('ntf-x', { at: NOW }); assert.equal(held.repeatCount, 2); throw new Error('synthetic abort'); }, { snapshot: L.snapshot }), /synthetic abort/);
-  assert.deepEqual(extrasOf(held), expectedExtras); assert.equal(held.repeatCount, 1); assert.equal(L.notifications.pending(), 0);
-  // A real COMMIT failure of a unit that marks the row read: the held view shows the restored row, the extras intact.
+  assert.deepEqual(plain(held), plain(legacy), 'the imported row, as given');
+  assert.throws(() => { held.audience.id = 'other'; }, /written through its domain repository/, 'the view refuses a nested write');
+  // An aborted unit: a repository write inside it is restored, the held view included.
+  assert.throws(() => L.store.unitOfWork(() => { L.notifications.coalesce('ntf-x', { at: NOW }); assert.equal(held.repeatCount, 2); throw new Error('synthetic abort'); }, { snapshot: L.snapshot }), /synthetic abort/);
+  assert.equal(held.repeatCount, 1); assert.equal(L.notifications.pending(), 0);
+  // A real COMMIT failure of a unit that marks the row read: the held view shows the restored row.
   L.store.sqlite.exec('CREATE TEMP TABLE rv_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE rv_child (parent_id TEXT NOT NULL REFERENCES rv_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER rv_commit AFTER UPDATE ON notifications BEGIN INSERT INTO rv_child (parent_id) VALUES (\'missing-on-purpose\'); END');
   assert.throws(() => L.store.unitOfWork(() => { L.notifications.markRead('org_user', 'usr-1'); }, { snapshot: L.snapshot }), /FOREIGN KEY constraint failed/);
-  assert.equal(held.read, false); assert.deepEqual(extrasOf(held), expectedExtras); L.store.sqlite.exec('DROP TRIGGER rv_commit');
-  // Stored, reloaded (a restart), round-tripped through the snapshot dispatcher: the same JSON.
-  const storedExtra = JSON.parse(rowsOf(dir, 'notifications', 'seq')[0].extra_json); assert.deepEqual(storedExtra, expectedExtras); assert.ok(Object.hasOwn(storedExtra, '__proto__'));
-  L.notifications.reload(); assert.deepEqual(extrasOf(L.notifications.byId('ntf-x')), expectedExtras, 'after a reload');
-  // Coalescing, the acknowledgment and the preferences are unchanged around a row with extras.
+  assert.equal(held.read, false); assert.deepEqual(plain(held), plain(legacy)); L.store.sqlite.exec('DROP TRIGGER rv_commit');
+  L.notifications.reload(); assert.deepEqual(plain(L.notifications.byId('ntf-x')), plain(legacy), 'after a reload');
   const c = L.notifications.findCoalescible({ audience: ORG_USER, type: 'message', text: 'Synthetic.', refId: 'chan-1', at: NOW }); assert.equal(c?.id, 'ntf-x', 'the coalescing scan still finds the row');
-  assert.deepEqual(L.notifications.ack('ntf-x', ORG_USER, { at: NOW + 1 }), { status: 'ok', ackedAt: NOW + 1, already: false }); assert.deepEqual(extrasOf(L.notifications.byId('ntf-x')), expectedExtras);
+  assert.deepEqual(L.notifications.ack('ntf-x', ORG_USER, { at: NOW + 1 }), { status: 'ok', ackedAt: NOW + 1, already: false });
   L.notifications.updatePrefs('org_user', 'usr-1', { categories: { mentions: false } }); assert.equal(L.notifications.prefsFor('org_user', 'usr-1').categories.mentions, false);
   L.save(); L.close();
-  { const tool = openStore(dir); const snap = tool.load(); assert.deepEqual(extrasOf(snap.db.notifications[0]), expectedExtras); tool.save(snap); assert.deepEqual(extrasOf(tool.load().db.notifications[0]), expectedExtras, 'round-tripped through replace'); tool.sqlite.close(); }
-  // Unsupported non-JSON values refuse the import and the snapshot write whole (nothing written, nothing retired).
+  { const tool = openStore(dir); const snap = tool.load(); const before = plain(snap.db.notifications); tool.save(snap); assert.deepEqual(plain(tool.load().db.notifications), before, 'round-tripped through replace'); tool.sqlite.close(); }
+  // Wrong-typed and non-JSON values for known fields refuse the whole write (nothing written, nothing retired).
   const SECRET = 'SECRET-TEXT-RV4';
-  for (const [label, value] of [['a function', () => 1], ['an undefined inside an object', { x: undefined }], ['a bigint', 1n], ['a non-finite number', Number.POSITIVE_INFINITY], ['a class instance', new Date(0)]]) {
-    assert.throws(() => validateNotificationRows([ntf({ id: 'bad', text: SECRET, futureField: value })]), (e) => /NOTIFICATIONS_IMPORT_BLOCKED/.test(e.message) && /futureField.*cannot be stored as JSON/.test(e.message) && !e.message.includes(SECRET), label);
+  for (const [label, over, re] of [['a function as refId', { refId: () => 1 }, /\(bad\): refId must be a string/], ['a bigint ts', { ts: 1n }, /\(bad\): ts must be/], ['a non-finite repeatCount', { repeatCount: Number.POSITIVE_INFINITY }, /\(bad\): repeatCount must be/], ['a class instance as read', { read: new Date(0) }, /\(bad\): read must be a boolean/], ['a numeric-string deferredPush', { deferredPush: '1' }, /\(bad\): deferredPush must be a boolean/]]) {
+    assert.throws(() => validateNotificationRows([ntf({ id: 'bad', text: SECRET, ...over })]), (e) => /NOTIFICATIONS_IMPORT_BLOCKED/.test(e.message) && re.test(e.message) && !e.message.includes(SECRET), label);
   }
   const bad = tempDir('ntf-rv-extras-bad'); s6File(bad, { notifications: [ntf({ id: 'ok' })] }); { const s = openRaw(bad); migrate(s); s.close(); }
-  { const tool = openStore(bad); const snap = tool.load(); const seq0 = tool.revision(); assert.throws(() => tool.save({ ...snap, db: { ...snap.db, notifications: [ntf({ id: 'bad', text: SECRET, futureField: { f: () => 1 } })] } }), (e) => /cannot be stored as JSON/.test(e.message) && !e.message.includes(SECRET)); assert.equal(tool.revision(), seq0); assert.deepEqual(tool.load().db.notifications.map((n) => n.id), ['ok']); tool.sqlite.close(); }
+  { const tool = openStore(bad); const snap = tool.load(); const seq0 = tool.revision(); assert.throws(() => tool.save({ ...snap, db: { ...snap.db, notifications: [ntf({ id: 'bad', text: SECRET, groupKey: { f: 1 } })] } }), (e) => /\(bad\): groupKey must be/.test(e.message) && !e.message.includes(SECRET)); assert.equal(tool.revision(), seq0); assert.deepEqual(tool.load().db.notifications.map((n) => n.id), ['ok']); tool.sqlite.close(); }
   rm(dir, bad);
 });
 

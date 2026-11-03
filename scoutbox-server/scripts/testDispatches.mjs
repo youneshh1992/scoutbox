@@ -1,7 +1,8 @@
 // S7b — delivery dispatch records and their attempts as tables
 // (repositories/dispatches.mjs, migration 0010):
 // the migration from the legacy `dispatches` blob (the one 18-key literal every
-// build since M13 wrote, nested attempts of the two shapes, extras, orphan
+// build since M13 wrote, nested attempts of the two shapes, unknown fields
+// dropped and reported, orphan
 // references counted — never refused — absent / empty / malformed / duplicate
 // collections, first installation, reruns, text-free refusals); the actual
 // schema (the attempt-shape CHECK rejecting a NULL send outcome in SQL, the
@@ -41,8 +42,6 @@ const blobOf = (dir, name) => { const s = second(dir); try { return s.prepare('S
 const seqOf = (dir) => { const s = second(dir); try { return Number(s.prepare("SELECT value FROM meta WHERE key = 'saveSeq'").get()?.value) || 0; } finally { s.close(); } };
 const tableExists = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
 const plain = (v) => JSON.parse(JSON.stringify(v));
-/** The export convention (S7a, kept for S7b): unknown own fields come FIRST, then the eighteen keys in the literal's order. A legacy row with extras elsewhere is byte-identical to this reordering. */
-const extrasFirst = (d) => { const o = {}; for (const k of Object.keys(d)) if (!DISPATCH_KEYS.includes(k)) Object.defineProperty(o, k, { value: d[k], enumerable: true, writable: true, configurable: true }); for (const k of DISPATCH_KEYS) if (Object.hasOwn(d, k)) o[k] = d[k]; return o; };
 const FRACTIONAL = 1700000000000.5; // what the signed callback route writes for a finite fractional `at` (design probe of dc4b559)
 const ORG_USER = { kind: 'org_user', id: 'usr-1' };
 /** A notification in the legacy blob shape (the 0009 import needs them so references resolve). */
@@ -74,15 +73,18 @@ function live(dir, { now = () => NOW } = {}) {
 const bare = (s, over = {}) => createDispatchesRepository({ sqlite: s, now: () => NOW, ...over });
 
 // ============================================================= migration 0010
-test('migration 0010 (legacy blob): every dispatch is imported with its 18 fields, its array position (the insertion order every reader depends on) and its attempts in order — a quiet re-check note row as kind quiet_recheck with ok NULL, send rows with ok 0/1 — a finite fractional deliveredAt/openedAt written by the callback route is stored exactly, an unknown own key (a "__proto__" key included) round-trips through extra_json, a dispatch whose notification no longer exists is imported and COUNTED (never refused, deleted or re-parented), the blob row is retired, and the cutover record carries counts only', () => {
+test('migration 0010 (legacy blob): every dispatch is imported with its 18 fields, its array position (the insertion order every reader depends on) and its attempts in order — a quiet re-check note row as kind quiet_recheck with ok NULL, send rows with ok 0/1 — a finite fractional deliveredAt/openedAt written by the callback route is stored exactly, unknown fields (top level — a "__proto__" key included — inside the audience and inside an attempt) are DROPPED and reported by dispatch id and field name (never a value), a dispatch whose notification no longer exists is imported and COUNTED (never refused, deleted or re-parented), the blob row is retired, and the cutover record carries counts only', () => {
   const dir = tempDir('dsp-mig');
   const legacy = [
     inApp('dsp-1', 'ntf-1'),
     dsp({ id: 'dsp-2', notificationId: 'ntf-1', status: 'opened', attempts: [{ at: NOW - 3 * MIN, note: 'quiet hours re-check' }, { at: NOW - 2 * MIN, ok: false, error: 'injected provider failure' }, { at: NOW - MIN, ok: true, error: null }], deliveredAt: FRACTIONAL, openedAt: FRACTIONAL }),
     dsp({ id: 'dsp-3', notificationId: 'ntf-gone', status: 'skipped', to: null, skipReason: 'no email on record', providerMessageId: null, attempts: [] }), // an orphan: ordinary deletion left it behind
-    JSON.parse(JSON.stringify(dsp({ id: 'dsp-4', notificationId: 'ntf-2', status: 'failed', attempts: [{ at: NOW - MIN, ok: false, error: 'synthetic provider error that is deliberately longer than one hundred and twenty characters so that the untruncated storage of the sweep is proven here' }], failedAt: NOW - MIN, failReason: 'synthetic provider error that is deliberately longer than one hundred and twenty characters so that the untruncated storage of the sweep is proven here' })).replace('"failReason"', '"__proto__":{"legacyMarker":"keep-me"},"nested":{"a":[1,{"b":null}]},"failReason"')),
+    dsp({ id: 'dsp-4', notificationId: 'ntf-2', status: 'failed', attempts: [{ at: NOW - MIN, ok: false, error: 'synthetic provider error that is deliberately longer than one hundred and twenty characters so that the untruncated storage of the sweep is proven here' }], failedAt: NOW - MIN, failReason: 'synthetic provider error that is deliberately longer than one hundred and twenty characters so that the untruncated storage of the sweep is proven here' }),
   ];
-  s7aFile(dir, { dispatches: legacy });
+  // The blob row for dsp-4 carries unknown fields at every level: the import drops them and says so.
+  const withUnknown = JSON.parse(JSON.stringify(legacy[3]).replace('"failReason"', '"__proto__":{"legacyMarker":"keep-me"},"nested":{"a":[1,{"b":null}]},"failReason"').replace('"id":"usr-1"}', '"id":"usr-1","name":"keep-me"}').replace('"error":"synthetic provider error', '"provider":"keep-me","error":"synthetic provider error'));
+  assert.ok(Object.hasOwn(withUnknown, '__proto__') && Object.hasOwn(withUnknown.audience, 'name') && Object.hasOwn(withUnknown.attempts[0], 'provider'), 'fixture: the unknown fields are in the blob');
+  s7aFile(dir, { dispatches: [...legacy.slice(0, 3), withUnknown] });
   const s = openRaw(dir);
   assert.deepEqual(migrate(s).ran, [DISPATCHES_MIGRATION, '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S7c: 0011 follows on the same run
   assert.deepEqual(s.prepare('SELECT seq, id FROM dispatches ORDER BY seq').all().map((r) => [r.seq, r.id]), [[1, 'dsp-1'], [2, 'dsp-2'], [3, 'dsp-3'], [4, 'dsp-4']], 'the array position is the durable ordering key');
@@ -92,20 +94,19 @@ test('migration 0010 (legacy blob): every dispatch is imported with its 18 field
   ], 'attempts keyed by (dispatch, position); a note row has ok NULL, a send row 0/1');
   const r2 = s.prepare('SELECT delivered_at, opened_at, typeof(delivered_at) AS t FROM dispatches WHERE id = ?').get('dsp-2');
   assert.equal(r2.delivered_at, FRACTIONAL); assert.equal(r2.opened_at, FRACTIONAL); assert.equal(r2.t, 'real', 'a finite fractional callback timestamp is stored as it was written, not rounded');
-  const r4 = s.prepare('SELECT fail_reason, extra_json FROM dispatches WHERE id = ?').get('dsp-4');
+  const r4 = s.prepare('SELECT fail_reason FROM dispatches WHERE id = ?').get('dsp-4');
   assert.equal(r4.fail_reason.length, legacy[3].failReason.length, 'failReason is stored untruncated (the sweep never truncates)');
-  assert.equal(JSON.parse(r4.extra_json).__proto__.legacyMarker, 'keep-me'); assert.deepEqual(JSON.parse(r4.extra_json).nested, { a: [1, { b: null }] });
+  assert.deepEqual(s.prepare('SELECT name FROM pragma_table_info(?) ORDER BY cid').all('dispatches').map((c) => c.name).filter((n) => /json/.test(n)), [], 'no side column: typed columns only');
   assert.equal(blob(s, 'dispatches'), undefined, 'the blob row is retired');
   const record = JSON.parse(meta(s, DISPATCHES_CUTOVER_META));
-  assert.deepEqual(record, { at: NOW, dispatches: { imported: 4, attempts: 4, withExtraFields: 1, orphanReferences: 1, byStatus: { delivered: 1, opened: 1, skipped: 1, failed: 1 } } });
-  assert.doesNotMatch(JSON.stringify(record), /example\.test|synthetic provider/, 'the record carries no address and no provider text');
-  // The export reproduces the legacy shape, position for position, attempts included, the own special key included.
+  assert.deepEqual(record, { at: NOW, dispatches: { imported: 4, attempts: 4, unknownFieldsDropped: 1, orphanReferences: 1, byStatus: { delivered: 1, opened: 1, skipped: 1, failed: 1 }, notes: ['dispatch dsp-4: unknown field(s) __proto__, nested, audience.name, attempts[0].provider dropped'] } });
+  assert.doesNotMatch(JSON.stringify(record), /example\.test|synthetic provider|keep-me/, 'the record carries ids and field names only: no address, no provider text, no dropped value');
+  // The export reproduces the typed record, position for position, attempts included; the dropped fields are gone.
   const repo = bare(s);
   const exported = repo.exportRows();
   assert.deepEqual(exported.map((d) => d.id), ['dsp-1', 'dsp-2', 'dsp-3', 'dsp-4']);
-  for (let i = 0; i < 3; i++) assert.deepEqual(exported[i], plain(legacy[i]), `row ${i} byte-identical`);
-  assert.ok(Object.hasOwn(exported[3], '__proto__') && exported[3].__proto__.legacyMarker === 'keep-me', 'the own __proto__ key is an own key of the export'); assert.equal(Object.getPrototypeOf(exported[3]), Object.prototype);
-  assert.equal(JSON.stringify(exported[3]), JSON.stringify(extrasFirst(legacy[3])), 'byte-identical up to the export convention (unknown fields first, then the eighteen keys in order)');
+  for (let i = 0; i < 4; i++) assert.equal(JSON.stringify(exported[i]), JSON.stringify(plain(legacy[i])), `row ${i}: the eighteen keys in the literal's order`);
+  assert.deepEqual(Object.keys(exported[3]), DISPATCH_KEYS); assert.equal(Object.hasOwn(exported[3], '__proto__'), false); assert.equal(Object.getPrototypeOf(exported[3]), Object.prototype);
   assert.deepEqual(exported[1].attempts, legacy[1].attempts, 'a note row comes back as {at, note} only; send rows as {at, ok, error}');
   assert.equal(repo.byId('dsp-3').notificationId, 'ntf-gone', 'the orphan keeps its reference as stored');
   s.close(); rm(dir);
@@ -130,14 +131,13 @@ test('migration 0010: a missing collection, an empty collection, an empty databa
   rm(none, empty, early, odd);
 });
 
-test('migration 0010 refusals: a dispatch that is not an object, without an id, with a duplicate id, a missing key of the literal, an unknown audience field, a non-string notificationId / channel / provider / status, a non-integer nextAt or createdAt, a non-finite or non-numeric deliveredAt, a non-integer actionedAt, a non-string failReason, attempts that are not an array, an attempt with both note and ok, with neither, with an unknown key, a non-integer at, a non-boolean ok; a blob that is not JSON or not an array — each aborts the whole step with DISPATCHES_IMPORT_BLOCKED (entry index and reason, never an address or a provider text), creates nothing, keeps the blob byte for byte and saveSeq unchanged, and the next run refuses the same way', () => {
+test('migration 0010 refusals: a dispatch that is not an object, without an id, with a duplicate id, a missing key of the literal, a non-string notificationId / channel / provider / status, a non-integer nextAt or createdAt, a non-finite or non-numeric deliveredAt, a non-integer actionedAt, a non-string failReason, attempts that are not an array, an attempt with both note and ok, with neither, a non-integer at, a non-boolean ok; a blob that is not JSON or not an array — each aborts the whole step with DISPATCHES_IMPORT_BLOCKED (entry index and reason, never an address or a provider text), creates nothing, keeps the blob byte for byte and saveSeq unchanged, and the next run refuses the same way', () => {
   const SECRET = 'SECRET-ADDRESS-ZQX9@example.test';
   const cases = [
     ['not an object', [null], /entry #0: not an object/],
     ['no id', [dsp({ id: '', to: SECRET })], /entry #0: id must be a non-empty string/],
     ['a duplicate id', [dsp({ id: 'dsp-dup', to: SECRET }), dsp({ id: 'dsp-dup' })], /entry #1: duplicates the id of an earlier entry/],
     ['a missing key of the literal', [(() => { const d = dsp({ to: SECRET }); delete d.failReason; return d; })()], /entry #0: failReason is absent \(every build wrote all 18 keys; nothing is normalised\)/],
-    ['an unknown audience field', [dsp({ audience: { kind: 'org_user', id: 'usr-1', name: SECRET } })], /audience carries unknown field\(s\) name/],
     ['a non-string notificationId', [dsp({ notificationId: 7, to: SECRET })], /notificationId must be a non-empty string/],
     ['a non-string channel', [dsp({ channel: null, to: SECRET })], /channel must be a non-empty string/],
     ['a non-string status', [dsp({ status: 2, to: SECRET })], /status must be a non-empty string/],
@@ -149,7 +149,6 @@ test('migration 0010 refusals: a dispatch that is not an object, without an id, 
     ['attempts not an array', [dsp({ attempts: {}, to: SECRET })], /attempts must be an array/],
     ['an attempt with both note and ok', [dsp({ attempts: [{ at: NOW, ok: true, error: null, note: 'x' }], to: SECRET })], /attempts\[0\] carries both note and ok/],
     ['an attempt with neither', [dsp({ attempts: [{ at: NOW }], to: SECRET })], /attempts\[0\] is neither a send row \{at, ok, error\} nor a quiet re-check row \{at, note\}/],
-    ['an attempt with an unknown key', [dsp({ attempts: [{ at: NOW, ok: true, error: null, provider: SECRET }], to: SECRET })], /attempts\[0\] carries unknown field\(s\) provider/],
     ['a non-integer attempt clock', [dsp({ attempts: [{ at: 1.5, ok: true, error: null }], to: SECRET })], /attempts\[0\]\.at must be an integer timestamp/],
     ['a non-boolean ok', [dsp({ attempts: [{ at: NOW, ok: 1, error: null }], to: SECRET })], /attempts\[0\]\.ok must be a boolean/],
     ['a non-array blob', { id: 'x' }, /the dispatches blob must be an array/],
@@ -172,6 +171,10 @@ test('migration 0010 refusals: a dispatch that is not an object, without an id, 
   rm(notJson);
   assert.throws(() => validateDispatchRows([dsp({ openedAt: Number.POSITIVE_INFINITY })]), /openedAt must be a finite number/);
   assert.deepEqual(validateDispatchRows([dsp(), inApp('dsp-b', 'ntf-1')]).byStatus, { accepted: 1, delivered: 1 });
+  // Outside the migration (a snapshot replace) an unknown audience or attempt field is still refused by name; an unknown top-level field is dropped.
+  assert.throws(() => validateDispatchRows([dsp({ audience: { kind: 'org_user', id: 'usr-1', name: SECRET } })]), (e) => /DISPATCHES_IMPORT_BLOCKED/.test(e.message) && /audience carries unknown field\(s\) name/.test(e.message) && !e.message.includes(SECRET));
+  assert.throws(() => validateDispatchRows([dsp({ attempts: [{ at: NOW, ok: true, error: null, provider: SECRET }] })]), /attempts\[0\] carries unknown field\(s\) provider/);
+  { const v = validateDispatchRows([dsp({ futureField: SECRET })]); assert.deepEqual(Object.keys(v.rows[0]), DISPATCH_KEYS); assert.equal(v.unknownFieldsDropped, 1); assert.doesNotMatch(v.notes.join(), /SECRET/); }
 });
 
 // ============================================================= the actual schema, in SQL
@@ -306,15 +309,16 @@ test('staged mode (the server): a create, an attempt and a patch are visible in 
 });
 
 // ============================================================= the snapshot dispatcher (backups, restores, the persistence suites)
-test('snapshot dispatcher: a tool that loads and saves the whole file round-trips every dispatch and attempt byte for byte (the own special key included); a snapshot that OMITS the collection leaves the tables alone; an explicit EMPTY array clears them; a malformed collection (an object) rolls the WHOLE save back — saveSeq and every other collection unchanged; an invalid entry refuses the whole save with a text-free diagnostic', () => {
+test('snapshot dispatcher: a tool that loads and saves the whole file round-trips every dispatch and attempt byte for byte (an unknown field — an own "__proto__" key — dropped by the import, and dropped silently by replace); a snapshot that OMITS the collection leaves the tables alone; an explicit EMPTY array clears them; a malformed collection (an object) rolls the WHOLE save back — saveSeq and every other collection unchanged; an invalid entry refuses the whole save with a text-free diagnostic', () => {
   const dir = tempDir('dsp-snap');
-  const special = JSON.parse('{"id":"dsp-proto","notificationId":"ntf-1","audience":{"kind":"org_user","id":"usr-1"},"channel":"email","to":"synthetic@example.test","provider":"local-fake","status":"accepted","skipReason":null,"providerMessageId":"fm_p","attempts":[{"at":1,"note":"quiet hours re-check"},{"at":2,"ok":true,"error":null}],"nextAt":1,"actionDeadline":null,"createdAt":1,"deliveredAt":1700000000000.5,"openedAt":null,"actionedAt":null,"failedAt":null,"failReason":null,"__proto__":{"legacyMarker":"keep-me"}}');
+  const typed = '{"id":"dsp-proto","notificationId":"ntf-1","audience":{"kind":"org_user","id":"usr-1"},"channel":"email","to":"synthetic@example.test","provider":"local-fake","status":"accepted","skipReason":null,"providerMessageId":"fm_p","attempts":[{"at":1,"note":"quiet hours re-check"},{"at":2,"ok":true,"error":null}],"nextAt":1,"actionDeadline":null,"createdAt":1,"deliveredAt":1700000000000.5,"openedAt":null,"actionedAt":null,"failedAt":null,"failReason":null';
+  const special = JSON.parse(`${typed},"__proto__":{"legacyMarker":"keep-me"}}`); const clean = JSON.parse(`${typed}}`);
   s7aFile(dir, { dispatches: [inApp('dsp-1', 'ntf-1'), special] });
   { const s = openRaw(dir); migrate(s); s.close(); }
   const tool = openStore(dir); const snap = tool.load();
-  assert.equal(JSON.stringify(snap.db.dispatches[1]), JSON.stringify(extrasFirst(special)), 'read back byte-identical up to the export convention'); assert.ok(Object.hasOwn(snap.db.dispatches[1], '__proto__'));
-  const seq0 = tool.revision(); tool.save(snap);
-  assert.equal(tool.revision(), seq0 + 1); assert.equal(JSON.stringify(tool.load().db.dispatches), JSON.stringify([inApp('dsp-1', 'ntf-1'), extrasFirst(special)]), 'round-tripped through replace'); assert.equal(attemptsOf(dir).length, 2);
+  assert.equal(JSON.stringify(snap.db.dispatches[1]), JSON.stringify(clean), 'read back as the typed record (the import dropped the unknown key)'); assert.equal(Object.hasOwn(snap.db.dispatches[1], '__proto__'), false);
+  const seq0 = tool.revision(); tool.save({ ...snap, db: { ...snap.db, dispatches: [snap.db.dispatches[0], special] } });
+  assert.equal(tool.revision(), seq0 + 1); assert.equal(JSON.stringify(tool.load().db.dispatches), JSON.stringify([inApp('dsp-1', 'ntf-1'), clean]), 'round-tripped through replace; an unknown top-level key is not stored'); assert.equal(attemptsOf(dir).length, 2);
   // Omitted: left alone.
   const { dispatches: _omit, ...without } = snap.db; tool.save({ ...snap, db: without });
   assert.deepEqual(idsOf(dir), ['dsp-1', 'dsp-proto'], 'an omitted collection leaves the tables alone'); assert.equal(blobOf(dir, 'dispatches'), null, 'and never recreates a shadow blob');
@@ -376,44 +380,32 @@ test('review of 26d492b, finding 1 — EVERY patch refusal is a participant fail
   L.close(); rm(dir);
 });
 
-test('review of 26d492b, finding 2 — nested unknown data is DETACHED at ingress, export and transaction snapshots: mutating the input after create, or a returned export, never changes the mirror or a later export; own prototype-like keys ("__proto__", "constructor", "toString") survive at every depth with arrays, nulls and booleans; a rolled-back unit and a real COMMIT failure leave the held view on the restored row; a reload (restart) and the snapshot dispatcher reproduce the stored JSON; unsupported non-JSON values are refused whole (nothing written, nothing queued); attempt order is unchanged', () => {
-  const dir = tempDir('dsp-rv2'); s7aFile(dir, { dispatches: [] });
+test('typed columns only (S8d fidelity rule): create drops an unknown top-level field silently, whatever its value (a function, a bigint, a nested object), and stores the eighteen keys; mutating the input after create, or an export, never changes the mirror; the view refuses a nested write; a rolled-back unit restores the held view; a reload and the snapshot dispatcher show the same typed record, attempt order unchanged', () => {
+  const dir = tempDir('dsp-typed'); s7aFile(dir, { dispatches: [] });
   const L = live(dir);
-  const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me","inner":{"__proto__":["deep"],"toString":null}},"constructor":{"toString":[1,{"__proto__":{"x":false}}]},"futureField":{"labels":["original"],"n":null,"b":true,"list":[[1,2],{"k":"v"}]}}');
-  const input = dsp({ id: 'dsp-1', attempts: [{ at: 1, note: 'quiet hours re-check' }, { at: 2, ok: false, error: 'e' }, { at: 3, ok: true, error: null }], ...special });
-  Object.defineProperty(input, '__proto__', { value: special.__proto__, enumerable: true, writable: true, configurable: true });
-  const expectedExtras = plain(special); // a JSON round-trip: an object literal's `__proto__` key would set the prototype, the parsed one is an own key
-  const extrasOf = (row) => { const o = {}; for (const k of Object.keys(row)) if (!DISPATCH_KEYS.includes(k)) Object.defineProperty(o, k, { value: row[k], enumerable: true, writable: true, configurable: true }); return plain(o); };
+  const input = dsp({ id: 'dsp-1', attempts: [{ at: 1, note: 'quiet hours re-check' }, { at: 2, ok: false, error: 'e' }, { at: 3, ok: true, error: null }], futureField: { labels: ['original'] }, fn: () => 1, big: 1n });
+  Object.defineProperty(input, '__proto__', { value: { legacyMarker: 'x' }, enumerable: true, writable: true, configurable: true });
+  const expected = plain(dsp({ id: 'dsp-1', attempts: input.attempts }));
   const createdView = L.dispatches.create(input); L.save();
-  assert.deepEqual(extrasOf(createdView), expectedExtras, 'the mirror carries every nested extra'); assert.ok(Object.hasOwn(L.dispatches.exportRows()[0], '__proto__') && Object.hasOwn(L.dispatches.exportRows()[0].__proto__.inner, '__proto__'));
-  // Input aliasing.
-  input.futureField.labels.push('input-alias'); input.constructor.toString.push('input-alias'); special.__proto__.inner.__proto__.push('input-alias');
-  assert.deepEqual(extrasOf(L.dispatches.byId('dsp-1')), expectedExtras, 'the mirror is detached from the input');
-  // Export aliasing.
-  const exported = L.dispatches.exportRows()[0]; exported.futureField.labels.push('export-alias'); exported.__proto__.inner.__proto__.push('export-alias'); exported.futureField.list[0].push(3);
-  assert.deepEqual(extrasOf(L.dispatches.byId('dsp-1')), expectedExtras, 'the mirror is detached from an export'); assert.deepEqual(extrasOf(L.dispatches.exportRows()[0]), expectedExtras, 'a later export is detached from an earlier one');
-  assert.throws(() => { L.dispatches.byId('dsp-1').futureField.labels.push('view'); }, /written through its domain repository/, 'the view refuses a nested write');
-  // A rolled-back unit: an export edit inside it changes nothing; a repository write inside it is restored, the held view included.
+  assert.deepEqual(Object.keys(createdView), DISPATCH_KEYS, 'the mirror holds the eighteen keys only'); assert.deepEqual(plain(L.dispatches.exportRows()[0]), expected);
+  // Input and export aliasing.
+  input.audience.id = 'input-alias'; input.attempts.push({ at: 4, ok: true, error: null });
+  assert.deepEqual(plain(L.dispatches.byId('dsp-1')), expected, 'the mirror is detached from the input');
+  const exported = L.dispatches.exportRows()[0]; exported.audience.kind = 'export-alias'; exported.attempts.length = 0;
+  assert.deepEqual(plain(L.dispatches.byId('dsp-1')), expected, 'the mirror is detached from an export');
+  assert.throws(() => { L.dispatches.byId('dsp-1').audience.id = 'view'; }, /written through its domain repository/, 'the view refuses a nested write');
+  // A rolled-back unit: a repository write inside it is restored, the held view included.
   const held = L.dispatches.byId('dsp-1');
-  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.exportRows()[0].futureField.labels.push('aborted-unit'); L.dispatches.patch('dsp-1', { status: 'delivered', failReason: 'x' }); assert.equal(held.status, 'delivered'); throw new Error('synthetic abort'); }, { snapshot: L.snapshot }), /synthetic abort/);
-  assert.deepEqual(extrasOf(held), expectedExtras); assert.equal(held.status, 'accepted'); assert.equal(held.failReason, null); assert.equal(L.dispatches.pending(), 0);
-  // A real COMMIT failure of a unit that creates a row with nested extras: no row in memory afterwards; the retry lands it.
-  L.store.sqlite.exec('CREATE TEMP TABLE rv_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE rv_child (parent_id TEXT NOT NULL REFERENCES rv_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER rv_commit AFTER INSERT ON dispatches BEGIN INSERT INTO rv_child (parent_id) VALUES (\'missing-on-purpose\'); END');
-  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.create(dsp({ id: 'dsp-2', attempts: [], futureField: { labels: ['two'] } })); }, { snapshot: L.snapshot }), /FOREIGN KEY constraint failed/);
-  assert.equal(L.dispatches.byId('dsp-2'), null); assert.equal(L.dispatches.count(), 1); L.store.sqlite.exec('DROP TRIGGER rv_commit');
-  L.store.unitOfWork(() => { L.dispatches.create(dsp({ id: 'dsp-2', attempts: [], futureField: { labels: ['two'] } })); }, { snapshot: L.snapshot }); assert.deepEqual(plain(L.dispatches.byId('dsp-2').futureField), { labels: ['two'] });
-  // Stored, reloaded (a restart) and round-tripped through the snapshot dispatcher: the same JSON; attempt order unchanged.
-  const storedExtra = JSON.parse(rowsOf(dir, 'dispatches', 'seq')[0].extra_json); assert.deepEqual(storedExtra, expectedExtras); assert.ok(Object.hasOwn(storedExtra, '__proto__'));
-  L.dispatches.reload(); assert.deepEqual(extrasOf(L.dispatches.byId('dsp-1')), expectedExtras, 'after a reload'); assert.deepEqual(plain(L.dispatches.byId('dsp-1').attempts), [{ at: 1, note: 'quiet hours re-check' }, { at: 2, ok: false, error: 'e' }, { at: 3, ok: true, error: null }], 'attempt order unchanged');
+  assert.throws(() => L.store.unitOfWork(() => { L.dispatches.patch('dsp-1', { status: 'delivered', failReason: 'x' }); assert.equal(held.status, 'delivered'); throw new Error('synthetic abort'); }, { snapshot: L.snapshot }), /synthetic abort/);
+  assert.deepEqual(plain(held), expected); assert.equal(L.dispatches.pending(), 0);
+  // Stored, reloaded (a restart) and round-tripped through the snapshot dispatcher: the same typed record.
+  L.dispatches.reload(); assert.deepEqual(plain(L.dispatches.byId('dsp-1')), expected, 'after a reload; attempt order unchanged');
   L.close();
-  { const tool = openStore(dir); const snap = tool.load(); assert.deepEqual(extrasOf(snap.db.dispatches[0]), expectedExtras); tool.save(snap); assert.deepEqual(extrasOf(tool.load().db.dispatches[0]), expectedExtras, 'round-tripped through replace'); tool.sqlite.close(); }
-  // Unsupported non-JSON values are refused whole: nothing written, nothing queued, the count unchanged.
+  { const tool = openStore(dir); const snap = tool.load(); assert.deepEqual(plain(snap.db.dispatches[0]), expected); tool.save(snap); assert.deepEqual(plain(tool.load().db.dispatches[0]), expected, 'round-tripped through replace'); tool.sqlite.close(); }
+  // A wrong-typed value for a column is refused by name, nothing written.
   const L2 = live(dir); const count = L2.dispatches.count();
-  for (const [label, value] of [['a function', () => 1], ['an undefined inside an object', { x: undefined }], ['a bigint', 1n], ['a non-finite number', Number.POSITIVE_INFINITY], ['a NaN in an array', [1, Number.NaN]], ['a class instance', new Date(0)], ['a symbol', Symbol('s')]]) {
-    assert.throws(() => L2.dispatches.create(dsp({ id: 'dsp-bad', attempts: [], futureField: value })), /futureField.*cannot be stored as JSON|unknown field.*cannot be/, label);
-    assert.equal(L2.dispatches.byId('dsp-bad'), null, label); assert.equal(L2.dispatches.count(), count, label); assert.equal(L2.dispatches.pending(), 0, label);
-  }
-  assert.throws(() => validateDispatchRows([dsp({ attempts: [], futureField: { f: () => 1 } })]), /DISPATCHES_IMPORT_BLOCKED.*cannot be stored as JSON/);
+  assert.throws(() => L2.dispatches.create(dsp({ id: 'dsp-bad', attempts: [], to: ['synthetic@example.test'] })), (e) => /to must be a string or null/.test(e.message) && !e.message.includes('example.test'));
+  assert.equal(L2.dispatches.byId('dsp-bad'), null); assert.equal(L2.dispatches.count(), count); assert.equal(L2.dispatches.pending(), 0);
   L2.close(); rm(dir);
 });
 

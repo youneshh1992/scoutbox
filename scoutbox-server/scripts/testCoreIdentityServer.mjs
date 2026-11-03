@@ -548,6 +548,9 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
   const st = await S.j('POST', '/player/stats', { season: '2024/25', goals: 5, appearances: 12 }, token); assert.equal(st.status, 200, JSON.stringify(st.body));
   assert.deepEqual(qAll(dir, 'SELECT season, goals, appearances, assists FROM player_season_history WHERE player_id = ?', pid), [{ season: '2024/25', goals: 5, appearances: 12, assists: 0 }]);
   assert.equal((await S.j('POST', '/player/medical/records', { title: 'Synthetic knee note', type: 'note', date: '2026-09-01', conditionStatus: 'fully_fit' }, token)).status, 201);
+  // The attendance row stores gps as two columns: a gps carrying anything else is refused at the route, nothing written.
+  const badGps = await S.j('POST', '/player/attendance', { fixture: 'Sunday league', venue: 'Park', date: '2026-09-01', gps: { lat: 53.4, lng: -2.2, accuracyM: 5 }, deviceId: 'dev-1' }, token);
+  assert.equal(badGps.status, 400, JSON.stringify(badGps.body)); assert.equal(badGps.body.error, 'GPS_INVALID'); assert.equal(qAll(dir, 'SELECT id FROM player_attendance WHERE player_id = ?', pid).length, 0, 'nothing written');
   assert.equal((await S.j('POST', '/player/drills/drill-passing-gates/complete', { value: 15 }, token)).status, 200);
   assert.equal((await S.j('POST', '/player/programme', { track: 'attack' }, token)).status, 201);
   assert.equal((await S.j('POST', '/player/programme/sessions/atk-sprint/complete', {}, token)).status, 200);

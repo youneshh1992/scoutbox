@@ -6,20 +6,24 @@
  *   1. Create the twelve `player_*` tables (SUBRECORDS_DDL).
  *   2. Decode every `players` row through the established decoder
  *      (`playerFromRow`: the current facets layout and the legacy `__rest` one),
- *      validate every item of every array (the same validator the repository
- *      uses) and reconcile every `trialReports` copy with the `trials`
- *      collection (`reconcileTrialReports`: an entry with no trial report, a
- *      content difference, a report the copy lacks, a different order).
- *      ANY refusal aborts the whole step with PLAYER_SUBRECORDS_CUTOVER_BLOCKED
- *      listing player ids, fields, indexes and reasons: the runner rolls back,
- *      the file is byte-identical, the next boot refuses the same way until the
- *      record is resolved by hand on the current build. Nothing is coerced,
- *      deduplicated, dropped or repaired.
+ *      type every item of every array for its table (`importSubrecords`: an
+ *      unknown field dropped; a wrong-typed value converted when the meaning
+ *      is obvious, dropped otherwise; each noted with the player id, the
+ *      array, the index and the field, never a value) and reconcile every
+ *      `trialReports` copy with the `trials` collection
+ *      (`reconcileTrialReports`: an entry with no trial report, a content
+ *      difference, a report the copy lacks, a different order). An item the
+ *      tables cannot take at all (not an object, a required field missing or
+ *      unusable, a repeated natural key) or an unreconciled copy aborts the
+ *      whole step with PLAYER_SUBRECORDS_CUTOVER_BLOCKED listing player ids,
+ *      fields, indexes and reasons: the runner rolls back, the file is
+ *      byte-identical, the next boot refuses the same way.
  *   3. Write every child row; re-read each player through the S5 read path and
- *      compare it with the decoded record byte for byte (the candidate is
- *      verified BEFORE its source fields are retired); then rewrite
- *      `facets_json` without the arrays and without `trialReports`.
- *   4. Record `meta.playerSubrecordsCutover` (counts only).
+ *      compare it with the typed record (the candidate is verified BEFORE its
+ *      source fields are retired); then rewrite `facets_json` without the
+ *      arrays and without `trialReports`.
+ *   4. Record `meta.playerSubrecordsCutover`: counts, and the notes of what
+ *      was converted or dropped (ids and field names only).
  * An empty players table (a first installation, initialised afterwards by the
  * data layer) creates the tables and imports nothing. The step never runs
  * twice (recorded) and refuses to run before 0005.
@@ -27,14 +31,14 @@
 import { playerFromRow, playerToRow, PLAYER_COLUMNS } from '../identityMapping.mjs';
 import { CORE_IDENTITY_LIVE_MIGRATION } from '../identityPreflight.mjs';
 import {
-  PLAYER_SUBRECORDS_MIGRATION, SUBRECORDS_DDL, SUBRECORD_TABLES, validateSubrecords, prepareSubrecordStatements, writeChildRows, readChildren,
+  PLAYER_SUBRECORDS_MIGRATION, SUBRECORDS_DDL, SUBRECORD_TABLES, importSubrecords, prepareSubrecordStatements, writeChildRows, readChildren,
   trialReportsFor, reconcileTrialReports, readTrialsBlob,
 } from '../playerSubrecords.mjs';
 import { migrationApplied } from '../database.mjs';
 
 export const id = PLAYER_SUBRECORDS_MIGRATION;
 export const note = 'player sub-records (media, attendance, timeline, badges, drills, drill results, activity, external ids, season history, medical records, programme completions) become their own tables; trialReports is served from the trials';
-/** `meta` key holding the cutover record: counts, never data. */
+/** `meta` key holding the cutover record: counts and notes (ids and field names), never data. */
 export const PLAYER_SUBRECORDS_CUTOVER_META = 'playerSubrecordsCutover';
 export const BLOCKED = 'PLAYER_SUBRECORDS_CUTOVER_BLOCKED';
 
@@ -55,11 +59,15 @@ export function up(sqlite, { now = Date.now() } = {}) {
   const rows = sqlite.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players ORDER BY rowid`).all();
   const trials = readTrialsBlob(sqlite);
   const refusals = []; // { id, reason }
+  const notes = [];
   const decoded = [];
   for (const row of rows) {
-    let rec;
-    try { rec = playerFromRow(row); } catch (err) { refusals.push({ id: row.id, reason: `facets_json cannot be decoded (${String(err?.message ?? err).slice(0, 120)})` }); continue; }
-    for (const p of validateSubrecords(rec)) refusals.push({ id: row.id, reason: p });
+    let raw;
+    try { raw = playerFromRow(row); } catch (err) { refusals.push({ id: row.id, reason: `facets_json cannot be decoded (${String(err?.message ?? err).slice(0, 120)})` }); continue; }
+    const typed = importSubrecords(raw);
+    const rec = typed.record;
+    notes.push(...typed.notes);
+    for (const p of typed.problems) refusals.push({ id: row.id, reason: p.replace(`players ${row.id}: `, '') });
     if (Object.hasOwn(rec, 'trialReports') || (trials ?? []).some((t) => t && t.playerId === row.id && t.report)) {
       if (trials === null) refusals.push({ id: row.id, reason: 'the trials collection is not a JSON array, so the trialReports copy cannot be reconciled with its source' });
       else for (const p of reconcileTrialReports(rec.trialReports, trialReportsFor(trials, row.id))) refusals.push({ id: row.id, reason: p });
@@ -81,21 +89,22 @@ export function up(sqlite, { now = Date.now() } = {}) {
     for (const [t, n] of Object.entries(counts)) perTable[t] = (perTable[t] ?? 0) + n;
     // The candidate — the row as it will be once the arrays are retired from
     // its facets, plus the rows just written — read back through the S5 path
-    // must be the decoded record exactly (the derived trial reports in the
+    // must be the typed record exactly (the derived trial reports in the
     // same place) BEFORE the facets are rewritten. (An empty derived list
     // reproduces a null or an absent `trialReports`; a stored copy reproduces
     // itself, having been reconciled above.)
     const expected = JSON.stringify(rec);
     const retired = { ...row, facets_json: playerToRow(rec, { subrecords: 'tables' }).facets_json };
     const reread = playerFromRow(retired, { children: readChildren(st, row.id), trialReports: Array.isArray(rec.trialReports) ? rec.trialReports : [] });
-    if (JSON.stringify(reread) !== expected) throw new Error(`${id}: players ${row.id}: the record read back from the sub-record tables differs from the decoded record; nothing is retired (rolled back)`);
+    if (JSON.stringify(reread) !== expected) throw new Error(`${id}: players ${row.id}: the record read back from the sub-record tables differs from the typed record; nothing is retired (rolled back)`);
     if (Array.isArray(rec.trialReports)) trialReportsDropped += rec.trialReports.length;
     setFacets.run({ id: row.id, facets_json: retired.facets_json });
   }
   perTable.player_media_tags = sqlite.prepare('SELECT COUNT(*) AS n FROM player_media_tags').get().n;
 
-  // 4. The record (counts only).
+  // 4. The record (counts, and the notes: ids and field names, never a value).
+  const normalised = { players: new Set(notes.map((n) => n.slice(0, n.indexOf(':')))).size, notes: notes.length };
   sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-    .run(PLAYER_SUBRECORDS_CUTOVER_META, JSON.stringify({ at: now, players: rows.length, rows: perTable, trialReportsCopiesDropped: trialReportsDropped, trialsBlobPresent: trials !== null && trials.length > 0 }));
-  return { players: rows.length, rows: perTable, trialReportsCopiesDropped: trialReportsDropped };
+    .run(PLAYER_SUBRECORDS_CUTOVER_META, JSON.stringify({ at: now, players: rows.length, rows: perTable, trialReportsCopiesDropped: trialReportsDropped, trialsBlobPresent: trials !== null && trials.length > 0, normalised, notes }));
+  return { players: rows.length, rows: perTable, trialReportsCopiesDropped: trialReportsDropped, normalised, notes };
 }

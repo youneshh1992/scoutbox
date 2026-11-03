@@ -1,9 +1,8 @@
 /**
  * The mail outbox, the push log and the device push tokens — migration plan
- * step S7c (docs/architecture/s7-readiness-review.md §10 as corrected by the
- * independent review of 6ca66ba: the push row's existing save scheduling kept,
- * lossless JSON token storage without a uniqueness assumption, a nullable
- * delivery destination).
+ * step S7c, under the fidelity rule of 3 November 2026 (typed columns, valid
+ * input only; docs/architecture/migration.md §1 rule 3; the S8d repository is
+ * the template).
  *
  * Owns three tables and three read-only views:
  *
@@ -22,141 +21,85 @@
  *     (b) the DELIVERY record { id, at, channel, to, text, providerMessageId, provider }
  *         (m13/delivery.mjs fakeSend — `text` the first 300 characters of the
  *         notification text, `to` the dispatch's destination, which an accepted
- *         queued dispatch may hold as NULL: the review of 6ca66ba drove the real
- *         boot sweep over such a row and it wrote `to: null`, so the column is
- *         nullable and the key is preserved as present-and-null).
- *     A shape's keys must ALL be present (every build wrote the whole literal;
- *     nothing is normalised) and none of the other shape's keys may be: an
- *     entry matching both or neither is refused by position. `source` records
- *     which literal a row is, and the structural CHECK below ties each source
- *     to its columns — NULL in a column means "that key is absent in this
- *     shape", never a value, so the way back rebuilds exactly the writer's
- *     literal with exactly its keys in the writer's order.
+ *         queued dispatch may hold as NULL).
+ *     `to` is a string e-mail address or null, in `to_address`. The routes that
+ *     reach the mailer validate the address as a string (POST /org/invites and
+ *     the m14 player invite used to coerce an array through RegExp.test and hand
+ *     the ORIGINAL value on; they now answer 400). A shape's keys must ALL be
+ *     present and none of the other shape's keys may be: an entry matching both
+ *     or neither is refused by position. `source` records which literal a row
+ *     is, and the structural CHECK below ties each source to its columns.
  *   push_log: the SENDER record { id, ts, audience: { kind, id }, title, body, transport }
  *     (adapters.mjs createPushSender.send), the audience the notification
- *     repository already validated (kind and id, both non-empty strings,
- *     nothing else; the kind is OPEN, as for notifications).
+ *     repository already validated (kind and id, both non-empty strings; the
+ *     kind is OPEN, as for notifications).
  *   push_tokens: the ROUTE record { kind, refId, token, ts } (POST /push/register).
- *     `token` is ANY JSON value the route accepted — the route checks truthiness
- *     only, and the review of 6ca66ba registered a number, a string, a boolean,
- *     objects and arrays through it — stored LOSSLESSLY as JSON text
- *     (`token_json`, decoded on read into an ordinary value of the same type;
- *     a consumer never sees the encoded string). There is NO uniqueness
- *     constraint: the route's matching rule is JavaScript `===` on the token —
- *     a primitive collapses an earlier row holding the same value of the same
- *     type (424242 and '424242' are different tokens), an object or an array
- *     NEVER matches an existing row (every request body is freshly parsed, so
- *     two structurally equal objects are two rows) — and `register` reproduces
- *     exactly that: primitives by strict equality of value and type on the
- *     LIVE value, objects and arrays never. Re-registration removes the matching rows and
- *     appends a new one at the end, so the view's order is "last registration
- *     last", as the array's was. The removed rows are deleted by their own
- *     `seq`, never by their JSON text (review of 40aa05c, F1, below).
+ *     `token` is a non-empty STRING (the Expo device token); the route refuses
+ *     anything else with 400 TOKEN_INVALID (it used to accept any truthy JSON
+ *     value, non-finite numbers included). There is NO uniqueness constraint:
+ *     re-registering the same token for the same (kind, refId) removes the
+ *     earlier rows and appends a new one at the end, so the view's order is
+ *     "last registration last", as the array's was.
  *
  * Vocabularies are OPEN: `transport`, `provider`, `channel`, `audience.kind`
- * and `kind` are stored as written (the review of 6ca66ba: no new enum
- * restriction; the sender filters staff pushes by 'org_user' while the route
- * registers 'org' — the known mismatch is carried through unchanged, not
- * decided here). Unknown OWN keys on any entry are kept in `extra_json` and
- * spread back FIRST on export (the S7a/S7b convention). UNKNOWN NESTED DATA
- * AND TOKEN DATA ARE DETACHED: a prototype-safe JSON clone at ingress, on
- * export, in every transaction snapshot and on restore (an own "__proto__",
- * "constructor" or "toString" key is data at every depth); a value JSON cannot
- * carry — undefined, a function, a symbol, a bigint, a non-finite number, a
- * class instance — refuses the whole write by name. Cloning does not change
- * the token matching rule: primitives compare by value, and an object token a
- * caller still holds is compared by reference against the mirror's DETACHED
- * copy, i.e. never matches — the rule the route's freshly parsed bodies always
- * had.
+ * and `kind` are stored as written (the sender filters staff pushes by
+ * 'org_user' while the route registers 'org' — the known mismatch is carried
+ * through unchanged, not decided here).
+ *
+ * FIDELITY. Every field is a typed column; there is no side column. A record
+ * is the literal built from its columns. At a repository write (append,
+ * register, a snapshot `replace`) unknown own keys are NOT stored (dropped
+ * silently) and a wrong-typed value is refused by field name — never an
+ * address, a mail text or a token in the message. The cutover import
+ * (`importOutboxPushBlobs`) drops unknown fields, normalises a non-string
+ * destination to null, a finite numeric token to its string, drops a token
+ * entry whose token is not a string or a number, and REPORTS each with the row
+ * id (or the token entry's position and owner) in `meta.outboxPushCutover.notes`
+ * and the boot log; it refuses the step (OUTBOX_PUSH_IMPORT_BLOCKED) only for a
+ * row the columns cannot hold (no id, a missing required field, a wrong-typed
+ * required field, a duplicate id, a shape that matches both or neither).
  *
  * THE ORDERING KEY. Array position was the only total order (ids are minted by
  * one counter and do not sort as strings; timestamps may tie). `seq INTEGER
  * PRIMARY KEY` is that order, durable: assigned at insert, preserved by the
- * migration (array position) and by backup/restore. No new externally visible id is minted.
+ * migration (array position) and by backup/restore.
  *
- * WHERE A ROW BECOMES DURABLE (nothing new; the review of 6ca66ba, D1). The
- * server attaches this repository in STAGED mode: a mutation changes the
- * mirror at once and its SQL waits for the next snapshot save, so each row
- * lands in exactly the save that carried its blob entry before S7c — a mailer
- * record with the route's own persistNow() or the debounced save `nextId`
- * schedules; a delivery record with the sweep's persistNow(), together with
- * the dispatch rows and attempts of the same pass; a token with the route's
- * persist(). A push record is written by `createPushSender.send`, which the
- * notification repository runs as an after-durable effect AFTER the save
- * carrying the notification row committed — so the push row is never in that
- * save; the sender's `nextId('push')` calls `persist()`, the existing
- * best-effort debounced save (about two seconds, not a guarantee: a failed
- * save, a crash or event-loop delay still lose or delay it), and the row lands
- * in that later save or in any earlier one (a sweep's persistNow). Nothing here
- * schedules a save, retries a save or reports a row durable before its save
- * committed; the mailer's and the sender's provider calls stay outside every
- * transaction.
+ * WHERE A ROW BECOMES DURABLE. The server attaches this repository in STAGED
+ * mode: a mutation changes the mirror at once and its SQL waits for the next
+ * snapshot save, so each row lands in exactly the save that carried its blob
+ * entry before S7c — a mailer record with the route's own persistNow() or the
+ * debounced save `nextId` schedules; a delivery record with the sweep's
+ * persistNow(), together with the dispatch rows and attempts of the same pass;
+ * a token with the route's persist(). A push record is written by
+ * `createPushSender.send`, which the notification repository runs as an
+ * after-durable effect AFTER the save carrying the notification row committed;
+ * the sender's `nextId('push')` calls `persist()`, the existing best-effort
+ * debounced save (about two seconds, not a guarantee), and the row lands in
+ * that later save or in any earlier one. Nothing here schedules a save; the
+ * mailer's and the sender's provider calls stay outside every transaction.
  *
- * FAILURE RECOVERY, two different things. An ordinary staged save that fails
- * (at a statement or at the real COMMIT) leaves the mirror as it is and keeps
- * every queued statement for the next save: memory is the intended state,
- * nothing is dropped, the next save by anybody lands it once. An aborted UNIT
- * OF WORK restores the mirror and the queue to the state they had when the unit
+ * FAILURE RECOVERY. An ordinary staged save that fails leaves the mirror as it
+ * is and keeps every queued statement for the next save. An aborted UNIT OF
+ * WORK restores the mirror and the queue to the state they had when the unit
  * began (`snapshotState` / `restoreState`), held views included. An owned
  * immediate transaction that fails restores the mirror in place.
  *
  * Whether the tables are authoritative is decided by the cutover record
  * `0011_outbox_push` in `data_migrations`, never by the tables existing or by
  * row counts. Snapshot format (backups, restores, the persistence suites): the
- * legacy shapes exactly, one entry per row, in insertion order; a snapshot that
- * omits a collection leaves its table alone. An entry the validators refuse
- * refuses the whole write (a save, the migration) with
- * OUTBOX_PUSH_IMPORT_BLOCKED, naming the collection, the entry position, the
- * reason and NEVER an address, a mail text, a token or a code.
- *
- * REVIEW OF 40aa05c — two compatibility defects of the first implementation,
- * corrected here (this build is unaccepted and local; no real database carries
- * the first shape):
- *   F2, the DESTINATION. The writers are not all strings: POST /org/invites
- *   validates `email` with RegExp.test (which coerces), stores String(email) on
- *   the invite and hands the ORIGINAL value to the mailer; the m14 player invite
- *   does the same through emailProblem. A JSON array therefore reaches the
- *   mailer and the accepted build persisted it as an array. The first
- *   implementation refused any non-string `to` — the route still answered 201
- *   and the unobserved rejection of `void mailer.send(...)` ended the process,
- *   and a file the accepted build wrote could not upgrade. Now `to` is ANY JSON
- *   value, stored losslessly in two columns: a string in `to_address`, null as
- *   NULL in both, any other value JSON-encoded in `to_json` (CHECK: valid JSON
- *   that is neither a JSON string nor JSON null; one of the two columns is NULL)
- *   and decoded on read into the value and type the writer handed over. Migration
- *   0011's DDL is amended IN PLACE. A value JSON cannot
- *   carry is still refused by name — except the non-finite numbers JSON syntax
- *   itself produces, which the review of 78c14b9 showed reach the destination
- *   INSIDE such an array (raw `[1e400,"…"]`, `[[-1e400],"…"]`): the destination
- *   is kept live through validation, every detached copy, the unit snapshot
- *   and restore and the export (so the admin view and the provider serialise
- *   it to null, as the accepted build's array did), and the save boundary
- *   writes the accepted build's JSON — null in those positions, the array
- *   structure kept; a bare non-finite destination (no writer produces one)
- *   follows the same boundary and persists as the old JSON `null`.
- *   F1, NON-FINITE TOKENS. JSON syntax such as 1e400 parses to Infinity; the
- *   route accepts it (truthy), the old array kept it as the live value until a
- *   restart, and JSON.stringify wrote null at the save — also inside an object
- *   or an array. The first implementation refused it (500). Now the token's
- *   clone keeps a non-finite number AS IS in the mirror (the route's strict
- *   equality rule needs the live value: a repeated +Infinity collapses, -Infinity
- *   is another row, a persisted null from an earlier process is never the live
- *   Infinity) and `token_json` holds JSON.stringify's null, so a restart reads
- *   null exactly as before. Because +Infinity, -Infinity and null all read
- *   "null" in SQL, a replacement deletes the removed rows BY SEQ (tracked per
- *   mirror row), never by JSON text. Every other field keeps the strict rule.
+ * legacy shapes, one entry per row, in insertion order; a snapshot that omits a
+ * collection leaves its table alone.
  */
 import { readonlyView } from './readonly.mjs';
 import { migrationApplied, transaction } from './database.mjs';
 
 export const OUTBOX_PUSH_MIGRATION = '0011_outbox_push';
-/** `meta` key holding the cutover record: counts only, never data. */
+/** `meta` key holding the cutover record: counts and id-only notes, never data. */
 export const OUTBOX_PUSH_CUTOVER_META = 'outboxPushCutover';
 export const OUTBOX_PUSH_TABLES = Object.freeze(['outbox', 'push_log', 'push_tokens']);
 /** The blob collections the three tables replace, in the order the migration imports them. */
 export const OUTBOX_PUSH_COLLECTIONS = Object.freeze(['outbox', 'pushLog', 'pushTokens']);
 
-const EXTRA_CHECK = "CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))";
 export const OUTBOX_PUSH_DDL = `
 CREATE TABLE outbox (
   seq                 INTEGER PRIMARY KEY,
@@ -164,15 +107,12 @@ CREATE TABLE outbox (
   source              TEXT NOT NULL CHECK (source IN ('mailer', 'delivery')),
   created_at          INTEGER NOT NULL,
   to_address          TEXT,
-  to_json             TEXT CHECK (to_json IS NULL OR (json_valid(to_json) AND json_type(to_json) NOT IN ('text', 'null'))),
   subject             TEXT,
   text                TEXT NOT NULL,
   transport           TEXT NOT NULL,
   delivered           INTEGER,
   channel             TEXT,
   provider_message_id TEXT,
-  extra_json          TEXT ${EXTRA_CHECK},
-  CHECK (to_address IS NULL OR to_json IS NULL),
   CHECK ((source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL AND delivered IN (0, 1) AND channel IS NULL AND provider_message_id IS NULL)
       OR (source = 'delivery' AND subject IS NULL AND delivered IS NULL AND channel IS NOT NULL AND provider_message_id IS NOT NULL))
 ) STRICT;
@@ -185,8 +125,7 @@ CREATE TABLE push_log (
   audience_id   TEXT NOT NULL,
   title         TEXT NOT NULL,
   body          TEXT NOT NULL,
-  transport     TEXT NOT NULL,
-  extra_json    TEXT ${EXTRA_CHECK}
+  transport     TEXT NOT NULL
 ) STRICT;
 CREATE INDEX push_log_created_at ON push_log (created_at);
 CREATE INDEX push_log_audience_seq ON push_log (audience_kind, audience_id, seq);
@@ -194,9 +133,8 @@ CREATE TABLE push_tokens (
   seq           INTEGER PRIMARY KEY,
   ref_kind      TEXT NOT NULL,
   ref_id        TEXT NOT NULL,
-  token_json    TEXT NOT NULL CHECK (json_valid(token_json)),
-  registered_at INTEGER NOT NULL,
-  extra_json    TEXT ${EXTRA_CHECK}
+  token         TEXT NOT NULL CHECK (length(token) > 0),
+  registered_at INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);`;
 
@@ -214,9 +152,11 @@ const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerab
  * finite numbers, arrays and plain objects, every own key copied with `setOwn`
  * at every depth. Anything JSON cannot carry is refused by name, never dropped
  * or coerced. Returns `{ value }` or `{ reason }`. With NON_FINITE_KEPT a
- * non-finite number (JSON syntax such as 1e400 parses to Infinity) is kept as
- * the live value instead — the token's rule only (review of 40aa05c, F1): the
- * save boundary then writes JSON.stringify's null for it, as the blob did.
+ * non-finite number is kept as the live value instead.
+ *
+ * No longer used by this repository (its records are typed columns only); it
+ * stays exported here because channels.mjs, recruitment.mjs and safetyAudit.mjs
+ * import it.
  */
 export const NON_FINITE_REFUSED = Object.freeze({ nonFinite: 'refuse' });
 export const NON_FINITE_KEPT = Object.freeze({ nonFinite: 'keep' });
@@ -225,7 +165,7 @@ export function cloneJson(v, at, opts = NON_FINITE_REFUSED) {
   if (typeof v === 'number') return Number.isFinite(v) || opts.nonFinite === 'keep' ? { value: v } : { reason: `${at} is a non-finite number and cannot be stored as JSON` };
   // `undefinedNested: 'json'` (opt-in; the S6b audit records only — review of c6cf5e1, F2): a NESTED undefined is stored the
   // way JSON.stringify, and so every pre-S6b blob, stored it: an object property is omitted, an array entry becomes null. The
-  // default (outbox, push) still refuses it. A top-level undefined is never accepted here; the caller decides what it means.
+  // default still refuses it. A top-level undefined is never accepted here; the caller decides what it means.
   const asJson = opts.undefinedNested === 'json';
   if (Array.isArray(v)) { const out = []; for (let i = 0; i < v.length; i++) { if (asJson && v[i] === undefined) { out.push(null); continue; } const r = cloneJson(v[i], `${at}[${i}]`, opts); if (r.reason) return r; out.push(r.value); } return { value: out }; }
   if (typeof v === 'object') {
@@ -235,12 +175,8 @@ export function cloneJson(v, at, opts = NON_FINITE_REFUSED) {
   }
   return { reason: `${at} (${typeof v}) cannot be stored as JSON` };
 }
-/** JSON.parse with every own key set as data (JSON.parse already creates own keys; `cloneJson` re-copies so a mirror row never shares the parser's object with anything). */
-const parseJson = (text, at) => cloneJson(JSON.parse(text), at).value;
-/** The type a token value has, for counts (never the value). */
-const tokenType = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
 
-// ------------------------------------------------------------------ validation (no coercion; every refusal names the reason, never an address, a text or a token)
+// ------------------------------------------------------------------ validation (typed; every refusal names the field, never an address, a text or a token)
 /** The mailer literal's keys, in its order (adapters.mjs createMailer.send). */
 export const MAILER_KEYS = Object.freeze(['id', 'ts', 'to', 'subject', 'text', 'transport', 'delivered']);
 /** The delivery-centre literal's keys, in its order (m13/delivery.mjs fakeSend). */
@@ -253,14 +189,15 @@ const AUDIENCE_KEYS = Object.freeze(['kind', 'id']);
 const MAILER_ONLY = MAILER_KEYS.filter((k) => !DELIVERY_KEYS.includes(k));
 const DELIVERY_ONLY = DELIVERY_KEYS.filter((k) => !MAILER_KEYS.includes(k));
 
-/** The unknown own keys of `raw` (those outside `known`), each a detached clone: `{ extra, hasExtra }` or `{ reason }`. */
-function extrasOf(raw, known) {
-  const extra = {};
-  for (const k of Object.keys(raw)) if (!known.includes(k)) { const c = cloneJson(raw[k], k); if (c.reason) return { reason: c.reason }; setOwn(extra, k, c.value); }
-  return { extra, hasExtra: Object.keys(extra).length > 0 };
-}
-/** The mirror row: extras first (the export convention), then the literal's keys in the writer's order. */
-function assemble(extra, literal) { const row = {}; for (const k of Object.keys(extra)) setOwn(row, k, extra[k]); for (const [k, v] of literal) row[k] = v; return row; }
+/**
+ * Validation modes. WRITE (a repository write, a snapshot replace): unknown keys are not stored, a wrong-typed value is
+ * refused. IMPORT (the cutover): unknown keys are dropped and noted, a non-string destination becomes null and is noted,
+ * a numeric token becomes its string and is noted, any other non-string token drops the entry (noted); every other
+ * wrong-typed required field still refuses the step.
+ */
+const WRITE = Object.freeze({ import: false });
+const IMPORT = Object.freeze({ import: true });
+const unknownKeyNotes = (raw, known, label) => Object.keys(raw).filter((k) => !known.includes(k)).map((k) => `${label}: unknown field ${k} dropped`);
 
 /** Which outbox literal `raw` is: 'mailer', 'delivery', or a reason. Structural: all of one shape's keys present, none of the other shape's. */
 export function outboxSourceOf(raw) {
@@ -270,130 +207,133 @@ export function outboxSourceOf(raw) {
   const shape = hasDelivery.length ? 'delivery' : hasMailer.length ? 'mailer' : null;
   if (!shape) return { reason: 'matches neither outbox shape (neither the mailer record\'s ts/subject/transport/delivered nor the delivery record\'s at/channel/providerMessageId/provider)' };
   const keys = shape === 'mailer' ? MAILER_KEYS : DELIVERY_KEYS;
-  for (const k of keys) if (!Object.hasOwn(raw, k)) return { reason: `${k} is absent (the ${shape} record always carries all of ${keys.join(', ')}; nothing is normalised)` };
+  for (const k of keys) if (!Object.hasOwn(raw, k)) return { reason: `${k} is absent (the ${shape} record always carries all of ${keys.join(', ')})` };
   return { source: shape };
 }
-/** Validate one outbox entry: `{ ok: true, row, source, hasExtra }` (the mirror row, a detached copy) or `{ ok: false, reason }`. */
-export function validateOutboxRow(raw) {
+/** Validate one outbox entry: `{ ok: true, row, source, notes }` (the typed record, a fresh object) or `{ ok: false, reason }`. */
+export function validateOutboxRow(raw, mode = WRITE) {
   const s = outboxSourceOf(raw); if (s.reason) return { ok: false, reason: s.reason };
   if (!nonEmpty(raw.id)) return { ok: false, reason: 'id must be a non-empty string' };
-  // Any JSON value: a string, null (an accepted queued dispatch), or what a coercing route handed the mailer — an array
-  // (review of 40aa05c, F2) whose elements may themselves be the non-finite numbers JSON syntax produces (1e400 →
-  // Infinity; review of 78c14b9): kept LIVE here, written as the accepted build's JSON (null) at the save boundary.
-  const d = cloneJson(raw.to, 'to', NON_FINITE_KEPT); if (d.reason) return { ok: false, reason: d.reason };
+  const label = `outbox ${raw.id}`;
+  const notes = mode.import ? unknownKeyNotes(raw, s.source === 'mailer' ? MAILER_KEYS : DELIVERY_KEYS, label) : [];
+  let to = raw.to;
+  if (to !== null && typeof to !== 'string') {
+    if (!mode.import) return { ok: false, reason: `to must be a string e-mail address or null (got ${describe(to)})` };
+    notes.push(`${label}: destination ${describe(to)} is not a string address; stored as null`); to = null;
+  }
   if (typeof raw.text !== 'string') return { ok: false, reason: 'text must be a string' };
-  const e = extrasOf(raw, s.source === 'mailer' ? MAILER_KEYS : DELIVERY_KEYS); if (e.reason) return { ok: false, reason: e.reason };
   if (s.source === 'mailer') {
     if (!isInt(raw.ts)) return { ok: false, reason: 'ts must be an integer timestamp' };
     if (typeof raw.subject !== 'string') return { ok: false, reason: 'subject must be a string' };
     if (!nonEmpty(raw.transport)) return { ok: false, reason: 'transport must be a non-empty string' };
     if (typeof raw.delivered !== 'boolean') return { ok: false, reason: 'delivered must be a boolean' };
-    return { ok: true, source: 'mailer', hasExtra: e.hasExtra, row: assemble(e.extra, [['id', raw.id], ['ts', raw.ts], ['to', d.value], ['subject', raw.subject], ['text', raw.text], ['transport', raw.transport], ['delivered', raw.delivered]]) };
+    return { ok: true, source: 'mailer', notes, row: { id: raw.id, ts: raw.ts, to, subject: raw.subject, text: raw.text, transport: raw.transport, delivered: raw.delivered } };
   }
   if (!isInt(raw.at)) return { ok: false, reason: 'at must be an integer timestamp' };
   if (!nonEmpty(raw.channel)) return { ok: false, reason: 'channel must be a non-empty string' };
   if (!nonEmpty(raw.providerMessageId)) return { ok: false, reason: 'providerMessageId must be a non-empty string' };
   if (!nonEmpty(raw.provider)) return { ok: false, reason: 'provider must be a non-empty string' };
-  return { ok: true, source: 'delivery', hasExtra: e.hasExtra, row: assemble(e.extra, [['id', raw.id], ['at', raw.at], ['channel', raw.channel], ['to', d.value], ['text', raw.text], ['providerMessageId', raw.providerMessageId], ['provider', raw.provider]]) };
+  return { ok: true, source: 'delivery', notes, row: { id: raw.id, at: raw.at, channel: raw.channel, to, text: raw.text, providerMessageId: raw.providerMessageId, provider: raw.provider } };
 }
-function audienceOf(raw) {
+function audienceOf(raw, mode, label, notes) {
   if (!isPlainObject(raw)) return { reason: `audience must be an object { kind, id } (got ${describe(raw)})` };
   const unknown = Object.keys(raw).filter((k) => !AUDIENCE_KEYS.includes(k));
-  if (unknown.length) return { reason: `audience carries unknown field(s) ${unknown.join(', ')} (the schema keeps an audience as kind and id only; a field dropped here would be lost)` };
+  if (unknown.length) {
+    if (!mode.import) return { reason: `audience carries unknown field(s) ${unknown.join(', ')} (an audience is kind and id only)` };
+    for (const k of unknown) notes.push(`${label}: unknown audience field ${k} dropped`);
+  }
   if (!nonEmpty(raw.kind)) return { reason: 'audience.kind must be a non-empty string' };
   if (!nonEmpty(raw.id)) return { reason: 'audience.id must be a non-empty string' };
   return { audience: { kind: raw.kind, id: raw.id } };
 }
-/** Validate one push-log entry: `{ ok: true, row, hasExtra }` or `{ ok: false, reason }`. */
-export function validatePushLogRow(raw) {
+/** Validate one push-log entry: `{ ok: true, row, notes }` or `{ ok: false, reason }`. */
+export function validatePushLogRow(raw, mode = WRITE) {
   if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
-  for (const k of PUSH_LOG_KEYS) if (!Object.hasOwn(raw, k)) return { ok: false, reason: `${k} is absent (the push sender always wrote all of ${PUSH_LOG_KEYS.join(', ')}; nothing is normalised)` };
+  for (const k of PUSH_LOG_KEYS) if (!Object.hasOwn(raw, k)) return { ok: false, reason: `${k} is absent (the push sender always wrote all of ${PUSH_LOG_KEYS.join(', ')})` };
   if (!nonEmpty(raw.id)) return { ok: false, reason: 'id must be a non-empty string' };
+  const label = `pushLog ${raw.id}`;
+  const notes = mode.import ? unknownKeyNotes(raw, PUSH_LOG_KEYS, label) : [];
   if (!isInt(raw.ts)) return { ok: false, reason: 'ts must be an integer timestamp' };
-  const a = audienceOf(raw.audience); if (a.reason) return { ok: false, reason: a.reason };
+  const a = audienceOf(raw.audience, mode, label, notes); if (a.reason) return { ok: false, reason: a.reason };
   if (typeof raw.title !== 'string') return { ok: false, reason: 'title must be a string' };
   if (typeof raw.body !== 'string') return { ok: false, reason: 'body must be a string' };
   if (!nonEmpty(raw.transport)) return { ok: false, reason: 'transport must be a non-empty string' };
-  const e = extrasOf(raw, PUSH_LOG_KEYS); if (e.reason) return { ok: false, reason: e.reason };
-  return { ok: true, hasExtra: e.hasExtra, row: assemble(e.extra, [['id', raw.id], ['ts', raw.ts], ['audience', a.audience], ['title', raw.title], ['body', raw.body], ['transport', raw.transport]]) };
+  return { ok: true, notes, row: { id: raw.id, ts: raw.ts, audience: a.audience, title: raw.title, body: raw.body, transport: raw.transport } };
 }
-/** Validate one push-token entry: `{ ok: true, row, hasExtra }` (the token a detached clone of ANY JSON value) or `{ ok: false, reason }`. */
-export function validatePushTokenRow(raw) {
+/**
+ * Validate one push-token entry: `{ ok: true, row, notes }`, `{ ok: false, reason }`, or (import only) `{ ok: true,
+ * dropped: true, notes }` for an entry whose token is not a string or a finite number. `label` names the entry in
+ * notes (its position and owner; a token entry has no id).
+ */
+export function validatePushTokenRow(raw, mode = WRITE, label = 'pushTokens entry') {
   if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
-  for (const k of PUSH_TOKEN_KEYS) if (!Object.hasOwn(raw, k)) return { ok: false, reason: `${k} is absent (the registration route always wrote all of ${PUSH_TOKEN_KEYS.join(', ')}; nothing is normalised)` };
+  for (const k of PUSH_TOKEN_KEYS) if (!Object.hasOwn(raw, k)) return { ok: false, reason: `${k} is absent (the registration route always wrote all of ${PUSH_TOKEN_KEYS.join(', ')})` };
   if (!nonEmpty(raw.kind)) return { ok: false, reason: 'kind must be a non-empty string (the session kind)' };
   if (!nonEmpty(raw.refId)) return { ok: false, reason: 'refId must be a non-empty string' };
-  const t = cloneJson(raw.token, 'token', NON_FINITE_KEPT); if (t.reason) return { ok: false, reason: t.reason };
   if (!isInt(raw.ts)) return { ok: false, reason: 'ts must be an integer timestamp' };
-  const e = extrasOf(raw, PUSH_TOKEN_KEYS); if (e.reason) return { ok: false, reason: e.reason };
-  return { ok: true, hasExtra: e.hasExtra, row: assemble(e.extra, [['kind', raw.kind], ['refId', raw.refId], ['token', t.value], ['ts', raw.ts]]) };
+  const at = `${label} (${raw.kind} ${raw.refId})`;
+  const notes = mode.import ? unknownKeyNotes(raw, PUSH_TOKEN_KEYS, at) : [];
+  let token = raw.token;
+  if (!nonEmpty(token)) {
+    if (!mode.import) return { ok: false, reason: `token must be a non-empty string (got ${typeof token === 'string' ? 'an empty string' : describe(token)})` };
+    if (typeof token === 'number' && Number.isFinite(token)) { token = String(token); notes.push(`${at}: numeric token stored as its string`); }
+    else { notes.push(`${at}: token ${typeof token === 'string' ? 'an empty string' : describe(token)} is not a device token; entry dropped`); return { ok: true, dropped: true, notes }; }
+  }
+  return { ok: true, notes, row: { kind: raw.kind, refId: raw.refId, token, ts: raw.ts } };
 }
-function validateRows(rows, validate, { label, unique = true, tally }) {
+function validateRows(rows, validate, { label, mode = WRITE, unique = true, tally }) {
   if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
-  const out = []; const problems = []; const ids = new Set(); const counts = { imported: 0, withExtraFields: 0 };
+  const out = []; const problems = []; const notes = []; const ids = new Set(); const counts = { imported: 0, normalised: 0, dropped: 0 };
   rows.forEach((raw, i) => {
-    const v = validate(raw);
+    const v = validate(raw, mode, `${label} entry #${i}`);
     if (!v.ok) { problems.push(`${label} entry #${i}: ${v.reason}`); return; }
+    notes.push(...v.notes);
+    if (v.dropped) { counts.dropped += 1; return; }
     if (unique) { if (ids.has(v.row.id)) { problems.push(`${label} entry #${i}: duplicates the id of an earlier entry (${v.row.id})`); return; } ids.add(v.row.id); }
-    if (v.hasExtra) counts.withExtraFields += 1;
+    if (v.notes.length) counts.normalised += 1;
     tally?.(counts, v);
     out.push(v.row);
   });
   if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
   counts.imported = out.length;
-  return { rows: out, counts };
+  return { rows: out, counts, notes };
 }
 const bump = (map, key) => { map[key] = (map[key] ?? 0) + 1; };
-/** Validate a whole outbox collection; throws OUTBOX_PUSH_IMPORT_BLOCKED. Returns `{ rows, counts: { imported, withExtraFields, bySource } }`. */
-export const validateOutboxRows = (rows, { label = 'outbox' } = {}) => validateRows(rows, validateOutboxRow, { label, tally: (c, v) => { c.bySource ??= {}; bump(c.bySource, v.source); } });
-/** Validate a whole push-log collection. Returns `{ rows, counts: { imported, withExtraFields, byAudienceKind } }`. */
-export const validatePushLogRows = (rows, { label = 'pushLog' } = {}) => validateRows(rows, validatePushLogRow, { label, tally: (c, v) => { c.byAudienceKind ??= {}; bump(c.byAudienceKind, v.row.audience.kind); } });
-/** Validate a whole push-token collection (no uniqueness: duplicates are legal). Returns `{ rows, counts: { imported, withExtraFields, byKind, byTokenType } }`. */
-export const validatePushTokenRows = (rows, { label = 'pushTokens' } = {}) => validateRows(rows, validatePushTokenRow, { label, unique: false, tally: (c, v) => { c.byKind ??= {}; bump(c.byKind, v.row.kind); c.byTokenType ??= {}; bump(c.byTokenType, tokenType(v.row.token)); } });
+/** Validate a whole outbox collection; throws OUTBOX_PUSH_IMPORT_BLOCKED. Returns `{ rows, counts: { imported, normalised, dropped, bySource }, notes }`. */
+export const validateOutboxRows = (rows, { label = 'outbox', mode } = {}) => validateRows(rows, validateOutboxRow, { label, mode, tally: (c, v) => { c.bySource ??= {}; bump(c.bySource, v.source); } });
+/** Validate a whole push-log collection. Returns `{ rows, counts: { imported, normalised, dropped, byAudienceKind }, notes }`. */
+export const validatePushLogRows = (rows, { label = 'pushLog', mode } = {}) => validateRows(rows, validatePushLogRow, { label, mode, tally: (c, v) => { c.byAudienceKind ??= {}; bump(c.byAudienceKind, v.row.audience.kind); } });
+/** Validate a whole push-token collection (no uniqueness: duplicates are legal). Returns `{ rows, counts: { imported, normalised, dropped, byKind }, notes }`. */
+export const validatePushTokenRows = (rows, { label = 'pushTokens', mode } = {}) => validateRows(rows, validatePushTokenRow, { label, mode, unique: false, tally: (c, v) => { c.byKind ??= {}; bump(c.byKind, v.row.kind); } });
 
 // ------------------------------------------------------------------ rows ↔ the tables
-const OUTBOX_SELECT = 'SELECT seq, id, source, created_at, to_address, to_json, subject, text, transport, delivered, channel, provider_message_id, extra_json FROM outbox';
-const OUTBOX_INSERT = 'INSERT INTO outbox (id, source, created_at, to_address, to_json, subject, text, transport, delivered, channel, provider_message_id, extra_json) VALUES (@id, @source, @created_at, @to_address, @to_json, @subject, @text, @transport, @delivered, @channel, @provider_message_id, @extra_json)';
-const PUSH_SELECT = 'SELECT seq, id, created_at, audience_kind, audience_id, title, body, transport, extra_json FROM push_log';
-const PUSH_INSERT = 'INSERT INTO push_log (id, created_at, audience_kind, audience_id, title, body, transport, extra_json) VALUES (@id, @created_at, @audience_kind, @audience_id, @title, @body, @transport, @extra_json)';
-const TOKEN_SELECT = 'SELECT seq, ref_kind, ref_id, token_json, registered_at, extra_json FROM push_tokens';
-const TOKEN_INSERT = 'INSERT INTO push_tokens (ref_kind, ref_id, token_json, registered_at, extra_json) VALUES (@ref_kind, @ref_id, @token_json, @registered_at, @extra_json)';
-/** A replaced token row goes by its own seq — never by JSON text: +Infinity, -Infinity and a persisted null all read "null" (review of 40aa05c, F1). */
-const TOKEN_DELETE_BY_SEQ = 'DELETE FROM push_tokens WHERE seq = ?';
-/** The destination's two columns: a string in to_address, null as NULL/NULL, any other JSON value encoded in to_json. */
-const destinationColumns = (to) => {
-  if (typeof to === 'string') return { to_address: to, to_json: null };
-  const json = to === null ? 'null' : JSON.stringify(to); // the accepted build's save boundary: a non-finite number becomes null here, inside an array too (review of 78c14b9)
-  return json === 'null' ? { to_address: null, to_json: null } : { to_address: null, to_json: json };
-};
-const destinationOf = (r) => (r.to_json != null ? parseJson(r.to_json, 'to') : r.to_address);
-const extraJsonOf = (row, known) => { const extra = {}; for (const k of Object.keys(row)) if (!known.includes(k)) setOwn(extra, k, cloneJson(row[k], k).value); return Object.keys(extra).length ? JSON.stringify(extra) : null; };
+const OUTBOX_SELECT = 'SELECT seq, id, source, created_at, to_address, subject, text, transport, delivered, channel, provider_message_id FROM outbox';
+const OUTBOX_INSERT = 'INSERT INTO outbox (id, source, created_at, to_address, subject, text, transport, delivered, channel, provider_message_id) VALUES (@id, @source, @created_at, @to_address, @subject, @text, @transport, @delivered, @channel, @provider_message_id)';
+const PUSH_SELECT = 'SELECT seq, id, created_at, audience_kind, audience_id, title, body, transport FROM push_log';
+const PUSH_INSERT = 'INSERT INTO push_log (id, created_at, audience_kind, audience_id, title, body, transport) VALUES (@id, @created_at, @audience_kind, @audience_id, @title, @body, @transport)';
+const TOKEN_SELECT = 'SELECT seq, ref_kind, ref_id, token, registered_at FROM push_tokens';
+const TOKEN_INSERT = 'INSERT INTO push_tokens (ref_kind, ref_id, token, registered_at) VALUES (@ref_kind, @ref_id, @token, @registered_at)';
+const TOKEN_DELETE = 'DELETE FROM push_tokens WHERE ref_kind = ? AND ref_id = ? AND token = ?';
 const sourceOfRow = (row) => (Object.hasOwn(row, 'transport') ? 'mailer' : 'delivery');
 function outboxParams(row) {
   return sourceOfRow(row) === 'mailer'
-    ? { id: row.id, source: 'mailer', created_at: row.ts, ...destinationColumns(row.to), subject: row.subject, text: row.text, transport: row.transport, delivered: row.delivered ? 1 : 0, channel: null, provider_message_id: null, extra_json: extraJsonOf(row, MAILER_KEYS) }
-    : { id: row.id, source: 'delivery', created_at: row.at, ...destinationColumns(row.to), subject: null, text: row.text, transport: row.provider, delivered: null, channel: row.channel, provider_message_id: row.providerMessageId, extra_json: extraJsonOf(row, DELIVERY_KEYS) };
+    ? { id: row.id, source: 'mailer', created_at: row.ts, to_address: row.to, subject: row.subject, text: row.text, transport: row.transport, delivered: row.delivered ? 1 : 0, channel: null, provider_message_id: null }
+    : { id: row.id, source: 'delivery', created_at: row.at, to_address: row.to, subject: null, text: row.text, transport: row.provider, delivered: null, channel: row.channel, provider_message_id: row.providerMessageId };
 }
-function outboxFromDb(r) {
-  const extra = r.extra_json ? parseJson(r.extra_json, 'extra_json') : {};
-  return r.source === 'mailer'
-    ? assemble(extra, [['id', r.id], ['ts', r.created_at], ['to', destinationOf(r)], ['subject', r.subject], ['text', r.text], ['transport', r.transport], ['delivered', r.delivered === 1]])
-    : assemble(extra, [['id', r.id], ['at', r.created_at], ['channel', r.channel], ['to', destinationOf(r)], ['text', r.text], ['providerMessageId', r.provider_message_id], ['provider', r.transport]]);
-}
-const pushParams = (row) => ({ id: row.id, created_at: row.ts, audience_kind: row.audience.kind, audience_id: row.audience.id, title: row.title, body: row.body, transport: row.transport, extra_json: extraJsonOf(row, PUSH_LOG_KEYS) });
-const pushFromDb = (r) => assemble(r.extra_json ? parseJson(r.extra_json, 'extra_json') : {}, [['id', r.id], ['ts', r.created_at], ['audience', { kind: r.audience_kind, id: r.audience_id }], ['title', r.title], ['body', r.body], ['transport', r.transport]]);
-const tokenParams = (row) => ({ ref_kind: row.kind, ref_id: row.refId, token_json: JSON.stringify(row.token), registered_at: row.ts, extra_json: extraJsonOf(row, PUSH_TOKEN_KEYS) });
-const tokenFromDb = (r) => assemble(r.extra_json ? parseJson(r.extra_json, 'extra_json') : {}, [['kind', r.ref_kind], ['refId', r.ref_id], ['token', parseJson(r.token_json, 'token')], ['ts', r.registered_at]]);
+const outboxFromDb = (r) => (r.source === 'mailer'
+  ? { id: r.id, ts: r.created_at, to: r.to_address, subject: r.subject, text: r.text, transport: r.transport, delivered: r.delivered === 1 }
+  : { id: r.id, at: r.created_at, channel: r.channel, to: r.to_address, text: r.text, providerMessageId: r.provider_message_id, provider: r.transport });
+const pushParams = (row) => ({ id: row.id, created_at: row.ts, audience_kind: row.audience.kind, audience_id: row.audience.id, title: row.title, body: row.body, transport: row.transport });
+const pushFromDb = (r) => ({ id: r.id, ts: r.created_at, audience: { kind: r.audience_kind, id: r.audience_id }, title: r.title, body: r.body, transport: r.transport });
+const tokenParams = (row) => ({ ref_kind: row.kind, ref_id: row.refId, token: row.token, registered_at: row.ts });
+const tokenFromDb = (r) => ({ kind: r.ref_kind, refId: r.ref_id, token: r.token, ts: r.registered_at });
 
-/** A DETACHED copy of a mirror row (the transaction snapshot / export shape: nothing shared with the mirror, nested data cloned); `keptKey` names the one field whose non-finite numbers are kept (the token). */
-const copyRow = (row, keptKey = null) => { const c = {}; for (const k of Object.keys(row)) setOwn(c, k, cloneJson(row[k], k, k === keptKey ? NON_FINITE_KEPT : NON_FINITE_REFUSED).value); return c; };
-const copyTokenRow = (row) => copyRow(row, 'token');
-const copyOutboxRow = (row) => copyRow(row, 'to'); // the destination keeps its live non-finite elements in every detached copy (review of 78c14b9)
+/** A DETACHED copy of a mirror row (the transaction snapshot / export shape): the fields are primitives, the audience is copied. */
+const copyRow = (row) => { const c = { ...row }; if (row.audience) c.audience = { ...row.audience }; return c; };
 
 const readOutbox = (sqlite) => sqlite.prepare(`${OUTBOX_SELECT} ORDER BY seq`).all().map(outboxFromDb);
 const readPushLog = (sqlite) => sqlite.prepare(`${PUSH_SELECT} ORDER BY seq`).all().map(pushFromDb);
-const readTokenRows = (sqlite) => sqlite.prepare(`${TOKEN_SELECT} ORDER BY seq`).all().map((r) => ({ seq: r.seq, row: tokenFromDb(r) }));
-const readTokens = (sqlite) => readTokenRows(sqlite).map((x) => x.row);
+const readTokens = (sqlite) => sqlite.prepare(`${TOKEN_SELECT} ORDER BY seq`).all().map(tokenFromDb);
 function writeOutbox(sqlite, rows) { sqlite.exec('DELETE FROM outbox;'); const ins = sqlite.prepare(OUTBOX_INSERT); for (const r of rows) ins.run(outboxParams(r)); return rows.length; }
 function writePushLog(sqlite, rows) { sqlite.exec('DELETE FROM push_log;'); const ins = sqlite.prepare(PUSH_INSERT); for (const r of rows) ins.run(pushParams(r)); return rows.length; }
 function writeTokens(sqlite, rows) { sqlite.exec('DELETE FROM push_tokens;'); const ins = sqlite.prepare(TOKEN_INSERT); for (const r of rows) ins.run(tokenParams(r)); return rows.length; }
@@ -403,9 +343,9 @@ function writeTokens(sqlite, rows) { sqlite.exec('DELETE FROM push_tokens;'); co
  * (backups, restores, the persistence suites). Before the cutover record both
  * methods decline (`null` / `false`): the caller keeps the legacy blob, which
  * the migration imports on the next boot. Afterwards `read` returns the rows in
- * the legacy shape, in insertion order, and `replace` validates every entry,
- * rewrites the table inside the caller's transaction (array position → seq) and
- * refuses the whole write on the first problem.
+ * the legacy shape, in insertion order, and `replace` validates every entry
+ * (unknown keys not stored; a wrong-typed value refuses the whole write),
+ * rewrites the table inside the caller's transaction (array position → seq).
  */
 const table = (name, read, write, validate) => ({
   name,
@@ -424,10 +364,11 @@ export const OUTBOX_PUSH_SNAPSHOT_TABLES = Object.freeze([OUTBOX_TABLE, PUSH_LOG
 
 /**
  * Import the three legacy (or exported) blobs into the tables, inside the
- * migration's transaction: validation of every entry, insertion in array order,
- * the blob rows retired. An absent blob imports nothing; an empty array imports
- * nothing; a non-array or non-JSON blob refuses the step. Returns the counts
- * the migration records in `meta` (never a value).
+ * migration's transaction, in IMPORT mode (see the header): insertion in array
+ * order, the blob rows retired. An absent blob imports nothing; an empty array
+ * imports nothing; a non-array or non-JSON blob refuses the step. Returns what
+ * the migration records in `meta`: per collection the counts, and the notes
+ * (ids, positions and field names only — never a value).
  */
 export function importOutboxPushBlobs(sqlite) {
   const hasCollections = tableExists(sqlite, 'collections');
@@ -436,15 +377,16 @@ export function importOutboxPushBlobs(sqlite) {
     if (!row) return undefined;
     try { return JSON.parse(row.value); } catch { throw blocked(`the ${name} blob is not valid JSON`); }
   };
-  const empty = { imported: 0, withExtraFields: 0 };
-  const out = { outbox: { ...empty, bySource: {} }, pushLog: { ...empty, byAudienceKind: {} }, pushTokens: { ...empty, byKind: {}, byTokenType: {} } };
+  const empty = { imported: 0, normalised: 0, dropped: 0 };
+  const out = { outbox: { ...empty, bySource: {} }, pushLog: { ...empty, byAudienceKind: {} }, pushTokens: { ...empty, byKind: {} }, notes: [] };
   const steps = [['outbox', validateOutboxRows, writeOutbox], ['pushLog', validatePushLogRows, writePushLog], ['pushTokens', validatePushTokenRows, writeTokens]];
   for (const [name, validate, write] of steps) {
     const parsed = readBlob(name);
     if (parsed === undefined) continue;
-    const v = validate(parsed, { label: `the ${name} blob` });
+    const v = validate(parsed, { label: `the ${name} blob`, mode: IMPORT });
     write(sqlite, v.rows);
     out[name] = { ...out[name], ...v.counts };
+    out.notes.push(...v.notes);
     sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
   }
   return out;
@@ -466,12 +408,11 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
     cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
     outbox: sqlite.prepare(OUTBOX_INSERT), delivered: sqlite.prepare('UPDATE outbox SET delivered = ? WHERE id = ?'),
     push: sqlite.prepare(PUSH_INSERT),
-    token: sqlite.prepare(TOKEN_INSERT), tokenDelete: sqlite.prepare(TOKEN_DELETE_BY_SEQ),
+    token: sqlite.prepare(TOKEN_INSERT), tokenDelete: sqlite.prepare(TOKEN_DELETE),
   };
 
   // The three mirrors: every row, in insertion order.
   const outboxRows = []; const outboxById = new Map(); const pushRows = []; const tokenRows = [];
-  const tokenSeq = new WeakMap(); // mirror token row → its seq (the only safe key for a replacement's DELETE)
   const outboxView = readonlyView(outboxRows, 'a mail outbox record');
   const pushView = readonlyView(pushRows, 'a push log record');
   const tokenView = readonlyView(tokenRows, 'a device push token');
@@ -480,7 +421,7 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
     if (!outboxPushLive(sqlite)) return;
     for (const r of readOutbox(sqlite)) { outboxRows.push(r); outboxById.set(r.id, r); }
     for (const r of readPushLog(sqlite)) pushRows.push(r);
-    for (const { seq, row } of readTokenRows(sqlite)) { tokenRows.push(row); tokenSeq.set(row, seq); }
+    for (const r of readTokens(sqlite)) tokenRows.push(r);
   };
   load();
 
@@ -507,12 +448,9 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
     const state = repo.snapshotState();
     try { return transaction(sqlite, body); } catch (err) { repo.restoreState(state); throw err; }
   };
-  /** Restore a mirror row IN PLACE from its snapshot copy (held views stay valid); every value a fresh detached clone, never the snapshot's object. */
-  const restoreInto = (obj, copy, keptKey = null) => {
-    for (const k of Object.keys(obj)) if (!Object.hasOwn(copy, k)) delete obj[k];
-    for (const k of Object.keys(copy)) setOwn(obj, k, cloneJson(copy[k], k, k === keptKey ? NON_FINITE_KEPT : NON_FINITE_REFUSED).value);
-  };
-  const restoreList = (list, entries, keptKey = null) => { list.length = 0; for (const [obj, copy] of entries) { restoreInto(obj, copy, keptKey); list.push(obj); } };
+  /** Restore a mirror row IN PLACE from its snapshot copy (held views stay valid). */
+  const restoreInto = (obj, copy) => { for (const k of Object.keys(obj)) if (!Object.hasOwn(copy, k)) delete obj[k]; Object.assign(obj, copyRow(copy)); };
+  const restoreList = (list, entries) => { list.length = 0; for (const [obj, copy] of entries) { restoreInto(obj, copy); list.push(obj); } };
 
   const repo = {
     /** Boot: refuse to run without the cutover record; (re)load the mirrors; report counts (never a value). */
@@ -533,7 +471,7 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
       view: outboxView,
       count: () => outboxRows.length,
       byId: (id) => { const r = outboxById.get(id); return r ? readonlyView(r, 'a mail outbox record') : null; },
-      /** A new record at the end, in EITHER literal (validated exactly like an import; a non-JSON value or an unmapped shape refuses). Returns it (read-only). */
+      /** A new record at the end, in EITHER literal (unknown keys not stored; a wrong-typed field or an unmapped shape refuses). Returns it (read-only). */
       append(raw) {
         return operation((exec) => {
           const v = validateOutboxRow(raw); if (!v.ok) throw new TypeError(`an outbox record needs the mailer or the delivery shape: ${v.reason}`);
@@ -544,7 +482,7 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
           return readonlyView(row, 'a mail outbox record');
         });
       },
-      /** The live transport's answer on a MAILER record, after its provider call settled (`record.delivered = res.ok` before S7c). Refusals (a missing id, a delivery record, a non-boolean) are raised inside the participant boundary. */
+      /** The live transport's answer on a MAILER record, after its provider call settled. Refusals (a missing id, a delivery record, a non-boolean) are raised inside the participant boundary. */
       markDelivered(id, ok) {
         return operation((exec) => {
           const row = outboxById.get(id); if (!row) throw new Error(`outbox: no record ${id} to mark delivered`);
@@ -556,8 +494,8 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
           return readonlyView(row, 'a mail outbox record');
         });
       },
-      /** Every record in its legacy shape (extras first, then the writer's keys), in insertion order, detached (the admin backup). */
-      exportRows: () => outboxRows.map(copyOutboxRow),
+      /** Every record in its legacy shape, in insertion order, detached (the admin backup). */
+      exportRows: () => outboxRows.map(copyRow),
     },
 
     // ---------------------------------------------------------- the push log
@@ -583,30 +521,26 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
       view: tokenView,
       count: () => tokenRows.length,
       /**
-       * The registration route's filter-then-push, exactly: every existing row
-       * of the same (kind, refId) whose token `===` the given one goes (a
-       * primitive by value and type; an object or an array never — see the
-       * header), then the new row is appended at the END with a fresh `seq`.
-       * Returns `{ removed, row }` (the row read-only).
+       * The registration route's filter-then-push: every existing row of the
+       * same (kind, refId) holding the same token string goes, then the new row
+       * is appended at the END with a fresh `seq`. Returns `{ removed, row }`
+       * (the row read-only).
        */
       register(raw) {
         return operation((exec) => {
           const v = validatePushTokenRow(raw); if (!v.ok) throw new TypeError(`a device token registration needs { kind, refId, token, ts }: ${v.reason}`);
           const row = v.row;
-          const removed = [];
-          for (let i = tokenRows.length - 1; i >= 0; i--) { const t = tokenRows[i]; if (t.kind === row.kind && t.refId === row.refId && t.token === raw.token) { removed.unshift(t); tokenRows.splice(i, 1); } }
+          let removed = 0;
+          for (let i = tokenRows.length - 1; i >= 0; i--) { const t = tokenRows[i]; if (t.kind === row.kind && t.refId === row.refId && t.token === row.token) { tokenRows.splice(i, 1); removed += 1; } }
           tokenRows.push(row);
           const params = tokenParams(row);
-          exec(() => {
-            for (const t of removed) { const seq = tokenSeq.get(t); if (seq === undefined) throw new Error('outbox/push: a device token row of unknown seq cannot be replaced (the mirror and the table disagree; reload() first)'); stmt.tokenDelete.run(seq); }
-            tokenSeq.set(row, Number(stmt.token.run(params).lastInsertRowid));
-          });
-          return { removed: removed.length, row: readonlyView(row, 'a device push token') };
+          exec(() => { if (removed) stmt.tokenDelete.run(row.kind, row.refId, row.token); stmt.token.run(params); });
+          return { removed, row: readonlyView(row, 'a device push token') };
         });
       },
-      /** The sender's filter: every row registered under exactly this (kind, id), in insertion order, each a DETACHED copy whose `token` has the type it was registered with (never the JSON text). */
-      forAudience(kind, id) { const out = []; for (const t of tokenRows) if (t.kind === kind && t.refId === id) out.push(copyTokenRow(t)); return out; },
-      exportRows: () => tokenRows.map(copyTokenRow),
+      /** The sender's filter: every row registered under exactly this (kind, id), in insertion order, each a detached copy. */
+      forAudience(kind, id) { const out = []; for (const t of tokenRows) if (t.kind === kind && t.refId === id) out.push(copyRow(t)); return out; },
+      exportRows: () => tokenRows.map(copyRow),
     },
 
     // ---------------------------------------------------------- the save hook (staged mode)
@@ -621,13 +555,13 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
     /** The store reports a failed save: nothing the flush ran exists; the writes stay queued for the next save (memory is the intended state). */
     rollback() { inFlight = 0; },
     /** Unit-of-work participation: the mirror rows (by identity, restored in place) and the queue length when the unit began. */
-    snapshotState: () => ({ pendingLength: pending.length, outbox: outboxRows.map((r) => [r, copyOutboxRow(r)]), pushLog: pushRows.map((r) => [r, copyRow(r)]), pushTokens: tokenRows.map((r) => [r, copyTokenRow(r)]) }),
+    snapshotState: () => ({ pendingLength: pending.length, outbox: outboxRows.map((r) => [r, copyRow(r)]), pushLog: pushRows.map((r) => [r, copyRow(r)]), pushTokens: tokenRows.map((r) => [r, copyRow(r)]) }),
     restoreState(state) {
       if (!state) return;
       pending.length = state.pendingLength; inFlight = 0;
-      restoreList(outboxRows, state.outbox, 'to'); outboxById.clear(); for (const r of outboxRows) outboxById.set(r.id, r);
+      restoreList(outboxRows, state.outbox); outboxById.clear(); for (const r of outboxRows) outboxById.set(r.id, r);
       restoreList(pushRows, state.pushLog);
-      restoreList(tokenRows, state.pushTokens, 'token');
+      restoreList(tokenRows, state.pushTokens);
     },
     /** What the store registers (staged mode; and immediate mode with a `unit`, before any operation may join one). Taking it is the registration this repository can see. */
     saveHook: () => { hookTaken = true; return { flush: () => repo.flush(), commit: () => repo.commit(), rollback: () => repo.rollback(), snapshotState: () => repo.snapshotState(), restoreState: (s) => repo.restoreState(s) }; },

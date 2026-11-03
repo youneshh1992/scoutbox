@@ -14,21 +14,18 @@
  * audience, channel, to, provider, status, skipReason, providerMessageId,
  * attempts, nextAt, actionDeadline, createdAt, deliveredAt, openedAt,
  * actionedAt, failedAt, failReason } — null (never absent) when a value is
- * unset. The import requires every one of those keys and normalises NOTHING:
- * a key that is absent is a row this build never wrote, refused by name.
- * Unknown OWN keys (a legacy row an older tool annotated) are kept in
- * `extra_json` and spread back first on export, as the S7a repository does
- * (an own "__proto__" key is data: `Object.defineProperty`, never assignment).
- * UNKNOWN NESTED DATA IS DETACHED (review of 26d492b, finding 2): an unknown
- * field is copied as a prototype-safe JSON clone at ingress (create, import,
- * snapshot replace), on export and in every transaction snapshot, so a caller
- * that mutates its input after `create`, or a returned export, never changes
- * the mirror; a value JSON cannot carry (undefined, a function, a symbol, a
- * bigint, a non-finite number, a class instance) refuses the whole write by
- * name — nothing is dropped or nulled silently. The read-only views refuse a
- * nested write as they refuse a top-level one.
- * The audience refuses unknown fields (its two columns are all the schema
- * keeps). Vocabularies are OPEN: any non-empty status, channel or provider is
+ * unset. The import requires every one of those keys: a key that is absent is
+ * a row this build never wrote, refused by name.
+ * TYPED COLUMNS, VALID INPUT ONLY (the S8d fidelity rule, 3 November 2026): a
+ * record is its typed columns and nothing else. An unknown field is never
+ * stored: the migration's import DROPS it (top level, inside the audience or
+ * inside an attempt) and REPORTS it by dispatch id and field name in the
+ * cutover record (`unknownFieldsDropped`, `notes`); `create` and a snapshot
+ * replace drop an unknown top-level field silently and refuse an unknown
+ * audience or attempt field by name, as they always did. A wrong-typed value
+ * for a column refuses the write by name (field and entry, never content).
+ * The read-only views refuse a nested write as they refuse a top-level one.
+ * Vocabularies are OPEN: any non-empty status, channel or provider is
  * stored as written (the ladder's RANK lives in m13/delivery.mjs, not here);
  * `failReason` is stored untruncated; no uniqueness of (notification, channel)
  * and none of `providerMessageId` — duplicates are legal.
@@ -119,7 +116,9 @@
  * legacy shape exactly, one entry per row, attempts nested, in insertion
  * order. An entry the validators refuse refuses the whole write (a save, the
  * migration) with DISPATCHES_IMPORT_BLOCKED, naming the entry index and the
- * reason and NEVER an address, a provider id or a provider text.
+ * reason and NEVER an address, a provider id or a provider text. Reads build
+ * the record from the typed columns only, the eighteen keys in the literal's
+ * order.
  */
 import { readonlyView } from './readonly.mjs';
 import { migrationApplied, transaction } from './database.mjs';
@@ -149,8 +148,7 @@ CREATE TABLE dispatches (
   opened_at           REAL,
   actioned_at         INTEGER,
   failed_at           INTEGER,
-  fail_reason         TEXT,
-  extra_json          TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  fail_reason         TEXT
 ) STRICT;
 CREATE INDEX dispatches_notification ON dispatches (notification_id);
 CREATE INDEX dispatches_provider_message ON dispatches (provider_message_id);
@@ -177,31 +175,6 @@ const isInt = (v) => Number.isSafeInteger(v);
 const isFiniteNumber = (v) => typeof v === 'number' && Number.isFinite(v);
 const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
 const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
-/** Set an own data property — never `obj[k] = v`, which for an own "__proto__" key of parsed JSON would rewrite the prototype and lose the field. */
-const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
-/**
- * A DETACHED, prototype-safe copy of a JSON value (review of 26d492b, finding
- * 2): null, booleans, strings, finite numbers, arrays and plain objects, every
- * own key copied with `setOwn` at every depth (an own "__proto__", "constructor"
- * or "toString" key is data). Anything JSON cannot carry — undefined, a
- * function, a symbol, a bigint, a non-finite number, a class instance — is
- * refused by name, never dropped or coerced (`JSON.stringify` would drop or
- * null it silently). Returns `{ value }` or `{ reason }`.
- */
-function cloneJson(v, at) {
-  if (v === null || typeof v === 'string' || typeof v === 'boolean') return { value: v };
-  if (typeof v === 'number') return Number.isFinite(v) ? { value: v } : { reason: `${at} is a non-finite number and cannot be stored as JSON` };
-  if (Array.isArray(v)) { const out = []; for (let i = 0; i < v.length; i++) { const r = cloneJson(v[i], `${at}[${i}]`); if (r.reason) return r; out.push(r.value); } return { value: out }; }
-  if (typeof v === 'object') {
-    const proto = Object.getPrototypeOf(v);
-    if (proto !== Object.prototype && proto !== null) return { reason: `${at} is not a plain object and cannot be stored as JSON` };
-    const out = {}; for (const k of Object.keys(v)) { const r = cloneJson(v[k], `${at}.${k}`); if (r.reason) return r; setOwn(out, k, r.value); } return { value: out };
-  }
-  return { reason: `${at} (${typeof v}) cannot be stored as JSON` };
-}
-/** The unknown own fields of a mirror row, each a detached copy (the mirror only ever holds values `cloneJson` accepted). */
-function cloneExtras(row) { const extra = {}; for (const k of Object.keys(row)) if (!DISPATCH_KEYS.includes(k)) setOwn(extra, k, cloneJson(row[k], k).value); return extra; }
-
 // ------------------------------------------------------------------ validation (no coercion; every refusal names the reason, never an address or a text)
 /** The eighteen keys of the literal every build since M13 wrote, in its order. */
 export const DISPATCH_KEYS = Object.freeze(['id', 'notificationId', 'audience', 'channel', 'to', 'provider', 'status', 'skipReason', 'providerMessageId', 'attempts', 'nextAt', 'actionDeadline', 'createdAt', 'deliveredAt', 'openedAt', 'actionedAt', 'failedAt', 'failReason']);
@@ -211,24 +184,31 @@ const NOTE_KEYS = Object.freeze(['at', 'note']);
 /** The fields the sweep and the callback route change after a row exists; everything else is fixed at creation. */
 const PATCH_KEYS = Object.freeze(['status', 'providerMessageId', 'nextAt', 'deliveredAt', 'openedAt', 'actionedAt', 'failedAt', 'failReason']);
 
-function audienceOf(raw, field = 'audience') {
+/**
+ * Unknown fields of a nested object: with `dropped` (the migration's import) they are dropped and their
+ * names collected; without it (create, a snapshot replace) they refuse the write, as they always did.
+ */
+const unknownFields = (raw, known, field, dropped) => {
+  const unknown = Object.keys(raw).filter((k) => !known.includes(k));
+  if (!unknown.length) return null;
+  if (dropped) { for (const k of unknown) dropped.push(`${field}.${k}`); return null; }
+  return `${field} carries unknown field(s) ${unknown.join(', ')}`;
+};
+function audienceOf(raw, field = 'audience', dropped = null) {
   if (!isPlainObject(raw)) return { reason: `${field} must be an object { kind, id } (got ${describe(raw)})` };
-  const unknown = Object.keys(raw).filter((k) => !AUDIENCE_KEYS.includes(k));
-  if (unknown.length) return { reason: `${field} carries unknown field(s) ${unknown.join(', ')} (the schema keeps an audience as kind and id only; a field dropped here would be lost)` };
+  const unknown = unknownFields(raw, AUDIENCE_KEYS, field, dropped); if (unknown) return { reason: unknown };
   if (!nonEmpty(raw.kind)) return { reason: `${field}.kind must be a non-empty string` };
   if (!nonEmpty(raw.id)) return { reason: `${field}.id must be a non-empty string` };
   return { audience: { kind: raw.kind, id: raw.id } };
 }
 /** Validate one attempt entry: `{ attempt }` (a plain copy in its shape) or `{ reason }`. */
-export function attemptOf(raw, field = 'attempt') {
+export function attemptOf(raw, field = 'attempt', dropped = null) {
   if (!isPlainObject(raw)) return { reason: `${field} must be an object (got ${describe(raw)})` };
-  const keys = Object.keys(raw);
   const hasNote = Object.hasOwn(raw, 'note'); const hasOk = Object.hasOwn(raw, 'ok');
   if (hasNote && hasOk) return { reason: `${field} carries both note and ok (a send row and a quiet re-check row are different shapes)` };
   const shape = hasNote ? NOTE_KEYS : hasOk && Object.hasOwn(raw, 'error') ? SEND_KEYS : null;
   if (!shape) return { reason: `${field} is neither a send row {at, ok, error} nor a quiet re-check row {at, note}` };
-  const unknown = keys.filter((k) => !shape.includes(k));
-  if (unknown.length) return { reason: `${field} carries unknown field(s) ${unknown.join(', ')}` };
+  const unknown = unknownFields(raw, shape, field, dropped); if (unknown) return { reason: unknown };
   if (!isInt(raw.at)) return { reason: `${field}.at must be an integer timestamp` };
   if (hasNote) {
     if (!nonEmpty(raw.note)) return { reason: `${field}.note must be a non-empty string` };
@@ -241,13 +221,19 @@ export function attemptOf(raw, field = 'attempt') {
 const stringOrNull = (v) => v === null || typeof v === 'string';
 const intOrNull = (v) => v === null || isInt(v);
 const finiteOrNull = (v) => v === null || isFiniteNumber(v);
-/** Validate one exported dispatch: `{ ok: true, row, hasExtra }` or `{ ok: false, reason }`. The row is the mirror shape (a plain copy, attempts copied). */
-export function validateDispatchRow(raw) {
+/**
+ * Validate one exported dispatch: `{ ok: true, row, dropped }` or `{ ok: false, reason }`. The row is the mirror
+ * shape (the eighteen keys, a plain copy, attempts copied); an unknown top-level field is never part of it and is
+ * listed in `dropped`. `importing` (the migration) also drops unknown audience / attempt fields instead of refusing.
+ */
+export function validateDispatchRow(raw, { importing = false } = {}) {
   if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
   for (const k of DISPATCH_KEYS) if (!Object.hasOwn(raw, k)) return { ok: false, reason: `${k} is absent (every build wrote all 18 keys; nothing is normalised)` };
   if (!nonEmpty(raw.id)) return { ok: false, reason: 'id must be a non-empty string' };
   if (!nonEmpty(raw.notificationId)) return { ok: false, reason: 'notificationId must be a non-empty string' };
-  const a = audienceOf(raw.audience); if (a.reason) return { ok: false, reason: a.reason };
+  const dropped = Object.keys(raw).filter((k) => !DISPATCH_KEYS.includes(k));
+  const nested = importing ? dropped : null;
+  const a = audienceOf(raw.audience, 'audience', nested); if (a.reason) return { ok: false, reason: a.reason };
   if (!nonEmpty(raw.channel)) return { ok: false, reason: 'channel must be a non-empty string' };
   if (!stringOrNull(raw.to)) return { ok: false, reason: 'to must be a string or null' };
   if (!nonEmpty(raw.provider)) return { ok: false, reason: 'provider must be a non-empty string' };
@@ -256,7 +242,7 @@ export function validateDispatchRow(raw) {
   if (!stringOrNull(raw.providerMessageId)) return { ok: false, reason: 'providerMessageId must be a string or null' };
   if (!Array.isArray(raw.attempts)) return { ok: false, reason: `attempts must be an array (got ${describe(raw.attempts)})` };
   const attempts = [];
-  for (let i = 0; i < raw.attempts.length; i++) { const v = attemptOf(raw.attempts[i], `attempts[${i}]`); if (v.reason) return { ok: false, reason: v.reason }; attempts.push(v.attempt); }
+  for (let i = 0; i < raw.attempts.length; i++) { const v = attemptOf(raw.attempts[i], `attempts[${i}]`, nested); if (v.reason) return { ok: false, reason: v.reason }; attempts.push(v.attempt); }
   if (!isInt(raw.nextAt)) return { ok: false, reason: 'nextAt must be an integer timestamp' };
   if (!intOrNull(raw.actionDeadline)) return { ok: false, reason: 'actionDeadline must be an integer timestamp or null' };
   if (!isInt(raw.createdAt)) return { ok: false, reason: 'createdAt must be an integer timestamp' };
@@ -265,30 +251,32 @@ export function validateDispatchRow(raw) {
   if (!intOrNull(raw.actionedAt)) return { ok: false, reason: 'actionedAt must be an integer timestamp or null' };
   if (!intOrNull(raw.failedAt)) return { ok: false, reason: 'failedAt must be an integer timestamp or null' };
   if (!stringOrNull(raw.failReason)) return { ok: false, reason: 'failReason must be a string or null' };
-  const extra = {};
-  for (const k of Object.keys(raw)) if (!DISPATCH_KEYS.includes(k)) { const c = cloneJson(raw[k], k); if (c.reason) return { ok: false, reason: c.reason }; setOwn(extra, k, c.value); }
-  const row = { ...extra, id: raw.id, notificationId: raw.notificationId, audience: a.audience, channel: raw.channel, to: raw.to, provider: raw.provider, status: raw.status, skipReason: raw.skipReason, providerMessageId: raw.providerMessageId, attempts, nextAt: raw.nextAt, actionDeadline: raw.actionDeadline, createdAt: raw.createdAt, deliveredAt: raw.deliveredAt, openedAt: raw.openedAt, actionedAt: raw.actionedAt, failedAt: raw.failedAt, failReason: raw.failReason };
-  return { ok: true, row, hasExtra: Object.keys(extra).length > 0 };
+  const row = { id: raw.id, notificationId: raw.notificationId, audience: a.audience, channel: raw.channel, to: raw.to, provider: raw.provider, status: raw.status, skipReason: raw.skipReason, providerMessageId: raw.providerMessageId, attempts, nextAt: raw.nextAt, actionDeadline: raw.actionDeadline, createdAt: raw.createdAt, deliveredAt: raw.deliveredAt, openedAt: raw.openedAt, actionedAt: raw.actionedAt, failedAt: raw.failedAt, failReason: raw.failReason };
+  return { ok: true, row, dropped };
 }
-/** Validate a whole exported dispatches collection; throws DISPATCHES_IMPORT_BLOCKED (entries and reasons, never an address). Returns `{ rows, attempts, withExtraFields, byStatus }`. */
-export function validateDispatchRows(rows, { label = 'the dispatches collection' } = {}) {
+/**
+ * Validate a whole exported dispatches collection; throws DISPATCHES_IMPORT_BLOCKED (entries and reasons, never an
+ * address). Returns `{ rows, attempts, byStatus, unknownFieldsDropped, notes }`: the rows that had a field dropped
+ * and one note per such row (dispatch id and field names only, never a value).
+ */
+export function validateDispatchRows(rows, { label = 'the dispatches collection', importing = false } = {}) {
   if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
-  const out = []; const problems = []; const ids = new Set();
-  let attempts = 0; let withExtraFields = 0; const byStatus = {};
+  const out = []; const problems = []; const ids = new Set(); const notes = [];
+  let attempts = 0; const byStatus = {};
   rows.forEach((raw, i) => {
-    const v = validateDispatchRow(raw);
+    const v = validateDispatchRow(raw, { importing });
     if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
     if (ids.has(v.row.id)) { problems.push(`entry #${i}: duplicates the id of an earlier entry (${v.row.id})`); return; }
-    ids.add(v.row.id); attempts += v.row.attempts.length; if (v.hasExtra) withExtraFields += 1; byStatus[v.row.status] = (byStatus[v.row.status] ?? 0) + 1;
+    ids.add(v.row.id); attempts += v.row.attempts.length; if (v.dropped.length) notes.push(`dispatch ${v.row.id}: unknown field(s) ${v.dropped.join(', ')} dropped`); byStatus[v.row.status] = (byStatus[v.row.status] ?? 0) + 1;
     out.push(v.row);
   });
   if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  return { rows: out, attempts, withExtraFields, byStatus };
+  return { rows: out, attempts, byStatus, unknownFieldsDropped: notes.length, notes };
 }
 
 // ------------------------------------------------------------------ rows ↔ the tables
-const SELECT = 'SELECT seq, id, notification_id, audience_kind, audience_id, channel, to_address, provider, status, skip_reason, provider_message_id, next_at, action_deadline_at, created_at, delivered_at, opened_at, actioned_at, failed_at, fail_reason, extra_json FROM dispatches';
-const INSERT = 'INSERT INTO dispatches (id, notification_id, audience_kind, audience_id, channel, to_address, provider, status, skip_reason, provider_message_id, next_at, action_deadline_at, created_at, delivered_at, opened_at, actioned_at, failed_at, fail_reason, extra_json) VALUES (@id, @notification_id, @audience_kind, @audience_id, @channel, @to_address, @provider, @status, @skip_reason, @provider_message_id, @next_at, @action_deadline_at, @created_at, @delivered_at, @opened_at, @actioned_at, @failed_at, @fail_reason, @extra_json)';
+const SELECT = 'SELECT seq, id, notification_id, audience_kind, audience_id, channel, to_address, provider, status, skip_reason, provider_message_id, next_at, action_deadline_at, created_at, delivered_at, opened_at, actioned_at, failed_at, fail_reason FROM dispatches';
+const INSERT = 'INSERT INTO dispatches (id, notification_id, audience_kind, audience_id, channel, to_address, provider, status, skip_reason, provider_message_id, next_at, action_deadline_at, created_at, delivered_at, opened_at, actioned_at, failed_at, fail_reason) VALUES (@id, @notification_id, @audience_kind, @audience_id, @channel, @to_address, @provider, @status, @skip_reason, @provider_message_id, @next_at, @action_deadline_at, @created_at, @delivered_at, @opened_at, @actioned_at, @failed_at, @fail_reason)';
 /** The attempt insert resolves the dispatch's seq by id, so it works queued (staged mode) before the dispatch's own INSERT has run. */
 const INSERT_ATTEMPT = 'INSERT INTO dispatch_attempts (dispatch_seq, seq, kind, attempted_at, ok, error, note) SELECT seq, ?, ?, ?, ?, ?, ? FROM dispatches WHERE id = ?';
 const SELECT_ATTEMPTS = 'SELECT dispatch_seq, seq, kind, attempted_at, ok, error, note FROM dispatch_attempts ORDER BY dispatch_seq, seq';
@@ -296,10 +284,7 @@ const attemptFromDb = (r) => (r.kind === 'quiet_recheck' ? { at: r.attempted_at,
 const attemptParams = (a) => (Object.hasOwn(a, 'note') ? ['quiet_recheck', a.at, null, null, a.note] : ['send', a.at, a.ok ? 1 : 0, a.error, null]);
 /** The mirror row for a table row (attempts attached by the reader). */
 function rowFromDb(r, attempts) {
-  const extra = r.extra_json ? JSON.parse(r.extra_json) : {};
-  const row = { ...extra, id: r.id, notificationId: r.notification_id, audience: { kind: r.audience_kind, id: r.audience_id }, channel: r.channel, to: r.to_address, provider: r.provider, status: r.status, skipReason: r.skip_reason, providerMessageId: r.provider_message_id, attempts, nextAt: r.next_at, actionDeadline: r.action_deadline_at, createdAt: r.created_at, deliveredAt: r.delivered_at, openedAt: r.opened_at, actionedAt: r.actioned_at, failedAt: r.failed_at, failReason: r.fail_reason };
-  // `{ ...extra }` copies an own "__proto__" key as an own key (spread uses CreateDataProperty); nothing else is needed.
-  return row;
+  return { id: r.id, notificationId: r.notification_id, audience: { kind: r.audience_kind, id: r.audience_id }, channel: r.channel, to: r.to_address, provider: r.provider, status: r.status, skipReason: r.skip_reason, providerMessageId: r.provider_message_id, attempts, nextAt: r.next_at, actionDeadline: r.action_deadline_at, createdAt: r.created_at, deliveredAt: r.delivered_at, openedAt: r.opened_at, actionedAt: r.actioned_at, failedAt: r.failed_at, failReason: r.fail_reason };
 }
 /**
  * What the file holds for a callback clock: the number itself when finite, NULL
@@ -309,16 +294,15 @@ function rowFromDb(r, attempts) {
  */
 const storedClock = (v) => (typeof v === 'number' && !Number.isFinite(v) ? null : v);
 function rowParams(row) {
-  const extra = cloneExtras(row);
   return {
     id: row.id, notification_id: row.notificationId, audience_kind: row.audience.kind, audience_id: row.audience.id, channel: row.channel, to_address: row.to, provider: row.provider, status: row.status,
     skip_reason: row.skipReason, provider_message_id: row.providerMessageId, next_at: row.nextAt, action_deadline_at: row.actionDeadline, created_at: row.createdAt, delivered_at: storedClock(row.deliveredAt), opened_at: storedClock(row.openedAt),
-    actioned_at: row.actionedAt, failed_at: row.failedAt, fail_reason: row.failReason, extra_json: Object.keys(extra).length ? JSON.stringify(extra) : null,
+    actioned_at: row.actionedAt, failed_at: row.failedAt, fail_reason: row.failReason,
   };
 }
 const copyAttempt = (a) => ({ ...a });
-/** A DETACHED copy of a mirror row (the transaction snapshot shape: nothing shared with the mirror, unknown nested data cloned, the in-memory clocks as they are). */
-const copyRow = (row) => { const c = { ...row, audience: { ...row.audience }, attempts: row.attempts.map(copyAttempt) }; for (const k of Object.keys(row)) if (!DISPATCH_KEYS.includes(k)) setOwn(c, k, cloneJson(row[k], k).value); return c; };
+/** A DETACHED copy of a mirror row (the transaction snapshot shape: nothing shared with the mirror, the in-memory clocks as they are). */
+const copyRow = (row) => ({ ...row, audience: { ...row.audience }, attempts: row.attempts.map(copyAttempt) });
 /** The export / snapshot-file shape: a detached copy whose callback clocks are what JSON carries (a non-finite in-memory clock → null, as the previous build's save wrote it). */
 const exportRow = (row) => { const c = copyRow(row); c.deliveredAt = storedClock(row.deliveredAt); c.openedAt = storedClock(row.openedAt); return c; };
 
@@ -362,22 +346,23 @@ export const DISPATCHES_TABLE = {
  * transaction: validation of every entry, insertion in array order (attempts
  * in their positions), the blob row retired. Orphan references — a
  * notificationId with no row in `notifications` — are imported unchanged and
- * counted. Returns the counts the migration records in `meta`.
+ * counted; unknown fields are dropped and reported (dispatch id and field names). Returns the counts and notes the
+ * migration records in `meta`.
  */
 export function importDispatchesBlob(sqlite) {
-  let counts = { imported: 0, attempts: 0, withExtraFields: 0, orphanReferences: 0, byStatus: {} };
+  let counts = { imported: 0, attempts: 0, unknownFieldsDropped: 0, orphanReferences: 0, byStatus: {}, notes: [] };
   const hasCollections = tableExists(sqlite, 'collections');
   const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get('dispatches') : null;
   if (row) {
     let parsed; try { parsed = JSON.parse(row.value); } catch { throw blocked('the dispatches blob is not valid JSON'); }
-    const v = validateDispatchRows(parsed, { label: 'the dispatches blob' });
+    const v = validateDispatchRows(parsed, { label: 'the dispatches blob', importing: true });
     writeRows(sqlite, v.rows);
     let orphanReferences = 0;
     if (tableExists(sqlite, 'notifications')) {
       const exists = sqlite.prepare('SELECT 1 FROM notifications WHERE id = ?');
       for (const r of v.rows) if (!exists.get(r.notificationId)) orphanReferences += 1;
     } else orphanReferences = v.rows.length;
-    counts = { imported: v.rows.length, attempts: v.attempts, withExtraFields: v.withExtraFields, orphanReferences, byStatus: v.byStatus };
+    counts = { imported: v.rows.length, attempts: v.attempts, unknownFieldsDropped: v.unknownFieldsDropped, orphanReferences, byStatus: v.byStatus, notes: v.notes };
     sqlite.prepare("DELETE FROM collections WHERE name = 'dispatches'").run();
   }
   return { dispatches: counts };
@@ -441,7 +426,7 @@ export function createDispatchesRepository({ sqlite, now = Date.now, log = () =>
     for (const [k, v] of Object.entries(copy)) {
       if (k === 'audience' && obj.audience) { for (const c of Object.keys(obj.audience)) delete obj.audience[c]; Object.assign(obj.audience, v); continue; }
       if (k === 'attempts' && Array.isArray(obj.attempts)) { obj.attempts.length = 0; for (const a of v) obj.attempts.push(copyAttempt(a)); continue; }
-      setOwn(obj, k, DISPATCH_KEYS.includes(k) ? v : cloneJson(v, k).value); // unknown nested data: a fresh detached copy, never the snapshot's object
+      obj[k] = v;
     }
   };
   // deliveredAt / openedAt accept ANY number: a finite clock as the route
@@ -544,7 +529,7 @@ export function createDispatchesRepository({ sqlite, now = Date.now, log = () =>
       });
     },
 
-    /** Every row in the legacy export shape (attempts nested, unknown nested data detached, callback clocks as JSON carries them), in insertion order (the admin backup; the mirror is the intended state, like every blob collection). */
+    /** Every row in the legacy export shape (attempts nested, detached copies, callback clocks as JSON carries them), in insertion order (the admin backup; the mirror is the intended state, like every blob collection). */
     exportRows: () => rows.map(exportRow),
 
     // ---------------------------------------------------------- the save hook (staged mode)

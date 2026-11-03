@@ -12,8 +12,10 @@
  *      checked, nothing is coerced; the array position becomes the durable
  *      ordering key; a pre-M18.2 row is normalised exactly as the snapshot
  *      migration m182_005 normalised it (repeatCount 1) and the absent optional
- *      fields default, each normalisation counted; unknown fields are kept in
- *      `extra_json`; a stored mandatory preference `false` is imported as it is.
+ *      fields default, each normalisation counted; an unknown top-level field
+ *      of a notification is dropped and the row id reported
+ *      (`unknownFieldsDropped`); a stored mandatory preference `false` is
+ *      imported as it is.
  *      ANY refusal aborts the whole migration with NOTIFICATIONS_IMPORT_BLOCKED
  *      (entry indexes and reasons, never a text): the runner rolls back, the
  *      file is byte-identical, the next boot refuses the same way until the blob

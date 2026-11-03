@@ -8,6 +8,11 @@
  * the exact row shapes routes have always seen: a field that is unset is
  * absent, not null, so no response changes shape.
  *
+ * Typed columns, valid input only: a record holds the named fields and
+ * nothing else. Unknown keys are not stored (a legacy blob import drops them
+ * and reports each with the row id); a known field of the wrong type is
+ * refused by name, never stored.
+ *
  * node:sqlite is required: the repository has no in-memory engine, and
  * `createUsersRepository` refuses a missing connection (store.mjs refuses to
  * open at all without node:sqlite, before any data is touched).
@@ -15,15 +20,33 @@
 import { readonlyView } from './readonly.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 
-/** Fields with a column of their own; everything else is kept in extra_json. */
-const COLUMNS = {
+/**
+ * The typed columns (the fidelity rule, 3 November 2026: typed columns, valid
+ * input only). A record holds these fields and nothing else; a field the
+ * schema does not name is not stored.
+ */
+const STRINGS = {
   orgId: 'org_id', name: 'name', role: 'role', email: 'email', ssoSubject: 'sso_subject',
-  createdAt: 'created_at', removedAt: 'removed_at', removedBy: 'removed_by', provenance: 'provenance',
+  removedBy: 'removed_by', provenance: 'provenance',
 };
-const JSON_COLUMNS = { mfa: 'mfa_json', deliveryPrefs: 'delivery_prefs_json' };
-const KNOWN = new Set(['id', ...Object.keys(COLUMNS), ...Object.keys(JSON_COLUMNS)]);
+const INTEGERS = { createdAt: 'created_at', removedAt: 'removed_at' };
+const OBJECTS = { mfa: 'mfa_json', deliveryPrefs: 'delivery_prefs_json' };
+const KNOWN = new Set(['id', ...Object.keys(STRINGS), ...Object.keys(INTEGERS), ...Object.keys(OBJECTS)]);
 
-const SELECT = 'SELECT id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json FROM org_users';
+const SELECT = 'SELECT id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json FROM org_users';
+const COLUMN_LIST = 'id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json';
+const PARAM_LIST = '@id, @org_id, @name, @role, @email, @sso_subject, @created_at, @removed_at, @removed_by, @provenance, @mfa_json, @delivery_prefs_json';
+
+const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** Why `value` cannot be stored as `key`, or null when it can (null/undefined mean "unset" and always can). */
+function offType(key, value) {
+  if (value === undefined || value === null) return null;
+  if (key in STRINGS) return typeof value === 'string' ? null : 'must be text';
+  if (key in INTEGERS) return Number.isSafeInteger(value) ? null : 'must be an integer timestamp';
+  if (key in OBJECTS) return isPlainObject(value) ? null : 'must be an object';
+  return null;
+}
 
 function toRow(dbRow) {
   const row = { id: dbRow.id, orgId: dbRow.org_id, name: dbRow.name };
@@ -36,13 +59,11 @@ function toRow(dbRow) {
   if (dbRow.provenance != null) row.provenance = dbRow.provenance;
   if (dbRow.mfa_json != null) row.mfa = JSON.parse(dbRow.mfa_json);
   if (dbRow.delivery_prefs_json != null) row.deliveryPrefs = JSON.parse(dbRow.delivery_prefs_json);
-  if (dbRow.extra_json != null) Object.assign(row, JSON.parse(dbRow.extra_json));
   return row;
 }
 
+/** Column parameters for a record whose known fields are already typed (unknown keys are ignored). */
 function toParams(row) {
-  const extra = {};
-  for (const key of Object.keys(row)) if (!KNOWN.has(key)) extra[key] = row[key];
   return {
     id: row.id, org_id: row.orgId, name: row.name, role: row.role ?? null,
     email: row.email ?? null, sso_subject: row.ssoSubject ?? null,
@@ -50,8 +71,40 @@ function toParams(row) {
     provenance: row.provenance ?? null,
     mfa_json: row.mfa == null ? null : JSON.stringify(row.mfa),
     delivery_prefs_json: row.deliveryPrefs == null ? null : JSON.stringify(row.deliveryPrefs),
-    extra_json: Object.keys(extra).length ? JSON.stringify(extra) : null,
   };
+}
+
+/** The record's known, set fields only (a copy); unknown keys and unset values are left out. */
+function knownFields(row) {
+  const out = {};
+  for (const key of Object.keys(row)) if (KNOWN.has(key) && row[key] !== undefined && row[key] !== null) out[key] = clone(row[key]);
+  return out;
+}
+
+/**
+ * Type a staff row from a legacy blob for import: unknown fields and
+ * wrong-typed optional values are dropped, each reported with the row id and
+ * field name (never the value). The caller has already checked isStaffRow.
+ */
+function typeForImport(raw) {
+  const notes = [];
+  const record = {};
+  for (const key of Object.keys(raw)) {
+    if (!KNOWN.has(key)) { notes.push(`staff ${raw.id}: unknown field ${key} dropped`); continue; }
+    const why = offType(key, raw[key]);
+    if (why) { notes.push(`staff ${raw.id}: ${key} ${why}; dropped`); continue; }
+    if (raw[key] !== undefined && raw[key] !== null) record[key] = clone(raw[key]);
+  }
+  return { record, notes };
+}
+
+/** Refuse (by code, id and field, never the value) a record whose known field holds the wrong type. */
+function refuseOffType(row, code) {
+  for (const key of Object.keys(row)) {
+    if (!KNOWN.has(key)) continue;
+    const why = offType(key, row[key]);
+    if (why) throw new TypeError(`${code}: staff ${typeof row.id === 'string' ? row.id : '(no id)'}: ${key} ${why}`);
+  }
 }
 
 const clone = (v) => (v === null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v)));
@@ -88,19 +141,41 @@ export const USERS_TABLE = {
    */
   replace(sqlite, rows, { prune = true } = {}) {
     if (!cutOver(sqlite)) return false;
-    const keep = [];
-    const upsert = sqlite.prepare(`INSERT INTO org_users (id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json)
-      VALUES (@id, @org_id, @name, @role, @email, @sso_subject, @created_at, @removed_at, @removed_by, @provenance, @mfa_json, @delivery_prefs_json, @extra_json)
+    const list = (Array.isArray(rows) ? rows : []).filter(isStaffRow);
+    // Unknown keys are not stored; a known field of the wrong type refuses the
+    // whole write before any row is touched.
+    for (const row of list) refuseOffType(row, 'ORG_USERS_SNAPSHOT_INVALID');
+    const upsert = sqlite.prepare(`INSERT INTO org_users (${COLUMN_LIST}) VALUES (${PARAM_LIST})
       ON CONFLICT(id) DO UPDATE SET org_id = excluded.org_id, name = excluded.name, role = excluded.role, email = excluded.email, sso_subject = excluded.sso_subject,
         created_at = excluded.created_at, removed_at = excluded.removed_at, removed_by = excluded.removed_by, provenance = excluded.provenance,
-        mfa_json = excluded.mfa_json, delivery_prefs_json = excluded.delivery_prefs_json, extra_json = excluded.extra_json`);
-    for (const row of Array.isArray(rows) ? rows : []) {
-      if (!isStaffRow(row)) continue;
-      upsert.run(toParams(clone(row)));
-      keep.push(row.id);
-    }
+        mfa_json = excluded.mfa_json, delivery_prefs_json = excluded.delivery_prefs_json`);
+    for (const row of list) upsert.run(toParams(knownFields(row)));
     if (prune) USERS_TABLE.prune(sqlite, rows);
     return true;
+  },
+  /**
+   * Import a legacy `users` blob into an empty table (the sessions cutover,
+   * migration 0003, does this on a pre-S0 file; the caller owns the
+   * transaction). Entries that are not staff rows are skipped; unknown fields
+   * and wrong-typed optional values are dropped. Returns counts and the notes
+   * (row ids and field names only) for the caller's cutover record.
+   */
+  importLegacy(sqlite, rows) {
+    const given = Array.isArray(rows) ? rows : [];
+    const insert = sqlite.prepare(`INSERT INTO org_users (${COLUMN_LIST}) VALUES (${PARAM_LIST})`);
+    const notes = [];
+    const seen = new Set();
+    let imported = 0, normalised = 0;
+    for (const raw of given) {
+      if (!isStaffRow(raw)) continue;
+      if (seen.has(raw.id)) { notes.push(`staff ${raw.id}: duplicate id; the later entry skipped`); continue; }
+      seen.add(raw.id);
+      const t = typeForImport(raw);
+      insert.run(toParams(t.record));
+      imported += 1;
+      if (t.notes.length) { normalised += 1; notes.push(...t.notes); }
+    }
+    return { imported, skipped: given.length - imported, normalised, notes };
   },
   /** Delete every staff row whose id is absent from `rows` (the second half of `replace`; the caller owns the transaction). */
   prune(sqlite, rows) {
@@ -126,10 +201,9 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
     throw new Error(`org_users.${what} writes in a transaction of its own and cannot run inside an open transaction`);
   };
 
-  const insertStmt = sqlite.prepare(`INSERT INTO org_users (id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json)
-    VALUES (@id, @org_id, @name, @role, @email, @sso_subject, @created_at, @removed_at, @removed_by, @provenance, @mfa_json, @delivery_prefs_json, @extra_json)`);
+  const insertStmt = sqlite.prepare(`INSERT INTO org_users (${COLUMN_LIST}) VALUES (${PARAM_LIST})`);
   const updateStmt = sqlite.prepare(`UPDATE org_users SET org_id = @org_id, name = @name, role = @role, email = @email, sso_subject = @sso_subject, created_at = @created_at,
-    removed_at = @removed_at, removed_by = @removed_by, provenance = @provenance, mfa_json = @mfa_json, delivery_prefs_json = @delivery_prefs_json, extra_json = @extra_json WHERE id = @id`);
+    removed_at = @removed_at, removed_by = @removed_by, provenance = @provenance, mfa_json = @mfa_json, delivery_prefs_json = @delivery_prefs_json WHERE id = @id`);
 
   const remember = (target) => { rows.push(target); byIdMap.set(target.id, target); return readonlyView(target, 'a staff record'); };
 
@@ -139,7 +213,7 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
     // Every record created here has a role; a row imported from an older
     // snapshot may lack one, and an update must not refuse to touch it.
     if ((creating || row.role !== undefined) && (typeof row.role !== 'string' || !row.role.trim())) throw new TypeError('a staff record needs a role');
-    for (const key of Object.keys(row)) if (!KNOWN.has(key)) warn(`staff record field "${key}" has no column and is kept in extra_json; promote it in a data migration`);
+    for (const key of Object.keys(row)) { const why = offType(key, row[key]); if (why) throw new TypeError(`a staff record's ${key} ${why}`); }
   }
 
   const repo = {
@@ -159,10 +233,10 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
     /** Create a staff record; the id is assigned here, never by the caller. */
     insert(fields) {
       requireAutocommit('insert');
-      const target = { ...clone(fields) };
+      // Only the typed fields are kept: a key the schema does not name is not stored.
+      const target = knownFields(fields);
       delete target.id;
       target.createdAt ??= Date.now();
-      for (const key of Object.keys(target)) if (target[key] === undefined || target[key] === null) delete target[key];
       validate(target, { creating: true });
       // The id counter is persisted with the snapshot, which is debounced; a
       // row is written immediately. After an abrupt stop the counter can be
@@ -186,7 +260,7 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
       if (patch.id !== undefined && patch.id !== id) throw new TypeError('a staff record id never changes');
       const next = { ...target };
       for (const [key, value] of Object.entries(patch)) {
-        if (key === 'id' || value === undefined) continue;
+        if (key === 'id' || value === undefined || !KNOWN.has(key)) continue; // a key the schema does not name is not stored
         if (value === null) delete next[key]; else next[key] = clone(value);
       }
       validate(next);
@@ -207,10 +281,11 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
       if (legacy.length !== given.length) warn(`org_users: ${given.length - legacy.length} entry(ies) in the users blob are not staff rows (no id, organisation or name) and were not imported`);
       const stored = sqlite.prepare(`${SELECT} ORDER BY rowid`).all();
       if (stored.length === 0 && legacy.length) {
-        transaction(sqlite, () => { for (const u of legacy) insertStmt.run(toParams(clone(u))); });
-        log(`org_users: imported ${legacy.length} staff record(s) from the users blob`);
+        const result = transaction(sqlite, () => USERS_TABLE.importLegacy(sqlite, legacy));
+        for (const note of result.notes) warn(`org_users: ${note}`);
+        log(`org_users: imported ${result.imported} staff record(s) from the users blob${result.normalised ? `; ${result.normalised} with fields dropped` : ''}`);
         for (const u of sqlite.prepare(`${SELECT} ORDER BY rowid`).all()) remember(toRow(u));
-        return { engine: 'sqlite', loaded: rows.length, imported: legacy.length };
+        return { engine: 'sqlite', loaded: rows.length, imported: result.imported };
       }
       if (stored.length && legacy.length) {
         // The in-memory array may be the blob a data migration imported into

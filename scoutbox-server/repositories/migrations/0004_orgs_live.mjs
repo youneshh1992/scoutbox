@@ -21,7 +21,7 @@
  *      `facets_json` for every field that has not cut over yet); import the
  *      records;
  *   4. rebuild `org_users` STRICT with `org_id REFERENCES orgs(id)` and
- *      `json_valid` CHECKs on the three JSON columns, copying every row and
+ *      `json_valid` CHECKs on the two JSON columns, copying every row and
  *      recreating its four indexes. `sessions.org_user_id` keeps referencing
  *      `org_users` by name, so after the rename every session still points at
  *      its staff row; the runner's foreign_key_check proves it;
@@ -83,8 +83,7 @@ export const ORG_USERS_DDL = `
       removed_by          TEXT,
       provenance          TEXT,
       mfa_json            TEXT CHECK (mfa_json IS NULL OR json_valid(mfa_json)),
-      delivery_prefs_json TEXT CHECK (delivery_prefs_json IS NULL OR json_valid(delivery_prefs_json)),
-      extra_json          TEXT CHECK (extra_json IS NULL OR json_valid(extra_json))
+      delivery_prefs_json TEXT CHECK (delivery_prefs_json IS NULL OR json_valid(delivery_prefs_json))
     ) STRICT;
     CREATE INDEX org_users_org ON org_users (org_id);
     CREATE INDEX org_users_org_name ON org_users (org_id, lower(name));
@@ -92,7 +91,7 @@ export const ORG_USERS_DDL = `
     CREATE INDEX org_users_sso ON org_users (sso_subject);
 `;
 
-const ORG_USERS_COLUMNS = 'id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json, extra_json';
+const ORG_USERS_COLUMNS = 'id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json';
 
 export function up(sqlite, { now = Date.now() } = {}) {
   const hasCollections = !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'collections'").get();

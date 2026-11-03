@@ -25,32 +25,23 @@
  *   the RECEIPTS: `channel.readBy.org = Date.now()` / `channel.readBy.counterparty =
  *     Date.now()` by the three read routes.
  *
- * LOSSLESS, AT EVERY LEVEL (review of 46e5afe). Every present, JSON-compatible own
- * field a record carries that the mapping does not name is preserved — in
- * `extra_json` of the channel, the message or the attachment; the unknown own keys
- * INSIDE the known nested objects `readBy` and `sender` are kept under those known
- * key names inside the parent's `extra_json` (a known key never collides with an
- * unknown one). `orgUserIdForNotify` — never written by the current creator but
- * observable through the spread-based views and the export when a legacy record
- * carries it — is one such field, preserved exactly. Extras are spread back FIRST on
- * export (the S7a/S7b/S7c convention); copies are detached and prototype-safe (an
- * own "__proto__" key is data, `setOwn`). ABSENCE IS PRESERVED AS ABSENCE: the
- * optional literal keys (`playerName`, `orgVerified`, `scoutName`, `scoutRole`,
- * `guardianId`, `readBy.org`, `readBy.counterparty`, a message's `attachment`) may be
- * present-and-null or absent; a NULL column alone cannot tell the two apart, so the
- * row's `absent_keys_json` lists the literal keys that were ABSENT (NULL when every
- * key was present — the common case) and the way back manufactures no null and
- * drops no present value. A message's `clientMsgId` follows the writer's own rule:
- * present ⇔ a non-empty string, absent ⇔ NULL. Nothing is coerced, no vocabulary is
- * narrowed beyond the literal's own (`counterparty`, `sender.kind`, the attachment
- * `kind` — the three sets the writers produce), and a non-finite number inside a
- * live unknown field is kept live and persisted as the blob's JSON would have
- * written it (null; the S7c rule), never a refusal of the whole record.
+ * TYPED COLUMNS, VALID INPUT ONLY (the S8d fidelity rule, 3 November 2026). Every
+ * field is a typed column; there is no `extra_json` or `absent_keys_json`. A record
+ * read back is built from the columns alone: every channel key is present (an optional
+ * column that is NULL reads as null, the way openChannel writes it), `readBy` carries
+ * both receipts, a message always carries `attachment` (null or one of the two shapes)
+ * and carries `clientMsgId` only when it has one (the writer's own rule). Writes
+ * (`open`, `appendMessage`, a snapshot `replace`) drop unknown keys silently and refuse a
+ * wrong-typed value by field and id. The import (migration 0012) drops unknown fields
+ * and a wrong-typed optional value (an unusable attachment included) and REPORTS each
+ * with the record's id in `meta.channelsCutover.notes` and the boot log; it refuses only
+ * a record that is unusable (no id, a wrong-typed required field, a missing reference).
+ * The legacy `orgUserIdForNotify` was never written by any build and its one reader in
+ * postMessage was dead code; it is dropped like any unknown field.
  *
  * THE ORDERING KEYS. The channel list every reader sees is `db.channels` array
  * order: `seq INTEGER PRIMARY KEY`, assigned at insert, preserved by the migration
- * (array position), by backup/restore and by the rollback (rows written back in
- * `seq` order). A thread's messages are array order: `position` per channel (array
+ * (array position) and by backup/restore. A thread's messages are array order: `position` per channel (array
  * index at import, the next position at append), unique per channel, so ties on
  * `ts` keep their order. No new externally visible id is minted.
  *
@@ -104,8 +95,7 @@
  * once); an aborted unit of work restores the mirror and the queue to the pre-unit
  * state, held views included — EVERY object of the mirror by identity (the graph
  * memento, repositories/memento.mjs): the thread list, each thread, its `readBy`, its
- * messages array, each message, its `sender`, its `attachment` and every unknown
- * nested field go back to their pre-unit keys and values IN PLACE, so a caller holding
+ * messages array, each message, its `sender` and its `attachment` go back to their pre-unit keys and values IN PLACE, so a caller holding
  * the receipts object itself (`channels.byId(id).readBy`), not only the thread, reads
  * the pre-unit value afterwards and follows the next committed write (the review of
  * 62e9c1a: a restore that replaced the nested objects with clones left such a held
@@ -120,18 +110,15 @@
 import { readonlyView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied, transaction } from './database.mjs';
-import { cloneJson, NON_FINITE_KEPT } from './outboxPush.mjs';
 import { readRequestsCollection } from './recruitment.mjs';
 
 export const CHANNELS_MIGRATION = '0012_channels';
-/** `meta` key holding the cutover record: counts only, never data. */
+/** `meta` key holding the cutover record: counts and ids only, never data. */
 export const CHANNELS_CUTOVER_META = 'channelsCutover';
 export const CHANNELS_TABLES = Object.freeze(['channels', 'messages', 'message_attachments']);
 /** The blob collection the three tables replace. */
 export const CHANNELS_COLLECTION = 'channels';
 
-const EXTRA_CHECK = "CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))";
-const ABSENT_CHECK = "CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array'))";
 export const CHANNELS_DDL = `
 CREATE TABLE channels (
   seq                     INTEGER PRIMARY KEY,
@@ -148,9 +135,7 @@ CREATE TABLE channels (
   guardian_id             TEXT,
   created_at              INTEGER NOT NULL,
   read_by_org_at          INTEGER,
-  read_by_counterparty_at INTEGER,
-  absent_keys_json        TEXT ${ABSENT_CHECK},
-  extra_json              TEXT ${EXTRA_CHECK}
+  read_by_counterparty_at INTEGER
 ) STRICT;
 CREATE UNIQUE INDEX channels_request_id ON channels (request_id);
 CREATE INDEX channels_org_id ON channels (org_id);
@@ -166,9 +151,7 @@ CREATE TABLE messages (
   sender_id        TEXT NOT NULL,
   sender_name      TEXT,
   text             TEXT NOT NULL,
-  client_msg_id    TEXT,
-  absent_keys_json TEXT ${ABSENT_CHECK},
-  extra_json       TEXT ${EXTRA_CHECK}
+  client_msg_id    TEXT
 ) STRICT;
 CREATE UNIQUE INDEX messages_channel_position ON messages (channel_id, position);
 CREATE TABLE message_attachments (
@@ -181,7 +164,6 @@ CREATE TABLE message_attachments (
   report_id     TEXT,
   org_name      TEXT,
   summary       TEXT,
-  extra_json    TEXT ${EXTRA_CHECK},
   CHECK ((kind = 'clip' AND media_id IS NOT NULL AND verified_clip IS NOT NULL AND report_id IS NULL AND org_name IS NULL AND summary IS NULL)
       OR (kind = 'trial_report' AND report_id IS NOT NULL AND media_id IS NULL AND title IS NULL AND url IS NULL AND verified_clip IS NULL))
 ) STRICT;`;
@@ -192,232 +174,182 @@ const blocked = (detail, extra = {}) => Object.assign(new Error(`CHANNELS_IMPORT
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v) => Number.isSafeInteger(v);
+const isString = (v) => typeof v === 'string';
 const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
+const isBool = (v) => typeof v === 'boolean';
 const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
-const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
-/** A detached, prototype-safe clone; a non-finite number in live unknown data is kept live (persisted as JSON null, the blob's rule). */
-const clone = (v, at) => cloneJson(v, at, NON_FINITE_KEPT);
-const parseJson = (text, at) => clone(JSON.parse(text), at).value;
 const ids = (list) => list.slice(0, 20).join(', ') + (list.length > 20 ? ', …' : '');
 
-// ------------------------------------------------------------------ the literals
-/** The channel literal's keys, in openChannel's order. */
+// ------------------------------------------------------------------ the records and their typing
+/** The channel record's keys, in openChannel's order. */
 export const CHANNEL_KEYS = Object.freeze(['id', 'requestId', 'playerId', 'playerName', 'orgId', 'orgName', 'orgVerified', 'scoutName', 'scoutRole', 'counterparty', 'guardianId', 'createdAt', 'messages', 'readBy']);
-/** The optional channel keys: present-and-null or absent, both preserved (absence recorded in absent_keys_json). */
-const CHANNEL_OPTIONAL = Object.freeze(['playerName', 'orgVerified', 'scoutName', 'scoutRole', 'guardianId']);
 const READ_BY_KEYS = Object.freeze(['org', 'counterparty']);
-/** The message literal's keys, in postMessage's order (`clientMsgId` present only when the client sent one). */
+/** The message record's keys, in postMessage's order (`clientMsgId` present only when the client sent one). */
 export const MESSAGE_KEYS = Object.freeze(['id', 'ts', 'sender', 'text', 'attachment', 'clientMsgId']);
 const SENDER_KEYS = Object.freeze(['kind', 'id', 'name']);
 const SENDER_KINDS = Object.freeze(['player', 'guardian', 'org_user']);
 export const CLIP_KEYS = Object.freeze(['kind', 'mediaId', 'title', 'url', 'verifiedClip']);
 export const TRIAL_REPORT_KEYS = Object.freeze(['kind', 'reportId', 'orgName', 'summary']);
 
-/** The unknown own keys of `raw` (outside `known`), each a detached clone: `{ extra, hasExtra }` or `{ reason }`. */
-function extrasOf(raw, known, at) {
-  const extra = {};
-  for (const k of Object.keys(raw)) if (!known.includes(k)) { const c = clone(raw[k], `${at}.${k}`); if (c.reason) return { reason: c.reason }; setOwn(extra, k, c.value); }
-  return { extra, hasExtra: Object.keys(extra).length > 0 };
+/**
+ * The typing context. STRICT (every write): an unknown key is dropped silently, a
+ * wrong-typed value is refused by field. LENIENT (the import): an unknown key and a
+ * wrong-typed optional value are dropped and noted with the record's id. A required
+ * field that does not hold is refused in both.
+ */
+const STRICT = Object.freeze({ lenient: false });
+const lenientContext = () => ({ lenient: true, notes: [] });
+const fail = (reason) => ({ ok: false, reason });
+/** An optional value: null when absent or null; wrong-typed → `{ reason }` (strict) or null with a note (lenient). */
+function optional(obj, key, field, holds, what, at, ctx) {
+  const v = Object.hasOwn(obj, key) ? obj[key] : undefined;
+  if (v === undefined || v === null) return { value: null };
+  if (holds(v)) return { value: v };
+  if (ctx.lenient) { ctx.notes.push(`${at}: ${field} is not ${what}; dropped`); return { value: null }; }
+  return { reason: `${at}: ${field} must be ${what} or null` };
 }
-/** A mirror object: extras first (the export convention), then the literal's present keys in the writer's order. */
-function assemble(extra, literal) { const row = {}; for (const k of Object.keys(extra)) setOwn(row, k, extra[k]); for (const [k, v] of literal) row[k] = v; return row; }
-const optionalString = (v) => v === null || typeof v === 'string';
+function noteUnknown(obj, known, prefix, at, ctx) {
+  if (ctx.lenient) for (const k of Object.keys(obj)) if (!known.includes(k)) ctx.notes.push(`${at}: unknown field ${prefix}${k} dropped`);
+}
 
-/** Validate one attachment value: `{ ok: true, value, kind, hasExtra }` (null allowed) or `{ ok: false, reason }`. */
-export function validateAttachment(raw, at = 'attachment') {
-  if (raw === null) return { ok: true, value: null, kind: null, hasExtra: false };
-  if (!isPlainObject(raw)) return { ok: false, reason: `${at} must be null or an object (got ${describe(raw)})` };
+/** One attachment: `{ ok, value }` (null or the clip / trial-report record) or `{ ok: false, reason }`. A lenient import drops an unusable one. */
+export function typeAttachment(raw, at = 'message', ctx = STRICT) {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  const unusable = (problem) => (ctx.lenient ? (ctx.notes.push(`${at}: ${problem}; the attachment dropped`), { ok: true, value: null }) : fail(`${at}: ${problem}`));
+  if (!isPlainObject(raw)) return unusable(`attachment must be null or an object (got ${describe(raw)})`);
   if (raw.kind === 'clip') {
-    for (const k of CLIP_KEYS) if (!Object.hasOwn(raw, k)) return { ok: false, reason: `${at}.${k} is absent (a clip attachment always carries ${CLIP_KEYS.join(', ')})` };
-    if (!nonEmpty(raw.mediaId)) return { ok: false, reason: `${at}.mediaId must be a non-empty string` };
-    if (!optionalString(raw.title)) return { ok: false, reason: `${at}.title must be a string or null` };
-    if (!optionalString(raw.url)) return { ok: false, reason: `${at}.url must be a string or null` };
-    if (typeof raw.verifiedClip !== 'boolean') return { ok: false, reason: `${at}.verifiedClip must be a boolean` };
-    const e = extrasOf(raw, CLIP_KEYS, at); if (e.reason) return { ok: false, reason: e.reason };
-    return { ok: true, kind: 'clip', hasExtra: e.hasExtra, value: assemble(e.extra, [['kind', 'clip'], ['mediaId', raw.mediaId], ['title', raw.title], ['url', raw.url], ['verifiedClip', raw.verifiedClip]]) };
+    if (!nonEmpty(raw.mediaId)) return unusable('attachment.mediaId must be a non-empty string');
+    const title = optional(raw, 'title', 'attachment.title', isString, 'a string', at, ctx); if (title.reason) return fail(title.reason);
+    const url = optional(raw, 'url', 'attachment.url', isString, 'a string', at, ctx); if (url.reason) return fail(url.reason);
+    let verifiedClip = raw.verifiedClip;
+    if (!isBool(verifiedClip)) {
+      if (!ctx.lenient) return fail(`${at}: attachment.verifiedClip must be a boolean`);
+      ctx.notes.push(`${at}: attachment.verifiedClip is not a boolean; recorded as false (unverified)`); verifiedClip = false;
+    }
+    noteUnknown(raw, CLIP_KEYS, 'attachment.', at, ctx);
+    return { ok: true, value: { kind: 'clip', mediaId: raw.mediaId, title: title.value, url: url.value, verifiedClip } };
   }
   if (raw.kind === 'trial_report') {
-    for (const k of TRIAL_REPORT_KEYS) if (!Object.hasOwn(raw, k)) return { ok: false, reason: `${at}.${k} is absent (a trial-report attachment always carries ${TRIAL_REPORT_KEYS.join(', ')})` };
-    if (!nonEmpty(raw.reportId)) return { ok: false, reason: `${at}.reportId must be a non-empty string` };
-    if (!optionalString(raw.orgName)) return { ok: false, reason: `${at}.orgName must be a string or null` };
-    if (!optionalString(raw.summary)) return { ok: false, reason: `${at}.summary must be a string or null` };
-    const e = extrasOf(raw, TRIAL_REPORT_KEYS, at); if (e.reason) return { ok: false, reason: e.reason };
-    return { ok: true, kind: 'trial_report', hasExtra: e.hasExtra, value: assemble(e.extra, [['kind', 'trial_report'], ['reportId', raw.reportId], ['orgName', raw.orgName], ['summary', raw.summary]]) };
+    if (!nonEmpty(raw.reportId)) return unusable('attachment.reportId must be a non-empty string');
+    const orgName = optional(raw, 'orgName', 'attachment.orgName', isString, 'a string', at, ctx); if (orgName.reason) return fail(orgName.reason);
+    const summary = optional(raw, 'summary', 'attachment.summary', isString, 'a string', at, ctx); if (summary.reason) return fail(summary.reason);
+    noteUnknown(raw, TRIAL_REPORT_KEYS, 'attachment.', at, ctx);
+    return { ok: true, value: { kind: 'trial_report', reportId: raw.reportId, orgName: orgName.value, summary: summary.value } };
   }
-  return { ok: false, reason: `${at}.kind must be 'clip' or 'trial_report' (the two shapes buildAttachment produces)` };
+  return unusable("attachment.kind must be 'clip' or 'trial_report' (the two shapes buildAttachment produces)");
 }
 
-/** Validate one message entry: `{ ok: true, row, absent, hasExtra, attachmentKind }` (the mirror row, detached) or `{ ok: false, reason }`. */
-export function validateMessage(raw, at = 'message') {
-  if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-  for (const k of ['id', 'ts', 'sender', 'text']) if (!Object.hasOwn(raw, k)) return { ok: false, reason: `${at}.${k} is absent (the message literal always carries id, ts, sender and text)` };
-  if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
-  if (!isInt(raw.ts)) return { ok: false, reason: `${at}.ts must be an integer timestamp` };
-  if (!isPlainObject(raw.sender)) return { ok: false, reason: `${at}.sender must be an object { kind, id, name } (got ${describe(raw.sender)})` };
-  if (!SENDER_KINDS.includes(raw.sender.kind)) return { ok: false, reason: `${at}.sender.kind must be one of ${SENDER_KINDS.join(', ')}` };
-  if (!nonEmpty(raw.sender.id)) return { ok: false, reason: `${at}.sender.id must be a non-empty string` };
-  if (Object.hasOwn(raw.sender, 'name') && !optionalString(raw.sender.name)) return { ok: false, reason: `${at}.sender.name must be a string or null` };
-  const se = extrasOf(raw.sender, SENDER_KEYS, `${at}.sender`); if (se.reason) return { ok: false, reason: se.reason };
-  if (typeof raw.text !== 'string') return { ok: false, reason: `${at}.text must be a string` };
-  const absent = [];
-  let attachment = null; let attachmentKind = null; let attachmentExtra = false;
-  if (Object.hasOwn(raw, 'attachment')) { const a = validateAttachment(raw.attachment, `${at}.attachment`); if (!a.ok) return { ok: false, reason: a.reason }; attachment = a.value; attachmentKind = a.kind; attachmentExtra = a.hasExtra; } else absent.push('attachment');
-  if (Object.hasOwn(raw, 'clientMsgId') && !nonEmpty(raw.clientMsgId)) return { ok: false, reason: `${at}.clientMsgId must be a non-empty string when present (the writer omits the key otherwise)` };
-  const e = extrasOf(raw, MESSAGE_KEYS, at); if (e.reason) return { ok: false, reason: e.reason };
-  const sender = assemble(se.extra, [['kind', raw.sender.kind], ['id', raw.sender.id], ...(Object.hasOwn(raw.sender, 'name') ? [['name', raw.sender.name]] : [])]);
-  if (!Object.hasOwn(raw.sender, 'name')) absent.push('sender.name');
-  const literal = [['id', raw.id], ['ts', raw.ts], ['sender', sender], ['text', raw.text]];
-  if (Object.hasOwn(raw, 'attachment')) literal.push(['attachment', attachment]);
-  if (Object.hasOwn(raw, 'clientMsgId')) literal.push(['clientMsgId', raw.clientMsgId]);
-  return { ok: true, absent, hasExtra: e.hasExtra || se.hasExtra || attachmentExtra, attachmentKind, row: assemble(e.extra, literal) };
+/** One message: `{ ok: true, row }` (the record, detached) or `{ ok: false, reason }`. */
+export function typeMessage(raw, at = 'message', ctx = STRICT) {
+  if (!isPlainObject(raw)) return fail(`${at}: not an object (${describe(raw)})`);
+  if (!nonEmpty(raw.id)) return fail(`${at}: id must be a non-empty string`);
+  at = `${at} (${raw.id})`;
+  if (!isInt(raw.ts)) return fail(`${at}: ts must be an integer timestamp`);
+  if (!isPlainObject(raw.sender)) return fail(`${at}: sender must be an object { kind, id, name } (got ${describe(raw.sender)})`);
+  if (!SENDER_KINDS.includes(raw.sender.kind)) return fail(`${at}: sender.kind must be one of ${SENDER_KINDS.join(', ')}`);
+  if (!nonEmpty(raw.sender.id)) return fail(`${at}: sender.id must be a non-empty string`);
+  const name = optional(raw.sender, 'name', 'sender.name', isString, 'a string', at, ctx); if (name.reason) return fail(name.reason);
+  noteUnknown(raw.sender, SENDER_KEYS, 'sender.', at, ctx);
+  if (!isString(raw.text)) return fail(`${at}: text must be a string`);
+  const attachment = typeAttachment(raw.attachment, at, ctx); if (!attachment.ok) return attachment;
+  let clientMsgId = null;
+  if (raw.clientMsgId !== undefined && raw.clientMsgId !== null) {
+    if (nonEmpty(raw.clientMsgId)) clientMsgId = raw.clientMsgId;
+    else if (ctx.lenient) ctx.notes.push(`${at}: clientMsgId is not a non-empty string; dropped`);
+    else return fail(`${at}: clientMsgId must be a non-empty string when present`);
+  }
+  noteUnknown(raw, MESSAGE_KEYS, '', at, ctx);
+  return { ok: true, row: messageRecord({ id: raw.id, ts: raw.ts, sender: { kind: raw.sender.kind, id: raw.sender.id, name: name.value }, text: raw.text, attachment: attachment.value, clientMsgId }) };
+}
+const messageRecord = ({ id, ts, sender, text, attachment, clientMsgId }) => ({ id, ts, sender, text, attachment, ...(clientMsgId !== null ? { clientMsgId } : {}) });
+
+const CHANNEL_OPTIONAL = Object.freeze([['playerName', isString, 'a string'], ['orgVerified', isBool, 'a boolean'], ['scoutName', isString, 'a string'], ['scoutRole', isString, 'a string'], ['guardianId', nonEmpty, 'a non-empty string']]);
+/** One channel, its messages included: `{ ok: true, row }` (the record, detached; `messages` the message records, `readBy` the receipts) or `{ ok: false, reason }`. */
+export function typeChannel(raw, at = 'channel', ctx = STRICT) {
+  if (!isPlainObject(raw)) return fail(`${at}: not an object (${describe(raw)})`);
+  if (!nonEmpty(raw.id)) return fail(`${at}: id must be a non-empty string`);
+  at = `${at} (${raw.id})`;
+  for (const k of ['requestId', 'playerId', 'orgId']) if (!nonEmpty(raw[k])) return fail(`${at}: ${k} must be a non-empty string`);
+  if (!isString(raw.orgName)) return fail(`${at}: orgName must be a string`);
+  if (raw.counterparty !== 'player' && raw.counterparty !== 'guardian') return fail(`${at}: counterparty must be 'player' or 'guardian'`);
+  if (!isInt(raw.createdAt)) return fail(`${at}: createdAt must be an integer timestamp`);
+  if (!Array.isArray(raw.messages)) return fail(`${at}: messages must be an array (got ${describe(raw.messages)})`);
+  const opt = {};
+  for (const [k, holds, what] of CHANNEL_OPTIONAL) { const o = optional(raw, k, k, holds, what, at, ctx); if (o.reason) return fail(o.reason); opt[k] = o.value; }
+  let rawReadBy = raw.readBy ?? {};
+  if (!isPlainObject(rawReadBy)) {
+    if (!ctx.lenient) return fail(`${at}: readBy must be an object { org, counterparty } (got ${describe(rawReadBy)})`);
+    ctx.notes.push(`${at}: readBy is not an object; both receipts recorded as null`); rawReadBy = {};
+  }
+  const readBy = {};
+  for (const k of READ_BY_KEYS) { const o = optional(rawReadBy, k, `readBy.${k}`, isInt, 'an integer timestamp', at, ctx); if (o.reason) return fail(o.reason); readBy[k] = o.value; }
+  noteUnknown(rawReadBy, READ_BY_KEYS, 'readBy.', at, ctx);
+  noteUnknown(raw, CHANNEL_KEYS, '', at, ctx);
+  const messages = []; const seen = new Set();
+  for (let i = 0; i < raw.messages.length; i++) {
+    const m = typeMessage(raw.messages[i], `${at} message #${i}`, ctx); if (!m.ok) return m;
+    if (seen.has(m.row.id)) return fail(`${at} message #${i}: duplicates the id of an earlier message (${m.row.id})`);
+    seen.add(m.row.id); messages.push(m.row);
+  }
+  return { ok: true, row: { id: raw.id, requestId: raw.requestId, playerId: raw.playerId, playerName: opt.playerName, orgId: raw.orgId, orgName: raw.orgName, orgVerified: opt.orgVerified, scoutName: opt.scoutName, scoutRole: opt.scoutRole, counterparty: raw.counterparty, guardianId: opt.guardianId, createdAt: raw.createdAt, messages, readBy } };
 }
 
 /**
- * Validate one channel entry (its messages included): `{ ok: true, row, absent, hasExtra, messages: [{ absent, hasExtra, attachmentKind }] }`
- * — the mirror row, detached, with `messages` the array of mirror message rows and `readBy` the receipt object — or `{ ok: false, reason }`.
+ * Type a whole channels collection (unique ids, unique requestIds); throws CHANNELS_IMPORT_BLOCKED.
+ * `lenient` (the import) drops and notes what does not fit; otherwise (a snapshot write) a wrong-typed value refuses.
+ * Returns `{ rows, counts, notes }` — the notes name ids and fields, never a value.
  */
-export function validateChannel(raw, at = 'channel') {
-  if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-  for (const k of ['id', 'requestId', 'playerId', 'orgId', 'orgName', 'counterparty', 'createdAt', 'messages', 'readBy']) if (!Object.hasOwn(raw, k)) return { ok: false, reason: `${at}.${k} is absent (the channel literal always carries it)` };
-  if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
-  if (!nonEmpty(raw.requestId)) return { ok: false, reason: `${at}.requestId must be a non-empty string` };
-  if (!nonEmpty(raw.playerId)) return { ok: false, reason: `${at}.playerId must be a non-empty string` };
-  if (!nonEmpty(raw.orgId)) return { ok: false, reason: `${at}.orgId must be a non-empty string` };
-  if (typeof raw.orgName !== 'string') return { ok: false, reason: `${at}.orgName must be a string` };
-  if (raw.counterparty !== 'player' && raw.counterparty !== 'guardian') return { ok: false, reason: `${at}.counterparty must be 'player' or 'guardian'` };
-  if (!isInt(raw.createdAt)) return { ok: false, reason: `${at}.createdAt must be an integer timestamp` };
-  if (!Array.isArray(raw.messages)) return { ok: false, reason: `${at}.messages must be an array (got ${describe(raw.messages)})` };
-  if (!isPlainObject(raw.readBy)) return { ok: false, reason: `${at}.readBy must be an object { org, counterparty } (got ${describe(raw.readBy)})` };
-  const absent = [];
-  const optional = [];
-  for (const k of CHANNEL_OPTIONAL) {
-    if (!Object.hasOwn(raw, k)) { absent.push(k); continue; }
-    const v = raw[k];
-    if (k === 'orgVerified') { if (v !== null && typeof v !== 'boolean') return { ok: false, reason: `${at}.orgVerified must be a boolean or null` }; }
-    else if (k === 'guardianId') { if (v !== null && !nonEmpty(v)) return { ok: false, reason: `${at}.guardianId must be a non-empty string or null` }; }
-    else if (!optionalString(v)) return { ok: false, reason: `${at}.${k} must be a string or null` };
-    optional.push([k, v]);
-  }
-  for (const k of READ_BY_KEYS) {
-    if (!Object.hasOwn(raw.readBy, k)) { absent.push(`readBy.${k}`); continue; }
-    if (raw.readBy[k] !== null && !isInt(raw.readBy[k])) return { ok: false, reason: `${at}.readBy.${k} must be an integer timestamp or null` };
-  }
-  const re = extrasOf(raw.readBy, READ_BY_KEYS, `${at}.readBy`); if (re.reason) return { ok: false, reason: re.reason };
-  const e = extrasOf(raw, CHANNEL_KEYS, at); if (e.reason) return { ok: false, reason: e.reason };
-  const messages = []; const messageMeta = []; const seen = new Set();
-  for (let i = 0; i < raw.messages.length; i++) {
-    const m = validateMessage(raw.messages[i], `${at}.messages[${i}]`); if (!m.ok) return { ok: false, reason: m.reason };
-    if (seen.has(m.row.id)) return { ok: false, reason: `${at}.messages[${i}] duplicates the id of an earlier message (${m.row.id})` };
-    seen.add(m.row.id); messages.push(m.row); messageMeta.push({ absent: m.absent, hasExtra: m.hasExtra, attachmentKind: m.attachmentKind });
-  }
-  const readBy = assemble(re.extra, READ_BY_KEYS.filter((k) => Object.hasOwn(raw.readBy, k)).map((k) => [k, raw.readBy[k]]));
-  const literal = [['id', raw.id], ['requestId', raw.requestId], ['playerId', raw.playerId]];
-  const opt = Object.fromEntries(optional);
-  for (const k of CHANNEL_KEYS.slice(3)) {
-    if (k === 'messages') literal.push(['messages', messages]);
-    else if (k === 'readBy') literal.push(['readBy', readBy]);
-    else if (CHANNEL_OPTIONAL.includes(k)) { if (Object.hasOwn(opt, k)) literal.push([k, opt[k]]); }
-    else literal.push([k, raw[k]]);
-  }
-  return { ok: true, absent, hasExtra: e.hasExtra || re.hasExtra, messages: messageMeta, row: assemble(e.extra, literal) };
-}
-
-/** Validate a whole channels collection (unique ids, unique requestIds); throws CHANNELS_IMPORT_BLOCKED. Returns `{ rows, counts }`. */
-export function validateChannelRows(rows, { label = 'channels' } = {}) {
+export function validateChannelRows(rows, { label = 'channels', lenient = false } = {}) {
   if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
+  const ctx = lenient ? lenientContext() : STRICT;
   const out = []; const problems = []; const seenIds = new Set(); const seenRequests = new Map();
-  const counts = { imported: 0, messages: 0, attachments: 0, withExtraFields: 0, withAbsentKeys: 0, byCounterparty: {} };
+  const counts = { imported: 0, messages: 0, attachments: 0, normalised: 0, byCounterparty: {} };
   rows.forEach((raw, i) => {
-    const v = validateChannel(raw, `${label} entry #${i}`);
+    const notesBefore = ctx.notes?.length ?? 0;
+    const v = typeChannel(raw, `${label} entry #${i}`, ctx);
     if (!v.ok) { problems.push(v.reason); return; }
     if (seenIds.has(v.row.id)) { problems.push(`${label} entry #${i}: duplicates the id of an earlier entry (${v.row.id})`); return; }
     if (seenRequests.has(v.row.requestId)) { problems.push(`${label} entry #${i}: a second channel for request ${v.row.requestId} (the first is ${seenRequests.get(v.row.requestId)}); a request opens one channel`); return; }
     seenIds.add(v.row.id); seenRequests.set(v.row.requestId, v.row.id);
-    if (v.hasExtra || v.messages.some((m) => m.hasExtra)) counts.withExtraFields += 1;
-    if (v.absent.length || v.messages.some((m) => m.absent.length)) counts.withAbsentKeys += 1;
-    counts.messages += v.row.messages.length; counts.attachments += v.messages.filter((m) => m.attachmentKind).length;
+    if ((ctx.notes?.length ?? 0) > notesBefore) counts.normalised += 1;
+    counts.messages += v.row.messages.length; counts.attachments += v.row.messages.filter((m) => m.attachment).length;
     counts.byCounterparty[v.row.counterparty] = (counts.byCounterparty[v.row.counterparty] ?? 0) + 1;
-    out.push({ row: v.row, absent: v.absent, messages: v.messages });
+    out.push(v.row);
   });
   if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
   counts.imported = out.length;
-  return { rows: out, counts };
+  return { rows: out, counts, notes: ctx.notes ?? [] };
 }
 
 // ------------------------------------------------------------------ rows ↔ the tables
-const CHANNEL_SELECT = 'SELECT seq, id, request_id, player_id, player_name, org_id, org_name, org_verified, scout_name, scout_role, counterparty, guardian_id, created_at, read_by_org_at, read_by_counterparty_at, absent_keys_json, extra_json FROM channels';
-const CHANNEL_INSERT = 'INSERT INTO channels (id, request_id, player_id, player_name, org_id, org_name, org_verified, scout_name, scout_role, counterparty, guardian_id, created_at, read_by_org_at, read_by_counterparty_at, absent_keys_json, extra_json) VALUES (@id, @request_id, @player_id, @player_name, @org_id, @org_name, @org_verified, @scout_name, @scout_role, @counterparty, @guardian_id, @created_at, @read_by_org_at, @read_by_counterparty_at, @absent_keys_json, @extra_json)';
-const MESSAGE_SELECT = 'SELECT seq, id, channel_id, position, created_at, sender_kind, sender_id, sender_name, text, client_msg_id, absent_keys_json, extra_json FROM messages';
-const MESSAGE_INSERT = 'INSERT INTO messages (id, channel_id, position, created_at, sender_kind, sender_id, sender_name, text, client_msg_id, absent_keys_json, extra_json) VALUES (@id, @channel_id, @position, @created_at, @sender_kind, @sender_id, @sender_name, @text, @client_msg_id, @absent_keys_json, @extra_json)';
-const ATTACHMENT_SELECT = 'SELECT message_id, kind, media_id, title, url, verified_clip, report_id, org_name, summary, extra_json FROM message_attachments';
-const ATTACHMENT_INSERT = 'INSERT INTO message_attachments (message_id, kind, media_id, title, url, verified_clip, report_id, org_name, summary, extra_json) VALUES (@message_id, @kind, @media_id, @title, @url, @verified_clip, @report_id, @org_name, @summary, @extra_json)';
-const READ_UPDATE = { org: 'UPDATE channels SET read_by_org_at = ?, absent_keys_json = ? WHERE id = ?', counterparty: 'UPDATE channels SET read_by_counterparty_at = ?, absent_keys_json = ? WHERE id = ?' };
+const CHANNEL_SELECT = 'SELECT seq, id, request_id, player_id, player_name, org_id, org_name, org_verified, scout_name, scout_role, counterparty, guardian_id, created_at, read_by_org_at, read_by_counterparty_at FROM channels';
+const CHANNEL_INSERT = 'INSERT INTO channels (id, request_id, player_id, player_name, org_id, org_name, org_verified, scout_name, scout_role, counterparty, guardian_id, created_at, read_by_org_at, read_by_counterparty_at) VALUES (@id, @request_id, @player_id, @player_name, @org_id, @org_name, @org_verified, @scout_name, @scout_role, @counterparty, @guardian_id, @created_at, @read_by_org_at, @read_by_counterparty_at)';
+const MESSAGE_SELECT = 'SELECT seq, id, channel_id, position, created_at, sender_kind, sender_id, sender_name, text, client_msg_id FROM messages';
+const MESSAGE_INSERT = 'INSERT INTO messages (id, channel_id, position, created_at, sender_kind, sender_id, sender_name, text, client_msg_id) VALUES (@id, @channel_id, @position, @created_at, @sender_kind, @sender_id, @sender_name, @text, @client_msg_id)';
+const ATTACHMENT_SELECT = 'SELECT message_id, kind, media_id, title, url, verified_clip, report_id, org_name, summary FROM message_attachments';
+const ATTACHMENT_INSERT = 'INSERT INTO message_attachments (message_id, kind, media_id, title, url, verified_clip, report_id, org_name, summary) VALUES (@message_id, @kind, @media_id, @title, @url, @verified_clip, @report_id, @org_name, @summary)';
+const READ_UPDATE = { org: 'UPDATE channels SET read_by_org_at = ? WHERE id = ?', counterparty: 'UPDATE channels SET read_by_counterparty_at = ? WHERE id = ?' };
 const DELETE_FOR_PLAYER = 'DELETE FROM channels WHERE player_id = ?';
 
-const jsonOrNull = (obj) => (Object.keys(obj).length ? JSON.stringify(obj) : null);
-const extraJsonOf = (row, known) => { const extra = {}; for (const k of Object.keys(row)) if (!known.includes(k)) setOwn(extra, k, clone(row[k], k).value); return extra; };
-const bool = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
-/** The literal keys ABSENT from a mirror channel (what absent_keys_json records). */
-const channelAbsent = (row) => [...CHANNEL_OPTIONAL.filter((k) => !Object.hasOwn(row, k)), ...READ_BY_KEYS.filter((k) => !Object.hasOwn(row.readBy, k)).map((k) => `readBy.${k}`)];
-const messageAbsent = (row) => [...(Object.hasOwn(row, 'attachment') ? [] : ['attachment']), ...(Object.hasOwn(row.sender, 'name') ? [] : ['sender.name'])];
-function channelParams(row) {
-  const extra = extraJsonOf(row, CHANNEL_KEYS);
-  const readByExtra = extraJsonOf(row.readBy, READ_BY_KEYS);
-  if (Object.keys(readByExtra).length) setOwn(extra, 'readBy', readByExtra);
-  const absent = channelAbsent(row);
-  return {
-    id: row.id, request_id: row.requestId, player_id: row.playerId, player_name: row.playerName ?? null, org_id: row.orgId, org_name: row.orgName,
-    org_verified: bool(row.orgVerified), scout_name: row.scoutName ?? null, scout_role: row.scoutRole ?? null, counterparty: row.counterparty, guardian_id: row.guardianId ?? null,
-    created_at: row.createdAt, read_by_org_at: row.readBy.org ?? null, read_by_counterparty_at: row.readBy.counterparty ?? null,
-    absent_keys_json: absent.length ? JSON.stringify(absent) : null, extra_json: jsonOrNull(extra),
-  };
-}
-function messageParams(channelId, position, row) {
-  const extra = extraJsonOf(row, MESSAGE_KEYS);
-  const senderExtra = extraJsonOf(row.sender, SENDER_KEYS);
-  if (Object.keys(senderExtra).length) setOwn(extra, 'sender', senderExtra);
-  const absent = messageAbsent(row);
-  return { id: row.id, channel_id: channelId, position, created_at: row.ts, sender_kind: row.sender.kind, sender_id: row.sender.id, sender_name: row.sender.name ?? null, text: row.text, client_msg_id: Object.hasOwn(row, 'clientMsgId') ? row.clientMsgId : null, absent_keys_json: absent.length ? JSON.stringify(absent) : null, extra_json: jsonOrNull(extra) };
-}
-function attachmentParams(messageId, a) {
-  const known = a.kind === 'clip' ? CLIP_KEYS : TRIAL_REPORT_KEYS;
-  return a.kind === 'clip'
-    ? { message_id: messageId, kind: 'clip', media_id: a.mediaId, title: a.title, url: a.url, verified_clip: a.verifiedClip ? 1 : 0, report_id: null, org_name: null, summary: null, extra_json: jsonOrNull(extraJsonOf(a, known)) }
-    : { message_id: messageId, kind: 'trial_report', media_id: null, title: null, url: null, verified_clip: null, report_id: a.reportId, org_name: a.orgName, summary: a.summary, extra_json: jsonOrNull(extraJsonOf(a, known)) };
-}
-function attachmentFromDb(r) {
-  const extra = r.extra_json ? parseJson(r.extra_json, 'extra_json') : {};
-  return r.kind === 'clip'
-    ? assemble(extra, [['kind', 'clip'], ['mediaId', r.media_id], ['title', r.title], ['url', r.url], ['verifiedClip', r.verified_clip === 1]])
-    : assemble(extra, [['kind', 'trial_report'], ['reportId', r.report_id], ['orgName', r.org_name], ['summary', r.summary]]);
-}
-function messageFromDb(r, attachmentRow) {
-  const extraAll = r.extra_json ? parseJson(r.extra_json, 'extra_json') : {};
-  const absent = r.absent_keys_json ? JSON.parse(r.absent_keys_json) : [];
-  const senderExtra = Object.hasOwn(extraAll, 'sender') ? extraAll.sender : {};
-  const extra = {}; for (const k of Object.keys(extraAll)) if (k !== 'sender') setOwn(extra, k, extraAll[k]);
-  const sender = assemble(senderExtra, [['kind', r.sender_kind], ['id', r.sender_id], ...(absent.includes('sender.name') ? [] : [['name', r.sender_name]])]);
-  const literal = [['id', r.id], ['ts', r.created_at], ['sender', sender], ['text', r.text]];
-  if (!absent.includes('attachment')) literal.push(['attachment', attachmentRow ? attachmentFromDb(attachmentRow) : null]);
-  if (r.client_msg_id !== null) literal.push(['clientMsgId', r.client_msg_id]);
-  return assemble(extra, literal);
-}
-function channelFromDb(r, messages) {
-  const extraAll = r.extra_json ? parseJson(r.extra_json, 'extra_json') : {};
-  const absent = r.absent_keys_json ? JSON.parse(r.absent_keys_json) : [];
-  const readByExtra = Object.hasOwn(extraAll, 'readBy') ? extraAll.readBy : {};
-  const extra = {}; for (const k of Object.keys(extraAll)) if (k !== 'readBy') setOwn(extra, k, extraAll[k]);
-  const readBy = assemble(readByExtra, READ_BY_KEYS.filter((k) => !absent.includes(`readBy.${k}`)).map((k) => [k, k === 'org' ? r.read_by_org_at : r.read_by_counterparty_at]));
-  const optional = { playerName: r.player_name, orgVerified: r.org_verified === null ? null : r.org_verified === 1, scoutName: r.scout_name, scoutRole: r.scout_role, guardianId: r.guardian_id };
-  const literal = [['id', r.id], ['requestId', r.request_id], ['playerId', r.player_id]];
-  for (const k of CHANNEL_KEYS.slice(3)) {
-    if (k === 'messages') literal.push(['messages', messages]);
-    else if (k === 'readBy') literal.push(['readBy', readBy]);
-    else if (CHANNEL_OPTIONAL.includes(k)) { if (!absent.includes(k)) literal.push([k, optional[k]]); }
-    else literal.push([k, k === 'orgId' ? r.org_id : k === 'orgName' ? r.org_name : k === 'counterparty' ? r.counterparty : r.created_at]);
-  }
-  return assemble(extra, literal);
-}
+const bool = (v) => (v === null ? null : v ? 1 : 0);
+const channelParams = (row) => ({
+  id: row.id, request_id: row.requestId, player_id: row.playerId, player_name: row.playerName, org_id: row.orgId, org_name: row.orgName,
+  org_verified: bool(row.orgVerified), scout_name: row.scoutName, scout_role: row.scoutRole, counterparty: row.counterparty, guardian_id: row.guardianId,
+  created_at: row.createdAt, read_by_org_at: row.readBy.org, read_by_counterparty_at: row.readBy.counterparty,
+});
+const messageParams = (channelId, position, row) => ({ id: row.id, channel_id: channelId, position, created_at: row.ts, sender_kind: row.sender.kind, sender_id: row.sender.id, sender_name: row.sender.name, text: row.text, client_msg_id: row.clientMsgId ?? null });
+const attachmentParams = (messageId, a) => (a.kind === 'clip'
+  ? { message_id: messageId, kind: 'clip', media_id: a.mediaId, title: a.title, url: a.url, verified_clip: a.verifiedClip ? 1 : 0, report_id: null, org_name: null, summary: null }
+  : { message_id: messageId, kind: 'trial_report', media_id: null, title: null, url: null, verified_clip: null, report_id: a.reportId, org_name: a.orgName, summary: a.summary });
+const attachmentFromDb = (r) => (r.kind === 'clip'
+  ? { kind: 'clip', mediaId: r.media_id, title: r.title, url: r.url, verifiedClip: r.verified_clip === 1 }
+  : { kind: 'trial_report', reportId: r.report_id, orgName: r.org_name, summary: r.summary });
+const messageFromDb = (r, attachmentRow) => messageRecord({ id: r.id, ts: r.created_at, sender: { kind: r.sender_kind, id: r.sender_id, name: r.sender_name }, text: r.text, attachment: attachmentRow ? attachmentFromDb(attachmentRow) : null, clientMsgId: r.client_msg_id });
+const channelFromDb = (r, messages) => ({
+  id: r.id, requestId: r.request_id, playerId: r.player_id, playerName: r.player_name, orgId: r.org_id, orgName: r.org_name,
+  orgVerified: r.org_verified === null ? null : r.org_verified === 1, scoutName: r.scout_name, scoutRole: r.scout_role, counterparty: r.counterparty,
+  guardianId: r.guardian_id, createdAt: r.created_at, messages, readBy: { org: r.read_by_org_at, counterparty: r.read_by_counterparty_at },
+});
 
 /** Every channel with its messages (array order) and attachments, in `seq` order: fresh objects from the file. */
 function readChannels(sqlite) {
@@ -426,7 +358,7 @@ function readChannels(sqlite) {
   for (const m of sqlite.prepare(`${MESSAGE_SELECT} ORDER BY channel_id, position`).all()) { if (!byChannel.has(m.channel_id)) byChannel.set(m.channel_id, []); byChannel.get(m.channel_id).push(messageFromDb(m, attachments.get(m.id) ?? null)); }
   return sqlite.prepare(`${CHANNEL_SELECT} ORDER BY seq`).all().map((r) => channelFromDb(r, byChannel.get(r.id) ?? []));
 }
-/** Write the validated mirror rows, in array order (the array position is the durable order). */
+/** Write the typed records, in array order (the array position is the durable order). */
 function writeChannels(sqlite, rows) {
   sqlite.exec('DELETE FROM channels;'); // the cascades take the messages and the attachments
   const ins = sqlite.prepare(CHANNEL_INSERT); const insM = sqlite.prepare(MESSAGE_INSERT); const insA = sqlite.prepare(ATTACHMENT_INSERT);
@@ -476,17 +408,17 @@ function checkIncomingReferences(sqlite, rows, { requests, label }) {
   if (!rows.length) return;
   if (!Array.isArray(requests)) throw blocked(`CHANNEL_REQUESTS_MALFORMED: ${rows.length} channel(s) in ${label} reference requests, but the requests collection is ${requests === undefined ? 'absent' : describe(requests)}, not an array`, { code: 'CHANNEL_REQUESTS_MALFORMED' });
   const requestIds = requestIdsOf(requests); const guardianIds = existingIds(sqlite, 'guardians'); const orgIds = existingIds(sqlite, 'orgs');
-  const noRequest = rows.filter((r) => !requestIds.has(r.row.requestId)); if (noRequest.length) throw blocked(`CHANNEL_REQUEST_MISSING: ${noRequest.length} channel(s) in ${label} name a request that is not in the requests collection (channels ${ids(noRequest.map((r) => r.row.id))}; requests ${ids([...new Set(noRequest.map((r) => r.row.requestId))])})`, { code: 'CHANNEL_REQUEST_MISSING' });
-  const noGuardian = rows.filter((r) => Object.hasOwn(r.row, 'guardianId') && r.row.guardianId !== null && !guardianIds.has(r.row.guardianId)); if (noGuardian.length) throw blocked(`CHANNEL_GUARDIAN_MISSING: ${noGuardian.length} channel(s) in ${label} name a guardian that does not exist (channels ${ids(noGuardian.map((r) => r.row.id))})`, { code: 'CHANNEL_GUARDIAN_MISSING' });
-  const noOrg = rows.filter((r) => !orgIds.has(r.row.orgId)); if (noOrg.length) throw blocked(`CHANNEL_ORG_MISSING: ${noOrg.length} channel(s) in ${label} name an organisation that does not exist (channels ${ids(noOrg.map((r) => r.row.id))})`, { code: 'CHANNEL_ORG_MISSING' });
+  const noRequest = rows.filter((r) => !requestIds.has(r.requestId)); if (noRequest.length) throw blocked(`CHANNEL_REQUEST_MISSING: ${noRequest.length} channel(s) in ${label} name a request that is not in the requests collection (channels ${ids(noRequest.map((r) => r.id))}; requests ${ids([...new Set(noRequest.map((r) => r.requestId))])})`, { code: 'CHANNEL_REQUEST_MISSING' });
+  const noGuardian = rows.filter((r) => r.guardianId !== null && !guardianIds.has(r.guardianId)); if (noGuardian.length) throw blocked(`CHANNEL_GUARDIAN_MISSING: ${noGuardian.length} channel(s) in ${label} name a guardian that does not exist (channels ${ids(noGuardian.map((r) => r.id))})`, { code: 'CHANNEL_GUARDIAN_MISSING' });
+  const noOrg = rows.filter((r) => !orgIds.has(r.orgId)); if (noOrg.length) throw blocked(`CHANNEL_ORG_MISSING: ${noOrg.length} channel(s) in ${label} name an organisation that does not exist (channels ${ids(noOrg.map((r) => r.id))})`, { code: 'CHANNEL_ORG_MISSING' });
 }
 
 /**
  * Whole-table access for the tools that treat the file as one snapshot (backups,
  * restores, the persistence suites). Before the cutover record both methods decline
  * (`null` / `false`): the caller keeps the legacy blob. Afterwards `read` returns
- * the channels in the legacy shape, in insertion order, with their messages nested;
- * `replace` validates every entry, checks the incoming rows' references against the
+ * the channel records, in insertion order, with their messages nested;
+ * `replace` types every entry (unknown keys dropped, a wrong-typed value refused), checks the incoming rows' references against the
  * requests the caller passes (the snapshot's own, or the retained blob) and the
  * tables as they stand, rewrites the three tables inside the caller's transaction
  * (array position → seq / position) and refuses the whole write on the first problem.
@@ -500,44 +432,42 @@ export const CHANNELS_TABLE = {
     if (!sqlite.isTransaction) throw new Error('channels: replace() runs inside the caller\'s transaction');
     const v = validateChannelRows(rows, { label: 'the channels snapshot collection' });
     checkIncomingReferences(sqlite, v.rows, { requests: requests === undefined ? readRequestsBlob(sqlite) : requests, label: 'the channels snapshot collection' });
-    writeChannels(sqlite, v.rows.map((r) => r.row));
+    writeChannels(sqlite, v.rows);
     return true;
   },
 };
 
 /**
  * Import the legacy (or exported) `channels` blob into the three tables, inside the
- * migration's transaction: validation of every entry and every nested message and
- * attachment, the reference checks against the file's `requests` blob and the
+ * migration's transaction: every entry and every nested message and attachment
+ * typed (unknown fields and wrong-typed optional values dropped and noted with the
+ * record's id; an unusable record refuses the step), the reference checks against the file's `requests` blob and the
  * guardians/orgs tables, insertion in array order, the blob row retired. An absent
  * blob imports nothing; an empty array imports nothing; a non-array or non-JSON blob
- * refuses the step. Returns the counts the migration records in `meta` (never a value).
+ * refuses the step. Returns the counts and notes the migration records in `meta` (ids and field names, never a value).
  */
 export function importChannelsBlob(sqlite) {
   const hasCollections = tableExists(sqlite, 'collections');
   const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(CHANNELS_COLLECTION) : null;
-  const counts = { imported: 0, messages: 0, attachments: 0, withExtraFields: 0, withAbsentKeys: 0, byCounterparty: {} };
-  if (!row) return counts;
+  if (!row) return { imported: 0, messages: 0, attachments: 0, normalised: 0, byCounterparty: {}, notes: [] };
   let parsed; try { parsed = JSON.parse(row.value); } catch { throw blocked('the channels blob is not valid JSON'); }
-  const v = validateChannelRows(parsed, { label: 'the channels blob' });
+  const v = validateChannelRows(parsed, { label: 'the channels blob', lenient: true });
   checkIncomingReferences(sqlite, v.rows, { requests: readRequestsBlob(sqlite), label: 'the channels blob' });
-  writeChannels(sqlite, v.rows.map((r) => r.row));
+  writeChannels(sqlite, v.rows);
   sqlite.prepare('DELETE FROM collections WHERE name = ?').run(CHANNELS_COLLECTION);
-  return { ...counts, ...v.counts };
+  return { ...v.counts, notes: v.notes };
 }
 
 // ------------------------------------------------------------------ detached copies (the export)
-const copyMessage = (m) => { const c = {}; for (const k of Object.keys(m)) setOwn(c, k, clone(m[k], k).value); return c; };
-/** A DETACHED copy of a mirror channel (the export shape): every key cloned, the messages array cloned message by message. */
-const copyChannel = (row) => { const c = {}; for (const k of Object.keys(row)) setOwn(c, k, k === 'messages' ? row.messages.map(copyMessage) : clone(row[k], k).value); return c; };
+/** A DETACHED copy of a mirror channel (the export shape). */
+const copyChannel = (row) => structuredClone(row);
 // The unit-of-work snapshot is NOT a detached copy: it is the graph memento of the mirror
 // (repositories/memento.mjs — every plain object and array reachable from `rows`, by
 // identity, with its own data properties by reference), restored IN PLACE. A clone-and-
 // replace restore kept the outer thread but swapped its nested objects, so a held
-// `readBy` (or sender, attachment, unknown nested field) stayed attached to the failed
-// value (the review of 62e9c1a). Own "__proto__" keys are data to the memento (own data
-// properties shadow the accessor on assignment); the mirror never deletes a key inside
-// an operation, so no restore has to recreate one.
+// `readBy` (or sender, attachment) stayed attached to the failed value (the review of
+// 62e9c1a). The mirror never deletes a key inside an operation, so no restore has to
+// recreate one.
 
 // ------------------------------------------------------------------ the repository
 /**
@@ -611,15 +541,15 @@ export function createChannelsRepository({ sqlite, now = Date.now, log = () => {
     byId: (id) => { const r = byId.get(id); return r ? readonlyView(r, 'a message thread') : null; },
 
     /**
-     * A new thread at the end, in the channel literal (validated exactly like an
-     * import). The TRANSITIONAL CHECKED REFERENCE (D-A): the requestId must be the id
+     * A new thread at the end, in the channel literal (typed: unknown keys dropped, a
+     * wrong-typed value refused by field). The TRANSITIONAL CHECKED REFERENCE (D-A): the requestId must be the id
      * of a request in the authoritative requests collection and no other channel may
      * carry it; the organisation must exist; a guardian, when named, must exist.
      * Returns the thread (read-only).
      */
     open(raw) {
       return operation((exec) => {
-        const v = validateChannel(raw); if (!v.ok) throw new TypeError(`a message thread needs the channel literal: ${v.reason}`);
+        const v = typeChannel(raw); if (!v.ok) throw new TypeError(`a message thread needs the channel literal: ${v.reason}`);
         const row = v.row;
         if (byId.has(row.id)) throw new Error(`channels: a thread with id ${row.id} already exists`);
         if (byRequest.has(row.requestId)) throw new Error(`channels: request ${row.requestId} already opened thread ${byRequest.get(row.requestId).id}; a request opens one thread`);
@@ -627,7 +557,7 @@ export function createChannelsRepository({ sqlite, now = Date.now, log = () => {
         const list = requests(); if (!Array.isArray(list)) throw new Error(`channels: the authoritative requests collection is ${describe(list)}, not an array; the request reference cannot be checked`);
         if (!list.some((r) => isPlainObject(r) && r.id === row.requestId)) throw refusal('CHANNEL_REQUEST_MISSING', `channels: request ${row.requestId} is not in the requests collection; a thread opens only for an existing request`);
         if (!stmt.org.get(row.orgId)) throw refusal('CHANNEL_ORG_MISSING', `channels: organisation ${row.orgId} does not exist`);
-        if (Object.hasOwn(row, 'guardianId') && row.guardianId !== null && !stmt.guardian.get(row.guardianId)) throw refusal('CHANNEL_GUARDIAN_MISSING', `channels: guardian ${row.guardianId} does not exist`);
+        if (row.guardianId !== null && !stmt.guardian.get(row.guardianId)) throw refusal('CHANNEL_GUARDIAN_MISSING', `channels: guardian ${row.guardianId} does not exist`);
         rows.push(row); byId.set(row.id, row); byRequest.set(row.requestId, row);
         const params = channelParams(row); const messages = row.messages.map((m, i) => [messageParams(row.id, i, m), m.attachment ? attachmentParams(m.id, m.attachment) : null]);
         exec(() => { stmt.channel.run(params); for (const [mp, ap] of messages) { stmt.message.run(mp); if (ap) stmt.attachment.run(ap); } });
@@ -638,7 +568,7 @@ export function createChannelsRepository({ sqlite, now = Date.now, log = () => {
     appendMessage(channelId, raw) {
       return operation((exec) => {
         const row = byId.get(channelId); if (!row) throw new Error(`channels: no thread ${channelId} to append to`);
-        const v = validateMessage(raw); if (!v.ok) throw new TypeError(`a message needs the message literal: ${v.reason}`);
+        const v = typeMessage(raw); if (!v.ok) throw new TypeError(`a message needs the message literal: ${v.reason}`);
         if (row.messages.some((m) => m.id === v.row.id)) throw new Error(`channels: thread ${channelId} already holds message ${v.row.id}`);
         const msg = v.row; const position = row.messages.length; row.messages.push(msg);
         const mp = messageParams(row.id, position, msg); const ap = msg.attachment ? attachmentParams(msg.id, msg.attachment) : null;
@@ -653,8 +583,7 @@ export function createChannelsRepository({ sqlite, now = Date.now, log = () => {
         if (!READ_BY_KEYS.includes(side)) throw new TypeError(`channels: a receipt side is 'org' or 'counterparty', not ${describe(side)}`);
         if (!isInt(at)) throw new TypeError('channels: a receipt needs an integer timestamp');
         row.readBy[side] = at;
-        const absent = channelAbsent(row); const absentJson = absent.length ? JSON.stringify(absent) : null;
-        exec(() => stmt.read[side].run(at, absentJson, row.id));
+        exec(() => stmt.read[side].run(at, row.id));
         return readonlyView(row.readBy, 'a message thread');
       });
     },
@@ -675,7 +604,7 @@ export function createChannelsRepository({ sqlite, now = Date.now, log = () => {
         return { channels: removed.length, messages: removed.reduce((n, r) => n + r.messages.length, 0) };
       });
     },
-    /** Every thread in its legacy shape (extras first, then the literal's keys in the writer's order; messages nested in order), detached (the admin backup). */
+    /** Every thread (the literal's keys in the writer's order; messages nested in order), detached (the admin backup). */
     exportRows: () => rows.map(copyChannel),
 
     // ---------------------------------------------------------- the save hook (staged mode)
@@ -689,12 +618,11 @@ export function createChannelsRepository({ sqlite, now = Date.now, log = () => {
     rollback() { inFlight = 0; },
     /**
      * Unit-of-work participation: the graph memento of the whole mirror (the thread list,
-     * every thread, its receipts, its messages, each sender, attachment and unknown nested
-     * field — by identity, restored IN PLACE so every held view, nested ones included,
-     * reads the pre-unit state) and the queue length when the unit began. Objects added
-     * during the unit (a new thread, a new message) are no longer referenced once their
-     * parents are restored; nothing is cloned, so key order, absence versus null and live
-     * non-finite values come back exactly as captured. A failed ORDINARY save never
+     * every thread, its receipts, its messages, each sender and attachment — by identity,
+     * restored IN PLACE so every held view, nested ones included, reads the pre-unit
+     * state) and the queue length when the unit began. Objects added during the unit (a
+     * new thread, a new message) are no longer referenced once their parents are
+     * restored; nothing is cloned. A failed ORDINARY save never
      * reaches here: its mirror and queue are the intended state (see the header).
      */
     snapshotState: () => ({ pendingLength: pending.length, graph: captureGraph([rows]) }),

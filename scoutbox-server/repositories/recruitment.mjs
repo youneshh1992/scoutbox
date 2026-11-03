@@ -262,9 +262,7 @@ CREATE TABLE channels (
   guardian_id             TEXT,
   created_at              INTEGER NOT NULL,
   read_by_org_at          INTEGER,
-  read_by_counterparty_at INTEGER,
-  absent_keys_json        TEXT ${ABSENT_CHECK},
-  extra_json              TEXT ${EXTRA_CHECK('extra_json')}
+  read_by_counterparty_at INTEGER
 ) STRICT;
 CREATE UNIQUE INDEX channels_request_id ON channels (request_id);
 CREATE INDEX channels_org_id ON channels (org_id);

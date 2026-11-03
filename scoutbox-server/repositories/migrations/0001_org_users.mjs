@@ -3,9 +3,9 @@
  *
  * One row per staff member of a club, academy or agency. The columns are the
  * fields the server reads today; `mfa_json` and `delivery_prefs_json` hold
- * the two small structured values a row can carry, and `extra_json` keeps
- * anything an older snapshot stored that this schema does not name, so an
- * import never silently drops data (the repository reports such fields).
+ * the two small structured values a row can carry. Typed columns only: a
+ * field this schema does not name is not stored (the repository's blob
+ * import drops it and reports it with the row id).
  *
  * `org_id` is not yet a foreign key: organisations are still a blob
  * collection. The constraint is added by the migration that moves them.
@@ -29,8 +29,7 @@ export function up(sqlite) {
       removed_by          TEXT,
       provenance          TEXT,
       mfa_json            TEXT,
-      delivery_prefs_json TEXT,
-      extra_json          TEXT
+      delivery_prefs_json TEXT
     );
     CREATE INDEX org_users_org ON org_users (org_id);
     CREATE INDEX org_users_org_name ON org_users (org_id, lower(name));

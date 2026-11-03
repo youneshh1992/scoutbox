@@ -582,7 +582,7 @@ const assertPrototypesClean = () => {
   assert.equal(Object.getPrototypeOf(Object.prototype), null);
 };
 
-test('review 3: own JSON properties named constructor, toString, __proto__ and hasOwnProperty survive the forward and reverse mapping as data — top level, inside a composite (stats), inside a composite remainder and inside S5 items — and no prototype is touched', () => {
+test('review 3: own JSON properties named constructor, toString, __proto__ and hasOwnProperty survive the forward and reverse mapping as data — top level, inside a composite (stats), inside a composite remainder — and no prototype is touched (sub-record items are typed columns: their unknown keys are not stored, testPlayerSubrecords.mjs)', () => {
   const p = protoPlayer();
   const row = playerToRow(p);
   assert.equal(row.stats_goals, 1, 'the real column sub-key is still mapped');
@@ -594,7 +594,7 @@ test('review 3: own JSON properties named constructor, toString, __proto__ and h
   const back = playerFromRow(row);
   assertProtoKept(p, back, 'player direct');
   assert.ok(Object.hasOwn(back.stats, 'constructor') && Object.hasOwn(back.stats, '__proto__') && Object.hasOwn(back.stats, 'valueOf')); assert.equal(back.stats.valueOf, null);
-  assert.ok(Object.hasOwn(back.medical.records[0], 'constructor')); assert.ok(Object.hasOwn(back.media[0], '__proto__')); assert.ok(Object.hasOwn(back.unknownBag, '__proto__'));
+  assert.ok(Object.hasOwn(back.unknownBag, '__proto__'));
   assert.deepEqual(validatePlayerRecord(p), { ok: true });
   const g = protoGuardian();
   const gback = guardianFromRow(guardianToRow(g), []);

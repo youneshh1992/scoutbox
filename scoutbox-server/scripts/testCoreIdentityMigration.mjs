@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
+import { SUBRECORD_TABLES, placeSubrecords } from '../repositories/playerSubrecords.mjs';
 import { RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
 import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.mjs';
 import { RECRUITMENT_CONTACTS_OFFERS_TABLES } from '../repositories/recruitmentContactsOffers.mjs';
@@ -78,7 +78,7 @@ test('cutover: an S3 file with every record shape cuts over — three live table
   assert.equal(identity.initState(), 'done');
   const boot = identity.attach();
   assert.deepEqual(boot, { engine: 'sqlite', players: 5, guardians: 3, links: 5, imported: 0 });
-  for (const rec of FIXTURE().players) sameShape(rec, identity.players.byId(rec.id), `player ${rec.id}`);
+  for (const rec of FIXTURE().players) sameShape(placeSubrecords(clone(rec)), identity.players.byId(rec.id), `player ${rec.id}`); // the sub-record arrays as their tables hold them (every array, after the other keys)
   for (const rec of FIXTURE().guardians) sameShape(rec, identity.guardians.byId(rec.id), `guardian ${rec.id}`);
   assert.deepEqual([...identity.guardians.byId('gd-primary').childIds], ['pl-child1', 'pl-child2', 'pl-grown']);
   assert.equal(identity.guardians.byId('gd-signup').emailCode, 'K7Q2ZP');

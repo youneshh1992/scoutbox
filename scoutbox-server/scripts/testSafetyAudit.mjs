@@ -8,26 +8,20 @@
 // the final state of every snapshot that touches the queue or the identity pair),
 // Q5 (lifting a block deletes its row, as today).
 //
-// Covered: the migration from the eight legacy blobs (every writer literal, unknown
-// own fields at row and nested level, absent versus null, values of a known key that
-// are not the column's type — the unchecked `targetPlayerId`, `orgId` and `reason` a
-// route stores as it received them — kept losslessly; refusals name positions, ids and
-// reasons, never a text); the actual schema (no foreign key on any of the eight
-// tables, a unique id per table, insertion order); the repository (append, the block
-// removal, the report and IDV status patches, the first-matching IDV entry, the
+// Covered: the migration from the eight legacy blobs (every writer literal, TYPED: an
+// unknown own field dropped and reported by id, an absent key read back as null, an
+// off-type value normalised when its meaning is obvious and dropped otherwise, each
+// change a note in the cutover record — ids and field names, never a value; refusals
+// name positions, ids and reasons, never a text); the actual schema (typed columns only,
+// no foreign key on any of the eight tables, a unique id per table, insertion order);
+// the repository (append — an unknown key dropped, an off-type value refused by name —,
+// the block removal, the report and IDV status patches, the first-matching IDV entry, the
 // source-change cap, the two write modes, joined units, real COMMIT failure, hook
 // registration, held views restored in place); the snapshot dispatcher (round trip,
-// omission, empty, malformed, tolerant player references under an identity rewrite,
-// the strict guardian assertion in every direction, identity-only replacement with
-// the queue omitted). Temporary databases only; nothing
-// touches DATA_DIR. Run with: npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged 1792fc7 tree before the implementation):
-// the tests marked [cutover] need the 0013 migration and the repository module
-// and FAIL there on concrete assertions (the migration id is absent
-// from DATA_MIGRATIONS; the eight tables do not exist; the blobs survive). The tests
-// marked [compat] exercise what the accepted representation already does and pass on
-// both trees.
+// omission, empty, malformed, an unknown key dropped, an off-type value refused, tolerant
+// player references under an identity rewrite, the strict guardian assertion in every
+// direction, identity-only replacement with the queue omitted). Temporary databases
+// only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,7 +29,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
-import { cloneJson as outboxCloneJson, validateOutboxRow, validatePushTokenRow, validatePushLogRow } from '../repositories/outboxPush.mjs';
 import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
@@ -68,10 +61,9 @@ const idsIn = (dir, table) => (tableExistsIn(dir, table) ? rowsOf(dir, table).ma
 const blobOf = (dir, name) => { const s = second(dir); try { return s.prepare('SELECT value FROM collections WHERE name = ?').get(name)?.value ?? null; } finally { s.close(); } };
 const seqOf = (dir) => { const s = second(dir); try { return Number(s.prepare("SELECT value FROM meta WHERE key = 'saveSeq'").get()?.value) || 0; } finally { s.close(); } };
 const plain = (v) => JSON.parse(JSON.stringify(v));
-const setOwn = (o, k, v) => Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
-/** The export convention: unknown own fields FIRST, then the literal's present keys in the writer's order. */
-const extrasFirst = (row, keys) => { const o = {}; for (const k of Object.keys(row)) if (!keys.includes(k)) setOwn(o, k, row[k]); for (const k of keys) if (Object.hasOwn(row, k)) o[k] = row[k]; return o; };
-const canon = (name, rows) => rows.map((r) => extrasFirst(r, KEYS[name]));
+/** The typed record of a valid literal: every key of the collection in the writer's order, an absent key null. */
+const canonRow = (name, r) => Object.fromEntries(KEYS[name].map((k) => [k, r[k] === undefined ? null : r[k]]));
+const canon = (name, rows) => rows.map((r) => canonRow(name, r));
 
 // ------------------------------------------------------------------ the literals (synthetic values only)
 const T = NOW - MIN;
@@ -110,28 +102,19 @@ function live(dir, { now = () => NOW } = {}) {
 }
 /** An immediate-mode repository on a bare connection (a tool, a test): own transaction per mutation. */
 const bare = (s, over = {}) => needModule().createSafetyAuditRepository({ sqlite: s, now: () => NOW, ...over });
-/** Every table's rows in the legacy shape, through the module's own reader. */
+/** Every table's typed records, through the module's own reader. */
 const stored = (s) => { const { AUDIT_SNAPSHOT_TABLES } = needModule(); const out = {}; for (const t of AUDIT_SNAPSHOT_TABLES) out[t.name] = t.read(s); return out; };
 
-// ============================================================= [compat] what the accepted representation already does
-test('[compat] the legacy blob representation: handleReport stores the targetPlayerId it received (a number, an object) without a type or existence check and omits the key on the automatic path; a ledger entry is `{ id, ts, ...entry }` with whatever keys the caller passed; JSON keeps absent and null apart; a non-finite number serialises as null — the shapes the storage move must keep', () => {
-  const blobRows = JSON.parse(JSON.stringify([report({ targetPlayerId: 123 }), report({ id: 'rep-2', targetPlayerId: { id: 'pl-x' } }), autoReport(), { ...led({ id: 'led-x' }), detail: { shareId: 's1' }, futureKey: Infinity }]));
-  assert.equal(blobRows[0].targetPlayerId, 123); assert.deepEqual(blobRows[1].targetPlayerId, { id: 'pl-x' });
-  assert.equal(Object.hasOwn(blobRows[2], 'targetPlayerId'), false, 'the automatic report has no targetPlayerId key'); assert.equal(Object.hasOwn(blobRows[2], 'byOrgId'), false);
-  assert.equal(blobRows[3].futureKey, null, 'a non-finite number is null in the blob'); assert.deepEqual(Object.keys(blobRows[3]).slice(0, 3), ['id', 'ts', 'type']);
-  assert.equal(Object.hasOwn(blobRows[0], 'targetScoutName'), true); assert.equal(blobRows[0].targetScoutName, null);
-});
-
 // ============================================================= [cutover] the migration from the eight legacy blobs
-test('[cutover] migration 0013 is registered after 0012 and imports the eight blobs losslessly: every writer literal, an unknown own key at row level and inside a nested context/detail (own "__proto__" keys included), an ABSENT optional key next to a present-and-null one, values of a known key that are not the column type (a numeric targetPlayerId, an object orgId, a float ts), a ledger row with no playerId key, rows naming a player that does not exist (Domain P: counted per table, imported as they are), a backup_refused and a backup_failed ops event, two IDV entries of one guardian; array order becomes seq; the eight blob rows are retired; the cutover record carries counts only; a second run applies nothing; the way back equals the input (extras first, absence preserved, odd values restored)', () => {
+test('[cutover] migration 0013 is registered after 0012 and imports the eight blobs TYPED: every writer literal into its columns; an unknown own field at row level (own "__proto__" and "constructor" keys included) dropped and reported by id; an absent optional key read back as null; an off-type value normalised when its meaning is obvious (a numeric targetPlayerId → its text, a numeric reason → its text, a fractional ts → rounded) and dropped otherwise (an object orgId, an object documentType), each reported by id and field; a nested unknown key inside context is part of the JSON value and kept; a ledger row with no playerId key; rows naming a player that does not exist (Domain P: counted per table, imported as they are); a backup_refused and a backup_failed ops event; two IDV entries of one guardian; array order becomes seq; the eight blob rows are retired; the cutover record carries counts and notes (ids and field names, never a value); a second run applies nothing; the tables read back the typed records', () => {
   const dir = tempDir('sa-mig');
   const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me"},"constructor":"own-constructor"}');
   const blobs = {
     blocks: [block(), block({ id: 'blk-2', playerId: 'pl-gone', orgId: { not: 'a string' }, reason: 42, by: 'guardian', futureBlockField: [1] }), block({ id: 'blk-3', playerId: 'pl-child1', orgId: 'org-pro', by: 'guardian', reason: 'suspended_pending_review' })],
     reports: [report(), report({ id: 'rep-2', by: 'org_user', byId: 'usr-1', byOrgId: 'org-pro', targetKind: 'player', targetPlayerId: 'pl-gone', targetOrgId: null }), report({ id: 'rep-3', targetKind: 'player', targetPlayerId: 123, ts: 1.5 }), autoReport({ ...special })],
-    moderationLog: [modHit(), modHit({ id: 'mod-2', context: { kind: 'org_message', channelId: 'chan-2', futureContextField: { deep: true }, ...special }, flags: ['secrecy', 'url'], severity: 'grooming' })],
+    moderationLog: [modHit(), modHit({ id: 'mod-2', context: { kind: 'org_message', channelId: 'chan-2', futureContextField: { deep: true } }, flags: ['secrecy', 'url'], severity: 'grooming' })],
     orgNotes: [note(), note({ id: 'note-2', playerId: 'pl-gone', userId: null })],
-    ledger: [led(), led({ id: 'led-2', type: 'open_trial_posted', playerId: null, userId: 'usr-1', scoutName: 'Maria', detail: { trialId: 't1' } }), { id: 'led-3', ts: T, type: 'staff_removed', orgId: 'org-pro', orgName: 'Eastport FC', userId: null, scoutName: 'system' }, led({ id: 'led-4', playerId: 'pl-gone', type: 'shortlist', futureLedgerField: 'kept' }), led({ id: 'led-5', playerId: 'pl-child1', type: 'message', scoutName: 'Primary Parent', userId: null })],
+    ledger: [led(), led({ id: 'led-2', type: 'open_trial_posted', playerId: null, userId: 'usr-1', scoutName: 'Maria', detail: { trialId: 't1' } }), { id: 'led-3', ts: T, type: 'staff_removed', orgId: 'org-pro', orgName: 'Eastport FC', userId: null, scoutName: 'system' }, led({ id: 'led-4', playerId: 'pl-gone', type: 'shortlist', futureLedgerField: 'dropped' }), led({ id: 'led-5', playerId: 'pl-child1', type: 'message', scoutName: 'Primary Parent', userId: null })],
     opsEvents: [ops(), ops({ id: 'ops-2', kind: 'backup_refused', detail: { dir: 'x', error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflicts: [{ mediaId: 'med-1', owners: ['pl-adult'] }] } }), ops({ id: 'ops-3', kind: 'backup_failed', detail: { dir: 'x', error: 'ENOSPC' } }), ops({ id: 'ops-4', kind: 'future_kind', detail: null })],
     sourceChanges: [srcc(), srcc({ id: 'srcc-2', playerId: 'pl-gone', sourceSystem: 'position_history', sourceId: 'ppos-1', detail: { to: 'CM', submittedBy: 'guardian' } })],
     idvQueue: [idv(), idv({ id: 'idv-2', ts: T + 1, documentType: { odd: 'object' }, status: 'revoked' }), idv({ id: 'idv-3', guardianId: 'gd-signup', guardianName: 'Signup Parent' })],
@@ -141,47 +124,53 @@ test('[cutover] migration 0013 is registered after 0012 and imports the eight bl
   const s = openRaw(dir);
   assert.ok(!applied(s).includes(MIGRATION)); for (const n of COLLECTIONS) assert.ok(blob(s, n), `${n} blob before`);
   const ran = migrate(s);
-  assert.ok(ran.ran.includes(MIGRATION), `0013 ran (${ran.ran.join(', ')})`); // fails on 1792fc7: the id is not registered
+  assert.ok(ran.ran.includes(MIGRATION), `0013 ran (${ran.ran.join(', ')})`);
   assert.deepEqual(applied(s).slice(-7), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S4b-R, S8a, S8b and S8c registered after this step
   for (const t of Object.values(TABLES)) assert.ok(s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), `${t} exists`);
   for (const n of COLLECTIONS) assert.equal(blob(s, n), undefined, `the ${n} blob row is retired`);
   // Columns and order.
   const bl = s.prepare('SELECT * FROM blocks ORDER BY seq').all();
-  assert.deepEqual(bl.map((r) => [r.seq, r.id, r.player_id, r.org_id, r.by_kind, r.reason, r.created_at]), [[1, 'blk-1', 'pl-adult', 'org-pro', 'player', 'synthetic reason', T], [2, 'blk-2', 'pl-gone', null, 'guardian', null, T], [3, 'blk-3', 'pl-child1', 'org-pro', 'guardian', 'suspended_pending_review', T]], 'array order is seq; a non-string orgId/reason leaves the column NULL');
-  assert.deepEqual(JSON.parse(bl[1].offtype_json), { orgId: { not: 'a string' }, reason: 42 }, 'the odd values are kept as JSON under their key'); assert.deepEqual(JSON.parse(bl[1].extra_json), { futureBlockField: [1] }); assert.equal(bl[0].offtype_json, null); assert.equal(bl[0].extra_json, null); assert.equal(bl[0].absent_keys_json, null);
+  assert.deepEqual(bl.map((r) => [r.seq, r.id, r.player_id, r.org_id, r.by_kind, r.reason, r.created_at]), [[1, 'blk-1', 'pl-adult', 'org-pro', 'player', 'synthetic reason', T], [2, 'blk-2', 'pl-gone', null, 'guardian', '42', T], [3, 'blk-3', 'pl-child1', 'org-pro', 'guardian', 'suspended_pending_review', T]], 'array order is seq; an object orgId is dropped (NULL), a numeric reason becomes its text');
   const rp = s.prepare('SELECT * FROM reports ORDER BY seq').all();
-  assert.deepEqual(rp.map((r) => [r.id, r.by_kind, r.by_org_id, r.target_kind, r.target_player_id, r.urgent, r.status, r.outcome, r.resolved_at, r.created_at]), [['rep-1', 'player', null, 'club', null, 0, 'pending_review', null, null, T], ['rep-2', 'org_user', 'org-pro', 'player', 'pl-gone', 0, 'pending_review', null, null, T], ['rep-3', 'player', null, 'player', null, 0, 'pending_review', null, null, null], ['rep-auto', 'system', null, 'club', null, 1, 'pending_review', null, null, T], ['rep-nokey', 'system', null, 'club', null, 1, 'pending_review', null, null, T]]);
-  assert.deepEqual(JSON.parse(rp[0].absent_keys_json), ['byOrgId'], 'a user report has no byOrgId key: recorded as absent'); assert.deepEqual(JSON.parse(rp[2].offtype_json), { targetPlayerId: 123, ts: 1.5 }, 'a numeric targetPlayerId and a float ts are kept as JSON'); assert.deepEqual(JSON.parse(rp[3].absent_keys_json), ['byOrgId', 'targetScoutName', 'targetPlayerId'], 'the automatic report: three absent keys'); assert.deepEqual(JSON.parse(rp[4].absent_keys_json), ['byOrgId', 'targetScoutName', 'targetPlayerId', 'outcome']);
-  assert.deepEqual(JSON.parse(JSON.stringify(JSON.parse(rp[3].extra_json))), JSON.parse('{"__proto__":{"legacyMarker":"keep-me"},"constructor":"own-constructor"}'), 'own prototype-like keys are data');
+  assert.deepEqual(rp.map((r) => [r.id, r.by_kind, r.by_org_id, r.target_kind, r.target_player_id, r.urgent, r.status, r.outcome, r.resolved_at, r.created_at]), [['rep-1', 'player', null, 'club', null, 0, 'pending_review', null, null, T], ['rep-2', 'org_user', 'org-pro', 'player', 'pl-gone', 0, 'pending_review', null, null, T], ['rep-3', 'player', null, 'player', '123', 0, 'pending_review', null, null, 2], ['rep-auto', 'system', null, 'club', null, 1, 'pending_review', null, null, T], ['rep-nokey', 'system', null, 'club', null, 1, 'pending_review', null, null, T]], 'a numeric targetPlayerId becomes its text, a fractional ts is rounded');
   const ml = s.prepare('SELECT * FROM moderation_log ORDER BY seq').all();
   assert.deepEqual(ml.map((r) => [r.id, r.severity, r.excerpt, r.flags_json]), [['mod-1', 'contact', 'synthetic excerpt with an address', '["email"]'], ['mod-2', 'grooming', 'synthetic excerpt with an address', '["secrecy","url"]']]);
-  assert.deepEqual(JSON.parse(JSON.stringify(JSON.parse(ml[1].context_json))), JSON.parse('{"kind":"org_message","channelId":"chan-2","futureContextField":{"deep":true},"__proto__":{"legacyMarker":"keep-me"},"constructor":"own-constructor"}'), 'the whole context, unknown keys included, as JSON');
+  assert.deepEqual(JSON.parse(ml[1].context_json), { kind: 'org_message', channelId: 'chan-2', futureContextField: { deep: true } }, 'the whole context, as JSON');
   const on = s.prepare('SELECT * FROM org_notes ORDER BY seq').all(); assert.deepEqual(on.map((r) => [r.id, r.org_id, r.player_id, r.user_id, r.scout_name, r.text, r.created_at]), [['note-1', 'org-pro', 'pl-adult', 'usr-1', 'Maria', 'Synthetic note text.', T], ['note-2', 'org-pro', 'pl-gone', null, 'Maria', 'Synthetic note text.', T]]);
   const lg = s.prepare('SELECT * FROM ledger ORDER BY seq').all();
-  assert.deepEqual(lg.map((r) => [r.id, r.type, r.player_id, r.org_id, r.org_name, r.user_id, r.actor_name, r.detail_json, r.absent_keys_json, r.extra_json]), [
-    ['led-1', 'view', 'pl-adult', 'org-pro', 'Eastport FC', 'usr-1', 'Maria', null, '["detail"]', null],
-    ['led-2', 'open_trial_posted', null, 'org-pro', 'Eastport FC', 'usr-1', 'Maria', '{"trialId":"t1"}', null, null],
-    ['led-3', 'staff_removed', null, 'org-pro', 'Eastport FC', null, 'system', null, '["playerId","detail"]', null],
-    ['led-4', 'shortlist', 'pl-gone', 'org-pro', 'Eastport FC', 'usr-1', 'Maria', null, '["detail"]', '{"futureLedgerField":"kept"}'],
-    ['led-5', 'message', 'pl-child1', 'org-pro', 'Eastport FC', null, 'Primary Parent', null, '["detail"]', null],
-  ], 'userId/scoutName verbatim (no actor kind derived); a row without a playerId key records the absence; a null playerId stays null');
+  assert.deepEqual(lg.map((r) => [r.id, r.type, r.player_id, r.org_id, r.org_name, r.user_id, r.actor_name, r.detail_json]), [
+    ['led-1', 'view', 'pl-adult', 'org-pro', 'Eastport FC', 'usr-1', 'Maria', null],
+    ['led-2', 'open_trial_posted', null, 'org-pro', 'Eastport FC', 'usr-1', 'Maria', '{"trialId":"t1"}'],
+    ['led-3', 'staff_removed', null, 'org-pro', 'Eastport FC', null, 'system', null],
+    ['led-4', 'shortlist', 'pl-gone', 'org-pro', 'Eastport FC', 'usr-1', 'Maria', null],
+    ['led-5', 'message', 'pl-child1', 'org-pro', 'Eastport FC', null, 'Primary Parent', null],
+  ], 'userId/scoutName verbatim (no actor kind derived); a row without a playerId key has a NULL player_id');
   const oe = s.prepare('SELECT * FROM ops_events ORDER BY seq').all(); assert.deepEqual(oe.map((r) => [r.id, r.kind, r.occurred_at, r.detail_json]), [['ops-1', 'backup_created', T, '{"dir":"2026-10-19","files":3,"queuedForRemoval":0}'], ['ops-2', 'backup_refused', T, '{"dir":"x","error":"MEDIA_QUEUE_OWNERSHIP_CONFLICT","conflicts":[{"mediaId":"med-1","owners":["pl-adult"]}]}'], ['ops-3', 'backup_failed', T, '{"dir":"x","error":"ENOSPC"}'], ['ops-4', 'future_kind', T, null]], 'every kind imported, the two the first DDL draft forgot included; an open vocabulary');
   const sc = s.prepare('SELECT * FROM source_changes ORDER BY seq').all(); assert.deepEqual(sc.map((r) => [r.id, r.player_id, r.type, r.source_system, r.source_id, r.occurred_at, r.detail_json]), [['srcc-1', 'pl-adult', 'position_changed', 'passport_prefs', 'pl-adult:ST', T, '{"from":null,"to":"ST","submittedBy":"player"}'], ['srcc-2', 'pl-gone', 'position_changed', 'position_history', 'ppos-1', T, '{"to":"CM","submittedBy":"guardian"}']]);
-  const iq = s.prepare('SELECT * FROM idv_queue ORDER BY seq').all(); assert.deepEqual(iq.map((r) => [r.id, r.guardian_id, r.guardian_name, r.document_type, r.document_ref_last4, r.provider, r.reference, r.created_at, r.status, r.offtype_json]), [['idv-1', 'gd-primary', 'Primary Parent', 'passport', '4567', 'dev-attestation', 'idv_0123456789abcdef', T, 'approved', null], ['idv-2', 'gd-primary', 'Primary Parent', null, '4567', 'dev-attestation', 'idv_0123456789abcdef', T + 1, 'revoked', '{"documentType":{"odd":"object"}}'], ['idv-3', 'gd-signup', 'Signup Parent', 'passport', '4567', 'dev-attestation', 'idv_0123456789abcdef', T, 'approved', null]]);
-  // The cutover record: counts only.
+  const iq = s.prepare('SELECT * FROM idv_queue ORDER BY seq').all(); assert.deepEqual(iq.map((r) => [r.id, r.guardian_id, r.guardian_name, r.document_type, r.document_ref_last4, r.provider, r.reference, r.created_at, r.status]), [['idv-1', 'gd-primary', 'Primary Parent', 'passport', '4567', 'dev-attestation', 'idv_0123456789abcdef', T, 'approved'], ['idv-2', 'gd-primary', 'Primary Parent', null, '4567', 'dev-attestation', 'idv_0123456789abcdef', T + 1, 'revoked'], ['idv-3', 'gd-signup', 'Signup Parent', 'passport', '4567', 'dev-attestation', 'idv_0123456789abcdef', T, 'approved']]);
+  // The cutover record: counts and notes (ids and field names only).
   const record = JSON.parse(meta(s, META));
   assert.deepEqual(Object.fromEntries(COLLECTIONS.map((n) => [n, record[n].imported])), { blocks: 3, reports: 5, moderationLog: 2, orgNotes: 2, ledger: 5, opsEvents: 4, sourceChanges: 2, idvQueue: 3 });
-  assert.deepEqual([record.blocks.withExtraFields, record.blocks.withOfftypeValues, record.reports.withAbsentKeys, record.reports.withOfftypeValues, record.reports.withExtraFields, record.moderationLog.withExtraFields, record.ledger.withAbsentKeys, record.idvQueue.withOfftypeValues], [1, 1, 4, 1, 1, 0, 4, 1], 'per-collection counts (rep-2 and led-2 carry every key; a nested unknown key inside context is part of the context value, not an extra field)');
-  assert.deepEqual(Object.fromEntries(['blocks', 'reports', 'orgNotes', 'ledger', 'sourceChanges'].map((n) => [n, [record[n].unresolvedPlayerIds, record[n].withoutPlayerId]])), { blocks: [1, 0], reports: [1, 4], orgNotes: [1, 0], ledger: [1, 2], sourceChanges: [1, 0] }, 'Domain P: unresolved ids counted per table (a count, not provenance); rows without a usable player id counted apart');
-  assert.doesNotMatch(JSON.stringify(record), /Synthetic|excerpt|address|Maria|Primary|4567|keep-me|pl-gone/, 'counts only — no text, no name, no id');
+  assert.deepEqual(Object.fromEntries(COLLECTIONS.map((n) => [n, record[n].normalised])), { blocks: 1, reports: 2, moderationLog: 0, orgNotes: 0, ledger: 1, opsEvents: 0, sourceChanges: 0, idvQueue: 1 }, 'rows the import changed, per collection');
+  assert.deepEqual(record.notes, [
+    'blocks blk-2: orgId was an object, dropped', 'blocks blk-2: reason was a number, normalised', 'blocks blk-2: unknown field futureBlockField dropped',
+    'reports rep-3: ts was a number, normalised', 'reports rep-3: targetPlayerId was a number, normalised',
+    'reports rep-auto: unknown field __proto__ dropped', 'reports rep-auto: unknown field constructor dropped',
+    'ledger led-4: unknown field futureLedgerField dropped',
+    'idvQueue idv-2: documentType was an object, dropped',
+  ], 'every change reported with its row id and field');
+  assert.deepEqual(Object.fromEntries(['blocks', 'reports', 'orgNotes', 'ledger', 'sourceChanges'].map((n) => [n, [record[n].unresolvedPlayerIds, record[n].withoutPlayerId]])), { blocks: [1, 0], reports: [2, 3], orgNotes: [1, 0], ledger: [1, 2], sourceChanges: [1, 0] }, 'Domain P: unresolved ids counted per table (a count, not provenance); rows without a player id counted apart');
+  assert.doesNotMatch(JSON.stringify(record), /Synthetic|excerpt|address|Maria|Primary|4567|keep-me|pl-gone|not a string|odd/, 'ids, field names and counts only — no text, no name, no value');
   assert.deepEqual(migrate(s).ran, [], 'a second run applies nothing');
-  // The way back is lossless.
+  // The way back: the typed records.
   const back = stored(s);
-  for (const n of COLLECTIONS) assert.equal(JSON.stringify(back[n]), JSON.stringify(canon(n, blobs[n])), `${n} round-trips (extras first, absence preserved, odd values restored)`);
-  assert.equal(back.reports[2].targetPlayerId, 123); assert.equal(back.reports[2].ts, 1.5); assert.deepEqual(back.blocks[1].orgId, { not: 'a string' }); assert.equal(back.blocks[1].reason, 42);
-  assert.equal(Object.hasOwn(back.reports[3], 'targetPlayerId'), false, 'absent stays absent'); assert.equal(back.reports[0].targetPlayerId, null, 'present-and-null stays null'); assert.equal(Object.hasOwn(back.reports[4], 'outcome'), false);
-  assert.equal(Object.hasOwn(back.ledger[2], 'playerId'), false); assert.equal(back.ledger[1].playerId, null);
-  assert.ok(Object.hasOwn(back.reports[3], '__proto__'), 'the own __proto__ key survives'); assert.equal(back.reports[3].constructor, 'own-constructor'); assert.ok(Object.hasOwn(back.moderationLog[1].context, '__proto__'));
+  const expected = Object.fromEntries(COLLECTIONS.map((n) => [n, canon(n, blobs[n])]));
+  expected.blocks[1] = { ...expected.blocks[1], orgId: null, reason: '42' };
+  expected.reports[2] = { ...expected.reports[2], ts: 2, targetPlayerId: '123' };
+  expected.idvQueue[1] = { ...expected.idvQueue[1], documentType: null };
+  for (const n of COLLECTIONS) assert.equal(JSON.stringify(back[n]), JSON.stringify(expected[n]), `${n} reads back typed (every key, in order; unknown fields gone)`);
+  assert.equal(back.reports[3].targetPlayerId, null, 'an absent key reads back as null'); assert.equal(back.reports[4].outcome, null); assert.equal(back.ledger[2].playerId, null);
+  assert.equal(Object.hasOwn(back.reports[3], '__proto__'), false, 'the own __proto__ key is dropped'); assert.equal(Object.getPrototypeOf(back.reports[3]), Object.prototype, 'and never assigned as a prototype'); assert.equal(Object.hasOwn(back.reports[3], 'constructor'), false);
   s.close(); rm(dir);
 });
 
@@ -214,12 +203,13 @@ test('[cutover] migration refusals (SAFETY_AUDIT_IMPORT_BLOCKED: collections, po
   s.close(); rm(dir);
 });
 
-test('[cutover] the actual schema: NO foreign key on any of the eight tables (Q4: the five player references are historical; Q4b: the guardian reference is checked in code; organisation and staff references are historical pointers the routes never checked); every table STRICT with a seq order key and a UNIQUE id; the documented indexes exist; no CHECK narrows a vocabulary the writers leave open', () => {
+test('[cutover] the actual schema: typed columns only (no absent_keys_json, offtype_json or extra_json side column); NO foreign key on any of the eight tables (Q4: the five player references are historical; Q4b: the guardian reference is checked in code; organisation and staff references are historical pointers the routes never checked); every table STRICT with a seq order key and a UNIQUE id; the documented indexes exist; no CHECK narrows a vocabulary the writers leave open', () => {
   const dir = tempDir('sa-schema'); s7dFile(dir); const s = openRaw(dir); migrate(s);
   for (const t of Object.values(TABLES)) {
     assert.deepEqual(s.prepare(`PRAGMA foreign_key_list(${t})`).all(), [], `${t}: no foreign key`);
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql; assert.match(sql, /STRICT\s*$/, `${t} STRICT`); assert.match(sql, /seq\s+INTEGER PRIMARY KEY/, `${t} seq`); assert.match(sql, /\bid\s+TEXT NOT NULL UNIQUE/, `${t} unique id`);
     assert.doesNotMatch(sql, /CHECK \((by_kind|severity|provider|status|kind|type|source_system|target_kind) IN/, `${t}: no vocabulary CHECK`);
+    assert.deepEqual(s.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name).filter((c) => /absent_keys|offtype|extra_json/.test(c)), [], `${t}: no side column`);
   }
   const idx = s.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' AND tbl_name IN ('blocks','reports','moderation_log','org_notes','ledger','ops_events','source_changes','idv_queue') ORDER BY name").all().map((r) => r.name);
   for (const i of ['blocks_player_id_org_id', 'reports_by_kind_by_id', 'reports_target_org_id_urgent_status', 'reports_status_created_at', 'reports_target_player_id', 'moderation_log_severity', 'moderation_log_created_at', 'org_notes_org_id_player_id_created_at', 'ledger_player_id_type', 'ledger_player_id_org_id_occurred_at', 'ledger_org_id_type', 'ledger_occurred_at', 'ops_events_kind', 'ops_events_occurred_at', 'source_changes_player_id_occurred_at', 'idv_queue_guardian_id_created_at']) assert.ok(idx.includes(i), `index ${i}`);
@@ -234,18 +224,22 @@ test('[cutover] repository, immediate mode: append on each of the eight collecti
   const dir = tempDir('sa-repo'); s7dFile(dir, { blobs: { idvQueue: [idv()], ledger: [led()] } }); const s = openRaw(dir); migrate(s);
   const repo = bare(s);
   assert.deepEqual(repo.counts(), { blocks: 0, reports: 0, moderationLog: 0, orgNotes: 0, ledger: 1, opsEvents: 0, sourceChanges: 0, idvQueue: 1 });
-  const b1 = repo.blocks.append(block({ id: 'blk-a' })); const b2 = repo.blocks.append(block({ id: 'blk-b', orgId: { odd: true } })); assert.equal(b1.id, 'blk-a'); assert.throws(() => { b1.reason = 'x'; }, /written through its domain repository/);
-  assert.deepEqual(repo.blocks.view.map((b) => b.id), ['blk-a', 'blk-b']); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-a', 'blk-b']); assert.deepEqual(plain(b2.orgId), { odd: true }, 'the odd value is live as given');
-  assert.throws(() => repo.blocks.append(block({ id: 'blk-a' })), /blocks: a row with id blk-a already exists/); assert.throws(() => repo.blocks.append({ playerId: 'x' }), /id must be a non-empty string/); assert.throws(() => repo.blocks.append(block({ id: 'blk-fn', reason: () => 1 })), /cannot be stored as JSON|not a JSON value/);
+  const b1 = repo.blocks.append(block({ id: 'blk-a' })); const b2 = repo.blocks.append(block({ id: 'blk-b', futureField: 'dropped' })); assert.equal(b1.id, 'blk-a'); assert.throws(() => { b1.reason = 'x'; }, /written through its domain repository/);
+  assert.deepEqual(repo.blocks.view.map((b) => b.id), ['blk-a', 'blk-b']); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-a', 'blk-b']); assert.deepEqual(plain(b2), block({ id: 'blk-b' }), 'an unknown key is dropped at the repository boundary');
+  // A wrong-typed value is refused by name: code, collection, field and id — never the value.
+  for (const [field, bad] of [['orgId', { odd: 'SECRET-VALUE' }], ['reason', 42], ['ts', 1.5], ['playerId', ['SECRET-VALUE']]]) assert.throws(() => repo.blocks.append(block({ id: 'blk-odd', [field]: bad })), (e) => e.code === 'AUDIT_RECORD_INVALID' && e.message.includes(`blocks.${field} must be`) && e.message.includes('blk-odd') && !e.message.includes('SECRET-VALUE') && !e.message.includes('42'), `${field}: refused by name`);
+  assert.throws(() => repo.reports.append(report({ id: 'rep-odd', urgent: 'yes' })), /reports\.urgent must be a boolean or null/);
+  assert.throws(() => repo.blocks.append(block({ id: 'blk-a' })), /blocks: a row with id blk-a already exists/); assert.throws(() => repo.blocks.append({ playerId: 'x' }), /id must be a non-empty string/); assert.throws(() => repo.blocks.append(block({ id: 'blk-fn', reason: () => 1 })), /blocks\.reason must be a string or null \(got a function; id blk-fn\)/);
+  assert.throws(() => repo.opsEvents.append(ops({ id: 'ops-fn', detail: { f: () => 1 } })), /opsEvents\.detail\.f \(function\) cannot be stored as JSON/);
   assert.deepEqual(repo.blocks.view.map((b) => b.id), ['blk-a', 'blk-b'], 'refusals leave the mirror as it was');
   const lifted = repo.blocks.remove('blk-a'); assert.deepEqual(plain(lifted), block({ id: 'blk-a' })); assert.deepEqual(repo.blocks.view.map((b) => b.id), ['blk-b']); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-b']); assert.equal(repo.blocks.remove('blk-none'), null);
   repo.reports.append(report({ id: 'rep-a' })); repo.reports.append(autoReport({ id: 'rep-b' })); repo.reports.append(report({ id: 'rep-c', targetKind: 'player', targetPlayerId: 'pl-nobody' }));
   const held = repo.reports.byId('rep-a'); assert.equal(held.status, 'pending_review');
-  assert.deepEqual(plain(repo.reports.patch('rep-a', { status: 'resolved', resolvedAt: NOW, outcome: 'Synthetic outcome.' })), report({ id: 'rep-a', status: 'resolved', resolvedAt: NOW, outcome: 'Synthetic outcome.' })); assert.equal(held.status, 'resolved'); assert.equal(held.resolvedAt, NOW);
+  assert.deepEqual(plain(repo.reports.patch('rep-a', { status: 'resolved', resolvedAt: NOW, outcome: 'Synthetic outcome.' })), canonRow('reports', report({ id: 'rep-a', status: 'resolved', resolvedAt: NOW, outcome: 'Synthetic outcome.' }))); assert.equal(held.status, 'resolved'); assert.equal(held.resolvedAt, NOW);
   assert.deepEqual(rowsOf(dir, 'reports').map((r) => [r.id, r.status, r.outcome, r.resolved_at]), [['rep-a', 'resolved', 'Synthetic outcome.', NOW], ['rep-b', 'pending_review', null, null], ['rep-c', 'pending_review', null, null]]);
-  assert.throws(() => repo.reports.patch('rep-a', { reason: 'rewritten' }), /reports: patch changes status, outcome and resolvedAt only/); assert.throws(() => repo.reports.patch('rep-none', { status: 'resolved' }), /no report rep-none/);
-  repo.moderationLog.append(modHit({ id: 'mod-a' })); repo.orgNotes.append(note({ id: 'note-a', playerId: 'pl-nobody' })); repo.ledger.append(led({ id: 'led-a', playerId: 'pl-nobody' })); repo.ledger.append({ id: 'led-b', ts: T, type: 'open_trial_posted', orgId: 'org-pro', orgName: 'Eastport FC', userId: 'usr-1', scoutName: 'Maria', detail: { trialId: 't1' }, extraKey: 'kept' }); repo.opsEvents.append(ops({ id: 'ops-a', kind: 'backup_refused' }));
-  assert.deepEqual(repo.ledger.view.map((l) => l.id), ['led-1', 'led-a', 'led-b']); assert.deepEqual(plain(repo.ledger.view[2]), extrasFirst({ id: 'led-b', ts: T, type: 'open_trial_posted', orgId: 'org-pro', orgName: 'Eastport FC', userId: 'usr-1', scoutName: 'Maria', detail: { trialId: 't1' }, extraKey: 'kept' }, KEYS.ledger));
+  assert.throws(() => repo.reports.patch('rep-a', { reason: 'rewritten' }), /reports: patch changes status, outcome and resolvedAt only/); assert.throws(() => repo.reports.patch('rep-a', { resolvedAt: 'yesterday' }), (e) => e.code === 'AUDIT_RECORD_INVALID' && /reports\.resolvedAt must be an integer or null/.test(e.message)); assert.equal(held.resolvedAt, NOW, 'a refused patch changes nothing'); assert.throws(() => repo.reports.patch('rep-none', { status: 'resolved' }), /no report rep-none/);
+  repo.moderationLog.append(modHit({ id: 'mod-a' })); repo.orgNotes.append(note({ id: 'note-a', playerId: 'pl-nobody' })); repo.ledger.append(led({ id: 'led-a', playerId: 'pl-nobody' })); repo.ledger.append({ id: 'led-b', ts: T, type: 'open_trial_posted', orgId: 'org-pro', orgName: 'Eastport FC', userId: 'usr-1', scoutName: 'Maria', detail: { trialId: 't1' }, extraKey: 'dropped' }); repo.opsEvents.append(ops({ id: 'ops-a', kind: 'backup_refused' }));
+  assert.deepEqual(repo.ledger.view.map((l) => l.id), ['led-1', 'led-a', 'led-b']); assert.deepEqual(plain(repo.ledger.view[2]), { id: 'led-b', ts: T, type: 'open_trial_posted', playerId: null, orgId: 'org-pro', orgName: 'Eastport FC', userId: 'usr-1', scoutName: 'Maria', detail: { trialId: 't1' } }, 'every key in the writer\'s order, an absent one null, the unknown one dropped');
   assert.deepEqual(repo.unresolvedPlayerReferences(), { blocks: 0, reports: 1, orgNotes: 1, ledger: 1, sourceChanges: 0 }, 'Domain P: counted, never refused');
   // IDV: strict.
   assert.throws(() => repo.idvQueue.append(idv({ id: 'idv-x', guardianId: 'gd-missing' })), (e) => e.code === 'IDV_GUARDIAN_MISSING' && /gd-missing/.test(e.message) && !/Primary Parent|4567/.test(e.message)); assert.deepEqual(repo.idvQueue.view.map((q) => q.id), ['idv-1']); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1']);
@@ -262,7 +256,7 @@ test('[cutover] repository, immediate mode: append on each of the eight collecti
   assert.deepEqual(heldLedger.map((l) => l.id), ['led-1', 'led-a', 'led-b'], 'the held view is back'); assert.equal(repo.ledger.byId('led-b').detail, heldDetail, 'nested identity kept'); assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-a', 'led-b']);
   s.exec('DROP TRIGGER sa_fail');
   const exported = repo.exportAll(); assert.deepEqual(Object.keys(exported), COLLECTIONS); exported.ledger[2].detail.trialId = 'edited'; assert.equal(repo.ledger.byId('led-b').detail.trialId, 't1', 'the export is detached'); assert.deepEqual(exported.blocks.map((b) => b.id), ['blk-b']);
-  repo.reload(); assert.deepEqual(repo.ledger.view.map((l) => l.id), ['led-1', 'led-a', 'led-b']); assert.equal(repo.reports.byId('rep-a').status, 'resolved'); assert.deepEqual(plain(repo.blocks.byId('blk-b').orgId), { odd: true }); assert.equal(repo.idvQueue.byId('idv-1').status, 'revoked');
+  repo.reload(); assert.deepEqual(repo.ledger.view.map((l) => l.id), ['led-1', 'led-a', 'led-b']); assert.equal(repo.reports.byId('rep-a').status, 'resolved'); assert.deepEqual(plain(repo.blocks.byId('blk-b')), block({ id: 'blk-b' })); assert.equal(repo.idvQueue.byId('idv-1').status, 'revoked');
   s.close(); rm(dir);
 });
 
@@ -318,16 +312,16 @@ test('[cutover] staged mode (the server): a block, a ledger row, a report patch,
 });
 
 // ============================================================= [cutover] the snapshot dispatcher: tolerant and strict references
-test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file round-trips all eight collections byte for byte (extras first, absence preserved, odd values); a collection OMITTED leaves its table alone while others are rewritten; an explicit EMPTY array clears a table; a malformed collection (an object) rolls the WHOLE save back — saveSeq and every other collection unchanged; an invalid entry refuses with a text-free diagnostic; the blobs are never recreated; Domain P: a snapshot whose audit rows name players that are absent is ACCEPTED, and an identity-only replacement that REMOVES a player every audit table names is ACCEPTED with every audit row and reference value exactly as before (unresolved references counted, never refused)', () => {
+test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file round-trips all eight collections byte for byte (typed records); an unknown key in a saved row is dropped silently; a wrong-typed value refuses the WHOLE save by name (collection, field, id — never the value); a collection OMITTED leaves its table alone while others are rewritten; an explicit EMPTY array clears a table; a malformed collection (an object) rolls the WHOLE save back — saveSeq and every other collection unchanged; an invalid entry refuses with a text-free diagnostic; the blobs are never recreated; Domain P: a snapshot whose audit rows name players that are absent is ACCEPTED, and an identity-only replacement that REMOVES a player every audit table names is ACCEPTED with every audit row and reference value exactly as before (unresolved references counted, never refused)', () => {
   const dir = tempDir('sa-snap');
-  const blobs = { blocks: [block(), block({ id: 'blk-2', orgId: { odd: 1 }, futureField: true })], reports: [report(), autoReport()], moderationLog: [modHit()], orgNotes: [note()], ledger: [led(), led({ id: 'led-2', playerId: 'pl-child1', type: 'shortlist', detail: { x: 1 } })], opsEvents: [ops()], sourceChanges: [srcc()], idvQueue: [idv(), idv({ id: 'idv-2', guardianId: 'gd-signup' })] };
+  const blobs = { blocks: [block(), block({ id: 'blk-2', orgId: 'org-harbour' })], reports: [report(), autoReport()], moderationLog: [modHit()], orgNotes: [note()], ledger: [led(), led({ id: 'led-2', playerId: 'pl-child1', type: 'shortlist', detail: { x: 1 } })], opsEvents: [ops()], sourceChanges: [srcc()], idvQueue: [idv(), idv({ id: 'idv-2', guardianId: 'gd-signup' })] };
   s7dFile(dir, { blobs }); { const s = openRaw(dir); migrate(s); s.close(); }
   const tool = openStore(dir); const snap = tool.load();
-  for (const n of COLLECTIONS) assert.equal(JSON.stringify(snap.db[n]), JSON.stringify(canon(n, blobs[n])), `${n} loaded in the legacy shape`);
+  for (const n of COLLECTIONS) assert.equal(JSON.stringify(snap.db[n]), JSON.stringify(canon(n, blobs[n])), `${n} loaded as typed records`);
   const texts0 = Object.fromEntries(COLLECTIONS.map((n) => [n, JSON.stringify(snap.db[n])]));
   const seq0 = tool.revision(); tool.save(snap); assert.equal(tool.revision(), seq0 + 1);
   const again = tool.load(); for (const n of COLLECTIONS) assert.equal(JSON.stringify(again.db[n]), texts0[n], `${n} round-tripped through replace`);
-  assert.deepEqual(plain(again.db.blocks[1].orgId), { odd: 1 }); assert.equal(Object.hasOwn(again.db.reports[1], 'targetPlayerId'), false);
+  assert.equal(again.db.reports[1].targetPlayerId, null, 'the automatic report\'s absent key reads back as null');
   const { ledger: _omit, blocks: _omit2, ...without } = snap.db; tool.save({ ...snap, db: { ...without, vouches: [{ id: 'v-1' }] } });
   assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2'], 'an omitted collection leaves its table alone'); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1', 'blk-2']); for (const n of COLLECTIONS) assert.equal(blobOf(dir, n), null, `no shadow ${n} blob`); assert.equal(JSON.parse(blobOf(dir, 'vouches')).length, 1);
   const beforeDump = dump(tool.sqlite); const seq1 = tool.revision();
@@ -336,6 +330,11 @@ test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file 
   const SECRET = 'SECRET-NOTE-TEXT-77';
   assert.throws(() => tool.save({ ...snap, db: { ...snap.db, orgNotes: [note({ id: 'note-1', text: SECRET }), note({ id: 'note-1', text: SECRET })] } }), (e) => /SAFETY_AUDIT_IMPORT_BLOCKED/.test(e.message) && /duplicates the id/.test(e.message) && !e.message.includes(SECRET));
   assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump);
+  const SECRET_VALUE = 'SECRET-ORG-VALUE-55';
+  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, vouches: [{ id: 'v-x' }], blocks: [block(), block({ id: 'blk-2', orgId: { name: SECRET_VALUE } })] } }), (e) => /SAFETY_AUDIT_IMPORT_BLOCKED/.test(e.message) && /blocks snapshot collection entry #1\.orgId must be a string or null \(got an object; id blk-2\)/.test(e.message) && !e.message.includes(SECRET_VALUE), 'a wrong-typed value is refused by name');
+  assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the refused save landed');
+  tool.save({ ...snap, db: { ...snap.db, ledger: snap.db.ledger.map((l) => ({ ...l, futureField: 'dropped' })) } });
+  assert.equal(JSON.stringify(tool.load().db.ledger), texts0.ledger, 'an unknown key is dropped silently: the table holds exactly the typed records');
   tool.save({ ...snap, db: { ...snap.db, moderationLog: [] } }); assert.deepEqual(idsIn(dir, 'moderation_log'), []); assert.equal(blobOf(dir, 'moderationLog'), null); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1', 'blk-2']);
   // Domain P, tolerant: audit rows naming absent players are accepted; an identity-only replacement removing a named player is accepted with the audit rows untouched.
   tool.save({ ...snap, db: { ...snap.db, ledger: [...snap.db.ledger, led({ id: 'led-orphan', playerId: 'pl-nobody' })], blocks: [...snap.db.blocks, block({ id: 'blk-orphan', playerId: 'pl-nobody' })] } });
@@ -410,19 +409,19 @@ test('[S6b correction F1] a REJECTED staged patch changes nothing: reports.patch
   L.close(); rm(dir);
 });
 
-test('[S6b correction F2] a nested OPTIONAL value that JSON cannot carry is stored the way the pre-S6b blob stored it, never refused: ledger detail { share: undefined } (the Box Cam prefs writer on a partial prefs row) is accepted, the key is ABSENT in the mirror, the file and the export; an undefined array entry becomes null (JSON.stringify\'s rule); the same holds for a nested context, an unknown nested field and a report patch value; a TOP-LEVEL undefined stays an absent key (unchanged); a nested function, a Map, a BigInt or a cyclic object is still refused; cloneJson\'s default and the outbox / push-token / push-log validators that use it are unchanged and still refuse a nested undefined (object property and array entry), with accepted controls', () => {
+test('[S6b correction F2] a nested OPTIONAL value that JSON cannot carry is stored the way JSON.stringify stores it, never refused: ledger detail { share: undefined } (the Box Cam prefs writer on a partial prefs row) is accepted, the key is ABSENT in the mirror, the file and the export; an undefined array entry becomes null; the same holds for a nested context; a TOP-LEVEL undefined is a NULL column (null in the record); an unknown top-level field is dropped; a nested function, a Map, a BigInt or a cyclic object is still refused by path', () => {
   const dir = tempDir('sa-f2'); s7dFile(dir, { blobs: { reports: [report()] } });
   const L = live(dir); L.save();
   const detail = { by: 'player', share: undefined, retainClips: true };
   const row = L.repo.ledger.append({ ...led({ id: 'led-prefs', type: 'box_prefs_changed', orgId: null, userId: undefined }), detail });
-  assert.deepEqual(Object.keys(row.detail), ['by', 'retainClips'], 'the undefined nested key is absent, as JSON would have it'); assert.equal(Object.hasOwn(row, 'userId'), false, 'a top-level undefined is an absent key (unchanged)');
-  assert.equal(JSON.stringify(row), JSON.stringify({ ...led({ id: 'led-prefs', type: 'box_prefs_changed', orgId: null, userId: undefined }), detail }), 'the mirror is exactly the JSON form of what the writer passed');
+  assert.deepEqual(Object.keys(row.detail), ['by', 'retainClips'], 'the undefined nested key is absent, as JSON would have it'); assert.equal(row.userId, null, 'a top-level undefined is a NULL column');
+  assert.equal(JSON.stringify(row), JSON.stringify(canonRow('ledger', { ...led({ id: 'led-prefs', type: 'box_prefs_changed', orgId: null, userId: null }), detail })), 'the mirror is the typed record of what the writer passed');
   L.repo.moderationLog.append(modHit({ id: 'mod-u', context: { kind: 'player_message', channelId: undefined, list: [1, undefined, 3] }, flags: ['email', undefined] }));
   const m = L.repo.moderationLog.byId('mod-u'); assert.deepEqual(plain(m.context), { kind: 'player_message', list: [1, null, 3] }); assert.deepEqual(plain(m.flags), ['email', null]); assert.equal(Object.hasOwn(m.context, 'channelId'), false);
-  L.repo.opsEvents.append({ ...ops({ id: 'ops-u' }), futureNested: { a: undefined, b: [undefined] } }); assert.deepEqual(plain(L.repo.opsEvents.byId('ops-u').futureNested), { b: [null] });
+  L.repo.opsEvents.append({ ...ops({ id: 'ops-u' }), futureNested: { a: undefined, b: [undefined] } }); assert.deepEqual(Object.keys(L.repo.opsEvents.byId('ops-u')), KEYS.opsEvents, 'an unknown top-level field is dropped');
   L.repo.reports.patch('rep-1', { outcome: 'x' }); // a patch value that is a plain string (the route's) is unchanged
-  for (const [label, bad] of [['a nested function', { f: () => 1 }], ['a nested Map', { m: new Map() }], ['a nested BigInt', { n: 10n }]]) assert.throws(() => L.repo.ledger.append({ ...led({ id: `led-bad-${label}` }), detail: bad }), /cannot be stored as JSON/, `${label} is still refused`);
-  const cyc = { a: 1 }; cyc.self = cyc; assert.throws(() => L.repo.ledger.append({ ...led({ id: 'led-cyc' }), detail: cyc }), RangeError, 'a cyclic object is still refused (no partial row)');
+  for (const [label, bad] of [['a nested function', { f: () => 1 }], ['a nested Map', { m: new Map() }], ['a nested BigInt', { n: 10n }]]) assert.throws(() => L.repo.ledger.append({ ...led({ id: `led-bad-${label}` }), detail: bad }), /ledger\.detail\.[fmn] .*cannot be stored as JSON/, `${label} is still refused`);
+  const cyc = { a: 1 }; cyc.self = cyc; assert.throws(() => L.repo.ledger.append({ ...led({ id: 'led-cyc' }), detail: cyc }), /ledger\.detail\.self is cyclic/, 'a cyclic object is still refused (no partial row)');
   assert.equal(L.repo.ledger.byId('led-cyc'), null); assert.equal(L.repo.ledger.byId('led-bad-a nested function'), null);
   L.save();
   const fileRow = rowsOf(dir, 'ledger').find((r) => r.id === 'led-prefs'); assert.equal(fileRow.detail_json, JSON.stringify({ by: 'player', retainClips: true }));
@@ -431,21 +430,6 @@ test('[S6b correction F2] a nested OPTIONAL value that JSON cannot carry is stor
   L.close();
   // A restart serves the same row.
   const L2 = live(dir); assert.equal(JSON.stringify(L2.repo.ledger.byId('led-prefs')), JSON.stringify(row)); L2.close();
-  // ISOLATION: the opt-in is the audit repository's only. cloneJson's default and the S7c outbox / push validators that use
-  // it still refuse a nested undefined exactly as before (an object property or an array entry), and still accept the same
-  // values without it.
-  assert.match(outboxCloneJson({ a: undefined }, 'to').reason ?? '', /cannot be stored as JSON/, 'cloneJson default: a nested undefined property is still refused');
-  assert.match(outboxCloneJson([1, undefined], 'to').reason ?? '', /cannot be stored as JSON/, 'cloneJson default: an undefined array entry is still refused');
-  const mail = { id: 'mail-iso', ts: NOW, to: 'a@example.test', subject: 's', text: 't', transport: 'dev', delivered: false };
-  assert.equal(validateOutboxRow(mail).ok, true, 'outbox control: the same mailer row is accepted');
-  assert.match(validateOutboxRow({ ...mail, to: ['a@example.test', undefined] }).reason ?? '', /to\[1\].*cannot be stored as JSON/, 'outbox: an undefined entry in an array destination is still refused');
-  assert.match(validateOutboxRow({ ...mail, futureNested: { a: undefined } }).reason ?? '', /cannot be stored as JSON/, 'outbox: a nested undefined in an unknown field is still refused');
-  const token = { kind: 'player', refId: 'pl-adult', token: { value: 'tok' }, ts: NOW };
-  assert.equal(validatePushTokenRow(token).ok, true, 'push token control: accepted');
-  assert.match(validatePushTokenRow({ ...token, token: { value: 'tok', extra: undefined } }).reason ?? '', /token\.extra.*cannot be stored as JSON/, 'push token: a nested undefined is still refused');
-  const plog = { id: 'push-iso', ts: NOW, audience: { kind: 'player', id: 'pl-adult' }, title: 't', body: 'b', transport: 'dev' };
-  assert.equal(validatePushLogRow(plog).ok, true, 'push log control: accepted');
-  assert.match(validatePushLogRow({ ...plog, futureNested: [undefined] }).reason ?? '', /cannot be stored as JSON/, 'push log: an undefined array entry in an unknown field is still refused');
   rm(dir);
 });
 

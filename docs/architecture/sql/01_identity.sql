@@ -70,10 +70,12 @@ CREATE INDEX orgs_type_level ON orgs (type, level);        -- /orgs directory fi
 -- lifecycle: removed_at soft delete; rows are never deleted (history stays attributable)
 -- mapping: id→id, orgId→org_id, name→name, role→role, email→email, ssoSubject→sso_subject, createdAt→created_at,
 --   removedAt→removed_at, removedBy→removed_by, provenance→provenance, mfa→mfa_json (secretB32 is PLAIN today: open
---   question §9), deliveryPrefs→delivery_prefs_json, unknown fields→extra_json
+--   question §9), deliveryPrefs→delivery_prefs_json. Typed columns only (the fidelity rule, 3 November 2026): an
+--   unknown field is not stored (the blob import drops it and reports it with the row id), a wrong-typed value is
+--   refused by name
 -- notes: created non-STRICT and without a foreign key by migration 0001 (S0); REBUILT by migration 0004 (S3) in the
 --   form below — STRICT, org_id REFERENCES orgs(id) (NO ACTION: an organisation with staff cannot be deleted; the
---   deletion policy itself is open question O2 and is not implemented), json_valid CHECKs on the three JSON columns.
+--   deletion policy itself is open question O2 and is not implemented), json_valid CHECKs on the two JSON columns.
 --   The rebuild runs with foreign keys off (create new, copy, drop old, rename), so `sessions.org_user_id` keeps
 --   referencing this table by name and no staff session is cascaded away; the migration runner verifies
 --   PRAGMA foreign_key_check before committing. scripts/testSchemaDdl.mjs compares this definition with the migrations.
@@ -89,8 +91,7 @@ CREATE TABLE org_users (
   removed_by          TEXT,                               -- snapshot (name)
   provenance          TEXT,
   mfa_json            TEXT CHECK (mfa_json IS NULL OR json_valid(mfa_json)),                       -- {secretB32, enabledAt, recoveryHashes[]}
-  delivery_prefs_json TEXT CHECK (delivery_prefs_json IS NULL OR json_valid(delivery_prefs_json)),
-  extra_json          TEXT CHECK (extra_json IS NULL OR json_valid(extra_json))
+  delivery_prefs_json TEXT CHECK (delivery_prefs_json IS NULL OR json_valid(delivery_prefs_json))
 ) STRICT;
 CREATE INDEX org_users_org ON org_users (org_id);
 CREATE INDEX org_users_org_name ON org_users (org_id, lower(name));
@@ -245,10 +246,16 @@ CREATE INDEX sessions_expires ON sessions (expires_at);                      -- 
 --     allows (a client-set badge twice, two activities in one millisecond, a session completed twice) survives; a row
 --     without a client-visible id is keyed by (player_id, position) — NO identifier is minted (the earlier prose that
 --     minted ids for badges, activity entries and timeline rows is withdrawn);
---   - extra_json: an item's unknown keys and its shape metadata (key order, explicit nulls), so the record reads back
---     byte for byte; nothing is coerced — a value a column cannot hold refuses the write with the field and the index;
+--   - typed columns, valid input only (3 Nov 2026): no side column. A write stores an item's known fields and drops
+--     unknown ones; a value a column cannot hold refuses the write with the field and the index. An item reads back
+--     with its fields in the spec's order (a NULL column is null for the fields writers set explicitly — a clip's url,
+--     verifiedClip, captions; an attendance's gps; a medical record's layoffWeeks, cleared — and omitted otherwise);
+--     every array is on every player record ([] when it has no rows); players.facets_json keeps nothing of them;
 --   - natural keys the code enforces are UNIQUE (season per player, drill per player, provider+external id per player,
 --     tag per clip, every item id); a legacy array that violates one is refused by the migration, never deduplicated.
+--     The migration's blob import drops an unknown item field, converts a wrong-typed value whose meaning is obvious
+--     and drops one whose meaning is not, noting each with the player id, array, index and field in
+--     meta.playerSubrecordsCutover; an item it cannot use (no id, a required field missing) blocks the step.
 -- Reconciled with the data the routes accept (each a change to the earlier proposal): player_media.uploaded_at is TEXT
 -- (the ISO string every writer stores), kind nullable, verified_clip_attendance_id has no foreign key (a snapshot rewrite
 -- of the attendance rows would have nulled it; the route checks the reference when the clip is created);
@@ -289,7 +296,6 @@ CREATE TABLE player_season_history (
   pass_completion_pct REAL,
   duel_success_pct    REAL,
   clean_sheets        REAL,
-  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
   PRIMARY KEY (player_id, season)
 ) STRICT;
 CREATE UNIQUE INDEX player_season_history_position ON player_season_history (player_id, position);
@@ -322,7 +328,6 @@ CREATE TABLE player_attendance (
   verified         INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0,1)),
   corroborated_by  TEXT,
   trial_id         TEXT,
-  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
   CHECK ((lat IS NULL) = (lng IS NULL))
 ) STRICT;
 CREATE UNIQUE INDEX player_attendance_player ON player_attendance (player_id, position);
@@ -332,7 +337,6 @@ CREATE TABLE player_timeline (
   position  INTEGER NOT NULL,
   year      TEXT NOT NULL,
   event     TEXT NOT NULL,
-  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
   PRIMARY KEY (player_id, position)
 ) STRICT;
 
@@ -349,8 +353,7 @@ CREATE TABLE player_media (
   captions                    TEXT,
   size_bytes                  INTEGER,
   captured_by                 TEXT CHECK (captured_by IS NULL OR captured_by IN ('box_cam')),
-  box_session_id              TEXT,
-  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json))
+  box_session_id              TEXT
 ) STRICT;
 CREATE UNIQUE INDEX player_media_player ON player_media (player_id, position);
 
@@ -371,8 +374,7 @@ CREATE TABLE player_medical_records (
   title        TEXT NOT NULL,
   record_date  TEXT CHECK (record_date IS NULL OR length(record_date) = 10),
   layoff_weeks REAL,
-  cleared      INTEGER CHECK (cleared IS NULL OR cleared IN (0,1)),
-  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json))
+  cleared      INTEGER CHECK (cleared IS NULL OR cleared IN (0,1))
 ) STRICT;
 CREATE UNIQUE INDEX player_medical_records_player ON player_medical_records (player_id, position);
 
@@ -386,8 +388,7 @@ CREATE TABLE player_drill_results (
   unit        TEXT,
   value       REAL NOT NULL,
   verified    INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0,1)),
-  recorded_at INTEGER NOT NULL,
-  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json))
+  recorded_at INTEGER NOT NULL
 ) STRICT;
 CREATE UNIQUE INDEX player_drill_results_player ON player_drill_results (player_id, position);
 
@@ -407,7 +408,6 @@ CREATE TABLE player_external_ids (
   linked_by_name TEXT,
   linked_at      INTEGER NOT NULL,
   claim_json TEXT CHECK (claim_json IS NULL OR json_valid(claim_json)),
-  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
   PRIMARY KEY (player_id, provider, external_id)
 ) STRICT;
 CREATE UNIQUE INDEX player_external_ids_position ON player_external_ids (player_id, position);
@@ -417,7 +417,6 @@ CREATE TABLE player_programme_completions (
   position     INTEGER NOT NULL,
   session_id   TEXT NOT NULL,
   completed_at INTEGER NOT NULL,
-  extra_json TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
   PRIMARY KEY (player_id, position)
 ) STRICT;
 

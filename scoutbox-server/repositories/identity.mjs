@@ -80,7 +80,7 @@ import { readTrialsCollection } from './recruitment.mjs';
 import {
   PLAYER_SUBRECORDS_MIGRATION, subrecordsLive, SUBRECORD_KEYS, SUBRECORD_SPECS, SUBRECORD_TABLES, getSubrecords, validateSubrecordArray,
   validatePlayerRecordWithItems as validatePlayerRecord, prepareSubrecordStatements, writeChildRows, writeArrayRows, deleteChildRows,
-  readAllChildren, countChildRows, itemRows, trialReportsFor, readPlayersWithChildren, emptyChildren, reconcileTrialReportCopy,
+  readAllChildren, countChildRows, itemRows, trialReportsFor, readPlayersWithChildren, emptyChildren, reconcileTrialReportCopy, placeSubrecords, storedItem,
 } from './playerSubrecords.mjs';
 
 /** `meta` key holding the initialisation state (`pending` | `done`); absent reads as `done`. */
@@ -341,8 +341,9 @@ export const IDENTITY_SNAPSHOT = {
     // accepted. The caller's transaction makes the rewrite all-or-nothing.
     // S5: the child rows CASCADE with the player rows here and are written again
     // below from the snapshot's records, so the FINAL state holds exactly the
-    // arrays the snapshot carries (a record without an array has no rows; an
-    // empty array has none and reads back empty; a null stays null).
+    // arrays the snapshot carries, typed (an unknown item field is not stored;
+    // a record without an array, or with a null or an empty one, has no rows and
+    // reads back with it empty).
     // S4b-R: the retained records are not part of any snapshot's players — they are
     // captured here, before the DELETE, and reinserted byte-identical after the
     // candidate; a candidate that lists a retained id as a live player is refused
@@ -527,8 +528,8 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
   /** The empty-state shape of `trialReports` on a plain record (data, not the accessor): `absent`, `null` or `array`. */
   const shapeOf = (rec) => (!hasOwn(rec, 'trialReports') ? 'absent' : rec.trialReports === null ? 'null' : 'array');
   const trialShape = new Map(); // player id → the shape the record keeps while no report names it (repository state: captured and restored with the unit of work)
-  // Players render in the S5 layout: the arrays are rows, the facets keep unknown
-  // fields and shape metadata only. `trialReports` renders as its SHAPE (absent /
+  // Players render in the S5 layout: the arrays are rows (the facets keep nothing
+  // of them), the facets keep the player's unknown fields and shape metadata. `trialReports` renders as its SHAPE (absent /
   // null / []), never as content: the row records where the key was and whether
   // it was null; the reports live on the trials. `shape` overrides the record's
   // (a restore adopting the restored record's shape).
@@ -666,21 +667,15 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     if (current !== undefined && current !== null && !Array.isArray(current)) throw new Error(`player ${id}: ${key} is not an array in memory`);
     return { rec, current };
   };
-  /** The array object for `key` on the record, created in place when absent or null (the key appears where a new key appears: at the end, recorded by the facets' shape metadata). */
+  /** The array object for `key` on the record (every array is on every record; a split composite set by players.update gains its sub-array there). */
   const ensureSubArray = (rec, key) => {
     if (!key.includes('.')) { if (!Array.isArray(rec[key])) setOwn(rec, key, []); return rec[key]; }
     const [k, sub] = key.split('.');
     if (!Array.isArray(rec[k][sub])) setOwn(rec[k], sub, []);
     return rec[k][sub];
   };
-  /** The facets_json the record will have once `key` holds `items`, or null when it does not change (the key already existed as an array). */
-  const facetsAfter = (rec, key, items) => {
-    const next = clone(rec);
-    if (!key.includes('.')) setOwn(next, key, items);
-    else { const [k, sub] = key.split('.'); setOwn(next[k], sub, items); }
-    const after = toRowOf(P, next).facets_json;
-    return after === toRowOf(P, rec).facets_json ? null : after;
-  };
+  /** A refused sub-record write: the field and the reason, never a value. */
+  const subRefusal = (message) => Object.assign(new TypeError(message), { code: 'PLAYER_SUBRECORD_INVALID' });
 
   // ------------------------------------------------------------ link operations (both sides, one transaction)
   function link(guardianId, playerId, role = 'co') {
@@ -749,6 +744,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       if (present(rec.guardianId) && !guardian) throw new Error(`player ${rec.id} names guardian ${rec.guardianId}, which does not exist`);
       if (!present(rec.guardianId) && !isAdult(rec, new Date(now()))) throw new Error(`player ${rec.id} is a minor and has no guardianId: a child is created with its primary guardian and the link in the same transaction, never without`);
       if (guardian && (childIdsOf(guardian) ?? []).includes(rec.id)) throw new Error(`guardian ${guardian.id} already lists player ${rec.id}`);
+      placeSubrecords(rec); // the arrays as the tables hold them: unknown item fields are not stored, and memory matches a reopen
       const row = toRowOf(P, rec);
       return atomically(() => {
         stmt.insertPlayer.run(row);
@@ -799,7 +795,11 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       const v = validatePlayerRecord(next);
       if (!v.ok) throw new TypeError(`a player update was refused: ${v.problems.join('; ')}`);
       const row = toRowOf(P, next);
-      atomically(() => stmt.updatePlayer.run(row), () => { applyPatch(rec, patch, { split: PLAYER_SPLIT_COMPOSITES }); noteRow(P, id, row.facets_json); });
+      atomically(() => stmt.updatePlayer.run(row), () => {
+        applyPatch(rec, patch, { split: PLAYER_SPLIT_COMPOSITES });
+        for (const [k, subs] of Object.entries(PLAYER_COMPOSITE_SUBRECORDS)) if (isPlainObject(rec[k])) for (const sub of subs) ensureSubArray(rec, `${k}.${sub}`); // a composite set whole reads back with its (empty) sub-array
+        noteRow(P, id, row.facets_json);
+      });
       return viewOf(P, rec);
     },
 
@@ -816,7 +816,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       // A trialReports array on the restored record is a claim about the trials (review of 132eda2, finding 1): equal or refused; an absent key or a null adopts that shape and the trials stand.
       const claim = reconcileTrialReportCopy(id, next.trialReports, derivedTrialReports(id), { hint: 'the restore is refused' });
       if (claim.length) throw new TypeError(`a player restore was refused: ${claim.join('; ')}`);
-      const row = toRowOf(P, next, { shape: shapeOf(next) });
+      const shape = shapeOf(next);
+      placeSubrecords(next);
+      const row = toRowOf(P, next, { shape });
       atomically(() => { stmt.updatePlayer.run(row); deleteChildRows(stmt.sub, id); writeChildRows(stmt.sub, next); }, () => { replaceContent(rec, next); noteRow(P, id, row.facets_json); });
       return viewOf(P, rec);
     },
@@ -826,27 +828,25 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
      * Append one item to a player's `key` array (`media`, `attendance`, …,
      * `medical.records`, `programme.completed`): validated as part of the whole
      * array (types, required fields, the natural key the code enforces), one row
-     * inserted at the next position (and the clip's tag rows), the record's
-     * shape metadata rewritten when the key appears for the first time — in one
-     * transaction, memory updated in place once it committed. Returns the
-     * read-only array.
+     * inserted at the next position (and the clip's tag rows) in one
+     * transaction, memory updated in place once it committed with the item as
+     * the table holds it (unknown fields are not stored). Returns the read-only
+     * array.
      */
     addItem(id, key, item) {
       requireAutocommit('players.addItem');
       const { rec, current } = subTarget(id, key);
       const items = [...(current ?? []), clone(item)];
       const problems = validateSubrecordArray(key, items);
-      if (problems.length) throw new TypeError(`adding to ${key} of player ${id} was refused: ${problems.join('; ')}`);
+      if (problems.length) throw subRefusal(`adding to ${key} of player ${id} was refused: ${problems.join('; ')}`);
       const position = items.length - 1;
       const { row, tags } = itemRows(key, items[position], position, id);
-      const facets = facetsAfter(rec, key, items);
+      const stored = storedItem(key, items[position]);
       atomically(() => {
         stmt.sub[key].insert.run(row);
         if (tags) for (const t of tags) stmt.sub.tags.insert.run(t);
-        if (facets) stmt.playerFacets.run({ id, facets_json: facets });
       }, () => {
-        ensureSubArray(rec, key).push(items[position]);
-        if (facets) noteRow(P, id, facets);
+        ensureSubArray(rec, key).push(stored);
       });
       return readonlyView(getSubrecords(rec, key), SUB_LABEL(key));
     },
@@ -858,16 +858,13 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       if (!Array.isArray(items)) throw new TypeError(`players.setItems needs an array for ${key} (got ${items === null ? 'null' : typeof items})`);
       const next = clone(items);
       const problems = validateSubrecordArray(key, next);
-      if (problems.length) throw new TypeError(`replacing ${key} of player ${id} was refused: ${problems.join('; ')}`);
-      const facets = facetsAfter(rec, key, next);
+      if (problems.length) throw subRefusal(`replacing ${key} of player ${id} was refused: ${problems.join('; ')}`);
       atomically(() => {
         stmt.sub[key].deleteAll.run(id); // the clips' tag rows cascade with the clips
         writeArrayRows(stmt.sub, key, id, next);
-        if (facets) stmt.playerFacets.run({ id, facets_json: facets });
       }, () => {
         const arr = ensureSubArray(rec, key);
-        arr.length = 0; for (const it of next) arr.push(it);
-        if (facets) noteRow(P, id, facets);
+        arr.length = 0; for (const it of next) arr.push(storedItem(key, it));
       });
       return readonlyView(getSubrecords(rec, key), SUB_LABEL(key));
     },
@@ -877,7 +874,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
      * object of equality tests: `{ id }` for a clip, `{ season }` for a season
      * row); exactly one item must match. `patch` merges key by key (undefined
      * leaves a key alone; nested values are replaced whole). The row is updated
-     * in place (a clip's tags rewritten when they change). Returns the item.
+     * in place (a clip's tags rewritten when they change) and the held item
+     * object takes the stored item's content (an unknown patch field is not
+     * stored). Returns the item.
      */
     patchItem(id, key, where, patch) {
       requireAutocommit('players.patchItem');
@@ -893,15 +892,17 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       for (const k of Object.keys(patch)) if (patch[k] !== undefined) setOwn(merged, k, clone(patch[k]));
       const items = list.map((it, i) => (i === index ? merged : it));
       const problems = validateSubrecordArray(key, items);
-      if (problems.length) throw new TypeError(`changing ${key} of player ${id} was refused: ${problems.join('; ')}`);
+      if (problems.length) throw subRefusal(`changing ${key} of player ${id} was refused: ${problems.join('; ')}`);
       const { row, tags } = itemRows(key, merged, index, id);
+      const stored = storedItem(key, merged);
       const tagsChanged = SUBRECORD_SPECS[key].children === 'tags' && hasOwn(patch, 'tags');
       atomically(() => {
         if (stmt.sub[key].update.run(row).changes !== 1) throw new Error(`players.patchItem: the ${key} row of player ${id} at position ${index} is not in the table although the view lists it`);
         if (tagsChanged) { stmt.sub.tags.deleteMedia.run(merged.id); for (const t of tags ?? []) stmt.sub.tags.insert.run(t); }
       }, () => {
-        const target = list[index];
-        for (const k of Object.keys(patch)) if (patch[k] !== undefined) setOwn(target, k, clone(patch[k]));
+        const target = list[index]; // the same object (held references stay valid), its content the stored item's
+        for (const k of Object.keys(target)) delete target[k];
+        for (const k of Object.keys(stored)) setOwn(target, k, stored[k]);
       });
       return readonlyView(list[index], SUB_LABEL(key));
     },

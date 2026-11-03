@@ -3,10 +3,10 @@
 // approved through D-A (messaging first with a transitional code-checked request
 // reference) and D-B (today's explicit deletion of a deleted player's threads
 // reproduced; retention left open). The migration from the legacy blob (the
-// channel and message literals, both attachment shapes, present legacy and unknown
-// fields at every level, absent versus null, duplicate ids, a second channel for one
-// request, orphan references, malformed blobs, first installation, reruns, text-free
-// refusals); the actual schema (no FK on request_id/player_id/guardian_id, the org
+// channel and message literals, both attachment shapes, typed columns only: unknown
+// fields and wrong-typed optional values dropped and reported with ids, duplicate ids,
+// a second channel for one request, orphan references, malformed blobs, first
+// installation, reruns, text-free refusals); the actual schema (no FK on request_id/player_id/guardian_id, the org
 // FK, the two internal cascades, the unique request index); the repository (open with
 // the checked request reference, append in array order, receipts, deletion for a
 // player, the two write modes, joined units, real COMMIT failure, hook registration, a
@@ -50,10 +50,6 @@ const messageRows = (dir) => (tableExistsIn(dir, 'messages') ? rowsOf(dir, 'mess
 const blobOf = (dir, name) => { const s = second(dir); try { return s.prepare('SELECT value FROM collections WHERE name = ?').get(name)?.value ?? null; } finally { s.close(); } };
 const seqOf = (dir) => { const s = second(dir); try { return Number(s.prepare("SELECT value FROM meta WHERE key = 'saveSeq'").get()?.value) || 0; } finally { s.close(); } };
 const plain = (v) => JSON.parse(JSON.stringify(v));
-const setOwn = (o, k, v) => Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
-const CHANNEL_KEYS = ['id', 'requestId', 'playerId', 'playerName', 'orgId', 'orgName', 'orgVerified', 'scoutName', 'scoutRole', 'counterparty', 'guardianId', 'createdAt', 'messages', 'readBy'];
-/** The export convention: unknown own fields FIRST, then the literal's present keys in the writer's order. */
-const extrasFirst = (row, keys) => { const o = {}; for (const k of Object.keys(row)) if (!keys.includes(k)) setOwn(o, k, row[k]); for (const k of keys) if (Object.hasOwn(row, k)) o[k] = row[k]; return o; };
 /** The channel literal, as openChannel writes it (an adult thread with the fixture's request req-1 of pl-adult, organisation org-pro). */
 const channel = (over = {}) => ({ id: 'chan-1', requestId: 'req-1', playerId: 'pl-adult', playerName: 'Adult Signup', orgId: 'org-pro', orgName: 'Eastport FC', orgVerified: true, scoutName: 'Maria', scoutRole: 'Head of Recruitment', counterparty: 'player', guardianId: null, createdAt: NOW - 2 * MIN, messages: [], readBy: { org: null, counterparty: null }, ...over });
 /** A guardian thread (the fixture's gd-primary, child pl-child1, request req-g). */
@@ -95,26 +91,24 @@ function live(dir, { now = () => NOW } = {}) {
 const bare = (s, requests = REQUESTS(), over = {}) => needModule().createChannelsRepository({ sqlite: s, now: () => NOW, requests: () => requests, ...over });
 
 // ============================================================= [compat] what the accepted representation already does
-test('[compat] the legacy blob representation: a channel record carrying a present legacy field (orgUserIdForNotify) and an unknown own key serialises them, the spread-based view keeps them, and a message without a clientMsgId has NO such key while one sent with a client id does — the absence/presence the storage move must preserve', () => {
-  const legacy = JSON.parse(JSON.stringify({ ...channel(), orgUserIdForNotify: 'usr-legacy', futureField: { nested: [1] }, messages: [message({ id: 'm1' }), message({ id: 'm2', clientMsgId: 'c-1' })] }));
-  const spread = { ...legacy };
-  assert.equal(spread.orgUserIdForNotify, 'usr-legacy'); assert.deepEqual(spread.futureField, { nested: [1] });
+test('[compat] the message literal: a message without a clientMsgId has NO such key while one sent with a client id does, and the attachment key is always present (null without one)', () => {
+  const legacy = JSON.parse(JSON.stringify({ ...channel(), messages: [message({ id: 'm1' }), message({ id: 'm2', clientMsgId: 'c-1' })] }));
   assert.equal(Object.hasOwn(legacy.messages[0], 'clientMsgId'), false); assert.equal(legacy.messages[1].clientMsgId, 'c-1');
   assert.equal(Object.hasOwn(legacy.messages[0], 'attachment'), true); assert.equal(legacy.messages[0].attachment, null);
 });
 
 // ============================================================= [cutover] the migration from the legacy blob
-test('[cutover] migration 0012 is registered after 0011 and imports the channels blob losslessly: two threads (an adult and a guardian thread) with messages of all three sender kinds, both attachment shapes, a message with and one without clientMsgId, a present legacy orgUserIdForNotify, unknown own keys at channel/message/attachment/readBy/sender level (own "__proto__" keys included), an ABSENT optional key next to a present-and-null one; array order becomes seq/position; the blob row is retired; the cutover record carries counts only (no text, no name); a second run applies nothing', () => {
+test('[cutover] migration 0012 is registered after 0011 and imports the channels blob into typed columns: two threads (an adult and a guardian thread) with messages of all three sender kinds, both attachment shapes, a message with and one without clientMsgId; unknown fields at channel/message/attachment/readBy/sender level (the legacy orgUserIdForNotify and own "__proto__" keys included), a wrong-typed optional value, an unusable attachment and a null clientMsgId are DROPPED and each is noted with the record id (field names, never values); an absent optional key reads back as null; array order becomes seq/position; the blob row is retired; the cutover record carries counts and notes only; a second run applies nothing', () => {
   const dir = tempDir('ch-mig');
   const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me"},"constructor":"own-constructor"}');
-  const adultThread = channel({ orgUserIdForNotify: 'usr-legacy', futureChannelField: [1, 2], messages: [
+  const adultThread = channel({ orgUserIdForNotify: 'usr-legacy', futureChannelField: [1, 2], scoutName: 42, messages: [
     message({ id: 'm-1', ts: NOW - 5 * MIN, sender: { kind: 'org_user', id: 'usr-1', name: 'Maria · Head of Recruitment · Eastport FC', ...special }, futureMessageField: true }),
     message({ id: 'm-2', ts: NOW - 4 * MIN, sender: { kind: 'player', id: 'pl-adult', name: 'Adult Signup' }, text: 'Reply.', clientMsgId: 'client-7', attachment: clip({ futureAttachmentField: 'x' }) }),
     message({ id: 'm-3', ts: NOW - 4 * MIN, sender: { kind: 'org_user', id: 'usr-1', name: 'Maria · Head of Recruitment · Eastport FC' }, text: 'Same ts, later position.', attachment: trialReport() }),
   ], readBy: { org: NOW - 3 * MIN, counterparty: null, futureReadByField: 1 } });
-  const gThread = { ...guardianChannel({ messages: [message({ id: 'm-g1', sender: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' } })] }) };
-  delete gThread.scoutRole; gThread.playerName = null; // ABSENT next to present-and-null
-  const noAttachmentKey = message({ id: 'm-g2', sender: { kind: 'org_user', id: 'usr-1', name: 'Maria · Head of Recruitment · Eastport FC' } }); delete noAttachmentKey.attachment; gThread.messages.push(noAttachmentKey);
+  const gThread = { ...guardianChannel({ messages: [message({ id: 'm-g1', sender: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, attachment: { kind: 'file', url: 'x' } })] }) };
+  delete gThread.scoutRole; gThread.playerName = null; // ABSENT next to present-and-null: both read back as null
+  const noAttachmentKey = message({ id: 'm-g2', sender: { kind: 'org_user', id: 'usr-1', name: 'Maria · Head of Recruitment · Eastport FC' }, clientMsgId: null }); delete noAttachmentKey.attachment; gThread.messages.push(noAttachmentKey);
   s7cFile(dir, { channels: [adultThread, gThread] });
   const s = openRaw(dir);
   assert.ok(!applied(s).includes(MIGRATION)); assert.ok(blob(s, 'channels'));
@@ -122,33 +116,31 @@ test('[cutover] migration 0012 is registered after 0011 and imports the channels
   assert.ok(ran.ran.includes(MIGRATION), `0012 ran (${ran.ran.join(', ')})`); // fails on b67bce5: the id is not registered
   assert.deepEqual(applied(s).slice(-2), ['0011_outbox_push', MIGRATION]);
   for (const t of ['channels', 'messages', 'message_attachments']) assert.ok(s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), `${t} exists`);
+  for (const t of ['channels', 'messages', 'message_attachments']) assert.deepEqual(s.prepare(`PRAGMA table_info(${t})`).all().filter((c) => /_json$/.test(c.name)).map((c) => c.name), [], `${t}: no side columns`);
   assert.equal(blob(s, 'channels'), undefined, 'the blob row is retired');
   const ch = s.prepare('SELECT * FROM channels ORDER BY seq').all();
-  assert.deepEqual(ch.map((r) => [r.id, r.request_id, r.counterparty, r.guardian_id, r.read_by_org_at, r.read_by_counterparty_at]), [['chan-1', 'req-1', 'player', null, NOW - 3 * MIN, null], ['chan-g', 'req-g', 'guardian', 'gd-primary', null, null]]);
-  assert.deepEqual(JSON.parse(ch[0].extra_json), { orgUserIdForNotify: 'usr-legacy', futureChannelField: [1, 2], readBy: { futureReadByField: 1 } }, 'channel extras, readBy extras nested under the known key'); assert.equal(ch[0].absent_keys_json, null);
-  assert.deepEqual(JSON.parse(ch[1].absent_keys_json), ['scoutRole'], 'the absent key is recorded'); assert.equal(ch[1].player_name, null); assert.equal(ch[1].scout_role, null);
+  assert.deepEqual(ch.map((r) => [r.id, r.request_id, r.counterparty, r.guardian_id, r.read_by_org_at, r.read_by_counterparty_at, r.scout_name]), [['chan-1', 'req-1', 'player', null, NOW - 3 * MIN, null, null], ['chan-g', 'req-g', 'guardian', 'gd-primary', null, null, 'Maria']]);
+  assert.equal(ch[1].player_name, null); assert.equal(ch[1].scout_role, null);
   const ms = s.prepare('SELECT * FROM messages ORDER BY channel_id, position').all();
   assert.deepEqual(ms.map((r) => [r.channel_id, r.position, r.id, r.sender_kind, r.client_msg_id, r.created_at]), [['chan-1', 0, 'm-1', 'org_user', null, NOW - 5 * MIN], ['chan-1', 1, 'm-2', 'player', 'client-7', NOW - 4 * MIN], ['chan-1', 2, 'm-3', 'org_user', null, NOW - 4 * MIN], ['chan-g', 0, 'm-g1', 'guardian', null, NOW - MIN], ['chan-g', 1, 'm-g2', 'org_user', null, NOW - MIN]], 'array order is position; a tie on ts keeps its order');
-  assert.deepEqual(JSON.parse(JSON.stringify(JSON.parse(ms[0].extra_json))), JSON.parse('{"futureMessageField":true,"sender":{"__proto__":{"legacyMarker":"keep-me"},"constructor":"own-constructor"}}'), 'message extras and sender extras (own prototype-like keys as data)');
-  assert.deepEqual(JSON.parse(ms[4].absent_keys_json), ['attachment'], 'an absent attachment key is recorded; a null one is not');
   const at = s.prepare('SELECT * FROM message_attachments ORDER BY message_id').all();
-  assert.deepEqual(at.map((r) => [r.message_id, r.kind, r.media_id, r.verified_clip, r.report_id, r.summary]), [['m-2', 'clip', 'med-1', 0, null, null], ['m-3', 'trial_report', null, null, 'rep-1', 'accel 7/10 · 31 km/h']]); assert.deepEqual(JSON.parse(at[0].extra_json), { futureAttachmentField: 'x' });
+  assert.deepEqual(at.map((r) => [r.message_id, r.kind, r.media_id, r.verified_clip, r.report_id, r.summary]), [['m-2', 'clip', 'med-1', 0, null, null], ['m-3', 'trial_report', null, null, 'rep-1', 'accel 7/10 · 31 km/h']], 'the unusable attachment of m-g1 was dropped');
   const record = JSON.parse(meta(s, 'channelsCutover'));
-  assert.deepEqual([record.imported, record.messages, record.attachments, record.withExtraFields, record.withAbsentKeys, record.byCounterparty], [2, 5, 2, 1, 1, { player: 1, guardian: 1 }]);
-  assert.doesNotMatch(JSON.stringify(record), /Synthetic message|Maria|Reply|keep-me/, 'counts only');
+  assert.deepEqual([record.imported, record.messages, record.attachments, record.normalised, record.byCounterparty], [2, 5, 2, 2, { player: 1, guardian: 1 }]);
+  for (const re of [/chan-1\): unknown field orgUserIdForNotify dropped/, /chan-1\): unknown field futureChannelField dropped/, /chan-1\): scoutName is not a string; dropped/, /chan-1\): unknown field readBy\.futureReadByField dropped/, /m-1\): unknown field futureMessageField dropped/, /m-1\): unknown field sender\.__proto__ dropped/, /m-1\): unknown field sender\.constructor dropped/, /m-2\): unknown field attachment\.futureAttachmentField dropped/, /m-g1\): attachment\.kind must be 'clip' or 'trial_report'[^"]*the attachment dropped/]) assert.ok(record.notes.some((n) => re.test(n)), `noted: ${re}`);
+  assert.equal(record.notes.length, 9, record.notes.join('\n'));
+  assert.doesNotMatch(JSON.stringify(record), /Synthetic message|Reply|keep-me|usr-legacy|own-constructor/, 'ids, field names and counts only — never a value');
   assert.deepEqual(migrate(s).ran, [], 'a second run applies nothing');
-  // The way back is lossless: the exported shape equals the input, extras first, absence preserved.
+  // The way back: the records built from the typed columns, every key present, the writer's key order.
   const { CHANNELS_TABLE } = needModule(); const back = CHANNELS_TABLE.read(s);
-  const MK = ['id', 'ts', 'sender', 'text', 'attachment', 'clientMsgId']; const SK = ['kind', 'id', 'name']; const AK = ['kind', 'mediaId', 'title', 'url', 'verifiedClip'];
-  const expectedMessages = [extrasFirst({ ...adultThread.messages[0], sender: extrasFirst(adultThread.messages[0].sender, SK) }, MK), extrasFirst({ ...adultThread.messages[1], attachment: extrasFirst(adultThread.messages[1].attachment, AK) }, MK), adultThread.messages[2]];
-  assert.equal(JSON.stringify(back[0]), JSON.stringify(extrasFirst({ ...adultThread, messages: expectedMessages, readBy: { futureReadByField: 1, org: NOW - 3 * MIN, counterparty: null } }, CHANNEL_KEYS)), 'the adult thread round-trips (extras first at every level: channel, message, sender, attachment, readBy)');
-  assert.ok(Object.hasOwn(back[0].messages[0].sender, '__proto__'), 'the own __proto__ key of the sender survives'); assert.equal(back[0].messages[0].sender.constructor, 'own-constructor');
-  assert.equal(Object.hasOwn(back[1], 'scoutRole'), false, 'absent stays absent'); assert.equal(back[1].playerName, null, 'present-and-null stays null'); assert.equal(Object.hasOwn(back[1].messages[1], 'attachment'), false); assert.equal(back[1].messages[0].attachment, null);
-  assert.equal(Object.hasOwn(back[0].messages[0], 'clientMsgId'), false); assert.equal(back[0].messages[1].clientMsgId, 'client-7');
+  assert.equal(JSON.stringify(back[0]), JSON.stringify({ ...channel({ scoutName: null }), messages: [message({ id: 'm-1', ts: NOW - 5 * MIN }), { ...adultThread.messages[1], attachment: clip() }, adultThread.messages[2]], readBy: { org: NOW - 3 * MIN, counterparty: null } }), 'the adult thread reads back typed: unknown fields gone, the wrong-typed scoutName null');
+  assert.equal(back[1].scoutRole, null, 'an absent optional key reads as null'); assert.equal(back[1].playerName, null); assert.equal(back[1].messages[0].attachment, null, 'the dropped attachment reads as null'); assert.equal(back[1].messages[1].attachment, null, 'an absent attachment key reads as null');
+  assert.equal(Object.hasOwn(back[0].messages[0], 'clientMsgId'), false); assert.equal(back[0].messages[1].clientMsgId, 'client-7'); assert.equal(Object.hasOwn(back[1].messages[1], 'clientMsgId'), false, 'a null clientMsgId is no clientMsgId');
+  assert.equal(Object.hasOwn(back[0], 'orgUserIdForNotify'), false); assert.equal(Object.hasOwn(back[0].messages[0].sender, 'constructor'), false);
   s.close(); rm(dir);
 });
 
-test('[cutover] migration refusals (CHANNELS_IMPORT_BLOCKED: positions, ids and reasons — never a message text): a duplicate channel id, a second channel for one request, a channel whose request is not in the requests blob, a channel whose guardian does not exist, a channel whose organisation does not exist, a sender kind outside the three, an attachment of neither shape, a present null clientMsgId, a non-finite-free but non-JSON entry (a non-array blob), a malformed requests blob behind a non-empty channels blob — each aborts the whole step: no table, the blob and saveSeq untouched; an absent blob and an empty blob import nothing and record the cutover', () => {
+test('[cutover] migration refusals (CHANNELS_IMPORT_BLOCKED: positions, ids and reasons — never a message text): a duplicate channel id, a second channel for one request, a channel whose request is not in the requests blob, a channel whose guardian does not exist, a channel whose organisation does not exist, a sender kind outside the three, a message without an integer ts, a channel without an id, a wrong-typed required field (orgName), a non-array blob, a malformed requests blob behind a non-empty channels blob — each aborts the whole step: no table, the blob and saveSeq untouched; an absent blob and an empty blob import nothing and record the cutover', () => {
   const cases = [
     ['duplicate id', { channels: [channel(), channel({ requestId: 'req-free' })] }, /duplicates the id/],
     ['second channel for one request', { channels: [channel(), channel({ id: 'chan-2' })] }, /a second channel for request req-1/],
@@ -156,8 +148,9 @@ test('[cutover] migration refusals (CHANNELS_IMPORT_BLOCKED: positions, ids and 
     ['guardian missing', { channels: [guardianChannel({ guardianId: 'gd-missing' })] }, /name a guardian that does not exist/],
     ['org missing', { channels: [channel({ orgId: 'org-missing' })] }, /name an organisation that does not exist/],
     ['sender kind', { channels: [channel({ messages: [message({ sender: { kind: 'admin', id: 'x', name: 'y' } })] })] }, /sender\.kind must be one of player, guardian, org_user/],
-    ['attachment shape', { channels: [channel({ messages: [message({ attachment: { kind: 'file', url: 'x' } })] })] }, /attachment\.kind must be 'clip' or 'trial_report'/],
-    ['null clientMsgId', { channels: [channel({ messages: [message({ clientMsgId: null })] })] }, /clientMsgId must be a non-empty string when present/],
+    ['message ts', { channels: [channel({ messages: [message({ id: 'm-ts', ts: '2026-11-01' })] })] }, /\(m-ts\): ts must be an integer timestamp/],
+    ['no id', { channels: [channel({ id: undefined })] }, /entry #0: id must be a non-empty string/],
+    ['orgName wrong type', { channels: [channel({ orgName: 7 })] }, /\(chan-1\): orgName must be a string/],
     ['blob not an array', { rawBlobs: { channels: '{"id":"chan-1"}' } }, /must be an array of entries/],
     ['requests blob malformed', { channels: [channel()], rawBlobs: { requests: '"not-an-array"' } }, /requests collection is a string, not an array/],
   ];
@@ -197,26 +190,33 @@ test('[cutover] the actual schema: channels references orgs (RESTRICT) and nothi
 });
 
 // ============================================================= [cutover] the repository (immediate mode)
-test('[cutover] repository, immediate mode: open appends a thread at the END with the checked request reference (a request not in the collection, a second thread for one request, a missing organisation, a missing guardian are refused by name; the array stays as it was); appendMessage keeps array order with positions and ties; markRead updates the receipt (an absent receipt key becomes present); deleteForPlayer removes the player\'s threads — guardian–club threads included — with their messages and attachments and nothing else; a refused operation inside its own transaction restores the mirror in place (held views included); reload reproduces the stored rows', () => {
+test('[cutover] repository, immediate mode: open appends a thread at the END with the checked request reference (a request not in the collection, a second thread for one request, a missing organisation, a missing guardian are refused by name; the array stays as it was); appendMessage keeps array order with positions and ties; a wrong-typed value is refused by field and id and an unknown key is dropped; markRead updates the receipt (an absent receipt reads as null until written); deleteForPlayer removes the player\'s threads — guardian–club threads included — with their messages and attachments and nothing else; a refused operation inside its own transaction restores the mirror in place (held views included); reload reproduces the stored rows', () => {
   const dir = tempDir('ch-repo'); s7cFile(dir, { channels: [channel(), guardianChannel()] }); const s = openRaw(dir); migrate(s);
   const requests = REQUESTS(); const repo = bare(s, requests);
   assert.equal(repo.count(), 2); assert.deepEqual(repo.view.map((c) => c.id), ['chan-1', 'chan-g']);
   assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-missing' })), /CHANNEL_REQUEST_MISSING/); assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-1' })), /already opened thread chan-1/); assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-free', orgId: 'org-missing' })), /CHANNEL_ORG_MISSING/); assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-free', guardianId: 'gd-missing' })), /CHANNEL_GUARDIAN_MISSING/);
   assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-free', counterparty: 'admin' })), /counterparty must be 'player' or 'guardian'/);
   assert.equal(repo.count(), 2, 'refusals leave the mirror as it was'); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-g']);
+  // A wrong-typed value is refused by field and id; an unknown key is dropped silently.
+  assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-free', playerName: 42 })), (e) => e instanceof TypeError && /\(chan-x\): playerName must be a string or null/.test(e.message));
+  assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-free', readBy: { org: 'yesterday' } })), /\(chan-x\): readBy\.org must be an integer timestamp or null/);
+  assert.equal(repo.count(), 2);
   const opened = repo.open(channel({ id: 'chan-3', requestId: 'req-free', orgUserIdForNotify: 'usr-legacy' }));
-  assert.equal(opened.id, 'chan-3'); assert.equal(opened.orgUserIdForNotify, 'usr-legacy'); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-g', 'chan-3']); assert.throws(() => { opened.orgName = 'x'; }, /written through its domain repository/);
+  assert.equal(opened.id, 'chan-3'); assert.equal(Object.hasOwn(opened, 'orgUserIdForNotify'), false, 'the unknown key is not stored'); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-g', 'chan-3']); assert.throws(() => { opened.orgName = 'x'; }, /written through its domain repository/);
   const held = repo.byId('chan-1');
   const m1 = repo.appendMessage('chan-1', message({ id: 'm-1', ts: NOW })); repo.appendMessage('chan-1', message({ id: 'm-2', ts: NOW, clientMsgId: 'cid', attachment: clip() })); repo.appendMessage('chan-g', message({ id: 'm-g', sender: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, attachment: trialReport() }));
   assert.deepEqual(held.messages.map((m) => m.id), ['m-1', 'm-2'], 'the held view sees the appended messages'); assert.equal(m1.text, 'Synthetic message text.');
   assert.deepEqual(messageRows(dir), [['chan-1', 0, 'm-1', null], ['chan-1', 1, 'm-2', 'cid'], ['chan-g', 0, 'm-g', null]]);
   assert.throws(() => repo.appendMessage('chan-1', message({ id: 'm-1' })), /already holds message m-1/); assert.throws(() => repo.appendMessage('chan-9', message()), /no thread chan-9/);
-  assert.throws(() => repo.appendMessage('chan-1', message({ sender: { kind: 'admin', id: 'a', name: 'b' } })), /sender\.kind/); assert.deepEqual(held.messages.map((m) => m.id), ['m-1', 'm-2'], 'a refused append changes nothing');
+  assert.throws(() => repo.appendMessage('chan-1', message({ sender: { kind: 'admin', id: 'a', name: 'b' } })), /sender\.kind/);
+  assert.throws(() => repo.appendMessage('chan-1', message({ id: 'm-bad', clientMsgId: 5 })), /\(m-bad\): clientMsgId must be a non-empty string when present/);
+  assert.throws(() => repo.appendMessage('chan-1', message({ id: 'm-bad', attachment: clip({ verifiedClip: 'yes' }) })), /\(m-bad\): attachment\.verifiedClip must be a boolean/);
+  assert.throws(() => repo.appendMessage('chan-1', message({ id: 'm-bad', attachment: { kind: 'file' } })), /\(m-bad\): attachment\.kind must be 'clip' or 'trial_report'/); assert.deepEqual(held.messages.map((m) => m.id), ['m-1', 'm-2'], 'a refused append changes nothing');
   assert.deepEqual(repo.markRead('chan-1', 'org', NOW + 1), { org: NOW + 1, counterparty: null }); assert.equal(held.readBy.org, NOW + 1); assert.equal(rowsOf(dir, 'channels', 'seq')[0].read_by_org_at, NOW + 1);
   assert.throws(() => repo.markRead('chan-1', 'admin', NOW), /'org' or 'counterparty'/); assert.throws(() => repo.markRead('chan-1', 'org', 1.5), /integer timestamp/);
-  // An absent receipt key becomes present when it is written.
+  // An absent receipt key is an unread receipt (null) until it is written.
   const noKey = guardianChannel({ id: 'chan-nk', requestId: 'req-nk', readBy: { org: null } }); requests.push({ id: 'req-nk', playerId: 'pl-child1', status: 'accepted' }); repo.open(noKey);
-  assert.equal(rowsOf(dir, 'channels', 'seq').at(-1).absent_keys_json, '["readBy.counterparty"]'); repo.markRead('chan-nk', 'counterparty', NOW + 2); assert.equal(rowsOf(dir, 'channels', 'seq').at(-1).absent_keys_json, null); assert.equal(repo.byId('chan-nk').readBy.counterparty, NOW + 2);
+  assert.deepEqual(plain(repo.byId('chan-nk').readBy), { org: null, counterparty: null }); repo.markRead('chan-nk', 'counterparty', NOW + 2); assert.equal(rowsOf(dir, 'channels', 'seq').at(-1).read_by_counterparty_at, NOW + 2); assert.equal(repo.byId('chan-nk').readBy.counterparty, NOW + 2);
   // Deletion: the player's threads — the guardian thread of the child included — go; the others stay.
   assert.deepEqual(repo.deleteForPlayer('pl-child1'), { channels: 2, messages: 1 });
   assert.deepEqual(repo.view.map((c) => c.id), ['chan-1', 'chan-3']); assert.deepEqual(channelIds(dir), ['chan-1', 'chan-3']); assert.deepEqual(messageRows(dir), [['chan-1', 0, 'm-1', null], ['chan-1', 1, 'm-2', 'cid']]); assert.equal(rowsOf(dir, 'message_attachments').length, 1, 'the deleted thread\'s attachment went with it; the other stays');
@@ -227,7 +227,7 @@ test('[cutover] repository, immediate mode: open appends a thread at the END wit
   assert.deepEqual(held.messages.map((m) => m.id), ['m-1', 'm-2'], 'the held view is back'); assert.deepEqual(messageRows(dir).map((r) => r[2]), ['m-1', 'm-2']);
   s.exec('DROP TRIGGER ch_fail');
   const exported = repo.exportRows(); assert.deepEqual(exported.map((c) => c.id), ['chan-1', 'chan-3']); exported[0].messages.push({ id: 'edit' }); assert.equal(held.messages.length, 2, 'the export is detached');
-  repo.reload(); assert.deepEqual(repo.view.map((c) => c.id), ['chan-1', 'chan-3']); assert.deepEqual(repo.byId('chan-1').messages.map((m) => m.id), ['m-1', 'm-2']); assert.equal(repo.byId('chan-3').orgUserIdForNotify, 'usr-legacy');
+  repo.reload(); assert.deepEqual(repo.view.map((c) => c.id), ['chan-1', 'chan-3']); assert.deepEqual(repo.byId('chan-1').messages.map((m) => m.id), ['m-1', 'm-2']); assert.deepEqual(plain(repo.byId('chan-3')), { ...channel({ id: 'chan-3', requestId: 'req-free' }) }, 'the stored thread reads back as opened, without the unknown key');
   s.close(); rm(dir);
 });
 
@@ -283,12 +283,12 @@ test('[cutover] staged mode (the server): a thread, a message and a receipt are 
 // The review of 62e9c1a (FAILING-FIRST, recorded on the unchanged 62e9c1a tree): the restore replaced the NESTED objects of a
 // channel (readBy, each message's sender and attachment, unknown nested fields) with fresh clones, so a caller holding
 // channels.byId(id).readBy — not the outer channel — kept reading the failed value and never followed later commits.
-test('[cutover] an ABORTED UNIT OF WORK restores the NESTED objects of a held view IN PLACE (the review of 62e9c1a): a caller holding channels.byId(id).readBy before the unit reads the pre-unit value afterwards and the SAME object is what a fresh lookup returns, a second connection agrees, the failed receipt leaves no pending SQL, a write queued BEFORE the unit survives it and lands exactly once, and the held receipts follow the NEXT committed write — whether the unit body threw or the receipt UPDATE itself failed at the unit\'s flush; a message\'s sender and attachment and an unknown nested field keep their identity too; the immediate mode\'s own transaction restores the same way', () => {
+test('[cutover] an ABORTED UNIT OF WORK restores the NESTED objects of a held view IN PLACE (the review of 62e9c1a): a caller holding channels.byId(id).readBy before the unit reads the pre-unit value afterwards and the SAME object is what a fresh lookup returns, a second connection agrees, the failed receipt leaves no pending SQL, a write queued BEFORE the unit survives it and lands exactly once, and the held receipts follow the NEXT committed write — whether the unit body threw or the receipt UPDATE itself failed at the unit\'s flush; a message\'s sender and attachment keep their identity too; the immediate mode\'s own transaction restores the same way', () => {
   for (const failure of ['body', 'flush']) {
-    const dir = tempDir(`ch-held-${failure}`); s7cFile(dir, { channels: [channel({ legacyMeta: { tag: 'keep-me' }, messages: [message({ id: 'm-0', attachment: clip() })] })] });
+    const dir = tempDir(`ch-held-${failure}`); s7cFile(dir, { channels: [channel({ messages: [message({ id: 'm-0', attachment: clip() })] })] });
     const L = live(dir); L.save(); const seq0 = seqOf(dir);
-    const heldChannel = L.repo.byId('chan-1'); const heldReceipts = heldChannel.readBy; const heldSender = heldChannel.messages[0].sender; const heldAttachment = heldChannel.messages[0].attachment; const heldExtra = heldChannel.legacyMeta;
-    assert.equal(heldReceipts.org, null); assert.deepEqual(plain(heldExtra), { tag: 'keep-me' });
+    const heldChannel = L.repo.byId('chan-1'); const heldReceipts = heldChannel.readBy; const heldSender = heldChannel.messages[0].sender; const heldAttachment = heldChannel.messages[0].attachment;
+    assert.equal(heldReceipts.org, null);
     L.repo.appendMessage('chan-1', message({ id: 'm-pre' })); assert.equal(L.repo.pending(), 1, 'a write queued BEFORE the unit');
     if (failure === 'flush') L.store.sqlite.exec("CREATE TEMP TRIGGER rv_held BEFORE UPDATE ON channels BEGIN SELECT RAISE(ABORT, 'synthetic receipt failure'); END");
     assert.throws(() => L.store.unitOfWork(() => { L.repo.markRead('chan-1', 'org', NOW + 1); assert.equal(heldReceipts.org, NOW + 1, 'inside the unit the held receipts show the change'); if (failure === 'body') throw new Error('synthetic unit failure'); }, { snapshot: L.snapshot }), failure === 'body' ? /synthetic unit failure/ : /synthetic receipt failure/);
@@ -297,8 +297,8 @@ test('[cutover] an ABORTED UNIT OF WORK restores the NESTED objects of a held vi
     assert.equal(heldReceipts.org, null, `${failure}: the held receipts object reads the pre-unit value`); assert.equal(heldReceipts.counterparty, null);
     assert.equal(fresh.readBy.org, null, `${failure}: a fresh lookup agrees`); assert.equal(rowsOf(dir, 'channels', 'seq')[0].read_by_org_at, null, `${failure}: a second connection agrees`);
     assert.equal(fresh.readBy, heldReceipts, `${failure}: the fresh lookup returns the SAME receipts object the caller held (restored in place, not replaced)`);
-    assert.equal(fresh.messages[0].sender, heldSender, `${failure}: the sender keeps its identity`); assert.equal(fresh.messages[0].attachment, heldAttachment, `${failure}: the attachment keeps its identity`); assert.equal(fresh.legacyMeta, heldExtra, `${failure}: the unknown nested field keeps its identity`);
-    assert.deepEqual(plain(heldSender), message().sender); assert.deepEqual(plain(heldAttachment), clip()); assert.deepEqual(plain(heldExtra), { tag: 'keep-me' });
+    assert.equal(fresh.messages[0].sender, heldSender, `${failure}: the sender keeps its identity`); assert.equal(fresh.messages[0].attachment, heldAttachment, `${failure}: the attachment keeps its identity`);
+    assert.deepEqual(plain(heldSender), message().sender); assert.deepEqual(plain(heldAttachment), clip());
     assert.equal(L.repo.pending(), 1, `${failure}: the pre-unit write is still pending and the failed receipt left no SQL behind`); assert.deepEqual(messageRows(dir).map((r) => r[2]), ['m-0'], 'nothing landed yet'); assert.equal(seqOf(dir), seq0);
     L.repo.markRead('chan-1', 'org', NOW + 2); L.save();
     assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(messageRows(dir).map((r) => r[2]), ['m-0', 'm-pre'], 'the pre-unit write landed with the retry'); assert.equal(rowsOf(dir, 'channels', 'seq')[0].read_by_org_at, NOW + 2); assert.equal(L.repo.pending(), 0);
@@ -317,17 +317,19 @@ test('[cutover] an ABORTED UNIT OF WORK restores the NESTED objects of a held vi
 });
 
 // ============================================================= [cutover] the snapshot dispatcher and the FINAL-STATE assertion
-test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file round-trips every thread (extras first, absence preserved, both attachment shapes, order and ties) byte for byte; channels OMITTED leaves the tables alone while other collections are rewritten; an explicit EMPTY array clears the threads; a malformed channels collection (an object) rolls the WHOLE save back — saveSeq and every other collection unchanged; an invalid entry refuses with a text-free diagnostic; the channels blob is never recreated', () => {
+test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file round-trips every thread (typed records, both attachment shapes, order and ties) byte for byte; an unknown key in a written snapshot is dropped silently and a wrong-typed value refuses the whole save by field and id; channels OMITTED leaves the tables alone while other collections are rewritten; an explicit EMPTY array clears the threads; a malformed channels collection (an object) rolls the WHOLE save back — saveSeq and every other collection unchanged; an invalid entry refuses with a text-free diagnostic; the channels blob is never recreated', () => {
   const dir = tempDir('ch-snap');
-  const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me"}}');
-  const g = guardianChannel({ messages: [message({ id: 'm-g', sender: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, attachment: trialReport() })] }); delete g.scoutName;
-  s7cFile(dir, { channels: [channel({ ...special, orgUserIdForNotify: 'usr-legacy', messages: [message({ id: 'm-1', ts: NOW }), message({ id: 'm-2', ts: NOW, attachment: clip(), clientMsgId: 'c' })] }), g] });
+  const g = guardianChannel({ scoutName: null, messages: [message({ id: 'm-g', sender: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, attachment: trialReport() })] });
+  s7cFile(dir, { channels: [channel({ messages: [message({ id: 'm-1', ts: NOW }), message({ id: 'm-2', ts: NOW, attachment: clip(), clientMsgId: 'c' })] }), g] });
   { const s = openRaw(dir); migrate(s); s.close(); }
   const tool = openStore(dir); const snap = tool.load();
-  assert.equal(snap.db.channels.length, 2); assert.ok(Object.hasOwn(snap.db.channels[0], '__proto__')); assert.equal(snap.db.channels[0].orgUserIdForNotify, 'usr-legacy'); assert.equal(Object.hasOwn(snap.db.channels[1], 'scoutName'), false);
+  assert.equal(snap.db.channels.length, 2); assert.equal(snap.db.channels[1].scoutName, null);
   const text0 = JSON.stringify(snap.db.channels);
   const seq0 = tool.revision(); tool.save(snap); assert.equal(tool.revision(), seq0 + 1);
-  const again = tool.load(); assert.equal(JSON.stringify(again.db.channels), text0, 'round-tripped through replace'); assert.ok(Object.hasOwn(again.db.channels[0], '__proto__')); assert.equal(Object.hasOwn(again.db.channels[1], 'scoutName'), false);
+  const again = tool.load(); assert.equal(JSON.stringify(again.db.channels), text0, 'round-tripped through replace');
+  // An unknown key in a written snapshot (any level) is not stored.
+  const withUnknown = plain(snap.db.channels); withUnknown[0].orgUserIdForNotify = 'usr-legacy'; withUnknown[0].readBy.extra = 1; withUnknown[0].messages[1].attachment.extra = 'x';
+  tool.save({ ...snap, db: { ...snap.db, channels: withUnknown } }); assert.equal(JSON.stringify(tool.load().db.channels), text0, 'unknown keys dropped silently');
   const { channels: _omit, ...without } = snap.db; tool.save({ ...snap, db: { ...without, vouches: [{ id: 'vch-1' }] } });
   assert.deepEqual(channelIds(dir), ['chan-1', 'chan-g'], 'an omitted collection leaves its tables alone'); assert.equal(blobOf(dir, 'channels'), null, 'no shadow blob'); assert.equal(JSON.parse(blobOf(dir, 'vouches')).length, 1);
   const beforeDump = dump(tool.sqlite); const seq1 = tool.revision();
@@ -335,6 +337,8 @@ test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file 
   assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the save landed (vouches included)');
   const SECRET = 'SECRET-MESSAGE-TEXT-77';
   assert.throws(() => tool.save({ ...snap, db: { ...snap.db, channels: [channel({ messages: [message({ text: SECRET, sender: { kind: 'admin', id: 'a', name: 'b' } })] })] } }), (e) => /CHANNELS_IMPORT_BLOCKED/.test(e.message) && /sender\.kind/.test(e.message) && !e.message.includes(SECRET));
+  assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump);
+  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, channels: [channel({ scoutRole: { secret: SECRET } })] } }), (e) => /CHANNELS_IMPORT_BLOCKED/.test(e.message) && /\(chan-1\): scoutRole must be a string or null/.test(e.message) && !e.message.includes(SECRET), 'a wrong-typed value refuses by field and id');
   assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump);
   tool.save({ ...snap, db: { ...snap.db, channels: [] } }); assert.deepEqual(channelIds(dir), []); assert.deepEqual(messageRows(dir), []); assert.equal(blobOf(dir, 'channels'), null);
   tool.sqlite.close(); rm(dir);

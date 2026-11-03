@@ -17,7 +17,7 @@ import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/
 import { playerToRow, playerFromRow, PLAYER_COLUMNS } from '../repositories/identityMapping.mjs';
 import {
   SUBRECORDS_DDL, SUBRECORD_TABLES, SUBRECORD_KEYS, PLAYER_SUBRECORDS_MIGRATION, validateSubrecordArray, validatePlayerRecordWithItems, prepareSubrecordStatements,
-  writeChildRows, readChildren, readAllChildren, trialReportsFor, reconcileTrialReports, readPlayersWithChildren, subrecordsLive,
+  writeChildRows, readChildren, readAllChildren, trialReportsFor, reconcileTrialReports, readPlayersWithChildren, subrecordsLive, placeSubrecords,
 } from '../repositories/playerSubrecords.mjs';
 import { createIdentityRepositories, IDENTITY_SNAPSHOT } from '../repositories/identity.mjs';
 import { createMediaDeletionsQueue, liveMediaReferences, assertMediaQueueConsistent } from '../repositories/mediaDeletions.mjs';
@@ -41,6 +41,8 @@ const dbFile = (dir) => path.join(dir, 'scoutbox.db');
 let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const sameJson = (a, b, what) => assert.equal(JSON.stringify(b), JSON.stringify(a), `${what}: byte-identical JSON`);
+/** A valid record as the tables hold it: every array present, each item its typed fields only (unknown fields not stored), the arrays after the other keys. */
+const stored = (rec) => placeSubrecords(JSON.parse(JSON.stringify(rec)));
 const S4A_MIGRATIONS = DATA_MIGRATIONS.filter((m) => m.id < PLAYER_SUBRECORDS_MIGRATION); // 0001–0006: what an S4a-shaped file has applied (0008 is later than 0007 too)
 const count = (s, t, where = '', ...p) => s.prepare(`SELECT COUNT(*) AS n FROM ${t} ${where}`).get(...p).n;
 
@@ -52,7 +54,7 @@ const requestOf = (rep) => ({ id: `req-${rep.trialId}`, playerId: rep.playerId, 
 const recruitmentBlobs = () => ({ trials: trials(), requests: trials().map((t) => requestOf(t.report)) });
 /** A trial filed after the cutover, through the recruitment repository (the former `db.trials.push`): its request first, then the trial. */
 const addTrial = (t, rep) => { t.layer.recruitment.addRequest(requestOf(rep)); return t.layer.recruitment.addTrial(trialOf(rep)); };
-/** A player with EVERY array populated, unknown item fields, prototype-named keys, nulls and legal duplicates (built from JSON, as a snapshot arrives). */
+/** A player with EVERY array populated, unknown item fields (not stored), prototype-named keys, nulls and legal duplicates (built from JSON, as a snapshot arrives). */
 const rich = () => JSON.parse(JSON.stringify({
   id: 'pl-rich', name: 'Rich Record', dob: '2000-02-02', country: 'GB', city: 'Leeds', position: 'CM', foot: 'left', heightCm: 180, weightKg: 75,
   seasonHistory: [{ season: '2025/26', appearances: 12.5, goals: 3, assists: 1, extraStat: 'kept' }, { season: '2024/25', appearances: 20, goals: 0, assists: 0, paceKmh: 31.2 }],
@@ -100,28 +102,37 @@ function roundTrip(s, rec, { trialReports } = {}) {
 }
 
 // ------------------------------------------------------------------ the mapping
-test('mapping: every array of a record with populated, empty, null and absent arrays round-trips byte for byte through the twelve tables — item key order, explicit nulls, unknown item fields, prototype-named keys, legal duplicates (a badge twice, two activities in one millisecond, a session completed twice), tag order, the gps composite, the split composites; facets_json keeps no array, only unknown fields and shape metadata', () => {
+test('mapping: every array of a record with populated, empty, null and absent arrays is stored as typed rows of the twelve tables and reads back as its typed fields — legal duplicates (a badge twice, two activities in one millisecond, a session completed twice), tag order, the gps composite, the split composites; an unknown item field or a prototype-named item key is not stored; a null or absent array reads back []; facets_json keeps nothing of the arrays; no table has a side column', () => {
   const s = liveDb();
   for (const rec of [rich(), sparse(), noKeys(), adult(), seeded(), child('pl-c', null, '2001-01-01')]) {
     const expectedTrialReports = Array.isArray(rec.trialReports) ? rec.trialReports : undefined;
     const { row, back } = roundTrip(s, rec, { trialReports: expectedTrialReports ?? (rec.trialReports === null ? [] : undefined) });
-    sameJson(rec, back, `players ${rec.id} through the S5 tables`);
-    assert.deepEqual(Object.keys(back), Object.keys(rec), `${rec.id}: key order`);
+    sameJson(stored(rec), back, `players ${rec.id} through the S5 tables`);
+    for (const key of ['media', 'attendance', 'timeline', 'badges', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory']) assert.ok(Array.isArray(back[key]), `${rec.id}: ${key} is always an array`);
     const facets = JSON.parse(row.facets_json);
     for (const key of ['media', 'attendance', 'timeline', 'badges', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory', 'trialReports']) assert.equal(key in facets, false, `${rec.id}: ${key} is not a facet`);
     assert.equal(facets.medical?.records, undefined); assert.equal(facets.programme?.completed, undefined);
+    for (const key of ['media', 'attendance', 'timeline', 'badges', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory']) assert.ok(!facets.__meta.order.includes(key) && !facets.__meta.nulls.includes(key), `${rec.id}: no shape metadata for ${key}`);
+    assert.ok(!facets.__meta.nulls.includes('medical.records') && !(facets.__meta.sub.medical ?? []).includes('records'), `${rec.id}: no shape metadata for medical.records`);
   }
   const r = rich();
+  const back = playerFromRow(s.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE id = 'pl-rich'`).get(), { children: readChildren(prepareSubrecordStatements(s), 'pl-rich'), trialReports: r.trialReports });
+  assert.equal('thumbnail' in back.media[0], false, 'an unknown clip field is not stored');
+  assert.equal('extraStat' in back.seasonHistory[0], false); assert.equal('note' in back.attendance[0], false);
+  assert.equal(Object.hasOwn(back.medical.records[0], 'constructor'), false, 'a prototype-named item key is not stored');
+  assert.equal(Object.hasOwn(back.drillResults[1], 'drillName'), false, 'an optional NULL column is omitted');
+  assert.deepEqual(back.media[1], { id: 'med-r2', title: 'Older shape', kind: 'video', uploadedAt: '2026-04-01T10:00:00.000Z', url: null, views: 0, verifiedClip: null, captions: null, tags: {} }, 'a clip carries url, verifiedClip, captions (null when NULL), views (the default) and tags');
+  assert.equal(back.attendance[1].gps, null); assert.equal(back.medical.records[1].layoffWeeks, null);
+  assert.equal(back.unknownBag.keep, true, 'a player-level facet is still a facet');
   assert.equal(count(s, 'player_badges', 'WHERE player_id = ?', 'pl-rich'), 3, 'the duplicate badge is a row of its own');
   assert.equal(count(s, 'player_activity_log', 'WHERE player_id = ?', 'pl-rich'), 3); assert.equal(count(s, 'player_programme_completions', 'WHERE player_id = ?', 'pl-rich'), 2);
   assert.deepEqual(s.prepare("SELECT tag, count FROM player_media_tags WHERE media_id = 'med-r1' ORDER BY position").all().map((t) => [t.tag, t.count]), [['pace', 2], ['vision', 1]]);
-  assert.equal(JSON.parse(s.prepare("SELECT extra_json FROM player_media WHERE id = 'med-r1'").get().extra_json).thumbnail.w, 1, 'an unknown item field rides in extra_json');
   assert.equal(s.prepare("SELECT claim_json FROM player_external_ids WHERE player_id = 'pl-rich'").get().claim_json, JSON.stringify(r.externalIds[0].claim));
   assert.equal(s.prepare("SELECT layoff_weeks FROM player_medical_records WHERE id = 'md-r1'").get().layoff_weeks, 3.5, 'REAL: the route accepts any finite number');
   assert.equal(s.prepare("SELECT appearances FROM player_season_history WHERE player_id = 'pl-rich' AND season = '2025/26'").get().appearances, 12.5);
-  const facetsSparse = JSON.parse(s.prepare("SELECT facets_json FROM players WHERE id = 'pl-sparse'").get().facets_json);
-  assert.ok(facetsSparse.__meta.nulls.includes('media') && facetsSparse.__meta.nulls.includes('medical.records') && facetsSparse.__meta.nulls.includes('trialReports'), 'a null array is remembered as null');
-  assert.ok(!facetsSparse.__meta.order.includes('drillResults'), 'an absent array stays absent');
+  for (const t of SUBRECORD_TABLES) for (const c of s.prepare(`PRAGMA table_info(${t})`).all()) assert.ok(!['extra_json', 'absent_keys_json', 'offtype_json'].includes(c.name), `${t} has no ${c.name}`);
+  const sp = playerFromRow(s.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE id = 'pl-sparse'`).get(), { children: readChildren(prepareSubrecordStatements(s), 'pl-sparse'), trialReports: [] });
+  assert.deepEqual(sp.media, [], 'a null array reads back []'); assert.deepEqual(sp.medical.records, []); assert.deepEqual(sp.drillResults, [], 'an absent array reads back []');
   // A record read back through readAllChildren (the repository's load) agrees with the single-player read.
   const st = prepareSubrecordStatements(s); const all = readAllChildren(st);
   assert.equal(JSON.stringify(all.get('pl-rich')), JSON.stringify(readChildren(st, 'pl-rich')));
@@ -140,11 +151,11 @@ test('mapping: the legacy layouts decode — an S4a row whose facets hold the ar
   sameJson(rec, playerFromRow(legacy), 'legacy __rest layout');
   const s = liveDb();
   const { back } = roundTrip(s, decoded, { trialReports: rec.trialReports });
-  sameJson(rec, back, 'decoded then stored as rows');
+  sameJson(stored(rec), back, 'decoded then stored as rows');
   // Derived placement.
   const st = prepareSubrecordStatements(s);
   const rowRich = s.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE id = 'pl-rich'`).get();
-  assert.deepEqual(Object.keys(playerFromRow(rowRich, { children: readChildren(st, 'pl-rich'), trialReports: [report('rep-9', 'pl-rich', NOW)] })).indexOf('trialReports'), Object.keys(rec).indexOf('trialReports'), 'where the record had it');
+  assert.deepEqual(Object.keys(playerFromRow(rowRich, { children: readChildren(st, 'pl-rich'), trialReports: [report('rep-9', 'pl-rich', NOW)] })).indexOf('trialReports'), Object.keys(stored(rec)).indexOf('trialReports'), 'where the record had it');
   const nk = noKeys(); roundTrip(s, nk);
   const rowNk = s.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players WHERE id = 'pl-nokeys'`).get();
   assert.equal('trialReports' in playerFromRow(rowNk, { children: readChildren(st, 'pl-nokeys'), trialReports: [] }), false, 'no key, no reports: absent');
@@ -157,7 +168,7 @@ test('mapping: the legacy layouts decode — an S4a row whose facets hold the ar
   s.close();
 });
 
-test('validation: every unsupported item is refused with the field, the index and the reason — nothing coerced, nothing deduplicated: a clip without a title, an unsafe integer view count, a tag with count 0, a capturedBy the CHECK refuses, a gps with lat only, a non-text fixture, a 9-character medical date, a text drill value, a float activity timestamp, a numeric badge, a repeated season, a repeated drill, a repeated provider+externalId, a repeated clip id, a reserved item key', () => {
+test('validation: every unsupported item is refused with the field, the index and the reason — nothing coerced, nothing deduplicated: a clip without a title, an unsafe integer view count, a tag with count 0, a capturedBy the CHECK refuses, a gps with lat only, a non-text fixture, a 9-character medical date, a text drill value, a float activity timestamp, a numeric badge, a repeated season, a repeated drill, a repeated provider+externalId, a repeated clip id; an unknown item field is not a problem (it is not stored)', () => {
   const cases = [
     ['media', [{ id: 'm', kind: 'video' }], /media\[0\]\.title is absent/],
     ['media', [{ id: 'm', title: 't', views: 2 ** 53 }], /media\[0\]\.views is 9007199254740992, not a safe integer/],
@@ -179,7 +190,6 @@ test('validation: every unsupported item is refused with the field, the index an
     ['externalIds', [{ provider: 'fa', externalId: 1, source: 's', at: NOW }], /externalIds\[0\]\.externalId is a number, not text/],
     ['timeline', [{ year: 2019, event: 'x' }], /timeline\[0\]\.year is a number, not text/],
     ['programme.completed', [{ sessionId: 's1' }], /programme\.completed\[0\]\.ts is absent/],
-    ['media', [{ id: 'm', title: 't', __meta: {} }], /media\[0\] carries the reserved field "__meta"/],
     ['media', 'not-an-array', /media is a string, not an array/],
   ];
   for (const [key, items, re] of cases) {
@@ -188,6 +198,7 @@ test('validation: every unsupported item is refused with the field, the index an
   }
   assert.deepEqual(validateSubrecordArray('media', null), []); assert.deepEqual(validateSubrecordArray('media', undefined), []);
   assert.deepEqual(validateSubrecordArray('badges', ['a', 'a']), [], 'a repeated badge is legal');
+  assert.deepEqual(validateSubrecordArray('media', [{ id: 'm', title: 't', thumbnail: { w: 1 }, __meta: {} }]), [], 'unknown item fields are dropped by the writer, not refused');
   assert.deepEqual(validateSubrecordArray('programme.completed', [{ sessionId: 's', ts: 1 }, { sessionId: 's', ts: 2 }]), [], 'a session completed twice is legal');
   const bad = rich(); bad.media[0].title = null;
   const v = validatePlayerRecordWithItems(bad);
@@ -225,7 +236,7 @@ function s4aFile(dir, opts = {}) {
 }
 const PLAYERS_WITH_TRIALS = () => [...FIXTURE().players, rich(), sparse(), noKeys()];
 
-test('migration 0007 on an S4a file: creates the twelve tables, decodes every row through the established decoder, verifies the re-read record before retiring the arrays and the trialReports copy from facets_json, records counts only, and the records read back through the S5 path are byte-identical to what the S4a build served (the derived trial reports in place); sessions, staff, organisations and other blobs untouched; the step never runs twice', () => {
+test('migration 0007 on an S4a file: creates the twelve tables, decodes every row through the established decoder, types every item (an unknown item field dropped and noted by player, array, index and field), verifies the re-read record before retiring the arrays and the trialReports copy from facets_json, records counts and notes only, and the records read back through the S5 path are what the S4a build served in their typed form (the derived trial reports in place); sessions, staff, organisations and other blobs untouched; the step never runs twice', () => {
   const dir = tempDir('s5-mig');
   const before = s4aFile(dir, { players: PLAYERS_WITH_TRIALS(), extra: { ...EXTRA(), ...recruitmentBlobs() } });
   const s = openRaw(dir);
@@ -237,11 +248,13 @@ test('migration 0007 on an S4a file: creates the twelve tables, decodes every ro
   for (const t of SUBRECORD_TABLES) assert.ok(s.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(t), t);
   const record = JSON.parse(meta(s, PLAYER_SUBRECORDS_CUTOVER_META));
   assert.equal(record.players, 8); assert.equal(record.trialReportsCopiesDropped, 2); assert.equal(record.rows.player_media, 4, 'the seeded clip and the three rich ones'); assert.equal(record.rows.player_media_tags, 3); assert.equal(record.trialsBlobPresent, true);
-  assert.ok(!/Rich Record|Hamstring|private club notes/.test(meta(s, PLAYER_SUBRECORDS_CUTOVER_META)), 'counts, never data');
+  assert.ok(!/Rich Record|Hamstring|private club notes|Highlights|kept/.test(meta(s, PLAYER_SUBRECORDS_CUTOVER_META)), 'counts and notes, never data');
+  for (const n of ['players pl-rich: media[0] (med-r1): unknown field thumbnail dropped', 'players pl-rich: seasonHistory[0]: unknown field extraStat dropped', 'players pl-rich: attendance[0] (att-r1): unknown field note dropped', 'players pl-rich: medical.records[0] (md-r1): unknown field constructor dropped']) assert.ok(record.notes.includes(n), `noted: ${n}`);
+  assert.equal(record.notes.length, 4, 'nothing else was dropped or converted'); assert.deepEqual(record.normalised, { players: 1, notes: 4 });
   const st = prepareSubrecordStatements(s);
   const after = readPlayersWithChildren(s, st, { trials: readTrialsCollection(s) }).map((x) => x.record); // S8a: the trials are rows since 0015 (the same boot)
   assert.equal(after.length, before.length);
-  before.forEach((rec, i) => { sameJson(rec, after[i], `players ${rec.id} after 0007`); assert.deepEqual(Object.keys(after[i]), Object.keys(rec)); });
+  before.forEach((rec, i) => sameJson(stored(rec), after[i], `players ${rec.id} after 0007`));
   for (const row of s.prepare('SELECT id, facets_json FROM players').all()) {
     const f = JSON.parse(row.facets_json);
     for (const key of ['media', 'attendance', 'badges', 'trialReports', 'seasonHistory']) assert.equal(key in f, false, `${row.id}: ${key} retired from the facets`);
@@ -255,10 +268,12 @@ test('migration 0007 on an S4a file: creates the twelve tables, decodes every ro
   s.close(); rm(dir);
 });
 
-test('migration 0007 blocks the whole step, leaves the file byte-identical and refuses again on the next boot — an item the table cannot hold (named by player, field and index), a trialReports copy entry without a trial, a copy whose content differs, a report the copy lacks, a different order, a trials collection that is not an array; the data resolved by hand then migrates', () => {
+test('migration 0007 blocks the whole step, leaves the file byte-identical and refuses again on the next boot — an item the table cannot use (a required field with no usable value, a non-object item, a repeated clip id; named by player, field and index), a trialReports copy entry without a trial, a copy whose content differs, a report the copy lacks, a different order, a trials collection that is not an array; the data resolved by hand then migrates', () => {
   // Each case is planted the way the S4a build could have stored it (its validator never inspected items): the row's facets_json or the trials blob edited after 0005 and 0006 ran.
   const cases = [
-    ['bad item', (f) => { f.media[0].title = 7; }, null, /players pl-rich: media\[0\]\.title is a number, not text/],
+    ['unusable item', (f) => { f.media[0].title = { x: 1 }; }, null, /players pl-rich: media\[0\] \(med-r1\) has no usable title \(required by player_media\)/],
+    ['not an object', (f) => { f.attendance[1] = 'junk'; }, null, /players pl-rich: attendance\[1\] is a string, not an object/],
+    ['repeated id', (f) => { f.media[1].id = 'med-r1'; }, null, /players pl-rich: media\[1\] repeats id "med-r1"/],
     ['ghost report', (f) => { f.trialReports.push(report('rep-ghost', 'pl-rich', NOW)); }, null, /players pl-rich: trialReports\[2\] \(rep-ghost\) has no trial report/],
     ['content differs', (f) => { f.trialReports[0].coachRating = 1; }, null, /players pl-rich: trialReports\[0\] \(rep-1\) differs/],
     ['copy lacks', (f) => { f.trialReports.pop(); }, null, /trial report rep-2 names the player but the player's trialReports does not carry it/],
@@ -282,12 +297,36 @@ test('migration 0007 blocks the whole step, leaves the file byte-identical and r
   const dir = tempDir('s5-resolved');
   s4aFile(dir, { players: PLAYERS_WITH_TRIALS(), extra: { ...EXTRA(), ...recruitmentBlobs() } });
   let s = openRaw(dir);
-  { const f0 = JSON.parse(s.prepare("SELECT facets_json FROM players WHERE id = 'pl-rich'").get().facets_json); f0.media[0].title = 7; s.prepare("UPDATE players SET facets_json = ? WHERE id = 'pl-rich'").run(JSON.stringify(f0)); }
+  { const f0 = JSON.parse(s.prepare("SELECT facets_json FROM players WHERE id = 'pl-rich'").get().facets_json); f0.media[0].title = { x: 1 }; s.prepare("UPDATE players SET facets_json = ? WHERE id = 'pl-rich'").run(JSON.stringify(f0)); }
   assert.throws(() => migrate(s, { now: NOW }), /BLOCKED/);
   const row = s.prepare("SELECT facets_json FROM players WHERE id = 'pl-rich'").get(); const f = JSON.parse(row.facets_json); f.media[0].title = 'Fixed by hand';
   s.prepare("UPDATE players SET facets_json = ? WHERE id = 'pl-rich'").run(JSON.stringify(f));
   assert.deepEqual(migrate(s, { now: NOW }).ran, [PLAYER_SUBRECORDS_MIGRATION, '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']);
   assert.equal(s.prepare("SELECT title FROM player_media WHERE id = 'med-r1'").get().title, 'Fixed by hand');
+  s.close(); rm(dir);
+});
+
+test('migration 0007 imports what it can use and reports the rest by id: an unknown item field is dropped, a wrong-typed value with an obvious meaning is converted (a numeric title → text, a numeric-text view count → integer, 0/1 → boolean, a numeric-text activity timestamp), one without is dropped (the column default or no value), a badge that is not text is converted or the entry dropped, an array that is not an array is dropped — each a note with the player id, the array, the index and the field, never a value', () => {
+  const dir = tempDir('s5-normalise');
+  s4aFile(dir, { players: PLAYERS_WITH_TRIALS(), extra: { ...EXTRA(), ...recruitmentBlobs() } });
+  const s = openRaw(dir);
+  const f = JSON.parse(s.prepare("SELECT facets_json FROM players WHERE id = 'pl-rich'").get().facets_json);
+  f.media[0].title = 7; f.media[0].views = '12'; f.media[1].views = 'many'; f.media[0].tags.bad = 0;
+  f.drillResults[0].verified = 1; f.drillResults[1].unit = { odd: true };
+  f.activityLog[0] = String(f.activityLog[0]); f.badges.push({ no: 1 }); f.badges.push(9);
+  f.timeline = 'not-a-list';
+  s.prepare("UPDATE players SET facets_json = ? WHERE id = 'pl-rich'").run(JSON.stringify(f));
+  migrate(s, { now: NOW });
+  const record = JSON.parse(meta(s, PLAYER_SUBRECORDS_CUTOVER_META));
+  for (const re of [/media\[0\] \(med-r1\)\.title was a number; stored as text/, /media\[0\] \(med-r1\)\.views was a string; stored as int/, /media\[1\] \(med-r2\)\.views is a string, which the int column cannot hold; the value was dropped/,
+    /media\[0\] \(med-r1\)\.tags: a tag whose count is not a positive integer was dropped/, /drillResults\[0\] \(dr-r1\)\.verified was a number; stored as bool/, /drillResults\[1\] \(dr-r2\)\.unit is an object, which the text column cannot hold/,
+    /activityLog\[0\] was a string; stored as an integer/, /badges\[3\] is an object, not text; the entry was dropped/, /badges\[4\] was a number; stored as text/, /players pl-rich: timeline is a string, not an array; dropped/]) assert.ok(record.notes.some((n) => re.test(n)), `noted: ${re}`);
+  assert.ok(record.notes.every((n) => n.startsWith('players pl-rich: ')), 'every note names the player');
+  assert.ok(!/many|odd|Rich Record/.test(JSON.stringify(record)), 'never a value');
+  const back = readPlayersWithChildren(s, prepareSubrecordStatements(s), { trials: readTrialsCollection(s) }).find((x) => x.record.id === 'pl-rich').record;
+  assert.equal(back.media[0].title, '7'); assert.equal(back.media[0].views, 12); assert.equal(back.media[1].views, 0, 'the column default');
+  assert.deepEqual(back.media[0].tags, { pace: 2, vision: 1 }); assert.equal(back.drillResults[0].verified, true); assert.equal('unit' in back.drillResults[1], false);
+  assert.equal(back.activityLog[0], NOW - 3 * DAY); assert.deepEqual(back.badges, ['Finisher', 'Captain', 'Finisher', '9']); assert.deepEqual(back.timeline, []);
   s.close(); rm(dir);
 });
 
@@ -299,7 +338,7 @@ test('migration 0007: a first installation creates the tables and imports nothin
   const identity = createIdentityRepositories({ sqlite: s, now: () => NOW, trialReports: (id) => trialReportsFor(trials(), id) });
   identity.initialize({ players: PLAYERS_WITH_TRIALS(), guardians: FIXTURE().guardians }, { now: NOW });
   assert.equal(count(s, 'player_media'), 4); assert.equal(count(s, 'player_badges'), 4);
-  const richRec = rich(); sameJson(richRec, identity.players.byId('pl-rich'), 'initialised from the seed, arrays as rows, trial reports derived');
+  const richRec = rich(); sameJson(stored(richRec), identity.players.byId('pl-rich'), 'initialised from the seed, arrays as rows, trial reports derived');
   s.close(); rm(fresh);
   // Intentionally empty.
   const empty = tempDir('s5-empty'); s3File(empty, { players: [], guardians: [], sessions: [] });
@@ -354,7 +393,7 @@ function failNextCommit(t) {
   return probe;
 }
 
-test('repository: addItem / setItems / patchItem are the one write path — a row at once (a second connection reads it), memory updated in place (held references to the array and the item stay valid), the view read-only, the facets rewritten only when a key appears for the first time (an absent drillResults gains the key, remembered through a reopen), a clip\'s tags rewritten as rows, a season list replaced in sorted order; a refused item or an unknown key changes nothing; the derived trialReports follows the trials collection live', () => {
+test('repository: addItem / setItems / patchItem are the one write path — a row at once (a second connection reads it), memory updated in place (held references to the array and the item stay valid), the view read-only, the facets never rewritten by a sub-record write (every array is on every record: one created without drillResults has it, empty), an unknown item field kept neither in memory nor in a row, a clip\'s tags rewritten as rows, a season list replaced in sorted order; a refused item (code PLAYER_SUBRECORD_INVALID) or an unknown key changes nothing; the derived trialReports follows the trials collection live', () => {
   const dir = tempDir('s5-repo');
   const t = boot(dir, { players: [adult(), rich(), noKeys()], guardians: [], trialList: trials() });
   const second = openRaw(dir);
@@ -367,15 +406,19 @@ test('repository: addItem / setItems / patchItem are the one write path — a ro
   assert.equal(t.raw("SELECT facets_json FROM players WHERE id = 'pl-adult'").facets_json, facetsBefore, 'the key existed: the facets are untouched');
   assert.equal(t.players.uncommitted(), 0);
   assert.throws(() => { view.push({}); }, /addItem/); assert.throws(() => { view[0].views = 1; }, /addItem/); assert.throws(() => { p.media = []; }, /identity repositories/);
-  // A key the record never had: created, and the shape metadata follows.
-  assert.equal('drillResults' in t.players.byId('pl-nokeys'), false);
-  t.players.addItem('pl-nokeys', 'drillResults', { id: 'dr-n1', drillId: 'd', metric: 'm', value: 1, verified: false, ts: NOW });
-  assert.equal(t.players.byId('pl-nokeys').drillResults.length, 1); assert.ok(t.facets('pl-nokeys').__meta.order.includes('drillResults'), 'the facets record the new key');
-  assert.equal(t.players.uncommitted(), 0, 'the facets were written in the same transaction');
+  // A record created without the key has the array, empty; an item's unknown field is not stored anywhere.
+  assert.deepEqual([...t.players.byId('pl-nokeys').drillResults], []);
+  const nkFacets = t.raw("SELECT facets_json FROM players WHERE id = 'pl-nokeys'").facets_json;
+  t.players.addItem('pl-nokeys', 'drillResults', { id: 'dr-n1', drillId: 'd', metric: 'm', value: 1, verified: false, ts: NOW, coachNote: 'junk' });
+  assert.equal(t.players.byId('pl-nokeys').drillResults.length, 1); assert.equal('coachNote' in t.players.byId('pl-nokeys').drillResults[0], false, 'not kept in memory');
+  assert.equal(t.raw("SELECT facets_json FROM players WHERE id = 'pl-nokeys'").facets_json, nkFacets, 'the facets are untouched');
+  assert.equal(t.players.uncommitted(), 0);
   // patchItem: a clip's views and tags; the item keeps its identity.
   const clip = t.players.byId('pl-rich').media[0]; const richMedia = t.players.byId('pl-rich').media;
   t.players.patchItem('pl-rich', 'media', { id: 'med-r1' }, { views: 4, tags: { pace: 3, vision: 1, composure: 1 } });
   assert.equal(clip.views, 4); assert.deepEqual({ ...clip.tags }, { pace: 3, vision: 1, composure: 1 }); assert.equal(t.players.byId('pl-rich').media, richMedia);
+  t.players.patchItem('pl-rich', 'media', { id: 'med-r1' }, { flavour: 'junk' });
+  assert.equal(t.players.byId('pl-rich').media[0], clip, 'the same item object'); assert.equal('flavour' in clip, false, 'an unknown patch field is not stored');
   assert.deepEqual(second.prepare("SELECT tag, count FROM player_media_tags WHERE media_id = 'med-r1' ORDER BY position").all().map((r) => [r.tag, r.count]), [['pace', 3], ['vision', 1], ['composure', 1]]);
   assert.equal(second.prepare("SELECT views FROM player_media WHERE id = 'med-r1'").get().views, 4);
   const vtt = 'WEBVTT\n\n00:00.000 --> 00:01.000\nhi';
@@ -389,7 +432,7 @@ test('repository: addItem / setItems / patchItem are the one write path — a ro
   // Refusals change nothing.
   const before = JSON.stringify(t.players.byId('pl-rich')); const rowsBefore = dump(second, { except: ['meta'] });
   assert.throws(() => t.players.addItem('pl-rich', 'media', { id: 'med-r1', title: 'dup' }), /adding to media of player pl-rich was refused: media\[3\] repeats id "med-r1"/);
-  assert.throws(() => t.players.addItem('pl-rich', 'attendance', { id: 'a', fixture: 9, date: '2026-01-01' }), /attendance\[2\]\.fixture is a number, not text/);
+  assert.throws(() => t.players.addItem('pl-rich', 'attendance', { id: 'a', fixture: 9, date: '2026-01-01' }), (e) => /attendance\[2\]\.fixture is a number, not text/.test(e.message) && e.code === 'PLAYER_SUBRECORD_INVALID');
   assert.throws(() => t.players.addItem('pl-rich', 'nonsense', {}), /"nonsense" is not a player sub-record/);
   assert.throws(() => t.players.addItem('pl-nobody', 'media', item), /does not exist/);
   assert.throws(() => t.players.patchItem('pl-rich', 'media', { id: 'nope' }, { views: 1 }), /0 item\(s\) of media/);
@@ -409,7 +452,7 @@ test('repository: addItem / setItems / patchItem are the one write path — a ro
   t.store.save(t.snapshot()); // the trials are a blob collection: persisted by the save, like every other blob
   second.close(); t.close();
   const r = reopen(dir);
-  assert.equal(r.players.byId('pl-adult').media[0].title, 'First clip'); assert.equal(r.players.byId('pl-nokeys').drillResults.length, 1); assert.equal(Object.keys(r.players.byId('pl-nokeys')).at(-1), 'drillResults');
+  assert.equal(r.players.byId('pl-adult').media[0].title, 'First clip'); assert.equal(r.players.byId('pl-nokeys').drillResults.length, 1); assert.equal('coachNote' in r.players.byId('pl-nokeys').drillResults[0], false);
   assert.deepEqual([...r.players.byId('pl-rich').badges], ['A', 'A', 'B']); assert.equal(r.players.byId('pl-rich').media[0].views, 4); assert.deepEqual(r.players.byId('pl-rich').trialReports.map((x) => x.id), ['rep-1', 'rep-2', 'rep-3']);
   r.close(); rm(dir);
 });
@@ -448,8 +491,8 @@ test('repository: a standalone sub-record write whose COMMIT fails leaves SQL an
   t.unit(() => { t.players.addItem('pl-rich', 'badges', 'Retry'); t.players.addItem('pl-rich', 'timeline', { year: '2026', event: 'x' }); });
   assert.deepEqual([...p.badges], ['Finisher', 'Captain', 'Finisher', 'Retry']); assert.equal(count(t.store.sqlite, 'player_timeline', 'WHERE player_id = ?', 'pl-rich'), 3);
   // insert / restore / remove.
-  const inserted = t.players.insert({ ...child('pl-kid', null, '2000-05-05'), media: [{ id: 'med-k1', title: 'Kid clip', kind: 'video' }], badges: ['New'] });
-  assert.equal(inserted.media[0].title, 'Kid clip'); assert.equal(count(t.store.sqlite, 'player_media', 'WHERE player_id = ?', 'pl-kid'), 1); assert.equal(count(t.store.sqlite, 'player_badges', 'WHERE player_id = ?', 'pl-kid'), 1);
+  const inserted = t.players.insert({ ...child('pl-kid', null, '2000-05-05'), media: [{ id: 'med-k1', title: 'Kid clip', kind: 'video', junk: { a: 1 } }], badges: ['New'] });
+  assert.equal(inserted.media[0].title, 'Kid clip'); assert.equal('junk' in inserted.media[0], false, 'an unknown item field is not kept'); assert.deepEqual([...inserted.drillResults], [], 'an absent array is on the record, empty'); assert.equal(count(t.store.sqlite, 'player_media', 'WHERE player_id = ?', 'pl-kid'), 1); assert.equal(count(t.store.sqlite, 'player_badges', 'WHERE player_id = ?', 'pl-kid'), 1);
   const snap = clone(t.players.byId('pl-kid')); snap.badges = ['Restored', 'Twice']; snap.media = [];
   t.players.restore('pl-kid', snap);
   assert.deepEqual([...t.players.byId('pl-kid').badges], ['Restored', 'Twice']); assert.equal(count(t.store.sqlite, 'player_media', 'WHERE player_id = ?', 'pl-kid'), 0); assert.equal(count(t.store.sqlite, 'player_badges', 'WHERE player_id = ?', 'pl-kid'), 2);
@@ -463,18 +506,18 @@ test('repository: a standalone sub-record write whose COMMIT fails leaves SQL an
 });
 
 // ------------------------------------------------------------------ snapshot replacement
-test('snapshot replacement under the child foreign keys: a whole-snapshot write (backup, restore, persistence suite) rewrites the player rows and every child row so the FINAL state holds exactly the snapshot\'s arrays — a changed array, a removed player, a new player with arrays, a record without an array key, with a null array, with an empty array; a partial snapshot leaves every table alone; a failure in the middle of the child rows rolls the whole save back, unrelated collections included; the store reads trialReports from the trials blob of the same file', () => {
+test('snapshot replacement under the child foreign keys: a whole-snapshot write (backup, restore, persistence suite) rewrites the player rows and every child row so the FINAL state holds exactly the snapshot\'s arrays — a changed array, a removed player, a new player with arrays (an unknown item field not stored), a record without an array key or with a null array (both read back []), with an empty array; a partial snapshot leaves every table alone; a failure in the middle of the child rows rolls the whole save back, unrelated collections included; the store reads trialReports from the trials blob of the same file', () => {
   const dir = tempDir('s5-snap');
   const t = boot(dir, { players: [adult(), rich(), sparse(), noKeys()], guardians: [], trialList: trials() }); t.close();
   const store = openStore(dir); // snapshot mode
   let loaded = store.load();
   assert.equal(loaded.db.players.find((p) => p.id === 'pl-rich').trialReports.length, 2, 'derived from the trials blob of the file');
-  assert.equal(JSON.stringify(loaded.db.players.find((p) => p.id === 'pl-rich')), JSON.stringify(rich()), 'the record as the server sees it');
+  assert.equal(JSON.stringify(loaded.db.players.find((p) => p.id === 'pl-rich')), JSON.stringify(stored(rich())), 'the record as the server sees it');
   const db = { ...loaded.db };
   db.players = db.players.filter((p) => p.id !== 'pl-adult');
   db.players.find((p) => p.id === 'pl-rich').badges = ['Rewritten'];
   db.players.find((p) => p.id === 'pl-rich').media.splice(1, 1);
-  db.players.push({ ...child('pl-new', null, '2001-01-01'), media: [{ id: 'med-new', title: 'New', kind: 'video' }], attendance: [{ id: 'att-new', fixture: 'F', date: '2026-01-01' }] });
+  db.players.push({ ...child('pl-new', null, '2001-01-01'), media: [{ id: 'med-new', title: 'New', kind: 'video', junk: 1 }], attendance: [{ id: 'att-new', fixture: 'F', date: '2026-01-01' }] });
   db.vouches.push({ id: 'vch-2', status: 'pending', history: [] });
   store.save({ savedAt: NOW + DAY, idCounter: 1500, db });
   const s = store.sqlite;
@@ -483,7 +526,8 @@ test('snapshot replacement under the child foreign keys: a whole-snapshot write 
   assert.equal(count(s, 'player_media_tags', "WHERE media_id = 'med-r2'"), 0); assert.deepEqual(s.prepare('PRAGMA foreign_key_check').all(), []);
   loaded = store.load();
   assert.equal(JSON.stringify(loaded.db.players.find((p) => p.id === 'pl-rich')), JSON.stringify(db.players.find((p) => p.id === 'pl-rich')), 'reads back as written');
-  assert.equal(loaded.db.players.find((p) => p.id === 'pl-sparse').media, null); assert.deepEqual(loaded.db.players.find((p) => p.id === 'pl-sparse').badges, []); assert.equal('media' in loaded.db.players.find((p) => p.id === 'pl-nokeys'), false);
+  assert.deepEqual(loaded.db.players.find((p) => p.id === 'pl-sparse').media, []); assert.deepEqual(loaded.db.players.find((p) => p.id === 'pl-sparse').badges, []); assert.deepEqual(loaded.db.players.find((p) => p.id === 'pl-nokeys').media, []);
+  assert.equal('junk' in loaded.db.players.find((p) => p.id === 'pl-new').media[0], false, 'an unknown item field is not stored');
   // Partial snapshot: no players/guardians → tables untouched.
   const before = dump(s, { except: ['meta', 'collections'] });
   store.save({ savedAt: NOW + 2 * DAY, idCounter: 1500, db: { vouches: db.vouches } });

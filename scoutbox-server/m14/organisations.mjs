@@ -689,7 +689,7 @@ export function registerOrganisationVerification(ctx) {
     if (today >= INVITES_PER_DAY) return res.status(429).json({ error: 'INVITE_RATE_LIMIT', message: `Deterministic limit: ${INVITES_PER_DAY} invitations per organisation per day.` });
     const { name, email, squad, playerId } = req.body ?? {};
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
-    if (email && emailProblem(email)) return res.status(400).json({ error: 'EMAIL_SYNTAX' });
+    if (email && (typeof email !== 'string' || emailProblem(email))) return res.status(400).json({ error: 'EMAIL_SYNTAX' }); // a string only: emailProblem would coerce an array
     // M14.1 recipient binding: when the invite targets an EXISTING ScoutBox
     // player, the token is bound to that identity and nobody else can attach
     // it. (Player targeting uses the standing visibility rules — an invite

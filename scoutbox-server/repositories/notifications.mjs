@@ -32,9 +32,8 @@
  * current on every mutation, so reads cost what they cost before S7a and the
  * coalescing scan is the same loop over the same array. Rows are plain objects
  * in the shape every reader expects ({ id, ts, audience, type, text, refId,
- * read, repeatCount, groupKey, category, deferredPush[, actionRequired] });
- * fields a row carried that this repository does not know are kept in
- * `extra_json` and spread back onto the row.
+ * read, repeatCount, groupKey, category, deferredPush[, actionRequired] }),
+ * built from the typed columns only.
  *
  * TWO WRITE MODES.
  *   immediate (tools, tests, the migration; `staged: false`): every mutation
@@ -103,21 +102,15 @@
  * (without the hook the unit's rollback could not reach the mirror). Only a
  * caller-owned raw transaction keeps the explicit `reload()` contract.
  *
- * UNKNOWN DATA IS NEVER LOST SILENTLY (finding 3). Fields this repository does
- * not know are copied as own data properties (`Object.defineProperty`, never
- * assignment: an own "__proto__" key of legacy JSON is data, and assignment
- * would rewrite the prototype and drop it) at validation, storage, read,
- * export, snapshot and rollback. UNKNOWN NESTED DATA IS DETACHED (review of
- * ac50b60, the follow-up of the S7b finding-2 class): an unknown field is a
- * prototype-safe JSON clone at ingress (import, snapshot replace), on export
- * and in every transaction snapshot, so a returned export can never change
- * the mirror and a nested edit inside a rolled-back unit never survives it; a
- * value JSON cannot carry (undefined, a function, a symbol, a bigint, a
- * non-finite number, a class instance) refuses the whole write by name. Nested objects whose shape the schema maps
- * to columns (the audience, the acknowledgment contract, a category map)
- * refuse unknown fields — the whole migration or snapshot write, before any
- * row is written or any blob retired — because a field dropped there would be
- * lost without a trace.
+ * TYPED COLUMNS, VALID INPUT ONLY (the S8d fidelity rule, 3 November 2026).
+ * Every stored field is a typed column; there is no side column. A top-level
+ * field of a notification this repository does not know is DROPPED — silently
+ * at a snapshot write, reported by row id (`unknownFieldsDropped` in the
+ * cutover record and the boot log; ids and counts, never content) at the
+ * migration. A wrong-typed value for a known field is refused by name. Nested
+ * objects the schema maps to columns (the audience, the acknowledgment
+ * contract, a category map) and a preference record refuse unknown fields, as
+ * they always did.
  *
  * Whether the tables are authoritative is decided by the cutover record
  * `0009_notifications` in `data_migrations`, never by the tables existing or
@@ -133,7 +126,7 @@
  * shapes exactly, one entry per row / per person, in insertion order. An entry
  * the validators below refuse — and they coerce nothing — refuses the whole
  * write (a save, the migration) with NOTIFICATIONS_IMPORT_BLOCKED, naming the
- * entry index and the reason and NEVER the text. Normalisations are the ones
+ * entry index, the row id and the reason and NEVER the text. Normalisations are the ones
  * the pre-S7a snapshot migrations applied or the literal always set:
  * repeatCount absent → 1 (m182_005), read absent → false, groupKey / category
  * absent → null, deferredPush absent → false; each is counted in the cutover
@@ -170,7 +163,6 @@ CREATE TABLE notifications (
   action_deadline_at INTEGER,
   action_acked_at    INTEGER,
   action_acked_by    TEXT,
-  extra_json         TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
   CHECK (action_required = 1 OR (action_deadline_at IS NULL AND action_acked_at IS NULL AND action_acked_by IS NULL))
 ) STRICT;
 CREATE INDEX notifications_audience_seq ON notifications (audience_kind, audience_id, seq);
@@ -199,32 +191,6 @@ const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
 const isCategory = (k) => Object.hasOwn(CATEGORIES_SET, k);
 const CATEGORIES_SET = Object.freeze(Object.fromEntries(CATEGORY_NAMES.map((k) => [k, true])));
 const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
-/** Set an own data property — never `obj[k] = v`, which for an own "__proto__" key of parsed JSON would rewrite the prototype and lose the field. */
-const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
-/**
- * A DETACHED, prototype-safe copy of a JSON value (review of ac50b60 — the
- * follow-up of the S7b finding 2 class, the same approach as
- * repositories/dispatches.mjs, kept local to this repository): null, booleans,
- * strings, finite numbers, arrays and plain objects, every own key copied with
- * `setOwn` at every depth (an own "__proto__", "constructor" or "toString" key
- * is data). Anything JSON cannot carry — undefined, a function, a symbol, a
- * bigint, a non-finite number, a class instance — is refused by name, never
- * dropped or nulled silently (`JSON.stringify` would). `{ value }` or `{ reason }`.
- */
-function cloneJson(v, at) {
-  if (v === null || typeof v === 'string' || typeof v === 'boolean') return { value: v };
-  if (typeof v === 'number') return Number.isFinite(v) ? { value: v } : { reason: `${at} is a non-finite number and cannot be stored as JSON` };
-  if (Array.isArray(v)) { const out = []; for (let i = 0; i < v.length; i++) { const r = cloneJson(v[i], `${at}[${i}]`); if (r.reason) return r; out.push(r.value); } return { value: out }; }
-  if (typeof v === 'object') {
-    const proto = Object.getPrototypeOf(v);
-    if (proto !== Object.prototype && proto !== null) return { reason: `${at} is not a plain object and cannot be stored as JSON` };
-    const out = {}; for (const k of Object.keys(v)) { const r = cloneJson(v[k], `${at}.${k}`); if (r.reason) return r; setOwn(out, k, r.value); } return { value: out };
-  }
-  return { reason: `${at} (${typeof v}) cannot be stored as JSON` };
-}
-/** The unknown own fields of a mirror row, each a detached copy (the mirror only ever holds values `cloneJson` accepted). */
-function cloneExtras(row) { const extra = {}; for (const k of Object.keys(row)) if (!KNOWN_KEYS.includes(k)) setOwn(extra, k, cloneJson(row[k], k).value); return extra; }
-
 // ------------------------------------------------------------------ validation (no coercion; every refusal names the reason, never the text)
 const KNOWN_KEYS = Object.freeze(['id', 'ts', 'audience', 'type', 'text', 'refId', 'read', 'repeatCount', 'groupKey', 'category', 'deferredPush', 'actionRequired']);
 const ACTION_KEYS = Object.freeze(['deadline', 'ackedAt', 'ackedBy']);
@@ -251,7 +217,7 @@ function actionOf(raw) {
   if (ackedBy !== null && typeof ackedBy !== 'string') return { reason: 'actionRequired.ackedBy must be a string or null' };
   return { action: { deadline, ackedAt, ackedBy } };
 }
-/** Validate one exported notification: `{ ok: true, row, normalised: [...names] }` or `{ ok: false, reason }`. The row is the mirror shape. */
+/** Validate one exported notification: `{ ok: true, row, normalised: [...names], dropped: [...unknown field names] }` or `{ ok: false, reason }`. The row is the mirror shape, known fields only. */
 export function validateNotificationRow(raw) {
   if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
   if (!nonEmpty(raw.id)) return { ok: false, reason: 'id must be a non-empty string' };
@@ -268,26 +234,25 @@ export function validateNotificationRow(raw) {
   let category = raw.category; if (category === undefined) { category = null; normalised.push('category'); } else if (category !== null && (typeof category !== 'string' || !isCategory(category))) return { ok: false, reason: `category ${typeof category === 'string' ? category : describe(category)} is not a notification category` };
   let deferredPush = raw.deferredPush; if (deferredPush === undefined) { deferredPush = false; normalised.push('deferredPush'); } else if (typeof deferredPush !== 'boolean') return { ok: false, reason: 'deferredPush must be a boolean' };
   const act = actionOf(raw.actionRequired); if (act.reason) return { ok: false, reason: act.reason };
-  const extra = {};
-  for (const k of Object.keys(raw)) if (!KNOWN_KEYS.includes(k)) { const c = cloneJson(raw[k], k); if (c.reason) return { ok: false, reason: c.reason }; setOwn(extra, k, c.value); }
-  const row = { ...extra, id: raw.id, ts: raw.ts, audience: a.audience, type: raw.type, text: raw.text, refId, read, repeatCount, groupKey, category, deferredPush };
+  const dropped = Object.keys(raw).filter((k) => !KNOWN_KEYS.includes(k));
+  const row = { id: raw.id, ts: raw.ts, audience: a.audience, type: raw.type, text: raw.text, refId, read, repeatCount, groupKey, category, deferredPush };
   if (act.action) row.actionRequired = act.action;
-  return { ok: true, row, normalised, hasExtra: Object.keys(extra).length > 0 };
+  return { ok: true, row, normalised, dropped };
 }
-/** Validate a whole exported notifications collection; throws NOTIFICATIONS_IMPORT_BLOCKED (entries and reasons, never a text). Returns `{ rows, normalised, withExtraFields, withActionRequired }`. */
+/** Validate a whole exported notifications collection; throws NOTIFICATIONS_IMPORT_BLOCKED (entries and reasons, never a text). Returns `{ rows, normalised, unknownFieldsDropped: [...row ids], withActionRequired }`. */
 export function validateNotificationRows(rows, { label = 'the notifications collection' } = {}) {
   if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
   const out = []; const problems = []; const ids = new Set();
-  const normalised = { read: 0, repeatCount: 0, groupKey: 0, category: 0, deferredPush: 0 }; let withExtraFields = 0; let withActionRequired = 0;
+  const normalised = { read: 0, repeatCount: 0, groupKey: 0, category: 0, deferredPush: 0 }; const unknownFieldsDropped = []; let withActionRequired = 0;
   rows.forEach((raw, i) => {
     const v = validateNotificationRow(raw);
-    if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
+    if (!v.ok) { problems.push(`entry #${i}${nonEmpty(raw?.id) ? ` (${raw.id})` : ''}: ${v.reason}`); return; }
     if (ids.has(v.row.id)) { problems.push(`entry #${i}: duplicates the id of an earlier entry (${v.row.id})`); return; }
-    ids.add(v.row.id); for (const n of v.normalised) normalised[n] += 1; if (v.hasExtra) withExtraFields += 1; if (v.row.actionRequired) withActionRequired += 1;
+    ids.add(v.row.id); for (const n of v.normalised) normalised[n] += 1; if (v.dropped.length) unknownFieldsDropped.push(v.row.id); if (v.row.actionRequired) withActionRequired += 1;
     out.push(v.row);
   });
   if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  return { rows: out, normalised, withExtraFields, withActionRequired };
+  return { rows: out, normalised, unknownFieldsDropped, withActionRequired };
 }
 
 const PREF_KEYS = Object.freeze(['audienceKind', 'audienceId', 'categories', 'emailIntent', 'updatedAt']);
@@ -332,27 +297,24 @@ export function validateNotificationPrefsRows(rows, { label = 'the notificationP
 }
 
 // ------------------------------------------------------------------ rows ↔ the table
-const SELECT = 'SELECT seq, id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required, action_deadline_at, action_acked_at, action_acked_by, extra_json FROM notifications';
-const INSERT = 'INSERT INTO notifications (id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required, action_deadline_at, action_acked_at, action_acked_by, extra_json) VALUES (@id, @occurred_at, @audience_kind, @audience_id, @type, @text, @ref_id, @read, @repeat_count, @group_key, @category, @deferred_push, @action_required, @action_deadline_at, @action_acked_at, @action_acked_by, @extra_json)';
+const SELECT = 'SELECT seq, id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required, action_deadline_at, action_acked_at, action_acked_by FROM notifications';
+const INSERT = 'INSERT INTO notifications (id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required, action_deadline_at, action_acked_at, action_acked_by) VALUES (@id, @occurred_at, @audience_kind, @audience_id, @type, @text, @ref_id, @read, @repeat_count, @group_key, @category, @deferred_push, @action_required, @action_deadline_at, @action_acked_at, @action_acked_by)';
 /** The mirror row for a table row. */
 function rowFromDb(r) {
-  const extra = r.extra_json ? JSON.parse(r.extra_json) : {};
-  const row = { ...extra, id: r.id, ts: r.occurred_at, audience: { kind: r.audience_kind, id: r.audience_id }, type: r.type, text: r.text, refId: r.ref_id, read: r.read === 1, repeatCount: r.repeat_count, groupKey: r.group_key, category: r.category, deferredPush: r.deferred_push === 1 };
+  const row = { id: r.id, ts: r.occurred_at, audience: { kind: r.audience_kind, id: r.audience_id }, type: r.type, text: r.text, refId: r.ref_id, read: r.read === 1, repeatCount: r.repeat_count, groupKey: r.group_key, category: r.category, deferredPush: r.deferred_push === 1 };
   if (r.action_required === 1) row.actionRequired = { deadline: r.action_deadline_at, ackedAt: r.action_acked_at, ackedBy: r.action_acked_by };
   return row;
 }
 /** The insert parameters for a mirror row. */
 function rowParams(row) {
-  const extra = cloneExtras(row);
   const a = row.actionRequired ?? null;
   return {
     id: row.id, occurred_at: row.ts, audience_kind: row.audience.kind, audience_id: row.audience.id, type: row.type, text: row.text, ref_id: row.refId, read: row.read ? 1 : 0, repeat_count: row.repeatCount,
     group_key: row.groupKey, category: row.category, deferred_push: row.deferredPush ? 1 : 0, action_required: a ? 1 : 0, action_deadline_at: a ? a.deadline : null, action_acked_at: a ? a.ackedAt : null, action_acked_by: a ? a.ackedBy : null,
-    extra_json: Object.keys(extra).length ? JSON.stringify(extra) : null,
   };
 }
-/** A DETACHED copy of a mirror row (the export / snapshot shape; nothing shared with the mirror — unknown nested data cloned, review of ac50b60). */
-const copyRow = (row) => { const c = { ...row, audience: { ...row.audience } }; if (row.actionRequired) c.actionRequired = { ...row.actionRequired }; for (const k of Object.keys(row)) if (!KNOWN_KEYS.includes(k)) setOwn(c, k, cloneJson(row[k], k).value); return c; };
+/** A DETACHED copy of a mirror row (the export / snapshot shape; nothing shared with the mirror). */
+const copyRow = (row) => { const c = { ...row, audience: { ...row.audience } }; if (row.actionRequired) c.actionRequired = { ...row.actionRequired }; return c; };
 const copyPref = (p) => ({ audienceKind: p.audienceKind, audienceId: p.audienceId, categories: { ...p.categories }, emailIntent: p.emailIntent, updatedAt: p.updatedAt });
 const prefKey = (kind, id) => `${kind}\u0000${id}`;
 
@@ -419,7 +381,7 @@ export const NOTIFICATION_PREFS_TABLE = {
  * rows retired. Returns the counts the migration records in `meta`.
  */
 export function importNotificationBlobs(sqlite) {
-  const counts = { notifications: { imported: 0, normalised: { read: 0, repeatCount: 0, groupKey: 0, category: 0, deferredPush: 0 }, withExtraFields: 0, withActionRequired: 0 }, notificationPrefs: { imported: 0, categories: 0, normalised: { emailIntent: 0, updatedAt: 0 } } };
+  const counts = { notifications: { imported: 0, normalised: { read: 0, repeatCount: 0, groupKey: 0, category: 0, deferredPush: 0 }, unknownFieldsDropped: [], withActionRequired: 0 }, notificationPrefs: { imported: 0, categories: 0, normalised: { emailIntent: 0, updatedAt: 0 } } };
   const hasCollections = tableExists(sqlite, 'collections');
   const readBlob = (name) => {
     const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null;
@@ -430,7 +392,7 @@ export function importNotificationBlobs(sqlite) {
   if (notifications !== undefined) {
     const v = validateNotificationRows(notifications, { label: 'the notifications blob' });
     writeRows(sqlite, v.rows);
-    counts.notifications = { imported: v.rows.length, normalised: v.normalised, withExtraFields: v.withExtraFields, withActionRequired: v.withActionRequired };
+    counts.notifications = { imported: v.rows.length, normalised: v.normalised, unknownFieldsDropped: v.unknownFieldsDropped, withActionRequired: v.withActionRequired };
   }
   const prefs = readBlob('notificationPrefs');
   if (prefs !== undefined) {
@@ -534,7 +496,7 @@ export function createNotificationsRepository({ sqlite, now = Date.now, nextId =
     for (const [k, v] of Object.entries(copy)) {
       if (k === 'actionRequired' && obj.actionRequired && v) { Object.assign(obj.actionRequired, v); continue; }
       if (k === 'categories' && obj.categories && v) { for (const c of Object.keys(obj.categories)) delete obj.categories[c]; Object.assign(obj.categories, v); continue; }
-      setOwn(obj, k, KNOWN_KEYS.includes(k) || k === 'audienceKind' || k === 'audienceId' || k === 'emailIntent' || k === 'updatedAt' ? v : cloneJson(v, k).value); // unknown nested data: a fresh detached copy, never the snapshot's object
+      obj[k] = v;
     }
   };
 

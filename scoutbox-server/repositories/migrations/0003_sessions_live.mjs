@@ -43,15 +43,17 @@ export function up(sqlite, { sessionTtlMs = DEFAULT_SESSION_TTL_MS, now = Date.n
   // staff still sit in the `users` blob) that table is empty at this point
   // and the S0 repository would import the blob only after the migrations;
   // so this migration performs that import first, inside the same
-  // transaction, with the S0 tooling's own row rule, and retires the users
-  // blob. No row is invented: a session naming a staff id that is in neither
+  // transaction, with the S0 tooling's own row rule (unknown fields and
+  // wrong-typed optional values dropped, counted and noted by row id under
+  // `meta.sessionsCutover.staff`), and retires the users blob. No row is invented: a session naming a staff id that is in neither
   // place is still unsupported and aborts the cutover.
+  let staffImport = null;
   if (hasCollections && sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n === 0) {
     const usersBlob = sqlite.prepare("SELECT value FROM collections WHERE name = 'users'").get();
     let users = null;
     try { users = usersBlob ? JSON.parse(usersBlob.value) : null; } catch { throw new Error('SESSIONS_CUTOVER_BLOCKED: the legacy users blob is not valid JSON'); }
     if (Array.isArray(users) && users.length) {
-      USERS_TABLE.replace(sqlite, users);
+      staffImport = USERS_TABLE.importLegacy(sqlite, users);
       sqlite.prepare("DELETE FROM collections WHERE name = 'users'").run();
     }
   }
@@ -79,7 +81,7 @@ export function up(sqlite, { sessionTtlMs = DEFAULT_SESSION_TTL_MS, now = Date.n
   const insert = sqlite.prepare('INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
   for (const r of rows) insert.run(r.tokenHash, r.sid, r.kind, r.refId, r.userId, r.via, r.createdAt, r.createdAt + sessionTtlMs);
   const meta = sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-  meta.run('sessionsCutover', JSON.stringify({ at: now, imported: rows.length, sidsDerived, blobPresent: !!blobRow }));
+  meta.run('sessionsCutover', JSON.stringify({ at: now, imported: rows.length, sidsDerived, blobPresent: !!blobRow, ...(staffImport ? { staff: staffImport } : {}) }));
   meta.run('sessionTtlMs', String(sessionTtlMs));
   if (hasCollections) sqlite.prepare("DELETE FROM collections WHERE name = 'sessions'").run();
 }
