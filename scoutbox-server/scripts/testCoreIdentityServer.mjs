@@ -1,9 +1,8 @@
 // S4a through the REAL server (server.mjs booted as a child process on
 // temporary data directories with synthetic records only): every boot case of
 // the readiness review §9 — a new installation, a previously saved file, an
-// intentionally empty domain, an interrupted first installation, a migrated
-// file without blobs, stale blobs, malformed input, the Founder's legacy-minor
-// refusal — each restarted; the converted writers through their real routes and
+// intentionally empty domain, an interrupted first installation, stale blobs,
+// the Founder's legacy-minor refusal — each restarted; the converted writers through their real routes and
 // after a restart; the audience allowlists on actual HTTP responses; the
 // crash-safe media-deletion queue; the admin backup and a restore into a fresh
 // directory. Nothing here touches DATA_DIR or any real data. Run with: npm test
@@ -17,8 +16,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { openStore } from '../store.mjs';
 import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
-import { NOW, tempDir, adult, child, gPrimary, gSignup, FIXTURE, s3File, freshFile, migrate, openRaw, S3_MIGRATIONS, TTL } from './coreIdentityTestFixtures.mjs';
-import { runDataMigrations } from '../repositories/database.mjs';
+import { NOW, tempDir, adult, child, gSignup, FIXTURE, ORGS, USERS, EXTRA, freshFile, migrate, openRaw } from './coreIdentityTestFixtures.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 
 let passed = 0;
@@ -49,16 +47,13 @@ function boot(dir, port, env = {}) {
     setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
-/** Boot and expect the process to refuse (exit before listening); returns { code, log }. */
-async function bootRefuses(dir, port) {
-  try { const S = await boot(dir, port); await S.kill(); throw new Error(`the server booted but must have refused: ${S.log().slice(-600)}`); }
-  catch (err) { if (typeof err.code !== 'number') throw err; return { code: err.code, log: err.log }; }
-}
 const raw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); return s; };
 const q1 = (dir, sql, ...p) => { const s = raw(dir); try { return s.prepare(sql).get(...p); } finally { s.close(); } };
 const qAll = (dir, sql, ...p) => { const s = raw(dir); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
 const blobNames = (dir) => qAll(dir, 'SELECT name FROM collections ORDER BY name').map((r) => r.name);
 const identityCounts = (dir) => ({ players: q1(dir, 'SELECT COUNT(*) AS n FROM players').n, guardians: q1(dir, 'SELECT COUNT(*) AS n FROM guardians').n, links: q1(dir, 'SELECT COUNT(*) AS n FROM guardian_children').n });
+/** A saved database, as a tool or fixture writes one: a snapshot-mode save (openStore(dir) without options), which writes the table-backed collections into their tables. */
+function savedFile(dir, { players = FIXTURE().players, guardians = FIXTURE().guardians } = {}) { const t = openStore(dir); t.save({ savedAt: NOW, idCounter: 1000, db: { orgs: ORGS(), users: USERS(), players, guardians, ...EXTRA() } }); t.sqlite.close(); }
 const SEED = buildSeed();
 const seedCounts = { players: SEED.players.length, guardians: SEED.guardians.length, links: SEED.guardians.reduce((n, g) => n + g.childIds.length, 0) };
 const orgLogin = async (S, orgId, scoutName = 'Maria Keane', role = 'Head of Recruitment', platform) => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) }); assert.equal(r.status, 200, `org login ${orgId}: ${JSON.stringify(r.body)}`); return r.body.token; };
@@ -96,12 +91,12 @@ await test('new installation: the seed is initialised once (never again), served
 });
 
 // ------------------------------------------------------------- a previously saved file (the cutover at boot)
-await test('previously saved file: an S3-shaped database (the seed saved as blobs, migrations 0001–0004) cuts over at boot — rows, links, blobs retired — and a restart attaches to the tables; a migrated file whose blobs are gone boots the same way (no seed fallback)', async () => {
+await test('previously saved file: a database a snapshot save wrote (the seed in its tables) boots without initialising — rows and links served, no identity blob — and a restart attaches to the tables; a file a tool wrote from other records boots the same way (no seed fallback)', async () => {
   const dir = tempDir('s4srv-saved');
   openStore(dir).save({ savedAt: NOW, idCounter: 2000, db: SEED });
-  { const s = openRaw(dir); runDataMigrations(s, S3_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }); s.close(); }
+  assert.ok(!blobNames(dir).includes('players'), 'the snapshot save wrote the tables');
   let S = await boot(dir, nextPort());
-  assert.match(S.log(), /14 players in the blob/, 'the first boot still loads the blob (the cutover runs in the data layer right after)'); assert.doesNotMatch(S.log(), /initialised from the first installation/);
+  assert.match(S.log(), /players table-backed/); assert.doesNotMatch(S.log(), /initialised from the first installation/);
   let cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.identity.initState, 'done'); assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players);
   assert.deepEqual(identityCounts(dir), seedCounts); assert.ok(!blobNames(dir).includes('players'));
@@ -110,15 +105,13 @@ await test('previously saved file: an S3-shaped database (the seed saved as blob
   assert.equal(p.status, 200); assert.equal(p.body.name, 'Kola Adeyemi');
   await S.stop();
   S = await boot(dir, nextPort());
-  assert.match(S.log(), /players table-backed/, 'the restart finds no blob and attaches to the tables');
+  assert.match(S.log(), /players table-backed/, 'the restart attaches to the tables');
   cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players);
   assert.equal((await S.j('GET', '/org/players/pl-adeyemi', undefined, token)).status, 200, 'the staff session minted before the restart is still valid');
   await S.stop(); rm(dir);
-  // A file migrated offline (no server): the blobs are gone, the server attaches and serves the records.
-  const mig = tempDir('s4srv-migrated'); s3File(mig);
-  { const s = openRaw(mig); migrate(s, { now: NOW }); s.close(); }
-  assert.ok(!blobNames(mig).includes('players'));
+  // A file a tool wrote from the fixture: the server attaches and serves its records, never the seed.
+  const mig = tempDir('s4srv-tool'); savedFile(mig);
   S = await boot(mig, nextPort());
   assert.match(S.log(), /players table-backed/);
   cap = (await S.j('GET', '/capabilities')).body;
@@ -129,10 +122,9 @@ await test('previously saved file: an S3-shaped database (the seed saved as blob
 });
 
 // ------------------------------------------------------------- intentionally empty
-await test('intentionally empty: a saved file whose players and guardians are empty arrays stays empty through the cutover and every restart — the seed is never imported into it', async () => {
+await test('intentionally empty: a saved file whose players and guardians are empty arrays stays empty through every restart — the seed is never imported into it', async () => {
   const dir = tempDir('s4srv-empty');
   openStore(dir).save({ savedAt: NOW, idCounter: 2000, db: { ...SEED, players: [], guardians: [] } });
-  { const s = openRaw(dir); runDataMigrations(s, S3_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }); s.close(); }
   for (let i = 0; i < 2; i++) {
     const S = await boot(dir, nextPort());
     const cap = (await S.j('GET', '/capabilities')).body;
@@ -161,9 +153,8 @@ await test('interrupted first installation: a database where migration 0005 reco
 });
 
 // ------------------------------------------------------------- stale blobs after the cutover
-await test('stale blobs: a players/guardians blob re-inserted into a cut-over file (an old backup half-restored by hand) is ignored at boot, never imported, and removed again by the next save', async () => {
-  const dir = tempDir('s4srv-stale'); s3File(dir);
-  { const s = openRaw(dir); migrate(s, { now: NOW }); s.close(); }
+await test('stale blobs: a players/guardians blob row inserted by hand into a saved file is ignored at boot, never imported, and removed again by the next save', async () => {
+  const dir = tempDir('s4srv-stale'); savedFile(dir);
   { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)').run('players', JSON.stringify([{ ...adult(), id: 'pl-stale', name: 'Stale Blob Player' }])); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)').run('guardians', JSON.stringify([{ ...gSignup(), id: 'gd-stale', email: 'stale@example.test' }])); s.close(); }
   const S = await boot(dir, nextPort());
   const cap = (await S.j('GET', '/capabilities')).body;
@@ -176,31 +167,22 @@ await test('stale blobs: a players/guardians blob re-inserted into a cut-over fi
   rm(dir);
 });
 
-// ------------------------------------------------------------- malformed input and the Founder's rule
-await test('malformed input and the legacy-minor rule: a players blob that is not an array, and a saved file with a legacy minor who has no guardian link, both stop the boot with the reason (ids, never records) and leave the file byte-for-byte as it was; the next boot refuses the same way', async () => {
-  const bad = tempDir('s4srv-malformed'); s3File(bad, { rawBlobs: { players: '{"id":"pl-object"}' } });
-  const badBefore = fs.readFileSync(path.join(bad, 'scoutbox.db'));
-  for (let i = 0; i < 2; i++) {
-    const r = await bootRefuses(bad, nextPort());
-    assert.notEqual(r.code, 0); assert.match(r.log, /SNAPSHOT_INVALID: the saved players collection is object, not an array|players: the saved players blob is an object, not an array/);
-    assert.equal(Buffer.compare(fs.readFileSync(path.join(bad, 'scoutbox.db')), badBefore), 0, `boot ${i + 1}: the file is untouched`);
-  }
+// ------------------------------------------------------------- the Founder's rule
+await test('the legacy-minor rule: a snapshot save holding a minor who has no guardian link is refused with the reason (ids, never records) and writes nothing; the database still boots as a first installation', async () => {
   const orphan = tempDir('s4srv-orphan'); const fx = FIXTURE(); fx.players.push(child('pl-orphan', null, '2013-04-04'));
-  s3File(orphan, { players: fx.players, guardians: fx.guardians });
-  const before = fs.readFileSync(path.join(orphan, 'scoutbox.db'));
-  for (let i = 0; i < 2; i++) {
-    const r = await bootRefuses(orphan, nextPort());
-    assert.notEqual(r.code, 0); assert.match(r.log, /CORE_IDENTITY_CUTOVER_BLOCKED/); assert.match(r.log, /legacy minors without any guardian link .*: pl-orphan/);
-    assert.equal(r.log.includes('2013-04-04'), false, 'ids, not records, in the log');
-    assert.equal(Buffer.compare(fs.readFileSync(path.join(orphan, 'scoutbox.db')), before), 0, `boot ${i + 1}: the file is untouched`);
-  }
-  assert.equal(q1(orphan, "SELECT COUNT(*) AS n FROM data_migrations WHERE id = '0005_core_identity_live'").n, 0);
-  rm(bad, orphan);
+  const t = openStore(orphan);
+  let err = null; try { t.save({ savedAt: NOW, idCounter: 1000, db: { orgs: ORGS(), users: USERS(), ...fx } }); } catch (e) { err = e; }
+  assert.ok(err, 'the save is refused'); assert.match(err.message, /pl-orphan/); assert.equal(err.message.includes('2013-04-04'), false, 'ids, not records');
+  assert.equal(t.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, 'nothing written'); assert.equal(t.revision(), 0);
+  t.sqlite.close();
+  const S = await boot(orphan, nextPort());
+  assert.match(S.log(), /initialised from the first installation's records/, 'never mistaken for a saved file');
+  await S.stop(); rm(orphan);
 });
 
 // ------------------------------------------------------------- the converted writers, through their routes
 await test('writers (the ones exercised here, not every writer): guardian sign-up, e-mail verification, ID verification, disclaimer and child creation write rows and the link; football category (m12), the audited level review (m13), medical sharing and aging-up write columns; each of these is a committed row before the response and is there after a restart — the coupled writers (a column together with a facet, a blob, an audit entry or another domain) are proven with SIGKILL and injected failures in scripts/testWriterAtomicity.mjs', async () => {
-  const dir = tempDir('s4srv-writers'); s3File(dir); // FIXTURE: pl-grown is an adult still linked to gd-primary
+  const dir = tempDir('s4srv-writers'); savedFile(dir); // FIXTURE: pl-grown is an adult still linked to gd-primary
   let S = await boot(dir, nextPort());
   const gs = await S.j('POST', '/auth/guardian/signup', { name: 'New Parent', email: 'newparent@example.test', password: 'parent-pass-1' });
   assert.equal(gs.status, 201, JSON.stringify(gs.body)); const gid = gs.body.guardianId; const gtok = gs.body.token;
@@ -239,7 +221,7 @@ await test('writers (the ones exercised here, not every writer): guardian sign-u
   assert.equal(lr.status, 200, JSON.stringify(lr.body)); assert.equal(q1(dir, 'SELECT level FROM players WHERE id = ?', pid).level, 'semi_pro');
   assert.equal((await S.j('POST', `/admin/players/${pid}/level-review`, { level: 'pro' }, null, A)).status, 400, 'the reason is required; nothing written');
   assert.equal(q1(dir, 'SELECT level FROM players WHERE id = ?', pid).level, 'semi_pro');
-  // Aging-up: pl-grown (an adult the cutover left linked to gd-primary) takes ownership; both sides of the link go together.
+  // Aging-up: pl-grown (an adult still linked to gd-primary) takes ownership; both sides of the link go together.
   const grown = await S.j('POST', '/auth/player/login', { playerId: 'pl-grown' });
   assert.equal(grown.status, 200, JSON.stringify(grown.body));
   assert.equal((await S.j('GET', '/player/me', undefined, grown.body.token)).body.agingUp?.eligible, true);
@@ -358,7 +340,7 @@ await test('deletion: the player row, the links, the sessions and the media-remo
 });
 
 // ------------------------------------------------------------- the admin backup and a restore into a fresh directory
-await test('backup/restore through the real admin routes: a backup taken after post-cutover changes (a sign-up, a child and its link, a guardian with an outstanding e-mail code, staff sessions) restores into a NEW directory with every record, link and session hash, and the pending code still verifies there', async () => {
+await test('backup/restore through the real admin routes: a backup taken after changes (a sign-up, a child and its link, a guardian with an outstanding e-mail code, staff sessions) restores into a NEW directory with every record, link and session hash, and the pending code still verifies there', async () => {
   const dir = tempDir('s4srv-backup');
   let S = await boot(dir, nextPort());
   const pro = await orgLogin(S, 'org-eastport');
@@ -372,15 +354,15 @@ await test('backup/restore through the real admin routes: a backup taken after p
   const kidId = kid.body.playerId ?? kid.body.player?.id ?? kid.body.id;
   const bk = await S.j('POST', '/admin/backup', {}, null, A);
   assert.equal(bk.status, 201, JSON.stringify(bk.body)); assert.equal(bk.body.manifest.counts.players, seedCounts.players + 2);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.equal(snapshot.db.players.length, seedCounts.players + 2); assert.ok(snapshot.db.guardians.find((g) => g.id === gs2.body.guardianId).childIds.includes(kidId));
-  assert.equal(JSON.stringify(snapshot.db.sessions).includes(pro), false, 'sessions are exported as hashes, never tokens');
+  assert.equal(q1(bk.body.dir, 'SELECT COUNT(*) AS n FROM players').n, seedCounts.players + 2);
+  assert.deepEqual(qAll(bk.body.dir, 'SELECT guardian_id, role FROM guardian_children WHERE player_id = ?', kidId), [{ guardian_id: gs2.body.guardianId, role: 'primary' }]);
+  assert.equal(fs.readFileSync(path.join(bk.body.dir, 'scoutbox.db')).includes(pro), false, 'sessions are copied as hashes, never tokens');
   assert.equal((await S.j('POST', '/admin/backup/verify', { dir: path.basename(bk.body.dir) }, null, A)).body.ok, true);
   await S.stop();
-  // Restore: the backup directory becomes a NEW data directory (db.json is the legacy import path).
+  // Restore: the backup directory becomes a NEW data directory.
   const restored = tempDir('s4srv-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored, nextPort());
-  assert.match(S.log(), /in the blob/, 'the legacy import wrote the backup as blobs; the cutover then imported them into the tables');
+  assert.doesNotMatch(S.log(), /initialised from the first installation/, 'a restored copy is never a first installation');
   const cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.identity.initState, 'done'); assert.equal(cap.dataLayer.domains.players.rows, seedCounts.players + 2); assert.equal(cap.dataLayer.domains.guardians.rows, seedCounts.guardians + 2);
   assert.deepEqual(qAll(restored, 'SELECT guardian_id, role FROM guardian_children WHERE player_id = ?', kidId), [{ guardian_id: gs2.body.guardianId, role: 'primary' }]);
@@ -389,13 +371,12 @@ await test('backup/restore through the real admin routes: a backup taken after p
   assert.equal((await S.j('POST', '/auth/guardian/verify-email', { guardianId: gs.body.guardianId, code: gs.body.devEmailCode })).status, 200, 'the outstanding code travelled with the record');
   assert.equal((await S.j('POST', '/auth/player/login', { playerId: ps.body.playerId, password: 'backup-pass-1' })).status, 200);
   await S.stop();
-  assert.ok(fs.existsSync(path.join(restored, 'db.json.migrated')));
   assert.ok(!blobNames(restored).includes('players'));
   rm(dir, restored);
 });
 
 // ------------------------------------------------------------- a backup taken while a media removal is pending (review of 9656a4b)
-await test('backup/restore keeps the intent of a pending media removal: a committed queue entry whose file is still on disk is exported with the snapshot and its file is left OUT of the backup (never a file without its removal intent); a live clip is copied; the restored server imports the queue, serves nothing for the id, finishes the removal at boot (a file put back by hand included) and stays clean across a restart; an older backup without the queue still restores; a tampered queue entry refuses the restore', async () => {
+await test('backup/restore keeps the intent of a pending media removal: a committed queue entry whose file is still on disk is in the copied database and its file is left OUT of the backup (never a file without its removal intent); a live clip is copied; the restored server serves nothing for the id, finishes the removal at boot (a file put back by hand included) and stays clean across a restart', async () => {
   const dir = tempDir('s4srv-backup-queue');
   let S = await boot(dir, nextPort());
   const mk = async (name) => { const r = await S.j('POST', '/auth/player/signup', { name, dob: '2001-01-01', country: 'GB', password: 'backup-pass-1' }); assert.equal(r.status, 201); const m = await S.j('POST', '/player/media', { title: 'Clip', kind: 'video', dataUrl: 'data:video/webm;base64,AAAAAAAA' }, r.body.token); assert.equal(m.status, 201, JSON.stringify(m.body)); return { id: r.body.playerId, token: r.body.token, mediaId: m.body.media.id, file: path.join(dir, 'media', `${m.body.media.id}.webm`) }; };
@@ -409,19 +390,18 @@ await test('backup/restore keeps the intent of a pending media removal: a commit
   assert.equal((await S.j('GET', `/media/${gone.mediaId}`, undefined, pro)).status, 404, 'queued: never served');
   const bk = await S.j('POST', '/admin/backup', {}, null, A);
   assert.equal(bk.status, 201, JSON.stringify(bk.body));
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.deepEqual((snapshot.db.mediaDeletions ?? []).map((r) => [r.media_id, r.player_id]), [[gone.mediaId, gone.id]], 'the removal intent travels with the snapshot');
+  assert.deepEqual(qAll(bk.body.dir, 'SELECT media_id, player_id FROM media_deletions'), [{ media_id: gone.mediaId, player_id: gone.id }], 'the removal intent travels with the copy');
   assert.equal(fs.existsSync(path.join(bk.body.dir, 'media', `${gone.mediaId}.webm`)), false, 'a queued file is never copied into a backup');
   assert.equal(fs.existsSync(path.join(bk.body.dir, 'media', `${live.mediaId}.webm`)), true, 'a live clip is');
   assert.equal(bk.body.manifest.media?.queuedForRemoval, 1, 'the manifest says what was left out and why');
   assert.ok(!bk.body.manifest.files.some((f) => f.path.includes(gone.mediaId)), 'the manifest lists only what the backup holds');
   assert.equal((await S.j('POST', '/admin/backup/verify', { dir: path.basename(bk.body.dir) }, null, A)).body.ok, true);
   await S.stop();
-  // Restore 1: as copied. The queue is imported, the file is absent, the boot sweep clears the entry; nothing is served; a restart stays clean.
+  // Restore 1: as copied. The queue entry is there, the file is absent, the boot sweep clears the entry; nothing is served; a restart stays clean.
   const restored = tempDir('s4srv-restored-queue'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored, nextPort());
   assert.equal(fs.existsSync(path.join(restored, 'media', `${gone.mediaId}.webm`)), false);
-  assert.equal(q1(restored, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0, 'the imported entry was cleared at boot because the file is absent');
+  assert.equal(q1(restored, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0, 'the entry was cleared at boot because the file is absent');
   assert.ok(!blobNames(restored).includes('mediaDeletions'), 'the queue is a table, never left as a blob');
   assert.ok([401, 404].includes((await S.j('GET', `/media/${gone.mediaId}`, undefined, pro)).status), 'the removed owner\'s id is not served on the restored server');
   assert.equal((await S.j('GET', `/media/${live.mediaId}`, undefined, live.token)).status, 200, 'the live clip is served to its owner (session restored by hash)');
@@ -430,37 +410,18 @@ await test('backup/restore keeps the intent of a pending media removal: a commit
   S = await boot(restored, nextPort());
   assert.equal(q1(restored, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0); assert.equal(fs.existsSync(path.join(restored, 'media', `${gone.mediaId}.webm`)), false);
   await S.stop();
-  // Restore 2: an operator copies the removed owner's file back by hand before the first boot. The imported intent removes it at boot.
+  // Restore 2: an operator copies the removed owner's file back by hand before the first boot. The copied intent removes it at boot.
   const restored2 = tempDir('s4srv-restored-queue2'); fs.cpSync(bk.body.dir, restored2, { recursive: true });
   fs.writeFileSync(path.join(restored2, 'media', `${gone.mediaId}.webm`), 'copied back by hand');
   S = await boot(restored2, nextPort());
   assert.equal(fs.existsSync(path.join(restored2, 'media', `${gone.mediaId}.webm`)), false, 'the boot sweep removed the file the queue named');
   assert.equal(q1(restored2, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0);
   await S.stop();
-  // Restore 3: a backup from a build without the queue (no mediaDeletions key) restores as before.
-  const restored3 = tempDir('s4srv-restored-queue3'); fs.cpSync(bk.body.dir, restored3, { recursive: true });
-  { const legacy = JSON.parse(fs.readFileSync(path.join(restored3, 'db.json'), 'utf8')); delete legacy.db.mediaDeletions; fs.writeFileSync(path.join(restored3, 'db.json'), JSON.stringify(legacy)); }
-  S = await boot(restored3, nextPort());
-  assert.equal(q1(restored3, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0); assert.equal((await S.j('GET', `/media/${live.mediaId}`, undefined, live.token)).status, 200);
-  await S.stop();
-  // Restore 4: a tampered queue entry (an id that is not a media id) refuses the whole restore; db.json stays in place and nothing is removed.
-  const restored4 = tempDir('s4srv-restored-queue4'); fs.cpSync(bk.body.dir, restored4, { recursive: true });
-  { const legacy = JSON.parse(fs.readFileSync(path.join(restored4, 'db.json'), 'utf8')); legacy.db.mediaDeletions = [{ media_id: '../../outside', player_id: null, queued_at: 1 }]; fs.writeFileSync(path.join(restored4, 'db.json'), JSON.stringify(legacy)); }
-  const refused = await bootRefuses(restored4, nextPort());
-  assert.notEqual(refused.code, 0); assert.match(refused.log, /MEDIA_QUEUE_IMPORT_BLOCKED/); assert.match(refused.log, /is not a media id/);
-  // The store imported the snapshot as blobs first (and renamed the file, as for every restore); the migration then refused and rolled back:
-  // the tampered entry sits in the blob, imported by nothing, no queue table or record exists, the live clip is untouched, and the next boot refuses the same way.
-  assert.ok(fs.existsSync(path.join(restored4, 'db.json.migrated')), 'nothing of the snapshot is lost');
-  assert.equal(JSON.parse(q1(restored4, "SELECT value FROM collections WHERE name = 'mediaDeletions'").value)[0].media_id, '../../outside');
-  assert.equal(qAll(restored4, "SELECT name FROM sqlite_master WHERE name = 'media_deletions'").length, 0, 'the migration rolled back whole');
-  assert.equal(qAll(restored4, "SELECT id FROM data_migrations WHERE id = '0006_media_deletions'").length, 0);
-  assert.equal(fs.existsSync(path.join(restored4, 'media', `${live.mediaId}.webm`)), true);
-  assert.match((await bootRefuses(restored4, nextPort())).log, /MEDIA_QUEUE_IMPORT_BLOCKED/, 'the next boot refuses the same way');
-  rm(dir, restored, restored2, restored3, restored4);
+  rm(dir, restored, restored2);
 });
 
 // ------------------------------------------------------------- the ownership guard of the media queue (review of 4ef9345)
-await test('ownership guard (review of 4ef9345): a restored snapshot whose queue names a clip a live player still references refuses the restore before any file is touched (the backup it came from untouched, the next boot refusing again); a conflicting entry already stored in a live directory is retained with a diagnostic at boot and at every sweep — the file and the live reference survive, /capabilities counts it, the backup route refuses rather than omit a live-owned clip — and once resolved the backup and a legitimate pending removal work as before', async () => {
+await test('ownership guard (review of 4ef9345): a conflicting entry stored in a data directory (a queue entry naming a clip a live player still references) is retained with a diagnostic at boot and at every sweep — the file and the live reference survive, /capabilities counts it, the backup route refuses rather than omit a live-owned clip — and once resolved the backup and a legitimate pending removal work as before', async () => {
   const dir = tempDir('s4srv-own');
   let S = await boot(dir, nextPort());
   const su = await S.j('POST', '/auth/player/signup', { name: 'Live Media Owner', dob: '2000-01-01', country: 'GB', password: 'owner-pass-1' }); assert.equal(su.status, 201);
@@ -468,24 +429,8 @@ await test('ownership guard (review of 4ef9345): a restored snapshot whose queue
   const up = await S.j('POST', '/player/media', { title: 'Keep this clip', kind: 'video', dataUrl: 'data:video/webm;base64,AAAAAAAA' }, token); assert.equal(up.status, 201, JSON.stringify(up.body));
   const mediaId = up.body.media.id;
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, JSON.stringify(bk.body));
-  const backupDigest = () => JSON.stringify(fs.readdirSync(bk.body.dir).sort().map((f) => [f, fs.statSync(path.join(bk.body.dir, f)).size]));
-  const before = backupDigest();
   await S.stop();
-  // 1. A restore copy whose queue names the live clip, attributed to an unrelated removed player.
-  const restored = tempDir('s4srv-own-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
-  { const legacy = JSON.parse(fs.readFileSync(path.join(restored, 'db.json'), 'utf8')); assert.ok(legacy.db.players.find((p) => p.id === pid).media.some((m) => m.id === mediaId));
-    legacy.db.mediaDeletions = [{ media_id: mediaId, player_id: 'pl-unrelated-removed', queued_at: Date.now(), attempts: 0, last_attempt_at: null, last_error: null }];
-    fs.writeFileSync(path.join(restored, 'db.json'), JSON.stringify(legacy)); }
-  const clip = path.join(restored, 'media', `${mediaId}.webm`); assert.ok(fs.existsSync(clip));
-  const refused = await bootRefuses(restored, nextPort());
-  assert.notEqual(refused.code, 0); assert.match(refused.log, /MEDIA_QUEUE_OWNERSHIP_CONFLICT/); assert.ok(refused.log.includes(mediaId) && refused.log.includes(pid), 'the diagnostic names the media id and the live owner');
-  assert.ok(fs.existsSync(clip), 'the live clip was not touched'); assert.equal(fs.readFileSync(clip).length > 0, true);
-  assert.equal(qAll(restored, "SELECT name FROM sqlite_master WHERE name = 'media_deletions'").length, 0, 'the migration rolled back whole: no queue table, no record');
-  assert.ok(fs.existsSync(path.join(restored, 'db.json.migrated')), 'the store imported the snapshot as blobs first (the established order); nothing is lost');
-  assert.equal(JSON.parse(q1(restored, "SELECT value FROM collections WHERE name = 'mediaDeletions'").value)[0].media_id, mediaId, 'the conflicting entry sits in the blob, imported by nothing');
-  assert.match((await bootRefuses(restored, nextPort())).log, /MEDIA_QUEUE_OWNERSHIP_CONFLICT/, 'the next boot refuses the same way'); assert.ok(fs.existsSync(clip));
-  assert.equal(backupDigest(), before, 'the backup the copy came from is unchanged');
-  // 2. A conflicting entry already stored in the live directory: the boot proceeds, the sweep retains it, nothing is unlinked.
+  // 1. A conflicting entry stored in the live directory: the boot proceeds, the sweep retains it, nothing is unlinked.
   { const s = openRaw(dir); s.prepare('INSERT INTO media_deletions (media_id, player_id, queued_at) VALUES (?, ?, ?)').run(mediaId, 'pl-unrelated-removed', Date.now()); s.close(); }
   const liveClip = path.join(dir, 'media', `${mediaId}.webm`); assert.ok(fs.existsSync(liveClip));
   S = await boot(dir, nextPort());
@@ -503,14 +448,14 @@ await test('ownership guard (review of 4ef9345): a restored snapshot whose queue
   S = await boot(dir, nextPort());
   assert.ok(fs.existsSync(liveClip), 'a restart does not unlink it either'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 1);
   await S.stop();
-  // 3. Resolved by hand (the operator removes the conflicting entry): the backup works, the clip is served, and a legitimate pending removal still completes.
+  // 2. Resolved by hand (the operator removes the conflicting entry): the backup works, the clip is served, and a legitimate pending removal still completes.
   { const s = openRaw(dir); s.prepare('DELETE FROM media_deletions WHERE media_id = ?').run(mediaId); s.prepare('INSERT INTO media_deletions (media_id, player_id, queued_at) VALUES (?, ?, ?)').run('media-nobody', 'pl-gone', Date.now()); s.close(); }
   fs.writeFileSync(path.join(dir, 'media', 'media-nobody.webm'), 'synthetic removed media');
   S = await boot(dir, nextPort());
   assert.equal(fs.existsSync(path.join(dir, 'media', 'media-nobody.webm')), false, 'a legitimate pending removal still completes at boot'); assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0);
   assert.ok(fs.existsSync(liveClip)); assert.equal((await S.j('GET', `/media/${mediaId}`, undefined, token)).status, 200);
   assert.equal((await S.j('POST', '/admin/backup', {}, null, A)).status, 201);
-  await S.stop(); rm(dir, restored);
+  await S.stop(); rm(dir);
 });
 
 // ------------------------------------------------------------- S5: the player sub-record tables through the real routes
@@ -609,10 +554,9 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
   await S.kill();
   S = await boot(dir, nextPort());
   assert.deepEqual(pick(await me()), snapshotMe, 'a restart serves every array from its rows: ids, order, the duplicate, the null url and the derived trialReports');
-  // The admin backup carries the arrays inline (the established format); a restore into a NEW directory re-imports them (0005 then 0007) with the same ids and order.
+  // The admin backup is a copy of the database: the same child rows; a restore into a NEW directory serves them with the same ids and order.
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, JSON.stringify(bk.body));
-  const exported = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')).db.players.find((p) => p.id === pid);
-  assert.deepEqual(pick(exported), snapshotMe, 'the backup carries every array inline, trialReports included');
+  assert.deepEqual(subCounts(bk.body.dir, pid), counts, 'the backup holds every child row');
   await S.stop();
   const restored = tempDir('s5srv-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored, nextPort());
@@ -633,10 +577,10 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
 // ------------------------------------------------------------- review of 132eda2, finding 2: a report filed for a legacy-shaped account appears at once
 await test('review of 132eda2 (finding 2): a trial report filed through the real route for an accepted LEGACY-shaped account — a record saved without any trialReports key, and one saved with null — appears on /player/me, in the CV and on the club\'s view at once, without a restart, exactly as for an ordinary sign-up (trialReports: []); a restart serves the same', async () => {
   const dir = tempDir('s5srv-legacy-report');
-  // An S3-shaped file (blobs) whose adults were saved without the key and with null: the boot cuts them over (0005, 0007) as they are.
+  // A saved file whose adults were written without the key and with null (a snapshot save accepts both).
   const noKey = { ...adult(), id: 'pl-legacy-absent', name: 'Legacy Absent', password: null }; delete noKey.trialReports;
   const nullKey = { ...adult(), id: 'pl-legacy-null', name: 'Legacy Null', password: null, trialReports: null };
-  s3File(dir, { players: [noKey, nullKey], guardians: [], sessions: [] });
+  savedFile(dir, { players: [noKey, nullKey], guardians: [] });
   let S = await boot(dir, nextPort());
   const pro = await orgLogin(S, 'org-pro', 'Maria');
   const file = async (pid, password = undefined) => {

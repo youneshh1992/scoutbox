@@ -10,7 +10,7 @@
 // provider ids); the acknowledgment unit under a real COMMIT failure; dispatch
 // rows retained after an ordinary account deletion; a configured synthetic
 // webhook endpoint's delivery row persisted with the failed dispatch; a SIGKILL
-// mid-retry; the admin backup and its restore. Every database read goes
+// mid-retry; the admin backup (a database copy) and its restore. Every database read goes
 // through a second read-only connection. Nothing here touches DATA_DIR or real
 // data. Run with: npm test
 import assert from 'node:assert/strict';
@@ -57,23 +57,15 @@ async function boot(dir, env = {}) {
     setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
-async function bootRefuses(dir) {
-  try { const S = await boot(dir); await S.kill(); throw new Error(`the server booted but must have refused: ${S.log().slice(-600)}`); }
-  catch (err) { if (typeof err.code !== 'number') throw err; return { code: err.code, log: err.log }; }
-}
 const q1 = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; } finally { s.close(); } };
 const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
-const live = (dir) => !!q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0010_dispatches'");
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
 // S6b: opsEvents is the ops_events table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
 const blobRows = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); if (r) return JSON.parse(r.value); const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === name); if (!t) return null; const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t.table) ? t.read(s) : null; } finally { s.close(); } };
-/** The mail outbox as the DATABASE holds it, in insertion order: the S7c table after its cutover (0011), the blob before it. */
-const outboxRows = (dir) => (q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'")
-  ? qAll(dir, 'SELECT id, provider_message_id FROM outbox ORDER BY seq').map((r) => ({ id: r.id, providerMessageId: r.provider_message_id }))
-  : (blobRows(dir, 'outbox') ?? []));
-/** The dispatch records as the DATABASE holds them, in insertion order, with attempts re-nested: the tables after the cutover, the blob before it (so a check reads the same way on both builds). */
+/** The mail outbox as the DATABASE holds it, in insertion order. */
+const outboxRows = (dir) => qAll(dir, 'SELECT id, provider_message_id FROM outbox ORDER BY seq').map((r) => ({ id: r.id, providerMessageId: r.provider_message_id }));
+/** The dispatch records as the DATABASE holds them, in insertion order, with attempts re-nested. */
 const stored = (dir) => {
-  if (!live(dir)) return (blobRows(dir, 'dispatches') ?? []).map((d) => ({ ...d }));
   const rows = qAll(dir, 'SELECT seq, id, notification_id, audience_kind, audience_id, channel, to_address, provider, status, skip_reason, provider_message_id, next_at, action_deadline_at, created_at, delivered_at, opened_at, actioned_at, failed_at, fail_reason, typeof(delivered_at) AS delivered_type FROM dispatches ORDER BY seq');
   const attempts = qAll(dir, 'SELECT dispatch_seq, seq, kind, attempted_at, ok, error, note FROM dispatch_attempts ORDER BY dispatch_seq, seq');
   return rows.map((r) => ({ id: r.id, notificationId: r.notification_id, audience: { kind: r.audience_kind, id: r.audience_id }, channel: r.channel, to: r.to_address, provider: r.provider, status: r.status, skipReason: r.skip_reason, providerMessageId: r.provider_message_id, attempts: attempts.filter((a) => a.dispatch_seq === r.seq).map((a) => (a.kind === 'quiet_recheck' ? { at: a.attempted_at, note: a.note } : { at: a.attempted_at, ok: a.ok === 1, error: a.error })), nextAt: r.next_at, actionDeadline: r.action_deadline_at, createdAt: r.created_at, deliveredAt: r.delivered_at, openedAt: r.opened_at, actionedAt: r.actioned_at, failedAt: r.failed_at, failReason: r.fail_reason, deliveredType: r.delivered_type }));
@@ -99,7 +91,6 @@ const emailRowOf = (S, dir, notice) => until(async () => { await sweep(S); const
 await test('a sweep pass is ONE save: the dispatch rows it creates, the attempt it records, the status it sets, the outbox row the provider accepted and the failure-injection counter it decremented are durable together (second connection, one revision) — and when that save fails at the REAL COMMIT (internal:save.sqlite_commit) none of them is durable (no table row, no attempt, no outbox row, counter unchanged, saveSeq unchanged) while memory shows them; the next save lands all of them once; the rows are in the tables, not in a blob', async () => {
   const dir = tempDir('s7b-sweep'); const S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara');
-  assert.ok(live(dir), 'this proof reads the dispatch tables'); // fails on the pre-S7b build (0641b2c): the tables do not exist
   await inject(S, 1); // the first send fails: the row stays retrying until the next pass
   const notice = await guardianNotice(S, maria, amara);
   const emailId = await until(async () => { await sweep(S); return stored(dir).find((x) => x.notificationId === notice.id && x.channel === 'email')?.id; });
@@ -299,7 +290,7 @@ await test('crash recovery: a SIGKILL while an e-mail dispatch is retrying loses
 });
 
 // ------------------------------------------------------------- 8. backup and restore
-await test('backup/restore: the admin backup exports `dispatches` explicitly in the legacy shape with nested attempts (a backup restores on any build); a restore into a NEW directory imports them (migration 0010) with the same rows, attempts, clocks and orphan count; a backup whose dispatch entry is malformed is refused at boot (DISPATCHES_IMPORT_BLOCKED) and creates no table', async () => {
+await test('backup/restore: the admin backup\'s database copy holds every dispatch with its attempts, the fractional clock exact and the orphan kept; a restore into a NEW directory gives the same rows, attempts and clocks', async () => {
   const dir = tempDir('s7b-backup'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara'); const kola = await playerLogin(S, 'pl-adeyemi');
   await inject(S, 1);
@@ -311,24 +302,22 @@ await test('backup/restore: the admin backup exports `dispatches` explicitly in 
   await sweep(S); assert.equal((await S.j('DELETE', '/player/account', {}, kola)).status, 200); await sleep(300);
   const all = stored(dir).map(({ deliveredType, ...d }) => d); assert.ok(all.length >= 4);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.deepEqual(snapshot.db.dispatches, all, 'the backup carries the dispatches in the legacy shape, attempts nested, the fractional clock exact');
+  assert.deepEqual(stored(bk.body.dir).map(({ deliveredType, ...d }) => d), all, 'the copy carries every dispatch, attempts in order, the fractional clock exact');
+  const orphans = (d) => stored(d).filter((x) => !qAll(d, 'SELECT id FROM notifications').some((n) => n.id === x.notificationId)).map((x) => x.id);
+  assert.ok(orphans(bk.body.dir).length >= 1, 'the orphan of the deleted account is in the copy');
   await S.stop();
   const restored = tempDir('s7b-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored);
-  assert.ok(live(restored)); assert.deepEqual(stored(restored).map(({ deliveredType, ...d }) => d), all, 'imported row for row, attempt for attempt');
-  assert.equal(JSON.parse(q1(restored, "SELECT value FROM meta WHERE key = 'dispatchesCutover'").value).dispatches.orphanReferences, all.filter((d) => !qAll(restored, 'SELECT id FROM notifications').some((n) => n.id === d.notificationId)).length);
-  assert.equal(q1(restored, "SELECT COUNT(*) AS n FROM collections WHERE name = 'dispatches'").n, 0, 'no blob left behind');
+  assert.deepEqual(stored(restored).map(({ deliveredType, ...d }) => d), all, 'restored row for row, attempt for attempt');
+  assert.deepEqual(orphans(restored), orphans(bk.body.dir), 'the orphan is kept as it was');
+  assert.equal(storedRow(restored, row.id).openedAt, FRACTIONAL);
   await S.stop();
-  const bad = tempDir('s7b-bad'); fs.cpSync(bk.body.dir, bad, { recursive: true });
-  { const j = JSON.parse(fs.readFileSync(path.join(bad, 'db.json'), 'utf8')); j.db.dispatches[0].attempts = [{ at: 1 }]; fs.writeFileSync(path.join(bad, 'db.json'), JSON.stringify(j)); }
-  const refusedBoot = await bootRefuses(bad); assert.match(refusedBoot.log, /DISPATCHES_IMPORT_BLOCKED/); assert.equal(refusedBoot.log.includes('example.test'), false, 'no address in the log'); assert.equal(live(bad), false);
-  rm(dir, restored, bad);
+  rm(dir, restored);
 });
 
 
 // ------------------------------------------------------------- review of 26d492b, finding 3: callback precedence through the real route
-await test('review of 26d492b, finding 3 (real route) — the pre-S7b nullish precedence survives a non-finite clock: one signed batch with delivered at "Infinity" then at 1234 for the same provider id persists deliveredAt NULL (the in-memory clock is set, the second event cannot replace it, the save stores what JSON stored); a later request in the same process cannot set it either; the admin view and the backup export carry null; an opened sequence behaves the same; after a RESTART the table\'s null lets a finite callback set the clock, and an existing finite clock is then kept; a failed save (real COMMIT) keeps the callback\'s changes queued and the next save lands them', async () => {
+await test('review of 26d492b, finding 3 (real route) — the pre-S7b nullish precedence survives a non-finite clock: one signed batch with delivered at "Infinity" then at 1234 for the same provider id persists deliveredAt NULL (the in-memory clock is set, the second event cannot replace it, the save stores what JSON stored); a later request in the same process cannot set it either; the admin view and the backup copy carry null; an opened sequence behaves the same; after a RESTART the table\'s null lets a finite callback set the clock, and an existing finite clock is then kept; a failed save (real COMMIT) keeps the callback\'s changes queued and the next save lands them', async () => {
   const dir = tempDir('s7b-rv3'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara');
   const n1 = await guardianNotice(S, maria, amara); const r1 = await emailRowOf(S, dir, n1); assert.equal(r1.status, 'accepted');
@@ -343,7 +332,7 @@ await test('review of 26d492b, finding 3 (real route) — the pre-S7b nullish pr
   assert.equal(storedRow(dir, r1.id).deliveredAt, null, 'a later finite event in the same process does not set it either (the in-memory clock is set)');
   const adminRow = (await admin(S)).recent.find((d) => d.id === r1.id); assert.equal(adminRow.deliveredAt, null, 'the admin view (JSON) carries null, as the previous build did');
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const exported = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')).db.dispatches.find((d) => d.id === r1.id); assert.equal(exported.deliveredAt, null, 'the backup export carries null');
+  const exported = storedRow(bk.body.dir, r1.id); assert.equal(exported.deliveredAt, null, 'the backup copy carries null'); assert.equal(exported.deliveredType, 'null');
   // An opened sequence: opened at Infinity, then delivered 999, then opened 5 — openedAt and deliveredAt stay null durable, the status is opened.
   c = await callback(S, [{ callbackId: 'rv-o1', providerMessageId: r2.providerMessageId, status: 'opened', at: 'Infinity' }]); assert.equal(c.body.applied, 1);
   await until(async () => storedRow(dir, r2.id).status === 'opened');

@@ -1,6 +1,5 @@
-// S6a — one-time codes (repositories/oneTimeCodes.mjs, migration 0008): the migration from the legacy blobs
-// and from exported rows (both formats, refusals, expired entries, missing
-// collections, empty databases, reruns); the repository (hashing, expiry,
+// S6a — one-time codes (repositories/oneTimeCodes.mjs, migration 0008): the
+// snapshot save's refusals; the repository (hashing, expiry,
 // attempts, reissue, sweep, hash-free views); the two consumption operations
 // inside units of work under injected failures and real COMMIT faults, read
 // back through an independent connection; concurrent redemption; the snapshot
@@ -10,15 +9,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { runDataMigrations, transaction } from '../repositories/database.mjs';
-import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
+import { transaction } from '../repositories/database.mjs';
+import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
 import {
   createOneTimeCodesRepository, hashCode, normaliseCode, validateCodeRows, validateEmailChallengeRow, EMAIL_CHALLENGE_MAX_ATTEMPTS, EMAIL_CHALLENGE_TTL_MS, PAIRING_CODE_TTL_MS,
-  ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, CODE_ALPHABET, randomCode,
+  CODE_ALPHABET, randomCode,
 } from '../repositories/oneTimeCodes.mjs';
 import { openStore } from '../store.mjs';
 import { createMailer, OUTBOX_SECRET_PLACEHOLDER } from '../adapters.mjs';
-import { NOW, TTL, tempDir, s3File, migrate, openRaw, applied, blob, meta, dump } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -34,18 +33,20 @@ const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const rowsOf = (dir, table) => { const s = second(dir); try { return s.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all().map((r) => ({ ...r })); } finally { s.close(); } };
 const blobOf = (dir, name) => { const s = second(dir); try { return s.prepare('SELECT value FROM collections WHERE name = ?').get(name)?.value ?? null; } finally { s.close(); } };
 const seqOf = (dir) => { const s = second(dir); try { return Number(s.prepare("SELECT value FROM meta WHERE key = 'saveSeq'").get()?.value) || 0; } finally { s.close(); } };
-const tableExists = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
 const legacyChallenge = (over = {}) => ({ orgId: 'org-pro', email: 'recruitment@eastport.test', code: 'CHAL22', expiresAt: NOW + 20 * MIN, ...over });
 const legacyPairing = (over = {}) => ({ code: 'PAIR22', playerId: 'pl-child1', expiresAt: NOW + 10 * MIN, ...over });
-/** A file at S5 (0001–0007 applied) carrying the code blobs the way every pre-S6a build wrote them. */
+/**
+ * A saved fixture: every migration applied and the fixture's staff, sessions,
+ * organisations, players and guardians written through a snapshot-mode save
+ * (the tables, never blobs). Code collections given here go through the same
+ * save, so a malformed one is refused by it.
+ */
 function s5File(dir, { emailChallenges, pairingCodes } = {}) {
-  const extra = { requests: [], vouches: [], ledger: [] };
-  if (emailChallenges !== undefined) extra.emailChallenges = emailChallenges;
-  if (pairingCodes !== undefined) extra.pairingCodes = pairingCodes;
-  s3File(dir, { extra });
-  const s = openRaw(dir);
-  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < ONE_TIME_CODES_MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } });
-  s.close();
+  const db = { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], vouches: [], ledger: [] };
+  if (emailChallenges !== undefined) db.emailChallenges = emailChallenges;
+  if (pairingCodes !== undefined) db.pairingCodes = pairingCodes;
+  const tool = openStore(dir);
+  try { tool.save({ savedAt: NOW, idCounter: 1000, db }); } finally { tool.sqlite.close(); }
 }
 /** A live server-mode store with the data layer attached at `now`. */
 function live(dir, { now = () => NOW } = {}) {
@@ -56,49 +57,8 @@ function live(dir, { now = () => NOW } = {}) {
   return { store, db, layer, codes: layer.codes, snapshot, close: () => store.sqlite.close() };
 }
 
-// ============================================================= migration 0008
-test('migration 0008 (legacy blobs): every live entry is imported as a hash — the plain code is stored nowhere, the blob rows are retired, an expired entry is not imported and is counted, the cutover record carries counts only; the code still verifies through the repository (case and spaces normalised as the routes always did)', () => {
-  const dir = tempDir('otc-mig');
-  s5File(dir, { emailChallenges: [legacyChallenge(), legacyChallenge({ orgId: 'org-gone-but-expired', expiresAt: NOW - MIN })], pairingCodes: [legacyPairing(), legacyPairing({ code: 'OLD999', playerId: 'pl-child2', expiresAt: NOW - 1 })] });
-  const s = openRaw(dir);
-  assert.deepEqual(migrate(s, { now: NOW }).ran, [ONE_TIME_CODES_MIGRATION, '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], '0008, then 0009 (S7a), 0010 (S7b) and 0011 (S7c) on the same run');
-  const challenge = s.prepare('SELECT * FROM email_challenges').all().map((r) => ({ ...r }));
-  assert.deepEqual(challenge, [{ org_id: 'org-pro', email: 'recruitment@eastport.test', code_hash: hashCode('CHAL22'), expires_at: NOW + 20 * MIN, attempts: 0 }]);
-  const pairing = s.prepare('SELECT * FROM pairing_codes').all().map((r) => ({ ...r }));
-  assert.deepEqual(pairing, [{ code_hash: hashCode('PAIR22'), player_id: 'pl-child1', expires_at: NOW + 10 * MIN }]);
-  assert.equal(blob(s, 'emailChallenges'), undefined); assert.equal(blob(s, 'pairingCodes'), undefined);
-  const record = JSON.parse(meta(s, ONE_TIME_CODES_CUTOVER_META));
-  assert.deepEqual(record, { at: NOW, emailChallenges: { imported: 1, droppedExpired: 1, legacy: 2, stored: 0 }, pairingCodes: { imported: 1, droppedExpired: 1, legacy: 2, stored: 0 } });
-  assert.doesNotMatch(dump(s), /CHAL22|PAIR22|OLD999/, 'no plain code anywhere in the file');
-  const codes = createOneTimeCodesRepository({ sqlite: s, now: () => NOW });
-  assert.deepEqual(codes.checkEmailChallenge('org-pro', ' chal22 '), { status: 'ok', email: 'recruitment@eastport.test' });
-  assert.deepEqual(codes.peekPairingCode('pair22'), { playerId: 'pl-child1' });
-  s.close(); rm(dir);
-});
-
-test('migration 0008 (stored-format blobs, a backup taken after S6a): codeHash entries are imported as they are, attempts kept; a missing collection, an empty database and a first installation import nothing; a rerun is a no-op (recorded once)', () => {
-  const dir = tempDir('otc-mig-stored');
-  s5File(dir, { emailChallenges: [{ orgId: 'org-pro', email: 'a@b.test', codeHash: hashCode('ABC234'), expiresAt: NOW + MIN, attempts: 3 }], pairingCodes: [{ codeHash: hashCode('XYZ789'), playerId: 'pl-adult', expiresAt: NOW + MIN }] });
-  let s = openRaw(dir); migrate(s, { now: NOW });
-  assert.deepEqual(s.prepare('SELECT org_id, attempts FROM email_challenges').all().map((r) => ({ ...r })), [{ org_id: 'org-pro', attempts: 3 }]);
-  assert.equal(s.prepare('SELECT code_hash FROM pairing_codes').get().code_hash, hashCode('XYZ789'));
-  assert.deepEqual(JSON.parse(meta(s, ONE_TIME_CODES_CUTOVER_META)).pairingCodes, { imported: 1, droppedExpired: 0, legacy: 0, stored: 1 });
-  assert.deepEqual(migrate(s, { now: NOW + 1 }).ran, [], 'a rerun does nothing'); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(ONE_TIME_CODES_MIGRATION).n, 1);
-  s.close();
-  // Missing collections: an S5 file whose codes were never saved (the pairing code was never persisted by the old build at mint).
-  const none = tempDir('otc-mig-none'); s5File(none);
-  s = openRaw(none); migrate(s, { now: NOW });
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM email_challenges').get().n + s.prepare('SELECT COUNT(*) AS n FROM pairing_codes').get().n, 0);
-  assert.deepEqual(JSON.parse(meta(s, ONE_TIME_CODES_CUTOVER_META)).emailChallenges, { imported: 0, droppedExpired: 0, legacy: 0, stored: 0 }); s.close();
-  // Empty collections and a genuinely new, in-memory database.
-  const empty = tempDir('otc-mig-empty'); s5File(empty, { emailChallenges: [], pairingCodes: [] });
-  s = openRaw(empty); migrate(s, { now: NOW }); assert.equal(blob(s, 'pairingCodes'), undefined, 'empty blob retired too'); s.close();
-  const mem = new DatabaseSync(':memory:'); mem.exec('PRAGMA foreign_keys = ON;');
-  assert.ok(runDataMigrations(mem, DATA_MIGRATIONS, { now: NOW }).ran.includes(ONE_TIME_CODES_MIGRATION)); assert.ok(tableExists(mem, 'pairing_codes')); mem.close();
-  rm(dir, none, empty);
-});
-
-test('migration 0008 refusals: an entry with both code and codeHash, with neither, an unknown field, a malformed hash, a non-integer expiry, negative attempts, a missing owner, a duplicate organisation or child, a duplicate code, a blob that is not JSON or not an array, a live challenge for an organisation that does not exist, a live code for a player that does not exist — each aborts the whole step with ONE_TIME_CODES_IMPORT_BLOCKED (entry and reason, never a code), creates nothing, keeps the blob byte for byte, and the next run refuses the same way', () => {
+// ============================================================= the snapshot save refuses junk
+test('snapshot save refusals: an entry with both code and codeHash, with neither, an unknown field, a malformed hash, a non-integer expiry, negative attempts, a missing owner, a duplicate organisation or child, a duplicate code, a collection that is not an array, a live challenge for an organisation that does not exist, a live code for a player that does not exist — each refuses the whole save (entry and reason, never a code) and writes nothing: no player, no organisation, no code, no save revision', () => {
   const cases = [
     ['both formats', { pairingCodes: [{ ...legacyPairing(), codeHash: hashCode('PAIR22') }] }, /entry #0: carries both code and codeHash/],
     ['neither format', { pairingCodes: [{ playerId: 'pl-child1', expiresAt: NOW + MIN }] }, /entry #0: has neither code/],
@@ -110,32 +70,26 @@ test('migration 0008 refusals: an entry with both code and codeHash, with neithe
     ['a duplicate child', { pairingCodes: [legacyPairing(), legacyPairing({ code: 'OTHER2' })] }, /entry #1: a second entry for playerId pl-child1/],
     ['a duplicate organisation', { emailChallenges: [legacyChallenge(), legacyChallenge({ code: 'NEWONE' })] }, /entry #1: a second entry for orgId org-pro/],
     ['a duplicate code', { pairingCodes: [legacyPairing(), legacyPairing({ playerId: 'pl-child2', code: 'pair22' })] }, /entry #1: duplicates the code of an earlier entry/],
-    ['a non-array blob', { pairingCodes: { code: 'PAIR22' } }, /the pairingCodes blob must be an array/],
-    ['an unknown organisation', { emailChallenges: [legacyChallenge({ orgId: 'org-nowhere' })] }, /organisation org-nowhere names an organisation that does not exist/],
-    ['an unknown player', { pairingCodes: [legacyPairing({ playerId: 'pl-nowhere' })] }, /player pl-nowhere names a player that does not exist/],
+    ['a non-array collection', { pairingCodes: { code: 'PAIR22' } }, /pairingCodes: the snapshot collection must be an array/],
+    ['an unknown organisation', { emailChallenges: [legacyChallenge({ orgId: 'org-nowhere' })] }, /EMAIL_CHALLENGE_ORG_MISSING/],
+    ['an unknown player', { pairingCodes: [legacyPairing({ playerId: 'pl-nowhere' })] }, /PAIRING_CODE_PLAYER_MISSING.*pl-nowhere/],
   ];
   for (const [label, blobs, re] of cases) {
-    const dir = tempDir('otc-refuse'); s5File(dir, blobs);
-    const s = openRaw(dir);
-    const before = Object.fromEntries(['emailChallenges', 'pairingCodes'].map((n) => [n, s.prepare('SELECT value FROM collections WHERE name = ?').get(n)?.value]));
-    let err = null; try { migrate(s, { now: NOW }); } catch (e) { err = e; }
-    assert.ok(err, `${label}: must refuse`); assert.match(err.message, /ONE_TIME_CODES_IMPORT_BLOCKED/, label); assert.match(err.message, re, label);
+    const dir = tempDir('otc-refuse');
+    let err = null; try { s5File(dir, blobs); } catch (e) { err = e; }
+    assert.ok(err, `${label}: must refuse`); assert.match(err.message, re, `${label}: ${err.message}`);
     assert.doesNotMatch(err.message, /PAIR22|CHAL22|OTHER2|NEWONE/i, `${label}: the refusal never carries a code`);
-    assert.equal(s.isTransaction, false); assert.equal(tableExists(s, 'pairing_codes') || tableExists(s, 'email_challenges'), false, `${label}: nothing created`);
-    assert.equal(applied(s).includes(ONE_TIME_CODES_MIGRATION), false);
-    for (const n of Object.keys(before)) assert.equal(s.prepare('SELECT value FROM collections WHERE name = ?').get(n)?.value, before[n], `${label}: the ${n} blob is kept as it was`);
-    assert.throws(() => migrate(s, { now: NOW }), /ONE_TIME_CODES_IMPORT_BLOCKED/, `${label}: the next run refuses the same way`);
+    const s = openRaw(dir);
+    for (const t of ['players', 'orgs', 'email_challenges', 'pairing_codes']) assert.equal(s.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${label}: nothing written to ${t}`);
+    assert.equal(seqOf(dir), 0, `${label}: the save revision did not advance`);
     s.close(); rm(dir);
   }
-  const notJson = tempDir('otc-refuse-json'); s5File(notJson);
-  { const s = openRaw(notJson); s.prepare("INSERT INTO collections (name, value) VALUES ('pairingCodes', '{not json')").run(); assert.throws(() => migrate(s, { now: NOW }), /the pairingCodes blob is not valid JSON/); s.close(); }
-  rm(notJson);
 });
 
 // ============================================================= the repository
 test('repository: an issue returns the plain code once and stores its hash; a reissue replaces the previous code (one per organisation, one per child) and resets the attempts; expiry is judged on every read and the sweep removes dead rows; the views carry no code and no hash and refuse writes; codes are drawn from the documented alphabet', () => {
   const dir = tempDir('otc-repo'); s5File(dir);
-  let t = NOW; const s = openRaw(dir); migrate(s, { now: NOW });
+  let t = NOW; const s = openRaw(dir);
   let n = 0; const fixed = ['AAAAAA', 'BBBBBB', 'CCCCCC', 'DDDDDD'];
   const codes = createOneTimeCodesRepository({ sqlite: s, now: () => t, newCode: () => fixed[n++] });
   const a = codes.issueEmailChallenge('org-pro', 'x@eastport.test');
@@ -167,7 +121,7 @@ test('repository: an issue returns the plain code once and stores its hash; a re
 
 test(`repository: wrong confirmations are counted on the row (they survive a reopen); the ${EMAIL_CHALLENGE_MAX_ATTEMPTS}th wrong code invalidates the challenge, after which even the correct code is refused until a fresh one is issued`, () => {
   const dir = tempDir('otc-attempts'); s5File(dir);
-  let s = openRaw(dir); migrate(s, { now: NOW });
+  let s = openRaw(dir);
   let codes = createOneTimeCodesRepository({ sqlite: s, now: () => NOW });
   const { code } = codes.issueEmailChallenge('org-pro', 'x@eastport.test');
   for (let i = 1; i <= 4; i++) assert.deepEqual(codes.noteFailedEmailAttempt('org-pro'), { attemptsRemaining: EMAIL_CHALLENGE_MAX_ATTEMPTS - i, invalidated: false });
@@ -338,7 +292,7 @@ test('review of b2a237e — the boundary itself: joined successes commit with th
 
 test('concurrent redemption across two connections: both see the code, one consumes it, the other finds nothing — and a consumption that loses the race inside its own transaction throws (zero rows deleted), so its unit rolls back instead of minting a second session', () => {
   const dir = tempDir('otc-race'); s5File(dir);
-  const s1 = openRaw(dir); migrate(s1, { now: NOW });
+  const s1 = openRaw(dir);
   const s2 = openRaw(dir);
   const a = createOneTimeCodesRepository({ sqlite: s1, now: () => NOW }); const b = createOneTimeCodesRepository({ sqlite: s2, now: () => NOW });
   const { code } = a.issuePairingCode('pl-child1');
@@ -381,9 +335,9 @@ test('player deletion revokes the pairing code inside the deletion unit: a failu
 });
 
 // ============================================================= snapshots (backups, restores, persistence suites)
-test('snapshot dispatcher: a tool reads the codes in their stored form (codeHash, never a code) and writes them back through the tables; a legacy plain-code entry written by a tool is hashed on the way in; a malformed stored entry, a duplicate, a challenge for an unknown organisation, or a whole-snapshot player rewrite that drops a player a retained code names refuses the WHOLE save (nothing written, the revision not advanced); before 0008 the tool writes the blobs and the migration imports them', () => {
+test('snapshot dispatcher: a tool reads the codes in their stored form (codeHash, never a code) and writes them back through the tables; a legacy plain-code entry written by a tool is hashed on the way in; a malformed stored entry, a duplicate, a challenge for an unknown organisation, or a whole-snapshot player rewrite that drops a player a retained code names refuses the WHOLE save (nothing written, the revision not advanced)', () => {
   const dir = tempDir('otc-snap'); s5File(dir);
-  { const s = openRaw(dir); migrate(s, { now: NOW }); const c = createOneTimeCodesRepository({ sqlite: s, now: () => NOW, newCode: () => 'LIVE22' }); c.issuePairingCode('pl-child1'); c.issueEmailChallenge('org-pro', 'x@eastport.test'); s.close(); }
+  { const s = openRaw(dir); const c = createOneTimeCodesRepository({ sqlite: s, now: () => NOW, newCode: () => 'LIVE22' }); c.issuePairingCode('pl-child1'); c.issueEmailChallenge('org-pro', 'x@eastport.test'); s.close(); }
   const tool = openStore(dir);
   let snap = tool.load();
   assert.deepEqual(snap.db.pairingCodes, [{ codeHash: hashCode('LIVE22'), playerId: 'pl-child1', expiresAt: NOW + PAIRING_CODE_TTL_MS }]);
@@ -407,17 +361,12 @@ test('snapshot dispatcher: a tool reads the codes in their stored form (codeHash
   refused('a player rewrite that drops a player a retained code names', (d) => { delete d.pairingCodes; d.players = d.players.filter((p) => p.id !== 'pl-child2'); d.guardians.forEach((g) => { g.childIds = (g.childIds ?? []).filter((id) => id !== 'pl-child2'); }); }, /PAIRING_CODE_PLAYER_MISSING.*pl-child2/);
   refused('a non-array collection', (d) => { d.pairingCodes = { codeHash: 'x' }; }, /pairingCodes: the snapshot collection must be an array/);
   tool.sqlite.close();
-  // Before 0008: the blob, then the migration imports it (the restore path of a backup taken on any build).
-  const pre = tempDir('otc-snap-pre'); s5File(pre);
-  const t2 = openStore(pre); const s3 = t2.load(); assert.equal(s3.db.pairingCodes, undefined, 'nothing read before the record');
-  s3.db.pairingCodes = [legacyPairing()]; t2.save(s3); assert.deepEqual(blob(t2.sqlite, 'pairingCodes'), [legacyPairing()], 'written as a blob'); t2.sqlite.close();
-  { const s = openRaw(pre); migrate(s, { now: NOW }); assert.equal(s.prepare('SELECT code_hash FROM pairing_codes').get().code_hash, hashCode('PAIR22')); s.close(); }
-  rm(dir, pre);
+  rm(dir);
 });
 
-test('boot: a stale in-memory code array (a seed container, a restored blob the migration already imported) is never imported — the table is the record; expired rows are swept at attach; the report carries counts and lifetimes, never a code or a hash', () => {
+test('boot: a stale in-memory code array (a seed container) is never imported — the table is the record; expired rows are swept at attach; the report carries counts and lifetimes, never a code or a hash', () => {
   const dir = tempDir('otc-boot'); s5File(dir, { pairingCodes: [legacyPairing(), legacyPairing({ playerId: 'pl-child2', code: 'SOON22', expiresAt: NOW + MIN })] });
-  let L = live(dir); // the migration runs here, at NOW
+  let L = live(dir);
   assert.deepEqual(L.codes.counts(), { emailChallenges: 0, pairingCodes: 2 });
   L.close();
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
@@ -432,9 +381,9 @@ test('boot: a stale in-memory code array (a seed container, a restored blob the 
 });
 
 
-test('collisions: two organisations may hold the same e-mail code by chance (each challenge is found by its organisation) and both import and verify; a minted pairing code equal to another child\'s live code is redrawn, never shared, and eight consecutive collisions refuse the issue with nothing written', () => {
+test('collisions: two organisations may hold the same e-mail code by chance (each challenge is found by its organisation) and both verify; a minted pairing code equal to another child\'s live code is redrawn, never shared, and eight consecutive collisions refuse the issue with nothing written', () => {
   const dir = tempDir('otc-collide'); s5File(dir);
-  let s = openRaw(dir); migrate(s, { now: NOW });
+  let s = openRaw(dir);
   s.prepare("INSERT INTO orgs (id, name, type, plan, facets_json) VALUES ('org-two', 'Two FC', 'club', 'Pro', '{}')").run();
   let n = 0; const draws = ['SAME22', 'SAME22', 'SAME22', 'OTHER3'];
   const codes = createOneTimeCodesRepository({ sqlite: s, now: () => NOW, newCode: () => draws[n++] });
@@ -460,7 +409,7 @@ test('validation is format-exact and never coerces: validateCodeRows reports the
 });
 
 // ============================================================= review of e020aba
-test('review of e020aba, finding 2 — stored attempts: a stored-format challenge must carry an explicit attempt count from 0 to 9 (missing, null, negative, fractional, nonnumeric, unsafe, at or above the limit are refused); a legacy challenge carries none and starts at 0; the migration and a snapshot save refuse such an entry whole (the blob kept, nothing written, the save revision not advanced, the unrelated edit not written); a legitimate count survives the snapshot round trip', () => {
+test('review of e020aba, finding 2 — stored attempts: a stored-format challenge must carry an explicit attempt count from 0 to 9 (missing, null, negative, fractional, nonnumeric, unsafe, at or above the limit are refused); a legacy challenge carries none and starts at 0; a snapshot save refuses such an entry whole (nothing written, the save revision not advanced, the unrelated edit not written); a legitimate count survives the snapshot round trip', () => {
   const stored = (over = {}) => ({ orgId: 'org-pro', email: 'a@b.test', codeHash: hashCode('GOOD22'), expiresAt: NOW + MIN, attempts: 0, ...over });
   const missing = stored(); delete missing.attempts;
   for (const [label, entry, re] of [
@@ -476,18 +425,9 @@ test('review of e020aba, finding 2 — stored attempts: a stored-format challeng
   assert.equal(validateEmailChallengeRow(stored({ attempts: 9 })).row.attempts, 9, 'nine is a valid count');
   assert.equal(validateEmailChallengeRow(legacyChallenge()).row.attempts, 0, 'a legacy entry starts at 0');
   assert.match(validateEmailChallengeRow({ ...legacyChallenge(), attempts: 3 }).reason, /unknown field\(s\) attempts for the legacy format/, 'a legacy entry never carries a count');
-  // The migration refuses whole and keeps the blob.
-  for (const [label, entry] of [['missing', missing], ['exhausted', stored({ attempts: 10 })]]) {
-    const dir = tempDir('otc-f2-mig'); s5File(dir, { emailChallenges: [entry] });
-    const s = openRaw(dir); const text = s.prepare("SELECT value FROM collections WHERE name = 'emailChallenges'").get().value;
-    assert.throws(() => migrate(s, { now: NOW }), /ONE_TIME_CODES_IMPORT_BLOCKED.*attempts/, label);
-    assert.equal(tableExists(s, 'email_challenges'), false, `${label}: nothing created`);
-    assert.equal(s.prepare("SELECT value FROM collections WHERE name = 'emailChallenges'").get().value, text, `${label}: the blob is kept as it was`);
-    s.close(); rm(dir);
-  }
   // A snapshot save refuses whole: nothing written, the revision unchanged, the unrelated edit not written.
   const dir = tempDir('otc-f2-snap'); s5File(dir);
-  { const s = openRaw(dir); migrate(s, { now: NOW }); createOneTimeCodesRepository({ sqlite: s, now: () => NOW }).issueEmailChallenge('org-pro', 'x@eastport.test'); s.close(); }
+  { const s = openRaw(dir); createOneTimeCodesRepository({ sqlite: s, now: () => NOW }).issueEmailChallenge('org-pro', 'x@eastport.test'); s.close(); }
   const tool = openStore(dir);
   const before = dump(tool.sqlite); const seq = tool.revision();
   for (const [label, mutate] of [['missing', (c) => { delete c.attempts; }], ['exhausted', (c) => { c.attempts = 10; }], ['nonnumeric', (c) => { c.attempts = 'many'; }]]) {
@@ -502,7 +442,7 @@ test('review of e020aba, finding 2 — stored attempts: a stored-format challeng
 
 test('review of e020aba, finding 2 — runtime: an exhausted row that somehow exists (planted directly) is never redeemed — check answers none, consumption returns nothing and deletes nothing, a wrong code counts nothing, it is not outstanding, and the sweep removes it; at nine attempts the tenth wrong code cancels a valid challenge', () => {
   const dir = tempDir('otc-f2-rt'); s5File(dir);
-  const s = openRaw(dir); migrate(s, { now: NOW });
+  const s = openRaw(dir);
   const codes = createOneTimeCodesRepository({ sqlite: s, now: () => NOW });
   s.prepare('INSERT INTO email_challenges (org_id, email, code_hash, expires_at, attempts) VALUES (?, ?, ?, ?, ?)').run('org-pro', 'x@eastport.test', hashCode('GOOD22'), NOW + MIN, EMAIL_CHALLENGE_MAX_ATTEMPTS);
   assert.deepEqual(codes.checkEmailChallenge('org-pro', 'GOOD22'), { status: 'none' });

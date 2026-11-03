@@ -1,8 +1,8 @@
 // Child process for scripts/testCoreIdentityMigration.mjs: runs the real
-// migration 0005 through the real runner on <dir>/scoutbox.db (an S3-shaped
-// temporary database the parent prepared) and kills itself with SIGKILL at the
-// moment the runner asks for COMMIT — after the shadow tables were dropped, the
-// live tables created, every row imported and the metadata written. The parent
+// migration 0005 through the real runner on <dir>/scoutbox.db (a new temporary
+// database the parent prepared with 0001–0004) and kills itself with SIGKILL at
+// the moment the runner asks for COMMIT — after the shadow tables were dropped,
+// the live tables created and the init state written. The parent
 // reopens the file and expects the pre-migration state everywhere (SQLite's
 // journal rolls the open transaction back on the next open). Synthetic data only.
 //   node scripts/coreIdentityMigrationCrashChild.mjs <data-dir>
@@ -10,7 +10,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { DATA_MIGRATIONS } from '../repositories/index.mjs';
-import * as m0005 from '../repositories/migrations/0005_core_identity_live.mjs';
+import { CORE_IDENTITY_INIT_META } from '../repositories/identity.mjs';
 // The registered list now includes 0005 (and 0006 after it); the crash is armed on 0005's COMMIT.
 
 const dir = process.argv[2];
@@ -21,9 +21,8 @@ const exec = sqlite.exec.bind(sqlite);
 sqlite.exec = (sql) => {
   if (sql === 'COMMIT') {
     const live = sqlite.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('players') WHERE name = 'facets_json'").get().n;
-    const rows = sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n;
-    const marker = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(m0005.CORE_IDENTITY_CUTOVER_META);
-    if (live !== 1 || rows === 0 || !marker) throw new Error(`fixture: expected the live table, imported rows and the cutover record inside the transaction (live=${live}, rows=${rows}, marker=${!!marker})`);
+    const marker = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META)?.value;
+    if (live !== 1 || marker !== 'pending') throw new Error(`fixture: expected the live table and the init state inside the transaction (live=${live}, init=${marker})`);
     process.stdout.write('ABOUT_TO_CRASH\n');
     process.kill(process.pid, 'SIGKILL');
   }

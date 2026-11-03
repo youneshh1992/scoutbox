@@ -7,14 +7,9 @@
 // comment, /capabilities counting the rows; the player's and the guardian's surfaces acquiring no internal note, no
 // decision and no mention of a room; another club's 404; the deletion unit tombstoning the cases in place with a REAL
 // COMMIT failure leaving every row as it was and the retry landing once; a case naming a historically missing player
-// restored, served and counted (Q8a); the admin backup carrying the five collections in the legacy shapes, a restore
-// into a NEW directory importing them through 0016 row for row. Every database read goes through a
+// restored, served and counted (Q8a); the admin backup (a copy of the database) holding the five collections, a restore
+// into a NEW directory serving them row for row. Every database read goes through a
 // second read-only connection. Nothing here touches DATA_DIR or real data. Run with: npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged 4d2c74b tree, source-identical to the accepted 7a7efc6): the [cutover]
-// tests assert the 0016 record, the twenty-five tables, the absence of the five blobs and the /capabilities domain
-// and FAIL there on concrete assertions; the [compat] checks inside them (the routes' answers, the
-// player's and guardian's surfaces, the other club's 404) hold on both trees.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -23,6 +18,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
+import { readCases, readRoomComments, readRoomDecisions } from '../repositories/recruitmentCases.mjs';
+import { openStore } from '../store.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -93,7 +90,7 @@ async function roomFor(S, token, playerId, extra = {}) { const r = await S.j('PO
 const roomRev = async (S, token, id) => (await S.j('GET', `/org/rooms/${id}`, undefined, token)).body.room.rev;
 const moveStatus = async (S, token, id, status, extra = {}) => S.j('POST', `/org/rooms/${id}/status`, { status, expectedRev: await roomRev(S, token, id), ...extra }, token);
 
-await test('[cutover] a fresh boot records 0016_recruitment_cases last; the twenty-five tables exist, recruitment_requests and trials carry the REAL case key, idempotency_keys the broadened CHECK, no blob behind any of the five; a room created, a comment (edited, tombstoned), a task, a status move with its snapshot, an archive and a reopen, an evidence review overwritten in place, a draft replayed/conflicted/patched/finalized with its key rows, an M12 case with its budget and a room adopting it land as rows the moment the route answers; the handoff readiness route, the listing and reading routes answer as before; a SIGKILL right after a comment loses nothing; /capabilities counts the rows; [compat] another club gets 404, the player\'s and the guardian\'s surfaces carry no internal note, no decision and no room', async () => {
+await test('[routes] a fresh boot records 0016_recruitment_cases last; the twenty-five tables exist, recruitment_requests and trials carry the REAL case key, idempotency_keys the broadened CHECK, no blob behind any of the five; a room created, a comment (edited, tombstoned), a task, a status move with its snapshot, an archive and a reopen, an evidence review overwritten in place, a draft replayed/conflicted/patched/finalized with its key rows, an M12 case with its budget and a room adopting it land as rows the moment the route answers; the handoff readiness route, the listing and reading routes answer as before; a SIGKILL right after a comment loses nothing; /capabilities counts the rows; [compat] another club gets 404, the player\'s and the guardian\'s surfaces carry no internal note, no decision and no room', async () => {
   const dir = tempDir('s8b-boot'); let S = await boot(dir);
   assert.equal(applied(dir).at(-3), MIGRATION, 'the recorded migration (0017_recruitment_contacts_offers, S8c, and 0018_signings_follow_ups, S8d, follow it on the same boot)'); assert.equal(applied(dir).at(-2), '0017_recruitment_contacts_offers'); assert.equal(applied(dir).at(-1), '0018_signings_follow_ups'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   for (const t of ['recruitment_requests', 'trials']) assert.ok(fkOf(dir, t).includes('case_id->recruitment_cases(id) RESTRICT'), `${t}.case_id is a real key: ${fkOf(dir, t)}`);
@@ -179,7 +176,7 @@ await test('[cutover] a fresh boot records 0016_recruitment_cases last; the twen
   await S.stop(); rm(dir);
 });
 
-await test('[cutover] the deletion unit tombstones the person\'s cases in place (player_name NULL, subject_removed_at set; the room rows, the comments and the decision stay) — a failure of the REAL COMMIT leaves every row as it was and the retry lands once; a backup whose db.json carries a case naming a historically missing player restores, is served as today and counted (Q8a), never refused', async () => {
+await test('[routes] the deletion unit tombstones the person\'s cases in place (player_name NULL, subject_removed_at set; the room rows, the comments and the decision stay) — a failure of the REAL COMMIT leaves every row as it was and the retry lands once; a restored backup to which a case naming a historically missing player is added (a snapshot-mode save) serves it as today and counts it (Q8a), never refused', async () => {
   const dir = tempDir('s8b-unit'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Leaving Adult'); const room = await roomFor(S, maria, a.pid); const RID = room.id;
   assert.equal((await S.j('POST', `/org/rooms/${RID}/comments`, { body: 'Before they left.' }, maria)).status, 201);
@@ -197,16 +194,17 @@ await test('[cutover] the deletion unit tombstones the person\'s cases in place 
   // Q8a: a historically missing player, through a restored backup
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
   const restored = tempDir('s8b-q8a'); fs.cpSync(bk.body.dir, restored, { recursive: true });
-  const dbJson = path.join(restored, 'db.json'); const sj = JSON.parse(fs.readFileSync(dbJson, 'utf8')); const base = sj.db.recruitmentCases.find((c) => c.id === RID);
-  sj.db.recruitmentCases.push({ ...base, id: 'case-gone', playerId: 'pl-gone-long-ago', playerName: 'Gone Player', subjectRemovedAt: undefined, room: null, decisionDraft: null, history: [], links: { requestIds: [], trialIds: [], signingId: null } });
-  fs.writeFileSync(dbJson, JSON.stringify(sj));
-  S = await boot(restored); assert.ok(live(restored)); const cut = JSON.parse(q1(restored, "SELECT value FROM meta WHERE key = 'recruitmentCasesCutover'").value); assert.equal(cut.players.missing, 1, 'the missing id counted at import'); assert.equal(cut.players.retained, 1);
+  { const store = openStore(restored); const loaded = store.load(); const base = loaded.db.recruitmentCases.find((c) => c.id === RID);
+    loaded.db.recruitmentCases = [...loaded.db.recruitmentCases, { ...base, id: 'case-gone', playerId: 'pl-gone-long-ago', playerName: 'Gone Player', subjectRemovedAt: undefined, room: null, decisionDraft: null, history: [], links: { requestIds: [], trialIds: [], signingId: null } }];
+    store.save(loaded); store.sqlite.close(); }
+  S = await boot(restored); assert.ok(live(restored));
+  assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentCases.retainedPlayerReferences.recruitmentCases, 1, 'the retained person still counted after the restore');
   const mariaR = await orgLogin(S); const list = await S.j('GET', '/org/cases', undefined, mariaR); assert.ok((list.body.cases ?? list.body.items ?? list.body).some((x) => x.id === 'case-gone'), 'the case of a missing player is served as today');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentCases.unresolvedPlayerReferences.recruitmentCases, 1);
   await S.stop(); rm(dir, restored, bk.body.dir);
 });
 
-await test('[cutover] the admin backup carries the five collections in the legacy shapes (insertion order, the writers\' literals, keys reassembled); a restore into a NEW directory imports them through 0016 row for row', async () => {
+await test('[backup] the admin backup is a copy of the database: the five collections read back from it (insertion order, the budget lines, the decision keys reassembled, the comment); a restore into a NEW directory serves them row for row', async () => {
   const dir = tempDir('s8b-backup'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Backup Adult'); const room = await roomFor(S, maria, a.pid); const RID = room.id;
   assert.equal((await S.j('POST', `/org/rooms/${RID}/comments`, { body: 'Kept through everything.' }, maria)).status, 201);
@@ -215,14 +213,13 @@ await test('[cutover] the admin backup carries the five collections in the legac
   const b = await signupAdult(S, 'Budget Adult'); const kase = await S.j('POST', '/org/cases', { playerId: b.pid }, maria); assert.equal(kase.status, 201); const KID = kase.body.case.id;
   assert.equal((await S.j('POST', `/org/cases/${KID}/budget/scenarios`, { label: 'Base', currency: 'GBP', termMonths: 12, lines: [{ kind: 'wage', label: 'Wage', amountMinor: 150000, currency: 'GBP', schedule: 'weekly', confirmed: true }] }, maria)).status, 201);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  for (const n of COLLECTIONS) assert.ok(Array.isArray(snapshot.db[n]), `${n} in the backup`);
-  assert.equal(snapshot.db.recruitmentCases.length, 2); assert.equal(snapshot.db.recruitmentCases[0].id, RID, 'insertion order'); assert.deepEqual(Object.keys(snapshot.db.recruitmentCases[1]).slice(0, 4), ['id', 'orgId', 'playerId', 'playerName'], 'the writer\'s literal order');
-  assert.equal(snapshot.db.recruitmentCases[1].budget.scenarios[0].lines[0].id, 'ln-1'); assert.equal(snapshot.db.recruitmentCases[0].room.status, fin.body.lifecycle.to);
-  const fd = snapshot.db.roomDecisions.find((d) => d.id === FID); assert.deepEqual(fd.keys.finalize.key, 'fin-key-b'); assert.equal(fd.keys.draft.key, 'draft-key-b', 'keys reassembled'); assert.equal(fd.kind, 'formal');
-  assert.equal(snapshot.db.roomComments[0].body, 'Kept through everything.');
-  const liveDump = recDump(dir);
   await S.stop();
+  const liveDump = recDump(dir); assert.equal(recDump(bk.body.dir), liveDump, 'the backup holds every case, room and thread row');
+  { const s = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); const cases = readCases(s);
+    assert.equal(cases.length, 2); assert.equal(cases[0].id, RID, 'insertion order');
+    assert.equal(cases[1].budget.scenarios[0].lines[0].id, 'ln-1'); assert.equal(cases[0].room.status, fin.body.lifecycle.to);
+    const fd = readRoomDecisions(s).find((d) => d.id === FID); assert.deepEqual(fd.keys.finalize.key, 'fin-key-b'); assert.equal(fd.keys.draft.key, 'draft-key-b', 'keys reassembled'); assert.equal(fd.kind, 'formal');
+    assert.equal(readRoomComments(s)[0].body, 'Kept through everything.'); s.close(); }
   const restored = tempDir('s8b-restore'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored)); assert.equal(recDump(restored), liveDump, 'row for row'); const mariaR = await orgLogin(S); assert.equal((await S.j('GET', `/org/rooms/${RID}/decision`, undefined, mariaR)).body.current.id, FID); await S.stop();
   rm(dir, restored, bk.body.dir);

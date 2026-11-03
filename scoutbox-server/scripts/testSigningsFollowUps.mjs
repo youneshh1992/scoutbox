@@ -1,17 +1,13 @@
 // S8d — signing packages, completed signings, follow-ups and outcome reports as typed tables with EXPLICIT writes
-// (repositories/signingsFollowUps.mjs, migration 0018): docs/architecture/s8d-design-note.md under the rules of
-// 30 October 2026 (CLAUDE.md). What this suite proves: the cutover types every field into its column, normalises exactly what the note lists and reports it
-// with ids, stops on a row it cannot type (nothing dropped), names every missing reference and every uniqueness rule
-// with ids; the repository's operations write rows at once and return fresh records, the views are read-only arrays of
-// frozen records, a unit of work rolls rows AND mirrors back (a statement failure, a real COMMIT failure, the deferred
-// completion key), the completion cycle commits in one unit; the snapshot write of a backup/restore (full, partial,
-// [], a legacy-shaped backup, junk, a retained dependant) and the live counters.
+// (repositories/signingsFollowUps.mjs, migration 0018): docs/architecture/s8d-design-note.md. What this suite proves:
+// the migration creates the typed tables; a snapshot save (fixtures, tools) types every field into its column,
+// normalises what the note lists, stops on a row it cannot type and names every missing reference and every
+// uniqueness rule with ids; the repository's operations write rows at once and return fresh records, the views are
+// read-only arrays of frozen records, a unit of work rolls rows AND mirrors back (a statement failure, a real COMMIT
+// failure, the deferred completion key), the completion cycle commits in one unit; the snapshot write (full, partial,
+// [], junk, a retained dependant) and the live counters.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged c0022be tree, before the implementation): every [cutover] and
-// [repository] test needs migration 0018 and the repository module and FAILS there on concrete assertions (the
-// migration id absent from DATA_MIGRATIONS and TABLE_BACKED; the tables absent; the blobs surviving; the module absent);
-// the [typed] tests fail on the behavioural assertions (that build keeps the blob store's junk; this step refuses it).
+
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,9 +15,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, blobText, meta, FIXTURE } from './coreIdentityTestFixtures.mjs';
-import { trialReportsFor } from '../repositories/playerSubrecords.mjs';
-import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest } from './recruitmentTestFixtures.mjs';
+import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
+import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
 import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
 import { S8C_FIX } from './recruitmentContactsOffersTestFixtures.mjs';
 import { S8D_FIX, draftPackage, completedPackage, canonicalSigning, legacySigning, followUpsFor, outcomeReport, srevision, parties, sdoc, shist, BY, SHA, SHA2, T } from './signingsFollowUpsTestFixtures.mjs';
@@ -47,18 +42,25 @@ const fullDump = (s) => JSON.stringify(s.prepare("SELECT name FROM sqlite_master
 const rowsOf = (s, t) => s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all().map((r) => ({ ...r }));
 const col = (s, sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? Object.values({ ...r })[0] : undefined; };
 const ddlOf = (s, t) => s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t)?.sql ?? null;
+const openRaw = (dir) => { const s = new DatabaseSync(dbFile(dir)); s.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;'); return s; };
 const S8A_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
 
-/** A file at S8c (0001–0017 applied) carrying the four S8d blobs the c0022be build wrote beside the earlier tables. */
-function preS8dFile(dir, { rawBlobs, more = {}, ...four } = {}) {
-  const fix = S8D_FIX(); const extra = { ledger: [], vouches: [], notifications: [], dispatches: [], channels: [], ...S8B_FIX(), ...S8C_FIX(), ...S8A_FIX(), ...more };
-  for (const name of COLLECTIONS) { const v = Object.hasOwn(four, name) ? four[name] : fix[name]; if (v !== undefined) extra[name] = v; }
-  const players = FIXTURE().players.map((p) => ({ ...p, trialReports: trialReportsFor(Array.isArray(extra.trials) ? plain(extra.trials) : [], p.id) }));
-  s3File(dir, { players, extra, rawBlobs });
-  const s = openRaw(dir); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } }); s.close();
-}
+/** A database holding the S8a–S8d fixtures, written by a snapshot-mode save (the tables, never blobs). `four` overrides an S8d collection (undefined omits it). */
+const fixtureCollections = ({ more = {}, ...four } = {}) => {
+  const fix = S8D_FIX(); const db = { ...S8B_FIX(), ...S8C_FIX(), ...S8A_FIX(), ...more };
+  for (const name of COLLECTIONS) { const v = Object.hasOwn(four, name) ? four[name] : fix[name]; if (v !== undefined) db[name] = v; }
+  return db;
+};
 const migrateAll = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
-const file = (tag, over = {}) => { const d = tempDir(`s8d-${tag}`); preS8dFile(d, over); const s = openRaw(d); migrateAll(s); s.close(); return d; };
+const file = (tag, over = {}) => saveFixture(tempDir(`s8d-${tag}`), fixtureCollections(over));
+/** Save the fixtures, with `over`, into a new database and expect the save refused, atomically. */
+const refusedSave = (tag, over, pattern) => {
+  const d = tempDir(`s8d-ref-${tag}`); const st = openStore(d); const before = fullDump(st.sqlite);
+  refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(over)) }), pattern, tag);
+  assert.equal(st.sqlite.isTransaction, false); assert.equal(fullDump(st.sqlite), before, `${tag}: nothing written`); assert.equal(st.revision(), 0);
+  refused(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections(over)) }), pattern, `${tag} (again)`);
+  st.sqlite.close(); rm(d);
+};
 function serverOpen(dir, { warnings = [] } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const loaded = store.load();
@@ -78,31 +80,23 @@ const typed = (name, raw) => { const t = mod[{ signingPackages: 'typeSigningPack
 
 // ------------------------------------------------------------- the cutover
 
-test('[cutover] migration 0018 is registered last and, on an S8c file, creates the ten typed tables and broadens idempotency_keys to signing_packages while every earlier row stays byte for byte; the four blobs import TYPED (the legacy signing\'s method and the copied ledger row normalised and NOTED with ids), the record carries the counts and the notes, the blobs are retired, the step never runs twice; the read-back equals the typed expectation; the live counters agree with the cutover', () => {
+test('[schema] migration 0018 is registered last and creates the ten typed STRICT tables (no lossless side column), the deferred completion key and the signing method CHECK, and broadens idempotency_keys to signing_packages; a fresh database holds no row; the step never runs twice; the fixtures written by a snapshot save read back as the typed expectation (the legacy signing\'s method and the copied ledger row normalised), with their key rows; the live player counters', () => {
   need();
   assert.equal(DATA_MIGRATIONS.at(-1)?.id, MIGRATION, 'the last registered migration'); for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const d = tempDir('s8d-mig'); preS8dFile(d);
-  const s = openRaw(d);
-  assert.ok(applied(s).includes(S8C)); for (const n of COLLECTIONS) assert.ok(Array.isArray(blob(s, n)), `${n} blob before`);
-  const earlier = () => JSON.stringify(EARLIER.map((t) => rowsOf(s, t)).concat([s.prepare("SELECT * FROM idempotency_keys WHERE owner_table <> 'signing_packages' ORDER BY owner_table, owner_id, position").all()]));
-  const before = earlier(); const seq = meta(s, 'saveSeq');
-  migrateAll(s);
-  assert.equal(applied(s).at(-1), MIGRATION); for (const t of TABLES) assert.ok(tableExistsIn(s, t), `${t} exists`);
-  for (const n of COLLECTIONS) assert.equal(blob(s, n), undefined, `${n} blob retired`);
-  assert.equal(earlier(), before, 'every earlier row and every S8a/S8b/S8c key row byte for byte');
-  assert.match(ddlOf(s, 'idempotency_keys'), /'signing_packages'/); assert.match(ddlOf(s, 'idempotency_keys'), /'recruitment_offers'/);
-  assert.equal(meta(s, 'saveSeq'), seq, 'the cutover does not advance the save revision');
-  // typed columns, no lossless side columns
-  for (const t of TABLES) { assert.doesNotMatch(ddlOf(s, t), /absent_keys_json|offtype_json|extra_json/, `${t} has no lossless side column`); assert.match(ddlOf(s, t), /STRICT/); }
-  assert.match(ddlOf(s, 'signing_packages'), /completion_signing_id\s+TEXT REFERENCES signings\(id\) DEFERRABLE INITIALLY DEFERRED/);
-  assert.match(ddlOf(s, 'signings'), /CHECK \(method IN \('CANONICAL_COMPLETION','LEGACY_RECORDED'\)\)/);
-  // the record
-  const rec = JSON.parse(meta(s, 'signingsFollowUpsCutover'));
-  assert.deepEqual(rec.counts, { signingPackages: { imported: 2, normalised: 0 }, signings: { imported: 2, normalised: 2 }, followUps: { imported: 3, normalised: 0 }, outcomeReports: { imported: 1, normalised: 0 } });
-  assert.deepEqual(rec.notes, ['signings entry #0 sign-2: firstQualifyingInteraction kept as the ledger reference (id, ts, type); the copied fields dropped', 'signings entry #1 sign-legacy: method missing, written as LEGACY_RECORDED']);
-  assert.equal(rec.keyRowsRebuilt, s.prepare("SELECT count(*) AS n FROM idempotency_keys WHERE owner_table <> 'signing_packages'").get().n);
-  assert.deepEqual(rec.players, { live: 17, retained: 0, missing: 0 }, 'every player-reference occurrence counted (parents, parties, actors, confirmations)');
-  // the read-back equals the typed expectation of each fixture, in insertion order; the stored columns hold the typed values
+  // a fresh database: the tables exist and are empty
+  const empty = tempDir('s8d-empty'); const e = openStore(empty).sqlite;
+  assert.equal(e.prepare('SELECT id FROM data_migrations ORDER BY id').all().at(-1).id, MIGRATION);
+  for (const t of TABLES) { assert.ok(tableExistsIn(e, t), `${t} exists`); assert.equal(e.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0); }
+  for (const t of TABLES) { assert.doesNotMatch(ddlOf(e, t), /absent_keys_json|offtype_json|extra_json/, `${t} has no lossless side column`); assert.match(ddlOf(e, t), /STRICT/); }
+  assert.match(ddlOf(e, 'signing_packages'), /completion_signing_id\s+TEXT REFERENCES signings\(id\) DEFERRABLE INITIALLY DEFERRED/);
+  assert.match(ddlOf(e, 'signings'), /CHECK \(method IN \('CANONICAL_COMPLETION','LEGACY_RECORDED'\)\)/);
+  assert.match(ddlOf(e, 'idempotency_keys'), /'signing_packages'/); assert.match(ddlOf(e, 'idempotency_keys'), /'recruitment_offers'/);
+  for (const n of COLLECTIONS) assert.equal(e.prepare('SELECT count(*) AS n FROM collections WHERE name = ?').get(n).n, 0, `no ${n} blob`);
+  e.close(); rm(empty);
+  // the fixtures
+  const d = file('mig'); const s = openRaw(d);
+  const after = fullDump(s); assert.deepEqual(migrateAll(s).ran, []); assert.equal(fullDump(s), after, 'never runs twice');
+  for (const n of COLLECTIONS) assert.equal(s.prepare('SELECT count(*) AS n FROM collections WHERE name = ?').get(n).n, 0, `no ${n} blob`);
   const back = readTableBacked(s);
   assert.deepEqual(plain(back.signingPackages), [typed('signingPackages', draftPackage()), typed('signingPackages', completedPackage())]);
   assert.deepEqual(plain(back.signings), [typed('signings', canonicalSigning()), typed('signings', legacySigning())]);
@@ -114,52 +108,41 @@ test('[cutover] migration 0018 is registered last and, on an S8c file, creates t
   assert.deepEqual(s.prepare("SELECT act, shape, key FROM idempotency_keys WHERE owner_table = 'signing_packages' AND owner_id = 'spk-2' ORDER BY position").all().map((r) => [r.act, r.shape, r.key]), [['start', 'value', 'k-start-2'], ['ready', 'list', 'k-ready-2'], ['party', 'list', 'k-party-p'], ['party', 'list', 'k-party-c'], ['complete', 'list', 'k-complete-2']]);
   assert.equal(s.prepare("SELECT count(*) AS n FROM signing_revision_parties WHERE status = 'COMPLETED'").get().n, 2); assert.equal(col(s, "SELECT evidence_document_sha256 FROM signing_revision_parties WHERE revision_id = 'spr-2' AND party_type = 'PLAYER'"), SHA);
   assert.equal(col(s, "SELECT sha256 FROM signing_documents WHERE revision_id = 'spr-2' AND kind = 'executed'"), SHA2);
-  // the live counters equal the cutover's; the step never runs twice
   assert.deepEqual(mod.unresolvedPlayerReferences(s), { signingPackages: 0, signings: 0, followUps: 0, outcomeReports: 0 }); assert.deepEqual(mod.retainedPlayerReferences(s), { signingPackages: 0, signings: 0, followUps: 0, outcomeReports: 0 });
-  const after = fullDump(s); assert.deepEqual(migrateAll(s).ran, []); assert.equal(fullDump(s), after);
   s.close(); rm(d);
-  // a file without the blobs (a first installation) creates the tables and imports nothing
-  const empty = tempDir('s8d-empty'); preS8dFile(empty, Object.fromEntries(COLLECTIONS.map((n) => [n, undefined]))); const e = openRaw(empty); for (const n of COLLECTIONS) assert.equal(blob(e, n), undefined); migrateAll(e);
-  assert.ok(applied(e).includes(MIGRATION)); for (const t of TABLES) assert.equal(e.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0); assert.deepEqual(JSON.parse(meta(e, 'signingsFollowUpsCutover')).counts, {}); e.close(); rm(empty);
 });
 
-test('[cutover][typed] the import STOPS with the id on a row the columns cannot hold — nothing dropped, nothing written, the blobs and the record untouched, the next boot refusing the same way: an unknown status word, a note over 400 characters, a package without a revision, a present null blob, a report whose matchesPlayed is not an integer, two confirmations by one person; whereas the dead signing fields and an unknown field are NOTES, not refusals', () => {
+test('[snapshot][typed] a save STOPS with the id on a row the columns cannot hold — nothing written, the revision unchanged, the same save refused again: an unknown status word, a note over 400 characters, a package without a revision, a present null collection, a report whose matchesPlayed is not an integer, two confirmations by one person, an unknown party type; whereas the dead signing fields and an unknown field are dropped, not refused', () => {
   need();
-  const tryImport = (tag, over, pattern) => {
-    const d = tempDir(`s8d-ref-${tag}`); preS8dFile(d, over); const s = openRaw(d); const before = fullDump(s); const bl = COLLECTIONS.map((n) => blobText(s, n));
-    refused(() => migrateAll(s), pattern, tag); assert.equal(s.isTransaction, false); assert.equal(fullDump(s), before, `${tag}: nothing written`); assert.deepEqual(COLLECTIONS.map((n) => blobText(s, n)), bl); assert.equal(applied(s).includes(MIGRATION), false);
-    refused(() => migrateAll(s), pattern, `${tag} (again)`); s.close(); rm(d);
-  };
-  tryImport('status', { signingPackages: [draftPackage({ status: 'OPEN' })] }, /SIGNINGS_IMPORT_BLOCKED[\s\S]*signingPackages entry #0 spk-1\.status must be one of DRAFT\|READY/);
-  tryImport('note', { signings: [canonicalSigning(), legacySigning({ note: 'x'.repeat(401) })] }, /signings entry #1 sign-legacy\.note exceeds 400 characters/);
-  tryImport('revisions', { signingPackages: [draftPackage({ revisions: [] })] }, /spk-1\.revisions must be a non-empty array/);
-  tryImport('null', { rawBlobs: { followUps: 'null' } }, /the followUps blob must be an array of entries \(got null\)/);
-  tryImport('matches', { outcomeReports: [outcomeReport({ matchesPlayed: 2.5 })] }, /outcomeReports entry #0 out-1\.matchesPlayed must be a non-negative integer or null/);
-  tryImport('twice', { outcomeReports: [outcomeReport({ confirmations: [outcomeReport().confirmations[0], outcomeReport().confirmations[0]] })] }, /out-1\.confirmations\[1\]\.by\.id duplicates pl-adult/);
-  tryImport('party-type', { signingPackages: [draftPackage({ revisions: [srevision({ requiredParties: [{ ...parties()[0], partyType: 'AGENT' }] })] })] }, /spk-1\.revisions\[0\]\.requiredParties\[0\]\.partyType must be one of PLAYER\|GUARDIAN\|CLUB_SIGNATORY/);
-  // notes, not refusals
+  refusedSave('status', { signingPackages: [draftPackage({ status: 'OPEN' })] }, /SIGNINGS_IMPORT_BLOCKED[\s\S]*signingPackages entry #0 spk-1\.status must be one of DRAFT\|READY/);
+  refusedSave('note', { signings: [canonicalSigning(), legacySigning({ note: 'x'.repeat(401) })] }, /signings entry #1 sign-legacy\.note exceeds 400 characters/);
+  refusedSave('revisions', { signingPackages: [draftPackage({ revisions: [] })] }, /spk-1\.revisions must be a non-empty array/);
+  refusedSave('null', { followUps: null }, /followUps: the snapshot collection must be an array/);
+  refusedSave('matches', { outcomeReports: [outcomeReport({ matchesPlayed: 2.5 })] }, /outcomeReports entry #0 out-1\.matchesPlayed must be a non-negative integer or null/);
+  refusedSave('twice', { outcomeReports: [outcomeReport({ confirmations: [outcomeReport().confirmations[0], outcomeReport().confirmations[0]] })] }, /out-1\.confirmations\[1\]\.by\.id duplicates pl-adult/);
+  refusedSave('party-type', { signingPackages: [draftPackage({ revisions: [srevision({ requiredParties: [{ ...parties()[0], partyType: 'AGENT' }] })] })] }, /spk-1\.revisions\[0\]\.requiredParties\[0\]\.partyType must be one of PLAYER\|GUARDIAN\|CLUB_SIGNATORY/);
+  // dropped, not refused
   const d = file('notes', { signings: [canonicalSigning({ cancelledAt: null, revokedAt: null, voidedAt: null, legacyFlag: true }), legacySigning()] });
-  withRo(d, (s) => { const rec = JSON.parse(meta(s, 'signingsFollowUpsCutover')); assert.equal(rec.counts.signings.normalised, 2); assert.ok(rec.notes.some((n) => /sign-2: dead field cancelledAt dropped/.test(n))); assert.ok(rec.notes.some((n) => /sign-2: unknown field legacyFlag dropped/.test(n))); assert.equal(Object.hasOwn(readTableBacked(s).signings[0], 'legacyFlag'), false); }); rm(d);
+  withRo(d, (s) => { const sg = readTableBacked(s).signings[0]; assert.equal(Object.hasOwn(sg, 'legacyFlag'), false); assert.equal(Object.hasOwn(sg, 'cancelledAt'), false); }); rm(d);
 });
 
-test('[cutover] every reference and every uniqueness rule is named with ids before the engine would: a package naming a missing case / offer / organisation / staff member, a signing naming a missing package, a follow-up naming a missing signing, a report naming a missing follow-up; two live packages per offer, two signings per offer, two standing legacy signings per organisation and player, two follow-ups per signing and milestone, two reports per follow-up; and the player references (Q7a/Q8a/Q8c-a applied): a historically missing player id imports and is counted, never refused', () => {
+test('[snapshot] every reference and every uniqueness rule is named with ids before the engine would: a package naming a missing case / offer / organisation / staff member, a signing naming a missing package, a follow-up naming a missing signing, a report naming a missing follow-up; two completed packages per offer, two signings per package, two standing legacy signings per organisation and player, two follow-ups per signing and milestone, two reports per follow-up; and the player references (Q7a/Q8a/Q8c-a applied): a missing player id is written and counted, never refused', () => {
   need();
-  const tryImport = (tag, over, pattern) => { const d = tempDir(`s8d-ref2-${tag}`); preS8dFile(d, over); const s = openRaw(d); const before = fullDump(s); refused(() => migrateAll(s), pattern, tag); assert.equal(fullDump(s), before); assert.equal(applied(s).includes(MIGRATION), false); s.close(); rm(d); };
-  tryImport('case', { signingPackages: [draftPackage({ caseId: 'case-nowhere' })] }, /SIGNINGS_REFERENCE_MISSING[\s\S]*signing_packages spk-1 → recruitment_cases case-nowhere/);
-  tryImport('offer', { signingPackages: [draftPackage({ offerId: 'rof-nowhere' })] }, /signing_packages spk-1 → recruitment_offers rof-nowhere/);
-  tryImport('org', { signingPackages: [draftPackage({ orgId: 'org-nowhere' })] }, /signing_packages spk-1 → orgs org-nowhere/);
-  tryImport('staff', { signingPackages: [draftPackage({ createdBy: { ...BY, id: 'usr-ghost' } })] }, /signing_packages spk-1 createdBy → org_users usr-ghost/);
-  tryImport('package', { signings: [canonicalSigning({ signingPackageId: 'spk-ghost', signingRevisionId: null })] }, /signings sign-2 → signing_packages spk-ghost/);
-  tryImport('signing', { followUps: [{ ...followUpsFor()[0], signingId: 'sign-ghost' }] }, /follow_ups fup-sign-2-3m → signings sign-ghost/);
-  tryImport('followup', { outcomeReports: [outcomeReport({ followUpId: 'fup-ghost' })] }, /outcome_reports out-1 → follow_ups fup-ghost/);
-  tryImport('two-done', { signingPackages: [draftPackage(), completedPackage(), completedPackage({ id: 'spk-dup', currentRevisionId: 'spr-dup', revisions: [srevision({ id: 'spr-dup', status: 'COMPLETED', readyAt: T.ready, readyBy: BY, completedAt: T.completed, completedBy: BY, document: sdoc('sgd-dup') })], keys: { start: null }, history: [], completion: { ...completedPackage().completion, signingId: 'sign-dup' } })], signings: [canonicalSigning(), canonicalSigning({ id: 'sign-dup', signingPackageId: 'spk-dup', signingRevisionId: 'spr-dup' })] }, /SIGNINGS_UNIQUENESS[\s\S]*a completed package per offer rof-1/);
-  tryImport('two-signings', { signings: [canonicalSigning(), canonicalSigning({ id: 'sign-dup', signingPackageId: 'spk-2', signingRevisionId: 'spr-2' })] }, /a signing per package spk-2/);
-  tryImport('two-legacy', { signings: [canonicalSigning(), legacySigning(), legacySigning({ id: 'sign-legacy-2' })] }, /a standing legacy signing per organisation and player org-pro\/pl-child1/);
-  tryImport('two-fups', { followUps: [...followUpsFor(), { ...followUpsFor()[0], id: 'fup-dup' }] }, /a follow-up per signing and milestone sign-2\/3m/);
-  tryImport('two-reports', { outcomeReports: [outcomeReport(), outcomeReport({ id: 'out-dup' })] }, /a report per follow-up fup-sign-2-3m/);
-  // tolerated and counted (the fourth application of the one answer)
+  refusedSave('case', { signingPackages: [draftPackage({ caseId: 'case-nowhere' }), completedPackage()] }, /SIGNINGS_REFERENCE_MISSING[\s\S]*signing_packages spk-1 → recruitment_cases case-nowhere/);
+  refusedSave('offer', { signingPackages: [draftPackage({ offerId: 'rof-nowhere' }), completedPackage()] }, /signing_packages spk-1 → recruitment_offers rof-nowhere/);
+  refusedSave('org', { signingPackages: [draftPackage({ orgId: 'org-nowhere' }), completedPackage()] }, /signing_packages spk-1 → orgs org-nowhere/);
+  refusedSave('staff', { signingPackages: [draftPackage({ createdBy: { ...BY, id: 'usr-ghost' } }), completedPackage()] }, /signing_packages spk-1 createdBy → org_users usr-ghost/);
+  refusedSave('package', { signings: [canonicalSigning({ signingPackageId: 'spk-ghost', signingRevisionId: null })] }, /signings sign-2 → signing_packages spk-ghost/);
+  refusedSave('signing', { followUps: [{ ...followUpsFor()[0], signingId: 'sign-ghost' }] }, /follow_ups fup-sign-2-3m → signings sign-ghost/);
+  refusedSave('followup', { outcomeReports: [outcomeReport({ followUpId: 'fup-ghost' })] }, /outcome_reports out-1 → follow_ups fup-ghost/);
+  refusedSave('two-done', { signingPackages: [draftPackage(), completedPackage(), completedPackage({ id: 'spk-dup', currentRevisionId: 'spr-dup', revisions: [srevision({ id: 'spr-dup', status: 'COMPLETED', readyAt: T.ready, readyBy: BY, completedAt: T.completed, completedBy: BY, document: sdoc('sgd-dup') })], keys: { start: null }, history: [], completion: { ...completedPackage().completion, signingId: 'sign-dup' } })], signings: [canonicalSigning(), canonicalSigning({ id: 'sign-dup', signingPackageId: 'spk-dup', signingRevisionId: 'spr-dup' })] }, /SIGNINGS_UNIQUENESS[\s\S]*a completed package per offer rof-1/);
+  refusedSave('two-signings', { signings: [canonicalSigning(), canonicalSigning({ id: 'sign-dup', signingPackageId: 'spk-2', signingRevisionId: 'spr-2' })] }, /a signing per package spk-2/);
+  refusedSave('two-legacy', { signings: [canonicalSigning(), legacySigning(), legacySigning({ id: 'sign-legacy-2' })] }, /a standing legacy signing per organisation and player org-pro\/pl-child1/);
+  refusedSave('two-fups', { followUps: [...followUpsFor(), { ...followUpsFor()[0], id: 'fup-dup' }] }, /a follow-up per signing and milestone sign-2\/3m/);
+  refusedSave('two-reports', { outcomeReports: [outcomeReport(), outcomeReport({ id: 'out-dup' })] }, /a report per follow-up fup-sign-2-3m/);
+  // tolerated and counted
   const d = file('tolerant', { signings: [canonicalSigning(), legacySigning({ playerId: 'pl-never-existed' })], followUps: followUpsFor().concat([{ ...followUpsFor('sign-legacy', 'pl-never-existed', T.legacy)[1], id: 'fup-gone' }]) });
-  withRo(d, (s) => { const rec = JSON.parse(meta(s, 'signingsFollowUpsCutover')); assert.equal(rec.players.missing, 2, 'the legacy signing and its follow-up'); assert.deepEqual(mod.unresolvedPlayerReferences(s), { signingPackages: 0, signings: 1, followUps: 1, outcomeReports: 0 }, 'the live counts equal the cutover\'s'); assert.equal(col(s, "SELECT player_id FROM signings WHERE id = 'sign-legacy'"), 'pl-never-existed', 'kept verbatim'); });
+  withRo(d, (s) => { assert.deepEqual(mod.unresolvedPlayerReferences(s), { signingPackages: 0, signings: 1, followUps: 1, outcomeReports: 0 }, 'the legacy signing and its follow-up'); assert.equal(col(s, "SELECT player_id FROM signings WHERE id = 'sign-legacy'"), 'pl-never-existed', 'kept verbatim'); });
   rm(d);
 });
 
@@ -245,10 +228,10 @@ test('[repository] the unit of work: several operations and a failure at the end
 
 // ------------------------------------------------------------- the snapshot write (backups, restores, the persistence suites)
 
-test('[snapshot] readTableBacked / writeTableBacked (snapshot mode): a save with the four collections supplied lands exactly (every record typed; a legacy-shaped backup normalised as the cutover does); a partial save retains the omitted collections whole; [] empties one; a departing signing a RETAINED follow-up still names is refused with the ids, atomically, as is a departing package a retained signing names; junk is refused with the id; the departures of a package and its offer in ONE save succeed (the S8d departures run before the S8c ones)', () => {
+test('[snapshot] readTableBacked / writeTableBacked (snapshot mode): a save with the four collections supplied lands exactly (every record typed; a legacy-shaped signing normalised); a partial save retains the omitted collections whole; [] empties one; a departing signing a RETAINED follow-up still names is refused with the ids, atomically, as is a departing package a retained signing names; junk is refused with the id; the departures of a package and its offer in ONE save succeed (the S8d departures run before the S8c ones)', () => {
   need();
   const d = file('snap'); const S = snapshotOpen(d); const rev0 = S.revision();
-  // a legacy-shaped backup: sign-legacy without a method, a copied ledger row — typed on the way in
+  // a legacy-shaped signing: sign-legacy without a method, a copied ledger row — typed on the way in
   const fups = plain(S.db.followUps); const reports = plain(S.db.outcomeReports);
   S.save({ signingPackages: plain(S.db.signingPackages), signings: [canonicalSigning(), legacySigning()], followUps: fups, outcomeReports: reports }, { omit: ['requests', 'trials'] });
   assert.equal(S.revision(), rev0 + 1); withRo(d, (s) => { assert.equal(col(s, "SELECT method FROM signings WHERE id = 'sign-legacy'"), 'LEGACY_RECORDED'); assert.deepEqual(plain(readTableBacked(s).signings), [typed('signings', canonicalSigning()), typed('signings', legacySigning())]); });

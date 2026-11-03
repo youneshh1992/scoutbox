@@ -4,9 +4,8 @@
 // every account reader and authentication path afterwards, the audit rows
 // untouched, SIGKILL and restart, the two failure seams of the deletion unit
 // (a failure after the erase, the real COMMIT) with everything restored and the
-// retry landing once; the admin backup keeping retained records separate from
-// live accounts, a tampered backup refused at boot, a restore into a NEW
-// directory. Every read of the file goes through a second connection. Nothing
+// retry landing once; the admin backup (a database copy) keeping retained
+// records separate from live accounts, a restore into a NEW directory. Every read of the file goes through a second connection. Nothing
 // here touches DATA_DIR or real data. Run with: npm test
 //
 // FAILING-FIRST NOTE (recorded on the unchanged d16362f tree): every test fails
@@ -62,17 +61,6 @@ async function boot(dir, env = {}, server = SERVER) {
     setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
-/** A boot expected to FAIL: resolves with { code, log } once the child exited. */
-async function bootRefused(dir, env = {}) {
-  const port = await freePort();
-  return new Promise((resolve) => {
-    const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
-    children.add(proc); let log = '';
-    proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
-    proc.on('exit', (code) => { children.delete(proc); resolve({ code, log }); });
-    setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* gone */ } }, 30_000).unref();
-  });
-}
 /** Every read of the file goes through a second, read-only connection; `snap` pins ONE read transaction. */
 const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { s.exec('BEGIN'); try { return fn({ get: (sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; }, all: (sql, ...p) => s.prepare(sql).all(...p).map((r) => ({ ...r })) }); } finally { s.exec('COMMIT'); } } finally { s.close(); } };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
@@ -85,8 +73,6 @@ const sessionsOf = (dir, id) => q1(dir, "SELECT COUNT(*) AS n FROM sessions WHER
 const codesOf = (dir, id) => q1(dir, 'SELECT COUNT(*) AS n FROM pairing_codes WHERE player_id = ?', id).n;
 const queued = (dir) => q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n;
 const auditRows = (dir) => snap(dir, (c) => JSON.stringify(Object.fromEntries(AUDIT_TABLES.map((t) => [t, c.all(`SELECT * FROM ${t} ORDER BY seq`)]))));
-const blobOf = (dir, name) => snap(dir, (c) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : undefined; });
-const applied = (dir) => qAll(dir, 'SELECT id FROM data_migrations ORDER BY id').map((r) => r.id);
 const retainedRowsOf = (dir) => qAll(dir, 'SELECT * FROM players WHERE deleted_at IS NOT NULL ORDER BY rowid');
 const orgLogin = async (S, orgId = 'org-eastport', scoutName = 'Maria Keane', role = 'Head of Recruitment') => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role }); assert.equal(r.status, 200, r.text); return r.body.token; };
 const signupAdult = async (S, name, { media = true } = {}) => {
@@ -197,7 +183,7 @@ await test('[cutover] the deletion unit\'s failure seams: a failure after the er
 });
 
 // ------------------------------------------------------------- backup, restore
-await test('[cutover] the admin backup carries the retained records under playersRetained and NEVER inside players; a backup tampered to list a retained id as a live player is refused at boot (PLAYER_ERASURE_IMPORT_BLOCKED, the id and no birth date, nothing of 0014 written); a restore into a NEW directory reproduces the retained rows exactly; nothing of the person comes back', async () => {
+await test('[cutover] the admin backup is a copy of the database that keeps the retained rows exactly and apart from live accounts (the manifest counts live players and retained records separately); a restore into a NEW directory reproduces the retained rows and the audit rows exactly; nothing of the person comes back', async () => {
   const dir = tempDir('s4br-backup'); let S = await boot(dir);
   const maria = await orgLogin(S);
   const a = await signupAdult(S, 'Backup Erased'); const b = await signupAdult(S, 'Backup Live', { media: false });
@@ -205,30 +191,24 @@ await test('[cutover] the admin backup carries the retained records under player
   const { token: gtok, childId } = await guardianWithChild(S, 'backup');
   assert.equal((await S.j('DELETE', '/player/account', {}, a.token)).status, 200); assert.equal((await S.j('DELETE', `/guardian/children/${childId}`, {}, gtok)).status, 200);
   const retained = retainedRowsOf(dir); assert.deepEqual(retained.map((r) => r.id), [a.pid, childId]);
-  const RECORDS = retained.map((r) => ({ id: r.id, deletedAt: r.deleted_at, birthDate: r.birth_date, country: r.country }));
   const auditBefore = auditRows(dir);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.equal(snapshot.db.players.some((p) => p.id === a.pid || p.id === childId), false, 'no retained id inside players'); assert.ok(snapshot.db.players.some((p) => p.id === b.pid), 'the live player is there');
-  assert.deepEqual(snapshot.db.playersRetained, RECORDS, 'the retained records, under their own name, exactly');
-  const manifest = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'manifest.json'), 'utf8')); assert.equal(manifest.counts.players, snapshot.db.players.length, 'the manifest counts live players');
   await S.stop();
-  // A tampered backup: a retained id listed as a live player.
-  const tampered = tempDir('s4br-tampered'); fs.cpSync(bk.body.dir, tampered, { recursive: true });
-  { const t = JSON.parse(fs.readFileSync(path.join(tampered, 'db.json'), 'utf8')); const liveB = t.db.players.find((p) => p.id === b.pid); t.db.players.push({ ...liveB, id: a.pid }); fs.writeFileSync(path.join(tampered, 'db.json'), JSON.stringify(t)); }
-  const refused = await bootRefused(tampered);
-  assert.notEqual(refused.code, 0, 'the boot is refused'); assert.match(refused.log, /PLAYER_ERASURE_IMPORT_BLOCKED/); assert.ok(refused.log.includes(a.pid), 'the id is named'); assert.doesNotMatch(refused.log, /2000-01-01/, 'the birth date is not');
-  assert.ok(applied(tampered).includes('0013_safety_audit') && !applied(tampered).includes(MIGRATION), 'nothing of 0014 was written'); assert.ok(Array.isArray(blobOf(tampered, 'playersRetained')), 'the blob is untouched');
+  assert.deepEqual(retainedRowsOf(bk.body.dir), retained, 'the backup holds the retained rows, exactly');
+  const liveIds = qAll(bk.body.dir, 'SELECT id FROM players WHERE deleted_at IS NULL').map((r) => r.id);
+  assert.equal(liveIds.includes(a.pid) || liveIds.includes(childId), false, 'no retained id is a live player'); assert.ok(liveIds.includes(b.pid), 'the live player is there');
+  const manifest = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.counts.players, liveIds.length, 'the manifest counts live players'); assert.equal(manifest.counts.retainedPlayers, 2);
   // A restore into a new directory.
   const restored = tempDir('s4br-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored);
-  assert.deepEqual(retainedRowsOf(restored), retained, 'the retained rows, exactly'); assert.equal(blobOf(restored, 'playersRetained'), undefined, 'the blob retired');
+  assert.deepEqual(retainedRowsOf(restored), retained, 'the retained rows, exactly');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.players.retained, 2);
   const mariaR = await orgLogin(S); assert.equal((await S.j('GET', `/org/players/${a.pid}`, undefined, mariaR)).status, 404); assert.equal((await S.j('GET', `/org/players/${b.pid}`, undefined, mariaR)).status, 200);
   assert.equal((await S.j('POST', '/auth/player/login', { playerId: a.pid, password: 'synthetic-pass-1' })).status, 404);
   assert.equal(auditRows(restored), auditBefore, 'the audit rows restored row for row');
   await S.stop();
-  rm(dir, tampered, restored, bk.body.dir);
+  rm(dir, restored);
 });
 
 console.log(`\n${passed} player-erasure server checks passed`);

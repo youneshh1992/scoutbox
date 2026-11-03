@@ -54,33 +54,16 @@ const ORGS = () => [
 ];
 /** A minimal player record migration 0005 accepts (dob and country are required; everything else is optional). */
 const PLAYER_1 = (name = 'P') => ({ id: 'pl-1', name, dob: '2001-01-01', country: 'GB', media: [] });
-const legacyUsers = () => [
+const fixtureUsers = () => [
   { id: 'usr-pro', orgId: 'org-pro', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1, mfa: { secretB32: 'S', enabledAt: 7, recoveryHashes: ['h1'] }, deliveryPrefs: { quietStart: '22:00' }, oddField: { kept: true } },
   { id: 'usr-grass', orgId: 'org-grass', name: 'Sam', role: 'Manager', createdAt: 2 },
   { id: 'usr-agency', orgId: 'org-agency', name: 'Ava', role: 'Agent', createdAt: 3 },
 ];
-const legacySessions = (now = Date.now()) => [
+const fixtureSessions = (now = Date.now()) => [
   { token: 'legacy-maria-token', sid: 'sid-maria', kind: 'org', refId: 'org-pro', userId: 'usr-pro', createdAt: now - DAY },
   { token: 'legacy-sam-token', sid: 'sid-sam', kind: 'org', refId: 'org-grass', userId: 'usr-grass', createdAt: now - DAY },
   { token: 'legacy-player-token', sid: 'sid-pl', kind: 'player', refId: 'pl-1', createdAt: now - DAY },
 ];
-
-/** An S2 database file: migrations 0001–0003 applied, staff and sessions in their tables, orgs still a blob. */
-function s2File(dir, { orgs = ORGS(), users = legacyUsers(), sessions = legacySessions(), extra = {} } = {}) {
-  const s = new DatabaseSync(path.join(dir, 'scoutbox.db'));
-  s.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
-  s.exec('CREATE TABLE IF NOT EXISTS collections (name TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
-  const put = s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)');
-  put.run('users', JSON.stringify(users));
-  put.run('sessions', JSON.stringify(sessions));
-  put.run('orgs', JSON.stringify(orgs));
-  put.run('players', JSON.stringify([PLAYER_1()]));
-  put.run('guardians', JSON.stringify([]));
-  for (const [k, v] of Object.entries(extra)) put.run(k, JSON.stringify(v));
-  s.prepare("INSERT INTO meta (key, value) VALUES ('idCounter', '1000'), ('savedAt', '1'), ('saveSeq', '1')").run();
-  runDataMigrations(s, [m0001, m0002, m0003], { context: { sessionTtlMs: TTL } }); // S2 state: staff and sessions live, orgs a blob
-  s.close();
-}
 
 // ------------------------------------------------------------- record ↔ row
 test('mapping: every record shape the application writes round-trips byte for byte — key order, explicit nulls, absent fields, composites, unknown fields', () => {
@@ -128,109 +111,43 @@ test('validation: unsupported records are refused with a reason and nothing is c
   for (const rec of ORGS()) assert.equal(validateOrgRecord(rec).ok, true, rec.id);
 });
 
-// ------------------------------------------------------------- the cutover migration
-test('cutover: the orgs blob is imported with every field preserved, org_users is rebuilt STRICT with the orgs foreign key, every staff row and session survives, and the blob is retired — in one transaction', () => {
-  const dir = tempDir('s3-valid'); s2File(dir);
-  const s = openRaw(dir);
-  const staffBefore = s.prepare('SELECT * FROM org_users ORDER BY rowid').all().map((r) => ({ ...r }));
-  const sessionsBefore = s.prepare('SELECT token_hash, sid, org_user_id FROM sessions ORDER BY sid').all().map((r) => ({ ...r }));
-  const before = s.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql;
-  assert.ok(!/STRICT/.test(before) && !/REFERENCES/.test(before), 'the S0 table is not STRICT and has no foreign key');
-  const r = runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
-  assert.deepEqual(r.ran, [ORGS_CUTOVER_MIGRATION]);
-  // Organisations: every record, every field, in its own shape.
-  const stored = ORGS_TABLE.read(s);
-  assert.equal(JSON.stringify(stored), JSON.stringify(ORGS()), 'records read back exactly as the blob held them');
-  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'the legacy blob is retired');
-  assert.equal(s.prepare("SELECT level FROM orgs WHERE id = 'org-agency'").get().level, null, 'the nullable level is stored as NULL');
-  assert.equal(s.prepare("SELECT password_hash FROM orgs WHERE id = 'org-pro'").get().password_hash, 'scrypt$00$11');
-  // Staff: rebuilt, every row and field identical, STRICT, foreign key, json checks, indexes.
+// ------------------------------------------------------------- the migration
+test('migration 0004 on a new database: org_users is rebuilt STRICT with the orgs foreign key, sessions still reference it, the first installation is pending, and a failure before commit leaves no trace', () => {
+  const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
+  assert.ok(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran.includes(ORGS_CUTOVER_MIGRATION));
   const after = s.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql;
   assert.match(after, /STRICT/); assert.match(after, /REFERENCES orgs\(id\)/); assert.match(after, /json_valid\(mfa_json\)/);
-  assert.deepEqual(s.prepare('SELECT * FROM org_users ORDER BY rowid').all().map((r) => ({ ...r })), staffBefore, 'every staff row and field is carried over');
   assert.deepEqual(s.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'org_users' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((x) => x.name), ['org_users_org', 'org_users_org_email', 'org_users_org_name', 'org_users_sso']);
-  // Sessions: untouched, still pointing at org_users by name, every reference intact.
-  assert.deepEqual(s.prepare('SELECT token_hash, sid, org_user_id FROM sessions ORDER BY sid').all().map((r) => ({ ...r })), sessionsBefore, 'no session was cascaded away or changed');
-  assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE name = 'sessions'").get().sql, /REFERENCES org_users\(id\)/, 'sessions still references org_users, not a temporary name');
-  assert.deepEqual(s.prepare('PRAGMA foreign_key_check').all(), [], 'every foreign key resolves');
-  assert.equal(s.prepare("SELECT value FROM meta WHERE key = 'orgsCutover'").get().value.includes('"imported":3'), true);
-  assert.equal(s.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'done', 'a cut-over blob is the initialisation: nothing is ever imported over it');
-  // The foreign key is enforced from now on, and the live tables still accept writes.
+  assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE name = 'sessions'").get().sql, /REFERENCES org_users\(id\)/, 'sessions references org_users, not a temporary name');
+  assert.equal(s.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'pending', 'a new database is a first installation');
+  assert.equal(s.prepare('PRAGMA foreign_keys').get().foreign_keys, 1, 'foreign keys are back on after the rebuild');
+  // The keys and checks are enforced.
+  ORGS_TABLE.replace(s, ORGS());
+  assert.equal(JSON.stringify(ORGS_TABLE.read(s)), JSON.stringify(ORGS()), 'records read back exactly as written');
+  assert.equal(s.prepare("SELECT level FROM orgs WHERE id = 'org-agency'").get().level, null, 'the nullable level is stored as NULL');
+  assert.equal(s.prepare("SELECT password_hash FROM orgs WHERE id = 'org-pro'").get().password_hash, 'scrypt$00$11');
   assert.throws(() => s.prepare("INSERT INTO org_users (id, org_id, name) VALUES ('usr-x', 'org-none', 'X')").run(), /FOREIGN KEY/);
   s.prepare("INSERT INTO org_users (id, org_id, name) VALUES ('usr-new', 'org-pro', 'New')").run();
   s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES ('h-new', 'sid-new', 'org', 'org-pro', 'usr-new', 1, 2)").run();
   assert.throws(() => s.prepare("UPDATE org_users SET mfa_json = 'not json' WHERE id = 'usr-new'").run(), /CHECK/);
   assert.throws(() => s.prepare("DELETE FROM orgs WHERE id = 'org-pro'").run(), /FOREIGN KEY/, 'an organisation with staff cannot be deleted (deletion policy is open question O2)');
-  s.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-test('cutover: an unsupported record, a duplicate id or a staff row naming a missing organisation aborts the whole migration; the file is byte-identical; a restart aborts the same way; the repaired file cuts over', () => {
-  const cases = [
-    ['a refused record', (o) => { o[1].level = 'agent'; return o; }, /id org-grass: level a string \("agent"\)/],
-    ['a duplicate id', (o) => [...o, { ...o[0] }], /id org-pro: duplicate id/],
-    ['a plan outside the list', (o) => { o[0].plan = 'Free'; return o; }, /id org-pro: plan/],
-    ['a staff row whose organisation is missing from the blob', (o) => o.filter((x) => x.id !== 'org-grass'), /staff usr-grass: names organisation org-grass, which the orgs blob does not hold/],
-  ];
-  for (const [name, mutate, pattern] of cases) {
-    const dir = tempDir('s3-abort'); s2File(dir, { orgs: mutate(ORGS()) });
-    const before = fileDigest(dir);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const s = openRaw(dir);
-      assert.throws(() => runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }), (err) => /ORGS_CUTOVER_BLOCKED/.test(err.message) && pattern.test(err.message), `${name}: aborts (attempt ${attempt + 1})`);
-      assert.equal(s.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(ORGS_CUTOVER_MIGRATION).n, 0);
-      assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 1, `${name}: the blob stays authoritative`);
-      assert.ok(!/STRICT/.test(s.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql), `${name}: org_users was not rebuilt`);
-      assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 3, `${name}: sessions untouched`);
-      assert.equal(s.prepare('PRAGMA foreign_keys').get().foreign_keys, 1, `${name}: foreign keys are back on after the failed step`);
-      s.close();
-      assert.equal(fileDigest(dir), before, `${name}: byte-identical`);
-    }
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-  // Repair, then retry: cuts over.
-  const dir = tempDir('s3-retry'); s2File(dir, { orgs: ORGS().map((o) => (o.id === 'org-grass' ? { ...o, level: 'agent' } : o)) });
-  let s = openRaw(dir);
-  assert.throws(() => runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }), /ORGS_CUTOVER_BLOCKED/);
-  const fixed = JSON.parse(s.prepare("SELECT value FROM collections WHERE name = 'orgs'").get().value).map((o) => (o.id === 'org-grass' ? { ...o, level: 'grassroots' } : o));
-  s.prepare("UPDATE collections SET value = ? WHERE name = 'orgs'").run(JSON.stringify(fixed));
-  s.close(); s = openRaw(dir);
-  assert.deepEqual(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION]);
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3);
-  s.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-test('cutover: an empty blob, a missing blob (first installation) and a stale populated S1 shadow all cut over to a complete, correct table; a failure injected before commit leaves no trace', () => {
-  for (const [name, setup] of [['empty blob', (dir) => s2File(dir, { orgs: [], users: [], sessions: [] })], ['missing blob', (dir) => { s2File(dir, { orgs: [], users: [], sessions: [] }); const s = openRaw(dir); s.prepare("DELETE FROM collections WHERE name = 'orgs'").run(); s.close(); }]]) {
-    const dir = tempDir('s3-empty'); setup(dir);
-    const s = openRaw(dir);
-    assert.deepEqual(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION], name);
-    assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, name);
-    assert.equal(s.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(ORGS_CUTOVER_MIGRATION).n, 1, `${name}: completion is the record, not the rows`);
-    const repo = createOrgsRepository({ sqlite: s }); assert.deepEqual(repo.attach([]), { engine: 'sqlite', loaded: 0, imported: 0 });
-    s.close(); fs.rmSync(dir, { recursive: true, force: true });
-  }
-  // A stale populated shadow: rows an S1 projection left in the orgs table that no longer match the blob.
-  const dir = tempDir('s3-stale'); s2File(dir);
-  let s = openRaw(dir);
-  s.prepare("INSERT INTO orgs (id, name, type, level, plan) VALUES ('org-ghost', 'Ghost', 'club', 'pro', 'Pro')").run();
-  s.prepare("INSERT INTO orgs (id, name, type, level, plan) VALUES ('org-pro', 'Stale Name', 'club', 'pro', 'Pro')").run();
-  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
-  assert.deepEqual(s.prepare('SELECT id, name FROM orgs ORDER BY id').all().map((r) => [r.id, r.name]), [['org-agency', 'Northstar Agency'], ['org-grass', 'Riverside Juniors'], ['org-pro', 'Eastport FC']], 'the shadow rows are replaced by the blob, the authoritative source');
-  s.close(); fs.rmSync(dir, { recursive: true, force: true });
-  // Failure injection after the rebuild but before the commit.
-  const dir2 = tempDir('s3-inject'); s2File(dir2);
-  s = openRaw(dir2);
-  const before = fileDigest(dir2);
-  const exploding = { id: m0004.id, note: m0004.note, foreignKeysOff: true, up(sqlite, ctx) { m0004.up(sqlite, ctx); assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3, 'rows were written inside the transaction'); throw new Error('process died before commit'); } };
-  assert.throws(() => runDataMigrations(s, [m0001, m0002, m0003, exploding], { context: { sessionTtlMs: TTL } }), /process died before commit/);
-  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 1);
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 3);
-  assert.ok(!/STRICT/.test(s.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql));
-  assert.equal(s.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
   s.close();
-  assert.equal(fileDigest(dir2), before, 'nothing of the failed attempt reached the file');
-  s = openRaw(dir2);
-  assert.deepEqual(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION]);
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3);
-  s.close(); fs.rmSync(dir2, { recursive: true, force: true });
+  // Failure injection after the rebuild but before the commit.
+  const dir = tempDir('s3-inject');
+  let f = openRaw(dir);
+  runDataMigrations(f, [m0001, m0002, m0003], { context: { sessionTtlMs: TTL } });
+  f.close();
+  const before = fileDigest(dir);
+  f = openRaw(dir);
+  const exploding = { id: m0004.id, note: m0004.note, foreignKeysOff: true, up(sqlite, ctx) { m0004.up(sqlite, ctx); throw new Error('process died before commit'); } };
+  assert.throws(() => runDataMigrations(f, [m0001, m0002, m0003, exploding], { context: { sessionTtlMs: TTL } }), /process died before commit/);
+  assert.ok(!/STRICT/.test(f.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql));
+  assert.equal(f.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
+  f.close();
+  assert.equal(fileDigest(dir), before, 'nothing of the failed attempt reached the file');
+  f = openRaw(dir);
+  assert.deepEqual(runDataMigrations(f, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION]);
+  f.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- the repository
@@ -406,19 +323,20 @@ test('correction 2: nested migrated fields are protected — assigning, deleting
   assert.equal(JSON.stringify(ORGS_TABLE.read(store.sqlite)), JSON.stringify(db2.orgs));
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('correction 3: initialisation is explicit state, never a row count — an empty cut-over table stays authoritative against stale arrays and blobs; a genuine first installation initialises once, atomically, and retries after an interruption; an intentionally empty table stays empty', () => {
-  // (a) A cut-over database whose table was emptied: a stale array is ignored, nothing is imported.
-  const dirA = tempDir('s3-c3a'); s2File(dirA);
+test('correction 3: initialisation is explicit state, never a row count — an empty initialised table stays authoritative against stale arrays; a genuine first installation initialises once, atomically, and retries after an interruption; an intentionally empty table stays empty', () => {
+  // (a) An initialised database whose table was emptied: a stale array is ignored, nothing is imported.
+  const dirA = tempDir('s3-c3a');
   let s = openRaw(dirA);
   runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
-  s.exec('DELETE FROM sessions; DELETE FROM org_users; DELETE FROM orgs;');
+  createOrgsRepository({ sqlite: s }).initialize(ORGS());
+  s.exec('DELETE FROM orgs;');
   let warnings = [];
   const repo = createOrgsRepository({ sqlite: s, warn: (m) => warnings.push(m) });
   const stale = [{ id: 'org-stale', name: 'Stale', type: 'club', plan: 'Pro' }];
   assert.deepEqual(repo.attach(stale), { engine: 'sqlite', loaded: 0, imported: 0 }, 'an empty authoritative table imports nothing');
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
   assert.match(warnings[0], /ignored/);
-  assert.equal(repo.initState(), 'done', 'the migration recorded that the organisations were initialised from the blob');
+  assert.equal(repo.initState(), 'done', 'the initialisation was recorded');
   s.close();
   // The same through the data layer with a seed-shaped array, as a server booting from the seed would pass.
   let store = openStore(dirA, { tableBacked: TABLE_BACKED });
@@ -428,17 +346,6 @@ test('correction 3: initialisation is explicit state, never a row count — an e
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 0, imported: 0 }); assert.equal(db.orgs.length, 0);
   assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0);
   assert.match(warnings.join('\n'), /3 organisation\(s\) the table does not hold was ignored/);
-  // A stale orgs blob written back into the file is ignored at attach and removed by the next save.
-  store.sqlite.prepare("INSERT INTO collections (name, value) VALUES ('orgs', ?)").run(JSON.stringify(ORGS()));
-  store.sqlite.close();
-  store = openStore(dirA, { tableBacked: TABLE_BACKED });
-  db = { ...store.load().db };
-  assert.equal(Array.isArray(db.orgs) && db.orgs.length, 3, 'fixture: the stale blob is what the server would load into memory');
-  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, warn: () => {} });
-  assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 0, imported: 0 }); assert.equal(db.orgs.length, 0);
-  store.save({ savedAt: 9, idCounter: 1000, db });
-  assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'the stale blob is gone');
-  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'and the table is still empty');
   store.sqlite.close(); fs.rmSync(dirA, { recursive: true, force: true });
   // (b) A genuine first installation: nothing was ever saved, so the migration leaves initialisation pending and the seed is imported once.
   const dirB = tempDir('s3-c3b');
@@ -516,22 +423,15 @@ test('review (cb1d22b): initialise refuses a collection that is not an array —
 });
 
 // ------------------------------------------------------------- snapshot tools
-test('snapshot mode: before the cutover record the orgs blob is authoritative; after it the table is read and written back, with shape and row validation rejecting the whole save', () => {
-  const dir = tempDir('s3-snap'); s2File(dir);
-  // Before: S2 state, blob authoritative, table (S1 shadow) ignored.
+test('snapshot mode: a fixture saved into a new directory goes into the tables and reads back as the same records; shape and row validation reject the whole save', () => {
+  const dir = tempDir('s3-snap');
   let tool = openStore(dir);
-  let snap = tool.load();
-  assert.equal(JSON.stringify(snap.db.orgs), JSON.stringify(ORGS()), 'the blob');
-  snap.db.players.push({ id: 'pl-2', name: 'Q', dob: '2002-02-02', country: 'GB' }); tool.save(snap);
-  assert.equal(JSON.parse(tool.sqlite.prepare("SELECT value FROM collections WHERE name = 'orgs'").get().value).length, 3, 'the blob is kept');
-  assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'the shadow table is not promoted');
+  tool.save({ savedAt: 1, idCounter: 1000, db: { orgs: ORGS(), users: fixtureUsers(), sessions: fixtureSessions(), players: [PLAYER_1()], guardians: [] } });
+  assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'no blob');
+  assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 3);
   tool.sqlite.close();
-  // Cut over through the server path.
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  let layer = attachDataLayer({ db: { ...store.load().db }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.equal(layer.orgs.count(), 3); store.sqlite.close();
-  // After: the table, as records.
-  tool = openStore(dir); snap = tool.load();
+  let store, layer;
+  tool = openStore(dir); let snap = tool.load();
   assert.equal(JSON.stringify(snap.db.orgs), JSON.stringify(ORGS()), 'the table, rendered as the same records');
   const before = tool.load();
   const untouched = () => {
@@ -541,7 +441,7 @@ test('snapshot mode: before the cutover record the orgs blob is authoritative; a
     assert.equal(JSON.stringify(now.db.sessions), JSON.stringify(before.db.sessions), 'sessions unchanged');
     assert.equal(now.db.players[0].name, 'P', 'the unrelated change was rolled back');
     assert.equal(now.saveSeq, before.saveSeq);
-    assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'no legacy blob recreated');
+    assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'no blob written');
   };
   const attempt = (mutate, pattern) => { const x = tool.load(); x.db.players[0].name = 'Changed'; mutate(x); assert.throws(() => tool.save(x), pattern); untouched(); };
   attempt((x) => { x.db.orgs = { id: 'obj' }; }, /orgs: the snapshot collection must be an array/);
@@ -577,19 +477,18 @@ test('snapshot mode: before the cutover record the orgs blob is authoritative; a
 });
 
 // ------------------------------------------------------------- through the real server
-await atest('server: an S2 database boots and cuts over; registration, settings, suspension, verification, credentials and staff sessions work; facet and scalar changes survive a restart; backup and restore keep every organisation', async () => {
+await atest('server: a fixture database boots; registration, settings, suspension, verification, credentials and staff sessions work; facet and scalar changes survive a restart; backup and restore keep every organisation', async () => {
   const dir = tempDir('s3-server');
   const seed = buildSeed();
   seed.users = [{ id: 'usr-legacy', orgId: 'org-eastport', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
   seed.sessions = [{ token: 'legacy-maria-token-00000000000000000000000000', sid: 'sid-maria', kind: 'org', refId: 'org-eastport', userId: 'usr-legacy', createdAt: Date.now() - DAY }];
   seed.orgs.find((o) => o.id === 'org-eastport').squad = [{ id: 'sq-seed', name: 'Seeded', position: 'ST', playerId: null, source: 'manual', addedAt: 1 }];
   // A Room owned by a live organisation: the boot integrity report must still
-  // see the organisation on every boot after the cutover (regression: it ran
+  // see the organisation on every boot (regression: it ran
   // before the data layer attached and called every Room an orphan).
   seed.recruitmentCases = [{ id: 'case-s3', orgId: 'org-eastport', playerId: seed.players[0].id, playerName: seed.players[0].name, ownerUserId: 'usr-legacy', ownerName: 'Maria Keane', stage: null, priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: { status: 'watching', rev: 1 } }]; // S8b: a case literal (the identifiers 0016 keys on: ownerUserId → org_users, createdAt)
-  // An S2 file: blobs saved by the snapshot store, then migrations 0001–0003 applied.
-  openStore(dir).save({ savedAt: Date.now(), idCounter: 1000, db: seed });
-  { const s = openRaw(dir); runDataMigrations(s, [m0001, m0002, m0003], { context: { sessionTtlMs: TTL } }); s.close(); }
+  // The fixture, saved by the snapshot store into the tables.
+  { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); }
   const port = pickPort(7600, 100);
   const boot = () => new Promise((resolve, reject) => {
     const proc = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -610,7 +509,7 @@ await atest('server: an S2 database boots and cuts over; registration, settings,
   let regToken, newOrgId;
   try {
     const maria = seed.sessions[0].token;
-    assert.equal((await j('GET', '/org/notifications', undefined, maria)).status, 200, 'the staff session survived the org_users rebuild');
+    assert.equal((await j('GET', '/org/notifications', undefined, maria)).status, 200, 'the fixture staff session works');
     const cap = await j('GET', '/capabilities');
     assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']);
     assert.equal(cap.body.dataLayer.domains.orgs.mode, 'live'); assert.equal(cap.body.dataLayer.domains.orgs.rows, 5);
@@ -656,17 +555,17 @@ await atest('server: an S2 database boots and cuts over; registration, settings,
     const rovers = clubs.body.find((o) => o.id === newOrgId);
     assert.equal(rovers.verified, true); assert.equal(rovers.verifiedDomain, 'rovers.example'); assert.equal(rovers.suspended, false);
     if (Array.isArray(rovers.lookingFor)) assert.deepEqual(rovers.lookingFor, ['ST', 'GK']);
-    assert.equal(clubs.body.find((o) => o.id === 'org-eastport').squad[0].name, 'Seeded', 'the seeded facet survived the cutover and a restart');
+    assert.equal(clubs.body.find((o) => o.id === 'org-eastport').squad[0].name, 'Seeded', 'the seeded facet survived a restart');
     assert.equal((await j('GET', '/org/notifications', undefined, regToken)).status, 200, 'the session minted before the restart is still valid');
     const cap2 = await j('GET', '/capabilities');
-    assert.equal(cap2.body.integrity.ok, true, `integrity after a restart on a cut-over file: ${JSON.stringify(cap2.body.integrity.byCode)}`);
+    assert.equal(cap2.body.integrity.ok, true, `integrity after a restart: ${JSON.stringify(cap2.body.integrity.byCode)}`);
     assert.equal(cap2.body.integrity.byCode.ROOM_ORPHAN_ORG, undefined, 'the Room still belongs to an organisation the report can see');
     // Backup → restore: every organisation, with its facets, and every session.
     const backup = await (await fetch(`http://127.0.0.1:${port}/admin/backup`, { method: 'POST', headers: A })).json();
     backupDir = backup.dir;
-    const exported = JSON.parse(fs.readFileSync(path.join(backupDir, 'db.json'), 'utf8'));
-    assert.equal(exported.db.orgs.length, 6); assert.ok(exported.db.orgs.find((o) => o.id === newOrgId).verified);
-    assert.ok(!JSON.stringify(exported.db.orgs).includes('__meta'), 'the reserved shape metadata never leaves the repository');
+    const copy = new DatabaseSync(path.join(backupDir, 'scoutbox.db'), { readOnly: true });
+    assert.equal(copy.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 6); assert.equal(copy.prepare('SELECT verified FROM orgs WHERE id = ?').get(newOrgId).verified, 1);
+    copy.close();
   } finally { await stop(S); }
   const restoreDir = tempDir('s3-restore'); fs.cpSync(backupDir, restoreDir, { recursive: true });
   const port2 = pickPort(7700, 100);

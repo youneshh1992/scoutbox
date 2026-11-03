@@ -12,7 +12,7 @@ import { SAFETY_AUDIT_MIGRATION } from '../safetyAudit.mjs';
 import { PLAYER_ERASURE_MIGRATION } from '../identity.mjs';
 
 export const id = PLAYER_ERASURE_MIGRATION;
-export const note = 'an account deletion keeps the player row as the retained record (id, deleted_at, birth_date, country; placeholders and NULL elsewhere; owned rows and links removed) instead of deleting it; the retained records of a restored backup (playersRetained) are imported; no table, no column, no foreign key, no retention period';
+export const note = 'an account deletion keeps the player row as the retained record (id, deleted_at, birth_date, country; placeholders and NULL elsewhere; owned rows and links removed) instead of deleting it; no table, no column, no foreign key, no retention period';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

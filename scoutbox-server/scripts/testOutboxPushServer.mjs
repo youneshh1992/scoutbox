@@ -79,17 +79,13 @@ const live = (dir) => !!q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id =
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
 const blobRows = (c, name) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
 const outboxFromRow = (r) => (r.source === 'mailer' ? { id: r.id, ts: r.created_at, to: r.to_address, subject: r.subject, text: r.text, transport: r.transport, delivered: r.delivered === 1 } : { id: r.id, at: r.created_at, channel: r.channel, to: r.to_address, text: r.text, providerMessageId: r.provider_message_id, provider: r.transport });
-/** The three collections as the DATABASE holds them, in insertion order: the tables after the cutover, the blobs before it (so a check reads the same way on both builds). */
-const readStored = (c) => {
-  const cut = !!c.get("SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'");
-  if (!cut) return { outbox: blobRows(c, 'outbox') ?? [], pushLog: blobRows(c, 'pushLog') ?? [], pushTokens: blobRows(c, 'pushTokens') ?? [], seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0 };
-  return {
+/** The three collections as the DATABASE holds them, in insertion order. */
+const readStored = (c) => ({
     outbox: c.all(`SELECT seq, id, source, created_at, to_address, subject, text, transport, delivered, channel, provider_message_id FROM outbox ORDER BY seq`).map(outboxFromRow),
     pushLog: c.all('SELECT id, created_at, audience_kind, audience_id, title, body, transport FROM push_log ORDER BY seq').map((r) => ({ id: r.id, ts: r.created_at, audience: { kind: r.audience_kind, id: r.audience_id }, title: r.title, body: r.body, transport: r.transport })),
     pushTokens: c.all('SELECT ref_kind, ref_id, token, registered_at FROM push_tokens ORDER BY seq').map((r) => ({ kind: r.ref_kind, refId: r.ref_id, token: r.token, ts: r.registered_at })),
     seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0,
-  };
-};
+});
 const stored = (dir) => snap(dir, readStored);
 const playerTokens = (dir, id = 'pl-adeyemi') => stored(dir).pushTokens.filter((t) => t.kind === 'player' && t.refId === id);
 const orgLogin = async (S, orgId, scoutName, role) => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role }); assert.equal(r.status, 200, `org login ${orgId}: ${r.text}`); return r.body.token; };
@@ -165,8 +161,7 @@ await test('D2 through the real route: five string registrations with repeats ar
   assert.equal((await S.j('POST', '/push/register', { token: 'x' })).status, 401);
   await sleep(2600); assert.deepEqual(playerTokens(dir), moved, 'nothing stored by a refusal'); assert.equal(S.proc.exitCode, null);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.deepEqual(snapshot.db.pushTokens.filter((t) => t.kind === 'player' && t.refId === 'pl-adeyemi'), moved, 'the backup carries the tokens');
+  assert.deepEqual(playerTokens(bk.body.dir), moved, 'the backup\'s database copy carries the tokens');
   await S.stop(); rm(dir, bk.body.dir);
 });
 
@@ -182,7 +177,7 @@ await test('[compat] an accepted queued dispatch with to: null (the stored state
   await S.stop(); S = await boot(dir);
   assert.ok(stored(dir).outbox.some((m) => m.id === row.id && m.to === null), 'survives the restart'); const admin = (await S.j('GET', '/admin/outbox', undefined, null, A)).body; assert.ok(admin.some((m) => m.id === row.id && m.to === null), 'listed by the admin view with to: null');
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201);
-  const entry = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')).db.outbox.find((m) => m.id === row.id); assert.ok(entry && Object.hasOwn(entry, 'to') && entry.to === null, 'the backup keeps the key present and null');
+  const entry = stored(bk.body.dir).outbox.find((m) => m.id === row.id); assert.ok(entry && Object.hasOwn(entry, 'to') && entry.to === null, 'the backup\'s database copy keeps the null destination');
   await S.stop(); rm(dir, bk.body.dir);
 });
 
@@ -252,7 +247,7 @@ await test('[cutover] a failed ordinary save (internal:save.sqlite_commit at the
 });
 
 // ============================================================= [cutover] deletion, backup/restore
-await test('[cutover] an ordinary account deletion leaves the three tables alone (the deleted player\'s token rows and push rows stay); the admin backup exports outbox, pushLog and pushTokens in their legacy shapes (both outbox literals, the null destination, the tokens); a restore into a NEW directory imports them (migration 0011) row for row; a backup whose outbox entry matches both shapes is refused at boot (OUTBOX_PUSH_IMPORT_BLOCKED, no address in the log) and creates no table', async () => {
+await test('[cutover] an ordinary account deletion leaves the three tables alone (the deleted player\'s token rows and push rows stay); the admin backup\'s database copy carries outbox, pushLog and pushTokens row for row (both outbox literals, the null destination, the tokens); a restore into a NEW directory boots with the same rows and no blob', async () => {
   const dir = tempDir('s7c-backup'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara'); let kola = await playerLogin(S, 'pl-adeyemi');
   for (const token of [...BASELINE_TOKENS, 'ExponentPushToken[synthetic-d]', 'ExponentPushToken[synthetic-e]', 'ExponentPushToken[synthetic-f]', 'ExponentPushToken[synthetic-g]']) assert.equal((await S.j('POST', '/push/register', { token }, kola)).status, 201);
@@ -278,22 +273,18 @@ await test('[cutover] an ordinary account deletion leaves the three tables alone
   assert.equal(afterDel.pushTokens.filter((t) => t.kind === 'player' && t.refId === 'pl-adeyemi').length, playerRows.tokens, 'the deleted person\'s token rows stay (no cascade, by decision)');
   // The backup.
   const all = stored(dir); const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.deepEqual(snapshot.db.outbox, all.outbox, 'both outbox literals, the null destination present'); assert.deepEqual(snapshot.db.pushLog, all.pushLog); assert.deepEqual(snapshot.db.pushTokens, all.pushTokens, 'the tokens');
-  assert.ok(snapshot.db.outbox.some((m) => Object.hasOwn(m, 'to') && m.to === null)); assert.ok(snapshot.db.outbox.some((m) => Object.hasOwn(m, 'subject')) && snapshot.db.outbox.some((m) => !Object.hasOwn(m, 'subject') && Object.hasOwn(m, 'providerMessageId')));
-  assert.equal(snapshot.db.pushTokens.filter((t) => t.kind === 'player').length, 7);
+  const copy = stored(bk.body.dir);
+  assert.deepEqual(copy.outbox, all.outbox, 'both outbox literals, the null destination present'); assert.deepEqual(copy.pushLog, all.pushLog); assert.deepEqual(copy.pushTokens, all.pushTokens, 'the tokens');
+  assert.ok(copy.outbox.some((m) => Object.hasOwn(m, 'to') && m.to === null)); assert.ok(copy.outbox.some((m) => Object.hasOwn(m, 'subject')) && copy.outbox.some((m) => !Object.hasOwn(m, 'subject') && Object.hasOwn(m, 'providerMessageId')));
+  assert.equal(copy.pushTokens.filter((t) => t.kind === 'player').length, 7);
   await S.stop();
   const restored = tempDir('s7c-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
-  S = await boot(restored); assert.ok(live(restored), 'the restore imported through 0011');
-  const back = stored(restored); assert.deepEqual([back.outbox, back.pushLog, back.pushTokens], [all.outbox, all.pushLog, all.pushTokens], 'imported row for row');
-  for (const n of ['outbox', 'pushLog', 'pushTokens']) assert.equal(q1(restored, 'SELECT COUNT(*) AS n FROM collections WHERE name = ?', n).n, 0, 'no blob left behind');
-  const record = JSON.parse(q1(restored, "SELECT value FROM meta WHERE key = 'outboxPushCutover'").value); assert.equal(record.outbox.imported, all.outbox.length); assert.equal(record.pushTokens.imported, all.pushTokens.length); assert.doesNotMatch(JSON.stringify(record), /example\.invalid|ExponentPushToken/);
+  S = await boot(restored); assert.ok(live(restored));
+  const back = stored(restored); assert.deepEqual([back.outbox, back.pushLog, back.pushTokens], [all.outbox, all.pushLog, all.pushTokens], 'restored row for row');
+  for (const n of ['outbox', 'pushLog', 'pushTokens']) assert.equal(q1(restored, 'SELECT COUNT(*) AS n FROM collections WHERE name = ?', n).n, 0, 'no blob');
+  assert.equal((await S.j('GET', '/admin/outbox', undefined, null, A)).body.length, all.outbox.length, 'the admin view lists the restored outbox');
   await S.stop();
-  const bad = tempDir('s7c-bad'); fs.cpSync(bk.body.dir, bad, { recursive: true });
-  { const j = JSON.parse(fs.readFileSync(path.join(bad, 'db.json'), 'utf8')); j.db.outbox[0].channel = 'email'; j.db.outbox[0].providerMessageId = 'fm_x'; fs.writeFileSync(path.join(bad, 'db.json'), JSON.stringify(j)); }
-  const refusedBoot = await (async () => { try { const x = await boot(bad); await x.kill(); throw new Error('must refuse'); } catch (e) { if (typeof e.code !== 'number') throw e; return e; } })();
-  assert.match(refusedBoot.log, /OUTBOX_PUSH_IMPORT_BLOCKED/); assert.match(refusedBoot.log, /matches both outbox shapes/); assert.equal(/example\.invalid/.test(refusedBoot.log), false, 'no address in the log'); assert.equal(live(bad), false);
-  rm(dir, bk.body.dir, restored, bad);
+  rm(dir, bk.body.dir, restored);
 });
 
 // ============================================================= valid input only: a non-string e-mail never reaches the mailer

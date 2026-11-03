@@ -1,6 +1,5 @@
 // Unit tests for the relational data layer (repositories/): the table
-// migration runner, the staff repository, the read-only views, the legacy
-// import and the snapshot store's table-backed exclusions. Everything runs on
+// migration runner, the staff repository, the read-only views and the snapshot store's table-backed exclusions. Everything runs on
 // an in-memory or throwaway SQLite database. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -172,7 +171,7 @@ test('repository: a table row survives a new process while the id counter is beh
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 2);
   s.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('repository: the legacy blob array is imported once, every typed field kept and an unknown field dropped and reported by id, and ignored once the table has rows', () => {
+test('repository: the in-memory (seed) array is imported once when the table is empty, every typed field kept and an unknown field dropped and reported by id, and ignored once the table has rows', () => {
   const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS); seedOrgs(s);
   const legacy = [
     { id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 5, email: 'a@x', ssoSubject: 'idp-1', mfa: { secretB32: 'S', enabledAt: 7, recoveryHashes: [] }, deliveryPrefs: { quietStart: '22:00' }, removedAt: 9, removedBy: 'B', oddField: { kept: true } },
@@ -218,7 +217,7 @@ test('repository: typed fields only — an unknown key is not stored, a wrong-ty
   assert.equal(repo.view.length, 1); assert.equal(typeof u.createdAt, 'number');
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
 });
-test('snapshot write and blob import: the snapshot write stores no unknown key and refuses a wrong-typed field by code, id and field; the blob import drops it and reports it', () => {
+test('snapshot write and array import: the snapshot write stores no unknown key and refuses a wrong-typed field by code, id and field; the array import drops it and reports it', () => {
   const s = fresh(); runDataMigrations(s, DATA_MIGRATIONS); seedOrgs(s);
   assert.equal(USERS_TABLE.replace(s, [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1, futureField: { x: 1 } }]), true);
   assert.deepEqual(USERS_TABLE.read(s), [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }]);
@@ -259,19 +258,17 @@ test('attachDataLayer: db.users becomes the repository view and cannot be replac
   }
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('store (server mode): a table-backed collection is never written as a blob again, and a stale blob row is deleted on the next save', () => {
+test('store (server mode): a table-backed collection is never written as a blob; a snapshot that carries players without guardians is refused', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-store-'));
+  const PLAYER = { id: 'p', name: 'P', dob: '2001-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } };
   let store = openStore(dir);
   // (A snapshot that carries players carries guardians: the identity pair is coupled, see checkTableBackedShapes.)
-  store.save({ savedAt: 1, idCounter: 1000, db: { players: [{ id: 'p' }], guardians: [], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
-  assert.throws(() => store.save({ savedAt: 1, idCounter: 1000, db: { players: [{ id: 'p' }], users: [] } }), /players: a snapshot that carries players must carry guardians too/);
+  assert.throws(() => store.save({ savedAt: 1, idCounter: 1000, db: { players: [PLAYER], users: [] } }), /players: a snapshot that carries players must carry guardians too/);
   store.sqlite.close();
-  store = openStore(dir, { tableBacked: ['users'] });
-  const loaded = store.load();
-  assert.equal(loaded.db.users.length, 1, 'the old blob is still handed back for the one-time import');
-  store.save({ savedAt: 2, idCounter: 1001, db: { players: [{ id: 'p' }], guardians: [], users: [{ id: 'usr-1' }] } });
-  const names = store.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name);
-  assert.deepEqual(names, ['guardians', 'players']);
+  store = openStore(dir, { tableBacked: TABLE_BACKED });
+  store.save({ savedAt: 2, idCounter: 1001, db: { players: [PLAYER], guardians: [], users: [{ id: 'usr-1' }], notes: [{ id: 'n1' }] } });
+  assert.deepEqual(store.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), ['notes'], 'only the collections without a table are blobs');
+  assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, 'a server-mode save leaves the tables to their repositories');
   assert.equal(store.load().db.users, undefined);
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -309,27 +306,21 @@ test('store (snapshot mode): load merges table-backed collections in from their 
   assert.equal(db2.players[0].name, 'P');
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('store (snapshot mode): before any boot there is no table, so a fixture is written as a blob and imported by the first boot', () => {
+test('store (snapshot mode): a fixture saved into a new directory is written into the tables, and the first boot attaches to them', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-fixture-'));
   const tool = openStore(dir);
   tool.save({ savedAt: 1, idCounter: 1000, db: { players: [], guardians: [], orgs: [ORG_O], users: [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }] } });
-  assert.deepEqual(tool.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), ['guardians', 'orgs', 'players', 'users']);
+  assert.deepEqual(tool.sqlite.prepare('SELECT name FROM collections ORDER BY name').all().map((r) => r.name), [], 'no blob: every collection of the fixture has a table');
+  assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
   tool.sqlite.close();
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = { ...server.load().db };
   const layer = attachDataLayer({ db, store: server, nextId, persist: () => {} });
-  // Since S2 the sessions cutover migration imports the users blob into the
-  // table inside its own transaction (org sessions reference staff rows), so by
-  // the time the repository attaches the table already holds the row and the
-  // blob is retired: loaded from the table, nothing left to import.
   assert.deepEqual(layer.boot.users, { engine: 'sqlite', loaded: 1, imported: 0 });
-  assert.equal(server.sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
-  assert.equal(server.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'users'").get().n, 0);
   assert.equal(db.users[0].name, 'A');
-  // The saved (empty) players and guardians blobs were cut over by migration 0005 the same way: imported, retired, done.
+  // A saved snapshot is never a first installation: the identity tables are attached, not seeded.
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 });
   assert.equal(layer.report().identity.initState, 'done');
-  assert.equal(server.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('players', 'guardians')").get().n, 0, 'the blobs are retired');
   server.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 

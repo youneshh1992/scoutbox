@@ -5,16 +5,11 @@
 // with the draft discarded; read receipts; /capabilities counting the rows and the Q8c-a references; the recipient's
 // and another club's surfaces unchanged (no internal note, no decision id, no body in the journey; another club's 404);
 // a SIGKILL right after a send; the deletion unit's in-place edits with a REAL COMMIT failure leaving every row as it
-// was and the retry landing once; a backup whose db.json carries a contact naming a historically missing player
-// restored, served and counted (Q8c-a) while one naming a missing guardian is refused (Q8c-b); the admin backup carrying
-// the two collections in the legacy shapes, a restore into a NEW directory importing them through 0017 row for row.
+// was and the retry landing once; a restored backup given a contact naming a historically missing player serves and
+// counts it (Q8c-a), while one naming a missing guardian is refused at the save (Q8c-b); the admin backup (a copy of the
+// database) holding the two collections, a restore into a NEW directory serving them row for row.
 // Every database read goes through a second read-only connection. Nothing here touches DATA_DIR or real data. Run
 // with: npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged 19f5ca8 tree, source-identical to the accepted 7072dd9): the [cutover]
-// tests assert the 0017 record, the nine tables, the absence of the two blobs and the /capabilities domain
-// and FAIL there on concrete assertions; the [compat] checks inside them (the routes' answers, the recipient's and
-// the other club's surfaces) hold on both trees.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -23,6 +18,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
+import { readContacts, readOffers } from '../repositories/recruitmentContactsOffers.mjs';
+import { openStore } from '../store.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -57,22 +54,6 @@ async function boot(dir, env = {}, server = SERVER) {
     setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
-/** Boot and MEASURE: resolves with { code, log } on exit, or { code: 'listening', log, S } when the build listens (the caller stops it). */
-async function bootMeasured(dir, env = {}, server = SERVER) {
-  const port = await freePort();
-  return new Promise((resolve) => {
-    const proc = spawn(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
-    children.add(proc); proc.on('exit', () => children.delete(proc));
-    let log = ''; let settled = false;
-    const j = async (method, p, body, token, headers = {}) => { const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined }); const text = await r.text(); let parsed = null; try { parsed = JSON.parse(text); } catch { /* no body */ } return { status: r.status, body: parsed, text }; };
-    const S = { proc, port, dir, log: () => log, j, stop: () => new Promise((res) => { proc.on('exit', () => res()); proc.kill('SIGTERM'); }) };
-    proc.stdout.on('data', (d) => { log += d; if (!settled && /listening on/.test(log)) { settled = true; resolve({ code: 'listening', log, S }); } });
-    proc.stderr.on('data', (d) => { log += d; });
-    proc.on('exit', (code) => { if (!settled) { settled = true; resolve({ code, log }); } });
-    setTimeout(() => { if (!settled) { settled = true; proc.kill('SIGKILL'); resolve({ code: 'timeout', log }); } }, 30_000).unref();
-  });
-}
-async function bootRefused(dir, env = {}, server = SERVER) { const r = await bootMeasured(dir, env, server); if (r.code === 'listening') { await r.S.stop(); return { code: 'listening', log: r.log }; } return r; }
 const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { s.exec('BEGIN'); try { return fn({ get: (sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; }, all: (sql, ...p) => s.prepare(sql).all(...p).map((r) => ({ ...r })) }); } finally { s.exec('COMMIT'); } } finally { s.close(); } };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
@@ -121,7 +102,7 @@ async function considerationRoom(S, token, playerId) {
 }
 const TERMS = { role: 'Central midfielder', squad: 'Under-23s', startDate: '2027-07-01', endDate: '2029-06-30', conditions: 'Subject to a medical.' };
 
-await test('[cutover] a fresh boot records 0017_recruitment_contacts_offers last; the nine tables exist with the real keys, idempotency_keys the broadened CHECK, no blob behind either collection; a contact drafted, edited, sent with one injected transport failure (the failed attempt a row) and then delivered — its request row, its send key and its history landing in the route\'s own save — answered through the real respond route; an external record; an offer created, edited, issued, revised (a draft beside the issued revision), viewed by the recipient (a receipt row) and accepted with the draft discarded (discarded_by_response_id on it only); /capabilities counts the rows; a SIGKILL right after a send loses nothing; [compat] another club gets 404; the recipient\'s surfaces carry no internal note, no decision id and no contact body; the journey carries no body', async () => {
+await test('[routes] a fresh boot records 0017_recruitment_contacts_offers last; the nine tables exist with the real keys, idempotency_keys the broadened CHECK, no blob behind either collection; a contact drafted, edited, sent with one injected transport failure (the failed attempt a row) and then delivered — its request row, its send key and its history landing in the route\'s own save — answered through the real respond route; an external record; an offer created, edited, issued, revised (a draft beside the issued revision), viewed by the recipient (a receipt row) and accepted with the draft discarded (discarded_by_response_id on it only); /capabilities counts the rows; a SIGKILL right after a send loses nothing; [compat] another club gets 404; the recipient\'s surfaces carry no internal note, no decision id and no contact body; the journey carries no body', async () => {
   const dir = tempDir('s8c-boot'); let S = await boot(dir);
   assert.equal(applied(dir).at(-2), MIGRATION, 'the recorded migration (0018_signings_follow_ups, S8d, follows it)'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   assert.ok(fkOf(dir, 'recruitment_contacts').includes('request_id->recruitment_requests(id) RESTRICT'), `the one new real key: ${fkOf(dir, 'recruitment_contacts')}`); assert.ok(fkOf(dir, 'recruitment_offers').includes('case_id->recruitment_cases(id) RESTRICT'));
@@ -173,7 +154,7 @@ await test('[cutover] a fresh boot records 0017_recruitment_contacts_offers last
   await S.stop(); rm(dir);
 });
 
-await test('[cutover] the deletion unit edits the person\'s contacts and offers in place (the reply\'s message, the response names and the history names NULL, subject_removed_at set; ids, states and times stay) — a failure of the REAL COMMIT leaves every row as it was and the retry lands once; a backup whose db.json carries a contact naming a historically missing player restores, is served as today and counted (Q8c-a), never refused; one naming a missing guardian is refused at boot with ids (Q8c-b), the file unchanged', async () => {
+await test('[routes] the deletion unit edits the person\'s contacts and offers in place (the reply\'s message, the response names and the history names NULL, subject_removed_at set; ids, states and times stay) — a failure of the REAL COMMIT leaves every row as it was and the retry lands once; a restored backup to which a contact naming a historically missing player is added (a snapshot-mode save) serves it as today and counts it (Q8c-a), never refused; one naming a missing guardian is refused by the save with ids (Q8c-b), the file unchanged', async () => {
   const dir = tempDir('s8c-unit'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Leaving Adult'); const RID = await plannedRoom(S, maria, a.pid);
   const d = await S.j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Hello', body: 'Body.', clientKey: 'u-create' }, maria); assert.equal(d.status, 201, d.text); const CID = d.body.contact.id;
@@ -196,36 +177,34 @@ await test('[cutover] the deletion unit edits the person\'s contacts and offers 
   // Q8c-a / Q8c-b through a restored backup
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
   const restored = tempDir('s8c-q8c'); fs.cpSync(bk.body.dir, restored, { recursive: true });
-  const dbJson = path.join(restored, 'db.json'); const sj = JSON.parse(fs.readFileSync(dbJson, 'utf8')); const base = sj.db.recruitmentContacts.find((c) => c.id === CID);
-  sj.db.recruitmentContacts.push({ ...base, id: 'rct-gone', playerId: 'pl-gone-long-ago', requestId: null, status: 'cancelled', recipient: null, response: null, keys: { create: null, send: null, record: null }, history: [], attempts: [] });
-  fs.writeFileSync(dbJson, JSON.stringify(sj));
-  S = await boot(restored); assert.ok(live(restored)); const cut = JSON.parse(q1(restored, "SELECT value FROM meta WHERE key = 'recruitmentContactsOffersCutover'").value); assert.equal(cut.players.missing, 1, 'the missing id counted at import (Q8c-a)'); assert.ok(cut.players.retained >= 1);
+  const addContact = (where, extra) => { const store = openStore(where); try { const loaded = store.load(); const base = loaded.db.recruitmentContacts.find((c) => c.id === CID); loaded.db.recruitmentContacts = [...loaded.db.recruitmentContacts, { ...base, keys: { create: null, send: null, record: null }, history: [], attempts: [], ...extra }]; store.save(loaded); } finally { store.sqlite.close(); } };
+  addContact(restored, { id: 'rct-gone', playerId: 'pl-gone-long-ago', requestId: null, status: 'cancelled', recipient: null, response: null });
+  S = await boot(restored); assert.ok(live(restored)); assert.ok((await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentContactsOffers.retainedPlayerReferences.recruitmentContacts >= 1);
   const mariaR = await orgLogin(S); const l = await S.j('GET', `/org/rooms/${RID}/contacts`, undefined, mariaR); assert.ok(JSON.stringify(l.body).includes('rct-gone'), 'the contact of a missing player is served as today');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.recruitmentContactsOffers.unresolvedPlayerReferences.recruitmentContacts, 1); await S.stop();
-  const strict = tempDir('s8c-q8cb'); fs.cpSync(bk.body.dir, strict, { recursive: true }); const sj2 = JSON.parse(fs.readFileSync(path.join(strict, 'db.json'), 'utf8'));
-  sj2.db.recruitmentContacts.push({ ...base, id: 'rct-ghost', requestId: null, status: 'cancelled', recipient: { type: 'guardian', playerId: a.pid, guardianId: 'gd-ghost', minor: true }, response: null, keys: { create: null, send: null, record: null }, history: [], attempts: [] }); fs.writeFileSync(path.join(strict, 'db.json'), JSON.stringify(sj2));
-  const r = await bootRefused(strict); assert.equal(r.code, 1, `Q8c-b: exit 1 — ${r.log.slice(-500)}`); assert.doesNotMatch(r.log, /listening on/); assert.match(r.log, /CONTACTS_OFFERS_GUARDIAN_MISSING/); assert.match(r.log, /rct-ghost → gd-ghost/); assert.doesNotMatch(r.log, /The reply text|Leaving Adult/, 'ids only');
-  assert.equal(live(strict), false, 'the refused boot recorded nothing'); assert.equal(tableExists(strict, 'recruitment_contacts'), false);
+  const strict = tempDir('s8c-q8cb'); fs.cpSync(bk.body.dir, strict, { recursive: true }); const strictBefore = recDump(strict);
+  assert.throws(() => addContact(strict, { id: 'rct-ghost', requestId: null, status: 'cancelled', recipient: { type: 'guardian', playerId: a.pid, guardianId: 'gd-ghost', minor: true }, response: null }), (e) => { assert.match(e.message, /CONTACTS_OFFERS_GUARDIAN_MISSING/); assert.match(e.message, /rct-ghost → gd-ghost/); assert.doesNotMatch(e.message, /The reply text|Leaving Adult/, 'ids only'); return true; }, 'Q8c-b: refused by the save');
+  assert.equal(recDump(strict), strictBefore, 'the refused save changed nothing');
+  S = await boot(strict); assert.equal(q1(strict, "SELECT count(*) AS n FROM recruitment_contacts WHERE id = 'rct-ghost'").n, 0, 'the server boots on the unchanged copy'); await S.stop();
   rm(dir, restored, strict, bk.body.dir);
 });
 
-await test('[cutover] the admin backup carries the two collections in the legacy shapes (insertion order, the writers\' literals, keys reassembled); a restore into a NEW directory imports them through 0017 row for row', async () => {
+await test('[backup] the admin backup is a copy of the database: the two collections read back from it (keys reassembled, the attempt, the internal note, the status); a restore into a NEW directory serves them row for row', async () => {
   const dir = tempDir('s8c-backup'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Backup Adult'); const RID = await plannedRoom(S, maria, a.pid);
   const d = await S.j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Kept through everything', body: 'Body kept through everything.', clientKey: 'b-create' }, maria); assert.equal(d.status, 201, d.text); const CID = d.body.contact.id;
   const s = await S.j('POST', `/org/rooms/${RID}/contacts/${CID}/send`, { expectedRev: d.body.contact.rev, clientKey: 'b-send' }, maria); assert.equal(s.status, 200, s.text);
   const { RID: ORID } = await considerationRoom(S, maria, a.pid); const c1 = await S.j('POST', `/org/rooms/${ORID}/offers`, { terms: TERMS, expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString(), internalNote: PRIVATE_NOTE, clientKey: 'b-offer' }, maria); assert.equal(c1.status, 201, c1.text); const OID = c1.body.offer.id;
   // A second boot before the backup, then a saving route: M13's boot-time normaliser (m13/shared.mjs: a case without a
-  // budget gets `budget: null`) is an in-place change the S8b staged flush lands in the NEXT save. The restore's import boot
-  // applies it to the imported cases too, so the live file must have been through a boot and a save as well for the two
-  // sides to be comparable row for row (an S8b property, not an S8c one; the two S8c collections are unaffected by it).
+  // budget gets `budget: null`) is an in-place change the S8b staged flush lands in the NEXT save. The restored server's
+  // boot applies it too, so the live file must have been through a boot and a save as well for the two sides to be
+  // comparable row for row (an S8b property, not an S8c one; the two S8c collections are unaffected by it).
   await S.stop(); S = await boot(dir); const maria2 = await orgLogin(S);
   assert.equal((await S.j('POST', `/org/offers/${OID}/issue`, { expectedRev: c1.body.offer.rev, clientKey: 'b-issue' }, maria2)).status, 200);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  for (const n of COLLECTIONS) assert.ok(Array.isArray(snapshot.db[n]), `${n} in the backup`);
-  assert.equal(snapshot.db.recruitmentContacts.length, 1); assert.deepEqual(Object.keys(snapshot.db.recruitmentContacts[0]).slice(0, 6), ['id', 'orgId', 'caseId', 'playerId', 'status', 'channel'], 'the writer\'s literal order'); assert.equal(snapshot.db.recruitmentContacts[0].keys.send.key, 'b-send', 'keys reassembled'); assert.equal(snapshot.db.recruitmentContacts[0].attempts.length, 1);
-  assert.equal(snapshot.db.recruitmentOffers.length, 1); assert.deepEqual(snapshot.db.recruitmentOffers[0].keys.issue.map((k) => k.key), ['b-issue']); assert.equal(snapshot.db.recruitmentOffers[0].revisions[0].internalNote, PRIVATE_NOTE); assert.equal(snapshot.db.recruitmentOffers[0].status, 'ISSUED');
+  { const c = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); const contacts = readContacts(c); const offers = readOffers(c);
+    assert.equal(contacts.length, 1); assert.equal(contacts[0].keys.send.key, 'b-send', 'keys reassembled'); assert.equal(contacts[0].attempts.length, 1);
+    assert.equal(offers.length, 1); assert.deepEqual(offers[0].keys.issue.map((k) => k.key), ['b-issue']); assert.equal(offers[0].revisions[0].internalNote, PRIVATE_NOTE); assert.equal(offers[0].status, 'ISSUED'); c.close(); }
   const liveCanon = recCanon(dir); await S.stop();
   const restored = tempDir('s8c-restore'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored)); { const got = recCanon(restored); assert.equal(got, liveCanon, `row for row (every table's rows equal by content; a rewrite reinserts children, so rowid order is not compared): ${got === liveCanon ? '' : canonDiff(got, liveCanon)}`); } const mariaR = await orgLogin(S); assert.equal((await S.j('GET', `/org/rooms/${RID}/contacts/${CID}`, undefined, mariaR)).body.contact.status, 'delivered'); await S.stop();

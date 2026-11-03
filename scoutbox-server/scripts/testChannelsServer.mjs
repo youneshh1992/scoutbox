@@ -73,20 +73,17 @@ const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
-const blobRows = (c, name) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
 // S6b: the ledger is a table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
 const ledgerRows = (dir) => { const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === 'ledger'); const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const r = s.prepare("SELECT value FROM collections WHERE name = 'ledger'").get(); if (r) return JSON.parse(r.value); return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger'").get() ? t.read(s) : []; } finally { s.close(); } };
 // S8a: the requests are rows of recruitment_requests since 0015 — read the columns the assertions need when the blob is retired.
-const requestRows = (c) => blobRows(c, 'requests') ?? (c.get("SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'recruitment_requests'") ? c.all('SELECT id, status, contact_channel_id AS contactChannel FROM recruitment_requests ORDER BY seq') : null);
+const requestRows = (c) => c.all('SELECT id, status, contact_channel_id AS contactChannel FROM recruitment_requests ORDER BY seq');
 const requestsOf = (dir) => snap(dir, (c) => requestRows(c) ?? []);
 const attachmentOf = (r) => (r.kind === 'clip' ? { kind: 'clip', mediaId: r.media_id, title: r.title, url: r.url, verifiedClip: r.verified_clip === 1 } : { kind: 'trial_report', reportId: r.report_id, orgName: r.org_name, summary: r.summary });
 /**
  * The threads as the DATABASE holds them, in insertion order and in the writers'
- * literal: the three tables after the cutover (typed columns only), the blob before it
- * — so a check reads the same way on both builds.
+ * literal (typed columns only).
  */
 const readStored = (c) => {
-  if (!c.get('SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION)) return blobRows(c, 'channels') ?? [];
   const attachments = new Map(c.all('SELECT * FROM message_attachments').map((r) => [r.message_id, r]));
   const messages = new Map();
   for (const m of c.all('SELECT * FROM messages ORDER BY channel_id, position')) {
@@ -296,7 +293,7 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0012
   await S.stop(); rm(dir);
 });
 
-await test('[cutover] the admin backup, a restore, and unknown fields through the import: the backup\'s channels equal the stored threads exactly and a restore into a NEW directory imports them through 0012 row for row (counts-only record, no blob left); the backup\'s channels of a file with two threads, given a legacy orgUserIdForNotify and unknown fields at channel, message, attachment, readBy and sender level by hand (as an older file might carry) and an absent optional key, are imported by a restore through 0012 into typed columns: the unknown fields are dropped and each is reported with its record id in the cutover record and the boot log (field names, never values); the absent key reads as null; the admin audit and the stored threads equal the typed threads; a message appends after the imported ones; the backup and a restore carry the typed threads', async () => {
+await test('[cutover] the admin backup and a restore: the backup\'s database copy holds the stored threads exactly; a restore into a NEW directory boots with them row for row (no blob), the admin audit shows them, and a message appends after the restored ones', async () => {
   const dir = tempDir('s7d-backup'); let S = await boot(dir);
   const maria = await orgLogin(S); let kola = await playerLogin(S, 'pl-adeyemi'); const amara = await guardianLogin(S, 'gd-amara');
   const { channel: adult } = await adultThread(S, maria, kola); const { channel: guardian } = await guardianThread(S, maria, amara);
@@ -305,48 +302,18 @@ await test('[cutover] the admin backup, a restore, and unknown fields through th
   assert.equal((await S.j('POST', `/guardian/channels/${guardian.id}/messages`, { text: 'Synthetic guardian.' }, amara)).status, 201);
   assert.equal((await S.j('POST', `/org/channels/${adult.id}/read`, {}, maria)).status, 200);
   const original = stored(dir); assert.deepEqual(original.map((c) => c.messages.length), [2, 1]);
-  // The admin backup carries the channels; a restore imports them row for row through 0012.
-  const bk0 = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk0.status, 201, bk0.text);
-  const snapshot0 = JSON.parse(fs.readFileSync(path.join(bk0.body.dir, 'db.json'), 'utf8')); assert.equal(JSON.stringify(snapshot0.db.channels), JSON.stringify(original), 'the backup equals the stored threads exactly');
-  await S.stop();
-  const restored0 = tempDir('s7d-restored0'); fs.cpSync(bk0.body.dir, restored0, { recursive: true });
-  S = await boot(restored0); assert.ok(live(restored0), 'the restore imported through 0012'); // fails on b67bce5: a restore keeps the blob, no 0012 record
-  assert.equal(JSON.stringify(stored(restored0)), JSON.stringify(original), 'row for row'); assert.equal(q1(restored0, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0, 'no blob left behind');
-  const record0 = JSON.parse(q1(restored0, "SELECT value FROM meta WHERE key = 'channelsCutover'").value); assert.deepEqual([record0.imported, record0.messages, record0.attachments], [2, 3, 1]); assert.doesNotMatch(JSON.stringify(record0), /Synthetic/, 'counts only');
-  await S.stop();
-  // The backup's channels, given legacy/unknown fields by hand (what an older file might carry).
-  const SECRET = 'SECRET-LEGACY-MARKER-91';
-  const rows = JSON.parse(JSON.stringify(snapshot0.db.channels));
-  rows[0].orgUserIdForNotify = 'usr-legacy-notify'; rows[0].futureChannelField = { nested: [1, SECRET] }; rows[0].readBy.futureReadByField = 7;
-  rows[0].messages[1].futureMessageField = true; rows[0].messages[1].sender.futureSenderField = 'kept'; rows[0].messages[1].attachment.futureAttachmentField = 'kept';
-  delete rows[1].scoutRole; // an ABSENT optional key next to present-and-null ones
-  const typed = JSON.parse(JSON.stringify(snapshot0.db.channels)); typed[1].scoutRole = null; // what the import must give back: the unknown fields gone, the absent key null
-  // This build imports the hand-edited snapshot through a restore.
-  const up = tempDir('s7d-up'); fs.cpSync(bk0.body.dir, up, { recursive: true });
-  fs.writeFileSync(path.join(up, 'db.json'), JSON.stringify({ ...snapshot0, db: { ...snapshot0.db, channels: rows } }));
-  S = await boot(up, { M13_QUIET_LOGS: '0' }); assert.ok(live(up), 'imported through 0012'); // logs on: the import's report is part of the check
-  assert.equal(q1(up, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0, 'the blob is retired');
-  const record = JSON.parse(q1(up, "SELECT value FROM meta WHERE key = 'channelsCutover'").value); assert.deepEqual([record.imported, record.messages, record.attachments, record.normalised], [2, 3, 1, 1]);
-  const [c0, m1] = [rows[0].id, rows[0].messages[1].id];
-  const expectedNotes = [`${c0}): unknown field readBy.futureReadByField dropped`, `${c0}): unknown field orgUserIdForNotify dropped`, `${c0}): unknown field futureChannelField dropped`, `${m1}): unknown field sender.futureSenderField dropped`, `${m1}): unknown field attachment.futureAttachmentField dropped`, `${m1}): unknown field futureMessageField dropped`];
-  for (const n of expectedNotes) { assert.ok(record.notes.some((x) => x.endsWith(n)), `noted in the cutover record: ${n}`); assert.ok(S.log().includes(n), `noted in the boot log: ${n}`); }
-  assert.equal(record.notes.length, expectedNotes.length, record.notes.join('\n'));
-  assert.doesNotMatch(JSON.stringify(record) + S.log(), new RegExp(`${SECRET}|usr-legacy-notify`), 'ids and field names only; no value in the record or the log');
-  const audit = (await S.j('GET', '/admin/channels', undefined, null, A)).body;
-  assert.equal(JSON.stringify(audit), JSON.stringify(typed), 'the admin audit shows the typed threads: unknown fields dropped, the absent key null');
-  assert.equal(JSON.stringify(stored(up)), JSON.stringify(typed), 'the tables read back the same');
-  // A message appends after the imported ones.
-  kola = await playerLogin(S, 'pl-adeyemi'); const m = await S.j('POST', `/player/channels/${adult.id}/messages`, { text: 'Synthetic after the import.' }, kola); assert.equal(m.status, 201, m.text);
-  assert.deepEqual(stored(up)[0].messages.map((x) => x.id), [...typed[0].messages.map((x) => x.id), m.body.id]);
-  // The admin backup carries the typed threads exactly; a restore of it imports them again.
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.equal(JSON.stringify(snapshot.db.channels), JSON.stringify(stored(up)), 'the backup equals the stored threads exactly');
+  assert.equal(JSON.stringify(stored(bk.body.dir)), JSON.stringify(original), 'the backup\'s copy holds the stored threads exactly');
   await S.stop();
   const restored = tempDir('s7d-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
-  S = await boot(restored); assert.ok(live(restored)); assert.equal(JSON.stringify(stored(restored)), JSON.stringify(snapshot.db.channels), 'row for row'); assert.equal(q1(restored, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0);
+  S = await boot(restored); assert.ok(live(restored));
+  assert.equal(JSON.stringify(stored(restored)), JSON.stringify(original), 'row for row'); assert.equal(q1(restored, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0, 'no blob');
+  const audit = (await S.j('GET', '/admin/channels', undefined, null, A)).body;
+  assert.equal(JSON.stringify(audit), JSON.stringify(original), 'the admin audit shows the restored threads');
+  kola = await playerLogin(S, 'pl-adeyemi'); const m = await S.j('POST', `/player/channels/${adult.id}/messages`, { text: 'Synthetic after the restore.' }, kola); assert.equal(m.status, 201, m.text);
+  assert.deepEqual(stored(restored)[0].messages.map((x) => x.id), [...original[0].messages.map((x) => x.id), m.body.id]);
   await S.stop();
-  rm(dir, bk0.body.dir, restored0, up, bk.body.dir, restored);
+  rm(dir, restored);
 });
 
 console.log(`\n${passed} channel server checks passed`);

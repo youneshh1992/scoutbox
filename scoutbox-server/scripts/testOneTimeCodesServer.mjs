@@ -3,7 +3,7 @@
 // two atomic consumption operations (a seam after the consumption and a real
 // COMMIT failure, each read back through a second connection), SIGKILL
 // restarts, concurrent redemption, attempt limits and rate limits, player
-// deletion, the admin backup and a restore in both snapshot formats, and the
+// deletion, the admin backup (a database copy) and its restore, and the
 // privacy of every response (the intended plain-code delivery included).
 // Nothing here touches DATA_DIR or any real data. Run with: npm test
 import assert from 'node:assert/strict';
@@ -45,10 +45,6 @@ async function boot(dir, env = {}) {
     proc.on('exit', (code, signal) => reject(Object.assign(new Error(`server exited ${code} (${signal}): ${log.slice(-1500)}`), { code, log })));
     setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
-}
-async function bootRefuses(dir) {
-  try { const S = await boot(dir); await S.kill(); throw new Error(`the server booted but must have refused: ${S.log().slice(-600)}`); }
-  catch (err) { if (typeof err.code !== 'number') throw err; return { code: err.code, log: err.log }; }
 }
 // Every database read goes through a SECOND, read-only connection: what it sees is what is committed.
 const q1 = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; } finally { s.close(); } };
@@ -201,7 +197,7 @@ await test('player deletion: the child\'s pairing code goes in the deletion unit
 });
 
 // ------------------------------------------------------------- backup and restore, both formats
-await test('backup/restore: the admin backup exports the codes in their stored form (codeHash, attempts; no plain code anywhere in db.json); a restore into a NEW directory imports them (migration 0008) and the outstanding pairing code and challenge still work there; a legacy backup holding plain codes (the pre-S6a shape) restores through the same migration with the codes hashed; a backup whose stored entry is malformed is refused at boot (ONE_TIME_CODES_IMPORT_BLOCKED), creates no table and is refused again on the next boot', async () => {
+await test('backup/restore: the admin backup\'s database copy holds the codes as hashes with their attempt counts (no plain code anywhere in the copy, the outbox mail withholds it); a restore into a NEW directory keeps them, and the outstanding pairing code and challenge still work there', async () => {
   const dir = tempDir('s6a-backup'); let S = await boot(dir);
   const { token, childId } = await guardianWithChild(S, 'bk');
   const { code } = (await S.j('POST', `/guardian/children/${childId}/pairing-code`, {}, token)).body;
@@ -213,52 +209,25 @@ await test('backup/restore: the admin backup exports the codes in their stored f
   for (let i = 0; i < 2; i++) assert.equal((await S.j('POST', '/org/verification/email/confirm', { code: challengeCode === 'WWWWWW' ? 'XXXXXX' : 'WWWWWW' }, pro)).status, 400);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
   await S.stop();
-  const jsonText = fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'); const snapshot = JSON.parse(jsonText);
-  assert.deepEqual(snapshot.db.pairingCodes, [{ codeHash: hash(code), playerId: childId, expiresAt: snapshot.db.pairingCodes[0].expiresAt }]);
-  assert.deepEqual(snapshot.db.emailChallenges.map((c) => [c.orgId, c.codeHash, c.attempts]), [['org-eastport', hash(challengeCode), 2]]);
-  // Review of e020aba, finding 1: the WHOLE serialized snapshot, not one JSON value — a code embedded in a longer string (an outbox mail) counts.
-  assert.equal(jsonText.includes(code), false, 'the raw pairing code appears nowhere in db.json');
-  assert.equal(jsonText.includes(challengeCode), false, 'the raw challenge code appears nowhere in db.json (the outbox mail withholds it)');
-  assert.ok(snapshot.db.outbox.some((m) => m.to === 'bk@eastportfc.test' && /code withheld/.test(m.text)), 'the mail itself is kept, its code withheld');
+  // The backup is a copy of the database: read it like one.
+  const backup = bk.body.dir; const backupBytes = fs.readFileSync(path.join(backup, 'scoutbox.db')).toString('latin1');
+  assert.deepEqual(qAll(backup, 'SELECT code_hash, player_id FROM pairing_codes'), [{ code_hash: hash(code), player_id: childId }]);
+  assert.deepEqual(qAll(backup, 'SELECT org_id, code_hash, attempts FROM email_challenges').map((c) => [c.org_id, c.code_hash, c.attempts]), [['org-eastport', hash(challengeCode), 2]]);
+  // Review of e020aba, finding 1: the WHOLE copy, not one value — a code embedded in a longer string (an outbox mail) counts.
+  for (const text of [fileText(backup), backupBytes]) {
+    assert.equal(text.includes(code), false, 'the raw pairing code appears nowhere in the backup');
+    assert.equal(text.includes(challengeCode), false, 'the raw challenge code appears nowhere in the backup (the outbox mail withholds it)');
+  }
+  assert.ok(qAll(backup, 'SELECT to_address, text FROM outbox').some((m) => m.to_address === 'bk@eastportfc.test' && /code withheld/.test(m.text)), 'the mail itself is kept, its code withheld');
   assert.equal(fileText(dir).includes(challengeCode) || fileText(dir).includes(code), false, 'nor anywhere in the live database file');
-  // New-format restore.
-  const restored = tempDir('s6a-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
+  // Restore.
+  const restored = tempDir('s6a-restored'); fs.cpSync(backup, restored, { recursive: true });
   S = await boot(restored);
   assert.equal(q1(restored, "SELECT attempts FROM email_challenges WHERE org_id = 'org-eastport'").attempts, 2, 'the attempt count survived the restore');
   assert.equal((await S.j('POST', '/auth/player/pair', { code })).status, 200, 'the restored pairing code works');
   assert.equal((await S.j('POST', '/org/verification/email/confirm', { code: challengeCode }, pro)).status, 200, 'the restored challenge works (the staff session travelled too)');
   await S.stop();
-  // Legacy-format restore: the same backup with the pre-S6a plain-code shape.
-  const legacy = tempDir('s6a-legacy'); fs.cpSync(bk.body.dir, legacy, { recursive: true });
-  const leg = JSON.parse(jsonText);
-  leg.db.pairingCodes = [{ code, playerId: childId, expiresAt: snapshot.db.pairingCodes[0].expiresAt }];
-  leg.db.emailChallenges = [{ orgId: 'org-eastport', email: 'bk@eastportfc.test', code: challengeCode, expiresAt: snapshot.db.emailChallenges[0].expiresAt }];
-  fs.writeFileSync(path.join(legacy, 'db.json'), JSON.stringify(leg));
-  S = await boot(legacy);
-  assert.equal(q1(legacy, 'SELECT code_hash FROM pairing_codes').code_hash, hash(code), 'hashed on import'); assert.equal(fileText(legacy).includes(code), false);
-  assert.equal(q1(legacy, "SELECT attempts FROM email_challenges WHERE org_id = 'org-eastport'").attempts, 0, 'a legacy challenge carries no count and starts at 0'); assert.equal(fileText(legacy).includes(challengeCode), false);
-  assert.equal((await S.j('POST', '/auth/player/pair', { code })).status, 200);
-  await S.stop();
-  // Malformed new-format entry: refused, never reinterpreted or dropped.
-  const bad = tempDir('s6a-badbk'); fs.cpSync(bk.body.dir, bad, { recursive: true });
-  const b = JSON.parse(jsonText); b.db.pairingCodes[0].codeHash = 'not-a-hash'; fs.writeFileSync(path.join(bad, 'db.json'), JSON.stringify(b));
-  const r1 = await bootRefuses(bad);
-  assert.notEqual(r1.code, 0); assert.match(r1.log, /ONE_TIME_CODES_IMPORT_BLOCKED.*codeHash must be 64/);
-  assert.equal(q1(bad, "SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'pairing_codes'").n, 0, 'no table created');
-  const r2 = await bootRefuses(bad); assert.match(r2.log, /ONE_TIME_CODES_IMPORT_BLOCKED/, 'refused again on the next boot');
-  // Review of e020aba, finding 2: a stored challenge without its count, or exhausted at the limit, is refused the same way.
-  const extra = [];
-  for (const [label, mutate, re] of [
-    ['a stored challenge without attempts', (c) => { delete c.attempts; }, /attempts is required in the stored format/],
-    ['an exhausted stored challenge', (c) => { c.attempts = 10; }, /attempts 10 reaches the limit of 10/],
-  ]) {
-    const d = tempDir('s6a-badattempts'); extra.push(d); fs.cpSync(bk.body.dir, d, { recursive: true });
-    const x = JSON.parse(jsonText); mutate(x.db.emailChallenges[0]); fs.writeFileSync(path.join(d, 'db.json'), JSON.stringify(x));
-    const r = await bootRefuses(d);
-    assert.notEqual(r.code, 0, label); assert.match(r.log, re, label);
-    assert.equal(q1(d, "SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'email_challenges'").n, 0, `${label}: no table created`);
-  }
-  rm(dir, restored, legacy, bad, ...extra);
+  rm(dir, restored);
 });
 
 // ------------------------------------------------------------- review of e020aba, finding 1: the mail's copy of the code
@@ -269,10 +238,7 @@ await test('review of e020aba, finding 1 — the challenge mail: on the dev tran
   assert.equal((await S.j('POST', '/org/verification/email', { email: 'f1@eastportfc.test' }, pro)).status, 201);
   const devMail = (await S.j('GET', '/admin/outbox', undefined, null, A)).body.find((m) => m.to === 'f1@eastportfc.test');
   const code = /code is ([A-Z0-9]{6})/.exec(devMail.text)?.[1]; assert.ok(code, 'the dev outbox delivers the code while the process runs');
-  // S7c: the outbox is a table after its cutover (0011); the blob before it — the saved text is read either way.
-  const saved = () => (q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'")
-    ? qAll(dir, 'SELECT to_address, text FROM outbox ORDER BY seq').map((r) => `${r.to_address} ${r.text}`)
-    : qAll(dir, "SELECT value FROM collections WHERE name = 'outbox'").map((r) => r.value)).join('');
+  const saved = () => qAll(dir, 'SELECT to_address, text FROM outbox ORDER BY seq').map((r) => `${r.to_address} ${r.text}`).join('');
   for (let i = 0; i < 120 && !saved().includes('f1@eastportfc.test'); i++) await new Promise((r) => setTimeout(r, 50));
   assert.ok(saved().includes('f1@eastportfc.test') && saved().includes('code withheld'), 'the outbox record was saved (debounced save restored), its code withheld');
   assert.equal(fileText(dir).includes(code), false, 'no raw code anywhere in the database file');
@@ -292,7 +258,7 @@ await test('review of e020aba, finding 1 — the challenge mail: on the dev tran
   const liveMail = (await S.j('GET', '/admin/outbox', undefined, null, A)).body.find((m) => m.to === 'live@eastportfc.test');
   assert.equal(liveMail.transport, 'sendgrid'); assert.equal(liveMail.delivered, true); assert.equal(liveMail.text.includes(liveCode), false, 'the admin outbox (an audit copy here) withholds the code');
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201);
-  assert.equal(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8').includes(liveCode), false, 'no raw code in the backup');
+  assert.equal(fileText(bk.body.dir).includes(liveCode) || fs.readFileSync(path.join(bk.body.dir, 'scoutbox.db')).toString('latin1').includes(liveCode), false, 'no raw code in the backup');
   assert.equal(fileText(live).includes(liveCode), false, 'no raw code in the database file');
   assert.equal((await S.j('POST', '/org/verification/email/confirm', { code: liveCode }, pro2)).status, 200, 'the delivered code confirms');
   await S.stop(); rm(live); fs.rmSync(stubLog, { force: true });

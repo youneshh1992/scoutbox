@@ -8,11 +8,8 @@
 // the final state of every snapshot that touches the queue or the identity pair),
 // Q5 (lifting a block deletes its row, as today).
 //
-// Covered: the migration from the eight legacy blobs (every writer literal, TYPED: an
-// unknown own field dropped and reported by id, an absent key read back as null, an
-// off-type value normalised when its meaning is obvious and dropped otherwise, each
-// change a note in the cutover record — ids and field names, never a value; refusals
-// name positions, ids and reasons, never a text); the actual schema (typed columns only,
+// Covered: the migration (DDL only, no blob import); junk refused at a snapshot
+// save (positions, ids and reasons, never a text); the actual schema (typed columns only,
 // no foreign key on any of the eight tables, a unique id per table, insertion order);
 // the repository (append — an unknown key dropped, an off-type value refused by name —,
 // the block removal, the report and IDV status patches, the first-matching IDV entry, the
@@ -29,7 +26,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, openRaw, applied, dump, FIXTURE, ORGS, USERS, SESSIONS } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -40,7 +37,6 @@ let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const MIN = 60_000;
 const MIGRATION = '0013_safety_audit';
-const META = 'safetyAuditCutover';
 const COLLECTIONS = ['blocks', 'reports', 'moderationLog', 'orgNotes', 'ledger', 'opsEvents', 'sourceChanges', 'idvQueue'];
 const TABLES = { blocks: 'blocks', reports: 'reports', moderationLog: 'moderation_log', orgNotes: 'org_notes', ledger: 'ledger', opsEvents: 'ops_events', sourceChanges: 'source_changes', idvQueue: 'idv_queue' };
 /** The writers' literals, key for key (server.mjs, m13, m181). */
@@ -78,14 +74,11 @@ const ops = (over = {}) => ({ id: 'ops-1', at: T, kind: 'backup_created', detail
 const srcc = (over = {}) => ({ id: 'srcc-1', playerId: 'pl-adult', type: 'position_changed', sourceSystem: 'passport_prefs', sourceId: 'pl-adult:ST', occurredAt: T, detail: { from: null, to: 'ST', submittedBy: 'player' }, ...over });
 const idv = (over = {}) => ({ id: 'idv-1', guardianId: 'gd-primary', guardianName: 'Primary Parent', documentType: 'passport', documentRef: '4567', provider: 'dev-attestation', reference: 'idv_0123456789abcdef', ts: T, status: 'approved', ...over });
 
-/** A file at S7d (0001–0012 applied) carrying the eight audit blobs the way the 4f954ad build wrote them. */
-function s7dFile(dir, { blobs = {}, rawBlobs, omit = [] } = {}) {
-  const extra = { requests: [], vouches: [], channels: [], notifications: [], dispatches: [], blocks: [], reports: [], moderationLog: [], orgNotes: [], ledger: [], opsEvents: [], sourceChanges: [], idvQueue: [], ...blobs };
-  for (const name of omit) delete extra[name];
-  s3File(dir, { extra, rawBlobs });
-  const s = openRaw(dir);
-  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } });
-  s.close();
+/** The fixture's identity, organisation and staff with the given audit collections, as a snapshot-mode save writes them. */
+const fixtureDb = (blobs = {}) => ({ ...FIXTURE(), orgs: ORGS(), users: USERS(), sessions: SESSIONS(), vouches: [], ...blobs });
+/** A fully migrated file holding the fixture and the given audit rows, written by a snapshot-mode save (the writers' validation applies). */
+function s7dFile(dir, { blobs = {} } = {}) {
+  const tool = openStore(dir); tool.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(blobs) }); tool.sqlite.close();
 }
 const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
 let mod = null;
@@ -105,106 +98,33 @@ const bare = (s, over = {}) => needModule().createSafetyAuditRepository({ sqlite
 /** Every table's typed records, through the module's own reader. */
 const stored = (s) => { const { AUDIT_SNAPSHOT_TABLES } = needModule(); const out = {}; for (const t of AUDIT_SNAPSHOT_TABLES) out[t.name] = t.read(s); return out; };
 
-// ============================================================= [cutover] the migration from the eight legacy blobs
-test('[cutover] migration 0013 is registered after 0012 and imports the eight blobs TYPED: every writer literal into its columns; an unknown own field at row level (own "__proto__" and "constructor" keys included) dropped and reported by id; an absent optional key read back as null; an off-type value normalised when its meaning is obvious (a numeric targetPlayerId → its text, a numeric reason → its text, a fractional ts → rounded) and dropped otherwise (an object orgId, an object documentType), each reported by id and field; a nested unknown key inside context is part of the JSON value and kept; a ledger row with no playerId key; rows naming a player that does not exist (Domain P: counted per table, imported as they are); a backup_refused and a backup_failed ops event; two IDV entries of one guardian; array order becomes seq; the eight blob rows are retired; the cutover record carries counts and notes (ids and field names, never a value); a second run applies nothing; the tables read back the typed records', () => {
-  const dir = tempDir('sa-mig');
-  const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me"},"constructor":"own-constructor"}');
-  const blobs = {
-    blocks: [block(), block({ id: 'blk-2', playerId: 'pl-gone', orgId: { not: 'a string' }, reason: 42, by: 'guardian', futureBlockField: [1] }), block({ id: 'blk-3', playerId: 'pl-child1', orgId: 'org-pro', by: 'guardian', reason: 'suspended_pending_review' })],
-    reports: [report(), report({ id: 'rep-2', by: 'org_user', byId: 'usr-1', byOrgId: 'org-pro', targetKind: 'player', targetPlayerId: 'pl-gone', targetOrgId: null }), report({ id: 'rep-3', targetKind: 'player', targetPlayerId: 123, ts: 1.5 }), autoReport({ ...special })],
-    moderationLog: [modHit(), modHit({ id: 'mod-2', context: { kind: 'org_message', channelId: 'chan-2', futureContextField: { deep: true } }, flags: ['secrecy', 'url'], severity: 'grooming' })],
-    orgNotes: [note(), note({ id: 'note-2', playerId: 'pl-gone', userId: null })],
-    ledger: [led(), led({ id: 'led-2', type: 'open_trial_posted', playerId: null, userId: 'usr-1', scoutName: 'Maria', detail: { trialId: 't1' } }), { id: 'led-3', ts: T, type: 'staff_removed', orgId: 'org-pro', orgName: 'Eastport FC', userId: null, scoutName: 'system' }, led({ id: 'led-4', playerId: 'pl-gone', type: 'shortlist', futureLedgerField: 'dropped' }), led({ id: 'led-5', playerId: 'pl-child1', type: 'message', scoutName: 'Primary Parent', userId: null })],
-    opsEvents: [ops(), ops({ id: 'ops-2', kind: 'backup_refused', detail: { dir: 'x', error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflicts: [{ mediaId: 'med-1', owners: ['pl-adult'] }] } }), ops({ id: 'ops-3', kind: 'backup_failed', detail: { dir: 'x', error: 'ENOSPC' } }), ops({ id: 'ops-4', kind: 'future_kind', detail: null })],
-    sourceChanges: [srcc(), srcc({ id: 'srcc-2', playerId: 'pl-gone', sourceSystem: 'position_history', sourceId: 'ppos-1', detail: { to: 'CM', submittedBy: 'guardian' } })],
-    idvQueue: [idv(), idv({ id: 'idv-2', ts: T + 1, documentType: { odd: 'object' }, status: 'revoked' }), idv({ id: 'idv-3', guardianId: 'gd-signup', guardianName: 'Signup Parent' })],
-  };
-  const noKey = { ...autoReport({ id: 'rep-nokey' }) }; delete noKey.outcome; blobs.reports.push(noKey); // an ABSENT key next to present-and-null ones
-  s7dFile(dir, { blobs });
-  const s = openRaw(dir);
-  assert.ok(!applied(s).includes(MIGRATION)); for (const n of COLLECTIONS) assert.ok(blob(s, n), `${n} blob before`);
-  const ran = migrate(s);
-  assert.ok(ran.ran.includes(MIGRATION), `0013 ran (${ran.ran.join(', ')})`);
-  assert.deepEqual(applied(s).slice(-7), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S4b-R, S8a, S8b and S8c registered after this step
-  for (const t of Object.values(TABLES)) assert.ok(s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), `${t} exists`);
-  for (const n of COLLECTIONS) assert.equal(blob(s, n), undefined, `the ${n} blob row is retired`);
-  // Columns and order.
-  const bl = s.prepare('SELECT * FROM blocks ORDER BY seq').all();
-  assert.deepEqual(bl.map((r) => [r.seq, r.id, r.player_id, r.org_id, r.by_kind, r.reason, r.created_at]), [[1, 'blk-1', 'pl-adult', 'org-pro', 'player', 'synthetic reason', T], [2, 'blk-2', 'pl-gone', null, 'guardian', '42', T], [3, 'blk-3', 'pl-child1', 'org-pro', 'guardian', 'suspended_pending_review', T]], 'array order is seq; an object orgId is dropped (NULL), a numeric reason becomes its text');
-  const rp = s.prepare('SELECT * FROM reports ORDER BY seq').all();
-  assert.deepEqual(rp.map((r) => [r.id, r.by_kind, r.by_org_id, r.target_kind, r.target_player_id, r.urgent, r.status, r.outcome, r.resolved_at, r.created_at]), [['rep-1', 'player', null, 'club', null, 0, 'pending_review', null, null, T], ['rep-2', 'org_user', 'org-pro', 'player', 'pl-gone', 0, 'pending_review', null, null, T], ['rep-3', 'player', null, 'player', '123', 0, 'pending_review', null, null, 2], ['rep-auto', 'system', null, 'club', null, 1, 'pending_review', null, null, T], ['rep-nokey', 'system', null, 'club', null, 1, 'pending_review', null, null, T]], 'a numeric targetPlayerId becomes its text, a fractional ts is rounded');
-  const ml = s.prepare('SELECT * FROM moderation_log ORDER BY seq').all();
-  assert.deepEqual(ml.map((r) => [r.id, r.severity, r.excerpt, r.flags_json]), [['mod-1', 'contact', 'synthetic excerpt with an address', '["email"]'], ['mod-2', 'grooming', 'synthetic excerpt with an address', '["secrecy","url"]']]);
-  assert.deepEqual(JSON.parse(ml[1].context_json), { kind: 'org_message', channelId: 'chan-2', futureContextField: { deep: true } }, 'the whole context, as JSON');
-  const on = s.prepare('SELECT * FROM org_notes ORDER BY seq').all(); assert.deepEqual(on.map((r) => [r.id, r.org_id, r.player_id, r.user_id, r.scout_name, r.text, r.created_at]), [['note-1', 'org-pro', 'pl-adult', 'usr-1', 'Maria', 'Synthetic note text.', T], ['note-2', 'org-pro', 'pl-gone', null, 'Maria', 'Synthetic note text.', T]]);
-  const lg = s.prepare('SELECT * FROM ledger ORDER BY seq').all();
-  assert.deepEqual(lg.map((r) => [r.id, r.type, r.player_id, r.org_id, r.org_name, r.user_id, r.actor_name, r.detail_json]), [
-    ['led-1', 'view', 'pl-adult', 'org-pro', 'Eastport FC', 'usr-1', 'Maria', null],
-    ['led-2', 'open_trial_posted', null, 'org-pro', 'Eastport FC', 'usr-1', 'Maria', '{"trialId":"t1"}'],
-    ['led-3', 'staff_removed', null, 'org-pro', 'Eastport FC', null, 'system', null],
-    ['led-4', 'shortlist', 'pl-gone', 'org-pro', 'Eastport FC', 'usr-1', 'Maria', null],
-    ['led-5', 'message', 'pl-child1', 'org-pro', 'Eastport FC', null, 'Primary Parent', null],
-  ], 'userId/scoutName verbatim (no actor kind derived); a row without a playerId key has a NULL player_id');
-  const oe = s.prepare('SELECT * FROM ops_events ORDER BY seq').all(); assert.deepEqual(oe.map((r) => [r.id, r.kind, r.occurred_at, r.detail_json]), [['ops-1', 'backup_created', T, '{"dir":"2026-10-19","files":3,"queuedForRemoval":0}'], ['ops-2', 'backup_refused', T, '{"dir":"x","error":"MEDIA_QUEUE_OWNERSHIP_CONFLICT","conflicts":[{"mediaId":"med-1","owners":["pl-adult"]}]}'], ['ops-3', 'backup_failed', T, '{"dir":"x","error":"ENOSPC"}'], ['ops-4', 'future_kind', T, null]], 'every kind imported, the two the first DDL draft forgot included; an open vocabulary');
-  const sc = s.prepare('SELECT * FROM source_changes ORDER BY seq').all(); assert.deepEqual(sc.map((r) => [r.id, r.player_id, r.type, r.source_system, r.source_id, r.occurred_at, r.detail_json]), [['srcc-1', 'pl-adult', 'position_changed', 'passport_prefs', 'pl-adult:ST', T, '{"from":null,"to":"ST","submittedBy":"player"}'], ['srcc-2', 'pl-gone', 'position_changed', 'position_history', 'ppos-1', T, '{"to":"CM","submittedBy":"guardian"}']]);
-  const iq = s.prepare('SELECT * FROM idv_queue ORDER BY seq').all(); assert.deepEqual(iq.map((r) => [r.id, r.guardian_id, r.guardian_name, r.document_type, r.document_ref_last4, r.provider, r.reference, r.created_at, r.status]), [['idv-1', 'gd-primary', 'Primary Parent', 'passport', '4567', 'dev-attestation', 'idv_0123456789abcdef', T, 'approved'], ['idv-2', 'gd-primary', 'Primary Parent', null, '4567', 'dev-attestation', 'idv_0123456789abcdef', T + 1, 'revoked'], ['idv-3', 'gd-signup', 'Signup Parent', 'passport', '4567', 'dev-attestation', 'idv_0123456789abcdef', T, 'approved']]);
-  // The cutover record: counts and notes (ids and field names only).
-  const record = JSON.parse(meta(s, META));
-  assert.deepEqual(Object.fromEntries(COLLECTIONS.map((n) => [n, record[n].imported])), { blocks: 3, reports: 5, moderationLog: 2, orgNotes: 2, ledger: 5, opsEvents: 4, sourceChanges: 2, idvQueue: 3 });
-  assert.deepEqual(Object.fromEntries(COLLECTIONS.map((n) => [n, record[n].normalised])), { blocks: 1, reports: 2, moderationLog: 0, orgNotes: 0, ledger: 1, opsEvents: 0, sourceChanges: 0, idvQueue: 1 }, 'rows the import changed, per collection');
-  assert.deepEqual(record.notes, [
-    'blocks blk-2: orgId was an object, dropped', 'blocks blk-2: reason was a number, normalised', 'blocks blk-2: unknown field futureBlockField dropped',
-    'reports rep-3: ts was a number, normalised', 'reports rep-3: targetPlayerId was a number, normalised',
-    'reports rep-auto: unknown field __proto__ dropped', 'reports rep-auto: unknown field constructor dropped',
-    'ledger led-4: unknown field futureLedgerField dropped',
-    'idvQueue idv-2: documentType was an object, dropped',
-  ], 'every change reported with its row id and field');
-  assert.deepEqual(Object.fromEntries(['blocks', 'reports', 'orgNotes', 'ledger', 'sourceChanges'].map((n) => [n, [record[n].unresolvedPlayerIds, record[n].withoutPlayerId]])), { blocks: [1, 0], reports: [2, 3], orgNotes: [1, 0], ledger: [1, 2], sourceChanges: [1, 0] }, 'Domain P: unresolved ids counted per table (a count, not provenance); rows without a player id counted apart');
-  assert.doesNotMatch(JSON.stringify(record), /Synthetic|excerpt|address|Maria|Primary|4567|keep-me|pl-gone|not a string|odd/, 'ids, field names and counts only — no text, no name, no value');
-  assert.deepEqual(migrate(s).ran, [], 'a second run applies nothing');
-  // The way back: the typed records.
-  const back = stored(s);
-  const expected = Object.fromEntries(COLLECTIONS.map((n) => [n, canon(n, blobs[n])]));
-  expected.blocks[1] = { ...expected.blocks[1], orgId: null, reason: '42' };
-  expected.reports[2] = { ...expected.reports[2], ts: 2, targetPlayerId: '123' };
-  expected.idvQueue[1] = { ...expected.idvQueue[1], documentType: null };
-  for (const n of COLLECTIONS) assert.equal(JSON.stringify(back[n]), JSON.stringify(expected[n]), `${n} reads back typed (every key, in order; unknown fields gone)`);
-  assert.equal(back.reports[3].targetPlayerId, null, 'an absent key reads back as null'); assert.equal(back.reports[4].outcome, null); assert.equal(back.ledger[2].playerId, null);
-  assert.equal(Object.hasOwn(back.reports[3], '__proto__'), false, 'the own __proto__ key is dropped'); assert.equal(Object.getPrototypeOf(back.reports[3]), Object.prototype, 'and never assigned as a prototype'); assert.equal(Object.hasOwn(back.reports[3], 'constructor'), false);
-  s.close(); rm(dir);
-});
-
-test('[cutover] migration refusals (SAFETY_AUDIT_IMPORT_BLOCKED: collections, positions, ids and reasons — never a text): a duplicate id within a collection, an entry without an id, an entry that is not an object, a non-array blob, an IDV entry whose guardian does not exist (STRICT — IDV_GUARDIAN_MISSING), an IDV entry whose guardianId is not a string — each aborts the whole step: no table, every blob and saveSeq untouched; an absent blob and an empty blob import nothing and record the cutover; a player-audit row naming a missing player is NOT a refusal', () => {
+// ============================================================= junk refused at the snapshot save
+test('snapshot-save refusals (SAFETY_AUDIT_IMPORT_BLOCKED: collections, positions, ids and reasons — never a text): a duplicate id within a collection, an entry without an id, an entry that is not an object, a non-array collection, an IDV entry whose guardian does not exist (STRICT — IDV_GUARDIAN_MISSING), an IDV entry whose guardianId is not a string — each refuses the whole save: every table and saveSeq untouched; a player-audit row naming a missing player is NOT a refusal (Domain P: stored as it is)', () => {
   const SECRET = 'SECRET-NOTE-TEXT-44';
   const cases = [
-    ['duplicate id', { blobs: { ledger: [led(), led()] } }, /ledger[^;]*duplicates the id/],
-    ['no id', { blobs: { orgNotes: [{ ...note({ text: SECRET }), id: undefined }] } }, /orgNotes[^;]*id must be a non-empty string/],
-    ['not an object', { blobs: { blocks: [block(), 'blk-2'] } }, /blocks blob entry #1[^;]*not an object/],
-    ['blob not an array', { rawBlobs: { reports: '{"id":"rep-1"}' } }, /reports[^;]*must be an array/],
-    ['guardian missing', { blobs: { idvQueue: [idv({ guardianId: 'gd-missing' })] } }, /IDV_GUARDIAN_MISSING[^;]*idv-1/],
-    ['guardianId not a string', { blobs: { idvQueue: [idv({ guardianId: 7 })] } }, /idvQueue[^;]*guardianId must be a non-empty string/],
+    ['duplicate id', { ledger: [led(), led()] }, /ledger[^;]*duplicates the id/],
+    ['no id', { orgNotes: [{ ...note({ text: SECRET }), id: undefined }] }, /orgNotes[^;]*id must be a non-empty string/],
+    ['not an object', { blocks: [block(), 'blk-2'] }, /blocks[^;]*entry #1[^;]*not an object/],
+    ['not an array', { reports: { id: 'rep-1' } }, /reports[^;]*must be an array/],
+    ['guardian missing', { idvQueue: [idv({ guardianId: 'gd-missing' })] }, /IDV_GUARDIAN_MISSING[^;]*idv-1/],
+    ['guardianId not a string', { idvQueue: [idv({ guardianId: 7 })] }, /idvQueue[^;]*guardianId must be a non-empty string/],
   ];
-  for (const [label, file, re] of cases) {
-    const dir = tempDir('sa-refuse'); s7dFile(dir, file); const s = openRaw(dir);
-    const before = { blobs: COLLECTIONS.map((n) => s.prepare('SELECT value FROM collections WHERE name = ?').get(n)?.value ?? null), seq: meta(s, 'saveSeq') };
-    assert.throws(() => migrate(s), (e) => /SAFETY_AUDIT_IMPORT_BLOCKED/.test(e.message) && re.test(e.message) && !e.message.includes(SECRET), `${label}: ${(() => { try { migrate(s); return 'did not throw'; } catch (e) { return e.message.slice(0, 300); } })()}`);
-    assert.ok(!applied(s).includes(MIGRATION), `${label}: not recorded`); for (const t of Object.values(TABLES)) assert.equal(s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), undefined, `${label}: no ${t} table`);
-    assert.deepEqual({ blobs: COLLECTIONS.map((n) => s.prepare('SELECT value FROM collections WHERE name = ?').get(n)?.value ?? null), seq: meta(s, 'saveSeq') }, before, `${label}: untouched`);
-    s.close(); rm(dir);
+  const dir = tempDir('sa-refuse'); s7dFile(dir);
+  const tool = openStore(dir); const before = dump(tool.sqlite); const seq = tool.revision();
+  for (const [label, blobs, re] of cases) {
+    assert.throws(() => tool.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(blobs) }), (e) => (/SAFETY_AUDIT_IMPORT_BLOCKED/.test(e.message) || /must be an array/.test(e.message)) && re.test(e.message) && !e.message.includes(SECRET), `${label}: ${(() => { try { tool.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(blobs) }); return 'did not throw'; } catch (e) { return e.message.slice(0, 300); } })()}`);
+    assert.equal(tool.revision(), seq, `${label}: saveSeq unchanged`); assert.deepEqual(dump(tool.sqlite), before, `${label}: nothing changed`);
   }
-  for (const [label, file] of [['absent', { omit: COLLECTIONS }], ['empty', {}]]) {
-    const dir = tempDir('sa-empty'); s7dFile(dir, file); const s = openRaw(dir);
-    migrate(s); assert.ok(applied(s).includes(MIGRATION), label); for (const t of Object.values(TABLES)) assert.equal(s.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${label}: ${t} empty`); for (const n of COLLECTIONS) assert.equal(blob(s, n), undefined);
-    assert.deepEqual(Object.fromEntries(COLLECTIONS.map((n) => [n, JSON.parse(meta(s, META))[n].imported])), Object.fromEntries(COLLECTIONS.map((n) => [n, 0])));
-    s.close(); rm(dir);
-  }
-  const dir = tempDir('sa-tolerant'); s7dFile(dir, { blobs: { ledger: [led({ playerId: 'pl-gone' })], blocks: [block({ playerId: 'pl-gone' })], reports: [report({ targetKind: 'player', targetPlayerId: 'pl-gone' })], orgNotes: [note({ playerId: 'pl-gone' })], sourceChanges: [srcc({ playerId: 'pl-gone' })] } }); const s = openRaw(dir);
-  migrate(s); assert.ok(applied(s).includes(MIGRATION), 'Domain P: a missing player refuses nothing'); const rec = JSON.parse(meta(s, META)); assert.deepEqual(['blocks', 'reports', 'orgNotes', 'ledger', 'sourceChanges'].map((n) => rec[n].unresolvedPlayerIds), [1, 1, 1, 1, 1]); assert.equal(s.prepare("SELECT player_id FROM ledger").get().player_id, 'pl-gone', 'imported as it is');
-  s.close(); rm(dir);
+  tool.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb({ ledger: [led({ playerId: 'pl-gone' })], blocks: [block({ playerId: 'pl-gone' })], reports: [report({ targetKind: 'player', targetPlayerId: 'pl-gone' })], orgNotes: [note({ playerId: 'pl-gone' })], sourceChanges: [srcc({ playerId: 'pl-gone' })] }) });
+  for (const t of ['ledger', 'blocks', 'org_notes', 'source_changes']) assert.equal(tool.sqlite.prepare(`SELECT player_id FROM ${t}`).get().player_id, 'pl-gone', `${t}: stored as it is`);
+  assert.equal(tool.sqlite.prepare('SELECT target_player_id AS p FROM reports').get().p, 'pl-gone');
+  tool.sqlite.close(); rm(dir);
 });
 
-test('[cutover] the actual schema: typed columns only (no absent_keys_json, offtype_json or extra_json side column); NO foreign key on any of the eight tables (Q4: the five player references are historical; Q4b: the guardian reference is checked in code; organisation and staff references are historical pointers the routes never checked); every table STRICT with a seq order key and a UNIQUE id; the documented indexes exist; no CHECK narrows a vocabulary the writers leave open', () => {
+test('[cutover] migration 0013 is registered after 0012; the actual schema: no audit blob, typed columns only (no absent_keys_json, offtype_json or extra_json side column); NO foreign key on any of the eight tables (Q4: the five player references are historical; Q4b: the guardian reference is checked in code; organisation and staff references are historical pointers the routes never checked); every table STRICT with a seq order key and a UNIQUE id; the documented indexes exist; no CHECK narrows a vocabulary the writers leave open', () => {
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).filter((id) => id <= MIGRATION).slice(-2), ['0012_channels', MIGRATION], '0013 is registered after 0012');
   const dir = tempDir('sa-schema'); s7dFile(dir); const s = openRaw(dir); migrate(s);
+  assert.ok(applied(s).includes(MIGRATION)); for (const n of COLLECTIONS) assert.equal(s.prepare('SELECT COUNT(*) AS n FROM collections WHERE name = ?').get(n).n, 0, `no ${n} blob`);
   for (const t of Object.values(TABLES)) {
     assert.deepEqual(s.prepare(`PRAGMA foreign_key_list(${t})`).all(), [], `${t}: no foreign key`);
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql; assert.match(sql, /STRICT\s*$/, `${t} STRICT`); assert.match(sql, /seq\s+INTEGER PRIMARY KEY/, `${t} seq`); assert.match(sql, /\bid\s+TEXT NOT NULL UNIQUE/, `${t} unique id`);

@@ -28,9 +28,8 @@ is archived in git under the tag `docs-archive-2026-11`. The migration's status 
   - passwordless seeded demo logins are refused (`DEV_LOGIN_DISABLED`);
   - the fault-injection layer and the test identity provider are disabled;
   - the unsafe-configuration checks below become fatal at boot.
-- **A legacy `db.json`** found in an empty `DATA_DIR` is imported once and renamed
-  `db.json.migrated`. A backup is restored the same way (see Backups). If the file cannot
-  be imported, the boot stops with `LEGACY_IMPORT_FAILED` and leaves the file untouched.
+- **There is no `db.json` import.** A file of that name in `DATA_DIR` is ignored. A backup
+  is restored by copying its `scoutbox.db` (see Backups).
 
 ### Tests and scripts (`package.json`)
 
@@ -156,16 +155,14 @@ There are two registries:
 - **Table migrations** (`repositories/migrations/NNNN_name.mjs`, registered in
   `repositories/index.mjs`) export `{ id, note, up(sqlite) }`. They run once, in id order,
   each inside a transaction. Each is recorded in **`data_migrations`** (`id`,
-  `applied_at`), and cutover counts go in `meta`. A step that rebuilds a referenced table
+  `applied_at`). A step that rebuilds a referenced table
   sets `foreignKeysOff` and must leave `PRAGMA foreign_key_check` empty before it
   commits. A failure rolls the step back and aborts the boot with the file unchanged.
 
 When you move a blob domain to tables:
 
-- Import the blob rows into typed columns. Normalise or drop what doesn't fit and report it
-  with ids. Refuse the step (`*_IMPORT_BLOCKED`) only when the data is actually unusable. All
-  data is seed or test data.
-- Retire the blob row in the same transaction.
+- The migration's `up()` is its DDL (plus any table rebuild the step needs). It does not
+  import the domain's blob rows: there is no production data, and rollback means re-seed.
 - Whether a domain reads from its table or its blob depends on its `data_migrations`
   record, never on whether the table exists or has rows.
 - After attach, an in-memory array (seed, `??= []` default, stale copy) is never imported
@@ -173,8 +170,9 @@ When you move a blob domain to tables:
 
 The latest table migration is `0018_signings_follow_ups`.
 
-**Snapshot mode.** `openStore(dir)` without options is for tools and fixtures. It reads
-and writes the whole database in the shape the server sees, tables included. A snapshot
+**Snapshot mode.** `openStore(dir)` without options is for tools and fixtures. It runs the
+table migrations when it opens the file, then reads and writes the whole database in the
+shape the server sees, tables included. A saved snapshot is never a first installation. A snapshot
 write is strict: a malformed collection or any invalid row rejects the whole save. An
 omitted collection leaves its table alone. An explicit `[]` empties it. Snapshot mode has
 no units of work.
@@ -184,18 +182,21 @@ no units of work.
 These routes exist (`m13/enterprise.mjs`). Admin routes need the `x-admin-key` header.
 
 - `POST /admin/backup` writes `DATA_DIR/backups/<timestamp>/`, which contains:
-  - `db.json`: the full snapshot in legacy collection shape, with sessions as token
-    hashes and one-time codes as hashes;
-  - `media/`: media files, except files queued for removal;
-  - `manifest.json`: checksums and counts, written last.
+  - `scoutbox.db`: a consistent copy of the database (`VACUUM INTO`, `store.copyTo`),
+    taken after a flush: every table and every remaining blob, with sessions and
+    one-time codes as hashes, as they are stored;
+  - `media/`: media files, except files queued for removal (their queue entries are in
+    the copy, and the restored server finishes the removal at boot);
+  - `manifest.json`: contract `backup.2026-11.v2`, checksums and counts, written last.
 
   A failure removes the partial directory and returns `500 BACKUP_FAILED`. A media-queue
   ownership conflict returns `409 MEDIA_QUEUE_OWNERSHIP_CONFLICT`.
 - `POST /admin/backup/verify {dir}` re-checksums a backup. `GET /admin/backups` lists
   backups.
 - **Restore:** copy the backup into a new, empty directory and boot with `DATA_DIR`
-  pointing at it. The first boot imports `db.json` and runs every table migration over
-  it. Never restore over a live directory.
+  pointing at it. The boot opens the copied `scoutbox.db` as it is; a corrupt file stops
+  the boot. An empty (0-byte) file is treated as a new installation, so check the copy
+  with `POST /admin/backup/verify` first. Never restore over a live directory.
 - Backups contain personal (seed) data but no server secrets: `ADMIN_KEY` and
   `MEDIA_SECRET` live only in the environment.
 

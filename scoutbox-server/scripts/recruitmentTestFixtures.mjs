@@ -5,7 +5,27 @@
 // confirm/decline/cancel; m12/journeys.mjs the day containers; m12/operations.mjs the
 // reminder markers). Synthetic ids and names only. Shared by testRecruitment.mjs,
 // testRecruitmentServer.mjs and the handoff bench.
-import { NOW } from './coreIdentityTestFixtures.mjs';
+import { NOW, FIXTURE, USERS, SESSIONS, ORGS } from './coreIdentityTestFixtures.mjs';
+import { openStore } from '../store.mjs';
+import { trialReportsFor } from '../repositories/playerSubrecords.mjs';
+
+/**
+ * A test database written the way fixtures are written now: a snapshot-mode save
+ * (openStore(dir).save), which migrates the file and writes every table-backed
+ * collection into its tables. `db` is laid over the core fixture (staff, sessions,
+ * organisations, players with the trial reports their trials imply, guardians).
+ * Returns the directory.
+ */
+export const fixtureDb = (db = {}) => {
+  const trials = Array.isArray(db.trials) ? JSON.parse(JSON.stringify(db.trials)) : [];
+  const players = FIXTURE().players.map((p) => ({ ...p, trialReports: trialReportsFor(trials, p.id) }));
+  return { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), players, guardians: FIXTURE().guardians, ledger: [], vouches: [], ...db };
+};
+export function saveFixture(dir, db = {}, { savedAt = NOW, idCounter = 1000 } = {}) {
+  const store = openStore(dir);
+  try { store.save({ savedAt, idCounter, db: fixtureDb(db) }); } finally { store.sqlite.close(); }
+  return dir;
+}
 
 const MIN = 60_000; const HOUR = 60 * MIN; const DAY = 24 * HOUR;
 export const T = Object.freeze({ invited: NOW - 3 * DAY, accepted: NOW - 2 * DAY, session: NOW + 2 * DAY, sessionEnd: NOW + 2 * DAY + 90 * MIN, filed: NOW - HOUR, removed: NOW });

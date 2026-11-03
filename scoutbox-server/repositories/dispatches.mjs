@@ -182,31 +182,27 @@ const NOTE_KEYS = Object.freeze(['at', 'note']);
 /** The fields the sweep and the callback route change after a row exists; everything else is fixed at creation. */
 const PATCH_KEYS = Object.freeze(['status', 'providerMessageId', 'nextAt', 'deliveredAt', 'openedAt', 'actionedAt', 'failedAt', 'failReason']);
 
-/**
- * Unknown fields of a nested object: with `dropped` (the migration's import) they are dropped and their
- * names collected; without it (create, a snapshot replace) they refuse the write, as they always did.
- */
-const unknownFields = (raw, known, field, dropped) => {
+/** Unknown fields of a nested object refuse the write (create, a snapshot replace). */
+const unknownFields = (raw, known, field) => {
   const unknown = Object.keys(raw).filter((k) => !known.includes(k));
   if (!unknown.length) return null;
-  if (dropped) { for (const k of unknown) dropped.push(`${field}.${k}`); return null; }
   return `${field} carries unknown field(s) ${unknown.join(', ')}`;
 };
-function audienceOf(raw, field = 'audience', dropped = null) {
+function audienceOf(raw, field = 'audience') {
   if (!isPlainObject(raw)) return { reason: `${field} must be an object { kind, id } (got ${describe(raw)})` };
-  const unknown = unknownFields(raw, AUDIENCE_KEYS, field, dropped); if (unknown) return { reason: unknown };
+  const unknown = unknownFields(raw, AUDIENCE_KEYS, field); if (unknown) return { reason: unknown };
   if (!nonEmpty(raw.kind)) return { reason: `${field}.kind must be a non-empty string` };
   if (!nonEmpty(raw.id)) return { reason: `${field}.id must be a non-empty string` };
   return { audience: { kind: raw.kind, id: raw.id } };
 }
 /** Validate one attempt entry: `{ attempt }` (a plain copy in its shape) or `{ reason }`. */
-export function attemptOf(raw, field = 'attempt', dropped = null) {
+export function attemptOf(raw, field = 'attempt') {
   if (!isPlainObject(raw)) return { reason: `${field} must be an object (got ${describe(raw)})` };
   const hasNote = Object.hasOwn(raw, 'note'); const hasOk = Object.hasOwn(raw, 'ok');
   if (hasNote && hasOk) return { reason: `${field} carries both note and ok (a send row and a quiet re-check row are different shapes)` };
   const shape = hasNote ? NOTE_KEYS : hasOk && Object.hasOwn(raw, 'error') ? SEND_KEYS : null;
   if (!shape) return { reason: `${field} is neither a send row {at, ok, error} nor a quiet re-check row {at, note}` };
-  const unknown = unknownFields(raw, shape, field, dropped); if (unknown) return { reason: unknown };
+  const unknown = unknownFields(raw, shape, field); if (unknown) return { reason: unknown };
   if (!isInt(raw.at)) return { reason: `${field}.at must be an integer timestamp` };
   if (hasNote) {
     if (!nonEmpty(raw.note)) return { reason: `${field}.note must be a non-empty string` };
@@ -222,16 +218,15 @@ const finiteOrNull = (v) => v === null || isFiniteNumber(v);
 /**
  * Validate one exported dispatch: `{ ok: true, row, dropped }` or `{ ok: false, reason }`. The row is the mirror
  * shape (the eighteen keys, a plain copy, attempts copied); an unknown top-level field is never part of it and is
- * listed in `dropped`. `importing` (the migration) also drops unknown audience / attempt fields instead of refusing.
+ * listed in `dropped`. An unknown audience or attempt field is refused.
  */
-export function validateDispatchRow(raw, { importing = false } = {}) {
+export function validateDispatchRow(raw) {
   if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
   for (const k of DISPATCH_KEYS) if (!Object.hasOwn(raw, k)) return { ok: false, reason: `${k} is absent (every build wrote all 18 keys; nothing is normalised)` };
   if (!nonEmpty(raw.id)) return { ok: false, reason: 'id must be a non-empty string' };
   if (!nonEmpty(raw.notificationId)) return { ok: false, reason: 'notificationId must be a non-empty string' };
   const dropped = Object.keys(raw).filter((k) => !DISPATCH_KEYS.includes(k));
-  const nested = importing ? dropped : null;
-  const a = audienceOf(raw.audience, 'audience', nested); if (a.reason) return { ok: false, reason: a.reason };
+  const a = audienceOf(raw.audience, 'audience'); if (a.reason) return { ok: false, reason: a.reason };
   if (!nonEmpty(raw.channel)) return { ok: false, reason: 'channel must be a non-empty string' };
   if (!stringOrNull(raw.to)) return { ok: false, reason: 'to must be a string or null' };
   if (!nonEmpty(raw.provider)) return { ok: false, reason: 'provider must be a non-empty string' };
@@ -240,7 +235,7 @@ export function validateDispatchRow(raw, { importing = false } = {}) {
   if (!stringOrNull(raw.providerMessageId)) return { ok: false, reason: 'providerMessageId must be a string or null' };
   if (!Array.isArray(raw.attempts)) return { ok: false, reason: `attempts must be an array (got ${describe(raw.attempts)})` };
   const attempts = [];
-  for (let i = 0; i < raw.attempts.length; i++) { const v = attemptOf(raw.attempts[i], `attempts[${i}]`, nested); if (v.reason) return { ok: false, reason: v.reason }; attempts.push(v.attempt); }
+  for (let i = 0; i < raw.attempts.length; i++) { const v = attemptOf(raw.attempts[i], `attempts[${i}]`); if (v.reason) return { ok: false, reason: v.reason }; attempts.push(v.attempt); }
   if (!isInt(raw.nextAt)) return { ok: false, reason: 'nextAt must be an integer timestamp' };
   if (!intOrNull(raw.actionDeadline)) return { ok: false, reason: 'actionDeadline must be an integer timestamp or null' };
   if (!isInt(raw.createdAt)) return { ok: false, reason: 'createdAt must be an integer timestamp' };
@@ -257,12 +252,12 @@ export function validateDispatchRow(raw, { importing = false } = {}) {
  * address). Returns `{ rows, attempts, byStatus, unknownFieldsDropped, notes }`: the rows that had a field dropped
  * and one note per such row (dispatch id and field names only, never a value).
  */
-export function validateDispatchRows(rows, { label = 'the dispatches collection', importing = false } = {}) {
+export function validateDispatchRows(rows, { label = 'the dispatches collection' } = {}) {
   if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
   const out = []; const problems = []; const ids = new Set(); const notes = [];
   let attempts = 0; const byStatus = {};
   rows.forEach((raw, i) => {
-    const v = validateDispatchRow(raw, { importing });
+    const v = validateDispatchRow(raw);
     if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
     if (ids.has(v.row.id)) { problems.push(`entry #${i}: duplicates the id of an earlier entry (${v.row.id})`); return; }
     ids.add(v.row.id); attempts += v.row.attempts.length; if (v.dropped.length) notes.push(`dispatch ${v.row.id}: unknown field(s) ${v.dropped.join(', ')} dropped`); byStatus[v.row.status] = (byStatus[v.row.status] ?? 0) + 1;

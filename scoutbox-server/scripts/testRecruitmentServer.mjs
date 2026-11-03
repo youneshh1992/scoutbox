@@ -6,17 +6,10 @@
 // the direct route beside two stored open-day invitations for one player (D2), a SIGKILL
 // right after the acceptance, the deletion unit's tombstones (requests and trials reduced in
 // place, the thread deleted) with a REAL COMMIT failure leaving everything as it was, a
-// request naming a historically missing player served and counted (Q7a), the admin backup
-// carrying both collections in the legacy shapes, a restore into a NEW directory importing
-// through 0015, and a pre-S8a file whose requests or trials blob is a present null refused
-// at boot. Every database read goes
+// request naming a historically missing player served and counted (Q7a), and the admin
+// backup (a copy of the database) restored into a NEW directory row for row. Every database read goes
 // through a second read-only connection. Nothing here touches DATA_DIR or real data.
 // Run with: npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged d0f0205 tree, source-identical to the
-// accepted 9b109dc): the [cutover] tests assert the 0015 record, the tables, the absence of
-// the blobs and FAIL there on concrete assertions; the [compat] checks
-// inside them (the routes' answers) hold on both trees.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -24,9 +17,8 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { tempDir, s3File, openRaw, FIXTURE, NOW, TTL } from './coreIdentityTestFixtures.mjs';
-import { runDataMigrations } from '../repositories/database.mjs';
-import { DATA_MIGRATIONS } from '../repositories/index.mjs';
+import { tempDir } from './coreIdentityTestFixtures.mjs';
+import { readTrials } from '../repositories/recruitment.mjs';
 import { openStore } from '../store.mjs';
 
 let passed = 0;
@@ -64,14 +56,6 @@ async function boot(dir, env = {}, server = SERVER) {
     setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
-async function bootRefused(dir, env = {}, server = SERVER) {
-  const port = await freePort();
-  return new Promise((resolve) => {
-    const proc = spawn(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
-    let log = ''; proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
-    proc.on('exit', (code) => resolve({ code, log })); setTimeout(() => { proc.kill('SIGKILL'); resolve({ code: 'timeout', log }); }, 30_000).unref();
-  });
-}
 const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { s.exec('BEGIN'); try { return fn({ get: (sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; }, all: (sql, ...p) => s.prepare(sql).all(...p).map((r) => ({ ...r })) }); } finally { s.exec('COMMIT'); } } finally { s.close(); } };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
@@ -89,7 +73,7 @@ async function inviteAndAccept(S, maria, pid, token, { proposedDate = '2026-11-0
   return { requestId: inv.body.requestId, trialId: acc.body.trialId, channelId: acc.body.contactChannel };
 }
 
-await test('[cutover] a fresh boot records 0015_recruitment (followed by S8b\'s 0016 since that step) and the fifteen tables exist with channels carrying the real request key; the direct invitation and the adult\'s acceptance land as rows (the request answered, the trial with its history and keys.accept, the thread naming the request through the key) with no blob behind them; /org/requests, /org/trials, /player/inbox and /player/trials answer as before; the report lands in trial_reports and the day staff in trial_day_staff; the direct route still answers REQUEST_PENDING; a SIGKILL right after the acceptance loses nothing; /capabilities counts the rows', async () => {
+await test('[routes] a fresh boot records 0015_recruitment (followed by S8b\'s 0016 since that step) and the fifteen tables exist with channels carrying the real request key; the direct invitation and the adult\'s acceptance land as rows (the request answered, the trial with its history and keys.accept, the thread naming the request through the key) with no blob behind them; /org/requests, /org/trials, /player/inbox and /player/trials answer as before; the report lands in trial_reports and the day staff in trial_day_staff; the direct route still answers REQUEST_PENDING; a SIGKILL right after the acceptance loses nothing; /capabilities counts the rows', async () => {
   const dir = tempDir('s8a-boot'); const S = await boot(dir);
   assert.equal(applied(dir).at(-4), MIGRATION, 'the S8a migration, recorded before S8b\'s 0016, S8c\'s 0017 and S8d\'s 0018'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   assert.ok(qAll(dir, 'PRAGMA foreign_key_list(channels)').some((r) => r.table === 'recruitment_requests'), 'channels.request_id is a real key');
@@ -121,26 +105,21 @@ await test('[cutover] a fresh boot records 0015_recruitment (followed by S8b\'s 
   const S2 = await boot(dir); const mariaR = await orgLogin(S2); assert.equal((await S2.j('GET', '/org/trials', undefined, mariaR)).body.length, 2); await S2.stop(); rm(dir);
 });
 
-await test('[cutover] two stored open-day invitations for one player (the shape the open-day outcome route writes, no one-pending guard) boot, are both served in the inbox and survive a save; a request naming a historically missing player is served and counted (Q7a), never refused; the deletion unit tombstones the requests and trials in place and deletes the thread — a failure of the REAL COMMIT leaves every row as it was; the retry lands once', async () => {
+await test('[routes] two stored open-day invitations for one player (the shape the open-day outcome route writes, no one-pending guard) boot, are both served in the inbox and survive a save; a request naming a historically missing player is served and counted (Q7a), never refused; the deletion unit tombstones the requests and trials in place and deletes the thread — a failure of the REAL COMMIT leaves every row as it was; the retry lands once', async () => {
   const dir = tempDir('s8a-openday'); let S = await boot(dir);
   const maria = await orgLogin(S); const { pid, token } = await signupAdult(S, 'Open Day Adult'); const flow = await inviteAndAccept(S, maria, pid, token);
   await S.stop();
-  // inject two pending open-day invitations for the same org/player/type and one request of a missing player, the way a backup from the previous build could carry them
-  const bk = tempDir('s8a-bkdir'); {
-    const s = new DatabaseSync(path.join(dir, 'scoutbox.db'));
-    const requests = JSON.parse(s.prepare("SELECT value FROM collections WHERE name = 'requests'").get()?.value ?? 'null');
-    assert.equal(requests, null, 'no blob on a 0015 file'); s.close();
-  }
-  // through the backup/restore path: edit the backup's db.json (the legacy shape) and restore it
+  assert.equal(blobOf(dir, 'requests'), undefined, 'no blob');
+  // two pending open-day invitations for the same org/player/type and one request of a missing player, written by a
+  // snapshot-mode save (as a tool would); then the backup of that database restored into a NEW directory
+  { const store = openStore(dir); const loaded = store.load(); const base = loaded.db.requests.find((r) => r.id === flow.requestId);
+    const openDay = (id) => ({ id, playerId: pid, playerName: 'Open Day Adult', orgId: base.orgId, orgName: base.orgName, orgType: base.orgType, orgVerified: base.orgVerified, orgSafeguardingCertified: base.orgSafeguardingCertified, trustedPartner: base.trustedPartner, userId: base.userId, scoutName: base.scoutName, scoutRole: base.scoutRole, type: 'trial', message: 'We liked what we saw at "Open day" — come for a proper trial.', trialDetails: { proposedDate: null, altSlots: [], venue: 'Eastport Ground', notes: 'Follow-up from open day "Open day".' }, status: 'pending', createdAt: base.createdAt + 1, routedTo: 'player', guardianId: null, contactChannel: null });
+    loaded.db.requests = [...loaded.db.requests, openDay('req-od1'), openDay('req-od2'), { ...openDay('req-gone'), playerId: 'pl-gone-long-ago', playerName: 'Gone' }];
+    store.save(loaded); store.sqlite.close(); }
   S = await boot(dir); const bkp = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bkp.status, 201, bkp.text); await S.stop();
   const restored = tempDir('s8a-restored'); fs.cpSync(bkp.body.dir, restored, { recursive: true });
-  const dbJson = path.join(restored, 'db.json'); const snapJson = JSON.parse(fs.readFileSync(dbJson, 'utf8'));
-  const base = snapJson.db.requests.find((r) => r.id === flow.requestId);
-  const openDay = (id) => ({ id, playerId: pid, playerName: 'Open Day Adult', orgId: base.orgId, orgName: base.orgName, orgType: base.orgType, orgVerified: base.orgVerified, orgSafeguardingCertified: base.orgSafeguardingCertified, trustedPartner: base.trustedPartner, userId: base.userId, scoutName: base.scoutName, scoutRole: base.scoutRole, type: 'trial', message: 'We liked what we saw at "Open day" — come for a proper trial.', trialDetails: { proposedDate: null, altSlots: [], venue: 'Eastport Ground', notes: 'Follow-up from open day "Open day".' }, status: 'pending', createdAt: base.createdAt + 1, routedTo: 'player', guardianId: null, contactChannel: null });
-  snapJson.db.requests.push(openDay('req-od1'), openDay('req-od2'), { ...openDay('req-gone'), playerId: 'pl-gone-long-ago', playerName: 'Gone' });
-  fs.writeFileSync(dbJson, JSON.stringify(snapJson));
   S = await boot(restored);
-  assert.ok(live(restored)); const cut = JSON.parse(q1(restored, "SELECT value FROM meta WHERE key = 'recruitmentCutover'").value); assert.equal(cut.players.missing, 1, 'the missing player id counted at import');
+  assert.ok(live(restored));
   const inbox = await S.j('GET', '/player/inbox', undefined, (await S.j('POST', '/auth/player/login', { playerId: pid, password: 'synthetic-pass-1' })).body.token); assert.equal(inbox.body.filter((r) => r.status === 'pending' && r.type === 'trial').length, 2, 'both open-day invitations served');
   const mariaR = await orgLogin(S); assert.ok((await S.j('GET', '/org/requests', undefined, mariaR)).body.some((r) => r.id === 'req-gone'), 'the request of a missing player is served as today');
   const cap = await S.j('GET', '/capabilities'); assert.equal(cap.body.dataLayer.domains.recruitment.unresolvedPlayerReferences.requests, 1);
@@ -157,10 +136,10 @@ await test('[cutover] two stored open-day invitations for one player (the shape 
   assert.equal(q1(restored, 'SELECT player_name, subject_removed_at FROM trials WHERE id = ?', flow.trialId).player_name, null); assert.ok(q1(restored, 'SELECT subject_removed_at FROM trials WHERE id = ?', flow.trialId).subject_removed_at);
   assert.equal(q1(restored, 'SELECT count(*) AS n FROM channels WHERE player_id = ?', pid).n, 0, 'the thread deleted (D-B), the request it named stays (RESTRICT satisfied by the order)');
   assert.ok(q1(restored, 'SELECT 1 AS one FROM recruitment_requests WHERE id = ?', 'req-gone'), 'the other person\'s request untouched');
-  await S.stop(); rm(dir, restored, bk, bkp.body.dir);
+  await S.stop(); rm(dir, restored, bkp.body.dir);
 });
 
-await test('[cutover] the admin backup carries requests and trials in the legacy shapes (insertion order, the writers\' literals, keys reassembled); a restore into a NEW directory imports them through 0015 row for row', async () => {
+await test('[backup] the admin backup is a copy of the database: its requests and trials (the day staff, the report, keys.accept) equal the live rows, and a restore into a NEW directory serves them row for row', async () => {
   const dir = tempDir('s8a-backup'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Backup Adult'); const flow = await inviteAndAccept(S, maria, a.pid, a.token);
   assert.equal((await S.j('POST', `/org/trials/${flow.trialId}/staff`, { name: 'Coach Dan', role: 'Lead coach' }, maria)).status, 201);
@@ -168,21 +147,18 @@ await test('[cutover] the admin backup carries requests and trials in the legacy
   assert.ok(await until(() => q1(dir, 'SELECT 1 AS one FROM trial_reports WHERE trial_id = ?', flow.trialId)), 'the report landed');
   const b = await signupAdult(S, 'Pending Adult'); assert.equal((await S.j('POST', `/org/players/${b.pid}/request`, { type: 'contact', message: 'Hello there.' }, maria)).status, 201);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  assert.equal(snapshot.db.requests.length, 2); assert.equal(snapshot.db.trials.length, 1); assert.equal(snapshot.db.requests[0].id, flow.requestId); assert.deepEqual(Object.keys(snapshot.db.trials[0]).slice(0, 3), ['id', 'requestId', 'caseId'], 'the writer\'s literal order'); assert.equal(snapshot.db.trials[0].day.staff[0].name, 'Coach Dan'); assert.deepEqual(snapshot.db.trials[0].keys.accept, { key: null, fp: JSON.stringify({ requestId: flow.requestId, day: '2026-11-01' }) });
-  const liveDump = recDump(dir);
   await S.stop();
+  const liveDump = recDump(dir); assert.equal(recDump(bk.body.dir), liveDump, 'the backup holds every recruitment and thread row');
+  assert.equal(q1(bk.body.dir, 'SELECT count(*) AS n FROM recruitment_requests').n, 2); assert.equal(q1(bk.body.dir, 'SELECT name FROM trial_day_staff WHERE trial_id = ?', flow.trialId).name, 'Coach Dan');
+  { const s = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); assert.deepEqual(readTrials(s)[0].keys.accept, { key: null, fp: JSON.stringify({ requestId: flow.requestId, day: '2026-11-01' }) }); s.close(); }
   const restored = tempDir('s8a-restore'); fs.cpSync(bk.body.dir, restored, { recursive: true });
-  S = await boot(restored); assert.ok(live(restored)); assert.equal(recDump(restored), liveDump, 'row for row'); await S.stop();
+  S = await boot(restored); assert.ok(live(restored)); assert.equal(recDump(restored), liveDump, 'row for row');
+  const mariaR = await orgLogin(S); assert.ok((await S.j('GET', '/org/trials', undefined, mariaR)).body.some((x) => x.id === flow.trialId), 'the restored server serves the trial'); await S.stop();
   rm(dir, restored, bk.body.dir);
 });
 
-// ------------------------------------------------------------- review of 6d77aa7 (F1, F2)
-// FAILING-FIRST NOTE: recorded on the unchanged 6d77aa7 tree before the correction — the F1 test fails once the
-// hand-written acts are read back after the restore (the empty list act and the prototype-named act are gone); the F2
-// test fails because the server LISTENS on a restored backup whose trials collection is a present JSON null.
-const blobTextOf = (dir, name) => snap(dir, (c) => c.get('SELECT value FROM collections WHERE name = ?', name)?.value);
-await test('[cutover] F1 (review of 6d77aa7) through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a trial whose keys carry an empty list act, an empty object act and a prototype-named own act (written into the file by hand — no route produces them today) keeps every act distinctly through a backup and a restore (where the same clientKey still replays)', async () => {
+// ------------------------------------------------------------- review of 6d77aa7 (F1)
+await test('[routes] F1 (review of 6d77aa7) through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a trial whose keys carry an empty list act, an empty object act and a prototype-named own act (written by a snapshot-mode save — no route produces them today) keeps every act distinctly through a backup and a restore (where the same clientKey still replays)', async () => {
   const dir = tempDir('s8a-f1'); let S = await boot(dir); let maria = await orgLogin(S); const a = await signupAdult(S, 'Keyed Adult');
   const room = await S.j('POST', '/org/rooms', { playerId: a.pid, sourceContext: 'search' }, maria); assert.equal(room.status, 201, room.text); const RID = room.body.room.roomId;
   const jr = (await S.j('GET', `/org/rooms/${RID}/journey`, undefined, maria)).body; if (jr.lifecycle.currentStage === 'watching') { const mv = await S.j('POST', `/org/rooms/${RID}/lifecycle`, { action: 'startReview', expectedRev: jr.case.rev }, maria); assert.equal(mv.status, 200, mv.text); }
@@ -209,41 +185,11 @@ await test('[cutover] F1 (review of 6d77aa7) through the real routes: an invitat
   const expectKeys = (keys, label) => { assert.ok(Object.hasOwn(keys, 'cancel') && Array.isArray(keys.cancel) && keys.cancel.length === 0, `${label}: the empty list act is present and empty`); assert.ok(Object.hasOwn(keys, 'extraEmpty') && Object.keys(keys.extraEmpty).length === 0, `${label}: the empty object act`); assert.ok(Object.hasOwn(keys, '__proto__') && keys.__proto__.key === 'proto-key', `${label}: the prototype-named own act`); assert.equal(keys.schedule[0].key, 'sched-key-1', `${label}: the real key`); };
   S = await boot(dir); maria = await orgLogin(S); await replayS(S, maria, 'after the hand edit');
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
-  const backup = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')); expectKeys(backup.db.trials.find((x) => x.id === TID).keys, 'the backup export');
+  { const s = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); expectKeys(readTrials(s).find((x) => x.id === TID).keys, 'the backup copy'); s.close(); }
   const restored = tempDir('s8a-f1-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); maria = await orgLogin(S); await replayS(S, maria, 'the restore'); await S.stop();
   { const store = openStore(restored); expectKeys(store.load().db.trials.find((x) => x.id === TID).keys, 'read back from the restored tables'); store.sqlite.close(); }
   rm(dir, restored, bk.body.dir);
-});
-
-await test('[cutover] F2 (review of 6d77aa7) through a real boot: a pre-S8a file (migrations 0001–0014 applied, the recruitment blobs planted) whose trials — or requests — blob is a present JSON null is REFUSED at boot with RECRUITMENT_IMPORT_BLOCKED naming the null: the server never listens, nothing is imported or seeded in its place, the migration is not recorded, the blob and every table are left as they were and the next boot refuses the same way; control: a db.json whose collection is null is refused earlier by the legacy import (LEGACY_IMPORT_FAILED), never served', async () => {
-  // a fresh file with NO request and NO trial, so that nothing else can refuse the import: on the reviewed source a null
-  // blob imported as an empty collection and the server listened over it
-  const dir = tempDir('s8a-f2'); const S = await boot(dir); const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
-  const stateOf = (where, name) => ({ recorded: applied(where).includes(MIGRATION), tables: TABLES.filter((t) => tableExists(where, t)), blob: blobTextOf(where, name), saveSeq: q1(where, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value, dump: recDump(where), other: blobTextOf(where, name === 'trials' ? 'requests' : 'trials') });
-  const refusedBoot = async (where, name, label) => {
-    const before = stateOf(where, name); const r = await bootRefused(where);
-    assert.equal(r.code, 1, `${label}: the server exits 1 at boot — ${r.log.slice(-600)}`); assert.doesNotMatch(r.log, /listening on/, `${label}: never listened`);
-    assert.match(r.log, /RECRUITMENT_IMPORT_BLOCKED/, `${label}: the refusal — ${r.log.slice(-600)}`); assert.match(r.log, new RegExp(`${name} blob.*null`), `${label}: names the null blob`);
-    const after = stateOf(where, name); assert.deepEqual(after, before, `${label}: the refused boot changed nothing`); assert.equal(after.recorded, false, `${label}: 0015 not recorded`); assert.deepEqual(after.tables, [], `${label}: no recruitment table`); assert.equal(after.blob, 'null', `${label}: the null blob left as it was`);
-    return after;
-  };
-  const setNull = (where, name) => { const s = new DatabaseSync(path.join(where, 'scoutbox.db')); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run(name, 'null'); s.close(); };
-  // a pre-S8a file built directly (the fixture's synthetic records, migrations 0001–0014 applied, the other collection an
-  // explicit []), one collection then set to null — written after the earlier steps ran, as 0007 refuses a non-array trials blob itself
-  for (const name of ['trials', 'requests']) {
-    const other = name === 'trials' ? 'requests' : 'trials';
-    const pre = tempDir(`s8a-f2-${name}`);
-    s3File(pre, { players: FIXTURE().players.map((p) => ({ ...p, trialReports: [] })), extra: { ledger: [], vouches: [], notifications: [], dispatches: [], recruitmentCases: [] }, rawBlobs: { [other]: '[]' } });
-    { const s = openRaw(pre); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } }); s.close(); }
-    assert.equal(live(pre), false); setNull(pre, name);
-    const first = await refusedBoot(pre, name, `${name}: first boot`); const second = await refusedBoot(pre, name, `${name}: second boot`); assert.deepEqual(second, first, `${name}: the next boot refuses the same way`);
-    rm(pre);
-  }
-  // control: a null collection in a db.json is refused by the legacy import before any blob exists (the store's existing contract), and never served
-  { const restored = tempDir('s8a-f2-json'); fs.cpSync(bk.body.dir, restored, { recursive: true }); const dbJson = path.join(restored, 'db.json'); const j = JSON.parse(fs.readFileSync(dbJson, 'utf8')); j.db.trials = null; fs.writeFileSync(dbJson, JSON.stringify(j));
-    const r = await bootRefused(restored); assert.equal(r.code, 1, r.log.slice(-400)); assert.doesNotMatch(r.log, /listening on/); assert.match(r.log, /LEGACY_IMPORT_FAILED.*trials.*got null/, 'the legacy import names the null collection'); rm(restored); }
-  rm(dir, bk.body.dir);
 });
 
 console.log(`\n${passed} recruitment server checks passed`);

@@ -1,10 +1,10 @@
 // S7b — delivery dispatch records and their attempts as tables
 // (repositories/dispatches.mjs, migration 0010):
-// the migration from the legacy `dispatches` blob (the one 18-key literal every
-// build since M13 wrote, nested attempts of the two shapes, unknown fields
-// dropped and reported, orphan
-// references counted — never refused — absent / empty / malformed / duplicate
-// collections, first installation, reruns, text-free refusals); the actual
+// the snapshot save (the one 18-key literal every build since M13 wrote, nested
+// attempts of the two shapes, unknown top-level fields dropped, orphan
+// references kept — never refused — malformed / duplicate collections,
+// text-free refusals); the migration (first installation, reruns,
+// prerequisites); the actual
 // schema (the attempt-shape CHECK rejecting a NULL send outcome in SQL, the
 // finite-fractional callback timestamps preserved exactly); the repository
 // (insertion order, the first-match provider lookup with duplicates, an
@@ -20,10 +20,10 @@ import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import {
   createDispatchesRepository, validateDispatchRows,
-  DISPATCHES_MIGRATION, DISPATCHES_CUTOVER_META, DISPATCH_TABLES, DISPATCH_KEYS,
+  DISPATCHES_MIGRATION, DISPATCH_TABLES, DISPATCH_KEYS,
 } from '../repositories/dispatches.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, freshFile, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -44,20 +44,23 @@ const tableExists = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE typ
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const FRACTIONAL = 1700000000000.5; // what the signed callback route writes for a finite fractional `at` (design probe of dc4b559)
 const ORG_USER = { kind: 'org_user', id: 'usr-1' };
-/** A notification in the legacy blob shape (the 0009 import needs them so references resolve). */
+/** A notification in the snapshot shape (so the fixture's references resolve). */
 const ntf = (id) => ({ id, ts: NOW - MIN, audience: ORG_USER, type: 'message', text: 'Synthetic.', refId: 'chan-1', read: false, repeatCount: 1, groupKey: 'message:chan-1', category: 'messages', deferredPush: false });
 /** A dispatch the way every build since M13 wrote it: all 18 keys, null (never absent) when unset. */
 const dsp = (over = {}) => ({ id: 'dsp-a', notificationId: 'ntf-1', audience: { kind: 'org_user', id: 'usr-1' }, channel: 'email', to: 'synthetic@example.test', provider: 'local-fake', status: 'accepted', skipReason: null, providerMessageId: 'fm_000000000000000a', attempts: [{ at: NOW - MIN, ok: true, error: null }], nextAt: NOW - MIN, actionDeadline: null, createdAt: NOW - 2 * MIN, deliveredAt: null, openedAt: null, actionedAt: null, failedAt: null, failReason: null, ...over });
 const inApp = (id, notificationId) => dsp({ id, notificationId, channel: 'in_app', to: `org_user:usr-1`, provider: 'in_app', status: 'delivered', providerMessageId: null, attempts: [], deliveredAt: NOW - 2 * MIN });
 
-/** A file at S7a (0001–0009 applied) carrying the dispatches blob the way the 0641b2c build wrote it. */
-function s7aFile(dir, { dispatches, notifications = [ntf('ntf-1'), ntf('ntf-2')], rawBlobs } = {}) {
-  const extra = { requests: [], vouches: [], ledger: [], notifications, outbox: [], opsEvents: [], deliveryCallbacksSeen: [] };
-  if (dispatches !== undefined) extra.dispatches = dispatches;
-  s3File(dir, { extra, rawBlobs });
-  const s = openRaw(dir);
-  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < DISPATCHES_MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } });
-  s.close();
+/**
+ * A saved fixture: every migration applied and the fixture's staff, sessions,
+ * organisations, players, guardians and notifications written through a
+ * snapshot-mode save (the tables, never blobs). Dispatches given here go
+ * through the same save, so a malformed one is refused by it.
+ */
+function s7aFile(dir, { dispatches, notifications = [ntf('ntf-1'), ntf('ntf-2')] } = {}) {
+  const db = { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], vouches: [], ledger: [], notifications, outbox: [], opsEvents: [], deliveryCallbacksSeen: [] };
+  if (dispatches !== undefined) db.dispatches = dispatches;
+  const tool = openStore(dir);
+  try { tool.save({ savedAt: NOW, idCounter: 1000, db }); } finally { tool.sqlite.close(); }
 }
 const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
 /** A live server-mode store with the data layer attached: the repository in its STAGED mode, as the server runs it. */
@@ -72,8 +75,8 @@ function live(dir, { now = () => NOW } = {}) {
 /** An immediate-mode repository on a bare connection (a tool, a test): own transaction per mutation. */
 const bare = (s, over = {}) => createDispatchesRepository({ sqlite: s, now: () => NOW, ...over });
 
-// ============================================================= migration 0010
-test('migration 0010 (legacy blob): every dispatch is imported with its 18 fields, its array position (the insertion order every reader depends on) and its attempts in order — a quiet re-check note row as kind quiet_recheck with ok NULL, send rows with ok 0/1 — a finite fractional deliveredAt/openedAt written by the callback route is stored exactly, unknown fields (top level — a "__proto__" key included — inside the audience and inside an attempt) are DROPPED and reported by dispatch id and field name (never a value), a dispatch whose notification no longer exists is imported and COUNTED (never refused, deleted or re-parented), the blob row is retired, and the cutover record carries counts only', () => {
+// ============================================================= the snapshot save, migration 0010
+test('snapshot save: every dispatch is written with its 18 fields, its array position (the insertion order every reader depends on) and its attempts in order — a quiet re-check note row as kind quiet_recheck with ok NULL, send rows with ok 0/1 — a finite fractional deliveredAt/openedAt written by the callback route is stored exactly, unknown top-level fields (a "__proto__" key included) are DROPPED, a dispatch whose notification no longer exists is written as it is (never refused, deleted or re-parented), and no blob row is written', () => {
   const dir = tempDir('dsp-mig');
   const legacy = [
     inApp('dsp-1', 'ntf-1'),
@@ -81,12 +84,11 @@ test('migration 0010 (legacy blob): every dispatch is imported with its 18 field
     dsp({ id: 'dsp-3', notificationId: 'ntf-gone', status: 'skipped', to: null, skipReason: 'no email on record', providerMessageId: null, attempts: [] }), // an orphan: ordinary deletion left it behind
     dsp({ id: 'dsp-4', notificationId: 'ntf-2', status: 'failed', attempts: [{ at: NOW - MIN, ok: false, error: 'synthetic provider error that is deliberately longer than one hundred and twenty characters so that the untruncated storage of the sweep is proven here' }], failedAt: NOW - MIN, failReason: 'synthetic provider error that is deliberately longer than one hundred and twenty characters so that the untruncated storage of the sweep is proven here' }),
   ];
-  // The blob row for dsp-4 carries unknown fields at every level: the import drops them and says so.
-  const withUnknown = JSON.parse(JSON.stringify(legacy[3]).replace('"failReason"', '"__proto__":{"legacyMarker":"keep-me"},"nested":{"a":[1,{"b":null}]},"failReason"').replace('"id":"usr-1"}', '"id":"usr-1","name":"keep-me"}').replace('"error":"synthetic provider error', '"provider":"keep-me","error":"synthetic provider error'));
-  assert.ok(Object.hasOwn(withUnknown, '__proto__') && Object.hasOwn(withUnknown.audience, 'name') && Object.hasOwn(withUnknown.attempts[0], 'provider'), 'fixture: the unknown fields are in the blob');
+  // The entry for dsp-4 carries unknown top-level fields: the save drops them.
+  const withUnknown = JSON.parse(JSON.stringify(legacy[3]).replace('"failReason"', '"__proto__":{"legacyMarker":"keep-me"},"nested":{"a":[1,{"b":null}]},"failReason"'));
+  assert.ok(Object.hasOwn(withUnknown, '__proto__') && Object.hasOwn(withUnknown, 'nested'), 'fixture: the unknown fields are in the entry');
   s7aFile(dir, { dispatches: [...legacy.slice(0, 3), withUnknown] });
   const s = openRaw(dir);
-  assert.deepEqual(migrate(s).ran, [DISPATCHES_MIGRATION, '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S7c: 0011 follows on the same run
   assert.deepEqual(s.prepare('SELECT seq, id FROM dispatches ORDER BY seq').all().map((r) => [r.seq, r.id]), [[1, 'dsp-1'], [2, 'dsp-2'], [3, 'dsp-3'], [4, 'dsp-4']], 'the array position is the durable ordering key');
   assert.deepEqual(s.prepare('SELECT dispatch_seq, seq, kind, ok, error, note FROM dispatch_attempts ORDER BY dispatch_seq, seq').all().map((r) => [r.dispatch_seq, r.seq, r.kind, r.ok, r.error, r.note]), [
     [2, 0, 'quiet_recheck', null, null, 'quiet hours re-check'], [2, 1, 'send', 0, 'injected provider failure', null], [2, 2, 'send', 1, null, null],
@@ -97,10 +99,8 @@ test('migration 0010 (legacy blob): every dispatch is imported with its 18 field
   const r4 = s.prepare('SELECT fail_reason FROM dispatches WHERE id = ?').get('dsp-4');
   assert.equal(r4.fail_reason.length, legacy[3].failReason.length, 'failReason is stored untruncated (the sweep never truncates)');
   assert.deepEqual(s.prepare('SELECT name FROM pragma_table_info(?) ORDER BY cid').all('dispatches').map((c) => c.name).filter((n) => /json/.test(n)), [], 'no side column: typed columns only');
-  assert.equal(blob(s, 'dispatches'), undefined, 'the blob row is retired');
-  const record = JSON.parse(meta(s, DISPATCHES_CUTOVER_META));
-  assert.deepEqual(record, { at: NOW, dispatches: { imported: 4, attempts: 4, unknownFieldsDropped: 1, orphanReferences: 1, byStatus: { delivered: 1, opened: 1, skipped: 1, failed: 1 }, notes: ['dispatch dsp-4: unknown field(s) __proto__, nested, audience.name, attempts[0].provider dropped'] } });
-  assert.doesNotMatch(JSON.stringify(record), /example\.test|synthetic provider|keep-me/, 'the record carries ids and field names only: no address, no provider text, no dropped value');
+  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'dispatches'").get().n, 0, 'no blob row');
+  assert.doesNotMatch(JSON.stringify(rowsOf(dir, 'dispatches')), /keep-me|legacyMarker/, 'the dropped value is stored nowhere');
   // The export reproduces the typed record, position for position, attempts included; the dropped fields are gone.
   const repo = bare(s);
   const exported = repo.exportRows();
@@ -112,26 +112,25 @@ test('migration 0010 (legacy blob): every dispatch is imported with its 18 field
   s.close(); rm(dir);
 });
 
-test('migration 0010: a missing collection, an empty collection, an empty database and a first installation import nothing (and never infer anything from the seed or from row counts); a rerun is a no-op; 0009 must be recorded first; tables that exist without the record refuse the step', () => {
+test('migration 0010: a first installation creates the tables and imports nothing; a rerun is a no-op; 0009 must be recorded first; tables that exist without the record refuse the step', () => {
   const none = tempDir('dsp-mig-none'); s7aFile(none);
-  let s = openRaw(none); migrate(s);
-  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM dispatches').get().n, 0); assert.equal(JSON.parse(meta(s, DISPATCHES_CUTOVER_META)).dispatches.imported, 0);
+  let s = openRaw(none);
+  assert.equal(s.prepare('SELECT COUNT(*) AS n FROM dispatches').get().n, 0);
   assert.deepEqual(migrate(s, { now: NOW + 1 }).ran, [], 'a rerun does nothing'); s.close();
-  const empty = tempDir('dsp-mig-empty'); s7aFile(empty, { dispatches: [] });
-  s = openRaw(empty); migrate(s); assert.equal(blob(s, 'dispatches'), undefined, 'an empty blob is retired too'); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM dispatches').get().n, 0); s.close();
   const mem = new DatabaseSync(':memory:'); mem.exec('PRAGMA foreign_keys = ON;');
   assert.ok(runDataMigrations(mem, DATA_MIGRATIONS, { now: NOW }).ran.includes(DISPATCHES_MIGRATION)); for (const t of DISPATCH_TABLES) assert.ok(tableExists(mem, t), t); mem.close();
-  const early = tempDir('dsp-mig-early'); s3File(early);
+  const early = tempDir('dsp-mig-early'); freshFile(early);
   s = openRaw(early);
   assert.throws(() => runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < '0009' || m.id === DISPATCHES_MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } }), /0010_dispatches failed: 0010_dispatches: 0009_notifications must be recorded first/);
   assert.equal(tableExists(s, 'dispatches'), false); s.close();
-  const odd = tempDir('dsp-mig-odd'); s7aFile(odd);
-  s = openRaw(odd); s.exec('CREATE TABLE dispatch_attempts (x INTEGER) STRICT');
+  const odd = tempDir('dsp-mig-odd'); freshFile(odd);
+  s = openRaw(odd); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < DISPATCHES_MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } });
+  s.exec('CREATE TABLE dispatch_attempts (x INTEGER) STRICT');
   assert.throws(() => migrate(s), /dispatch_attempts already exist without the migration record; refusing to guess/); s.close();
-  rm(none, empty, early, odd);
+  rm(none, early, odd);
 });
 
-test('migration 0010 refusals: a dispatch that is not an object, without an id, with a duplicate id, a missing key of the literal, a non-string notificationId / channel / provider / status, a non-integer nextAt or createdAt, a non-finite or non-numeric deliveredAt, a non-integer actionedAt, a non-string failReason, attempts that are not an array, an attempt with both note and ok, with neither, a non-integer at, a non-boolean ok; a blob that is not JSON or not an array — each aborts the whole step with DISPATCHES_IMPORT_BLOCKED (entry index and reason, never an address or a provider text), creates nothing, keeps the blob byte for byte and saveSeq unchanged, and the next run refuses the same way', () => {
+test('snapshot save refusals: a dispatch that is not an object, without an id, with a duplicate id, a missing key of the literal, a non-string notificationId / channel / provider / status, a non-integer nextAt or createdAt, a non-finite or non-numeric deliveredAt, a non-integer actionedAt, a non-string failReason, attempts that are not an array, an attempt with both note and ok, with neither, a non-integer at, a non-boolean ok, an unknown audience or attempt field; a collection that is not an array — each refuses the whole save with DISPATCHES_IMPORT_BLOCKED (entry index and reason, never an address or a provider text) and writes nothing: no player, no notification, no dispatch, saveSeq unchanged', () => {
   const SECRET = 'SECRET-ADDRESS-ZQX9@example.test';
   const cases = [
     ['not an object', [null], /entry #0: not an object/],
@@ -151,27 +150,23 @@ test('migration 0010 refusals: a dispatch that is not an object, without an id, 
     ['an attempt with neither', [dsp({ attempts: [{ at: NOW }], to: SECRET })], /attempts\[0\] is neither a send row \{at, ok, error\} nor a quiet re-check row \{at, note\}/],
     ['a non-integer attempt clock', [dsp({ attempts: [{ at: 1.5, ok: true, error: null }], to: SECRET })], /attempts\[0\]\.at must be an integer timestamp/],
     ['a non-boolean ok', [dsp({ attempts: [{ at: NOW, ok: 1, error: null }], to: SECRET })], /attempts\[0\]\.ok must be a boolean/],
-    ['a non-array blob', { id: 'x' }, /the dispatches blob must be an array/],
+    ['an unknown audience field', [dsp({ audience: { kind: 'org_user', id: 'usr-1', name: SECRET } })], /audience carries unknown field\(s\) name/],
+    ['an unknown attempt field', [dsp({ attempts: [{ at: NOW, ok: true, error: null, provider: SECRET }] })], /attempts\[0\] carries unknown field\(s\) provider/],
+    ['a non-array collection', { id: 'x' }, /dispatches: the snapshot collection must be an array/],
   ];
   for (const [label, dispatches, re] of cases) {
-    const dir = tempDir('dsp-refuse'); s7aFile(dir, { dispatches });
-    const s = openRaw(dir);
-    const before = s.prepare('SELECT value FROM collections WHERE name = ?').get('dispatches')?.value; const seq0 = meta(s, 'saveSeq');
-    let err = null; try { migrate(s); } catch (e) { err = e; }
-    assert.ok(err, `${label}: must refuse`); assert.match(err.message, /DISPATCHES_IMPORT_BLOCKED/, label); assert.match(err.message, re, `${label}: ${err.message}`);
+    const dir = tempDir('dsp-refuse');
+    let err = null; try { s7aFile(dir, { dispatches }); } catch (e) { err = e; }
+    assert.ok(err, `${label}: must refuse`); assert.match(err.message, re, `${label}: ${err.message}`);
+    if (!/snapshot collection/.test(err.message)) assert.match(err.message, /DISPATCHES_IMPORT_BLOCKED/, label);
     assert.equal(err.message.includes(SECRET), false, `${label}: the refusal never carries an address`); assert.equal(err.message.includes('example.test'), false, label);
-    assert.equal(s.isTransaction, false); for (const t of DISPATCH_TABLES) assert.equal(tableExists(s, t), false, `${label}: ${t} not created`);
-    assert.equal(applied(s).includes(DISPATCHES_MIGRATION), false);
-    assert.equal(s.prepare('SELECT value FROM collections WHERE name = ?').get('dispatches')?.value, before, `${label}: the blob is kept as it was`); assert.equal(meta(s, 'saveSeq'), seq0, `${label}: saveSeq unchanged`);
-    assert.throws(() => migrate(s), /DISPATCHES_IMPORT_BLOCKED/, `${label}: the next run refuses the same way`);
-    s.close(); rm(dir);
+    for (const t of ['players', 'notifications', ...DISPATCH_TABLES]) assert.equal(rowsOf(dir, t).length, 0, `${label}: nothing written to ${t}`);
+    assert.equal(seqOf(dir), 0, `${label}: saveSeq unchanged`);
+    rm(dir);
   }
-  const notJson = tempDir('dsp-refuse-json'); s7aFile(notJson, { rawBlobs: { dispatches: '{not json' } });
-  { const s = openRaw(notJson); assert.throws(() => migrate(s), /the dispatches blob is not valid JSON/); s.close(); }
-  rm(notJson);
   assert.throws(() => validateDispatchRows([dsp({ openedAt: Number.POSITIVE_INFINITY })]), /openedAt must be a finite number/);
   assert.deepEqual(validateDispatchRows([dsp(), inApp('dsp-b', 'ntf-1')]).byStatus, { accepted: 1, delivered: 1 });
-  // Outside the migration (a snapshot replace) an unknown audience or attempt field is still refused by name; an unknown top-level field is dropped.
+  // An unknown audience or attempt field is refused by name; an unknown top-level field is dropped.
   assert.throws(() => validateDispatchRows([dsp({ audience: { kind: 'org_user', id: 'usr-1', name: SECRET } })]), (e) => /DISPATCHES_IMPORT_BLOCKED/.test(e.message) && /audience carries unknown field\(s\) name/.test(e.message) && !e.message.includes(SECRET));
   assert.throws(() => validateDispatchRows([dsp({ attempts: [{ at: NOW, ok: true, error: null, provider: SECRET }] })]), /attempts\[0\] carries unknown field\(s\) provider/);
   { const v = validateDispatchRows([dsp({ futureField: SECRET })]); assert.deepEqual(Object.keys(v.rows[0]), DISPATCH_KEYS); assert.equal(v.unknownFieldsDropped, 1); assert.doesNotMatch(v.notes.join(), /SECRET/); }
@@ -204,9 +199,9 @@ test('the actual schema (direct SQL, review of dc4b559 finding 1 and 2): dispatc
 });
 
 // ============================================================= the repository: immediate mode (tools, tests)
-test('repository (immediate mode): create / recordAttempt / patch validate like the import (unknown patch keys, non-numeric callback timestamps and malformed attempts refused), insertion order is seq order, byProviderMessageId is the FIRST row in insertion order whose id strictly equals the value — duplicates legal, an explicit null matches the first null row, an omitted/undefined value matches nothing — counts by status and the backlog count, a finite fractional timestamp is durable exactly (second connection); an owned transaction that fails at a statement or at COMMIT restores the mirror in place (rows, attempts arrays, held views) and the retry lands; a caller-owned raw transaction keeps the explicit reload() contract', () => {
+test('repository (immediate mode): create / recordAttempt / patch validate like the snapshot save (unknown patch keys, non-numeric callback timestamps and malformed attempts refused), insertion order is seq order, byProviderMessageId is the FIRST row in insertion order whose id strictly equals the value — duplicates legal, an explicit null matches the first null row, an omitted/undefined value matches nothing — counts by status and the backlog count, a finite fractional timestamp is durable exactly (second connection); an owned transaction that fails at a statement or at COMMIT restores the mirror in place (rows, attempts arrays, held views) and the retry lands; a caller-owned raw transaction keeps the explicit reload() contract', () => {
   const dir = tempDir('dsp-imm'); s7aFile(dir, { dispatches: [] });
-  const s = openRaw(dir); migrate(s);
+  const s = openRaw(dir);
   const repo = bare(s);
   const a = repo.create(dsp({ id: 'dsp-1', providerMessageId: 'fm_dup', attempts: [] }));
   const b = repo.create(dsp({ id: 'dsp-2', providerMessageId: null, status: 'queued', attempts: [] }));
@@ -309,14 +304,13 @@ test('staged mode (the server): a create, an attempt and a patch are visible in 
 });
 
 // ============================================================= the snapshot dispatcher (backups, restores, the persistence suites)
-test('snapshot dispatcher: a tool that loads and saves the whole file round-trips every dispatch and attempt byte for byte (an unknown field — an own "__proto__" key — dropped by the import, and dropped silently by replace); a snapshot that OMITS the collection leaves the tables alone; an explicit EMPTY array clears them; a malformed collection (an object) rolls the WHOLE save back — saveSeq and every other collection unchanged; an invalid entry refuses the whole save with a text-free diagnostic', () => {
+test('snapshot dispatcher: a tool that loads and saves the whole file round-trips every dispatch and attempt byte for byte (an unknown field — an own "__proto__" key — dropped silently by the save); a snapshot that OMITS the collection leaves the tables alone; an explicit EMPTY array clears them; a malformed collection (an object) rolls the WHOLE save back — saveSeq and every other collection unchanged; an invalid entry refuses the whole save with a text-free diagnostic', () => {
   const dir = tempDir('dsp-snap');
   const typed = '{"id":"dsp-proto","notificationId":"ntf-1","audience":{"kind":"org_user","id":"usr-1"},"channel":"email","to":"synthetic@example.test","provider":"local-fake","status":"accepted","skipReason":null,"providerMessageId":"fm_p","attempts":[{"at":1,"note":"quiet hours re-check"},{"at":2,"ok":true,"error":null}],"nextAt":1,"actionDeadline":null,"createdAt":1,"deliveredAt":1700000000000.5,"openedAt":null,"actionedAt":null,"failedAt":null,"failReason":null';
   const special = JSON.parse(`${typed},"__proto__":{"legacyMarker":"keep-me"}}`); const clean = JSON.parse(`${typed}}`);
   s7aFile(dir, { dispatches: [inApp('dsp-1', 'ntf-1'), special] });
-  { const s = openRaw(dir); migrate(s); s.close(); }
   const tool = openStore(dir); const snap = tool.load();
-  assert.equal(JSON.stringify(snap.db.dispatches[1]), JSON.stringify(clean), 'read back as the typed record (the import dropped the unknown key)'); assert.equal(Object.hasOwn(snap.db.dispatches[1], '__proto__'), false);
+  assert.equal(JSON.stringify(snap.db.dispatches[1]), JSON.stringify(clean), 'read back as the typed record (the save dropped the unknown key)'); assert.equal(Object.hasOwn(snap.db.dispatches[1], '__proto__'), false);
   const seq0 = tool.revision(); tool.save({ ...snap, db: { ...snap.db, dispatches: [snap.db.dispatches[0], special] } });
   assert.equal(tool.revision(), seq0 + 1); assert.equal(JSON.stringify(tool.load().db.dispatches), JSON.stringify([inApp('dsp-1', 'ntf-1'), clean]), 'round-tripped through replace; an unknown top-level key is not stored'); assert.equal(attemptsOf(dir).length, 2);
   // Omitted: left alone.
@@ -427,7 +421,7 @@ test('review of 26d492b, finding 3 (the repository) — a non-finite callback cl
   assert.deepEqual(rowsOf(dir, 'dispatches', 'seq')[1].delivered_at, FRACTIONAL); assert.equal(L.dispatches.exportRows()[1].deliveredAt, FRACTIONAL);
   // A restart: the table's NULL is what the old build's JSON save left — the clock can be set again.
   L.dispatches.reload(); assert.equal(L.dispatches.byId('dsp-1').deliveredAt, null); assert.equal(L.dispatches.byId('dsp-1').openedAt, null);
-  // Creation and import never accept a non-finite value (JSON cannot carry one; nothing is normalised there).
+  // Creation and the snapshot save never accept a non-finite value (JSON cannot carry one; nothing is normalised there).
   assert.throws(() => L.dispatches.create(dsp({ id: 'dsp-3', attempts: [], deliveredAt: Number.POSITIVE_INFINITY })), /deliveredAt must be a finite number/);
   assert.throws(() => validateDispatchRows([dsp({ openedAt: Number.NaN })]), /openedAt must be a finite number/);
   assert.throws(() => L.dispatches.patch('dsp-1', { deliveredAt: '1' }), /deliveredAt must be a number/); assert.throws(() => L.dispatches.patch('dsp-1', { actionedAt: Number.POSITIVE_INFINITY }), /actionedAt must be an integer/);

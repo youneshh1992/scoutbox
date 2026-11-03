@@ -15,18 +15,10 @@
 // itself: migration 0013 recorded at boot, the eight tables with no blob behind them, a
 // block and its ledger row durable together in one save, the IDV entry committed with
 // the guardian's column (both failure seams, real COMMIT failure, SIGKILL, retry), a
-// failed ordinary save keeping the row and landing it once, a hand-edited backup typed
-// on import (unknown fields dropped, off-type values normalised or dropped, reported by
-// id), and a backup whose IDV entry names a missing guardian refused
-// at boot (STRICT, Q4b) with the blobs untouched. Every database read goes through a
-// second read-only connection. Nothing here touches DATA_DIR or real data. Run with: npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged 1792fc7 tree before the implementation):
-// [compat] tests read the rows through a storage adapter (the tables after the cutover,
-// the blobs before it) and PASS on both trees — they are the behaviour the migration
-// must preserve; [cutover] tests assert the 0013 record, the tables, the absence of the
-// blobs and the strict boot refusal and FAIL on 1792fc7 on concrete
-// assertions.
+// failed ordinary save keeping the row and landing it once, and the admin backup (a
+// database copy) restored row for row into a new directory. Every database read goes
+// through a second read-only connection. Nothing here touches DATA_DIR or real data.
+// Run with: npm test
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -82,31 +74,15 @@ async function boot(dir, env = {}, server = SERVER) {
     setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
-/** A boot expected to FAIL: resolves with { code, log } once the child exited. */
-async function bootRefused(dir, env = {}) {
-  const port = await freePort();
-  return new Promise((resolve) => {
-    const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
-    children.add(proc); let log = '';
-    proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
-    proc.on('exit', (code) => { children.delete(proc); resolve({ code, log }); });
-    setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* gone */ } }, 30_000).unref();
-  });
-}
 /** Every read of the file goes through a second, read-only connection; `snap` pins ONE read transaction so several reads see one committed state. */
 const snap = (dir, fn) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { s.exec('BEGIN'); try { return fn({ get: (sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; }, all: (sql, ...p) => s.prepare(sql).all(...p).map((r) => ({ ...r })) }); } finally { s.exec('COMMIT'); } } finally { s.close(); } };
 const q1 = (dir, sql, ...p) => snap(dir, (c) => c.get(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
-const blobRows = (c, name) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
 /** The typed record: every key of the collection in the writer's order, an absent key null. */
 const ordered = (row, keys) => Object.fromEntries(keys.map((k) => [k, row[k] === undefined ? null : row[k]]));
-/**
- * The rows as the DATABASE holds them, in insertion order, as typed records: the table
- * after the cutover, the blob before it.
- */
+/** The rows as the DATABASE holds them, in insertion order, as typed records. */
 function readStored(c, name) {
-  if (!c.get('SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION)) return (blobRows(c, name) ?? []).map((r) => ordered(r, KEYS[name]));
   return c.all(`SELECT * FROM ${TABLES[name]} ORDER BY seq`).map((r) => Object.fromEntries(COLS[name].map(([col, key, kind]) => { const v = r[col]; return [key, v === null ? null : kind === 'bool' ? v === 1 : kind === 'json' ? JSON.parse(v) : v]; })));
 }
 const stored = (dir, name) => snap(dir, (c) => readStored(c, name));
@@ -227,8 +203,7 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
   assert.ok((await adminReports(S)).some((r) => r.targetPlayerId === pid), 'the admin still lists the report about the deleted person');
   // An unchanged save succeeds (the backup flushes) and the backup carries the rows.
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, `an unchanged save after the deletion succeeds: ${bk.text}`);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  for (const n of COLLECTIONS) assert.equal(JSON.stringify(canon(n, snapshot.db[n])), JSON.stringify(after[n]), `the backup's ${n} equals the stored rows`);
+  for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(bk.body.dir, n)), JSON.stringify(after[n]), `the backup's ${n} equals the stored rows`);
   const unknown = await S.j('POST', '/org/report', { targetKind: 'player', targetPlayerId: 'pl-never-existed', reason: 'Synthetic report naming an unknown player.' }, maria); assert.equal(unknown.status, 201, 'a report naming an unknown player stays accepted');
   const seqBeforeIdle = seqOf(dir); await sleep(2600); assert.ok(seqOf(dir) >= seqBeforeIdle, 'the debounced save after the report did not fail'); assert.ok(stored(dir, 'reports').some((r) => r.targetPlayerId === 'pl-never-existed'), 'and landed');
   await S.stop();
@@ -294,60 +269,27 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0013
   await S.stop(); rm(dir);
 });
 
-await test('[cutover] legacy and unknown shapes through the import, the admin backup, a restore, and the STRICT boot refusal: an admin backup edited by hand (unknown fields at row level, an unknown key inside a context, an absent key, an object orgId, a numeric reason, a numeric targetPlayerId, a ledger row naming a player that never existed, a backup_refused ops event) is imported TYPED by this build — unknown fields dropped, an absent key null, the numbers normalised to text, the object dropped, each change reported by id in the cutover record (never a value) — and served as typed; the backup equals the stored rows and a restore imports them again; a backup whose IDV entry names a guardian that does not exist refuses the WHOLE boot (IDV_GUARDIAN_MISSING: ids only), records nothing and leaves every blob as it was', async () => {
-  const dir = tempDir('s6b-legacy'); let S = await boot(dir);
-  const maria = await orgLogin(S); const { pid, token: adult } = await signupAdult(S, 'Legacy Adult');
+await test('[cutover] the admin backup and a restore: the backup\'s database copy holds the eight collections exactly as stored (its own backup_created event is appended after the copy); a restore into a NEW directory reproduces them row for row and the admin views serve them', async () => {
+  const dir = tempDir('s6b-backup2'); let S = await boot(dir);
+  const maria = await orgLogin(S); const { pid, token: adult } = await signupAdult(S, 'Backup Adult');
   assert.equal((await S.j('POST', '/player/block', { orgId: 'org-eastport', reason: 'synthetic' }, adult)).status, 201);
   assert.equal((await S.j('POST', '/org/report', { targetKind: 'player', targetPlayerId: pid, reason: 'Synthetic.' }, maria)).status, 201);
-  const { gid, token: gtok } = await signupGuardian(S, 'Legacy Parent', 'legacy-parent@example.test'); assert.equal((await S.j('POST', '/guardian/verify-id', { documentType: 'passport', documentRef: 'P1234567' }, gtok)).status, 200);
-  const bk0 = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk0.status, 201, bk0.text);
-  await S.stop();
-  // The admin backup, edited by hand: a restore of it imports the eight collections through 0013.
-  const copy = tempDir('s6b-copy'); fs.cpSync(bk0.body.dir, copy, { recursive: true });
-  const SECRET = 'SECRET-LEGACY-MARKER-55';
-  const editBackup = (d, fn) => { const f = path.join(d, 'db.json'); const env = JSON.parse(fs.readFileSync(f, 'utf8')); fn(env.db); fs.writeFileSync(f, JSON.stringify(env)); return env.db; };
-  const edited = editBackup(copy, (db) => {
-    db.blocks[0].futureBlockField = { nested: [SECRET] }; db.blocks.push({ id: 'blk-legacy', playerId: 'pl-never-existed', orgId: { odd: 'object' }, by: 'player', reason: 7, ts: 1 });
-    delete db.reports[0].targetScoutName; db.reports.push({ id: 'rep-legacy', ts: 2, by: 'player', byId: pid, targetKind: 'player', targetOrgId: null, targetScoutName: null, targetPlayerId: 123, reason: 'Synthetic legacy report.', urgent: false, status: 'pending_review', outcome: null, resolvedAt: null });
-    db.ledger.push({ id: 'led-legacy', ts: 3, type: 'view', playerId: 'pl-never-existed', orgId: 'org-eastport', orgName: 'Eastport FC', userId: 'usr-legacy', scoutName: 'Legacy Scout', futureLedgerField: true });
-    db.opsEvents.push({ id: 'ops-legacy', at: 4, kind: 'backup_refused', detail: { dir: 'x', error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflicts: [] } });
-    db.moderationLog.push({ id: 'mod-legacy', ts: 5, context: { kind: 'org_message', channelId: 'chan-x', futureContextField: 1 }, flags: ['url'], severity: 'contact', excerpt: 'synthetic excerpt' });
-  });
-  const legacy = Object.fromEntries(COLLECTIONS.map((n) => [n, canon(n, edited[n])]));
-  legacy.blocks = legacy.blocks.map((b) => (b.id === 'blk-legacy' ? { ...b, orgId: null, reason: '7' } : b));
-  legacy.reports = legacy.reports.map((r) => (r.id === 'rep-legacy' ? { ...r, targetPlayerId: '123' } : r));
-  // This build imports the hand-edited copy.
-  const up = tempDir('s6b-up'); fs.cpSync(copy, up, { recursive: true });
-  S = await boot(up); assert.ok(live(up), 'imported through 0013');
-  assert.equal(q1(up, `SELECT COUNT(*) AS n FROM collections WHERE name IN (${COLLECTIONS.map((n) => `'${n}'`).join(', ')})`).n, 0, 'the blobs are retired');
-  const record = JSON.parse(q1(up, "SELECT value FROM meta WHERE key = 'safetyAuditCutover'").value);
-  assert.deepEqual([record.blocks.normalised, record.reports.normalised, record.ledger.normalised, record.moderationLog.normalised], [2, 1, 1, 0], 'rows the import changed');
-  assert.deepEqual(record.notes, [`blocks ${edited.blocks[0].id}: unknown field futureBlockField dropped`, 'blocks blk-legacy: orgId was an object, dropped', 'blocks blk-legacy: reason was a number, normalised', 'reports rep-legacy: targetPlayerId was a number, normalised', 'ledger led-legacy: unknown field futureLedgerField dropped'], 'every change reported by id and field');
-  assert.equal(record.ledger.unresolvedPlayerIds, 1); assert.equal(record.blocks.unresolvedPlayerIds, 1); assert.doesNotMatch(JSON.stringify(record) + S.log(), new RegExp(SECRET), 'never a text'); assert.doesNotMatch(JSON.stringify(record), /odd|object'/, 'never a value');
-  for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(up, n)), JSON.stringify(legacy[n]), `${n}: the tables read back the typed records`);
-  const blocks = await adminBlocks(S); assert.equal(blocks[0].orgId, null); assert.equal(blocks[0].reason, '7'); assert.equal(Object.hasOwn(blocks[1], 'futureBlockField'), false, 'the unknown field is gone');
-  const reports = await adminReports(S); assert.equal(reports.find((r) => r.id === 'rep-legacy').targetPlayerId, '123'); assert.equal(reports.find((r) => r.id !== 'rep-legacy').targetScoutName, null, 'the absent key reads as null');
-  assert.ok((await adminModeration(S)).some((m) => m.context.futureContextField === 1)); assert.ok((await S.j('GET', '/admin/metrics', undefined, null, A)).body.opsEvents.some((e) => e.kind === 'backup_refused'));
-  // The admin backup carries the typed records exactly; a restore imports them again.
+  const { token: gtok } = await signupGuardian(S, 'Backup Parent', 'backup-parent@example.test'); assert.equal((await S.j('POST', '/guardian/verify-id', { documentType: 'passport', documentRef: 'P1234567' }, gtok)).status, 200);
+  assert.equal((await S.j('POST', '/player/timeline', { year: 2026, event: 'Call me on +44 7700 900123 please' }, adult)).status, 400, 'a moderation hit');
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'));
-  // The backup's own `backup_created` event is appended AFTER the file is written (as every build did), so it is the one stored row the file cannot hold.
-  const storedAtBackup = (n) => { const rows = stored(up, n); if (n !== 'opsEvents') return rows; const last = rows.at(-1); assert.equal(last?.kind, 'backup_created'); assert.equal(last.detail?.dir, path.basename(bk.body.dir)); return rows.slice(0, -1); };
-  for (const n of COLLECTIONS) assert.equal(JSON.stringify(snapshot.db[n]), JSON.stringify(storedAtBackup(n)), `the backup's ${n} equals the stored rows exactly`);
+  const storedAtBackup = (n) => { const rows = stored(dir, n); if (n !== 'opsEvents') return rows; const last = rows.at(-1); assert.equal(last?.kind, 'backup_created'); assert.equal(last.detail?.dir, path.basename(bk.body.dir)); return rows.slice(0, -1); };
+  const copy = Object.fromEntries(COLLECTIONS.map((n) => [n, stored(bk.body.dir, n)]));
+  for (const n of COLLECTIONS) assert.equal(JSON.stringify(copy[n]), JSON.stringify(storedAtBackup(n)), `the backup's ${n} equals the stored rows exactly`);
+  for (const n of ['blocks', 'reports', 'ledger', 'idvQueue', 'moderationLog']) assert.ok(copy[n].length > 0, `${n} has rows to carry`);
   await S.stop();
-  const restored = tempDir('s6b-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
-  S = await boot(restored); assert.ok(live(restored)); for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(restored, n)), JSON.stringify(snapshot.db[n]), `row for row: ${n}`);
+  const restored = tempDir('s6b-restored2'); fs.cpSync(bk.body.dir, restored, { recursive: true });
+  S = await boot(restored); assert.ok(live(restored));
+  for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(restored, n)), JSON.stringify(copy[n]), `row for row: ${n}`);
+  assert.equal(q1(restored, `SELECT COUNT(*) AS n FROM collections WHERE name IN (${COLLECTIONS.map((n) => `'${n}'`).join(', ')})`).n, 0, 'no blob');
+  assert.equal((await adminBlocks(S)).length, copy.blocks.length, 'the admin lists the restored blocks');
+  assert.ok((await adminReports(S)).some((r) => r.targetPlayerId === pid)); assert.equal((await adminIdv(S)).length, copy.idvQueue.length); assert.equal((await adminModeration(S)).length, copy.moderationLog.length);
   await S.stop();
-  // STRICT (Q4b): a legacy file whose IDV entry names a missing guardian refuses the whole boot.
-  const strict = tempDir('s6b-strict'); fs.cpSync(copy, strict, { recursive: true });
-  const strictDb = editBackup(strict, (db) => { db.idvQueue.push({ ...db.idvQueue[0], id: 'idv-orphan', guardianId: 'gd-never-existed' }); });
-  const blobsBefore = COLLECTIONS.map((n) => JSON.stringify(strictDb[n]));
-  const refused = await bootRefused(strict);
-  assert.notEqual(refused.code, 0, 'the boot refused'); assert.match(refused.log, /SAFETY_AUDIT_IMPORT_BLOCKED/); assert.match(refused.log, /IDV_GUARDIAN_MISSING[^\n]*idv-orphan/); assert.doesNotMatch(refused.log, /Legacy Parent|P1234567|4567/, 'ids only');
-  assert.equal(live(strict), false, 'nothing recorded'); assert.equal(q1(strict, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'idv_queue'"), undefined, 'no table');
-  assert.deepEqual(snap(strict, (c) => COLLECTIONS.map((n) => JSON.stringify(blobRows(c, n)))), blobsBefore, 'every blob as the backup held it');
-  void gid;
-  rm(dir, bk0.body.dir, copy, up, bk.body.dir, restored, strict);
+  rm(dir, restored);
 });
 
 await test('[S6b correction F2] an EXISTING partial Box Cam prefs row ({ playerId } only, as an older build or a restore can leave it) and the real authenticated PATCH /player/box-cam/prefs { retainClips: true }: answered 200 with the same payload the pre-S6b build gives (no preference default introduced), the box_prefs_changed ledger row recorded with detail { by, retainClips } — the absent share key absent, exactly as the pre-S6b blob stored it; the prefs and the row survive a restart; the admin backup carries the row exactly', async () => {
@@ -367,8 +309,8 @@ await test('[S6b correction F2] an EXISTING partial Box Cam prefs row ({ playerI
   assert.equal(JSON.stringify(row.detail), JSON.stringify({ by: 'player', retainClips: true }), 'the detail as the pre-S6b blob stored it: share absent');
   assert.equal(Object.hasOwn(row.detail, 'share'), false);
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
-  const backupRow = JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8')).db.ledger.find((l) => l.id === row.id);
-  assert.equal(JSON.stringify(canon('ledger', [backupRow])[0]), JSON.stringify(row), 'the backup carries the row exactly');
+  const backupRow = stored(bk.body.dir, 'ledger').find((l) => l.id === row.id);
+  assert.equal(JSON.stringify(backupRow), JSON.stringify(row), 'the backup carries the row exactly');
   await S.kill(); // SIGKILL after the answers: nothing pending is lost
   S = await boot(dir);
   assert.equal((await S.j('GET', '/player/box-cam/prefs', undefined, token)).body.prefs.retainClips, true, 'the prefs survived the restart');

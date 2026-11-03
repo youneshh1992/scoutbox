@@ -6,9 +6,9 @@
 // until S8b) and Q7c (the guardian references checked STRICTLY in code, no SET NULL key).
 // The lossless mapping (every writer shape of plan §D.7.3: presence, absence, null,
 // unknown fields, off-type values, blockedBy, keys.accept, the tombstone's
-// trialDetails.instructions, the day container, recipient.playerId); the cutover
-// (migration 0015: sixteen tables, the channels rebuild with the real request key, the
-// counts, every refusal with ids only); the repository (in-place mutation landing in the
+// trialDetails.instructions, the day container, recipient.playerId); the schema
+// (migration 0015: the tables, channels with the real request key); a snapshot save's
+// refusals with ids only and the Q7a counts; the repository (in-place mutation landing in the
 // next save with the children rewritten, an unchanged save writing nothing, a failed
 // ordinary save keeping its pending state, an aborted unit restoring the pre-unit graph
 // in place, held nested views); the six-phase snapshot write (plan §D.7.5: new graphs
@@ -17,29 +17,19 @@
 // case and guardian refusals — identity-only changes included — pair mismatches, the
 // channel key, intentional prunes, exact rollback).
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
-//
-// FAILING-FIRST NOTE (recorded on the unchanged d0f0205 tree, source-identical to the
-// accepted 9b109dc, before the implementation): the tests marked [cutover] need the 0015
-// migration and the repository module and FAIL there on concrete
-// assertions (the migration id is absent from DATA_MIGRATIONS; the tables do not exist;
-// the blobs survive; the modules do not export the repository). The tests marked
-// [compat] exercise behaviour the accepted build already has and pass on both trees.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, blobText, meta, failRunAt, FIXTURE } from './coreIdentityTestFixtures.mjs';
-import { trialReportsFor } from '../repositories/playerSubrecords.mjs';
-import { legacyTrialRequest, contactRequest, openDayRequest, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, acceptedTrial, preP4bTrial, workedTrial, cancelledTrial, report, session, CASES, persisted, T } from './recruitmentTestFixtures.mjs';
+import { NOW, TTL, tempDir, failRunAt } from './coreIdentityTestFixtures.mjs';
+import { legacyTrialRequest, contactRequest, openDayRequest, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, acceptedTrial, preP4bTrial, workedTrial, cancelledTrial, report, session, CASES, persisted, T, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const dbFile = (dir) => path.join(dir, 'scoutbox.db');
 let counter = 9000; const nextId = (p) => `${p}-${++counter}`;
@@ -53,26 +43,24 @@ const withRo = (dir, fn) => { const s = second(dir); try { return fn(s); } final
 const tableExistsIn = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const sortKeys = (v) => (Array.isArray(v) ? v.map(sortKeys) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])])) : v);
-/** The recruitment tables + channels, as an exact canonical dump (rowid order inside each table). */
 /** Every table of the file as a logical dump. */
 const fullDump = (s) => JSON.stringify(s.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => [r.name, s.prepare(`SELECT * FROM "${r.name}"`).all().map((x) => ({ ...x }))]));
 const recDump = (s) => JSON.stringify(Object.fromEntries([...TABLES, 'channels', 'messages'].filter((t) => tableExistsIn(s, t)).map((t) => [t, s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all().map((r) => ({ ...r }))])));
 const fkTargets = (s, table) => s.prepare(`PRAGMA foreign_key_list(${table})`).all().map((r) => `${r.from}->${r.table}(${r.to}) ${r.on_delete}`);
 const CHANNEL = (over = {}) => ({ id: 'chan-1', requestId: 'req-p4b', playerId: 'pl-adult', playerName: 'Adult Signup', orgId: 'org-pro', orgName: 'Eastport FC', orgVerified: true, scoutName: 'Maria', scoutRole: 'Head of Recruitment', counterparty: 'player', guardianId: null, createdAt: T.accepted, messages: [{ id: 'msg-1', ts: T.accepted + 1, sender: { kind: 'org_user', id: 'usr-1', name: 'Maria' }, text: 'Welcome.', attachment: null }], readBy: { org: null, counterparty: null }, ...over });
 
-/** A file at S4b-R (0001–0014 applied) carrying the recruitment blobs the d0f0205 build wrote, with the cases blob the strict references resolve against and a thread on req-p4b. The fixture players (pl-adult, pl-child1, pl-child2, …) carry the trialReports the trials derive (S5's invariant, which migration 0007 checks). */
-function preS8aFile(dir, { requests, trials, cases = CASES(), channels = [CHANNEL()], rawBlobs, more = {} } = {}) {
-  const extra = { ledger: [], vouches: [], notifications: [], dispatches: [], recruitmentCases: cases, ...more };
-  if (requests !== undefined) extra.requests = requests; if (trials !== undefined) extra.trials = trials; if (channels !== undefined) extra.channels = channels;
-  const players = FIXTURE().players.map((p) => ({ ...p, trialReports: trialReportsFor(Array.isArray(trials) ? plain(trials) : [], p.id) }));
-  s3File(dir, { players, extra, rawBlobs });
-  const s = openRaw(dir); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } }); s.close();
+/** The recruitment fixtures as one snapshot: the requests and trials, the cases the strict references resolve against and a thread on req-p4b. The fixture players carry the trialReports the trials derive (S5's invariant). */
+function fixtureCollections({ requests, trials, cases = CASES(), channels = [CHANNEL()], more = {} } = {}) {
+  const db = { notifications: [], dispatches: [], recruitmentCases: cases, ...more };
+  if (requests !== undefined) db.requests = requests; if (trials !== undefined) db.trials = trials; if (channels !== undefined) db.channels = channels;
+  return db;
 }
+/** A database holding the fixtures, written by a snapshot-mode save (the tables, never blobs). */
+const file = (tag, fixture = {}) => saveFixture(tempDir(`s8a-${tag}`), fixtureCollections(fixture));
+const openRaw = (dir) => { const s = new DatabaseSync(dbFile(dir)); s.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;'); return s; };
 const migrateAll = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS, { now, context: { sessionTtlMs: TTL } });
-const STD = () => ({ requests: [p4bInvitation(), acceptedRequest(p4bInvitation(), 'trial-1'), contactRequest(), openDayRequest(), legacyTrialRequest()].filter((r, i, a) => a.findIndex((x) => x.id === r.id) === i), trials: [scheduledTrial()] });
 /** The standard fixture: the accepted P4B pair (req-p4b ↔ trial-1, thread chan-1), a contact, an open-day invitation, a legacy date-only invitation still pending, the minor's invitation, a pre-P4B reported trial on req-old. */
 const FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), contactRequest(), openDayRequest(), legacyTrialRequest(), minorInvitation(), legacyTrialRequest({ id: 'req-old', status: 'accepted', respondedAt: T.accepted - 30 * 86_400_000, respondedBy: 'player', contactChannel: null })], trials: [scheduledTrial(), preP4bTrial()] });
-void STD;
 
 /** The server-mode harness over a prepared file: the real store + data layer, saves through store.save, reads through a second connection. */
 function serverOpen(dir, { warnings = [], cases } = {}) {
@@ -94,35 +82,27 @@ function snapshotOpen(dir) {
 }
 
 // ------------------------------------------------------------- the migration
-test('[cutover] migration 0015 is registered last and, on an S4b-R file, creates the fifteen recruitment tables and rebuilds channels with the real request key (RESTRICT) while every thread, message and attachment survives byte for byte; imports both blobs row for row and retires them; records counts only; the pre-P4B trial whose request has no trialId key is counted as a legacy pair; reruns are no-ops; a file without the blobs creates the tables and imports nothing — never from the seed or memory', () => {
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).slice(-4), [MIGRATION, '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], '0015_recruitment is registered after 0014; 0016_recruitment_cases (S8b) and 0017_recruitment_contacts_offers (S8c) follow it and run on the same boot');
+test('[schema] migration 0015 is registered before 0016–0018 and creates the fifteen recruitment tables and channels with the real request key (RESTRICT); a fresh database holds no row and no blob; the fixtures written by a snapshot save read back exactly, the threads included; the pre-P4B trial whose request has no trialId is kept as a legacy pair; the live counters count the players (Q7a); reruns are no-ops', () => {
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).slice(-4), [MIGRATION, '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], '0015_recruitment is registered after 0014; 0016_recruitment_cases (S8b), 0017 (S8c) and 0018 (S8d) follow it');
   assert.ok(TABLE_BACKED.includes('requests') && TABLE_BACKED.includes('trials'), 'requests and trials are table-backed collections');
-  const dir = tempDir('s8a-mig'); preS8aFile(dir, FIX());
-  const s = openRaw(dir);
-  const channelsBefore = JSON.stringify([s.prepare('SELECT * FROM channels ORDER BY seq').all(), s.prepare('SELECT * FROM messages ORDER BY seq').all(), s.prepare('SELECT * FROM message_attachments ORDER BY message_id').all()]);
-  const requestsBlob = blob(s, 'requests'); const trialsBlob = blob(s, 'trials');
-  const ran = migrateAll(s);
-  assert.deepEqual(ran.ran, [MIGRATION, '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], '0016 (S8b) and 0017 (S8c) run on the same boot');
-  for (const t of TABLES) assert.ok(tableExistsIn(s, t), `${t} exists`);
-  assert.ok(fkTargets(s, 'channels').some((f) => f.startsWith('request_id->recruitment_requests(id) RESTRICT')), `channels.request_id is a real key: ${fkTargets(s, 'channels')}`);
-  assert.equal(JSON.stringify([s.prepare('SELECT * FROM channels ORDER BY seq').all(), s.prepare('SELECT * FROM messages ORDER BY seq').all(), s.prepare('SELECT * FROM message_attachments ORDER BY message_id').all()]), channelsBefore, 'the threads survive the rebuild byte for byte');
-  assert.equal(blob(s, 'requests'), undefined); assert.equal(blob(s, 'trials'), undefined);
+  const fresh = tempDir('s8a-fresh'); const f = openStore(fresh).sqlite;
+  for (const t of TABLES) { assert.ok(tableExistsIn(f, t), `${t} exists`); assert.equal(f.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0); }
+  assert.ok(fkTargets(f, 'channels').some((x) => x.startsWith('request_id->recruitment_requests(id) RESTRICT')), `channels.request_id is a real key: ${fkTargets(f, 'channels')}`);
+  assert.equal(f.prepare("SELECT count(*) AS n FROM collections WHERE name IN ('requests', 'trials')").get().n, 0, 'no blob');
+  f.close(); rm(fresh);
+  const dir = file('mig', FIX()); const s = openRaw(dir);
+  assert.equal(s.prepare("SELECT count(*) AS n FROM collections WHERE name IN ('requests', 'trials')").get().n, 0, 'no blob');
   const { readRequests, readTrials } = needRec();
-  assert.deepEqual(readRequests(s), requestsBlob, 'the requests come back exactly (presence, absence, null, nested containers, keys)');
-  assert.deepEqual(readTrials(s), trialsBlob, 'the trials come back exactly');
-  const record = JSON.parse(meta(s, 'recruitmentCutover'));
-  assert.equal(record.requests.imported, 6); assert.equal(record.trials.imported, 2); assert.equal(record.trials.legacyPairs, 1, 'trial-old names req-old, which carries no trialId key: a legacy pair, counted');
-  assert.deepEqual(record.players, { live: 8, retained: 0, missing: 0 }, 'six requests and two trials name the live fixture players pl-adult and pl-child1 (Q7a: counted)');
-  assert.equal(JSON.stringify(record).includes('Adult Signup'), false, 'counts only');
-  assert.deepEqual(migrateAll(s).ran, []);
-  s.close();
-  const fresh = tempDir('s8a-fresh'); preS8aFile(fresh, { requests: undefined, trials: undefined, channels: [] });
-  const f = openRaw(fresh); migrateAll(f);
-  assert.equal(f.prepare('SELECT count(*) AS n FROM recruitment_requests').get().n, 0); assert.equal(f.prepare('SELECT count(*) AS n FROM trials').get().n, 0);
-  f.close(); rm(dir, fresh);
+  assert.deepEqual(readRequests(s), persisted(FIX().requests), 'the requests come back exactly (presence, absence, null, nested containers, keys)');
+  assert.deepEqual(readTrials(s), persisted(FIX().trials), 'the trials come back exactly');
+  assert.equal(s.prepare('SELECT count(*) AS n FROM channels').get().n, 1); assert.equal(s.prepare('SELECT count(*) AS n FROM messages').get().n, 1);
+  assert.equal(s.prepare("SELECT trial_id FROM recruitment_requests WHERE id = 'req-old'").get().trial_id, null, 'trial-old names req-old, which carries no trialId key: a legacy pair, kept');
+  assert.deepEqual(rec.unresolvedPlayerReferences(s), Object.fromEntries(Object.keys(rec.unresolvedPlayerReferences(s)).map((k) => [k, 0])), 'six requests and two trials name the live fixture players pl-adult and pl-child1 (Q7a)');
+  const after = fullDump(s); assert.deepEqual(migrateAll(s).ran, []); assert.equal(fullDump(s), after);
+  s.close(); rm(dir);
 });
 
-test('[cutover] the mapping is lossless for every writer shape: the P4B invitation (slots, private details, keys.invite, recipient, caseId, trialId null), the contact (subject, contactId, trialDetails null), the open-day literal (trustedPartner absent), the legacy direct request, the accepted request, both tombstones (trialDetails.instructions present-and-null, keys and recipient dropped), the scheduled, accepted, pre-P4B, worked (revision 2, evidence links active and removed, attendance, completion, the day container, the report, reminders, lifecycle, keys lists, rev) and cancelled trials, blockedBy as a value, null and absent, unknown fields at the record, nested-object and list-entry level, off-type values and a live non-finite number', () => {
+test('[snapshot] the mapping is lossless for every writer shape: the P4B invitation (slots, private details, keys.invite, recipient, caseId, trialId null), the contact (subject, contactId, trialDetails null), the open-day literal (trustedPartner absent), the legacy direct request, the accepted request, both tombstones (trialDetails.instructions present-and-null, keys and recipient dropped), the scheduled, accepted, pre-P4B, worked (revision 2, evidence links active and removed, attendance, completion, the day container, the report, reminders, lifecycle, keys lists, rev) and cancelled trials, blockedBy as a value, null and absent, unknown fields at the record, nested-object and list-entry level, off-type values and a live non-finite number', () => {
   const { readRequests, readTrials } = needRec();
   const tombstoneRequest = (r, at) => { const td = r.trialDetails && typeof r.trialDetails === 'object' ? r.trialDetails : null; return { id: r.id, playerId: r.playerId, playerName: null, orgId: r.orgId, orgName: r.orgName, orgType: r.orgType, orgVerified: r.orgVerified, orgSafeguardingCertified: r.orgSafeguardingCertified, trustedPartner: r.trustedPartner, userId: r.userId, scoutName: r.scoutName, scoutRole: r.scoutRole, type: r.type, message: null, ...(r.contactId ? { contactId: r.contactId } : {}), trialDetails: td ? { proposedDate: td.proposedDate ?? null, altSlots: Array.isArray(td.altSlots) ? td.altSlots : [], venue: td.venue ?? null, notes: '', ...(Array.isArray(td.slots) ? { slots: td.slots.map((x) => ({ id: x.id, day: x.day, startsAt: x.startsAt, endsAt: x.endsAt, timezone: x.timezone, kind: x.kind ?? null, venue: x.venue ? { name: x.venue.name, town: x.venue.town ?? null, address: null } : null })), instructions: null } : {}) } : null, ...(r.caseId ? { caseId: r.caseId } : {}), ...(r.trialId ? { trialId: r.trialId } : {}), status: r.status, createdAt: r.createdAt, respondedAt: r.respondedAt ?? null, respondedBy: r.respondedBy ?? null, routedTo: r.routedTo ?? null, guardianId: null, contactChannel: null, subjectRemovedAt: at }; };
   const requests = [p4bInvitation(), contactRequest(), persisted(openDayRequest({ trustedPartner: undefined })), acceptedRequest(legacyTrialRequest(), 'trial-legacy'), acceptedRequest(p4bInvitation({ id: 'req-acc' }), 'trial-acc'), tombstoneRequest(acceptedRequest(p4bInvitation({ id: 'req-tomb' }), 'trial-tomb'), T.removed),
@@ -134,8 +114,8 @@ test('[cutover] the mapping is lossless for every writer shape: the P4B invitati
   const t4 = workedTrial({ id: 'trial-worked', requestId: 'req-worked', unknownTop: [1, 2], schedule: { ...workedTrial().schedule, unknownInSchedule: 'x', sessions: [{ ...workedTrial().schedule.sessions[0], extraOnSession: true }] }, history: [{ id: 'aud-x', at: 1, action: 'a', by: null, detail: 'a string detail', extraOnEntry: 1 }], reportDueAt: 'soon', completion: { state: 'completed', at: 5, by: { kind: 'system' }, reason: null, phase: 'scheduled' } });
   const t5 = cancelledTrial(); const t6 = { ...scheduledTrial({ id: 'trial-tomb', requestId: 'req-tomb', caseId: 'case-x' }), playerName: null, notes: '', subjectRemovedAt: T.removed }; // case-x: trial-acc already holds case-1's open slot
   const trials = [t1, t2, t3, t4, t5, t6];
-  const dir = tempDir('s8a-map'); preS8aFile(dir, { requests: persisted(requests), trials: persisted(trials), cases: [...CASES(), { ...CASES()[0], id: 'case-x', playerId: 'pl-child2', playerName: 'Child pl-child2' }], channels: [] }); // case-x a full case literal: since S8b (0016) the cases blob is imported into recruitment_cases on the same run
-  const s = openRaw(dir); migrateAll(s);
+  const dir = file('map', { requests: persisted(requests), trials: persisted(trials), cases: [...CASES(), { ...CASES()[0], id: 'case-x', playerId: 'pl-child2', playerName: 'Child pl-child2' }], channels: [] }); // case-x a full case literal
+  const s = openRaw(dir);
   const backR = readRequests(s); const backT = readTrials(s);
   assert.deepEqual(backR, persisted(requests)); assert.deepEqual(backT, persisted(trials));
   // presence, not only equality
@@ -154,13 +134,15 @@ test('[cutover] the mapping is lossless for every writer shape: the P4B invitati
   s.close(); rm(dir);
 });
 
-test('[cutover] the import refuses with ids only — nothing written, the blobs and the record untouched, the next boot refuses the same way: a trial whose request is not in the file, two trials for one request, a request naming a trial that names another request, a request naming a missing trial, a case id not in recruitmentCases (Q7b strict), a guardian id (guardianId, recipient.guardianId, a trial\'s recipient.guardianId) not in guardians (Q7c strict), a duplicate id, an entry without an id, a non-object entry, a non-array blob, a non-JSON blob; a trial whose request names NO trial (the legacy pair) and a player id that is live, retained or missing are accepted and counted (Q7a)', () => {
+test('[snapshot] a save into a new database refuses with ids only — nothing written, the revision unchanged, the same save refused again: a trial whose request is not in the snapshot, two trials for one request, a request naming a trial that names another request, a request naming a missing trial, a case id not in recruitmentCases (Q7b strict), a guardian id (guardianId, recipient.guardianId, a trial\'s recipient.guardianId) not in guardians (Q7c strict), a duplicate id, an entry without an id, a non-object entry, a non-array collection; a trial whose request names NO trial (the legacy pair) and a player id that is live, retained or missing are accepted and counted (Q7a)', () => {
   needRec();
   const refuse = (label, fixture, pattern) => {
-    const dir = tempDir('s8a-refuse'); preS8aFile(dir, { channels: [], ...fixture }); const s = openRaw(dir); const before = [blobText(s, 'requests'), blobText(s, 'trials'), applied(s)];
-    assert.throws(() => migrateAll(s), (e) => { assert.match(String(e.message), /RECRUITMENT_IMPORT_BLOCKED/, label); assert.match(String(e.message), pattern, label); assert.doesNotMatch(String(e.message), /Adult Signup|Harbour Road|Bring boots/, `${label}: ids only`); return true; });
-    assert.deepEqual([blobText(s, 'requests'), blobText(s, 'trials'), applied(s)], before, `${label}: nothing written`); for (const t of TABLES) assert.equal(tableExistsIn(s, t), false, `${label}: ${t} not created`);
-    assert.throws(() => migrateAll(s), /RECRUITMENT_IMPORT_BLOCKED/); s.close(); rm(dir);
+    const dir = tempDir('s8a-refuse'); const st = openStore(dir); const before = fullDump(st.sqlite);
+    for (const l of [label, `${label} (again)`]) {
+      assert.throws(() => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections({ channels: [], ...fixture })) }), (e) => { assert.match(String(e.message), pattern, `${l}: ${e.message}`); assert.doesNotMatch(String(e.message), /Adult Signup|Harbour Road|Bring boots/, `${l}: ids only`); return true; });
+      assert.equal(fullDump(st.sqlite), before, `${l}: nothing written`); assert.equal(st.revision(), 0); assert.equal(st.sqlite.isTransaction, false);
+    }
+    st.sqlite.close(); rm(dir);
   };
   refuse('trial without request', { requests: [p4bInvitation()], trials: [scheduledTrial({ requestId: 'req-none' })] }, /trial-1.*req-none|req-none/);
   refuse('two trials one request', { requests: [acceptedRequest(p4bInvitation(), 'trial-1')], trials: [scheduledTrial(), scheduledTrial({ id: 'trial-dup' })] }, /trial-dup/);
@@ -174,17 +156,16 @@ test('[cutover] the import refuses with ids only — nothing written, the blobs 
   refuse('duplicate id', { requests: [legacyTrialRequest(), legacyTrialRequest()], trials: [] }, /req-legacy/);
   refuse('no id', { requests: [{ ...legacyTrialRequest(), id: undefined }], trials: [] }, /entry #0/);
   refuse('non-object', { requests: ['nope'], trials: [] }, /entry #0/);
-  refuse('non-array', { requests: undefined, trials: undefined, rawBlobs: { requests: JSON.stringify({ a: 1 }), trials: '[]' } }, /array/);
-  refuse('non-json', { requests: undefined, trials: undefined, rawBlobs: { requests: '{not json', trials: '[]' } }, /JSON/);
-  const dir = tempDir('s8a-tolerant'); preS8aFile(dir, { requests: [legacyTrialRequest({ id: 'req-gone', playerId: 'pl-gone' }), acceptedRequest(legacyTrialRequest({ id: 'req-old', playerId: 'pl-adult' }), undefined)], trials: [preP4bTrial({ requestId: 'req-old' }), preP4bTrial({ id: 'trial-gone', requestId: 'req-gone', playerId: 'pl-gone', report: undefined })], channels: [] });
-  const s = openRaw(dir); migrateAll(s); const c = JSON.parse(meta(s, 'recruitmentCutover'));
-  assert.equal(c.players.missing, 2, 'pl-gone on a request and a trial: counted'); assert.equal(c.trials.legacyPairs, 2); assert.equal(s.prepare("SELECT count(*) AS n FROM trials WHERE player_id = 'pl-gone'").get().n, 1, 'imported as it is, never fabricated, never refused');
+  refuse('non-array', { requests: { a: 1 }, trials: [] }, /array/);
+  const dir = file('tolerant', { requests: [legacyTrialRequest({ id: 'req-gone', playerId: 'pl-gone' }), acceptedRequest(legacyTrialRequest({ id: 'req-old', playerId: 'pl-adult' }), undefined)], trials: [preP4bTrial({ requestId: 'req-old' }), preP4bTrial({ id: 'trial-gone', requestId: 'req-gone', playerId: 'pl-gone', report: undefined })], channels: [] });
+  const s = openRaw(dir);
+  assert.equal(Object.values(rec.unresolvedPlayerReferences(s)).reduce((a, b) => a + b, 0), 2, 'pl-gone on a request and a trial: counted'); assert.equal(s.prepare('SELECT count(*) AS n FROM trials t JOIN recruitment_requests r ON r.id = t.request_id WHERE r.trial_id IS NULL').get().n, 2, 'two legacy pairs'); assert.equal(s.prepare("SELECT count(*) AS n FROM trials WHERE player_id = 'pl-gone'").get().n, 1, 'written as it is, never fabricated, never refused');
   s.close(); rm(dir);
 });
 
 // ------------------------------------------------------------- the repository (server mode, staged)
-test('[cutover] the repository: db.requests and db.trials are read-only ARRAYS of plain mutable records; addRequest/addTrial land in the next save as rows with their children; an in-place mutation (status, a schedule, an attendance push, a day staff push, a keys list push, a report) lands in the next save with the children rewritten in list order; an unchanged save writes no recruitment row and advances the revision; the derived trialReports accessor reads the table; tombstoneForPlayer replaces the records in place; exportRequests/exportTrials are detached copies; a reopen serves the same records', () => {
-  const dir = tempDir('s8a-repo'); preS8aFile(dir, FIX()); withRo(dir, () => {}); { const s = openRaw(dir); migrateAll(s); s.close(); }
+test('[repository] the repository: db.requests and db.trials are read-only ARRAYS of plain mutable records; addRequest/addTrial land in the next save as rows with their children; an in-place mutation (status, a schedule, an attendance push, a day staff push, a keys list push, a report) lands in the next save with the children rewritten in list order; an unchanged save writes no recruitment row and advances the revision; the derived trialReports accessor reads the table; tombstoneForPlayer replaces the records in place; exportRequests/exportTrials are detached copies; a reopen serves the same records', () => {
+  const dir = file('repo', FIX());
   const L = serverOpen(dir, { cases: CASES() }); needRec();
   assert.ok(Array.isArray(L.db.requests) && Array.isArray(L.db.trials)); assert.equal(L.db.requests.length, 6); assert.equal(L.db.trials.length, 2);
   assert.throws(() => L.db.requests.push({ id: 'x' }), /repositor/i); assert.throws(() => { L.db.trials[0] = {}; }, /repositor/i);
@@ -227,8 +208,8 @@ test('[cutover] the repository: db.requests and db.trials are read-only ARRAYS o
   const again = serverOpen(dir, { cases: CASES() }); assert.deepEqual(plain(again.db.trials), plain(exported)); assert.deepEqual(plain(again.db.requests), plain(L.db.requests)); again.close(); rm(dir);
 });
 
-test('[cutover] the two failure contracts: a failed ORDINARY save (a statement failure, then a failure of the REAL COMMIT) leaves the tables and the revision unchanged, keeps every pending change in memory and lands it ONCE on the next save; an aborted UNIT OF WORK (a joined failure, a real COMMIT failure) rolls the tables back AND restores the pre-unit graph in place — a held nested view (the trial\'s schedule object, the request record) reads the pre-unit values; edits pending before the unit stay pending; the retry lands once', () => {
-  const dir = tempDir('s8a-fail'); preS8aFile(dir, FIX()); { const s = openRaw(dir); migrateAll(s); s.close(); }
+test('[repository] the two failure contracts: a failed ORDINARY save (a statement failure, then a failure of the REAL COMMIT) leaves the tables and the revision unchanged, keeps every pending change in memory and lands it ONCE on the next save; an aborted UNIT OF WORK (a joined failure, a real COMMIT failure) rolls the tables back AND restores the pre-unit graph in place — a held nested view (the trial\'s schedule object, the request record) reads the pre-unit values; edits pending before the unit stay pending; the retry lands once', () => {
+  const dir = file('fail', FIX());
   const L = serverOpen(dir, { cases: CASES() }); needRec();
   const t1 = L.db.trials.find((t) => t.id === 'trial-1'); const held = t1.schedule; const r1 = L.db.requests.find((r) => r.id === 'req-p4b');
   t1.workflowState = 'completed'; t1.completion = { state: 'completed', at: NOW, by: { kind: 'org', userId: 'usr-1', name: 'Maria' }, reason: null, phase: 'scheduled' };
@@ -262,9 +243,8 @@ test('[cutover] the two failure contracts: a failed ORDINARY save (a statement f
 });
 
 // ------------------------------------------------------------- the six-phase snapshot write
-test('[cutover] the six-phase snapshot write (plan §D.7.5): an empty file receiving a complete new request/trial/channel graph in BOTH trial orders persists identical rows and children; the unchanged snapshot re-saved is byte-identical; a replacement trial; a request swap between two surviving trials; completion and cancellation followed by a new open trial in the same case in both orders; a terminal trial re-entering accepted only when the holder leaves; case-only changes (case-1 → case-2, → NULL, NULL → case, a swap of two open survivors) with requests OMITTED equal the same change with the unchanged requests supplied, in both orders; a deliberate removal leaves the back-reference NULL', () => {
+test('[snapshot] the six-phase snapshot write (plan §D.7.5): an empty file receiving a complete new request/trial/channel graph in BOTH trial orders persists identical rows and children; the unchanged snapshot re-saved is byte-identical; a replacement trial; a request swap between two surviving trials; completion and cancellation followed by a new open trial in the same case in both orders; a terminal trial re-entering accepted only when the holder leaves; case-only changes (case-1 → case-2, → NULL, NULL → case, a swap of two open survivors) with requests OMITTED equal the same change with the unchanged requests supplied, in both orders; a deliberate removal leaves the back-reference NULL', () => {
   needRec();
-  const file = (tag, fixture) => { const d = tempDir(`s8a-${tag}`); preS8aFile(d, fixture); const s = openRaw(d); migrateAll(s); s.close(); return d; };
   const both = (label, fixture, over, { omit = [] } = {}) => {
     const outs = [false, true].map((reverse) => { const d = file('both', fixture); const S = snapshotOpen(d); const o = { ...over }; if (reverse && o.trials) o.trials = [...o.trials].reverse(); S.save(o, { omit }); const dump = withRo(d, recDump); S.close(); rm(d); return dump; });
     // the same final graph: every row and child row identical; `seq` (the parents' insertion order) is the supplied order by design, so a swap that departs and re-arrives two trials numbers them in the order given
@@ -303,10 +283,9 @@ test('[cutover] the six-phase snapshot write (plan §D.7.5): an empty file recei
   { const d = file('removal', graph); const S = snapshotOpen(d); S.save({ trials: [] }, { omit: ['requests'] }); withRo(d, (s) => { assert.equal(s.prepare("SELECT trial_id FROM recruitment_requests WHERE id = 'req-p4b'").get().trial_id, null); assert.equal(s.prepare('SELECT count(*) AS n FROM trials').get().n + s.prepare('SELECT count(*) AS n FROM trial_history').get().n, 0); }); S.close(); rm(d); }
 });
 
-test('[cutover] the snapshot write refuses atomically — every table, the channels and the revision unchanged, no transaction open, ids only: two open trials in one case (both orders); a trial naming a missing request; a request naming a missing trial; a pair mismatch; a new trial for a retained request that names NOTHING but carries the key (trialId null, requests omitted); an actual request reassignment with requests omitted; a case id not in the FINAL recruitmentCases — supplied or retained — including when ONLY the recruitmentCases collection changes (Q7b strict); a guardian not in the FINAL guardians — including when ONLY the identity pair is rewritten (Q7c strict); a request removed while its trial or its thread stays (RESTRICT); a channel naming a request outside the final table (the real key); a malformed collection; a mediaDeletions-style explicit non-array', () => {
+test('[snapshot] the snapshot write refuses atomically — every table, the channels and the revision unchanged, no transaction open, ids only: two open trials in one case (both orders); a trial naming a missing request; a request naming a missing trial; a pair mismatch; a new trial for a retained request that names NOTHING but carries the key (trialId null, requests omitted); an actual request reassignment with requests omitted; a case id not in the FINAL recruitmentCases — supplied or retained — including when ONLY the recruitmentCases collection changes (Q7b strict); a guardian not in the FINAL guardians — including when ONLY the identity pair is rewritten (Q7c strict); a request removed while its trial or its thread stays (RESTRICT); a channel naming a request outside the final table (the real key); a malformed collection; a mediaDeletions-style explicit non-array', () => {
   needRec();
-  const d = tempDir('s8a-refusals'); preS8aFile(d, { requests: [acceptedRequest(p4bInvitation(), 'trial-1'), acceptedRequest(p4bInvitation({ id: 'req-2', caseId: 'case-2' }), 'trial-2'), minorInvitation()], trials: [scheduledTrial(), scheduledTrial({ id: 'trial-2', requestId: 'req-2', caseId: 'case-2', workflowState: 'completed' })], channels: [CHANNEL()] });
-  { const s = openRaw(d); migrateAll(s); s.close(); }
+  const d = file('refusals', { requests: [acceptedRequest(p4bInvitation(), 'trial-1'), acceptedRequest(p4bInvitation({ id: 'req-2', caseId: 'case-2' }), 'trial-2'), minorInvitation()], trials: [scheduledTrial(), scheduledTrial({ id: 'trial-2', requestId: 'req-2', caseId: 'case-2', workflowState: 'completed' })], channels: [CHANNEL()] });
   const S = snapshotOpen(d);
   const refused = (label, over, pattern, { omit = [] } = {}) => {
     const before = withRo(d, (s) => [recDump(s), s.prepare('SELECT count(*) AS n FROM guardians').get().n]); const rev = S.revision();
@@ -331,9 +310,9 @@ test('[cutover] the snapshot write refuses atomically — every table, the chann
   S.close(); rm(d);
 });
 
-test('[cutover] the snapshot read serves both collections under their names (never a blob), a snapshot that omits them keeps the rows, an explicit empty array clears them (with its channels), and the identity replace still reconciles trialReports against the FINAL trials when the trials are table-backed (supplied or retained)', () => {
+test('[snapshot] the snapshot read serves both collections under their names (never a blob), a snapshot that omits them keeps the rows, an explicit empty array clears them (with its channels), and the identity replace still reconciles trialReports against the FINAL trials when the trials are table-backed (supplied or retained)', () => {
   needRec();
-  const d = tempDir('s8a-read'); preS8aFile(d, FIX()); { const s = openRaw(d); migrateAll(s); s.close(); }
+  const d = file('read', FIX());
   const S = snapshotOpen(d);
   assert.deepEqual(plain(S.db.requests), persisted(FIX().requests)); assert.deepEqual(plain(S.db.trials), persisted(FIX().trials));
   const before = withRo(d, recDump); S.save({}, { omit: ['requests', 'trials'] }); assert.equal(withRo(d, recDump), before, 'omitted: retained');
@@ -346,10 +325,7 @@ test('[cutover] the snapshot read serves both collections under their names (nev
 });
 
 // ------------------------------------------------------------- review of 6d77aa7 (F1, F2)
-// FAILING-FIRST NOTE: recorded on the unchanged 6d77aa7 tree before the correction — F1 fails at the cutover read-back
-// (an empty list act comes back absent; a prototype-named own act disappears), F2 fails because a present `null` blob
-// imports as an empty collection and records the migration.
-test('[cutover] F1 (review of 6d77aa7): every idempotency action is preserved losslessly and DISTINCTLY — an empty list act, an empty object act, a null act, a prototype-named own act (`__proto__`) holding a keyed value or a keyed list, `constructor`- and `toString`-named acts, mixed empty and non-empty acts — through the cutover, a whole-snapshot save, the staged repository (in place, and an unchanged save writing nothing), and a reopen; a non-empty list keeps its order, its duplicates and its fingerprints', () => {
+test('[snapshot] F1 (review of 6d77aa7): every idempotency action is preserved losslessly and DISTINCTLY — an empty list act, an empty object act, a null act, a prototype-named own act (`__proto__`) holding a keyed value or a keyed list, `constructor`- and `toString`-named acts, mixed empty and non-empty acts — through a first snapshot save, a whole-snapshot save, the staged repository (in place, and an unchanged save writing nothing), and a reopen; a non-empty list keeps its order, its duplicates and its fingerprints', () => {
   const { readRequests, readTrials } = needRec();
   const own = (json) => JSON.parse(json); // JSON.parse creates OWN properties, `__proto__` included — the way every blob is read
   const KEYS_R = () => own('{"invite":[],"__proto__":{"key":"proto-key","fp":"proto-fp"},"constructor":{"key":"ctor-key","fp":"ctor-fp"},"toString":[{"key":"ts-1","fp":"ts-fp","at":1}],"empty":{},"nothing":null}');
@@ -370,10 +346,10 @@ test('[cutover] F1 (review of 6d77aa7): every idempotency action is preserved lo
     assert.ok(Object.hasOwn(t.keys, '__proto__') && Array.isArray(t.keys.__proto__) && t.keys.__proto__.length === 2, `${label}: the prototype-named list act with its duplicate`);
     assert.deepEqual(t.keys.accept, { key: null, fp: 'fp-accept' }, `${label}: keys.accept as written`);
   };
-  const dir = tempDir('s8a-f1'); preS8aFile(dir, { requests: expectR, trials: expectT, channels: [] });
-  { const s = openRaw(dir); migrateAll(s); checkKeys('cutover', readRequests(s)[0], readTrials(s)[0]);
+  const dir = file('f1', { requests: expectR, trials: expectT, channels: [] });
+  { const s = openRaw(dir); checkKeys('first save', readRequests(s)[0], readTrials(s)[0]);
     assert.deepEqual(s.prepare("SELECT key, fp FROM idempotency_keys WHERE owner_id = 'trial-1' AND act = 'attendance' ORDER BY position").all().map((r) => [r.key, r.fp]), [['k-a', 'f-a'], ['k-a', 'f-a'], ['k-b', 'f-b']], 'the list rows in order with the duplicate');
-    assert.deepEqual(readRequests(s)[1].keys, expectR[1].keys, 'cutover: the legacy request\'s prototype-named act'); s.close(); }
+    assert.deepEqual(readRequests(s)[1].keys, expectR[1].keys, 'first save: the legacy request\'s prototype-named act'); s.close(); }
   // a whole-snapshot save with fresh objects
   { const S = snapshotOpen(dir); S.db.requests[0].keys = KEYS_R(); S.db.trials[0].keys = KEYS_T(); S.save(); S.close(); withRo(dir, (s) => checkKeys('snapshot save', readRequests(s)[0], readTrials(s)[0])); }
   // the staged repository: in place, then an unchanged save
@@ -383,23 +359,17 @@ test('[cutover] F1 (review of 6d77aa7): every idempotency action is preserved lo
   rm(dir);
 });
 
-test('[cutover] F2 (review of 6d77aa7): a PRESENT null blob — requests or trials — refuses the cutover with RECRUITMENT_IMPORT_BLOCKED like an object, a string or a number: no table created, the blob, the record, saveSeq and every other row untouched, no transaction left open, the next attempt refused the same way; a genuinely ABSENT blob and an explicit [] still import nothing and cut over', () => {
+test('[snapshot] F2 (review of 6d77aa7): a PRESENT null collection — requests or trials — is refused by a save like an object, a string or a number: nothing written, the revision unchanged, no transaction left open, the same save refused again; an ABSENT collection and an explicit [] write nothing and are accepted', () => {
   needRec();
-  for (const [name, other] of [['requests', 'trials'], ['trials', 'requests']]) {
-    // the null is written AFTER the earlier steps ran (0007 reconciles trialReports against the trials blob and refuses a non-array itself): the file is a valid S4b-R file whose blob row then holds JSON null
-    const dir = tempDir('s8a-f2'); preS8aFile(dir, { requests: undefined, trials: undefined, channels: [], rawBlobs: { [other]: '[]' } });
-    const s = openRaw(dir); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run(name, 'null');
-    assert.equal(blobText(s, name), 'null'); const before = fullDump(s);
-    assert.throws(() => migrateAll(s), (e) => { assert.match(String(e.message), /RECRUITMENT_IMPORT_BLOCKED/, `${name}: refused`); assert.match(String(e.message), new RegExp(`${name} blob.*null`), `${name}: the refusal names the null blob`); return true; });
-    assert.equal(blobText(s, name), 'null', `${name}: the blob is left as it was`); assert.equal(applied(s).includes(MIGRATION), false, `${name}: the migration is not recorded`); for (const t of TABLES) assert.equal(tableExistsIn(s, t), false, `${name}: ${t} not created`);
-    assert.equal(fullDump(s), before, `${name}: every row of every table as before`);
-    s.exec('BEGIN'); s.exec('ROLLBACK'); // the refusal left no transaction open
-    assert.throws(() => migrateAll(s), /RECRUITMENT_IMPORT_BLOCKED/, `${name}: the next attempt refuses the same way`); assert.equal(fullDump(s), before);
-    s.close(); rm(dir);
+  for (const name of ['requests', 'trials']) {
+    const dir = tempDir('s8a-f2'); const st = openStore(dir); const before = fullDump(st.sqlite);
+    const save = () => st.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(fixtureCollections({ requests: [], trials: [], channels: [], [name]: null })) });
+    for (const l of [name, `${name} (again)`]) { assert.throws(save, (e) => { assert.match(String(e.message), new RegExp(`${name}[\\s\\S]*(null|array)`), `${l}: the refusal names the collection: ${e.message}`); return true; }); assert.equal(fullDump(st.sqlite), before, `${l}: nothing written`); assert.equal(st.revision(), 0); assert.equal(st.sqlite.isTransaction, false); }
+    st.sqlite.close(); rm(dir);
   }
   for (const explicit of [false, true]) {
-    const dir = tempDir('s8a-f2-ok'); preS8aFile(dir, { requests: undefined, trials: undefined, channels: [], ...(explicit ? { rawBlobs: { requests: '[]', trials: '[]' } } : {}) });
-    const s = openRaw(dir); migrateAll(s); assert.ok(applied(s).includes(MIGRATION), explicit ? 'explicit [] blobs cut over' : 'absent blobs cut over'); assert.equal(s.prepare('SELECT count(*) AS n FROM trials').get().n + s.prepare('SELECT count(*) AS n FROM recruitment_requests').get().n, 0); s.close(); rm(dir);
+    const dir = file('f2-ok', { channels: [], ...(explicit ? { requests: [], trials: [] } : {}) });
+    const s = openRaw(dir); assert.equal(s.prepare('SELECT count(*) AS n FROM trials').get().n + s.prepare('SELECT count(*) AS n FROM recruitment_requests').get().n, 0, explicit ? 'explicit []' : 'absent'); s.close(); rm(dir);
   }
 });
 

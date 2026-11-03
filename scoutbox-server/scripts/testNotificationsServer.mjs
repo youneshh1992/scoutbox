@@ -7,7 +7,7 @@
 // the acknowledgment atomic with the dispatch blob under a real COMMIT failure,
 // preferences (a mandatory category stored false through numeric zero, forced
 // on; a muted category never creates a row), mark-read, account deletion, the
-// admin backup and its restore in the legacy shape. Nothing here touches
+// admin backup (a database copy) and its restore. Nothing here touches
 // DATA_DIR or any real data. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -48,31 +48,17 @@ async function boot(dir, env = {}) {
     setTimeout(() => reject(new Error(`boot timeout: ${log.slice(-800)}`)), 30_000).unref();
   });
 }
-async function bootRefuses(dir) {
-  try { const S = await boot(dir); await S.kill(); throw new Error(`the server booted but must have refused: ${S.log().slice(-600)}`); }
-  catch (err) { if (typeof err.code !== 'number') throw err; return { code: err.code, log: err.log }; }
-}
 // Every database read goes through a SECOND, read-only connection: what it sees is what is committed.
 const q1 = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const r = s.prepare(sql).get(...p); return r ? { ...r } : r; } finally { s.close(); } };
 const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
-const live = (dir) => !!q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0009_notifications'");
-const blobRows = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : null; };
-/** The feed as the database holds it, in insertion order: the table after the cutover, the blob before it — so a check reads the same way on both builds. */
-const stored = (dir) => (live(dir)
-  ? qAll(dir, 'SELECT id, occurred_at AS ts, audience_kind, audience_id, repeat_count AS repeatCount, read, action_acked_at AS ackedAt FROM notifications ORDER BY seq').map((r) => ({ id: r.id, ts: r.ts, audience: { kind: r.audience_kind, id: r.audience_id }, repeatCount: r.repeatCount, read: !!r.read, ackedAt: r.ackedAt }))
-  : (blobRows(dir, 'notifications') ?? []).map((n) => ({ id: n.id, ts: n.ts, audience: n.audience, repeatCount: n.repeatCount ?? 1, read: !!n.read, ackedAt: n.actionRequired?.ackedAt ?? null })));
-/** Plant notification rows (legacy shape) at the END of the stored feed, server stopped: into the table after the cutover, into the blob before it. */
+/** The feed as the database holds it, in insertion order. */
+const stored = (dir) => qAll(dir, 'SELECT id, occurred_at AS ts, audience_kind, audience_id, repeat_count AS repeatCount, read, action_acked_at AS ackedAt FROM notifications ORDER BY seq').map((r) => ({ id: r.id, ts: r.ts, audience: { kind: r.audience_kind, id: r.audience_id }, repeatCount: r.repeatCount, read: !!r.read, ackedAt: r.ackedAt }));
+/** Plant notification rows at the END of the stored feed, server stopped. */
 function plant(dir, rows) {
   const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA busy_timeout = 5000;');
   try {
-    if (live(dir)) {
-      const ins = s.prepare('INSERT INTO notifications (id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)');
-      for (const n of rows) ins.run(n.id, n.ts, n.audience.kind, n.audience.id, n.type, n.text, n.refId ?? null, n.read ? 1 : 0, n.repeatCount ?? 1, n.groupKey ?? null, n.category ?? null, n.deferredPush ? 1 : 0);
-    } else {
-      const arr = JSON.parse(s.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value);
-      arr.push(...rows);
-      s.prepare("UPDATE collections SET value = ? WHERE name = 'notifications'").run(JSON.stringify(arr));
-    }
+    const ins = s.prepare('INSERT INTO notifications (id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)');
+    for (const n of rows) ins.run(n.id, n.ts, n.audience.kind, n.audience.id, n.type, n.text, n.refId ?? null, n.read ? 1 : 0, n.repeatCount ?? 1, n.groupKey ?? null, n.category ?? null, n.deferredPush ? 1 : 0);
   } finally { s.close(); }
 }
 const orgLogin = async (S, orgId, scoutName, role) => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role }); assert.equal(r.status, 200, `org login ${orgId}: ${r.text}`); return r.body.token; };
@@ -125,13 +111,11 @@ await test('feed and coalescing through the real routes: an identical message no
   assert.equal(feed[0].type, 'request', 'the trial request, inserted later, is still first'); assert.equal(feed[1].id, msg.id, 'the refreshed row did not move');
   assert.ok(feed[1].ts > feed[0].ts, 'although its clock is now the newest: the order is insertion, never occurred_at');
   const orderBefore = feed.map((n) => n.id);
-  if (live(dir)) {
+  {
     assert.deepEqual(qAll(dir, 'SELECT id FROM notifications WHERE audience_kind = ? AND audience_id = ? ORDER BY seq DESC', 'player', 'pl-adeyemi').map((r) => r.id), orderBefore, 'the table holds the feed in its durable order (second connection)');
     assert.equal(q1(dir, 'SELECT repeat_count AS n FROM notifications WHERE id = ?', msg.id).n, 2, 'the coalesce is durable with the message it announces (postMessage saves at once)');
-    // S7d: the message is a row of the messages table after the 0012 cutover; before it, an entry of the channels blob — the same file either way.
-    const channelsCut = !!q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0012_channels'");
-    const storedMessages = channelsCut ? qAll(dir, 'SELECT text FROM messages WHERE channel_id = ? ORDER BY position', channelId).map((r) => r.text).join('\n') : q1(dir, "SELECT value FROM collections WHERE name = 'channels'").value;
-    assert.ok(storedMessages.includes('Second message'), 'the message is in the same file (the messages table since S7d; the channels blob before)');
+    const storedMessages = qAll(dir, 'SELECT text FROM messages WHERE channel_id = ? ORDER BY position', channelId).map((r) => r.text).join('\n');
+    assert.ok(storedMessages.includes('Second message'), 'the message is in the same file');
   }
   // SIGKILL: the order and the counts are what the file holds.
   await S.kill(); S = await boot(dir);
@@ -163,7 +147,7 @@ await test('feed and coalescing through the real routes: an identical message no
   assert.equal((await say('Fifth message.')).status, 201);
   feed = await feedOf(S, '/player/notifications', kola);
   assert.equal(feed.filter((n) => n.type === 'message' && n.refId === channelId).length, 5); assert.equal(feed[0].read, false); assert.equal(feed[1].read, true);
-  if (live(dir)) assert.deepEqual(qAll(dir, 'SELECT id, read FROM notifications WHERE audience_kind = ? ORDER BY seq DESC LIMIT 2', 'player').map((r) => r.read), [0, 1], 'mark-read is durable');
+  assert.deepEqual(qAll(dir, 'SELECT id, read FROM notifications WHERE audience_kind = ? ORDER BY seq DESC LIMIT 2', 'player').map((r) => r.read), [0, 1], 'mark-read is durable');
   // The server log never carries a notification text in its data-layer lines.
   for (const line of S.log().split('\n').filter((l) => /notifications/i.test(l))) assert.equal(line.includes(text), false, `a log line carries notification text: ${line}`);
   await S.stop(); rm(dir);
@@ -180,13 +164,9 @@ await test('acknowledgment: a withdrawal notice (notifyAction) lands with its co
   let feed = await feedOf(S, '/org/notifications', maria);
   const notice = feed.find((n) => n.type === 'transition' && n.actionRequired); assert.ok(notice, JSON.stringify(feed));
   assert.deepEqual(notice.actionRequired, { deadline: notice.actionRequired.deadline, ackedAt: null, ackedBy: null }); assert.ok(notice.actionRequired.deadline > Date.now());
-  assert.ok(live(dir), 'this proof reads the notifications table'); // fails on the pre-S7a build: the table does not exist
   assert.deepEqual(q1(dir, 'SELECT action_required AS a, action_acked_at AS at FROM notifications WHERE id = ?', notice.id), { a: 1, at: null });
   assert.ok((await S.j('POST', '/admin/delivery/sweep', {}, null, A)).status === 200);
-  // S7b: the dispatch rows live in the dispatches table (the blob before the 0010 cutover); the ack coupling is what this test checks either way.
-  const dispatches = () => (q1(dir, "SELECT 1 AS one FROM data_migrations WHERE id = '0010_dispatches'")
-    ? qAll(dir, 'SELECT id, status, actioned_at AS actionedAt, channel FROM dispatches WHERE notification_id = ? ORDER BY seq', notice.id)
-    : blobRows(dir, 'dispatches').filter((d) => d.notificationId === notice.id));
+  const dispatches = () => qAll(dir, 'SELECT id, status, actioned_at AS actionedAt, channel FROM dispatches WHERE notification_id = ? ORDER BY seq', notice.id);
   assert.ok(dispatches().length >= 1, 'the sweep created dispatch rows for the notice'); assert.ok(dispatches().every((d) => d.status !== 'actioned' && !d.actionedAt));
   const statusesBefore = dispatches().map((d) => [d.id, d.status]);
   const ack = () => S.j('POST', `/org/notifications/${notice.id}/ack`, {}, maria);
@@ -222,16 +202,10 @@ await test('preferences through the real routes: a category turned off never cre
   assert.equal(r.status, 200, r.text);
   const compliance = r.body.preferences.categories.find((c) => c.id === 'compliance'); assert.deepEqual([compliance.enabled, compliance.mandatory], [true, true], 'the view forces the mandatory category on');
   assert.equal(r.body.preferences.categories.find((c) => c.id === 'messages').enabled, false); assert.equal(r.body.preferences.emailIntent, true);
-  if (live(dir)) {
-    const cats = () => qAll(dir, 'SELECT category, enabled FROM notification_pref_categories WHERE audience_kind = ? AND audience_id = ? ORDER BY category', 'player', 'pl-adeyemi').map((x) => [x.category, x.enabled]);
-    assert.ok(await settled(() => cats().length === 2), 'the preference write landed with the debounced save');
-    assert.deepEqual(cats(), [['compliance', 0], ['messages', 0]], 'stored as the route coerced it: false, the mandatory one included');
-    assert.equal(q1(dir, 'SELECT email_intent AS e FROM notification_prefs WHERE audience_id = ?', 'pl-adeyemi').e, 1);
-  } else {
-    const stored = () => (blobRows(dir, 'notificationPrefs') ?? []).find((p) => p.audienceKind === 'player' && p.audienceId === 'pl-adeyemi');
-    assert.ok(await settled(() => !!stored()), 'the preference write landed with the debounced save');
-    assert.deepEqual(stored().categories, { messages: false, compliance: false });
-  }
+  const cats = () => qAll(dir, 'SELECT category, enabled FROM notification_pref_categories WHERE audience_kind = ? AND audience_id = ? ORDER BY category', 'player', 'pl-adeyemi').map((x) => [x.category, x.enabled]);
+  assert.ok(await settled(() => cats().length === 2), 'the preference write landed with the debounced save');
+  assert.deepEqual(cats(), [['compliance', 0], ['messages', 0]], 'stored as the route coerced it: false, the mandatory one included');
+  assert.equal(q1(dir, 'SELECT email_intent AS e FROM notification_prefs WHERE audience_id = ?', 'pl-adeyemi').e, 1);
   r = await put({ categories: { compliance: false } }); assert.equal(r.status, 400); assert.equal(r.body.error, 'PREF_CATEGORY_MANDATORY');
   r = await put({ categories: { gossip: true } }); assert.equal(r.status, 400); assert.equal(r.body.error, 'PREF_CATEGORY_UNKNOWN');
   r = await put({ categories: 'all' }); assert.equal(r.status, 400); assert.equal(r.body.error, 'PREFS_INVALID');
@@ -239,7 +213,7 @@ await test('preferences through the real routes: a category turned off never cre
   const before = Date.now();
   assert.equal((await say('Two, while muted.')).status, 201);
   assert.equal(await rows(), 1, 'no notification was created for a muted category');
-  if (live(dir)) assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM notifications WHERE audience_id = ? AND occurred_at >= ?', 'pl-adeyemi', before).n, 0, 'nor in the table');
+  assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM notifications WHERE audience_id = ? AND occurred_at >= ?', 'pl-adeyemi', before).n, 0, 'nor in the table');
   const cap = await S.j('GET', '/capabilities'); assert.ok(Number(/"suppressedByPreference":(\d+)/.exec(cap.text)?.[1]) >= 1, `counted as suppressed: ${cap.text.slice(0, 200)}`);
   // Restart: the preferences and the mute hold.
   await S.kill(); S = await boot(dir);
@@ -262,7 +236,6 @@ await test('account deletion: the person\'s notification rows go inside the dele
   const { channelId } = await openThread(S, maria, kola);
   assert.equal((await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'Hello.' }, maria)).status, 201);
   assert.equal((await S.j('PUT', '/player/notification-preferences', { categories: { combine: false } }, kola)).status, 200);
-  assert.ok(live(dir), 'this proof reads the notifications table');
   const mine = () => q1(dir, 'SELECT COUNT(*) AS n FROM notifications WHERE audience_kind = ? AND audience_id = ?', 'player', 'pl-adeyemi').n;
   const others = () => q1(dir, 'SELECT COUNT(*) AS n FROM notifications WHERE NOT (audience_kind = ? AND audience_id = ?)', 'player', 'pl-adeyemi').n;
   assert.ok(mine() >= 2); const othersBefore = others(); assert.ok(othersBefore >= 1, 'Maria has rows too');
@@ -277,7 +250,7 @@ await test('account deletion: the person\'s notification rows go inside the dele
 });
 
 // ------------------------------------------------------------- backup and restore
-await test('backup/restore: the admin backup exports the notifications and preferences in the legacy shape and order (a backup restores on any build); a restore into a NEW directory imports them (migration 0009) with the same feed, repeat counts and acknowledgment contracts; a backup whose notification entry is malformed is refused at boot (NOTIFICATIONS_IMPORT_BLOCKED), creates no table and is refused again', async () => {
+await test('backup/restore: the admin backup\'s database copy holds the notifications in their stored order and the preferences; the manifest counts them; a restore into a NEW directory gives the same feeds, repeat counts, acknowledgment contracts and preferences', async () => {
   const dir = tempDir('s7a-backup'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const { channelId } = await openThread(S, maria, kola);
@@ -287,30 +260,21 @@ await test('backup/restore: the admin backup exports the notifications and prefe
   assert.ok(playerFeed.some((n) => n.repeatCount === 2));
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
   await S.stop();
-  const jsonText = fs.readFileSync(path.join(bk.body.dir, 'db.json'), 'utf8'); const snapshot = JSON.parse(jsonText);
-  assert.ok(Array.isArray(snapshot.db.notifications) && Array.isArray(snapshot.db.notificationPrefs), 'both collections are in the backup');
-  assert.deepEqual(snapshot.db.notifications.map((n) => n.id), stored(dir).map((n) => n.id), 'in the stored order');
-  const exported = snapshot.db.notifications.find((n) => n.id === playerFeed[0].id);
-  assert.deepEqual(Object.keys(exported).sort(), ['audience', 'category', 'deferredPush', 'groupKey', 'id', 'read', 'refId', 'repeatCount', 'text', 'ts', 'type'], 'the legacy shape, nothing more');
-  const mariaPrefs = snapshot.db.notificationPrefs.find((p) => p.audienceKind === 'org_user'); assert.deepEqual(mariaPrefs.categories, { mentions: false, compliance: false }); assert.equal(mariaPrefs.emailIntent, true);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(bk.body.dir, 'manifest.json'), 'utf8')).counts.notifications, snapshot.db.notifications.length);
+  const backup = bk.body.dir;
+  assert.deepEqual(stored(backup), stored(dir), 'the copy holds every notification, in the stored order');
+  const prefsOf = (d) => qAll(d, 'SELECT p.audience_kind, p.audience_id, p.email_intent, c.category, c.enabled FROM notification_prefs p LEFT JOIN notification_pref_categories c USING (audience_kind, audience_id) ORDER BY p.audience_kind, p.audience_id, c.category');
+  assert.deepEqual(prefsOf(backup), prefsOf(dir), 'and every preference');
+  assert.ok(prefsOf(backup).some((p) => p.audience_kind === 'org_user' && p.category === 'mentions' && p.enabled === 0 && p.email_intent === 1));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(backup, 'manifest.json'), 'utf8')).counts.notifications, stored(backup).length);
   // Restore.
-  const restored = tempDir('s7a-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
+  const restored = tempDir('s7a-restored'); fs.cpSync(backup, restored, { recursive: true });
   S = await boot(restored);
-  assert.ok(live(restored)); assert.deepEqual(stored(restored).map((n) => n.id), snapshot.db.notifications.map((n) => n.id), 'imported in order');
+  assert.deepEqual(stored(restored).map((n) => n.id), stored(backup).map((n) => n.id), 'restored in order');
   assert.deepEqual(sameFeed(await feedOf(S, '/player/notifications', kola)), sameFeed(playerFeed), 'the player feed is identical (the session travelled too)');
   assert.deepEqual(sameFeed(await feedOf(S, '/org/notifications', maria)), sameFeed(orgFeed));
   const prefs = await S.j('GET', '/org/notification-preferences', undefined, maria); assert.equal(prefs.body.preferences.categories.find((c) => c.id === 'mentions').enabled, false); assert.equal(prefs.body.preferences.categories.find((c) => c.id === 'compliance').enabled, true);
-  assert.equal(q1(restored, "SELECT COUNT(*) AS n FROM collections WHERE name IN ('notifications', 'notificationPrefs')").n, 0, 'no blob left behind');
   await S.stop();
-  // Malformed entry: refused whole, nothing created, refused again.
-  const bad = tempDir('s7a-badbk'); fs.cpSync(bk.body.dir, bad, { recursive: true });
-  const b = JSON.parse(jsonText); b.db.notifications[0].ts = 'yesterday'; fs.writeFileSync(path.join(bad, 'db.json'), JSON.stringify(b));
-  const r1 = await bootRefuses(bad); assert.notEqual(r1.code, 0); assert.match(r1.log, /NOTIFICATIONS_IMPORT_BLOCKED.*ts must be/);
-  assert.equal(r1.log.includes(b.db.notifications[0].text), false, 'the refusal carries no notification text');
-  assert.equal(q1(bad, "SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'notifications'").n, 0, 'no table created');
-  const r2 = await bootRefuses(bad); assert.match(r2.log, /NOTIFICATIONS_IMPORT_BLOCKED/, 'refused again on the next boot');
-  rm(dir, restored, bad);
+  rm(dir, restored);
 });
 
 // ------------------------------------------------------------- review of ba6956d, finding 1: effects after the durable save, through the real server

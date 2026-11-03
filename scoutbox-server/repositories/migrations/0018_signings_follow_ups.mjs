@@ -11,7 +11,7 @@ import { rebuildTable } from './0016_recruitment_cases.mjs';
 import { SIGNINGS_FOLLOWUPS_MIGRATION, SIGNINGS_FOLLOWUPS_DDL, SIGNINGS_FOLLOWUPS_TABLES, S8D_KEY_OWNERS } from '../signingsFollowUps.mjs';
 
 export const id = SIGNINGS_FOLLOWUPS_MIGRATION;
-export const note = 'signing packages (revisions, documents, parties, history), completed signings (parties), post-signing follow-ups and outcome reports (confirmations) become typed tables; the four blobs imported with the normalisations reported and retired; idempotency_keys broadened to signing_packages (S8d)';
+export const note = 'signing packages (revisions, documents, parties, history), completed signings (parties), post-signing follow-ups and outcome reports (confirmations) become typed tables; idempotency_keys broadened to signing_packages (S8d)';
 export const foreignKeysOff = true;
 
 export function up(sqlite) {

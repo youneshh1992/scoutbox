@@ -2,11 +2,8 @@
 // the bounded storage migration the Founder
 // approved through D-A (messaging first with a transitional code-checked request
 // reference) and D-B (today's explicit deletion of a deleted player's threads
-// reproduced; retention left open). The migration from the legacy blob (the
-// channel and message literals, both attachment shapes, typed columns only: unknown
-// fields and wrong-typed optional values dropped and reported with ids, duplicate ids,
-// a second channel for one request, orphan references, malformed blobs, first
-// installation, reruns, text-free refusals); the actual schema (no FK on request_id/player_id/guardian_id, the org
+// reproduced; retention left open). The migration (DDL only, no blob import);
+// the actual schema (no FK on request_id/player_id/guardian_id, the org
 // FK, the two internal cascades, the unique request index); the repository (open with
 // the checked request reference, append in array order, receipts, deletion for a
 // player, the two write modes, joined units, real COMMIT failure, hook registration, a
@@ -16,14 +13,9 @@
 // absence versus empty array, parent-prune order).
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 //
-// FAILING-FIRST NOTE (recorded on the unchanged b67bce5 tree before the implementation):
-// the tests marked [cutover] need the 0012 migration and the repository module and FAIL
-// there on concrete assertions (the migration id is absent from DATA_MIGRATIONS; the
-// three tables do not exist; the channels blob survives). The tests marked [compat]
-// exercise behaviour the accepted build already has and pass on both trees. The check
-// named "the review of 62e9c1a" was recorded FAILING on the unchanged 62e9c1a source
-// (a held nested receipts view kept the failed value after an aborted unit) before the
-// repository's snapshot/restore moved to the graph memento.
+// Fixtures are written by a snapshot-mode save (openStore(dir).save), which runs
+// every migration first, so the threads meet the final schema (the request key
+// is real since S8a).
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,7 +23,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, openRaw, applied, dump, FIXTURE, ORGS, USERS, SESSIONS, freshFile } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -65,16 +57,13 @@ const requestRow = (dir, id) => (tableExistsIn(dir, 'recruitment_requests') ? ro
 /** A guardian thread naming the fixture's CHILDLESS guardian gd-signup (removing that guardian is valid for the identity snapshot itself, so the channel assertion is what refuses). */
 const soloChannel = (over = {}) => channel({ id: 'chan-solo', requestId: 'req-solo', playerId: 'pl-child2', playerName: 'Child pl-child2', counterparty: 'guardian', guardianId: 'gd-signup', ...over });
 
-/** A file at S7c (0001–0011 applied) carrying the channels blob the way the b67bce5 build wrote it, with the requests blob the threads reference. */
-function s7cFile(dir, { channels, requests = REQUESTS(), rawBlobs, extra: more = {} } = {}) {
-  const extra = { requests, ledger: [], vouches: [], notifications: [], dispatches: [], ...more }; // vouches: the unrelated plain blob the snapshot tests below touch (the ledger is a table since S6b)
-  if (channels !== undefined) extra.channels = channels;
-  s3File(dir, { extra, rawBlobs });
-  const s = openRaw(dir);
-  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } });
-  s.close();
+/** A fully migrated file holding the fixture's identity, organisation and staff, the requests the threads reference and the given threads, written by a snapshot-mode save (the writers' validation applies). */
+function s7cFile(dir, { channels, requests = REQUESTS(), extra: more = {} } = {}) {
+  const db = { ...FIXTURE(), orgs: ORGS(), users: USERS(), sessions: SESSIONS(), requests, vouches: [], ...more }; // vouches: the unrelated plain blob the snapshot tests below touch
+  if (channels !== undefined) db.channels = channels;
+  const tool = openStore(dir); tool.save({ savedAt: NOW, idCounter: 1000, db }); tool.sqlite.close();
 }
-const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id <= MIGRATION), { now, context: { sessionTtlMs: TTL } }); // up to 0012: this suite exercises the S7d step (S6b's 0013 and its tool have their own suite, testSafetyAudit.mjs)
+const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id <= MIGRATION), { now, context: { sessionTtlMs: TTL } }); // up to 0012 (a no-op on a fixture, which is fully migrated)
 let mod = null;
 try { mod = await import('../repositories/channels.mjs'); } catch { mod = null; }
 const needModule = () => { assert.ok(mod, 'repositories/channels.mjs exists (the S7d repository module)'); return mod; };
@@ -97,80 +86,19 @@ test('[compat] the message literal: a message without a clientMsgId has NO such 
   assert.equal(Object.hasOwn(legacy.messages[0], 'attachment'), true); assert.equal(legacy.messages[0].attachment, null);
 });
 
-// ============================================================= [cutover] the migration from the legacy blob
-test('[cutover] migration 0012 is registered after 0011 and imports the channels blob into typed columns: two threads (an adult and a guardian thread) with messages of all three sender kinds, both attachment shapes, a message with and one without clientMsgId; unknown fields at channel/message/attachment/readBy/sender level (the legacy orgUserIdForNotify and own "__proto__" keys included), a wrong-typed optional value, an unusable attachment and a null clientMsgId are DROPPED and each is noted with the record id (field names, never values); an absent optional key reads back as null; array order becomes seq/position; the blob row is retired; the cutover record carries counts and notes only; a second run applies nothing', () => {
-  const dir = tempDir('ch-mig');
-  const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me"},"constructor":"own-constructor"}');
-  const adultThread = channel({ orgUserIdForNotify: 'usr-legacy', futureChannelField: [1, 2], scoutName: 42, messages: [
-    message({ id: 'm-1', ts: NOW - 5 * MIN, sender: { kind: 'org_user', id: 'usr-1', name: 'Maria · Head of Recruitment · Eastport FC', ...special }, futureMessageField: true }),
-    message({ id: 'm-2', ts: NOW - 4 * MIN, sender: { kind: 'player', id: 'pl-adult', name: 'Adult Signup' }, text: 'Reply.', clientMsgId: 'client-7', attachment: clip({ futureAttachmentField: 'x' }) }),
-    message({ id: 'm-3', ts: NOW - 4 * MIN, sender: { kind: 'org_user', id: 'usr-1', name: 'Maria · Head of Recruitment · Eastport FC' }, text: 'Same ts, later position.', attachment: trialReport() }),
-  ], readBy: { org: NOW - 3 * MIN, counterparty: null, futureReadByField: 1 } });
-  const gThread = { ...guardianChannel({ messages: [message({ id: 'm-g1', sender: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, attachment: { kind: 'file', url: 'x' } })] }) };
-  delete gThread.scoutRole; gThread.playerName = null; // ABSENT next to present-and-null: both read back as null
-  const noAttachmentKey = message({ id: 'm-g2', sender: { kind: 'org_user', id: 'usr-1', name: 'Maria · Head of Recruitment · Eastport FC' }, clientMsgId: null }); delete noAttachmentKey.attachment; gThread.messages.push(noAttachmentKey);
-  s7cFile(dir, { channels: [adultThread, gThread] });
-  const s = openRaw(dir);
-  assert.ok(!applied(s).includes(MIGRATION)); assert.ok(blob(s, 'channels'));
-  const ran = migrate(s);
-  assert.ok(ran.ran.includes(MIGRATION), `0012 ran (${ran.ran.join(', ')})`); // fails on b67bce5: the id is not registered
-  assert.deepEqual(applied(s).slice(-2), ['0011_outbox_push', MIGRATION]);
-  for (const t of ['channels', 'messages', 'message_attachments']) assert.ok(s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), `${t} exists`);
+test('[cutover] migration 0012 is registered after 0011; the actual schema: no side columns, channels references orgs (RESTRICT) and nothing else — no foreign key on request_id, player_id or guardian_id (D-A: the checked reference; D-B: no lifecycle clause; the code-validated guardian); a unique index on request_id; messages → channels and message_attachments → messages CASCADE; the three sender kinds, the two counterparties and the two attachment kinds are CHECKed; the attachment CHECK ties each kind to its columns; every table STRICT', () => {
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id).filter((id) => id <= MIGRATION).slice(-2), ['0011_outbox_push', MIGRATION], '0012 is registered after 0011');
+  { // The final state: since S8a (0015) the request reference is a real key.
+    const full = tempDir('ch-schema-full'); s7cFile(full, { channels: [] }); const f = openRaw(full);
+    assert.equal(f.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").get().n, 0, 'no channels blob');
+    assert.deepEqual(f.prepare('PRAGMA foreign_key_list(channels)').all().map((k) => [k.from, k.table, k.on_delete]).sort(), [['org_id', 'orgs', 'RESTRICT'], ['request_id', 'recruitment_requests', 'RESTRICT']]);
+    f.close(); rm(full);
+  }
+  // The 0012 step's own DDL, on a new database migrated up to 0012.
+  const dir = tempDir('ch-schema'); freshFile(dir); const s = openRaw(dir); migrate(s);
+  assert.ok(applied(s).includes(MIGRATION));
+  s.exec("INSERT INTO orgs (id, name, type, level, plan, country) VALUES ('org-pro', 'Eastport FC', 'club', 'pro', 'Pro', 'GB')");
   for (const t of ['channels', 'messages', 'message_attachments']) assert.deepEqual(s.prepare(`PRAGMA table_info(${t})`).all().filter((c) => /_json$/.test(c.name)).map((c) => c.name), [], `${t}: no side columns`);
-  assert.equal(blob(s, 'channels'), undefined, 'the blob row is retired');
-  const ch = s.prepare('SELECT * FROM channels ORDER BY seq').all();
-  assert.deepEqual(ch.map((r) => [r.id, r.request_id, r.counterparty, r.guardian_id, r.read_by_org_at, r.read_by_counterparty_at, r.scout_name]), [['chan-1', 'req-1', 'player', null, NOW - 3 * MIN, null, null], ['chan-g', 'req-g', 'guardian', 'gd-primary', null, null, 'Maria']]);
-  assert.equal(ch[1].player_name, null); assert.equal(ch[1].scout_role, null);
-  const ms = s.prepare('SELECT * FROM messages ORDER BY channel_id, position').all();
-  assert.deepEqual(ms.map((r) => [r.channel_id, r.position, r.id, r.sender_kind, r.client_msg_id, r.created_at]), [['chan-1', 0, 'm-1', 'org_user', null, NOW - 5 * MIN], ['chan-1', 1, 'm-2', 'player', 'client-7', NOW - 4 * MIN], ['chan-1', 2, 'm-3', 'org_user', null, NOW - 4 * MIN], ['chan-g', 0, 'm-g1', 'guardian', null, NOW - MIN], ['chan-g', 1, 'm-g2', 'org_user', null, NOW - MIN]], 'array order is position; a tie on ts keeps its order');
-  const at = s.prepare('SELECT * FROM message_attachments ORDER BY message_id').all();
-  assert.deepEqual(at.map((r) => [r.message_id, r.kind, r.media_id, r.verified_clip, r.report_id, r.summary]), [['m-2', 'clip', 'med-1', 0, null, null], ['m-3', 'trial_report', null, null, 'rep-1', 'accel 7/10 · 31 km/h']], 'the unusable attachment of m-g1 was dropped');
-  const record = JSON.parse(meta(s, 'channelsCutover'));
-  assert.deepEqual([record.imported, record.messages, record.attachments, record.normalised, record.byCounterparty], [2, 5, 2, 2, { player: 1, guardian: 1 }]);
-  for (const re of [/chan-1\): unknown field orgUserIdForNotify dropped/, /chan-1\): unknown field futureChannelField dropped/, /chan-1\): scoutName is not a string; dropped/, /chan-1\): unknown field readBy\.futureReadByField dropped/, /m-1\): unknown field futureMessageField dropped/, /m-1\): unknown field sender\.__proto__ dropped/, /m-1\): unknown field sender\.constructor dropped/, /m-2\): unknown field attachment\.futureAttachmentField dropped/, /m-g1\): attachment\.kind must be 'clip' or 'trial_report'[^"]*the attachment dropped/]) assert.ok(record.notes.some((n) => re.test(n)), `noted: ${re}`);
-  assert.equal(record.notes.length, 9, record.notes.join('\n'));
-  assert.doesNotMatch(JSON.stringify(record), /Synthetic message|Reply|keep-me|usr-legacy|own-constructor/, 'ids, field names and counts only — never a value');
-  assert.deepEqual(migrate(s).ran, [], 'a second run applies nothing');
-  // The way back: the records built from the typed columns, every key present, the writer's key order.
-  const { CHANNELS_TABLE } = needModule(); const back = CHANNELS_TABLE.read(s);
-  assert.equal(JSON.stringify(back[0]), JSON.stringify({ ...channel({ scoutName: null }), messages: [message({ id: 'm-1', ts: NOW - 5 * MIN }), { ...adultThread.messages[1], attachment: clip() }, adultThread.messages[2]], readBy: { org: NOW - 3 * MIN, counterparty: null } }), 'the adult thread reads back typed: unknown fields gone, the wrong-typed scoutName null');
-  assert.equal(back[1].scoutRole, null, 'an absent optional key reads as null'); assert.equal(back[1].playerName, null); assert.equal(back[1].messages[0].attachment, null, 'the dropped attachment reads as null'); assert.equal(back[1].messages[1].attachment, null, 'an absent attachment key reads as null');
-  assert.equal(Object.hasOwn(back[0].messages[0], 'clientMsgId'), false); assert.equal(back[0].messages[1].clientMsgId, 'client-7'); assert.equal(Object.hasOwn(back[1].messages[1], 'clientMsgId'), false, 'a null clientMsgId is no clientMsgId');
-  assert.equal(Object.hasOwn(back[0], 'orgUserIdForNotify'), false); assert.equal(Object.hasOwn(back[0].messages[0].sender, 'constructor'), false);
-  s.close(); rm(dir);
-});
-
-test('[cutover] migration refusals (CHANNELS_IMPORT_BLOCKED: positions, ids and reasons — never a message text): a duplicate channel id, a second channel for one request, a channel whose request is not in the requests blob, a channel whose guardian does not exist, a channel whose organisation does not exist, a sender kind outside the three, a message without an integer ts, a channel without an id, a wrong-typed required field (orgName), a non-array blob, a malformed requests blob behind a non-empty channels blob — each aborts the whole step: no table, the blob and saveSeq untouched; an absent blob and an empty blob import nothing and record the cutover', () => {
-  const cases = [
-    ['duplicate id', { channels: [channel(), channel({ requestId: 'req-free' })] }, /duplicates the id/],
-    ['second channel for one request', { channels: [channel(), channel({ id: 'chan-2' })] }, /a second channel for request req-1/],
-    ['request missing', { channels: [channel({ requestId: 'req-missing' })] }, /name a request that is not in the requests collection[^;]*chan-1/],
-    ['guardian missing', { channels: [guardianChannel({ guardianId: 'gd-missing' })] }, /name a guardian that does not exist/],
-    ['org missing', { channels: [channel({ orgId: 'org-missing' })] }, /name an organisation that does not exist/],
-    ['sender kind', { channels: [channel({ messages: [message({ sender: { kind: 'admin', id: 'x', name: 'y' } })] })] }, /sender\.kind must be one of player, guardian, org_user/],
-    ['message ts', { channels: [channel({ messages: [message({ id: 'm-ts', ts: '2026-11-01' })] })] }, /\(m-ts\): ts must be an integer timestamp/],
-    ['no id', { channels: [channel({ id: undefined })] }, /entry #0: id must be a non-empty string/],
-    ['orgName wrong type', { channels: [channel({ orgName: 7 })] }, /\(chan-1\): orgName must be a string/],
-    ['blob not an array', { rawBlobs: { channels: '{"id":"chan-1"}' } }, /must be an array of entries/],
-    ['requests blob malformed', { channels: [channel()], rawBlobs: { requests: '"not-an-array"' } }, /requests collection is a string, not an array/],
-  ];
-  for (const [label, file, re] of cases) {
-    const dir = tempDir('ch-refuse'); s7cFile(dir, file); const s = openRaw(dir);
-    const before = { blob: blob(s, 'channels') ?? s.prepare("SELECT value FROM collections WHERE name = 'channels'").get()?.value, seq: meta(s, 'saveSeq') };
-    assert.throws(() => migrate(s), (e) => /CHANNELS_IMPORT_BLOCKED/.test(e.message) && re.test(e.message) && !/Synthetic message text/.test(e.message), label);
-    assert.ok(!applied(s).includes(MIGRATION), `${label}: not recorded`); assert.equal(s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channels'").get(), undefined, `${label}: no table`);
-    assert.deepEqual([blob(s, 'channels') ?? s.prepare("SELECT value FROM collections WHERE name = 'channels'").get()?.value, meta(s, 'saveSeq')], [before.blob, before.seq], `${label}: untouched`);
-    s.close(); rm(dir);
-  }
-  for (const [label, file] of [['absent', {}], ['empty', { channels: [] }]]) {
-    const dir = tempDir('ch-empty'); s7cFile(dir, file); const s = openRaw(dir);
-    migrate(s); assert.ok(applied(s).includes(MIGRATION), label); assert.equal(s.prepare('SELECT COUNT(*) AS n FROM channels').get().n, 0); assert.equal(blob(s, 'channels'), undefined); assert.equal(JSON.parse(meta(s, 'channelsCutover')).imported, 0);
-    s.close(); rm(dir);
-  }
-});
-
-test('[cutover] the actual schema: channels references orgs (RESTRICT) and nothing else — no foreign key on request_id, player_id or guardian_id (D-A: the checked reference; D-B: no lifecycle clause; the code-validated guardian); a unique index on request_id; messages → channels and message_attachments → messages CASCADE; the three sender kinds, the two counterparties and the two attachment kinds are CHECKed; the attachment CHECK ties each kind to its columns; every table STRICT', () => {
-  const dir = tempDir('ch-schema'); s7cFile(dir, { channels: [] }); const s = openRaw(dir); migrate(s);
   assert.deepEqual(s.prepare('PRAGMA foreign_key_list(channels)').all().map((f) => [f.from, f.table, f.on_delete]), [['org_id', 'orgs', 'RESTRICT']]);
   assert.deepEqual(s.prepare('PRAGMA foreign_key_list(messages)').all().map((f) => [f.from, f.table, f.on_delete]), [['channel_id', 'channels', 'CASCADE']]);
   assert.deepEqual(s.prepare('PRAGMA foreign_key_list(message_attachments)').all().map((f) => [f.from, f.table, f.on_delete]), [['message_id', 'messages', 'CASCADE']]);
@@ -191,7 +119,7 @@ test('[cutover] the actual schema: channels references orgs (RESTRICT) and nothi
 
 // ============================================================= [cutover] the repository (immediate mode)
 test('[cutover] repository, immediate mode: open appends a thread at the END with the checked request reference (a request not in the collection, a second thread for one request, a missing organisation, a missing guardian are refused by name; the array stays as it was); appendMessage keeps array order with positions and ties; a wrong-typed value is refused by field and id and an unknown key is dropped; markRead updates the receipt (an absent receipt reads as null until written); deleteForPlayer removes the player\'s threads — guardian–club threads included — with their messages and attachments and nothing else; a refused operation inside its own transaction restores the mirror in place (held views included); reload reproduces the stored rows', () => {
-  const dir = tempDir('ch-repo'); s7cFile(dir, { channels: [channel(), guardianChannel()] }); const s = openRaw(dir); migrate(s);
+  const dir = tempDir('ch-repo'); s7cFile(dir, { channels: [channel(), guardianChannel()], requests: [...REQUESTS(), REQ('req-nk', 'pl-child1', null)] }); const s = openRaw(dir); migrate(s); // req-nk: the stored row behind the thread opened below (the request key is real since S8a)
   const requests = REQUESTS(); const repo = bare(s, requests);
   assert.equal(repo.count(), 2); assert.deepEqual(repo.view.map((c) => c.id), ['chan-1', 'chan-g']);
   assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-missing' })), /CHANNEL_REQUEST_MISSING/); assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-1' })), /already opened thread chan-1/); assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-free', orgId: 'org-missing' })), /CHANNEL_ORG_MISSING/); assert.throws(() => repo.open(channel({ id: 'chan-x', requestId: 'req-free', guardianId: 'gd-missing' })), /CHANNEL_GUARDIAN_MISSING/);
@@ -321,7 +249,6 @@ test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file 
   const dir = tempDir('ch-snap');
   const g = guardianChannel({ scoutName: null, messages: [message({ id: 'm-g', sender: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, attachment: trialReport() })] });
   s7cFile(dir, { channels: [channel({ messages: [message({ id: 'm-1', ts: NOW }), message({ id: 'm-2', ts: NOW, attachment: clip(), clientMsgId: 'c' })] }), g] });
-  { const s = openRaw(dir); migrate(s); s.close(); }
   const tool = openStore(dir); const snap = tool.load();
   assert.equal(snap.db.channels.length, 2); assert.equal(snap.db.channels[1].scoutName, null);
   const text0 = JSON.stringify(snap.db.channels);
@@ -347,7 +274,6 @@ test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file 
 test('[cutover] the FINAL-STATE assertion, every direction (review §11.5): channels supplied with requests omitted — valid against the RETAINED requests passes, an orphan refuses (CHANNEL_REQUEST_MISSING, nothing written); requests supplied with channels omitted — a request removed under a retained channel refuses, a set that keeps every referenced id passes; both supplied — a coordinated removal passes, an invalid combination refuses whole with unrelated collections untouched; requests supplied as an EMPTY array with retained channels refuses (absence ≠ empty); a non-array requests collection refuses; and the five guardian cases: identity pair only with a referenced guardian removed refuses atomically (tables, unrelated blobs and saveSeq unchanged), identity pair only with every guardian retained succeeds with channel/message order and content unchanged, identity pair and channels with a guardian and its channel removed together succeeds, an invalid coordinated replacement refuses whole, channels only with an invalid guardian refuses against the retained identity tables; an organisation removed with its channel retained refuses (the org FK at the prune), removed together with its channels succeeds', () => {
   const dir = tempDir('ch-final');
   s7cFile(dir, { channels: [channel({ messages: [message({ id: 'm-1', ts: NOW }), message({ id: 'm-2', ts: NOW })] }), guardianChannel({ messages: [message({ id: 'm-g' })] }), soloChannel()] });
-  { const s = openRaw(dir); runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }); s.close(); } // every registered step: since S8a the requests are rows and the channel key is real, which is the final state this test asserts
   const tool = openStore(dir); const snap = tool.load(); const base = { ...snap.db }; const seqAt = () => tool.revision();
   const ALL = ['chan-1', 'chan-g', 'chan-solo'];
   const unchangedAfter = (fn, re, code, label) => { const before = dump(tool.sqlite); const seq = seqAt(); assert.throws(fn, (e) => re.test(e.message) && (!code || e.code === code), label); assert.equal(seqAt(), seq, `${label}: saveSeq unchanged`); assert.deepEqual(dump(tool.sqlite), before, `${label}: nothing changed`); };

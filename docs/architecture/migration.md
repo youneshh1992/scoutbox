@@ -83,7 +83,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed** | implemented; accept on green tests |
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
-| — | backups become database copies | — | — | — | **in progress** (§4.2): code done on `migrate/backup-db-copy`, unit suites being rewritten |
+| — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
 | — | recruitment end-state proof | — | — | — | §4.3 |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
@@ -108,9 +108,9 @@ refusals and the "in-memory array was ignored" warnings.
 
 Kept on purpose: `repositories/identityPreflight.mjs` (the identity validator migration `0005` and the identity
 repository use; only the script around it went), and the `db.json` import in `store.mjs`, which is how a backup is
-restored. It goes with §4.2.
+restored. It went in §4.2.
 
-### 4.2 Backups become database copies (in progress)
+### 4.2 Backups become database copies (done)
 
 This was planned for S14. Doing it now removes code that §4.3 and S9–S13 would otherwise rewrite.
 
@@ -120,19 +120,18 @@ and the seed goes through the repositories. The restore path was not the only ot
 the CI persistence batteries (`m23*Persistence`, `m23BootContract`) build their fixtures with `openStore(dir).save(…)`
 into an empty directory, which wrote the table-backed collections as blobs for the next boot to import.
 
-**Status (3 November), branch `migrate/backup-db-copy`:**
+**Done 3 November** (branch `migrate/backup-db-copy`). Snapshot mode runs the table migrations when it opens a
+file, so a fixture's save goes straight into the tables through the `*_SNAPSHOT` writers, and a saved snapshot settles
+the first-installation state (`orgsInit`, `coreIdentityInit`). Junk entries in a fixture are refused by the save, with
+the same codes the imports used. Kept on purpose: the shared validators and their `*_IMPORT_BLOCKED` codes (the
+snapshot writers use them; renaming would be churn) and snapshot mode itself (the m23 batteries and the unit suites
+build fixtures with it). The unit suites no longer plant blobs: the import and upgrade cases were deleted, the rest
+build their setup with a snapshot-mode save, and the backup cases read the copied `scoutbox.db`. `testBackup.mjs`
+proves the copy matches the source table for table, a restore brings everything back (sessions, media, the removal
+queue), and a corrupt `scoutbox.db` stops the boot. Left for §4.3: the recruitment readers' "blob before migration
+00NN" fallbacks (`readTrialsCollection`, `readRequestsCollection`, `readCasesCollection`).
 
-- Done: items 1–3 and 5 below. Snapshot mode now runs the table migrations when it opens a file, so a fixture's save
-  goes straight into the tables through the `*_SNAPSHOT` writers, and a saved snapshot settles the first-installation
-  state (`orgsInit`, `coreIdentityInit`). Junk entries in a fixture are refused by the save, with the same codes and
-  positions the imports used; the three m23 batteries that planted junk now assert the refusal at the save. Every CI
-  end-to-end step passes (`apiE2E`, `connectedE2E`, `m13E2E` and the nine persistence batteries).
-- Kept on purpose: the shared validators and their `*_IMPORT_BLOCKED` codes, which the snapshot writers use to refuse
-  junk; renaming the codes would only be churn. Snapshot mode itself, which the m23 batteries need.
-- Not done: item 4. 25 of the 37 unit suites fail, all in tests of what this step removed: blob imports and upgrades
-  (about 16 suites), reading or editing the backup's `db.json` (the 10 `*Server` suites), a hand-built pre-0004
-  database (`testSessions`) and a junk snapshot fixture (`testDataLayer`). Also still to add: a backup suite proving
-  the copy matches the source table for table and that a corrupt `scoutbox.db` stops the boot.
+The step was:
 
 1. Backup writes `scoutbox.db` with `VACUUM INTO`, next to `media/` and `manifest.json` (checksums as now). Restore
    stays "copy the backup into a new, empty directory and boot". Never restore over a live directory.
