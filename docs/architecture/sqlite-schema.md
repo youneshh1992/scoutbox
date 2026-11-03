@@ -1,5 +1,15 @@
 # ScoutBox relational SQLite schema
 
+> **Read this first (3 November 2026).** This is the original schema design of 10 October 2026: the inventory of
+> every collection, the conventions and the per-domain rationale. It is useful background for S9–S13.
+>
+> - **Its status lines and step references are out of date.** The live status and the rules are in
+>   [`migration.md`](migration.md); the executable target is [`sql/*.sql`](sql/).
+> - Two of its rules have since changed: lossless side columns and "preserve every quirk" are replaced by typed
+>   columns and valid input only, and a step may improve the design.
+> - Links to `sqlite-migration-plan.md` and the readiness reviews point at the archive:
+>   `git show docs-archive-2026-11:docs/architecture/<file>`.
+
 Status: design proposed, executable DDL in `docs/architecture/sql/`, implementation steps
 S0 (staff), S1 (core identity shadow, corrected after acceptance review), S2 (sessions
 live, hashed tokens), S3 (organisations live, `org_users` rebuilt STRICT with its
