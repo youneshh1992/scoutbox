@@ -134,7 +134,7 @@ them.
 |---|---|---|---|---|
 | `users` | persistent | 01 | `org_users` (LIVE since migration 0001) | S0 done |
 | `orgs` | persistent | 01 (+04, 05) | `orgs`; nested `tactical` → `org_tactical_setups/roles/role_criteria/windows`, `squad[]` → `org_squad_members`, `lookingFor[]` → `org_looking_for`, `federationCheck` → `org_federation_checks` (04); `verification.domains[]` → `org_verified_domains` (05); `verification.revokedAt/orgType` → columns on `orgs`; `agencySettings` → 06 | **S3 done** (live; scalars and composites are columns, the nested facets ride in `orgs.facets_json` until S9/S10/S11; blob retired by migration `0004`) |
-| `guardians` | persistent | 01 | `guardians` (LIVE since migration 0005; `coGuardians[]`, `emailCode` and unknown fields in `facets_json`); `childIds[]` → `guardian_children` (LIVE) | **S4a done** (S4b: lifecycle, after O1) |
+| `guardians` | persistent | 01 | `guardians` (LIVE since migration 0005; `coGuardians[]` and unknown fields in `facets_json`; the sign-up code only as `email_code_hash` since 3 Nov 2026); `childIds[]` → `guardian_children` (LIVE) | **S4a done** (S4b: lifecycle, after O1) |
 | `players` | persistent | 01 | `players` (scalars, `stats`, `medical.shared/conditionStatus`, `notificationPrefs`, `programme.track/startedAt`, `location`); `seasonHistory[]`, `badges[]`, `drills[]`, `attendance[]`, `timeline[]`, `media[]` (+`media[].tags` → `player_media_tags`), `medical.records[]`, `drillResults[]`, `activityLog[]`, `externalIds[]`, `programme.completed[]` → twelve `player_*` tables; `trialReports[]` derived (copy of `trials.report`); **since migration 0014 (S4b-R) an account deletion keeps the row as the retained record — `id`, `deleted_at`, `birth_date`, `country`; placeholders and NULL elsewhere — served by no account reader** | S4 (scalars, shadow since S1), S5 (sub-records), S4b-R (the retained record; implemented 21 October 2026, independently accepted at `9b109dc`) |
 | `sessions` | temporary | 01 | `sessions` (token stored as `token_hash`) | **S2 done** (live; blob retired by migration `0003`) |
 | `requests` | persistent | 02 | `recruitment_requests`, `request_trial_slots`; `keys` → `idempotency_keys` (LIVE since migration 0015, S8a-core; `player_id` tolerant with no key — Q7a; `case_id` and the guardian columns checked in code — Q7b, Q7c; absent/null/off-type/unknown fields kept) | **S8a-core — independently accepted at `7a7efc6`** (22 October 2026; plan §D.8, §D.8.11) |
@@ -918,7 +918,7 @@ All FACT on this branch unless marked fixed. The schema addresses the storage ha
 the route and response half is named with its plan step.
 
 1. **Plain-text secrets in the snapshot and in backups:** session tokens
-   (`server.mjs:650`), guardian `emailCode` (`1244`), `emailChallenges.code` (`3024`),
+   (`server.mjs:650`), guardian `emailCode` (`1244`; fixed 3 Nov 2026, hashed), `emailChallenges.code` (`3024`),
    `pairingCodes.code` (`3766`), `vouches.code` (`3692`), `orgInvites.token`
    (`m13/enterprise.mjs:80`), `ssoStates.state/nonce` (`274`), `boxSessions.nonce`
    (`m16/sessions.mjs:89`), `users.mfa.secretB32` (`m13/mfa`), `webhookEndpoints.secret`,

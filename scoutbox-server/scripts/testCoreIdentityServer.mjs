@@ -7,6 +7,7 @@
 // after a restart; the audience allowlists on actual HTTP responses; the
 // crash-safe media-deletion queue; the admin backup and a restore into a fresh
 // directory. Nothing here touches DATA_DIR or any real data. Run with: npm test
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -206,13 +207,19 @@ await test('writers (the ones exercised here, not every writer): guardian sign-u
   let S = await boot(dir, nextPort());
   const gs = await S.j('POST', '/auth/guardian/signup', { name: 'New Parent', email: 'newparent@example.test', password: 'parent-pass-1' });
   assert.equal(gs.status, 201, JSON.stringify(gs.body)); const gid = gs.body.guardianId; const gtok = gs.body.token;
-  assert.ok(gs.body.devEmailCode && !('emailCode' in gs.body.guardian) && !('password' in gs.body.guardian));
+  assert.ok(gs.body.devEmailCode && !('emailCode' in gs.body.guardian) && !('emailCodeHash' in gs.body.guardian) && !('password' in gs.body.guardian));
   assert.equal(q1(dir, 'SELECT email_verified FROM guardians WHERE id = ?', gid).email_verified, 0);
+  {
+    const row = q1(dir, 'SELECT * FROM guardians WHERE id = ?', gid);
+    assert.equal(row.email_code_hash, crypto.createHash('sha256').update(gs.body.devEmailCode).digest('hex'), 'only the sha256 of the code is stored, like every other one-time code');
+    assert.equal(JSON.stringify(row).includes(gs.body.devEmailCode), false, 'the plain code is in no column and no facet');
+  }
+  assert.equal((await S.j('POST', '/auth/guardian/verify-email', { guardianId: gid, code: crypto.createHash('sha256').update(gs.body.devEmailCode).digest('hex') })).status, 400, 'the stored hash is not itself a code');
   assert.equal((await S.j('POST', '/auth/guardian/signup', { name: 'Dup', email: 'NEWPARENT@example.test', password: 'parent-pass-1' })).status, 409, 'the e-mail is unique regardless of case');
   assert.equal((await S.j('POST', '/guardian/children', { name: 'Too Early', dob: '2016-01-01' }, gtok)).status, 403, 'no child before the gates');
   assert.equal((await S.j('POST', '/auth/guardian/verify-email', { guardianId: gid, code: 'WRONG0' })).status, 400);
   assert.equal((await S.j('POST', '/auth/guardian/verify-email', { guardianId: gid, code: gs.body.devEmailCode })).status, 200);
-  assert.equal(q1(dir, 'SELECT email_verified FROM guardians WHERE id = ?', gid).email_verified, 1); assert.equal(JSON.parse(q1(dir, 'SELECT facets_json FROM guardians WHERE id = ?', gid).facets_json).emailCode, null, 'the code is gone with the column change');
+  assert.deepEqual({ ...q1(dir, 'SELECT email_verified, email_code_hash FROM guardians WHERE id = ?', gid) }, { email_verified: 1, email_code_hash: null }, 'verified, and the spent code\'s hash cleared in the same row write');
   assert.equal((await S.j('POST', '/guardian/verify-id', { documentType: 'passport', documentRef: 'P1234567' }, gtok)).status, 200);
   assert.equal((await S.j('POST', '/guardian/disclaimer', { accepted: true }, gtok)).status, 200);
   assert.deepEqual([q1(dir, 'SELECT id_verified FROM guardians WHERE id = ?', gid).id_verified, q1(dir, 'SELECT disclaimer_accepted FROM guardians WHERE id = ?', gid).disclaimer_accepted], [1, 1]);
@@ -306,7 +313,7 @@ await test('allowlists (actual HTTP responses): a verified club sees the adult a
   assert.equal(gs.status, 201);
   const admin = (await S.j('GET', '/admin/guardians', undefined, null, A)).body;
   const pending = admin.guardians.find((g) => g.id === gs.body.guardianId);
-  expectKeys(pending, ['id', 'name', 'email', 'emailVerified', 'idVerified', 'disclaimerAccepted', 'childIds'], ['password', 'emailCode'], 'admin/guardian');
+  expectKeys(pending, ['id', 'name', 'email', 'emailVerified', 'idVerified', 'disclaimerAccepted', 'childIds'], ['password', 'emailCode', 'emailCodeHash'], 'admin/guardian');
   assert.equal(JSON.stringify(admin).includes(gs.body.devEmailCode), false, 'the code appears nowhere in the Trust & Safety response');
   assert.equal(JSON.stringify(admin).includes('scrypt'), false);
   await S.stop(); rm(dir);

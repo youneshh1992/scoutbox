@@ -65,7 +65,8 @@ import { orgPlayerView, guardianChildView, guardianSelfView, adminGuardianView }
 import { validateContactReply } from './m23/contact.mjs';
 import { icsLocal as trialIcsLocal, icsText as trialIcsText } from './m23/trial.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
-import { totpValid } from './m13/shared.mjs';
+import { totpValid, timingSafeEqStr } from './m13/shared.mjs';
+import { hashCode } from './repositories/oneTimeCodes.mjs';
 import {
   PROGRAMME_TRACKS, trackForPosition, programmeProgress, pathwayFor,
   earnedGrassrootsBadges, percentileAmong, inCohort,
@@ -1340,13 +1341,14 @@ app.post('/auth/guardian/signup', async (req, res) => {
   if (db.guardians.some((x) => x.email.toLowerCase() === email.toLowerCase())) {
     return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists — log in instead.' });
   }
+  const emailCode = randomCode(6);
   const record = {
     id: nextId('gd'),
     name,
     email,
     password: hashPassword(password),
     emailVerified: false,
-    emailCode: randomCode(6),
+    emailCodeHash: hashCode(emailCode), // like every other one-time code, only the hash is stored
     idVerified: false,
     disclaimerAccepted: false,
     childIds: [],
@@ -1361,14 +1363,13 @@ app.post('/auth/guardian/signup', async (req, res) => {
   await mailer.send({
     to: email,
     subject: 'Verify your ScoutBox guardian account',
-    text: `Hi ${name},\n\nYour ScoutBox verification code is ${g.emailCode}.\n\nGuardian accounts own every under-18 profile on ScoutBox — verifying your email is the first of the safeguarding gates (email → ID → disclaimer) before any child profile can exist.`,
+    text: `Hi ${name},\n\nYour ScoutBox verification code is ${emailCode}.\n\nGuardian accounts own every under-18 profile on ScoutBox — verifying your email is the first of the safeguarding gates (email → ID → disclaimer) before any child profile can exist.`,
   });
-  const { password: _pw, emailCode: _c, ...safe } = g;
   res.status(201).json({
-    guardianId: g.id, guardian: safe, token: createSession('guardian', g.id), emailVerificationSent: true,
+    guardianId: g.id, guardian: guardianSelfView(g), token: createSession('guardian', g.id), emailVerificationSent: true,
     // Dev transport has no real inbox — surface the code so the flow can
     // complete. Never present when a live mail provider is configured.
-    ...(mailer.transport === 'dev-outbox' ? { devEmailCode: g.emailCode } : {}),
+    ...(mailer.transport === 'dev-outbox' ? { devEmailCode: emailCode } : {}),
   });
 });
 
@@ -1377,11 +1378,11 @@ app.post('/auth/guardian/verify-email', (req, res) => {
   const g = db.guardians.find((x) => x.id === guardianId);
   if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
   if (g.emailVerified) return res.json({ emailVerified: true });
-  if (!code || String(code).trim().toUpperCase() !== g.emailCode) {
+  if (!code || !g.emailCodeHash || !timingSafeEqStr(hashCode(code), g.emailCodeHash)) {
     return res.status(400).json({ error: 'CODE_INVALID', message: 'That code doesn\'t match — check the email we sent you.' });
   }
-  // The column (emailVerified) and the facet (the code goes) commit together.
-  unit(() => { guardians.update(g.id, { emailVerified: true }); g.emailCode = null; });
+  // One row write: verified, and the spent code's hash cleared.
+  guardians.update(g.id, { emailVerified: true, emailCodeHash: null });
   res.json({ emailVerified: true });
 });
 
@@ -1408,8 +1409,7 @@ app.post('/auth/guardian/login', (req, res) => {
   } else if (!DEV_LOGINS) {
     return devLoginRefused(res);
   }
-  const { password: _pw, emailCode: _c, ...safe } = g;
-  res.json({ guardianId: g.id, guardian: safe, token: createSession('guardian', g.id) });
+  res.json({ guardianId: g.id, guardian: guardianSelfView(g), token: createSession('guardian', g.id) });
 });
 
 function guardianAuth(req, res, next) {

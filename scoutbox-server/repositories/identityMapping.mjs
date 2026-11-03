@@ -26,19 +26,18 @@
  * `notificationPrefs`, `seasonHistory`).
  *
  * Decisions this module encodes, and the ones it does not take:
- *   - The guardian's `emailCode` stays EXACTLY what it is today — the plain
- *     value on the record, as a facet. It is not hashed, not copied, not
- *     verified here; the `email_code_hash` column stays NULL (readiness
- *     review §8.2: hashing moves to S6 with expiry, attempt limits and a
- *     resend route, so a rollback stays lossless).
+ *   - The guardian sign-up code is stored only as `emailCodeHash` (sha256 of
+ *     the normalised code, `hashCode` in oneTimeCodes.mjs) in the
+ *     `email_code_hash` column (3 Nov 2026). A legacy plain `emailCode` on a
+ *     record from an old file stays a facet; the server no longer writes one.
  *   - `childIds` is not a facet: it becomes `guardian_children` rows (one per
  *     entry, in order; `role` is `primary` where the child's `guardianId`
  *     names this guardian, `co` otherwise). `guardianToRow` records where the
  *     key sat so `guardianFromRow(row, childIds)` puts it back in place.
  *   - Nothing is coerced and nothing is invented: a value the target refuses
  *     is reported by `validatePlayerRecord` / `validateGuardianRecord` with
- *     the field and the reason; `disclaimer_accepted_at`, `deleted_at`,
- *     `email_code_hash` are NULL for every imported row.
+ *     the field and the reason; `disclaimer_accepted_at` and `deleted_at`
+ *     are NULL for every imported row.
  *
  * Reports built from these validators carry ids, field names and reasons
  * only — never a password hash, an e-mail code, an e-mail address or a record.
@@ -127,7 +126,7 @@ const PLAYER_SPEC = Object.freeze({
 const GUARDIAN_SPEC = Object.freeze({
   table: 'guardians',
   scalars: Object.freeze({
-    name: 'name', email: 'email', password: 'password_hash', emailVerified: 'email_verified', idVerified: 'id_verified',
+    name: 'name', email: 'email', password: 'password_hash', emailVerified: 'email_verified', emailCodeHash: 'email_code_hash', idVerified: 'id_verified',
     idvReference: 'idv_reference', disclaimerAccepted: 'disclaimer_accepted', coGuardianOf: 'co_guardian_of', createdAt: 'created_at',
   }),
   booleans: new Set(['emailVerified', 'idVerified', 'disclaimerAccepted']),
@@ -489,6 +488,7 @@ export function validateGuardianRecord(rec) {
   for (const key of ['password', 'idvReference']) checkString(problems, rec, key);
   checkString(problems, rec, 'coGuardianOf', { nonEmpty: true });
   if (!absentOrNull(rec.emailCode) && typeof rec.emailCode !== 'string') problems.push(`emailCode is ${describe(rec.emailCode)}, not text`);
+  if (!absentOrNull(rec.emailCodeHash) && !(typeof rec.emailCodeHash === 'string' && /^[0-9a-f]{64}$/.test(rec.emailCodeHash))) problems.push('emailCodeHash is not a sha256 hex digest');
   for (const key of GUARDIAN_SPEC.booleans) checkBoolean(problems, rec, key);
   checkInteger(problems, rec, 'createdAt', 'createdAt', { min: 0 });
   if (rec.childIds !== undefined) {

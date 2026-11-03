@@ -158,10 +158,10 @@ test('round trip: absent versus explicit null is preserved for every player colu
   sameShape(partial, roundTripPlayer(partial), 'partial composites');
 });
 
-test('round trip: a guardian signup with an outstanding e-mail code keeps the code exactly as it is — in the facets, once, plain; email_code_hash stays NULL; disclaimer_accepted_at stays NULL; a verified guardian with emailCode null keeps the null', () => {
+test('round trip: a legacy guardian record with an outstanding plain e-mail code keeps the code exactly as it is — in the facets, once, plain; email_code_hash stays NULL; disclaimer_accepted_at stays NULL; a verified guardian with emailCode null keeps the null', () => {
   const rec = guardianSignup();
   const row = guardianToRow(rec);
-  assert.equal(row.email_code_hash, null, 'not hashed in S4a (readiness review §8.2)');
+  assert.equal(row.email_code_hash, null, 'the mapping never hashes or copies a legacy plain code');
   assert.equal(row.disclaimer_accepted_at, null); assert.equal(row.password_hash, 'scrypt$cc$dd'); assert.equal(row.email_verified, 0);
   const facets = JSON.parse(row.facets_json);
   assert.equal(facets.emailCode, 'K7Q2ZP');
@@ -172,6 +172,18 @@ test('round trip: a guardian signup with an outstanding e-mail code keeps the co
   const verified = { ...rec, emailVerified: true, emailCode: null };
   const back = roundTripGuardian(verified);
   sameShape(verified, back, 'verified guardian'); assert.equal(back.emailCode, null);
+});
+
+test('round trip: a guardian signup today stores only the code\'s sha256, in email_code_hash; nothing of the code is in the facets', () => {
+  const { emailCode: _legacy, ...rest } = guardianSignup();
+  const hash = 'a'.repeat(64);
+  const rec = { ...rest, emailCodeHash: hash };
+  const row = guardianToRow(rec);
+  assert.equal(row.email_code_hash, hash);
+  assert.equal(JSON.parse(row.facets_json).emailCodeHash, undefined, 'a column, not a facet');
+  sameShape(rec, roundTripGuardian(rec), 'hashed signup');
+  const verified = { ...rec, emailVerified: true, emailCodeHash: null };
+  assert.equal(roundTripGuardian(verified).emailCodeHash, null, 'a spent code leaves a null');
 });
 
 test('round trip: a co-guardian without password, emailVerified or createdAt stays without them (absent, not false/null); coGuardianOf goes to its column; childIds order and the primary\'s coGuardians facet are kept', () => {
@@ -258,6 +270,7 @@ test('rejection: every unsupported guardian shape is refused with a reason, the 
     [{ ...guardianSignup(), email: null }, /email is null/],
     [{ ...guardianSignup(), password: 12 }, /password is a number/],
     [{ ...guardianSignup(), emailCode: 123456 }, /emailCode is a number, not text/],
+    [{ ...guardianSignup(), emailCodeHash: 'K7Q2ZP' }, /emailCodeHash is not a sha256 hex digest/],
     [{ ...guardianSignup(), emailVerified: 'true' }, /emailVerified is a string, not a boolean/],
     [{ ...guardianSignup(), childIds: 'pl-1' }, /childIds is a string, not an array/],
     [{ ...guardianSignup(), childIds: ['pl-1', 7, ''] }, /childIds\[1\] is a number/],

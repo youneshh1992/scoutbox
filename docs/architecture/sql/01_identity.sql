@@ -101,7 +101,7 @@ CREATE INDEX org_users_sso ON org_users (sso_subject);
 -- owner/writer: server.mjs (core)
 -- lifecycle: no deletion route; emailVerified/idVerified/disclaimerAccepted gates
 -- mapping: id→id, name→name, email→email, password→password_hash, emailVerified→email_verified,
---   emailCode→email_code_hash (PLAIN today), idVerified→id_verified, idvReference→idv_reference,
+--   emailCodeHash→email_code_hash, idVerified→id_verified, idvReference→idv_reference,
 --   disclaimerAccepted→disclaimer_accepted (+ disclaimer_accepted_at, new, NULL for imported rows),
 --   childIds[]→guardian_children, coGuardianOf→co_guardian_of, coGuardians[]→derived from guardian rows with
 --   co_guardian_of (not stored: duplicate), notificationPrefs.{quietStart,quietEnd,schoolHoursMute,timezone}→prefs_* columns
@@ -114,7 +114,7 @@ CREATE TABLE guardians (
   email                   TEXT NOT NULL,                  -- personal data
   password_hash           TEXT,
   email_verified          INTEGER NOT NULL DEFAULT 0 CHECK (email_verified IN (0,1)),
-  email_code_hash         TEXT,                           -- sha256 of the 6-char code; plain today (server.mjs:1244)
+  email_code_hash         TEXT,                           -- sha256 of the 6-char code (hashCode, oneTimeCodes.mjs)
   id_verified             INTEGER NOT NULL DEFAULT 0 CHECK (id_verified IN (0,1)),
   idv_reference           TEXT,
   disclaimer_accepted     INTEGER NOT NULL DEFAULT 0 CHECK (disclaimer_accepted IN (0,1)),
@@ -126,7 +126,7 @@ CREATE TABLE guardians (
   prefs_timezone          TEXT,
   created_at              INTEGER,
   deleted_at              INTEGER,                        -- new: tombstone (no guardian deletion route exists today)
-  facets_json             TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)) -- S4a transitional storage (coGuardians, emailCode, unknown fields, shape metadata)
+  facets_json             TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)) -- S4a transitional storage (coGuardians, unknown fields, shape metadata)
 ) STRICT;
 CREATE UNIQUE INDEX guardians_email ON guardians (lower(email));   -- new: enforced by code only on signup today
 CREATE INDEX guardians_co_guardian_of ON guardians (co_guardian_of);

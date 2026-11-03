@@ -77,9 +77,9 @@ export function guardianChildView(player, helpers) {
   return { ...rest, age: ageOn(player.dob), trustScore: computeTrustScore(player), trust: trustBreakdown(player) };
 }
 
-/** §6.3 — a guardian's own record: minus the password hash and the outstanding e-mail code (kept as before). */
+/** §6.3 — a guardian's own record: minus the password hash and the outstanding e-mail code or its hash. */
 export function guardianSelfView(guardian) {
-  const { password, emailCode, ...safe } = plain(guardian);
+  const { password, emailCode, emailCodeHash, ...safe } = plain(guardian);
   return safe;
 }
 
