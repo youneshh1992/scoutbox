@@ -10,5 +10,4 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
 
 ## Product
 
-- **A second request writer:** the Grassroots open-day `invite_trial` bypasses `issueRecruitmentRequest`.
 - **The guardian sign-up e-mail code is stored in plain text**, unlike every other one-time code.

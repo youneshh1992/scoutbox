@@ -368,6 +368,14 @@ r = await j(`/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome
 ok(r.status === 200 && r.body.registration.outcome === 'invite_trial', 'open-day outcome recorded: trial invitation');
 r = await j('/player/inbox', {}, bearer(KOLA));
 ok(r.body.some((x) => x.type === 'trial' && /open day/.test(x.trialDetails?.notes ?? '') && x.status === 'pending'), 'the invitation is a real, properly-routed trial request in the player inbox');
+{
+  const invite = r.body.find((x) => x.type === 'trial' && /open day/.test(x.trialDetails?.notes ?? ''));
+  ok(invite?.routedTo === 'player' && invite.orgName === 'Moss Side Athletic' && typeof invite.orgSafeguardingCertified === 'boolean' && invite.message.startsWith('Great movement'),
+    'it is written by the one request writer: routing, club facts and the club\'s note, like any other trial invitation');
+  const feed = await j('/player/notifications', {}, bearer(KOLA));
+  const items = Array.isArray(feed.body) ? feed.body : (feed.body?.items ?? []);
+  ok(items.some((n) => n.type === 'open_trial' && n.refId === invite?.id && /trial invitation in your inbox/.test(n.text)), 'the player is told in the open-day wording, linked to the request');
+}
 r = await j(`/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'declined' }) }, bearer(MOSS));
 ok(r.status === 409 && r.body.error === 'ALREADY_RESOLVED', 'an outcome is final — no flip-flopping on a player');
 r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Next open session', date: '2099-07-01', venue: 'Moss Side Rec' }) }, bearer(MOSS));

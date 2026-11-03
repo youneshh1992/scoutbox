@@ -2228,10 +2228,13 @@ orgRouter.post('/players/:id/request', (req, res) => {
  * `guardianId` lets a caller that has already resolved the guardian route
  * (M23 P3 validates the record, the child link and the verification gates)
  * name it; the legacy route keeps the player's own link.
+ * `notice` lets a caller with its own occasion word the notifications
+ * (`{ kind, toGuardian, toPlayer }`, the open-day invitation); the row, the
+ * routing, the ledger entry and the inbox ping are the same either way.
  */
 function issueRecruitmentRequest({
   org, orgUser, player, type, message = '', trialDetails = null,
-  subject = null, contactId = null, guardianId = undefined, at = Date.now(),
+  subject = null, contactId = null, guardianId = undefined, at = Date.now(), notice = null,
 }, { persist: persistAfter = true } = {}) {
   const minor = !isAdult(player);
   const request = {
@@ -2265,11 +2268,12 @@ function issueRecruitmentRequest({
   recruitment.addRequest(request); // S8a-core: a row of recruitment_requests, written by the save below (the former db.requests.push)
   if (persistAfter) persistNow();
   ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: player.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name });
+  const kind = notice?.kind ?? 'request';
   if (minor) {
-    notify({ kind: 'guardian', id: request.guardianId }, 'request', `${org.name} has requested to discuss a ${type === 'trial' ? 'trial' : 'conversation'} for ${player.name}.`, request.id);
-    notify({ kind: 'player', id: player.id }, 'request', `${org.name} contacted your parent/guardian about a ${type === 'trial' ? 'trial' : 'conversation'}.`, request.id);
+    notify({ kind: 'guardian', id: request.guardianId }, kind, notice?.toGuardian ?? `${org.name} has requested to discuss a ${type === 'trial' ? 'trial' : 'conversation'} for ${player.name}.`, request.id);
+    notify({ kind: 'player', id: player.id }, kind, notice?.toPlayer ?? `${org.name} contacted your parent/guardian about a ${type === 'trial' ? 'trial' : 'conversation'}.`, request.id);
   } else {
-    notify({ kind: 'player', id: player.id }, 'request', `${org.name} sent you a ${type} request.`, request.id);
+    notify({ kind: 'player', id: player.id }, kind, notice?.toPlayer ?? `${org.name} sent you a ${type} request.`, request.id);
   }
   broadcast('inbox', { playerId: player.id });
   return request;
@@ -2883,28 +2887,22 @@ orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
   reg.outcomeAt = Date.now();
   if (p && visibleToOrg(p, req.org)) {
     if (outcome === 'invite_trial') {
-      const minor = !isAdult(p);
-      const request = {
-        id: nextId('req'), playerId: p.id, playerName: p.name,
-        orgId: req.org.id, orgName: req.org.name, orgType: req.org.type,
-        orgVerified: !!req.org.verified, orgSafeguardingCertified: safeguardingCertified(req.org),
-        trustedPartner: req.org.trustedPartner, userId: req.orgUser.id,
-        scoutName: req.orgUser.name, scoutRole: req.orgUser.role || 'Manager',
-        type: 'trial',
+      // Through THE request writer: the same row, routing (guardian-first for a
+      // minor), ledger entry and inbox ping as every other trial invitation;
+      // only the notifications are worded for the open day. Several pending
+      // invitations per player stay allowed (D2).
+      issueRecruitmentRequest({
+        org: req.org, orgUser: req.orgUser, player: p, type: 'trial',
         message: reg.outcomeNote || `We liked what we saw at "${trial.title}" — come for a proper trial.`,
         trialDetails: { proposedDate: null, altSlots: [], venue: trial.venue, notes: `Follow-up from open day "${trial.title}".` },
-        status: 'pending', createdAt: Date.now(),
-        routedTo: minor ? 'guardian' : 'player', guardianId: minor ? p.guardianId : null,
-        contactChannel: null,
-      };
-      recruitment.addRequest(request); // S8a-core (the former db.requests.push; several pending invitations per player stay allowed — D2)
-      ledgerAppend({ type: `trial_request${minor ? '_to_guardian' : ''}`, playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-      if (minor) {
-        notify({ kind: 'guardian', id: p.guardianId }, 'open_trial', `Good news: ${req.org.name} would like to invite ${p.name} for a trial after the open day.`, request.id);
-        notify({ kind: 'player', id: p.id }, 'open_trial', `${req.org.name} liked what they saw at the open day — they've contacted your parent/guardian about a trial.`, request.id);
-      } else {
-        notify({ kind: 'player', id: p.id }, 'open_trial', `⚽ ${req.org.name} liked what they saw at "${trial.title}" — trial invitation in your inbox.`, request.id);
-      }
+        notice: {
+          kind: 'open_trial',
+          toGuardian: `Good news: ${req.org.name} would like to invite ${p.name} for a trial after the open day.`,
+          toPlayer: isAdult(p)
+            ? `${req.org.name} liked what they saw at "${trial.title}" — trial invitation in your inbox.`
+            : `${req.org.name} liked what they saw at the open day — they've contacted your parent/guardian about a trial.`,
+        },
+      });
     } else {
       const kindNo = reg.outcomeNote || 'Thanks for coming — not this time, but keep playing and keep logging your football.';
       if (!isAdult(p) && p.guardianId) {

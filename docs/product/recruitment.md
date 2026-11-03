@@ -95,7 +95,6 @@ How a club takes a player from "watching" to a decision. The case lifecycle, the
 ## Open questions and deferred work
 
 - Legal review is needed: Trial-specific footage/observation consent for minors, and whether event consent should name Box Cam (D-15, P4A architecture §6).
-- Open low defect: grassroots open-day `invite_trial` is a second request writer bypassing `issueRecruitmentRequest`.
 - D-24 recommendation not done: Nobody Missed/Second Look should key on trial completion so "completed but not evaluated" shows.
 - Deferred: Box Cam 2.0 (multi-player, pose, tactics, auto clips; Combine Verified awaits real-world validation); opt-in Passport line "captured during a trial at Club X"; cross-room comparison; Room export; T&S room access; lifecycle-transition events; minor→adult birthday test.
 
