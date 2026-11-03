@@ -16,6 +16,4 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
 
 - **A second request writer:** the Grassroots open-day `invite_trial` bypasses `issueRecruitmentRequest`.
 - **M22 routes don't call `refusedClientFields()`.**
-- **Fix before S11:** the migration plan records a defect in how `m25/index.mjs` reads
-  `req.org.settings.jurisdictions` (around lines 254 and 370). Not re-verified in the cleanup.
 - **The guardian sign-up e-mail code is stored in plain text**, unlike every other one-time code.

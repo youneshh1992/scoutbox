@@ -617,6 +617,19 @@ section('U/V/W — minors: readiness is evaluated against no subject; discovery 
   neg(expect(collect('U15', await j('POST', '/org/agent/compliance/minors/approach', { playerId: 'pl-guni' }, ANA.token)), 404, null) && expect(collect('U15b', await j('POST', '/org/agent/compliance/minors/evaluate', { dob: '2011-03-15' }, ANA.token)), 404, null), 'U15 no minors approach or subject-evaluation route exists');
 }
 
+// ============================================================ agency markets
+section('agency markets — the jurisdictions an agency declares in its settings count for every member');
+{
+  const marketsOf = (body) => [...body.inEffect.map((p) => p.jurisdiction), ...body.missing];
+  neg(!marketsOf((await j('GET', '/org/agent/compliance/policies', undefined, DAN.token)).body).includes('USA'), 'AM1 before: Dan declares only England, so no US rules apply to him');
+  const set = await j('PATCH', '/org/agent/agency/settings', { jurisdictions: ['USA'] }, tomas.token);
+  ok(set.status === 200 && set.body.settings.jurisdictions.includes('USA'), 'AM2 the agency administrator declares the United States as an agency market');
+  ok(marketsOf((await j('GET', '/org/agent/compliance/policies', undefined, DAN.token)).body).includes('USA'), 'AM3 the policy set for Dan now covers the agency market too');
+  const ov = await j('GET', '/org/agent/compliance/overview', undefined, DAN.token);
+  ok(ov.body.minorReadiness.some((m) => m.memberAssociation === 'USA') && ov.body.minorReadiness.some((m) => m.memberAssociation === 'ENG'), 'AM4 and so does his compliance overview, beside his own England declaration');
+  ok((await j('PATCH', '/org/agent/agency/settings', { jurisdictions: [] }, tomas.token)).status === 200, 'AM5 (the agency markets are cleared again for the rest of the run)');
+}
+
 // ============================================================ X/Y/Z — blocks, tenant, privacy
 section('X/Y/Z — blocks beat clearance; tenancy; nothing private in a refusal');
 {

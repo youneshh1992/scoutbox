@@ -52,6 +52,9 @@ export const RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
 /** Member associations a facet may be scoped to in P5.6B. `INT` = FIFA level. */
 export const JURISDICTIONS = Object.freeze(['INT', 'ENG', 'USA']);
 
+/** The markets an agency declared in its settings (PATCH /org/agent/agency/settings validates them). */
+export const agencyJurisdictions = (org) => org?.agencySettings?.jurisdictions ?? [];
+
 const emptyFacet = () => ({
   state: 'UNVERIFIED', reference: null, memberAssociation: null,
   provenance: null, submittedAt: null, verifiedAt: null, recheckAt: null, note: null,

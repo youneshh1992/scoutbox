@@ -29,7 +29,7 @@ import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../m23/contact.mjs';
 import { hasVerLevel } from '../m14/shared.mjs';
-import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt } from '../m24/shared.mjs';
+import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt, agencyJurisdictions } from '../m24/shared.mjs';
 import { sendComplianceError } from './errors.mjs';
 import { RULE_STATUSES, SEEDED_POLICY_VERSIONS } from './policyVersions.mjs';
 import { applicablePolicySet, evaluatePolicy, evaluateMinorGate, representationScopeProblem, resolveScope, ruleAt, MINOR_PATHWAY_PRODUCTION_ENABLED, POLICY_FACETS, POLICY_ACTIONS } from './policy.mjs';
@@ -251,7 +251,7 @@ export function registerCompliance(rawCtx) {
   });
   orgRouter.get('/agent/compliance/policies', (req, res) => {
     if (!agent.resolveMembership(req, res)) return;
-    const mas = [...new Set(['INT', ...(req.org.settings?.jurisdictions ?? []), ...((profileOf(req.orgUser.id)?.declared?.jurisdictions) ?? [])])];
+    const mas = [...new Set(['INT', ...agencyJurisdictions(req.org), ...((profileOf(req.orgUser.id)?.declared?.jurisdictions) ?? [])])];
     const set = policySetFor(mas);
     res.json({ inEffect: set.policies.map(policyPublic), missing: set.missing, ruleStatuses: RULE_STATUSES, honest: 'These are ScoutBox\'s encoded platform rules with their operative status as recorded on the retrieval date. They are not legal advice and a status can change without a deploy.' });
   });
@@ -367,7 +367,7 @@ export function registerCompliance(rawCtx) {
     const reviews = db.regulatoryReviews.filter(mine).map((r) => reviewPublic(r));
     const contexts = db.complianceContexts.filter((c) => c && c.agencyOrgId === req.org.id && c.agentUserId === req.orgUser.id).map(contextForAgent);
     const consents = db.regulatoryConsents.filter((k) => k && k.agencyOrgId === req.org.id && k.agentUserId === req.orgUser.id && k.kind !== 'revocation').map(consentForAgent);
-    const jurisdictions = [...new Set([...(p?.declared?.jurisdictions ?? []), ...(req.org.settings?.jurisdictions ?? [])])].filter((j) => JURISDICTIONS.includes(j));
+    const jurisdictions = [...new Set([...(p?.declared?.jurisdictions ?? []), ...agencyJurisdictions(req.org)])].filter((j) => JURISDICTIONS.includes(j));
     res.json({
       provider: provider.status(), facets, freshness,
       policies: { inEffect: policySetFor(['INT', ...jurisdictions]).policies.map((x) => ({ id: x.id, regulator: x.regulator, jurisdiction: x.jurisdiction, effectiveFrom: x.effectiveFrom })), missing: policySetFor(['INT', ...jurisdictions]).missing },
