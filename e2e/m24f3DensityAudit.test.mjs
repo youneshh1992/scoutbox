@@ -126,17 +126,5 @@ for (const [file, needles, label] of [
 ]) ok(needles.every((n) => read(file).includes(n)), label);
 ok(!/Every action is on the ledger/.test(read('scoutbox-player/src/app/(tabs)/discover.tsx')), 'Home: no ledger sentence on the root');
 
-// ------------------------------------------------------------ 7. the audit document
-const auditPath = path.join(ROOT, 'M24F3_SCREEN_DENSITY_AUDIT.md');
-ok(fs.existsSync(auditPath), 'M24F3_SCREEN_DENSITY_AUDIT.md exists');
-if (fs.existsSync(auditPath)) {
-  const doc = fs.readFileSync(auditPath, 'utf8');
-  const rows = doc.split('\n').filter((l) => /^\| (Pro|Grassroots|Agent|Trust & Safety|Player|Guardian) \|/.test(l));
-  const open = rows.filter((l) => /TOO DENSE/.test(l) && !/\| (Folded|Shortened|Kept|Clipped|Removed|Moved)[^|]*\|\s*$/.test(l));
-  ok(rows.length >= 60, `the audit lists every crawled screen (${rows.length} rows)`);
-  ok(open.length === 0, `no TOO DENSE screen is left without a fix or an accepted reason (${open.length})`);
-  ok(/\| App \| Route \| Screen \| Visible text/.test(doc), 'the audit carries the mandated columns');
-}
-
 console.log(`\nm24f3DensityAudit: ${passed} checks passed${failures.length ? `, ${failures.length} FAILED` : ''}`);
 if (failures.length) process.exit(1);

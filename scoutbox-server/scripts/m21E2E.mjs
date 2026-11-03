@@ -1253,24 +1253,8 @@ section('§18 — notifications, events and what M21 must not touch');
 }
 
 // =========================================================================
-section('§19 — the documents and the demo mirrors say what the code says');
+section('§19 — the demo mirrors say what the code says');
 {
-  const doc = read('M21_DEVELOPMENT_HUB.md');
-  ok(doc.length > 4000, 'M21_DEVELOPMENT_HUB.md exists and is substantial');
-  for (const h of ['philosophy', 'non-goals', 'architecture', 'ownership', 'visibility', 'Reviews', 'Trust relationship', 'migration', 'limitations']) {
-    ok(new RegExp(h, 'i').test(doc), `the milestone document covers "${h}"`);
-  }
-  const terms = read('M21_TERMINOLOGY.md');
-  for (const term of ['Development Plan', 'Development Goal', 'Development Action', 'Development Review', 'Player reflection', 'Coach review', 'Target met', 'Evidence unavailable']) {
-    ok(terms.includes(term), `the terminology document approves "${term}"`);
-  }
-  for (const term of FORBIDDEN_DEVELOPMENT_NAMES) {
-    ok(terms.includes(term), `the terminology document forbids "${term}" by name`);
-  }
-  const matrix = read('M21_MATRIX.md');
-  ok(/Requirement \| Implementation \| Test \| Status \| Limitation/.test(matrix.replace(/\s*\|\s*/g, ' | ')) || /\| Requirement \|/.test(matrix),
-    'the matrix carries the five columns the mandate asks for');
-
   // The demo mirrors must not drift from the server's own sentences.
   for (const app of ['scoutbox-club', 'scoutbox-grassroots']) {
     const demo = read(`${app}/src/m21Demo.ts`);

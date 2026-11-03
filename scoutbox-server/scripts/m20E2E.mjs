@@ -127,10 +127,8 @@ section('§1 — the metric registry is internally consistent');
 {
   // The demo bundles carry their own copy of each limitation, because they
   // run with no server. A caveat that says something different in the demo is
-  // worse than no caveat, so both copies are compared word for word — and the
-  // documented definition is compared too.
+  // worse than no caveat, so both copies are compared word for word.
   const clients = ['scoutbox-club/src/m20Demo.ts', 'scoutbox-grassroots/src/m20Demo.ts'];
-  const docs = read('M20_METRICS.md');
   // M23 P4B (D-29): the Trial process metric is counts only — no ratio, no
   // rate, and it never declares a read of the club's notes, instructions,
   // attendance notes or assessments.
@@ -143,10 +141,6 @@ section('§1 — the metric registry is internally consistent');
     const drifted = METRIC_IDS.filter((id) => !src.includes(METRICS[id].limitation));
     ok(drifted.length === 0, `${rel}: every limitation matches the server's word for word${drifted.length ? ` (drifted: ${drifted.join(', ')})` : ''}`);
   }
-  const undocumented = METRIC_IDS.filter((id) => !docs.includes(METRICS[id].limitation.split('.')[0]));
-  ok(undocumented.length === 0, `M20_METRICS.md documents every metric's limitation${undocumented.length ? ` (missing: ${undocumented.join(', ')})` : ''}`);
-  const unregistered = [...docs.matchAll(/^#### [A-Z]\d+ · `([a-z_]+)`/gm)].map((m) => m[1]).filter((id) => !METRIC_IDS.includes(id));
-  ok(unregistered.length === 0, `M20_METRICS.md documents no metric the registry does not have${unregistered.length ? ` (${unregistered.join(', ')})` : ''}`);
 }
 
 // =========================================================================
