@@ -117,7 +117,8 @@ section('2 — upgrade from 2306: three containers appear and nothing else moves
   runMigrations(db);
   db.orgs.push({ id: 'org-a', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: false, squad: [], location: null });
   db.players.push({ id: 'pl-1', name: 'Adult Player', dob: '1998-04-02', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } });
-  db.recruitmentCases.push({ id: 'case-1', orgId: 'org-a', playerId: 'pl-1', status: 'shortlist', room: { rev: 1 } });
+  db.users.push({ id: 'usr-1', orgId: 'org-a', name: 'Agency Agent', role: 'Agent', createdAt: 1 }); // the agent the context and the agreement name, and the case's owner
+  db.recruitmentCases.push({ id: 'case-1', orgId: 'org-a', playerId: 'pl-1', ownerUserId: 'usr-1', createdAt: 1, status: 'shortlist', room: { rev: 1 } }); // a case names its owner (the data layer refuses one without)
   db.complianceContexts.push({ id: 'ctx-1', agencyOrgId: 'org-a', agentUserId: 'usr-1', type: 'transfer', jurisdictions: ['ENG'], parties: [], representations: [], evaluations: [], status: 'open', history: [] });
   db.representationAgreements.push({ id: 'rep-1', agentUserId: 'usr-1', agencyOrgId: 'org-a', clientId: 'pl-1', status: 'active', confirmedAt: 1, scope: ['transfer'], rev: 1, history: [] });
   db.schema.version = 2306;

@@ -94,8 +94,9 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   developmentReviews: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
   // dispatches: no longer a blob collection since S7b — the rows live in dispatches / dispatch_attempts (migration 0010,
   // repositories/dispatches.mjs); the data layer defines a read-only view at db.dispatches (insertion order, attempts
-  // nested) and m13/delivery.mjs writes through the repository. (notifications is the precedent.)
-  dispatches: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by migrateM13 (??= []) before the data layer attaches; since S7b a read-only view over the dispatches table, written only through the dispatches repository' },
+  // nested) and m13/delivery.mjs writes through the repository. S7b filed it as 'migration' after the notifications
+  // precedent, but no snapshot migration creates it (notifications is in m182_002's list); the boot proves 'module'.
+  dispatches: { guarantee: 'module', owner: 'm13', reason: 'container created by migrateM13 (??= []); since S7b a read-only view over the dispatches table, written only through the dispatches repository' },
   drillGuidance: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   dynamicWatchlists: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   // emailChallenges: no longer a production db.* read since S6a — the rows live in email_challenges (migration 0008,
@@ -149,6 +150,9 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   plans: { guarantee: 'migration', owner: 'core', reason: 'product configuration, restored from catalogue.mjs; empty would silently move a Grassroots attribution window from 12 to 18 months (D2)' },
   playerPrefs: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   players: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
+  // playersRetained: never a production db.* read — the retained records live in players_retained (migration 0014,
+  // repositories/identity.mjs) and the backup reads them through players.retainedRecords(); the data layer defines a
+  // read-only view at db.playersRetained, like the other table-backed collections.
   playlists: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   prospects: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   pushLog: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_log table (defined by attachDataLayer), written only through the push log repository' },
