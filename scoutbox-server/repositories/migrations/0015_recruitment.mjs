@@ -1,16 +1,17 @@
 /**
- * Recruitment requests and accepted trials (S8a) get their own tables (recruitment_requests, request_trial_slots,
- * trials and its owned child tables, idempotency_keys), and `channels` is rebuilt so `request_id` is a real key.
- * Runs with foreign keys off because it rebuilds a referenced table.
- * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written
- * through the repository.
+ * Recruitment requests and accepted trials (S8a) get their typed tables (recruitment_requests, request_trial_slots,
+ * trials and its thirteen owned child tables; repositories/recruitment.mjs), and `channels` is rebuilt so
+ * `request_id` is a real key. Runs with foreign keys off because it rebuilds a referenced table.
+ * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written through the
+ * repository. Amended in place on 3 November 2026 (§4.3: typed columns, explicit writes); re-seed a development
+ * database. The `case_id` keys name recruitment_cases, which 0016 creates in the same boot.
  */
 import { migrationApplied } from '../database.mjs';
 import { PLAYER_ERASURE_MIGRATION } from '../identity.mjs';
 import { RECRUITMENT_MIGRATION, RECRUITMENT_DDL, RECRUITMENT_TABLES, CHANNELS_DDL_WITH_KEY } from '../recruitment.mjs';
 
 export const id = RECRUITMENT_MIGRATION;
-export const note = 'recruitment requests and accepted trials become their own tables (recruitment_requests, request_trial_slots, trials and its eleven owned child tables, idempotency_keys; insertion and list order kept; absence, null, off-type and unknown fields kept losslessly; the player references tolerant and counted (Q7a), the case and guardian references checked strictly in code (Q7b, Q7c)); channels rebuilt with the real request_id foreign key (D-A)';
+export const note = 'recruitment requests and accepted trials become typed tables (recruitment_requests, request_trial_slots, trials and its thirteen owned child tables; vocabulary CHECKs, no lossless side columns; the case and trial keys deferred to COMMIT while cases are staged; the player references tolerant and counted (Q7a), the guardian references checked in code (Q7c)); channels rebuilt with the real request_id foreign key (D-A)';
 export const foreignKeysOff = true;
 
 /** Copy the three thread tables out, drop them (children first), recreate `channels` with the key, and put every row back with its seq/position. */

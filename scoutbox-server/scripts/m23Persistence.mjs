@@ -80,7 +80,7 @@ function priorSnapshot({ withExistingRows = false } = {}) {
   if (withExistingRows) {
     db.users = [{ id: 'usr-legacy', orgId: 'org-legacy', name: 'Legacy Scout', role: 'Scout', createdAt: 1 }];
     db.blocks = [{ id: 'blk-legacy', playerId: 'pl-legacy', orgId: 'org-legacy', by: 'guardian', reason: 'legacy', ts: 1 }];
-    db.requests = [{ id: 'req-legacy', playerId: 'pl-legacy', orgId: 'org-legacy', userId: 'usr-legacy', type: 'contact', status: 'pending', createdAt: 1 }]; // a request names the staff member who sent it
+    db.requests = [{ id: 'req-legacy', playerId: 'pl-legacy', playerName: 'Legacy Player', orgId: 'org-legacy', orgName: 'Legacy FC', orgType: 'club', orgVerified: false, orgSafeguardingCertified: false, userId: 'usr-legacy', scoutName: 'Legacy Scout', scoutRole: 'Scout', type: 'contact', message: '', trialDetails: null, status: 'pending', createdAt: 1, routedTo: 'player', guardianId: null, contactChannel: null }]; // issueRecruitmentRequest's literal: a request names the staff member who sent it
     db.channels = [{ id: 'ch-legacy', requestId: 'req-legacy', playerId: 'pl-legacy', orgId: 'org-legacy', orgName: 'Legacy FC', counterparty: 'player', createdAt: 1, messages: [], readBy: { org: null, counterparty: null } }]; // the channel literal (openChannel); the data layer refuses a thread without its request
     db.plans = { Grassroots: { name: 'Grassroots', attributionWindowMonths: 99, customised: true } };
   }

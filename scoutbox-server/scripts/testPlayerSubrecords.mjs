@@ -42,11 +42,11 @@ const count = (s, t, where = '', ...p) => s.prepare(`SELECT COUNT(*) AS n FROM $
 
 // ------------------------------------------------------------------ fixtures
 const report = (id, playerId, filedAt, extra = {}) => ({ id, trialId: `tr-${id}`, playerId, orgId: 'org-pro', orgName: 'Eastport FC', userId: 'usr-1', scoutName: 'Maria', filedAt, acceleration: 7, sprintSpeedKmh: 31, distanceKm: 9.5, passCompletionPct: 80, duelSuccessPct: 55, coachRating: 8, notes: 'private club notes', strengthNote: null, focusNote: null, ...extra });
-const trialOf = (rep) => ({ id: rep.trialId, requestId: `req-${rep.trialId}`, playerId: rep.playerId, orgId: rep.orgId, orgName: rep.orgName, status: 'reported', acceptedAt: NOW - 5 * DAY, report: rep });
+const trialOf = (rep) => ({ id: rep.trialId, requestId: `req-${rep.trialId}`, playerId: rep.playerId, orgId: rep.orgId, orgName: rep.orgName, status: 'reported', acceptedAt: NOW - 5 * DAY, workflowState: 'accepted', rev: 1, report: rep });
 /** S8a: the trials are rows of `trials` since migration 0015 and every trial names a request of `recruitment_requests` — the pre-P4B pair (the request carries no trialId key). */
 const requestOf = (rep) => ({ id: `req-${rep.trialId}`, playerId: rep.playerId, playerName: 'Synthetic', orgId: rep.orgId, orgName: rep.orgName, orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, trustedPartner: false, userId: rep.userId, scoutName: rep.scoutName, scoutRole: 'Head of Recruitment', type: 'trial', message: 'Synthetic invitation.', trialDetails: { proposedDate: '2026-09-01', altSlots: [], venue: 'Old ground', notes: '' }, status: 'accepted', createdAt: NOW - 6 * DAY, respondedAt: NOW - 5 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
 /** A trial filed after the cutover, through the recruitment repository (the former `db.trials.push`): its request first, then the trial. */
-const addTrial = (t, rep) => { t.layer.recruitment.addRequest(requestOf(rep)); return t.layer.recruitment.addTrial(trialOf(rep)); };
+const addTrial = (t, rep) => { t.layer.recruitment.requests.create(requestOf(rep)); return t.layer.recruitment.trials.create(trialOf(rep)); };
 /** A player with EVERY array populated, unknown item fields (not stored), prototype-named keys, nulls and legal duplicates (built from JSON, as a snapshot arrives). */
 const rich = () => JSON.parse(JSON.stringify({
   id: 'pl-rich', name: 'Rich Record', dob: '2000-02-02', country: 'GB', city: 'Leeds', position: 'CM', foot: 'left', heightCm: 180, weightKg: 75,
@@ -250,7 +250,7 @@ function boot(dir, { players = [], guardians = [], trialList = [] } = {}) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
   // S8a: the trials are rows of `trials` and the repository never imports from memory — the fixture's trials enter through it (the identity initialisation above reconciled the players' copies against the same in-memory list)
-  for (const x of clone(trialList)) { layer.recruitment.addRequest(requestOf(x.report)); layer.recruitment.addTrial(x); }
+  for (const x of clone(trialList)) { layer.recruitment.requests.create(requestOf(x.report)); layer.recruitment.trials.create(x); }
   return wire({ store, layer, db });
 }
 function reopen(dir) {

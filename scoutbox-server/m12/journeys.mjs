@@ -14,8 +14,11 @@ export function registerJourneys(ctx) {
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, requireLead, isLead, moderateOrRefuse, isAdult,
     checkEligibility, distanceBand, guardianOwnsChild, recordActivity, DRILLS,
-    players, unit,
+    players, unit, recruitment,
   } = ctx;
+  // S8a: a trial-day change is an explicit write of the trial (recruitment.trials.update); the records the views hand out are read-only.
+  const trials = recruitment?.trials;
+  if (!trials) throw new TypeError('registerJourneys needs the recruitment repository from the data layer');
 
   // ================================================================== F5
   const OPP_TYPES = ['trial', 'open_day', 'programme', 'role'];
@@ -519,8 +522,6 @@ export function registerJourneys(ctx) {
   // completed check), event consent, restricted emergency info, check-in
   // feeding existing attendance without duplicates, honest cancellation.
 
-  const CHECK_STATES = ['pending', 'reviewed', 'expired', 'rejected'];
-
   function trialFor(req, res) {
     const t = db.trials.find((x) => x.id === req.params.id && x.orgId === req.org.id);
     if (!t) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
@@ -531,8 +532,7 @@ export function registerJourneys(ctx) {
       res.status(409).json({ error: 'TRIAL_SUBJECT_REMOVED', message: 'This player removed their ScoutBox account. The trial stays on record; it can no longer be changed.' });
       return null;
     }
-    t.day ??= { staff: [], consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [] };
-    return t;
+    return t; // S8a: every trial reads back with its trial-day container
   }
 
   orgRouter.get('/trials/:id/day', (req, res) => {
@@ -616,8 +616,7 @@ export function registerJourneys(ctx) {
       } : null,
       addedBy: req.orgUser.name, addedAt: Date.now(),
     };
-    t.day.staff.push(s);
-    persistNow();
+    trials.update(t.id, (d) => { d.day.staff.push(s); });
     res.status(201).json({ staff: s, note: 'The check is PENDING until Trust & Safety reviews it — an uploaded reference is not a completed background check.' });
   });
 
@@ -626,11 +625,12 @@ export function registerJourneys(ctx) {
     if (!t) return;
     const { time, address, notes, collection } = req.body ?? {};
     if (notes && !moderateOrRefuse(res, notes, { kind: 'trial_arrival', playerId: t.playerId, orgId: req.org.id })) return;
-    t.day.arrival = { time: time ? String(time).slice(0, 40) : null, address: address ? String(address).slice(0, 200) : null, notes: notes ? String(notes).slice(0, 300) : null };
-    if (collection) t.day.collection = { policy: String(collection).slice(0, 300) };
-    persistNow();
-    notifyTrialParties(t, `📍 ${t.orgName} published arrival details for the trial on ${t.proposedDate ?? 'TBC'}.`);
-    res.json({ trial: trialDayView(t, 'org') });
+    const fresh = trials.update(t.id, (d) => {
+      d.day.arrival = { time: time ? String(time).slice(0, 40) : null, address: address ? String(address).slice(0, 200) : null, notes: notes ? String(notes).slice(0, 300) : null };
+      if (collection) d.day.collection = { policy: String(collection).slice(0, 300) };
+    });
+    notifyTrialParties(fresh, `📍 ${fresh.orgName} published arrival details for the trial on ${fresh.proposedDate ?? 'TBC'}.`);
+    res.json({ trial: trialDayView(fresh, 'org') });
   });
 
   function notifyTrialParties(t, text) {
@@ -649,16 +649,17 @@ export function registerJourneys(ctx) {
     // re-derived from the new day by the one derivation — never computed here.
     const moved = kind === 'postponed' ? parseTrialDate(newDate) : { ok: true, value: null };
     if (!moved.ok) return res.status(400).json({ ...moved, field: 'newDate' });
-    t.day.statusEvents.push({ kind, at: Date.now(), by: req.orgUser.name, reason: String(reason).slice(0, 200), newDate: moved.value });
-    if (kind === 'postponed' && moved.value) {
-      t.proposedDate = moved.value;
-      t.reportDueAt = trialReportDueAt(moved.value, t.acceptedAt);
-    }
-    persistNow();
-    notifyTrialParties(t, kind === 'cancelled'
-      ? `❌ ${t.orgName} cancelled the trial: ${reason}`
-      : `📅 ${t.orgName} moved the trial to ${newDate ?? 'a new date TBC'}: ${reason}`);
-    res.json({ trial: trialDayView(t, 'org') });
+    const fresh = trials.update(t.id, (d) => {
+      d.day.statusEvents.push({ kind, at: Date.now(), by: req.orgUser.name, reason: String(reason).slice(0, 200), newDate: moved.value });
+      if (kind === 'postponed' && moved.value) {
+        d.proposedDate = moved.value;
+        d.reportDueAt = trialReportDueAt(moved.value, d.acceptedAt);
+      }
+    });
+    notifyTrialParties(fresh, kind === 'cancelled'
+      ? `❌ ${fresh.orgName} cancelled the trial: ${reason}`
+      : `📅 ${fresh.orgName} moved the trial to ${newDate ?? 'a new date TBC'}: ${reason}`);
+    res.json({ trial: trialDayView(fresh, 'org') });
   }
   orgRouter.post('/trials/:id/cancel', (req, res) => cancelOrPostpone(req, res, 'cancelled'));
   orgRouter.post('/trials/:id/postpone', (req, res) => cancelOrPostpone(req, res, 'postponed'));
@@ -682,22 +683,22 @@ export function registerJourneys(ctx) {
     // ONE unit of work (S5): the check-in and the attendance records on the
     // trial (a blob), the player's attendance row and activity, and the ledger
     // row commit together before the response.
-    unit(() => {
-    t.day.checkins.push({ playerId: t.playerId, at: checkedInAt, byUserId: req.orgUser.id, byName: req.orgUser.name });
+    const fresh = unit(() => {
+    const checkedIn = trials.update(t.id, (d) => {
+    d.day.checkins.push({ playerId: d.playerId, at: checkedInAt, byUserId: req.orgUser.id, byName: req.orgUser.name });
     // M23 P4B (D-8): a check-in is the strongest attendance source. If the
     // trial carries a confirmed P4B schedule, the session whose window holds
     // this moment (from two hours before its start) gets an `attended`
     // record with source `checkin` — once, append-only, never a judgement.
     // A trial without a P4B schedule records nothing new here.
-    const sessions = Array.isArray(t.schedule?.sessions) && t.schedule?.confirmedAt ? t.schedule.sessions : [];
+    const sessions = d.schedule?.confirmedAt ? d.schedule.sessions : [];
     const live = sessions.find((s) => s.startsAt - 2 * 3600_000 <= checkedInAt && checkedInAt <= s.endsAt) ?? null;
-    if (live && !(t.attendance ?? []).some((a) => a.sessionId === live.id && a.state === 'attended')) {
-      t.attendance ??= [];
-      t.attendance.push({ sessionId: live.id, state: 'attended', source: 'checkin', recordedBy: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, recordedAt: checkedInAt, note: null });
-      t.history ??= [];
-      t.history.push({ id: nextId('aud'), at: checkedInAt, action: 'trial_attendance_recorded', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { sessionId: live.id, state: 'attended', source: 'checkin' } });
-      t.rev = (Number(t.rev) || 1) + 1; t.revAt = checkedInAt; t.revBy = { userId: req.orgUser.id, name: req.orgUser.name };
+    if (live && !d.attendance.some((a) => a.sessionId === live.id && a.state === 'attended')) {
+      d.attendance.push({ sessionId: live.id, state: 'attended', source: 'checkin', recordedBy: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, recordedAt: checkedInAt, note: null });
+      d.history.push({ id: nextId('aud'), at: checkedInAt, action: 'trial_attendance_recorded', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { sessionId: live.id, state: 'attended', source: 'checkin' } });
+      d.rev = (Number(d.rev) || 1) + 1; d.revAt = checkedInAt; d.revBy = { userId: req.orgUser.id, name: req.orgUser.name };
     }
+    });
     // Feed the existing attendance record — once, coach-signed, no duplicate.
     if (p && !(p.attendance ?? []).some((a) => a.trialId === t.id)) {
       players.addItem(p.id, 'attendance', {
@@ -708,22 +709,21 @@ export function registerJourneys(ctx) {
       recordActivity(p);
     }
     ledgerAppend({ type: 'trial_checkin', playerId: t.playerId, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+    return checkedIn;
     });
-    res.json({ trial: trialDayView(t, 'org') });
+    res.json({ trial: trialDayView(fresh, 'org') });
   });
 
   // Player/guardian side: consent, restricted emergency info, safety pack.
   function playerTrial(req, res, playerIds) {
     const t = db.trials.find((x) => x.id === req.params.id && playerIds.includes(x.playerId));
     if (!t) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
-    t.day ??= { staff: [], consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [] };
-    return t;
+    return t; // S8a: every trial reads back with its trial-day container
   }
 
   function giveConsent(req, res, t, by, scope) {
     if (t.day.consents.some((c) => c.scope === scope && c.by.id === by.id)) return res.status(409).json({ error: 'ALREADY_CONSENTED' });
-    t.day.consents.push({ id: nextId('cns'), by, scope, at: Date.now() });
-    persistNow();
+    trials.update(t.id, (d) => { d.day.consents.push({ id: nextId('cns'), by, scope, at: Date.now() }); });
     res.status(201).json({ consented: scope });
   }
 
@@ -743,8 +743,7 @@ export function registerJourneys(ctx) {
     if (!name || !phone) return res.status(400).json({ error: 'NAME_AND_PHONE_REQUIRED' });
     // Restricted: written by the family, readable ONLY in the org's trial-day
     // view for the named event. Never in profiles, search or exports.
-    t.day.emergency = { name: String(name).slice(0, 80), phone: String(phone).slice(0, 30), setBy: by, at: Date.now() };
-    persistNow();
+    trials.update(t.id, (d) => { d.day.emergency = { name: String(name).slice(0, 80), phone: String(phone).slice(0, 30), setBy: by, at: Date.now() }; });
     res.json({ ok: true, note: 'Held for this event’s safety staff only.' });
   }
   playerRouter.post('/trials/:id/emergency-contact', (req, res) => {
@@ -777,7 +776,6 @@ export function registerJourneys(ctx) {
   const familyTrials = (playerIds, { minorDevice = false } = {}) => db.trials
     .filter((t) => t && typeof t === 'object' && playerIds.includes(t.playerId))
     .map((t) => {
-      t.day ??= { staff: [], consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [] };
       // P4B: the workflow edge (state, confirmed sessions, completion) rides
       // beside the P2 day view. Family view only — never the club's internals.
       // A minor's own device carries the guardian-managed OUTCOME LINE only
@@ -812,12 +810,15 @@ export function registerJourneys(ctx) {
     if (!['reviewed', 'rejected'].includes(status)) return res.status(400).json({ error: 'STATUS_INVALID', allowed: ['reviewed', 'rejected'] });
     const exp = checkExpiryOrRefuse(res, expiresAt);
     if (exp === undefined) return;
-    s.check.status = status;
-    s.check.reviewedBy = 'Trust & Safety';
-    s.check.reviewedAt = Date.now();
-    if (exp !== null) s.check.expiresAt = exp;
-    persistNow();
-    res.json({ check: { ...s.check, state: checkState(s.check) } });
+    const fresh = trials.update(t.id, (d) => {
+      const c = d.day.staff.find((x) => x.id === s.id).check;
+      c.status = status;
+      c.reviewedBy = 'Trust & Safety';
+      c.reviewedAt = Date.now();
+      if (exp !== null) c.expiresAt = exp;
+    });
+    const check = fresh.day.staff.find((x) => x.id === s.id).check;
+    res.json({ check: { ...check, state: checkState(check) } });
   });
 }
 

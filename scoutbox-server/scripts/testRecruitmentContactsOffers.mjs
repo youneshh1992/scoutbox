@@ -166,7 +166,7 @@ test('[repository] explicit writes: the views and every returned record are read
 test('[repository] a unit of work: a contact written in a unit together with the request it names — a NEW request the staged S8a repository writes at the same COMMIT (the deferred key) — commits; a unit that throws after its writes rolls the rows AND the mirrors back (the records held before read the pre-unit values); a contact naming a request that never arrives fails at COMMIT, nothing lands and the mirror is restored', () => {
   const d = file('unit'); const L = serverOpen(d); const { contacts } = L.repo;
   const sent = (id, requestId) => draftContact({ id, status: 'delivered', recipient: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false }, requestId, sentAt: NOW, deliveredAt: NOW, attempts: [{ at: NOW, ok: true, code: null }], keys: { create: null, send: { key: null, fp: `{"contactId":"${id}"}` }, record: null }, history: [] });
-  L.unit(() => { L.recruitment.addRequest(contactRequest('req-new', 'rct-new')); contacts.create(sent('rct-new', 'req-new')); });
+  L.unit(() => { L.recruitment.requests.create(contactRequest('req-new', 'rct-new')); contacts.create(sent('rct-new', 'req-new')); });
   withRo(d, (s) => { assert.equal(col(s, "SELECT request_id FROM recruitment_contacts WHERE id = 'rct-new'"), 'req-new'); assert.equal(col(s, "SELECT contact_id FROM recruitment_requests WHERE id = 'req-new'"), 'rct-new'); });
   const held = L.repo.contacts.byId('rct-1'); const before = withRo(d, fullDump);
   assert.throws(() => L.unit(() => { contacts.update('rct-1', (x) => { x.subject = 'In the unit'; }); contacts.create(draftContact({ id: 'rct-gone', history: [] })); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);

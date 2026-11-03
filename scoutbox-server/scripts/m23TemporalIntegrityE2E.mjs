@@ -434,10 +434,11 @@ await stop(server);
   snap.db.users ??= [];
   if (!snap.db.users.some((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane')) snap.db.users.push({ id: 'usr-p57-maria', orgId: 'org-eastport', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 });
   snap.db.requests ??= [];
-  snap.db.requests.push({ id: 'req-p57', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, userId: snap.db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: T.utcDayOf(Date.now() + 10 * DAY), altSlots: [], venue: 'Training ground', notes: '' }, status: 'accepted', createdAt: Date.now() - 4 * DAY, respondedAt: Date.now() - 3 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
+  snap.db.requests.push({ id: 'req-p57', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: false, userId: snap.db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come and train.', trialDetails: { proposedDate: T.utcDayOf(Date.now() + 10 * DAY), altSlots: [], venue: 'Training ground', notes: '' }, status: 'accepted', createdAt: Date.now() - 4 * DAY, respondedAt: Date.now() - 3 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
   snap.db.trials.push({
     id: 'trial-p57', requestId: 'req-p57', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', orgId: 'org-eastport', orgName: 'Eastport FC', scoutName: 'Maria Keane',
-    acceptedAt: Date.now() - 3 * DAY, proposedDate: T.utcDayOf(Date.now() + 10 * DAY), venue: 'Training ground', notes: '', reportDueAt: Date.now() + 17 * DAY, status: 'awaiting_report',
+    acceptedAt: Date.now() - 3 * DAY, acceptedBy: 'player', proposedDate: T.utcDayOf(Date.now() + 10 * DAY), venue: 'Training ground', notes: '', reportDueAt: Date.now() + 17 * DAY, status: 'awaiting_report',
+    workflowState: 'accepted', rev: 1, // issueAcceptedTrial's literal for a date-only invitation
     day: {
       staff: [
         { id: 'stf-past', name: 'A Past', role: 'Coach', check: { kind: 'DBS', ref: 'x', status: 'reviewed', expiresAt: '2020-01-01', reviewedBy: 'T&S' }, addedBy: 'Maria Keane', addedAt: 1 },

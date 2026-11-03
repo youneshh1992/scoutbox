@@ -26,8 +26,10 @@ export function registerOperations(ctx) {
     db, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     paginate, guardianOwnsChild, orgCanSee, moderateOrRefuse,
-    storage, sessionFor, isBlocked, DATA_DIR, players, unit, signingsFollowUps,
+    storage, sessionFor, isBlocked, DATA_DIR, players, unit, signingsFollowUps, recruitment,
   } = ctx;
+  if (!recruitment?.trials) throw new TypeError('registerOperations needs the recruitment repository (S8a) from the data layer');
+  const trials = recruitment.trials; // S8a: an escalation or a reminder marker is an explicit write of the trial
   if (typeof signingsFollowUps?.followUps?.schedule !== 'function' || typeof signingsFollowUps?.outcomeReports?.file !== 'function') throw new TypeError('registerOperations needs the signings/follow-ups repository (S8d) from the data layer');
   const fu = signingsFollowUps.followUps; const outcomes = signingsFollowUps.outcomeReports;
   const LIMITS = { progression: 200, endReason: 200, note: 300 };
@@ -338,7 +340,7 @@ export function registerOperations(ctx) {
       // P4A-D1/D14: a null deadline is "unknown", not "now"; a tombstoned
       // trial has nobody to file for, so it never escalates.
       if (Number.isFinite(t.reportDueAt) && t.reportDueAt < now && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt) {
-        t.feedbackEscalatedAt = now;
+        trials.update(t.id, (d) => { d.feedbackEscalatedAt = now; });
         const lead = usersOf(t.orgId)[0];
         if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `🚨 Trial feedback for ${t.playerName} is overdue — the mandatory report blocks new trials until filed.`, t.id);
         changed = true;
@@ -355,14 +357,14 @@ export function registerOperations(ctx) {
     for (const t of db.trials) {
       if (!t || typeof t !== 'object' || t.subjectRemovedAt || !t.schedule?.confirmedAt) continue;
       if (deriveWorkflowState(t) !== 'scheduled') continue;
-      t.reminders ??= {};
+      const marks = {}; // the markers this sweep sets, written once below
       const p = findPlayer(t.playerId);
       const blocked = isBlocked(t.playerId, t.orgId);
       for (const s of t.schedule.sessions ?? []) {
         const key = `t48:${s.id}:${t.schedule.revision}`;
         if (t.reminders[key] || !Number.isFinite(s.startsAt)) continue;
         if (s.startsAt <= now || s.startsAt - now > 48 * 3600_000) continue;
-        t.reminders[key] = now;
+        marks[key] = now;
         changed = true;
         if (!p || blocked) continue;
         const toGuardian = t.recipient?.type === 'guardian' || (!isAdult(p) && p.guardianId);
@@ -371,18 +373,18 @@ export function registerOperations(ctx) {
       }
       const lastEnd = (t.schedule.sessions ?? []).reduce((m, s) => (Number.isFinite(s.endsAt) ? Math.max(m, s.endsAt) : m), 0);
       if (lastEnd && now - lastEnd > 24 * 3600_000 && !t.reminders.completionPending) {
-        t.reminders.completionPending = now;
+        marks.completionPending = now;
         const lead = usersOf(t.orgId)[0];
         if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `The trial for ${t.playerName} has ended — record attendance and complete it.`, t.id);
         changed = true;
       }
+      if (Object.keys(marks).length) trials.update(t.id, (d) => { Object.assign(d.reminders, marks); });
     }
     for (const t of db.trials) {
       if (!t || typeof t !== 'object' || t.subjectRemovedAt || t.completion?.state !== 'completed' || t.reminders?.assessmentPending) continue;
       if (!Number.isFinite(t.completion.at) || now - t.completion.at < 7 * 86_400_000) continue;
       if ((db.assessments ?? []).some((a) => a?.context?.trialId === t.id)) continue;
-      t.reminders ??= {};
-      t.reminders.assessmentPending = now;
+      trials.update(t.id, (d) => { d.reminders.assessmentPending = now; });
       const lead = usersOf(t.orgId)[0];
       if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `No assessment has been recorded for ${t.playerName}'s completed trial yet.`, t.id);
       changed = true;

@@ -136,7 +136,7 @@ await test('[routes] two stored open-day invitations for one player (the shape t
   await S.stop(); rm(dir, restored, bkp.body.dir);
 });
 
-await test('[backup] the admin backup is a copy of the database: its requests and trials (the day staff, the report, keys.accept) equal the live rows, and a restore into a NEW directory serves them row for row', async () => {
+await test('[backup] the admin backup is a copy of the database: its requests and trials (the day staff, the report, the acceptance) equal the live rows, and a restore into a NEW directory serves them row for row', async () => {
   const dir = tempDir('s8a-backup'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Backup Adult'); const flow = await inviteAndAccept(S, maria, a.pid, a.token);
   assert.equal((await S.j('POST', `/org/trials/${flow.trialId}/staff`, { name: 'Coach Dan', role: 'Lead coach' }, maria)).status, 201);
@@ -147,7 +147,7 @@ await test('[backup] the admin backup is a copy of the database: its requests an
   await S.stop();
   const liveDump = recDump(dir); assert.equal(recDump(bk.body.dir), liveDump, 'the backup holds every recruitment and thread row');
   assert.equal(q1(bk.body.dir, 'SELECT count(*) AS n FROM recruitment_requests').n, 2); assert.equal(q1(bk.body.dir, 'SELECT name FROM trial_day_staff WHERE trial_id = ?', flow.trialId).name, 'Coach Dan');
-  { const s = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); assert.deepEqual(readTrials(s)[0].keys.accept, { key: null, fp: JSON.stringify({ requestId: flow.requestId, day: '2026-11-01' }) }); s.close(); }
+  { const s = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); const t = readTrials(s)[0]; assert.equal(t.requestId, flow.requestId); assert.deepEqual(t.history.map((h) => h.action).slice(0, 1), ['trial_accepted'], 'the acceptance is in the copy (S8a: recorded by the history entry; the write-only keys.accept fingerprint is gone)'); s.close(); }
   const restored = tempDir('s8a-restore'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored)); assert.equal(recDump(restored), liveDump, 'row for row');
   const mariaR = await orgLogin(S); assert.ok((await S.j('GET', '/org/trials', undefined, mariaR)).body.some((x) => x.id === flow.trialId), 'the restored server serves the trial'); await S.stop();
@@ -155,7 +155,7 @@ await test('[backup] the admin backup is a copy of the database: its requests an
 });
 
 // ------------------------------------------------------------- review of 6d77aa7 (F1)
-await test('[routes] F1 (review of 6d77aa7) through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a trial whose keys carry an empty list act, an empty object act and a prototype-named own act (written by a snapshot-mode save — no route produces them today) keeps every act distinctly through a backup and a restore (where the same clientKey still replays)', async () => {
+await test('[routes] F1 (review of 6d77aa7) through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a snapshot save of an act the routes never write (an unknown act, a prototype-named own act) is refused with the trial\'s id, and the real keys survive a backup and a restore (where the same clientKey still replays)', async () => {
   const dir = tempDir('s8a-f1'); let S = await boot(dir); let maria = await orgLogin(S); const a = await signupAdult(S, 'Keyed Adult');
   const room = await S.j('POST', '/org/rooms', { playerId: a.pid, sourceContext: 'search' }, maria); assert.equal(room.status, 201, room.text); const RID = room.body.room.roomId;
   const jr = (await S.j('GET', `/org/rooms/${RID}/journey`, undefined, maria)).body; if (jr.lifecycle.currentStage === 'watching') { const mv = await S.j('POST', `/org/rooms/${RID}/lifecycle`, { action: 'startReview', expectedRev: jr.case.rev }, maria); assert.equal(mv.status, 200, mv.text); }
@@ -164,7 +164,7 @@ await test('[routes] F1 (review of 6d77aa7) through the real routes: an invitati
   const inv = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE(), maria); assert.equal(inv.status, 201, inv.text);
   const replay = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE(), maria); assert.equal(replay.status, 200, replay.text); assert.equal(replay.body.idempotent, true, 'the same clientKey and payload: a replay');
   const conflict = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE({ message: 'A different message.' }), maria); assert.equal(conflict.body.error, 'TRIAL_IDEMPOTENCY_CONFLICT', conflict.text);
-  assert.equal(q1(dir, 'SELECT count(*) AS n FROM recruitment_requests WHERE case_id = ?', RID).n, 1, 'one request row'); assert.equal(q1(dir, "SELECT key FROM idempotency_keys WHERE owner_table = 'recruitment_requests' AND act = 'invite'").key, 'inv-key-1', 'keys.invite as a row');
+  assert.equal(q1(dir, 'SELECT count(*) AS n FROM recruitment_requests WHERE case_id = ?', RID).n, 1, 'one request row'); assert.equal(q1(dir, 'SELECT invite_key FROM recruitment_requests WHERE case_id = ?', RID).invite_key, 'inv-key-1', 'keys.invite as the request\'s own column (§4.3)');
   const pending = (await S.j('GET', '/player/inbox', undefined, a.token)).body.find((r) => r.type === 'trial' && r.status === 'pending'); assert.ok(pending, 'the invitation in the inbox');
   const acc = await S.j('POST', `/player/requests/${pending.id}/respond`, { accept: true, chosenSlot: pending.trialDetails.proposedDate }, a.token); assert.equal(acc.status, 200, acc.text); const TID = acc.body.trialId;
   const current = async (srv, token) => (await srv.j('GET', `/org/rooms/${RID}/trials/${TID}`, undefined, token)).body;
@@ -175,12 +175,18 @@ await test('[routes] F1 (review of 6d77aa7) through the real routes: an invitati
   const replayS = async (srv, token, label) => { const t = await srv.j('GET', `/org/rooms/${RID}/trials/${TID}`, undefined, token); const r = await srv.j('POST', `/org/rooms/${RID}/trials/${TID}/reschedule`, RESCHEDULE(t.body.trial?.rev ?? t.body.rev), token); assert.equal(r.status, 200, `${label}: ${r.text}`); assert.equal(r.body.idempotent, true, `${label}: the schedule clientKey replays`); return r; };
   await replayS(S, maria, 'same process');
   await S.stop(); S = await boot(dir); maria = await orgLogin(S); await replayS(S, maria, 'after a restart'); await S.stop();
-  // the hand-written acts: an empty list, an empty object and a prototype-named own act beside the real schedule key
+  // S8a (§4.3): an act the routes never write (an unknown act, a prototype-named own act) is refused by a snapshot save
+  // with the trial's id — nothing written — and the real keys survive a backup and a restore, where they still replay.
   { const store = openStore(dir); const loaded = store.load(); const t = loaded.db.trials.find((x) => x.id === TID); assert.ok(t && Array.isArray(t.keys.schedule) && t.keys.schedule[0].key === 'sched-key-1');
-    t.keys.cancel = []; t.keys.extraEmpty = {}; Object.defineProperty(t.keys, '__proto__', { value: { key: 'proto-key', fp: 'proto-fp' }, enumerable: true, writable: true, configurable: true });
-    store.save(loaded); store.sqlite.close(); }
-  const expectKeys = (keys, label) => { assert.ok(Object.hasOwn(keys, 'cancel') && Array.isArray(keys.cancel) && keys.cancel.length === 0, `${label}: the empty list act is present and empty`); assert.ok(Object.hasOwn(keys, 'extraEmpty') && Object.keys(keys.extraEmpty).length === 0, `${label}: the empty object act`); assert.ok(Object.hasOwn(keys, '__proto__') && keys.__proto__.key === 'proto-key', `${label}: the prototype-named own act`); assert.equal(keys.schedule[0].key, 'sched-key-1', `${label}: the real key`); };
-  S = await boot(dir); maria = await orgLogin(S); await replayS(S, maria, 'after the hand edit');
+    const rev0 = store.revision();
+    for (const [label, edit] of [['an unknown act', (k) => { k.extraEmpty = {}; }], ['a prototype-named own act', (k) => { Object.defineProperty(k, '__proto__', { value: { key: 'proto-key', fp: 'proto-fp' }, enumerable: true, writable: true, configurable: true }); }]]) {
+      const copy = JSON.parse(JSON.stringify(loaded)); const ct = copy.db.trials.find((x) => x.id === TID); edit(ct.keys);
+      assert.throws(() => store.save(copy), (e) => e.code === 'RECRUITMENT_INPUT_INVALID' && e.message.includes(TID) && /keys\.(extraEmpty|__proto__)/.test(e.message), `${label} is refused with the trial's id`);
+      assert.equal(store.revision(), rev0, `${label}: nothing written`);
+    }
+    store.sqlite.close(); }
+  const expectKeys = (keys, label) => { assert.ok(Array.isArray(keys.cancel) && keys.cancel.length === 0, `${label}: an act with no key reads back as an empty list`); assert.equal(keys.schedule[0].key, 'sched-key-1', `${label}: the real key`); assert.deepEqual(Object.keys(keys).sort(), ['attendance', 'cancel', 'complete', 'link', 'schedule'], `${label}: the five acts and nothing else`); };
+  S = await boot(dir); maria = await orgLogin(S); await replayS(S, maria, 'after the refused edits');
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
   { const s = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); expectKeys(readTrials(s).find((x) => x.id === TID).keys, 'the backup copy'); s.close(); }
   const restored = tempDir('s8a-f1-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });

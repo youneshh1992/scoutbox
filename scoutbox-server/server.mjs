@@ -1562,50 +1562,49 @@ guardianRouter.get('/inbox', (req, res) => {
 });
 
 guardianRouter.post('/requests/:id/respond', (req, res) => {
-  const request = db.requests.find(
+  const found = db.requests.find(
     (r) => r.id === req.params.id && r.routedTo === 'guardian' && req.guardian.childIds.includes(r.playerId)
   );
-  if (!request) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
-  if (request.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
-  const child = findPlayer(request.playerId);
+  if (!found) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
+  if (found.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
+  const child = findPlayer(found.playerId);
   const { accept, chosenSlot } = req.body || {};
-  const replyCheck = contactReplyFrom(req, res, request);
+  const replyCheck = contactReplyFrom(req, res, found);
   if (!replyCheck.ok) return;
   // A block the guardian placed AFTER the request arrived: they may still
   // decline it, but accepting would open a thread with an organisation they
   // blocked, so that is refused (M23 P3 §68/§69).
-  if (accept && isBlocked(request.playerId, request.orgId)) {
+  if (accept && isBlocked(found.playerId, found.orgId)) {
     return res.status(403).json({ error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block before accepting.' });
   }
-  if (request.contactId && rateLimit.limited('contact_response', `guardian:${req.guardian.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
+  if (found.contactId && rateLimit.limited('contact_response', `guardian:${req.guardian.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
   // P4A-D12: the slot is checked BEFORE the answer is recorded, so a refused
   // slot leaves the request pending rather than accepted-with-the-wrong-day.
-  const slot = accept && request.type === 'trial' ? chooseTrialSlot(request.trialDetails, chosenSlot) : { ok: true, date: null };
+  const slot = accept && found.type === 'trial' ? chooseTrialSlot(found.trialDetails, chosenSlot) : { ok: true, date: null };
   if (!slot.ok) return res.status(400).json(slot);
   // M23 P4B (D-7): a Trial invitation tied to a recruitment case re-derives
   // its recipient NOW — the guardian must still be this child's verified
   // route, the club must still be allowed to reach the child. Legacy M12
   // requests (no caseId) keep their existing rule.
-  if (accept && request.type === 'trial' && request.caseId && m23Ctx?.trialAcceptGate) {
-    const gate = m23Ctx.trialAcceptGate({ request, by: 'guardian', actorId: req.guardian.id });
+  if (accept && found.type === 'trial' && found.caseId && m23Ctx?.trialAcceptGate) {
+    const gate = m23Ctx.trialAcceptGate({ request: found, by: 'guardian', actorId: req.guardian.id });
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
   }
   const respondedAt = Date.now();
   // One unit of work: the answer, the Contact (S8c, an explicit write), the
   // channel and the trial commit together or not at all (P4A-D15).
-  unit(() => {
-  request.status = accept ? 'accepted' : 'declined';
-  request.respondedAt = respondedAt;
-  request.respondedBy = 'guardian';
+  const answered = unit(() => {
+  // S8a: the answer is an explicit write; the record the hooks see is the stored one.
+  let request = recruitment.requests.update(found.id, (d) => { d.status = accept ? 'accepted' : 'declined'; d.respondedAt = respondedAt; d.respondedBy = 'guardian'; });
   // M23 P3: the Contact that created this request learns of the answer.
   m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'guardian', at: respondedAt });
-  // P4A-D15: the answer, the channel and the trial row are ONE save (below),
+  // P4A-D15: the answer, the channel and the trial row are ONE unit,
   // so a crash between them cannot leave an accepted request with no trial.
 
   if (accept) {
     // The conversation that opens is between adults: club staff and guardian.
     const channel = openChannel(request);
-    request.contactChannel = channel.id;
+    request = recruitment.requests.update(request.id, (d) => { d.contactChannel = channel.id; });
     ledgerAppend({ type: `${request.type}_accepted_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
     if (request.type === 'trial') {
       const trial = issueAcceptedTrial({ request, player: child, trialDate: slot.date, by: 'guardian', at: respondedAt, actor: { id: req.guardian.id, name: req.guardian.name } });
@@ -1626,8 +1625,9 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
     notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian declined the ${request.type} with ${request.orgName}.`, request.id);
   }
   broadcast('requests', { playerId: child.id });
+  return recruitment.requests.byId(request.id);
   });
-  res.json(requestForRecipient(request));
+  res.json(requestForRecipient(answered));
 });
 
 // Guardian-side message threads (adult-to-adult, moderated, logged).
@@ -1811,12 +1811,14 @@ function handleReport(req, res, actor) {
     const playerIds = actor.by === 'guardian'
       ? db.guardians.find((g) => g.id === actor.byId)?.childIds ?? []
       : actor.by === 'player' ? [actor.byId] : [];
-    for (const pid of playerIds) {
-      safetyAudit.blocks.append({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
-      for (const r of db.requests) {
-        if (r.playerId === pid && r.orgId === targetOrgId && r.status === 'pending') r.status = 'suspended';
+    unit(() => {
+      for (const pid of playerIds) {
+        safetyAudit.blocks.append({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
+        for (const r of db.requests.filter((x) => x.playerId === pid && x.orgId === targetOrgId && x.status === 'pending')) {
+          recruitment.requests.update(r.id, (d) => { d.status = 'suspended'; }); // S8a: the frozen request, with its block
+        }
       }
-    }
+    });
     broadcast('players');
   }
   res.status(201).json({ reportId: report.id, status: report.status, suspended: !!(report.urgent && targetOrgId) });
@@ -2234,10 +2236,14 @@ orgRouter.post('/players/:id/request', (req, res) => {
  * `notice` lets a caller with its own occasion word the notifications
  * (`{ kind, toGuardian, toPlayer }`, the open-day invitation); the row, the
  * routing, the ledger entry and the inbox ping are the same either way.
+ * `workflow` lets the Trial invitation write its case link, recipient snapshot
+ * and client key in the same create (`{ caseId, recipient, keys }`).
+ * S8a: the row is written at once (`requests.create`); the returned record is
+ * the stored, read-only one.
  */
 function issueRecruitmentRequest({
   org, orgUser, player, type, message = '', trialDetails = null,
-  subject = null, contactId = null, guardianId = undefined, at = Date.now(), notice = null,
+  subject = null, contactId = null, guardianId = undefined, at = Date.now(), notice = null, workflow = null,
 }, { persist: persistAfter = true } = {}) {
   const minor = !isAdult(player);
   const request = {
@@ -2267,19 +2273,20 @@ function issueRecruitmentRequest({
     routedTo: minor ? 'guardian' : 'player',
     guardianId: minor ? (guardianId ?? player.guardianId) : null,
     contactChannel: null, // stays null until the player/guardian accepts
+    ...(workflow ? { caseId: workflow.caseId, trialId: null, recipient: workflow.recipient, keys: workflow.keys } : {}),
   };
-  recruitment.addRequest(request); // S8a-core: a row of recruitment_requests, written by the save below (the former db.requests.push)
+  const stored = recruitment.requests.create(request); // S8a: a row of recruitment_requests, written now (inside the caller's unit when there is one)
   if (persistAfter) persistNow();
   ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: player.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name });
   const kind = notice?.kind ?? 'request';
   if (minor) {
-    notify({ kind: 'guardian', id: request.guardianId }, kind, notice?.toGuardian ?? `${org.name} has requested to discuss a ${type === 'trial' ? 'trial' : 'conversation'} for ${player.name}.`, request.id);
-    notify({ kind: 'player', id: player.id }, kind, notice?.toPlayer ?? `${org.name} contacted your parent/guardian about a ${type === 'trial' ? 'trial' : 'conversation'}.`, request.id);
+    notify({ kind: 'guardian', id: stored.guardianId }, kind, notice?.toGuardian ?? `${org.name} has requested to discuss a ${type === 'trial' ? 'trial' : 'conversation'} for ${player.name}.`, stored.id);
+    notify({ kind: 'player', id: player.id }, kind, notice?.toPlayer ?? `${org.name} contacted your parent/guardian about a ${type === 'trial' ? 'trial' : 'conversation'}.`, stored.id);
   } else {
-    notify({ kind: 'player', id: player.id }, kind, notice?.toPlayer ?? `${org.name} sent you a ${type} request.`, request.id);
+    notify({ kind: 'player', id: player.id }, kind, notice?.toPlayer ?? `${org.name} sent you a ${type} request.`, stored.id);
   }
   broadcast('inbox', { playerId: player.id });
-  return request;
+  return stored;
 }
 
 /**
@@ -2316,7 +2323,7 @@ function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }
     timezone: slot.timezone, revision: 1, proposedAt: request.createdAt ?? at, proposedBy,
     confirmedAt: at, confirmedBy: who,
     sessions: [session],
-    revisions: [{ revision: 1, timezone: slot.timezone, sessions: [{ ...session }], proposedAt: request.createdAt ?? at, proposedBy, confirmedAt: at, confirmedBy: who, supersededAt: null, reason: 'invitation', material: null }],
+    revisions: [{ revision: 1, timezone: slot.timezone, sessions: [{ ...session, evidence: undefined }], proposedAt: request.createdAt ?? at, proposedBy, confirmedAt: at, confirmedBy: who, supersededAt: null, reason: 'invitation', material: null }],
   } : null;
   const trial = {
     id: nextId('trial'),
@@ -2342,7 +2349,6 @@ function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }
     attendance: [],
     completion: null,
     recipient,
-    keys: { accept: { key: null, fp: JSON.stringify({ requestId: request.id, day: trialDate ?? null }) } },
     history: [
       { id: nextId('aud'), at, action: 'trial_accepted', by: who, detail: { recipientType: by, slotId: slot?.id ?? null, day: trialDate ?? null } },
       ...(schedule ? [{ id: nextId('aud'), at, action: 'trial_schedule_confirmed', by: who, detail: { revision: 1, sessionCount: 1 } }] : []),
@@ -2350,8 +2356,7 @@ function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }
     reminders: {},
     rev: 1, revAt: at, revBy: null,
   };
-  recruitment.addTrial(trial); // S8a-core: a row of trials with its children, written by the caller's save (the former db.trials.push)
-  return trial;
+  return recruitment.trials.create(trial); // S8a: a row of trials with its children, written now (inside the respond route's unit)
 }
 
 /** A request row as its RECIPIENT may see it: no org id, no user id, no internal Contact link. */
@@ -2527,7 +2532,7 @@ orgRouter.get('/feed', (req, res) => {
     items.push({ type: 'report_due', ts: dueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt });
     // one-shot reminder when the mandatory report is due within 48h
     if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000) {
-      t.reminderSent = true;
+      recruitment.trials.update(t.id, (d) => { d.reminderSent = true; }); // S8a: the one-shot marker, written now
       const request = db.requests.find((r) => r.id === t.requestId);
       if (request?.userId) notify({ kind: 'org_user', id: request.userId }, 'report_due', `Mandatory trial report for ${t.playerName} is due ${utcDayOf(dueAt)}.`, t.id); // M23 P5.7: the UTC day, not the server locale
     }
@@ -2715,15 +2720,16 @@ orgRouter.post('/trials/:trialId/report', (req, res) => {
     strengthNote: strengthNote || null,
     focusNote: focusNote || null,
   };
-  trial.status = 'reported';
-  trial.report = report;
-
   // Filed reports raise Trust Score (institutional corroboration). Since S5 the
   // player's `trialReports` is DERIVED from the trials: the report written on
-  // the trial above is what the profile serves, in filing order — no copy is
-  // pushed onto the player (docs/architecture/s5-player-subrecords.md §2.5).
+  // the trial is what the profile serves, in filing order — no copy is pushed
+  // onto the player (docs/architecture/s5-player-subrecords.md §2.5). S8a: the
+  // report and its ledger row commit together.
   const p = findPlayer(trial.playerId);
-  ledgerAppend({ type: 'trial_report', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+  unit(() => {
+    recruitment.trials.update(trial.id, (d) => { d.status = 'reported'; d.report = report; });
+    ledgerAppend({ type: 'trial_report', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+  });
   // P4B (D-16): the mandatory report closes the club's obligation even while
   // the family has blocked the club, but the block stands — no notification
   // reaches the player or guardian from a blocked club. The report is still
@@ -3426,41 +3432,40 @@ playerRouter.get('/inbox', (req, res) => {
 
 playerRouter.post('/requests/:id/respond', (req, res) => {
   if (guardianManagedOnly(req, res)) return; // minors never respond — guardians do
-  const request = db.requests.find((r) => r.id === req.params.id && r.playerId === req.player.id && r.routedTo === 'player');
-  if (!request) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
-  if (request.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
+  const found = db.requests.find((r) => r.id === req.params.id && r.playerId === req.player.id && r.routedTo === 'player');
+  if (!found) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
+  if (found.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
   const { accept, chosenSlot } = req.body || {};
-  const replyCheck = contactReplyFrom(req, res, request);
+  const replyCheck = contactReplyFrom(req, res, found);
   if (!replyCheck.ok) return;
   // Same rule as the guardian route: a blocked organisation can be declined,
   // never accepted (M23 P3 §68/§69).
-  if (accept && isBlocked(req.player.id, request.orgId)) {
+  if (accept && isBlocked(req.player.id, found.orgId)) {
     return res.status(403).json({ error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block before accepting.' });
   }
-  if (request.contactId && rateLimit.limited('contact_response', `player:${req.player.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
+  if (found.contactId && rateLimit.limited('contact_response', `player:${req.player.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
   // P4A-D12: slot checked before the answer is recorded (see the guardian route).
-  const slot = accept && request.type === 'trial' ? chooseTrialSlot(request.trialDetails, chosenSlot) : { ok: true, date: null };
+  const slot = accept && found.type === 'trial' ? chooseTrialSlot(found.trialDetails, chosenSlot) : { ok: true, date: null };
   if (!slot.ok) return res.status(400).json(slot);
   // M23 P4B (D-7): the recipient of a case-tied Trial invitation is re-derived now.
-  if (accept && request.type === 'trial' && request.caseId && m23Ctx?.trialAcceptGate) {
-    const gate = m23Ctx.trialAcceptGate({ request, by: 'player', actorId: req.player.id });
+  if (accept && found.type === 'trial' && found.caseId && m23Ctx?.trialAcceptGate) {
+    const gate = m23Ctx.trialAcceptGate({ request: found, by: 'player', actorId: req.player.id });
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
   }
   const respondedAt = Date.now();
   // One unit of work: the answer, the Contact (S8c, an explicit write), the
   // channel and the trial commit together or not at all (P4A-D15).
-  unit(() => {
-  request.status = accept ? 'accepted' : 'declined';
-  request.respondedAt = respondedAt;
-  request.respondedBy = 'player'; // P4A-D13: both respond paths stamp who answered
+  const answered = unit(() => {
+  // S8a: the answer is an explicit write (P4A-D13: both respond paths stamp who answered).
+  let request = recruitment.requests.update(found.id, (d) => { d.status = accept ? 'accepted' : 'declined'; d.respondedAt = respondedAt; d.respondedBy = 'player'; });
   // M23 P3: the Contact that created this request learns of the answer.
   m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'player', at: respondedAt });
-  // P4A-D15: one save for the answer, the channel and the trial (below).
+  // P4A-D15: one unit for the answer, the channel and the trial (below).
 
   if (accept) {
     // Only now does a contact channel exist.
     const channel = openChannel(request);
-    request.contactChannel = channel.id;
+    request = recruitment.requests.update(request.id, (d) => { d.contactChannel = channel.id; });
     ledgerAppend({ type: `${request.type}_accepted`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
     if (request.type === 'trial') {
       const trial = issueAcceptedTrial({ request, player: req.player, trialDate: slot.date, by: 'player', at: respondedAt, actor: { id: req.player.id, name: req.player.name } });
@@ -3473,8 +3478,9 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
     notify({ kind: 'org_user', id: request.userId }, 'declined', `${req.player.name} declined your ${request.type} request.`, request.id);
   }
   broadcast('requests', { playerId: req.player.id });
+  return recruitment.requests.byId(request.id);
   });
-  res.json(requestForRecipient(request));
+  res.json(requestForRecipient(answered));
 });
 
 // Adult players talk in their own threads; a child never has one.
@@ -4196,7 +4202,7 @@ function tombstoneTrial(t, at) {
   } : undefined;
   const day = t.day ? {
     staff: t.day.staff ?? [], // the club's own named staff and their checks
-    consents: (t.day.consents ?? []).map((c) => ({ id: c.id, by: { kind: c.by?.kind ?? null }, scope: c.scope, at: c.at })),
+    consents: (t.day.consents ?? []).map((c) => ({ id: c.id, by: c.by?.kind ? { kind: c.by.kind } : null, scope: c.scope, at: c.at })),
     arrival: null, emergency: null, collection: null,
     checkins: (t.day.checkins ?? []).map((c) => ({ playerId: c.playerId, at: c.at, byUserId: c.byUserId, byName: c.byName })),
     statusEvents: t.day.statusEvents ?? [],
@@ -4206,12 +4212,12 @@ function tombstoneTrial(t, at) {
   // about the person: instructions, venue address lines, attendance notes,
   // Box Cam evidence links (the player's sessions are no longer the club's to
   // cite), the guardian id in recipient snapshots, and history detail text.
-  const stripSession = (s) => ({ id: s.id, kind: s.kind, startsAt: s.startsAt, endsAt: s.endsAt, venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null, address: null } : null, instructions: null, evidence: [] });
+  const stripSession = (s) => ({ id: s.id, kind: s.kind, startsAt: s.startsAt, endsAt: s.endsAt, venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null, address: null } : null, instructions: null });
   const schedule = t.schedule && typeof t.schedule === 'object' ? {
     timezone: t.schedule.timezone, revision: t.schedule.revision, proposedAt: t.schedule.proposedAt ?? null,
     proposedBy: t.schedule.proposedBy ? { kind: t.schedule.proposedBy.kind } : null,
     confirmedAt: t.schedule.confirmedAt ?? null, confirmedBy: t.schedule.confirmedBy ? { kind: t.schedule.confirmedBy.kind } : null,
-    sessions: (t.schedule.sessions ?? []).map(stripSession),
+    sessions: (t.schedule.sessions ?? []).map((s) => ({ ...stripSession(s), evidence: [] })),
     revisions: (t.schedule.revisions ?? []).map((r) => ({ revision: r.revision, timezone: r.timezone, proposedAt: r.proposedAt ?? null, proposedBy: r.proposedBy ? { kind: r.proposedBy.kind } : null, confirmedAt: r.confirmedAt ?? null, supersededAt: r.supersededAt ?? null, reason: null, material: r.material ?? null, sessions: (r.sessions ?? []).map(stripSession) })),
   } : (t.schedule ?? null);
   return {
@@ -4230,9 +4236,8 @@ function tombstoneTrial(t, at) {
     attendance: (t.attendance ?? []).map((a) => ({ sessionId: a.sessionId, state: a.state, source: a.source, recordedAt: a.recordedAt, recordedBy: a.recordedBy ? { kind: a.recordedBy.kind ?? 'org', userId: a.recordedBy.userId ?? null, name: a.recordedBy.name ?? null } : null, note: null })),
     completion: t.completion ? { state: t.completion.state, at: t.completion.at, by: t.completion.by ? { kind: t.completion.by.kind } : null, reason: null, phase: t.completion.phase ?? null } : null,
     recipient: t.recipient ? { type: t.recipient.type, minor: !!t.recipient.minor, at: t.recipient.at ?? null } : null,
-    blockedBy: t.blockedBy ?? null,
     keys: t.keys ?? {},
-    history: (t.history ?? []).map((h) => ({ id: h.id, at: h.at, action: h.action, by: h.by ? { kind: h.by.kind ?? null } : null, detail: h.detail && typeof h.detail === 'object' ? Object.fromEntries(Object.entries(h.detail).filter(([, v]) => typeof v !== 'string' || v.length <= 40)) : null })),
+    history: (t.history ?? []).map((h) => ({ id: h.id, at: h.at, action: h.action, by: h.by?.kind ? { kind: h.by.kind } : null, detail: h.detail && typeof h.detail === 'object' ? Object.fromEntries(Object.entries(h.detail).filter(([, v]) => typeof v !== 'string' || v.length <= 40)) : null })),
     reminders: t.reminders ?? {},
     rev: t.rev ?? 1, revAt: t.revAt ?? null, revBy: null,
     subjectRemovedAt: at,
@@ -4252,7 +4257,7 @@ function tombstoneRequest(r, at) {
     trialDetails: td ? {
       proposedDate: td.proposedDate ?? null, altSlots: Array.isArray(td.altSlots) ? td.altSlots : [], venue: td.venue ?? null, notes: '',
       // P4B slots: times and venue name/town only; no instructions, no address line.
-      ...(Array.isArray(td.slots) ? { slots: td.slots.map((s) => ({ id: s.id, day: s.day, startsAt: s.startsAt, endsAt: s.endsAt, timezone: s.timezone, kind: s.kind ?? null, venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null, address: null } : null })), instructions: null } : {}),
+      ...(Array.isArray(td.slots) ? { slots: td.slots.map((s) => ({ id: s.id, day: s.day, startsAt: s.startsAt, endsAt: s.endsAt, timezone: s.timezone, kind: s.kind ?? null, venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null, address: null } : null })) } : {}),
     } : null,
     ...(r.caseId ? { caseId: r.caseId } : {}),
     ...(r.trialId ? { trialId: r.trialId } : {}),
@@ -4292,8 +4297,7 @@ function deletePlayerData(playerId) {
   // is gone from it. The case's status is NOT touched here — deletion is not
   // a lifecycle event, and no path other than the lifecycle writer moves a
   // case (M23 P2). The case's copy of the name goes with the person.
-  // S8a-core: the tombstones replace the records in place in the recruitment
-  // repository (the former array replacements) and land in this unit's commit.
+  // S8a: each tombstone is an explicit write of the reduced record, in this unit.
   recruitment.tombstoneForPlayer(playerId, { request: (r) => tombstoneRequest(r, at), trial: (t) => tombstoneTrial(t, at) });
   for (const c of db.recruitmentCases ?? []) {
     if (c?.playerId === playerId) { c.playerName = null; c.subjectRemovedAt = at; }
@@ -4633,7 +4637,7 @@ function revokeOrgUserAccess(userId) {
 
 registerM12({
   db, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
   signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4852,6 +4856,7 @@ const m23Ctx = registerM23({
   recruitmentEvidenceProvider: recruitmentEvidence,
   recruitmentCases, // S8b: the formal decision row enters through the repository (and leaves it on a transport failure)
   recruitmentContactsOffers, // S8c: contacts are explicit repository writes (contacts.create / update), inside a unit of work
+  recruitment, // S8a: requests and trials are explicit repository writes (requests/trials.create / update), inside a unit of work
   unit, afterCommit: (fn) => store.afterCommit(fn),
   ...m19Ctx,
   isAdult,

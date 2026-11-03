@@ -1,248 +1,378 @@
 /**
- * Recruitment requests and accepted trials — migration plan step S8a-core
- * (docs/architecture/sqlite-migration-plan.md §D.7 as corrected after the independent
- * reviews of a6c40f3, cd7dc95 and f2121b5 and accepted at d0f0205; approved by the
- * Founder's three explicit decisions of 22 October 2026: Q7a tolerant player
- * references, Q7b strict case references in code until S8b, Q7c strict guardian
- * references in code without the drafted SET NULL key).
+ * Recruitment requests and accepted trials as typed tables with EXPLICIT writes (migration `0015_recruitment`,
+ * docs/architecture/migration.md §4.3; the S8c and S8d repositories are the template).
  *
- * Owns fifteen tables (and, since migration 0015, the `channels` definition carrying
- * the REAL `request_id` foreign key — the conversion D-A promised) and two read-only
- * collection views:
+ * Tables (file 02):
+ *   recruitment_requests, request_trial_slots                                      → db.requests
+ *   trials, trial_schedule_sessions, trial_session_evidence, trial_schedule_revisions,
+ *   trial_revision_sessions, trial_attendance, trial_history, trial_keys, trial_reminders,
+ *   trial_reports, trial_day_staff, trial_day_consents, trial_day_checkins,
+ *   trial_day_status_events                                                         → db.trials
+ * and `channels`, rebuilt by 0015 so its `request_id` is a real key.
  *
- *   recruitment_requests, request_trial_slots                    → db.requests
- *   trials, trial_schedule_sessions, trial_session_evidence,
- *   trial_schedule_revisions, trial_attendance, trial_reminders,
- *   trial_day_staff, trial_day_consents, trial_day_checkins,
- *   trial_day_status_events, trial_reports, trial_history          → db.trials
- *   idempotency_keys (the `keys` of both)
+ * EVERY FIELD IS A TYPED COLUMN with the vocabulary CHECKs of the domain rules (server.mjs issueRecruitmentRequest and
+ * issueAcceptedTrial, m23/trial.mjs, m23/trialRoutes.mjs, m12/journeys.mjs). There is no `absent_keys_json`,
+ * `offtype_json`, `extra_json` or `raw_json`. A record the columns cannot hold — an unknown field at any level
+ * included — is REFUSED with its id, at a repository write (the unit rolls back) and at a snapshot write (the save
+ * rolls back). An `undefined` field is an absent one (the JSON rule); an absent field reads back as null, an absent
+ * list as empty. A trial always reads back with its trial-day container, its five client-key lists and its reminder
+ * map, so a reader never has to create them.
  *
- * WHAT THE ROWS ARE. `db.requests` and `db.trials` were JSON blobs every build since
- * M9 wrote and mutated IN PLACE from twenty-five modules: the writers' literals
- * (server.mjs issueRecruitmentRequest, the open-day outcome route, issueAcceptedTrial,
- * the report route, tombstoneRequest/tombstoneTrial; m23/trialRoutes.mjs the P4B
- * invitation and the schedule/cancel/attendance/complete/evidence/recipient routes;
- * m12/journeys.mjs the day containers; m12/operations.mjs the reminder markers) and
- * dozens of field assignments and nested pushes. This step keeps that contract: the
- * two views are read-only ARRAYS (push/splice/assignment refused) whose elements are
- * the plain, mutable records the routes hold, and every change a route makes in
- * place — a status, a schedule, a pushed attendance row, a day container, a report —
- * is detected and written by the next save's `flush` (the organisations' facet
- * contract since S3), so each row lands in exactly the save that carried its blob
- * before: the invitation in issueRecruitmentRequest's persistNow(), the answer,
- * the thread and the trial in the respond route's one save (P4A-D15), the report
- * in its route's save, a day change in its route's save. New records enter through
- * `addRequest` / `addTrial` (the three former `push` sites) and the deletion unit's
- * tombstones through `tombstoneForPlayer` (the two former array replacements).
+ * EXPLICIT WRITES. `db.requests` and `db.trials` are read-only views over the repository's mirrors; every record they
+ * hand out is a read-only proxy, so an in-place edit throws. A route changes a record by calling an operation:
+ * `requests.create(record)`, `requests.update(id, (draft) => { … })`, the same for `trials`, and the deletion unit's
+ * `tombstoneForPlayer`. `update` hands the caller a plain copy to change, types the result whole, writes the record's
+ * rows at once and re-reads it from the tables into the mirror. An operation joins the open unit of work
+ * (store.unit) or runs a transaction of its own; the mirrors are restored by the unit's rollback through `hook()`.
  *
- * LOSSLESS, AT EVERY LEVEL (plan §D.7.3, D3). Every record is mapped by a shape: the
- * literal's keys in the writer's order, each scalar to its column, each known nested
- * object (trialDetails, trialDetails.private, recipient, schedule, schedule.proposedBy,
- * completion, completion.by, lifecycle, revBy, day, day.arrival, day.emergency,
- * day.collection, …) to columns of the same row, each list to a child table in list
- * order (`position`), each map (`reminders`, `keys`) to its table. A known key that is
- * ABSENT is listed in `absent_keys_json` (dotted for nested keys) and comes back
- * absent; a present `null` is a NULL column and comes back null; a present value the
- * column cannot hold (a string where an integer belongs, `null` where an object
- * belongs, a non-array where a list belongs) is kept verbatim in `offtype_json` under
- * its path and comes back as it was; every unknown own key at any level is kept in
- * `extra_json` (nested extras under their known parent key) and spread back first.
- * `blockedBy` (read by trialClubView, carried by tombstoneTrial) is a column;
- * `trials.keys.accept {key: null, fp}` cannot be an idempotency row (a null key) and
- * is kept as the value it is; the tombstone's present-and-null
- * `trialDetails.instructions` is a column; the `day` container's presence is
- * recorded; `recipient.playerId` is stored (and counted when it differs from the
- * row's player). A live `undefined` is absence and a non-finite number persists as
- * JSON null — the blob's own rules. No vocabulary or length CHECK is applied to a
- * value the writers validate (a storage-only step changes no product behaviour);
- * the NOT NULL columns are the identifiers the FKs need.
+ * References. `org_id` → orgs and `user_id` → org_users (RESTRICT). `case_id` (both tables) → recruitment_cases and
+ * `recruitment_requests.trial_id` → trials are DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): the cases are still
+ * written at the unit's commit by their staged repository (S8b), and a snapshot writes a request before the trial it
+ * names. `trials.request_id` → recruitment_requests is immediate. Player ids: no key, tolerant and counted (Q7a).
+ * Guardian ids: no key (identity rewrites the guardians table), checked in code at every write (Q7c).
  *
- * REFERENCES — THE APPROVED SCOPE:
- *   player_id (both tables)   NO key, TOLERANT (Q7a): a live id resolves, a retained id
- *                             resolves to the retained record, a historically missing
- *                             id is preserved and counted — never refused, never given
- *                             a fabricated account, never deleted.
- *   case_id (both tables)     NO key yet (S8b creates recruitment_cases): STRICT in code
- *                             (Q7b) — a write or import naming a case that is not in the
- *                             retained `recruitmentCases` collection is refused with ids
- *                             only; every save asserts the FINAL state.
- *   guardian_id, recipient_guardian_id (requests), recipient_guardian_id (trials)
- *                             NO key (the drafted SET NULL would fire at every identity
- *                             rewrite): STRICT in code (Q7c) — refused when the guardian
- *                             does not exist; the FINAL state asserted on every save.
- *   trials.request_id         NOT NULL UNIQUE REFERENCES recruitment_requests RESTRICT.
- *   recruitment_requests.trial_id   REFERENCES trials ON DELETE SET NULL.
- *   org_id / user_id          REFERENCES orgs / org_users RESTRICT (the parent-preserving
- *                             upsert-and-prune tables).
- *   channels.request_id       REFERENCES recruitment_requests RESTRICT (rebuilt by 0015).
- *   the child tables          CASCADE from their owner; trial_reports and trial_history
- *                             RESTRICT (deleted explicitly, first, on a departure).
- *   recruitment_requests_one_pending  WITHDRAWN (D2): the direct route keeps its
- *                             code-level REQUEST_PENDING answer; the open-day outcome
- *                             route keeps its several pending invitations.
- *
- * THE WRITE (plan §D.7.5, six phases, constraints IMMEDIATE, no deferral), the same
- * for a flush, a whole snapshot, the cutover import and a restore:
- *   1. requests upserted, the back-reference PARKED (NULL on insert; a survivor keeps
- *      its stored trial_id only when it equals the final one); slots and keys rewritten;
- *   2. trials: (a) DEPARTURES — rows no longer listed or whose request_id changes — their
- *      RESTRICT children deleted first, then the row; (b) RELEASES — a survivor leaving
- *      its trials_one_open_per_case slot (terminal state, another case, no case) has
- *      case_id PARKED to NULL by a parent-preserving update, never deleted, before any
- *      arrival; (c) upserts with the final case/state, children rewritten in list order;
- *   3. the supplied requests' final trial_id assigned (the trial exists now);
- *   4. channels (its own replace; its key is real now);
- *   5. requests no longer listed pruned (CASCADE takes the slots; a request still named
- *      by a trial or a thread refuses the save — an intentional removal removes its
- *      dependants in the same snapshot);
- *   6. the FINAL-state assertions: the pair (a request naming a trial is named back by
- *      it; a trial's request names it, or carries NO trialId key at all — the pre-P4B
- *      legacy pair, counted, never fabricated), every case id in the final
- *      recruitmentCases, every guardian id in the final guardians table.
- * A case-only change with `requests` omitted persists exactly what the same change
- * with the unchanged requests persists; no link is ever reconstructed from a trial.
- *
- * TWO FAILURE CONTRACTS (the store's, unchanged): a failed ORDINARY save leaves the
- * records as they are — memory is the intended state — and the next save lands them
- * once (change tracking reflects COMMITTED state only); an aborted UNIT OF WORK rolls
- * the tables back AND restores the whole mirror in place through the graph memento
- * (every record, nested object and array by identity: a held `trial.schedule` reads
- * the pre-unit value), the pending edits made before the unit still pending.
- *
- * Whether the tables are authoritative is decided by the cutover record
- * `0015_recruitment` in `data_migrations`, never by the tables existing. Refusals
- * (RECRUITMENT_IMPORT_BLOCKED and the reference codes) name collections, positions,
- * ids and reasons — never a name, a message, an address or a note.
+ * Refusals name tables, fields and ids — never a name, a message, a note, an address or a phone number.
  */
 import { readonlyView, markView } from './readonly.mjs';
-import { captureGraph, restoreGraph } from './memento.mjs';
-import { migrationApplied, transaction } from './database.mjs';
-import { cloneJson } from './outboxPush.mjs';
-import { readTrialsBlob, trialReportsFor as trialReportsOf } from './playerSubrecords.mjs';
+import { transaction, migrationApplied } from './database.mjs';
+import { ORG_TYPES } from './orgs.mjs';
+import {
+  TRIAL_WORKFLOW_STATES, TRIAL_SESSION_KINDS, TRIAL_ATTENDANCE_STATES, TRIAL_ATTENDANCE_SOURCES, TRIAL_COMPLETION_STATES,
+  TRIAL_CANCEL_ACTORS, TRIAL_STATUSES, TRIAL_STAFF_CHECK_STATES, TRIAL_DAY_EVENT_KINDS, TRIAL_CONSENT_SCOPES, TRIAL_KEY_ACTS, TRIAL_LIMITS,
+} from '../m23/trial.mjs';
+import { TRIAL_REPORT_FIELDS } from '../domain.mjs';
 
 export const RECRUITMENT_MIGRATION = '0015_recruitment';
 export const RECRUITMENT_COLLECTIONS = Object.freeze(['requests', 'trials']);
-/** The collections the strict references resolve against and the identity table they are checked in. */
-export const CASES_COLLECTION = 'recruitmentCases';
-
-export const EXTRA_CHECK = (col) => `CHECK (${col} IS NULL OR (json_valid(${col}) AND json_type(${col}) = 'object'))`;
-export const ABSENT_CHECK = "CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array'))";
-export const JSON_CHECK = (col) => `CHECK (${col} IS NULL OR json_valid(${col}))`;
-
+export const REQUEST_TABLES = Object.freeze(['recruitment_requests', 'request_trial_slots']);
+export const TRIAL_TABLES = Object.freeze(['trials', 'trial_schedule_sessions', 'trial_session_evidence', 'trial_schedule_revisions', 'trial_revision_sessions', 'trial_attendance', 'trial_history', 'trial_keys', 'trial_reminders', 'trial_reports', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events']);
+export const RECRUITMENT_TABLES = Object.freeze([...REQUEST_TABLES, ...TRIAL_TABLES]);
 export const recruitmentLive = (sqlite) => migrationApplied(sqlite, RECRUITMENT_MIGRATION);
-/** S8b (migration 0016): once recorded, the recruitmentCases collection is the recruitment_cases table, not a blob (the id is a constant here so this module needs no import of its sibling). */
-const CASES_MIGRATION = '0016_recruitment_cases';
-export const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
-const blocked = (detail, extra = {}) => Object.assign(new Error(`RECRUITMENT_IMPORT_BLOCKED: ${detail}; nothing was imported`), { code: 'RECRUITMENT_IMPORT_BLOCKED', ...extra });
-const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+
+// ------------------------------------------------------------------ small shared helpers (S8b, S8c and S8d import these)
+export const describe = (v) => (v === null ? 'null' : v === undefined ? 'nothing' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
 export const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 export const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
 export const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
-export const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
-/** The blob's JSON rules: a non-finite number is kept live (persisted as null), a nested undefined is stored as JSON.stringify stored it. */
-const JSON_RULES = Object.freeze({ nonFinite: 'keep', undefinedNested: 'json' });
-export const clone = (v, at) => cloneJson(v, at, JSON_RULES);
-export const parseJson = (text, at) => clone(JSON.parse(text), at).value;
 export const ids = (list) => list.slice(0, 20).join(', ') + (list.length > 20 ? ', …' : '');
-const jsonOrNull = (obj) => (Object.keys(obj).length ? JSON.stringify(obj) : null);
-const TERMINAL = Object.freeze(['completed', 'cancelled']);
-const inSlot = (caseId, state) => typeof caseId === 'string' && !TERMINAL.includes(state);
+const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
-// ------------------------------------------------------------------ the shapes (the writers' literals, key for key)
-// kinds: text (string) | int (safe integer) | num (finite number) | bool | json (any JSON value) | id (non-empty string)
-const by3 = (cols) => ({ keys: ['kind', 'userId', 'id', 'name'], cols: { kind: [cols[0], 'text'], userId: [cols[1], 'text'], id: [cols[2], 'text'], name: [cols[3], 'text'] } });
-const VENUE = (p) => ({ keys: ['name', 'town', 'address'], cols: { name: [`${p}_name`, 'text'], town: [`${p}_town`, 'text'], address: [`${p}_address`, 'text'] } });
-
-const SLOT = { table: 'request_trial_slots', ownerCols: ['request_id'], shape: { keys: ['id', 'day', 'kind', 'startsAt', 'endsAt', 'timezone', 'venue'], cols: { id: ['id', 'text'], day: ['day', 'text'], kind: ['kind', 'text'], startsAt: ['starts_at', 'int'], endsAt: ['ends_at', 'int'], timezone: ['timezone', 'text'] }, objects: { venue: VENUE('venue') } }, indexes: ['CREATE INDEX request_trial_slots_id ON request_trial_slots (id)', 'CREATE UNIQUE INDEX request_trial_slots_one_per_day ON request_trial_slots (request_id, day) WHERE day IS NOT NULL'] }; // one slot per day per invitation (validateInvitation, trialRoutes.mjs; plan §D.7.3)
-const KEYS_REQUESTS = { table: 'idempotency_keys', ownerTable: 'recruitment_requests' };
-const KEYS_TRIALS = { table: 'idempotency_keys', ownerTable: 'trials' };
-const REQUEST_SHAPE = {
-  keys: ['id', 'playerId', 'playerName', 'orgId', 'orgName', 'orgType', 'orgVerified', 'orgSafeguardingCertified', 'trustedPartner', 'userId', 'scoutName', 'scoutRole', 'type', 'message', 'subject', 'contactId', 'trialDetails', 'status', 'createdAt', 'respondedAt', 'respondedBy', 'routedTo', 'guardianId', 'contactChannel', 'caseId', 'trialId', 'recipient', 'keys', 'subjectRemovedAt'],
-  cols: { id: ['id', 'id'], playerId: ['player_id', 'text'], playerName: ['player_name', 'text'], orgId: ['org_id', 'text'], orgName: ['org_name', 'text'], orgType: ['org_type', 'text'], orgVerified: ['org_verified', 'bool'], orgSafeguardingCertified: ['org_safeguarding_certified', 'bool'], trustedPartner: ['org_trusted_partner', 'bool'], userId: ['user_id', 'text'], scoutName: ['scout_name', 'text'], scoutRole: ['scout_role', 'text'], type: ['type', 'text'], message: ['message', 'text'], subject: ['subject', 'text'], contactId: ['contact_id', 'text'], status: ['status', 'text'], createdAt: ['created_at', 'int'], respondedAt: ['responded_at', 'int'], respondedBy: ['responded_by', 'text'], routedTo: ['routed_to', 'text'], guardianId: ['guardian_id', 'text'], contactChannel: ['contact_channel_id', 'text'], caseId: ['case_id', 'text'], trialId: ['trial_id', 'text'], subjectRemovedAt: ['subject_removed_at', 'int'] },
-  objects: {
-    trialDetails: { keys: ['proposedDate', 'altSlots', 'venue', 'notes', 'slots', 'private', 'instructions'], cols: { proposedDate: ['trial_proposed_date', 'text'], altSlots: ['trial_alt_slots_json', 'json'], venue: ['trial_venue', 'text'], notes: ['trial_notes', 'text'], instructions: ['trial_instructions', 'text'] }, lists: { slots: SLOT }, objects: { private: { keys: ['venueAddress', 'instructions'], cols: { venueAddress: ['trial_private_venue_address', 'text'], instructions: ['trial_private_instructions', 'text'] } } } },
-    recipient: { keys: ['type', 'playerId', 'guardianId', 'minor'], cols: { type: ['recipient_type', 'text'], playerId: ['recipient_player_id', 'text'], guardianId: ['recipient_guardian_id', 'text'], minor: ['recipient_minor', 'bool'] } },
-  },
-  maps: { keys: KEYS_REQUESTS },
-};
-const EVIDENCE = { table: 'trial_session_evidence', ownerCols: ['trial_id', 'session_position'], shape: { keys: ['id', 'kind', 'sessionId', 'linkedAt', 'linkedBy', 'removedAt', 'removedBy'], cols: { id: ['id', 'text'], kind: ['kind', 'text'], sessionId: ['box_session_id', 'text'], linkedAt: ['linked_at', 'int'], removedAt: ['removed_at', 'int'] }, objects: { linkedBy: by3(['linked_by_kind', 'linked_by_user_id', 'linked_by_id', 'linked_by_name']), removedBy: by3(['removed_by_kind', 'removed_by_user_id', 'removed_by_id', 'removed_by_name']) } }, indexes: ['CREATE INDEX trial_session_evidence_box_session ON trial_session_evidence (box_session_id)', 'CREATE UNIQUE INDEX trial_session_evidence_one_active ON trial_session_evidence (trial_id, session_position, box_session_id) WHERE removed_at IS NULL AND box_session_id IS NOT NULL'] }; // one ACTIVE link per (session, box session): D-12, trialRoutes.mjs (linking twice is a replay); plan §D.7.3
-const SESSION = { table: 'trial_schedule_sessions', ownerCols: ['trial_id'], shape: { keys: ['id', 'kind', 'startsAt', 'endsAt', 'venue', 'instructions', 'evidence'], cols: { id: ['id', 'text'], kind: ['kind', 'text'], startsAt: ['starts_at', 'int'], endsAt: ['ends_at', 'int'], instructions: ['instructions', 'text'] }, objects: { venue: VENUE('venue') }, lists: { evidence: EVIDENCE } }, indexes: ['CREATE INDEX trial_schedule_sessions_id ON trial_schedule_sessions (id)', 'CREATE INDEX trial_schedule_sessions_trial_starts ON trial_schedule_sessions (trial_id, starts_at)'] };
-const REVISION = { table: 'trial_schedule_revisions', ownerCols: ['trial_id'], shape: { keys: ['revision', 'timezone', 'sessions', 'proposedAt', 'proposedBy', 'confirmedAt', 'confirmedBy', 'supersededAt', 'reason', 'material'], cols: { revision: ['revision', 'int'], timezone: ['timezone', 'text'], sessions: ['sessions_json', 'json'], proposedAt: ['proposed_at', 'int'], confirmedAt: ['confirmed_at', 'int'], supersededAt: ['superseded_at', 'int'], reason: ['reason', 'text'], material: ['material', 'bool'] }, objects: { proposedBy: by3(['proposed_by_kind', 'proposed_by_user_id', 'proposed_by_id', 'proposed_by_name']), confirmedBy: by3(['confirmed_by_kind', 'confirmed_by_user_id', 'confirmed_by_id', 'confirmed_by_name']) } } };
-const ATTENDANCE = { table: 'trial_attendance', ownerCols: ['trial_id'], shape: { keys: ['sessionId', 'state', 'source', 'recordedBy', 'recordedAt', 'note'], cols: { sessionId: ['session_id', 'text'], state: ['state', 'text'], source: ['source', 'text'], recordedAt: ['recorded_at', 'int'], note: ['note', 'text'] }, objects: { recordedBy: by3(['recorded_by_kind', 'recorded_by_user_id', 'recorded_by_id', 'recorded_by_name']) } }, indexes: ['CREATE INDEX trial_attendance_trial_session_at ON trial_attendance (trial_id, session_id, recorded_at)'] };
-const HISTORY = { table: 'trial_history', ownerCols: ['trial_id'], restrict: true, shape: { keys: ['id', 'at', 'action', 'by', 'detail'], cols: { id: ['id', 'text'], at: ['at', 'int'], action: ['action', 'text'], detail: ['detail_json', 'json'] }, objects: { by: by3(['by_kind', 'by_user_id', 'by_id', 'by_name']) } }, indexes: ['CREATE INDEX trial_history_trial_at ON trial_history (trial_id, at)', 'CREATE INDEX trial_history_id ON trial_history (id)'] };
-const STAFF = { table: 'trial_day_staff', ownerCols: ['trial_id'], shape: { keys: ['id', 'name', 'role', 'check', 'addedBy', 'addedAt'], cols: { id: ['id', 'text'], name: ['name', 'text'], role: ['role', 'text'], addedBy: ['added_by_name', 'text'], addedAt: ['added_at', 'int'] }, objects: { check: { keys: ['kind', 'ref', 'status', 'expiresAt', 'reviewedBy', 'reviewedAt'], cols: { kind: ['check_kind', 'text'], ref: ['check_ref', 'text'], status: ['check_status', 'text'], expiresAt: ['check_expires_raw', 'text'], reviewedBy: ['check_reviewed_by_name', 'text'], reviewedAt: ['check_reviewed_at', 'int'] } } } } };
-const CONSENT = { table: 'trial_day_consents', ownerCols: ['trial_id'], shape: { keys: ['id', 'by', 'scope', 'at'], cols: { id: ['id', 'text'], scope: ['scope', 'text'], at: ['at', 'int'] }, objects: { by: by3(['by_kind', 'by_user_id', 'by_id', 'by_name']) } }, indexes: ['CREATE UNIQUE INDEX trial_day_consents_one_per_actor ON trial_day_consents (trial_id, scope, by_id) WHERE by_id IS NOT NULL AND scope IS NOT NULL'] };
-const CHECKIN = { table: 'trial_day_checkins', ownerCols: ['trial_id'], shape: { keys: ['playerId', 'at', 'byUserId', 'byName'], cols: { playerId: ['player_id', 'text'], at: ['at', 'int'], byUserId: ['by_user_id', 'text'], byName: ['by_name', 'text'] } } };
-const STATUS_EVENT = { table: 'trial_day_status_events', ownerCols: ['trial_id'], shape: { keys: ['kind', 'at', 'by', 'reason', 'newDate'], cols: { kind: ['kind', 'text'], at: ['at', 'int'], by: ['by_name', 'text'], reason: ['reason', 'text'], newDate: ['new_date', 'text'] } }, indexes: ['CREATE INDEX trial_day_status_events_trial_at ON trial_day_status_events (trial_id, at)'] };
-const REPORT = { table: 'trial_reports', ownerCols: ['trial_id'], single: true, restrict: true, shape: { keys: ['id', 'trialId', 'playerId', 'orgId', 'orgName', 'userId', 'scoutName', 'filedAt', 'acceleration', 'sprintSpeedKmh', 'distanceKm', 'passCompletionPct', 'duelSuccessPct', 'coachRating', 'notes', 'strengthNote', 'focusNote'], cols: { id: ['id', 'text'], trialId: ['report_trial_id', 'text'], playerId: ['player_id', 'text'], orgId: ['org_id', 'text'], orgName: ['org_name', 'text'], userId: ['user_id', 'text'], scoutName: ['scout_name', 'text'], filedAt: ['filed_at', 'int'], acceleration: ['acceleration', 'num'], sprintSpeedKmh: ['sprint_speed_kmh', 'num'], distanceKm: ['distance_km', 'num'], passCompletionPct: ['pass_completion_pct', 'num'], duelSuccessPct: ['duel_success_pct', 'num'], coachRating: ['coach_rating', 'num'], notes: ['notes', 'text'], strengthNote: ['strength_note', 'text'], focusNote: ['focus_note', 'text'] } }, indexes: ['CREATE INDEX trial_reports_player ON trial_reports (player_id)', 'CREATE INDEX trial_reports_org ON trial_reports (org_id, filed_at)', 'CREATE INDEX trial_reports_id ON trial_reports (id)'] };
-const REMINDERS = { table: 'trial_reminders', ownerCols: ['trial_id'], map: true };
-const TRIAL_SHAPE = {
-  keys: ['id', 'requestId', 'caseId', 'playerId', 'playerName', 'orgId', 'orgName', 'scoutName', 'acceptedAt', 'acceptedBy', 'guardianApproved', 'proposedDate', 'venue', 'notes', 'reportDueAt', 'status', 'reminderSent', 'feedbackEscalatedAt', 'report', 'day', 'workflowState', 'schedule', 'attendance', 'completion', 'recipient', 'keys', 'history', 'reminders', 'lifecycle', 'rev', 'revAt', 'revBy', 'blockedBy', 'subjectRemovedAt'],
-  cols: { id: ['id', 'id'], requestId: ['request_id', 'text'], caseId: ['case_id', 'text'], playerId: ['player_id', 'text'], playerName: ['player_name', 'text'], orgId: ['org_id', 'text'], orgName: ['org_name', 'text'], scoutName: ['scout_name', 'text'], acceptedAt: ['accepted_at', 'int'], acceptedBy: ['accepted_by', 'text'], guardianApproved: ['guardian_approved', 'bool'], proposedDate: ['proposed_date', 'text'], venue: ['venue', 'text'], notes: ['notes', 'text'], reportDueAt: ['report_due_at', 'int'], status: ['status', 'text'], reminderSent: ['reminder_sent', 'bool'], feedbackEscalatedAt: ['feedback_escalated_at', 'int'], workflowState: ['workflow_state', 'text'], rev: ['rev', 'int'], revAt: ['rev_at', 'int'], blockedBy: ['blocked_by_json', 'json'], subjectRemovedAt: ['subject_removed_at', 'int'] },
-  objects: {
-    schedule: { keys: ['timezone', 'revision', 'proposedAt', 'proposedBy', 'confirmedAt', 'confirmedBy', 'declinedAt', 'declinedBy', 'sessions', 'revisions'], cols: { timezone: ['schedule_timezone', 'text'], revision: ['schedule_revision', 'int'], proposedAt: ['schedule_proposed_at', 'int'], confirmedAt: ['schedule_confirmed_at', 'int'], declinedAt: ['schedule_declined_at', 'int'] }, objects: { proposedBy: by3(['schedule_proposed_by_kind', 'schedule_proposed_by_user_id', 'schedule_proposed_by_id', 'schedule_proposed_by_name']), confirmedBy: by3(['schedule_confirmed_by_kind', 'schedule_confirmed_by_user_id', 'schedule_confirmed_by_id', 'schedule_confirmed_by_name']), declinedBy: by3(['schedule_declined_by_kind', 'schedule_declined_by_user_id', 'schedule_declined_by_id', 'schedule_declined_by_name']) }, lists: { sessions: SESSION, revisions: REVISION } },
-    completion: { keys: ['state', 'at', 'by', 'reason', 'phase', 'cancelledBy'], cols: { state: ['completion_state', 'text'], at: ['completion_at', 'int'], reason: ['completion_reason', 'text'], phase: ['completion_phase', 'text'], cancelledBy: ['completion_cancelled_by', 'text'] }, objects: { by: by3(['completion_by_kind', 'completion_by_user_id', 'completion_by_id', 'completion_by_name']) } },
-    recipient: { keys: ['type', 'playerId', 'guardianId', 'minor', 'at'], cols: { type: ['recipient_type', 'text'], playerId: ['recipient_player_id', 'text'], guardianId: ['recipient_guardian_id', 'text'], minor: ['recipient_minor', 'bool'], at: ['recipient_at', 'int'] } },
-    lifecycle: { keys: ['applied', 'from', 'to', 'at', 'reason'], cols: { applied: ['lifecycle_applied', 'bool'], from: ['lifecycle_from', 'text'], to: ['lifecycle_to', 'text'], at: ['lifecycle_at', 'int'], reason: ['lifecycle_reason', 'text'] } },
-    revBy: { keys: ['userId', 'name'], cols: { userId: ['rev_by_user_id', 'text'], name: ['rev_by_name', 'text'] } },
-    day: { keys: ['staff', 'consents', 'arrival', 'emergency', 'checkins', 'collection', 'statusEvents'], cols: {}, objects: { arrival: { keys: ['time', 'address', 'notes'], cols: { time: ['day_arrival_time', 'text'], address: ['day_arrival_address', 'text'], notes: ['day_arrival_notes', 'text'] } }, emergency: { keys: ['name', 'phone', 'setBy', 'at'], cols: { name: ['day_emergency_name', 'text'], phone: ['day_emergency_phone', 'text'], setBy: ['day_emergency_set_by', 'text'], at: ['day_emergency_at', 'int'] } }, collection: { keys: ['policy'], cols: { policy: ['day_collection_policy', 'text'] } } }, lists: { staff: STAFF, consents: CONSENT, checkins: CHECKIN, statusEvents: STATUS_EVENT } },
-  },
-  lists: { attendance: ATTENDANCE, history: HISTORY },
-  object: { report: REPORT },
-  maps: { keys: KEYS_TRIALS, reminders: REMINDERS },
-};
-const REQUESTS = { table: 'recruitment_requests', shape: REQUEST_SHAPE };
-const TRIALS = { table: 'trials', shape: TRIAL_SHAPE };
-/** The child tables of a parent, in write order (a sub-child after its owner). */
-export const childSpecs = (shape, out = []) => { for (const s of Object.values(shape.lists ?? {})) { out.push(s); childSpecs(s.shape, out); } for (const s of Object.values(shape.object ?? {})) { out.push(s); childSpecs(s.shape, out); } for (const s of Object.values(shape.objects ?? {})) childSpecs(s, out); return out; };
-const REQUEST_CHILDREN = Object.freeze(childSpecs(REQUEST_SHAPE));
-const TRIAL_CHILDREN = Object.freeze(childSpecs(TRIAL_SHAPE));
-export const RECRUITMENT_TABLES = Object.freeze(['recruitment_requests', ...REQUEST_CHILDREN.map((c) => c.table), 'trials', ...TRIAL_CHILDREN.map((c) => c.table), 'trial_reminders', 'idempotency_keys']);
-/** The unique indexes the write strategy retains (plan §D.7.3): structural, or enforced by every writer. */
-
-// ------------------------------------------------------------------ the DDL (generated from the shapes; amended into docs/architecture/sql/02_recruitment.sql at this step)
-export const sqlType = (kind) => (kind === 'int' || kind === 'bool' ? 'INTEGER' : kind === 'num' ? 'REAL' : 'TEXT');
-export const columnsOf = (shape, out = []) => { for (const k of shape.keys) { if (shape.cols?.[k]) out.push(shape.cols[k]); else if (shape.objects?.[k]) columnsOf(shape.objects[k], out); } return out; };
-const CONSTRAINTS = {
-  recruitment_requests: { id: 'TEXT NOT NULL UNIQUE', player_id: 'TEXT NOT NULL', org_id: 'TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT', user_id: 'TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT', trial_id: 'TEXT REFERENCES trials(id) ON DELETE SET NULL' },
-  trials: { id: 'TEXT NOT NULL UNIQUE', request_id: 'TEXT NOT NULL UNIQUE REFERENCES recruitment_requests(id) ON DELETE RESTRICT', player_id: 'TEXT NOT NULL', org_id: 'TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT' },
-  trial_reports: { org_id: 'TEXT REFERENCES orgs(id) ON DELETE RESTRICT' },
-};
-/** S8b (migration 0016, Q7b's conversion): the two parents' `case_id` becomes a REAL key to recruitment_cases (RESTRICT: a case still named by a request or a trial is never deleted under it). */
-const CASE_KEY = 'TEXT REFERENCES recruitment_cases(id) ON DELETE RESTRICT';
-function parentDdl(spec, indexes, { caseKey = false } = {}) {
-  const constraintOf = (col) => (caseKey && col === 'case_id' ? CASE_KEY : CONSTRAINTS[spec.table]?.[col]);
-  const cols = columnsOf(spec.shape).map(([col, kind]) => `  ${col.padEnd(32)} ${constraintOf(col) ?? sqlType(kind)}${kind === 'json' && !constraintOf(col) ? ` ${JSON_CHECK(col)}` : ''}`);
-  return `CREATE TABLE ${spec.table} (\n  seq                              INTEGER PRIMARY KEY,\n${cols.join(',\n')},\n  absent_keys_json                 TEXT ${ABSENT_CHECK},\n  offtype_json                     TEXT ${EXTRA_CHECK('offtype_json')},\n  extra_json                       TEXT ${EXTRA_CHECK('extra_json')}\n) STRICT;\n${indexes.map((ix) => `${ix};`).join('\n')}`;
-}
-const REQUEST_INDEXES = ['CREATE INDEX recruitment_requests_org_player_type_status ON recruitment_requests (org_id, player_id, type, status)', 'CREATE INDEX recruitment_requests_player ON recruitment_requests (player_id, created_at)', 'CREATE INDEX recruitment_requests_routed_guardian ON recruitment_requests (routed_to, guardian_id)', 'CREATE INDEX recruitment_requests_case_type_created ON recruitment_requests (case_id, type, created_at)', 'CREATE INDEX recruitment_requests_contact ON recruitment_requests (contact_id)', 'CREATE INDEX recruitment_requests_trial ON recruitment_requests (trial_id)'];
-const TRIAL_INDEXES = ['CREATE INDEX trials_org_status ON trials (org_id, status)', 'CREATE INDEX trials_org_player_case ON trials (org_id, player_id, case_id)', 'CREATE INDEX trials_player ON trials (player_id)', 'CREATE INDEX trials_case ON trials (case_id)', 'CREATE INDEX trials_status_report_due ON trials (status, report_due_at)', 'CREATE INDEX trials_workflow_confirmed ON trials (workflow_state, schedule_confirmed_at)', "CREATE UNIQUE INDEX trials_one_open_per_case ON trials (case_id) WHERE case_id IS NOT NULL AND workflow_state NOT IN ('completed', 'cancelled')"];
-/** The DDL of one of the two parents (table and its indexes), with or without the S8b case key: 0015 creates them without, 0016 rebuilds them with, the S8b rollback rebuilds them without again. */
-export function recruitmentParentDdl(table, { caseKey = false } = {}) {
-  const spec = table === 'recruitment_requests' ? REQUESTS : table === 'trials' ? TRIALS : null;
-  if (!spec) throw new TypeError(`recruitmentParentDdl: ${table} is not a recruitment parent`);
-  const indexes = spec === REQUESTS ? REQUEST_INDEXES : TRIAL_INDEXES;
-  return { table: parentDdl(spec, [], { caseKey }), indexes };
-}
-/** The ONE shared idempotency_keys table: its owner CHECK names the owner tables that exist (0015: the two S8a parents; 0016 broadens it to the S8b owners; the S8b rollback narrows it again). */
-export const S8A_KEY_OWNERS = Object.freeze(['recruitment_requests', 'trials']);
-export function idempotencyKeysDdl(owners = S8A_KEY_OWNERS) {
+/**
+ * The ONE shared idempotency_keys table of the case graph (S8b's drafts, handoffs and formal decisions; S8d's packages).
+ * Its owner CHECK names the owner tables that exist; each migration that adds an owner rebuilds it.
+ */
+export const JSON_CHECK = (col) => `CHECK (${col} IS NULL OR json_valid(${col}))`;
+export function idempotencyKeysDdl(owners) {
   return { table: `CREATE TABLE idempotency_keys (\n  owner_table                      TEXT NOT NULL CHECK (owner_table IN (${owners.map((o) => `'${o}'`).join(', ')})),\n  owner_id                         TEXT NOT NULL,\n  position                         INTEGER NOT NULL,\n  act                              TEXT NOT NULL,\n  shape                            TEXT NOT NULL CHECK (shape IN ('list', 'value')),\n  key                              TEXT,\n  fp                               TEXT,\n  at                               INTEGER,\n  entry_json                       TEXT NOT NULL ${JSON_CHECK('entry_json')},\n  PRIMARY KEY (owner_table, owner_id, position)\n) STRICT;`, indexes: ['CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, owner_id, act, key)'] };
 }
-function childDdl(spec) {
-  const owner = spec.ownerCols.map((c, i) => `  ${c.padEnd(32)} ${i === 0 ? `TEXT NOT NULL REFERENCES ${spec.ownerCols[0] === 'trial_id' ? 'trials' : 'recruitment_requests'}(id) ON DELETE ${spec.restrict ? 'RESTRICT' : 'CASCADE'}` : 'INTEGER NOT NULL'}`);
-  const cols = columnsOf(spec.shape).map(([col, kind]) => `  ${col.padEnd(32)} ${CONSTRAINTS[spec.table]?.[col] ?? sqlType(kind)}${kind === 'json' ? ` ${JSON_CHECK(col)}` : ''}`);
-  const pk = spec.single ? `PRIMARY KEY (${spec.ownerCols.join(', ')})` : `PRIMARY KEY (${[...spec.ownerCols, 'position'].join(', ')})`;
-  return `CREATE TABLE ${spec.table} (\n${owner.join(',\n')},\n  position                         INTEGER NOT NULL,\n${cols.join(',\n')},\n  raw_json                         TEXT ${JSON_CHECK('raw_json')},\n  absent_keys_json                 TEXT ${ABSENT_CHECK},\n  offtype_json                     TEXT ${EXTRA_CHECK('offtype_json')},\n  extra_json                       TEXT ${EXTRA_CHECK('extra_json')},\n  ${pk}\n) STRICT;\n${(spec.indexes ?? []).map((ix) => `${ix};`).join('\n')}`;
-}
-export const RECRUITMENT_DDL = [
-  parentDdl(REQUESTS, REQUEST_INDEXES),
-  ...REQUEST_CHILDREN.map(childDdl),
-  parentDdl(TRIALS, TRIAL_INDEXES),
-  ...TRIAL_CHILDREN.map(childDdl),
-  `CREATE TABLE trial_reminders (\n  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,\n  position                         INTEGER NOT NULL,\n  marker                           TEXT NOT NULL,\n  sent_at                          INTEGER,\n  value_json                       TEXT ${JSON_CHECK('value_json')},\n  PRIMARY KEY (trial_id, position)\n) STRICT;\nCREATE UNIQUE INDEX trial_reminders_marker ON trial_reminders (trial_id, marker);`,
-  `${idempotencyKeysDdl().table}\n${idempotencyKeysDdl().indexes.map((ix) => `${ix};`).join('\n')}`,
-].join('\n');
+
+// ------------------------------------------------------------------ vocabulary
+const REQUEST_TYPES = ['contact', 'trial'];
+/** `suspended`: an urgent safety report froze the pending request (server.mjs, the report route). */
+const REQUEST_STATUSES = ['pending', 'accepted', 'declined', 'suspended'];
+const PARTIES = ['player', 'guardian'];
+const ACTOR_KINDS = ['org', 'player', 'guardian', 'system'];
+const EVIDENCE_KINDS = ['box_cam_session'];
+function snake(s) { return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`); }
+
+// ------------------------------------------------------------------ DDL
+const inList = (col, list) => `CHECK (${col} IS NULL OR ${col} IN (${list.map((v) => `'${v}'`).join(',')}))`;
+const maxLen = (col, n) => `CHECK (${col} IS NULL OR length(${col}) <= ${n})`;
+const bool = (col) => `CHECK (${col} IS NULL OR ${col} IN (0,1))`;
+const dayCheck = (col) => `CHECK (${col} IS NULL OR ${col} GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')`;
+/** An actor: an organisation member (`user_id`) or a family member / the system (`actor_id`), with the name shown. */
+const actor = (p) => `  ${p}_kind TEXT ${inList(`${p}_kind`, ACTOR_KINDS)},\n  ${p}_user_id TEXT,\n  ${p}_actor_id TEXT,\n  ${p}_name TEXT`;
+const venue = (p) => `  ${p}_name TEXT ${maxLen(`${p}_name`, TRIAL_LIMITS.venueName)},\n  ${p}_town TEXT ${maxLen(`${p}_town`, TRIAL_LIMITS.venueTown)},\n  ${p}_address TEXT ${maxLen(`${p}_address`, TRIAL_LIMITS.venueAddress)}`;
+const sessionCols = () => `  id TEXT NOT NULL,\n  kind TEXT NOT NULL ${inList('kind', TRIAL_SESSION_KINDS)},\n  starts_at INTEGER NOT NULL,\n  ends_at INTEGER NOT NULL,\n${venue('venue')},\n  instructions TEXT ${maxLen('instructions', TRIAL_LIMITS.instructions)}`;
+const ownedBy = (table, col = 'trial_id') => `  ${col} TEXT NOT NULL REFERENCES ${table}(id) ON DELETE CASCADE`;
+
+export const RECRUITMENT_DDL = `
+CREATE TABLE recruitment_requests (
+  id TEXT PRIMARY KEY,
+  player_id TEXT NOT NULL,
+  player_name TEXT,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name TEXT NOT NULL,
+  org_type TEXT ${inList('org_type', ORG_TYPES)},
+  org_verified INTEGER NOT NULL ${bool('org_verified')},
+  org_safeguarding_certified INTEGER NOT NULL ${bool('org_safeguarding_certified')},
+  org_trusted_partner INTEGER ${bool('org_trusted_partner')},
+  user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  scout_name TEXT,
+  scout_role TEXT,
+  type TEXT NOT NULL ${inList('type', REQUEST_TYPES)},
+  message TEXT,
+  subject TEXT,
+  contact_id TEXT,
+  trial_proposed_date TEXT ${dayCheck('trial_proposed_date')},
+  trial_alt_days_json TEXT CHECK (trial_alt_days_json IS NULL OR (json_valid(trial_alt_days_json) AND json_type(trial_alt_days_json) = 'array')),
+  trial_venue TEXT,
+  trial_notes TEXT,
+  trial_private_venue_address TEXT ${maxLen('trial_private_venue_address', TRIAL_LIMITS.venueAddress)},
+  trial_private_instructions TEXT ${maxLen('trial_private_instructions', TRIAL_LIMITS.instructions)},
+  status TEXT NOT NULL ${inList('status', REQUEST_STATUSES)},
+  created_at INTEGER NOT NULL,
+  responded_at INTEGER,
+  responded_by TEXT ${inList('responded_by', PARTIES)},
+  routed_to TEXT NOT NULL ${inList('routed_to', PARTIES)},
+  guardian_id TEXT,
+  contact_channel_id TEXT,
+  case_id TEXT REFERENCES recruitment_cases(id) DEFERRABLE INITIALLY DEFERRED,
+  trial_id TEXT REFERENCES trials(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
+  recipient_type TEXT ${inList('recipient_type', PARTIES)},
+  recipient_player_id TEXT,
+  recipient_guardian_id TEXT,
+  recipient_minor INTEGER ${bool('recipient_minor')},
+  invite_key TEXT ${maxLen('invite_key', TRIAL_LIMITS.clientKey)},
+  invite_fp TEXT,
+  subject_removed_at INTEGER,
+  CHECK ((type = 'trial') = (trial_alt_days_json IS NOT NULL)),
+  CHECK ((recipient_type IS NULL) = (recipient_minor IS NULL)),
+  CHECK ((invite_key IS NULL) = (invite_fp IS NULL))
+) STRICT;
+CREATE INDEX recruitment_requests_org_player_type_status ON recruitment_requests (org_id, player_id, type, status);
+CREATE INDEX recruitment_requests_player ON recruitment_requests (player_id, created_at);
+CREATE INDEX recruitment_requests_routed_guardian ON recruitment_requests (routed_to, guardian_id);
+CREATE INDEX recruitment_requests_case_type_created ON recruitment_requests (case_id, type, created_at);
+CREATE INDEX recruitment_requests_contact ON recruitment_requests (contact_id);
+CREATE INDEX recruitment_requests_trial ON recruitment_requests (trial_id);
+CREATE TABLE request_trial_slots (
+${ownedBy('recruitment_requests', 'request_id')},
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  day TEXT NOT NULL ${dayCheck('day')},
+  kind TEXT NOT NULL ${inList('kind', TRIAL_SESSION_KINDS)},
+  starts_at INTEGER NOT NULL,
+  ends_at INTEGER NOT NULL,
+  timezone TEXT NOT NULL,
+${venue('venue')},
+  PRIMARY KEY (request_id, position),
+  UNIQUE (request_id, day),
+  CHECK (ends_at > starts_at)
+) STRICT;
+CREATE TABLE trials (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL UNIQUE REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
+  case_id TEXT REFERENCES recruitment_cases(id) DEFERRABLE INITIALLY DEFERRED,
+  player_id TEXT NOT NULL,
+  player_name TEXT,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name TEXT NOT NULL,
+  scout_name TEXT,
+  accepted_at INTEGER NOT NULL,
+  accepted_by TEXT ${inList('accepted_by', PARTIES)},
+  guardian_approved INTEGER ${bool('guardian_approved')},
+  proposed_date TEXT ${dayCheck('proposed_date')},
+  venue TEXT,
+  notes TEXT,
+  report_due_at INTEGER,
+  status TEXT NOT NULL ${inList('status', TRIAL_STATUSES)},
+  reminder_sent INTEGER NOT NULL ${bool('reminder_sent')},
+  feedback_escalated_at INTEGER,
+  workflow_state TEXT NOT NULL ${inList('workflow_state', TRIAL_WORKFLOW_STATES)},
+  schedule_timezone TEXT,
+  schedule_revision INTEGER,
+  schedule_proposed_at INTEGER,
+${actor('schedule_proposed_by')},
+  schedule_confirmed_at INTEGER,
+${actor('schedule_confirmed_by')},
+  schedule_declined_at INTEGER,
+${actor('schedule_declined_by')},
+  completion_state TEXT ${inList('completion_state', TRIAL_COMPLETION_STATES)},
+  completion_at INTEGER,
+${actor('completion_by')},
+  completion_reason TEXT ${maxLen('completion_reason', TRIAL_LIMITS.reason)},
+  completion_phase TEXT ${inList('completion_phase', TRIAL_WORKFLOW_STATES)},
+  completion_cancelled_by TEXT ${inList('completion_cancelled_by', TRIAL_CANCEL_ACTORS)},
+  recipient_type TEXT ${inList('recipient_type', PARTIES)},
+  recipient_player_id TEXT,
+  recipient_guardian_id TEXT,
+  recipient_minor INTEGER ${bool('recipient_minor')},
+  recipient_at INTEGER,
+  lifecycle_applied INTEGER ${bool('lifecycle_applied')},
+  lifecycle_from TEXT,
+  lifecycle_to TEXT,
+  lifecycle_reason TEXT,
+  lifecycle_at INTEGER,
+  day_arrival_time TEXT ${maxLen('day_arrival_time', 40)},
+  day_arrival_address TEXT ${maxLen('day_arrival_address', 200)},
+  day_arrival_notes TEXT ${maxLen('day_arrival_notes', 300)},
+  day_emergency_name TEXT ${maxLen('day_emergency_name', 80)},
+  day_emergency_phone TEXT ${maxLen('day_emergency_phone', 30)},
+  day_emergency_set_by TEXT ${inList('day_emergency_set_by', PARTIES)},
+  day_emergency_at INTEGER,
+  day_collection_policy TEXT ${maxLen('day_collection_policy', 300)},
+  rev INTEGER NOT NULL CHECK (rev >= 0),
+  rev_at INTEGER,
+  rev_by_user_id TEXT,
+  rev_by_name TEXT,
+  subject_removed_at INTEGER,
+  CHECK ((schedule_timezone IS NULL) = (schedule_revision IS NULL)),
+  CHECK ((completion_state IS NULL) = (completion_at IS NULL)),
+  CHECK ((recipient_type IS NULL) = (recipient_minor IS NULL)),
+  CHECK (day_emergency_at IS NOT NULL OR (day_emergency_name IS NULL AND day_emergency_phone IS NULL))
+) STRICT;
+CREATE INDEX trials_org_status ON trials (org_id, status);
+CREATE INDEX trials_org_player_case ON trials (org_id, player_id, case_id);
+CREATE INDEX trials_player ON trials (player_id);
+CREATE INDEX trials_case ON trials (case_id);
+CREATE INDEX trials_status_report_due ON trials (status, report_due_at);
+CREATE INDEX trials_workflow_confirmed ON trials (workflow_state, schedule_confirmed_at);
+CREATE UNIQUE INDEX trials_one_open_per_case ON trials (case_id) WHERE case_id IS NOT NULL AND workflow_state NOT IN ('completed', 'cancelled');
+CREATE TABLE trial_schedule_sessions (
+${ownedBy('trials')},
+  position INTEGER NOT NULL,
+${sessionCols()},
+  PRIMARY KEY (trial_id, position),
+  UNIQUE (trial_id, id),
+  CHECK (ends_at > starts_at)
+) STRICT;
+CREATE INDEX trial_schedule_sessions_trial_starts ON trial_schedule_sessions (trial_id, starts_at);
+CREATE TABLE trial_session_evidence (
+  trial_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  kind TEXT NOT NULL ${inList('kind', EVIDENCE_KINDS)},
+  box_session_id TEXT NOT NULL,
+  linked_at INTEGER NOT NULL,
+${actor('linked_by')},
+  removed_at INTEGER,
+${actor('removed_by')},
+  PRIMARY KEY (trial_id, session_id, position),
+  FOREIGN KEY (trial_id, session_id) REFERENCES trial_schedule_sessions(trial_id, id) ON DELETE CASCADE
+) STRICT;
+CREATE INDEX trial_session_evidence_box_session ON trial_session_evidence (box_session_id);
+CREATE UNIQUE INDEX trial_session_evidence_one_active ON trial_session_evidence (trial_id, session_id, box_session_id) WHERE removed_at IS NULL;
+CREATE TABLE trial_schedule_revisions (
+${ownedBy('trials')},
+  position INTEGER NOT NULL,
+  revision INTEGER NOT NULL,
+  timezone TEXT NOT NULL,
+  proposed_at INTEGER,
+${actor('proposed_by')},
+  confirmed_at INTEGER,
+${actor('confirmed_by')},
+  superseded_at INTEGER,
+  reason TEXT ${maxLen('reason', TRIAL_LIMITS.reason)},
+  material INTEGER ${bool('material')},
+  PRIMARY KEY (trial_id, position),
+  UNIQUE (trial_id, revision)
+) STRICT;
+CREATE TABLE trial_revision_sessions (
+  trial_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  position INTEGER NOT NULL,
+${sessionCols()},
+  PRIMARY KEY (trial_id, revision, position),
+  FOREIGN KEY (trial_id, revision) REFERENCES trial_schedule_revisions(trial_id, revision) ON DELETE CASCADE
+) STRICT;
+CREATE TABLE trial_attendance (
+${ownedBy('trials')},
+  position INTEGER NOT NULL,
+  session_id TEXT NOT NULL,
+  state TEXT NOT NULL ${inList('state', TRIAL_ATTENDANCE_STATES)},
+  source TEXT NOT NULL ${inList('source', TRIAL_ATTENDANCE_SOURCES)},
+${actor('recorded_by')},
+  recorded_at INTEGER NOT NULL,
+  note TEXT ${maxLen('note', TRIAL_LIMITS.note)},
+  PRIMARY KEY (trial_id, position)
+) STRICT;
+CREATE INDEX trial_attendance_trial_session_at ON trial_attendance (trial_id, session_id, recorded_at);
+CREATE TABLE trial_history (
+${ownedBy('trials')},
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  action TEXT NOT NULL ${maxLen('action', 64)},
+${actor('by')},
+  detail_json TEXT CHECK (detail_json IS NULL OR (json_valid(detail_json) AND json_type(detail_json) = 'object')),
+  PRIMARY KEY (trial_id, position),
+  UNIQUE (trial_id, id)
+) STRICT;
+CREATE INDEX trial_history_trial_at ON trial_history (trial_id, at);
+CREATE TABLE trial_keys (
+${ownedBy('trials')},
+  act TEXT NOT NULL ${inList('act', TRIAL_KEY_ACTS)},
+  position INTEGER NOT NULL,
+  key TEXT NOT NULL ${maxLen('key', TRIAL_LIMITS.clientKey)},
+  fp TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (trial_id, act, position)
+) STRICT;
+CREATE INDEX trial_keys_key ON trial_keys (trial_id, act, key);
+CREATE TABLE trial_reminders (
+${ownedBy('trials')},
+  marker TEXT NOT NULL ${maxLen('marker', 120)},
+  sent_at INTEGER NOT NULL,
+  PRIMARY KEY (trial_id, marker)
+) STRICT;
+CREATE TABLE trial_reports (
+  trial_id TEXT PRIMARY KEY REFERENCES trials(id) ON DELETE CASCADE,
+  id TEXT NOT NULL UNIQUE,
+  player_id TEXT NOT NULL,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name TEXT,
+  user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  scout_name TEXT,
+  filed_at INTEGER NOT NULL,
+${TRIAL_REPORT_FIELDS.map((f) => `  ${snake(f)} REAL NOT NULL`).join(',\n')},
+  notes TEXT,
+  strength_note TEXT,
+  focus_note TEXT
+) STRICT;
+CREATE INDEX trial_reports_player ON trial_reports (player_id, filed_at);
+CREATE INDEX trial_reports_org ON trial_reports (org_id, filed_at);
+CREATE TABLE trial_day_staff (
+${ownedBy('trials')},
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  name TEXT NOT NULL ${maxLen('name', 80)},
+  role TEXT NOT NULL ${maxLen('role', 60)},
+  check_kind TEXT ${maxLen('check_kind', 60)},
+  check_ref TEXT ${maxLen('check_ref', 60)},
+  check_status TEXT ${inList('check_status', TRIAL_STAFF_CHECK_STATES)},
+  check_expires_at TEXT,
+  check_reviewed_by TEXT,
+  check_reviewed_at INTEGER,
+  added_by_name TEXT,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY (trial_id, position),
+  UNIQUE (trial_id, id),
+  CHECK (check_status IS NOT NULL OR (check_kind IS NULL AND check_ref IS NULL AND check_expires_at IS NULL AND check_reviewed_by IS NULL AND check_reviewed_at IS NULL))
+) STRICT;
+CREATE TABLE trial_day_consents (
+${ownedBy('trials')},
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+${actor('by')},
+  scope TEXT NOT NULL ${inList('scope', TRIAL_CONSENT_SCOPES)},
+  at INTEGER NOT NULL,
+  PRIMARY KEY (trial_id, position)
+) STRICT;
+CREATE UNIQUE INDEX trial_day_consents_one_per_actor ON trial_day_consents (trial_id, scope, by_actor_id) WHERE by_actor_id IS NOT NULL;
+CREATE TABLE trial_day_checkins (
+${ownedBy('trials')},
+  position INTEGER NOT NULL,
+  player_id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  by_user_id TEXT,
+  by_name TEXT,
+  PRIMARY KEY (trial_id, position)
+) STRICT;
+CREATE TABLE trial_day_status_events (
+${ownedBy('trials')},
+  position INTEGER NOT NULL,
+  kind TEXT NOT NULL ${inList('kind', TRIAL_DAY_EVENT_KINDS)},
+  at INTEGER NOT NULL,
+  by_name TEXT,
+  reason TEXT ${maxLen('reason', 200)},
+  new_date TEXT ${dayCheck('new_date')},
+  PRIMARY KEY (trial_id, position)
+) STRICT;
+`;
+
 /** `channels` as migration 0015 rebuilds it: the 0012 definition with the REAL request key (messages and attachments unchanged). */
 export const CHANNELS_DDL_WITH_KEY = `
 CREATE TABLE channels (
@@ -267,475 +397,599 @@ CREATE INDEX channels_org_id ON channels (org_id);
 CREATE INDEX channels_guardian_id ON channels (guardian_id);
 CREATE INDEX channels_player_id_counterparty ON channels (player_id, counterparty);`;
 
-// ------------------------------------------------------------------ the mapping engine (record ↔ row + child rows)
-const columnHolds = (kind, v) => (kind === 'text' ? typeof v === 'string' : kind === 'id' ? nonEmpty(v) : kind === 'int' ? Number.isSafeInteger(v) : kind === 'num' ? (typeof v === 'number' && Number.isFinite(v)) : kind === 'bool' ? typeof v === 'boolean' : true);
-const toCol = (kind, v) => (kind === 'bool' ? (v ? 1 : 0) : kind === 'json' ? JSON.stringify(clone(v, 'json').value) : v);
-const fromCol = (kind, v, col) => (v === null ? null : kind === 'bool' ? v === 1 : kind === 'json' ? parseJson(v, col) : v);
-/**
- * Encode one object against a shape level: columns, absent paths, off-type values, extras (nested extras under their
- * known key), and the children to write (`{ spec, path, items | map }`).
- */
-export function encodeLevel(shape, obj, prefix, out, extraHolder) {
-  for (const k of Object.keys(obj)) { if (shape.keys.includes(k) || obj[k] === undefined) continue; const c = clone(obj[k], `${prefix}${k}`); if (c.reason) throw new TypeError(c.reason); setOwn(extraHolder, k, c.value); }
-  for (const k of shape.keys) {
-    const path = `${prefix}${k}`;
-    if (!Object.hasOwn(obj, k) || obj[k] === undefined) { out.absent.push(path); continue; }
-    const v = obj[k];
-    if (shape.objects?.[k]) {
-      if (!isPlainObject(v)) { out.offtype[path] = clone(v, path).value; continue; }
-      const sub = {}; encodeLevel(shape.objects[k], v, `${path}.`, out, sub); if (Object.keys(sub).length) setOwn(extraHolder, k, sub);
-    } else if (shape.lists?.[k]) { if (!Array.isArray(v)) out.offtype[path] = clone(v, path).value; else out.children.push({ spec: shape.lists[k], path, items: v }); }
-    else if (shape.object?.[k]) { if (!isPlainObject(v)) out.offtype[path] = clone(v, path).value; else out.children.push({ spec: shape.object[k], path, items: [v] }); }
-    else if (shape.maps?.[k]) {
-      if (!isPlainObject(v)) { out.offtype[path] = clone(v, path).value; continue; }
-      if (!shape.maps[k].ownerTable) { out.children.push({ spec: shape.maps[k], path, map: v }); continue; }
-      // the idempotency keys: a NON-EMPTY list act and a value act carrying a string key are rows; everything else an
-      // act holds — a value act WITHOUT a key (`trials.keys.accept {key: null, fp}`, plan §D.7.3), an EMPTY list (no row
-      // could carry its presence), an empty object, null, any other value — stays on the owner row under `keys` in
-      // extra_json exactly as it is, so every act comes back present and distinct (review of 6d77aa7, F1). Acts are set
-      // as OWN data properties: an act named `__proto__` (own in the writer's object, own again after JSON.parse)
-      // assigned with `rows[act] =` would set the prototype and vanish.
-      const rows = {}; const held = {};
-      for (const [act, entry] of Object.entries(v)) {
-        if (entry === undefined) continue;
-        if ((Array.isArray(entry) && entry.length > 0) || (isPlainObject(entry) && typeof entry.key === 'string')) setOwn(rows, act, entry);
-        else setOwn(held, act, clone(entry, `${path}.${act}`).value);
-      }
-      if (Object.keys(held).length) setOwn(extraHolder, k, held);
-      out.children.push({ spec: shape.maps[k], path, map: rows });
-    }
-    else { const [col, kind] = shape.cols[k]; if (v === null) out.cols[col] = null; else if (columnHolds(kind, v)) out.cols[col] = toCol(kind, v); else { out.cols[col] = null; out.offtype[path] = clone(v, path).value; } }
-  }
+// ------------------------------------------------------------------ typing (the one place a value is judged)
+const isInt = (v) => Number.isSafeInteger(v);
+const isStr = (v) => typeof v === 'string';
+const absent = (v) => v === undefined || v === null;
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** A typing failure carries `reason` (record, field, what it holds — never the value of a text field). */
+class Bad extends Error {}
+const fail = (label, field, what) => { throw new Bad(`${label}.${field} ${what}`); };
+/** Refuse an own key the tables have no column for; an `undefined` value is an absent key (the JSON rule). */
+function onlyKeys(v, keys, label, field) {
+  if (!isPlainObject(v)) fail(label, field, `must be an object (got ${describe(v)})`);
+  for (const k of Object.keys(v)) if (v[k] !== undefined && !keys.includes(k)) fail(label, `${field}.${k}`, 'is not a field this table stores');
+  return v;
 }
-export function encode(shape, obj) {
-  const out = { cols: {}, absent: [], offtype: {}, extra: {}, children: [] };
-  encodeLevel(shape, obj, '', out, out.extra);
+const str = (v, label, field, { max = null, required = false } = {}) => {
+  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
+  if (!isStr(v)) fail(label, field, `must be text or null (got ${describe(v)})`);
+  if (required && v.length === 0) fail(label, field, 'must not be empty');
+  if (max !== null && v.length > max) fail(label, field, `exceeds ${max} characters`);
+  return v;
+};
+const int = (v, label, field, { required = false, min = null } = {}) => {
+  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
+  if (!isInt(v)) fail(label, field, `must be an integer or null (got ${describe(v)})`);
+  if (min !== null && v < min) fail(label, field, `must be at least ${min}`);
+  return v;
+};
+const num = (v, label, field) => { if (typeof v !== 'number' || !Number.isFinite(v)) fail(label, field, `must be a finite number (got ${describe(v)})`); return v; };
+const flag = (v, label, field, { required = false } = {}) => {
+  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
+  if (typeof v !== 'boolean') fail(label, field, `must be true or false (got ${describe(v)})`);
+  return v;
+};
+const oneOf = (v, allowed, label, field, { required = true } = {}) => {
+  if (absent(v) && !required) return null;
+  if (!allowed.includes(v)) fail(label, field, `must be one of ${allowed.join('|')} (got ${isStr(v) && v.length <= 40 ? JSON.stringify(v) : describe(v)})`);
+  return v;
+};
+const dayOf = (v, label, field, { required = false } = {}) => {
+  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
+  if (!isStr(v) || !DAY_RE.test(v)) fail(label, field, 'must be a YYYY-MM-DD day or null');
+  return v;
+};
+const list = (v, label, field) => { if (absent(v)) return []; if (!Array.isArray(v)) fail(label, field, `must be a list (got ${describe(v)})`); return v; };
+const obj = (v, keys, label, field) => (absent(v) ? null : onlyKeys(v, keys, label, field));
+const unique = (items, keyOf, label, field) => { const seen = new Set(); for (const x of items) { const k = keyOf(x); if (seen.has(k)) fail(label, field, `repeats ${k}`); seen.add(k); } };
+
+/**
+ * An actor as the trial writers build it: an organisation member `{kind:'org', userId, name}` (trialRoutes orgActor)
+ * or a family member / the system `{kind, id, name}`. A tombstone keeps the kind alone.
+ */
+function typeActor(v, label, field) {
+  const a = obj(v, ['kind', 'userId', 'id', 'name'], label, field);
+  if (!a) return null;
+  const kind = oneOf(a.kind, ACTOR_KINDS, label, `${field}.kind`);
+  if (kind === 'org') { if (!absent(a.id)) fail(label, `${field}.id`, 'is not stored for an organisation actor (userId is)'); return { kind, userId: str(a.userId, label, `${field}.userId`), name: str(a.name, label, `${field}.name`) }; }
+  if (!absent(a.userId)) fail(label, `${field}.userId`, 'is only stored for an organisation actor');
+  return { kind, id: str(a.id, label, `${field}.id`), name: str(a.name, label, `${field}.name`) };
+}
+function typeVenue(v, label, field) {
+  const x = obj(v, ['name', 'town', 'address'], label, field);
+  if (!x) return null;
+  return { name: str(x.name, label, `${field}.name`, { required: true, max: TRIAL_LIMITS.venueName }), town: str(x.town, label, `${field}.town`, { max: TRIAL_LIMITS.venueTown }), address: str(x.address, label, `${field}.address`, { max: TRIAL_LIMITS.venueAddress }) };
+}
+function typeSession(s, label, { withEvidence }) {
+  onlyKeys(s, ['id', 'kind', 'startsAt', 'endsAt', 'venue', 'instructions', ...(withEvidence ? ['evidence'] : [])], label, 'session');
+  const out = { id: str(s.id, label, 'id', { required: true }), kind: oneOf(s.kind, TRIAL_SESSION_KINDS, label, 'kind'), startsAt: int(s.startsAt, label, 'startsAt', { required: true }), endsAt: int(s.endsAt, label, 'endsAt', { required: true }), venue: typeVenue(s.venue, label, 'venue'), instructions: str(s.instructions, label, 'instructions', { max: TRIAL_LIMITS.instructions }) };
+  if (out.endsAt <= out.startsAt) fail(label, 'endsAt', 'must be after startsAt');
+  if (withEvidence) {
+    out.evidence = list(s.evidence, label, 'evidence').map((e, i) => {
+      const L = `${label} evidence[${i}]`;
+      onlyKeys(e, ['id', 'kind', 'sessionId', 'linkedAt', 'linkedBy', 'removedAt', 'removedBy'], L, 'entry');
+      return { id: str(e.id, L, 'id', { required: true }), kind: oneOf(e.kind, EVIDENCE_KINDS, L, 'kind'), sessionId: str(e.sessionId, L, 'sessionId', { required: true }), linkedAt: int(e.linkedAt, L, 'linkedAt', { required: true }), linkedBy: typeActor(e.linkedBy, L, 'linkedBy'), removedAt: int(e.removedAt, L, 'removedAt'), removedBy: typeActor(e.removedBy, L, 'removedBy') };
+    });
+    unique(out.evidence.filter((e) => e.removedAt === null), (e) => e.sessionId, label, 'evidence (active links)');
+  }
   return out;
 }
-/** Decode one shape level from a row (its columns, the parsed absent/offtype/extra of the record) and the children already decoded by path. */
-export function decodeLevel(shape, row, prefix, extraHolder, absent, offtype, children) {
-  const obj = {};
-  for (const k of Object.keys(extraHolder)) if (!shape.keys.includes(k)) setOwn(obj, k, extraHolder[k]);
-  for (const k of shape.keys) {
-    const path = `${prefix}${k}`;
-    if (absent.has(path)) continue;
-    if (Object.hasOwn(offtype, path)) { setOwn(obj, k, offtype[path]); continue; }
-    if (shape.objects?.[k]) obj[k] = decodeLevel(shape.objects[k], row, `${path}.`, isPlainObject(extraHolder[k]) ? extraHolder[k] : {}, absent, offtype, children);
-    else if (shape.lists?.[k]) obj[k] = children.get(path) ?? [];
-    else if (shape.object?.[k]) obj[k] = (children.get(path) ?? [null])[0];
-    else if (shape.maps?.[k]) { const held = shape.maps[k].ownerTable && isPlainObject(extraHolder[k]) ? extraHolder[k] : {}; const o = {}; for (const a of Object.keys(held)) setOwn(o, a, held[a]); for (const [a, val] of Object.entries(children.get(path) ?? {})) setOwn(o, a, val); obj[k] = o; }
-    else { const [col, kind] = shape.cols[k]; obj[k] = fromCol(kind, row[col], col); }
-  }
-  return obj;
-}
-export const rowMeta = (enc) => ({ absent_keys_json: enc.absent.length ? JSON.stringify(enc.absent) : null, offtype_json: jsonOrNull(enc.offtype), extra_json: jsonOrNull(enc.extra) });
-export const metaOf = (r) => ({ absent: new Set(r.absent_keys_json ? JSON.parse(r.absent_keys_json) : []), offtype: r.offtype_json ? parseJson(r.offtype_json, 'offtype_json') : {}, extra: r.extra_json ? parseJson(r.extra_json, 'extra_json') : {} });
-/** Column admission and conversion, shared with the S8b engine (repositories/recruitmentCases.mjs). */
-export const columnAdmits = (kind, v) => columnHolds(kind, v);
-export const toColumn = (kind, v) => toCol(kind, v);
-export const fromColumn = (kind, v, col) => fromCol(kind, v, col);
 
-// ------------------------------------------------------------------ statements (lazily prepared per connection; re-prepared when the connection's `prepare` is replaced — the suites' statement-failure seam wraps it)
+const REQUEST_KEYS = ['id', 'playerId', 'playerName', 'orgId', 'orgName', 'orgType', 'orgVerified', 'orgSafeguardingCertified', 'trustedPartner', 'userId', 'scoutName', 'scoutRole', 'type', 'message', 'subject', 'contactId', 'trialDetails', 'status', 'createdAt', 'respondedAt', 'respondedBy', 'routedTo', 'guardianId', 'contactChannel', 'caseId', 'trialId', 'recipient', 'keys', 'subjectRemovedAt'];
+
+/** A request as issueRecruitmentRequest (and the trial invitation) writes it, typed. Returns `{ ok: true, record }` or `{ ok: false, reason }`. */
+export function typeRequest(raw, at = 'requests') {
+  try {
+    if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
+    if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
+    const L = `${at} ${raw.id}`;
+    onlyKeys(raw, REQUEST_KEYS, L, 'record');
+    const type = oneOf(raw.type, REQUEST_TYPES, L, 'type');
+    let trialDetails = null;
+    if (type === 'trial') {
+      const td = obj(raw.trialDetails, ['proposedDate', 'altSlots', 'venue', 'notes', 'slots', 'private'], L, 'trialDetails');
+      if (!td) fail(L, 'trialDetails', 'is required on a trial request');
+      const priv = obj(td.private, ['venueAddress', 'instructions'], L, 'trialDetails.private');
+      const slots = list(td.slots, L, 'trialDetails.slots').map((s, i) => {
+        const SL = `${L} trialDetails.slots[${i}]`;
+        onlyKeys(s, ['id', 'day', 'kind', 'startsAt', 'endsAt', 'timezone', 'venue'], SL, 'slot');
+        const slot = { id: str(s.id, SL, 'id', { required: true }), day: dayOf(s.day, SL, 'day', { required: true }), kind: oneOf(s.kind, TRIAL_SESSION_KINDS, SL, 'kind'), startsAt: int(s.startsAt, SL, 'startsAt', { required: true }), endsAt: int(s.endsAt, SL, 'endsAt', { required: true }), timezone: str(s.timezone, SL, 'timezone', { required: true }), venue: typeVenue(s.venue, SL, 'venue') };
+        if (slot.endsAt <= slot.startsAt) fail(SL, 'endsAt', 'must be after startsAt');
+        return slot;
+      });
+      unique(slots, (s) => s.day, L, 'trialDetails.slots');
+      const privateDetails = priv && (!absent(priv.venueAddress) || !absent(priv.instructions)) ? { venueAddress: str(priv.venueAddress, L, 'trialDetails.private.venueAddress', { max: TRIAL_LIMITS.venueAddress }), instructions: str(priv.instructions, L, 'trialDetails.private.instructions', { max: TRIAL_LIMITS.instructions }) } : null;
+      trialDetails = {
+        proposedDate: dayOf(td.proposedDate, L, 'trialDetails.proposedDate'),
+        altSlots: list(td.altSlots, L, 'trialDetails.altSlots').map((d, i) => dayOf(d, L, `trialDetails.altSlots[${i}]`, { required: true })),
+        venue: str(td.venue, L, 'trialDetails.venue'), notes: str(td.notes, L, 'trialDetails.notes'),
+        slots, private: privateDetails,
+      };
+    } else if (!absent(raw.trialDetails)) fail(L, 'trialDetails', 'is only stored on a trial request');
+    const r = obj(raw.recipient, ['type', 'playerId', 'guardianId', 'minor'], L, 'recipient');
+    const recipient = r ? { type: oneOf(r.type, PARTIES, L, 'recipient.type'), playerId: str(r.playerId, L, 'recipient.playerId'), guardianId: str(r.guardianId, L, 'recipient.guardianId'), minor: flag(r.minor, L, 'recipient.minor', { required: true }) } : null;
+    const keys = obj(raw.keys, ['invite'], L, 'keys');
+    const inv = keys ? obj(keys.invite, ['key', 'fp'], L, 'keys.invite') : null;
+    const record = {
+      id: raw.id, playerId: str(raw.playerId, L, 'playerId', { required: true }), playerName: str(raw.playerName, L, 'playerName'),
+      orgId: str(raw.orgId, L, 'orgId', { required: true }), orgName: str(raw.orgName, L, 'orgName', { required: true }), orgType: oneOf(raw.orgType, ORG_TYPES, L, 'orgType', { required: false }),
+      orgVerified: flag(raw.orgVerified, L, 'orgVerified', { required: true }), orgSafeguardingCertified: flag(raw.orgSafeguardingCertified, L, 'orgSafeguardingCertified', { required: true }), trustedPartner: flag(raw.trustedPartner, L, 'trustedPartner'),
+      userId: str(raw.userId, L, 'userId', { required: true }), scoutName: str(raw.scoutName, L, 'scoutName'), scoutRole: str(raw.scoutRole, L, 'scoutRole'),
+      type, message: str(raw.message, L, 'message'), subject: str(raw.subject, L, 'subject'), contactId: str(raw.contactId, L, 'contactId'),
+      trialDetails, status: oneOf(raw.status, REQUEST_STATUSES, L, 'status'), createdAt: int(raw.createdAt, L, 'createdAt', { required: true }),
+      respondedAt: int(raw.respondedAt, L, 'respondedAt'), respondedBy: oneOf(raw.respondedBy, PARTIES, L, 'respondedBy', { required: false }),
+      routedTo: oneOf(raw.routedTo, PARTIES, L, 'routedTo'), guardianId: str(raw.guardianId, L, 'guardianId'), contactChannel: str(raw.contactChannel, L, 'contactChannel'),
+      caseId: str(raw.caseId, L, 'caseId'), trialId: str(raw.trialId, L, 'trialId'), recipient,
+      keys: { invite: inv ? { key: str(inv.key, L, 'keys.invite.key', { required: true, max: TRIAL_LIMITS.clientKey }), fp: str(inv.fp, L, 'keys.invite.fp', { required: true }) } : null },
+      subjectRemovedAt: int(raw.subjectRemovedAt, L, 'subjectRemovedAt'),
+    };
+    return { ok: true, record };
+  } catch (e) { if (e instanceof Bad) return { ok: false, reason: e.message }; throw e; }
+}
+
+const TRIAL_KEYS = ['id', 'requestId', 'caseId', 'playerId', 'playerName', 'orgId', 'orgName', 'scoutName', 'acceptedAt', 'acceptedBy', 'guardianApproved', 'proposedDate', 'venue', 'notes', 'reportDueAt', 'status', 'reminderSent', 'feedbackEscalatedAt', 'report', 'day', 'workflowState', 'schedule', 'attendance', 'completion', 'recipient', 'keys', 'history', 'reminders', 'lifecycle', 'rev', 'revAt', 'revBy', 'subjectRemovedAt'];
+/** The trial-day container every trial reads back with (m12/journeys.mjs). */
+export const emptyTrialDay = () => ({ staff: [], consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [] });
+
+function typeDay(d, L) {
+  if (!d) return emptyTrialDay();
+  const staff = list(d.staff, L, 'day.staff').map((s, i) => {
+    const SL = `${L} day.staff[${i}]`;
+    onlyKeys(s, ['id', 'name', 'role', 'check', 'addedBy', 'addedAt'], SL, 'entry');
+    const ch = obj(s.check, ['kind', 'ref', 'status', 'expiresAt', 'reviewedBy', 'reviewedAt'], SL, 'check');
+    return { id: str(s.id, SL, 'id', { required: true }), name: str(s.name, SL, 'name', { required: true, max: 80 }), role: str(s.role, SL, 'role', { required: true, max: 60 }), check: ch ? { kind: str(ch.kind, SL, 'check.kind', { max: 60 }), ref: str(ch.ref, SL, 'check.ref', { max: 60 }), status: oneOf(ch.status, TRIAL_STAFF_CHECK_STATES, SL, 'check.status'), expiresAt: str(ch.expiresAt, SL, 'check.expiresAt', { max: 40 }), reviewedBy: str(ch.reviewedBy, SL, 'check.reviewedBy', { max: 80 }), reviewedAt: int(ch.reviewedAt, SL, 'check.reviewedAt') } : null, addedBy: str(s.addedBy, SL, 'addedBy'), addedAt: int(s.addedAt, SL, 'addedAt', { required: true }) };
+  });
+  unique(staff, (s) => s.id, L, 'day.staff');
+  const consents = list(d.consents, L, 'day.consents').map((x, i) => { const CL = `${L} day.consents[${i}]`; onlyKeys(x, ['id', 'by', 'scope', 'at'], CL, 'entry'); return { id: str(x.id, CL, 'id', { required: true }), by: typeActor(x.by, CL, 'by'), scope: oneOf(x.scope, TRIAL_CONSENT_SCOPES, CL, 'scope'), at: int(x.at, CL, 'at', { required: true }) }; });
+  const checkins = list(d.checkins, L, 'day.checkins').map((x, i) => { const CL = `${L} day.checkins[${i}]`; onlyKeys(x, ['playerId', 'at', 'byUserId', 'byName'], CL, 'entry'); return { playerId: str(x.playerId, CL, 'playerId', { required: true }), at: int(x.at, CL, 'at', { required: true }), byUserId: str(x.byUserId, CL, 'byUserId'), byName: str(x.byName, CL, 'byName') }; });
+  const statusEvents = list(d.statusEvents, L, 'day.statusEvents').map((x, i) => { const EL = `${L} day.statusEvents[${i}]`; onlyKeys(x, ['kind', 'at', 'by', 'reason', 'newDate'], EL, 'entry'); return { kind: oneOf(x.kind, TRIAL_DAY_EVENT_KINDS, EL, 'kind'), at: int(x.at, EL, 'at', { required: true }), by: str(x.by, EL, 'by'), reason: str(x.reason, EL, 'reason', { max: 200 }), newDate: dayOf(x.newDate, EL, 'newDate') }; });
+  const ar = obj(d.arrival, ['time', 'address', 'notes'], L, 'day.arrival');
+  const arrival = ar ? { time: str(ar.time, L, 'day.arrival.time', { max: 40 }), address: str(ar.address, L, 'day.arrival.address', { max: 200 }), notes: str(ar.notes, L, 'day.arrival.notes', { max: 300 }) } : null;
+  const em = obj(d.emergency, ['name', 'phone', 'setBy', 'at'], L, 'day.emergency');
+  const emergency = em ? { name: str(em.name, L, 'day.emergency.name', { required: true, max: 80 }), phone: str(em.phone, L, 'day.emergency.phone', { required: true, max: 30 }), setBy: oneOf(em.setBy, PARTIES, L, 'day.emergency.setBy', { required: false }), at: int(em.at, L, 'day.emergency.at', { required: true }) } : null;
+  const co = obj(d.collection, ['policy'], L, 'day.collection');
+  const collection = co ? { policy: str(co.policy, L, 'day.collection.policy', { required: true, max: 300 }) } : null;
+  // An arrival with nothing in it is no arrival: it reads back as null.
+  return { staff, consents, arrival: arrival && (arrival.time !== null || arrival.address !== null || arrival.notes !== null) ? arrival : null, emergency, checkins, collection, statusEvents };
+}
+
+/** A trial as issueAcceptedTrial, the trial routes and the trial-day routes write it, typed. */
+export function typeTrial(raw, at = 'trials') {
+  try {
+    if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
+    if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
+    const L = `${at} ${raw.id}`;
+    onlyKeys(raw, TRIAL_KEYS, L, 'record');
+    const sc = obj(raw.schedule, ['timezone', 'revision', 'proposedAt', 'proposedBy', 'confirmedAt', 'confirmedBy', 'declinedAt', 'declinedBy', 'sessions', 'revisions'], L, 'schedule');
+    const schedule = sc ? (() => {
+      const sessions = list(sc.sessions, L, 'schedule.sessions').map((s, i) => typeSession(s, `${L} schedule.sessions[${i}]`, { withEvidence: true }));
+      unique(sessions, (s) => s.id, L, 'schedule.sessions');
+      const revisions = list(sc.revisions, L, 'schedule.revisions').map((r, i) => {
+        const RL = `${L} schedule.revisions[${i}]`;
+        onlyKeys(r, ['revision', 'timezone', 'sessions', 'proposedAt', 'proposedBy', 'confirmedAt', 'confirmedBy', 'supersededAt', 'reason', 'material'], RL, 'revision');
+        return { revision: int(r.revision, RL, 'revision', { required: true, min: 1 }), timezone: str(r.timezone, RL, 'timezone', { required: true }), sessions: list(r.sessions, RL, 'sessions').map((s, j) => typeSession(s, `${RL} sessions[${j}]`, { withEvidence: false })), proposedAt: int(r.proposedAt, RL, 'proposedAt'), proposedBy: typeActor(r.proposedBy, RL, 'proposedBy'), confirmedAt: int(r.confirmedAt, RL, 'confirmedAt'), confirmedBy: typeActor(r.confirmedBy, RL, 'confirmedBy'), supersededAt: int(r.supersededAt, RL, 'supersededAt'), reason: str(r.reason, RL, 'reason', { max: TRIAL_LIMITS.reason }), material: flag(r.material, RL, 'material') };
+      });
+      unique(revisions, (r) => r.revision, L, 'schedule.revisions');
+      return { timezone: str(sc.timezone, L, 'schedule.timezone', { required: true }), revision: int(sc.revision, L, 'schedule.revision', { required: true, min: 1 }), proposedAt: int(sc.proposedAt, L, 'schedule.proposedAt'), proposedBy: typeActor(sc.proposedBy, L, 'schedule.proposedBy'), confirmedAt: int(sc.confirmedAt, L, 'schedule.confirmedAt'), confirmedBy: typeActor(sc.confirmedBy, L, 'schedule.confirmedBy'), declinedAt: int(sc.declinedAt, L, 'schedule.declinedAt'), declinedBy: typeActor(sc.declinedBy, L, 'schedule.declinedBy'), sessions, revisions };
+    })() : null;
+    const c = obj(raw.completion, ['state', 'at', 'by', 'reason', 'phase', 'cancelledBy'], L, 'completion');
+    const completion = c ? { state: oneOf(c.state, TRIAL_COMPLETION_STATES, L, 'completion.state'), at: int(c.at, L, 'completion.at', { required: true }), by: typeActor(c.by, L, 'completion.by'), reason: str(c.reason, L, 'completion.reason', { max: TRIAL_LIMITS.reason }), phase: oneOf(c.phase, TRIAL_WORKFLOW_STATES, L, 'completion.phase', { required: false }), cancelledBy: oneOf(c.cancelledBy, TRIAL_CANCEL_ACTORS, L, 'completion.cancelledBy', { required: false }) } : null;
+    const r = obj(raw.recipient, ['type', 'playerId', 'guardianId', 'minor', 'at'], L, 'recipient');
+    const recipient = r ? { type: oneOf(r.type, PARTIES, L, 'recipient.type'), playerId: str(r.playerId, L, 'recipient.playerId'), guardianId: str(r.guardianId, L, 'recipient.guardianId'), minor: flag(r.minor, L, 'recipient.minor', { required: true }), at: int(r.at, L, 'recipient.at') } : null;
+    const lc = obj(raw.lifecycle, ['applied', 'from', 'to', 'at', 'reason'], L, 'lifecycle');
+    const lifecycle = lc ? (() => {
+      const applied = flag(lc.applied, L, 'lifecycle.applied', { required: true });
+      if (applied) { if (!absent(lc.reason)) fail(L, 'lifecycle.reason', 'is not stored on an applied move'); return { applied, from: str(lc.from, L, 'lifecycle.from'), to: str(lc.to, L, 'lifecycle.to'), at: int(lc.at, L, 'lifecycle.at') }; }
+      if (!absent(lc.from) || !absent(lc.to)) fail(L, 'lifecycle.from', 'is not stored on a move that was not applied');
+      return { applied, reason: str(lc.reason, L, 'lifecycle.reason'), at: int(lc.at, L, 'lifecycle.at') };
+    })() : null;
+    const attendance = list(raw.attendance, L, 'attendance').map((a, i) => {
+      const AL = `${L} attendance[${i}]`;
+      onlyKeys(a, ['sessionId', 'state', 'source', 'recordedBy', 'recordedAt', 'note'], AL, 'entry');
+      return { sessionId: str(a.sessionId, AL, 'sessionId', { required: true }), state: oneOf(a.state, TRIAL_ATTENDANCE_STATES, AL, 'state'), source: oneOf(a.source, TRIAL_ATTENDANCE_SOURCES, AL, 'source'), recordedBy: typeActor(a.recordedBy, AL, 'recordedBy'), recordedAt: int(a.recordedAt, AL, 'recordedAt', { required: true }), note: str(a.note, AL, 'note', { max: TRIAL_LIMITS.note }) };
+    });
+    const history = list(raw.history, L, 'history').map((h, i) => {
+      const HL = `${L} history[${i}]`;
+      onlyKeys(h, ['id', 'at', 'action', 'by', 'detail'], HL, 'entry');
+      if (!absent(h.detail) && !isPlainObject(h.detail)) fail(HL, 'detail', 'must be an object or null');
+      return { id: str(h.id, HL, 'id', { required: true }), at: int(h.at, HL, 'at', { required: true }), action: str(h.action, HL, 'action', { required: true, max: 64 }), by: typeActor(h.by, HL, 'by'), detail: absent(h.detail) ? null : clone(h.detail) };
+    });
+    unique(history, (h) => h.id, L, 'history');
+    const k = obj(raw.keys, TRIAL_KEY_ACTS, L, 'keys') ?? {};
+    const keys = Object.fromEntries(TRIAL_KEY_ACTS.map((act) => [act, list(k[act], L, `keys.${act}`).map((e, i) => { const KL = `${L} keys.${act}[${i}]`; onlyKeys(e, ['key', 'fp', 'at'], KL, 'entry'); return { key: str(e.key, KL, 'key', { required: true, max: TRIAL_LIMITS.clientKey }), fp: str(e.fp, KL, 'fp', { required: true }), at: int(e.at, KL, 'at', { required: true }) }; })]));
+    const rm = absent(raw.reminders) ? {} : raw.reminders;
+    if (!isPlainObject(rm)) fail(L, 'reminders', `must be an object (got ${describe(rm)})`);
+    const reminders = {};
+    for (const [marker, v] of Object.entries(rm)) {
+      if (v === undefined) continue;
+      if (marker.length > 120) fail(L, 'reminders', 'carries a marker longer than 120 characters');
+      Object.defineProperty(reminders, marker, { value: int(v, L, 'reminders (a marker\'s instant)', { required: true }), enumerable: true, writable: true, configurable: true });
+    }
+    const rep = obj(raw.report, ['id', 'trialId', 'playerId', 'orgId', 'orgName', 'userId', 'scoutName', 'filedAt', ...TRIAL_REPORT_FIELDS, 'notes', 'strengthNote', 'focusNote'], L, 'report');
+    const report = rep ? (() => {
+      if (rep.trialId !== raw.id) fail(L, 'report.trialId', 'must name the trial it is filed on');
+      return { id: str(rep.id, L, 'report.id', { required: true }), trialId: raw.id, playerId: str(rep.playerId, L, 'report.playerId', { required: true }), orgId: str(rep.orgId, L, 'report.orgId', { required: true }), orgName: str(rep.orgName, L, 'report.orgName'), userId: str(rep.userId, L, 'report.userId'), scoutName: str(rep.scoutName, L, 'report.scoutName'), filedAt: int(rep.filedAt, L, 'report.filedAt', { required: true }), ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, num(rep[f], L, `report.${f}`)])), notes: str(rep.notes, L, 'report.notes'), strengthNote: str(rep.strengthNote, L, 'report.strengthNote'), focusNote: str(rep.focusNote, L, 'report.focusNote') };
+    })() : null;
+    const rb = obj(raw.revBy, ['userId', 'name'], L, 'revBy');
+    const record = {
+      id: raw.id, requestId: str(raw.requestId, L, 'requestId', { required: true }), caseId: str(raw.caseId, L, 'caseId'),
+      playerId: str(raw.playerId, L, 'playerId', { required: true }), playerName: str(raw.playerName, L, 'playerName'),
+      orgId: str(raw.orgId, L, 'orgId', { required: true }), orgName: str(raw.orgName, L, 'orgName', { required: true }), scoutName: str(raw.scoutName, L, 'scoutName'),
+      acceptedAt: int(raw.acceptedAt, L, 'acceptedAt', { required: true }), acceptedBy: oneOf(raw.acceptedBy, PARTIES, L, 'acceptedBy', { required: false }), guardianApproved: flag(raw.guardianApproved, L, 'guardianApproved'),
+      proposedDate: dayOf(raw.proposedDate, L, 'proposedDate'), venue: str(raw.venue, L, 'venue'), notes: str(raw.notes, L, 'notes'),
+      reportDueAt: int(raw.reportDueAt, L, 'reportDueAt'), status: oneOf(raw.status, TRIAL_STATUSES, L, 'status'),
+      reminderSent: flag(raw.reminderSent, L, 'reminderSent') ?? false, feedbackEscalatedAt: int(raw.feedbackEscalatedAt, L, 'feedbackEscalatedAt'),
+      report, day: typeDay(obj(raw.day, ['staff', 'consents', 'arrival', 'emergency', 'checkins', 'collection', 'statusEvents'], L, 'day'), L),
+      workflowState: oneOf(raw.workflowState, TRIAL_WORKFLOW_STATES, L, 'workflowState'), schedule, attendance, completion, recipient, keys, history, reminders, lifecycle,
+      rev: int(raw.rev, L, 'rev', { required: true, min: 0 }), revAt: int(raw.revAt, L, 'revAt'), revBy: rb ? { userId: str(rb.userId, L, 'revBy.userId'), name: str(rb.name, L, 'revBy.name') } : null,
+      subjectRemovedAt: int(raw.subjectRemovedAt, L, 'subjectRemovedAt'),
+    };
+    if (report && report.playerId !== record.playerId) fail(L, 'report.playerId', 'must name the trial\'s player');
+    return { ok: true, record };
+  } catch (e) { if (e instanceof Bad) return { ok: false, reason: e.message }; throw e; }
+}
+
+// ------------------------------------------------------------------ rows
+const b = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
+const flagOut = (v) => (v === null ? null : v === 1);
+const actorRow = (p, a) => ({ [`${p}_kind`]: a?.kind ?? null, [`${p}_user_id`]: a?.kind === 'org' ? a.userId : null, [`${p}_actor_id`]: a && a.kind !== 'org' ? a.id : null, [`${p}_name`]: a?.name ?? null });
+const actorOut = (row, p) => (row[`${p}_kind`] === null ? null : row[`${p}_kind`] === 'org' ? { kind: 'org', userId: row[`${p}_user_id`], name: row[`${p}_name`] } : { kind: row[`${p}_kind`], id: row[`${p}_actor_id`], name: row[`${p}_name`] });
+const venueRow = (p, v) => ({ [`${p}_name`]: v?.name ?? null, [`${p}_town`]: v?.town ?? null, [`${p}_address`]: v?.address ?? null });
+const venueOut = (row, p) => (row[`${p}_name`] === null ? null : { name: row[`${p}_name`], town: row[`${p}_town`], address: row[`${p}_address`] });
+const sessionRow = (s) => ({ id: s.id, kind: s.kind, starts_at: s.startsAt, ends_at: s.endsAt, ...venueRow('venue', s.venue), instructions: s.instructions });
+const sessionOut = (r) => ({ id: r.id, kind: r.kind, startsAt: r.starts_at, endsAt: r.ends_at, venue: venueOut(r, 'venue'), instructions: r.instructions });
+
+const requestRow = (q) => ({
+  id: q.id, player_id: q.playerId, player_name: q.playerName, org_id: q.orgId, org_name: q.orgName, org_type: q.orgType, org_verified: b(q.orgVerified), org_safeguarding_certified: b(q.orgSafeguardingCertified), org_trusted_partner: b(q.trustedPartner),
+  user_id: q.userId, scout_name: q.scoutName, scout_role: q.scoutRole, type: q.type, message: q.message, subject: q.subject, contact_id: q.contactId,
+  trial_proposed_date: q.trialDetails?.proposedDate ?? null, trial_alt_days_json: q.trialDetails ? JSON.stringify(q.trialDetails.altSlots) : null, trial_venue: q.trialDetails?.venue ?? null, trial_notes: q.trialDetails?.notes ?? null,
+  trial_private_venue_address: q.trialDetails?.private?.venueAddress ?? null, trial_private_instructions: q.trialDetails?.private?.instructions ?? null,
+  status: q.status, created_at: q.createdAt, responded_at: q.respondedAt, responded_by: q.respondedBy, routed_to: q.routedTo, guardian_id: q.guardianId, contact_channel_id: q.contactChannel,
+  case_id: q.caseId, trial_id: q.trialId, recipient_type: q.recipient?.type ?? null, recipient_player_id: q.recipient?.playerId ?? null, recipient_guardian_id: q.recipient?.guardianId ?? null, recipient_minor: b(q.recipient?.minor),
+  invite_key: q.keys.invite?.key ?? null, invite_fp: q.keys.invite?.fp ?? null, subject_removed_at: q.subjectRemovedAt,
+});
+const trialRow = (t) => ({
+  id: t.id, request_id: t.requestId, case_id: t.caseId, player_id: t.playerId, player_name: t.playerName, org_id: t.orgId, org_name: t.orgName, scout_name: t.scoutName,
+  accepted_at: t.acceptedAt, accepted_by: t.acceptedBy, guardian_approved: b(t.guardianApproved), proposed_date: t.proposedDate, venue: t.venue, notes: t.notes,
+  report_due_at: t.reportDueAt, status: t.status, reminder_sent: b(t.reminderSent), feedback_escalated_at: t.feedbackEscalatedAt, workflow_state: t.workflowState,
+  schedule_timezone: t.schedule?.timezone ?? null, schedule_revision: t.schedule?.revision ?? null, schedule_proposed_at: t.schedule?.proposedAt ?? null, ...actorRow('schedule_proposed_by', t.schedule?.proposedBy),
+  schedule_confirmed_at: t.schedule?.confirmedAt ?? null, ...actorRow('schedule_confirmed_by', t.schedule?.confirmedBy), schedule_declined_at: t.schedule?.declinedAt ?? null, ...actorRow('schedule_declined_by', t.schedule?.declinedBy),
+  completion_state: t.completion?.state ?? null, completion_at: t.completion?.at ?? null, ...actorRow('completion_by', t.completion?.by), completion_reason: t.completion?.reason ?? null, completion_phase: t.completion?.phase ?? null, completion_cancelled_by: t.completion?.cancelledBy ?? null,
+  recipient_type: t.recipient?.type ?? null, recipient_player_id: t.recipient?.playerId ?? null, recipient_guardian_id: t.recipient?.guardianId ?? null, recipient_minor: b(t.recipient?.minor), recipient_at: t.recipient?.at ?? null,
+  lifecycle_applied: b(t.lifecycle?.applied), lifecycle_from: t.lifecycle?.from ?? null, lifecycle_to: t.lifecycle?.to ?? null, lifecycle_reason: t.lifecycle?.reason ?? null, lifecycle_at: t.lifecycle?.at ?? null,
+  day_arrival_time: t.day.arrival?.time ?? null, day_arrival_address: t.day.arrival?.address ?? null, day_arrival_notes: t.day.arrival?.notes ?? null,
+  day_emergency_name: t.day.emergency?.name ?? null, day_emergency_phone: t.day.emergency?.phone ?? null, day_emergency_set_by: t.day.emergency?.setBy ?? null, day_emergency_at: t.day.emergency?.at ?? null, day_collection_policy: t.day.collection?.policy ?? null,
+  rev: t.rev, rev_at: t.revAt, rev_by_user_id: t.revBy?.userId ?? null, rev_by_name: t.revBy?.name ?? null, subject_removed_at: t.subjectRemovedAt,
+});
+const SAMPLE_REQUEST = { id: 'x', playerId: 'p', playerName: null, orgId: 'o', orgName: 'o', orgType: null, orgVerified: false, orgSafeguardingCertified: false, trustedPartner: null, userId: 'u', scoutName: null, scoutRole: null, type: 'contact', message: null, subject: null, contactId: null, trialDetails: null, status: 'pending', createdAt: 0, respondedAt: null, respondedBy: null, routedTo: 'player', guardianId: null, contactChannel: null, caseId: null, trialId: null, recipient: null, keys: { invite: null }, subjectRemovedAt: null };
+const SAMPLE_TRIAL = { id: 'x', requestId: 'r', caseId: null, playerId: 'p', playerName: null, orgId: 'o', orgName: 'o', scoutName: null, acceptedAt: 0, acceptedBy: null, guardianApproved: null, proposedDate: null, venue: null, notes: null, reportDueAt: null, status: 'awaiting_report', reminderSent: false, feedbackEscalatedAt: null, report: null, day: emptyTrialDay(), workflowState: 'accepted', schedule: null, attendance: [], completion: null, recipient: null, keys: {}, history: [], reminders: {}, lifecycle: null, rev: 1, revAt: null, revBy: null, subjectRemovedAt: null };
+const COLS = {
+  recruitment_requests: Object.keys(requestRow(SAMPLE_REQUEST)),
+  request_trial_slots: ['request_id', 'position', 'id', 'day', 'kind', 'starts_at', 'ends_at', 'timezone', 'venue_name', 'venue_town', 'venue_address'],
+  trials: Object.keys(trialRow(SAMPLE_TRIAL)),
+  trial_schedule_sessions: ['trial_id', 'position', ...Object.keys(sessionRow({ venue: null }))],
+  trial_session_evidence: ['trial_id', 'session_id', 'position', 'id', 'kind', 'box_session_id', 'linked_at', ...Object.keys(actorRow('linked_by', null)), 'removed_at', ...Object.keys(actorRow('removed_by', null))],
+  trial_schedule_revisions: ['trial_id', 'position', 'revision', 'timezone', 'proposed_at', ...Object.keys(actorRow('proposed_by', null)), 'confirmed_at', ...Object.keys(actorRow('confirmed_by', null)), 'superseded_at', 'reason', 'material'],
+  trial_revision_sessions: ['trial_id', 'revision', 'position', ...Object.keys(sessionRow({ venue: null }))],
+  trial_attendance: ['trial_id', 'position', 'session_id', 'state', 'source', ...Object.keys(actorRow('recorded_by', null)), 'recorded_at', 'note'],
+  trial_history: ['trial_id', 'position', 'id', 'at', 'action', ...Object.keys(actorRow('by', null)), 'detail_json'],
+  trial_keys: ['trial_id', 'act', 'position', 'key', 'fp', 'at'],
+  trial_reminders: ['trial_id', 'marker', 'sent_at'],
+  trial_reports: ['trial_id', 'id', 'player_id', 'org_id', 'org_name', 'user_id', 'scout_name', 'filed_at', ...TRIAL_REPORT_FIELDS.map(snake), 'notes', 'strength_note', 'focus_note'],
+  trial_day_staff: ['trial_id', 'position', 'id', 'name', 'role', 'check_kind', 'check_ref', 'check_status', 'check_expires_at', 'check_reviewed_by', 'check_reviewed_at', 'added_by_name', 'added_at'],
+  trial_day_consents: ['trial_id', 'position', 'id', ...Object.keys(actorRow('by', null)), 'scope', 'at'],
+  trial_day_checkins: ['trial_id', 'position', 'player_id', 'at', 'by_user_id', 'by_name'],
+  trial_day_status_events: ['trial_id', 'position', 'kind', 'at', 'by_name', 'reason', 'new_date'],
+};
+/** The trial's child tables, in delete order (a grandchild before its parent). */
+const TRIAL_CHILDREN = ['trial_session_evidence', 'trial_schedule_sessions', 'trial_revision_sessions', 'trial_schedule_revisions', 'trial_attendance', 'trial_history', 'trial_keys', 'trial_reminders', 'trial_reports', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events'];
+
+// ------------------------------------------------------------------ statements and the record readers
 const stmtCache = new WeakMap();
-function stmts(sqlite) {
+function statements(sqlite) {
   let s = stmtCache.get(sqlite); if (s && s.preparedBy === sqlite.prepare) return s;
-  const insertFor = (table, cols) => sqlite.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`);
-  const parentCols = (spec) => [...columnsOf(spec.shape).map((c) => c[0]), 'absent_keys_json', 'offtype_json', 'extra_json'];
-  const upsertFor = (spec, parked) => { const cols = parentCols(spec); const set = cols.filter((c) => c !== 'id' && !(parked && c === 'trial_id')).map((c) => `${c} = excluded.${c}`); return sqlite.prepare(`INSERT INTO ${spec.table} (${cols.join(', ')}) VALUES (${cols.map((c) => (parked && c === 'trial_id' ? 'NULL' : `@${c}`)).join(', ')}) ON CONFLICT(id) DO UPDATE SET ${set.join(', ')}${parked ? `, trial_id = CASE WHEN ${spec.table}.trial_id IS @trial_id THEN ${spec.table}.trial_id ELSE NULL END` : ''}`); };
-  const child = (spec) => ({ insert: insertFor(spec.table, [...spec.ownerCols, 'position', ...columnsOf(spec.shape).map((c) => c[0]), 'raw_json', 'absent_keys_json', 'offtype_json', 'extra_json']), deleteOwner: sqlite.prepare(`DELETE FROM ${spec.table} WHERE ${spec.ownerCols[0]} = ?`), select: sqlite.prepare(`SELECT * FROM ${spec.table} ORDER BY ${[...spec.ownerCols, 'position'].join(', ')}`) });
+  const insert = (table, { upsert = false } = {}) => {
+    const cols = COLS[table];
+    const tail = upsert ? ` ON CONFLICT(id) DO UPDATE SET ${cols.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}` : '';
+    return sqlite.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})${tail}`);
+  };
+  const childOf = (t) => sqlite.prepare(`SELECT * FROM ${t} WHERE trial_id = ?${t === 'trial_reminders' ? ' ORDER BY rowid' : t === 'trial_reports' ? '' : ' ORDER BY position'}`);
   s = {
-    requests: { upsert: upsertFor(REQUESTS, true), select: sqlite.prepare('SELECT * FROM recruitment_requests ORDER BY seq'), assign: sqlite.prepare('UPDATE recruitment_requests SET trial_id = ? WHERE id = ?'), del: sqlite.prepare('DELETE FROM recruitment_requests WHERE id = ?'), children: Object.fromEntries(REQUEST_CHILDREN.map((c) => [c.table, child(c)])) },
-    trials: { upsert: upsertFor(TRIALS, false), select: sqlite.prepare('SELECT * FROM trials ORDER BY seq'), stored: sqlite.prepare('SELECT id, request_id, case_id, workflow_state FROM trials'), park: sqlite.prepare('UPDATE trials SET case_id = NULL WHERE id = ?'), del: sqlite.prepare('DELETE FROM trials WHERE id = ?'), children: Object.fromEntries(TRIAL_CHILDREN.map((c) => [c.table, child(c)])) },
-    reminders: { insert: insertFor('trial_reminders', ['trial_id', 'position', 'marker', 'sent_at', 'value_json']), deleteOwner: sqlite.prepare('DELETE FROM trial_reminders WHERE trial_id = ?'), select: sqlite.prepare('SELECT * FROM trial_reminders ORDER BY trial_id, position') },
-    keys: { insert: insertFor('idempotency_keys', ['owner_table', 'owner_id', 'position', 'act', 'shape', 'key', 'fp', 'at', 'entry_json']), deleteOwner: sqlite.prepare('DELETE FROM idempotency_keys WHERE owner_table = ? AND owner_id = ?'), select: sqlite.prepare('SELECT * FROM idempotency_keys WHERE owner_table = ? ORDER BY owner_id, position') },
+    ins: Object.fromEntries(Object.keys(COLS).map((t) => [t, insert(t, { upsert: t === 'recruitment_requests' || t === 'trials' })])),
+    slotsDel: sqlite.prepare('DELETE FROM request_trial_slots WHERE request_id = ?'),
+    trialChildrenDel: TRIAL_CHILDREN.map((t) => sqlite.prepare(`DELETE FROM ${t} WHERE trial_id = ?`)),
+    requestDel: sqlite.prepare('DELETE FROM recruitment_requests WHERE id = ?'), trialDel: sqlite.prepare('DELETE FROM trials WHERE id = ?'),
+    requestById: sqlite.prepare('SELECT * FROM recruitment_requests WHERE id = ?'), requestAll: sqlite.prepare('SELECT * FROM recruitment_requests ORDER BY rowid'),
+    trialById: sqlite.prepare('SELECT * FROM trials WHERE id = ?'), trialAll: sqlite.prepare('SELECT * FROM trials ORDER BY rowid'),
+    slotsOf: sqlite.prepare('SELECT * FROM request_trial_slots WHERE request_id = ? ORDER BY position'),
+    of: Object.fromEntries(['trial_schedule_sessions', 'trial_schedule_revisions', 'trial_attendance', 'trial_history', 'trial_reminders', 'trial_reports', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events'].map((t) => [t, childOf(t)])),
+    evidenceOf: sqlite.prepare('SELECT * FROM trial_session_evidence WHERE trial_id = ? AND session_id = ? ORDER BY position'),
+    revisionSessionsOf: sqlite.prepare('SELECT * FROM trial_revision_sessions WHERE trial_id = ? AND revision = ? ORDER BY position'),
+    keysOf: sqlite.prepare('SELECT * FROM trial_keys WHERE trial_id = ? ORDER BY act, position'),
     guardian: sqlite.prepare('SELECT 1 FROM guardians WHERE id = ?'),
+    ids: (table) => sqlite.prepare(`SELECT id FROM ${table} ORDER BY rowid`).all().map((r) => r.id),
     preparedBy: sqlite.prepare,
   };
   stmtCache.set(sqlite, s); return s;
 }
 
-/** Write one parent record (its row by upsert; every child row deleted and reinserted in list order). */
-function writeRecord(sqlite, spec, record) {
-  const S = stmts(sqlite); const P = spec === REQUESTS ? S.requests : S.trials;
-  const enc = encode(spec.shape, record);
-  P.upsert.run({ ...Object.fromEntries(columnsOf(spec.shape).map(([col]) => [col, enc.cols[col] ?? null])), ...rowMeta(enc) });
-  const children = spec === REQUESTS ? REQUEST_CHILDREN : TRIAL_CHILDREN;
-  for (const c of children) P.children[c.table].deleteOwner.run(record.id);
-  if (spec === TRIALS) S.reminders.deleteOwner.run(record.id);
-  S.keys.deleteOwner.run(spec.table, record.id);
-  writeChildren(sqlite, spec, enc.children, [record.id]);
+/** Write a typed request whole: the row upserted (its rowid, and so its place in the mirror, kept), the slots replaced. */
+function writeRequest(st, q) {
+  st.ins.recruitment_requests.run(requestRow(q));
+  st.slotsDel.run(q.id);
+  (q.trialDetails?.slots ?? []).forEach((s, i) => st.ins.request_trial_slots.run({ request_id: q.id, position: i, id: s.id, day: s.day, kind: s.kind, starts_at: s.startsAt, ends_at: s.endsAt, timezone: s.timezone, ...venueRow('venue', s.venue) }));
 }
-function writeChildren(sqlite, parentSpec, children, ownerValues) {
-  const S = stmts(sqlite); const P = parentSpec === REQUESTS ? S.requests : S.trials;
-  for (const ch of children) {
-    if (ch.spec.map) { // reminders
-      let i = 0; for (const [marker, v] of Object.entries(ch.map)) { if (v === undefined) continue; const c = clone(v, `reminders.${marker}`).value; S.reminders.insert.run({ trial_id: ownerValues[0], position: i++, marker, sent_at: Number.isSafeInteger(c) ? c : null, value_json: Number.isSafeInteger(c) ? null : JSON.stringify(c) }); }
-      continue;
-    }
-    if (ch.spec.ownerTable) { // idempotency keys
-      let i = 0;
-      for (const [act, v] of Object.entries(ch.map)) {
-        if (v === undefined) continue;
-        if (Array.isArray(v)) for (const e of v) { const c = clone(e, `keys.${act}`).value; S.keys.insert.run({ owner_table: ch.spec.ownerTable, owner_id: ownerValues[0], position: i++, act, shape: 'list', key: isPlainObject(c) && typeof c.key === 'string' ? c.key : null, fp: isPlainObject(c) && typeof c.fp === 'string' ? c.fp : null, at: isPlainObject(c) && Number.isSafeInteger(c.at) ? c.at : null, entry_json: JSON.stringify(c === undefined ? null : c) }); }
-        else { const c = clone(v, `keys.${act}`).value; S.keys.insert.run({ owner_table: ch.spec.ownerTable, owner_id: ownerValues[0], position: i++, act, shape: 'value', key: isPlainObject(c) && typeof c.key === 'string' ? c.key : null, fp: isPlainObject(c) && typeof c.fp === 'string' ? c.fp : null, at: null, entry_json: JSON.stringify(c === undefined ? null : c) }); }
-      }
-      continue;
-    }
-    const st = P.children[ch.spec.table];
-    ch.items.forEach((item, position) => {
-      const owner = Object.fromEntries(ch.spec.ownerCols.map((c, i) => [c, ownerValues[i]]));
-      if (!isPlainObject(item)) { st.insert.run({ ...owner, position, ...Object.fromEntries(columnsOf(ch.spec.shape).map(([col]) => [col, null])), raw_json: JSON.stringify(clone(item, ch.path).value), absent_keys_json: null, offtype_json: null, extra_json: null }); return; }
-      const enc = encode(ch.spec.shape, item);
-      st.insert.run({ ...owner, position, ...Object.fromEntries(columnsOf(ch.spec.shape).map(([col]) => [col, enc.cols[col] ?? null])), raw_json: null, ...rowMeta(enc) });
-      if (enc.children.length) writeChildren(sqlite, parentSpec, enc.children, [...ownerValues, position]);
-    });
-  }
+/** Write a typed trial whole: the row upserted, every child row replaced in list order. */
+function writeTrial(st, t) {
+  st.ins.trials.run(trialRow(t));
+  for (const d of st.trialChildrenDel) d.run(t.id);
+  const I = st.ins;
+  (t.schedule?.sessions ?? []).forEach((s, i) => {
+    I.trial_schedule_sessions.run({ trial_id: t.id, position: i, ...sessionRow(s) });
+    s.evidence.forEach((e, j) => I.trial_session_evidence.run({ trial_id: t.id, session_id: s.id, position: j, id: e.id, kind: e.kind, box_session_id: e.sessionId, linked_at: e.linkedAt, ...actorRow('linked_by', e.linkedBy), removed_at: e.removedAt, ...actorRow('removed_by', e.removedBy) }));
+  });
+  (t.schedule?.revisions ?? []).forEach((r, i) => {
+    I.trial_schedule_revisions.run({ trial_id: t.id, position: i, revision: r.revision, timezone: r.timezone, proposed_at: r.proposedAt, ...actorRow('proposed_by', r.proposedBy), confirmed_at: r.confirmedAt, ...actorRow('confirmed_by', r.confirmedBy), superseded_at: r.supersededAt, reason: r.reason, material: b(r.material) });
+    r.sessions.forEach((s, j) => I.trial_revision_sessions.run({ trial_id: t.id, revision: r.revision, position: j, ...sessionRow(s) }));
+  });
+  t.attendance.forEach((a, i) => I.trial_attendance.run({ trial_id: t.id, position: i, session_id: a.sessionId, state: a.state, source: a.source, ...actorRow('recorded_by', a.recordedBy), recorded_at: a.recordedAt, note: a.note }));
+  t.history.forEach((h, i) => I.trial_history.run({ trial_id: t.id, position: i, id: h.id, at: h.at, action: h.action, ...actorRow('by', h.by), detail_json: h.detail === null ? null : JSON.stringify(h.detail) }));
+  for (const act of TRIAL_KEY_ACTS) t.keys[act].forEach((e, i) => I.trial_keys.run({ trial_id: t.id, act, position: i, key: e.key, fp: e.fp, at: e.at }));
+  for (const [marker, at] of Object.entries(t.reminders)) I.trial_reminders.run({ trial_id: t.id, marker, sent_at: at });
+  if (t.report) { const r = t.report; I.trial_reports.run({ trial_id: t.id, id: r.id, player_id: r.playerId, org_id: r.orgId, org_name: r.orgName, user_id: r.userId, scout_name: r.scoutName, filed_at: r.filedAt, ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [snake(f), r[f]])), notes: r.notes, strength_note: r.strengthNote, focus_note: r.focusNote }); }
+  t.day.staff.forEach((s, i) => I.trial_day_staff.run({ trial_id: t.id, position: i, id: s.id, name: s.name, role: s.role, check_kind: s.check?.kind ?? null, check_ref: s.check?.ref ?? null, check_status: s.check?.status ?? null, check_expires_at: s.check?.expiresAt ?? null, check_reviewed_by: s.check?.reviewedBy ?? null, check_reviewed_at: s.check?.reviewedAt ?? null, added_by_name: s.addedBy, added_at: s.addedAt }));
+  t.day.consents.forEach((c, i) => I.trial_day_consents.run({ trial_id: t.id, position: i, id: c.id, ...actorRow('by', c.by), scope: c.scope, at: c.at }));
+  t.day.checkins.forEach((c, i) => I.trial_day_checkins.run({ trial_id: t.id, position: i, player_id: c.playerId, at: c.at, by_user_id: c.byUserId, by_name: c.byName }));
+  t.day.statusEvents.forEach((e, i) => I.trial_day_status_events.run({ trial_id: t.id, position: i, kind: e.kind, at: e.at, by_name: e.by, reason: e.reason, new_date: e.newDate }));
 }
-/** Read every parent record of a spec with its children, in `seq` order: fresh objects from the file. */
-function readRecords(sqlite, spec) {
-  const S = stmts(sqlite); const P = spec === REQUESTS ? S.requests : S.trials;
-  const children = spec === REQUESTS ? REQUEST_CHILDREN : TRIAL_CHILDREN;
-  // child rows grouped by owner key (the owner column values joined), each decoded with its own sub-children
-  const groups = new Map(); // `${table}|${ownerKey}` → rows
-  for (const c of children) for (const r of P.children[c.table].select.all()) { const key = `${c.table}|${c.ownerCols.map((col) => r[col]).join('|')}`; if (!groups.has(key)) groups.set(key, []); groups.get(key).push({ ...r }); }
-  const reminders = new Map(); if (spec === TRIALS) for (const r of S.reminders.select.all()) { if (!reminders.has(r.trial_id)) reminders.set(r.trial_id, []); reminders.get(r.trial_id).push(r); }
-  const keys = new Map(); for (const r of S.keys.select.all(spec.table)) { if (!keys.has(r.owner_id)) keys.set(r.owner_id, []); keys.get(r.owner_id).push(r); }
-  const decodeChildren = (shape, ownerValues, out = new Map(), prefix = '') => {
-    for (const [k, sub] of Object.entries(shape.lists ?? {})) out.set(`${prefix}${k}`, (groups.get(`${sub.table}|${ownerValues.join('|')}`) ?? []).map((r) => decodeChild(sub, r, ownerValues)));
-    for (const [k, sub] of Object.entries(shape.object ?? {})) out.set(`${prefix}${k}`, (groups.get(`${sub.table}|${ownerValues.join('|')}`) ?? []).map((r) => decodeChild(sub, r, ownerValues)));
-    for (const [k, sub] of Object.entries(shape.maps ?? {})) {
-      if (sub.map) { const o = {}; for (const r of reminders.get(ownerValues[0]) ?? []) setOwn(o, r.marker, r.sent_at !== null ? r.sent_at : parseJson(r.value_json, 'value_json')); out.set(`${prefix}${k}`, o); }
-      else { const o = {}; for (const r of keys.get(ownerValues[0]) ?? []) { const v = parseJson(r.entry_json, 'entry_json'); if (r.shape === 'list') { if (!Object.hasOwn(o, r.act) || !Array.isArray(o[r.act])) setOwn(o, r.act, []); o[r.act].push(v); } else setOwn(o, r.act, v); } out.set(`${prefix}${k}`, o); } // own properties only: an act named __proto__ or constructor is data
-    }
-    for (const [k, sub] of Object.entries(shape.objects ?? {})) decodeChildren(sub, ownerValues, out, `${prefix}${k}.`);
-    return out;
-  };
-  const decodeChild = (sub, r, ownerValues) => {
-    if (r.raw_json !== null) return parseJson(r.raw_json, 'raw_json');
-    const m = metaOf(r); const kids = decodeChildren(sub.shape, [...ownerValues, r.position]);
-    return decodeLevel(sub.shape, r, '', m.extra, m.absent, m.offtype, kids);
-  };
-  return P.select.all().map((r) => { const m = metaOf(r); return decodeLevel(spec.shape, r, '', m.extra, m.absent, m.offtype, decodeChildren(spec.shape, [r.id])); });
-}
-export const readRequests = (sqlite) => readRecords(sqlite, REQUESTS);
-export const readTrials = (sqlite) => readRecords(sqlite, TRIALS);
-/** The trials collection as the file holds it: the tables once 0015 is recorded, the blob before (`[]` when there is none; `null` when the blob is not valid JSON) — what the identity snapshot reconciles trialReports against. */
-export const readTrialsCollection = (sqlite) => (recruitmentLive(sqlite) ? readTrials(sqlite) : readTrialsBlob(sqlite));
-/** The requests collection as the file holds it (the tables, or the blob): ids are what the callers need. */
-export function readRequestsCollection(sqlite) {
-  if (recruitmentLive(sqlite)) return readRequests(sqlite);
-  if (!tableExists(sqlite, 'collections')) return undefined;
-  const row = sqlite.prepare("SELECT value FROM collections WHERE name = 'requests'").get();
-  if (!row) return undefined;
-  try { return JSON.parse(row.value); } catch { return null; }
-}
-/** The recruitmentCases collection as the file holds it, for the strict case references (ids are what the callers need): the recruitment_cases table once 0016 is recorded (S8b), the blob before (`[]` when there is none; `null` when the blob is not valid JSON or not an array). */
-export function readCasesCollection(sqlite) {
-  if (migrationApplied(sqlite, CASES_MIGRATION)) return sqlite.prepare('SELECT id FROM recruitment_cases ORDER BY seq').all().map((r) => ({ id: r.id }));
-  if (!tableExists(sqlite, 'collections')) return [];
-  const row = sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(CASES_COLLECTION);
-  if (!row) return [];
-  try { const v = JSON.parse(row.value); return Array.isArray(v) ? v : null; } catch { return null; }
-}
+function deleteTrial(st, id) { for (const d of st.trialChildrenDel) d.run(id); st.trialDel.run(id); }
+function deleteRequest(st, id) { st.slotsDel.run(id); st.requestDel.run(id); }
 
-// ------------------------------------------------------------------ validation (the literal's contract: never a value in a message)
-/** Validate one request entry: `{ ok: true }` or `{ ok: false, reason }`. The contract is the identifiers the keys and tolerant references need; everything else is lossless. */
-export function validateRequest(raw, at = 'request') {
-  if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-  if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
-  if (!nonEmpty(raw.playerId)) return { ok: false, reason: `${at}.playerId must be a non-empty string (${raw.id})` };
-  if (!nonEmpty(raw.orgId)) return { ok: false, reason: `${at}.orgId must be a non-empty string (${raw.id})` };
-  if (!nonEmpty(raw.userId)) return { ok: false, reason: `${at}.userId must be a non-empty string (${raw.id})` };
-  if (Object.hasOwn(raw, 'trialId') && raw.trialId !== undefined && raw.trialId !== null && !nonEmpty(raw.trialId)) return { ok: false, reason: `${at}.trialId must be a string or null (${raw.id})` };
-  if (Object.hasOwn(raw, 'caseId') && raw.caseId !== undefined && raw.caseId !== null && !nonEmpty(raw.caseId)) return { ok: false, reason: `${at}.caseId must be a string or null (${raw.id})` };
-  for (const k of ['guardianId']) if (Object.hasOwn(raw, k) && raw[k] !== undefined && raw[k] !== null && !nonEmpty(raw[k])) return { ok: false, reason: `${at}.${k} must be a string or null (${raw.id})` };
-  try { encode(REQUEST_SHAPE, raw); } catch (e) { return { ok: false, reason: `${at} (${raw.id}): ${e.message}` }; }
-  return { ok: true };
+function decodeRequest(st, row) {
+  const trialDetails = row.type !== 'trial' ? null : {
+    proposedDate: row.trial_proposed_date, altSlots: JSON.parse(row.trial_alt_days_json), venue: row.trial_venue, notes: row.trial_notes,
+    slots: st.slotsOf.all(row.id).map((s) => ({ id: s.id, day: s.day, kind: s.kind, startsAt: s.starts_at, endsAt: s.ends_at, timezone: s.timezone, venue: venueOut(s, 'venue') })),
+    private: row.trial_private_venue_address === null && row.trial_private_instructions === null ? null : { venueAddress: row.trial_private_venue_address, instructions: row.trial_private_instructions },
+  };
+  return {
+    id: row.id, playerId: row.player_id, playerName: row.player_name, orgId: row.org_id, orgName: row.org_name, orgType: row.org_type, orgVerified: row.org_verified === 1, orgSafeguardingCertified: row.org_safeguarding_certified === 1, trustedPartner: flagOut(row.org_trusted_partner),
+    userId: row.user_id, scoutName: row.scout_name, scoutRole: row.scout_role, type: row.type, message: row.message, subject: row.subject, contactId: row.contact_id,
+    trialDetails, status: row.status, createdAt: row.created_at, respondedAt: row.responded_at, respondedBy: row.responded_by, routedTo: row.routed_to, guardianId: row.guardian_id, contactChannel: row.contact_channel_id,
+    caseId: row.case_id, trialId: row.trial_id,
+    recipient: row.recipient_type === null ? null : { type: row.recipient_type, playerId: row.recipient_player_id, guardianId: row.recipient_guardian_id, minor: row.recipient_minor === 1 },
+    keys: { invite: row.invite_fp === null ? null : { key: row.invite_key, fp: row.invite_fp } }, subjectRemovedAt: row.subject_removed_at,
+  };
 }
-export function validateTrial(raw, at = 'trial') {
-  if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-  if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
-  if (!nonEmpty(raw.requestId)) return { ok: false, reason: `${at}.requestId must be a non-empty string (${raw.id})` };
-  if (!nonEmpty(raw.playerId)) return { ok: false, reason: `${at}.playerId must be a non-empty string (${raw.id})` };
-  if (!nonEmpty(raw.orgId)) return { ok: false, reason: `${at}.orgId must be a non-empty string (${raw.id})` };
-  if (Object.hasOwn(raw, 'caseId') && raw.caseId !== undefined && raw.caseId !== null && !nonEmpty(raw.caseId)) return { ok: false, reason: `${at}.caseId must be a string or null (${raw.id})` };
-  try { encode(TRIAL_SHAPE, raw); } catch (e) { return { ok: false, reason: `${at} (${raw.id}): ${e.message}` }; }
-  return { ok: true };
+function decodeTrial(st, row) {
+  const O = st.of;
+  const schedule = row.schedule_revision === null ? null : {
+    timezone: row.schedule_timezone, revision: row.schedule_revision, proposedAt: row.schedule_proposed_at, proposedBy: actorOut(row, 'schedule_proposed_by'),
+    confirmedAt: row.schedule_confirmed_at, confirmedBy: actorOut(row, 'schedule_confirmed_by'), declinedAt: row.schedule_declined_at, declinedBy: actorOut(row, 'schedule_declined_by'),
+    sessions: O.trial_schedule_sessions.all(row.id).map((s) => ({ ...sessionOut(s), evidence: st.evidenceOf.all(row.id, s.id).map((e) => ({ id: e.id, kind: e.kind, sessionId: e.box_session_id, linkedAt: e.linked_at, linkedBy: actorOut(e, 'linked_by'), removedAt: e.removed_at, removedBy: actorOut(e, 'removed_by') })) })),
+    revisions: O.trial_schedule_revisions.all(row.id).map((r) => ({ revision: r.revision, timezone: r.timezone, sessions: st.revisionSessionsOf.all(row.id, r.revision).map(sessionOut), proposedAt: r.proposed_at, proposedBy: actorOut(r, 'proposed_by'), confirmedAt: r.confirmed_at, confirmedBy: actorOut(r, 'confirmed_by'), supersededAt: r.superseded_at, reason: r.reason, material: flagOut(r.material) })),
+  };
+  const keyRows = st.keysOf.all(row.id);
+  const rep = O.trial_reports.all(row.id)[0] ?? null;
+  const reminders = {}; for (const r of O.trial_reminders.all(row.id)) Object.defineProperty(reminders, r.marker, { value: r.sent_at, enumerable: true, writable: true, configurable: true });
+  return {
+    id: row.id, requestId: row.request_id, caseId: row.case_id, playerId: row.player_id, playerName: row.player_name, orgId: row.org_id, orgName: row.org_name, scoutName: row.scout_name,
+    acceptedAt: row.accepted_at, acceptedBy: row.accepted_by, guardianApproved: flagOut(row.guardian_approved), proposedDate: row.proposed_date, venue: row.venue, notes: row.notes,
+    reportDueAt: row.report_due_at, status: row.status, reminderSent: row.reminder_sent === 1, feedbackEscalatedAt: row.feedback_escalated_at,
+    report: rep ? { id: rep.id, trialId: row.id, playerId: rep.player_id, orgId: rep.org_id, orgName: rep.org_name, userId: rep.user_id, scoutName: rep.scout_name, filedAt: rep.filed_at, ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, rep[snake(f)]])), notes: rep.notes, strengthNote: rep.strength_note, focusNote: rep.focus_note } : null,
+    day: {
+      staff: O.trial_day_staff.all(row.id).map((s) => ({ id: s.id, name: s.name, role: s.role, check: s.check_status === null ? null : { kind: s.check_kind, ref: s.check_ref, status: s.check_status, expiresAt: s.check_expires_at, reviewedBy: s.check_reviewed_by, reviewedAt: s.check_reviewed_at }, addedBy: s.added_by_name, addedAt: s.added_at })),
+      consents: O.trial_day_consents.all(row.id).map((c) => ({ id: c.id, by: actorOut(c, 'by'), scope: c.scope, at: c.at })),
+      arrival: row.day_arrival_time === null && row.day_arrival_address === null && row.day_arrival_notes === null ? null : { time: row.day_arrival_time, address: row.day_arrival_address, notes: row.day_arrival_notes },
+      emergency: row.day_emergency_at === null ? null : { name: row.day_emergency_name, phone: row.day_emergency_phone, setBy: row.day_emergency_set_by, at: row.day_emergency_at },
+      checkins: O.trial_day_checkins.all(row.id).map((c) => ({ playerId: c.player_id, at: c.at, byUserId: c.by_user_id, byName: c.by_name })),
+      collection: row.day_collection_policy === null ? null : { policy: row.day_collection_policy },
+      statusEvents: O.trial_day_status_events.all(row.id).map((e) => ({ kind: e.kind, at: e.at, by: e.by_name, reason: e.reason, newDate: e.new_date })),
+    },
+    workflowState: row.workflow_state, schedule,
+    attendance: O.trial_attendance.all(row.id).map((a) => ({ sessionId: a.session_id, state: a.state, source: a.source, recordedBy: actorOut(a, 'recorded_by'), recordedAt: a.recorded_at, note: a.note })),
+    completion: row.completion_state === null ? null : { state: row.completion_state, at: row.completion_at, by: actorOut(row, 'completion_by'), reason: row.completion_reason, phase: row.completion_phase, cancelledBy: row.completion_cancelled_by },
+    recipient: row.recipient_type === null ? null : { type: row.recipient_type, playerId: row.recipient_player_id, guardianId: row.recipient_guardian_id, minor: row.recipient_minor === 1, at: row.recipient_at },
+    keys: Object.fromEntries(TRIAL_KEY_ACTS.map((act) => [act, keyRows.filter((k) => k.act === act).map((k) => ({ key: k.key, fp: k.fp, at: k.at }))])),
+    history: O.trial_history.all(row.id).map((h) => ({ id: h.id, at: h.at, action: h.action, by: actorOut(h, 'by'), detail: h.detail_json === null ? null : JSON.parse(h.detail_json) })),
+    reminders,
+    lifecycle: row.lifecycle_applied === null ? null : row.lifecycle_applied === 1 ? { applied: true, from: row.lifecycle_from, to: row.lifecycle_to, at: row.lifecycle_at } : { applied: false, reason: row.lifecycle_reason, at: row.lifecycle_at },
+    rev: row.rev, revAt: row.rev_at, revBy: row.rev_by_user_id === null && row.rev_by_name === null ? null : { userId: row.rev_by_user_id, name: row.rev_by_name },
+    subjectRemovedAt: row.subject_removed_at,
+  };
 }
-/** Unknown fields at the record level (the `keys` holder of a non-replayable act is a known value kept in place, not an unknown field). */
-const unknownExtras = (enc) => Object.keys(enc.extra).some((k) => k !== 'keys');
-const guardianRefsOfRequest = (r) => [r.guardianId, isPlainObject(r.recipient) ? r.recipient.guardianId : null].filter((g) => typeof g === 'string' && g.length);
-const guardianRefsOfTrial = (t) => [isPlainObject(t.recipient) ? t.recipient.guardianId : null].filter((g) => typeof g === 'string' && g.length);
-const caseRefOf = (x) => (typeof x.caseId === 'string' && x.caseId.length ? x.caseId : null);
-/**
- * Validate whole collections and their cross references (ids only). `stored` gives the
- * retained side for a partial write: `{ requests, trials }` as arrays of records (or null
- * when that side is supplied). `cases` is the FINAL recruitmentCases collection (array) and
- * `guardianExists(id)` the FINAL guardians table. Throws RECRUITMENT_IMPORT_BLOCKED (a
- * collection problem) or the reference refusal codes. Returns `{ counts }`.
- */
-export function validateCollections(sqlite, { requests, trials }, { stored = {}, cases, orgs, users, label = 'the snapshot' } = {}) {
-  const problems = [];
-  const reqList = requests === undefined ? (stored.requests ?? []) : requests; const trList = trials === undefined ? (stored.trials ?? []) : trials;
-  if (requests !== undefined && !Array.isArray(requests)) throw blocked(`${label}: requests must be an array of entries (got ${describe(requests)})`);
-  if (trials !== undefined && !Array.isArray(trials)) throw blocked(`${label}: trials must be an array of entries (got ${describe(trials)})`);
-  const counts = { requests: { imported: 0, withExtraFields: 0, withAbsentKeys: 0, withOfftypeValues: 0 }, trials: { imported: 0, withExtraFields: 0, withAbsentKeys: 0, withOfftypeValues: 0, legacyPairs: 0, preP4bShape: 0, recipientMismatch: 0 }, players: { live: 0, retained: 0, missing: 0 } };
-  const seenR = new Set(); const seenT = new Set();
-  if (requests !== undefined) requests.forEach((raw, i) => { const v = validateRequest(raw, `requests entry #${i}`); if (!v.ok) { problems.push(v.reason); return; } if (seenR.has(raw.id)) { problems.push(`requests entry #${i}: duplicates the id of an earlier entry (${raw.id})`); return; } seenR.add(raw.id); const e = encode(REQUEST_SHAPE, raw); counts.requests.imported += 1; if (unknownExtras(e)) counts.requests.withExtraFields += 1; if (e.absent.length) counts.requests.withAbsentKeys += 1; if (Object.keys(e.offtype).length) counts.requests.withOfftypeValues += 1; });
-  if (trials !== undefined) trials.forEach((raw, i) => { const v = validateTrial(raw, `trials entry #${i}`); if (!v.ok) { problems.push(v.reason); return; } if (seenT.has(raw.id)) { problems.push(`trials entry #${i}: duplicates the id of an earlier entry (${raw.id})`); return; } seenT.add(raw.id); const e = encode(TRIAL_SHAPE, raw); counts.trials.imported += 1; if (unknownExtras(e)) counts.trials.withExtraFields += 1; if (e.absent.length) counts.trials.withAbsentKeys += 1; if (Object.keys(e.offtype).length) counts.trials.withOfftypeValues += 1; if (!Object.hasOwn(raw, 'workflowState')) counts.trials.preP4bShape += 1; if (isPlainObject(raw.recipient) && typeof raw.recipient.playerId === 'string' && raw.recipient.playerId !== raw.playerId) counts.trials.recipientMismatch += 1; });
-  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  // cross references on the FINAL combined state
-  const reqById = new Map(reqList.filter(isPlainObject).map((r) => [r.id, r])); const trById = new Map(trList.filter(isPlainObject).map((t) => [t.id, t]));
-  const byRequest = new Map();
-  for (const t of trById.values()) {
-    if (!reqById.has(t.requestId)) problems.push(`trial ${t.id} names request ${t.requestId}, which is not in the final requests`);
-    else if (byRequest.has(t.requestId)) problems.push(`trial ${t.id} and trial ${byRequest.get(t.requestId)} both name request ${t.requestId}; a request has one trial`);
-    byRequest.set(t.requestId, t.id);
-    const r = reqById.get(t.requestId);
-    if (r) { if (!Object.hasOwn(r, 'trialId') || r.trialId === undefined) counts.trials.legacyPairs += 1; else if (r.trialId !== t.id) problems.push(`trial ${t.id} names request ${t.requestId}, which names ${r.trialId === null ? 'no trial' : `trial ${r.trialId}`}`); }
-  }
-  // A SUPPLIED request's values are authoritative: a trial it names must be in the final trials. A RETAINED request whose
-  // trial is removed by this write keeps nothing of it: the departure sets its back-reference NULL (the key's SET NULL) —
-  // the deliberate removal of plan §D.7.5; a retained request whose trial is reassigned to another request is a mismatch.
-  for (const r of reqById.values()) { if (typeof r.trialId === 'string') { const t = trById.get(r.trialId); if (!t) { if (requests !== undefined) problems.push(`request ${r.id} names trial ${r.trialId}, which is not in the final trials`); } else if (t.requestId !== r.id) problems.push(`request ${r.id} names trial ${r.trialId}, which names request ${t.requestId}`); } }
-  if (problems.length) throw refusal('PAIR_MISMATCH', `${problems.length} request/trial relationship(s) in ${label} do not agree (${ids(problems)}); the write was rolled back and nothing was changed`, { problems });
-  const caseIds = cases === undefined ? null : new Set((cases ?? []).filter(isPlainObject).map((c) => c.id));
-  if (caseIds) { const missing = [...reqById.values(), ...trById.values()].filter((x) => caseRefOf(x) && !caseIds.has(x.caseId)); if (missing.length) throw refusal('RECRUITMENT_CASE_MISSING', `${missing.length} row(s) in ${label} name a case that is not in the final ${CASES_COLLECTION} collection (rows ${ids(missing.map((x) => x.id))}; cases ${ids([...new Set(missing.map((x) => x.caseId))])}); the write was rolled back and nothing was changed — resolve the case id by hand, never by guessing (Q7b)`, { rows: missing.map((x) => x.id) }); }
-  // the organisation and staff keys (RESTRICT): checked here with ids only, so a dangling reference is named before the
-  // engine's bare "FOREIGN KEY constraint failed" — against the FINAL collections when the snapshot supplies them (their
-  // prunes run after this write), the tables otherwise
-  const idsOf = (list) => new Set((Array.isArray(list) ? list : []).filter(isPlainObject).map((x) => x.id));
-  const orgIds = orgs !== undefined ? idsOf(orgs) : tableExists(sqlite, 'orgs') ? new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id)) : null;
-  const userIds = users !== undefined ? idsOf(users) : tableExists(sqlite, 'org_users') ? new Set(sqlite.prepare('SELECT id FROM org_users').all().map((r) => r.id)) : null;
-  if (orgIds) { const noOrg = [...(requests === undefined ? [] : reqById.values()), ...(trials === undefined ? [] : trById.values())].filter((x) => !orgIds.has(x.orgId)); if (noOrg.length) throw refusal('RECRUITMENT_ORG_MISSING', `${noOrg.length} row(s) in ${label} name an organisation that does not exist in the final orgs table (rows ${ids(noOrg.map((x) => x.id))}; organisations ${ids([...new Set(noOrg.map((x) => x.orgId))])}); the write was rolled back and nothing was changed`, { rows: noOrg.map((x) => x.id) }); }
-  if (userIds && requests !== undefined) { const noUser = [...reqById.values()].filter((r) => !userIds.has(r.userId)); if (noUser.length) throw refusal('RECRUITMENT_USER_MISSING', `${noUser.length} request(s) in ${label} name a staff member that does not exist in the final org_users table (rows ${ids(noUser.map((x) => x.id))}; staff ${ids([...new Set(noUser.map((x) => x.userId))])}); the write was rolled back and nothing was changed`, { rows: noUser.map((x) => x.id) }); }
-  const S = stmts(sqlite); const noGuardian = [];
-  for (const r of reqById.values()) for (const g of guardianRefsOfRequest(r)) if (!S.guardian.get(g)) noGuardian.push([r.id, g]);
-  for (const t of trById.values()) for (const g of guardianRefsOfTrial(t)) if (!S.guardian.get(g)) noGuardian.push([t.id, g]);
-  if (noGuardian.length) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `${noGuardian.length} row(s) in ${label} name a guardian that does not exist in the final guardians table (rows ${ids(noGuardian.map((x) => x[0]))}; guardians ${ids([...new Set(noGuardian.map((x) => x[1]))])}); the write was rolled back and nothing was changed (Q7c)`, { rows: noGuardian.map((x) => x[0]) });
-  // the tolerant player references, counted
-  if (tableExists(sqlite, 'players')) {
-    const live = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NULL').all().map((r) => r.id)); const retained = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NOT NULL').all().map((r) => r.id));
-    for (const x of [...(requests === undefined ? [] : reqById.values()), ...(trials === undefined ? [] : trById.values())]) { if (live.has(x.playerId)) counts.players.live += 1; else if (retained.has(x.playerId)) counts.players.retained += 1; else counts.players.missing += 1; }
-  }
-  return { counts };
-}
+export const readRequests = (sqlite) => { const st = statements(sqlite); return st.requestAll.all().map((r) => decodeRequest(st, r)); };
+export const readTrials = (sqlite) => { const st = statements(sqlite); return st.trialAll.all().map((r) => decodeTrial(st, r)); };
 
-// ------------------------------------------------------------------ the six phases against the tables
-/**
- * Phases 1–3 and 5 (plan §D.7.5) for the supplied collections against the table state. `requests`/`trials` are
- * arrays of records (a full collection) or `undefined` (omitted, retained). `only` restricts the rows written to
- * the given ids (a flush writes the changed ones; a snapshot writes every supplied one). Runs inside the caller's
- * transaction. Phase 4 (channels) is the caller's, between `phases123` and `prune`.
- */
-export function phases123(sqlite, { requests, trials }, { only = null } = {}) {
-  const S = stmts(sqlite);
-  const dirty = (id) => !only || only.has(id);
-  if (requests) for (const r of requests) if (dirty(r.id)) writeRecord(sqlite, REQUESTS, r); // phase 1 (the back-reference parked by the upsert)
-  if (trials) {
-    const supplied = new Map(trials.map((t) => [t.id, t]));
-    const stored = S.trials.stored.all().map((r) => ({ ...r }));
-    const departing = stored.filter((st) => { const t = supplied.get(st.id); return !t || t.requestId !== st.request_id; });
-    for (const { id } of departing) { for (const c of TRIAL_CHILDREN) if (c.restrict) S.trials.children[c.table].deleteOwner.run(id); S.keys.deleteOwner.run('trials', id); S.trials.del.run(id); } // (a): the RESTRICT children and the keys (no key of their own: a polymorphic owner) first, the cascades take the rest
-    const gone = new Set(departing.map((d) => d.id));
-    for (const st of stored) { if (gone.has(st.id)) continue; const t = supplied.get(st.id); const wasIn = inSlot(st.case_id, st.workflow_state); const keeps = inSlot(t.caseId, t.workflowState) && t.caseId === st.case_id; if (wasIn && !keeps) S.trials.park.run(st.id); } // (b)
-    for (const t of trials) if (dirty(t.id) || gone.has(t.id)) writeRecord(sqlite, TRIALS, t); // (c)
-  }
-  if (requests) for (const r of requests) if (dirty(r.id)) S.requests.assign.run(typeof r.trialId === 'string' ? r.trialId : null, r.id); // phase 3
-}
-export function prune(sqlite, { requests, label = 'the snapshot' }) {
-  if (!requests) return;
-  const S = stmts(sqlite); const keep = new Set(requests.map((r) => r.id));
-  const gone = sqlite.prepare('SELECT id FROM recruitment_requests').all().map((r) => r.id).filter((id) => !keep.has(id));
-  if (!gone.length) return;
-  // A thread still naming a request this write removes: named with ids (the RESTRICT key would refuse it without them).
-  if (tableExists(sqlite, 'channels')) {
-    const goneSet = new Set(gone); const held = sqlite.prepare('SELECT id, request_id FROM channels ORDER BY seq').all().filter((c) => goneSet.has(c.request_id));
-    if (held.length) throw refusal('CHANNEL_REQUEST_MISSING', `${held.length} channel(s) in ${label} name a request that is not in the final requests collection (channels ${ids(held.map((c) => c.id))}; requests ${ids([...new Set(held.map((c) => c.request_id))])}); the write was rolled back and nothing was changed — remove the thread with its request, or keep the request`, { channels: held.map((c) => c.id) });
-  }
-  for (const id of gone) { S.keys.deleteOwner.run('recruitment_requests', id); S.requests.del.run(id); } // phase 5 (the keys first: no key of their own; the slots cascade; a trial still naming the request is refused by its RESTRICT key — the pre-write check names it first)
-}
-/**
- * Phase 6 — the FINAL-state assertions, inside the caller's transaction: the request/trial pair (a request naming a
- * trial is named back; a trial's request names it or carries no trialId key — the legacy pair), every case id in the
- * final recruitmentCases (`cases`: the supplied collection, or the retained blob when omitted), every guardian id in
- * the final guardians table. Throws with ids only. A no-op before the cutover record.
- */
-export function assertRecruitmentConsistent(sqlite, { cases = undefined, label = 'the snapshot' } = {}) {
-  if (!recruitmentLive(sqlite)) return;
-  const pairA = sqlite.prepare(`SELECT t.id AS trial_id, t.request_id, r.trial_id AS named FROM trials t JOIN recruitment_requests r ON r.id = t.request_id WHERE r.trial_id IS NOT t.id AND instr(coalesce(r.absent_keys_json, ''), '"trialId"') = 0`).all();
-  const pairB = sqlite.prepare('SELECT r.id AS request_id, r.trial_id FROM recruitment_requests r LEFT JOIN trials t ON t.id = r.trial_id WHERE r.trial_id IS NOT NULL AND (t.id IS NULL OR t.request_id <> r.id)').all();
-  if (pairA.length || pairB.length) throw refusal('PAIR_MISMATCH', `${pairA.length + pairB.length} request/trial relationship(s) in ${label} do not agree (trials ${ids(pairA.map((r) => r.trial_id))}; requests ${ids(pairB.map((r) => r.request_id))}); the write was rolled back and nothing was changed — write the requests and the trials of a relationship together`, { trials: pairA.map((r) => r.trial_id), requests: pairB.map((r) => r.request_id) });
-  const finalCases = cases === undefined ? readCasesCollection(sqlite) : cases;
-  const caseRows = sqlite.prepare("SELECT 'request' AS kind, id, case_id FROM recruitment_requests WHERE case_id IS NOT NULL UNION ALL SELECT 'trial', id, case_id FROM trials WHERE case_id IS NOT NULL").all();
-  if (caseRows.length) {
-    if (!Array.isArray(finalCases)) throw refusal('RECRUITMENT_CASES_MALFORMED', `${caseRows.length} row(s) in ${label} reference cases, but the ${cases === undefined ? `retained ${CASES_COLLECTION} collection` : `${CASES_COLLECTION} collection supplied with the snapshot`} is ${describe(finalCases)}, not an array; the write was rolled back and nothing was changed`);
-    const caseIds = new Set(finalCases.filter(isPlainObject).map((c) => c.id)); const missing = caseRows.filter((r) => !caseIds.has(r.case_id));
-    if (missing.length) throw refusal('RECRUITMENT_CASE_MISSING', `${missing.length} row(s) in ${label} name a case that is not in the final ${CASES_COLLECTION} collection (rows ${ids(missing.map((r) => r.id))}; cases ${ids([...new Set(missing.map((r) => r.case_id))])}); the write was rolled back and nothing was changed (Q7b)`, { rows: missing.map((r) => r.id) });
-  }
-  const guardianRows = sqlite.prepare(`SELECT id, guardian_id AS g FROM recruitment_requests WHERE guardian_id IS NOT NULL UNION ALL SELECT id, recipient_guardian_id FROM recruitment_requests WHERE recipient_guardian_id IS NOT NULL UNION ALL SELECT id, recipient_guardian_id FROM trials WHERE recipient_guardian_id IS NOT NULL`).all();
-  const guardians = new Set(sqlite.prepare('SELECT id FROM guardians').all().map((r) => r.id));
-  const noGuardian = guardianRows.filter((r) => !guardians.has(r.g));
-  if (noGuardian.length) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `${noGuardian.length} row(s) in ${label} name a guardian that does not exist in the final guardians table (rows ${ids([...new Set(noGuardian.map((r) => r.id))])}; guardians ${ids([...new Set(noGuardian.map((r) => r.g))])}); the write was rolled back and nothing was changed (Q7c)`, { rows: noGuardian.map((r) => r.id) });
-}
-/** The counts of the admin report: rows naming a player that is not in the players table, and rows naming a retained record (Q7a: counted, never refused). */
+// ------------------------------------------------------------------ references (Q7a counted, Q7c strict)
+const PLAYER_REFS_SQL = {
+  requests: 'SELECT player_id AS pid FROM recruitment_requests UNION ALL SELECT recipient_player_id FROM recruitment_requests WHERE recipient_player_id IS NOT NULL',
+  trials: 'SELECT player_id AS pid FROM trials UNION ALL SELECT recipient_player_id FROM trials WHERE recipient_player_id IS NOT NULL UNION ALL SELECT player_id FROM trial_reports UNION ALL SELECT player_id FROM trial_day_checkins',
+};
 export function unresolvedPlayerReferences(sqlite) {
   if (!recruitmentLive(sqlite)) return null;
-  const q = (t) => sqlite.prepare(`SELECT count(*) AS n FROM ${t} x WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.player_id)`).get().n;
-  return { requests: q('recruitment_requests'), trials: q('trials') };
+  return Object.fromEntries(RECRUITMENT_COLLECTIONS.map((c) => [c, sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL[c]}) x WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid)`).get().n]));
 }
 export function retainedPlayerReferences(sqlite) {
   if (!recruitmentLive(sqlite)) return null;
-  const q = (t) => sqlite.prepare(`SELECT count(*) AS n FROM ${t} x WHERE EXISTS (SELECT 1 FROM players p WHERE p.id = x.player_id AND p.deleted_at IS NOT NULL)`).get().n;
-  return { requests: q('recruitment_requests'), trials: q('trials') };
+  return Object.fromEntries(RECRUITMENT_COLLECTIONS.map((c) => [c, sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL[c]}) x WHERE EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid AND p.deleted_at IS NOT NULL)`).get().n]));
+}
+/** Every guardian id a typed record names. */
+const guardianIdsOf = (name, r) => (name === 'requests' ? [r.guardianId, r.recipient?.guardianId ?? null] : [r.recipient?.guardianId ?? null]).filter((g) => g !== null);
+
+/** The pair the respond routes read both ways: a request's trial names it back. */
+function assertPairs(sqlite, label) {
+  const broken = sqlite.prepare('SELECT r.id AS request, r.trial_id AS trial FROM recruitment_requests r LEFT JOIN trials t ON t.id = r.trial_id WHERE r.trial_id IS NOT NULL AND (t.id IS NULL OR t.request_id <> r.id)').all();
+  if (broken.length) throw refusal('RECRUITMENT_PAIR_MISMATCH', `${label}: ${broken.length} request(s) name a trial that does not name them back (${ids(broken.map((x) => `${x.request} → ${x.trial}`))}); the write was rolled back`);
+}
+function assertKeys(sqlite, label) {
+  for (const t of RECRUITMENT_TABLES) {
+    const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all();
+    if (!broken.length) continue;
+    const owner = t === 'recruitment_requests' || t === 'trials' ? 'id' : t === 'request_trial_slots' ? 'request_id' : 'trial_id';
+    const fks = sqlite.prepare(`PRAGMA foreign_key_list(${t})`).all();
+    const named = (r) => {
+      const cols = fks.filter((f) => f.id === r.fkid).map((f) => f.from);
+      const row = sqlite.prepare(`SELECT ${[owner, ...cols].join(', ')} FROM ${t} WHERE rowid = ?`).get(r.rowid) ?? {};
+      return `${row[owner] ?? `rowid ${r.rowid}`} → ${r.parent} ${cols.map((c) => row[c]).join('/')}`;
+    };
+    const code = broken.every((r) => r.parent === 'recruitment_cases') ? 'RECRUITMENT_CASE_MISSING' : 'RECRUITMENT_REFERENCE_MISSING';
+    throw refusal(code, `${label}: ${t} holds ${broken.length} row(s) naming a ${broken[0].parent} row that is not there (${ids(broken.map(named))}); the write was rolled back`);
+  }
+}
+/** Every guardian a request or a trial names exists (Q7c), whichever side the write changed. */
+function assertGuardians(sqlite, label) {
+  const rows = sqlite.prepare("SELECT 'recruitment_requests' AS t, id, guardian_id AS g FROM recruitment_requests WHERE guardian_id IS NOT NULL UNION ALL SELECT 'recruitment_requests', id, recipient_guardian_id FROM recruitment_requests WHERE recipient_guardian_id IS NOT NULL UNION ALL SELECT 'trials', id, recipient_guardian_id FROM trials WHERE recipient_guardian_id IS NOT NULL").all();
+  const st = statements(sqlite);
+  const missing = rows.filter((r) => !st.guardian.get(r.g));
+  if (missing.length) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `${label}: ${missing.length} guardian reference(s) name no guardian (${ids(missing.map((r) => `${r.t} ${r.id} → guardians ${r.g}`))}); the write was rolled back`);
+}
+/** The final state of the recruitment graph, ids only: every key (the deferred case and trial keys named before COMMIT would refuse them anonymously), the request/trial pairs, the guardians. */
+export function assertRecruitmentConsistent(sqlite, { label = 'the snapshot' } = {}) {
+  if (!recruitmentLive(sqlite)) return;
+  assertKeys(sqlite, label); assertPairs(sqlite, label); assertGuardians(sqlite, label);
 }
 
-// ------------------------------------------------------------------ whole-snapshot access (writeTableBacked / readTableBacked)
+// ------------------------------------------------------------------ the snapshot path (tools, fixtures, the persistence suites)
+const TYPERS = { requests: typeRequest, trials: typeTrial };
+const TABLE_OF = { requests: 'recruitment_requests', trials: 'trials' };
 export const RECRUITMENT_SNAPSHOT = {
   names: RECRUITMENT_COLLECTIONS,
   read(sqlite) { if (!recruitmentLive(sqlite)) return null; return { requests: readRequests(sqlite), trials: readTrials(sqlite) }; },
-  /** Phases 1–3 for the supplied collections (both optional); returns the names written (empty before the cutover record: the caller writes the blobs). */
-  replace(sqlite, { requests, trials }, { cases = undefined, orgs = undefined, users = undefined, label = 'the snapshot' } = {}) {
+  /**
+   * Type the supplied collections (an omitted one is retained whole, an array is the whole final collection), remove
+   * the trials a supplied list no longer carries, and write the records — requests before trials. The requests a
+   * supplied list no longer carries are removed by `prune`, after the threads that may name them. Returns the names
+   * written.
+   */
+  replace(sqlite, db, { label = 'the snapshot' } = {}) {
     if (!recruitmentLive(sqlite)) return [];
-    if (!sqlite.isTransaction) throw new Error('recruitment: replace() runs inside the caller\'s transaction');
-    if (requests === undefined && trials === undefined) return [];
-    const stored = { requests: requests === undefined ? readRequests(sqlite) : null, trials: trials === undefined ? readTrials(sqlite) : null };
-    validateCollections(sqlite, { requests, trials }, { stored, cases: cases === undefined ? readCasesCollection(sqlite) : cases, orgs, users, label });
-    phases123(sqlite, { requests, trials });
-    return [requests !== undefined ? 'requests' : null, trials !== undefined ? 'trials' : null].filter(Boolean);
+    const typed = {}; const written = [];
+    for (const name of RECRUITMENT_COLLECTIONS) {
+      const value = db[name];
+      if (value === undefined) continue;
+      if (!Array.isArray(value)) throw refusal('RECRUITMENT_INPUT_INVALID', `the ${name} collection of ${label} must be an array of records (got ${describe(value)}); nothing was written`);
+      const seen = new Set(); const problems = [];
+      typed[name] = value.map((raw, i) => {
+        const t = TYPERS[name](raw, `${name} entry #${i}`);
+        if (!t.ok) { problems.push(t.reason); return null; }
+        if (seen.has(t.record.id)) problems.push(`${name} entry #${i} duplicates the id of an earlier entry (${t.record.id})`);
+        seen.add(t.record.id); return t.record;
+      });
+      // Every entry the typed tables cannot hold is named, not just the first.
+      if (problems.length) throw refusal('RECRUITMENT_INPUT_INVALID', `${label}: ${problems.length} ${name} entr${problems.length === 1 ? 'y' : 'ies'} refused (${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}); nothing was written`);
+      written.push(name);
+    }
+    const st = statements(sqlite);
+    if (typed.trials) { const keep = new Set(typed.trials.map((t) => t.id)); for (const id of st.ids('trials')) if (!keep.has(id)) deleteTrial(st, id); }
+    for (const q of typed.requests ?? []) writeRequest(st, q);
+    for (const t of typed.trials ?? []) writeTrial(st, t);
+    return written;
   },
-  prune(sqlite, { requests, label = 'the snapshot' }) { if (recruitmentLive(sqlite)) prune(sqlite, { requests, label }); },
+  /** The requests a supplied list no longer carries (their slots with them); a thread or a trial still naming one refuses the save by its key. */
+  prune(sqlite, { requests, label = 'the snapshot' }) {
+    if (!recruitmentLive(sqlite) || !Array.isArray(requests)) return;
+    const st = statements(sqlite); const keep = new Set(requests.filter(isPlainObject).map((r) => r.id));
+    const gone = st.ids('recruitment_requests').filter((id) => !keep.has(id));
+    if (!gone.length) return;
+    // A thread still naming a request this write removes: named with ids (the RESTRICT key would refuse it without them).
+    if (tableExists(sqlite, 'channels')) {
+      const goneSet = new Set(gone); const held = sqlite.prepare('SELECT id, request_id FROM channels ORDER BY seq').all().filter((c) => goneSet.has(c.request_id));
+      if (held.length) throw refusal('CHANNEL_REQUEST_MISSING', `${held.length} channel(s) in ${label} name a request that is not in the final requests collection (channels ${ids(held.map((c) => c.id))}; requests ${ids([...new Set(held.map((c) => c.request_id))])}); the write was rolled back and nothing was changed — remove the thread with its request, or keep the request`, { channels: held.map((c) => c.id) });
+    }
+    for (const id of gone) {
+      try { deleteRequest(st, id); } catch (e) { throw refusal('RECRUITMENT_REQUEST_STILL_REFERENCED', `${label}: request ${id} is no longer listed but a trial still names it (${e.message}); the write was rolled back`); }
+    }
+  },
+  assert(sqlite, { label = 'the snapshot' } = {}) { assertRecruitmentConsistent(sqlite, { label }); },
 };
 
-// ------------------------------------------------------------------ detached copies (the export)
-export const copyRecord = (r) => { const c = {}; for (const k of Object.keys(r)) setOwn(c, k, clone(r[k], k).value); return c; };
-
-// ------------------------------------------------------------------ the repository
+// ------------------------------------------------------------------ the repository (explicit writes; the mirrors; the participant)
 /**
- * `unit` is the store's participant API ({ active(), join(work) }) or null; `staged` selects the server's write
- * mode (the save hook must be registered); `cases` is an accessor for the authoritative recruitmentCases collection
- * (the live blob: `() => db.recruitmentCases`) that the strict case references are checked against.
+ * `createRecruitmentRepository({ sqlite, unit, now, log })`. Every operation joins the open unit of work (a failure
+ * poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and re-reads
+ * the record into the mirror. A route that writes a request or a trial naming a case created in the same act runs
+ * inside a unit, whose COMMIT checks the deferred keys after the staged case repository wrote its rows.
  */
-export function createRecruitmentRepository({ sqlite, now = Date.now, log = () => {}, unit = null, staged = false, cases = null } = {}) {
-  if (!sqlite) throw new TypeError('the recruitment repository needs a SQLite connection (node:sqlite); requests and trials have no in-memory or JSON fallback');
-  if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the recruitment repository needs the store\'s participant API `unit` ({ active(), join(work) }) or null');
-  if (staged && !unit) throw new TypeError('the recruitment repository in staged mode needs the store\'s participant API `unit` and the store must register its saveHook()');
-  if (cases !== null && typeof cases !== 'function') throw new TypeError('the recruitment repository takes `cases` as an accessor function returning the authoritative recruitmentCases collection');
-  void now; void staged;
-  const cutover = sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?');
-  const refuse = (what) => { throw new TypeError(`${what} is written through the recruitment repository (addRequest / addTrial / tombstoneForPlayer), never directly on the in-memory collection; a record's own fields are edited in place and land in the next save`); };
-  // The mirrors: plain, mutable records in insertion order; the views are read-only ARRAYS over them.
-  const requests = []; const trials = [];
-  const arrayView = (target, label) => markView(new Proxy(target, { set() { return refuse(`the ${label} collection`); }, deleteProperty() { return refuse(`the ${label} collection`); }, defineProperty() { return refuse(`the ${label} collection`); } }));
-  const requestsView = arrayView(requests, 'requests'); const trialsView = arrayView(trials, 'trials');
-  // Change tracking reflects COMMITTED state only: id → the fingerprint of the record as last committed (and, for trials, the key columns).
-  const committed = { requests: new Map(), trials: new Map() };
-  let inFlight = null; // what the open save transaction wrote: applied by commit(), discarded by rollback()
-  const fp = (r) => JSON.stringify(r);
-  const load = () => {
-    requests.length = 0; trials.length = 0; committed.requests.clear(); committed.trials.clear();
-    if (!recruitmentLive(sqlite)) return;
-    for (const r of readRequests(sqlite)) { requests.push(r); committed.requests.set(r.id, fp(r)); }
-    for (const t of readTrials(sqlite)) { trials.push(t); committed.trials.set(t.id, fp(t)); }
-  };
-  load();
-  const inUnit = () => !!unit?.active?.();
-  let hookTaken = false;
-  const hookRefusal = (what) => new Error(`recruitment: ${what} needs the repository's save hook registered with the store first (store.setSaveHook(repo.saveHook())): the hook is how a save writes the changed records and how a unit of work's rollback restores this repository's memory`);
-  /** A mutation of the mirror: inside a unit it joins (a failure poisons the unit); outside, the save that follows lands it. */
-  const mutate = (fn) => { if (inUnit()) return unit.join(() => { if (!hookTaken) throw hookRefusal('a write inside a unit of work'); return fn(); }); if (staged && !hookTaken) throw hookRefusal('a write'); return fn(); };
-  const casesNow = () => (cases ? cases() : undefined);
+export function createRecruitmentRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
+  if (!sqlite) throw new TypeError('the recruitment repository needs a SQLite connection (node:sqlite)');
+  const st = statements(sqlite);
+  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const mirrors = { requests: [], trials: [] };
+  const LABEL = { requests: 'a request record', trials: 'a trial record' };
+  const views = Object.fromEntries(RECRUITMENT_COLLECTIONS.map((n) => [n, markView(readonlyView(mirrors[n], LABEL[n]))]));
+  const reload = () => { const all = RECRUITMENT_SNAPSHOT.read(sqlite); for (const n of RECRUITMENT_COLLECTIONS) { mirrors[n].length = 0; for (const r of all[n]) mirrors[n].push(r); } };
+  const find = (name, id) => mirrors[name].find((x) => x.id === id) ?? null;
+  const replaceIn = (name, id, record) => { const i = mirrors[name].findIndex((r) => r.id === id); if (i >= 0) mirrors[name][i] = record; else mirrors[name].push(record); return readonlyView(record, LABEL[name]); };
+  const refresh = (name, id) => (name === 'requests' ? replaceIn(name, id, decodeRequest(st, st.requestById.get(id))) : replaceIn(name, id, decodeTrial(st, st.trialById.get(id))));
+  const must = (name, id) => { const r = find(name, id); if (!r) throw refusal('RECRUITMENT_NOT_FOUND', `${name} ${id} is not a record of the repository`); return r; };
+  const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_INPUT_INVALID', t.reason); return t.record; };
+  const IMMUTABLE = { requests: ['id', 'playerId', 'orgId', 'userId', 'type', 'createdAt'], trials: ['id', 'requestId', 'playerId', 'orgId', 'acceptedAt'] };
+  const guardiansExist = (name, r) => { const missing = guardianIdsOf(name, r).filter((g) => !st.guardian.get(g)); if (missing.length) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `${TABLE_OF[name]} ${r.id} names a guardian that does not exist (${ids(missing)})`); };
+  const write = (name, record) => { guardiansExist(name, record); if (name === 'requests') writeRequest(st, record); else writeTrial(st, record); };
 
-  const repo = {
-    attach() {
-      if (!cutover.get(RECRUITMENT_MIGRATION)) throw new Error(`recruitment: the cutover record ${RECRUITMENT_MIGRATION} is missing from data_migrations; the tables cannot be trusted as the source of truth`);
-      load();
-      log(`recruitment: ${requests.length} request(s) and ${trials.length} trial(s) loaded from the tables`);
-      return { engine: 'sqlite', requests: requests.length, trials: trials.length };
-    },
-    reload() { load(); return requests.length + trials.length; },
-    requestsView, trialsView,
-    counts: () => ({ requests: requests.length, trials: trials.length, trialReports: trials.filter((t) => isPlainObject(t.report)).length }),
-    /** Changed or new records not yet in a committed save. */
-    pending: () => ({ requests: requests.filter((r) => committed.requests.get(r.id) !== fp(r)).length + [...committed.requests.keys()].filter((id) => !requests.some((r) => r.id === id)).length, trials: trials.filter((t) => committed.trials.get(t.id) !== fp(t)).length + [...committed.trials.keys()].filter((id) => !trials.some((t) => t.id === id)).length }),
-    /** A new request at the end (the former `db.requests.push`): the record itself is kept, validated like an import; the strict references checked now (ids only). */
-    addRequest(record) {
-      return mutate(() => {
-        const v = validateRequest(record); if (!v.ok) throw new TypeError(`a request needs the writer's literal: ${v.reason}`);
-        if (requests.some((r) => r.id === record.id)) throw new Error(`recruitment: a request with id ${record.id} already exists`);
-        if (caseRefOf(record) && casesNow() !== undefined) { const c = casesNow(); if (!(Array.isArray(c) && c.some((k) => isPlainObject(k) && k.id === record.caseId))) throw refusal('RECRUITMENT_CASE_MISSING', `recruitment: request ${record.id} names case ${record.caseId}, which is not in the ${CASES_COLLECTION} collection (Q7b)`); }
-        for (const g of guardianRefsOfRequest(record)) if (!stmts(sqlite).guardian.get(g)) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `recruitment: request ${record.id} names guardian ${g}, which does not exist (Q7c)`);
-        requests.push(record); return record;
-      });
-    },
-    /** A new trial at the end (the former `db.trials.push`): its request must exist in the collection. */
-    addTrial(record) {
-      return mutate(() => {
-        const v = validateTrial(record); if (!v.ok) throw new TypeError(`a trial needs the writer's literal: ${v.reason}`);
-        if (trials.some((t) => t.id === record.id)) throw new Error(`recruitment: a trial with id ${record.id} already exists`);
-        if (!requests.some((r) => r.id === record.requestId)) throw refusal('RECRUITMENT_REQUEST_MISSING', `recruitment: trial ${record.id} names request ${record.requestId}, which is not in the requests collection`);
-        if (trials.some((t) => t.requestId === record.requestId)) throw new Error(`recruitment: request ${record.requestId} already has trial ${trials.find((t) => t.requestId === record.requestId).id}; a request has one trial`);
-        if (caseRefOf(record) && casesNow() !== undefined) { const c = casesNow(); if (!(Array.isArray(c) && c.some((k) => isPlainObject(k) && k.id === record.caseId))) throw refusal('RECRUITMENT_CASE_MISSING', `recruitment: trial ${record.id} names case ${record.caseId}, which is not in the ${CASES_COLLECTION} collection (Q7b)`); }
-        for (const g of guardianRefsOfTrial(record)) if (!stmts(sqlite).guardian.get(g)) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `recruitment: trial ${record.id} names guardian ${g}, which does not exist (Q7c)`);
-        trials.push(record); return record;
-      });
-    },
-    /** The deletion unit's tombstones (the former array replacements): every record of the player replaced in place by `request(r)` / `trial(t)`; ids and positions kept. Returns the counts. */
+  /** `create(record)`: a new record, typed whole; an existing id is refused. */
+  const create = (name) => (raw) => operation(() => {
+    const r = typedOr(name, raw);
+    if (find(name, r.id)) throw refusal('RECRUITMENT_DUPLICATE', `${TABLE_OF[name]} ${r.id} already exists`);
+    write(name, r); return refresh(name, r.id);
+  });
+  /**
+   * `update(id, change)`: `change` receives a plain copy of the stored record and edits it (or returns a replacement);
+   * the result is typed whole and written at once. The identifiers and the creation instant cannot change.
+   */
+  const update = (name) => (id, change) => operation(() => {
+    if (typeof change !== 'function') throw new TypeError(`${name}.update(id, change) needs a function that edits the copy it is given`);
+    const before = must(name, id);
+    const draft = clone(before);
+    const returned = change(draft);
+    const next = typedOr(name, returned === undefined ? draft : returned);
+    for (const k of IMMUTABLE[name]) if (next[k] !== before[k]) throw refusal('RECRUITMENT_INPUT_INVALID', `${TABLE_OF[name]} ${id}: ${k} cannot change`);
+    write(name, next); return refresh(name, id);
+  });
+  const byId = (name) => (id) => { const r = find(name, id); return r ? readonlyView(r, LABEL[name]) : null; };
+
+  return {
+    views,
+    /** S8b reads the final requests and trials through these (ids, case ids, request ids). */
+    requestsView: views.requests, trialsView: views.trials,
+    requests: { create: create('requests'), update: update('requests'), byId: byId('requests') },
+    trials: { create: create('trials'), update: update('trials'), byId: byId('trials') },
+    /**
+     * The deletion unit (M23 P4A-D14): every request and trial of the player becomes the tombstone the callbacks build
+     * from a plain copy (ids, states and times kept; the person-shaped fields gone), written at once.
+     */
     tombstoneForPlayer(playerId, { request, trial }) {
-      return mutate(() => {
-        if (!nonEmpty(playerId)) throw new TypeError('recruitment: tombstoneForPlayer needs a player id');
-        let n = 0;
-        for (let i = 0; i < requests.length; i++) if (requests[i].playerId === playerId) { const next = request(requests[i]); if (!isPlainObject(next) || next.id !== requests[i].id) throw new Error(`recruitment: a tombstone keeps the id (${requests[i].id})`); requests[i] = next; n += 1; }
-        let m = 0;
-        for (let i = 0; i < trials.length; i++) if (trials[i].playerId === playerId) { const next = trial(trials[i]); if (!isPlainObject(next) || next.id !== trials[i].id || next.requestId !== trials[i].requestId) throw new Error(`recruitment: a tombstone keeps the id and the request (${trials[i].id})`); trials[i] = next; m += 1; }
+      return operation(() => {
+        let n = 0; let m = 0;
+        for (const r of mirrors.requests.filter((x) => x.playerId === playerId)) { update('requests')(r.id, (d) => request(d)); n += 1; }
+        for (const t of mirrors.trials.filter((x) => x.playerId === playerId)) { update('trials')(t.id, (d) => trial(d)); m += 1; }
         return { requests: n, trials: m };
       });
     },
-    /** The derived `players[].trialReports`: the reports filed on the player's trials, in filing order (S5's rule), read from the mirror. */
-    trialReportsFor: (playerId) => trialReportsOf(trials, playerId),
-    /**
-     * S8b: what the next flush's phases 2(a) and 5 will remove or reinsert, measured against the tables — the trials no
-     * longer in the mirror or whose requestId changed (deleted and reinserted under their link rows, recruitment.mjs
-     * phase 2a) and the requests no longer in the mirror (pruned). The recruitment-cases repository releases the link
-     * rows naming them before this repository's flush runs and puts them back after it (readiness review §6, R/C).
-     */
-    departures() {
-      if (!recruitmentLive(sqlite)) return { trials: [], requests: [] };
-      const byId = new Map(trials.map((t) => [t.id, t]));
-      const trialsOut = sqlite.prepare('SELECT id, request_id FROM trials').all().filter((st) => { const t = byId.get(st.id); return !t || t.requestId !== st.request_id; }).map((st) => st.id);
-      const keep = new Set(requests.map((r) => r.id));
-      const requestsOut = sqlite.prepare('SELECT id FROM recruitment_requests').all().map((r) => r.id).filter((id) => !keep.has(id));
-      return { trials: trialsOut, requests: requestsOut };
+    /** The derived `players[].trialReports`: the reports filed on the player's trials, in filing order (S5's rule). */
+    trialReportsFor(playerId) {
+      return mirrors.trials.filter((t) => t.playerId === playerId && t.report).map((t) => t.report).sort((a, b) => a.filedAt - b.filedAt);
     },
-    /** Every record in its legacy shape, detached (the admin backup). */
-    exportRequests: () => requests.map(copyRecord),
-    exportTrials: () => trials.map(copyRecord),
-
-    // ---------------------------------------------------------- the save hook
-    flush() {
-      if (!sqlite.isTransaction) throw new Error('recruitment.flush runs inside a save transaction; the store reports its commit or rollback afterwards');
-      const changedR = new Set(); const changedT = new Set();
-      for (const r of requests) if (committed.requests.get(r.id) !== fp(r)) changedR.add(r.id);
-      for (const t of trials) if (committed.trials.get(t.id) !== fp(t)) changedT.add(t.id);
-      const removedR = [...committed.requests.keys()].filter((id) => !requests.some((r) => r.id === id)); const removedT = [...committed.trials.keys()].filter((id) => !trials.some((t) => t.id === id));
-      const touched = changedR.size + changedT.size + removedR.length + removedT.length > 0;
-      if (touched) {
-        for (const r of changedR) { const rec = requests.find((x) => x.id === r); const v = validateRequest(rec); if (!v.ok) throw new TypeError(`recruitment: a request cannot be saved: ${v.reason}`); }
-        for (const t of changedT) { const rec = trials.find((x) => x.id === t); const v = validateTrial(rec); if (!v.ok) throw new TypeError(`recruitment: a trial cannot be saved: ${v.reason}`); }
-        phases123(sqlite, { requests: changedR.size || removedR.length ? requests : undefined, trials: changedT.size || removedT.length ? trials : undefined }, { only: new Set([...changedR, ...changedT]) });
-        prune(sqlite, { requests: removedR.length ? requests : undefined, label: 'the save' });
-      }
-      assertRecruitmentConsistent(sqlite, { cases: casesNow(), label: 'the save (requests, trials, recruitmentCases and guardians together)' });
-      inFlight = { requests: new Map([...changedR].map((id) => [id, fp(requests.find((x) => x.id === id))])), trials: new Map([...changedT].map((id) => [id, fp(trials.find((x) => x.id === id))])), removedR, removedT };
-      return changedR.size + changedT.size + removedR.length + removedT.length;
+    /** S8b's release set: an explicit write never removes a request or a trial, so a save has nothing to release. */
+    departures: () => ({ trials: [], requests: [] }),
+    /** Load the mirrors (the tables are authoritative once 0015 is recorded; nothing is imported from memory). */
+    attach() {
+      if (!recruitmentLive(sqlite)) throw new Error(`the recruitment repository needs ${RECRUITMENT_MIGRATION} recorded; it never imports an in-memory array`);
+      reload(); return { counts: this.counts() };
     },
-    commit() { if (!inFlight) return; for (const [id, f] of inFlight.requests) committed.requests.set(id, f); for (const [id, f] of inFlight.trials) committed.trials.set(id, f); for (const id of inFlight.removedR) committed.requests.delete(id); for (const id of inFlight.removedT) committed.trials.delete(id); inFlight = null; },
-    rollback() { inFlight = null; },
-    /** Unit-of-work participation: the graph memento of both mirrors, restored IN PLACE (every record, nested object and array by identity). The committed fingerprints are not part of it: they reflect committed state, which a rollback does not change. */
-    snapshotState: () => ({ graph: captureGraph([requests, trials]) }),
-    restoreState(state) { if (!state) return; inFlight = null; restoreGraph(state.graph); },
-    saveHook: () => { hookTaken = true; return { flush: () => repo.flush(), commit: () => repo.commit(), rollback: () => repo.rollback(), snapshotState: () => repo.snapshotState(), restoreState: (s) => repo.restoreState(s) }; },
+    /** The store participant: no flush (every write is already in the tables); the mirrors restored by a unit's rollback. */
+    hook() {
+      return {
+        flush() {},
+        snapshotState() { return Object.fromEntries(RECRUITMENT_COLLECTIONS.map((n) => [n, mirrors[n].slice()])); },
+        restoreState(s) { if (!s) return; for (const n of RECRUITMENT_COLLECTIONS) { mirrors[n].length = 0; for (const r of s[n]) mirrors[n].push(r); } },
+      };
+    },
+    counts() { return { requests: mirrors.requests.length, trials: mirrors.trials.length, trialReports: mirrors.trials.filter((t) => t.report).length }; },
+    pending: () => 0,
+    exportAll() { return Object.fromEntries(RECRUITMENT_COLLECTIONS.map((n) => [n, clone(mirrors[n])])); },
+    log,
+    now,
   };
-  return repo;
 }
-void readonlyView;

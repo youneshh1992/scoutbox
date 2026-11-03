@@ -157,11 +157,11 @@ const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-restore-'));
     soundContact({ id: 'rct-4', status: 'responded', requestId: 'req-4', respondedAt: 4000, response: { kind: 'accepted', message: 'Yes', by: 'player', at: 4000 }, history: [{ id: 'aud-40', at: 2001, action: 'contact_sent', by: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, detail: {} }, { id: 'aud-41', at: 4000, action: 'contact_responded', by: { kind: 'player', name: 'Player' }, detail: { kind: 'accepted' } }], rev: 3 }),
   ];
   db.recruitmentContacts = rows;
-  // S8a-core: the request row carries the staff member the production writer (issueRecruitmentRequest) always sets;
-  // a row without userId is refused at the cutover with its id, never repaired.
+  // S8a: the request rows are issueRecruitmentRequest's literal (the staff member and the organisation's flags it
+  // always sets); a row the typed table cannot hold is refused with its id, never repaired.
   db.requests = [
-    { id: 'req-1', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactId: 'rct-1', contactChannel: null },
-    { id: 'req-4', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'accepted', createdAt: 2001, respondedAt: 4000, respondedBy: 'player', routedTo: 'player', guardianId: null, contactId: 'rct-4', contactChannel: null },
+    { id: 'req-1', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactId: 'rct-1', contactChannel: null },
+    { id: 'req-4', playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'accepted', createdAt: 2001, respondedAt: 4000, respondedBy: 'player', routedTo: 'player', guardianId: null, contactId: 'rct-4', contactChannel: null },
   ];
   openStore(RESTORE_DIR).save({ savedAt: Date.now(), idCounter: 500, db });
   // S8c: the rows are read back from the tables, every key and value identical, the keys in the stored shape's order (the
@@ -204,7 +204,7 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   // the file are REFUSED by the save, naming the entry, and nothing is written; asserted below, one directory each. The
   // defects a typed row CAN carry (a delivered contact with no recipient, a contact answered but never delivered, a row
   // of another organisation, a player disagreeing with its case) are still planted and still judged on read.
-  const REQ = { playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactChannel: null };
+  const REQ = { playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactChannel: null };
   // Since §4.2 a snapshot is written straight into the tables (store.mjs, snapshot mode): the save itself refuses such a
   // file, names the entry, and writes nothing; there is no blob for a later boot to import.
   const refusedAtCutover = async (label, port, contacts, requests, pattern) => {

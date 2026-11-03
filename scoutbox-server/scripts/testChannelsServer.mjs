@@ -73,7 +73,7 @@ const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveS
 // S6b: the ledger is a table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
 const ledgerRows = (dir) => { const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === 'ledger'); const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { const r = s.prepare("SELECT value FROM collections WHERE name = 'ledger'").get(); if (r) return JSON.parse(r.value); return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ledger'").get() ? t.read(s) : []; } finally { s.close(); } };
 // S8a: the requests are rows of recruitment_requests since 0015 — read the columns the assertions need when the blob is retired.
-const requestRows = (c) => c.all('SELECT id, status, contact_channel_id AS contactChannel FROM recruitment_requests ORDER BY seq');
+const requestRows = (c) => c.all('SELECT id, status, contact_channel_id AS contactChannel FROM recruitment_requests ORDER BY rowid');
 const requestsOf = (dir) => snap(dir, (c) => requestRows(c) ?? []);
 const attachmentOf = (r) => (r.kind === 'clip' ? { kind: 'clip', mediaId: r.media_id, title: r.title, url: r.url, verifiedClip: r.verified_clip === 1 } : { kind: 'trial_report', reportId: r.report_id, orgName: r.org_name, summary: r.summary });
 /**

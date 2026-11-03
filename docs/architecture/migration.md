@@ -77,14 +77,14 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S7a–d | notifications, dispatches, outbox/push, message threads | `0009`–`0012` | `notifications.mjs`, `dispatches.mjs`, `outboxPush.mjs`, `channels.mjs` | staged, written at save | done |
 | S6b | safeguarding and audit (8 tables) | `0013_safety_audit` | `safetyAudit.mjs` | staged | done |
 | S4b-R | retained record on player deletion | `0014_player_erasure` | `identity.mjs` | direct | done |
-| S8a | recruitment requests, trials | `0015_recruitment` | `recruitment.mjs` | **in-place edits + fingerprint at save** | done |
+| S8a | recruitment requests, trials | `0015_recruitment` | `recruitment.mjs` | **explicit, typed** (§4.3, 3 Nov) | implemented; accept on green tests |
 | S8b | cases, rooms, decisions | `0016_recruitment_cases` | `recruitmentCases.mjs` | **fingerprint** | done |
 | S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **explicit, typed** (§4.3, 3 Nov) | implemented; accept on green tests |
 | S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed** | implemented; accept on green tests |
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3: S8c done (3 Nov); S8a and S8b next |
+| — | recruitment end-state proof | — | — | — | §4.3: S8c and S8a done (3 Nov); S8b next |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -94,7 +94,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S14 | retire the blob | | | | not started |
 
 The lossless side columns (`extra_json`, `absent_keys_json`, `offtype_json`) of the old fidelity rule were dropped
-from S0–S7 and S6b on 3 November, and from S8c when it moved to explicit writes (§4.3). S8a and S8b still carry
+from S0–S7 and S6b on 3 November, and from S8c and S8a when they moved to explicit writes (§4.3). S8b still carries
 them; they go in §4.3.
 
 ## 4. The order of work
@@ -186,6 +186,31 @@ rollback. The guardian e-mail copy is sent after COMMIT. What we learned, for S8
   missing revision, unknown status words, partial literals). Those assertions now check that the save refuses the
   record and names its id. Corruption a typed row can still carry (a delivered contact with no recipient, an ACCEPTED
   revision with no response, a stale but resolvable pointer) is still planted and still judged on read.
+
+**S8a done 3 November** (on `feat/sqlite-schema`). Requests and trials are sixteen typed tables with the vocabulary
+CHECKs of `m23/trial.mjs` and no side columns. Migration `0015` was amended in place (re-seed a development database)
+and `0016` no longer rebuilds them: it creates the shared `idempotency_keys` for the case graph's owners only. The
+invitation key is a column of the request; a trial's client keys, reminder markers and revision sessions are rows of
+`trial_keys`, `trial_reminders` and `trial_revision_sessions`; actors keep their kind (`<x>_kind`, `_user_id`,
+`_actor_id`, `_name`). Every trial reads back with its trial-day container, so the readers' `t.day ??= …` writes are
+gone. Two never-read fields were dropped: `trials.keys.accept` and `trials.blockedBy`. The repository offers
+`requests.create` / `update`, `trials.create` / `update` and `tombstoneForPlayer`, the same pattern as S8c, and every
+writer uses them: the request writer (the Trial invitation's case link, recipient and key are part of the one create),
+both respond routes, the report route, the urgent-report freeze (the `suspended` status, now in the vocabulary), the
+deletion unit, every trial route, the trial-day routes and the reminder sweep. The routes that move a case run in one
+unit of work, and the trial is written before the lifecycle move so the evidence provider sees it. What we learned, for
+S8b:
+
+- The coupling to S8b was smaller than it looked: S8b's flush only needs the final requests and trials (the views) and
+  the departures, which are always empty now that nothing deletes a request or a trial outside a snapshot.
+- The `case_id` keys are `DEFERRABLE INITIALLY DEFERRED` like S8c's. When S8b is explicit, they and S8c's can become
+  immediate `RESTRICT`.
+- The shape probe paid off: instrumenting the old save and running the batteries listed every field the writers
+  actually produce. One writer it missed (the urgent-report freeze) was caught by `testSafetyAuditServer`.
+- Five batteries planted partial literals (no organisation flags, no `workflowState`, no `rev`). They now plant the
+  writers' whole literals. `m23TrialPersistence` §3 plants only the corruption a typed row can carry (a state that
+  disagrees with its facts, a timezone that is not a zone, rev 0); the unstorable cases moved to a new §3c that
+  asserts the save refuses each one with its id.
 
 ### 4.4 The end-to-end test estate
 

@@ -30,7 +30,7 @@
  * through `addCase` / `addComment` / `addSnapshot` / `addDecision` / `addEvidenceState` (the former `push` sites) and
  * the finalize route's transport-failure splice through `removeDecision`.
  *
- * LOSSLESS, AT EVERY LEVEL — the S8a engine (repositories/recruitment.mjs, shared here): the writers' literals key for
+ * LOSSLESS, AT EVERY LEVEL — the lossless engine below (S8a's before it became typed, §4.3): the writers' literals key for
  * key; every scalar a column of the writer's nullability (no vocabulary or length CHECK — a storage step changes no
  * product rule; the NOT NULL columns are the identifiers the keys need); every known nested object columns of the same
  * row; every list a child table keyed (owner…, position) in list order — a list of strings in a `scalar` column, a
@@ -70,7 +70,8 @@
  *      link rows excepted — with the polymorphic key rows of the previous draft/handoff removed first;
  *   R  release: the link rows of the cases this write supplies or prunes are gone (rewritten at C); the link rows of
  *      RETAINED cases naming a trial of the S8a departure set (or a pruned request) are MEMORISED verbatim and deleted;
- *   B  the accepted S8a phases (repositories/recruitment.mjs — its own hook, between this repository's two);
+ *   B  the S8a rows (repositories/recruitment.mjs: explicit writes since §4.3, so a flush has no S8a departures;
+ *      a snapshot writes them between this repository's two stages);
  *   C  the supplied cases' link rows in list order; the memorised rows back verbatim;
  *   D  the supplied room collections upserted, children in list order, the decision chain as plain ids;
  *   E  the channels (S7d, its own hook);
@@ -94,12 +95,92 @@
 import { markView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied } from './database.mjs';
-import { EXTRA_CHECK, ABSENT_CHECK, JSON_CHECK, describe, isPlainObject, nonEmpty, tableExists, setOwn, clone, parseJson, ids, sqlType, columnsOf, childSpecs, encode, decodeLevel, rowMeta, metaOf, columnAdmits, toColumn, fromColumn, copyRecord, recruitmentLive, readRequests, readTrials, S8A_KEY_OWNERS } from './recruitment.mjs';
+import { cloneJson } from './outboxPush.mjs';
+import { JSON_CHECK, describe, isPlainObject, nonEmpty, tableExists, ids } from './recruitment.mjs';
+
+// ------------------------------------------------------------------ the lossless engine (moved here from recruitment.mjs when S8a became typed and explicit, §4.3; it goes when S8b does)
+const EXTRA_CHECK = (col) => `CHECK (${col} IS NULL OR (json_valid(${col}) AND json_type(${col}) = 'object'))`;
+const ABSENT_CHECK = "CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array'))";
+const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
+/** The blob's JSON rules: a non-finite number is kept live (persisted as null), a nested undefined is stored as JSON.stringify stored it. */
+const JSON_RULES = Object.freeze({ nonFinite: 'keep', undefinedNested: 'json' });
+const clone = (v, at) => cloneJson(v, at, JSON_RULES);
+const parseJson = (text, at) => clone(JSON.parse(text), at).value;
+const childSpecs = (shape, out = []) => { for (const s of Object.values(shape.lists ?? {})) { out.push(s); childSpecs(s.shape, out); } for (const s of Object.values(shape.object ?? {})) { out.push(s); childSpecs(s.shape, out); } for (const s of Object.values(shape.objects ?? {})) childSpecs(s, out); return out; };
+const sqlType = (kind) => (kind === 'int' || kind === 'bool' ? 'INTEGER' : kind === 'num' ? 'REAL' : 'TEXT');
+const columnsOf = (shape, out = []) => { for (const k of shape.keys) { if (shape.cols?.[k]) out.push(shape.cols[k]); else if (shape.objects?.[k]) columnsOf(shape.objects[k], out); } return out; };
+const columnHolds = (kind, v) => (kind === 'text' ? typeof v === 'string' : kind === 'id' ? nonEmpty(v) : kind === 'int' ? Number.isSafeInteger(v) : kind === 'num' ? (typeof v === 'number' && Number.isFinite(v)) : kind === 'bool' ? typeof v === 'boolean' : true);
+const toCol = (kind, v) => (kind === 'bool' ? (v ? 1 : 0) : kind === 'json' ? JSON.stringify(clone(v, 'json').value) : v);
+const fromCol = (kind, v, col) => (v === null ? null : kind === 'bool' ? v === 1 : kind === 'json' ? parseJson(v, col) : v);
+/**
+ * Encode one object against a shape level: columns, absent paths, off-type values, extras (nested extras under their
+ * known key), and the children to write (`{ spec, path, items | map }`).
+ */
+function encodeLevel(shape, obj, prefix, out, extraHolder) {
+  for (const k of Object.keys(obj)) { if (shape.keys.includes(k) || obj[k] === undefined) continue; const c = clone(obj[k], `${prefix}${k}`); if (c.reason) throw new TypeError(c.reason); setOwn(extraHolder, k, c.value); }
+  for (const k of shape.keys) {
+    const path = `${prefix}${k}`;
+    if (!Object.hasOwn(obj, k) || obj[k] === undefined) { out.absent.push(path); continue; }
+    const v = obj[k];
+    if (shape.objects?.[k]) {
+      if (!isPlainObject(v)) { out.offtype[path] = clone(v, path).value; continue; }
+      const sub = {}; encodeLevel(shape.objects[k], v, `${path}.`, out, sub); if (Object.keys(sub).length) setOwn(extraHolder, k, sub);
+    } else if (shape.lists?.[k]) { if (!Array.isArray(v)) out.offtype[path] = clone(v, path).value; else out.children.push({ spec: shape.lists[k], path, items: v }); }
+    else if (shape.object?.[k]) { if (!isPlainObject(v)) out.offtype[path] = clone(v, path).value; else out.children.push({ spec: shape.object[k], path, items: [v] }); }
+    else if (shape.maps?.[k]) {
+      if (!isPlainObject(v)) { out.offtype[path] = clone(v, path).value; continue; }
+      if (!shape.maps[k].ownerTable) { out.children.push({ spec: shape.maps[k], path, map: v }); continue; }
+      // the idempotency keys: a NON-EMPTY list act and a value act carrying a string key are rows; everything else an
+      // act holds — a value act WITHOUT a key (`trials.keys.accept {key: null, fp}`, plan §D.7.3), an EMPTY list (no row
+      // could carry its presence), an empty object, null, any other value — stays on the owner row under `keys` in
+      // extra_json exactly as it is, so every act comes back present and distinct (review of 6d77aa7, F1). Acts are set
+      // as OWN data properties: an act named `__proto__` (own in the writer's object, own again after JSON.parse)
+      // assigned with `rows[act] =` would set the prototype and vanish.
+      const rows = {}; const held = {};
+      for (const [act, entry] of Object.entries(v)) {
+        if (entry === undefined) continue;
+        if ((Array.isArray(entry) && entry.length > 0) || (isPlainObject(entry) && typeof entry.key === 'string')) setOwn(rows, act, entry);
+        else setOwn(held, act, clone(entry, `${path}.${act}`).value);
+      }
+      if (Object.keys(held).length) setOwn(extraHolder, k, held);
+      out.children.push({ spec: shape.maps[k], path, map: rows });
+    }
+    else { const [col, kind] = shape.cols[k]; if (v === null) out.cols[col] = null; else if (columnHolds(kind, v)) out.cols[col] = toCol(kind, v); else { out.cols[col] = null; out.offtype[path] = clone(v, path).value; } }
+  }
+}
+function encode(shape, obj) {
+  const out = { cols: {}, absent: [], offtype: {}, extra: {}, children: [] };
+  encodeLevel(shape, obj, '', out, out.extra);
+  return out;
+}
+/** Decode one shape level from a row (its columns, the parsed absent/offtype/extra of the record) and the children already decoded by path. */
+function decodeLevel(shape, row, prefix, extraHolder, absent, offtype, children) {
+  const obj = {};
+  for (const k of Object.keys(extraHolder)) if (!shape.keys.includes(k)) setOwn(obj, k, extraHolder[k]);
+  for (const k of shape.keys) {
+    const path = `${prefix}${k}`;
+    if (absent.has(path)) continue;
+    if (Object.hasOwn(offtype, path)) { setOwn(obj, k, offtype[path]); continue; }
+    if (shape.objects?.[k]) obj[k] = decodeLevel(shape.objects[k], row, `${path}.`, isPlainObject(extraHolder[k]) ? extraHolder[k] : {}, absent, offtype, children);
+    else if (shape.lists?.[k]) obj[k] = children.get(path) ?? [];
+    else if (shape.object?.[k]) obj[k] = (children.get(path) ?? [null])[0];
+    else if (shape.maps?.[k]) { const held = shape.maps[k].ownerTable && isPlainObject(extraHolder[k]) ? extraHolder[k] : {}; const o = {}; for (const a of Object.keys(held)) setOwn(o, a, held[a]); for (const [a, val] of Object.entries(children.get(path) ?? {})) setOwn(o, a, val); obj[k] = o; }
+    else { const [col, kind] = shape.cols[k]; obj[k] = fromCol(kind, row[col], col); }
+  }
+  return obj;
+}
+const rowMeta = (enc) => ({ absent_keys_json: enc.absent.length ? JSON.stringify(enc.absent) : null, offtype_json: jsonOrNull(enc.offtype), extra_json: jsonOrNull(enc.extra) });
+const metaOf = (r) => ({ absent: new Set(r.absent_keys_json ? JSON.parse(r.absent_keys_json) : []), offtype: r.offtype_json ? parseJson(r.offtype_json, 'offtype_json') : {}, extra: r.extra_json ? parseJson(r.extra_json, 'extra_json') : {} });
+/** Column admission and conversion, shared with the S8b engine (repositories/recruitmentCases.mjs). */
+const columnAdmits = (kind, v) => columnHolds(kind, v);
+const toColumn = (kind, v) => toCol(kind, v);
+const fromColumn = (kind, v, col) => fromCol(kind, v, col);
+const copyRecord = (r) => { const c = {}; for (const k of Object.keys(r)) setOwn(c, k, clone(r[k], k).value); return c; };
 
 export const RECRUITMENT_CASES_MIGRATION = '0016_recruitment_cases';
 export const RECRUITMENT_CASES_COLLECTIONS = Object.freeze(['recruitmentCases', 'roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState']);
 /** The owner tables the shared idempotency_keys CHECK names once 0016 is recorded (the S8a two first). */
-export const S8B_KEY_OWNERS = Object.freeze([...S8A_KEY_OWNERS, 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions']);
+export const S8B_KEY_OWNERS = Object.freeze(['recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions']);
 
 export const recruitmentCasesLive = (sqlite) => migrationApplied(sqlite, RECRUITMENT_CASES_MIGRATION);
 const blocked = (detail, extra = {}) => Object.assign(new Error(`RECRUITMENT_CASES_IMPORT_BLOCKED: ${detail}; nothing was imported`), { code: 'RECRUITMENT_CASES_IMPORT_BLOCKED', ...extra });

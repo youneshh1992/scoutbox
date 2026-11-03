@@ -110,7 +110,7 @@
 import { readonlyView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied, transaction } from './database.mjs';
-import { readRequestsCollection } from './recruitment.mjs';
+import { readRequests, recruitmentLive } from './recruitment.mjs';
 
 export const CHANNELS_MIGRATION = '0012_channels';
 export const CHANNELS_TABLES = Object.freeze(['channels', 'messages', 'message_attachments']);
@@ -366,14 +366,9 @@ function writeChannels(sqlite, rows) {
   }
   return rows.length;
 }
-/**
- * The retained `requests` collection as the file holds it: the recruitment_requests
- * rows once migration 0015 (S8a-core) is recorded, the blob before it — `undefined`
- * when the collection does not exist, the parsed value otherwise (the callers require
- * an array; `null` when the blob is not valid JSON).
- */
+/** The retained requests (the S8a table; `undefined` before migration 0015 is recorded). */
 export function readRequestsBlob(sqlite) {
-  return readRequestsCollection(sqlite);
+  return recruitmentLive(sqlite) ? readRequests(sqlite) : undefined;
 }
 const requestIdsOf = (requests) => { const s = new Set(); for (const r of requests) if (isPlainObject(r) && typeof r.id === 'string') s.add(r.id); return s; };
 const existingIds = (sqlite, table) => (tableExists(sqlite, table) ? new Set(sqlite.prepare(`SELECT id FROM ${table}`).all().map((r) => r.id)) : new Set());

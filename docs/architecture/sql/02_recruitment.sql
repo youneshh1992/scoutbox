@@ -41,42 +41,9 @@
 -- STATUS (S8c, amended 3 November 2026): migration 0017_recruitment_contacts_offers (REGISTERED) creates the ten typed
 -- contact/offer definitions below, written by explicit operations; Q8c-a tolerant, Q8c-b strict.
 -- =============================================================================
--- STATUS (S8a-core, 22 October 2026; INDEPENDENTLY ACCEPTED at 7a7efc6 — plan
--- §D.8.11): the sixteen definitions below marked "LIVE since migration
--- 0015_recruitment (REGISTERED — accepted at 7a7efc6)" — recruitment_requests, request_trial_slots, trials,
--- its eleven owned child tables, idempotency_keys, and channels (file 03,
--- rebuilt with the real request_id key) — are the DDL migration 0015 creates
--- (repositories/recruitment.mjs generates it from the writers' shapes;
--- scripts/testSchemaDdl.mjs checks this file against the migration column for
--- column and index for index). They are no longer drafts. The decisions behind
--- them: docs/architecture/sqlite-migration-plan.md §D.7 (as corrected and
--- independently accepted at d0f0205) and §D.8 (the implementation record), the
--- Founder's Q7a / Q7b / Q7c of 22 October 2026. What changed against the draft:
---   * every mapped scalar is a column of the SAME nullability the writer has
---     (no NOT NULL DEFAULT, no vocabulary or length CHECK: a storage step
---     changes no product rule; the identifiers the keys need are NOT NULL);
---   * every parent row and every child row carries absent_keys_json (the known
---     keys that were ABSENT, dotted for nested keys), offtype_json (a present
---     value the column cannot hold, kept verbatim under its path) and
---     extra_json (every unknown own key, nested under its known parent key) —
---     absence, null, off-type and unknown fields come back exactly;
---   * a child table is keyed (owner, position) in list order (evidence by
---     (trial_id, session_position, position)); raw_json keeps a non-object
---     list element; trial_reports is one row per trial (RESTRICT, like
---     trial_history: deleted explicitly before the owner on a departure);
---   * the drafted recruitment_requests_one_pending index is WITHDRAWN (D2: the
---     open-day outcome route creates several pending invitations); the other
---     drafted indexes are kept, trials_one_open_per_case with the
---     release-before-arrival write rule of plan §D.7.5;
---   * NO key to players(id) (Q7a, tolerant and counted), NO key to
---     guardians(id) (Q7c, strict in code), NO key to recruitment_cases (Q7b,
---     strict in code against the recruitmentCases blob until S8b);
---     org_id / user_id -> orgs / org_users (RESTRICT) as drafted; the parent
---     rows keep a seq INTEGER PRIMARY KEY (insertion order) with id UNIQUE;
---   * idempotency_keys holds the replayable acts only — a list act's entries
---     and a value act with a string key — verbatim in entry_json, keyed
---     (owner_table, owner_id, position); trials.keys.accept {key: null, fp}
---     stays on the trial row (extra_json.keys.accept) exactly as written.
+-- STATUS (S8a, amended 3 November 2026): migration 0015_recruitment (REGISTERED) creates the sixteen typed
+-- request/trial definitions below and rebuilds channels (file 03) with the real request_id key; written by explicit
+-- operations (migration.md §4.3); Q7a tolerant, Q7c strict in code; the case keys deferred to COMMIT.
 -- STATUS (S8b, 23 October 2026; IMPLEMENTED, INDEPENDENTLY ACCEPTED at 7072dd9 —
 -- the design independently accepted at 4d2c74b, docs/architecture/
 -- s8b-readiness-review.md; the Founder's explicit Q8a answer of 23 October 2026,
@@ -110,24 +77,19 @@
 -- see the S8d note before signing_packages for what changed against the drafts.
 -- =============================================================================
 -- =============================================================================
--- idempotency_keys — LIVE since migration 0015_recruitment (S8a-core, REGISTERED — independently
---   accepted at 7a7efc6) for the two owners of that step: recruitment_requests and trials.
+-- idempotency_keys — LIVE since migration 0016_recruitment_cases (S8b) for the case graph's owners
+--   (recruitment_cases, case_decision_drafts, case_transaction_handoffs, room_decisions); 0018 adds
+--   signing_packages. S8a (requests, trials) and S8c (contacts, offers) keep their keys in their own
+--   columns and tables since §4.3.
 -- =============================================================================
--- source: every `keys` object / list / map on db.requests and db.trials (the drafted mapping of the
---         OTHER owners below stays a draft for S8b+; the owner_table CHECK widens with each step).
--- implemented mapping (repositories/recruitment.mjs):
---   a list act (trials.keys.schedule|cancel|attendance|complete|link [{key,fp,at}]) -> one row per
---       entry, shape 'list', position = write order across the owner's acts, key/fp/at lifted when
---       present, the entry itself verbatim in entry_json (any extra field kept);
---   a value act with a string key (requests.keys.invite {key,fp}) -> one row, shape 'value';
---   a value act WITHOUT a string key (trials.keys.accept {key: null, fp}) is not replayable and is
---       NOT a row: it stays on the owner row in extra_json.keys.<act>, exactly as written (plan §D.7.3, D3);
---   the trials' 50-entry cap per act is a writer rule kept as data, not a constraint.
+-- implemented mapping (repositories/recruitmentCases.mjs, the lossless engine until S8b is typed):
+--   a list act -> one row per entry, shape 'list', position = write order across the owner's acts,
+--       key/fp/at lifted when present, the entry itself verbatim in entry_json;
+--   a value act with a string key -> one row, shape 'value'; any other value stays on the owner row.
 -- replay rule (unchanged, in the routes): the same (owner, act, key) with the same fp replays, a
---   different fp is a conflict. ref_id / actor_id of the drafted seven-column shape are not columns
---   yet: a later step's owners that need them read them from entry_json or add the columns.
+--   different fp is a conflict.
 CREATE TABLE idempotency_keys (
-  owner_table                      TEXT NOT NULL CHECK (owner_table IN ('recruitment_requests', 'trials', 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions', 'signing_packages')),
+  owner_table                      TEXT NOT NULL CHECK (owner_table IN ('recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions', 'signing_packages')),
   owner_id                         TEXT NOT NULL,
   position                         INTEGER NOT NULL,
   act                              TEXT NOT NULL,
@@ -557,218 +519,169 @@ CREATE TABLE case_budget_actuals (
 
 
 -- =============================================================================
--- recruitment_requests, request_trial_slots — LIVE since migration 0015_recruitment (S8a-core,
---   REGISTERED — independently accepted at 7a7efc6; repositories/recruitment.mjs)
+-- recruitment_requests, request_trial_slots, trials and its thirteen owned child tables — LIVE since
+--   migration 0015_recruitment (amended in place on 3 November 2026, migration.md §4.3: typed and explicit;
+--   repositories/recruitment.mjs, which generates this DDL)
 -- =============================================================================
--- source: db.requests (the blob every build since M9 wrote; imported row for row and retired by
---         0015, array position -> seq). Writers unchanged: server.mjs issueRecruitmentRequest (the
---         direct route; now recruitment.addRequest), the open-day outcome route (addRequest), the
---         respond / suspension routes and tombstoneRequest (in-place edits landing in the next save),
---         m23/trialRoutes.mjs (the P4B invitation: caseId, trialId, recipient, keys; trialId after
---         acceptance). Readers unchanged: db.requests is a read-only array view of the same records.
--- mapping: the writer's literal key for key (repositories/recruitment.mjs REQUEST_SHAPE):
---   id, playerId, playerName, orgId, orgName, orgType, orgVerified, orgSafeguardingCertified,
---   trustedPartner -> org_trusted_partner, userId, scoutName, scoutRole, type, message, subject,
---   contactId, trialDetails.{proposedDate, altSlots (JSON), venue, notes, private.venueAddress,
---   private.instructions, instructions (the tombstone's present-and-null key)}, trialDetails.slots[]
---   -> request_trial_slots (position = list order; venue.{name,town,address}), status, createdAt,
---   respondedAt, respondedBy, routedTo, guardianId, contactChannel -> contact_channel_id, caseId,
---   trialId, recipient.{type, playerId (stored; counted when it differs from player_id), guardianId,
---   minor}, keys -> idempotency_keys, subjectRemovedAt. trialDetails: null = every trial_* column
---   NULL with no absent key; an absent trialDetails is recorded in absent_keys_json.
--- references: player_id tolerant, no key (Q7a); guardian_id and recipient_guardian_id strict in
---   code, no key (Q7c); case_id strict in code against recruitmentCases, no key until S8b (Q7b);
---   org_id -> orgs, user_id -> org_users (RESTRICT, checked with ids first); trial_id -> trials
---   (SET NULL: the back-reference of the pair, parked NULL on insert and where it changes, assigned
---   after the trial exists — plan §D.7.5 phases 1 and 3).
--- notes: the drafted one-pending index is withdrawn (D2); the direct route's REQUEST_PENDING rule and
---   the open-day route's several pending invitations are both kept as they are.
+-- writers: server.mjs issueRecruitmentRequest (requests.create; the Trial invitation's case link, recipient
+--   and client key in the same create), the respond routes, the report route, the urgent-report freeze and
+--   the deletion unit's tombstones (requests/trials.update), issueAcceptedTrial (trials.create),
+--   m23/trialRoutes.mjs, m12/journeys.mjs (the trial day) and m12/operations.mjs (reminder markers) — every
+--   one an explicit repository operation inside the route's unit of work. db.requests and db.trials are
+--   read-only views.
+-- columns: every field is a typed column with its vocabulary CHECK (request type and status, the parties,
+--   the trial status, workflow, completion, attendance, session, consent, staff-check and day-event
+--   vocabularies of m23/trial.mjs). No lossless side columns: a record the columns cannot hold is refused
+--   with its id. Actors {kind:'org', userId, name} | {kind, id, name} are <x>_kind / <x>_user_id /
+--   <x>_actor_id / <x>_name. A request's trialDetails is present exactly when its type is trial; its
+--   invitation key is invite_key / invite_fp. A trial's client keys are rows of trial_keys; its reminder
+--   markers rows of trial_reminders; a schedule revision's copy of its sessions rows of
+--   trial_revision_sessions. Dropped as never read: trials.keys.accept and trials.blockedBy.
+-- references: player_id tolerant, no key (Q7a); guardian_id and recipient_guardian_id checked in code at
+--   every write, no key (Q7c); case_id (both tables) -> recruitment_cases and recruitment_requests.trial_id
+--   -> trials DEFERRABLE INITIALLY DEFERRED (the cases are written by their staged hooks at COMMIT; a
+--   snapshot writes a request before its trial); trials.request_id -> recruitment_requests RESTRICT;
+--   org_id -> orgs, user_id -> org_users (RESTRICT); every child table cascades with its owner.
+-- notes: the drafted one-pending index stays withdrawn (D2); trials_one_open_per_case is kept.
 CREATE TABLE recruitment_requests (
-  seq                              INTEGER PRIMARY KEY,
-  id                               TEXT NOT NULL UNIQUE,
-  player_id                        TEXT NOT NULL,
-  player_name                      TEXT,
-  org_id                           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name                         TEXT,
-  org_type                         TEXT,
-  org_verified                     INTEGER,
-  org_safeguarding_certified       INTEGER,
-  org_trusted_partner              INTEGER,
-  user_id                          TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  scout_name                       TEXT,
-  scout_role                       TEXT,
-  type                             TEXT,
-  message                          TEXT,
-  subject                          TEXT,
-  contact_id                       TEXT,
-  trial_proposed_date              TEXT,
-  trial_alt_slots_json             TEXT CHECK (trial_alt_slots_json IS NULL OR json_valid(trial_alt_slots_json)),
-  trial_venue                      TEXT,
-  trial_notes                      TEXT,
-  trial_private_venue_address      TEXT,
-  trial_private_instructions       TEXT,
-  trial_instructions               TEXT,
-  status                           TEXT,
-  created_at                       INTEGER,
-  responded_at                     INTEGER,
-  responded_by                     TEXT,
-  routed_to                        TEXT,
-  guardian_id                      TEXT,
-  contact_channel_id               TEXT,
-  case_id                          TEXT REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
-  trial_id                         TEXT REFERENCES trials(id) ON DELETE SET NULL,
-  recipient_type                   TEXT,
-  recipient_player_id              TEXT,
-  recipient_guardian_id            TEXT,
-  recipient_minor                  INTEGER,
-  subject_removed_at               INTEGER,
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  id TEXT PRIMARY KEY,
+  player_id TEXT NOT NULL,
+  player_name TEXT,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name TEXT NOT NULL,
+  org_type TEXT CHECK (org_type IS NULL OR org_type IN ('club','agency')),
+  org_verified INTEGER NOT NULL CHECK (org_verified IS NULL OR org_verified IN (0,1)),
+  org_safeguarding_certified INTEGER NOT NULL CHECK (org_safeguarding_certified IS NULL OR org_safeguarding_certified IN (0,1)),
+  org_trusted_partner INTEGER CHECK (org_trusted_partner IS NULL OR org_trusted_partner IN (0,1)),
+  user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  scout_name TEXT,
+  scout_role TEXT,
+  type TEXT NOT NULL CHECK (type IS NULL OR type IN ('contact','trial')),
+  message TEXT,
+  subject TEXT,
+  contact_id TEXT,
+  trial_proposed_date TEXT CHECK (trial_proposed_date IS NULL OR trial_proposed_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  trial_alt_days_json TEXT CHECK (trial_alt_days_json IS NULL OR (json_valid(trial_alt_days_json) AND json_type(trial_alt_days_json) = 'array')),
+  trial_venue TEXT,
+  trial_notes TEXT,
+  trial_private_venue_address TEXT CHECK (trial_private_venue_address IS NULL OR length(trial_private_venue_address) <= 200),
+  trial_private_instructions TEXT CHECK (trial_private_instructions IS NULL OR length(trial_private_instructions) <= 500),
+  status TEXT NOT NULL CHECK (status IS NULL OR status IN ('pending','accepted','declined','suspended')),
+  created_at INTEGER NOT NULL,
+  responded_at INTEGER,
+  responded_by TEXT CHECK (responded_by IS NULL OR responded_by IN ('player','guardian')),
+  routed_to TEXT NOT NULL CHECK (routed_to IS NULL OR routed_to IN ('player','guardian')),
+  guardian_id TEXT,
+  contact_channel_id TEXT,
+  case_id TEXT REFERENCES recruitment_cases(id) DEFERRABLE INITIALLY DEFERRED,
+  trial_id TEXT REFERENCES trials(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
+  recipient_type TEXT CHECK (recipient_type IS NULL OR recipient_type IN ('player','guardian')),
+  recipient_player_id TEXT,
+  recipient_guardian_id TEXT,
+  recipient_minor INTEGER CHECK (recipient_minor IS NULL OR recipient_minor IN (0,1)),
+  invite_key TEXT CHECK (invite_key IS NULL OR length(invite_key) <= 64),
+  invite_fp TEXT,
+  subject_removed_at INTEGER,
+  CHECK ((type = 'trial') = (trial_alt_days_json IS NOT NULL)),
+  CHECK ((recipient_type IS NULL) = (recipient_minor IS NULL)),
+  CHECK ((invite_key IS NULL) = (invite_fp IS NULL))
 ) STRICT;
-
 CREATE INDEX recruitment_requests_org_player_type_status ON recruitment_requests (org_id, player_id, type, status);
 CREATE INDEX recruitment_requests_player ON recruitment_requests (player_id, created_at);
 CREATE INDEX recruitment_requests_routed_guardian ON recruitment_requests (routed_to, guardian_id);
 CREATE INDEX recruitment_requests_case_type_created ON recruitment_requests (case_id, type, created_at);
 CREATE INDEX recruitment_requests_contact ON recruitment_requests (contact_id);
 CREATE INDEX recruitment_requests_trial ON recruitment_requests (trial_id);
--- request_trial_slots: the invitation's slots in list order (1–3 per P4B invitation; the tombstone keeps
---   id, day, startsAt, endsAt, timezone, kind and venue name/town); one slot per day per invitation
---   (request_trial_slots_one_per_day, the drafted UNIQUE(request_id, day) as a partial index: validateInvitation enforces it).
 CREATE TABLE request_trial_slots (
-  request_id                       TEXT NOT NULL REFERENCES recruitment_requests(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  day                              TEXT,
-  kind                             TEXT,
-  starts_at                        INTEGER,
-  ends_at                          INTEGER,
-  timezone                         TEXT,
-  venue_name                       TEXT,
-  venue_town                       TEXT,
-  venue_address                    TEXT,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (request_id, position)
+  request_id TEXT NOT NULL REFERENCES recruitment_requests(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  day TEXT NOT NULL CHECK (day IS NULL OR day GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  kind TEXT NOT NULL CHECK (kind IS NULL OR kind IN ('onboarding','training','drill','small_sided','match','other')),
+  starts_at INTEGER NOT NULL,
+  ends_at INTEGER NOT NULL,
+  timezone TEXT NOT NULL,
+  venue_name TEXT CHECK (venue_name IS NULL OR length(venue_name) <= 120),
+  venue_town TEXT CHECK (venue_town IS NULL OR length(venue_town) <= 80),
+  venue_address TEXT CHECK (venue_address IS NULL OR length(venue_address) <= 200),
+  PRIMARY KEY (request_id, position),
+  UNIQUE (request_id, day),
+  CHECK (ends_at > starts_at)
 ) STRICT;
-CREATE INDEX request_trial_slots_id ON request_trial_slots (id);
-CREATE UNIQUE INDEX request_trial_slots_one_per_day ON request_trial_slots (request_id, day) WHERE day IS NOT NULL;
-
--- =============================================================================
--- trials and its eleven owned child tables — LIVE since migration 0015_recruitment (S8a-core,
---   REGISTERED — independently accepted at 7a7efc6; repositories/recruitment.mjs)
--- =============================================================================
--- source: db.trials (the blob every build since M9 wrote; imported row for row and retired by 0015,
---         array position -> seq). Writers unchanged: server.mjs issueAcceptedTrial (now
---         recruitment.addTrial), the report route, tombstoneTrial, m23/trialRoutes.mjs (schedule,
---         cancel, attendance, complete, evidence links, the recipient's confirm/decline/cancel),
---         m12/journeys.mjs (the day containers), m12/operations.mjs (reminders, escalation) — every
---         in-place edit lands in the next save with the trial's children rewritten in list order.
--- mapping: the writer's literal key for key (TRIAL_SHAPE): id, requestId, caseId, playerId,
---   playerName, orgId, orgName, scoutName, acceptedAt, acceptedBy, guardianApproved, proposedDate,
---   venue, notes, reportDueAt, status, reminderSent, feedbackEscalatedAt, report -> trial_reports
---   (one row; RESTRICT), day.{arrival, emergency, collection} -> day_* columns, day.staff[] ->
---   trial_day_staff, day.consents[] -> trial_day_consents, day.checkins[] -> trial_day_checkins,
---   day.statusEvents[] -> trial_day_status_events (the presence of `day` itself is recorded:
---   absent stays absent), workflowState (absent on a pre-P4B row stays absent — nothing is
---   fabricated; isLegacyTrial reads it as legacy_accepted), schedule.{timezone, revision,
---   proposedAt, proposedBy, confirmedAt, confirmedBy, declinedAt, declinedBy} -> schedule_* columns,
---   schedule.sessions[] -> trial_schedule_sessions (+ evidence[] -> trial_session_evidence keyed
---   (trial_id, session_position, position)), schedule.revisions[] -> trial_schedule_revisions
---   (sessions_json verbatim), attendance[] -> trial_attendance, completion.{state, at, by, reason,
---   phase, cancelledBy}, recipient.{type, playerId, guardianId, minor, at}, keys -> idempotency_keys
---   (keys.accept stays on the row), history[] -> trial_history (RESTRICT), reminders {marker: value}
---   -> trial_reminders (sent_at for an integer, value_json otherwise), lifecycle.{applied, from, to,
---   at, reason}, rev, revAt, revBy.{userId, name}, blockedBy -> blocked_by_json (a value, null or
---   absent, exactly), subjectRemovedAt. Actor tuples {kind, userId|id, name} -> <x>_kind, <x>_user_id,
---   <x>_id, <x>_name (both writer shapes kept apart).
--- references: request_id -> recruitment_requests (NOT NULL UNIQUE, RESTRICT); org_id -> orgs
---   (RESTRICT); player_id tolerant (Q7a); recipient_guardian_id strict in code (Q7c); case_id
---   strict in code (Q7b). trials_one_open_per_case is kept: a survivor leaving its slot (terminal,
---   another case, caseless) is released by a parent-preserving UPDATE (case_id parked NULL) before
---   any arrival (plan §D.7.5 phase 2b) — never deleted, so its retained request link survives a
---   partial save. trial_session_evidence_one_active (one ACTIVE link per session and box session, D-12)
---   is kept over the (trial_id, session_position, box_session_id) key; trial_day_consents_one_per_actor
---   is kept (checked against m12/journeys.mjs).
 CREATE TABLE trials (
-  seq                              INTEGER PRIMARY KEY,
-  id                               TEXT NOT NULL UNIQUE,
-  request_id                       TEXT NOT NULL UNIQUE REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
-  case_id                          TEXT REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
-  player_id                        TEXT NOT NULL,
-  player_name                      TEXT,
-  org_id                           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name                         TEXT,
-  scout_name                       TEXT,
-  accepted_at                      INTEGER,
-  accepted_by                      TEXT,
-  guardian_approved                INTEGER,
-  proposed_date                    TEXT,
-  venue                            TEXT,
-  notes                            TEXT,
-  report_due_at                    INTEGER,
-  status                           TEXT,
-  reminder_sent                    INTEGER,
-  feedback_escalated_at            INTEGER,
-  day_arrival_time                 TEXT,
-  day_arrival_address              TEXT,
-  day_arrival_notes                TEXT,
-  day_emergency_name               TEXT,
-  day_emergency_phone              TEXT,
-  day_emergency_set_by             TEXT,
-  day_emergency_at                 INTEGER,
-  day_collection_policy            TEXT,
-  workflow_state                   TEXT,
-  schedule_timezone                TEXT,
-  schedule_revision                INTEGER,
-  schedule_proposed_at             INTEGER,
-  schedule_proposed_by_kind        TEXT,
-  schedule_proposed_by_user_id     TEXT,
-  schedule_proposed_by_id          TEXT,
-  schedule_proposed_by_name        TEXT,
-  schedule_confirmed_at            INTEGER,
-  schedule_confirmed_by_kind       TEXT,
-  schedule_confirmed_by_user_id    TEXT,
-  schedule_confirmed_by_id         TEXT,
-  schedule_confirmed_by_name       TEXT,
-  schedule_declined_at             INTEGER,
-  schedule_declined_by_kind        TEXT,
-  schedule_declined_by_user_id     TEXT,
-  schedule_declined_by_id          TEXT,
-  schedule_declined_by_name        TEXT,
-  completion_state                 TEXT,
-  completion_at                    INTEGER,
-  completion_by_kind               TEXT,
-  completion_by_user_id            TEXT,
-  completion_by_id                 TEXT,
-  completion_by_name               TEXT,
-  completion_reason                TEXT,
-  completion_phase                 TEXT,
-  completion_cancelled_by          TEXT,
-  recipient_type                   TEXT,
-  recipient_player_id              TEXT,
-  recipient_guardian_id            TEXT,
-  recipient_minor                  INTEGER,
-  recipient_at                     INTEGER,
-  lifecycle_applied                INTEGER,
-  lifecycle_from                   TEXT,
-  lifecycle_to                     TEXT,
-  lifecycle_at                     INTEGER,
-  lifecycle_reason                 TEXT,
-  rev                              INTEGER,
-  rev_at                           INTEGER,
-  rev_by_user_id                   TEXT,
-  rev_by_name                      TEXT,
-  blocked_by_json                  TEXT CHECK (blocked_by_json IS NULL OR json_valid(blocked_by_json)),
-  subject_removed_at               INTEGER,
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL UNIQUE REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
+  case_id TEXT REFERENCES recruitment_cases(id) DEFERRABLE INITIALLY DEFERRED,
+  player_id TEXT NOT NULL,
+  player_name TEXT,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name TEXT NOT NULL,
+  scout_name TEXT,
+  accepted_at INTEGER NOT NULL,
+  accepted_by TEXT CHECK (accepted_by IS NULL OR accepted_by IN ('player','guardian')),
+  guardian_approved INTEGER CHECK (guardian_approved IS NULL OR guardian_approved IN (0,1)),
+  proposed_date TEXT CHECK (proposed_date IS NULL OR proposed_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  venue TEXT,
+  notes TEXT,
+  report_due_at INTEGER,
+  status TEXT NOT NULL CHECK (status IS NULL OR status IN ('awaiting_report','reported')),
+  reminder_sent INTEGER NOT NULL CHECK (reminder_sent IS NULL OR reminder_sent IN (0,1)),
+  feedback_escalated_at INTEGER,
+  workflow_state TEXT NOT NULL CHECK (workflow_state IS NULL OR workflow_state IN ('legacy_accepted','accepted','scheduled','completed','cancelled')),
+  schedule_timezone TEXT,
+  schedule_revision INTEGER,
+  schedule_proposed_at INTEGER,
+  schedule_proposed_by_kind TEXT CHECK (schedule_proposed_by_kind IS NULL OR schedule_proposed_by_kind IN ('org','player','guardian','system')),
+  schedule_proposed_by_user_id TEXT,
+  schedule_proposed_by_actor_id TEXT,
+  schedule_proposed_by_name TEXT,
+  schedule_confirmed_at INTEGER,
+  schedule_confirmed_by_kind TEXT CHECK (schedule_confirmed_by_kind IS NULL OR schedule_confirmed_by_kind IN ('org','player','guardian','system')),
+  schedule_confirmed_by_user_id TEXT,
+  schedule_confirmed_by_actor_id TEXT,
+  schedule_confirmed_by_name TEXT,
+  schedule_declined_at INTEGER,
+  schedule_declined_by_kind TEXT CHECK (schedule_declined_by_kind IS NULL OR schedule_declined_by_kind IN ('org','player','guardian','system')),
+  schedule_declined_by_user_id TEXT,
+  schedule_declined_by_actor_id TEXT,
+  schedule_declined_by_name TEXT,
+  completion_state TEXT CHECK (completion_state IS NULL OR completion_state IN ('completed','cancelled')),
+  completion_at INTEGER,
+  completion_by_kind TEXT CHECK (completion_by_kind IS NULL OR completion_by_kind IN ('org','player','guardian','system')),
+  completion_by_user_id TEXT,
+  completion_by_actor_id TEXT,
+  completion_by_name TEXT,
+  completion_reason TEXT CHECK (completion_reason IS NULL OR length(completion_reason) <= 300),
+  completion_phase TEXT CHECK (completion_phase IS NULL OR completion_phase IN ('legacy_accepted','accepted','scheduled','completed','cancelled')),
+  completion_cancelled_by TEXT CHECK (completion_cancelled_by IS NULL OR completion_cancelled_by IN ('club','player','guardian','system')),
+  recipient_type TEXT CHECK (recipient_type IS NULL OR recipient_type IN ('player','guardian')),
+  recipient_player_id TEXT,
+  recipient_guardian_id TEXT,
+  recipient_minor INTEGER CHECK (recipient_minor IS NULL OR recipient_minor IN (0,1)),
+  recipient_at INTEGER,
+  lifecycle_applied INTEGER CHECK (lifecycle_applied IS NULL OR lifecycle_applied IN (0,1)),
+  lifecycle_from TEXT,
+  lifecycle_to TEXT,
+  lifecycle_reason TEXT,
+  lifecycle_at INTEGER,
+  day_arrival_time TEXT CHECK (day_arrival_time IS NULL OR length(day_arrival_time) <= 40),
+  day_arrival_address TEXT CHECK (day_arrival_address IS NULL OR length(day_arrival_address) <= 200),
+  day_arrival_notes TEXT CHECK (day_arrival_notes IS NULL OR length(day_arrival_notes) <= 300),
+  day_emergency_name TEXT CHECK (day_emergency_name IS NULL OR length(day_emergency_name) <= 80),
+  day_emergency_phone TEXT CHECK (day_emergency_phone IS NULL OR length(day_emergency_phone) <= 30),
+  day_emergency_set_by TEXT CHECK (day_emergency_set_by IS NULL OR day_emergency_set_by IN ('player','guardian')),
+  day_emergency_at INTEGER,
+  day_collection_policy TEXT CHECK (day_collection_policy IS NULL OR length(day_collection_policy) <= 300),
+  rev INTEGER NOT NULL CHECK (rev >= 0),
+  rev_at INTEGER,
+  rev_by_user_id TEXT,
+  rev_by_name TEXT,
+  subject_removed_at INTEGER,
+  CHECK ((schedule_timezone IS NULL) = (schedule_revision IS NULL)),
+  CHECK ((completion_state IS NULL) = (completion_at IS NULL)),
+  CHECK ((recipient_type IS NULL) = (recipient_minor IS NULL)),
+  CHECK (day_emergency_at IS NOT NULL OR (day_emergency_name IS NULL AND day_emergency_phone IS NULL))
 ) STRICT;
-
 CREATE INDEX trials_org_status ON trials (org_id, status);
 CREATE INDEX trials_org_player_case ON trials (org_id, player_id, case_id);
 CREATE INDEX trials_player ON trials (player_id);
@@ -777,215 +690,196 @@ CREATE INDEX trials_status_report_due ON trials (status, report_due_at);
 CREATE INDEX trials_workflow_confirmed ON trials (workflow_state, schedule_confirmed_at);
 CREATE UNIQUE INDEX trials_one_open_per_case ON trials (case_id) WHERE case_id IS NOT NULL AND workflow_state NOT IN ('completed', 'cancelled');
 CREATE TABLE trial_schedule_sessions (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  kind                             TEXT,
-  starts_at                        INTEGER,
-  ends_at                          INTEGER,
-  venue_name                       TEXT,
-  venue_town                       TEXT,
-  venue_address                    TEXT,
-  instructions                     TEXT,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (trial_id, position)
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IS NULL OR kind IN ('onboarding','training','drill','small_sided','match','other')),
+  starts_at INTEGER NOT NULL,
+  ends_at INTEGER NOT NULL,
+  venue_name TEXT CHECK (venue_name IS NULL OR length(venue_name) <= 120),
+  venue_town TEXT CHECK (venue_town IS NULL OR length(venue_town) <= 80),
+  venue_address TEXT CHECK (venue_address IS NULL OR length(venue_address) <= 200),
+  instructions TEXT CHECK (instructions IS NULL OR length(instructions) <= 500),
+  PRIMARY KEY (trial_id, position),
+  UNIQUE (trial_id, id),
+  CHECK (ends_at > starts_at)
 ) STRICT;
-CREATE INDEX trial_schedule_sessions_id ON trial_schedule_sessions (id);
 CREATE INDEX trial_schedule_sessions_trial_starts ON trial_schedule_sessions (trial_id, starts_at);
 CREATE TABLE trial_session_evidence (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
-  session_position                 INTEGER NOT NULL,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  kind                             TEXT,
-  box_session_id                   TEXT,
-  linked_at                        INTEGER,
-  linked_by_kind                   TEXT,
-  linked_by_user_id                TEXT,
-  linked_by_id                     TEXT,
-  linked_by_name                   TEXT,
-  removed_at                       INTEGER,
-  removed_by_kind                  TEXT,
-  removed_by_user_id               TEXT,
-  removed_by_id                    TEXT,
-  removed_by_name                  TEXT,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (trial_id, session_position, position)
+  trial_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IS NULL OR kind IN ('box_cam_session')),
+  box_session_id TEXT NOT NULL,
+  linked_at INTEGER NOT NULL,
+  linked_by_kind TEXT CHECK (linked_by_kind IS NULL OR linked_by_kind IN ('org','player','guardian','system')),
+  linked_by_user_id TEXT,
+  linked_by_actor_id TEXT,
+  linked_by_name TEXT,
+  removed_at INTEGER,
+  removed_by_kind TEXT CHECK (removed_by_kind IS NULL OR removed_by_kind IN ('org','player','guardian','system')),
+  removed_by_user_id TEXT,
+  removed_by_actor_id TEXT,
+  removed_by_name TEXT,
+  PRIMARY KEY (trial_id, session_id, position),
+  FOREIGN KEY (trial_id, session_id) REFERENCES trial_schedule_sessions(trial_id, id) ON DELETE CASCADE
 ) STRICT;
 CREATE INDEX trial_session_evidence_box_session ON trial_session_evidence (box_session_id);
-CREATE UNIQUE INDEX trial_session_evidence_one_active ON trial_session_evidence (trial_id, session_position, box_session_id) WHERE removed_at IS NULL AND box_session_id IS NOT NULL;
+CREATE UNIQUE INDEX trial_session_evidence_one_active ON trial_session_evidence (trial_id, session_id, box_session_id) WHERE removed_at IS NULL;
 CREATE TABLE trial_schedule_revisions (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  revision                         INTEGER,
-  timezone                         TEXT,
-  sessions_json                    TEXT CHECK (sessions_json IS NULL OR json_valid(sessions_json)),
-  proposed_at                      INTEGER,
-  proposed_by_kind                 TEXT,
-  proposed_by_user_id              TEXT,
-  proposed_by_id                   TEXT,
-  proposed_by_name                 TEXT,
-  confirmed_at                     INTEGER,
-  confirmed_by_kind                TEXT,
-  confirmed_by_user_id             TEXT,
-  confirmed_by_id                  TEXT,
-  confirmed_by_name                TEXT,
-  superseded_at                    INTEGER,
-  reason                           TEXT,
-  material                         INTEGER,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (trial_id, position)
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  revision INTEGER NOT NULL,
+  timezone TEXT NOT NULL,
+  proposed_at INTEGER,
+  proposed_by_kind TEXT CHECK (proposed_by_kind IS NULL OR proposed_by_kind IN ('org','player','guardian','system')),
+  proposed_by_user_id TEXT,
+  proposed_by_actor_id TEXT,
+  proposed_by_name TEXT,
+  confirmed_at INTEGER,
+  confirmed_by_kind TEXT CHECK (confirmed_by_kind IS NULL OR confirmed_by_kind IN ('org','player','guardian','system')),
+  confirmed_by_user_id TEXT,
+  confirmed_by_actor_id TEXT,
+  confirmed_by_name TEXT,
+  superseded_at INTEGER,
+  reason TEXT CHECK (reason IS NULL OR length(reason) <= 300),
+  material INTEGER CHECK (material IS NULL OR material IN (0,1)),
+  PRIMARY KEY (trial_id, position),
+  UNIQUE (trial_id, revision)
+) STRICT;
+CREATE TABLE trial_revision_sessions (
+  trial_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IS NULL OR kind IN ('onboarding','training','drill','small_sided','match','other')),
+  starts_at INTEGER NOT NULL,
+  ends_at INTEGER NOT NULL,
+  venue_name TEXT CHECK (venue_name IS NULL OR length(venue_name) <= 120),
+  venue_town TEXT CHECK (venue_town IS NULL OR length(venue_town) <= 80),
+  venue_address TEXT CHECK (venue_address IS NULL OR length(venue_address) <= 200),
+  instructions TEXT CHECK (instructions IS NULL OR length(instructions) <= 500),
+  PRIMARY KEY (trial_id, revision, position),
+  FOREIGN KEY (trial_id, revision) REFERENCES trial_schedule_revisions(trial_id, revision) ON DELETE CASCADE
 ) STRICT;
 CREATE TABLE trial_attendance (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  session_id                       TEXT,
-  state                            TEXT,
-  source                           TEXT,
-  recorded_by_kind                 TEXT,
-  recorded_by_user_id              TEXT,
-  recorded_by_id                   TEXT,
-  recorded_by_name                 TEXT,
-  recorded_at                      INTEGER,
-  note                             TEXT,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  session_id TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IS NULL OR state IN ('attended','partial','no_show','club_cancelled','player_withdrew')),
+  source TEXT NOT NULL CHECK (source IS NULL OR source IN ('checkin','manual')),
+  recorded_by_kind TEXT CHECK (recorded_by_kind IS NULL OR recorded_by_kind IN ('org','player','guardian','system')),
+  recorded_by_user_id TEXT,
+  recorded_by_actor_id TEXT,
+  recorded_by_name TEXT,
+  recorded_at INTEGER NOT NULL,
+  note TEXT CHECK (note IS NULL OR length(note) <= 300),
   PRIMARY KEY (trial_id, position)
 ) STRICT;
 CREATE INDEX trial_attendance_trial_session_at ON trial_attendance (trial_id, session_id, recorded_at);
-CREATE TABLE trial_reminders (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  marker                           TEXT NOT NULL,
-  sent_at                          INTEGER,
-  value_json                       TEXT CHECK (value_json IS NULL OR json_valid(value_json)),
-  PRIMARY KEY (trial_id, position)
+CREATE TABLE trial_history (
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  action TEXT NOT NULL CHECK (action IS NULL OR length(action) <= 64),
+  by_kind TEXT CHECK (by_kind IS NULL OR by_kind IN ('org','player','guardian','system')),
+  by_user_id TEXT,
+  by_actor_id TEXT,
+  by_name TEXT,
+  detail_json TEXT CHECK (detail_json IS NULL OR (json_valid(detail_json) AND json_type(detail_json) = 'object')),
+  PRIMARY KEY (trial_id, position),
+  UNIQUE (trial_id, id)
 ) STRICT;
-CREATE UNIQUE INDEX trial_reminders_marker ON trial_reminders (trial_id, marker);
+CREATE INDEX trial_history_trial_at ON trial_history (trial_id, at);
+CREATE TABLE trial_keys (
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
+  act TEXT NOT NULL CHECK (act IS NULL OR act IN ('schedule','cancel','attendance','complete','link')),
+  position INTEGER NOT NULL,
+  key TEXT NOT NULL CHECK (key IS NULL OR length(key) <= 64),
+  fp TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (trial_id, act, position)
+) STRICT;
+CREATE INDEX trial_keys_key ON trial_keys (trial_id, act, key);
+CREATE TABLE trial_reminders (
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
+  marker TEXT NOT NULL CHECK (marker IS NULL OR length(marker) <= 120),
+  sent_at INTEGER NOT NULL,
+  PRIMARY KEY (trial_id, marker)
+) STRICT;
+CREATE TABLE trial_reports (
+  trial_id TEXT PRIMARY KEY REFERENCES trials(id) ON DELETE CASCADE,
+  id TEXT NOT NULL UNIQUE,
+  player_id TEXT NOT NULL,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name TEXT,
+  user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  scout_name TEXT,
+  filed_at INTEGER NOT NULL,
+  acceleration REAL NOT NULL,
+  sprint_speed_kmh REAL NOT NULL,
+  distance_km REAL NOT NULL,
+  pass_completion_pct REAL NOT NULL,
+  duel_success_pct REAL NOT NULL,
+  coach_rating REAL NOT NULL,
+  notes TEXT,
+  strength_note TEXT,
+  focus_note TEXT
+) STRICT;
+CREATE INDEX trial_reports_player ON trial_reports (player_id, filed_at);
+CREATE INDEX trial_reports_org ON trial_reports (org_id, filed_at);
 CREATE TABLE trial_day_staff (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  name                             TEXT,
-  role                             TEXT,
-  check_kind                       TEXT,
-  check_ref                        TEXT,
-  check_status                     TEXT,
-  check_expires_raw                TEXT,
-  check_reviewed_by_name           TEXT,
-  check_reviewed_at                INTEGER,
-  added_by_name                    TEXT,
-  added_at                         INTEGER,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (trial_id, position)
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  name TEXT NOT NULL CHECK (name IS NULL OR length(name) <= 80),
+  role TEXT NOT NULL CHECK (role IS NULL OR length(role) <= 60),
+  check_kind TEXT CHECK (check_kind IS NULL OR length(check_kind) <= 60),
+  check_ref TEXT CHECK (check_ref IS NULL OR length(check_ref) <= 60),
+  check_status TEXT CHECK (check_status IS NULL OR check_status IN ('pending','reviewed','expired','rejected')),
+  check_expires_at TEXT,
+  check_reviewed_by TEXT,
+  check_reviewed_at INTEGER,
+  added_by_name TEXT,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY (trial_id, position),
+  UNIQUE (trial_id, id),
+  CHECK (check_status IS NOT NULL OR (check_kind IS NULL AND check_ref IS NULL AND check_expires_at IS NULL AND check_reviewed_by IS NULL AND check_reviewed_at IS NULL))
 ) STRICT;
 CREATE TABLE trial_day_consents (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  by_kind                          TEXT,
-  by_user_id                       TEXT,
-  by_id                            TEXT,
-  by_name                          TEXT,
-  scope                            TEXT,
-  at                               INTEGER,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  by_kind TEXT CHECK (by_kind IS NULL OR by_kind IN ('org','player','guardian','system')),
+  by_user_id TEXT,
+  by_actor_id TEXT,
+  by_name TEXT,
+  scope TEXT NOT NULL CHECK (scope IS NULL OR scope IN ('player_event_consent','guardian_event_consent')),
+  at INTEGER NOT NULL,
   PRIMARY KEY (trial_id, position)
 ) STRICT;
-CREATE UNIQUE INDEX trial_day_consents_one_per_actor ON trial_day_consents (trial_id, scope, by_id) WHERE by_id IS NOT NULL AND scope IS NOT NULL;
+CREATE UNIQUE INDEX trial_day_consents_one_per_actor ON trial_day_consents (trial_id, scope, by_actor_id) WHERE by_actor_id IS NOT NULL;
 CREATE TABLE trial_day_checkins (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  player_id                        TEXT,
-  at                               INTEGER,
-  by_user_id                       TEXT,
-  by_name                          TEXT,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  player_id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  by_user_id TEXT,
+  by_name TEXT,
   PRIMARY KEY (trial_id, position)
 ) STRICT;
 CREATE TABLE trial_day_status_events (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  kind                             TEXT,
-  at                               INTEGER,
-  by_name                          TEXT,
-  reason                           TEXT,
-  new_date                         TEXT,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IS NULL OR kind IN ('cancelled','postponed')),
+  at INTEGER NOT NULL,
+  by_name TEXT,
+  reason TEXT CHECK (reason IS NULL OR length(reason) <= 200),
+  new_date TEXT CHECK (new_date IS NULL OR new_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
   PRIMARY KEY (trial_id, position)
 ) STRICT;
-CREATE INDEX trial_day_status_events_trial_at ON trial_day_status_events (trial_id, at);
-CREATE TABLE trial_reports (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE RESTRICT,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  report_trial_id                  TEXT,
-  player_id                        TEXT,
-  org_id                           TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name                         TEXT,
-  user_id                          TEXT,
-  scout_name                       TEXT,
-  filed_at                         INTEGER,
-  acceleration                     REAL,
-  sprint_speed_kmh                 REAL,
-  distance_km                      REAL,
-  pass_completion_pct              REAL,
-  duel_success_pct                 REAL,
-  coach_rating                     REAL,
-  notes                            TEXT,
-  strength_note                    TEXT,
-  focus_note                       TEXT,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (trial_id)
-) STRICT;
-CREATE INDEX trial_reports_player ON trial_reports (player_id);
-CREATE INDEX trial_reports_org ON trial_reports (org_id, filed_at);
-CREATE INDEX trial_reports_id ON trial_reports (id);
-CREATE TABLE trial_history (
-  trial_id                         TEXT NOT NULL REFERENCES trials(id) ON DELETE RESTRICT,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  at                               INTEGER,
-  action                           TEXT,
-  by_kind                          TEXT,
-  by_user_id                       TEXT,
-  by_id                            TEXT,
-  by_name                          TEXT,
-  detail_json                      TEXT CHECK (detail_json IS NULL OR json_valid(detail_json)),
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (trial_id, position)
-) STRICT;
-CREATE INDEX trial_history_trial_at ON trial_history (trial_id, at);
-CREATE INDEX trial_history_id ON trial_history (id);
 
 -- =============================================================================
 -- room_comments, room_snapshots, room_decisions, room_evidence_states and their child tables — LIVE since

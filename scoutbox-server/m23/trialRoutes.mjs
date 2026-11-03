@@ -55,8 +55,11 @@ export function registerTrial(ctx) {
   const {
     db, orgRouter, playerRouter, guardianRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked, isAdult,
     rateLimit, isLead, moderateOrRefuse, issueRecruitmentRequest, audit, orgCanSee, guardianManagedOnly,
-    combineOrgMaySeeResults, testProviderEnabled = false,
+    combineOrgMaySeeResults, testProviderEnabled = false, recruitment, unit,
   } = ctx;
+  // S8a: every trial and request write is an explicit repository operation (trials.update / requests.update) inside `unit`.
+  if (typeof unit !== 'function' || !recruitment?.trials) throw new TypeError('registerTrial needs the recruitment repository and unit from the data layer');
+  const { trials } = recruitment;
 
   /**
    * ONE clock per request. In a test deployment (SCOUTBOX_TEST_CLOCK=1) a
@@ -394,6 +397,8 @@ export function registerTrial(ctx) {
       return err(res, 'TRIAL_TRANSPORT_REFUSED', 'The invitation could not be delivered. Nothing was sent; try again.');
     }
 
+    let moved = null;
+    const request = unit(() => {
     const request = issueRecruitmentRequest({
       org: req.org, orgUser: req.orgUser, player, type: 'trial', message: inv.message,
       trialDetails: {
@@ -405,17 +410,16 @@ export function registerTrial(ctx) {
         private: { venueAddress: inv.venue.address ?? null, instructions: inv.instructions },
       },
       guardianId: recipient.guardianId, at,
+      // S8a: the case link, the recipient snapshot and the client key are part of the one create.
+      workflow: { caseId: room.id, recipient, keys: { invite: key.key ? { key: key.key, fp } : null } },
     }, { persist: false });
-    request.caseId = room.id;
-    request.trialId = null;
-    request.recipient = recipient;
-    request.keys = { invite: key.key ? { key: key.key, fp } : null };
     room.links ??= { requestIds: [], trialIds: [], signingId: null };
     if (!room.links.requestIds.includes(request.id)) room.links.requestIds.push(request.id);
     audit(room, 'org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', { requestId: request.id, recipientType: recipient.type, slotCount: inv.slots.length });
 
-    const moved = advanceCase({ req, room, action: 'planTrial', at, trigger: `trial:invite:${request.id}`, keyDetail: { requestId: request.id } });
-    persistNow();
+    moved = advanceCase({ req, room, action: 'planTrial', at, trigger: `trial:invite:${request.id}`, keyDetail: { requestId: request.id } });
+    return request;
+    });
     broadcast('trial_invited', { orgId: room.orgId, roomId: room.id, requestId: request.id });
     res.status(201).json({ invitation: invitationView(request), routing: routingView({ ok: true, recipient }), case: moved.applied ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status } });
   });
@@ -493,35 +497,33 @@ export function registerTrial(ctx) {
     const wasConfirmed = !!t.schedule?.confirmedAt;
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, TRIAL_LIMITS.reason) || null : null;
 
-    if (t.schedule) {
-      for (const r of t.schedule.revisions) if (!r.supersededAt) r.supersededAt = at;
-    }
-    const revisions = [...(t.schedule?.revisions ?? []), {
-      revision, timezone: check.schedule.timezone, sessions: sessions.map((s) => ({ ...s, evidence: undefined })),
-      proposedAt: at, proposedBy: by, confirmedAt: null, confirmedBy: null, supersededAt: null, reason, material,
-    }];
     // A material change asks the recipient again (D-8); a cosmetic one keeps
     // the confirmation the recipient already gave.
     const keepsConfirmation = wasConfirmed && !material;
-    t.schedule = {
-      timezone: check.schedule.timezone, revision, proposedAt: at, proposedBy: by,
-      confirmedAt: keepsConfirmation ? t.schedule.confirmedAt : null,
-      confirmedBy: keepsConfirmation ? t.schedule.confirmedBy : null,
-      declinedAt: null, declinedBy: null,
-      sessions, revisions,
-    };
-    if (keepsConfirmation) revisions[revisions.length - 1].confirmedAt = t.schedule.confirmedAt;
-    t.workflowState = deriveWorkflowState(t);
-    record(t, isRevision ? 'trial_rescheduled' : 'trial_schedule_proposed', by, { revision, sessionCount: sessions.length, material, requiresConfirmation: !keepsConfirmation }, at);
-    keyRecord(t, 'schedule', key.key, fp, at);
-    bumpRev(t, { by: req.orgUser, at });
-    persistNow();
+    const fresh = unit(() => trials.update(t.id, (d) => {
+      const revisions = [...(d.schedule?.revisions ?? []).map((r) => (r.supersededAt ? r : { ...r, supersededAt: at })), {
+        revision, timezone: check.schedule.timezone, sessions: sessions.map(({ evidence: _e, ...s }) => s),
+        proposedAt: at, proposedBy: by, confirmedAt: null, confirmedBy: null, supersededAt: null, reason, material,
+      }];
+      d.schedule = {
+        timezone: check.schedule.timezone, revision, proposedAt: at, proposedBy: by,
+        confirmedAt: keepsConfirmation ? d.schedule.confirmedAt : null,
+        confirmedBy: keepsConfirmation ? d.schedule.confirmedBy : null,
+        declinedAt: null, declinedBy: null,
+        sessions, revisions,
+      };
+      if (keepsConfirmation) revisions[revisions.length - 1].confirmedAt = d.schedule.confirmedAt;
+      d.workflowState = deriveWorkflowState(d);
+      record(d, isRevision ? 'trial_rescheduled' : 'trial_schedule_proposed', by, { revision, sessionCount: sessions.length, material, requiresConfirmation: !keepsConfirmation }, at);
+      keyRecord(d, 'schedule', key.key, fp, at);
+      bumpRev(d, { by: req.orgUser, at });
+    }));
     if (isRevision) broadcast('trial_rescheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
     else broadcast('trial_scheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-    notifyRecipient(t, keepsConfirmation
-      ? `${t.orgName} updated the details of your trial (times unchanged).`
-      : isRevision ? `${t.orgName} proposed new times for your trial — please confirm the updated schedule.` : `${t.orgName} proposed a schedule for your trial — please confirm it.`);
-    res.json({ trial: trialClubView(t), requiresConfirmation: !keepsConfirmation, material });
+    notifyRecipient(fresh, keepsConfirmation
+      ? `${fresh.orgName} updated the details of your trial (times unchanged).`
+      : isRevision ? `${fresh.orgName} proposed new times for your trial — please confirm the updated schedule.` : `${fresh.orgName} proposed a schedule for your trial — please confirm it.`);
+    res.json({ trial: trialClubView(fresh), requiresConfirmation: !keepsConfirmation, material });
   }
   orgRouter.post('/rooms/:id/trials/:tid/schedule', scheduleHandler);
   orgRouter.post('/rooms/:id/trials/:tid/reschedule', scheduleHandler);
@@ -553,15 +555,16 @@ export function registerTrial(ctx) {
     if (!moderateOrRefuse(res, reason, { kind: 'trial_cancellation', orgId: req.org.id, userId: req.orgUser.id })) return;
     const by = orgActor(req);
     const phase = deriveWorkflowState(t);
-    t.completion = { state: 'cancelled', at, by, reason, phase, cancelledBy: 'club' };
-    t.workflowState = 'cancelled';
-    record(t, 'trial_cancelled', by, { phase, cancelledBy: 'club', attendedSessions: [...currentAttendance(t).values()].filter((a) => ['attended', 'partial'].includes(a.state)).length }, at);
-    keyRecord(t, 'cancel', key.key, fp, at);
-    bumpRev(t, { by: req.orgUser, at });
-    persistNow();
+    const fresh = unit(() => trials.update(t.id, (d) => {
+      d.completion = { state: 'cancelled', at, by, reason, phase, cancelledBy: 'club' };
+      d.workflowState = 'cancelled';
+      record(d, 'trial_cancelled', by, { phase, cancelledBy: 'club', attendedSessions: [...currentAttendance(d).values()].filter((a) => ['attended', 'partial'].includes(a.state)).length }, at);
+      keyRecord(d, 'cancel', key.key, fp, at);
+      bumpRev(d, { by: req.orgUser, at });
+    }));
     broadcast('trial_cancelled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-    notifyRecipient(t, `${t.orgName} cancelled the trial: ${reason}`);
-    res.json({ trial: trialClubView(t) });
+    notifyRecipient(fresh, `${fresh.orgName} cancelled the trial: ${reason}`);
+    res.json({ trial: trialClubView(fresh) });
   });
 
   // ------------------------------------------------------------ attendance
@@ -593,14 +596,14 @@ export function registerTrial(ctx) {
     if (limited('trial_attendance', req.org.id)) return res.status(429).json(rateLimitedBody('trial_attendance'));
     if (note && !moderateOrRefuse(res, note, { kind: 'trial_attendance_note', orgId: req.org.id, userId: req.orgUser.id })) return;
     const by = orgActor(req);
-    t.attendance ??= [];
-    t.attendance.push({ sessionId: s.id, state, source: 'manual', recordedBy: by, recordedAt: at, note });
-    record(t, 'trial_attendance_recorded', by, { sessionId: s.id, state, source: 'manual' }, at);
-    keyRecord(t, 'attendance', key.key, fp, at);
-    bumpRev(t, { by: req.orgUser, at });
-    persistNow();
+    const fresh = unit(() => trials.update(t.id, (d) => {
+      d.attendance.push({ sessionId: s.id, state, source: 'manual', recordedBy: by, recordedAt: at, note });
+      record(d, 'trial_attendance_recorded', by, { sessionId: s.id, state, source: 'manual' }, at);
+      keyRecord(d, 'attendance', key.key, fp, at);
+      bumpRev(d, { by: req.orgUser, at });
+    }));
     broadcast('trial_attendance_recorded', { orgId: room.orgId, roomId: room.id, trialId: t.id, sessionId: s.id });
-    res.json({ trial: trialClubView(t) });
+    res.json({ trial: trialClubView(fresh) });
   });
 
   // -------------------------------------------------------------- complete
@@ -630,18 +633,22 @@ export function registerTrial(ctx) {
       return err(res, 'TRIAL_TRANSPORT_REFUSED', 'The completion could not be recorded. Nothing was changed; try again.');
     }
     const by = orgActor(req);
-    t.completion = { state: 'completed', at, by, reason: null, phase: 'scheduled' };
-    t.workflowState = 'completed';
-    record(t, 'trial_completed', by, { sessionCount: t.schedule.sessions.length, attendedSessions: [...currentAttendance(t).values()].filter((a) => ['attended', 'partial'].includes(a.state)).length }, at);
-    keyRecord(t, 'complete', key.key, fp, at);
-    bumpRev(t, { by: req.orgUser, at });
-    // The case advances THROUGH the single writer, in the same save (D-5).
-    const moved = t.caseId ? advanceCase({ req, room, action: 'completeTrial', at, trigger: `trial:complete:${t.id}`, keyDetail: { trialId: t.id } }) : { applied: false, reason: 'legacy_no_case', at };
-    t.lifecycle = moved;
-    persistNow();
+    let moved = null;
+    const fresh = unit(() => {
+      trials.update(t.id, (d) => {
+        d.completion = { state: 'completed', at, by, reason: null, phase: 'scheduled' };
+        d.workflowState = 'completed';
+        record(d, 'trial_completed', by, { sessionCount: d.schedule.sessions.length, attendedSessions: [...currentAttendance(d).values()].filter((a) => ['attended', 'partial'].includes(a.state)).length }, at);
+        keyRecord(d, 'complete', key.key, fp, at);
+        bumpRev(d, { by: req.orgUser, at });
+      });
+      // The case advances THROUGH the single writer, in the same unit (D-5); the evidence provider reads the completed trial.
+      moved = t.caseId ? advanceCase({ req, room, action: 'completeTrial', at, trigger: `trial:complete:${t.id}`, keyDetail: { trialId: t.id } }) : { applied: false, reason: 'legacy_no_case', at };
+      return trials.update(t.id, (d) => { d.lifecycle = moved; });
+    });
     broadcast('trial_completed', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-    notifyRecipient(t, `${t.orgName} recorded the trial as completed. Thank you for taking part.`);
-    res.json({ trial: trialClubView(t), case: moved.applied ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status, reason: moved.reason ?? null } });
+    notifyRecipient(fresh, `${fresh.orgName} recorded the trial as completed. Thank you for taking part.`);
+    res.json({ trial: trialClubView(fresh), case: moved.applied ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status, reason: moved.reason ?? null } });
   });
 
   // ------------------------------------------------------- Box Cam evidence
@@ -696,7 +703,6 @@ export function registerTrial(ctx) {
     if (!la.ok) return err(res, la.error, la.message);
     if (!revGate(req, res, t)) return;
     // Idempotent on (trialSessionId, boxSessionId): linking twice is a replay (D-12).
-    s.evidence ??= [];
     const existing = s.evidence.find((e) => e.kind === 'box_cam_session' && e.sessionId === la.session.id && !e.removedAt);
     if (existing) return res.json({ trial: trialClubView(t), evidence: evidenceViews(t), idempotent: true });
     if (s.evidence.filter((e) => !e.removedAt).length >= TRIAL_LIMITS.evidencePerSession) return err(res, 'TRIAL_INVALID_STATE', `A session cites at most ${TRIAL_LIMITS.evidencePerSession} Box Cam sessions.`);
@@ -704,13 +710,14 @@ export function registerTrial(ctx) {
     const by = orgActor(req);
     // Reference only (N1/N5): the session id and the link event. Nothing is
     // copied; provenance is read live at projection time.
-    s.evidence.push({ id: nextId('tev'), kind: 'box_cam_session', sessionId: la.session.id, linkedAt: at, linkedBy: by, removedAt: null, removedBy: null });
-    record(t, 'trial_evidence_linked', by, { trialSessionId: s.id, kind: 'box_cam_session', sessionId: la.session.id }, at);
-    keyRecord(t, 'link', key.key, fp, at);
-    bumpRev(t, { by: req.orgUser, at });
-    persistNow();
+    const fresh = unit(() => trials.update(t.id, (d) => {
+      d.schedule.sessions.find((x) => x.id === s.id).evidence.push({ id: nextId('tev'), kind: 'box_cam_session', sessionId: la.session.id, linkedAt: at, linkedBy: by, removedAt: null, removedBy: null });
+      record(d, 'trial_evidence_linked', by, { trialSessionId: s.id, kind: 'box_cam_session', sessionId: la.session.id }, at);
+      keyRecord(d, 'link', key.key, fp, at);
+      bumpRev(d, { by: req.orgUser, at });
+    }));
     broadcast('trial_evidence_linked', { orgId: room.orgId, roomId: room.id, trialId: t.id, sessionId: s.id });
-    res.status(201).json({ trial: trialClubView(t), evidence: evidenceViews(t) });
+    res.status(201).json({ trial: trialClubView(fresh), evidence: evidenceViews(fresh) });
   });
 
   orgRouter.post('/rooms/:id/trials/:tid/evidence/:eid/unlink', (req, res) => {
@@ -728,12 +735,14 @@ export function registerTrial(ctx) {
     if (!revGate(req, res, t)) return;
     if (hit.removedAt) return res.json({ trial: trialClubView(t), evidence: evidenceViews(t), idempotent: true });
     // Tombstoned, never erased: the link row stays with its removal time.
-    hit.removedAt = at;
-    hit.removedBy = orgActor(req);
-    record(t, 'trial_evidence_unlinked', orgActor(req), { trialSessionId: sess.id, sessionId: hit.sessionId }, at);
-    bumpRev(t, { by: req.orgUser, at });
-    persistNow();
-    res.json({ trial: trialClubView(t), evidence: evidenceViews(t) });
+    const fresh = unit(() => trials.update(t.id, (d) => {
+      const e = d.schedule.sessions.find((x) => x.id === sess.id).evidence.find((x) => x.id === hit.id);
+      e.removedAt = at;
+      e.removedBy = orgActor(req);
+      record(d, 'trial_evidence_unlinked', orgActor(req), { trialSessionId: sess.id, sessionId: hit.sessionId }, at);
+      bumpRev(d, { by: req.orgUser, at });
+    }));
+    res.json({ trial: trialClubView(fresh), evidence: evidenceViews(fresh) });
   });
 
   /**
@@ -836,7 +845,7 @@ export function registerTrial(ctx) {
 
   /** After the single writer created the trial row: link it to the case and, if the slot was concrete, confirm the case's trial_scheduled. Same save as the answer. */
   ctx.onTrialAccepted = ({ request, trial, at, actor }) => {
-    request.trialId = trial.id;
+    recruitment.requests.update(request.id, (d) => { d.trialId = trial.id; }); // S8a: in the respond route's unit
     const room = (db.recruitmentCases ?? []).find((k) => k?.id === request.caseId) ?? null;
     if (!room) return null;
     room.links ??= { requestIds: [], trialIds: [], signingId: null };
@@ -846,7 +855,7 @@ export function registerTrial(ctx) {
     if (trial.workflowState === 'scheduled') {
       moved = advanceCase({ room, action: 'confirmTrial', at, trigger: `trial:accept:${trial.id}`, actor, keyDetail: { trialId: trial.id } });
     }
-    trial.lifecycle = moved;
+    trials.update(trial.id, (d) => { d.lifecycle = moved; });
     for (const uid of new Set([room.ownerUserId, room.room?.leadScoutUserId])) {
       if (!uid || uid === request.userId) continue;
       notify({ kind: 'org_user', id: uid }, 'trial_day', `Recruitment Room — ${room.playerName ?? 'a removed player'}: the ${actor.kind} accepted the trial invitation${trial.workflowState === 'scheduled' ? ' and confirmed the schedule' : ''}.`, trial.id);
@@ -908,23 +917,26 @@ export function registerTrial(ctx) {
         if (!guardRev(req, res, t, { errorCode: 'TRIAL_VERSION_CONFLICT', current: { workflowState: deriveWorkflowState(t) } })) return;
       }
       const who = { kind: by, id: actorId, name: actorName };
-      t.schedule.confirmedAt = at;
-      t.schedule.confirmedBy = who;
-      t.schedule.declinedAt = null;
-      const rev = t.schedule.revisions.find((r) => r.revision === t.schedule.revision);
-      if (rev) { rev.confirmedAt = at; rev.confirmedBy = who; }
-      t.workflowState = deriveWorkflowState(t);
-      t.recipient = { type: by, playerId: t.playerId, guardianId: by === 'guardian' ? actorId : null, minor: by === 'guardian', at };
-      record(t, 'trial_schedule_confirmed', who, { revision: t.schedule.revision, sessionCount: t.schedule.sessions.length }, at);
-      bumpRev(t, { by: null, at });
-      let moved = { applied: false, reason: 'legacy_no_case', at };
       const room = t.caseId ? (db.recruitmentCases ?? []).find((k) => k?.id === t.caseId) ?? null : null;
-      if (room) moved = advanceCase({ room, action: 'confirmTrial', at, trigger: `trial:confirm:${t.id}`, actor: who, keyDetail: { trialId: t.id } });
-      t.lifecycle = moved;
-      persistNow();
+      const fresh = unit(() => {
+        trials.update(t.id, (d) => {
+          d.schedule.confirmedAt = at;
+          d.schedule.confirmedBy = who;
+          d.schedule.declinedAt = null;
+          const rev = d.schedule.revisions.find((r) => r.revision === d.schedule.revision);
+          if (rev) { rev.confirmedAt = at; rev.confirmedBy = who; }
+          d.workflowState = deriveWorkflowState(d);
+          d.recipient = { type: by, playerId: d.playerId, guardianId: by === 'guardian' ? actorId : null, minor: by === 'guardian', at };
+          record(d, 'trial_schedule_confirmed', who, { revision: d.schedule.revision, sessionCount: d.schedule.sessions.length }, at);
+          bumpRev(d, { by: null, at });
+        });
+        // The evidence provider reads the confirmed trial; the case moves through the single writer in the same unit.
+        const moved = room ? advanceCase({ room, action: 'confirmTrial', at, trigger: `trial:confirm:${t.id}`, actor: who, keyDetail: { trialId: t.id } }) : { applied: false, reason: 'legacy_no_case', at };
+        return trials.update(t.id, (d) => { d.lifecycle = moved; });
+      });
       if (room) broadcast('trial_scheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-      notifyClub(t, `${actorName} confirmed the trial schedule for ${t.playerName ?? 'the player'} (revision ${t.schedule.revision}).`);
-      res.json({ trial: trialFamilyView(t) });
+      notifyClub(fresh, `${actorName} confirmed the trial schedule for ${fresh.playerName ?? 'the player'} (revision ${fresh.schedule.revision}).`);
+      res.json({ trial: trialFamilyView(fresh) });
     };
   }
 
@@ -947,13 +959,14 @@ export function registerTrial(ctx) {
       const reason = typeof reasonRaw === 'string' && reasonRaw.trim() ? reasonRaw.trim() : null;
       if (reason && !moderateOrRefuse(res, reason, { kind: 'trial_schedule_decline', trialId: t.id })) return;
       const who = { kind: by, id: actorId, name: actorName };
-      t.schedule.declinedAt = at;
-      t.schedule.declinedBy = who;
-      record(t, 'trial_schedule_declined', who, { revision: t.schedule.revision, hadReason: !!reason }, at);
-      bumpRev(t, { by: null, at });
-      persistNow();
-      notifyClub(t, `${actorName} declined the proposed trial schedule for ${t.playerName ?? 'the player'} (revision ${t.schedule.revision})${reason ? `: ${reason}` : '.'}`);
-      res.json({ trial: trialFamilyView(t) });
+      const fresh = unit(() => trials.update(t.id, (d) => {
+        d.schedule.declinedAt = at;
+        d.schedule.declinedBy = who;
+        record(d, 'trial_schedule_declined', who, { revision: d.schedule.revision, hadReason: !!reason }, at);
+        bumpRev(d, { by: null, at });
+      }));
+      notifyClub(fresh, `${actorName} declined the proposed trial schedule for ${fresh.playerName ?? 'the player'} (revision ${fresh.schedule.revision})${reason ? `: ${reason}` : '.'}`);
+      res.json({ trial: trialFamilyView(fresh) });
     };
   }
 
@@ -975,15 +988,16 @@ export function registerTrial(ctx) {
       const reason = typeof reasonRaw === 'string' && reasonRaw.trim() ? reasonRaw.trim() : null;
       if (reason && !moderateOrRefuse(res, reason, { kind: 'trial_cancellation', trialId: t.id })) return;
       const who = { kind: by, id: actorId, name: actorName };
-      t.completion = { state: 'cancelled', at, by: who, reason, phase: state, cancelledBy: by };
-      t.workflowState = 'cancelled';
-      record(t, 'trial_cancelled', who, { phase: state, cancelledBy: by, attendedSessions: [...currentAttendance(t).values()].filter((a) => ['attended', 'partial'].includes(a.state)).length }, at);
-      bumpRev(t, { by: null, at });
-      persistNow();
-      const room = t.caseId ? (db.recruitmentCases ?? []).find((k) => k?.id === t.caseId) ?? null : null;
+      const fresh = unit(() => trials.update(t.id, (d) => {
+        d.completion = { state: 'cancelled', at, by: who, reason, phase: state, cancelledBy: by };
+        d.workflowState = 'cancelled';
+        record(d, 'trial_cancelled', who, { phase: state, cancelledBy: by, attendedSessions: [...currentAttendance(d).values()].filter((a) => ['attended', 'partial'].includes(a.state)).length }, at);
+        bumpRev(d, { by: null, at });
+      }));
+      const room = fresh.caseId ? (db.recruitmentCases ?? []).find((k) => k?.id === fresh.caseId) ?? null : null;
       if (room) broadcast('trial_cancelled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-      notifyClub(t, `${actorName} cancelled the trial for ${t.playerName ?? 'the player'}${reason ? `: ${reason}` : '.'}`);
-      res.json({ trial: trialFamilyView(t) });
+      notifyClub(fresh, `${actorName} cancelled the trial for ${fresh.playerName ?? 'the player'}${reason ? `: ${reason}` : '.'}`);
+      res.json({ trial: trialFamilyView(fresh) });
     };
   }
 

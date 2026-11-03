@@ -66,8 +66,10 @@ export const acceptedRequest = (base, trialId, { by = 'player', channel = 'chan-
 
 const who = (kind, id, name) => (kind === 'org' ? { kind, userId: id, name } : { kind, id, name });
 export const session = (over = {}) => ({ id: 'tses-1', kind: 'training', startsAt: T.session, endsAt: T.sessionEnd, venue: { name: 'Eastport Ground', town: 'Eastport', address: '1 Harbour Road' }, instructions: 'Gate B, ask for Maria', evidence: [], ...over });
+/** A schedule revision's copy of a session: everything but the evidence list. */
+const revisionCopy = ({ evidence: _e, ...s }) => s;
 export const evidenceLink = (over = {}) => ({ id: 'tev-1', kind: 'box_cam_session', sessionId: 'box-1', linkedAt: T.accepted + HOUR, linkedBy: who('org', SCOUT.userId, SCOUT.name), removedAt: null, removedBy: null, ...over });
-/** issueAcceptedTrial for a concrete P4B slot: born `scheduled`, revision 1 confirmed by the recipient; keys.accept {key: null, fp}; history of two entries. */
+/** issueAcceptedTrial for a concrete P4B slot: born `scheduled`, revision 1 confirmed by the recipient (its copy of the session carries no evidence list); history of two entries. */
 export const scheduledTrial = (over = {}) => {
   const s = session();
   const proposedBy = who('org', SCOUT.userId, SCOUT.name); const confirmedBy = who('player', 'pl-adult', 'Adult Signup');
@@ -75,17 +77,17 @@ export const scheduledTrial = (over = {}) => {
     id: 'trial-1', requestId: 'req-p4b', caseId: 'case-1', playerId: 'pl-adult', playerName: 'Adult Signup', orgId: ORG.id, orgName: ORG.name, scoutName: SCOUT.name,
     acceptedAt: T.accepted, acceptedBy: 'player', guardianApproved: false, proposedDate: '2026-11-03', venue: 'Eastport Ground, Eastport', notes: '', reportDueAt: T.session + 7 * DAY, status: 'awaiting_report',
     workflowState: 'scheduled',
-    schedule: { timezone: 'Europe/London', revision: 1, proposedAt: T.invited, proposedBy, confirmedAt: T.accepted, confirmedBy, sessions: [s], revisions: [{ revision: 1, timezone: 'Europe/London', sessions: [{ ...s }], proposedAt: T.invited, proposedBy, confirmedAt: T.accepted, confirmedBy, supersededAt: null, reason: 'invitation', material: null }] },
+    schedule: { timezone: 'Europe/London', revision: 1, proposedAt: T.invited, proposedBy, confirmedAt: T.accepted, confirmedBy, sessions: [s], revisions: [{ revision: 1, timezone: 'Europe/London', sessions: [revisionCopy(s)], proposedAt: T.invited, proposedBy, confirmedAt: T.accepted, confirmedBy, supersededAt: null, reason: 'invitation', material: null }] },
     attendance: [], completion: null, recipient: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false, at: T.accepted },
-    keys: { accept: { key: null, fp: JSON.stringify({ requestId: 'req-p4b', day: '2026-11-03' }) } },
+    keys: {},
     history: [{ id: 'aud-1', at: T.accepted, action: 'trial_accepted', by: confirmedBy, detail: { recipientType: 'player', slotId: 'tslot-1', day: '2026-11-03' } }, { id: 'aud-2', at: T.accepted, action: 'trial_schedule_confirmed', by: confirmedBy, detail: { revision: 1, sessionCount: 1 } }],
     reminders: {}, rev: 1, revAt: T.accepted, revBy: null, ...over,
   };
 };
 /** issueAcceptedTrial for a date-only (legacy) invitation: born `accepted`, no schedule. */
-export const acceptedTrial = (over = {}) => scheduledTrial({ id: 'trial-legacy', requestId: 'req-legacy', caseId: null, proposedDate: '2026-11-01', venue: 'Eastport Ground', notes: 'Bring boots', workflowState: 'accepted', schedule: null, keys: { accept: { key: null, fp: JSON.stringify({ requestId: 'req-legacy', day: '2026-11-01' }) } }, history: [{ id: 'aud-3', at: T.accepted, action: 'trial_accepted', by: who('player', 'pl-adult', 'Adult Signup'), detail: { recipientType: 'player', slotId: null, day: '2026-11-01' } }], ...over });
-/** A trial written BEFORE the P4B containers existed (M12): no workflowState, schedule, attendance, completion, recipient, keys, history, reminders, rev — `isLegacyTrial` reads it as legacy_accepted. */
-export const preP4bTrial = (over = {}) => ({ id: 'trial-old', requestId: 'req-old', caseId: null, playerId: 'pl-adult', playerName: 'Adult Signup', orgId: ORG.id, orgName: ORG.name, scoutName: SCOUT.name, acceptedAt: T.accepted - 30 * DAY, acceptedBy: 'player', guardianApproved: false, proposedDate: '2026-09-01', venue: 'Old ground', notes: '', reportDueAt: T.accepted - 20 * DAY, status: 'reported', report: report({ id: 'rep-old', trialId: 'trial-old', filedAt: T.accepted - 25 * DAY }), ...over });
+export const acceptedTrial = (over = {}) => scheduledTrial({ id: 'trial-legacy', requestId: 'req-legacy', caseId: null, proposedDate: '2026-11-01', venue: 'Eastport Ground', notes: 'Bring boots', workflowState: 'accepted', schedule: null, keys: {}, history: [{ id: 'aud-3', at: T.accepted, action: 'trial_accepted', by: who('player', 'pl-adult', 'Adult Signup'), detail: { recipientType: 'player', slotId: null, day: '2026-11-01' } }], ...over });
+/** A trial without the P4B containers (M12's shape): stored as `legacy_accepted`, no schedule, attendance, completion, recipient, keys, history or reminders. */
+export const preP4bTrial = (over = {}) => ({ id: 'trial-old', requestId: 'req-old', caseId: null, playerId: 'pl-adult', playerName: 'Adult Signup', orgId: ORG.id, orgName: ORG.name, scoutName: SCOUT.name, acceptedAt: T.accepted - 30 * DAY, acceptedBy: 'player', guardianApproved: false, proposedDate: '2026-09-01', venue: 'Old ground', notes: '', reportDueAt: T.accepted - 20 * DAY, status: 'reported', workflowState: 'legacy_accepted', rev: 1, report: report({ id: 'rep-old', trialId: 'trial-old', filedAt: T.accepted - 25 * DAY }), ...over });
 /** The report route's literal (TRIAL_REPORT_FIELDS in order, notes '' default, the two feedback notes). */
 export const report = (over = {}) => ({ id: 'rep-1', trialId: 'trial-1', playerId: 'pl-adult', orgId: ORG.id, orgName: ORG.name, userId: SCOUT.userId, scoutName: SCOUT.name, filedAt: T.filed, acceleration: 7, sprintSpeedKmh: 31, distanceKm: 6.2, passCompletionPct: 78, duelSuccessPct: 55, coachRating: 8, notes: 'Quick feet.', strengthNote: 'Pace', focusNote: 'Left foot', ...over });
 /** The day container (m12/journeys.mjs:534) once the club worked on the trial day: staff with a filed check, a consent, a check-in, a status event, arrival/emergency/collection. */
@@ -103,7 +105,7 @@ export const workedTrial = (over = {}) => {
   const orgBy = who('org', SCOUT.userId, SCOUT.name);
   return {
     ...base, status: 'reported', reminderSent: true, feedbackEscalatedAt: T.filed - HOUR, report: report(), day: dayContainer(), workflowState: 'completed',
-    schedule: { ...base.schedule, revision: 2, proposedAt: T.accepted + HOUR, proposedBy: orgBy, confirmedAt: T.accepted + 2 * HOUR, confirmedBy: base.schedule.confirmedBy, declinedAt: null, declinedBy: null, sessions: [s2], revisions: [...base.schedule.revisions, { revision: 2, timezone: 'Europe/London', sessions: [{ ...s2, evidence: [] }], proposedAt: T.accepted + HOUR, proposedBy: orgBy, confirmedAt: T.accepted + 2 * HOUR, confirmedBy: base.schedule.confirmedBy, supersededAt: null, reason: 'Pitch change', material: true }] },
+    schedule: { ...base.schedule, revision: 2, proposedAt: T.accepted + HOUR, proposedBy: orgBy, confirmedAt: T.accepted + 2 * HOUR, confirmedBy: base.schedule.confirmedBy, declinedAt: null, declinedBy: null, sessions: [s2], revisions: [...base.schedule.revisions, { revision: 2, timezone: 'Europe/London', sessions: [revisionCopy(s2)], proposedAt: T.accepted + HOUR, proposedBy: orgBy, confirmedAt: T.accepted + 2 * HOUR, confirmedBy: base.schedule.confirmedBy, supersededAt: null, reason: 'Pitch change', material: true }] },
     attendance: [{ sessionId: 'tses-2', state: 'attended', source: 'manual', recordedBy: orgBy, recordedAt: T.sessionEnd + DAY, note: 'Full session' }],
     completion: { state: 'completed', at: T.sessionEnd + DAY + HOUR, by: orgBy, reason: null, phase: 'scheduled' },
     keys: { ...base.keys, schedule: [{ key: 'k-sched-1', fp: 'fp-s1', at: T.accepted + HOUR }], attendance: [{ key: 'k-att-1', fp: 'fp-a1', at: T.sessionEnd + DAY }], complete: [{ key: 'k-comp-1', fp: 'fp-c1', at: T.sessionEnd + DAY + HOUR }], link: [{ key: 'k-link-1', fp: 'fp-l1', at: T.accepted + HOUR }] },
@@ -113,7 +115,7 @@ export const workedTrial = (over = {}) => {
   };
 };
 /** The recipient cancelled (trialRoutes.mjs:978): completion by the recipient, cancelledBy the kind. */
-export const cancelledTrial = (over = {}) => scheduledTrial({ id: 'trial-cancelled', requestId: 'req-cancelled', workflowState: 'cancelled', completion: { state: 'cancelled', at: T.accepted + DAY, by: who('player', 'pl-adult', 'Adult Signup'), reason: 'Injured', phase: 'scheduled', cancelledBy: 'player' }, keys: { accept: { key: null, fp: 'fp-x' }, cancel: [{ key: 'k-cancel-1', fp: 'fp-cx', at: T.accepted + DAY }] }, rev: 2, revAt: T.accepted + DAY, revBy: null, ...over });
+export const cancelledTrial = (over = {}) => scheduledTrial({ id: 'trial-cancelled', requestId: 'req-cancelled', workflowState: 'cancelled', completion: { state: 'cancelled', at: T.accepted + DAY, by: who('player', 'pl-adult', 'Adult Signup'), reason: 'Injured', phase: 'scheduled', cancelledBy: 'player' }, keys: { cancel: [{ key: 'k-cancel-1', fp: 'fp-cx', at: T.accepted + DAY }] }, rev: 2, revAt: T.accepted + DAY, revBy: null, ...over });
 
 /** The recruitmentCases blob entries the strict case references (Q7b) resolve against: ids only matter here. */
 /** The cases the strict case references (Q7b) resolve against: since S8b (migration 0016) a table-backed collection imported on the same run, so each is a full case literal (m12/scouting.mjs:450) with EMPTY links — these fixtures vary the requests and trials freely and a case link would have to name one of them. */

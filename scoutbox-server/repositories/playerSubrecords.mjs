@@ -716,15 +716,6 @@ export function reconcileTrialReportCopy(playerId, copy, derived, { hint = 'reso
   return reconcileTrialReports(copy, derived, { hint }).map((p) => `players ${playerId}: ${p}`);
 }
 
-/** Read the `trials` collection off a database file (a blob until its own step), for snapshot tools and the migration. */
-export function readTrialsBlob(sqlite) {
-  if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'collections'").get()) return [];
-  const row = sqlite.prepare("SELECT value FROM collections WHERE name = 'trials'").get();
-  if (!row) return [];
-  let v; try { v = JSON.parse(row.value); } catch { return null; }
-  return Array.isArray(v) ? v : null;
-}
-
 /** Every player of the live tables as full records (the S5 read path), for snapshot tools and rollback: `[{ record, row }]` in rowid order. */
 export function readPlayersWithChildren(sqlite, st, { trials } = {}) {
   const children = readAllChildren(st);
