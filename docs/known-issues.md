@@ -3,13 +3,6 @@
 Defects and stale spots found while distilling the old documents (November 2026 cleanup) that are not yet fixed.
 Remove an entry when it's fixed. None of them matters until there is a real deployment, but each is a real bug.
 
-## Configuration and boot
-
-- **The Docker image can't build the web portals.** Each portal's build stage copies only its own folder
-  (`COPY scoutbox-club/ ./`), but the portals import from outside it: `../../design-system` and, for Pro and
-  Grassroots, `../../scoutbox-server/roles.mjs`. Build from the repository root (copy `design-system/` and
-  `scoutbox-server/roles.mjs` into each stage) before relying on the image.
-
 ## Tests
 
 - **Three server batteries fail and are kept out of CI:** `m23Persistence`, `m23BootContract` and

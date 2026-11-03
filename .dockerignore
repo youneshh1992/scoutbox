@@ -1,0 +1,15 @@
+# Build context for the Dockerfile: sources only. Never ship a developer's
+# installed modules (built for another OS), local data or environment files.
+**/node_modules
+**/dist
+**/dist-*
+**/.env
+**/.env.*
+!**/.env.example
+scoutbox-server/data
+scoutbox-server/public
+.git
+.claude
+e2e
+docs
+scoutbox-player
