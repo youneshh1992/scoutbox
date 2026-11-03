@@ -92,8 +92,6 @@ import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied, transaction } from './database.mjs';
 
 export const SAFETY_AUDIT_MIGRATION = '0013_safety_audit';
-/** `meta` key holding the cutover record: counts and notes (ids and field names), never data. */
-export const SAFETY_AUDIT_CUTOVER_META = 'safetyAuditCutover';
 
 const JSON_CHECK = (col) => `CHECK (${col} IS NULL OR json_valid(${col}))`;
 
@@ -285,13 +283,6 @@ export function retainedPlayerReferences(sqlite) {
   }
   return out;
 }
-/** The two Domain P counts of a validated row set against a set of player ids: ids that resolve to nothing; rows with no usable (string) id. */
-function playerReferenceCounts(name, rows, players) {
-  const key = DOMAINS[name].playerKey; if (!key) return {};
-  let unresolvedPlayerIds = 0; let withoutPlayerId = 0;
-  for (const r of rows) { const v = r[key]; if (typeof v !== 'string') withoutPlayerId += 1; else if (!players.has(v)) unresolvedPlayerIds += 1; }
-  return { unresolvedPlayerIds, withoutPlayerId };
-}
 
 /**
  * Whole-table access for the tools that treat the file as one snapshot (backups,
@@ -316,34 +307,6 @@ export const AUDIT_SNAPSHOT_TABLES = Object.freeze(AUDIT_COLLECTIONS.map((name) 
     return true;
   },
 })));
-
-/**
- * Import the eight legacy blobs into the tables, inside the migration's transaction:
- * every entry typed leniently (an unknown field dropped, an off-type value normalised or
- * dropped — each a note with the row id), the strict guardian check for the IDV queue,
- * insertion in array order, the blob rows retired, the Domain P counts taken against the
- * players table. An absent blob imports nothing; an empty array imports nothing; a
- * non-array or non-JSON blob, an entry without an id or a duplicate id refuses the step.
- * Returns the counts and notes the migration records in `meta` (never a value).
- */
-export function importSafetyAuditBlobs(sqlite) {
-  const hasCollections = tableExists(sqlite, 'collections');
-  const players = existingIds(sqlite, 'players');
-  const counts = {}; const notes = [];
-  for (const name of AUDIT_COLLECTIONS) {
-    const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null;
-    if (!row) { counts[name] = { imported: 0, normalised: 0, ...playerReferenceCounts(name, [], players) }; continue; }
-    let parsed; try { parsed = JSON.parse(row.value); } catch { throw blocked(`the ${name} blob is not valid JSON`); }
-    const v = validateAuditRows(name, parsed, { label: `the ${name} blob`, lenient: true });
-    const typed = v.entries.map((e) => e.row);
-    if (DOMAINS[name].guardianKey) checkIncomingGuardians(sqlite, typed, { label: `the ${name} blob` });
-    writeRows(sqlite, name, v.entries);
-    sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-    counts[name] = { ...v.counts, ...playerReferenceCounts(name, typed, players) };
-    notes.push(...v.notes);
-  }
-  return { ...counts, notes };
-}
 
 // ------------------------------------------------------------------ detached copies (the export)
 const copyRow = (row) => JSON.parse(JSON.stringify(row));

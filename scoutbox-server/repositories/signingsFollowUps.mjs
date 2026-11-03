@@ -36,7 +36,6 @@ import { readonlyView, markView } from './readonly.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 
 export const SIGNINGS_FOLLOWUPS_MIGRATION = '0018_signings_follow_ups';
-export const SIGNINGS_FOLLOWUPS_CUTOVER_META = 'signingsFollowUpsCutover';
 export const SIGNINGS_FOLLOWUPS_COLLECTIONS = Object.freeze(['signingPackages', 'signings', 'followUps', 'outcomeReports']);
 export const SIGNINGS_FOLLOWUPS_TABLES = Object.freeze(['signing_packages', 'signing_revisions', 'signing_documents', 'signing_revision_parties', 'signing_history', 'signings', 'signing_parties', 'follow_ups', 'outcome_reports', 'outcome_report_confirmations']);
 /** The owner tables the shared idempotency_keys CHECK names once 0018 is recorded. */
@@ -701,23 +700,6 @@ function assertKeys(sqlite, label) {
   for (const t of SIGNINGS_FOLLOWUPS_TABLES) { const broken = sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all(); if (broken.length) throw refusal('SIGNINGS_KEY_VIOLATION', `${label}: ${t} holds ${broken.length} row(s) whose reference is not there (first: rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`); }
 }
 
-/**
- * The cutover (migration 0018): the four blobs typed and normalised (notes with ids), every reference checked against
- * the tables as they stand, the uniqueness rules named, the rows written, the player references counted. Returns the
- * counts and the notes for `meta.signingsFollowUpsCutover`. Any refusal throws SIGNINGS_IMPORT_BLOCKED and the runner
- * rolls back; a genuinely absent blob imports nothing.
- */
-export function importSigningsFollowUpsBlobs(sqlite) {
-  const blob = (name) => { const row = tableExists(sqlite, 'collections') ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null; if (!row) return undefined; let v; try { v = JSON.parse(row.value); } catch { throw refusal('SIGNINGS_IMPORT_BLOCKED', `the ${name} blob is not valid JSON`); } if (v === null || !Array.isArray(v)) throw refusal('SIGNINGS_IMPORT_BLOCKED', `the ${name} blob must be an array of entries (got ${describe(v)})`); return v; };
-  const supplied = Object.fromEntries(SIGNINGS_FOLLOWUPS_COLLECTIONS.map((n) => [n, blob(n)]));
-  const { typed, notes, counts } = typeCollections(supplied, 'the signing, follow-up and outcome blobs');
-  try { checkReferences(sqlite, typed, 'the blobs'); checkUniqueness(typed, 'the blobs'); } catch (e) { throw refusal('SIGNINGS_IMPORT_BLOCKED', e.message, { cause: e }); }
-  writeTyped(sqlite, typed);
-  if (tableExists(sqlite, 'collections')) for (const n of SIGNINGS_FOLLOWUPS_COLLECTIONS) sqlite.prepare('DELETE FROM collections WHERE name = ?').run(n);
-  const players = countPlayers(sqlite, typed);
-  return { counts, players, notes };
-}
-
 /** Whole-snapshot access (readTableBacked / writeTableBacked). */
 export const SIGNINGS_FOLLOWUPS_SNAPSHOT = {
   names: SIGNINGS_FOLLOWUPS_COLLECTIONS,
@@ -835,7 +817,7 @@ export function createSigningsFollowUpsRepository({ sqlite, unit = null, now = D
   return {
     views, signingPackages, signings, followUps, outcomeReports,
     /** Load the mirrors (the tables are authoritative once 0018 is recorded; nothing is imported from memory). */
-    attach() { if (!signingsFollowUpsLive(sqlite)) throw new Error(`the signings/follow-ups repository needs ${SIGNINGS_FOLLOWUPS_MIGRATION} recorded; it never imports an in-memory array`); reload(); const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(SIGNINGS_FOLLOWUPS_CUTOVER_META)?.value ?? null; return { counts: this.counts(), cutover: record ? JSON.parse(record) : null }; },
+    attach() { if (!signingsFollowUpsLive(sqlite)) throw new Error(`the signings/follow-ups repository needs ${SIGNINGS_FOLLOWUPS_MIGRATION} recorded; it never imports an in-memory array`); reload(); return { counts: this.counts() }; },
     /** The store participant: no flush (every write is already in the tables); the mirrors restored by the unit's rollback. */
     hook() { return { flush() {}, snapshotState() { return Object.fromEntries(SIGNINGS_FOLLOWUPS_COLLECTIONS.map((n) => [n, mirrors[n].slice()])); }, restoreState(s) { if (!s) return; for (const n of SIGNINGS_FOLLOWUPS_COLLECTIONS) { mirrors[n].length = 0; for (const r of s[n]) mirrors[n].push(r); } } }; },
     counts() { return Object.fromEntries(SIGNINGS_FOLLOWUPS_COLLECTIONS.map((n) => [n, mirrors[n].length])); },

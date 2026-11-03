@@ -158,8 +158,6 @@ const updateSql = (table, columns) => `UPDATE ${table} SET ${columns.filter((c) 
  * Nothing of this is a retention period, a foreign key or a new age rule.
  */
 export const PLAYER_ERASURE_MIGRATION = '0014_player_erasure';
-/** `meta` key holding the cutover record: `{ at, imported }`, counts only. */
-export const PLAYER_ERASURE_CUTOVER_META = 'playerErasureCutover';
 /** The backup / snapshot collection the retained records travel in (never inside `players`). */
 export const PLAYERS_RETAINED_COLLECTION = 'playersRetained';
 export const RETAINED_PLAYER_NAME = 'Deleted player';
@@ -206,25 +204,6 @@ export function checkRetainedCollection(list, { liveIds = new Set(), label = 'pl
   });
   if (problems.length) throw retainedRefusal(`${label}: ${problems.length} retained record(s) refused (${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}); nothing was written`);
   return records;
-}
-/**
- * Migration 0014's import: a `playersRetained` blob (a restored backup, a rollback
- * copy being re-upgraded) becomes retained rows, validated against every players row
- * the file holds; the blob row is retired. A file without the blob imports nothing.
- * Returns the count. Runs inside the caller's transaction.
- */
-export function importPlayersRetainedBlob(sqlite) {
-  if (!sqlite.isTransaction) throw new Error('importPlayersRetainedBlob runs inside the caller\'s transaction');
-  const hasCollections = !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'collections'").get();
-  const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(PLAYERS_RETAINED_COLLECTION) : null;
-  if (!row) return 0;
-  let parsed; try { parsed = JSON.parse(row.value); } catch { throw retainedRefusal('the playersRetained blob is not valid JSON; nothing was written'); }
-  const liveIds = new Set(sqlite.prepare('SELECT id FROM players').all().map((r) => r.id));
-  const records = checkRetainedCollection(parsed, { liveIds, label: 'the playersRetained blob' });
-  const ins = sqlite.prepare(insertSql('players', PLAYER_COLUMNS));
-  for (const rec of records) ins.run(retainedRowFor(rec));
-  sqlite.prepare('DELETE FROM collections WHERE name = ?').run(PLAYERS_RETAINED_COLLECTION);
-  return records.length;
 }
 /**
  * The retained records as a snapshot collection: read for backups and the persistence

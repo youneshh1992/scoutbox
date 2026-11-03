@@ -75,8 +75,6 @@ import { readonlyView, markView } from './readonly.mjs';
 import { migrationApplied, transaction } from './database.mjs';
 
 export const ONE_TIME_CODES_MIGRATION = '0008_one_time_codes';
-/** `meta` key holding the cutover record: counts only, never data. */
-export const ONE_TIME_CODES_CUTOVER_META = 'oneTimeCodesCutover';
 export const EMAIL_CHALLENGE_TTL_MS = 30 * 60 * 1000;
 export const PAIRING_CODE_TTL_MS = 15 * 60 * 1000;
 /** Wrong confirmations an e-mail challenge survives; the one that reaches this count invalidates it (the organisation requests a fresh code). */
@@ -264,42 +262,6 @@ export const PAIRING_CODES_TABLE = {
     return true;
   },
 };
-
-/**
- * Import the legacy (or exported) blobs into the tables, inside the migration's
- * transaction: validation of every entry, expired entries dropped and COUNTED,
- * owners checked against the live tables, the blob rows retired. Returns the
- * counts the migration records in `meta`.
- */
-export function importCodeBlobs(sqlite, { now }) {
-  const counts = { emailChallenges: { imported: 0, droppedExpired: 0, legacy: 0, stored: 0 }, pairingCodes: { imported: 0, droppedExpired: 0, legacy: 0, stored: 0 } };
-  const hasCollections = tableExists(sqlite, 'collections');
-  const readBlob = (name) => {
-    const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null;
-    if (!row) return undefined;
-    try { return JSON.parse(row.value); } catch { throw blocked(`the ${name} blob is not valid JSON`); }
-  };
-  const challenges = readBlob('emailChallenges');
-  if (challenges !== undefined) {
-    const { rows, formats } = validateCodeRows('emailChallenges', challenges, { label: 'the emailChallenges blob' });
-    const live = rows.filter((r) => r.expiresAt > now);
-    const orgExists = sqlite.prepare('SELECT 1 FROM orgs WHERE id = ?');
-    for (const r of live) if (!orgExists.get(r.orgId)) throw blocked(`the e-mail challenge of organisation ${r.orgId} names an organisation that does not exist`);
-    writeEmailChallengeRows(sqlite, live);
-    counts.emailChallenges = { imported: live.length, droppedExpired: rows.length - live.length, ...formats };
-  }
-  const codes = readBlob('pairingCodes');
-  if (codes !== undefined) {
-    const { rows, formats } = validateCodeRows('pairingCodes', codes, { label: 'the pairingCodes blob' });
-    const live = rows.filter((r) => r.expiresAt > now);
-    const playerExists = sqlite.prepare('SELECT 1 FROM players WHERE id = ? AND deleted_at IS NULL'); // S4b-R: a retained row is not a player
-    for (const r of live) if (!playerExists.get(r.playerId)) throw blocked(`the pairing code of player ${r.playerId} names a player that does not exist`);
-    writePairingCodeRows(sqlite, live);
-    counts.pairingCodes = { imported: live.length, droppedExpired: rows.length - live.length, ...formats };
-  }
-  if (hasCollections) sqlite.prepare("DELETE FROM collections WHERE name IN ('emailChallenges', 'pairingCodes')").run();
-  return counts;
-}
 
 // ------------------------------------------------------------------ the repository
 /**

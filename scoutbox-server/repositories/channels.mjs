@@ -113,8 +113,6 @@ import { migrationApplied, transaction } from './database.mjs';
 import { readRequestsCollection } from './recruitment.mjs';
 
 export const CHANNELS_MIGRATION = '0012_channels';
-/** `meta` key holding the cutover record: counts and ids only, never data. */
-export const CHANNELS_CUTOVER_META = 'channelsCutover';
 export const CHANNELS_TABLES = Object.freeze(['channels', 'messages', 'message_attachments']);
 /** The blob collection the three tables replace. */
 export const CHANNELS_COLLECTION = 'channels';
@@ -436,27 +434,6 @@ export const CHANNELS_TABLE = {
     return true;
   },
 };
-
-/**
- * Import the legacy (or exported) `channels` blob into the three tables, inside the
- * migration's transaction: every entry and every nested message and attachment
- * typed (unknown fields and wrong-typed optional values dropped and noted with the
- * record's id; an unusable record refuses the step), the reference checks against the file's `requests` blob and the
- * guardians/orgs tables, insertion in array order, the blob row retired. An absent
- * blob imports nothing; an empty array imports nothing; a non-array or non-JSON blob
- * refuses the step. Returns the counts and notes the migration records in `meta` (ids and field names, never a value).
- */
-export function importChannelsBlob(sqlite) {
-  const hasCollections = tableExists(sqlite, 'collections');
-  const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(CHANNELS_COLLECTION) : null;
-  if (!row) return { imported: 0, messages: 0, attachments: 0, normalised: 0, byCounterparty: {}, notes: [] };
-  let parsed; try { parsed = JSON.parse(row.value); } catch { throw blocked('the channels blob is not valid JSON'); }
-  const v = validateChannelRows(parsed, { label: 'the channels blob', lenient: true });
-  checkIncomingReferences(sqlite, v.rows, { requests: readRequestsBlob(sqlite), label: 'the channels blob' });
-  writeChannels(sqlite, v.rows);
-  sqlite.prepare('DELETE FROM collections WHERE name = ?').run(CHANNELS_COLLECTION);
-  return { ...v.counts, notes: v.notes };
-}
 
 // ------------------------------------------------------------------ detached copies (the export)
 /** A DETACHED copy of a mirror channel (the export shape). */

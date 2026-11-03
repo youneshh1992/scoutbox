@@ -94,8 +94,6 @@ import { readonlyView } from './readonly.mjs';
 import { migrationApplied, transaction } from './database.mjs';
 
 export const OUTBOX_PUSH_MIGRATION = '0011_outbox_push';
-/** `meta` key holding the cutover record: counts and id-only notes, never data. */
-export const OUTBOX_PUSH_CUTOVER_META = 'outboxPushCutover';
 export const OUTBOX_PUSH_TABLES = Object.freeze(['outbox', 'push_log', 'push_tokens']);
 /** The blob collections the three tables replace, in the order the migration imports them. */
 export const OUTBOX_PUSH_COLLECTIONS = Object.freeze(['outbox', 'pushLog', 'pushTokens']);
@@ -361,36 +359,6 @@ export const OUTBOX_TABLE = table('outbox', readOutbox, writeOutbox, validateOut
 export const PUSH_LOG_TABLE = table('pushLog', readPushLog, writePushLog, validatePushLogRows);
 export const PUSH_TOKENS_TABLE = table('pushTokens', readTokens, writeTokens, validatePushTokenRows);
 export const OUTBOX_PUSH_SNAPSHOT_TABLES = Object.freeze([OUTBOX_TABLE, PUSH_LOG_TABLE, PUSH_TOKENS_TABLE]);
-
-/**
- * Import the three legacy (or exported) blobs into the tables, inside the
- * migration's transaction, in IMPORT mode (see the header): insertion in array
- * order, the blob rows retired. An absent blob imports nothing; an empty array
- * imports nothing; a non-array or non-JSON blob refuses the step. Returns what
- * the migration records in `meta`: per collection the counts, and the notes
- * (ids, positions and field names only — never a value).
- */
-export function importOutboxPushBlobs(sqlite) {
-  const hasCollections = tableExists(sqlite, 'collections');
-  const readBlob = (name) => {
-    const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null;
-    if (!row) return undefined;
-    try { return JSON.parse(row.value); } catch { throw blocked(`the ${name} blob is not valid JSON`); }
-  };
-  const empty = { imported: 0, normalised: 0, dropped: 0 };
-  const out = { outbox: { ...empty, bySource: {} }, pushLog: { ...empty, byAudienceKind: {} }, pushTokens: { ...empty, byKind: {} }, notes: [] };
-  const steps = [['outbox', validateOutboxRows, writeOutbox], ['pushLog', validatePushLogRows, writePushLog], ['pushTokens', validatePushTokenRows, writeTokens]];
-  for (const [name, validate, write] of steps) {
-    const parsed = readBlob(name);
-    if (parsed === undefined) continue;
-    const v = validate(parsed, { label: `the ${name} blob`, mode: IMPORT });
-    write(sqlite, v.rows);
-    out[name] = { ...out[name], ...v.counts };
-    out.notes.push(...v.notes);
-    sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
-  }
-  return out;
-}
 
 // ------------------------------------------------------------------ the repository
 /**

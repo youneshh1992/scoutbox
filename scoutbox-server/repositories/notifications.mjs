@@ -138,8 +138,6 @@ import { migrationApplied, transaction } from './database.mjs';
 import { CATEGORY_NAMES } from '../m182/notificationPrefs.mjs';
 
 export const NOTIFICATIONS_MIGRATION = '0009_notifications';
-/** `meta` key holding the cutover record: counts only, never data. */
-export const NOTIFICATIONS_CUTOVER_META = 'notificationsCutover';
 export const NOTIFICATION_TABLES = Object.freeze(['notifications', 'notification_prefs', 'notification_pref_categories']);
 /** How long an identical UNREAD notification stays coalescible (M18.1; server.mjs NOTIFY_COALESCE_MS before S7a). */
 export const NOTIFY_COALESCE_MS = 6 * 60 * 60 * 1000;
@@ -374,35 +372,6 @@ export const NOTIFICATION_PREFS_TABLE = {
     return true;
   },
 };
-
-/**
- * Import the legacy (or exported) blobs into the tables, inside the migration's
- * transaction: validation of every entry, insertion in array order, the blob
- * rows retired. Returns the counts the migration records in `meta`.
- */
-export function importNotificationBlobs(sqlite) {
-  const counts = { notifications: { imported: 0, normalised: { read: 0, repeatCount: 0, groupKey: 0, category: 0, deferredPush: 0 }, unknownFieldsDropped: [], withActionRequired: 0 }, notificationPrefs: { imported: 0, categories: 0, normalised: { emailIntent: 0, updatedAt: 0 } } };
-  const hasCollections = tableExists(sqlite, 'collections');
-  const readBlob = (name) => {
-    const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null;
-    if (!row) return undefined;
-    try { return JSON.parse(row.value); } catch { throw blocked(`the ${name} blob is not valid JSON`); }
-  };
-  const notifications = readBlob('notifications');
-  if (notifications !== undefined) {
-    const v = validateNotificationRows(notifications, { label: 'the notifications blob' });
-    writeRows(sqlite, v.rows);
-    counts.notifications = { imported: v.rows.length, normalised: v.normalised, unknownFieldsDropped: v.unknownFieldsDropped, withActionRequired: v.withActionRequired };
-  }
-  const prefs = readBlob('notificationPrefs');
-  if (prefs !== undefined) {
-    const v = validateNotificationPrefsRows(prefs, { label: 'the notificationPrefs blob' });
-    writePrefs(sqlite, v.rows);
-    counts.notificationPrefs = { imported: v.rows.length, categories: v.categories, normalised: v.normalised };
-  }
-  if (hasCollections) sqlite.prepare("DELETE FROM collections WHERE name IN ('notifications', 'notificationPrefs')").run();
-  return counts;
-}
 
 // ------------------------------------------------------------------ the repository
 const defaultNextId = (prefix) => `${prefix}-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;

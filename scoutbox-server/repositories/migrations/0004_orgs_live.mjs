@@ -1,39 +1,16 @@
 /**
- * Organisations cut over (migration plan step S3).
- *
- * Runs with foreign keys OFF (the runner switches them off before the
- * transaction and verifies `PRAGMA foreign_key_check` before committing),
- * because two tables are rebuilt and SQLite can only add a constraint by
- * rebuilding: dropping the old `org_users` with foreign keys on would cascade
- * through `sessions.org_user_id` and delete every staff session.
- *
- * Inside the one transaction the runner opens:
- *   1. read the authoritative `orgs` blob straight from `collections`;
- *   2. validate every record without coercion (validateOrgRecord: id, name,
- *      type/level/plan lists, booleans, text, timestamps, composites), refuse
- *      duplicate ids, and refuse any staff row (`org_users.org_id`) that names
- *      an organisation the blob does not hold — ABORT on the first problem
- *      set, naming ids and reasons; the runner rolls back and the file is
- *      byte-identical, the blob still authoritative;
- *   3. rebuild `orgs`: the S1 shadow table (level NOT NULL, no facets) is
- *      replaced by the live definition (level nullable — the verification
- *      review creates non-grassroots organisations with `level: null` — plus
- *      `facets_json` for every field that has not cut over yet); import the
- *      records;
- *   4. rebuild `org_users` STRICT with `org_id REFERENCES orgs(id)` and
- *      `json_valid` CHECKs on the two JSON columns, copying every row and
- *      recreating its four indexes. `sessions.org_user_id` keeps referencing
- *      `org_users` by name, so after the rename every session still points at
- *      its staff row; the runner's foreign_key_check proves it;
- *   5. record `meta.orgsCutover` and the initialisation state `meta.orgsInit`
- *      (`done` when a blob was imported or the file already held a snapshot;
- *      `pending` only when nothing was ever saved to this database — a first
- *      installation, whose seed the data layer imports once, explicitly),
- *      delete the `orgs` blob.
- * The runner then writes the `data_migrations` row and commits. Completion is
- * decided only by that row (repositories/orgs.mjs `attach` refuses without it).
+ * Organisations become authoritative in their table (S3). Runs with foreign keys OFF (the runner checks
+ * `foreign_key_check` before committing) because two tables are rebuilt:
+ *   1. `orgs`: the S1 shadow definition is replaced by the live one (level nullable, `facets_json` for the
+ *      fields that have not moved yet);
+ *   2. `org_users` is rebuilt STRICT with `org_id REFERENCES orgs(id)` and `json_valid` checks, every row and
+ *      index carried over (created under a temporary name, copied, the old table dropped, then renamed, so
+ *      `sessions` keeps referencing `org_users`);
+ *   3. `meta.orgsInit` is `pending`: the data layer initialises the table from the seed once, on the first boot,
+ *      and a snapshot save settles it (repositories/index.mjs `writeTableBacked`).
+ * REGISTERED in DATA_MIGRATIONS.
  */
-import { validateOrgRecord, toRow, ORGS_CUTOVER_MIGRATION, ORGS_INIT_META } from '../orgs.mjs';
+import { ORGS_CUTOVER_MIGRATION, ORGS_INIT_META } from '../orgs.mjs';
 
 export const id = ORGS_CUTOVER_MIGRATION;
 export const note = 'organisations become table-backed (scalars in columns, other fields in facets_json); org_users rebuilt STRICT with the orgs foreign key and JSON checks';
@@ -93,70 +70,19 @@ export const ORG_USERS_DDL = `
 
 const ORG_USERS_COLUMNS = 'id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json';
 
-export function up(sqlite, { now = Date.now() } = {}) {
-  const hasCollections = !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'collections'").get();
-  const blobRow = hasCollections ? sqlite.prepare("SELECT value FROM collections WHERE name = 'orgs'").get() : null;
-  let legacy = [];
-  if (blobRow) {
-    try { legacy = JSON.parse(blobRow.value); } catch { throw new Error('ORGS_CUTOVER_BLOCKED: the legacy orgs blob is not valid JSON'); }
-    if (!Array.isArray(legacy)) throw new Error('ORGS_CUTOVER_BLOCKED: the legacy orgs blob is not an array');
-  }
-
-  // 2. Validate everything first; nothing is written until every record passes.
-  const problems = [];
-  const ids = new Set();
-  legacy.forEach((rec, i) => {
-    const v = validateOrgRecord(rec);
-    const label = rec && typeof rec === 'object' && typeof rec.id === 'string' ? `id ${rec.id}` : `entry #${i}`;
-    if (!v.ok) { problems.push(`${label}: ${v.reason}`); return; }
-    if (ids.has(rec.id)) { problems.push(`${label}: duplicate id`); return; }
-    ids.add(rec.id);
-  });
-  const staffRows = sqlite.prepare(`SELECT ${ORG_USERS_COLUMNS} FROM org_users ORDER BY rowid`).all();
-  for (const u of staffRows) if (!ids.has(u.org_id)) problems.push(`staff ${u.id}: names organisation ${u.org_id}, which the orgs blob does not hold`);
-  if (problems.length) {
-    throw new Error(`ORGS_CUTOVER_BLOCKED: ${problems.length} unsupported record(s); repair them on the current build first — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`);
-  }
-
-  // 3. Rebuild orgs (the shadow's rows are derived and simply go) and import.
+export function up(sqlite) {
+  // 1. orgs (the shadow's rows are derived and simply go).
   sqlite.exec('DROP TABLE IF EXISTS orgs;');
   sqlite.exec(ORGS_DDL);
-  const insert = sqlite.prepare(`INSERT INTO orgs (id, name, type, level, plan, country, city, lat, lng, federation, federation_registration_id,
-    trusted_partner, verified, verified_domain, safeguarding_contract_signed, suspended, password_hash, email_domain, email_domain_verified,
-    mfa_required_for_leads, verification_revoked_at, verification_org_type, created_at, facets_json)
-    VALUES (@id, @name, @type, @level, @plan, @country, @city, @lat, @lng, @federation, @federation_registration_id,
-    @trusted_partner, @verified, @verified_domain, @safeguarding_contract_signed, @suspended, @password_hash, @email_domain, @email_domain_verified,
-    @mfa_required_for_leads, @verification_revoked_at, @verification_org_type, @created_at, @facets_json)`);
-  for (const rec of legacy) insert.run(toRow(rec));
-
-  // 4. Rebuild org_users with the foreign key; every row and every index is
-  //    carried over. The order is the one SQLite documents for schema changes:
-  //    create the NEW table under a temporary name, copy, DROP the old table
-  //    (foreign keys are off, so nothing cascades into sessions), then rename
-  //    the new one to `org_users`. Renaming the OLD table first would be wrong:
-  //    since SQLite 3.26 a RENAME rewrites the REFERENCES clauses of other
-  //    tables, so `sessions` would be left pointing at the temporary name.
-  //    `sessions` never names the temporary table, so its REFERENCES clause is
-  //    untouched and resolves to the rebuilt table; the runner's
-  //    foreign_key_check proves every staff session still has its row.
+  // 2. org_users with the foreign key. Create the new table under a temporary name, copy, DROP the old one, then
+  //    rename: renaming the OLD table first would rewrite the REFERENCES clause of `sessions` to the temporary name.
+  const staff = sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n;
   sqlite.exec(ORG_USERS_DDL.replace('CREATE TABLE org_users (', 'CREATE TABLE org_users_s3 (').replace(/CREATE INDEX [\s\S]*$/, ''));
   sqlite.exec(`INSERT INTO org_users_s3 (${ORG_USERS_COLUMNS}) SELECT ${ORG_USERS_COLUMNS} FROM org_users ORDER BY rowid;`);
   sqlite.exec('DROP TABLE org_users;');
   sqlite.exec('ALTER TABLE org_users_s3 RENAME TO org_users;');
   sqlite.exec(ORG_USERS_DDL.slice(ORG_USERS_DDL.indexOf('CREATE INDEX')));
-  const copied = sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n;
-  const sessionsRef = sqlite.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").get()?.sql ?? '';
-  if (sessionsRef && !/REFERENCES\s+"?org_users"?\s*\(/.test(sessionsRef)) throw new Error('ORGS_CUTOVER_BLOCKED: the sessions table no longer references org_users after the rebuild');
-  if (copied !== staffRows.length) throw new Error(`ORGS_CUTOVER_BLOCKED: the staff table rebuild copied ${copied} of ${staffRows.length} rows`);
-
-  // 5. Record and retire the blob.
-  const meta = sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-  meta.run('orgsCutover', JSON.stringify({ at: now, imported: legacy.length, staffRebuilt: copied, blobPresent: !!blobRow }));
-  // Initialisation state, explicit and never a row count: a blob (even an
-  // empty one) or any saved snapshot means the organisations ARE what the
-  // table now holds; only a database nothing was ever saved to is a first
-  // installation still waiting for its seed.
-  const everSaved = hasCollections && sqlite.prepare('SELECT COUNT(*) AS n FROM collections').get().n > 0;
-  meta.run(ORGS_INIT_META, blobRow || everSaved ? 'done' : 'pending');
-  if (hasCollections) sqlite.prepare("DELETE FROM collections WHERE name = 'orgs'").run();
+  if (sqlite.prepare('SELECT COUNT(*) AS n FROM org_users').get().n !== staff) throw new Error(`${id}: the staff table rebuild lost rows`);
+  // 3. A first installation waits for its seed.
+  sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(ORGS_INIT_META, 'pending');
 }

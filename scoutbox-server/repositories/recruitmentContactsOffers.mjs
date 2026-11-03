@@ -85,8 +85,6 @@ import { EXTRA_CHECK, ABSENT_CHECK, JSON_CHECK, describe, isPlainObject, nonEmpt
 import { S8B_KEY_OWNERS, recruitmentCasesLive } from './recruitmentCases.mjs';
 
 export const RECRUITMENT_CONTACTS_OFFERS_MIGRATION = '0017_recruitment_contacts_offers';
-/** `meta` key holding the cutover record: counts only, never data. */
-export const RECRUITMENT_CONTACTS_OFFERS_CUTOVER_META = 'recruitmentContactsOffersCutover';
 export const RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS = Object.freeze(['recruitmentContacts', 'recruitmentOffers']);
 /** The owner tables the shared idempotency_keys CHECK names once 0017 is recorded (the S8a and S8b owners first). */
 export const S8C_KEY_OWNERS = Object.freeze([...S8B_KEY_OWNERS, 'recruitment_contacts', 'recruitment_offers']);
@@ -532,27 +530,6 @@ export const CONTACTS_OFFERS_SNAPSHOT = {
   /** G. */
   assert(sqlite, { label } = {}) { assertContactsOffersConsistent(sqlite, { label }); },
 };
-
-/**
- * Import the legacy (or exported) two blobs into the tables inside the migration's transaction (every entry validated,
- * the references checked against the file's own tables, insertion in array order, the two blob rows retired). An absent
- * blob imports nothing; a non-array, non-JSON or PRESENT-null blob refuses the step. Returns the counts the migration
- * records (never a value).
- */
-export function importRecruitmentContactsOffersBlobs(sqlite) {
-  const read = (name) => { const row = tableExists(sqlite, 'collections') ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null; if (!row) return undefined; try { return JSON.parse(row.value); } catch { throw blocked(`the ${name} blob is not valid JSON`); } };
-  const supplied = {};
-  for (const n of RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS) { const v = read(n); supplied[n] = v === undefined ? [] : v; if (!Array.isArray(supplied[n])) throw blocked(`the ${n} blob must be an array of entries (got ${describe(supplied[n])})`); }
-  const requests = recruitmentLive(sqlite) ? readRequests(sqlite) : [];
-  const cases = recruitmentCasesLive(sqlite) ? tableCaseIds(sqlite) : new Set();
-  let counts;
-  try { ({ counts } = preflight(sqlite, supplied, { stored: { recruitmentContacts: [], recruitmentOffers: [] }, cases, requests, label: 'the recruitment contacts and offers blobs' })); }
-  catch (e) { if (e?.code && e.code !== 'CONTACTS_OFFERS_IMPORT_BLOCKED') throw blocked(e.message, { refusal: e.code, rows: e.rows, problems: e.problems }); throw e; }
-  stageRecords(sqlite, CONTACTS, supplied.recruitmentContacts); // A′
-  stageRecords(sqlite, OFFERS, supplied.recruitmentOffers); // D′
-  if (tableExists(sqlite, 'collections')) sqlite.prepare(`DELETE FROM collections WHERE name IN (${RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map(() => '?').join(', ')})`).run(...RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS);
-  return counts;
-}
 
 // ------------------------------------------------------------------ the repository
 /**

@@ -29,7 +29,7 @@ import { runDataMigrations, dataSchemaReport } from './database.mjs';
 import { createUsersRepository, USERS_TABLE } from './users.mjs';
 import { createSessionsRepository, SESSIONS_TABLE } from './sessions.mjs';
 import { createOrgsRepository, ORGS_TABLE, ORGS_INIT_META } from './orgs.mjs';
-import { createIdentityRepositories, CORE_IDENTITY_INIT_META, IDENTITY_SNAPSHOT, IDENTITY_COLLECTIONS, PLAYERS_RETAINED, PLAYER_ERASURE_MIGRATION, PLAYER_ERASURE_CUTOVER_META } from './identity.mjs';
+import { createIdentityRepositories, CORE_IDENTITY_INIT_META, IDENTITY_SNAPSHOT, IDENTITY_COLLECTIONS, PLAYERS_RETAINED, PLAYER_ERASURE_MIGRATION } from './identity.mjs';
 import { createMediaDeletionsQueue, MEDIA_DELETIONS_TABLE, MEDIA_DELETIONS_MIGRATION, assertMediaQueueConsistent } from './mediaDeletions.mjs';
 import * as m0001 from './migrations/0001_org_users.mjs';
 import * as m0002 from './migrations/0002_core_identity_shadow.mjs';
@@ -50,16 +50,16 @@ import * as m0016 from './migrations/0016_recruitment_cases.mjs';
 import * as m0017 from './migrations/0017_recruitment_contacts_offers.mjs';
 import * as m0018 from './migrations/0018_signings_follow_ups.mjs';
 import { trialReportsFor } from './playerSubrecords.mjs';
-import { createRecruitmentRepository, RECRUITMENT_SNAPSHOT, RECRUITMENT_COLLECTIONS, RECRUITMENT_MIGRATION, RECRUITMENT_CUTOVER_META, CASES_COLLECTION, assertRecruitmentConsistent, unresolvedPlayerReferences as unresolvedRecruitmentPlayers, retainedPlayerReferences as retainedRecruitmentPlayers } from './recruitment.mjs';
-import { createRecruitmentCasesRepository, RECRUITMENT_CASES_SNAPSHOT, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_MIGRATION, RECRUITMENT_CASES_CUTOVER_META, unresolvedPlayerReferences as unresolvedCasePlayers, retainedPlayerReferences as retainedCasePlayers } from './recruitmentCases.mjs';
-import { createRecruitmentContactsOffersRepository, CONTACTS_OFFERS_SNAPSHOT, RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, RECRUITMENT_CONTACTS_OFFERS_MIGRATION, RECRUITMENT_CONTACTS_OFFERS_CUTOVER_META, unresolvedPlayerReferences as unresolvedContactOfferPlayers, retainedPlayerReferences as retainedContactOfferPlayers, unresolvedPointerReferences } from './recruitmentContactsOffers.mjs';
-import { createSigningsFollowUpsRepository, SIGNINGS_FOLLOWUPS_SNAPSHOT, SIGNINGS_FOLLOWUPS_COLLECTIONS, SIGNINGS_FOLLOWUPS_MIGRATION, SIGNINGS_FOLLOWUPS_CUTOVER_META, unresolvedPlayerReferences as unresolvedSigningPlayers, retainedPlayerReferences as retainedSigningPlayers } from './signingsFollowUps.mjs';
-import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_CUTOVER_META, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
-import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, NOTIFICATIONS_MIGRATION, NOTIFICATIONS_CUTOVER_META } from './notifications.mjs';
-import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCHES_MIGRATION, DISPATCHES_CUTOVER_META } from './dispatches.mjs';
-import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MIGRATION, OUTBOX_PUSH_CUTOVER_META } from './outboxPush.mjs';
-import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, CHANNELS_CUTOVER_META, assertChannelReferencesConsistent } from './channels.mjs';
-import { createSafetyAuditRepository, AUDIT_COLLECTIONS, AUDIT_SNAPSHOT_TABLES, SAFETY_AUDIT_MIGRATION, SAFETY_AUDIT_CUTOVER_META, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
+import { createRecruitmentRepository, RECRUITMENT_SNAPSHOT, RECRUITMENT_COLLECTIONS, RECRUITMENT_MIGRATION, CASES_COLLECTION, assertRecruitmentConsistent, unresolvedPlayerReferences as unresolvedRecruitmentPlayers, retainedPlayerReferences as retainedRecruitmentPlayers } from './recruitment.mjs';
+import { createRecruitmentCasesRepository, RECRUITMENT_CASES_SNAPSHOT, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_MIGRATION, unresolvedPlayerReferences as unresolvedCasePlayers, retainedPlayerReferences as retainedCasePlayers } from './recruitmentCases.mjs';
+import { createRecruitmentContactsOffersRepository, CONTACTS_OFFERS_SNAPSHOT, RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, RECRUITMENT_CONTACTS_OFFERS_MIGRATION, unresolvedPlayerReferences as unresolvedContactOfferPlayers, retainedPlayerReferences as retainedContactOfferPlayers, unresolvedPointerReferences } from './recruitmentContactsOffers.mjs';
+import { createSigningsFollowUpsRepository, SIGNINGS_FOLLOWUPS_SNAPSHOT, SIGNINGS_FOLLOWUPS_COLLECTIONS, SIGNINGS_FOLLOWUPS_MIGRATION, unresolvedPlayerReferences as unresolvedSigningPlayers, retainedPlayerReferences as retainedSigningPlayers } from './signingsFollowUps.mjs';
+import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
+import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, NOTIFICATIONS_MIGRATION } from './notifications.mjs';
+import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCHES_MIGRATION } from './dispatches.mjs';
+import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MIGRATION } from './outboxPush.mjs';
+import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, assertChannelReferencesConsistent } from './channels.mjs';
+import { createSafetyAuditRepository, AUDIT_COLLECTIONS, AUDIT_SNAPSHOT_TABLES, SAFETY_AUDIT_MIGRATION, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
 
 export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018]);
 
@@ -450,10 +450,6 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   // transaction of their own.
   const codes = createOneTimeCodesRepository({ sqlite, log, now, unit: store.unit });
   const codesBoot = codes.attach({ at: now() });
-  if (migrations.ran.includes(ONE_TIME_CODES_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(ONE_TIME_CODES_CUTOVER_META)?.value;
-    if (record) { const c = JSON.parse(record); log(`one-time codes: cutover imported ${c.emailChallenges.imported} e-mail challenge(s) (${c.emailChallenges.droppedExpired} expired, not imported) and ${c.pairingCodes.imported} pairing code(s) (${c.pairingCodes.droppedExpired} expired, not imported)`); }
-  }
   for (const [name, view] of [[EMAIL_CHALLENGES_TABLE.name, codes.emailChallengesView], [PAIRING_CODES_TABLE.name, codes.pairingCodesView]]) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
@@ -482,10 +478,6 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   const notifications = createNotificationsRepository({ sqlite, log, warn, now, nextId, unit: store.unit, staged: true, runEffect: (fn) => store.afterCommit(fn) });
   const notificationsBoot = notifications.attach();
   store.setSaveHook?.(notifications.saveHook());
-  if (migrations.ran.includes(NOTIFICATIONS_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(NOTIFICATIONS_CUTOVER_META)?.value;
-    if (record) { const c = JSON.parse(record); log(`notifications: cutover imported ${c.notifications.imported} notification(s) (${Object.values(c.notifications.normalised).reduce((a, b) => a + b, 0)} field normalisation(s), ${c.notifications.unknownFieldsDropped?.length ?? 0} with unknown fields dropped${c.notifications.unknownFieldsDropped?.length ? `: ${c.notifications.unknownFieldsDropped.join(', ')}` : ''}) and ${c.notificationPrefs.imported} preference record(s) (${c.notificationPrefs.categories} category settings)`); }
-  }
   for (const [name, view] of [[NOTIFICATIONS_TABLE.name, notifications.view], [NOTIFICATION_PREFS_TABLE.name, notifications.prefsView]]) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
@@ -510,10 +502,6 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   const dispatches = createDispatchesRepository({ sqlite, log, now, unit: store.unit, staged: true });
   const dispatchesBoot = dispatches.attach();
   store.setSaveHook?.(dispatches.saveHook());
-  if (migrations.ran.includes(DISPATCHES_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(DISPATCHES_CUTOVER_META)?.value;
-    if (record) { const c = JSON.parse(record).dispatches; log(`dispatches: cutover imported ${c.imported} dispatch record(s) with ${c.attempts} attempt(s) (${c.unknownFieldsDropped} with unknown fields dropped${c.notes?.length ? ` — ${c.notes.join('; ')}` : ''}, ${c.orphanReferences} referencing a notification that no longer exists — retained as they were)`); }
-  }
   if (Object.hasOwn(db, DISPATCHES_TABLE.name)) {
     delete db[DISPATCHES_TABLE.name];
     sqlite.prepare('DELETE FROM collections WHERE name = ?').run(DISPATCHES_TABLE.name);
@@ -538,10 +526,6 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   const outboxPush = createOutboxPushRepository({ sqlite, log, now, unit: store.unit, staged: true });
   const outboxPushBoot = outboxPush.attach();
   store.setSaveHook?.(outboxPush.saveHook());
-  if (migrations.ran.includes(OUTBOX_PUSH_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(OUTBOX_PUSH_CUTOVER_META)?.value;
-    if (record) { const c = JSON.parse(record); log(`outbox/push: cutover imported ${c.outbox.imported} outbox record(s) (${c.outbox.bySource?.mailer ?? 0} mailer, ${c.outbox.bySource?.delivery ?? 0} delivery), ${c.pushLog.imported} push log record(s) and ${c.pushTokens.imported} device token(s) into typed columns (${['outbox', 'pushLog', 'pushTokens'].reduce((a, n) => a + (c[n]?.normalised ?? 0), 0)} record(s) normalised, ${c.pushTokens.dropped ?? 0} token entr(ies) dropped — each noted below)`); for (const n of c.notes ?? []) log(`outbox/push: cutover note — ${n}`); }
-  }
   for (const [name, view] of [['outbox', outboxPush.outbox.view], ['pushLog', outboxPush.pushLog.view], ['pushTokens', outboxPush.pushTokens.view]]) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
@@ -642,20 +626,12 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   store.setSaveHook?.(recruitmentContactsOffers.writeHook()); // S8c hook β: A′, D′, G — after the recruitment hook (B1 and F2)
   store.setSaveHook?.(recruitmentCases.linksHook());
   store.setSaveHook?.(recruitmentCases.roomsHook());
-  if (migrations.ran.includes(RECRUITMENT_CASES_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(RECRUITMENT_CASES_CUTOVER_META)?.value;
-    if (record) { const c = JSON.parse(record); log(`recruitment cases: cutover imported ${RECRUITMENT_CASES_COLLECTIONS.map((n) => `${c[n]?.imported ?? 0} ${n}`).join(', ')} (${c.recruitmentCases?.roomless ?? 0} case(s) without a room facet; ${RECRUITMENT_CASES_COLLECTIONS.reduce((a, n) => a + (c[n]?.withExtraFields ?? 0), 0)} with unknown fields kept, ${RECRUITMENT_CASES_COLLECTIONS.reduce((a, n) => a + (c[n]?.withAbsentKeys ?? 0), 0)} with absent keys preserved, ${RECRUITMENT_CASES_COLLECTIONS.reduce((a, n) => a + (c[n]?.withOfftypeValues ?? 0), 0)} with off-type values kept); player references: ${c.players?.live ?? 0} live, ${c.players?.retained ?? 0} retained, ${c.players?.missing ?? 0} not in the players table (counted, never refused — Q8a); recruitment_requests and trials rebuilt with the real case key (${c.rebuilt?.requests ?? 0} request(s), ${c.rebuilt?.trials ?? 0} trial(s)), idempotency_keys rebuilt with the broadened owner CHECK (${c.rebuilt?.idempotencyKeys ?? 0} S8a key row(s))`); }
-  }
   for (const name of RECRUITMENT_CASES_COLLECTIONS) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
       sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
     }
     Object.defineProperty(db, name, { value: recruitmentCases.views[name], writable: false, configurable: false, enumerable: true });
-  }
-  if (migrations.ran.includes(RECRUITMENT_CONTACTS_OFFERS_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(RECRUITMENT_CONTACTS_OFFERS_CUTOVER_META)?.value;
-    if (record) { const c = JSON.parse(record); log(`recruitment contacts/offers: cutover imported ${RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((n) => `${c[n]?.imported ?? 0} ${n}`).join(', ')} (${RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.reduce((a, n) => a + (c[n]?.withExtraFields ?? 0), 0)} with unknown fields kept, ${RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.reduce((a, n) => a + (c[n]?.withAbsentKeys ?? 0), 0)} with absent keys preserved, ${RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.reduce((a, n) => a + (c[n]?.withOfftypeValues ?? 0), 0)} with off-type values kept); player references: ${c.players?.live ?? 0} live, ${c.players?.retained ?? 0} retained, ${c.players?.missing ?? 0} not in the players table (counted, never refused — Q8c-a); unresolved offer pointers (kept verbatim, counted): ${Object.entries(c.unresolvedPointers ?? {}).map(([k, v]) => `${v} ${k}`).join(', ')}; ${c.danglingDecisionIds ?? 0} offer(s) naming a decision that no longer exists; idempotency_keys rebuilt with the broadened owner CHECK (${c.rebuilt?.idempotencyKeys ?? 0} S8a/S8b key row(s))`); }
   }
   for (const name of RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS) {
     if (Object.hasOwn(db, name)) {
@@ -675,20 +651,12 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   const signingsFollowUps = createSigningsFollowUpsRepository({ sqlite, log, now, unit: store.unit });
   const signingsFollowUpsBoot = signingsFollowUps.attach();
   store.setSaveHook?.(signingsFollowUps.hook());
-  if (migrations.ran.includes(SIGNINGS_FOLLOWUPS_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(SIGNINGS_FOLLOWUPS_CUTOVER_META)?.value;
-    if (record) { const c = JSON.parse(record); log(`signings/follow-ups: cutover imported ${SIGNINGS_FOLLOWUPS_COLLECTIONS.map((n) => `${c.counts?.[n]?.imported ?? 0} ${n}`).join(', ')} into typed columns (${SIGNINGS_FOLLOWUPS_COLLECTIONS.reduce((a, n) => a + (c.counts?.[n]?.normalised ?? 0), 0)} record(s) normalised — each noted below); player references: ${c.players?.live ?? 0} live, ${c.players?.retained ?? 0} retained, ${c.players?.missing ?? 0} not in the players table (counted, never refused); idempotency_keys rebuilt with the owner CHECK broadened to signing_packages (${c.keyRowsRebuilt ?? 0} key row(s))`); for (const n of c.notes ?? []) log(`signings/follow-ups: cutover note — ${n}`); }
-  }
   for (const name of SIGNINGS_FOLLOWUPS_COLLECTIONS) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
       sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
     }
     Object.defineProperty(db, name, { value: signingsFollowUps.views[name], writable: false, configurable: false, enumerable: true });
-  }
-  if (migrations.ran.includes(RECRUITMENT_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(RECRUITMENT_CUTOVER_META)?.value;
-    if (record) { const c = JSON.parse(record); log(`recruitment: cutover imported ${c.requests.imported} request(s) (${c.requests.withExtraFields} with unknown fields kept, ${c.requests.withAbsentKeys} with absent keys preserved, ${c.requests.withOfftypeValues} with off-type values kept) and ${c.trials.imported} trial(s) (${c.trials.withExtraFields} with unknown fields kept, ${c.trials.withAbsentKeys} with absent keys preserved, ${c.trials.withOfftypeValues} with off-type values kept; ${c.trials.legacyPairs} pre-P4B legacy pair(s) whose request carries no trialId key, kept as they are; ${c.trials.preP4bShape} trial(s) without the P4B containers, kept as they are); player references: ${c.players.live} live, ${c.players.retained} retained, ${c.players.missing} not in the players table (counted, never refused); channels rebuilt with the real request key (${c.channels.channels} thread(s), ${c.channels.messages} message(s), ${c.channels.attachments} attachment(s))`); }
   }
   for (const [name, view] of [['requests', recruitment.requestsView], ['trials', recruitment.trialsView]]) {
     if (Object.hasOwn(db, name)) {
@@ -702,10 +670,6 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   const channelsBoot = channels.attach();
   store.setSaveHook?.(channels.saveHook());
   store.setSaveHook?.(recruitmentCases.pruneHook()); // S8b hook 4: F3 and G, after the channels and the request prune
-  if (migrations.ran.includes(CHANNELS_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(CHANNELS_CUTOVER_META)?.value;
-    if (record) { const c = JSON.parse(record); log(`channels: cutover imported ${c.imported} thread(s) (${c.byCounterparty?.player ?? 0} with a player, ${c.byCounterparty?.guardian ?? 0} with a guardian) with ${c.messages} message(s) and ${c.attachments} attachment(s) into typed columns; ${c.normalised ?? 0} thread(s) normalised — each noted below`); for (const n of c.notes ?? []) log(`channels: cutover note — ${n}`); }
-  }
   if (Object.hasOwn(db, CHANNELS_TABLE.name)) {
     delete db[CHANNELS_TABLE.name];
     sqlite.prepare('DELETE FROM collections WHERE name = ?').run(CHANNELS_TABLE.name);
@@ -727,22 +691,9 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   const safetyAudit = createSafetyAuditRepository({ sqlite, log, unit: store.unit, staged: true });
   const safetyAuditBoot = safetyAudit.attach();
   store.setSaveHook?.(safetyAudit.saveHook());
-  if (migrations.ran.includes(SAFETY_AUDIT_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(SAFETY_AUDIT_CUTOVER_META)?.value;
-    if (record) {
-      const c = JSON.parse(record);
-      const unresolved = Object.entries(c).filter(([, v]) => v && typeof v === 'object' && 'unresolvedPlayerIds' in v).map(([n, v]) => `${v.unresolvedPlayerIds} ${n}`).join(', ');
-      log(`safety audit: cutover imported ${AUDIT_COLLECTIONS.map((n) => `${c[n]?.imported ?? 0} ${n}`).join(', ')}; ${AUDIT_COLLECTIONS.reduce((a, n) => a + (c[n]?.normalised ?? 0), 0)} row(s) typed with a field dropped or normalised; rows naming a player that is not in the players table (counted, imported as they are): ${unresolved}`);
-      for (const note of c.notes ?? []) log(`safety audit: import ${note}`); // ids and field names only, never a value
-    }
-  }
   // S4b-R (migration 0014): the retained player records. A `playersRetained` array the
   // caller holds in memory is the blob the migration just imported (a restored backup, a
   // rollback copy re-upgraded) or stale; dropped, its blob row deleted; the rows are the record.
-  if (migrations.ran.includes(PLAYER_ERASURE_MIGRATION)) {
-    const record = sqlite.prepare('SELECT value FROM meta WHERE key = ?').get(PLAYER_ERASURE_CUTOVER_META)?.value;
-    log(`players: migration ${PLAYER_ERASURE_MIGRATION} recorded — an account deletion keeps the retained record from here on (${record ? JSON.parse(record).imported : 0} retained record(s) imported from a backup)`);
-  }
   if (Object.hasOwn(db, PLAYERS_RETAINED.name)) {
     delete db[PLAYERS_RETAINED.name];
     sqlite.prepare('DELETE FROM collections WHERE name = ?').run(PLAYERS_RETAINED.name);

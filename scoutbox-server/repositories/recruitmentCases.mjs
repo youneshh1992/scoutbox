@@ -97,8 +97,6 @@ import { migrationApplied } from './database.mjs';
 import { EXTRA_CHECK, ABSENT_CHECK, JSON_CHECK, describe, isPlainObject, nonEmpty, tableExists, setOwn, clone, parseJson, ids, sqlType, columnsOf, childSpecs, encode, decodeLevel, rowMeta, metaOf, columnAdmits, toColumn, fromColumn, copyRecord, recruitmentLive, readRequests, readTrials, S8A_KEY_OWNERS } from './recruitment.mjs';
 
 export const RECRUITMENT_CASES_MIGRATION = '0016_recruitment_cases';
-/** `meta` key holding the cutover record: counts only, never data. */
-export const RECRUITMENT_CASES_CUTOVER_META = 'recruitmentCasesCutover';
 export const RECRUITMENT_CASES_COLLECTIONS = Object.freeze(['recruitmentCases', 'roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState']);
 /** The owner tables the shared idempotency_keys CHECK names once 0016 is recorded (the S8a two first). */
 export const S8B_KEY_OWNERS = Object.freeze([...S8A_KEY_OWNERS, 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions']);
@@ -576,30 +574,6 @@ export const RECRUITMENT_CASES_SNAPSHOT = {
   /** G. */
   assert(sqlite, { label } = {}) { assertCasesConsistent(sqlite, { label }); },
 };
-
-/**
- * Import the legacy (or exported) five blobs into the tables inside the migration's transaction (every entry validated,
- * the cross references checked against the file's S8a tables and the orgs/org_users tables, insertion in array order,
- * the blob rows retired). An absent blob imports nothing; a non-array, non-JSON or PRESENT-null blob refuses the step.
- * `s8a` names the two S8a phases the migration interleaves: `rebuildParents()` between A and C (the real case key).
- * Returns the counts the migration records (never a value).
- */
-export function importRecruitmentCasesBlobs(sqlite, { rebuildParents = () => {} } = {}) {
-  const read = (name) => { const row = tableExists(sqlite, 'collections') ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null; if (!row) return undefined; try { return JSON.parse(row.value); } catch { throw blocked(`the ${name} blob is not valid JSON`); } };
-  const supplied = {};
-  for (const n of RECRUITMENT_CASES_COLLECTIONS) { const v = read(n); supplied[n] = v === undefined ? [] : v; if (!Array.isArray(supplied[n])) throw blocked(`the ${n} blob must be an array of entries (got ${describe(supplied[n])})`); }
-  const live = recruitmentLive(sqlite);
-  const s8a = live ? { requests: readRequests(sqlite), trials: readTrials(sqlite) } : { requests: [], trials: [] };
-  let counts;
-  try { ({ counts } = preflight(sqlite, supplied, { stored: { recruitmentCases: [], roomComments: [], roomSnapshots: [], roomDecisions: [], roomEvidenceState: [] }, s8a, label: 'the recruitment cases blobs' })); }
-  catch (e) { if (e?.code && e.code !== 'RECRUITMENT_CASES_IMPORT_BLOCKED') throw blocked(e.message, { refusal: e.code, rows: e.rows, problems: e.problems }); throw e; } // one code for the operator (the step is blocked), the specific refusal in the detail
-  stageCases(sqlite, supplied.recruitmentCases); // A
-  rebuildParents(); // the two S8a parents gain the real case key (B's tables, no rows change)
-  stageLinks(sqlite, supplied.recruitmentCases, []); // C
-  stageRooms(sqlite, supplied); // D
-  if (tableExists(sqlite, 'collections')) sqlite.prepare(`DELETE FROM collections WHERE name IN (${RECRUITMENT_CASES_COLLECTIONS.map(() => '?').join(', ')})`).run(...RECRUITMENT_CASES_COLLECTIONS);
-  return counts;
-}
 
 // ------------------------------------------------------------------ the repository
 /**

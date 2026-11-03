@@ -17,21 +17,17 @@
 //
 //   server mode   openStore(dir, { tableBacked: [...] }) — the running server.
 //                 Those collections belong to their repositories: `save` skips
-//                 them (and deletes any blob row left from before the move)
-//                 and `load` hands back only what is still a blob, so the
-//                 repository can import a legacy blob on the first boot after
-//                 the move.
-//   snapshot mode openStore(dir) — backups, restores, fixtures and the
-//                 persistence suites, which treat the file as one snapshot.
+//                 them and `load` hands back only what is still a blob.
+//   snapshot mode openStore(dir) — tools, fixtures and the persistence
+//                 suites, which treat the file as one snapshot. The file is
+//                 brought up to the current table schema when it is opened;
 //                 `load` merges each table-backed collection in from its table
-//                 and `save` writes it back into that table, so the database
-//                 reads and writes as the single shape the server sees.
+//                 and `save` writes it into that table (validated: junk is
+//                 refused and nothing is written), so the database reads and
+//                 writes as the single shape the server sees.
 //
-// Whether a table-backed collection is read from and written to its table is
-// decided by the domain's cutover record in `data_migrations`
-// (repositories/*.mjs, `migrationApplied`), never by whether the table exists:
-// before the record the blob is authoritative and the table (an S1 shadow, or a
-// rollback copy's emptied table) is left alone; after it the blob is gone.
+// A backup is a copy of the database file (`copyTo`, VACUUM INTO); a restore
+// boots a new, empty DATA_DIR holding the copy.
 
 import fs from 'node:fs';
 import path from 'node:path';

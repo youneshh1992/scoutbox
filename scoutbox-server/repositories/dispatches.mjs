@@ -124,8 +124,6 @@ import { readonlyView } from './readonly.mjs';
 import { migrationApplied, transaction } from './database.mjs';
 
 export const DISPATCHES_MIGRATION = '0010_dispatches';
-/** `meta` key holding the cutover record: counts only, never data. */
-export const DISPATCHES_CUTOVER_META = 'dispatchesCutover';
 export const DISPATCH_TABLES = Object.freeze(['dispatches', 'dispatch_attempts']);
 
 export const DISPATCHES_DDL = `
@@ -340,33 +338,6 @@ export const DISPATCHES_TABLE = {
     return true;
   },
 };
-
-/**
- * Import the legacy (or exported) blob into the tables, inside the migration's
- * transaction: validation of every entry, insertion in array order (attempts
- * in their positions), the blob row retired. Orphan references — a
- * notificationId with no row in `notifications` — are imported unchanged and
- * counted; unknown fields are dropped and reported (dispatch id and field names). Returns the counts and notes the
- * migration records in `meta`.
- */
-export function importDispatchesBlob(sqlite) {
-  let counts = { imported: 0, attempts: 0, unknownFieldsDropped: 0, orphanReferences: 0, byStatus: {}, notes: [] };
-  const hasCollections = tableExists(sqlite, 'collections');
-  const row = hasCollections ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get('dispatches') : null;
-  if (row) {
-    let parsed; try { parsed = JSON.parse(row.value); } catch { throw blocked('the dispatches blob is not valid JSON'); }
-    const v = validateDispatchRows(parsed, { label: 'the dispatches blob', importing: true });
-    writeRows(sqlite, v.rows);
-    let orphanReferences = 0;
-    if (tableExists(sqlite, 'notifications')) {
-      const exists = sqlite.prepare('SELECT 1 FROM notifications WHERE id = ?');
-      for (const r of v.rows) if (!exists.get(r.notificationId)) orphanReferences += 1;
-    } else orphanReferences = v.rows.length;
-    counts = { imported: v.rows.length, attempts: v.attempts, unknownFieldsDropped: v.unknownFieldsDropped, orphanReferences, byStatus: v.byStatus, notes: v.notes };
-    sqlite.prepare("DELETE FROM collections WHERE name = 'dispatches'").run();
-  }
-  return { dispatches: counts };
-}
 
 // ------------------------------------------------------------------ the repository
 /**

@@ -121,8 +121,6 @@ import { cloneJson } from './outboxPush.mjs';
 import { readTrialsBlob, trialReportsFor as trialReportsOf } from './playerSubrecords.mjs';
 
 export const RECRUITMENT_MIGRATION = '0015_recruitment';
-/** `meta` key holding the cutover record: counts only, never data. */
-export const RECRUITMENT_CUTOVER_META = 'recruitmentCutover';
 export const RECRUITMENT_COLLECTIONS = Object.freeze(['requests', 'trials']);
 /** The collections the strict references resolve against and the identity table they are checked in. */
 export const CASES_COLLECTION = 'recruitmentCases';
@@ -608,29 +606,6 @@ export const RECRUITMENT_SNAPSHOT = {
   },
   prune(sqlite, { requests, label = 'the snapshot' }) { if (recruitmentLive(sqlite)) prune(sqlite, { requests, label }); },
 };
-
-/**
- * Import the legacy (or exported) `requests` and `trials` blobs into the tables inside the migration's transaction
- * (every entry validated, the cross references checked against the file's blobs and tables, insertion in array
- * order, the blob rows retired). An absent blob imports nothing; a non-array or non-JSON blob refuses the step.
- * Returns the counts the migration records (never a value).
- */
-export function importRecruitmentBlobs(sqlite) {
-  // `undefined` is a genuinely ABSENT blob row (nothing to import); a PRESENT row holding JSON `null` is a malformed
-  // collection and refuses like an object, a string or a number (review of 6d77aa7, F2) — never defaulted to []
-  const read = (name) => { const row = tableExists(sqlite, 'collections') ? sqlite.prepare('SELECT value FROM collections WHERE name = ?').get(name) : null; if (!row) return undefined; try { return JSON.parse(row.value); } catch { throw blocked(`the ${name} blob is not valid JSON`); } };
-  const requestsBlob = read('requests'); const trialsBlob = read('trials');
-  const requests = requestsBlob === undefined ? [] : requestsBlob; const trials = trialsBlob === undefined ? [] : trialsBlob;
-  if (!Array.isArray(requests)) throw blocked(`the requests blob must be an array of entries (got ${describe(requests)})`);
-  if (!Array.isArray(trials)) throw blocked(`the trials blob must be an array of entries (got ${describe(trials)})`);
-  const cases = readCasesCollection(sqlite);
-  let counts;
-  try { ({ counts } = validateCollections(sqlite, { requests, trials }, { cases: cases ?? [], label: 'the recruitment blobs' })); }
-  catch (e) { if (e?.code && e.code !== 'RECRUITMENT_IMPORT_BLOCKED') throw blocked(e.message, { refusal: e.code, rows: e.rows, problems: e.problems }); throw e; } // one code for the operator (the step is blocked), the specific refusal in the detail
-  phases123(sqlite, { requests, trials });
-  if (tableExists(sqlite, 'collections')) sqlite.prepare('DELETE FROM collections WHERE name IN (?, ?)').run('requests', 'trials');
-  return counts;
-}
 
 // ------------------------------------------------------------------ detached copies (the export)
 export const copyRecord = (r) => { const c = {}; for (const k of Object.keys(r)) setOwn(c, k, clone(r[k], k).value); return c; };
