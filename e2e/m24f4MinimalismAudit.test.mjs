@@ -8,7 +8,8 @@
 //     only; the Box Cam root carries no setup instructions; the Development
 //     root no feedback paragraph; the Offer root no conditions);
 //  3. no seconds anywhere (every timestamp goes through time.ts / design-system
-//     time.ts); no system font as a primary face; zero product emoji;
+//     time.ts); Inter in the portals and the system font in the Player (the
+//     approved Player design); zero product emoji;
 //  4. the Grassroots radar read state is a line, not an input; a squad row has
 //     no bordered name chip;
 //  5. the portals' Nobody Missed is a coverage tool (ring + rows) and the
@@ -88,13 +89,23 @@ for (const f of files.filter((p) => /\.(ts|tsx)$/.test(p))) {
   if (/second: '2-digit'|second: 'numeric'|(?<!key=\{[\w.]*)toISOString\(\)[^;]*\}<\/|toLocaleTimeString\(\)/.test(s) && !/time\.ts$/.test(f) && !/formatToParts/.test(s)) seconds.push(rel(f));
 }
 ok(seconds.length === 0, `no screen formats seconds (${seconds.join(', ') || 'none'})`);
+// The portals use Inter. The approved Player uses the system font (docs/design.md, Player › Typography), checked below.
 const fontHits = [];
-for (const f of files.filter((p) => /\.(css|tsx|ts)$/.test(p))) {
+for (const f of files.filter((p) => /\.(css|tsx|ts)$/.test(p) && !/scoutbox-player/.test(p))) {
   const s = strip(fs.readFileSync(f, 'utf8'));
   for (const m of s.matchAll(/font-family:\s*([^;]+);/g)) { const v = m[1]; if (!/var\(--sb-font|Inter|inherit|monospace|'Albert Sans'|AlbertSans/.test(v)) fontHits.push(`${rel(f)}: ${v.slice(0, 40)}`); }
   for (const m of s.matchAll(/fontFamily:\s*'([^']+)'/g)) { if (!/^Inter|monospace|AlbertSans|inherit/.test(m[1])) fontHits.push(`${rel(f)}: ${m[1]}`); }
 }
-ok(fontHits.length === 0, `Inter is the only primary face (Albert Sans for the wordmark, monospace for machine strings) (${fontHits.slice(0, 3).join(' | ') || 'clean'})`);
+ok(fontHits.length === 0, `portals: Inter is the only primary face (Albert Sans for the wordmark, monospace for machine strings) (${fontHits.slice(0, 3).join(' | ') || 'clean'})`);
+const playerText = read('scoutbox-player/src/components/Text.tsx');
+ok(/WEB_UI_FONT = '-apple-system, BlinkMacSystemFont, system-ui/.test(playerText) && /'ios' \? 'System' : 'sans-serif'/.test(playerText) && /fontFamily: BRAND_FONT/.test(playerText) && !/Inter/.test(strip(playerText)), 'Player: the system font for all text; Albert Sans only for the wordmark');
+const playerFontHits = [];
+for (const f of files.filter((p) => /scoutbox-player/.test(p))) {
+  const s = strip(fs.readFileSync(f, 'utf8'));
+  for (const m of s.matchAll(/font-family:\s*([^;]+);/g)) if (!/^\$\{WEB_UI_FONT\}|^'AlbertSans/.test(m[1].trim())) playerFontHits.push(`${rel(f)}: ${m[1].slice(0, 40)}`);
+  for (const m of s.matchAll(/fontFamily:\s*'([^']+)'/g)) if (!/^AlbertSans/.test(m[1])) playerFontHits.push(`${rel(f)}: ${m[1]}`);
+}
+ok(playerFontHits.length === 0, `Player: no other face is set anywhere (${playerFontHits.slice(0, 3).join(' | ') || 'clean'})`);
 ok(/--sb-font: 'Inter'/.test(read('design-system/tokens.css')) && /--sb-font-brand: 'Albert Sans'/.test(read('design-system/tokens.css')), 'tokens: --sb-font is Inter; the brand face is the wordmark only');
 const PICTO = /\p{Extended_Pictographic}/u; const emoji = [];
 for (const f of files) { const s = strip(fs.readFileSync(f, 'utf8')); for (const [i, l] of s.split('\n').entries()) if (PICTO.test(l) && !/[✓✕○➤⊘◷↻✗›⌄▲▼]/.test(l.match(PICTO)[0])) emoji.push(`${rel(f)}:${i + 1}`); }

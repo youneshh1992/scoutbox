@@ -64,8 +64,10 @@ ok(inboxTabs.length === 3 && inboxTabs.join(',') === 'all,unread,requests', `Inb
 ok(/hint=\{`\$\{[^\n]*humanDate\([^\n]*`\}/.test(board) && !/hint=\{`[^`]*\n[^`]*`\}/.test(board), 'Opportunity board: the preview is one templated line (title / club · date · distance · state)');
 ok(/testID=\{`board-view-\$\{/.test(board) && /pt\('boardRequirements'\)/.test(board) && /testID=\{`board-apply-\$\{/.test(board), 'Opportunity board: description, requirements and Apply sit behind "View details"');
 ok(/pt\('m13fitLine'\)/.test(fit) && /testID=\{`fit-check-\$\{/.test(fit) && /testID=\{`fit-why-\$\{/.test(fit), 'Opportunity fit: one line + "Check fit"; reasons behind "Why"');
-ok(/testID=\{`req-details-\$\{/.test(inbox) && /pt\('inboxViewFullMessage'\)/.test(inbox) && /testID=\{`req-accept-\$\{/.test(inbox) && /testID=\{`req-decline-\$\{/.test(inbox), 'Request detail: Accept and Decline visible; the full message, venue and instructions behind "View full message"');
-ok(after(inbox, 'testID={`req-message-', 'testID={`req-details-'), 'Request detail: the message body renders inside the Disclosure');
+// The approved Player (99de825) opens a request as a message: the full message is the first bubble and the
+// venue and arrival notes sit in the shared InvitationCard, so there is no "View full message" Disclosure here.
+ok(/testID=\{`req-details-\$\{/.test(inbox) && /<InvitationCard[^\n]*venue=\{trial \? r\.trialDetails\?\.venue/.test(inbox) && /pt\('invBeforeArrival'\)/.test(inbox) && /testID=\{`req-accept-\$\{/.test(inbox) && /testID=\{`req-decline-\$\{/.test(inbox), 'Request detail: Accept and Decline visible; the message opens as a bubble, the venue and instructions in the invitation card');
+ok(after(inbox, 'testID={`req-message-', 'testID={`req-details-'), 'Request detail: the message body renders inside the request message bubble');
 const guardian = read('scoutbox-player/src/app/guardian.tsx');
 ok(/testID=\{`req-details-\$\{/.test(guardian) && /pt\('inboxViewFullMessage'\)/.test(guardian), 'Guardian request card: message and notes behind "View full message"');
 ok(/inboxSafety: 'You control who can contact you\.'/.test(i18n) && /inboxLearnMore: 'Learn more'/.test(i18n), 'Safeguarding copy: "You control who can contact you. Learn more →"');
@@ -80,18 +82,21 @@ for (const f of files) { const s = strip(fs.readFileSync(f, 'utf8')); s.split('\
 ok(secondsHits.length === 0, `no machine timestamp with seconds in the five applications (${secondsHits.slice(0, 4).join(', ') || 'none'})`);
 
 // ------------------------------------------------------------ 4. the trial token
+// The Player is dark-only (approved 5 October 2026), so there is one palette. The trial accent is the code's
+// '#f6c376' (docs/design.md, "Contradictions resolved"), not M24F.3's '#e9c46a'.
 const theme = read('scoutbox-player/src/theme.ts');
-const block = (name) => { const m = theme.match(new RegExp(`${name}[^{]*\\{([\\s\\S]*?)\\n  \\}`)); return m ? m[1] : ''; };
 const pal = (b) => Object.fromEntries([...b.matchAll(/(\w+): '(#[0-9a-fA-F]{6})'/g)].map((m) => [m[1], m[2].toLowerCase()]));
-const light = pal(theme.slice(theme.indexOf('light:'), theme.indexOf('dark:'))); const dark = pal(theme.slice(theme.indexOf('dark:'), theme.indexOf('export const AUTH_PANEL')));
+const palettes = theme.slice(theme.indexOf('export const palettes'), theme.indexOf('export const AUTH_PANEL'));
+const dark = pal(palettes.slice(palettes.indexOf('dark:')));
 const lum = (hex) => { const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
 const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-for (const [name, p] of [['light', light], ['dark', dark]]) {
-  ok(p.trial && p.trialBg && p.trialInk && p.offer && p.signing, `theme ${name}: trial / offer / signing accents declared`);
-  const r = p.trialInk && p.trialBg ? ratio(p.trialInk, p.trialBg) : 0;
-  ok(r >= 4.5, `theme ${name}: the "Trial" label (${p.trialInk} on ${p.trialBg}) meets AA — ${r.toFixed(1)}:1`);
+ok(!/\blight:\s*\{/.test(palettes) && /export type Scheme = 'dark';/.test(theme), 'theme: the Player declares only the dark palette');
+ok(dark.trial && dark.trialBg && dark.trialInk && dark.offer && dark.signing, 'theme dark: trial / offer / signing accents declared');
+{
+  const r = dark.trialInk && dark.trialBg ? ratio(dark.trialInk, dark.trialBg) : 0;
+  ok(r >= 4.5, `theme dark: the "Trial" label (${dark.trialInk} on ${dark.trialBg}) meets AA — ${r.toFixed(1)}:1`);
 }
-ok(/#e9c46a/i.test(dark.trial ?? '') && /#b08a1c|#c9a227|#ddbb55/i.test(light.trial ?? ''), 'the trial accent is the warm gold / amber family (#E9C46A dark; a darker gold on paper)');
+ok(dark.trial === '#f6c376', `the trial accent is the approved warm gold (#F6C376) (${dark.trial})`);
 ok(/accent=\{r\.type === 'trial' \? 'trial'/.test(inbox) || /accent=\{[^}]*'trial'/.test(inbox), 'Inbox: a trial request row carries the trial accent');
 ok(/accentLabel=\{[^}]*pt\('inboxTrialLabel'\)/.test(inbox) && /inboxTrialLabel: 'Trial'/.test(i18n), 'Inbox: the trial row carries the word "Trial" — never colour alone');
 ok(/`row-accent-\$\{accent\}`/.test(previewRow) && /accentLabel/.test(previewRow), 'PreviewRow: the accent edge and its label are part of the primitive');

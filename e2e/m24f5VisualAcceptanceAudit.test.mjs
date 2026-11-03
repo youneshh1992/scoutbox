@@ -13,7 +13,8 @@
 //     detail/explanation is one tap deeper; no <code> face; Nobody Missed keeps
 //     its coverage ring and drops its doubled heading;
 //  5. Grassroots radar read state and squad names carry no border;
-//  6. Inter everywhere: no monospace face in any app, code/pre/samp set to Inter,
+//  6. Inter in the portals (the Player uses the system font, and the approved
+//     Grassroots workspace its own monospace figures), code/pre/samp set to Inter,
 //     the demo badge in Inter; zero emoji; no seconds; no browser-locale dates
 //     in the Player;
 //  7. the guardian dashboard's child sections are rows; the Staff & Security
@@ -77,7 +78,9 @@ const offer = strip(read('scoutbox-player/src/components/M23Offer.tsx'));
 ok(!/<FactRow k=\{pt\('offerStatus'\)\}/.test(offer) && /humanDate\(cur\.terms\.startDate\)\} – \$\{humanDate\(cur\.terms\.endDate\)\}/.test(offer), 'Offer: status on its own line; term dates as a range');
 ok(/testID=\{`offer-terms-\$\{o\.id\}`\}/.test(offer) && /testID=\{`offer-not-signature-\$\{o\.id\}`\}/.test(offer), 'Offer: "View terms" holds the detail; "Offer acceptance is not a signature." stays on screen');
 const inbox = strip(read('scoutbox-player/src/app/(tabs)/inbox.tsx'));
-ok(!/styles\.special, trial && \{[^}]*trialBg/.test(inbox) && /tone=\{trial \? 'trial' : 'accent'\}/.test(inbox), 'Trial thread: a warm edge and a "Trial" kicker — no filled yellow card');
+// The approved Player (99de825) heads a trial thread and a trial request with the shared InvitationCard
+// (docs/design.md, Player › Invitations) instead of M24F.5's warm edge and kicker. What remains: no filled yellow card.
+ok(!/trialBg/.test(inbox) && /<InvitationCard[^\n]*testID="thread-trial-card"/.test(inbox) && /<InvitationCard[^\n]*testID=\{trial \? 'trial-card'/.test(inbox), 'Trial thread: the shared invitation card — no filled yellow card');
 
 // ------------------------------------------------------------ 4. Director Dashboard, Nobody Missed
 for (const app of ['club', 'grassroots']) {
@@ -104,17 +107,28 @@ ok(!/border/.test(squadName), 'Squad: names are plain text, no border');
 ok(/data-testid="openday-post-toggle"/.test(gScreens), 'Open Days: the posting form opens on demand');
 
 // ------------------------------------------------------------ 6. Inter, emoji, seconds, dates
+// The approved Grassroots workspace (5a3e7b0) sets its timecodes, rulers and counts in monospace in scoutSuite.css.
+const MONO_APPROVED = /scoutbox-grassroots\/src\/scoutSuite\.css$/;
 const mono = [];
-for (const f of files) { const s = strip(fs.readFileSync(f, 'utf8')); if (/monospace/.test(s) && !/Text\.tsx$/.test(f)) mono.push(rel(f)); }
-ok(mono.length === 0, `no monospace face in any app (${mono.join(', ') || 'clean'})`);
+for (const f of files) { const s = strip(fs.readFileSync(f, 'utf8')); if (/monospace/.test(s) && !/Text\.tsx$/.test(f) && !MONO_APPROVED.test(f)) mono.push(rel(f)); }
+ok(mono.length === 0, `no monospace face in any app outside the approved Grassroots workspace (${mono.join(', ') || 'clean'})`);
 ok(/code, pre, samp \{ font-family: var\(--sb-font\)/.test(css), 'code / pre / samp render in Inter');
+// The portals use Inter. The approved Player uses the system font (docs/design.md, Player › Typography), checked below.
 const fontHits = [];
-for (const f of files.filter((p) => /\.(css|tsx|ts)$/.test(p))) {
+for (const f of files.filter((p) => /\.(css|tsx|ts)$/.test(p) && !/scoutbox-player/.test(p))) {
   const s = strip(fs.readFileSync(f, 'utf8'));
   for (const m of s.matchAll(/font-family:\s*([^;]+);/g)) { const v = m[1]; if (!/var\(--sb-font|Inter|inherit|'Albert Sans'|AlbertSans|var\(--sb-font-brand|var\(--gr-display/.test(v)) fontHits.push(`${rel(f)}: ${v.slice(0, 40)}`); }
   for (const m of s.matchAll(/fontFamily:\s*'([^']+)'/g)) { if (!/^Inter|AlbertSans|inherit/.test(m[1])) fontHits.push(`${rel(f)}: ${m[1]}`); }
 }
-ok(fontHits.length === 0, `Inter is the only UI face; Albert Sans only for the wordmark (${fontHits.slice(0, 3).join(' | ') || 'clean'})`);
+ok(fontHits.length === 0, `portals: Inter is the only UI face; Albert Sans only for the wordmark (${fontHits.slice(0, 3).join(' | ') || 'clean'})`);
+const playerFontHits = [];
+for (const f of files.filter((p) => /scoutbox-player/.test(p) && /\.(tsx|ts)$/.test(p))) {
+  const s = strip(fs.readFileSync(f, 'utf8'));
+  for (const m of s.matchAll(/font-family:\s*([^;]+);/g)) if (!/^\$\{WEB_UI_FONT\}|^'AlbertSans/.test(m[1].trim())) playerFontHits.push(`${rel(f)}: ${m[1].slice(0, 40)}`);
+  for (const m of s.matchAll(/fontFamily:\s*'([^']+)'/g)) if (!/^AlbertSans/.test(m[1])) playerFontHits.push(`${rel(f)}: ${m[1]}`);
+}
+const playerText = read('scoutbox-player/src/components/Text.tsx');
+ok(playerFontHits.length === 0 && /WEB_UI_FONT = '-apple-system, BlinkMacSystemFont, system-ui/.test(playerText) && /fontFamily: BRAND_FONT/.test(playerText), `Player: the system font is the only UI face; Albert Sans only for the wordmark (${playerFontHits.slice(0, 3).join(' | ') || 'clean'})`);
 ok(/--sb-font: 'Inter'/.test(read('design-system/tokens.css')), 'tokens: --sb-font is Inter');
 const build = read('e2e/buildDemos.mjs');
 ok(/font:10px\/1\.4 Inter/.test(build) && /right:8px/.test(build) && /'scoutbox-player-demo\.html' \? 74 : 8/.test(build), 'demo badge: Inter, bottom-right, above the Player tab bar');
