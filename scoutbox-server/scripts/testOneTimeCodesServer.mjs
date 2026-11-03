@@ -8,9 +8,9 @@
 // Nothing here touches DATA_DIR or any real data. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
+import { freePort } from './testPort.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -24,7 +24,6 @@ const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
 const hash = (code) => crypto.createHash('sha256').update(String(code).trim().toUpperCase()).digest('hex');
-const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 
 async function boot(dir, env = {}) {
   const port = await freePort();

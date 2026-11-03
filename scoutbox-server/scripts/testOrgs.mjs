@@ -26,7 +26,7 @@ import { openStore } from '../store.mjs';
 // attachDataLayer and the real-server checks below run.
 const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
-import { pickPort } from './testPort.mjs';
+import { freePort } from './testPort.mjs';
 
 let passed = 0;
 // TEST_ONLY=<substring> runs the matching checks alone (reproductions and reviews); unset, every check runs.
@@ -489,7 +489,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
   seed.recruitmentCases = [{ id: 'case-s3', orgId: 'org-eastport', playerId: seed.players[0].id, playerName: seed.players[0].name, ownerUserId: 'usr-legacy', ownerName: 'Maria Keane', stage: null, priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: { status: 'watching', rev: 1 } }]; // S8b: a case literal (the identifiers 0016 keys on: ownerUserId → org_users, createdAt)
   // The fixture, saved by the snapshot store into the tables.
   { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); }
-  const port = pickPort(7600, 100);
+  const port = await freePort();
   const boot = () => new Promise((resolve, reject) => {
     const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
@@ -568,7 +568,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     copy.close();
   } finally { await stop(S); }
   const restoreDir = tempDir('s3-restore'); fs.cpSync(backupDir, restoreDir, { recursive: true });
-  const port2 = pickPort(7700, 100);
+  const port2 = await freePort();
   const restored = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port2), DATA_DIR: restoreDir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log2 = ''; restored.stdout.on('data', (d) => { log2 += d; }); restored.stderr.on('data', (d) => { log2 += d; });
   try {

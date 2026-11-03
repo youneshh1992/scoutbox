@@ -12,8 +12,8 @@
 // there on a concrete assertion (the row is hard-deleted; no 0014).
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
+import { freePort } from './testPort.mjs';
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -28,7 +28,6 @@ const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
 const MIGRATION = '0014_player_erasure';
-const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 const AUDIT_TABLES = ['blocks', 'reports', 'org_notes', 'ledger', 'source_changes'];
 
 /** The retained row (plan §D.6.1 item 1): id, the deletion instant, the full birth date, the country; fixed placeholders; NULL everywhere else. */

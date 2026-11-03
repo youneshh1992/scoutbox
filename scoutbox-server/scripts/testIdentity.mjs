@@ -13,7 +13,7 @@ import { parseTrustProxy } from '../httpTrust.mjs';
 import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, liveMailConfigured, livePushConfigured, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, SAVE_DEBOUNCE_DEFAULT_MS, saveDebounceMs, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../m181/capabilities.mjs';
 import { createBilling, createIdvProvider, createStorage } from '../adapters.mjs';
 import { buildSeed } from '../seed.mjs';
-import { pickPort } from './testPort.mjs';
+import { freePort } from './testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -235,7 +235,7 @@ await test('first boot: demo data in development, catalogues only in production;
 });
 await test('first boot (real server): production starts with no people or clubs, SCOUTBOX_SEED_DEMO=1 opts in, and a saved database is never re-seeded', async () => {
   const PROD_ENV = { NODE_ENV: 'production', MEDIA_SECRET: PROD.MEDIA_SECRET, ADMIN_KEY: PROD.ADMIN_KEY };
-  const port = pickPort(7900, 100);
+  const port = await freePort();
   const boot = (dir, env) => new Promise((resolve, reject) => {
     const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, SCOUTBOX_SEED_DEMO: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';

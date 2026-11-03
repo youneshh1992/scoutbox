@@ -1,4 +1,10 @@
+import net from 'node:net';
+
 // PRE-M24 (TH-6): a random test port that fetch() will actually connect to.
+//
+// Prefer `freePort()`: the operating system hands out a port nobody holds, so
+// suites running side by side (the parallel `npm test`) never collide. The
+// fixed ranges of `pickPort` remain for the milestone end-to-end scripts.
 //
 // The suites draw a base port at random so that parallel runs rarely collide,
 // then boot servers on base plus a few fixed offsets. The WHATWG Fetch standard refuses a
@@ -13,6 +19,13 @@ const FETCH_BAD_PORTS = new Set([
   526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049,
   3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
 ]);
+
+/** A port the operating system reports free right now (its ephemeral range is clear of the fetch-blocked ports). */
+export const freePort = () => new Promise((resolve, reject) => {
+  const s = net.createServer();
+  s.once('error', reject);
+  s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
+});
 
 export const isFetchBlockedPort = (port) => FETCH_BAD_PORTS.has(port);
 

@@ -24,8 +24,8 @@
 // absence of the blob and FAIL on b67bce5 on concrete assertions.
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
+import { freePort } from './testPort.mjs';
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -41,7 +41,6 @@ const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, 
 const A = { 'x-admin-key': 'scoutbox-admin' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (check, ms = 10_000, step = 40) => { const t0 = Date.now(); for (;;) { const v = await check(); if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(step); } };
-const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 const MIGRATION = '0012_channels';
 /** seed.mjs `med()`: the media id is derived from the title; the first clip of pl-adeyemi. */
 const hash = (s) => { let h = 0; for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) | 0; return h; };

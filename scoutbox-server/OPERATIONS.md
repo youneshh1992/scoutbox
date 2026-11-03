@@ -35,7 +35,7 @@ is archived in git under the tag `docs-archive-2026-11`. The migration's status 
 
 | Command | What it does |
 |---|---|
-| `npm test` | Runtime contract, data-layer, repository, migration and per-domain batteries, plus their real-server variants. Each one runs on temporary directories. |
+| `npm test` | Runtime contract, data-layer, repository, migration and per-domain batteries, plus their real-server variants (`scripts/runTests.mjs`, the list is `SUITES`). Each suite runs on its own temporary directories and free ports, up to 4 at a time (`TEST_JOBS`); a failing suite prints its whole log (`TEST_VERBOSE=1` prints every log). `npm test -- testOrgs testSessions` runs only those. |
 | `npm run e2e` | `scripts/apiE2E.mjs`. Starts its own freshly seeded server on a free port and a temporary `DATA_DIR`, and removes both. To test a server you started yourself, pass both `API_URL` and that server's `DATA_DIR`; `API_URL` alone is refused, because the persistence checks read the data directory. |
 | `npm run perf:data-layer` | Data-layer micro-benchmark. |
 | `node scripts/m13E2E.mjs` | Delivery, webhook, backup and restore end to end (sets `M13_FAST_RETRY`, `ALLOW_LOCAL_WEBHOOKS`). |

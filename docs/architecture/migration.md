@@ -253,8 +253,9 @@ is the design note for that step: a fair example of the content a PR description
   its collections to `TABLE_BACKED` in `index.mjs`. Snapshot mode (tools, fixtures, the persistence suites) uses it.
   Backups don't: a backup is a `VACUUM INTO` copy of the database (`store.copyTo`).
 - **Reporting and tests.** Add a `/capabilities.dataLayer.domains` entry (`index.mjs`). Add `scripts/test<Domain>.mjs`
-  to the `npm test` chain. Update `sql/*.sql` to match the real DDL (`testSchemaDdl.mjs`). Add the domain's passing
-  end-to-end batteries to `.github/workflows/ci.yml`.
+  to `SUITES` in `scripts/runTests.mjs` (`npm test` refuses to run while a `test*.mjs` suite is unlisted).
+  Update `sql/*.sql` to match the real DDL (`testSchemaDdl.mjs`). Add the domain's passing end-to-end batteries
+  to `.github/workflows/ci.yml`.
 
 ## 6. Open questions that touch the migration
 

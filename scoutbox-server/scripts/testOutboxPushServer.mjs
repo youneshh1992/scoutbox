@@ -24,8 +24,8 @@
 // touches DATA_DIR or real data; no real provider is called. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
+import { freePort } from './testPort.mjs';
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -49,7 +49,6 @@ const SAVE_MS = 300;
 const settle = (S) => sleep(S.saveMs + 500);
 const REAL_SAVE_DELAY = { SCOUTBOX_SAVE_DEBOUNCE_MS: '' };
 const until = async (check, ms = 10_000, step = 40) => { const t0 = Date.now(); for (;;) { const v = await check(); if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(step); } };
-const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 const PLACEHOLDER = '[code withheld — delivered to the recipient only]';
 /** Five registrations with repeats: three persisted rows (a repeated token removes its earlier row and is appended last). */
 const BASELINE_TOKENS = ['ExponentPushToken[synthetic-a]', 'ExponentPushToken[synthetic-a]', 'ExponentPushToken[synthetic-b]', 'ExponentPushToken[synthetic-c]', 'ExponentPushToken[synthetic-b]'];
@@ -198,7 +197,7 @@ await test('[cutover] the cutover and the mailer\'s rows: a fresh boot records 0
   for (const n of ['outbox', 'pushLog', 'pushTokens']) assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM collections WHERE name = ?', n).n, 0, `no ${n} blob after the cutover`);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara');
   // The invite: one revision for the invite row and its mail row.
-  const seq0 = seqOf(dir);
+  await settle(S); const seq0 = seqOf(dir); // the logins' own debounced save lands first, so the count below is the invite's alone
   const invite = await S.j('POST', '/org/invites', { email: 'synthetic-invitee@example.invalid', name: 'Synthetic Invitee', role: 'Scout' }, maria); assert.equal(invite.status, 201, invite.text);
   const after = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mail: readStored(c).outbox.find((m) => m.subject && /invited you/.test(m.subject)), inviteRow: (blobRows(c, 'orgInvites') ?? []).some((i) => i.id === invite.body.invite.id) }));
   assert.equal(after.seq, seq0 + 1, 'one save'); assert.ok(after.mail && after.inviteRow, 'the mail row and the invite row are in that save'); assert.equal(after.mail.transport, 'dev-outbox'); assert.equal(after.mail.delivered, true);

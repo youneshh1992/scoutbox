@@ -21,7 +21,7 @@ import { openStore } from '../store.mjs';
 // attachDataLayer and the real-server checks below run.
 const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
-import { pickPort } from './testPort.mjs';
+import { freePort } from './testPort.mjs';
 
 let passed = 0;
 function test(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -315,7 +315,7 @@ await atest('server: plain-token sessions in a fixture are stored as hashes, the
   clip.url = `/media/${clip.id}`;
   seed.mediaBlobs = { [clip.id]: { dataUrl: `data:video/webm;base64,${clipBytes.toString('base64')}` } };
   { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); } // snapshot mode: the sessions go into their table, hashed
-  const port = pickPort(7700, 100);
+  const port = await freePort();
   const boot = () => new Promise((resolve, reject) => {
     const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
@@ -393,7 +393,7 @@ await atest('server: media links are signed with MEDIA_SECRET only — a link su
   clip.url = `/media/${clip.id}`;
   seed.mediaBlobs = { [clip.id]: { dataUrl: `data:video/webm;base64,${Buffer.from('synthetic-media-secret-bytes').toString('base64')}` } };
   { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); }
-  const port = pickPort(7800, 100);
+  const port = await freePort();
   const boot = (env) => new Promise((resolve, reject) => {
     const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, MEDIA_SECRET: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
@@ -437,7 +437,7 @@ await atest('server (review correction 2): player and org sessions survive the a
     { token: 'dbjson-maria-token-00000000000000000000000000', sid: 'sid-json-maria', kind: 'org', refId: 'org-eastport', userId: 'usr-legacy', createdAt: Date.now() - DAY },
   ];
   { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); }
-  const port = pickPort(7850, 100);
+  const port = await freePort();
   const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
@@ -464,7 +464,7 @@ await atest('server (review correction 2): player and org sessions survive the a
     assert.deepEqual(exported.map((r) => r.token_hash), [sha256(seed.sessions[0].token), sha256(seed.sessions[1].token)], 'the backup holds hashes only');
     assert.ok(!fs.readFileSync(path.join(backup.dir, 'scoutbox.db'), 'latin1').includes('dbjson-kola-token'));
     const restoreDir = tempDir('s2-restore'); fs.cpSync(backup.dir, restoreDir, { recursive: true });
-    const port2 = pickPort(7900, 100);
+    const port2 = await freePort();
     const restored = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port2), DATA_DIR: restoreDir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log2 = ''; restored.stdout.on('data', (d) => { log2 += d; }); restored.stderr.on('data', (d) => { log2 += d; });
     try {
