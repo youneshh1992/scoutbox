@@ -51,7 +51,7 @@ import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
 import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './m181/rateLimit.mjs';
-import { buildCapabilityReport, productionConfigProblems } from './m181/capabilities.mjs';
+import { buildCapabilityReport, devLoginsEnabled, productionConfigProblems } from './m181/capabilities.mjs';
 import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
 import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './m182/eventRegistry.mjs';
@@ -772,12 +772,8 @@ const authLimiter = makeRateLimiter({ windowMs: 60_000, max: 40, bucket: 'auth' 
 app.use('/auth', authLimiter);
 
 // Development shortcuts (seeded passwordless identities, credential-less org
-// logins) exist for local work and tests only. Outside development they are
-// refused — set ALLOW_DEV_LOGINS=1 to re-enable them explicitly.
-const DEV_LOGINS = process.env.ALLOW_DEV_LOGINS === '1' || (process.env.NODE_ENV ?? 'development') !== 'production';
-if (process.env.ALLOW_DEV_LOGINS === '1' && (process.env.NODE_ENV ?? '') === 'production') {
-  console.warn('⚠️  ALLOW_DEV_LOGINS=1 with NODE_ENV=production: seeded passwordless logins are ENABLED. Never run this configuration on anything reachable from the internet.');
-}
+// logins) exist for local work and tests only, and are refused in production.
+const DEV_LOGINS = devLoginsEnabled();
 function devLoginRefused(res) {
   res.status(403).json({
     error: 'DEV_LOGIN_DISABLED',
@@ -4498,8 +4494,8 @@ adminRouter.get('/clubs', (_req, res) => {
 });
 
 // Credentialed login for organisations: Trust & Safety provisions (or
-// rotates) the club password. This — not ALLOW_DEV_LOGINS — is how real Pro
-// and Grassroots users sign in when dev shortcuts are off.
+// rotates) the club password. This is how real Pro and Grassroots users sign
+// in when dev shortcuts are off.
 adminRouter.post('/clubs/:id/credentials', (req, res) => {
   const org = db.orgs.find((o) => o.id === req.params.id);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });

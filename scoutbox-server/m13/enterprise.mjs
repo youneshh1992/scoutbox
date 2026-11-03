@@ -13,6 +13,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { totpValid, b32encode, timingSafeEqStr } from './shared.mjs';
+import { devLoginsEnabled } from '../m181/capabilities.mjs';
 
 // ---------------------------------------------------- request instrumentation
 // Exported separately so server.mjs can install it BEFORE all routes.
@@ -68,7 +69,7 @@ export function registerEnterprise(ctx) {
   // S6b: an ops event is a row of ops_events (repositories/safetyAudit.mjs), staged into the persist() that follows each one; a bare context without the repository keeps the array push.
   const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
 
-  const DEV = (process.env.NODE_ENV ?? 'development') !== 'production' || process.env.ALLOW_DEV_LOGINS === '1';
+  const DEV = devLoginsEnabled();
 
   // ================================================== A. org onboarding
   orgRouter.post('/invites', (req, res) => {

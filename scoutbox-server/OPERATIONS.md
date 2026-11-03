@@ -58,7 +58,7 @@ mismatches section).
 | **`PORT`** | HTTP port | `4000` |
 | **`DATA_DIR`** | Database, media and backups directory | `scoutbox-server/data` |
 | **`NODE_ENV`** | `production` switches off dev shortcuts and makes config checks fatal | development |
-| **`ALLOW_DEV_LOGINS`** | `1` re-enables passwordless demo logins under `NODE_ENV=production` (logs a warning) | off. Note: the capabilities boot check tests `SCOUTBOX_ALLOW_DEV_LOGIN` instead, so it never fires |
+| `ALLOW_DEV_LOGINS` | Not read. Passwordless demo logins exist in development only | Setting it in production is fatal (`DEV_LOGIN_IN_PRODUCTION`) |
 | **`ADMIN_KEY`** | Shared key for `/admin` (header `x-admin-key`) | `scoutbox-admin`. Production: required, 16+ chars, not the default (`ADMIN_KEY_UNSAFE`) |
 | **`SESSION_TTL_DAYS`** | Session lifetime, judged against the current value (a change applies to existing sessions) | `30` |
 | **`SCOUTBOX_ALLOWED_ORIGINS`** | Comma-separated CORS allowlist | unset = permissive in dev |

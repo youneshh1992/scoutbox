@@ -110,4 +110,4 @@ These are the product's first principles for under-18s. Everything below refines
 - ✓ `security_account` is mandatory: `m182/notificationPrefs.mjs:78`.
 - ✓ `/auth/logout` revokes the session id on the server: `server.mjs:764`.
 - ✓ Production boot refuses the Box Cam test provider and a missing media secret: `m181/capabilities.mjs:137`, `:144`.
-- ≠ Dev login: the boot check looks for `SCOUTBOX_ALLOW_DEV_LOGIN` (`m181/capabilities.mjs:151`), but the server enables dev logins with `ALLOW_DEV_LOGINS` (`server.mjs:777`). With that set in production the server only prints a warning (`server.mjs:778`) and keeps running. Development logins are off in production by default.
+- ✓ Development logins exist only outside production, by one rule (`devLoginsEnabled`, `m181/capabilities.mjs`). A production boot with `ALLOW_DEV_LOGINS` set is refused (`DEV_LOGIN_IN_PRODUCTION`).

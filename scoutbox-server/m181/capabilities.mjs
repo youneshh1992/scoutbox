@@ -16,13 +16,20 @@ import { combineVerifiedProtocols } from '../m22/eligibility.mjs';
 import { parseTrustProxy } from '../httpTrust.mjs';
 export const CAPABILITY_STATES = ['configured', 'not_configured', 'test_only'];
 
+/**
+ * The one rule for development shortcuts: seeded passwordless logins,
+ * credential-less org logins and the local test identity provider. They exist
+ * in development only. There is no production override: a production boot
+ * with ALLOW_DEV_LOGINS set is refused (productionConfigProblems).
+ */
+export const devLoginsEnabled = (env = process.env) => env.NODE_ENV !== 'production';
+
 // M22: the Combine gate is read here, not restated. If eligibility ever
 // changes it changes in one place and every surface follows.
 export function buildCapabilityReport({ env = process.env, rateLimit = null, providers = [], trustProxy = null, extra = {} } = {}) {
   const flag = (v) => !!v && String(v).trim() !== '';
   const proxy = trustProxy ?? parseTrustProxy(env.SCOUTBOX_TRUST_PROXY);
-  const production = env.NODE_ENV === 'production';
-  const devLogins = !production || env.ALLOW_DEV_LOGINS === '1';
+  const devLogins = devLoginsEnabled(env);
 
   // "Production CV" means a provider that can genuinely OBSERVE — classify
   // technique, count repetitions. `web_client` is deliberately `limited`: it
@@ -148,10 +155,13 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
       fatal: true,
     });
   }
-  if (production && env.SCOUTBOX_ALLOW_DEV_LOGIN === '1') {
+  // Passwordless logins have no production override. The variable was one
+  // once; an environment that still sets it expects behaviour that no longer
+  // exists, so it is refused rather than silently ignored.
+  if (production && flagged(env.ALLOW_DEV_LOGINS)) {
     problems.push({
       code: 'DEV_LOGIN_IN_PRODUCTION',
-      message: 'SCOUTBOX_ALLOW_DEV_LOGIN=1 bypasses real credentials.',
+      message: 'ALLOW_DEV_LOGINS is set. Passwordless demo logins are never available in production; give demo accounts real passwords instead.',
       fatal: true,
     });
   }

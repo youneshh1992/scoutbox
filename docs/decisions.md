@@ -16,6 +16,7 @@ November 2026 cleanup. One line each, newest first within each section. Details 
 | Date | Decision | Who |
 |---|---|---|
 | 3 Nov | The repo was cleaned up. Milestone documents were removed from the root and distilled into `docs/`. The rule is now: **no new Markdown at the root; design notes and test evidence go in PR descriptions; `docs/` is updated in place.** This replaces the "milestone gates" documentation-housekeeping policy of 14 Oct. | Tom (cleanup), for the Founder to review |
+| 3 Nov | **No passwordless logins in production.** Dev logins are on only in development; a production boot with `ALLOW_DEV_LOGINS` set is refused. A hosted demo gives its accounts real passwords. (The demos inside Claude are the self-contained builds and need no server.) | Tom |
 | 3 Nov | `render.yaml`, `fly.toml` and `Dockerfile` are kept, though neither deploy target is live, because they may be used to serve the demo. | Tom |
 | 3 Nov | The feature freeze (below) stays until the SQLite migration is done. | Tom, confirming the Founder's 9 Oct rule |
 | 30 Oct | **There is no production data and no deployment.** Every database is seed or test data. Rollback means "re-seed". No rollback tools, historical-build boots, compatibility with old dev-build files, or operator warnings for deployments that don't exist. (CLAUDE_old "Facts about the data") | Founder |
@@ -81,7 +82,7 @@ treated as settled unless he says otherwise.
 
   ([`product/safeguarding.md`](product/safeguarding.md))
 - **Finance (3 Nov, Tom).** Deal amounts (Pro's Finance page) are visible to every lead role and to finance roles (role names containing "finance" or "treasurer"). One definition, `isFinanceRole` in `scoutbox-server/roles.mjs`, used by both the server and the sidebar. ([`product/navigation.md`](product/navigation.md))
-- **Platform.** `ALLOW_DEV_LOGINS=1` is a deliberate, loudly logged escape hatch. Unreadable legacy dates are not migrated. ([`product/platform.md`](product/platform.md))
+- **Platform.** Unreadable legacy dates are not migrated. ([`product/platform.md`](product/platform.md))
 
 ## 5. Open questions
 
@@ -111,4 +112,4 @@ wins**, then **the later document wins**.
 - ⚠ **Decision reason codes.** There are 20 (the data), though a comment in `m23/lifecycle.mjs:64` says 19.
 - ⚠ **Pro entry photo.** The approved AI-generated stadium image wins over M24F.4's "no stock images" rule; "no fake photo for missing media" still holds.
 - ⚠ **Trial accent colour** is `#f6c376` (code), not `#e9c46a` (M24F3_INBOX_DESIGN). The Grassroots serif was reverted (M24F5 reports still mention it). Code wins.
-- ⚠ **Dev login in production.** M18.1 says production boot refuses dev login; the check reads the wrong variable, so it doesn't. Kept as the intended rule; listed in [`known-issues.md`](known-issues.md).
+- **Dev login in production** (resolved 3 Nov). M18.1 said production boot refuses dev login, but the check read the wrong variable and `ALLOW_DEV_LOGINS=1` was an escape hatch. Settled as refused: see §1.

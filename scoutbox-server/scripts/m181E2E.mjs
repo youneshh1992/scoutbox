@@ -167,8 +167,8 @@ section('§48 — boot refuses configuration that is unsafe in production');
     'the simulated observer is fatal in production');
   neg(productionConfigProblems({ env: { NODE_ENV: 'production' } }).some((p) => p.code === 'MEDIA_SECRET_MISSING'),
     'a missing media signing secret is fatal in production');
-  neg(productionConfigProblems({ env: { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 's', SCOUTBOX_ALLOW_DEV_LOGIN: '1' } })
-    .some((p) => p.code === 'DEV_LOGIN_IN_PRODUCTION'), 'dev login is fatal in production');
+  neg(productionConfigProblems({ env: { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 's', ALLOW_DEV_LOGINS: '1' } })
+    .some((p) => p.code === 'DEV_LOGIN_IN_PRODUCTION' && p.fatal), 'dev login is fatal in production');
   neg(productionConfigProblems({ env: {}, trustWeightsTotal: 95 }).some((p) => p.code === 'TRUST_WEIGHTS_INVALID' && p.fatal),
     'Trust Score weights that do not total 100 are fatal in EVERY mode — a wrong score is not a development-only problem');
   // PRE-M24 (PM-1, PM-2): the admin key and the synthetic licence register.

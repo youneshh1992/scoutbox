@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.mjs';
 import { parseTrustProxy } from '../httpTrust.mjs';
-import { buildCapabilityReport, productionConfigProblems } from '../m181/capabilities.mjs';
+import { buildCapabilityReport, devLoginsEnabled, productionConfigProblems } from '../m181/capabilities.mjs';
 
 let passed = 0;
 async function test(name, fn) {
@@ -140,7 +140,20 @@ await test('capabilities: proxy trust is reported as a state with a plain-langua
 await test('capabilities: staff SSO is test_only in development and not_configured in production', () => {
   assert.equal(buildCapabilityReport({ env: {} }).capabilities.staff_sso.state, 'test_only');
   assert.equal(buildCapabilityReport({ env: { NODE_ENV: 'production' } }).capabilities.staff_sso.state, 'not_configured');
-  assert.equal(buildCapabilityReport({ env: { NODE_ENV: 'production', ALLOW_DEV_LOGINS: '1' } }).capabilities.staff_sso.state, 'test_only');
+  assert.equal(buildCapabilityReport({ env: { NODE_ENV: 'production', ALLOW_DEV_LOGINS: '1' } }).capabilities.staff_sso.state, 'not_configured', 'no production override');
+});
+await test('boot: ALLOW_DEV_LOGINS on a production instance is fatal, whatever its value, and harmless in development', () => {
+  for (const value of ['1', 'true', '0']) {
+    assert.ok(productionConfigProblems({ env: { ...PROD, ALLOW_DEV_LOGINS: value }, trustWeightsTotal: 100 }).some((p) => p.code === 'DEV_LOGIN_IN_PRODUCTION' && p.fatal), value);
+  }
+  assert.equal(productionConfigProblems({ env: { ...PROD, ALLOW_DEV_LOGINS: '' }, trustWeightsTotal: 100 }).length, 0, 'an empty value (.env.example) is unset');
+  assert.equal(productionConfigProblems({ env: { ALLOW_DEV_LOGINS: '1' }, trustWeightsTotal: 100 }).length, 0);
+});
+await test('dev logins: one rule — on in development, off in production with no override', () => {
+  assert.equal(devLoginsEnabled({}), true);
+  assert.equal(devLoginsEnabled({ NODE_ENV: 'test' }), true);
+  assert.equal(devLoginsEnabled({ NODE_ENV: 'production' }), false);
+  assert.equal(devLoginsEnabled({ NODE_ENV: 'production', ALLOW_DEV_LOGINS: '1' }), false);
 });
 await test('capabilities: the report never carries the test IdP secret', () => {
   const text = JSON.stringify(buildCapabilityReport({ env: { TEST_IDP_SECRET: 'super-secret-value-9' } }));

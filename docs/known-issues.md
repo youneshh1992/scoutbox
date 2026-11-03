@@ -5,9 +5,6 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
 
 ## Configuration and boot
 
-- **The dev-login production gate checks the wrong variable.** `m181/capabilities.mjs` refuses a production boot when
-  `SCOUTBOX_ALLOW_DEV_LOGIN` is set, but the server reads `ALLOW_DEV_LOGINS` (`server.mjs` around line 777), and in
-  production that only prints a warning. Pick one name and make the gate check it.
 - **The media-signing secret has two names.** The production gate and `/capabilities` check `SCOUTBOX_MEDIA_SECRET`
   (`m181/capabilities.mjs` around line 144). Media URLs are signed with `MEDIA_SECRET`, falling back to a generated
   secret stored in the database (`db.secrets.mediaSign`, `server.mjs` around line 432). So setting the gated variable
