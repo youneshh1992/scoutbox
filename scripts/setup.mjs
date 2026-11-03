@@ -7,6 +7,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CONTRACT, runtimeSupport } from '../scoutbox-server/runtime.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APPS = ['scoutbox-server', 'scoutbox-player', 'scoutbox-club', 'scoutbox-admin', 'e2e'];
@@ -16,12 +17,11 @@ let failed = false;
 const fail = (m) => { console.error(`✗ ${m}`); failed = true; };
 const okay = (m) => console.log(`✓ ${m}`);
 
-// Node version: node:sqlite needs >= 22.5 (older Node falls back to a JSON
-// snapshot store — works, but say so honestly).
-const [major, minor] = process.versions.node.split('.').map(Number);
-if (major > 22 || (major === 22 && minor >= 5)) okay(`node ${process.versions.node} (SQLite persistence available)`);
-else if (major >= 20) console.warn(`⚠ node ${process.versions.node}: works, but < 22.5 uses the JSON fallback store instead of SQLite`);
-else fail(`node ${process.versions.node} is too old — install Node 22+ (https://nodejs.org)`);
+// Node version: the server's own runtime contract (scoutbox-server/runtime.mjs),
+// so this check can never drift from what the server accepts at boot.
+const runtime = runtimeSupport();
+if (runtime.ok) okay(`node ${process.versions.node} (${CONTRACT})`);
+else fail(`${runtime.reason} Install a supported Node.js (https://nodejs.org).`);
 
 for (const app of APPS) {
   const dir = path.join(ROOT, app);

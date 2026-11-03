@@ -13,8 +13,6 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
   `scoutbox-server/roles.mjs` into each stage) before relying on the image.
 - **There's no empty production start.** A first boot always loads the demo seed; production mode only refuses
   the passwordless demo logins. (The migration plan's S13 makes demo data opt-in.)
-- **`scripts/setup.mjs` is stale.** It says Node ≥22.5 with a JSON fallback. The real requirement
-  (`scoutbox-server/runtime.mjs`, `engines`) is ≥22.16 on the 22 line or ≥24, with no fallback.
 
 ## Tests
 
