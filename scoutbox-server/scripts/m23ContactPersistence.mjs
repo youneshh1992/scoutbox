@@ -206,21 +206,20 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   // tables CARRY losslessly (an unknown status word, a missing recipient, an off-type history, an off-type timestamp, a
   // prototype-named channel, an impossible state, an unknown history event) is still planted and still judged on read.
   const REQ = { playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactChannel: null };
+  // Since §4.2 a snapshot is written straight into the tables (store.mjs, snapshot mode): the save itself refuses such a
+  // file, names the entry, and writes nothing; there is no blob for a later boot to import.
   const refusedAtCutover = async (label, port, contacts, requests, pattern) => {
     const dir = mkdtempSync(path.join(tmpdir(), 'sbx-cp-refused-'));
     const fixture = baseDb(); fixture.recruitmentContacts = contacts; fixture.requests = requests;
-    openStore(dir).save({ savedAt: Date.now(), idCounter: 500, db: fixture });
-    // the two collections compared in every key and value (the earlier steps of the same boot, 0015 among them, commit
-    // before 0017 refuses, so the requests read back from their tables in the stored shape's key order)
-    const canonK = (v) => (Array.isArray(v) ? v.map(canonK) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonK(v[k])])) : v);
-    const kept = () => { const d = openStore(dir).load()?.db; return JSON.stringify(canonK([d?.recruitmentContacts, d?.requests])); };
-    const was = kept();
+    let refused = null;
+    try { openStore(dir).save({ savedAt: Date.now(), idCounter: 500, db: fixture }); } catch (err) { refused = err; }
+    const msg = String(refused?.message ?? '');
+    neg(!!refused && pattern.test(msg), `${label}: the save refuses the snapshot and names the entry (${(pattern.exec(msg) ?? ['NOT named'])[0]})`);
+    if (!refused || !pattern.test(msg)) console.error(`   ${label}: refused=${!!refused}; ${msg.slice(0, 700)}`);
+    neg(openStore(dir).load() === null, `${label}: nothing was written — nothing imported, dropped or repaired`);
     const s = await bootOn(dir, port);
-    neg(!s.up && /CONTACTS_OFFERS_IMPORT_BLOCKED/.test(s.log()) && pattern.test(s.log()), `${label}: the cutover refuses the file at boot and names the entry (${(pattern.exec(s.log()) ?? ['NOT named'])[0]})`);
-    if (s.up || !pattern.test(s.log())) console.error(`   ${label}: up=${s.up}; the log ends:\n${s.log().slice(-700)}`);
-    neg(kept() === was, `${label}: the file is exactly as it was — nothing imported, dropped or repaired`);
-    const s2 = await bootOn(dir, port);
-    neg(!s2.up && pattern.test(s2.log()), `${label}: the next boot refuses the same way`);
+    neg(s.up, `${label}: a server started on the directory boots from its seed (the refused snapshot left nothing behind)`);
+    if (s.up) await s.stop();
   };
   await refusedAtCutover('a null entry', PORT + 4, [soundContact(), null], [{ ...REQ, id: 'req-1', contactId: 'rct-1' }], /recruitmentContacts entry #1 is not an object \(null\)/);
   await refusedAtCutover('a duplicated id', PORT + 5, [soundContact(), soundContact({ id: 'rct-1', requestId: null })], [{ ...REQ, id: 'req-1', contactId: 'rct-1' }], /duplicates the id of an earlier entry \(rct-1\)/);

@@ -28,8 +28,8 @@
 import { runDataMigrations, dataSchemaReport } from './database.mjs';
 import { createUsersRepository, USERS_TABLE } from './users.mjs';
 import { createSessionsRepository, SESSIONS_TABLE } from './sessions.mjs';
-import { createOrgsRepository, ORGS_TABLE } from './orgs.mjs';
-import { createIdentityRepositories, IDENTITY_SNAPSHOT, IDENTITY_COLLECTIONS, PLAYERS_RETAINED, PLAYER_ERASURE_MIGRATION, PLAYER_ERASURE_CUTOVER_META } from './identity.mjs';
+import { createOrgsRepository, ORGS_TABLE, ORGS_INIT_META } from './orgs.mjs';
+import { createIdentityRepositories, CORE_IDENTITY_INIT_META, IDENTITY_SNAPSHOT, IDENTITY_COLLECTIONS, PLAYERS_RETAINED, PLAYER_ERASURE_MIGRATION, PLAYER_ERASURE_CUTOVER_META } from './identity.mjs';
 import { createMediaDeletionsQueue, MEDIA_DELETIONS_TABLE, MEDIA_DELETIONS_MIGRATION, assertMediaQueueConsistent } from './mediaDeletions.mjs';
 import * as m0001 from './migrations/0001_org_users.mjs';
 import * as m0002 from './migrations/0002_core_identity_shadow.mjs';
@@ -349,7 +349,21 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   if (contactsOffersPlan) CONTACTS_OFFERS_SNAPSHOT.assert(sqlite, { label: 'the snapshot (contacts, offers, requests and cases together)' });
   // S8d: foreign_key_check over the ten typed tables whenever this snapshot touched them.
   if (signingsPlan?.typed) SIGNINGS_FOLLOWUPS_SNAPSHOT.assert(sqlite, { label: 'the snapshot (signings, follow-ups and outcomes)' });
+  // A saved snapshot is never a first installation: the server attaches to the
+  // tables it wrote and never initialises them from its seed.
+  const settle = sqlite.prepare("UPDATE meta SET value = 'done' WHERE key = ? AND value = 'pending'");
+  for (const key of [ORGS_INIT_META, CORE_IDENTITY_INIT_META]) settle.run(key);
   return written;
+}
+
+/**
+ * Snapshot mode (`openStore(dir)` without options: tools and fixtures) brings
+ * the file up to the current table schema when it opens it, exactly as a boot
+ * would, so a snapshot save writes every table-backed collection into its
+ * table. There is no blob path for those collections any more.
+ */
+export function migrateForSnapshot(sqlite, { now = Date.now() } = {}) {
+  return runDataMigrations(sqlite, DATA_MIGRATIONS, { now });
 }
 
 export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.now, log = () => {}, warn = (m) => console.warn(m) }) {

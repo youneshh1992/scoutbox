@@ -118,9 +118,8 @@ const db = buildSeed({ demo: demoSeedEnabled() });
 
 // ------------------------------------------------------------- persistence
 // SQLite-backed snapshot store (store.mjs): the working set stays in memory,
-// every save is an atomic transaction into data/scoutbox.db, and a legacy
-// data/db.json is imported once on first boot. Saves are debounced and
-// flushed on shutdown.
+// every save is an atomic transaction into data/scoutbox.db. Saves are
+// debounced and flushed on shutdown.
 // DATA_DIR override keeps destructive tests on isolated throwaway databases.
 const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
@@ -132,7 +131,7 @@ let snapshotIdCounter = 0; // applied when the id counter initialises below
 function loadSnapshot() {
   try {
     const raw = store.load();
-    // `null` means nothing was ever saved here (and no legacy db.json): a first
+    // `null` means nothing was ever saved here: a first
     // installation, run from the seed. Anything else is a saved snapshot and is
     // never mistaken for a new installation — since S4a the players and
     // guardians are table-backed and are NOT in the blobs, so their absence
@@ -149,9 +148,6 @@ function loadSnapshot() {
     console.log(`snapshot loaded (${store.engine}): ${Array.isArray(db.players) ? `${db.players.length} players in the blob` : 'players table-backed'}, ${Array.isArray(db.ledger) ? `${db.ledger.length} ledger rows in the blob` : 'ledger table-backed'}`);
   } catch (err) {
     if (err?.code === 'SNAPSHOT_INVALID') throw err;
-    // A legacy db.json that could not be imported is a snapshot that exists
-    // and must not be overwritten by a seed save on first boot: stop here.
-    if (err?.code === 'LEGACY_IMPORT_FAILED') throw err;
     console.error('snapshot load failed — running from seed:', err.message);
   }
 }
@@ -4649,7 +4645,7 @@ const m13Ctx = registerM13({
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
-  createSession, currentIdCounter, DATA_DIR,
+  createSession, currentIdCounter, DATA_DIR, backupDatabase: (file) => store.copyTo(file),
 });
 
 // ------------------------------------------------------------ Milestone 14

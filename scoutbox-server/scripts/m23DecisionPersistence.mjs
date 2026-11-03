@@ -210,16 +210,16 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
   // an operator fixes a copy by hand. The old contract ("tolerated on disk, omitted on read") is kept below for the
   // corrupt rows the cutover does carry losslessly: every row defect but the dangling chain pointer.
   {
+    // Since §4.2 a snapshot is written straight into the tables (store.mjs, snapshot mode): the save itself refuses
+    // such a file, names the entries, and writes nothing; there is no blob for a later boot to import.
     const refused = async (label, rows, pattern) => {
       const D = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-refused-'));
       const fixture = baseDb(); fixture.roomDecisions.push(legacyRow({ supersededById: 'rdec-formal-2' }), headRow({ supersedes: 'rdec-legacy' }), ...rows);
-      openStore(D).save({ db: fixture });
-      const r = await bootOn(D, PORT + 1);
-      const refusal = r.log().split('\n').find((l) => /0016_recruitment_cases failed/.test(l)) ?? '';
-      if (r.up) await r.stop();
-      ok(!r.up && pattern.test(refusal), `${label}: the boot is REFUSED at the S8b cutover, the refusal names the entries (${refusal.replace(/^.*failed: /, '').slice(0, 160)}…)`);
-      const kept = openStore(D).load()?.db ?? null;
-      ok(kept && stableJson(kept.roomDecisions) === stableJson(fixture.roomDecisions) && stableJson(kept.recruitmentCases) === stableJson(fixture.recruitmentCases), `${label}: the file is exactly as it was — nothing deleted, nothing repaired, no table created`);
+      let err = null;
+      try { openStore(D).save({ db: fixture }); } catch (e) { err = e; }
+      const refusal = String(err?.message ?? '');
+      ok(!!err && pattern.test(refusal), `${label}: the save is REFUSED and the refusal names the entries (${refusal.slice(0, 160)}…)`);
+      ok(openStore(D).load() === null, `${label}: nothing was written — nothing deleted, nothing repaired`);
     };
     await refused('three alien entries (null, a string, a number)', [null, 'string', 42], /roomDecisions entry #2 is not an object \(null\); roomDecisions entry #3 is not an object \(a string\); roomDecisions entry #4 is not an object \(a number\)/);
     await refused('eight corrupt rows whose chain pointer names a decision that does not exist', bad, /DECISION_CHAIN_BROKEN: 8 decision chain reference\(s\).*rdec-bad-outcome \(room case-x\) names x1 \(supersededById\): no such decision/);

@@ -272,27 +272,24 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
 }
 
 // ======================================================= 3b — alien entries (S8a-core)
-section('3b — alien entries in the trials store refuse the cutover with their positions; the file is not modified');
+section('3b — alien entries in the trials store are refused with their positions; the file is not modified');
 {
-  // Before S8a-core the boot ignored a null, a string or a number in the trials blob; since migration 0015 imports the
-  // blob into rows through the repository's own validation, an entry that is not a record is refused with its position
-  // and ids only, nothing is imported and the next boot refuses the same way (plan §D.7.3, §D.8.5) — an operator fixes
-  // a COPY by hand; nothing is dropped or repaired silently.
+  // A null, a string or a number in the trials store is not a record. Since §4.2 a snapshot is written straight into the
+  // tables (store.mjs, snapshot mode), so the refusal comes from the save itself, with each entry's position and kind and
+  // nothing written; there is no blob for a later boot to import. Nothing is dropped or repaired silently.
   const ALIEN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-alien-'));
   const db = baseDb();
   db.trials.push(soundTrial(), null, 'string', 42);
   db.requests = [{ id: 'req-1', orgId: 'org-x', orgName: 'X FC', orgType: 'club', orgVerified: true, playerId: 'pl-x', playerName: 'Xavier Adult', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'trial', message: 'Come.', trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '' }, status: 'accepted', createdAt: T0 - 1000, respondedAt: T0, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null, caseId: 'case-x', trialId: 'trial-1' }];
-  openStore(ALIEN_DIR).save({ db });
-  const beforeBlob = stableJson(openStore(ALIEN_DIR).load().db.trials);
+  let refused = null;
+  try { openStore(ALIEN_DIR).save({ db }); } catch (err) { refused = err; }
+  neg(!!refused, 'the save of a trials store holding a null, a string and a number is refused');
+  const msg = String(refused?.message ?? '');
+  neg(/RECRUITMENT_IMPORT_BLOCKED/.test(msg) && /trials entry #1 is not an object \(null\)/.test(msg) && /trials entry #2 is not an object \(a string\)/.test(msg) && /trials entry #3 is not an object \(a number\)/.test(msg), 'the refusal names each alien entry by its position and kind, nothing else');
+  neg(openStore(ALIEN_DIR).load() === null, 'nothing was written: the directory is still a first installation');
   const s = await bootOn(ALIEN_DIR, PORT + 2);
-  neg(!s.up, 'the server does not boot on a trials store holding a null, a string and a number');
-  const log = s.log();
-  neg(/RECRUITMENT_IMPORT_BLOCKED/.test(log) && /trials entry #1 is not an object \(null\)/.test(log) && /trials entry #2 is not an object \(a string\)/.test(log) && /trials entry #3 is not an object \(a number\)/.test(log), 'the refusal names each alien entry by its position and kind, nothing else');
-  neg(/Boot aborted; the database was not modified/.test(log), 'the boot is aborted and the database is not modified');
-  const afterBlob = openStore(ALIEN_DIR).load();
-  neg(stableJson(afterBlob.db.trials) === beforeBlob && afterBlob.db.trials.length === 4, 'the trials blob still holds the four entries exactly as written — nothing imported, dropped or "repaired"');
-  const again = await bootOn(ALIEN_DIR, PORT + 3);
-  neg(!again.up && /RECRUITMENT_IMPORT_BLOCKED/.test(again.log()), 'the next boot refuses the same way');
+  ok(s.up, 'a server started on the directory boots from its seed (the refused snapshot left nothing behind)');
+  if (s.up) await s.stop();
 }
 
 // ======================================================= 4 — clean boot, live flow, restart

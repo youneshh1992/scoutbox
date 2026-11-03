@@ -815,7 +815,7 @@ section('F12D — backup and isolated restore');
 {
   let r = await fetch(`${BASE}/admin/backup`, { method: 'POST', headers: A() });
   const backup = await r.json();
-  ok(r.status === 201 && backup.manifest.files[0].path === 'db.json' && backup.manifest.files.every((f) => f.sha256), 'backup written with checksummed manifest');
+  ok(r.status === 201 && backup.manifest.files[0].path === 'scoutbox.db' && backup.manifest.files.every((f) => f.sha256), 'backup written with checksummed manifest');
   r = await fetch(`${BASE}/admin/backup/verify`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ dir: path.basename(backup.dir) }) });
   ok((await r.json()).ok === true, 'backup verifies against its manifest');
 
