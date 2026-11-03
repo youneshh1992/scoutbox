@@ -302,7 +302,7 @@ section('§12 — the fault layer is inert in production and refuses to be confi
   neg(prod.enabled === false && prod.rules().length === 0, 'in production the layer is disabled and loads NO rules even when the variable is set');
   const routes = []; prod.install({ use() {}, post(p) { routes.push(p); } });
   neg(!routes.includes('/__faults'), 'and the runtime control route is not mounted');
-  neg(productionConfigProblems({ env: { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 's', SCOUTBOX_FAULTS: 'x' } }).some((p) => p.code === 'FAULTS_IN_PRODUCTION' && p.fatal),
+  neg(productionConfigProblems({ env: { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', SCOUTBOX_FAULTS: 'x' } }).some((p) => p.code === 'FAULTS_IN_PRODUCTION' && p.fatal),
     'a production boot with SCOUTBOX_FAULTS set is a fatal configuration problem');
   const dev = createFaultLayer({ env: { NODE_ENV: 'development' } });
   ok(dev.enabled && dev.rules().length === 0, 'development with no variable is enabled and empty (a no-op)');
@@ -788,7 +788,7 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
   await sleep(800);
   const PPORT = PORT + 10; const PBASE = `http://localhost:${PPORT}`;
   const PDATA = mkdtempSync(path.join(tmpdir(), 'sbx-m182prod-'));
-  const prodEnv = { ...process.env, NODE_ENV: 'production', PORT: String(PPORT), DATA_DIR: PDATA, M13_QUIET_LOGS: '1', SCOUTBOX_MEDIA_SECRET: 'm182-test-secret-value-not-real', ADMIN_KEY: 'm182-test-admin-key-not-real' }; // PRE-M24 (PM-1): a real deployment names its own admin key
+  const prodEnv = { ...process.env, NODE_ENV: 'production', PORT: String(PPORT), DATA_DIR: PDATA, M13_QUIET_LOGS: '1', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'm182-test-admin-key-not-real' }; // PRE-M24 (PM-1): a real deployment names its own admin key
   const withFaults = spawn(process.execPath, [SERVER], { env: { ...prodEnv, SCOUTBOX_FAULTS: 'unavailable:/org/players' }, stdio: 'ignore' });
   children.push(withFaults);
   const exited = await new Promise((resolve) => { const t = setTimeout(() => resolve(null), 8000); withFaults.on('exit', (code) => { clearTimeout(t); resolve(code); }); });

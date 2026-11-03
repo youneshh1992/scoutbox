@@ -266,7 +266,7 @@ them.
 | `deliveryCallbacksSeen` | temporary (string[], capped 5k) | 08 | `delivery_callbacks_seen` (+ `seen_at` for the cap) | S13 |
 | `deliveryCentreSince` | persistent (number) | 08 | `ops_settings` key `delivery_centre_since` | S13 |
 | `deliveryFailInject` | operational/test (object) | 08 | `ops_settings` keys `delivery_fail_inject.<channel>` | S13 |
-| `secrets` | secret (`mediaSign`) | 08 | no table: moves to env `MEDIA_SECRET`, not copied by the migration | S13 |
+| `secrets` | secret (`mediaSign`) | 08 | no table: the key is env `MEDIA_SECRET` only | **retired** (3 Nov 2026; the server no longer reads or writes it) |
 | `mediaBlobs` | dead (legacy, always `{}` after boot, `server.mjs:246-249`) | 01 | none; dropped at S14 | — |
 
 Not stores (per `storeContract.mjs NOT_A_STORE`): `schema` (the snapshot migration
@@ -922,7 +922,7 @@ the route and response half is named with its plan step.
    `pairingCodes.code` (`3766`), `vouches.code` (`3692`), `orgInvites.token`
    (`m13/enterprise.mjs:80`), `ssoStates.state/nonce` (`274`), `boxSessions.nonce`
    (`m16/sessions.mjs:89`), `users.mfa.secretB32` (`m13/mfa`), `webhookEndpoints.secret`,
-   `secrets.mediaSign` (`server.mjs:345`), and one-time codes inside `outbox.text`. Schema:
+   `secrets.mediaSign` (`server.mjs:345`; fixed 3 Nov 2026, the key is env-only), and one-time codes inside `outbox.text`. Schema:
    `*_hash` columns everywhere except push tokens and webhook secrets (OPEN: encrypt at rest
    with a key from env); `mediaSign` leaves the database; `outbox.text` retention OPEN.
 2. **Unsalted sha256 for API keys, verification tokens and share tokens** (`m13/imports.mjs`,

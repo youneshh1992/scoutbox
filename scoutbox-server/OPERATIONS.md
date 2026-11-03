@@ -64,7 +64,7 @@ mismatches section).
 | **`SCOUTBOX_ALLOWED_ORIGINS`** | Comma-separated CORS allowlist | unset = permissive in dev |
 | **`SCOUTBOX_TRUST_PROXY`** | Proxy hops or subnets to trust for client IP (`0`, `1`, `true`, `loopback, 10.0.0.0/8`) | unset = trust none. Invalid value is fatal in production (`TRUST_PROXY_INVALID`) |
 | **`SCOUTBOX_RATE_LIMIT_PROVIDER`** | Rate-limit backend | `memory`. Any other value refuses to start: no shared backend exists |
-| **`MEDIA_SECRET`** | HMAC key for signed media URLs | unset = a random key stored in the snapshot (`db.secrets.mediaSign`). Note: capabilities checks `SCOUTBOX_MEDIA_SECRET` and requires it in production (`MEDIA_SECRET_MISSING`), but the server never reads that name |
+| **`MEDIA_SECRET`** | HMAC key for signed media URLs | unset = a random key per process, never stored (links stop verifying after a restart; clients re-mint them). Production: required, 32+ chars (`MEDIA_SECRET_MISSING`) |
 | **`DELIVERY_CALLBACK_SECRET`** | HMAC for `POST /callbacks/delivery` | `local-fake-callback-secret` |
 | **`SENDGRID_API_KEY`** / **`MAIL_FROM`** | Real mail transport / sender | unset = dev outbox. `MAIL_FROM` defaults to `noreply@scoutbox.app`. Note: capabilities reports `email_transport` from `SCOUTBOX_SMTP_URL` / `SMTP_URL`, which nothing else reads |
 | **`EXPO_ACCESS_TOKEN`** | Real push via Expo | unset = dev push log |
@@ -196,9 +196,8 @@ These routes exist (`m13/enterprise.mjs`). Admin routes need the `x-admin-key` h
 - **Restore:** copy the backup into a new, empty directory and boot with `DATA_DIR`
   pointing at it. The first boot imports `db.json` and runs every table migration over
   it. Never restore over a live directory.
-- Backups contain personal (seed) data. The manifest says they contain no server secrets.
-  However, the auto-generated media signing key lives in the snapshot (`db.secrets`), so
-  that claim depends on whether the export strips it.
+- Backups contain personal (seed) data but no server secrets: `ADMIN_KEY` and
+  `MEDIA_SECRET` live only in the environment.
 
 ## External adapters (`adapters.mjs`, `m13/delivery.mjs`)
 

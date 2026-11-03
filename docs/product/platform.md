@@ -144,7 +144,7 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 
 - ✓ The error table has no default: `httpStatusFor = code => M23_ERROR_HTTP[code] ?? null`, null-prototype table (`m23/errors.mjs:26,234`); `sendDomainError`/`publicErrorBody` at `:284,311`.
 - ✓ Fatal production gates `ADMIN_KEY_UNSAFE`, `AGENT_TEST_PROVIDER_IN_PRODUCTION` and `TEST_PROVIDER_IN_PRODUCTION` exist (`m181/capabilities.mjs:137-187`), and boot throws on them (`server.mjs:5058-5066`).
-- ≠ Media secret: the gate reads `SCOUTBOX_MEDIA_SECRET`, but signing reads `MEDIA_SECRET` (`server.mjs:432`).
+- ✓ Media URLs are signed with `MEDIA_SECRET` only, which production requires (32+ characters). Development uses a per-process key; nothing is stored in the database.
 - ✓ The temporal parsers exist (`temporal.mjs:91-311`). Quiet hours default to `PLATFORM_HOME_ZONE='Europe/London'` (`server.mjs:830`) and the zone is validated (`:4140`).
 - ✓ Boot order loadSnapshot → runMigrations → … → `app.listen` (`server.mjs:184,190,5184`).
 - ✓ The Node contract is ≥22.16 / ≥24 with no JSON fallback (`runtime.mjs:26,40`).

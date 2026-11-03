@@ -134,7 +134,7 @@ section('§50 — the capability report is honest and carries no secrets');
 {
   const rl = createRateLimiter({ provider: 'memory' });
   const report = buildCapabilityReport({
-    env: { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 'super-secret-value', SCOUTBOX_SMTP_URL: 'smtp://user:pw@host' },
+    env: { NODE_ENV: 'production', MEDIA_SECRET: 'super-secret-value-for-the-report-test-0123', SCOUTBOX_SMTP_URL: 'smtp://user:pw@host' },
     rateLimit: rl,
     providers: [{ id: 'web_client', status: 'limited', testOnly: false }, { id: 'sim', status: 'configured', testOnly: true }],
   });
@@ -162,18 +162,18 @@ section('§49 — capability states are not inflated');
 
 section('§48 — boot refuses configuration that is unsafe in production');
 {
-  const prod = { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 's', BOX_CAM_TEST_PROVIDER: '1' };
+  const prod = { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', BOX_CAM_TEST_PROVIDER: '1' };
   neg(productionConfigProblems({ env: prod }).some((p) => p.code === 'TEST_PROVIDER_IN_PRODUCTION' && p.fatal),
     'the simulated observer is fatal in production');
   neg(productionConfigProblems({ env: { NODE_ENV: 'production' } }).some((p) => p.code === 'MEDIA_SECRET_MISSING'),
     'a missing media signing secret is fatal in production');
-  neg(productionConfigProblems({ env: { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 's', ALLOW_DEV_LOGINS: '1' } })
+  neg(productionConfigProblems({ env: { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ALLOW_DEV_LOGINS: '1' } })
     .some((p) => p.code === 'DEV_LOGIN_IN_PRODUCTION' && p.fatal), 'dev login is fatal in production');
   neg(productionConfigProblems({ env: {}, trustWeightsTotal: 95 }).some((p) => p.code === 'TRUST_WEIGHTS_INVALID' && p.fatal),
     'Trust Score weights that do not total 100 are fatal in EVERY mode — a wrong score is not a development-only problem');
   // PRE-M24 (PM-1, PM-2): the admin key and the synthetic licence register.
-  const SAFE = { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 's', ADMIN_KEY: 'a-long-production-admin-key-0123' };
-  neg(productionConfigProblems({ env: { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 's' } }).some((p) => p.code === 'ADMIN_KEY_UNSAFE' && p.fatal),
+  const SAFE = { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'a-long-production-admin-key-0123' };
+  neg(productionConfigProblems({ env: { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef' } }).some((p) => p.code === 'ADMIN_KEY_UNSAFE' && p.fatal),
     'PM-1: an unset ADMIN_KEY is fatal in production (the T&S API would accept the public development key)');
   neg(productionConfigProblems({ env: { ...SAFE, ADMIN_KEY: 'scoutbox-admin' } }).some((p) => p.code === 'ADMIN_KEY_UNSAFE' && p.fatal),
     'PM-1: the development default key is fatal in production');

@@ -5,11 +5,6 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
 
 ## Configuration and boot
 
-- **The media-signing secret has two names.** The production gate and `/capabilities` check `SCOUTBOX_MEDIA_SECRET`
-  (`m181/capabilities.mjs` around line 144). Media URLs are signed with `MEDIA_SECRET`, falling back to a generated
-  secret stored in the database (`db.secrets.mediaSign`, `server.mjs` around line 432). So setting the gated variable
-  changes nothing. The README and tests use one name; `scoutbox-server/.env.example` uses the other.
-  Backups may contain the stored secret.
 - **`/capabilities` reports adapters from names the adapters don't read:** `SCOUTBOX_SMTP_URL`/`SMTP_URL`,
   `SCOUTBOX_IDV_PROVIDER` and `SCOUTBOX_STORAGE_BUCKET`, whereas the adapters read `SENDGRID_API_KEY`,
   `ONFIDO_API_TOKEN` and `S3_BUCKET`.

@@ -89,8 +89,8 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
         note: 'Without it, media is stored on the local disk of this instance.',
       },
       media_signing_secret: {
-        state: flag(env.SCOUTBOX_MEDIA_SECRET) ? 'configured' : 'not_configured',
-        note: 'A per-deployment secret. Without one a development secret is used, which is not safe for production.',
+        state: flag(env.MEDIA_SECRET) ? 'configured' : 'not_configured',
+        note: 'A per-deployment secret (MEDIA_SECRET). Without one, development signs with a random key per process, so links stop working after a restart; production refuses to start.',
       },
       box_cam_test_provider: {
         state: env.BOX_CAM_TEST_PROVIDER === '1' ? 'test_only' : 'not_configured',
@@ -129,6 +129,8 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
  * while leaving development exactly as it was. Returns the list of problems;
  * the caller decides whether to throw (it does, in production mode).
  */
+export const MEDIA_SECRET_MIN_LENGTH = 32;
+
 export function productionConfigProblems({ env = process.env, trustWeightsTotal = null } = {}) {
   const problems = [];
   const production = env.NODE_ENV === 'production';
@@ -148,10 +150,13 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
       fatal: true,
     });
   }
-  if (production && !env.SCOUTBOX_MEDIA_SECRET) {
+  // Signed media URLs are the capability to fetch a player's footage; their
+  // HMAC key must be the deployment's own, stable across restarts and
+  // instances, and long enough not to be guessed.
+  if (production && String(env.MEDIA_SECRET ?? '').length < MEDIA_SECRET_MIN_LENGTH) {
     problems.push({
       code: 'MEDIA_SECRET_MISSING',
-      message: 'SCOUTBOX_MEDIA_SECRET is unset, so signed media URLs would be signed with the development secret.',
+      message: `MEDIA_SECRET is unset or shorter than ${MEDIA_SECRET_MIN_LENGTH} characters; signed media URLs need a stable secret of the deployment's own.`,
       fatal: true,
     });
   }

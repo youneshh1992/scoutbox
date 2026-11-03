@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.mjs';
 import { parseTrustProxy } from '../httpTrust.mjs';
-import { buildCapabilityReport, devLoginsEnabled, productionConfigProblems } from '../m181/capabilities.mjs';
+import { buildCapabilityReport, devLoginsEnabled, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems } from '../m181/capabilities.mjs';
 
 let passed = 0;
 async function test(name, fn) {
@@ -113,7 +113,7 @@ await test('req.ip: an invalid value behaves like nothing trusted', async () => 
 });
 
 // ------------------------------------------------- m181/capabilities.mjs
-const PROD = { NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 's', ADMIN_KEY: 'a-long-production-admin-key-0123' };
+const PROD = { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'a-long-production-admin-key-0123' };
 await test('boot: a test IdP secret on a production instance is fatal', () => {
   const problems = productionConfigProblems({ env: { ...PROD, TEST_IDP_SECRET: 'copied-from-dev' }, trustWeightsTotal: 100 });
   assert.ok(problems.some((p) => p.code === 'TEST_IDP_IN_PRODUCTION' && p.fatal));
@@ -148,6 +148,17 @@ await test('boot: ALLOW_DEV_LOGINS on a production instance is fatal, whatever i
   }
   assert.equal(productionConfigProblems({ env: { ...PROD, ALLOW_DEV_LOGINS: '' }, trustWeightsTotal: 100 }).length, 0, 'an empty value (.env.example) is unset');
   assert.equal(productionConfigProblems({ env: { ALLOW_DEV_LOGINS: '1' }, trustWeightsTotal: 100 }).length, 0);
+});
+await test('boot: production needs MEDIA_SECRET of 32+ characters; the old SCOUTBOX_MEDIA_SECRET name does not count', () => {
+  const { MEDIA_SECRET: _m, ...noSecret } = PROD;
+  const fatal = (env) => productionConfigProblems({ env, trustWeightsTotal: 100 }).some((p) => p.code === 'MEDIA_SECRET_MISSING' && p.fatal);
+  assert.ok(fatal(noSecret));
+  assert.ok(fatal({ ...noSecret, SCOUTBOX_MEDIA_SECRET: PROD.MEDIA_SECRET }), 'the name the server never read is not accepted');
+  assert.ok(fatal({ ...noSecret, MEDIA_SECRET: 'x'.repeat(MEDIA_SECRET_MIN_LENGTH - 1) }));
+  assert.ok(!fatal({ ...noSecret, MEDIA_SECRET: 'x'.repeat(MEDIA_SECRET_MIN_LENGTH) }));
+  assert.ok(!fatal({}), 'development signs with a per-process key');
+  assert.equal(buildCapabilityReport({ env: { MEDIA_SECRET: PROD.MEDIA_SECRET } }).capabilities.media_signing_secret.state, 'configured');
+  assert.equal(buildCapabilityReport({ env: { SCOUTBOX_MEDIA_SECRET: PROD.MEDIA_SECRET } }).capabilities.media_signing_secret.state, 'not_configured');
 });
 await test('dev logins: one rule — on in development, off in production with no override', () => {
   assert.equal(devLoginsEnabled({}), true);

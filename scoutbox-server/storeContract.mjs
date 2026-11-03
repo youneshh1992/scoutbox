@@ -188,7 +188,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   roomSnapshots: { guarantee: 'migration', owner: 'm17', reason: 'Recruitment Room collection, guaranteed by the migration registry' },
   savedSearches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   secondLookItems: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
-  secrets: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   sessions: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   signings: { guarantee: 'migration', owner: 'core', reason: 'the evidence the signed lifecycle state rests on; exactly one writer in the repository — recordCompletedSigning in m29 since P7' },
   // M23 P7 — the signing workflow. Guaranteed by migration 2308 (m280_001_signing_workflow).

@@ -247,7 +247,7 @@ await new Promise((res) => setTimeout(res, 300));
 // signing secret, so this production-mode section supplies one — a real
 // deployment would. The assertion itself is exercised directly in m181E2E.
 // PRE-M24 (PM-1): production also refuses to start without its own admin key.
-await startServer({ NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 'connected-e2e-media-secret', ADMIN_KEY: 'connected-e2e-admin-key-not-real' });
+await startServer({ NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'connected-e2e-admin-key-not-real' });
 r = await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId: 'pl-adeyemi' }) });
 ok(r.status === 403 && r.body.error === 'DEV_LOGIN_DISABLED', 'passwordless seed player login refused in production');
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane' }) });

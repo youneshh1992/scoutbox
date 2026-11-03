@@ -427,9 +427,12 @@ app.use(requestInstrumentation());
 // caller only ever holds links to media it was allowed to see. Direct
 // bearer-authenticated fetches are also accepted, re-checked against the
 // owning player's visibility.
-db.secrets ??= {};
-db.secrets.mediaSign ??= crypto.randomBytes(24).toString('base64url');
-const MEDIA_SIGN_SECRET = process.env.MEDIA_SECRET || db.secrets.mediaSign;
+//
+// The key comes from MEDIA_SECRET only; production refuses to boot without it
+// (productionConfigProblems). In development an unset key is a fresh random
+// one per process, never stored: links minted before a restart stop verifying,
+// and clients re-mint them on their next fetch.
+const MEDIA_SIGN_SECRET = process.env.MEDIA_SECRET || crypto.randomBytes(32).toString('base64url');
 // Short-lived on purpose: clients refetch constantly (SSE ticks), so links are
 // re-minted long before expiry. Possession of a URL is NOT authority — the
 // signature binds the URL to the minting session, and the serve route

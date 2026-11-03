@@ -237,11 +237,11 @@ await stop(S);
 section('P — production refuses to start without its own admin key (PM-1)');
 {
   const d2 = mkdtempSync(path.join(tmpdir(), 'sbx-prem24p-'));
-  const p1 = await boot({ NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 'sweep-media-secret' }, d2, PORT + 201);
+  const p1 = await boot({ NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef' }, d2, PORT + 201);
   neg(!p1.up && /Refusing to start: .*ADMIN_KEY_UNSAFE/.test(p1.log()), 'P1 NODE_ENV=production with no ADMIN_KEY: the server refuses to start (ADMIN_KEY_UNSAFE)');
-  const p2 = await boot({ NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 'sweep-media-secret', ADMIN_KEY: 'scoutbox-admin' }, d2, PORT + 202);
+  const p2 = await boot({ NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'scoutbox-admin' }, d2, PORT + 202);
   neg(!p2.up && /ADMIN_KEY_UNSAFE/.test(p2.log()), 'P2 the development default key is refused too');
-  const p3 = await boot({ NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 'sweep-media-secret', ADMIN_KEY: 'sweep-production-admin-key-0123' }, d2, PORT + 203);
+  const p3 = await boot({ NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'sweep-production-admin-key-0123' }, d2, PORT + 203);
   ok(p3.up, 'P3 with its own key the production server starts');
   if (p3.up) {
     const def = await fetch(`http://localhost:${PORT + 203}/admin/reports`, { headers: { 'x-admin-key': 'scoutbox-admin' } });
@@ -251,7 +251,7 @@ section('P — production refuses to start without its own admin key (PM-1)');
     neg(dev.status !== 200, `P5 passwordless demo logins stay refused in production (${dev.status})`);
     await stop(p3);
   }
-  const p4 = await boot({ NODE_ENV: 'production', SCOUTBOX_MEDIA_SECRET: 'sweep-media-secret', ADMIN_KEY: 'sweep-production-admin-key-0123', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, d2, PORT + 204);
+  const p4 = await boot({ NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'sweep-production-admin-key-0123', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, d2, PORT + 204);
   neg(!p4.up && /AGENT_TEST_PROVIDER_IN_PRODUCTION/.test(p4.log()), 'P6 the synthetic agent licence register is refused in production (PM-2)');
 }
 

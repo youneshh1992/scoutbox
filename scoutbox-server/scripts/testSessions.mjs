@@ -727,6 +727,48 @@ await atest('server: legacy bearer tokens survive the cutover and a restart, med
   }
 });
 
+await atest('server: media links are signed with MEDIA_SECRET only — a link survives a restart with the same secret, dies with a different or unset one, and no signing key is written to the database', async () => {
+  const dir = tempDir('media-secret');
+  const seed = buildSeed();
+  const clip = seed.players.find((p) => p.id === 'pl-adeyemi').media[0];
+  clip.url = `/media/${clip.id}`;
+  seed.mediaBlobs = { [clip.id]: { dataUrl: `data:video/webm;base64,${Buffer.from('synthetic-media-secret-bytes').toString('base64')}` } };
+  openStore(dir).save({ savedAt: Date.now(), idCounter: 1000, db: seed });
+  const port = pickPort(7800, 100);
+  const boot = (env) => new Promise((resolve, reject) => {
+    const proc = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, MEDIA_SECRET: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let log = '';
+    proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve({ proc }); });
+    proc.stderr.on('data', (d) => { log += d; });
+    proc.on('exit', (code, signal) => reject(new Error(`server exited ${code} (${signal}) on port ${port}: ${log}`)));
+    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000);
+  });
+  const stop = (S) => new Promise((resolve) => { S.proc.on('exit', () => resolve()); S.proc.kill('SIGTERM'); });
+  const status = async (url) => (await fetch(`http://127.0.0.1:${port}${url}`)).status;
+  const SECRET = 'synthetic-media-secret-0123456789abcdef';
+  let S = await boot({ MEDIA_SECRET: SECRET });
+  try {
+    const login = await (await fetch(`http://127.0.0.1:${port}/auth/player/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ playerId: 'pl-adeyemi' }) })).json();
+    const me = await (await fetch(`http://127.0.0.1:${port}/player/me`, { headers: { authorization: `Bearer ${login.token}` } })).json();
+    const url = JSON.stringify(me).match(new RegExp(`/media/${clip.id}\\?e=\\d+&s=[A-Za-z0-9_-]+&v=[A-Za-z0-9_-]+`))?.[0];
+    assert.ok(url, 'the profile carries a signed link');
+    assert.equal(await status(url), 200);
+    await stop(S); S = await boot({ MEDIA_SECRET: SECRET });
+    assert.equal(await status(url), 200, 'the same MEDIA_SECRET verifies a link minted before the restart');
+    await stop(S); S = await boot({ MEDIA_SECRET: `${SECRET}-rotated` });
+    assert.equal(await status(url), 401, 'a different secret refuses it');
+    await stop(S); S = await boot({ SCOUTBOX_MEDIA_SECRET: SECRET });
+    assert.equal(await status(url), 401, 'the old variable name is not read: development signs with a fresh per-process key');
+    await stop(S); S = null;
+    const raw = openRaw(dir);
+    assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'secrets'").get().n, 0, 'no secrets collection is saved');
+    raw.close();
+  } finally {
+    if (S) await stop(S);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 await atest('server (review correction 2): a legacy db.json with a staff member and player and org sessions boots the real server and both tokens work', async () => {
   const dir = tempDir('s2-server-dbjson');
   const seed = buildSeed();

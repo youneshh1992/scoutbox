@@ -964,13 +964,10 @@ CREATE INDEX media_deletions_queued ON media_deletions (queued_at);
 
 -- =====================================================================
 -- not tables:
---   db.secrets.mediaSign (server.mjs:345-347) — MOVES TO ENVIRONMENT, no table. Justification: the code already
---     prefers process.env.MEDIA_SECRET and only falls back to the persisted value; OPERATIONS.md:4 and :11 state
---     secrets live in the environment and media-URL signing keys are per boot, and enterprise.mjs:454 promises
---     backups contain no signing secrets — persisting it contradicts all three and puts the key in every backup.
---     The only effect of dropping it is that signed media URLs (15-minute TTL, server.mjs:354) stop verifying
---     after a restart without MEDIA_SECRET set, which the clients already tolerate (links are re-minted on every
---     SSE tick). Deployment requirement: set MEDIA_SECRET; the migration does not copy the old value.
+--   db.secrets.mediaSign — RETIRED (3 Nov 2026), no table. The signing key is process.env.MEDIA_SECRET only
+--     (required in production); development uses a random per-process key. Signed media URLs (15-minute TTL)
+--     stop verifying after a restart without MEDIA_SECRET, which clients tolerate (links are re-minted on every
+--     SSE tick).
 --   CONNECTORS registry (m13/imports.mjs:432-436) — code registry, status derived from env keys.
 --   API_SCOPES, WEBHOOK_EVENTS, RETRY_MS ladders, MAX_ATTEMPTS, EXPORT_CONTRACT_VERSION (imports.mjs) — code constants
 --     (the enum values appear as CHECKs above).
