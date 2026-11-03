@@ -24,6 +24,7 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 
 ### Production configuration
 - `NODE_ENV=production` refuses to boot (fatal) on any of: `MEDIA_SECRET_MISSING`, `ADMIN_KEY_UNSAFE` (unset, `scoutbox-admin`, or <16 characters), `TEST_PROVIDER_IN_PRODUCTION` (`BOX_CAM_TEST_PROVIDER=1`), `AGENT_TEST_PROVIDER_IN_PRODUCTION`, `FAULTS_IN_PRODUCTION` (`SCOUTBOX_FAULTS`), `TEST_IDP_IN_PRODUCTION`, `DEV_LOGIN_IN_PRODUCTION` (`ALLOW_DEV_LOGINS` set), `TRUST_WEIGHTS_INVALID`. (README, PRE_M24_DEFECT_REGISTER; code `m181/capabilities.mjs`)
+- A production first boot has no people or clubs, only the product catalogues; `SCOUTBOX_SEED_DEMO=1` opts into the demo world (decided 3 Nov).
 - Seeded passwordless dev logins, credential-less org logins and the test identity provider exist in development only, with no production override (`devLoginsEnabled` in `m181/capabilities.mjs`). Pro and Grassroots club credentials come from T&S (`POST /admin/clubs/:id/credentials`). (README, PRE_M24_DEFECT_REGISTER; decided 3 Nov)
 - Sessions expire after `SESSION_TTL_DAYS` (default 30), checked on requests, stream connect and signed media. Sign-out revokes the token (`POST /auth/logout`); any 401 or `session_expired` returns the app to login, across tabs. (PRE_M24_DEFECT_REGISTER)
 - Connected mode is the default. Demo mode only with `VITE_DEMO=1` / `EXPO_PUBLIC_DEMO=1`; a missing variable never selects mock data, and an outage shows a connection error. (README)

@@ -51,7 +51,7 @@ import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
 import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './m181/rateLimit.mjs';
-import { buildCapabilityReport, devLoginsEnabled, productionConfigProblems } from './m181/capabilities.mjs';
+import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, productionConfigProblems } from './m181/capabilities.mjs';
 import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
 import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './m182/eventRegistry.mjs';
@@ -113,7 +113,7 @@ function dateOnlyOrRefuse(res, value, field) {
 }
 
 const PORT = process.env.PORT || 4000;
-const db = buildSeed();
+const db = buildSeed({ demo: demoSeedEnabled() });
 
 // ------------------------------------------------------------- persistence
 // SQLite-backed snapshot store (store.mjs): the working set stays in memory,

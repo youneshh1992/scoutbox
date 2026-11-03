@@ -2,12 +2,20 @@
 // proxy trust parsing and its effect on req.ip, and the capability/boot
 // reporting of both. Run with: npm test (from scoutbox-server/).
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.mjs';
 import { parseTrustProxy } from '../httpTrust.mjs';
-import { buildCapabilityReport, devLoginsEnabled, liveMailConfigured, livePushConfigured, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../m181/capabilities.mjs';
+import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, liveMailConfigured, livePushConfigured, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../m181/capabilities.mjs';
 import { createBilling, createIdvProvider, createStorage } from '../adapters.mjs';
+import { buildSeed } from '../seed.mjs';
+import { pickPort } from './testPort.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 let passed = 0;
 async function test(name, fn) {
@@ -197,6 +205,59 @@ await test('capabilities: adapters are reported from the variables the adapters 
   assert.equal(caps(everything).object_storage.state, 'not_configured', 'no object storage is integrated');
   assert.equal(liveMailConfigured({ SENDGRID_API_KEY: 'k' }), true);
   assert.equal(livePushConfigured({ EXPO_ACCESS_TOKEN: '' }), false);
+});
+await test('first boot: demo data in development, catalogues only in production; SCOUTBOX_SEED_DEMO overrides either way', () => {
+  assert.equal(demoSeedEnabled({}), true);
+  assert.equal(demoSeedEnabled({ SCOUTBOX_SEED_DEMO: '0' }), false);
+  assert.equal(demoSeedEnabled({ NODE_ENV: 'production' }), false);
+  assert.equal(demoSeedEnabled({ NODE_ENV: 'production', SCOUTBOX_SEED_DEMO: '1' }), true);
+  assert.ok(productionConfigProblems({ env: { ...PROD, SCOUTBOX_SEED_DEMO: 'yes' }, trustWeightsTotal: 100 }).some((p) => p.code === 'SEED_DEMO_INVALID' && p.fatal));
+  const empty = buildSeed({ demo: false }), demo = buildSeed();
+  for (const k of ['orgs', 'guardians', 'players', 'reputationSeed']) assert.deepEqual(empty[k], [], k);
+  assert.ok(demo.orgs.length && demo.players.length && demo.guardians.length);
+  assert.deepEqual(Object.keys(empty).sort(), Object.keys(demo).sort(), 'the same containers either way');
+  assert.deepEqual(empty.plans, demo.plans, 'the product catalogues are not demo data');
+  assert.deepEqual(empty.archetypes, demo.archetypes);
+});
+await test('first boot (real server): production starts with no people or clubs, SCOUTBOX_SEED_DEMO=1 opts in, and a saved database is never re-seeded', async () => {
+  const PROD_ENV = { NODE_ENV: 'production', MEDIA_SECRET: PROD.MEDIA_SECRET, ADMIN_KEY: PROD.ADMIN_KEY };
+  const port = pickPort(7900, 100);
+  const boot = (dir, env) => new Promise((resolve, reject) => {
+    const proc = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, SCOUTBOX_SEED_DEMO: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let log = '';
+    proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(proc); });
+    proc.stderr.on('data', (d) => { log += d; });
+    proc.on('exit', (code) => reject(new Error(`server exited ${code}: ${log}`)));
+    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000);
+  });
+  const stop = (proc) => new Promise((resolve) => { proc.removeAllListeners('exit'); proc.on('exit', resolve); proc.kill('SIGTERM'); });
+  const health = async () => (await fetch(`http://127.0.0.1:${port}/health`)).json();
+  const dirs = [];
+  const fresh = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-first-boot-')); dirs.push(d); return d; };
+  try {
+    const prodDir = fresh();
+    let proc = await boot(prodDir, PROD_ENV);
+    let h = await health();
+    assert.equal(h.players, 0, 'no demo players'); assert.equal(h.orgs, 0, 'no demo clubs');
+    const directory = await (await fetch(`http://127.0.0.1:${port}/orgs/directory`)).json();
+    assert.deepEqual(directory, [], 'the public club directory is empty');
+    await stop(proc);
+    proc = await boot(prodDir, { ...PROD_ENV, SCOUTBOX_SEED_DEMO: '1' });
+    h = await health();
+    assert.equal(h.players + h.orgs, 0, 'the flag never seeds over a saved database');
+    await stop(proc);
+    proc = await boot(fresh(), { ...PROD_ENV, SCOUTBOX_SEED_DEMO: '1' });
+    h = await health();
+    assert.ok(h.players > 0 && h.orgs > 0, 'opting in loads the demo world on a first boot');
+    assert.equal(h.devLogins, false, 'and its people still have no passwordless logins');
+    await stop(proc);
+    proc = await boot(fresh(), { SCOUTBOX_SEED_DEMO: '0' });
+    h = await health();
+    assert.equal(h.players + h.orgs, 0, 'development can start empty too');
+    await stop(proc);
+  } finally {
+    for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+  }
 });
 await test('dev logins: one rule — on in development, off in production with no override', () => {
   assert.equal(devLoginsEnabled({}), true);

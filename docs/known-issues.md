@@ -11,8 +11,6 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
   (`COPY scoutbox-club/ ./`), but the portals import from outside it: `../../design-system` and, for Pro and
   Grassroots, `../../scoutbox-server/roles.mjs`. Build from the repository root (copy `design-system/` and
   `scoutbox-server/roles.mjs` into each stage) before relying on the image.
-- **There's no empty production start.** A first boot always loads the demo seed; production mode only refuses
-  the passwordless demo logins. (The migration plan's S13 makes demo data opt-in.)
 
 ## Tests
 

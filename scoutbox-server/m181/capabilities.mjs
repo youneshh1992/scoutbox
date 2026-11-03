@@ -24,6 +24,16 @@ export const CAPABILITY_STATES = ['configured', 'not_configured', 'test_only'];
  */
 export const devLoginsEnabled = (env = process.env) => env.NODE_ENV !== 'production';
 
+/**
+ * Whether a first boot (a data directory never saved to) loads the demo
+ * people and clubs. Development does unless SCOUTBOX_SEED_DEMO=0; production
+ * starts with the product catalogues only unless SCOUTBOX_SEED_DEMO=1. Later
+ * boots never seed: the saved database is authoritative.
+ */
+export const demoSeedEnabled = (env = process.env) => (
+  env.SCOUTBOX_SEED_DEMO === '1' ? true : env.SCOUTBOX_SEED_DEMO === '0' ? false : env.NODE_ENV !== 'production'
+);
+
 const isSet = (v) => v != null && String(v).trim() !== '';
 /** The mail adapter sends through SendGrid when this holds; otherwise it writes the local outbox. */
 export const liveMailConfigured = (env = process.env) => isSet(env.SENDGRID_API_KEY);
@@ -188,6 +198,13 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
         fatal: true,
       });
     }
+  }
+  if (flagged(env.SCOUTBOX_SEED_DEMO) && !['0', '1'].includes(env.SCOUTBOX_SEED_DEMO)) {
+    problems.push({
+      code: 'SEED_DEMO_INVALID',
+      message: 'SCOUTBOX_SEED_DEMO must be 1 (load the demo world on first boot) or 0 (start empty).',
+      fatal: true,
+    });
   }
   // Passwordless logins have no production override. The variable was one
   // once; an environment that still sets it expects behaviour that no longer

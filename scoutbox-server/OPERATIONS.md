@@ -19,11 +19,12 @@ is archived in git under the tag `docs-archive-2026-11`. The migration's status 
   `scoutbox.db` (SQLite), `media/` (uploaded files on local disk) and `backups/`. Tests
   point `DATA_DIR` at throwaway temporary directories. Point it at a fresh directory
   whenever you want a clean world.
-- **First boot = demo seed.** `seed.mjs` (`buildSeed()`) always builds the in-memory
-  demo world. When the directory has never been saved to, this seed initialises the
-  tables. On later boots the saved database is authoritative, even when a table is empty,
-  and the seed is never imported over it. No separate "empty production" initialisation
-  exists. `NODE_ENV=production` changes behaviour, not data:
+- **First boot.** When the directory has never been saved to, `seed.mjs` (`buildSeed()`)
+  initialises it. In development that is the demo world (people, clubs, track records);
+  in production it is the product catalogues only (plans, archetypes) and no people or
+  clubs. `SCOUTBOX_SEED_DEMO=1` or `=0` overrides either way (`demoSeedEnabled` in
+  `m181/capabilities.mjs`). On later boots the saved database is authoritative, even when a
+  table is empty, and the seed is never imported over it. `NODE_ENV=production` also:
   - passwordless seeded demo logins are refused (`DEV_LOGIN_DISABLED`);
   - the fault-injection layer and the test identity provider are disabled;
   - the unsafe-configuration checks below become fatal at boot.
@@ -57,6 +58,7 @@ are refused in production.
 | **`PORT`** | HTTP port | `4000` |
 | **`DATA_DIR`** | Database, media and backups directory | `scoutbox-server/data` |
 | **`NODE_ENV`** | `production` switches off dev shortcuts and makes config checks fatal | development |
+| **`SCOUTBOX_SEED_DEMO`** | `1` loads the demo world on a first boot, `0` starts empty. Ignored once the database has been saved | unset = demo in development, empty in production. Any other value is fatal in production (`SEED_DEMO_INVALID`) |
 | `ALLOW_DEV_LOGINS` | Not read. Passwordless demo logins exist in development only | Setting it in production is fatal (`DEV_LOGIN_IN_PRODUCTION`) |
 | **`ADMIN_KEY`** | Shared key for `/admin` (header `x-admin-key`) | `scoutbox-admin`. Production: required, 16+ chars, not the default (`ADMIN_KEY_UNSAFE`) |
 | **`SESSION_TTL_DAYS`** | Session lifetime, judged against the current value (a change applies to existing sessions) | `30` |

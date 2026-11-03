@@ -8,7 +8,12 @@
 // reach the same definition. The values are unchanged.
 import { planCatalogue, archetypeCatalogue } from './catalogue.mjs';
 
-export function buildSeed() {
+/**
+ * The world a first boot starts from. `demo: false` keeps only the product
+ * catalogues (plans, archetypes) and every container empty: no people, clubs
+ * or track records. The server picks with demoSeedEnabled() (m181/capabilities.mjs).
+ */
+export function buildSeed({ demo = true } = {}) {
   const now = Date.now();
   const day = 24 * 60 * 60 * 1000;
 
@@ -468,11 +473,11 @@ export function buildSeed() {
   players.find((p) => p.id === 'pl-carvalho').level = 'semi_pro';
 
   return {
-    orgs,
-    guardians,
-    players,
+    orgs: demo ? orgs : [],
+    guardians: demo ? guardians : [],
+    players: demo ? players : [],
     archetypes,
-    reputationSeed,
+    reputationSeed: demo ? reputationSeed : [],
     plans,
     users: [],       // org scout users, created at org login (with verified role)
     requests: [],    // contact/trial requests (minors: routed to guardian)
