@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 if (!fs.existsSync(path.join(root, 'CLAUDE.md'))) throw new Error('ScoutBox project instructions are missing.');
 const url = new URL('claude://code/new');
 url.searchParams.set('folder', root.replace(/\/$/, ''));
-url.searchParams.set('q', 'Use this local ScoutBox checkout. Read CLAUDE.md, HANDOFF_CLAUDE_UI.md and the final approval in BRAND_RULES.md. Preserve the approved Player design from commit 99de825 and subsequent authorized changes. Confirm you can read the source and project instructions; do not redesign, push, merge or deploy.');
+url.searchParams.set('q', 'Use this local ScoutBox checkout. Read CLAUDE.md and docs/design.md. Preserve the approved designs and subsequent authorised changes. Confirm you can read the source and project instructions; do not redesign, push, merge or deploy.');
 if (process.argv.includes('--print-url')) {
   console.log(url.href);
 } else {

@@ -8,7 +8,7 @@ are data, not fixed design requirements. Captures are viewport examples,
 not a complete catalogue of every application state.
 
 `chat-dark.png` is an earlier conversation reference retained for context.
-The current implementation and final approval in `BRAND_RULES.md` take
+The current implementation and the Player approval in `docs/design.md` take
 precedence wherever an older image differs. Do not restore superseded
 vertical metadata, larger verification badges or opaque selected controls.
 

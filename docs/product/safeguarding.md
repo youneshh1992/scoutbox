@@ -4,6 +4,27 @@ Rules for under-18s and guardians, blocks and reports, privacy of player data, s
 
 > Names in brackets, like (M17_RECRUITMENT_ROOMS), are the original milestone documents. They were removed in the November 2026 cleanup; read one with `git show docs-archive-2026-11:M17_RECRUITMENT_ROOMS.md`. Founder decisions and resolved contradictions for this area are in [`../decisions.md`](../decisions.md).
 
+## Founding rules (the original product deck, Milestone 3)
+
+These are the product's first principles for under-18s. Everything below refines them. (Old README.md, "Deck rules enforced in code")
+
+- **Parents own every under-18 account.**
+  - Guardian ID verification and a safeguarding disclaimer are hard gates before a child profile can exist.
+  - A minor can't sign themselves up (`403 GUARDIAN_REQUIRED`).
+- **No child receives direct messages, ever.**
+  - It is scout → parent, not scout → child. Contact and trial requests to a minor go to the guardian.
+  - The child sees only sanitised status updates. A guardian's acceptance opens an adult-to-adult channel.
+- **Clubs.**
+  - Parents see the verified club and the sender's verified role, not a bare name.
+  - Only verified clubs ever see minors (`403 VERIFIED_CLUBS_ONLY`). Verification means a company e-mail domain plus a signed safeguarding contract.
+  - Agencies can never list, view or contact a minor.
+- **No social features.** No comments, likes, followers or public messaging. Minor profiles are app-only: the city and exact birth date are stripped from every org view.
+- **Moderation and reporting.**
+  - Personal contact details, social handles and attempts to move off-platform are blocked in messages, media titles and timeline events (`400 MODERATION_BLOCKED`).
+  - Report and Block are on every screen of every app. An urgent report suspends communication pending review.
+- **Accountability.** All communications are logged, and parents can read the full ledger for their children. Every discovery action is attributed to a named scout and org; a request without an individual user id is refused.
+- **Children keep the football.** Uploads, stats edits and drills stay under the child's control.
+
 ## How it works
 
 **Age and minority**

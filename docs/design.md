@@ -15,6 +15,20 @@ The three rules that matter most:
 - Work on one app must not restyle other apps, the shared design system or auth screens.
 
 
+## Approved baselines
+
+All four are in this branch's history. To see exactly what was approved, diff against them.
+
+| App | Approved | Commit | Branch | Demo deliverable |
+|---|---|---|---|---|
+| Player | 5 Oct 2026 | `a623e8c` (tip) | `handoff/codex-player-vivid-ui` | `e2e/dist/scoutbox-player-demo.html` |
+| Pro | 6 Oct 2026 | `f87f61d` | `design/pro-executive` | `e2e/dist/scoutbox-club-demo.html` |
+| Grassroots | 6 Oct 2026 | `5a3e7b0` | `design/grassroots-clubhouse` | `e2e/dist/scoutbox-grassroots-demo.html` |
+| Agent | 6 Oct 2026 | `7ee9ecb` | `design/agent-finance` | `e2e/dist/scoutbox-agent-demo.html` |
+
+Later fixes on top of these are allowed. A redesign is not, unless the Founder asks for one. Approving one
+app's design never reopens another's.
+
 ## Shared brand rules
 
 - **Logo.** The logo is permanent: "ScoutBox" in Albert Sans ExtraBold, a green square on the baseline after the "x", and a raised ™ above the square. Never redraw or restyle it. Albert Sans is used for the wordmark only. (BRAND_RULES, M24E_INTER_TYPOGRAPHY)

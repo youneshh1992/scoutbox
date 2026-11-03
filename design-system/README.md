@@ -22,14 +22,14 @@ every colour, size and weight below is the reference's computed value.
 
 | File | Purpose |
 |---|---|
-| `fonts.css`, `fonts/` | M24E — Inter 4.1, bundled (`Inter-VariableFont_opsz,wght.ttf` upright and `Inter-Italic-VariableFont_opsz,wght.ttf` italic, weight axis 100–900, optical-size axis; SIL Open Font License 1.1, `fonts/Inter-OFL.txt`) is the product typeface: `--sb-font` on `html`, every control and every screen; nothing is fetched at runtime. Albert Sans (`AlbertSans[wght].ttf` + `AlbertSans-normal.woff2`, `fonts/OFL.txt`) is kept for the ScoutBox wordmark only (`--sb-font-brand`, `.wordmark`). The Player carries its own copies under `scoutbox-player/assets/fonts/` because Expo bundles assets from inside the app. See `M24E_INTER_TYPOGRAPHY.md`. (The M24F Instrument Serif for the word "Grassroots" was reverted at the Founder's direction: "Grassroots" is Inter again.) |
+| `fonts.css`, `fonts/` | M24E — Inter 4.1, bundled (`Inter-VariableFont_opsz,wght.ttf` upright and `Inter-Italic-VariableFont_opsz,wght.ttf` italic, weight axis 100–900, optical-size axis; SIL Open Font License 1.1, `fonts/Inter-OFL.txt`) is the product typeface: `--sb-font` on `html`, every control and every screen; nothing is fetched at runtime. Albert Sans (`AlbertSans[wght].ttf` + `AlbertSans-normal.woff2`, `fonts/OFL.txt`) is kept for the ScoutBox wordmark only (`--sb-font-brand`, `.wordmark`). The Player carries its own copies under `scoutbox-player/assets/fonts/` because Expo bundles assets from inside the app. See `docs/design.md`. (The M24F Instrument Serif for the word "Grassroots" was reverted at the Founder's direction: "Grassroots" is Inter again.) |
 | `tokens.css` | Design tokens. `:root` is the platform light palette; `:root[data-theme="dark"]` the dark embossed palette shared by every app; `:root[data-app="agent"]` the Agent cream palette and gold label; `:root[data-app="grass"]` the Grassroots workspace surfaces and turf lines (the M24E scheme; the M24F Sage palette was reverted at the Founder's direction). The legacy names the screens read inline (`--bg`, `--panel`, `--line`, `--text`, `--muted`, `--accent`, `--accent-2`, `--gold`, `--danger`) are aliases of the new `--sb-*` tokens, so every existing screen follows the theme without a rewrite. |
 | `platform.css` | The portal shell (204px sidebar, 67px top bar, 29/26px content gutter) and every component class the portals render — buttons, inputs, chips and dot statuses, panels, ledgers, drawers, dialogs, the command palette, the phone strip — resolved onto the class names the applications and their browser suites already use. Includes the Grassroots grain and pitch markings. |
 | `icons.tsx` | The lucide icon set (ISC) as one React component. Path data is copied from `lucide-static`; legacy navigation names (`home`, `target`, `clipboard`, `building`, `inbox`, `help`, …) resolve to their lucide equivalents so `nav.ts` did not change. |
 | `theme.tsx` | `useTheme(app)` — one appearance per application, persisted under `sb-theme:<app>`, defaults from the reference (Agent dark, everything else light); `ThemeToggle` — the header switch (`role="switch"`, `aria-checked` = dark); `PREPAINT_SCRIPT` — the one-line `<head>` script each `index.html` carries so a saved theme never flashes. |
 | `text.ts` | `initials()` for avatar tiles. |
 | `AuthShell.tsx` | M24C — the authentication composition every portal signs in through: the brand-green page, a centred two-panel card (soft-green introduction ≈45%, deep-green form ≈55%, stacked under 720px), the product mark above the form, `AuthTabs` only where sign-up really exists (Grassroots registration), `AuthField` labelled underlined inputs, `PasswordInput` with show / hide, `AuthAccessNote` for invitation-only access. M24D — choices are `AuthRow`s (name, one quiet line, an arrow; `aria-pressed` when it selects), `AuthNote` for quiet notes, a `summary` sentence under the headline (all a phone shows of the introduction); no pill, emoji or icon circle on any entry screen. Styles live under `.login.auth-page` in `platform.css`; they never touch the signed-in theme tokens. The Player renders the same composition stacked, in React Native (`app/onboarding.tsx`, `AUTH_PANEL` in `theme.ts`). |
-| `caseNav.ts`, `CaseNav.tsx` | M24B — the category → subcategory navigation of one recruitment case (a Room, a client, a transaction): the model types, the hard rule `CASE_NAV_MAX_SUBS = 5` with `validateCaseNav`, strict link parsing (`parseCaseSegments`, `resolveTab` for the flat tab ids the server still emits), and the two-row control (segmented categories with `aria-current`, an ARIA tablist of pages, `casePanelProps` for the panel, `CaseCrumb`). Each application keeps its own model in `src/caseNav.ts`; the Player repeats the model in plain TypeScript. See `M24_RECRUITMENT_NAVIGATION_IA.md`. |
+| `caseNav.ts`, `CaseNav.tsx` | M24B — the category → subcategory navigation of one recruitment case (a Room, a client, a transaction): the model types, the hard rule `CASE_NAV_MAX_SUBS = 5` with `validateCaseNav`, strict link parsing (`parseCaseSegments`, `resolveTab` for the flat tab ids the server still emits), and the two-row control (segmented categories with `aria-current`, an ARIA tablist of pages, `casePanelProps` for the panel, `CaseCrumb`). Each application keeps its own model in `src/caseNav.ts`; the Player repeats the model in plain TypeScript. See `docs/product/navigation.md`. |
 | `reference/` | The approved design explorer, unchanged. |
 
 ## How an application uses it
@@ -62,8 +62,8 @@ screen carries ONE section-level line instead. "Manage your…", "Here you
 can…", "Use this to…", "Control how…" and "Choose whether…" never appear:
 the control says what it does. Safeguarding information is never hidden to
 meet the ratio — it is relocated (to the section line, to the detail a row
-opens, or to the moment the action is taken). The audit of every note that
-was kept, removed or moved is `M24F2_SUBNOTE_AUDIT.md`.
+opens, or to the moment the action is taken). The rules are in `docs/design.md`; the original
+note-by-note audit is `git show docs-archive-2026-11:M24F2_SUBNOTE_AUDIT.md`.
 
 ## Theme switching
 
@@ -95,4 +95,4 @@ A root screen shows one primary line per item, at most one secondary line, and a
 disclaimers render behind `About` / `Hint` (`design-system/About.tsx`) in the portals
 and behind `Disclosure` in the Player — never as a paragraph on the root. Times are
 human (`design-system/time.ts`: "3 Oct · 20:45"); seconds never appear. Rules and
-exceptions: `M24F3_MINIMALISM_RULES.md`.
+exceptions: `docs/design.md`.
