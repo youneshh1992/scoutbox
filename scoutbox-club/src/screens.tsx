@@ -691,7 +691,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <>
-      <header className="pro-correspondence-heading"><div><span>SCOUTBOX / CORRESPONDENCE</span><h2>Messages<span className="pro-communications-mark" aria-hidden="true">↗</span></h2></div><p><Icon name="lock-keyhole" size={14}/> Your conversations. One private workspace.</p></header>
+      <header className="pro-correspondence-heading"><div><span>SCOUTBOX / CORRESPONDENCE</span><h2>Messages<span className="pro-communications-mark" aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></h2></div><p><Icon name="lock-keyhole" size={14}/> Your conversations. One private workspace.</p></header>
       <div className={`pro-messenger pro-correspondence ${open?'has-thread':''} ${showDetails&&open?'with-details':''}`}>
         <aside className="pro-inbox"><header><div><strong>Conversations</strong><span>{visibleChannels.length.toString().padStart(2,'0')}</span></div><label><Icon name="search" size={16}/><input type="search" aria-label="Find a conversation" placeholder="Search conversations" value={threadSearch} onChange={e=>setThreadSearch(e.target.value)}/></label><nav aria-label="Conversation filters"><button aria-pressed={inboxFilter==='all'} onClick={()=>setInboxFilter('all')}>All</button><button aria-pressed={inboxFilter==='open'} onClick={()=>setInboxFilter('open')}>Open</button></nav></header>
           {filteredChannels.map((c) => (
@@ -702,7 +702,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
               {...pressable(() => setOpenId(c.id))}
             >
               <span className="pro-message-avatar" aria-hidden="true">{c.playerName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow">
-                <b>{c.playerName}<span aria-hidden="true">↗</span></b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>Closed</span>}
+                <b>{c.playerName}<span aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>Closed</span>}
                 <span className="pro-thread-preview">{c.messages.at(-1)?.text ?? 'Your conversation is ready'}</span><small>{DEMO_MODE&&c.id===sample.id?'Sample conversation':c.counterparty==='guardian'?'With parent or guardian':'Player conversation'}</small>
               </span>
             </div>
@@ -762,7 +762,7 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                 suspension, or a platform change). The history stays for audit; nothing new can be sent.
               </div>
             )}
-            <div className="pro-compose-area">{!open.closed&&<div className="pro-reply-starters"><span>START A REPLY</span><button onClick={()=>onDraftChange('Could you share your availability for a conversation this week?')}>Availability <span>↗</span></button><button onClick={()=>onDraftChange('We would like to discuss a training visit. Which dates would work for you?')}>Training visit <span>↗</span></button></div>}<div className="pro-message-composer">
+            <div className="pro-compose-area">{!open.closed&&<div className="pro-reply-starters"><span>START A REPLY</span><button onClick={()=>onDraftChange('Could you share your availability for a conversation this week?')}>Availability <span><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></button><button onClick={()=>onDraftChange('We would like to discuss a training visit. Which dates would work for you?')}>Training visit <span><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></button></div>}<div className="pro-message-composer">
               {openPlayerReports.length > 0 && (
                 <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report" disabled={open.closed}>
                   <option value="">no attachment</option>

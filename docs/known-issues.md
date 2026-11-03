@@ -7,10 +7,6 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
 
 - **Three server batteries fail and are kept out of CI:** `m23Persistence`, `m23BootContract` and
   `m23AgentTransactionPersistence`. The boot contract predates the SQLite migration.
-- **The `e2e/m24f3DensityAudit`, `m24f4MinimalismAudit` and `m24f5VisualAcceptanceAudit` source checks fail**
-  (5, 4 and 8 checks). They encode M24F minimalism rules that the later approved designs partly overrode (Player
-  system font, Pro/Grassroots restyles), plus a few real regressions such as emoji in `scoutbox-club/src/m18Screens.tsx`.
-  Triage them: delete the checks the approvals overrode and fix the rest. See [`design.md`](design.md).
 
 ## Product
 

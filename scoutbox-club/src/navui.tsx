@@ -232,7 +232,7 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
       aria-current={activeItemId === c.id ? 'page' : undefined}
       onClick={() => onNavigate(c.id)}
     >
-      <Icon name={PRO_PAGE_META[c.id]?.icon ?? "files"} size={18}/><span><strong>{tr(c.labelKey)}</strong><small>{PRO_PAGE_META[c.id]?.note}</small></span><span className="pro-page-arrow" aria-hidden="true">↗</span>
+      <Icon name={PRO_PAGE_META[c.id]?.icon ?? "files"} size={18}/><span><strong>{tr(c.labelKey)}</strong><small>{PRO_PAGE_META[c.id]?.note}</small></span><span className="pro-page-arrow" aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span>
     </button>
   ));
   const children = (role: 'menuitem' | undefined, accordion: boolean) => groups.map((g) => {

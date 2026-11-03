@@ -23,6 +23,7 @@ import { CountChart, countBy } from './ScoutVisuals';
 // a background process that does not exist.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { humanText } from '../../design-system/humanize';
+import { Icon } from '../../design-system/icons';
 import { ApiError, type Session } from './api';
 import {
   m19, encodeCriteria, decodeCriteria,
@@ -780,7 +781,7 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
         {items && items.length > 0 && (
           <div className="watchlist-register">
             {items.map(w => <article key={w.id} className="watchlist-record">
-              <header className="watchlist-record-heading"><div><span className="suite-eyebrow">{t('m19.wl.criteria')}</span><h3>{w.name}</h3></div><span className="pill">{wlStatusLabel(w.status)}</span><button onClick={() => onOpenWatchlist(w.id)} aria-label={`${t('m19.wl.open')} ${w.name}`}>{t('m19.wl.open')} <span aria-hidden="true">↗</span></button></header>
+              <header className="watchlist-record-heading"><div><span className="suite-eyebrow">{t('m19.wl.criteria')}</span><h3>{w.name}</h3></div><span className="pill">{wlStatusLabel(w.status)}</span><button onClick={() => onOpenWatchlist(w.id)} aria-label={`${t('m19.wl.open')} ${w.name}`}>{t('m19.wl.open')} <span aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></button></header>
               <CriteriaSummary criteria={w.criteria} />
               <RecordFacts items={[
                 {label: t('m19.wl.mode'), value: modeLabel(w.mode)},

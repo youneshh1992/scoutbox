@@ -140,7 +140,7 @@ Approved 6 October 2026.
 
 These apply unless an app's approved design overrides them (see section 3).
 
-- **Emoji.** Zero authored emoji (Unicode Extended_Pictographic) in UI source, translations, fixtures or toasts. Typographic symbols are fine (✓ ✕ → ○ ● ■ ▲ ⌘ ➤). User content is untouched. (M24F_EMOJI_AUDIT)
+- **Emoji.** Zero authored emoji (Unicode Extended_Pictographic) in UI source, translations, fixtures or toasts. Typographic symbols are fine (✓ ✕ → ○ ● ■ ▲ ⌘ ➤). Arrows with an emoji form, such as ↗, count as emoji: use the `arrow-up-right` icon. User content is untouched. (M24F_EMOJI_AUDIT)
 - **Report control.** Every screen of every app has a Report/Block control (safeguarding). (M24A_DESIGN_IMPLEMENTATION)
 - **Navigation limits.** At most five bottom-nav items and at most five tabs or categories per bar (`CASE_NAV_MAX_SUBS = 5`). (M24F4_MINIMAL_PRODUCT_RULES)
 - **Portal root density.**

@@ -26,6 +26,7 @@ import { RecordFacts, DetailItems, sentenceCase } from './RecordDetails';
 // never 0.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { humanText } from '../../design-system/humanize';
+import { Icon } from '../../design-system/icons';
 import { ApiError, type Session } from './api';
 import {
   m18, BRIEF_EVIDENCE_REQUIREMENTS, BRIEF_FEET, BRIEF_LEVELS, BRIEF_POSITIONS,
@@ -297,7 +298,7 @@ function SecondLookCard({
       <header className="review-dossier-head">
         <span className="review-monogram" aria-hidden="true">{item.playerName ? item.playerName.split(' ').map(n=>n[0]).slice(0,2).join('') : '—'}</span>
         <div><span className="suite-eyebrow">Second Look · decision review</span><h3>{item.playerName ?? t('m18.sl.playerWithheld')}</h3><div className="review-statuses">{item.kindLabel && <span>{item.kindLabel}</span>}<span className="pill">{statusLabel(item.status)}</span></div></div>
-        {item.playerName && <button onClick={() => openPlayer(item.playerId)}>{t('m18.sl.openProfile')} <span aria-hidden="true">↗</span></button>}
+        {item.playerName && <button onClick={() => openPlayer(item.playerId)}>{t('m18.sl.openProfile')} <span aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></button>}
       </header>
       {item.playerAvailable === false && <div className="notice block">{t('m18.sl.playerUnavailable')}</div>}
       {item.summary && <p className="review-summary">{item.summary}</p>}
@@ -864,7 +865,7 @@ function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
       <div className="section" aria-label={t('m18.br.listLabel')}>
         {!data && !err && <div className="dim">{t('m18.loading')}</div>}
         {data && data.items.length === 0 && <div className="dim">{t('m18.br.empty')}</div>}
-        <div className="brief-dossiers">{(data?.items??[]).map(b=><article key={b.id} className="brief-dossier"><header><span className="pill">{briefStatusLabel(b.status)}</span><small>Version {b.version}</small><h3>{b.title}</h3></header><dl>{b.criteriaExplained.map((c,i)=><div key={`${c.key}-${i}`}><dt>{c.label}</dt><dd>{sentenceCase(humanText(c.value))}</dd></div>)}</dl>{!b.criteriaExplained.length&&<p>{t('m18.br.noCriteria')}</p>}<footer><span>Updated {fmtDate(b.updatedAt)}</span><button onClick={()=>onOpenBrief?.(b.id)} aria-label={`${t('m18.br.open')} ${b.title}`}>Open brief <span aria-hidden="true">↗</span></button></footer></article>)}</div>
+        <div className="brief-dossiers">{(data?.items??[]).map(b=><article key={b.id} className="brief-dossier"><header><span className="pill">{briefStatusLabel(b.status)}</span><small>Version {b.version}</small><h3>{b.title}</h3></header><dl>{b.criteriaExplained.map((c,i)=><div key={`${c.key}-${i}`}><dt>{c.label}</dt><dd>{sentenceCase(humanText(c.value))}</dd></div>)}</dl>{!b.criteriaExplained.length&&<p>{t('m18.br.noCriteria')}</p>}<footer><span>Updated {fmtDate(b.updatedAt)}</span><button onClick={()=>onOpenBrief?.(b.id)} aria-label={`${t('m18.br.open')} ${b.title}`}>Open brief <span aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></button></footer></article>)}</div>
       </div>
     </div>
   );
