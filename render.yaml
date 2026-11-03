@@ -6,7 +6,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: starter
-    healthCheckPath: /orgs/directory
+    healthCheckPath: /healthz
     disk:
       name: scoutbox-data
       mountPath: /srv/data
@@ -14,7 +14,14 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Production refuses to boot without these two (m181/capabilities.mjs).
+      # Render generates a random value for each; read ADMIN_KEY in the dashboard.
       - key: ADMIN_KEY
-        sync: false # set in the dashboard
-      # Optional live providers — set in the dashboard to switch the adapters:
+        generateValue: true
+      - key: MEDIA_SECRET
+        generateValue: true
+      # A first production boot starts with no people or clubs. For a hosted
+      # demo, add SCOUTBOX_SEED_DEMO=1 before the first deploy, then give the
+      # demo clubs passwords with POST /admin/clubs/:id/credentials.
+      # Optional live providers, set in the dashboard to switch the adapters:
       # SENDGRID_API_KEY, EXPO_ACCESS_TOKEN

@@ -5,8 +5,6 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
 
 ## Configuration and boot
 
-- **The deploy configs wouldn't boot.** `fly.toml` and `render.yaml` set only `ADMIN_KEY`, but a production boot also
-  needs the media secret and an admin key of at least 16 characters. Neither target is live.
 - **The Docker image can't build the web portals.** Each portal's build stage copies only its own folder
   (`COPY scoutbox-club/ ./`), but the portals import from outside it: `../../design-system` and, for Pro and
   Grassroots, `../../scoutbox-server/roles.mjs`. Build from the repository root (copy `design-system/` and

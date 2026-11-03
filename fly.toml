@@ -14,10 +14,21 @@ primary_region = "lhr"
   auto_start_machines = true
   min_machines_running = 0
 
+[[http_service.checks]]
+  method = "GET"
+  path = "/healthz"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "20s"
+
 [[mounts]]
   source = "scoutbox_data"
   destination = "/srv/data"
 
 [env]
   NODE_ENV = "production"
-  # Set secrets with: flyctl secrets set ADMIN_KEY=... SENDGRID_API_KEY=...
+  # Production refuses to boot without ADMIN_KEY (16+ chars) and MEDIA_SECRET (32+ chars).
+  # Before the first deploy:
+  #   flyctl secrets set ADMIN_KEY=$(openssl rand -hex 24) MEDIA_SECRET=$(openssl rand -hex 32)
+  # Optional: SENDGRID_API_KEY, EXPO_ACCESS_TOKEN. A first boot starts with no people or
+  # clubs; for a hosted demo also set SCOUTBOX_SEED_DEMO=1 before the first deploy.
