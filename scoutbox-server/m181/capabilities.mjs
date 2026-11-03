@@ -24,6 +24,12 @@ export const CAPABILITY_STATES = ['configured', 'not_configured', 'test_only'];
  */
 export const devLoginsEnabled = (env = process.env) => env.NODE_ENV !== 'production';
 
+const isSet = (v) => v != null && String(v).trim() !== '';
+/** The mail adapter sends through SendGrid when this holds; otherwise it writes the local outbox. */
+export const liveMailConfigured = (env = process.env) => isSet(env.SENDGRID_API_KEY);
+/** The push adapter sends through Expo when this holds; otherwise it writes the local push log. */
+export const livePushConfigured = (env = process.env) => isSet(env.EXPO_ACCESS_TOKEN);
+
 // M22: the Combine gate is read here, not restated. If eligibility ever
 // changes it changes in one place and every surface follows.
 export function buildCapabilityReport({ env = process.env, rateLimit = null, providers = [], trustProxy = null, extra = {} } = {}) {
@@ -73,20 +79,22 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
       distributed_rate_limit: rateLimit
         ? { state: rateLimit.capability().state, note: rateLimit.capability().note }
         : { state: 'not_configured', note: 'No rate limiter is installed.' },
+      // No real identity-verification or object-storage provider is integrated
+      // (adapters.mjs), so no environment can make these configured.
       authoritative_identity_provider: {
-        state: flag(env.SCOUTBOX_IDV_PROVIDER) && env.SCOUTBOX_IDV_PROVIDER !== 'local_test' ? 'configured' : 'not_configured',
+        state: 'not_configured',
         note: 'Without one, the strongest identity a player can hold is a ScoutBox document review, which is scored below authoritative.',
       },
       email_transport: {
         // M18.2: "not_configured" undersold what exists and "configured" would
         // oversell it. Mail is written to a local outbox that the delivery
         // centre can read; nothing leaves the machine.
-        state: flag(env.SCOUTBOX_SMTP_URL) || flag(env.SMTP_URL) ? 'configured' : 'local_outbox',
+        state: liveMailConfigured(env) ? 'configured' : 'local_outbox',
         note: 'Without a transport, invitations and notifications are recorded in the local outbox and the delivery centre, and are not sent anywhere.',
       },
       object_storage: {
-        state: flag(env.SCOUTBOX_STORAGE_BUCKET) ? 'configured' : 'not_configured',
-        note: 'Without it, media is stored on the local disk of this instance.',
+        state: 'not_configured',
+        note: 'Media is stored on the local disk of this instance.',
       },
       media_signing_secret: {
         state: flag(env.MEDIA_SECRET) ? 'configured' : 'not_configured',

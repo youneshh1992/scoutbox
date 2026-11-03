@@ -49,9 +49,8 @@ makes the runtime test also probe real Node binaries.
 
 `m181/capabilities.mjs` is the registry. `GET /capabilities` reports what is configured
 without revealing any values. `productionConfigProblems()` refuses to boot in production
-on the fatal cases listed below. Names in **bold** are the ones the code actually reads.
-Where `capabilities.mjs` checks a different name, the Note column says so (see the
-mismatches section).
+on the fatal cases listed below. Names in **bold** are the ones the code reads; the others
+are refused in production.
 
 | Variable | Purpose | Default / required |
 |---|---|---|
@@ -66,7 +65,7 @@ mismatches section).
 | **`SCOUTBOX_RATE_LIMIT_PROVIDER`** | Rate-limit backend | `memory`. Any other value refuses to start: no shared backend exists |
 | **`MEDIA_SECRET`** | HMAC key for signed media URLs | unset = a random key per process, never stored (links stop verifying after a restart; clients re-mint them). Production: required, 32+ chars (`MEDIA_SECRET_MISSING`) |
 | **`DELIVERY_CALLBACK_SECRET`** | HMAC for `POST /callbacks/delivery` | `local-fake-callback-secret` |
-| **`SENDGRID_API_KEY`** / **`MAIL_FROM`** | Real mail transport / sender | unset = dev outbox. `MAIL_FROM` defaults to `noreply@scoutbox.app`. Note: capabilities reports `email_transport` from `SCOUTBOX_SMTP_URL` / `SMTP_URL`, which nothing else reads |
+| **`SENDGRID_API_KEY`** / **`MAIL_FROM`** | Real mail transport / sender | unset = dev outbox. `MAIL_FROM` defaults to `noreply@scoutbox.app`. |
 | **`EXPO_ACCESS_TOKEN`** | Real push via Expo | unset = dev push log |
 | `ONFIDO_API_TOKEN`, `STRIPE_SECRET_KEY`, `S3_BUCKET` | Not read: no real IDV, billing or storage provider exists | Setting one in production is fatal (`PROVIDER_NOT_IMPLEMENTED`) |
 | **`TS_REVIEWER_BOOTSTRAP_ID`** / `_SECRET` / `_NAME` | Creates a Trust & Safety reviewer at boot | unset = none |

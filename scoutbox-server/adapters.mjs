@@ -15,6 +15,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { liveMailConfigured, livePushConfigured } from './m181/capabilities.mjs';
 
 // ------------------------------------------------------------------ passwords
 // scrypt with a per-password salt. Stored as `scrypt$<salt>$<hash>` so the
@@ -87,7 +88,7 @@ const outboxStore = (db, stores) => (stores?.outbox
   : { append: (record) => db.outbox.push(record), markDelivered: () => {} });
 
 export function createMailer(db, nextId, stores = null) {
-  const live = !!process.env.SENDGRID_API_KEY;
+  const live = liveMailConfigured();
   // S6a (review of e020aba, finding 1): `secrets` are one-time codes embedded in
   // the mail. The outbox record is persisted with every save and copied into
   // every backup, so the record keeps the mail with each secret replaced by
@@ -156,7 +157,7 @@ const pushStores = (db, stores) => ({
 });
 
 export function createPushSender(db, nextId, stores = null) {
-  const live = !!process.env.EXPO_ACCESS_TOKEN;
+  const live = livePushConfigured();
   const push = pushStores(db, stores);
   return {
     transport: live ? 'expo' : 'dev-log',

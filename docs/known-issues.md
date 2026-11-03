@@ -5,9 +5,6 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
 
 ## Configuration and boot
 
-- **`/capabilities` reports adapters from names the adapters don't read:** `SCOUTBOX_SMTP_URL`/`SMTP_URL`,
-  `SCOUTBOX_IDV_PROVIDER` and `SCOUTBOX_STORAGE_BUCKET`, whereas the adapters read `SENDGRID_API_KEY`,
-  `ONFIDO_API_TOKEN` and `S3_BUCKET`.
 - **The deploy configs wouldn't boot.** `fly.toml` and `render.yaml` set only `ADMIN_KEY`, but a production boot also
   needs the media secret and an admin key of at least 16 characters. Neither target is live.
 - **The Docker image can't build the web portals.** Each portal's build stage copies only its own folder

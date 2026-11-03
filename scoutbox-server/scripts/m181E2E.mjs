@@ -134,13 +134,13 @@ section('§50 — the capability report is honest and carries no secrets');
 {
   const rl = createRateLimiter({ provider: 'memory' });
   const report = buildCapabilityReport({
-    env: { NODE_ENV: 'production', MEDIA_SECRET: 'super-secret-value-for-the-report-test-0123', SCOUTBOX_SMTP_URL: 'smtp://user:pw@host' },
+    env: { NODE_ENV: 'production', MEDIA_SECRET: 'super-secret-value-for-the-report-test-0123', SENDGRID_API_KEY: 'SG.synthetic-not-a-real-key' },
     rateLimit: rl,
     providers: [{ id: 'web_client', status: 'limited', testOnly: false }, { id: 'sim', status: 'configured', testOnly: true }],
   });
   const raw = JSON.stringify(report);
   neg(!raw.includes('super-secret-value'), 'a configured secret VALUE never appears');
-  neg(!raw.includes('smtp://') && !raw.includes('user:pw'), 'no connection string or credential appears');
+  neg(!raw.includes('SG.synthetic'), 'no provider credential appears');
   ok(report.capabilities.media_signing_secret.state === 'configured', 'it reports that the secret is configured');
   ok(report.capabilities.email_transport.state === 'configured', 'and that email is configured');
   ok(report.capabilities.distributed_rate_limit.state === 'not_configured', 'and that the rate limiter is not distributed');

@@ -6,7 +6,7 @@ import os from 'node:os';
 import express from 'express';
 import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.mjs';
 import { parseTrustProxy } from '../httpTrust.mjs';
-import { buildCapabilityReport, devLoginsEnabled, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../m181/capabilities.mjs';
+import { buildCapabilityReport, devLoginsEnabled, liveMailConfigured, livePushConfigured, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../m181/capabilities.mjs';
 import { createBilling, createIdvProvider, createStorage } from '../adapters.mjs';
 
 let passed = 0;
@@ -186,6 +186,17 @@ await test('adapters: IDV, billing and storage name the dev provider they are, w
   } finally {
     for (const k of ['ONFIDO_API_TOKEN', 'STRIPE_SECRET_KEY', 'S3_BUCKET']) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
   }
+});
+await test('capabilities: adapters are reported from the variables the adapters read', () => {
+  const caps = (env) => buildCapabilityReport({ env }).capabilities;
+  assert.equal(caps({ SENDGRID_API_KEY: 'SG.synthetic' }).email_transport.state, 'configured');
+  assert.equal(caps({ SENDGRID_API_KEY: '  ' }).email_transport.state, 'local_outbox', 'blank is unset, as in the mailer');
+  assert.equal(caps({ SCOUTBOX_SMTP_URL: 'smtp://x', SMTP_URL: 'smtp://x' }).email_transport.state, 'local_outbox', 'names nothing reads');
+  const everything = { SCOUTBOX_IDV_PROVIDER: 'onfido', ONFIDO_API_TOKEN: 'x', SCOUTBOX_STORAGE_BUCKET: 'b', S3_BUCKET: 'b' };
+  assert.equal(caps(everything).authoritative_identity_provider.state, 'not_configured', 'no IDV provider is integrated');
+  assert.equal(caps(everything).object_storage.state, 'not_configured', 'no object storage is integrated');
+  assert.equal(liveMailConfigured({ SENDGRID_API_KEY: 'k' }), true);
+  assert.equal(livePushConfigured({ EXPO_ACCESS_TOKEN: '' }), false);
 });
 await test('dev logins: one rule — on in development, off in production with no override', () => {
   assert.equal(devLoginsEnabled({}), true);
