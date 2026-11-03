@@ -75,7 +75,8 @@ const playerTime = read('scoutbox-player/src/time.ts'); const dsTime = read('des
 ok(/export function relTime/.test(playerTime) && /fmtDayTime/.test(playerTime) && /export function fmtStamp/.test(dsTime) && /export const fmtClock/.test(dsTime), 'time.ts: relTime / fmtDayTime (Player) and fmtStamp / fmtClock (portals) exist');
 ok(!/second/.test(strip(playerTime + dsTime)), 'time.ts: seconds are never formatted');
 const secondsHits = [];
-for (const f of files) { const s = strip(fs.readFileSync(f, 'utf8')); s.split('\n').forEach((l, i) => { if (/toLocaleString\(\)|toLocaleTimeString\(\)|toISOString\(\)\.replace\('T'|second: '2-digit'|:ss\b/.test(l) && !/formatToParts|Intl\.DateTimeFormat\('en-GB', \{ timeZone: zone/.test(l)) secondsHits.push(`${rel(f)}:${i + 1}`); }); }
+// Number#toLocaleString() on a count (thousands separators) is not a timestamp, so numeric receivers are allowed.
+for (const f of files) { const s = strip(fs.readFileSync(f, 'utf8')); s.split('\n').forEach((l, i) => { if (/(?<!\b(?:value|total|count|length)|\?\? 0\))\.toLocaleString\(\)|toLocaleTimeString\(\)|toISOString\(\)\.replace\('T'|second: '2-digit'|:ss\b/.test(l) && !/formatToParts|Intl\.DateTimeFormat\('en-GB', \{ timeZone: zone/.test(l)) secondsHits.push(`${rel(f)}:${i + 1}`); }); }
 ok(secondsHits.length === 0, `no machine timestamp with seconds in the five applications (${secondsHits.slice(0, 4).join(', ') || 'none'})`);
 
 // ------------------------------------------------------------ 4. the trial token

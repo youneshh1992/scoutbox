@@ -46,7 +46,9 @@ const i18n = read('scoutbox-player/src/i18n.ts');
 ok(!/homeMorning|homeAfternoon|homeEvening|Good morning|Good afternoon|Good evening/.test(home), 'Home: no greeting');
 ok(!/toLocaleDateString\([^)]*weekday/.test(home) && !/dateLine/.test(home), 'Home: no day / date line');
 ok(!/View your Passport|homeViewPassport/.test(home), 'Home: no "View your Passport" in the header');
-ok(after(home, 'Verified clubs can see you', 'testID="home-visibility"'), 'Home: "Verified clubs can see you" renders only inside the visibility row, never in the header');
+// The approved Player words the statement "Verified clubs can discover your profile inside ScoutBox."
+const visibilityAt = home.search(/Verified clubs can (see you|discover)/);
+ok(visibilityAt > 0 && home.indexOf('testID="home-visibility"') > 0 && visibilityAt > home.indexOf('testID="home-visibility"'), 'Home: "Verified clubs can see you" renders only inside the visibility row, never in the header');
 ok(/testID="home-identity"/.test(home) && /testID="home-availability"/.test(home) && /testID="home-joined"/.test(home), 'Home: identity block carries the name, the availability and the joined line');
 ok(/typeof me\.createdAt === 'number' && me\.createdAt > 0 \? fmtMonthYear\(me\.createdAt\) : null/.test(home), 'Home: the joined line comes from the record\'s creation date only — never invented');
 ok(/testID="home-primary"/.test(home) && /testID="home-activity"/.test(home) && /testID="home-activity-all"/.test(home) && /slice\(0, 3\)/.test(home), 'Home: one current action, three recent events, "View all activity"');
@@ -82,8 +84,8 @@ ok(after(profile, 'WebVideo src={src}', 'page === \'video\''), 'Evidence: the cl
 const seconds = [];
 for (const f of files.filter((p) => /\.(ts|tsx)$/.test(p))) {
   const s = strip(fs.readFileSync(f, 'utf8'));
-  // a formatter that only feeds formatToParts (zone arithmetic) renders nothing
-  if (/second: '2-digit'|second: 'numeric'|toISOString\(\)[^;]*\}<\/|toLocaleTimeString\(\)/.test(s) && !/time\.ts$/.test(f) && !/formatToParts/.test(s)) seconds.push(rel(f));
+  // a formatter that only feeds formatToParts (zone arithmetic) renders nothing; a React key is never rendered
+  if (/second: '2-digit'|second: 'numeric'|(?<!key=\{[\w.]*)toISOString\(\)[^;]*\}<\/|toLocaleTimeString\(\)/.test(s) && !/time\.ts$/.test(f) && !/formatToParts/.test(s)) seconds.push(rel(f));
 }
 ok(seconds.length === 0, `no screen formats seconds (${seconds.join(', ') || 'none'})`);
 const fontHits = [];

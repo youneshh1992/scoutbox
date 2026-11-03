@@ -46,14 +46,17 @@ const home = strip(read('scoutbox-player/src/app/(tabs)/discover.tsx'));
 ok(!/Good morning|Good afternoon|Good evening|homeMorning|homeAfternoon|homeEvening/.test(home), 'Home: no greeting');
 ok(!/weekday/.test(home) && !/dateLine/.test(home), 'Home: no day or full date');
 ok(!/View your Passport|homeViewPassport/.test(home), 'Home: no "View your Passport"');
-ok(after(home, 'Verified clubs can see you', 'testID="home-visibility"'), 'Home: "Verified clubs can see you" only inside the visibility row');
+// The approved Player words the statement "Verified clubs can discover your profile inside ScoutBox."
+const visibilityAt = home.search(/Verified clubs can (see you|discover)/);
+ok(visibilityAt > 0 && home.indexOf('testID="home-visibility"') > 0 && visibilityAt > home.indexOf('testID="home-visibility"'), 'Home: "Verified clubs can see you" only inside the visibility row');
 ok(/typeof me\.createdAt === 'number' && me\.createdAt > 0 \? fmtMonthYear\(me\.createdAt\) : null/.test(home), 'Home: "Joined" only from the record\'s creation date');
 ok(/<TimelineItem[^>]*testID="home-recent-row"/.test(home) && !/activityRow|activityWhen/.test(home), 'Home: Recent is a timeline (dot, date above, event below), not a two-column table');
 ok(/homeClubsWithinOne|homeClubsWithinMany/.test(home) && !/· 50 km`/.test(home), 'Home: "1 club within 50 km" — never the cryptic "1 · 50 km"');
 const activity = strip(read('scoutbox-player/src/app/activity.tsx'));
 ok(/<TimelineItem/.test(activity) && /activity-group-\$\{g\.key\}/.test(activity), 'Activity: grouped Today / This week / Earlier, timeline rows');
-const ui = read('scoutbox-player/src/components/ui.tsx');
-ok(/export function TimelineItem/.test(ui) && !/borderBottomWidth/.test(ui.slice(ui.indexOf('export function TimelineItem'), ui.indexOf('export function Kicker'))), 'TimelineItem: no dividers');
+// TimelineItem moved to components/Timeline.tsx in the approved Player; ui.tsx re-exports it.
+const ui = read('scoutbox-player/src/components/ui.tsx'); const timeline = read('scoutbox-player/src/components/Timeline.tsx');
+ok(/export \{ EventRow, TimelineItem \} from '\.\/Timeline'/.test(ui) && /export function TimelineItem/.test(timeline) && !/borderBottomWidth/.test(timeline.slice(timeline.indexOf('export function TimelineItem'), timeline.indexOf('export function EventRow'))), 'TimelineItem: no dividers');
 
 // ------------------------------------------------------------ 2. Player roots
 const combine = strip(read('scoutbox-player/src/components/CombineSection.tsx'));
@@ -142,8 +145,12 @@ for (const app of ['club', 'grassroots']) {
 // Kept-screen re-review fixes (R2).
 for (const app of ['club', 'grassroots']) {
   const scr = strip(read(`scoutbox-${app}/src/screens.tsx`));
-  const overlay = scr.slice(scr.indexOf('className="filmroom-overlay"'), scr.indexOf('</>', scr.indexOf('className="filmroom-overlay"')));
-  ok(/data-testid="filmroom-caption"/.test(scr) && overlay.length > 0 && !/media\.title/.test(overlay), `${app} Film Room: the caption sits under the clip, not over the video controls`);
+  // The approved redesigns dropped the overlay: the video's container (Pro "filmroom-stage", Grassroots
+  // "studio-screen") holds the video alone, and the caption and tags render after it, outside the stage.
+  const videoAt = scr.indexOf('<video ref={videoRef}');
+  const stage = videoAt > 0 ? scr.slice(videoAt, scr.indexOf('</div>', videoAt)) : '';
+  const captionAt = scr.indexOf('data-testid="filmroom-caption"');
+  ok(stage.length > 0 && !/media\.title|filmroom-caption|filmroom-overlay|Tag what you saw/.test(stage) && captionAt > videoAt && scr.indexOf('aria-label="Tag what you saw"') > videoAt + stage.length, `${app} Film Room: the caption sits under the clip, not over the video controls`);
   const m14 = strip(read(`scoutbox-${app}/src/m14screens.tsx`));
   ok(/allStepsDone \?/.test(m14) && /data-testid="verify-start-more"/.test(m14), `${app} Verification: start forms fold once every step is done`);
   ok(['refs-ref-add', 'refs-inv-add', 'refs-coi-add', 'verify-credential-add'].every((id) => m14.includes(`data-testid="${id}"`)), `${app} Verification: add forms sit behind one row each`);
