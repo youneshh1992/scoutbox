@@ -36,7 +36,7 @@
 // decode attempt.
 
 import {
-  FRAME_LIMITS, FRAME_ENCODING, CANDIDATE_PROTOCOLS,
+  FRAME_LIMITS, FRAME_ENCODING, CANDIDATE_PROTOCOLS, refusedClientFields,
 } from './policy.mjs';
 import { decodeFrame, FRAME_ERRORS } from './frames.mjs';
 import { productionCvProvider, PROVIDER_ERRORS } from './provider.mjs';
@@ -58,6 +58,7 @@ const HTTP_FOR = {
   [PROVIDER_ERRORS.INVALID_STATE]: 409,
   [PROVIDER_ERRORS.ALREADY_FINALIZED]: 409,
   [PROVIDER_ERRORS.UNSUPPORTED_PROTOCOL]: 422,
+  [PROVIDER_ERRORS.CLIENT_FIELD_REFUSED]: 422,
   [PROVIDER_ERRORS.PROVIDER_BUSY]: 503,
   [PROVIDER_ERRORS.ENGINE_FAILURE]: 500,
 };
@@ -78,6 +79,18 @@ const FRAME_ERROR_TO_PROVIDER = {
 function fail(res, code, extra = {}) {
   const status = HTTP_FOR[code] ?? 400;
   return res.status(status).json({ error: code, ...extra });
+}
+
+/**
+ * §22/§A4: the client supplies frames, never a measurement. A body, or a frame
+ * envelope, that names a field the server derives (FORBIDDEN_CLIENT_FIELDS) is
+ * refused by name with a 422, never silently ignored. Returns true once refused.
+ */
+function refuseClientFields(res, ...objects) {
+  const fields = [...new Set(objects.flatMap((o) => refusedClientFields(o)))];
+  if (!fields.length) return false;
+  fail(res, PROVIDER_ERRORS.CLIENT_FIELD_REFUSED, { fields });
+  return true;
 }
 
 export function registerM22Routes(ctx) {
@@ -108,6 +121,7 @@ export function registerM22Routes(ctx) {
     if (limited('box_cv_session_create', req.player.id)) {
       return fail(res, PROVIDER_ERRORS.RATE_LIMITED, { retryAfterSeconds: 30 });
     }
+    if (refuseClientFields(res, req.body)) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
     if ((req.body ?? {}).nonce !== s.nonce) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
@@ -165,10 +179,10 @@ export function registerM22Routes(ctx) {
         detail: 'frames are submitted as JSON envelopes; this endpoint is not a file upload',
       });
     }
+    const body = req.body ?? {};
+    if (refuseClientFields(res, body, ...(Array.isArray(body.frames) ? body.frames : []))) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
-
-    const body = req.body ?? {};
     if (body.nonce !== s.nonce) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
 
     const providerSessionId = String(body.providerSessionId ?? '');
@@ -231,6 +245,7 @@ export function registerM22Routes(ctx) {
     if (limited('box_cv_finalize', req.player.id)) {
       return fail(res, PROVIDER_ERRORS.RATE_LIMITED, { retryAfterSeconds: 5 });
     }
+    if (refuseClientFields(res, req.body)) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
     const body = req.body ?? {};
@@ -271,6 +286,7 @@ export function registerM22Routes(ctx) {
   });
 
   playerRouter.post('/box-cam/sessions/:id/cv/cancel', (req, res) => {
+    if (refuseClientFields(res, req.body)) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
     if ((req.body ?? {}).nonce !== s.nonce) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
@@ -322,6 +338,7 @@ export function registerM22Routes(ctx) {
     if (limited('box_cv_ready_check', req.player.id)) {
       return fail(res, PROVIDER_ERRORS.RATE_LIMITED, { retryAfterSeconds: 10 });
     }
+    if (refuseClientFields(res, req.body)) return;
     const b = req.body ?? {};
     const checks = [];
     const add = (id, state, reasonCode = null, detail = null) => checks.push({ id, state, reasonCode, detail });

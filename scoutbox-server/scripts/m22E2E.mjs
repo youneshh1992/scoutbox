@@ -214,6 +214,20 @@ const FRAMES_URL = `/player/box-cam/sessions/${live.session.id}/cv/frames`;
   neg(r.status === 429 && r.body.error === PROVIDER_ERRORS.QUEUE_OVERFLOW,
     `13/14. a batch above ${FRAME_LIMITS.maxFramesPerBatch} frames is refused rather than queued`);
 }
+// 15b. §22/§A4 — a measurement the server derives is refused by name, on a batch or inside a frame
+{
+  const onBatch = await j('POST', FRAMES_URL, { nonce: live.nonce, providerSessionId: PSID, frames: goodFrames.slice(0, 1), repCount: 60 }, kola.token);
+  neg(onBatch.status === 422 && onBatch.body.error === PROVIDER_ERRORS.CLIENT_FIELD_REFUSED && onBatch.body.fields?.includes('repCount'),
+    '15b. a batch carrying its own rep count is refused with a 422 that names the field');
+  const inFrame = await j('POST', FRAMES_URL, { nonce: live.nonce, providerSessionId: PSID, frames: [{ ...goodFrames[0], seq: 4000, verified: true }] }, kola.token);
+  neg(inFrame.status === 422 && inFrame.body.fields?.includes('verified'), '15b. so is a frame envelope that claims to be verified');
+  for (const [route, body] of [['cv/begin', { nonce: live.nonce, protocolId: 'combine-box-touch-60', confidence: 1 }], ['cv/cancel', { nonce: live.nonce, providerSessionId: PSID, accepted: true }]]) {
+    const r = await j('POST', `/player/box-cam/sessions/${live.session.id}/${route}`, body, kola.token);
+    neg(r.status === 422 && r.body.error === PROVIDER_ERRORS.CLIENT_FIELD_REFUSED, `15b. ${route} refuses a derived field too, before touching the session`);
+  }
+  const ready = await j('POST', '/player/box-cam/cv/ready-check', { cameraPermission: 'granted', score: 99 }, kola.token);
+  neg(ready.status === 422 && ready.body.fields?.includes('score'), '15b. and so does the Ready Check');
+}
 // 16. finalized session ingest
 {
   const fin = await j('POST', `/player/box-cam/sessions/${live.session.id}/cv/finalize`,
@@ -503,11 +517,17 @@ section('§58/§59 — the Combine blocker, over HTTP, end to end');
   neg(attempt.body.observationSupported === true,
     '§58. and the refusal distinguishes "cannot observe" from "observes but may not certify"');
 
-  // §107 — a client claiming its own count changes nothing.
+  // §107 — a client claiming its own count changes nothing: the claim is
+  // refused by name (§22/§A4), and the stored result is the server's.
   const tampered = await j('POST', `/player/box-cam/sessions/${s.session.id}/cv/finalize`,
-    { nonce: s.nonce, providerSessionId: b.body.providerSessionId, touchCount: 176, verifiedReps: 176, combineVerified: true }, kola.token);
-  neg(tampered.body.result?.derived?.touchCount !== 176 && tampered.body.result?.combineVerified === false,
-    '§107/§22. a client-submitted count and combineVerified flag are ignored entirely');
+    { nonce: s.nonce, providerSessionId: b.body.providerSessionId, verifiedReps: 176, combineVerified: true }, kola.token);
+  neg(tampered.status === 422 && tampered.body.error === PROVIDER_ERRORS.CLIENT_FIELD_REFUSED
+    && ['verifiedReps', 'combineVerified'].every((f) => tampered.body.fields.includes(f)),
+    '§107/§22. a client-submitted count and combineVerified flag are refused by name');
+  const stored = await j('POST', `/player/box-cam/sessions/${s.session.id}/cv/finalize`,
+    { nonce: s.nonce, providerSessionId: b.body.providerSessionId }, kola.token);
+  neg(stored.body.result?.derived?.touchCount !== 176 && stored.body.result?.combineVerified === false,
+    '§107/§22. and the stored result carries none of them');
 }
 
 // =====================================================================

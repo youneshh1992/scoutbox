@@ -82,6 +82,7 @@ export const PROVIDER_ERRORS = Object.freeze({
   UNSUPPORTED_PROTOCOL: 'unsupported_protocol',
   PROVIDER_BUSY: 'provider_busy',
   ENGINE_FAILURE: 'engine_failure',
+  CLIENT_FIELD_REFUSED: 'client_field_refused',
 });
 
 // §17 — a small bounded reorder window, or nothing. Never an unlimited buffer.
