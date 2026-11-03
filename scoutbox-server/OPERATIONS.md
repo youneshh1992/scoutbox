@@ -140,7 +140,7 @@ module registration → integrity report → listen.
 - **Typed columns, valid input only**. Each field is a typed column. Routes
   reject junk input; there are no `absent_keys_json` / `offtype_json` / `extra_json` side
   columns. The S8a–S8c recruitment tables still carry them from the old lossless rule until they are
-  rewritten (migration plan §4.2).
+  rewritten (migration plan §4.3).
   List order is kept with `seq` / `position`.
 - **Refusals name ids, not content.** Validation errors from repositories and migrations
   carry codes, ids and reasons. They never include a name, e-mail, message body, token or

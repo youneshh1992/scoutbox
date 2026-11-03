@@ -82,7 +82,10 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **fingerprint** | implemented; accept on green tests |
 | S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed** | implemented; accept on green tests |
 | — | rollback machinery removed | — | — | — | done (§4.1) |
-| — | recruitment end-state proof | — | — | — | **next** (§4.2) |
+| — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
+| — | backups become database copies | — | — | — | **next** (§4.2) |
+| — | recruitment end-state proof | — | — | — | §4.3 |
+| — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
 | S11 | agents, compliance, transactions | | | | not started |
@@ -91,7 +94,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S14 | retire the blob | | | | not started |
 
 The lossless side columns (`extra_json`, `absent_keys_json`, `offtype_json`) of the old fidelity rule were dropped
-from S0–S7 and S6b on 3 November. S8a–S8c still carry them; they go in §4.2.
+from S0–S7 and S6b on 3 November. S8a–S8c still carry them; they go in §4.3.
 
 ## 4. The order of work
 
@@ -105,16 +108,41 @@ refusals and the "in-memory array was ignored" warnings.
 
 Kept on purpose: `repositories/identityPreflight.mjs` (the identity validator migration `0005` and the identity
 repository use; only the script around it went), and the `db.json` import in `store.mjs`, which is how a backup is
-restored. It goes at S14, when backup becomes `VACUUM INTO`.
+restored. It goes with §4.2.
 
-### 4.2 Prove the end state on recruitment
+### 4.2 Backups become database copies (next)
+
+This was planned for S14. Doing it now removes code that §4.3 and S9–S13 would otherwise rewrite.
+
+Today `POST /admin/backup` writes the whole snapshot as `db.json`, and a restore boots a fresh `DATA_DIR` that imports
+it as blobs, after which every table migration runs its blob import. That restore path is the only real user of
+the migrations' blob imports: on a first boot there are no blobs, and the seed goes through the repositories.
+
+1. Backup writes `scoutbox.db` with `VACUUM INTO`, next to `media/` and `manifest.json` (checksums as now). Restore
+   stays "copy the backup into a new, empty directory and boot". Never restore over a live directory.
+2. Delete the legacy `db.json` import (`readLegacySnapshot`, `LEGACY_IMPORT_FAILED` in `store.mjs`, its check in
+   `server.mjs`) and the backup's legacy-shape export.
+3. Each table migration's `up()` becomes its DDL plus whatever the boot still needs. Delete the blob imports, their
+   normalise-and-report code, the `*_IMPORT_BLOCKED` refusals and the cutover counts in `meta`.
+4. Tests that plant blob rows before a boot in order to test an import or an upgrade go. Tests that only used
+   planting as setup write through the repositories or SQL instead. The backup and restore tests are rewritten for
+   the new format; their behaviour (everything comes back, media included, a bad backup is refused) stays.
+5. Check what still uses snapshot mode (`openStore(dir)` without options) and each domain's `*_SNAPSHOT`. Keep
+   them only if a tool or fixture still needs them.
+
+Update `OPERATIONS.md` (Backups and restore, the legacy `db.json` note) in the same change. The blob collections
+that haven't moved yet are inside `scoutbox.db`, so the new backup carries them unchanged.
+
+### 4.3 Prove the end state on recruitment
 
 Before migrating ~227 more tables, make one domain look like §2, so S9–S13 copy a finished pattern and nothing needs
 a second pass:
 
 1. Convert S8a–S8c (`recruitment.mjs`, `recruitmentCases.mjs`, `recruitmentContactsOffers.mjs`) to explicit
-   writes like S8d. The route code (`m23/*`, `m28/*`) calls repository operations instead of editing objects in
-   place.
+   writes like S8d. The route code calls repository operations instead of editing objects in place. That's more
+   than `m23/*` and `m28/*`: on 3 November about 25 route modules read or edit `db.recruitmentCases` and
+   `db.trials` directly (`git grep -c 'db\.recruitmentCases\b'`), so plan to split this into several PRs, for
+   example one per repository.
 2. Move the hot recruitment reads (case lists, the Room, contacts, offers) to SQL queries with pagination, and drop
    those mirrors.
 3. Drop the lossless `*_json` side columns from the S8a–S8c tables as part of step 1 (decided 3 November; the
@@ -124,7 +152,24 @@ a second pass:
 Doing the same for players and guardians (S4a's whole-snapshot identity replace) would also settle the A0–A3
 foreign-key questions. That's a candidate for later.
 
-### 4.3 S9–S13: the remaining domains
+### 4.4 The end-to-end test estate
+
+The behavioural specification is spread over 67 milestone-named scripts in `scoutbox-server/scripts/` (`m12E2E.mjs`
+… `m23*`, `preM24SweepE2E.mjs`, about 3 MB). CI runs ten of them, plus `connectedE2E.mjs` and `apiE2E.mjs`. Some of
+the rest fail (see [`../known-issues.md`](../known-issues.md)), and nobody knows the state of the others.
+
+1. Run every script once and record which pass, which fail and why.
+2. Separate the correctness batteries from performance, probe and evaluation scripts (`*Perf`, `*Load`,
+   `*Bench`, `*Probe`, `m22CvEval`, `m22Holdout`, `m22Robustness`, `m22Blocker`). Those aren't CI gates.
+3. Regroup the batteries by domain, not milestone. Merge duplicates. Never delete a behavioural assertion.
+4. Put every passing battery in CI. List any that stay out, with the reason, in `known-issues.md`.
+5. Name tests after what they check, not after the review that produced them ("review of 2fe05df, R1"). The unit
+   suites (`scripts/test*.mjs`) get the same treatment once §4.2 has shrunk them.
+
+This is independent of the storage work and can run in parallel, but it should be done before S9, so new domains
+add to the regrouped batteries.
+
+### 4.5 S9–S13: the remaining domains
 
 One step per `sql/*.sql` file, split only if a step gets too big to review. Each is a short branch and a PR into `main`.
 
@@ -138,11 +183,10 @@ One step per `sql/*.sql` file, split only if a step gets too big to review. Each
 
 S12 is large; consider splitting Box Cam/Combine from discovery and watchlists.
 
-### 4.4 S14: retire the blob
+### 4.6 S14: retire the blob
 
 Depends on S2–S13. The `collections` table ends up empty. `meta.idCounter` moves to a `counters` table, and
-`db.schema` is replaced by `data_migrations`. `store.mjs` snapshot mode becomes the backup and restore tool over
-tables. The `m182` snapshot migrations become no-ops. `mediaBlobs`, `boxSessionEvents` and `NOT_A_STORE` leave
+`db.schema` is replaced by `data_migrations`. The `m182` snapshot migrations become no-ops. `mediaBlobs`, `boxSessionEvents` and `NOT_A_STORE` leave
 `storeContract.mjs`. The `db.x ??= []` and `migrateMxx` lines are deleted. The contract test asserts zero blob
 collections. With no production data, the migrations `0001`–`00NN` may be squashed into one baseline at this
 point, if that helps.
@@ -170,7 +214,8 @@ is the design note for that step: a fair example of the content a PR description
   `up(sqlite, { now, ...context })`. Set `foreignKeysOff = true` only if the step rebuilds a referenced table. Register
   it in `repositories/index.mjs` (`import * as mNNNN` and an entry in `DATA_MIGRATIONS`). `up()` runs the DDL, then
   imports the domain's blob rows from the file's `collections` table (never from memory): it types each row, reports
-  what it normalised or dropped, and deletes the blob rows.
+  what it normalised or dropped, and deletes the blob rows. Once §4.2 is done, the blob import goes and `up()` is the
+  DDL only.
 - **Runner.** `runDataMigrations` (`repositories/database.mjs`) runs migrations in lexical order, one transaction
   each, records `(id, applied_at)` in `data_migrations`, and aborts the boot on failure. Under `foreignKeysOff`,
   `foreign_key_check` must be empty before commit. A domain is authoritative because its migration is recorded,
@@ -180,8 +225,8 @@ is the design note for that step: a fair example of the content a PR description
   a read-only view (`repositories/readonly.mjs`), so existing readers keep working and a direct write throws.
 - **Seed data.** `seed.mjs` fills only orgs, guardians and players. Domains from S8a on start empty on a fresh
   database and get rows through routes. Tests plant blob rows in a file before booting, using fixtures in the
-  writers' shapes (e.g. `scripts/signingsFollowUpsTestFixtures.mjs`). For new domains the import path mainly matters
-  for tests; keep it simple.
+  writers' shapes (e.g. `scripts/signingsFollowUpsTestFixtures.mjs`). After §4.2, tests write their setup through
+  the repositories or SQL instead.
 - **Repository.** `create<Domain>Repository({ sqlite, unit, now, log })` prepares statements. `operation(fn)` joins
   the open unit of work or opens its own transaction. Each write types its input, writes rows, and returns the
   stored record. While a domain keeps an in-memory mirror, the write refreshes it from SQL. `hook()` registers
