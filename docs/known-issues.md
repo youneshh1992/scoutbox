@@ -14,6 +14,10 @@ fixed on 3 November; these were found while fixing it.
 
 ## Tests
 
+- **`testBackup` failed once in about 40 parallel `npm test` runs** (3 Nov), and the log wasn't kept. It didn't
+  reproduce in 18 further runs under heavy load. Its strictest check compares the backup with the source table for
+  table, so anything the server writes after the copy (other than the `backup_created` event) fails it. If it fails
+  again, the runner prints the whole log: note which table differed.
 - **`scripts/m181E2E.mjs` fails one check** ("no … key-shaped value appears anywhere"). The heuristic
   `/[A-Za-z0-9_-]{32,}/` matches table, index and migration names in `/capabilities.dataLayer` (for example
   `0017_recruitment_contacts_offers`); it is a false positive, not a leak. Not in CI.
