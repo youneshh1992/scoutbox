@@ -511,7 +511,7 @@ export default function App() {
 
           {tab === 'billing' && (
             <div className="list-rows">
-              <details className="f-about"><summary>About</summary><div className="notice">Success fees issued by the billing adapter (dev ledger; Stripe when STRIPE_SECRET_KEY is set). A signing inside the attribution window invoices automatically.</div></details>
+              <details className="f-about"><summary>About</summary><div className="notice">Success fees issued by the billing adapter (dev ledger; no payment provider is connected). A signing inside the attribution window invoices automatically.</div></details>
               {invoices.length === 0 && <div className="notice">No invoices yet.</div>}
               {invoices.map((i) => (
                 <div key={i.id} className="list-row">

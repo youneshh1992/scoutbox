@@ -1430,8 +1430,8 @@ guardianRouter.post('/verify-id', async (req, res, next) => {
   if (!documentType || !documentRef) {
     return res.status(400).json({ error: 'DOCUMENT_REQUIRED', message: 'ID verification needs a document type and reference.' });
   }
-  // Runs through the IDV adapter: instant attestation in dev, a document +
-  // liveness provider (ONFIDO_API_TOKEN) in production — same call either way.
+  // Runs through the IDV adapter (adapters.mjs): today the dev attestation; a
+  // document + liveness provider slots in behind the same call.
   const result = await idv.verify({ name: req.guardian.name, documentType, documentRef });
   if (!result.approved) {
     return res.status(422).json({ error: 'IDV_REJECTED', message: 'Identity verification did not pass — check the document details.' });

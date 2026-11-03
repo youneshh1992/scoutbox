@@ -17,4 +17,4 @@ services:
       - key: ADMIN_KEY
         sync: false # set in the dashboard
       # Optional live providers — set in the dashboard to switch the adapters:
-      # SENDGRID_API_KEY, STRIPE_SECRET_KEY, EXPO_ACCESS_TOKEN, ONFIDO_API_TOKEN
+      # SENDGRID_API_KEY, EXPO_ACCESS_TOKEN

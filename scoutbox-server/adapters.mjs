@@ -1,13 +1,16 @@
-// Production-integration adapters. Every external service the platform needs
-// sits behind one of these seams: the dev transport is fully functional (and
-// is what tests exercise), and setting the named env var switches the seam to
-// the real provider without touching any calling code.
+// Integration adapters. Every external service the platform needs sits behind
+// one of these seams, so a real provider slots in without touching any calling
+// code. The dev transport is fully functional and is what tests exercise.
 //
-//   Mailer   → SENDGRID_API_KEY   (dev: writes to db.outbox)
-//   Push     → EXPO_ACCESS_TOKEN  (dev: writes to db.pushLog)
-//   IDV      → ONFIDO_API_TOKEN   (dev: instant approval with an audit ref)
-//   Billing  → STRIPE_SECRET_KEY  (dev: invoices recorded in db.invoices)
-//   Storage  → S3_BUCKET (+creds) (dev: files under data/media/)
+//   Mailer   → SENDGRID_API_KEY switches to SendGrid (dev: the outbox table)
+//   Push     → EXPO_ACCESS_TOKEN switches to Expo   (dev: the push log table)
+//   IDV      → dev attestation only: instant approval with an audit reference
+//   Billing  → dev ledger only: invoices recorded in db.invoices
+//   Storage  → local disk only: files under DATA_DIR/media/
+//
+// No real IDV, billing or object-storage provider is integrated yet. Each seam
+// names what it is; none claims a provider it doesn't call
+// (UNIMPLEMENTED_PROVIDER_VARIABLES in m181/capabilities.mjs).
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -184,21 +187,15 @@ export function createPushSender(db, nextId, stores = null) {
 }
 
 // ----------------------------------------------------------------------- IDV
-// Guardian identity verification. Dev provider approves instantly but leaves
-// a full audit reference; a real document+liveness provider slots in here.
+// Guardian identity verification. The dev provider approves instantly but
+// leaves a full audit reference; a real document+liveness provider slots in here.
 export function createIdvProvider() {
-  const live = !!process.env.ONFIDO_API_TOKEN;
   return {
-    provider: live ? 'onfido' : 'dev-attestation',
+    provider: 'dev-attestation',
     async verify({ name, documentType, documentRef }) {
-      if (live) {
-        // Real integration: create applicant + check via the provider's API,
-        // then poll/webhook the result. Requires ONFIDO_API_TOKEN.
-        // Falls through to attestation if the call cannot complete here.
-      }
       return {
         approved: true,
-        provider: live ? 'onfido' : 'dev-attestation',
+        provider: 'dev-attestation',
         reference: `idv_${crypto.randomBytes(8).toString('hex')}`,
         checkedAt: Date.now(),
         document: { type: documentType, refLast4: String(documentRef).slice(-4) },
@@ -215,9 +212,8 @@ export function createIdvProvider() {
 const SUCCESS_FEE_BY_PLAN = { Pro: 1500, Academy: 500, Agency: 2000 };
 
 export function createBilling(db, nextId) {
-  const live = !!process.env.STRIPE_SECRET_KEY;
   return {
-    provider: live ? 'stripe' : 'dev-ledger',
+    provider: 'dev-ledger',
     async invoiceForSigning(signing, org) {
       const amount = SUCCESS_FEE_BY_PLAN[org.plan] ?? 1000;
       const invoice = {
@@ -231,12 +227,8 @@ export function createBilling(db, nextId) {
         amount,
         currency: 'EUR',
         status: 'issued',
-        provider: live ? 'stripe' : 'dev-ledger',
+        provider: 'dev-ledger',
       };
-      if (live) {
-        // Real integration: stripe.invoiceItems.create + stripe.invoices.create
-        // against the org's Stripe customer. Requires STRIPE_SECRET_KEY.
-      }
       db.invoices.push(invoice);
       return invoice;
     },
@@ -244,15 +236,14 @@ export function createBilling(db, nextId) {
 }
 
 // ------------------------------------------------------------- object storage
-// Media files live OUTSIDE the database: on local disk in dev, S3-compatible
-// storage in production. The database keeps only ids and content types.
+// Media files live OUTSIDE the database, on the local disk under DATA_DIR. The
+// database keeps only ids and content types.
 export function createStorage(dataDir) {
   const mediaDir = path.join(dataDir, 'media');
-  const live = !!process.env.S3_BUCKET;
   const extFor = (contentType) => (contentType.includes('webm') ? 'webm' : contentType.includes('mp4') ? 'mp4' : 'bin');
 
   return {
-    provider: live ? 's3' : 'local-disk',
+    provider: 'local-disk',
     /** dataUrl → stored file. Returns {contentType} (the id names the file). */
     saveDataUrl(id, dataUrl) {
       const m = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl ?? '');
@@ -260,7 +251,6 @@ export function createStorage(dataDir) {
       const [, contentType, b64] = m;
       fs.mkdirSync(mediaDir, { recursive: true });
       fs.writeFileSync(path.join(mediaDir, `${id}.${extFor(contentType)}`), Buffer.from(b64, 'base64'));
-      // S3: PutObject with the same key — the local file doubles as a cache.
       return { contentType };
     },
     read(id) {

@@ -131,6 +131,18 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
  */
 export const MEDIA_SECRET_MIN_LENGTH = 32;
 
+/**
+ * Variables that once relabelled a stub adapter as a real provider. No such
+ * integration exists (adapters.mjs), so setting one is refused in production
+ * rather than letting a deployment believe it verifies identity, bills or
+ * stores media off the instance.
+ */
+export const UNIMPLEMENTED_PROVIDER_VARIABLES = Object.freeze({
+  ONFIDO_API_TOKEN: 'identity verification (guardian ID checks still auto-approve)',
+  STRIPE_SECRET_KEY: 'billing (success fees are recorded in the local ledger only)',
+  S3_BUCKET: 'object storage (media is stored on this instance\'s disk)',
+});
+
 export function productionConfigProblems({ env = process.env, trustWeightsTotal = null } = {}) {
   const problems = [];
   const production = env.NODE_ENV === 'production';
@@ -159,6 +171,15 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
       message: `MEDIA_SECRET is unset or shorter than ${MEDIA_SECRET_MIN_LENGTH} characters; signed media URLs need a stable secret of the deployment's own.`,
       fatal: true,
     });
+  }
+  for (const [name, what] of Object.entries(UNIMPLEMENTED_PROVIDER_VARIABLES)) {
+    if (production && flagged(env[name])) {
+      problems.push({
+        code: 'PROVIDER_NOT_IMPLEMENTED',
+        message: `${name} is set, but no real provider is integrated for ${what}.`,
+        fatal: true,
+      });
+    }
   }
   // Passwordless logins have no production override. The variable was one
   // once; an environment that still sets it expects behaviour that no longer

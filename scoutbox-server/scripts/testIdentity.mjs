@@ -2,10 +2,12 @@
 // proxy trust parsing and its effect on req.ip, and the capability/boot
 // reporting of both. Run with: npm test (from scoutbox-server/).
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import express from 'express';
 import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.mjs';
 import { parseTrustProxy } from '../httpTrust.mjs';
-import { buildCapabilityReport, devLoginsEnabled, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems } from '../m181/capabilities.mjs';
+import { buildCapabilityReport, devLoginsEnabled, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../m181/capabilities.mjs';
+import { createBilling, createIdvProvider, createStorage } from '../adapters.mjs';
 
 let passed = 0;
 async function test(name, fn) {
@@ -159,6 +161,31 @@ await test('boot: production needs MEDIA_SECRET of 32+ characters; the old SCOUT
   assert.ok(!fatal({}), 'development signs with a per-process key');
   assert.equal(buildCapabilityReport({ env: { MEDIA_SECRET: PROD.MEDIA_SECRET } }).capabilities.media_signing_secret.state, 'configured');
   assert.equal(buildCapabilityReport({ env: { SCOUTBOX_MEDIA_SECRET: PROD.MEDIA_SECRET } }).capabilities.media_signing_secret.state, 'not_configured');
+});
+await test('boot: a provider variable with no real integration behind it is fatal in production and ignored in development', () => {
+  for (const name of ['ONFIDO_API_TOKEN', 'STRIPE_SECRET_KEY', 'S3_BUCKET']) {
+    const problems = productionConfigProblems({ env: { ...PROD, [name]: 'synthetic' }, trustWeightsTotal: 100 });
+    assert.ok(problems.some((p) => p.code === 'PROVIDER_NOT_IMPLEMENTED' && p.fatal && p.message.startsWith(name)), name);
+    assert.ok(!JSON.stringify(problems).includes('synthetic'), 'the value is never echoed');
+    assert.equal(productionConfigProblems({ env: { [name]: 'synthetic' }, trustWeightsTotal: 100 }).length, 0);
+  }
+  assert.deepEqual(Object.keys(UNIMPLEMENTED_PROVIDER_VARIABLES).sort(), ['ONFIDO_API_TOKEN', 'S3_BUCKET', 'STRIPE_SECRET_KEY']);
+});
+await test('adapters: IDV, billing and storage name the dev provider they are, whatever the environment says', async () => {
+  const saved = { ...process.env };
+  Object.assign(process.env, { ONFIDO_API_TOKEN: 'synthetic', STRIPE_SECRET_KEY: 'synthetic', S3_BUCKET: 'synthetic' });
+  try {
+    const idv = createIdvProvider();
+    assert.equal(idv.provider, 'dev-attestation');
+    assert.equal((await idv.verify({ name: 'Parent', documentType: 'passport', documentRef: '123456789' })).provider, 'dev-attestation');
+    const db = { invoices: [] };
+    const billing = createBilling(db, (p) => `${p}-1`);
+    assert.equal(billing.provider, 'dev-ledger');
+    assert.equal((await billing.invoiceForSigning({ id: 'sg-1', playerName: 'Player' }, { id: 'org-1', name: 'Club', plan: 'Pro' })).provider, 'dev-ledger');
+    assert.equal(createStorage(os.tmpdir()).provider, 'local-disk');
+  } finally {
+    for (const k of ['ONFIDO_API_TOKEN', 'STRIPE_SECRET_KEY', 'S3_BUCKET']) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
 });
 await test('dev logins: one rule — on in development, off in production with no override', () => {
   assert.equal(devLoginsEnabled({}), true);

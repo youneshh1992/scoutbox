@@ -68,9 +68,7 @@ mismatches section).
 | **`DELIVERY_CALLBACK_SECRET`** | HMAC for `POST /callbacks/delivery` | `local-fake-callback-secret` |
 | **`SENDGRID_API_KEY`** / **`MAIL_FROM`** | Real mail transport / sender | unset = dev outbox. `MAIL_FROM` defaults to `noreply@scoutbox.app`. Note: capabilities reports `email_transport` from `SCOUTBOX_SMTP_URL` / `SMTP_URL`, which nothing else reads |
 | **`EXPO_ACCESS_TOKEN`** | Real push via Expo | unset = dev push log |
-| **`ONFIDO_API_TOKEN`** | IDV provider switch | unset = dev attestation. Note: capabilities reports `authoritative_identity_provider` from `SCOUTBOX_IDV_PROVIDER` |
-| **`STRIPE_SECRET_KEY`** | Billing provider switch | unset = dev ledger |
-| **`S3_BUCKET`** | Object storage switch | unset = local disk. Note: capabilities reports `object_storage` from `SCOUTBOX_STORAGE_BUCKET` |
+| `ONFIDO_API_TOKEN`, `STRIPE_SECRET_KEY`, `S3_BUCKET` | Not read: no real IDV, billing or storage provider exists | Setting one in production is fatal (`PROVIDER_NOT_IMPLEMENTED`) |
 | **`TS_REVIEWER_BOOTSTRAP_ID`** / `_SECRET` / `_NAME` | Creates a Trust & Safety reviewer at boot | unset = none |
 | **`BOX_CAM_TEST_PROVIDER`** | `1` enables the simulated Box Cam observer | off. Fatal in production |
 | **`AGENT_VERIFICATION_TEST_PROVIDER`** | `1` enables the synthetic licence register (`TEST-VERIFIED-*` references verify) | off. Fatal in production |
@@ -202,15 +200,16 @@ These routes exist (`m13/enterprise.mjs`). Admin routes need the `x-admin-key` h
 ## External adapters (`adapters.mjs`, `m13/delivery.mjs`)
 
 Every external service has a dev transport that fully works, and tests use it. Setting
-the named variable switches the adapter.
+the named variable switches the adapter. `ONFIDO_API_TOKEN`, `STRIPE_SECRET_KEY` and `S3_BUCKET`
+used to relabel stubs as live providers; production now refuses them (`PROVIDER_NOT_IMPLEMENTED`).
 
 | Adapter | Switch | Dev behaviour | Live behaviour today |
 |---|---|---|---|
 | Mail | `SENDGRID_API_KEY` | Records go to the `outbox` table, visible at `GET /admin/outbox`. Codes are withheld from the persisted text. The full text of the last 500 mails is kept in process memory only, so after a restart request a fresh code. | Real SendGrid `fetch` |
 | Push | `EXPO_ACCESS_TOKEN` | Records go to `push_log` (`GET /admin/push-log`) | Real Expo `fetch` |
-| IDV | `ONFIDO_API_TOKEN` | Instant approval with an audit reference (`dev-attestation`) | **Stub:** labelled `onfido` but still auto-approves |
-| Billing | `STRIPE_SECRET_KEY` | Success-fee invoices in `db.invoices` (`dev-ledger`) | **Stub:** labelled `stripe`, no API call |
-| Storage | `S3_BUCKET` | Files under `DATA_DIR/media/` | **Stub:** labelled `s3`, still writes local disk |
+| IDV | none | Instant approval with an audit reference (`dev-attestation`), in every mode | Not built |
+| Billing | none | Success-fee invoices in `db.invoices` (`dev-ledger`) | Not built |
+| Storage | none | Files under `DATA_DIR/media/` | Not built |
 | Delivery centre | n/a | In-process `local-fake` provider. `POST /admin/delivery/inject-failure` simulates failures and `POST /admin/delivery/sweep` forces a pass | No real provider |
 | Box Cam CV | `BOX_CAM_TEST_PROVIDER=1` | Labelled simulated observer, never production evidence | No production CV provider |
 | Staff SSO | `TEST_IDP_SECRET` | Local test IdP, dev only | None |
