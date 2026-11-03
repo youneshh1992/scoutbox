@@ -83,7 +83,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed** | implemented; accept on green tests |
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
-| — | backups become database copies | — | — | — | **next** (§4.2) |
+| — | backups become database copies | — | — | — | **in progress** (§4.2): code done on `migrate/backup-db-copy`, unit suites being rewritten |
 | — | recruitment end-state proof | — | — | — | §4.3 |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
@@ -110,13 +110,29 @@ Kept on purpose: `repositories/identityPreflight.mjs` (the identity validator mi
 repository use; only the script around it went), and the `db.json` import in `store.mjs`, which is how a backup is
 restored. It goes with §4.2.
 
-### 4.2 Backups become database copies (next)
+### 4.2 Backups become database copies (in progress)
 
 This was planned for S14. Doing it now removes code that §4.3 and S9–S13 would otherwise rewrite.
 
-Today `POST /admin/backup` writes the whole snapshot as `db.json`, and a restore boots a fresh `DATA_DIR` that imports
-it as blobs, after which every table migration runs its blob import. That restore path is the only real user of
-the migrations' blob imports: on a first boot there are no blobs, and the seed goes through the repositories.
+Before this step, `POST /admin/backup` wrote the whole snapshot as `db.json`, and a restore booted a fresh `DATA_DIR`
+that imported it as blobs, after which every table migration ran its blob import. On a first boot there are no blobs,
+and the seed goes through the repositories. The restore path was not the only other user of the blob imports, though:
+the CI persistence batteries (`m23*Persistence`, `m23BootContract`) build their fixtures with `openStore(dir).save(…)`
+into an empty directory, which wrote the table-backed collections as blobs for the next boot to import.
+
+**Status (3 November), branch `migrate/backup-db-copy`:**
+
+- Done: items 1–3 and 5 below. Snapshot mode now runs the table migrations when it opens a file, so a fixture's save
+  goes straight into the tables through the `*_SNAPSHOT` writers, and a saved snapshot settles the first-installation
+  state (`orgsInit`, `coreIdentityInit`). Junk entries in a fixture are refused by the save, with the same codes and
+  positions the imports used; the three m23 batteries that planted junk now assert the refusal at the save. Every CI
+  end-to-end step passes (`apiE2E`, `connectedE2E`, `m13E2E` and the nine persistence batteries).
+- Kept on purpose: the shared validators and their `*_IMPORT_BLOCKED` codes, which the snapshot writers use to refuse
+  junk; renaming the codes would only be churn. Snapshot mode itself, which the m23 batteries need.
+- Not done: item 4. 25 of the 37 unit suites fail, all in tests of what this step removed: blob imports and upgrades
+  (about 16 suites), reading or editing the backup's `db.json` (the 10 `*Server` suites), a hand-built pre-0004
+  database (`testSessions`) and a junk snapshot fixture (`testDataLayer`). Also still to add: a backup suite proving
+  the copy matches the source table for table and that a corrupt `scoutbox.db` stops the boot.
 
 1. Backup writes `scoutbox.db` with `VACUUM INTO`, next to `media/` and `manifest.json` (checksums as now). Restore
    stays "copy the backup into a new, empty directory and boot". Never restore over a live directory.
@@ -212,10 +228,9 @@ is the design note for that step: a fair example of the content a PR description
 
 - **Migration.** Create `repositories/migrations/NNNN_name.mjs`, exporting `id`, `note` and
   `up(sqlite, { now, ...context })`. Set `foreignKeysOff = true` only if the step rebuilds a referenced table. Register
-  it in `repositories/index.mjs` (`import * as mNNNN` and an entry in `DATA_MIGRATIONS`). `up()` runs the DDL, then
-  imports the domain's blob rows from the file's `collections` table (never from memory): it types each row, reports
-  what it normalised or dropped, and deletes the blob rows. Once §4.2 is done, the blob import goes and `up()` is the
-  DDL only.
+  it in `repositories/index.mjs` (`import * as mNNNN` and an entry in `DATA_MIGRATIONS`). `up()` is the DDL only (plus
+  any table rebuild the step needs): there is no blob import. A domain's existing blob rows are not carried over;
+  rollback means re-seed.
 - **Runner.** `runDataMigrations` (`repositories/database.mjs`) runs migrations in lexical order, one transaction
   each, records `(id, applied_at)` in `data_migrations`, and aborts the boot on failure. Under `foreignKeysOff`,
   `foreign_key_check` must be empty before commit. A domain is authoritative because its migration is recorded,
@@ -224,9 +239,9 @@ is the design note for that step: a fair example of the content a PR description
   migrations, then `attachDataLayer`. That deletes the in-memory `db[name]` for table-backed collections and installs
   a read-only view (`repositories/readonly.mjs`), so existing readers keep working and a direct write throws.
 - **Seed data.** `seed.mjs` fills only orgs, guardians and players. Domains from S8a on start empty on a fresh
-  database and get rows through routes. Tests plant blob rows in a file before booting, using fixtures in the
-  writers' shapes (e.g. `scripts/signingsFollowUpsTestFixtures.mjs`). After §4.2, tests write their setup through
-  the repositories or SQL instead.
+  database and get rows through routes. Tests write their setup through the repositories, SQL, or a snapshot-mode
+  save (`openStore(dir).save(…)`, which writes into the tables), using fixtures in the writers' shapes (e.g.
+  `scripts/signingsFollowUpsTestFixtures.mjs`). They don't plant blob rows.
 - **Repository.** `create<Domain>Repository({ sqlite, unit, now, log })` prepares statements. `operation(fn)` joins
   the open unit of work or opens its own transaction. Each write types its input, writes rows, and returns the
   stored record. While a domain keeps an in-memory mirror, the write refreshes it from SQL. `hook()` registers
@@ -236,7 +251,8 @@ is the design note for that step: a fair example of the content a PR description
   failure; nested units join. Side effects (mail, push, live events) go through `store.afterCommit`. Provider calls
   happen before the unit, never inside it.
 - **Snapshot path.** Each domain exports a `*_SNAPSHOT` (`read`, `write`, `assert` with `foreign_key_check`) and adds
-  its collections to `TABLE_BACKED` in `index.mjs`. Backups, restores and the persistence suites use it.
+  its collections to `TABLE_BACKED` in `index.mjs`. Snapshot mode (tools, fixtures, the persistence suites) uses it.
+  Backups don't: a backup is a `VACUUM INTO` copy of the database (`store.copyTo`).
 - **Reporting and tests.** Add a `/capabilities.dataLayer.domains` entry (`index.mjs`). Add `scripts/test<Domain>.mjs`
   to the `npm test` chain. Update `sql/*.sql` to match the real DDL (`testSchemaDdl.mjs`). Add the domain's passing
   end-to-end batteries to `.github/workflows/ci.yml`.
