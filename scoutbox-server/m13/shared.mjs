@@ -3,7 +3,7 @@
 // deleted; every helper enforces at the server, never in a client.
 import crypto from 'node:crypto';
 import { isAdult, ageOn, adultAgeFor, visibleToOrg, haversineKm } from '../domain.mjs';
-import { isLeadUser } from '../roles.mjs';
+import { isLeadUser, isFinanceUser } from '../roles.mjs';
 
 // ------------------------------------------------------------- migrations
 /** `players` (S5): the identity repository, for the external-ids default (a row write). */
@@ -190,8 +190,8 @@ export function buildSharedM13(ctx) {
   // ----- coarse location (F3): clubs see an area label + distance band only.
   const coarseArea = (loc) => loc?.city || 'area withheld';
 
-  // ----- finance-visible roles (F9)
-  const canViewFinance = (user) => /head|director|lead|manager|owner|chief|finance|treasurer/i.test(user?.role ?? '');
+  // ----- finance-visible roles (F9): the lead tier plus finance roles (roles.mjs)
+  const canViewFinance = isFinanceUser;
 
   // ----- group grant evaluation (F8). THE rule: effective permission is the
   // INTERSECTION of membership ∧ live grant ∧ resource permission ∧ current

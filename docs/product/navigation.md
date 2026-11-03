@@ -17,7 +17,8 @@ Where things live in each app, the rules navigation must follow, and the product
 ### Role-aware visibility (Pro/Grassroots, convenience only)
 - Ordinary scout: Home, Recruitment, Squad & Planning, Network, Inbox. Organisation is hidden entirely, never shown empty.
 - Lead-pattern role (`/head|director|lead|manager|owner|chief/i`, the same pattern as the server's `isLead`): all of Organisation.
-- Verification authority without a lead role (`/org/verification/me`): Staff & Security, Verification, Reputation. Integrations, Finance and Plan stay lead-only.
+- Verification authority without a lead role (`/org/verification/me`): Staff & Security, Verification, Reputation. Integrations and Plan stay lead-only.
+- Finance (deal amounts) is shown to leads and finance roles (e.g. "Finance Officer", "Treasurer"). A finance role that isn't a lead sees Organisation → Finance and nothing else there. The sidebar and the server use the same rule, `isFinanceRole` in `scoutbox-server/roles.mjs`.
 - Grassroots Clubs & Groups is visible to everyone, so a coach sees a Club section holding only that page.
 (NAVIGATION_ARCHITECTURE, M23_P25_FINAL_IA)
 
@@ -104,4 +105,4 @@ There are no health categories: `availability/rehabilitation` and `injury_or_una
 - ✓ Player tabs and the "Updates" label: `scoutbox-player/src/app/(tabs)/_layout.tsx:19-25,73`; categories `scoutbox-player/src/caseNav.ts:27-70`; You sections `you.tsx:57-73`.
 - ✓ Stage not writable on a Room: `scoutbox-server/m12/scouting.mjs:538`. ✓ Contacted needs `contact_delivered`: `m17/shared.mjs:274`.
 - ✓ 16 lifecycle reason codes: `m23/lifecycle.mjs:67`. ✓ Development vocabulary checked at boot: `m21/shared.mjs:448`.
-- ≠ Finance access is wider on the server (see §3).
+- ✓ Finance: the sidebar (`scoutbox-club/src/nav.ts`) and the server (`m13/shared.mjs` `canViewFinance`) both use `isFinanceRole` from `scoutbox-server/roles.mjs`. Others get `403 FINANCE_ROLE_REQUIRED` (`m13/planning.mjs`).

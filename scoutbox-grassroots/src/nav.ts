@@ -8,6 +8,8 @@
 // every permission (401/403/404) exactly as before — hiding a destination
 // never becomes authorization, and typing a hidden route still hits the same
 // server rules.
+
+import { LEAD_ROLE_PATTERN, isLeadRole } from '../../scoutbox-server/roles.mjs';
 import type { ScreenId } from './App';
 import { ROOM_NAV } from './caseNav';
 import { allSubs, caseSegments, parseCaseSegments, resolveTab, type CaseLocation } from '../../design-system/caseNav';
@@ -71,9 +73,11 @@ export interface NavContext {
   verLevel: string | null;
 }
 
-// Mirrors the server's lead heuristic (m12/shared.mjs). Convenience only.
-export const LEAD_RE = /head|director|lead|manager|owner|chief/i;
-export const isLeadRole = (role: string) => LEAD_RE.test(role ?? '');
+// The role tiers are the server's own definitions (scoutbox-server/roles.mjs, imported above) rather
+// than copies, so the sidebar can't drift from what the API allows. Visibility here is a
+// convenience only: the server still refuses every route a role may not use.
+export { isLeadRole };
+export const LEAD_RE = LEAD_ROLE_PATTERN;
 
 const leadOrVer = (ctx: NavContext) => isLeadRole(ctx.role) || ctx.verLevel !== null;
 

@@ -80,6 +80,7 @@ treated as settled unless he says otherwise.
   - "Profile completeness" and "Trust Score" are different things. Trust is evidence confidence only.
 
   ([`product/safeguarding.md`](product/safeguarding.md))
+- **Finance (3 Nov, Tom).** Deal amounts (Pro's Finance page) are visible to every lead role and to finance roles (role names containing "finance" or "treasurer"). One definition, `isFinanceRole` in `scoutbox-server/roles.mjs`, used by both the server and the sidebar. ([`product/navigation.md`](product/navigation.md))
 - **Platform.** `ALLOW_DEV_LOGINS=1` is a deliberate, loudly logged escape hatch. Unreadable legacy dates are not migrated. ([`product/platform.md`](product/platform.md))
 
 ## 5. Open questions
@@ -106,7 +107,7 @@ wins**, then **the later document wins**.
 - ⚠ **Opening a Room** for a player the org can't see answers 403 `NOT_VISIBLE`, not 404. Code wins; the docs had already been corrected.
 - ⚠ **Agents.** The representation route checks visibility and blocks *before* scope (P5.6C), unlike the general authorisation order in the contract. FIFA-RSTP-2027 is a rule inside `jp-fifa-2025-1`, not its own policy version. Transactions and opportunity sharing exist, though P5.6C said there were none. Later doc and code win.
 - ⚠ **Computer vision** is `configured` for observation (presence, ball, motion, duration, rep count) but certifies nothing; no Combine protocol is enabled (M16 docs said `not_configured`). Code and M22 win.
-- ⚠ **Finance visibility.** The docs say Finance is for lead roles only, but the server (`m13/shared.mjs:194`) also lets `finance` and `treasurer` roles in, while the navigation hides it from them. Recorded as the server's behaviour; decide which is intended.
+- **Finance visibility** (resolved 3 Nov). The docs said Finance was lead-only. The server also let `finance`/`treasurer` roles in, but the sidebar hid the page from them. Settled in the server's favour: see §4.
 - ⚠ **Decision reason codes.** There are 20 (the data), though a comment in `m23/lifecycle.mjs:64` says 19.
 - ⚠ **Pro entry photo.** The approved AI-generated stadium image wins over M24F.4's "no stock images" rule; "no fake photo for missing media" still holds.
 - ⚠ **Trial accent colour** is `#f6c376` (code), not `#e9c46a` (M24F3_INBOX_DESIGN). The Grassroots serif was reverted (M24F5 reports still mention it). Code wins.

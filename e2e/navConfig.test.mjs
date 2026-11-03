@@ -60,6 +60,7 @@ const tr = (k) => LABELS[k] ?? k.replace(/^nav2?\./, '').replace(/^navsec\./, ''
 const SCOUT = { role: 'First-Team Scout', verLevel: null };
 const LEAD = { role: 'Head of Recruitment', verLevel: null };
 const REVIEWER = { role: 'Analyst', verLevel: 'verification_reviewer' };
+const TREASURER = { role: 'Club Treasurer', verLevel: null };
 
 // P2.5: every label key the configuration names must exist in BOTH
 // dictionaries of its app — a raw key in the sidebar is a defect, and the
@@ -251,7 +252,12 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(!!revOrg && revOrg.children.some((c) => c.id === 'verification'), 'verification authority (non-lead): Organisation → Verification visible');
   ok(!revOrg.children.some((c) => c.id === 'imports' || c.id === 'plan'), 'integrations and plan stay lead-only even for verification reviewers');
   if (app === 'scoutbox-club') {
-    ok(!revOrg.children.some((c) => c.id === 'budgets'), 'finance stays lead-only even for verification reviewers');
+    ok(!revOrg.children.some((c) => c.id === 'budgets'), 'Finance stays hidden from verification reviewers who hold no finance role');
+    const finIds = (ctx) => nav.filterSections(ctx).flatMap((s) => s.children.map((c) => c.id));
+    ok(finIds(TREASURER).includes('budgets') && finIds(LEAD).includes('budgets') && !finIds(SCOUT).includes('budgets'),
+      'Finance shows to leads and finance roles (the server\'s rule, roles.mjs) and not to scouts');
+    const treasurerOrg = nav.filterSections(TREASURER).find((s) => s.id === 'organisation');
+    ok(!!treasurerOrg && treasurerOrg.children.map((c) => c.id).join(',') === 'budgets', 'a finance role gains Finance only, not other lead or admin pages');
   }
   // P2.5: regrouping widened nothing. The set of ids a role can see is the
   // same set it could see before, computed from the same predicates.

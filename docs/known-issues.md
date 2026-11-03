@@ -20,6 +20,10 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
   Only SendGrid and Expo push make real calls.
 - **The deploy configs wouldn't boot.** `fly.toml` and `render.yaml` set only `ADMIN_KEY`, but a production boot also
   needs the media secret and an admin key of at least 16 characters. Neither target is live.
+- **The Docker image can't build the web portals.** Each portal's build stage copies only its own folder
+  (`COPY scoutbox-club/ ./`), but the portals import from outside it: `../../design-system` and, for Pro and
+  Grassroots, `../../scoutbox-server/roles.mjs`. Build from the repository root (copy `design-system/` and
+  `scoutbox-server/roles.mjs` into each stage) before relying on the image.
 - **There's no empty production start.** A first boot always loads the demo seed; production mode only refuses
   the passwordless demo logins. (The migration plan's S13 makes demo data opt-in.)
 - **`scripts/setup.mjs` is stale.** It says Node ≥22.5 with a JSON fallback. The real requirement
@@ -36,9 +40,6 @@ Remove an entry when it's fixed. None of them matters until there is a real depl
 
 ## Product
 
-- **Finance visibility is inconsistent.** The server's `canViewFinance` (`m13/shared.mjs:194`) admits `finance` and
-  `treasurer` roles; the navigation and docs say lead roles only. Decide which is intended. (See
-  [`decisions.md`](decisions.md) §6.)
 - **A second request writer:** the Grassroots open-day `invite_trial` bypasses `issueRecruitmentRequest`.
 - **M22 routes don't call `refusedClientFields()`.**
 - **Fix before S11:** the migration plan records a defect in how `m25/index.mjs` reads

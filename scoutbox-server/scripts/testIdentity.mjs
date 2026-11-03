@@ -3,7 +3,7 @@
 // reporting of both. Run with: npm test (from scoutbox-server/).
 import assert from 'node:assert/strict';
 import express from 'express';
-import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN } from '../roles.mjs';
+import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.mjs';
 import { parseTrustProxy } from '../httpTrust.mjs';
 import { buildCapabilityReport, productionConfigProblems } from '../m181/capabilities.mjs';
 
@@ -35,6 +35,20 @@ await test('lead tier: a missing role or user is never a lead', () => {
 await test('lead tier: the exported pattern is the documented one', () => {
   assert.equal(LEAD_ROLE_PATTERN.source, 'head|director|lead|manager|owner|chief');
   assert.equal(LEAD_ROLE_PATTERN.flags, 'i');
+});
+await test('finance tier: every lead plus finance and treasurer roles see deal amounts', () => {
+  for (const role of ['Head of Recruitment', 'Director', 'Finance Officer', 'Head of Finance', 'Club Treasurer', 'treasurer']) {
+    assert.equal(isFinanceRole(role), true, role);
+  }
+  for (const role of ['Scout', 'First-Team Scout', 'Analyst', 'Assistant', 'Agent', '', null, undefined]) {
+    assert.equal(isFinanceRole(role), false, String(role));
+  }
+  assert.equal(isFinanceUser({ role: 'Treasurer' }), true);
+  assert.equal(isFinanceUser(null), false);
+});
+await test('finance tier: m13 canViewFinance is the roles.mjs rule, not a copy', async () => {
+  const src = (await import('node:fs')).readFileSync(new URL('../m13/shared.mjs', import.meta.url), 'utf8');
+  assert.match(src, /const canViewFinance = isFinanceUser;/);
 });
 
 // ---------------------------------------------------------- httpTrust.mjs

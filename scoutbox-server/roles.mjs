@@ -20,3 +20,20 @@ export const isLeadRole = (role) => LEAD_ROLE_PATTERN.test(role ?? '');
 
 /** The same test on a staff user record (`{ role }`). */
 export const isLeadUser = (user) => isLeadRole(user?.role);
+
+/**
+ * The finance tier: who may see deal amounts (Pro's Finance page, the budgets on a
+ * recruitment case). That's the lead tier plus staff whose role names a finance
+ * function, e.g. "Finance Officer" or "Club Treasurer".
+ *
+ * The web portals import this file too (`scoutbox-club/src/nav.ts`), so the sidebar
+ * shows Finance to exactly the roles the server lets in. Keep this file free of
+ * imports and Node APIs.
+ */
+export const FINANCE_ROLE_PATTERN = /finance|treasurer/i;
+
+/** True when a role string may see deal amounts. Null/undefined → false. */
+export const isFinanceRole = (role) => isLeadRole(role) || FINANCE_ROLE_PATTERN.test(role ?? '');
+
+/** The same test on a staff user record (`{ role }`). */
+export const isFinanceUser = (user) => isFinanceRole(user?.role);

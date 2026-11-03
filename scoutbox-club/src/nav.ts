@@ -8,6 +8,8 @@
 // every permission (401/403/404) exactly as before — hiding a destination
 // never becomes authorization, and typing a hidden route still hits the same
 // server rules.
+
+import { LEAD_ROLE_PATTERN, isLeadRole, isFinanceRole } from '../../scoutbox-server/roles.mjs';
 import type { ScreenId } from './App';
 import { ROOM_NAV } from './caseNav';
 import { allSubs, caseSegments, parseCaseSegments, resolveTab, type CaseLocation } from '../../design-system/caseNav';
@@ -71,9 +73,11 @@ export interface NavContext {
   verLevel: string | null;
 }
 
-// Mirrors the server's lead heuristic (m12/shared.mjs). Convenience only.
-export const LEAD_RE = /head|director|lead|manager|owner|chief/i;
-export const isLeadRole = (role: string) => LEAD_RE.test(role ?? '');
+// The role tiers are the server's own definitions (scoutbox-server/roles.mjs, imported above) rather
+// than copies, so the sidebar can't drift from what the API allows. Visibility here is a
+// convenience only: the server still refuses every route a role may not use.
+export { isLeadRole, isFinanceRole };
+export const LEAD_RE = LEAD_ROLE_PATTERN;
 
 const leadOrVer = (ctx: NavContext) => isLeadRole(ctx.role) || ctx.verLevel !== null;
 
@@ -165,16 +169,17 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     id: 'organisation', labelKey: 'navsec.organisation', icon: 'building',
-    // Administrative tooling: shown only to leads / verification authorities.
+    // Administrative tooling: shown to leads and verification authorities, and to
+    // finance roles for Finance alone (so every other child carries its own gate).
     // Convenience only — every route stays server-enforced.
-    visible: leadOrVer,
+    visible: (c) => leadOrVer(c) || isFinanceRole(c.role),
     children: [
-      { id: 'organisation', labelKey: 'nav2.organisation', primary: true, shortKey: 'navshort.organisation', aliases: ['staff', 'security', 'mfa', 'sso', 'audit', 'settings', 'general', 'organisation'] },
+      { id: 'organisation', labelKey: 'nav2.organisation', primary: true, shortKey: 'navshort.organisation', aliases: ['staff', 'security', 'mfa', 'sso', 'audit', 'settings', 'general', 'organisation'], visible: leadOrVer },
       { id: 'verification', labelKey: 'nav.verification', primary: true, aliases: ['verify', 'staff verification', 'club verification', 'vérification'], visible: leadOrVer },
       { id: 'imports', labelKey: 'nav2.imports', aliases: ['integrations', 'imports', 'webhooks', 'api', 'intégrations'], visible: (c) => isLeadRole(c.role) },
-      { id: 'budgets', labelKey: 'nav2.budgets', aliases: ['finance', 'deal budgets', 'budgeting', 'budgets'], visible: (c) => isLeadRole(c.role) },
+      { id: 'budgets', labelKey: 'nav2.budgets', aliases: ['finance', 'deal budgets', 'budgeting', 'budgets'], visible: (c) => isFinanceRole(c.role) },
       { id: 'plan', labelKey: 'nav.plan', shortKey: 'navshort.plan', aliases: ['billing', 'compliance', 'subscription', 'abonnement'], visible: (c) => isLeadRole(c.role) },
-      { id: 'reputation', labelKey: 'nav.reputation', aliases: ['standing', 'réputation'] },
+      { id: 'reputation', labelKey: 'nav.reputation', aliases: ['standing', 'réputation'], visible: leadOrVer },
     ],
     // M24D — six administrative pages were one flat list; two groups of three.
     groups: [
