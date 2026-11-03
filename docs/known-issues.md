@@ -24,6 +24,8 @@ fixed on 3 November; these were found while fixing it.
 - **`scripts/m182E2E.mjs` fails three checks** (also before 3 Nov): Grassroots screens ask for `desk.*` translation
   keys that don't exist; `orgPanels.tsx` is no longer byte-identical in `scoutbox-club` and `scoutbox-grassroots`
   (which must share business logic); and its backfill fixture leaves one `ROOM_REV_INVALID`. Not in CI.
+- **`scripts/m23AgentPersistence.mjs` fails one check** ("the migrated staff member is an assistant"), also before
+  the S8a change of 3 Nov. Not related to recruitment storage. Not in CI.
 - **`e2e/m24f2DensityAudit` (3 checks) and `e2e/m24fVisualAudit` (2 checks) fail**, like the M24F audits fixed on
   3 Nov: Player Account categories, the portal ™ label, the Grassroots and Player Home single primary action, and
   the Player Card/ListRow check. Triage them against [`design.md`](design.md).
