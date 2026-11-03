@@ -36,7 +36,7 @@ is archived in git under the tag `docs-archive-2026-11`. The migration's status 
 | Command | What it does |
 |---|---|
 | `npm test` | Runtime contract, data-layer, repository, migration and per-domain batteries, plus their real-server variants. Each one runs on temporary directories. |
-| `npm run e2e` | `scripts/apiE2E.mjs` against a running server (`API_URL`, default `http://localhost:4000`). |
+| `npm run e2e` | `scripts/apiE2E.mjs`. Starts its own freshly seeded server on a free port and a temporary `DATA_DIR`, and removes both. To test a server you started yourself, pass both `API_URL` and that server's `DATA_DIR`; `API_URL` alone is refused, because the persistence checks read the data directory. |
 | `npm run perf:data-layer` | Data-layer micro-benchmark. |
 | `node scripts/m13E2E.mjs` | Delivery, webhook, backup and restore end to end (sets `M13_FAST_RETRY`, `ALLOW_LOCAL_WEBHOOKS`). |
 | `node scripts/m13Load.mjs` | Small local load probe. Not a capacity claim. |
@@ -194,9 +194,9 @@ These routes exist (`m13/enterprise.mjs`). Admin routes need the `x-admin-key` h
 - `POST /admin/backup/verify {dir}` re-checksums a backup. `GET /admin/backups` lists
   backups.
 - **Restore:** copy the backup into a new, empty directory and boot with `DATA_DIR`
-  pointing at it. The boot opens the copied `scoutbox.db` as it is; a corrupt file stops
-  the boot. An empty (0-byte) file is treated as a new installation, so check the copy
-  with `POST /admin/backup/verify` first. Never restore over a live directory.
+  pointing at it. The boot opens the copied `scoutbox.db` as it is. A corrupt file stops
+  the boot, and so does an empty (0-byte) one (`DATABASE_EMPTY`): it is never taken for a
+  new installation. Never restore over a live directory.
 - Backups contain personal (seed) data but no server secrets: `ADMIN_KEY` and
   `MEDIA_SECRET` live only in the environment.
 

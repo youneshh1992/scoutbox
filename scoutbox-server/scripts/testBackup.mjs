@@ -209,6 +209,22 @@ await test('corrupt database: a restored directory whose scoutbox.db has a garba
   }
 });
 
+await test('empty database: a restored directory whose scoutbox.db is 0 bytes stops the boot with DATABASE_EMPTY instead of starting from the seed; nothing is created beside it, the file stays empty, and the next boot refuses again (a missing file is still a first installation)', async () => {
+  const dir = tempDir('empty'); fs.cpSync(src.backup, dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'scoutbox.db'), '');
+  for (const attempt of ['first boot', 'next boot']) {
+    const r = await bootRefuses(dir); assert.notEqual(r.code, 0, `${attempt}: non-zero exit`);
+    assert.match(r.log, /DATABASE_EMPTY/, `${attempt}: the refusal names the cause`);
+    assert.equal(/listening on|seeded/.test(r.log), false, `${attempt}: nothing was seeded or served`);
+    assert.equal(fs.statSync(path.join(dir, 'scoutbox.db')).size, 0, `${attempt}: the file is untouched`);
+    for (const side of ['scoutbox.db-wal', 'scoutbox.db-shm']) assert.equal(fs.existsSync(path.join(dir, side)), false, `${attempt}: no ${side} was created`);
+  }
+  rm(dir);
+  const fresh = tempDir('fresh'); const S = await boot(fresh);
+  assert.equal((await S.j('GET', '/orgs/directory')).status, 200, 'a directory with no scoutbox.db still boots as a first installation');
+  await S.stop(); rm(fresh);
+});
+
 // ------------------------------------------------------------- the store's copy
 await test('store.copyTo: refused while a transaction is open (its writes are not committed) and over an existing file (left untouched); outside a transaction it writes a standalone copy of what is committed', () => {
   const dir = tempDir('copyto'); const store = openStore(dir);

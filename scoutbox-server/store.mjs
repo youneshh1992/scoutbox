@@ -57,7 +57,17 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   const serverMode = Array.isArray(tableBacked);
   const skip = new Set(serverMode ? tableBacked : []);
 
-  const sqlite = new DatabaseSync(path.join(dataDir, 'scoutbox.db'));
+  const databaseFile = path.join(dataDir, 'scoutbox.db');
+  // SQLite treats an empty file as a new database, so a backup emptied in
+  // transit would boot as a first installation and load the seed. A missing
+  // file is a first installation; an empty one is refused. (Switching to WAL
+  // writes the header at once, so a real database is never 0 bytes.)
+  if (fs.existsSync(databaseFile) && fs.statSync(databaseFile).size === 0) {
+    const err = new Error(`DATABASE_EMPTY: ${databaseFile} exists but is empty (0 bytes). It is not opened as a new installation. Restore a verified backup, or delete the file to start from the seed. Nothing was changed.`);
+    err.code = 'DATABASE_EMPTY';
+    throw err;
+  }
+  const sqlite = new DatabaseSync(databaseFile);
   sqlite.exec('PRAGMA journal_mode = WAL;');
   sqlite.exec('PRAGMA foreign_keys = ON;');
   // A second connection on the same file (backup tooling, the validation
