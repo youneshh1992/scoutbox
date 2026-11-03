@@ -23,7 +23,7 @@
 // migration must preserve; [cutover] tests assert the 0012 record, the tables, the
 // absence of the blob and FAIL on b67bce5 on concrete assertions.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawnChild } from './testChildren.mjs';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -42,8 +42,6 @@ const A = { 'x-admin-key': 'scoutbox-admin' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (check, ms = 10_000, step = 40) => { const t0 = Date.now(); for (;;) { const v = await check(); if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(step); } };
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
-const children = new Set();
-process.on('exit', () => { for (const p of children) { try { p.kill('SIGKILL'); } catch { /* gone */ } } });
 const MIGRATION = '0012_channels';
 /** seed.mjs `med()`: the media id is derived from the title; the first clip of pl-adeyemi. */
 const hash = (s) => { let h = 0; for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) | 0; return h; };
@@ -53,8 +51,8 @@ const REPORT = { acceleration: 7, sprintSpeedKmh: 31, distanceKm: 6.2, passCompl
 async function boot(dir, env = {}, server = SERVER) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
-    children.add(proc); proc.on('exit', () => children.delete(proc));
+    const proc = spawnChild(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+   
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {
       const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });

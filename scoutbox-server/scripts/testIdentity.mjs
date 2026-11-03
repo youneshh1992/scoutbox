@@ -2,7 +2,7 @@
 // proxy trust parsing and its effect on req.ip, and the capability/boot
 // reporting of both. Run with: npm test (from scoutbox-server/).
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawnChild } from './testChildren.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -223,7 +223,7 @@ await test('first boot (real server): production starts with no people or clubs,
   const PROD_ENV = { NODE_ENV: 'production', MEDIA_SECRET: PROD.MEDIA_SECRET, ADMIN_KEY: PROD.ADMIN_KEY };
   const port = pickPort(7900, 100);
   const boot = (dir, env) => new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, SCOUTBOX_SEED_DEMO: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, SCOUTBOX_SEED_DEMO: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(proc); });
     proc.stderr.on('data', (d) => { log += d; });

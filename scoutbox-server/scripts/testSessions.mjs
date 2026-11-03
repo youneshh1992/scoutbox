@@ -2,7 +2,8 @@
 // with hashed tokens. Everything runs on throwaway databases under the OS temp
 // directory with synthetic fixtures; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import { spawnChild } from './testChildren.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -273,7 +274,7 @@ await atest('busy timeout: a save waits for a concurrent writer in another proce
   attachDataLayer({ db: { orgs: [ORG_A], guardians: [], players: [], users: [] }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   store.save({ savedAt: 1, idCounter: 1000, db: { orgs: [], players: [], guardians: [] } });
   const holdMs = 1200;
-  const holder = spawn(process.execPath, ['--input-type=module', '-e', `
+  const holder = spawnChild(process.execPath, ['--input-type=module', '-e', `
     import { DatabaseSync } from 'node:sqlite';
     const db = new DatabaseSync(process.argv[1]);
     db.exec('BEGIN IMMEDIATE'); db.exec("INSERT INTO meta (key, value) VALUES ('lock-probe', '1') ON CONFLICT(key) DO UPDATE SET value = '1'");
@@ -316,7 +317,7 @@ await atest('server: plain-token sessions in a fixture are stored as hashes, the
   { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); } // snapshot mode: the sessions go into their table, hashed
   const port = pickPort(7700, 100);
   const boot = () => new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve({ proc, log: () => log }); });
     proc.stderr.on('data', (d) => { log += d; });
@@ -394,7 +395,7 @@ await atest('server: media links are signed with MEDIA_SECRET only — a link su
   { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); }
   const port = pickPort(7800, 100);
   const boot = (env) => new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, MEDIA_SECRET: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, MEDIA_SECRET: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve({ proc }); });
     proc.stderr.on('data', (d) => { log += d; });
@@ -437,7 +438,7 @@ await atest('server (review correction 2): player and org sessions survive the a
   ];
   { const t = openStore(dir); t.save({ savedAt: Date.now(), idCounter: 1000, db: seed }); t.sqlite.close(); }
   const port = pickPort(7850, 100);
-  const proc = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
   await new Promise((resolve, reject) => {
@@ -464,7 +465,7 @@ await atest('server (review correction 2): player and org sessions survive the a
     assert.ok(!fs.readFileSync(path.join(backup.dir, 'scoutbox.db'), 'latin1').includes('dbjson-kola-token'));
     const restoreDir = tempDir('s2-restore'); fs.cpSync(backup.dir, restoreDir, { recursive: true });
     const port2 = pickPort(7900, 100);
-    const restored = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port2), DATA_DIR: restoreDir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const restored = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port2), DATA_DIR: restoreDir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log2 = ''; restored.stdout.on('data', (d) => { log2 += d; }); restored.stderr.on('data', (d) => { log2 += d; });
     try {
       await new Promise((resolve, reject) => {
@@ -539,7 +540,7 @@ test('snapshot mode (review correction 5): a table-backed collection that is not
 // ------------------------------------------------------------- SQLite is required (review correction 4)
 test('without node:sqlite the store refuses to open with a compatibility error and touches nothing; the repositories refuse a missing connection', () => {
   const dir = tempDir('s2-nosqlite');
-  const probe = spawn === null ? null : execFileSync(process.execPath, ['--no-experimental-sqlite', '--input-type=module', '-e', `
+  const probe = execFileSync(process.execPath, ['--no-experimental-sqlite', '--input-type=module', '-e', `
     try { const { openStore } = await import(${JSON.stringify(path.join(HERE, '..', 'store.mjs'))}); openStore(process.argv[1]); console.log('OPENED'); }
     catch (err) { console.log('REFUSED ' + err.code + ' ' + err.message); }
   `, dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });

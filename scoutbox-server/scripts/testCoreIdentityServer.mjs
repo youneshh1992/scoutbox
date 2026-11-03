@@ -8,7 +8,7 @@
 // directory. Nothing here touches DATA_DIR or any real data. Run with: npm test
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawnChild } from './testChildren.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +33,7 @@ const nextPort = () => BASE + (portSeq++ % 10);
 /** Boot the real server on `dir`; resolves once it listens, rejects if it exits first (with the log and the exit code). */
 function boot(dir, port, env = {}) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {
       const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });

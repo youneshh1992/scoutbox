@@ -7,7 +7,7 @@
 // privacy of every response (the intended plain-code delivery included).
 // Nothing here touches DATA_DIR or any real data. Run with: npm test
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawnChild } from './testChildren.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -25,14 +25,12 @@ const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, 
 const A = { 'x-admin-key': 'scoutbox-admin' };
 const hash = (code) => crypto.createHash('sha256').update(String(code).trim().toUpperCase()).digest('hex');
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
-const children = new Set();
-process.on('exit', () => { for (const p of children) { try { p.kill('SIGKILL'); } catch { /* gone */ } } });
 
 async function boot(dir, env = {}) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
-    children.add(proc); proc.on('exit', () => children.delete(proc));
+    const proc = spawnChild(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+   
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {
       const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
