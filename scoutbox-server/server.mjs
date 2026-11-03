@@ -51,7 +51,7 @@ import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
 import { registerSourceChanges } from './m181/sourceChanges.mjs';
 import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
 import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './m181/rateLimit.mjs';
-import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, productionConfigProblems } from './m181/capabilities.mjs';
+import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, productionConfigProblems, saveDebounceMs } from './m181/capabilities.mjs';
 import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
 import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './m182/eventRegistry.mjs';
@@ -153,6 +153,7 @@ function loadSnapshot() {
 }
 
 let saveTimer = null;
+const SAVE_DEBOUNCE_MS = saveDebounceMs(); // 2000 ms; shorter only in a test environment (m181/capabilities.mjs)
 function persist() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
@@ -162,7 +163,7 @@ function persist() {
     } catch (err) {
       console.error('snapshot save failed:', err.message);
     }
-  }, 2000);
+  }, SAVE_DEBOUNCE_MS);
 }
 
 function persistNow() {

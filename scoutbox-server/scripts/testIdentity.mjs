@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.mjs';
 import { parseTrustProxy } from '../httpTrust.mjs';
-import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, liveMailConfigured, livePushConfigured, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../m181/capabilities.mjs';
+import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, liveMailConfigured, livePushConfigured, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, SAVE_DEBOUNCE_DEFAULT_MS, saveDebounceMs, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../m181/capabilities.mjs';
 import { createBilling, createIdvProvider, createStorage } from '../adapters.mjs';
 import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
@@ -205,6 +205,20 @@ await test('capabilities: adapters are reported from the variables the adapters 
   assert.equal(caps(everything).object_storage.state, 'not_configured', 'no object storage is integrated');
   assert.equal(liveMailConfigured({ SENDGRID_API_KEY: 'k' }), true);
   assert.equal(livePushConfigured({ EXPO_ACCESS_TOKEN: '' }), false);
+});
+await test('save delay: 2000 ms unless SCOUTBOX_SAVE_DEBOUNCE_MS asks for a whole number from 10 to 2000 outside production; production always saves on the normal delay and refuses to boot with the variable set; an invalid value falls back to the normal delay and is reported', () => {
+  assert.equal(SAVE_DEBOUNCE_DEFAULT_MS, 2000);
+  assert.equal(saveDebounceMs({}), 2000);
+  assert.equal(saveDebounceMs({ SCOUTBOX_SAVE_DEBOUNCE_MS: '' }), 2000, 'empty is unset');
+  for (const [v, ms] of [['300', 300], ['10', 10], ['2000', 2000], [' 250 ', 250]]) assert.equal(saveDebounceMs({ SCOUTBOX_SAVE_DEBOUNCE_MS: v }), ms, v);
+  for (const v of ['0', '9', '2001', '1.5', '-5', 'fast', '1e3']) {
+    assert.equal(saveDebounceMs({ SCOUTBOX_SAVE_DEBOUNCE_MS: v }), 2000, `${v}: the normal delay`);
+    assert.ok(productionConfigProblems({ env: { SCOUTBOX_SAVE_DEBOUNCE_MS: v }, trustWeightsTotal: 100 }).some((p) => p.code === 'SAVE_DEBOUNCE_INVALID'), `${v}: reported`);
+  }
+  assert.equal(productionConfigProblems({ env: { SCOUTBOX_SAVE_DEBOUNCE_MS: '300' }, trustWeightsTotal: 100 }).length, 0, 'a valid value in development is not a problem');
+  assert.equal(saveDebounceMs({ NODE_ENV: 'production', SCOUTBOX_SAVE_DEBOUNCE_MS: '300' }), 2000, 'never honoured in production');
+  assert.ok(productionConfigProblems({ env: { ...PROD, SCOUTBOX_SAVE_DEBOUNCE_MS: '300' }, trustWeightsTotal: 100 }).some((p) => p.code === 'SAVE_DEBOUNCE_IN_PRODUCTION' && p.fatal));
+  assert.equal(productionConfigProblems({ env: { ...PROD }, trustWeightsTotal: 100 }).length, 0);
 });
 await test('first boot: demo data in development, catalogues only in production; SCOUTBOX_SEED_DEMO overrides either way', () => {
   assert.equal(demoSeedEnabled({}), true);

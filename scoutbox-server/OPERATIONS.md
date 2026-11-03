@@ -78,6 +78,7 @@ are refused in production.
 | **`SCOUTBOX_TEST_CLOCK`** | `1` enables test-clock routes (m23 / m28) | off |
 | **`ALLOW_LOCAL_WEBHOOKS`** | `1` permits loopback webhook targets (tests) | off (SSRF guard) |
 | **`M13_FAST_RETRY`** | `1` compresses retry ladders and sweep intervals (tests) | off |
+| **`SCOUTBOX_SAVE_DEBOUNCE_MS`** | Shortens the 2-second debounced save (10–2000 ms) so test suites need not wait for it | 2000. Never honoured in production, and fatal there (`SAVE_DEBOUNCE_IN_PRODUCTION`). Any other value is the normal delay (`SAVE_DEBOUNCE_INVALID`) |
 | **`M13_QUIET_LOGS`** | `1` silences boot and per-request logs | off |
 
 A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
