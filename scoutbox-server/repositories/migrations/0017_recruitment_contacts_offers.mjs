@@ -24,7 +24,7 @@
  */
 import { migrationApplied } from '../database.mjs';
 import { idempotencyKeysDdl } from '../recruitment.mjs';
-import { RECRUITMENT_CASES_MIGRATION, assertKeyFormat } from '../recruitmentCases.mjs';
+import { RECRUITMENT_CASES_MIGRATION } from '../recruitmentCases.mjs';
 import { RECRUITMENT_CONTACTS_OFFERS_MIGRATION, RECRUITMENT_CONTACTS_OFFERS_CUTOVER_META, RECRUITMENT_CONTACTS_OFFERS_DDL, RECRUITMENT_CONTACTS_OFFERS_TABLES, S8C_KEY_OWNERS, importRecruitmentContactsOffersBlobs } from '../recruitmentContactsOffers.mjs';
 import { rebuildTable } from './0016_recruitment_cases.mjs';
 
@@ -35,7 +35,6 @@ export const foreignKeysOff = true;
 export function up(sqlite, { now = Date.now() } = {}) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);
   if (!migrationApplied(sqlite, RECRUITMENT_CASES_MIGRATION)) throw new Error(`${id}: ${RECRUITMENT_CASES_MIGRATION} must be recorded first`);
-  assertKeyFormat(sqlite, { label: `migration ${id}` });
   const hasTable = (t) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
   const existing = RECRUITMENT_CONTACTS_OFFERS_TABLES.filter(hasTable);
   if (existing.length) throw new Error(`${id}: ${existing.join(', ')} already exist without the migration record; refusing to guess their state`);

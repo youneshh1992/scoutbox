@@ -79,8 +79,8 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S8b | cases, rooms, decisions | `0016_recruitment_cases` | `recruitmentCases.mjs` | **fingerprint** | done |
 | S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **fingerprint** | implemented; accept on green tests |
 | S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed** | implemented; accept on green tests |
-| — | rollback machinery removed | — | — | — | **next** (§4.1) |
-| — | recruitment end-state proof | — | — | — | §4.2 |
+| — | rollback machinery removed | — | — | — | done (§4.1) |
+| — | recruitment end-state proof | — | — | — | **next** (§4.2) |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
 | S11 | agents, compliance, transactions | | | | not started |
@@ -92,29 +92,17 @@ S6b, S7d and S8a–S8c carry the lossless side columns (`*_json`) of the old fid
 
 ## 4. The order of work
 
-### 4.1 Remove the rollback and compatibility machinery (next)
+### 4.1 Remove the rollback and compatibility machinery (done)
 
-One commit, no behaviour change. Delete:
+Removed with no behaviour change: the 15 rollback tools and their scripts, `rollbackChain.mjs`,
+`rollbackToPreS8c.mjs`, the core-identity preflight script, the `rollback:*` and `preflight:*` npm scripts,
+`copyDatabaseReadOnly`, the `SCOUTBOX_PRE_*` historical-build boots, the rollback cases in the unit suites, the
+recruitment-cases key-format marker, the stale-outbox refusal (`OUTBOX_PUSH_SCHEMA_STALE`), the `LATER_SCHEMA`
+refusals and the "in-memory array was ignored" warnings.
 
-- `repositories/*Rollback.mjs` (15 files) and `repositories/rollbackChain.mjs`
-- `scripts/*Rollback.mjs` (the same 15), `scripts/rollbackToPreS8c.mjs`, `scripts/testCoreIdentityRollback.mjs`
-  (remove it from the `npm test` chain)
-- in `scoutbox-server/package.json`: the `rollback:*` scripts, and probably `preflight:core-identity` with
-  `scripts/preflightCoreIdentity.mjs`
-- `copyDatabaseReadOnly` in `repositories/database.mjs` (only the rollback tools and the preflight use it)
-- the `SCOUTBOX_PRE_*` historical-build boots in `scripts/test{Channels,Dispatches,Notifications,OutboxPush,PlayerErasure,RecruitmentCases,RecruitmentContactsOffers,Recruitment,SafetyAudit}Server.mjs`
-- the rollback cases in the unit suites (`testChannels`, `testDispatches`, `testNotifications`, `testOneTimeCodes`,
-  `testOrgs`, `testOutboxPush`, `testPlayer*`, `testRecruitment*`, `testSafetyAudit`, `testSessions`,
-  `testSigningsFollowUps`, `testMediaDeletions`, `testCoreIdentityServer`, `coreIdentityTestFixtures.mjs`)
-- the key-format marker: `RECRUITMENT_CASES_FORMAT_META`, `RECRUITMENT_CASES_KEY_FORMAT`, `recordedKeyFormat`
-  and `assertKeyFormat` in `recruitmentCases.mjs`, their calls in `recruitmentContactsOffers.mjs`, and `keyFormat`
-  in the `index.mjs` capabilities
-- `OUTBOX_PUSH_SCHEMA_STALE` / `outboxHasToJson` in `outboxPush.mjs`, which guard against an unaccepted build
-- the `LATER_SCHEMA` refusals that exist for the rollback tools, and the "in-memory array was ignored" warnings in `attachDataLayer`
-- the legacy `db.json` import (`readLegacySnapshot`, `LEGACY_IMPORT_FAILED` in `store.mjs`), now or at S14
-- `SCOUTBOX_SHADOW_VALIDATION` mentions
-
-Then run `npm test` and the Player suite.
+Kept on purpose: `repositories/identityPreflight.mjs` (the identity validator migration `0005` and the identity
+repository use; only the script around it went), and the `db.json` import in `store.mjs`, which is how a backup is
+restored. It goes at S14, when backup becomes `VACUUM INTO`.
 
 ### 4.2 Prove the end state on recruitment
 

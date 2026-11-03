@@ -778,7 +778,7 @@ DECISIONs, some already in force:
 - **Migration modules** live in `scoutbox-server/repositories/migrations/NNNN_name.mjs` and
   export `{ id, note, up(sqlite) }`. Ids sort lexically; a migration runs once, in a
   transaction, and a failure aborts the boot without modifying the file. There is no `down`:
-  rollback is restore-from-backup (§ plan, every step records its rollback).
+  rollback is a re-seed (there is no production data).
 - **Applied today:** `0001_org_users` (S0), `0002_core_identity_shadow` (S1), `0003_sessions_live` (S2), `0004_orgs_live` (S3), `0005_core_identity_live` and `0006_media_deletions` (S4a), `0007_player_subrecords` (S5).
 - **Rule.** The DDL in `docs/architecture/sql/` is the design; the migration files are what
   runs. `testSchemaDdl.mjs` asserts the two agree for every table a migration has created, so

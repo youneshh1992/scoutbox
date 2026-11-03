@@ -7,19 +7,16 @@
 // a SIGKILL right after a send; the deletion unit's in-place edits with a REAL COMMIT failure leaving every row as it
 // was and the retry landing once; a backup whose db.json carries a contact naming a historically missing player
 // restored, served and counted (Q8c-a) while one naming a missing guardian is refused (Q8c-b); the admin backup carrying
-// the two collections in the legacy shapes, a restore into a NEW directory importing them through 0017 row for row; the
-// accepted pre-S8c build (7072dd9 — SCOUTBOX_PRE_S8C_SERVER) booted DIRECTLY on a 0017 copy (MEASURED, whichever way
-// it goes); the copy-only rollback booted by that build, reading the same contacts and offers and writing one of each
-// into its blobs, and this build re-upgrading the copy with those writes; a rollback copy whose blob is a present JSON
-// null refused at boot. Every database read goes through a second read-only connection. Nothing here touches DATA_DIR
-// or real data. Run with: npm test
+// the two collections in the legacy shapes, a restore into a NEW directory importing them through 0017 row for row.
+// Every database read goes through a second read-only connection. Nothing here touches DATA_DIR or real data. Run
+// with: npm test
 //
 // FAILING-FIRST NOTE (recorded on the unchanged 19f5ca8 tree, source-identical to the accepted 7072dd9): the [cutover]
-// tests assert the 0017 record, the nine tables, the absence of the two blobs, the /capabilities domain and the rollback
-// tool and FAIL there on concrete assertions; the [compat] checks inside them (the routes' answers, the recipient's and
+// tests assert the 0017 record, the nine tables, the absence of the two blobs and the /capabilities domain
+// and FAIL there on concrete assertions; the [compat] checks inside them (the routes' answers, the recipient's and
 // the other club's surfaces) hold on both trees.
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -82,7 +79,6 @@ const qAll = (dir, sql, ...p) => snap(dir, (c) => c.all(sql, ...p));
 const live = (dir) => !!q1(dir, 'SELECT 1 AS one FROM data_migrations WHERE id = ?', MIGRATION);
 const applied = (dir) => qAll(dir, 'SELECT id FROM data_migrations ORDER BY id').map((r) => r.id);
 const blobOf = (dir, name) => snap(dir, (c) => { const r = c.get('SELECT value FROM collections WHERE name = ?', name); return r ? JSON.parse(r.value) : undefined; });
-const blobTextOf = (dir, name) => snap(dir, (c) => c.get('SELECT value FROM collections WHERE name = ?', name)?.value);
 const tableExists = (dir, t) => !!q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t);
 const fkOf = (dir, t) => qAll(dir, `PRAGMA foreign_key_list(${t})`).map((r) => `${r.from}->${r.table}(${r.to}) ${r.on_delete}`);
 const ddlOf = (dir, t) => q1(dir, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", t)?.sql ?? null;
@@ -213,7 +209,7 @@ await test('[cutover] the deletion unit edits the person\'s contacts and offers 
   rm(dir, restored, strict, bk.body.dir);
 });
 
-await test('[cutover] the admin backup carries the two collections in the legacy shapes (insertion order, the writers\' literals, keys reassembled); a restore into a NEW directory imports them through 0017 row for row; the accepted pre-S8c build booted DIRECTLY on a copy of the live file is MEASURED (whichever way it goes: the tables are untouched and any blob it writes holds nothing from them); the copy-only rollback writes the two blobs back and idempotency_keys to the S8b CHECK, the S8b tool refuses the live file (LATER_SCHEMA) and accepts the copy, the S8a tool the S8b output; the pre-S8c build (SCOUTBOX_PRE_S8C_SERVER) boots the copy — serves the same contact and offer, writes one of each into its blobs — and this build re-upgrades the copy with those writes exactly; a rollback copy whose blob is a present JSON null is refused at boot', async () => {
+await test('[cutover] the admin backup carries the two collections in the legacy shapes (insertion order, the writers\' literals, keys reassembled); a restore into a NEW directory imports them through 0017 row for row', async () => {
   const dir = tempDir('s8c-backup'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Backup Adult'); const RID = await plannedRoom(S, maria, a.pid);
   const d = await S.j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Kept through everything', body: 'Body kept through everything.', clientKey: 'b-create' }, maria); assert.equal(d.status, 201, d.text); const CID = d.body.contact.id;
@@ -233,54 +229,7 @@ await test('[cutover] the admin backup carries the two collections in the legacy
   const liveCanon = recCanon(dir); await S.stop();
   const restored = tempDir('s8c-restore'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored)); { const got = recCanon(restored); assert.equal(got, liveCanon, `row for row (every table's rows equal by content; a rewrite reinserts children, so rowid order is not compared): ${got === liveCanon ? '' : canonDiff(got, liveCanon)}`); } const mariaR = await orgLogin(S); assert.equal((await S.j('GET', `/org/rooms/${RID}/contacts/${CID}`, undefined, mariaR)).body.contact.status, 'delivered'); await S.stop();
-  const OLD = process.env.SCOUTBOX_PRE_S8C_SERVER;
-  if (OLD && fs.existsSync(OLD)) {
-    // the actual behaviour, MEASURED and recorded: that build knows no table for the two collections
-    const direct = tempDir('s8c-direct'); fs.cpSync(dir, direct, { recursive: true }); const directBefore = recDump(direct); const seqBefore = q1(direct, "SELECT value FROM meta WHERE key = 'saveSeq'").value;
-    const wrong = await bootMeasured(direct, {}, OLD);
-    let served = null; let listed = null;
-    if (wrong.code === 'listening') {
-      const mariaO = await orgLogin(wrong.S);
-      const r = await wrong.S.j('GET', `/org/rooms/${RID}/contacts/${CID}`, undefined, mariaO); served = r.status; assert.notEqual(r.status, 200, `the pre-S8c build serves no contact from the tables: ${r.status}`);
-      const l = await wrong.S.j('GET', `/org/rooms/${ORID}/offers`, undefined, mariaO); listed = l.status === 200 ? l.body.offers.length : l.status; if (l.status === 200) assert.equal(l.body.offers.length, 0, 'the pre-S8c build lists no offer (the rows are invisible to it)');
-      await wrong.S.stop();
-    } else assert.equal(wrong.code, 1, `the pre-S8c build exited: ${wrong.log.slice(-400)}`);
-    assert.equal(recDump(direct), directBefore, 'the direct boot changed no table row (the contact, offer, request, case and thread tables byte-identical)');
-    const seqAfter = q1(direct, "SELECT value FROM meta WHERE key = 'saveSeq'").value; const blobsWritten = COLLECTIONS.map((n) => [n, blobOf(direct, n)]).filter(([, v]) => v !== undefined);
-    for (const [n, v] of blobsWritten) assert.deepEqual(v, [], `${n}: a blob that build wrote holds nothing from the tables (an empty container, never a copy or a fabrication)`);
-    const back = await boot(direct); const mariaB = await orgLogin(back); assert.equal((await back.j('GET', `/org/rooms/${RID}/contacts/${CID}`, undefined, mariaB)).status, 200, 'this build serves the contact from the tables again'); assert.ok((await back.j('GET', `/org/rooms/${ORID}/offers`, undefined, mariaB)).body.offers.some((o) => o.id === OID)); await back.stop();
-    for (const n of COLLECTIONS) assert.equal(blobOf(direct, n), undefined, `${n}: the stale blob is dropped at attach`);
-    console.log(`    (MEASURED — the pre-S8c build booted DIRECTLY on a copy of the live file: ${wrong.code === 'listening' ? `LISTENED — GET /org/rooms/:id/contacts/:cid answered ${served}, /org/rooms/:id/offers listed ${listed} offer(s)` : `exited ${wrong.code} at boot`}; the tables were untouched; the save revision went ${seqBefore} → ${seqAfter}; blobs written: ${blobsWritten.length ? blobsWritten.map(([n]) => `${n} []`).join(', ') : 'none'}; its boot log: ${/INTEGRITY[^\n]*STORE_MISSING[^\n]*/.exec(wrong.log)?.[0]?.slice(0, 160) ?? 'no STORE_MISSING line'}; this build served the contact and the offer from the tables again — the rollback tool is the only way back)`);
-    rm(direct);
-  }
-  // the rollback copy
-  const copy = tempDir('s8c-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs'), dir, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
-  assert.equal(live(copy), false); for (const t of TABLES) assert.equal(tableExists(copy, t), false, `${t} dropped`); assert.ok(tableExists(copy, 'recruitment_cases'), 'the S8b tables stay'); assert.ok(tableExists(copy, 'trials'));
-  for (const n of COLLECTIONS) assert.deepEqual(blobOf(copy, n), snapshot.db[n], `${n} blob equals the backup's legacy shape`);
-  assert.doesNotMatch(ddlOf(copy, 'idempotency_keys'), /recruitment_contacts|recruitment_offers/, 'idempotency_keys back to the S8b CHECK'); assert.match(ddlOf(copy, 'idempotency_keys'), /'room_decisions'/); assert.equal(q1(copy, "SELECT count(*) AS n FROM idempotency_keys WHERE owner_table IN ('recruitment_contacts', 'recruitment_offers')").n, 0); assert.equal(q1(copy, "SELECT value FROM meta WHERE key = 'recruitmentCasesKeyFormat'").value, 'case-owned-keys/1', 'the S8b marker untouched');
-  let refused = null; try { execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), dir, tempDir('s8c-x')], { stdio: 'pipe' }); } catch (e) { refused = e; } assert.equal(refused?.status, 4, 'the S8b tool refuses the 0017 file (LATER_SCHEMA)');
-  const s8bOut = tempDir('s8c-y'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), copy, s8bOut], { stdio: 'pipe' }); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), s8bOut, tempDir('s8c-z')], { stdio: 'pipe' });
-  if (OLD && fs.existsSync(OLD)) {
-    const old = await boot(copy, {}, OLD); const mariaO = await orgLogin(old);
-    const r = await old.j('GET', `/org/rooms/${RID}/contacts/${CID}`, undefined, mariaO); assert.equal(r.status, 200, r.text); assert.equal(r.body.contact.status, 'delivered', 'the pre-S8c build reads the same contact from its blob');
-    const lo = await old.j('GET', `/org/rooms/${ORID}/offers`, undefined, mariaO); assert.equal(lo.status, 200, lo.text); assert.ok(lo.body.offers.some((o) => o.id === OID && o.status === 'ISSUED'), 'and the same offer');
-    const b = await signupAdult(old, 'Old Build Adult'); const RID2 = await plannedRoom(old, mariaO, b.pid); // the first room is at offer_made (one room per player and organisation): the old build's contact goes into a second player's planned room
-    const oc = await old.j('POST', `/org/rooms/${RID2}/contacts`, { subject: 'Written by the old build', body: 'Old build body.', clientKey: 'old-create' }, mariaO); assert.equal(oc.status, 201, oc.text);
-    const orv = await old.j('POST', `/org/offers/${OID}/revise`, { terms: { ...TERMS, squad: 'Old build squad' }, expectedRev: lo.body.offers.find((o) => o.id === OID).rev, clientKey: 'old-revise' }, mariaO); assert.equal(orv.status, 201, orv.text);
-    await old.stop();
-    assert.equal(blobOf(copy, 'recruitmentContacts').length, 2, 'written into its blob'); assert.equal(blobOf(copy, 'recruitmentOffers')[0].revisions.length, 2);
-    const up = await boot(copy); assert.ok(live(copy)); const mariaU = await orgLogin(up);
-    assert.equal(contactRow(copy, oc.body.contact.id).subject, 'Written by the old build'); assert.equal(q1(copy, 'SELECT term_squad FROM offer_revisions WHERE offer_id = ? AND position = 1', OID).term_squad, 'Old build squad'); for (const n of COLLECTIONS) assert.equal(blobOf(copy, n), undefined);
-    assert.equal((await up.j('GET', `/org/rooms/${RID2}/contacts/${oc.body.contact.id}`, undefined, mariaU)).status, 200); assert.equal((await up.j('GET', `/org/offers/${OID}`, undefined, mariaU)).body.offer.currentRevision.terms.squad, 'Old build squad');
-    await up.stop();
-    console.log('    (pre-S8c build 7072dd9 booted the rollback copy: the same contact and offer in its routes, a contact and a revision written into its blobs; re-upgraded with those writes)');
-  } else console.log('    (SCOUTBOX_PRE_S8C_SERVER not set: the pre-S8c boots of the live copy and of the rollback copy were NOT exercised here)');
-  const nul = tempDir('s8c-null'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs'), dir, nul], { stdio: 'pipe' });
-  { const s2 = new DatabaseSync(path.join(nul, 'scoutbox.db')); s2.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run('recruitmentOffers', 'null'); s2.close(); }
-  const stateOf = () => ({ recorded: applied(nul).includes(MIGRATION), tables: TABLES.filter((t) => tableExists(nul, t)), blob: blobTextOf(nul, 'recruitmentOffers'), saveSeq: q1(nul, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value, dump: recDump(nul) });
-  const nb = stateOf(); const r = await bootRefused(nul); assert.equal(r.code, 1, `the null blob: exit 1 — ${r.log.slice(-500)}`); assert.doesNotMatch(r.log, /listening on/); assert.match(r.log, /CONTACTS_OFFERS_IMPORT_BLOCKED/); assert.match(r.log, /recruitmentOffers blob.*null/);
-  assert.deepEqual(stateOf(), nb, 'the refused boot changed nothing'); assert.equal(nb.recorded, false); assert.deepEqual(nb.tables, []);
-  rm(dir, restored, copy, s8bOut, nul, bk.body.dir);
+  rm(dir, restored, bk.body.dir);
 });
 
 console.log(`\n${passed} recruitment contacts/offers server checks passed`);

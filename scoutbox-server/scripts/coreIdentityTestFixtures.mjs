@@ -1,5 +1,5 @@
 // TEST SUPPORT ONLY — synthetic fixtures and temporary-database helpers shared
-// by scripts/testCoreIdentityMigration.mjs and scripts/testCoreIdentityRollback.mjs.
+// by scripts/testCoreIdentityMigration.mjs and the other migration suites.
 // Nothing here is reached by server boot. Every database is a throwaway file
 // under the OS temp directory (or in memory); every record is invented.
 import crypto from 'node:crypto';
@@ -21,7 +21,7 @@ export const TTL = 30 * DAY;
 export const NOW = Date.UTC(2026, 9, 11, 12);
 export const T0 = NOW - 400 * DAY;
 export const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
-export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 export const clone = (v) => JSON.parse(JSON.stringify(v));
 
 // ------------------------------------------------------------------ records (the shapes the application writes today)
@@ -73,7 +73,7 @@ export const SESSIONS = (now = NOW) => [
   { token: 'legacy-player-token-000000000000000000000000000', sid: 'sid-player', kind: 'player', refId: 'pl-adult', createdAt: now - DAY },
   { token: 'legacy-staff-token-0000000000000000000000000000', sid: 'sid-staff', kind: 'org', refId: 'org-pro', userId: 'usr-1', createdAt: now - DAY },
 ];
-/** `vouches`: the unrelated plain blob record the unit-of-work and rollback suites edit (`requests` is table-backed since S8a, migration 0015). */
+/** `vouches`: the unrelated plain blob record the unit-of-work suites edit (`requests` is table-backed since S8a, migration 0015). */
 export const EXTRA = () => ({ requests: [], vouches: [{ id: 'vch-1', playerId: 'pl-adult', status: 'pending', history: [] }], ledger: [] });
 
 // ------------------------------------------------------------------ databases

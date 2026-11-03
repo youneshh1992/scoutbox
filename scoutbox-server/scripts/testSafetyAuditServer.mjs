@@ -9,13 +9,12 @@
 // stores without checking (a report naming an unknown player, a numeric targetPlayerId,
 // a block naming an organisation that does not exist), a REAL adult account deletion
 // that retains every audit row with its now-unresolved id — through an unchanged save,
-// the admin backup, a restore into a new directory, the copy-only rollback booted by the
-// accepted pre-S6b build (SCOUTBOX_PRE_S6B_SERVER) and the re-upgrade — plus the cutover
+// the admin backup and a restore into a new directory — plus the cutover
 // itself: migration 0013 recorded at boot, the eight tables with no blob behind them, a
 // block and its ledger row durable together in one save, the IDV entry committed with
 // the guardian's column (both failure seams, real COMMIT failure, SIGKILL, retry), a
 // failed ordinary save keeping the row and landing it once, legacy and unknown shapes
-// through the import, and a legacy file whose IDV entry names a missing guardian refused
+// through the import, and a backup whose IDV entry names a missing guardian refused
 // at boot (STRICT, Q4b) with the blobs untouched. Every database read goes through a
 // second read-only connection. Nothing here touches DATA_DIR or real data. Run with: npm test
 //
@@ -23,10 +22,10 @@
 // [compat] tests read the rows through a storage adapter (the tables after the cutover,
 // the blobs before it) and PASS on both trees — they are the behaviour the migration
 // must preserve; [cutover] tests assert the 0013 record, the tables, the absence of the
-// blobs, the rollback tool and the strict boot refusal and FAIL on 1792fc7 on concrete
+// blobs and the strict boot refusal and FAIL on 1792fc7 on concrete
 // assertions.
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -39,8 +38,6 @@ const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
-// S4b-R: a file this build wrote carries 0014 too; the S4b-R tool (copy-only, the retained records kept as a blob) goes first and the S6b tool works on its output.
-const preS4bR = (dir) => { const s8c = tempDir('s8c-to-s8b'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, s8c], { stdio: 'pipe' }); /* S8c: the file carries 0017; its rollback goes first */ const s8b = tempDir('s8b-to-s8a'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), s8c, s8b], { stdio: 'pipe' }); /* then S8b */ const s8a = tempDir('s8a-to-s4br'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), s8b, s8a], { stdio: 'pipe' }); /* then S8a */ const out = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, out], { stdio: 'pipe' }); return out; };
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -140,7 +137,7 @@ const orgLedger = async (S, token) => (await S.j('GET', '/org/ledger', undefined
 const orgNotesOf = async (S, token, pid) => (await S.j('GET', `/org/players/${pid}`, undefined, token)).body.orgNotes;
 const count = (text, re) => (text.match(re) ?? []).length;
 const waitForLog = async (S, re, above) => { for (let i = 0; i < 80 && count(S.log(), re) <= above; i++) await sleep(25); return count(S.log(), re) > above; };
-/** The whole audit state the admin and the owners see, in one object (what a restart, a restore, a rollback and a re-upgrade must reproduce). */
+/** The whole audit state the admin and the owners see, in one object (what a restart and a restore must reproduce). */
 async function audited(S, maria) {
   return { reports: await adminReports(S), blocks: await adminBlocks(S), moderation: await adminModeration(S), idv: await adminIdv(S), ledger: await orgLedger(S, maria) };
 }
@@ -209,7 +206,7 @@ await test('[compat] every writer through its route and every reader: a guardian
   await S.stop(); rm(dir, bk.body.dir);
 });
 
-await test('[compat] a REAL adult account deletion retains every audit row that names the person, with its now-unresolved id, as today: the ledger, report, note, block and source-change rows survive DELETE /player/account; an unchanged save succeeds afterwards (the admin backup\'s persistNow); the backup carries the rows; a restore into a NEW directory imports them row for row; the copy-only rollback copy boots on the accepted pre-S6b build (SCOUTBOX_PRE_S6B_SERVER) with the same rows in its routes and accepts a new block and a new report there; this build re-upgrades the copy with those writes; a report naming an unknown player stays accepted throughout', async () => {
+await test('[compat] a REAL adult account deletion retains every audit row that names the person, with its now-unresolved id, as today: the ledger, report, note, block and source-change rows survive DELETE /player/account; an unchanged save succeeds afterwards (the admin backup\'s persistNow); the backup carries the rows; a restore into a NEW directory imports them row for row; a report naming an unknown player stays accepted throughout', async () => {
   const dir = tempDir('s6b-deletion'); let S = await boot(dir);
   const maria = await orgLogin(S); const { pid, token: adult } = await signupAdult(S, 'Deleted Adult');
   assert.equal((await S.j('POST', '/player/block', { orgId: 'org-harbour', reason: 'synthetic' }, adult)).status, 201);
@@ -241,34 +238,7 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
   for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(restored, n)), JSON.stringify(after[n]), `the restore reproduced ${n} row for row`);
   assert.ok((await adminReports(S)).some((r) => r.targetPlayerId === pid)); assert.ok((await orgLedger(S, mariaR)).some((l) => l.playerId === pid), 'the org ledger still carries the deleted person\'s id');
   await S.stop();
-  // The copy-only rollback and the accepted build.
-  const copy = tempDir('s6b-copy');
-  const OLD = process.env.SCOUTBOX_PRE_S6B_SERVER;
-  let rolled = null;
-  try { rolled = execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), preS4bR(dir), copy], { encoding: 'utf8' }); } catch (e) { rolled = null; }
-  if (rolled === null) { console.log('    (scripts/safetyAuditRollback.mjs is not on this tree: the rollback copy was not produced — expected on the unchanged 1792fc7 tree)'); }
-  else {
-    const final = storedAll(dir);
-    for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(copy, n)), JSON.stringify(final[n]), `the rollback copy's ${n} blob holds every row in order`);
-    if (OLD && fs.existsSync(OLD)) {
-      const old = await boot(copy, {}, OLD); const oldMaria = await orgLogin(old);
-      assert.ok(!/0013_safety_audit/.test(old.log()), 'the accepted build knows nothing of 0013');
-      assert.ok((await adminReports(old)).some((r) => r.targetPlayerId === pid), 'the old build lists the report about the deleted person'); assert.ok((await orgLedger(old, oldMaria)).some((l) => l.playerId === pid));
-      assert.deepEqual((await adminBlocks(old)).map((b) => b.id), final.blocks.slice().reverse().map((b) => b.id), 'the old build lists the same blocks');
-      const { token: oldAdult, pid: oldPid } = await signupAdult(old, 'Old Build Adult');
-      assert.equal((await old.j('POST', '/player/block', { orgId: 'org-eastport', reason: 'from the old build' }, oldAdult)).status, 201);
-      const oldRep = await old.j('POST', '/org/report', { targetKind: 'player', targetPlayerId: oldPid, reason: 'Synthetic report from the old build.' }, oldMaria); assert.equal(oldRep.status, 201);
-      await old.stop();
-      assert.ok(snap(copy, (c) => (blobRows(c, 'blocks') ?? [])).some((b) => b.reason === 'from the old build'), 'the old build kept writing to its blobs');
-      console.log('    (pre-S6b build booted the rollback copy: same rows, a new block and a new report accepted)');
-      const re = await boot(copy); assert.ok(live(copy), 'this build re-upgraded the copy');
-      const reBlocks = await adminBlocks(re); assert.ok(reBlocks.some((b) => b.reason === 'from the old build'), 'the old build\'s block is in the tables'); assert.ok((await adminReports(re)).some((r) => r.id === oldRep.body.reportId));
-      await re.stop();
-    } else {
-      console.log('    (SCOUTBOX_PRE_S6B_SERVER not set: the pre-S6b boot of the rollback copy was not exercised here)');
-    }
-  }
-  rm(dir, bkBefore.body.dir, bk.body.dir, restored, copy);
+  rm(dir, bkBefore.body.dir, bk.body.dir, restored);
 });
 
 // ============================================================= [cutover] the tables, the save points, the strict reference at boot
@@ -324,30 +294,26 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0013
   await S.stop(); rm(dir);
 });
 
-await test('[cutover] legacy and unknown shapes through the import, the admin backup, a restore, the S7d tool\'s refusal, and the STRICT boot refusal: a rollback copy edited by hand (unknown fields at row and nested level, an absent key, an object orgId, a numeric targetPlayerId, a ledger row naming a player that never existed, a backup_refused ops event) is imported row for row by this build and served unchanged; the backup equals the stored rows and a restore imports them again; the S7d tool refuses the 0013 file; a copy whose IDV entry names a guardian that does not exist refuses the WHOLE boot (IDV_GUARDIAN_MISSING: ids only), records nothing and leaves every blob as it was', async () => {
+await test('[cutover] legacy and unknown shapes through the import, the admin backup, a restore, and the STRICT boot refusal: an admin backup edited by hand (unknown fields at row and nested level, an absent key, an object orgId, a numeric targetPlayerId, a ledger row naming a player that never existed, a backup_refused ops event) is imported row for row by this build and served unchanged; the backup equals the stored rows and a restore imports them again; a backup whose IDV entry names a guardian that does not exist refuses the WHOLE boot (IDV_GUARDIAN_MISSING: ids only), records nothing and leaves every blob as it was', async () => {
   const dir = tempDir('s6b-legacy'); let S = await boot(dir);
   const maria = await orgLogin(S); const { pid, token: adult } = await signupAdult(S, 'Legacy Adult');
   assert.equal((await S.j('POST', '/player/block', { orgId: 'org-eastport', reason: 'synthetic' }, adult)).status, 201);
   assert.equal((await S.j('POST', '/org/report', { targetKind: 'player', targetPlayerId: pid, reason: 'Synthetic.' }, maria)).status, 201);
   const { gid, token: gtok } = await signupGuardian(S, 'Legacy Parent', 'legacy-parent@example.test'); assert.equal((await S.j('POST', '/guardian/verify-id', { documentType: 'passport', documentRef: 'P1234567' }, gtok)).status, 200);
-  assert.equal((await S.j('POST', '/admin/backup', {}, null, A)).status, 201); // flushes
-  const original = storedAll(dir);
+  const bk0 = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk0.status, 201, bk0.text);
   await S.stop();
-  // The S7d tool refuses the 0013 file.
-  try { execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, tempDir('s6b-s7dtool')], { stdio: 'pipe' }); assert.fail('the S7d tool must refuse a 0013 file'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
-  // The rollback copy, edited by hand.
-  const copy = tempDir('s6b-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), preS4bR(dir), copy], { encoding: 'utf8' }); assert.match(out, /written back/); assert.equal(live(copy), false);
-  for (const n of COLLECTIONS) assert.equal(JSON.stringify(stored(copy, n)), JSON.stringify(original[n]), `the copy's ${n} blob`);
+  // The admin backup, edited by hand: a restore of it imports the eight collections through 0013.
+  const copy = tempDir('s6b-copy'); fs.cpSync(bk0.body.dir, copy, { recursive: true });
   const SECRET = 'SECRET-LEGACY-MARKER-55';
-  { const s = new DatabaseSync(path.join(copy, 'scoutbox.db'));
-    const edit = (name, fn) => { const rows = JSON.parse(s.prepare('SELECT value FROM collections WHERE name = ?').get(name).value); fn(rows); s.prepare('UPDATE collections SET value = ? WHERE name = ?').run(JSON.stringify(rows), name); };
-    edit('blocks', (rows) => { rows[0].futureBlockField = { nested: [SECRET] }; rows.push({ id: 'blk-legacy', playerId: 'pl-never-existed', orgId: { odd: 'object' }, by: 'player', reason: 7, ts: 1 }); });
-    edit('reports', (rows) => { delete rows[0].targetScoutName; rows.push({ id: 'rep-legacy', ts: 2, by: 'player', byId: pid, targetKind: 'player', targetOrgId: null, targetScoutName: null, targetPlayerId: 123, reason: 'Synthetic legacy report.', urgent: false, status: 'pending_review', outcome: null, resolvedAt: null }); });
-    edit('ledger', (rows) => { rows.push({ id: 'led-legacy', ts: 3, type: 'view', playerId: 'pl-never-existed', orgId: 'org-eastport', orgName: 'Eastport FC', userId: 'usr-legacy', scoutName: 'Legacy Scout', futureLedgerField: true }); });
-    edit('opsEvents', (rows) => { rows.push({ id: 'ops-legacy', at: 4, kind: 'backup_refused', detail: { dir: 'x', error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflicts: [] } }); });
-    edit('moderationLog', (rows) => { rows.push({ id: 'mod-legacy', ts: 5, context: { kind: 'org_message', channelId: 'chan-x', futureContextField: 1 }, flags: ['url'], severity: 'contact', excerpt: 'synthetic excerpt' }); });
-    s.close(); }
-  const legacy = Object.fromEntries(COLLECTIONS.map((n) => [n, canon(n, stored(copy, n))]));
+  const editBackup = (d, fn) => { const f = path.join(d, 'db.json'); const env = JSON.parse(fs.readFileSync(f, 'utf8')); fn(env.db); fs.writeFileSync(f, JSON.stringify(env)); return env.db; };
+  const edited = editBackup(copy, (db) => {
+    db.blocks[0].futureBlockField = { nested: [SECRET] }; db.blocks.push({ id: 'blk-legacy', playerId: 'pl-never-existed', orgId: { odd: 'object' }, by: 'player', reason: 7, ts: 1 });
+    delete db.reports[0].targetScoutName; db.reports.push({ id: 'rep-legacy', ts: 2, by: 'player', byId: pid, targetKind: 'player', targetOrgId: null, targetScoutName: null, targetPlayerId: 123, reason: 'Synthetic legacy report.', urgent: false, status: 'pending_review', outcome: null, resolvedAt: null });
+    db.ledger.push({ id: 'led-legacy', ts: 3, type: 'view', playerId: 'pl-never-existed', orgId: 'org-eastport', orgName: 'Eastport FC', userId: 'usr-legacy', scoutName: 'Legacy Scout', futureLedgerField: true });
+    db.opsEvents.push({ id: 'ops-legacy', at: 4, kind: 'backup_refused', detail: { dir: 'x', error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflicts: [] } });
+    db.moderationLog.push({ id: 'mod-legacy', ts: 5, context: { kind: 'org_message', channelId: 'chan-x', futureContextField: 1 }, flags: ['url'], severity: 'contact', excerpt: 'synthetic excerpt' });
+  });
+  const legacy = Object.fromEntries(COLLECTIONS.map((n) => [n, canon(n, edited[n])]));
   // This build imports the hand-edited copy.
   const up = tempDir('s6b-up'); fs.cpSync(copy, up, { recursive: true });
   S = await boot(up); assert.ok(live(up), 'imported through 0013');
@@ -369,17 +335,17 @@ await test('[cutover] legacy and unknown shapes through the import, the admin ba
   await S.stop();
   // STRICT (Q4b): a legacy file whose IDV entry names a missing guardian refuses the whole boot.
   const strict = tempDir('s6b-strict'); fs.cpSync(copy, strict, { recursive: true });
-  { const s = new DatabaseSync(path.join(strict, 'scoutbox.db')); const rows = JSON.parse(s.prepare("SELECT value FROM collections WHERE name = 'idvQueue'").get().value); rows.push({ ...rows[0], id: 'idv-orphan', guardianId: 'gd-never-existed' }); s.prepare("UPDATE collections SET value = ? WHERE name = 'idvQueue'").run(JSON.stringify(rows)); s.close(); }
-  const blobsBefore = snap(strict, (c) => COLLECTIONS.map((n) => c.get('SELECT value FROM collections WHERE name = ?', n)?.value ?? null)); const seqBefore = seqOf(strict);
+  const strictDb = editBackup(strict, (db) => { db.idvQueue.push({ ...db.idvQueue[0], id: 'idv-orphan', guardianId: 'gd-never-existed' }); });
+  const blobsBefore = COLLECTIONS.map((n) => JSON.stringify(strictDb[n]));
   const refused = await bootRefused(strict);
   assert.notEqual(refused.code, 0, 'the boot refused'); assert.match(refused.log, /SAFETY_AUDIT_IMPORT_BLOCKED/); assert.match(refused.log, /IDV_GUARDIAN_MISSING[^\n]*idv-orphan/); assert.doesNotMatch(refused.log, /Legacy Parent|P1234567|4567/, 'ids only');
   assert.equal(live(strict), false, 'nothing recorded'); assert.equal(q1(strict, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = 'idv_queue'"), undefined, 'no table');
-  assert.deepEqual(snap(strict, (c) => COLLECTIONS.map((n) => c.get('SELECT value FROM collections WHERE name = ?', n)?.value ?? null)), blobsBefore, 'every blob as it was'); assert.equal(seqOf(strict), seqBefore);
+  assert.deepEqual(snap(strict, (c) => COLLECTIONS.map((n) => JSON.stringify(blobRows(c, n)))), blobsBefore, 'every blob as the backup held it');
   void gid;
-  rm(dir, copy, up, bk.body.dir, restored, strict);
+  rm(dir, bk0.body.dir, copy, up, bk.body.dir, restored, strict);
 });
 
-await test('[S6b correction F2] an EXISTING partial Box Cam prefs row ({ playerId } only, as an older build or a restore can leave it) and the real authenticated PATCH /player/box-cam/prefs { retainClips: true }: answered 200 with the same payload the pre-S6b build gives (no preference default introduced), the box_prefs_changed ledger row recorded with detail { by, retainClips } — the absent share key absent, exactly as the pre-S6b blob stored it; the prefs and the row survive a restart; the admin backup carries the row exactly; the copy-only rollback blob holds it in the legacy literal; the pre-S6b build reads the copy and answers the same PATCH the same way; this build re-upgrades the copy', async () => {
+await test('[S6b correction F2] an EXISTING partial Box Cam prefs row ({ playerId } only, as an older build or a restore can leave it) and the real authenticated PATCH /player/box-cam/prefs { retainClips: true }: answered 200 with the same payload the pre-S6b build gives (no preference default introduced), the box_prefs_changed ledger row recorded with detail { by, retainClips } — the absent share key absent, exactly as the pre-S6b blob stored it; the prefs and the row survive a restart; the admin backup carries the row exactly', async () => {
   const dir = tempDir('s6b-f2'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Prefs Adult');
   assert.equal((await S.j('PATCH', '/player/box-cam/prefs', { retainClips: false }, token)).status, 200, 'control: a full prefs row created by the route');
@@ -403,25 +369,7 @@ await test('[S6b correction F2] an EXISTING partial Box Cam prefs row ({ playerI
   assert.equal((await S.j('GET', '/player/box-cam/prefs', undefined, token)).body.prefs.retainClips, true, 'the prefs survived the restart');
   assert.equal(JSON.stringify(prefsRows()[1]), JSON.stringify(row), 'the row survived the restart');
   await S.stop();
-  const copy = tempDir('s6b-f2-copy');
-  execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), preS4bR(dir), copy], { encoding: 'utf8' });
-  const legacy = snap(copy, (c) => blobRows(c, 'ledger')).find((l) => l.id === row.id);
-  assert.equal(JSON.stringify(canon('ledger', [legacy])[0]), JSON.stringify(row), 'the rollback blob holds the legacy literal');
-  const OLD = process.env.SCOUTBOX_PRE_S6B_SERVER;
-  if (OLD && fs.existsSync(OLD)) {
-    const old = await boot(copy, {}, OLD);
-    const again = await old.j('PATCH', '/player/box-cam/prefs', { retainClips: false }, token); assert.equal(again.status, 200, 'the pre-S6b build answers the same PATCH');
-    assert.deepEqual(Object.keys(again.body.prefs), ['playerId', 'retainClips', 'updatedAt', 'updatedBy'], 'with the same payload shape');
-    await old.stop();
-    console.log('    (pre-S6b build booted the F2 rollback copy and answered the same PATCH with the same payload)');
-    const re = await boot(copy); assert.ok(live(copy), 'this build re-upgraded the copy');
-    const rows = stored(copy, 'ledger').filter((l) => l.playerId === pid && l.type === 'box_prefs_changed');
-    assert.equal(rows.length, 3); assert.equal(JSON.stringify(rows[1]), JSON.stringify(row)); assert.equal(Object.hasOwn(rows[2].detail, 'share'), false, 'the old build\'s row, re-imported, keeps share absent');
-    await re.stop();
-  } else {
-    console.log('    (SCOUTBOX_PRE_S6B_SERVER not set: the pre-S6b boot of the F2 rollback copy was not exercised here)');
-  }
-  rm(dir, bk.body.dir, copy);
+  rm(dir, bk.body.dir);
 });
 
 console.log(`\n${passed} safety-audit server checks passed`);

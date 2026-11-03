@@ -194,12 +194,10 @@ test('identity snapshot (tool mode): a tool reads players and guardians from the
   // The server attaches to exactly that; the array in memory (a stale copy) imports nothing.
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
   const db2 = { ...again.load().db, players: [PLAYER_ADULT()], guardians: [GUARDIAN_1(), GUARDIAN_2()] };
-  const warnings = [];
-  const layer2 = attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  const layer2 = attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
   assert.deepEqual(layer2.boot.identity, { engine: 'sqlite', players: 3, guardians: 2, links: 2, imported: 0 });
   assert.equal(db2.players.find((p) => p.id === 'pl-adult').name, 'Adult Renamed'); assert.deepEqual([...db2.players.find((p) => p.id === 'pl-adult').badges], ['Finisher', 'Captain']);
   assert.equal(db2.guardians.find((g) => g.id === 'gd-2'), undefined, 'the stale in-memory guardian was not resurrected');
-  assert.ok(warnings.some((w) => /guardians table holds 2 row\(s\)/.test(w)), `the stale array is reported: ${JSON.stringify(warnings)}`);
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 

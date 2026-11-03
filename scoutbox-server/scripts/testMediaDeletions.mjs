@@ -1,40 +1,22 @@
 // The media-deletion queue (repositories/mediaDeletions.mjs, migration 0006):
 // an entry is written inside the deletion's transaction, processed after COMMIT
 // through the storage adapter, retried while the adapter fails, cleared only
-// once the file is gone or was already absent; the S4a rollback tool refuses a
-// copy whose queue is not empty and drops the table when it is. Temporary
-// databases and directories only; nothing touches DATA_DIR. Run with: npm test
+// once the file is gone or was already absent. Temporary databases and
+// directories only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { createMediaDeletionsQueue } from '../repositories/mediaDeletions.mjs';
-import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
-import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
-import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
-import { rollbackNotificationsCopy } from '../repositories/notificationsRollback.mjs';
-import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
-import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
-import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
-import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
-import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
-import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
-import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
-import { rollbackToPreS8c as rollbackRecruitmentContactsOffersCopy } from '../repositories/rollbackChain.mjs'; // S8d: the S8d step-back then the S8c tool, as one link (a live file carries 0018)
 import { createStorage } from '../adapters.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, adult, s3File, migrate, openRaw, applied, blob, dump } from './coreIdentityTestFixtures.mjs';
-// S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s8c = tempDir('s8c-to-s8b'); rollbackRecruitmentContactsOffersCopy(file, s8c); /* S8c: the file carries 0017; its rollback (copy-only, the contacts and offers written back as blobs) goes first */ const s8b = tempDir('s8b-to-s8a'); rollbackRecruitmentCasesCopy(path.join(s8c, 'scoutbox.db'), s8b); /* then S8b: the file carries 0016; its rollback (copy-only, the cases and the four room collections written back as blobs) goes first */ const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(path.join(s8b, 'scoutbox.db'), s8a); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 let counter = 7000;
 const nextId = (p) => `${p}-${++counter}`;
@@ -103,39 +85,7 @@ test('transaction coupling: an entry queued inside a unit of work that rolls bac
   store.sqlite.close(); rm(dir, storageDir);
 });
 
-test('rollback tool: a copy whose queue is not empty is refused (MEDIA_QUEUE_PENDING, exit 8) and no output is left; once the queue drained the tool drops media_deletions with its migration record, and the real migration brings both back on re-upgrade', () => {
-  const dir = tempDir('media-rb'); s3File(dir);
-  let s = openRaw(dir); migrate(s, { now: NOW });
-  transaction(s, () => createMediaDeletionsQueue({ sqlite: s, now: () => NOW }).enqueue(['media-gone'], { playerId: 'pl-adult', at: NOW }));
-  s.close();
-  // S5: the file carries 0007, which the S4a tool refuses outright (LATER_SCHEMA); the S5 rollback goes first and keeps the queue (both builds have it).
-  const out0 = tempDir('media-rb-o0');
-  assert.throws(() => rollbackCoreIdentityCopy(path.join(dir, 'scoutbox.db'), out0), (err) => err.code === 'LATER_SCHEMA' && /0007_player_subrecords/.test(err.message));
-  assert.deepEqual(fs.readdirSync(out0), []);
-  // S6a: the file carries 0008 too; the S6a rollback goes first (copy-only; the queue and everything else kept), then the S5 tool on its output.
-  const s7c = tempDir('media-rb-s7c'); rollbackChannelsCopy(preS6b(path.join(dir, 'scoutbox.db')), s7c); /* S7d first: the file carries 0012 */ const s7b = tempDir('media-rb-s7b'); rollbackOutboxPushCopy(path.join(s7c, 'scoutbox.db'), s7b); const s7a = tempDir('media-rb-s7a'); rollbackDispatchesCopy(path.join(s7b, 'scoutbox.db'), s7a); const s6a = tempDir('media-rb-s6a'); rollbackNotificationsCopy(path.join(s7a, 'scoutbox.db'), s6a); const s5 = tempDir('media-rb-s5'); rollbackOneTimeCodesCopy(path.join(s6a, 'scoutbox.db'), s5); // S7a: the file carries 0009 too; its rollback goes first (copy-only, nothing lost)
-  const s4a = tempDir('media-rb-s4a'); rollbackPlayerSubrecordsCopy(path.join(s5, 'scoutbox.db'), s4a);
-  assert.equal(openRaw(s4a).prepare('SELECT COUNT(*) AS n FROM media_deletions').get().n, 1, 'the S5 rollback keeps the pending queue entry');
-  const out1 = tempDir('media-rb-o1');
-  assert.throws(() => rollbackCoreIdentityCopy(path.join(s4a, 'scoutbox.db'), out1), (err) => err.code === 'MEDIA_QUEUE_PENDING' && /media-gone|1 media file/.test(err.message));
-  assert.deepEqual(fs.readdirSync(out1), []);
-  const script = path.join(HERE, 'coreIdentityRollback.mjs');
-  try { execFileSync(process.execPath, [script, s4a, path.join(tempDir('media-rb-cli'), 'x')], { stdio: 'pipe' }); assert.fail('should refuse'); } catch (err) { assert.equal(err.status, 8); }
-  s = openRaw(dir); s.prepare('DELETE FROM media_deletions').run(); s.close(); // the sweep removed the file and cleared the entry
-  const s7c2 = tempDir('media-rb-s7c2'); rollbackChannelsCopy(preS6b(path.join(dir, 'scoutbox.db')), s7c2); const s7b2 = tempDir('media-rb-s7b2'); rollbackOutboxPushCopy(path.join(s7c2, 'scoutbox.db'), s7b2); const s7a2 = tempDir('media-rb-s7a2'); rollbackDispatchesCopy(path.join(s7b2, 'scoutbox.db'), s7a2); const s6a2 = tempDir('media-rb-s6a2'); rollbackNotificationsCopy(path.join(s7a2, 'scoutbox.db'), s6a2); const s52 = tempDir('media-rb-s52'); rollbackOneTimeCodesCopy(path.join(s6a2, 'scoutbox.db'), s52);
-  const s4a2 = tempDir('media-rb-s4a2'); rollbackPlayerSubrecordsCopy(path.join(s52, 'scoutbox.db'), s4a2);
-  const out2 = tempDir('media-rb-o2');
-  const result = rollbackCoreIdentityCopy(path.join(s4a2, 'scoutbox.db'), out2);
-  assert.equal(result.recordRemoved, true);
-  const o = openRaw(out2);
-  assert.equal(o.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'media_deletions'").get().n, 0, 'the table is gone');
-  assert.deepEqual(o.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live']);
-  assert.deepEqual(migrate(o, { now: NOW }).ran, ['0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], 're-upgrade: the steps run again (0015 included)');
-  assert.equal(o.prepare('SELECT COUNT(*) AS n FROM media_deletions').get().n, 0);
-  o.close(); rm(dir, out1, out2);
-});
-
-test('backup/restore pieces (review of 9656a4b): the queue travels as the mediaDeletions collection — a snapshot tool reads it from the table and writes it back through the table, validated whole (a path instead of an id, an unknown field, a duplicate, a bad time or a non-array refuses the save with nothing written); before migration 0006 the tool writes it as a blob and the migration imports and retires it; a tampered blob aborts the migration whole, keeps the blob, creates nothing and refuses again on the next run; a stale in-memory array at boot is reported, dropped and its blob row deleted — the queue never imports from memory', () => {
+test('backup/restore pieces (review of 9656a4b): the queue travels as the mediaDeletions collection — a snapshot tool reads it from the table and writes it back through the table, validated whole (a path instead of an id, an unknown field, a duplicate, a bad time or a non-array refuses the save with nothing written); before migration 0006 the tool writes it as a blob and the migration imports and retires it; a tampered blob aborts the migration whole, keeps the blob, creates nothing and refuses again on the next run; a stale in-memory array at boot is dropped and its blob row deleted — the queue never imports from memory', () => {
   // (a) A migrated file, snapshot mode: read from the table, written back through it.
   const dir = tempDir('media-snap'); s3File(dir); { const s = openRaw(dir); migrate(s, { now: NOW }); s.close(); }
   let tool = openStore(dir);
@@ -181,12 +131,11 @@ test('backup/restore pieces (review of 9656a4b): the queue travels as the mediaD
     assert.deepEqual(applied(s).filter((id) => /^000[56]/.test(id)), ['0005_core_identity_live'], '0005 committed on its own; 0006 did not');
     assert.deepEqual(blob(s, 'mediaDeletions'), [{ media_id: '../../outside', queued_at: 1 }], 'the blob is kept, imported by nothing');
     assert.throws(() => migrate(s, { now: NOW }), /MEDIA_QUEUE_IMPORT_BLOCKED/, 'the next run refuses the same way'); s.close(); }
-  // (d) A stale in-memory array at boot (server mode): reported, dropped, its blob row deleted, the table untouched.
-  { const store = openStore(dir, { tableBacked: TABLE_BACKED }); const warnings = [];
+  // (d) A stale in-memory array at boot (server mode): dropped, its blob row deleted, the table untouched.
+  { const store = openStore(dir, { tableBacked: TABLE_BACKED });
     store.sqlite.prepare("INSERT INTO collections (name, value) VALUES ('mediaDeletions', '[]')").run();
     const db = { ...store.load().db, players: [], guardians: [], mediaDeletions: [{ media_id: 'media-stale', queued_at: 1 }] };
-    const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
-    assert.ok(warnings.some((w) => /media deletions: an in-memory array with 1 entry was ignored/.test(w)), JSON.stringify(warnings));
+    const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
     assert.equal(Object.hasOwn(db, 'mediaDeletions'), false, 'the array is dropped from memory');
     assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'mediaDeletions'").get().n, 0, 'the blob row is deleted');
     assert.deepEqual(layer.mediaDeletions.pending().map((r) => r.media_id), ['media-q', 'media-r'], 'the table is untouched');

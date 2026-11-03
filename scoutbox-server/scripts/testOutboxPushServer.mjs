@@ -7,9 +7,9 @@
 // first — never the notification's own save); (D2) POST /push/register keeps
 // accepting any truthy JSON token, primitives collapse by strict equality,
 // structurally equal objects and arrays are separate rows, values and types are
-// preserved through storage, backup, restore and rollback; (to:null) an accepted
+// preserved through storage, backup and restore; (to:null) an accepted
 // queued dispatch without a destination is swept into a delivery outbox record
-// with to: null that survives restart, backup and rollback — plus the cutover
+// with to: null that survives restart and backup — plus the cutover
 // itself: the mailer's rows commit in the save their route always used (the
 // invite with its invite row, the sign-up with the debounced save, the club
 // challenge with the withheld text and the admin view's process-local full text
@@ -18,9 +18,7 @@
 // once), a SIGKILL between the notification's commit and the push save (no push
 // row, no re-send), an ordinary deletion leaving the three collections alone, the
 // admin backup carrying the three collections in their legacy shapes and a
-// restore importing them (migration 0011), the S7b tool refusing the file, the
-// copy-only rollback booted by the accepted 6ca66ba build (SCOUTBOX_PRE_S7C_SERVER)
-// which reads the same records and keeps writing to its blobs, and the re-upgrade.
+// restore importing them (migration 0011).
 // Every database read goes through a second read-only connection. Nothing here
 // touches DATA_DIR or real data; no real provider is called. Run with: npm test
 //
@@ -30,7 +28,7 @@
 // observations, preserved; [cutover] tests assert the tables, the absence of the
 // blobs and the migration record and FAIL on 6ca66ba on concrete assertions.
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -42,8 +40,6 @@ let passed = 0;
 const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6bDir = (dir) => { const s8c = tempDir('s8c-to-s8b'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, s8c], { stdio: 'pipe' }); /* S8c: the file carries 0017; its rollback (copy-only, the contacts and offers written back as blobs) goes first */ const s8b = tempDir('s8b-to-s8a'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), s8c, s8b], { stdio: 'pipe' }); /* then S8b (the cases and the four room collections written back as blobs) */ const s8a = tempDir('s8a-to-s4br'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), s8b, s8a], { stdio: 'pipe' }); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, s4br], { stdio: 'pipe' }); /* then S4b-R (copy-only, the retained records kept as a blob) */ const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), s4br, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -96,7 +92,7 @@ const readStored = (c) => {
   const cut = !!c.get("SELECT 1 AS one FROM data_migrations WHERE id = '0011_outbox_push'");
   if (!cut) return { outbox: blobRows(c, 'outbox') ?? [], pushLog: blobRows(c, 'pushLog') ?? [], pushTokens: blobRows(c, 'pushTokens') ?? [], seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0 };
   return {
-    outbox: c.all(`SELECT seq, id, source, created_at, to_address, ${c.get("SELECT 1 AS one FROM pragma_table_info('outbox') WHERE name = 'to_json'") ? 'to_json' : 'NULL AS to_json'}, subject, text, transport, delivered, channel, provider_message_id FROM outbox ORDER BY seq`).map(outboxFromRow),
+    outbox: c.all(`SELECT seq, id, source, created_at, to_address, to_json, subject, text, transport, delivered, channel, provider_message_id FROM outbox ORDER BY seq`).map(outboxFromRow),
     pushLog: c.all('SELECT id, created_at, audience_kind, audience_id, title, body, transport FROM push_log ORDER BY seq').map((r) => ({ id: r.id, ts: r.created_at, audience: { kind: r.audience_kind, id: r.audience_id }, title: r.title, body: r.body, transport: r.transport })),
     pushTokens: c.all('SELECT ref_kind, ref_id, token_json, registered_at FROM push_tokens ORDER BY seq').map((r) => ({ kind: r.ref_kind, refId: r.ref_id, token: JSON.parse(r.token_json), ts: r.registered_at })),
     seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0,
@@ -263,8 +259,8 @@ await test('[cutover] a failed ordinary save (internal:save.sqlite_commit at the
   await S.stop(); rm(dir);
 });
 
-// ============================================================= [cutover] deletion, backup/restore, rollback, the old build, re-upgrade
-await test('[cutover] an ordinary account deletion leaves the three tables alone (the deleted player\'s token rows and push rows stay); the admin backup exports outbox, pushLog and pushTokens in their legacy shapes (both outbox literals, the null destination, token values and types); a restore into a NEW directory imports them (migration 0011) row for row; a backup whose outbox entry matches both shapes is refused at boot (OUTBOX_PUSH_IMPORT_BLOCKED, no address in the log) and creates no table; the S7b rollback tool refuses the S7c file (exit 4); the copy-only rollback writes the three blobs back and, with SCOUTBOX_PRE_S7C_SERVER set, the accepted 6ca66ba build boots the copy, lists the same outbox and push-log records in the same order, registers a token and sends a mail into its blobs; this build then re-upgrades the copy with every row, the old build\'s included', async () => {
+// ============================================================= [cutover] deletion, backup/restore
+await test('[cutover] an ordinary account deletion leaves the three tables alone (the deleted player\'s token rows and push rows stay); the admin backup exports outbox, pushLog and pushTokens in their legacy shapes (both outbox literals, the null destination, token values and types); a restore into a NEW directory imports them (migration 0011) row for row; a backup whose outbox entry matches both shapes is refused at boot (OUTBOX_PUSH_IMPORT_BLOCKED, no address in the log) and creates no table', async () => {
   const dir = tempDir('s7c-backup'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara'); let kola = await playerLogin(S, 'pl-adeyemi');
   for (const token of BASELINE_TOKENS) assert.equal((await S.j('POST', '/push/register', { token }, kola)).status, 201);
@@ -305,36 +301,11 @@ await test('[cutover] an ordinary account deletion leaves the three tables alone
   { const j = JSON.parse(fs.readFileSync(path.join(bad, 'db.json'), 'utf8')); j.db.outbox[0].channel = 'email'; j.db.outbox[0].providerMessageId = 'fm_x'; fs.writeFileSync(path.join(bad, 'db.json'), JSON.stringify(j)); }
   const refusedBoot = await (async () => { try { const x = await boot(bad); await x.kill(); throw new Error('must refuse'); } catch (e) { if (typeof e.code !== 'number') throw e; return e; } })();
   assert.match(refusedBoot.log, /OUTBOX_PUSH_IMPORT_BLOCKED/); assert.match(refusedBoot.log, /matches both outbox shapes/); assert.equal(/example\.invalid/.test(refusedBoot.log), false, 'no address in the log'); assert.equal(live(bad), false);
-  // The S7b tool refuses the S7c file.
-  try { execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, tempDir('s7c-s7btool')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
-  // The copy-only rollback booted by the accepted build.
-  const copy = tempDir('s7c-rollback'); const s7cCopy = tempDir('s7c-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); // S7d first (the file carries 0012)
-  const out = execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
-  assert.match(out, /written back as blobs/); assert.equal(live(copy), false); assert.deepEqual([stored(copy).outbox, stored(copy).pushLog, stored(copy).pushTokens], [all.outbox, all.pushLog, all.pushTokens], 'the blobs hold every row in order');
-  const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
-  if (OLD && fs.existsSync(OLD)) {
-    const old = await boot(copy, {}, OLD);
-    assert.ok(!/0011_outbox_push/.test(old.log()), 'the accepted build knows nothing of 0011');
-    const oldOutbox = (await old.j('GET', '/admin/outbox', undefined, null, A)).body; assert.deepEqual(oldOutbox.map((m) => m.id), all.outbox.map((m) => m.id).reverse(), 'the old build lists the same outbox records, newest first');
-    const oldPush = (await old.j('GET', '/admin/push-log', undefined, null, A)).body; assert.deepEqual(oldPush.map((p) => p.id), all.pushLog.map((p) => p.id).reverse(), 'and the same push log');
-    const oldMaria = await orgLogin(old, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const oldAmara = await guardianLogin(old, 'gd-amara');
-    assert.equal((await old.j('POST', '/push/register', { token: { registeredOn: 'old-build' } }, oldAmara)).status, 201);
-    assert.equal((await old.j('POST', '/org/invites', { email: 'synthetic-invitee-old@example.invalid', name: 'Synthetic Old', role: 'Scout' }, oldMaria)).status, 201);
-    assert.ok(await until(async () => stored(copy).pushTokens.some((t) => t.kind === 'guardian' && t.token?.registeredOn === 'old-build') && stored(copy).outbox.length === all.outbox.length + 1, 8000), 'the old build keeps writing to its blobs');
-    await old.stop();
-    console.log('    (pre-S7c build booted the rollback copy: same records, new writes accepted)');
-    // Re-upgrade: this build imports the blobs, the old build's writes included.
-    const up = await boot(copy); assert.ok(live(copy), 'this build re-upgraded the copy'); const re = stored(copy);
-    assert.deepEqual(re.outbox.slice(0, all.outbox.length), all.outbox); assert.equal(re.outbox.length, all.outbox.length + 1); assert.ok(re.pushTokens.some((t) => t.token?.registeredOn === 'old-build')); assert.deepEqual(re.pushLog, all.pushLog);
-    await up.stop();
-  } else {
-    console.log('    (SCOUTBOX_PRE_S7C_SERVER not set: the pre-S7c boot of the rollback copy was not exercised here)');
-  }
-  rm(dir, bk.body.dir, restored, bad, copy);
+  rm(dir, bk.body.dir, restored, bad);
 });
 
 // ============================================================= review of 40aa05c — two independently reproduced compatibility defects, through the real routes
-await test('[review of 40aa05c, F2] POST /org/invites with a destination the route COERCES (email given as a JSON array: RegExp.test coerces it, the invite stores String(email), the mailer receives the ORIGINAL array — the accepted build persisted that array): the response is the same 201, the process stays alive, the invite row and its mail record are durable in the route\'s one save with the array destination; a two-element array the regular expression also passes, an ordinary string and an object (400, unchanged) behave as before; the admin view, a restart, the backup, a restore, the copy-only rollback blob and the re-upgrade keep the array by value and type; on the live transport (provider intercepted locally) the provider receives the same JSON as before and the row records its answer; the accepted 6ca66ba build reads the rollback copy, writes an array itself, and a file it created from scratch with an array invite upgrades on this build', async () => {
+await test('[review of 40aa05c, F2] POST /org/invites with a destination the route COERCES (email given as a JSON array: RegExp.test coerces it, the invite stores String(email), the mailer receives the ORIGINAL array — the accepted build persisted that array): the response is the same 201, the process stays alive, the invite row and its mail record are durable in the route\'s one save with the array destination; a two-element array the regular expression also passes, an ordinary string and an object (400, unchanged) behave as before; the admin view, a restart, the backup and a restore keep the array by value and type; on the live transport (provider intercepted locally) the provider receives the same JSON as before and the row records its answer', async () => {
   const dir = tempDir('s7c-f2'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const seq0 = seqOf(dir); const logBefore = S.log().length;
   const ONE = ['synthetic-review@example.invalid']; const TWO = ['synthetic-second@example.invalid', 'x'];
@@ -368,28 +339,10 @@ await test('[review of 40aa05c, F2] POST /org/invites with a destination the rou
   assert.equal((await SL.j('POST', '/org/invites', { email: 'synthetic-live-2@example.invalid', name: 'Synthetic Live Two', role: 'Scout' }, lm)).status, 201); // that next save
   const liveRow = byName(stored(liveDir).outbox, 'Synthetic Live'); assert.deepEqual([liveRow.transport, liveRow.delivered, liveRow.to], ['sendgrid', true, ONE], 'the provider\'s answer recorded on the row, the array kept');
   await SL.stop(); rm(liveDir); fs.rmSync(stubLog, { force: true });
-  // Rollback and the accepted build.
-  const copy = tempDir('s7c-f2-rollback'); const s7cCopy = tempDir('s7c-f2-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
-  assert.equal(live(copy), false); assert.deepEqual(stored(copy).outbox, all.outbox, 'the blob holds every row, the arrays by value and type');
-  const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
-  if (OLD && fs.existsSync(OLD)) {
-    const old = await boot(copy, {}, OLD); const om = await orgLogin(old, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
-    assert.deepEqual(byName((await old.j('GET', '/admin/outbox', undefined, null, A)).body, 'Synthetic Reviewer').to, ONE, 'the accepted build reads the array back');
-    assert.equal((await old.j('POST', '/org/invites', { email: ['synthetic-old@example.invalid'], name: 'Synthetic Old', role: 'Scout' }, om)).status, 201); await sleep(300); assert.equal(old.proc.exitCode, null); await old.stop();
-    assert.deepEqual(byName(stored(copy).outbox, 'Synthetic Old').to, ['synthetic-old@example.invalid'], 'the accepted build wrote its array into the blob');
-    const up = await boot(copy); assert.ok(live(copy), 're-upgraded'); const re = stored(copy).outbox; assert.deepEqual(re.slice(0, all.outbox.length), all.outbox); assert.deepEqual(byName(re, 'Synthetic Old').to, ['synthetic-old@example.invalid']); await up.stop();
-    const fresh = tempDir('s7c-f2-old-fresh'); const o2 = await boot(fresh, {}, OLD); const fm = await orgLogin(o2, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
-    assert.equal((await o2.j('POST', '/org/invites', { email: ['synthetic-upgrade@example.invalid'], name: 'Synthetic Upgrade', role: 'Scout' }, fm)).status, 201); await o2.stop();
-    assert.deepEqual(byName(stored(fresh).outbox, 'Synthetic Upgrade').to, ['synthetic-upgrade@example.invalid'], 'the pre-S7c file holds the array');
-    const up2 = await boot(fresh); assert.ok(live(fresh), 'this build upgrades a file the accepted build wrote'); assert.deepEqual(byName(stored(fresh).outbox, 'Synthetic Upgrade').to, ['synthetic-upgrade@example.invalid'], 'with the array intact'); assert.doesNotMatch(up2.log(), /OUTBOX_PUSH_IMPORT_BLOCKED/); await up2.stop();
-    console.log('    (pre-S7c build: reads the rollback copy, writes an array destination, and its own file upgrades on this build)'); rm(fresh);
-  } else {
-    console.log('    (SCOUTBOX_PRE_S7C_SERVER not set: the old-build array-destination proofs were not exercised here)');
-  }
-  rm(dir, bk.body.dir, restored, copy);
+  rm(dir, bk.body.dir, restored);
 });
 
-await test('[review of 40aa05c, F1] POST /push/register with RAW JSON bodies (1e400 twice, -1e400, {"n":1e400}, [1e400] — JSON.stringify would pre-normalise them): five 201 responses as the accepted build answered; four rows persisted [null,null,{"n":null},[null]] with the debounced save (a repeated positive Infinity collapses by strict equality on the live value, negative Infinity is a separate row); the same five again collapse only their own live rows; falsy tokens are still 400; the backup carries null; after a restart every non-finite value reads null and a new live Infinity removes none of them; finite primitives and structurally equal objects behave as before; the push sender hands the live provider (intercepted locally) the same JSON payload as the accepted build; the rollback blob holds the nulls, the accepted build boots it and persists its own raw overflow registration as null, and the re-upgrade keeps every row', async () => {
+await test('[review of 40aa05c, F1] POST /push/register with RAW JSON bodies (1e400 twice, -1e400, {"n":1e400}, [1e400] — JSON.stringify would pre-normalise them): five 201 responses as the accepted build answered; four rows persisted [null,null,{"n":null},[null]] with the debounced save (a repeated positive Infinity collapses by strict equality on the live value, negative Infinity is a separate row); the same five again collapse only their own live rows; falsy tokens are still 400; the backup carries null; after a restart every non-finite value reads null and a new live Infinity removes none of them; finite primitives and structurally equal objects behave as before; the push sender hands the live provider (intercepted locally) the same JSON payload as the accepted build (null for Infinity)', async () => {
   const dir = tempDir('s7c-f1'); let S = await boot(dir, { M13_FAST_RETRY: '' }); let kola = await playerLogin(S, 'pl-adeyemi');
   const RAW = ['{"token":1e400}', '{"token":1e400}', '{"token":-1e400}', '{"token":{"n":1e400}}', '{"token":[1e400]}'];
   const statuses = []; for (const b of RAW) statuses.push((await S.raw('POST', '/push/register', b, kola)).status);
@@ -426,21 +379,10 @@ await test('[review of 40aa05c, F1] POST /push/register with RAW JSON bodies (1e
   };
   const mine = await payloads(SERVER);
   assert.deepEqual(mine, [{ to: null, title: 'ScoutBox' }, { to: { n: null }, title: 'ScoutBox' }, { to: 'ExponentPushToken[synthetic]', title: 'ScoutBox' }], 'null for Infinity in the provider payload, as JSON.stringify always wrote');
-  const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
-  if (OLD && fs.existsSync(OLD)) { assert.deepEqual(await payloads(OLD), mine, 'the accepted 6ca66ba build sends the identical payloads'); console.log('    (pre-S7c build: identical provider payloads for non-finite tokens)'); } else console.log('    (SCOUTBOX_PRE_S7C_SERVER not set: the old-build payload comparison was not exercised here)');
-  // Rollback: the blob holds the nulls; the accepted build boots it and persists its own raw overflow registration as null; the re-upgrade keeps every row.
-  const copy = tempDir('s7c-f1-rollback'); const s7cCopy = tempDir('s7c-f1-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
-  assert.deepEqual(playerTokens(copy).map((t) => t.token), nine.map((t) => t.token), 'the blob the accepted build reads');
-  if (OLD && fs.existsSync(OLD)) {
-    const old = await boot(copy, {}, OLD); const ok = await playerLogin(old, 'pl-adeyemi');
-    assert.equal((await old.raw('POST', '/push/register', '{"token":-1e400}', ok)).status, 201); assert.ok(await until(async () => playerTokens(copy).length === 10, 8000), 'the accepted build persisted its own null'); assert.equal(playerTokens(copy).at(-1).token, null); await old.stop();
-    const up = await boot(copy); assert.ok(live(copy)); assert.equal(playerTokens(copy).length, 10); assert.deepEqual(playerTokens(copy).slice(0, 9).map((t) => t.token), nine.map((t) => t.token)); await up.stop();
-    console.log('    (pre-S7c build booted the rollback copy: a raw overflow registration persisted as null; re-upgraded with every row)');
-  }
-  rm(dir, bk.body.dir, copy);
+  rm(dir, bk.body.dir);
 });
 
-await test('[review of 78c14b9] POST /org/invites with RAW JSON destinations the route coerces and accepts — ["…"] (control), [1e400,"…"] and [[-1e400],"…"] (the elements parse to ±Infinity): three 201 responses, the process alive, three invite rows and THREE mail records in the routes\' own saves with the array structure kept and the accepted build\'s JSON in the overflow positions (null, nested null); no refusal logged; the admin view, a restart, the backup, a restore, the live transport\'s provider payload (intercepted locally), the copy-only rollback blob and the re-upgrade all match; the actual 6ca66ba build persists the same destinations for the same raw bodies, reads the rollback copy and writes one itself', async () => {
+await test('[review of 78c14b9] POST /org/invites with RAW JSON destinations the route coerces and accepts — ["…"] (control), [1e400,"…"] and [[-1e400],"…"] (the elements parse to ±Infinity): three 201 responses, the process alive, three invite rows and THREE mail records in the routes\' own saves with the array structure kept and the accepted build\'s JSON in the overflow positions (null, nested null); no refusal logged; the admin view, a restart, the backup, a restore and the live transport\'s provider payload (intercepted locally) all match', async () => {
   const dir = tempDir('s7c-f2b'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const seq0 = seqOf(dir); const logBefore = S.log().length;
   const RAW = ['{"email":["synthetic-control@example.invalid"],"name":"Synthetic Control","role":"Scout"}', '{"email":[1e400,"synthetic-overflow@example.invalid"],"name":"Synthetic Overflow","role":"Scout"}', '{"email":[[-1e400],"synthetic-nested@example.invalid"],"name":"Synthetic Nested","role":"Scout"}'];
@@ -470,27 +412,7 @@ await test('[review of 78c14b9] POST /org/invites with RAW JSON destinations the
   assert.equal((await SL.j('POST', '/org/invites', { email: 'synthetic-live-3@example.invalid', name: 'Synthetic Live Three', role: 'Scout' }, lm)).status, 201); // the next save carries the provider's answer
   const liveRow = byName(stored(liveDir).outbox, 'Synthetic Overflow'); assert.deepEqual([liveRow.transport, liveRow.delivered, liveRow.to], ['sendgrid', true, EXPECTED[1]]);
   await SL.stop(); rm(liveDir); fs.rmSync(stubLog, { force: true });
-  // Rollback: the blob holds the old JSON.
-  const copy = tempDir('s7c-f2b-rollback'); const s7cCopy = tempDir('s7c-f2b-rollback-s7d'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, copy], { encoding: 'utf8' });
-  assert.equal(live(copy), false); assert.deepEqual(stored(copy).outbox, all.outbox);
-  const OLD = process.env.SCOUTBOX_PRE_S7C_SERVER;
-  if (OLD && fs.existsSync(OLD)) {
-    // The same raw bodies on the accepted build: the same persisted destinations.
-    const oldDir = tempDir('s7c-f2b-old'); const o1 = await boot(oldDir, {}, OLD); const om1 = await orgLogin(o1, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
-    const oldStatuses = []; for (const b of RAW) oldStatuses.push((await o1.raw('POST', '/org/invites', b, om1)).status); await sleep(300); assert.equal(o1.proc.exitCode, null); await o1.stop();
-    assert.deepEqual(oldStatuses, [201, 201, 201]); assert.deepEqual(['Control', 'Overflow', 'Nested'].map((n) => byName(stored(oldDir).outbox, `Synthetic ${n}`).to), EXPECTED, 'the accepted build persisted the same destinations');
-    const up0 = await boot(oldDir); assert.ok(live(oldDir)); assert.deepEqual(['Control', 'Overflow', 'Nested'].map((n) => byName(stored(oldDir).outbox, `Synthetic ${n}`).to), EXPECTED, 'and its file upgrades on this build with them intact'); await up0.stop();
-    // The rollback copy on the accepted build.
-    const old = await boot(copy, {}, OLD); const om = await orgLogin(old, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
-    const oldView = (await old.j('GET', '/admin/outbox', undefined, null, A)).body; assert.deepEqual(['Control', 'Overflow', 'Nested'].map((n) => byName(oldView, `Synthetic ${n}`).to), EXPECTED, 'the accepted build reads the rollback copy');
-    assert.equal((await old.raw('POST', '/org/invites', '{"email":[1e400,"synthetic-old-overflow@example.invalid"],"name":"Synthetic Old Overflow","role":"Scout"}', om)).status, 201); await sleep(300); assert.equal(old.proc.exitCode, null); await old.stop();
-    assert.deepEqual(byName(stored(copy).outbox, 'Synthetic Old Overflow').to, [null, 'synthetic-old-overflow@example.invalid'], 'the accepted build wrote its JSON into the blob');
-    const up = await boot(copy); assert.ok(live(copy)); const re = stored(copy).outbox; assert.deepEqual(re.slice(0, all.outbox.length), all.outbox); assert.deepEqual(byName(re, 'Synthetic Old Overflow').to, [null, 'synthetic-old-overflow@example.invalid']); await up.stop();
-    console.log('    (pre-S7c build: same persisted destinations for the raw overflow bodies, its file upgrades, it reads and extends the rollback copy)'); rm(oldDir);
-  } else {
-    console.log('    (SCOUTBOX_PRE_S7C_SERVER not set: the old-build comparisons were not exercised here)');
-  }
-  rm(dir, bk.body.dir, restored, copy);
+  rm(dir, bk.body.dir, restored);
 });
 
 console.log(`\n${passed} outbox/push server checks passed`);

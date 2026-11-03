@@ -1,5 +1,5 @@
-// S8c — recruitment contacts and offers as tables (repositories/recruitmentContactsOffers.mjs, migration 0017,
-// repositories/recruitmentContactsOffersRollback.mjs): the bounded storage migration designed in
+// S8c — recruitment contacts and offers as tables (repositories/recruitmentContactsOffers.mjs, migration 0017):
+// the bounded storage migration designed in
 // docs/architecture/s8c-readiness-review.md (independently accepted at 19f5ca8 after the reviews of 854d035, a5a7ed9
 // and 19f5ca8) and decided by the Founder's explicit answers of 24 October 2026: Q8c-a "Approve tolerant (Recommended)"
 // (no player key; live, retained and historically missing player ids resolve, are counted and never refused, fabricated
@@ -12,12 +12,11 @@
 // A′ D′ | F2 | G: both input orders, partial saves equal to full saves, [] versus omitted, the joint contact/request
 // departure, the retarget with the old request departing, the retained refusals with their tables, the FIVE offer
 // pointers over the FINAL collection in both R1 directions, the true foreign-owner refusal with both owners present,
-// an injected statement failure and a real COMMIT failure with byte-identical tables and the retry landing once); the
-// copy-only rollback tool and the chain through the S8b and S8a tools. Temporary databases only; nothing touches
-// DATA_DIR. Run with: npm test
+// an injected statement failure and a real COMMIT failure with byte-identical tables and the retry landing once).
+// Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 //
 // FAILING-FIRST NOTE (recorded on the unchanged 19f5ca8 tree, source-identical to the accepted 7072dd9, before the
-// implementation): the tests marked [cutover] need migration 0017, the repository module and the rollback module and
+// implementation): the tests marked [cutover] need migration 0017 and the repository module and
 // FAIL there on concrete assertions (the migration id is absent from DATA_MIGRATIONS and TABLE_BACKED; the tables do
 // not exist; the blobs survive; the modules are absent). The [behaviour] test fails on the unchanged tree on a
 // BEHAVIOURAL assertion: that build's whole-snapshot save removes a request a retained contact still names (and keeps
@@ -27,7 +26,6 @@
 // there on behavioural assertions — the cutover record counts 0 missing where the live report counts 5; an empty-string
 // guardian id imports unrefused (review §14.2, the one reference rule).
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -50,13 +48,9 @@ const MIGRATION = '0017_recruitment_contacts_offers'; const S8B = '0016_recruitm
 const COLLECTIONS = ['recruitmentContacts', 'recruitmentOffers'];
 const TABLES = ['recruitment_contacts', 'contact_attempts', 'contact_history', 'recruitment_offers', 'offer_revisions', 'offer_revision_documents', 'offer_responses', 'offer_read_receipts', 'offer_history'];
 const S8AB_TABLES = ['recruitment_requests', 'request_trial_slots', 'trials', 'trial_history', 'idempotency_keys', 'recruitment_cases', 'case_history', 'room_comments', 'room_decisions'];
-let rco = null; let rollbackMod = null;
+let rco = null;
 try { rco = await import('../repositories/recruitmentContactsOffers.mjs'); } catch { rco = null; }
-try { rollbackMod = await import('../repositories/recruitmentContactsOffersRollback.mjs'); } catch { rollbackMod = null; }
-const s8bRollbackMod = await import('../repositories/recruitmentCasesRollback.mjs');
-const chainMod = await import('../repositories/rollbackChain.mjs'); // S8d: the S8d step-back then the S8c tool, as one link
 const needRco = () => { assert.ok(rco?.createRecruitmentContactsOffersRepository, 'repositories/recruitmentContactsOffers.mjs exports createRecruitmentContactsOffersRepository (the S8c repository module)'); return rco; };
-const needRollback = () => { assert.ok(rollbackMod?.rollbackRecruitmentContactsOffersCopy, 'repositories/recruitmentContactsOffersRollback.mjs exports rollbackRecruitmentContactsOffersCopy (the S8c rollback module)'); return rollbackMod.rollbackRecruitmentContactsOffersCopy; };
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const withRo = (dir, fn) => { const s = second(dir); try { return fn(s); } finally { s.close(); } };
 const tableExistsIn = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
@@ -109,17 +103,17 @@ function offerPointing(id, kind, target, { caseId = 'case-1', playerId = 'pl-adu
 const pointerCol = (s, offerId, kind) => (kind === 'current_revision_id' ? col(s, 'SELECT current_revision_id FROM recruitment_offers WHERE id = ?', offerId) : col(s, `SELECT ${kind} FROM offer_revisions WHERE offer_id = ? AND position = 0`, offerId));
 
 // ------------------------------------------------------------- the migration
-test('[cutover] migration 0017 is registered last and, on an S8b file, creates the nine contact and offer tables and rebuilds idempotency_keys with the owner CHECK broadened to the two parents while every S8a/S8b row, key row, the S8b key-format marker, thread and case survives byte for byte; imports the two blobs row for row and retires them; records counts only (the Q8c-a player counts, the unresolved pointers per kind, the dangling decision ids); reruns are no-ops; a file without the blobs creates the tables and imports nothing — never from the seed or memory', () => {
+test('[cutover] migration 0017 is registered last and, on an S8b file, creates the nine contact and offer tables and rebuilds idempotency_keys with the owner CHECK broadened to the two parents while every S8a/S8b row, key row, thread and case survives byte for byte; imports the two blobs row for row and retires them; records counts only (the Q8c-a player counts, the unresolved pointers per kind, the dangling decision ids); reruns are no-ops; a file without the blobs creates the tables and imports nothing — never from the seed or memory', () => {
   assert.equal(DATA_MIGRATIONS.at(-2)?.id, MIGRATION, 'migration 0017 is registered after 0016; 0018_signings_follow_ups (S8d) follows it'); for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
   const d = tempDir('s8c-mig'); preS8cFile(d);
   const s = openRaw(d);
   assert.ok(applied(s).includes(S8B)); for (const n of COLLECTIONS) assert.ok(Array.isArray(blob(s, n)), `${n} blob before`);
   const s8abRows = () => JSON.stringify(S8AB_TABLES.map((t) => (t === 'idempotency_keys' ? s.prepare("SELECT * FROM idempotency_keys WHERE owner_table NOT IN ('recruitment_contacts', 'recruitment_offers') ORDER BY owner_table, owner_id, position").all() : s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all())));
-  const before = s8abRows(); const marker = meta(s, 'recruitmentCasesKeyFormat'); const seq = meta(s, 'saveSeq');
+  const before = s8abRows(); const seq = meta(s, 'saveSeq');
   migrateAll(s);
   assert.equal(applied(s).at(-2), MIGRATION); assert.equal(applied(s).at(-1), '0018_signings_follow_ups', 'S8d follows (it imports nothing from this fixture)'); for (const t of TABLES) assert.ok(tableExistsIn(s, t), `${t} exists`);
   assert.match(ddlOf(s, 'idempotency_keys'), /'recruitment_contacts', 'recruitment_offers'/, 'the broadened owner CHECK');
-  assert.equal(s8abRows(), before, 'every S8a/S8b row (the S8a/S8b key rows included) byte-identical'); assert.equal(meta(s, 'recruitmentCasesKeyFormat'), marker, 'the S8b marker untouched'); assert.equal(meta(s, 'saveSeq'), seq, 'the migration is not a save');
+  assert.equal(s8abRows(), before, 'every S8a/S8b row (the S8a/S8b key rows included) byte-identical'); assert.equal(meta(s, 'saveSeq'), seq, 'the migration is not a save');
   for (const n of COLLECTIONS) assert.equal(blob(s, n), undefined, `${n} blob retired`);
   assert.equal(col(s, 'SELECT count(*) FROM recruitment_contacts'), 6); assert.equal(col(s, 'SELECT count(*) FROM recruitment_offers'), 4); assert.equal(col(s, 'SELECT count(*) FROM offer_revisions'), 6); assert.equal(col(s, 'SELECT count(*) FROM offer_revision_documents'), 3); assert.equal(col(s, 'SELECT count(*) FROM contact_history'), 9); assert.equal(col(s, 'SELECT count(*) FROM offer_read_receipts'), 2);
   assert.deepEqual(s.prepare("SELECT owner_id, act, key FROM idempotency_keys WHERE owner_table = 'recruitment_offers' AND owner_id = 'rof-2' ORDER BY position").all().map((r) => r.key), ['k-o2', 'k-issue-1', 'k-issue-2', 'k-rev-2', 'k-rev-3'], 'the offer keys as rows in act order');
@@ -488,37 +482,6 @@ test('[empty-string ids — the ONE reference rule, Q8c-b] the same rule on the 
       L.save(supplied(undefined), { omit: ['requests', 'trials'] }); withRo(dd, (s) => assert.equal(s.prepare("SELECT count(*) AS n FROM recruitment_contacts WHERE id = 'rct-g'").get().n + s.prepare("SELECT count(*) AS n FROM recruitment_offers WHERE id = 'rof-g'").get().n, 1, `${kind}: the absent control lands`));
       L.close(); rm(dd); }
   }
-});
-
-// ------------------------------------------------------------- the rollback
-test('[cutover] the copy-only rollback: the source is never modified (the main file\'s bytes, the WAL, the logical content and the revision); the copy gets the two blobs back in insertion order in the writers\' literals (keys reassembled, every post-cutover edit and every pointer kept), idempotency_keys rebuilt to the S8b CHECK with the S8c owner rows removed and every S8a/S8b row byte for byte, the S8b key-format marker untouched, the nine tables dropped, the 0017 record and meta key removed, the revision advanced, every other table untouched; refusals leave no output (NOT_CUT_OVER, OUTPUT_NOT_EMPTY, FORMAT_UNSUPPORTED, a commit failure); the S8b tool refuses the 0017 file (LATER_SCHEMA) and accepts the output, the S8a tool the S8b output; re-upgrading the copy reproduces the tables exactly', () => {
-  const d = tempDir('s8c-rb'); preS8cFile(d); { const s = openRaw(d); migrateAll(s); assert.ok(applied(s).includes(MIGRATION), 'migration 0017 applied'); s.close(); }
-  needRollback(); needRco();
-  // S8d: a live file of this build carries 0018, which the S8c tool refuses by design (LATER_SCHEMA); the chain step runs the S8d step-back first and the S8c tool on its output, with the S8c tool's result and refusals.
-  const rollback = chainMod.rollbackToPreS8c;
-  const L = serverOpen(d); L.repo.addOffer(draftOffer({ id: 'rof-after', revisions: [revision({ id: 'rofr-after' })], currentRevisionId: 'rofr-after', history: [] })); L.db.recruitmentContacts.find((c) => c.id === 'rct-1').subject = 'after the cutover'; L.save();
-  const expected = L.repo.exportAll(); L.close();
-  { const s = openRaw(d); s.exec('PRAGMA wal_checkpoint(TRUNCATE)'); s.close(); }
-  const sha = (f) => (fs.existsSync(f) ? crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex') : 'absent');
-  const sourceState = () => ({ main: sha(dbFile(d)), wal: fs.existsSync(`${dbFile(d)}-wal`) ? fs.statSync(`${dbFile(d)}-wal`).size : 0, logical: withRo(d, fullDump), saveSeq: withRo(d, (s) => meta(s, 'saveSeq')) });
-  const sourceBefore = sourceState();
-  const s8abBefore = withRo(d, (s) => JSON.stringify([...S8AB_TABLES.filter((t) => t !== 'idempotency_keys').map((t) => s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()), s.prepare("SELECT * FROM idempotency_keys WHERE owner_table NOT IN ('recruitment_contacts', 'recruitment_offers') ORDER BY rowid").all()]));
-  const out = tempDir('s8c-rb-out'); const result = rollback(dbFile(d), out);
-  assert.equal(result.recruitmentContacts, 6); assert.equal(result.recruitmentOffers, 5); assert.deepEqual(sourceState(), sourceBefore, 'the source is untouched');
-  const c = new DatabaseSync(dbFile(out), { readOnly: true });
-  for (const n of COLLECTIONS) assert.deepEqual(blob(c, n), plain(expected[n]), `${n} blob`);
-  assert.equal(blob(c, 'recruitmentOffers').find((o) => o.id === 'rof-4').currentRevisionId, 'rofr-missing', 'the unresolved pointer byte for byte'); assert.equal(blob(c, 'recruitmentContacts')[0].subject, 'after the cutover');
-  for (const t of TABLES) assert.equal(tableExistsIn(c, t), false, `${t} dropped`); assert.equal(applied(c).includes(MIGRATION), false); assert.ok(applied(c).includes(S8B)); assert.equal(meta(c, 'recruitmentContactsOffersCutover'), undefined); assert.equal(meta(c, 'recruitmentCasesKeyFormat'), 'case-owned-keys/1', 'the S8b marker untouched');
-  assert.equal(JSON.stringify([...S8AB_TABLES.filter((t) => t !== 'idempotency_keys').map((t) => c.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()), c.prepare('SELECT * FROM idempotency_keys ORDER BY rowid').all()]), s8abBefore, 'the S8a/S8b rows byte-identical');
-  assert.doesNotMatch(ddlOf(c, 'idempotency_keys'), /recruitment_contacts|recruitment_offers/); assert.match(ddlOf(c, 'idempotency_keys'), /'room_decisions'/); assert.equal(c.prepare('PRAGMA foreign_key_check').all().length, 0); c.close();
-  const notCut = tempDir('s8c-notcut'); preS8cFile(notCut); const o2 = tempDir('s8c-o2'); assert.throws(() => rollback(dbFile(notCut), o2), (e) => e.code === 'NOT_CUT_OVER'); assert.equal(fs.readdirSync(o2).length, 0);
-  fs.writeFileSync(path.join(o2, 'x'), ''); assert.throws(() => rollback(dbFile(d), o2), (e) => e.code === 'OUTPUT_NOT_EMPTY');
-  const o3 = tempDir('s8c-o3'); assert.throws(() => rollback(dbFile(d), o3, { _failBeforeCommit: true }), /synthetic commit failure/); assert.equal(fs.readdirSync(o3).length, 0); assert.deepEqual(sourceState(), sourceBefore);
-  const fmt = tempDir('s8c-fmt'); fs.cpSync(d, fmt, { recursive: true }); { const s = openRaw(fmt); s.prepare('DELETE FROM meta WHERE key = ?').run('recruitmentCasesKeyFormat'); s.close(); } const o4 = tempDir('s8c-o4'); assert.throws(() => rollback(dbFile(fmt), o4), (e) => e.code === 'FORMAT_UNSUPPORTED'); assert.equal(fs.readdirSync(o4).length, 0);
-  const { rollbackRecruitmentCasesCopy } = s8bRollbackMod; const chain = tempDir('s8c-chain'); assert.throws(() => rollbackRecruitmentCasesCopy(dbFile(d), chain), (e) => e.code === 'LATER_SCHEMA' && /0017_recruitment_contacts_offers/.test(e.message)); assert.equal(fs.readdirSync(chain).length, 0);
-  rollbackRecruitmentCasesCopy(dbFile(out), chain); assert.ok(fs.existsSync(dbFile(chain)), 'the S8b tool accepts the S8c output');
-  const up = openRaw(out); migrateAll(up); assert.deepEqual(plain(rco.readContacts(up)), plain(expected.recruitmentContacts)); assert.deepEqual(plain(rco.readOffers(up)), plain(expected.recruitmentOffers)); assert.equal(canon(up), withRo(d, canon), 're-upgrading the copy reproduces the live tables exactly'); up.close();
-  rm(d, out, notCut, o2, o3, fmt, o4, chain);
 });
 
 console.log(`\n${passed} recruitment contacts/offers checks passed`);

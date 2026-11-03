@@ -134,7 +134,7 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
       // are on /capabilities → dataLayer, never subjects.
       core_identity_storage: {
         state: 'live',
-        note: 'Players, guardians and guardian–child links are table-backed (migration 0005); writes go through the identity repositories and multi-domain operations run inside the store\'s unit of work. The rollback is scripts/coreIdentityRollback.mjs on a copy.',
+        note: 'Players, guardians and guardian–child links are table-backed (migration 0005); writes go through the identity repositories and multi-domain operations run inside the store\'s unit of work.',
       },
     },
     ...extra,

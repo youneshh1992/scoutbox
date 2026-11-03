@@ -108,10 +108,8 @@ test('database kinds are explicit state, never row counts: a genuinely new datab
   assert.equal(m0005.describeDatabase(s).everSaved, true);
   migrate(s, { now: NOW });
   assert.equal(meta(s, CORE_IDENTITY_INIT_META), 'done'); assert.equal(JSON.parse(meta(s, m0005.CORE_IDENTITY_CUTOVER_META)).firstInstallation, false);
-  const warnings = [];
-  identity = createIdentityRepositories({ sqlite: s, now: () => NOW, warn: (m) => warnings.push(m) });
+  identity = createIdentityRepositories({ sqlite: s, now: () => NOW });
   assert.deepEqual(identity.attach([adult()], [gSignup()]), { engine: 'sqlite', players: 0, guardians: 0, links: 0, imported: 0 });
-  assert.equal(warnings.length, 2); assert.match(warnings[0], /authoritative.*ignored/);
   assert.throws(() => identity.initialize({ players: [adult()], guardians: [] }, { now: NOW }), /already initialised/);
   s.close(); rm(empty);
   // (c) A saved snapshot that lacks a collection, or whose collection is malformed: refused as a whole, file untouched, nothing seeded.
@@ -195,10 +193,9 @@ test('stale populated shadow rows are discarded unread: the live tables hold exa
   // After the cutover: a stale blob written back is ignored by the repositories; the migration refuses to run again over the live domain; the runner never repeats a recorded step.
   const liveBefore = identityDump(s);
   s.prepare("INSERT INTO collections (name, value) VALUES ('players', ?)").run(JSON.stringify([{ ...adult(), name: 'Stale Blob' }, child('pl-stale-blob', 'gd-primary', '2015-01-01')]));
-  const warnings = [];
-  const identity = createIdentityRepositories({ sqlite: s, now: () => NOW, warn: (m) => warnings.push(m) });
+  const identity = createIdentityRepositories({ sqlite: s, now: () => NOW });
   identity.attach(blob(s, 'players'), null);
-  assert.equal(identity.players.byId('pl-adult').name, 'Adult Signup'); assert.equal(identity.players.byId('pl-stale-blob'), null); assert.match(warnings[0], /1 record\(s\) the table does not hold was ignored/);
+  assert.equal(identity.players.byId('pl-adult').name, 'Adult Signup'); assert.equal(identity.players.byId('pl-stale-blob'), null);
   assert.deepEqual(migrate(s, { now: NOW }).ran, [], 'recorded: the runner skips it');
   s.exec('BEGIN');
   assert.throws(() => m0005.up(s, { now: NOW }), /CORE_IDENTITY_CUTOVER_BLOCKED: the players\/guardians tables already have the live definition/);
@@ -271,14 +268,12 @@ test('integrated boot: 0005 and 0006 are registered, players and guardians are t
   assert.equal(blob(store.sqlite, 'players'), undefined); assert.equal(blob(store.sqlite, 'guardians'), undefined, 'no identity blob is written');
   assert.equal(store.sqlite.prepare('SELECT COUNT(*) AS n FROM guardian_children').get().n, 1);
   store.sqlite.close();
-  // (b) A restart with the seed in memory again: attached, never imported; a stale extra record is reported and ignored.
+  // (b) A restart with the seed in memory again: attached, never imported; a stale extra record is ignored.
   store = openStore(dir, { tableBacked: TABLE_BACKED });
   db = { ...store.load().db, ...seed() }; db.players.push({ ...adult(), id: 'pl-stale' });
-  const warnings = [];
-  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
+  layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   assert.deepEqual(layer.boot.identity, { engine: 'sqlite', players: 2, guardians: 2, links: 1, imported: 0 });
   assert.equal(db.players.find((p) => p.id === 'pl-stale'), undefined, 'the stale seed record is not resurrected');
-  assert.ok(warnings.some((w) => /players table holds 2 row\(s\).*1 record\(s\) the table does not hold was ignored/.test(w)), JSON.stringify(warnings));
   store.sqlite.close();
   // (c) A database whose identity domain was saved EMPTY on purpose stays empty: the seed is never imported into it.
   const emptyDir = tempDir('s4-boot-empty'); s3File(emptyDir, { players: [], guardians: [] });

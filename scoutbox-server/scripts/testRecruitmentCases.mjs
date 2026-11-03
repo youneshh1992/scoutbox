@@ -1,5 +1,5 @@
 // S8b — recruitment cases, room comments, room snapshots, room decisions and room evidence states as tables
-// (repositories/recruitmentCases.mjs, migration 0016, repositories/recruitmentCasesRollback.mjs): the bounded storage
+// (repositories/recruitmentCases.mjs, migration 0016): the bounded storage
 // migration designed in docs/architecture/s8b-readiness-review.md (accepted at 4d2c74b) and approved for the player
 // references by the Founder's Q8a answer of 23 October 2026, "Approve tolerant (Recommended)" (no player foreign key;
 // live, retained and historically missing ids resolve, are counted and never refused, fabricated or deleted).
@@ -15,18 +15,17 @@
 // nested views); the corrected snapshot write of the review's §6 through the REAL store (P A R B C D F1 F2 F3 G: the
 // reviewer's F1a/F1b/F1c, F2 for each room collection and all four, R1 the owned history under the kept RESTRICT key,
 // both input orders, partial saves equal to full saves, the retained refusals with their tables, an injected failure
-// after the owned children were removed and before the parent, the retry landing once); the copy-only rollback tool.
+// after the owned children were removed and before the parent, the retry landing once).
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 //
 // FAILING-FIRST NOTE (recorded on the unchanged 4d2c74b tree, source-identical to the accepted 7a7efc6, before the
-// implementation): the tests marked [cutover] need migration 0016, the repository module and the rollback module and
+// implementation): the tests marked [cutover] need migration 0016 and the repository module and
 // FAIL there on concrete assertions (the migration id is absent from DATA_MIGRATIONS and TABLE_BACKED; the tables do
 // not exist; the blobs survive; the parents carry no case key; the modules are absent). The [behaviour] test fails on
 // the unchanged tree on a BEHAVIOURAL assertion: that build's whole-snapshot save removes a case a retained room comment
 // still names (and silently keeps the comment), where this step refuses with the table and the ids. The [compat] checks
 // hold on both trees.
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,20 +45,15 @@ const HERE = path.dirname(fileURLToPath(import.meta.url)); void HERE;
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const dbFile = (dir) => path.join(dir, 'scoutbox.db');
 let counter = 9000; const nextId = (p) => `${p}-${++counter}`;
-const MIGRATION = '0016_recruitment_cases'; const S8A = '0015_recruitment';
+const MIGRATION = '0016_recruitment_cases';
 const COLLECTIONS = ['recruitmentCases', 'roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState'];
 const CASE_TABLES = ['recruitment_cases', 'case_room_tags', 'case_assignments', 'case_tasks', 'case_approvals', 'case_history', 'case_request_links', 'case_trial_links', 'case_decision_drafts', 'case_decision_draft_reason_codes', 'case_decision_draft_evidence_refs', 'case_transaction_handoffs', 'case_budget_scenarios', 'case_budget_lines', 'case_budget_fx_assumptions', 'case_budget_actuals'];
 const ROOM_TABLES = ['room_comments', 'room_comment_mentions', 'room_snapshots', 'room_snapshot_source_refs', 'room_decisions', 'room_decision_reason_codes', 'room_decision_evidence_refs', 'room_decision_assessment_ids', 'room_evidence_states'];
 const TABLES = [...CASE_TABLES, ...ROOM_TABLES];
 const S8A_TABLES = ['recruitment_requests', 'request_trial_slots', 'trials', 'trial_schedule_sessions', 'trial_session_evidence', 'trial_schedule_revisions', 'trial_attendance', 'trial_reminders', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events', 'trial_reports', 'trial_history', 'idempotency_keys'];
-let rc = null; let rollbackMod = null;
+let rc = null;
 try { rc = await import('../repositories/recruitmentCases.mjs'); } catch { rc = null; }
-try { rollbackMod = await import('../repositories/recruitmentCasesRollback.mjs'); } catch { rollbackMod = null; }
-const s8aRollbackMod = await import('../repositories/recruitmentRollback.mjs'); // the S8a tool: the rollback chain's previous link
 const needRc = () => { assert.ok(rc?.createRecruitmentCasesRepository, 'repositories/recruitmentCases.mjs exports createRecruitmentCasesRepository (the S8b repository module)'); return rc; };
-const s8cRollbackMod = { rollbackRecruitmentContactsOffersCopy: (await import('../repositories/rollbackChain.mjs')).rollbackToPreS8c }; // S8d: the S8d step-back then the S8c tool, as one link (a live file carries 0018); // S8c: a live file of this build carries 0017, which the S8b tool refuses outright (LATER_SCHEMA); the chain runs the S8c tool (copy-only) first and the S8b tool on ITS output
-const viaS8c = (file, out, opts = {}) => { const s8c = tempDir('s8b-via-s8c'); s8cRollbackMod.rollbackRecruitmentContactsOffersCopy(file, s8c, { now: opts.now }); return rollbackMod.rollbackRecruitmentCasesCopy(dbFile(s8c), out, opts); };
-const needRollback = () => { assert.ok(rollbackMod?.rollbackRecruitmentCasesCopy, 'repositories/recruitmentCasesRollback.mjs exports rollbackRecruitmentCasesCopy (the S8b rollback module)'); return viaS8c; };
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const withRo = (dir, fn) => { const s = second(dir); try { return fn(s); } finally { s.close(); } };
 const tableExistsIn = (s, t) => !!s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
@@ -356,45 +350,6 @@ test('[compat] a request naming a case that is not in the FINAL cases is refused
   assert.equal(withRo(d, fullDump), before); S.close(); rm(d);
 });
 
-// ------------------------------------------------------------- the rollback tool
-test('[cutover] the copy-only rollback: the source is never modified (the main file\'s bytes, the WAL, the logical content and the revision); the copy gets the five blobs back in insertion order in the writers\' literals (keys reassembled, every post-cutover edit kept), recruitment_requests and trials rebuilt to the S8a definitions (no case key) row for row, idempotency_keys rebuilt to the S8a CHECK with the S8b owner rows removed, the twenty-five tables dropped, the 0016 record and meta key removed, the revision advanced, every other table untouched; refusals leave no output; the S8a tool refuses the 0016 file (LATER_SCHEMA) and accepts the output; re-upgrading the copy reproduces the tables exactly', () => {
-  const d = tempDir('s8b-rb'); preS8bFile(d); { const s = openRaw(d); migrateAll(s); assert.ok(applied(s).includes(MIGRATION), 'migration 0016 applied'); s.close(); }
-  const rollback = needRollback(); needRc();
-  const L = serverOpen(d); L.repo.addCase(legacyCase({ id: 'case-after', createdAt: NOW })); L.db.recruitmentCases.find((c) => c.id === 'case-1').room.status = 'shortlisted'; L.save();
-  const expected = Object.fromEntries(COLLECTIONS.map((n) => [n, plain(L.db[n])])); const expectedR = plain(L.db.requests); const expectedT = plain(L.db.trials); L.close();
-  { const s = openRaw(d); s.exec('PRAGMA wal_checkpoint(TRUNCATE)'); s.close(); }
-  const sha = (f) => (fs.existsSync(f) ? crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex') : 'absent');
-  const walBytes = () => (fs.existsSync(`${dbFile(d)}-wal`) ? fs.statSync(`${dbFile(d)}-wal`).size : 0);
-  const sourceState = () => ({ main: sha(dbFile(d)), walBytes: walBytes(), logical: withRo(d, fullDump), saveSeq: withRo(d, (s) => meta(s, 'saveSeq')) });
-  const sourceBefore = sourceState(); assert.equal(sourceBefore.walBytes, 0);
-  const s8aRowsBefore = withRo(d, (s) => JSON.stringify(['recruitment_requests', 'trials', 'request_trial_slots', 'trial_history'].map((t) => s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all())));
-  const out = tempDir('s8b-rb-out');
-  const result = rollback(dbFile(d), out, { now: NOW });
-  assert.equal(result.recruitmentCases, 5); assert.equal(result.roomComments, 3);
-  assert.deepEqual(sourceState(), sourceBefore, 'the source is untouched');
-  withRo(d, (s) => assert.ok(tableExistsIn(s, 'recruitment_cases')));
-  const c = new DatabaseSync(dbFile(out), { readOnly: true });
-  for (const n of COLLECTIONS) assert.deepEqual(blob(c, n), expected[n], `${n} blob`);
-  for (const t of TABLES) assert.equal(tableExistsIn(c, t), false, `${t} dropped`);
-  assert.equal(applied(c).includes(MIGRATION), false); assert.ok(applied(c).includes(S8A)); assert.equal(meta(c, 'recruitmentCasesCutover'), undefined);
-  for (const t of ['recruitment_requests', 'trials']) assert.equal(fkTargets(c, t).some((f) => f.includes('recruitment_cases')), false, `${t}: no case key`);
-  assert.equal(JSON.stringify(['recruitment_requests', 'trials', 'request_trial_slots', 'trial_history'].map((t) => c.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all())), s8aRowsBefore, 'the S8a rows byte-identical');
-  assert.match(ddlOf(c, 'idempotency_keys'), /owner_table IN \('recruitment_requests', 'trials'\)/); assert.equal(c.prepare("SELECT count(*) AS n FROM idempotency_keys WHERE owner_table NOT IN ('recruitment_requests', 'trials')").get().n, 0); assert.equal(c.prepare("SELECT count(*) AS n FROM idempotency_keys").get().n, 2);
-  assert.equal(c.prepare('PRAGMA foreign_key_check').all().length, 0); assert.equal(c.prepare('SELECT count(*) AS n FROM channels').get().n, 1);
-  c.close();
-  const { rollbackRecruitmentCopy } = s8aRollbackMod;
-  const chain = tempDir('s8b-chain'); assert.throws(() => rollbackRecruitmentCopy(dbFile(d), chain, { now: NOW }), (e) => e.code === 'LATER_SCHEMA' && /0016_recruitment_cases/.test(e.message)); assert.equal(fs.readdirSync(chain).length, 0);
-  rollbackRecruitmentCopy(dbFile(out), chain, { now: NOW }); assert.ok(fs.existsSync(dbFile(chain)));
-  const notCut = tempDir('s8b-notcut'); preS8bFile(notCut); const o2 = tempDir('s8b-o2'); assert.throws(() => rollback(dbFile(notCut), o2, { now: NOW }), (e) => e.code === 'NOT_CUT_OVER'); assert.equal(fs.readdirSync(o2).length, 0);
-  fs.writeFileSync(path.join(o2, 'x'), ''); assert.throws(() => rollback(dbFile(d), o2, { now: NOW }), (e) => e.code === 'OUTPUT_NOT_EMPTY');
-  const o3 = tempDir('s8b-o3'); assert.throws(() => rollback(dbFile(d), o3, { now: NOW, _failBeforeCommit: true }), /synthetic commit failure/); assert.equal(fs.readdirSync(o3).length, 0); assert.deepEqual(sourceState(), sourceBefore);
-  const up = openRaw(out); migrateAll(up); for (const n of COLLECTIONS) assert.deepEqual(rc[{ recruitmentCases: 'readCases', roomComments: 'readRoomComments', roomSnapshots: 'readRoomSnapshots', roomDecisions: 'readRoomDecisions', roomEvidenceState: 'readRoomEvidenceStates' }[n]](up), expected[n], `${n} re-upgraded`);
-  assert.equal(JSON.stringify(['recruitment_requests', 'trials', 'request_trial_slots', 'trial_history'].map((t) => up.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all())), s8aRowsBefore, 'the S8a rows after the re-upgrade (the case key back) byte-identical to the live file');
-  assert.equal(canon(up), withRo(d, canon), 're-upgrading the copy reproduces the live tables exactly');
-  up.close(); void expectedR; void expectedT;
-  rm(d, out, chain, notCut, o2, o3);
-});
-
 // ------------------------------------------------------------- the independent review of b7c0dd0 (F1, F2): regressions written before the correction
 // FAILING-FIRST NOTE (recorded on the unchanged b7c0dd0 tree): F1 — the preflight and the final guard checked only that
 // a chain target EXISTS, so a decision of case-1 naming a decision of case-2 imported and committed; F2 — the draft and
@@ -443,8 +398,8 @@ test('[review b7c0dd0 F1] decision chains are SAME-ROOM: a supersedes / supersed
     S.close(); rm(d); }
 });
 
-test('[review b7c0dd0 F2] owned-child replay keys are owned by the CASE: two cases whose decisionDraft (or transactionHandoff) carry the SAME child id each keep exactly their own keys — at the cutover (both input orders; empty, absent, null, held-only and row-worthy keys on the colliding child), in the snapshot and the staged write (a later edit introducing and removing the collision; two populated maps pending in one transaction; an unrelated rewrite of either owner; an unchanged save; a restart; a statement failure and a real COMMIT failure with the retry landing once; the backup export and a restore; the copy-only rollback and the re-upgrade), and when one owner departs; the key rows are stored under the owning case id, never under the child id', () => {
-  needRc(); const rollback = needRollback();
+test('[review b7c0dd0 F2] owned-child replay keys are owned by the CASE: two cases whose decisionDraft (or transactionHandoff) carry the SAME child id each keep exactly their own keys — at the cutover (both input orders; empty, absent, null, held-only and row-worthy keys on the colliding child), in the snapshot and the staged write (a later edit introducing and removing the collision; two populated maps pending in one transaction; an unrelated rewrite of either owner; an unchanged save; a restart; a statement failure and a real COMMIT failure with the retry landing once; the backup export and a restore), and when one owner departs; the key rows are stored under the owning case id, never under the child id', () => {
+  needRc();
   const variants = { empty: { keys: {} }, absent: {}, null: { keys: null }, held: { keys: { create: { key: null, fp: 'held-fp' } } }, rows: { keys: { create: { key: 'k-second', fp: 'f-second' }, extra: [{ key: 'l1', fp: 'lf1' }] } } };
   const table = { decisionDraft: 'case_decision_drafts', transactionHandoff: 'case_transaction_handoffs' };
   const keyRows = (s, t) => s.prepare('SELECT owner_id, act, key FROM idempotency_keys WHERE owner_table = ? ORDER BY owner_id, position').all(t).map((r) => [r.owner_id, r.act, r.key]);
@@ -493,9 +448,6 @@ test('[review b7c0dd0 F2] owned-child replay keys are owned by the CASE: two cas
         const r = tempDir('s8b-f2-restore'); preS8bFile(r, { ...exported }); const rs = openRaw(r); migrateAll(rs); assert.deepEqual(rc.readCases(rs), exported.recruitmentCases, 'the restore reads the same cases and keys'); rs.close(); rm(r);
       }
       L.close();
-      // the copy-only rollback and the re-upgrade keep each owner's keys
-      { const live = withRo(d, (s) => rc.readCases(s)); const out = tempDir('s8b-f2-rb'); rollback(dbFile(d), out, { now: NOW }); const c = openRaw(out); const back = blob(c, 'recruitmentCases');
-        assert.deepEqual(back.map((x) => [x.id, x[child]?.keys ?? null]), live.map((x) => [x.id, x[child]?.keys ?? null]), 'the rollback copy carries each case\'s own keys'); migrateAll(c); assert.deepEqual(rc.readCases(c), live, 're-upgraded: identical'); c.close(); rm(out); }
       rm(d);
     }
     // one owner departs: the other's keys stay (a third case, named by nothing, sharing case-1's child id)
@@ -504,52 +456,5 @@ test('[review b7c0dd0 F2] owned-child replay keys are owned by the CASE: two cas
       S.save({ recruitmentCases: cases.filter((c) => c.id !== 'case-3') }); assert.deepEqual(keysOf(rc.readCases(S.store.sqlite), 'case-1', child), one, 'case-3 gone, case-1\'s keys intact'); assert.equal(S.store.sqlite.prepare("SELECT count(*) AS n FROM idempotency_keys WHERE owner_id = 'case-3'").get().n, 0, 'no orphan row');
       S.close(); rm(d); }
   }
-});
-// ------------------------------------------------------------- the independent review of 2fe05df (R1): the persisted key format, written before the correction
-// FAILING-FIRST NOTE (recorded on the unchanged 2fe05df tree): that build recorded no format marker, read the draft and
-// handoff key rows as case-owned on ANY 0016 file, and so returned empty or exchanged keys from a file the superseded
-// b7c0dd0 build had written (child-owned rows) — on attachment, on the snapshot load and in the rollback copy — instead
-// of refusing before any data was decoded.
-test('[review 2fe05df R1] the persisted key format is a recorded discriminator checked before anything is decoded, published, written, exported or rolled back: migration 0016 records meta.recruitmentCasesKeyFormat atomically with its rows (a failed step leaves none, the retry records it); a 0016 file WITHOUT the marker — the layouts of the superseded b7c0dd0 and 2fe05df builds: ordinary, overlapping case/child ids, no row-worthy keys — or with an unknown, empty or malformed marker is refused by the staged load, the snapshot load, the readers, the snapshot write, the final guard and the copy-only rollback (RECRUITMENT_CASES_FORMAT_UNSUPPORTED naming the recorded and the expected format and the version-matched recovery route; the source unchanged; no usable rollback output); the same file reads again once its own marker is back; the rollback copy carries no marker and the re-upgrade, a backup restore and a fresh cutover record it', () => {
-  needRc(); const rollback = needRollback();
-  const META = rc.RECRUITMENT_CASES_FORMAT_META ?? 'recruitmentCasesKeyFormat'; const FORMAT = rc.RECRUITMENT_CASES_KEY_FORMAT ?? null;
-  const marker = (s) => s.prepare('SELECT value FROM meta WHERE key = ?').get(META)?.value ?? null;
-  const setMarker = (d, value) => { const s = openRaw(d); if (value === null) s.prepare('DELETE FROM meta WHERE key = ?').run(META); else s.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(META, value); s.close(); };
-  // the b7c0dd0 layout with overlapping case/child ids: every key row names an existing case that has that child, yet belongs to the other case — a layout no ownership query can tell apart
-  const swapOwners = (d) => { const s = openRaw(d); for (const t of ['case_decision_drafts', 'case_transaction_handoffs']) for (const [from, to] of [['case-1', 'swap-tmp'], ['case-2', 'case-1'], ['swap-tmp', 'case-2']]) s.prepare('UPDATE idempotency_keys SET owner_id = ? WHERE owner_table = ? AND owner_id = ?').run(to, t, from); s.close(); };
-  const expectRefusal = (d, label) => {
-    const before = withRo(d, fullDump);
-    const e1 = refused(() => serverOpen(d), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the staged load (attachment)`);
-    assert.match(e1.message, /recorded/, `${label}: names the recorded format`); assert.match(e1.message, /expected|this build reads/, `${label}: names the expected format`); assert.match(e1.message, /rollback|roll it back/i, `${label}: names the recovery route`); assert.doesNotMatch(e1.message, /Adult Signup|Strong on the left|Harbour Road/);
-    refused(() => snapshotOpen(d), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the snapshot load`);
-    refused(() => withRo(d, (s) => rc.RECRUITMENT_CASES_SNAPSHOT.read(s)), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the snapshot reader`);
-    refused(() => withRo(d, (s) => rc.readCases(s)), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the case reader`);
-    { const s = openRaw(d); s.exec('BEGIN'); refused(() => rc.RECRUITMENT_CASES_SNAPSHOT.begin(s, { recruitmentCases: [] }), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the snapshot write`); refused(() => rc.assertCasesConsistent(s), /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/, `${label}: the final guard`); s.exec('ROLLBACK'); s.close(); }
-    const out = tempDir('s8b-fmt-rb'); let err = null; try { rollback(dbFile(d), out, { now: NOW }); } catch (e) { err = e; }
-    assert.ok(err && err.code === 'FORMAT_UNSUPPORTED' && /RECRUITMENT_CASES_FORMAT_UNSUPPORTED/.test(err.message), `${label}: the rollback refuses with FORMAT_UNSUPPORTED before reading a row (${err?.code}: ${err?.message})`); assert.equal(fs.readdirSync(out).length, 0, `${label}: no usable rollback output`); rm(out);
-    assert.equal(withRo(d, fullDump), before, `${label}: the source is unchanged`);
-  };
-  // 1. the fresh cutover records the marker atomically with its rows; a failed step leaves none; the retry records it
-  const dA = tempDir('s8b-fmt-a'); preS8bFile(dA);
-  { const s = openRaw(dA);
-    const probe = failRunAt(s, (sql) => /INSERT INTO meta/.test(sql), 1, 'synthetic marker failure'); assert.throws(() => migrateAll(s), /synthetic marker failure/); probe.restore();
-    assert.equal(marker(s), null, 'a failed cutover records no marker'); assert.equal(tableExistsIn(s, 'recruitment_cases'), false, 'nor tables'); assert.equal(s.prepare('SELECT 1 FROM data_migrations WHERE id = ?').get(MIGRATION) ?? null, null, 'nor the record'); assert.equal(s.isTransaction, false);
-    migrateAll(s); assert.ok(typeof marker(s) === 'string' && marker(s).length > 0, 'the cutover records a format marker'); if (FORMAT) assert.equal(marker(s), FORMAT, 'the marker is the format this build reads'); s.close(); }
-  const recorded = withRo(dA, marker); const expectedA = withRo(dA, (s) => rc.readCases(s));
-  { const L = serverOpen(dA); assert.deepEqual(plain(L.db.recruitmentCases), expectedA); L.close(); }
-  // 2. the ordinary file without its marker (the 2fe05df layout); its own marker back, it reads exactly as before
-  setMarker(dA, null); expectRefusal(dA, 'the unmarked ordinary file (the 2fe05df layout)');
-  setMarker(dA, recorded); { const L = serverOpen(dA); assert.deepEqual(plain(L.db.recruitmentCases), expectedA, 'with its own marker back the file reads exactly as before'); L.close(); }
-  // 3. unknown, empty and malformed markers
-  for (const [what, v] of [['an unknown marker', 'garbage'], ['an empty marker', ''], ['a malformed marker', JSON.stringify({ v: 1 })]]) { setMarker(dA, v); expectRefusal(dA, what); }
-  rm(dA);
-  // 4. the b7c0dd0 layout with overlapping case/child ids, unmarked: refused the same way (the marker decides, not the rows)
-  { const dB = tempDir('s8b-fmt-b'); const f = S8B_FIX(); for (const child of ['decisionDraft', 'transactionHandoff']) { f.recruitmentCases[0][child] = { ...f.recruitmentCases[0][child], id: 'case-2', keys: { create: { key: 'key-first', fp: 'fp-first' } } }; f.recruitmentCases[1][child] = { id: 'case-1', keys: { create: { key: 'key-second', fp: 'fp-second' } } }; }
-    preS8bFile(dB, f); { const s = openRaw(dB); migrateAll(s); s.close(); } swapOwners(dB); setMarker(dB, null); expectRefusal(dB, 'the unmarked file with overlapping case/child ids (the b7c0dd0 layout)'); rm(dB); }
-  // 5. a file with no row-worthy key at all, unmarked: refused too (the refusal does not depend on the rows)
-  { const dC = tempDir('s8b-fmt-c'); const f = S8B_FIX(); f.recruitmentCases[0].decisionDraft.keys = {}; f.recruitmentCases[0].transactionHandoff.keys = {}; preS8bFile(dC, f); { const s = openRaw(dC); migrateAll(s); s.close(); } setMarker(dC, null); expectRefusal(dC, 'the unmarked file without row-worthy keys'); rm(dC); }
-  // 6. the rollback copy carries no marker (a pre-S8b file); the re-upgrade and a backup restore record it again
-  { const d = file('fmt-rb'); const out = tempDir('s8b-fmt-out'); rollback(dbFile(d), out, { now: NOW }); const c = openRaw(out); assert.equal(marker(c), null, 'the rollback copy carries no marker'); migrateAll(c); assert.equal(marker(c), recorded, 're-upgraded: recorded again'); c.close();
-    const L = serverOpen(d); const exported = L.repo.exportAll(); L.close(); const r = tempDir('s8b-fmt-restore'); preS8bFile(r, { ...exported }); const rs = openRaw(r); migrateAll(rs); assert.equal(marker(rs), recorded, 'a restore records it'); rs.close(); rm(d, out, r); }
 });
 console.log(`\n${passed} recruitment cases checks passed`);

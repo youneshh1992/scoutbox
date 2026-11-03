@@ -3,15 +3,10 @@
  * guardian/child links and sessions — created as a VERIFIED SHADOW of the
  * blob snapshot (migration plan step S1, docs/architecture/sqlite-migration-plan.md).
  *
- * History: at S1 the blob snapshot stayed the source of truth and these
- * tables were filled by a projection (repositories/shadow.mjs, switched on
- * with SCOUTBOX_SHADOW_VALIDATION=1) so the target constraints could be
- * exercised against real data. Since then every table this step created has
- * cut over: sessions (0003), orgs (0004), players / guardians /
- * guardian_children (0005, which replaces the three shadow definitions with
- * the live ones). The projection, the switch and scripts/validateShadow.mjs
- * are retired (S4a); this module stays as the recorded first step of a
- * database's schema history and still runs first on a new file.
+ * Every table this step created has since cut over: sessions (0003), orgs
+ * (0004), players / guardians / guardian_children (0005, which replaces the
+ * three shadow definitions with the live ones). This module stays as the
+ * recorded first step of a database's schema history.
  *
  * The DDL is the identity section of docs/architecture/sql/01_identity.sql
  * (the player_* sub-record tables of that file arrive with step S5).

@@ -137,7 +137,7 @@ What differs from §1–§5, and why:
   `scripts/signingsFollowUpsRollback.mjs`, and `repositories/rollbackChain.mjs` / `scripts/rollbackToPreS8c.mjs`
   (the S8d step into a scratch copy, then the S8c tool). The twenty-one suites that prove the chain call the
   helper instead of the S8c tool; the S8c tool itself refuses a `0018` file with `LATER_SCHEMA`, as every earlier
-  tool refuses the step after it.
+  tool refuses the step after it. (All the rollback tooling was deleted afterwards: migration plan §4.1.)
 - **`m23SigningPersistence` joins the passing set**: its fixture seeded a case without `ownerUserId` (a key since
   S8b); Maria now logs in once before the legacy case is planted. CI's "four pre-existing failures" becomes three.
 - **Route validation added**, per §2: the outcome report's `matchesPlayed` (a safe integer ≥ 0 or null → 400

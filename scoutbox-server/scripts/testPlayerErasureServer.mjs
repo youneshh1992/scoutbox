@@ -6,16 +6,13 @@
 // (a failure after the erase, the real COMMIT) with everything restored and the
 // retry landing once; the admin backup keeping retained records separate from
 // live accounts, a tampered backup refused at boot, a restore into a NEW
-// directory; the documented danger (the previous build booted DIRECTLY on a copy
-// of the live file serves a retained row as an account); the copy-only rollback
-// booted by the actual accepted pre-S4b-R build (SCOUTBOX_PRE_S4BR_SERVER) and the
-// re-upgrade. Every read of the file goes through a second connection. Nothing
+// directory. Every read of the file goes through a second connection. Nothing
 // here touches DATA_DIR or real data. Run with: npm test
 //
 // FAILING-FIRST NOTE (recorded on the unchanged d16362f tree): every test fails
-// there on a concrete assertion (the row is hard-deleted; no 0014; no tool).
+// there on a concrete assertion (the row is hard-deleted; no 0014).
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -199,8 +196,8 @@ await test('[cutover] the deletion unit\'s failure seams: a failure after the er
   await S.stop(); rm(dir);
 });
 
-// ------------------------------------------------------------- backup, restore, the danger, rollback, re-upgrade
-await test('[cutover] the admin backup carries the retained records under playersRetained and NEVER inside players; a backup tampered to list a retained id as a live player is refused at boot (PLAYER_ERASURE_IMPORT_BLOCKED, the id and no birth date, nothing of 0014 written); a restore into a NEW directory reproduces the retained rows exactly; the previous build booted DIRECTLY on a copy of the live file serves a retained row as a passwordless account (the documented danger); the copy-only rollback moves the rows into the playersRetained blob, the S6b tool refuses the live file and accepts the copy, the accepted pre-S4b-R build (SCOUTBOX_PRE_S4BR_SERVER) boots the copy — serves nothing of them, signs up and hard-deletes accounts as it does, keeps the blob through its saves and backups — and this build re-upgrades the copy with its writes and the retained rows restored exactly; nothing of the person comes back', async () => {
+// ------------------------------------------------------------- backup, restore
+await test('[cutover] the admin backup carries the retained records under playersRetained and NEVER inside players; a backup tampered to list a retained id as a live player is refused at boot (PLAYER_ERASURE_IMPORT_BLOCKED, the id and no birth date, nothing of 0014 written); a restore into a NEW directory reproduces the retained rows exactly; nothing of the person comes back', async () => {
   const dir = tempDir('s4br-backup'); let S = await boot(dir);
   const maria = await orgLogin(S);
   const a = await signupAdult(S, 'Backup Erased'); const b = await signupAdult(S, 'Backup Live', { media: false });
@@ -231,57 +228,7 @@ await test('[cutover] the admin backup carries the retained records under player
   assert.equal((await S.j('POST', '/auth/player/login', { playerId: a.pid, password: 'synthetic-pass-1' })).status, 404);
   assert.equal(auditRows(restored), auditBefore, 'the audit rows restored row for row');
   await S.stop();
-  const OLD = process.env.SCOUTBOX_PRE_S4BR_SERVER;
-  // S8a: the live file carries 0015 as well, which the pre-S4b-R build cannot boot at all (its boot-contract check finds the
-  // requests and trials collections absent and exits 1 — the S8a hazard, proven in testRecruitmentServer.mjs); the S4b-R
-  // rollback and the S4b-R hazard below are exercised on the S8a rollback copy, a 0014 file with the retained rows.
-  const s8c = tempDir('s4br-s8c'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, s8c], { stdio: 'pipe' }); // S8c: the live file carries 0017 too; its rollback goes first
-  const s8b = tempDir('s4br-s8b'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), s8c, s8b], { stdio: 'pipe' }); // then S8b
-  const s8a = tempDir('s4br-s8a'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), s8b, s8a], { stdio: 'pipe' });
-  if (OLD && fs.existsSync(OLD)) {
-    // The danger: the previous build booted DIRECTLY on (a copy of) a 0014 file.
-    const direct = tempDir('s4br-direct'); fs.cpSync(s8a, direct, { recursive: true });
-    const wrong = await boot(direct, {}, OLD);
-    const served = await wrong.j('POST', '/auth/player/login', { playerId: a.pid });
-    assert.equal(served.status, 200, `the previous build serves the retained row as a passwordless account: ${served.text}`); assert.equal(served.body.name, 'Deleted player');
-    await wrong.stop(); rm(direct);
-    console.log('    (the pre-S4b-R build booted DIRECTLY on a copy of a 0014 file served the retained row as an account — the documented danger; the rollback tool is the only way back)');
-  }
-  // The copy-only rollback.
-  const copy = tempDir('s4br-copy');
-  try { execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), dir, tempDir('s4br-refused-0015')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4, 'the S4b-R tool refuses the live file carrying 0015 (a later schema step)'); }
-  const out = execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, copy], { encoding: 'utf8' }); // on the S8a tool's output
-  assert.match(out, /2 retained/);
-  assert.deepEqual(blobOf(copy, 'playersRetained'), RECORDS, 'the legacy blob: exactly the records'); assert.deepEqual(retainedRowsOf(copy), []); assert.equal(q1(copy, 'SELECT 1 AS one FROM players WHERE id = ?', a.pid), undefined);
-  assert.ok(!applied(copy).includes(MIGRATION)); assert.equal(JSON.stringify(retainedRowsOf(dir)), JSON.stringify(retained), 'the source is untouched');
-  try { execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), dir, tempDir('s4br-s6b-refused')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4, 'the S6b tool refuses the live file (a later schema step)'); }
-  execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), copy, tempDir('s4br-s6b-chain')], { stdio: 'pipe' }); // and accepts this tool's output
-  if (OLD && fs.existsSync(OLD)) {
-    const old = await boot(copy, {}, OLD);
-    assert.ok(!/0014_player_erasure/.test(old.log()), 'the accepted build knows nothing of 0014');
-    assert.equal((await old.j('POST', '/auth/player/login', { playerId: a.pid })).status, 404, 'nothing of the retained records is served as an account');
-    const oldMaria = await orgLogin(old); assert.equal((await old.j('GET', `/org/players/${a.pid}`, undefined, oldMaria)).status, 404); assert.equal((await old.j('GET', `/org/players/${b.pid}`, undefined, oldMaria)).status, 200);
-    const oldNew = await signupAdult(old, 'Old Build Adult', { media: false }); const oldGone = await signupAdult(old, 'Old Build Deleted', { media: false });
-    assert.equal((await old.j('DELETE', '/player/account', {}, oldGone.token)).status, 200);
-    const oldBk = await old.j('POST', '/admin/backup', {}, null, A); assert.equal(oldBk.status, 201, oldBk.text);
-    const oldSnapshot = JSON.parse(fs.readFileSync(path.join(oldBk.body.dir, 'db.json'), 'utf8'));
-    assert.deepEqual(oldSnapshot.db.playersRetained, RECORDS, 'the old build carries the blob through its saves and backups'); assert.equal(oldSnapshot.db.players.some((p) => p.id === a.pid), false);
-    await old.stop();
-    assert.equal(q1(copy, 'SELECT 1 AS one FROM players WHERE id = ?', oldGone.pid), undefined, 'that build hard-deletes, as it does'); assert.deepEqual(blobOf(copy, 'playersRetained'), RECORDS, 'the blob survived its saves');
-    // The re-upgrade.
-    S = await boot(copy);
-    assert.ok(applied(copy).includes(MIGRATION), 'the re-upgrade recorded 0014');
-    assert.deepEqual(retainedRowsOf(copy), retained, 'the retained rows are exactly the source\'s'); assert.equal(blobOf(copy, 'playersRetained'), undefined);
-    const mariaU = await orgLogin(S); assert.equal((await S.j('GET', `/org/players/${oldNew.pid}`, undefined, mariaU)).status, 200, 'the old build\'s new account is live');
-    assert.equal(q1(copy, 'SELECT 1 AS one FROM players WHERE id = ?', oldGone.pid), undefined, 'the account that build hard-deleted is absent — nothing is fabricated for it');
-    assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.domains.players.retained, 2);
-    { const beforeRows = JSON.parse(auditBefore); const afterRows = JSON.parse(auditRows(copy)); for (const t of AUDIT_TABLES) assert.deepEqual(afterRows[t].slice(0, beforeRows[t].length), beforeRows[t], `${t}: every row from before the rollback is exactly as it was after the re-upgrade (the old build's own rows follow)`); }
-    await S.stop();
-    console.log('    (pre-S4b-R build booted the rollback copy: nothing of the retained records served, a signup and a hard delete accepted, the blob kept; re-upgraded with its writes and the retained rows restored)');
-  } else {
-    console.log('    (SCOUTBOX_PRE_S4BR_SERVER not set: the pre-S4b-R boots of the live copy and of the rollback copy were NOT exercised here)');
-  }
-  rm(dir, s8a, tampered, restored, copy, bk.body.dir);
+  rm(dir, tampered, restored, bk.body.dir);
 });
 
 console.log(`\n${passed} player-erasure server checks passed`);

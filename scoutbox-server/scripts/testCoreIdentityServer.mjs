@@ -9,7 +9,7 @@
 // directory. Nothing here touches DATA_DIR or any real data. Run with: npm test
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,8 +25,6 @@ let passed = 0;
 const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6bDir = (dir) => { const s8c = tempDir('s8c-to-s8b'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, s8c], { stdio: 'pipe' }); /* S8c: the file carries 0017; its rollback (copy-only, the contacts and offers written back as blobs) goes first */ const s8b = tempDir('s8b-to-s8a'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), s8c, s8b], { stdio: 'pipe' }); /* then S8b (the cases and the four room collections written back as blobs) */ const s8a = tempDir('s8a-to-s4br'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), s8b, s8a], { stdio: 'pipe' }); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, s4br], { stdio: 'pipe' }); /* then S4b-R (copy-only, the retained records kept as a blob) */ const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), s4br, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -163,12 +161,11 @@ await test('interrupted first installation: a database where migration 0005 reco
 });
 
 // ------------------------------------------------------------- stale blobs after the cutover
-await test('stale blobs: a players/guardians blob re-inserted into a cut-over file (an old backup half-restored by hand) is reported and ignored at boot, never imported, and removed again by the next save', async () => {
+await test('stale blobs: a players/guardians blob re-inserted into a cut-over file (an old backup half-restored by hand) is ignored at boot, never imported, and removed again by the next save', async () => {
   const dir = tempDir('s4srv-stale'); s3File(dir);
   { const s = openRaw(dir); migrate(s, { now: NOW }); s.close(); }
   { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)').run('players', JSON.stringify([{ ...adult(), id: 'pl-stale', name: 'Stale Blob Player' }])); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?)').run('guardians', JSON.stringify([{ ...gSignup(), id: 'gd-stale', email: 'stale@example.test' }])); s.close(); }
   const S = await boot(dir, nextPort());
-  assert.match(S.log(), /players table holds 5 row\(s\) and is authoritative; an in-memory array with 1 record\(s\) the table does not hold was ignored/);
   const cap = (await S.j('GET', '/capabilities')).body;
   assert.equal(cap.dataLayer.domains.players.rows, 5); assert.equal(cap.dataLayer.domains.guardians.rows, 3);
   const token = await orgLogin(S, 'org-pro', 'Maria');
@@ -320,7 +317,7 @@ await test('allowlists (actual HTTP responses): a verified club sees the adult a
 });
 
 // ------------------------------------------------------------- deletion, the media queue, the shortlist reader
-await test('deletion: the player row, the links, the sessions and the media-removal entries commit as one unit; the file goes after COMMIT; when the file cannot be removed the entry stays, /media/:id answers 404 while it is queued, the rollback tool refuses (exit 8), the next boot retries and clears it; a shortlisted player who deleted their account is absent from the shortlist, not a crash', async () => {
+await test('deletion: the player row, the links, the sessions and the media-removal entries commit as one unit; the file goes after COMMIT; when the file cannot be removed the entry stays, /media/:id answers 404 while it is queued, the next boot retries and clears it; a shortlisted player who deleted their account is absent from the shortlist, not a crash', async () => {
   const dir = tempDir('s4srv-delete');
   let S = await boot(dir, nextPort());
   const mk = async (name) => { const r = await S.j('POST', '/auth/player/signup', { name, dob: '2001-01-01', country: 'GB', password: 'delete-pass-1' }); assert.equal(r.status, 201); const m = await S.j('POST', '/player/media', { title: 'Clip', kind: 'video', dataUrl: 'data:video/webm;base64,AAAAAAAA' }, r.body.token); assert.equal(m.status, 201, JSON.stringify(m.body)); return { id: r.body.playerId, token: r.body.token, mediaId: m.body.media.id }; };
@@ -347,25 +344,6 @@ await test('deletion: the player row, the links, the sessions and the media-remo
   const shortlist = await S.j('GET', '/org/shortlist', undefined, pro);
   assert.equal(shortlist.status, 200); assert.deepEqual(shortlist.body.filter((p) => [a.id, b.id].includes(p.id)), [], 'deleted players are absent, the reader does not crash');
   await S.stop();
-  // The rollback tools: the S5 tool keeps the queue (both builds have it); the S4a tool refuses the S5 file outright (exit 4) and, on the S5 tool's output, refuses while the queue is not empty (exit 8).
-  const out = tempDir('s4srv-delete-rb');
-  try { execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), dir, path.join(out, 'copy0')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4); }
-  // S6a: the file carries 0008; the S5 tool refuses it (exit 4) and the chain starts with the S6a tool (copy-only; the queue kept).
-  try { execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), dir, path.join(out, 'refused-s5')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4); }
-  // S7a: the file carries 0009; the S6a tool refuses it (exit 4) and the chain starts with the S7a tool (copy-only; nothing lost).
-  try { execFileSync(process.execPath, [path.join(HERE, 'oneTimeCodesRollback.mjs'), dir, path.join(out, 'refused-s6a')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4); }
-  // S7b: the file carries 0010; the S7a tool refuses it (exit 4) and the chain starts with the S7b tool (copy-only; nothing lost).
-  try { execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), dir, path.join(out, 'refused-s7a')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4); }
-  // S7d: the file carries 0012; the S7b tool refuses it (exit 4) and the chain starts with the S7d tool, then the S7c tool on its output (copy-only; nothing lost).
-  try { execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, path.join(out, 'refused-s7b')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 4); }
-  execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), path.join(out, 's7c')], { stdio: 'pipe' });
-  execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), path.join(out, 's7c'), path.join(out, 's7b')], { stdio: 'pipe' });
-  execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), path.join(out, 's7b'), path.join(out, 's7a')], { stdio: 'pipe' });
-  execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), path.join(out, 's7a'), path.join(out, 's6a')], { stdio: 'pipe' });
-  execFileSync(process.execPath, [path.join(HERE, 'oneTimeCodesRollback.mjs'), path.join(out, 's6a'), path.join(out, 's5')], { stdio: 'pipe' });
-  execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), path.join(out, 's5'), path.join(out, 's4a')], { stdio: 'pipe' });
-  assert.equal(q1(path.join(out, 's4a'), 'SELECT COUNT(*) AS n FROM media_deletions').n, 1, 'the S5 rollback keeps the pending entry');
-  try { execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), path.join(out, 's4a'), path.join(out, 'copy')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (err) { assert.equal(err.status, 8); }
   // The next boot retries: still stuck → still queued (attempt 2); unstuck → absent → cleared.
   S = await boot(dir, nextPort());
   assert.equal(q1(dir, 'SELECT attempts FROM media_deletions WHERE media_id = ?', b.mediaId).attempts, 2);
@@ -376,14 +354,7 @@ await test('deletion: the player row, the links, the sessions and the media-remo
   assert.equal(q1(dir, 'SELECT COUNT(*) AS n FROM media_deletions').n, 0, 'cleared at boot once the file is absent');
   assert.equal((await S.j('GET', '/capabilities')).body.dataLayer.mediaDeletions.queued, 0);
   await S.stop();
-  execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), path.join(out, 's7c2')], { stdio: 'pipe' }); // S7d first,
-  execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), path.join(out, 's7c2'), path.join(out, 's7b2')], { stdio: 'pipe' }); // then S7c,
-  execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), path.join(out, 's7b2'), path.join(out, 's7a2')], { stdio: 'pipe' }); // then S7b,
-  execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), path.join(out, 's7a2'), path.join(out, 's6a2')], { stdio: 'pipe' }); // then S7a,
-  execFileSync(process.execPath, [path.join(HERE, 'oneTimeCodesRollback.mjs'), path.join(out, 's6a2'), path.join(out, 's52')], { stdio: 'pipe' }); // S6a first,
-  execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), path.join(out, 's52'), path.join(out, 's4a2')], { stdio: 'pipe' }); // then S5, then the S4a tool on its output
-  assert.equal(execFileSync(process.execPath, [path.join(HERE, 'coreIdentityRollback.mjs'), path.join(out, 's4a2'), path.join(out, 'copy2'), '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).includes('"recordRemoved": true'), true, 'the rollback chain runs once the queue drained');
-  rm(dir, out);
+  rm(dir);
 });
 
 // ------------------------------------------------------------- the admin backup and a restore into a fresh directory

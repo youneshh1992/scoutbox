@@ -1098,17 +1098,11 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     /**
      * Boot on a database that is past initialisation: load the tables and nothing
      * else. Whatever arrays the caller holds (the seed, a superseded blob copy)
-     * are never imported; records they name that the tables do not hold are
-     * reported as ignored.
+     * are never imported.
      */
     attach(givenPlayers = null, givenGuardians = null) {
       if (readInitState() === 'pending') throw new Error(`core identity: initialisation is pending (meta.${CORE_IDENTITY_INIT_META}); call initialize() with the first installation's records instead of attach()`);
       load();
-      for (const [name, given, domain] of [['players', givenPlayers, P], ['guardians', givenGuardians, G]]) {
-        if (!Array.isArray(given) || !given.length) continue;
-        const unknown = given.filter((r) => isPlainObject(r) && typeof r.id === 'string' && !domain.byId.has(r.id)).length;
-        if (unknown) warn(`core identity: the ${name} table holds ${domain.records.length} row(s) and is authoritative; an in-memory array with ${unknown} record(s) the table does not hold was ignored`);
-      }
       return { engine: 'sqlite', players: P.records.length, guardians: G.records.length, links: stmt.countLinks.get().n, imported: 0 };
     },
 

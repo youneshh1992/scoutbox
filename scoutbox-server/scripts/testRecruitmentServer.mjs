@@ -8,27 +8,25 @@
 // place, the thread deleted) with a REAL COMMIT failure leaving everything as it was, a
 // request naming a historically missing player served and counted (Q7a), the admin backup
 // carrying both collections in the legacy shapes, a restore into a NEW directory importing
-// through 0015, the previous build booted DIRECTLY on a 0015 copy finding NO requests and
-// NO trials blob and exiting 1 at boot (STORE_MISSING — measured; serving nothing, writing
-// nothing; the rollback tool is the only way back), the copy-only
-// rollback booted by the actual accepted pre-S8a build (SCOUTBOX_PRE_S8A_SERVER, 9b109dc)
-// reading the same requests and trials in its routes and writing a new request into its
-// blob, and this build re-upgrading the copy with that write. Every database read goes
+// through 0015, and a pre-S8a file whose requests or trials blob is a present null refused
+// at boot. Every database read goes
 // through a second read-only connection. Nothing here touches DATA_DIR or real data.
 // Run with: npm test
 //
 // FAILING-FIRST NOTE (recorded on the unchanged d0f0205 tree, source-identical to the
 // accepted 9b109dc): the [cutover] tests assert the 0015 record, the tables, the absence of
-// the blobs and the rollback tool and FAIL there on concrete assertions; the [compat] checks
+// the blobs and FAIL there on concrete assertions; the [compat] checks
 // inside them (the routes' answers) hold on both trees.
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { tempDir } from './coreIdentityTestFixtures.mjs';
+import { tempDir, s3File, openRaw, FIXTURE, NOW, TTL } from './coreIdentityTestFixtures.mjs';
+import { runDataMigrations } from '../repositories/database.mjs';
+import { DATA_MIGRATIONS } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 
 let passed = 0;
@@ -162,7 +160,7 @@ await test('[cutover] two stored open-day invitations for one player (the shape 
   await S.stop(); rm(dir, restored, bk, bkp.body.dir);
 });
 
-await test('[cutover] the admin backup carries requests and trials in the legacy shapes (insertion order, the writers\' literals, keys reassembled); a restore into a NEW directory imports them through 0015 row for row; the previous build booted DIRECTLY on a copy of the live file finds NO requests and NO trials blob and exits 1 at boot (STORE_MISSING — the measured hazard, serving nothing); the copy-only rollback writes both blobs back and channels back to the 0012 definition, the S4b-R tool refuses the live file and accepts the copy, the accepted pre-S8a build (SCOUTBOX_PRE_S8A_SERVER, 9b109dc) boots the copy — serves the same requests and trials, accepts a new invitation and an acceptance into its blobs — and this build re-upgrades the copy with those writes exactly', async () => {
+await test('[cutover] the admin backup carries requests and trials in the legacy shapes (insertion order, the writers\' literals, keys reassembled); a restore into a NEW directory imports them through 0015 row for row', async () => {
   const dir = tempDir('s8a-backup'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Backup Adult'); const flow = await inviteAndAccept(S, maria, a.pid, a.token);
   assert.equal((await S.j('POST', `/org/trials/${flow.trialId}/staff`, { name: 'Coach Dan', role: 'Lead coach' }, maria)).status, 201);
@@ -176,39 +174,7 @@ await test('[cutover] the admin backup carries requests and trials in the legacy
   await S.stop();
   const restored = tempDir('s8a-restore'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored)); assert.equal(recDump(restored), liveDump, 'row for row'); await S.stop();
-  const OLD = process.env.SCOUTBOX_PRE_S8A_SERVER;
-  if (OLD && fs.existsSync(OLD)) {
-    // the actual behaviour, recorded: that build's boot-contract integrity check finds the two collections ABSENT (the
-    // rows are invisible to it), reports STORE_MISSING and the process exits 1 before listening; nothing is served, nothing is written
-    const direct = tempDir('s8a-direct'); fs.cpSync(dir, direct, { recursive: true }); const directBefore = [recDump(direct), q1(direct, "SELECT value FROM meta WHERE key = 'saveSeq'").value];
-    const wrong = await bootRefused(direct, {}, OLD);
-    assert.equal(wrong.code, 1, `the pre-S8a build does not boot a 0015 file: ${wrong.log.slice(-400)}`); assert.match(wrong.log, /STORE_MISSING [^\n]*\brequests\b[^\n]*\btrials\b/); // since 0016 the line lists the five S8b collections too
-    assert.deepEqual([recDump(direct), q1(direct, "SELECT value FROM meta WHERE key = 'saveSeq'").value], directBefore, 'the refused boot wrote nothing'); assert.equal(blobOf(direct, 'requests'), undefined);
-    rm(direct);
-    console.log('    (the pre-S8a build booted DIRECTLY on a copy of the live file exited 1 at boot — INTEGRITY STORE_MISSING naming requests and trials (and, since 0016, the five S8b collections) — serving nothing and writing nothing; the rollback tools are the only way back)');
-  }
-  // the rollback copy
-  // since 0016 a live file carries S8b too: the S8b tool runs first (copy-only), then the S8a tool on its output
-  const pre = tempDir('s8a-pre'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, pre], { stdio: 'pipe' }); // the S8c tool first (a live file carries 0017)
-  const mid = tempDir('s8a-mid'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), pre, mid], { stdio: 'pipe' });
-  const copy = tempDir('s8a-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), mid, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
-  assert.equal(live(copy), false); assert.equal(tableExists(copy, 'trials'), false); assert.equal(blobOf(copy, 'requests').length, 2); assert.equal(blobOf(copy, 'trials').length, 1); assert.deepEqual(blobOf(copy, 'trials'), snapshot.db.trials, 'the blob equals the backup\'s legacy shape');
-  assert.equal(qAll(copy, 'PRAGMA foreign_key_list(channels)').some((r) => r.table === 'recruitment_requests'), false, 'channels back to the 0012 definition');
-  let refused = null; try { execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), dir, tempDir('s8a-x')], { stdio: 'pipe' }); } catch (e) { refused = e; } assert.equal(refused?.status, 4, 'the S4b-R tool refuses the 0015 file (LATER_SCHEMA)');
-  execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), copy, tempDir('s8a-y')], { stdio: 'pipe' });
-  if (OLD && fs.existsSync(OLD)) {
-    const old = await boot(copy, {}, OLD); const mariaO = await orgLogin(old);
-    assert.equal((await old.j('GET', '/org/trials', undefined, mariaO)).body.find((t) => t.id === flow.trialId).requestId, flow.requestId, 'the pre-S8a build reads the same trials from its blob');
-    const inboxO = await old.j('GET', '/player/inbox', undefined, (await old.j('POST', '/auth/player/login', { playerId: a.pid, password: 'synthetic-pass-1' })).body.token); assert.equal(inboxO.body[0].id, flow.requestId);
-    const c = await signupAdult(old, 'Old Build Adult'); const flowO = await inviteAndAccept(old, mariaO, c.pid, c.token, { proposedDate: '2026-11-09' });
-    await old.stop();
-    assert.equal(blobOf(copy, 'requests').length, 3, 'written into its blob'); assert.equal(blobOf(copy, 'trials').length, 2);
-    const up = await boot(copy); assert.ok(live(copy)); const mariaU = await orgLogin(up);
-    assert.equal(q1(copy, 'SELECT status FROM recruitment_requests WHERE id = ?', flowO.requestId).status, 'accepted'); assert.equal(q1(copy, 'SELECT request_id FROM trials WHERE id = ?', flowO.trialId).request_id, flowO.requestId); assert.equal(blobOf(copy, 'trials'), undefined);
-    assert.equal((await up.j('GET', '/org/trials', undefined, mariaU)).body.length, 2); await up.stop();
-    console.log('    (pre-S8a build 9b109dc booted the rollback copy: the same requests and trials in its routes, a new invitation and acceptance written into its blobs; re-upgraded with those writes)');
-  } else console.log('    (SCOUTBOX_PRE_S8A_SERVER not set: the pre-S8a boots of the live copy and of the rollback copy were NOT exercised here)');
-  rm(dir, restored, copy, bk.body.dir);
+  rm(dir, restored, bk.body.dir);
 });
 
 // ------------------------------------------------------------- review of 6d77aa7 (F1, F2)
@@ -216,7 +182,7 @@ await test('[cutover] the admin backup carries requests and trials in the legacy
 // hand-written acts are read back after the restore (the empty list act and the prototype-named act are gone); the F2
 // test fails because the server LISTENS on a restored backup whose trials collection is a present JSON null.
 const blobTextOf = (dir, name) => snap(dir, (c) => c.get('SELECT value FROM collections WHERE name = ?', name)?.value);
-await test('[cutover] F1 (review of 6d77aa7) through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a trial whose keys carry an empty list act, an empty object act and a prototype-named own act (written into the file by hand — no route produces them today) keeps every act distinctly through a backup, a restore (where the same clientKey still replays), the copy-only rollback (the blob carries them) and the re-upgrade; the pre-S8a build on the rollback copy replays the same clientKey from its blob', async () => {
+await test('[cutover] F1 (review of 6d77aa7) through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a trial whose keys carry an empty list act, an empty object act and a prototype-named own act (written into the file by hand — no route produces them today) keeps every act distinctly through a backup and a restore (where the same clientKey still replays)', async () => {
   const dir = tempDir('s8a-f1'); let S = await boot(dir); let maria = await orgLogin(S); const a = await signupAdult(S, 'Keyed Adult');
   const room = await S.j('POST', '/org/rooms', { playerId: a.pid, sourceContext: 'search' }, maria); assert.equal(room.status, 201, room.text); const RID = room.body.room.roomId;
   const jr = (await S.j('GET', `/org/rooms/${RID}/journey`, undefined, maria)).body; if (jr.lifecycle.currentStage === 'watching') { const mv = await S.j('POST', `/org/rooms/${RID}/lifecycle`, { action: 'startReview', expectedRev: jr.case.rev }, maria); assert.equal(mv.status, 200, mv.text); }
@@ -247,19 +213,10 @@ await test('[cutover] F1 (review of 6d77aa7) through the real routes: an invitat
   const restored = tempDir('s8a-f1-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); maria = await orgLogin(S); await replayS(S, maria, 'the restore'); await S.stop();
   { const store = openStore(restored); expectKeys(store.load().db.trials.find((x) => x.id === TID).keys, 'read back from the restored tables'); store.sqlite.close(); }
-  const pre = tempDir('s8a-f1-pre'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, restored, pre], { stdio: 'pipe' }); // the S8c tool first (a live file carries 0017)
-  const mid = tempDir('s8a-f1-mid'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), pre, mid], { stdio: 'pipe' }); // then the S8b tool
-  const copy = tempDir('s8a-f1-copy'); const out = execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), mid, copy], { encoding: 'utf8' }); assert.match(out, /written back/);
-  expectKeys(blobOf(copy, 'trials').find((x) => x.id === TID).keys, 'the rollback blob');
-  const OLD = process.env.SCOUTBOX_PRE_S8A_SERVER;
-  if (OLD && fs.existsSync(OLD)) { const old = await boot(copy, {}, OLD); const mariaO = await orgLogin(old); await replayS(old, mariaO, 'the pre-S8a build on the rollback copy'); await old.stop(); console.log('    (pre-S8a build 9b109dc replayed the same clientKey from the rollback copy\'s blob)'); }
-  else console.log('    (SCOUTBOX_PRE_S8A_SERVER not set: the pre-S8a replay on the rollback copy was NOT exercised here)');
-  S = await boot(copy); assert.ok(live(copy)); maria = await orgLogin(S); await replayS(S, maria, 're-upgraded'); await S.stop();
-  { const store = openStore(copy); expectKeys(store.load().db.trials.find((x) => x.id === TID).keys, 'read back after the re-upgrade'); store.sqlite.close(); }
-  rm(dir, restored, copy, bk.body.dir);
+  rm(dir, restored, bk.body.dir);
 });
 
-await test('[cutover] F2 (review of 6d77aa7) through a real boot: a pre-S8a file (the rollback tool\'s own output, and a file the pre-S8a build wrote) whose trials — or requests — blob is a present JSON null is REFUSED at boot with RECRUITMENT_IMPORT_BLOCKED naming the null: the server never listens, nothing is imported or seeded in its place, the migration is not recorded, the blob and every table are left as they were and the next boot refuses the same way; control: a db.json whose collection is null is refused earlier by the legacy import (LEGACY_IMPORT_FAILED), never served', async () => {
+await test('[cutover] F2 (review of 6d77aa7) through a real boot: a pre-S8a file (migrations 0001–0014 applied, the recruitment blobs planted) whose trials — or requests — blob is a present JSON null is REFUSED at boot with RECRUITMENT_IMPORT_BLOCKED naming the null: the server never listens, nothing is imported or seeded in its place, the migration is not recorded, the blob and every table are left as they were and the next boot refuses the same way; control: a db.json whose collection is null is refused earlier by the legacy import (LEGACY_IMPORT_FAILED), never served', async () => {
   // a fresh file with NO request and NO trial, so that nothing else can refuse the import: on the reviewed source a null
   // blob imported as an empty collection and the server listened over it
   const dir = tempDir('s8a-f2'); const S = await boot(dir); const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text); await S.stop();
@@ -272,21 +229,17 @@ await test('[cutover] F2 (review of 6d77aa7) through a real boot: a pre-S8a file
     return after;
   };
   const setNull = (where, name) => { const s = new DatabaseSync(path.join(where, 'scoutbox.db')); s.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run(name, 'null'); s.close(); };
-  // a pre-S8a file produced by this build's own rollback tool (no old build needed), one collection set to null
+  // a pre-S8a file built directly (the fixture's synthetic records, migrations 0001–0014 applied, the other collection an
+  // explicit []), one collection then set to null — written after the earlier steps ran, as 0007 refuses a non-array trials blob itself
   for (const name of ['trials', 'requests']) {
-    const pre0 = tempDir(`s8a-f2-${name}-pre`); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, pre0], { stdio: 'pipe' }); // the S8c tool first (a live file carries 0017)
-    const mid = tempDir(`s8a-f2-${name}-mid`); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), pre0, mid], { stdio: 'pipe' }); // then the S8b tool
-    const pre = tempDir(`s8a-f2-${name}`); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), mid, pre], { stdio: 'pipe' }); assert.equal(live(pre), false); setNull(pre, name);
+    const other = name === 'trials' ? 'requests' : 'trials';
+    const pre = tempDir(`s8a-f2-${name}`);
+    s3File(pre, { players: FIXTURE().players.map((p) => ({ ...p, trialReports: [] })), extra: { ledger: [], vouches: [], notifications: [], dispatches: [], recruitmentCases: [] }, rawBlobs: { [other]: '[]' } });
+    { const s = openRaw(pre); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } }); s.close(); }
+    assert.equal(live(pre), false); setNull(pre, name);
     const first = await refusedBoot(pre, name, `${name}: first boot`); const second = await refusedBoot(pre, name, `${name}: second boot`); assert.deepEqual(second, first, `${name}: the next boot refuses the same way`);
     rm(pre);
   }
-  // the same on a file the pre-S8a build itself wrote
-  const OLD = process.env.SCOUTBOX_PRE_S8A_SERVER;
-  if (OLD && fs.existsSync(OLD)) {
-    const oldDir = tempDir('s8a-f2-old'); const old = await boot(oldDir, {}, OLD); await old.stop();
-    setNull(oldDir, 'trials'); const first = await refusedBoot(oldDir, 'trials', 'the pre-S8a build\'s file: first boot'); const second = await refusedBoot(oldDir, 'trials', 'the pre-S8a build\'s file: second boot'); assert.deepEqual(second, first);
-    console.log('    (a file the pre-S8a build 9b109dc wrote, its trials blob set to null, is refused at boot by this build and left as it was)'); rm(oldDir);
-  } else console.log('    (SCOUTBOX_PRE_S8A_SERVER not set: the null-blob refusal on a file the pre-S8a build wrote was NOT exercised here)');
   // control: a null collection in a db.json is refused by the legacy import before any blob exists (the store's existing contract), and never served
   { const restored = tempDir('s8a-f2-json'); fs.cpSync(bk.body.dir, restored, { recursive: true }); const dbJson = path.join(restored, 'db.json'); const j = JSON.parse(fs.readFileSync(dbJson, 'utf8')); j.db.trials = null; fs.writeFileSync(dbJson, JSON.stringify(j));
     const r = await bootRefused(restored); assert.equal(r.code, 1, r.log.slice(-400)); assert.doesNotMatch(r.log, /listening on/); assert.match(r.log, /LEGACY_IMPORT_FAILED.*trials.*got null/, 'the legacy import names the null collection'); rm(restored); }

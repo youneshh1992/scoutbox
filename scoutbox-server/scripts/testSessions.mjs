@@ -11,21 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
 import { createSessionsRepository, validateSessionRow, SESSIONS_TABLE, SESSIONS_CUTOVER_MIGRATION } from '../repositories/sessions.mjs';
-import { rollbackSessionsCopy } from '../repositories/sessionsRollback.mjs';
 import { ORGS_CUTOVER_MIGRATION } from '../repositories/orgs.mjs';
-import { rollbackOrgsCopy } from '../repositories/orgsRollback.mjs';
-import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
-import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
-import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
-import { rollbackNotificationsCopy } from '../repositories/notificationsRollback.mjs';
-import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
-import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
-import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
-import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
-import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
-import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
-import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
-import { rollbackToPreS8c as rollbackRecruitmentContactsOffersCopy } from '../repositories/rollbackChain.mjs'; // S8d: the S8d step-back then the S8c tool, as one link (a live file carries 0018)
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
@@ -39,8 +25,6 @@ import { openStore } from '../store.mjs';
 const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
-// S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s8c = tempDir('s8c-to-s8b'); rollbackRecruitmentContactsOffersCopy(file, s8c); /* S8c: the file carries 0017; its rollback (copy-only, the contacts and offers written back as blobs) goes first */ const s8b = tempDir('s8b-to-s8a'); rollbackRecruitmentCasesCopy(path.join(s8c, 'scoutbox.db'), s8b); /* then S8b: the file carries 0016; its rollback (copy-only, the cases and the four room collections written back as blobs) goes first */ const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(path.join(s8b, 'scoutbox.db'), s8a); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 function test(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
@@ -448,35 +432,7 @@ test('snapshot mode (review correction 1): before the cutover record exists the 
   tool.save(snap);
   assert.equal(tool.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'sessions'").get().n, 0, 'no blob is recreated after the cutover');
   tool.sqlite.close();
-  // (e) Rollback output (record removed, empty blob) before re-upgrade: the blob is authoritative again, the table is left alone.
-  const out = tempDir('s2-snap-rb');
-  // The file is at S4a now: the S2 and S3 tools refuse it (later schema steps), and the rollback chain is S4a first, then S3, then S2.
-  assert.throws(() => rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0004_orgs_live/.test(err.message) && /0005_core_identity_live/.test(err.message));
-  assert.throws(() => rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), tempDir('s2-snap-rb-refused3')), (err) => err.code === 'LATER_SCHEMA' && /0005_core_identity_live, 0006_media_deletions/.test(err.message));
-  const s4aState = tempDir('s2-snap-rb-s4a'); const s3State = tempDir('s2-snap-rb-s3'); const s2State = tempDir('s2-snap-rb-s2');
-  const s7cState = tempDir('s2-snap-rb-s7c'); rollbackChannelsCopy(preS6b(path.join(dir, 'scoutbox.db')), s7cState); // S7d first (the file carries 0012),
-  const s7bState = tempDir('s2-snap-rb-s7b'); rollbackOutboxPushCopy(path.join(s7cState, 'scoutbox.db'), s7bState); // then S7c on its output,
-  const s7aState = tempDir('s2-snap-rb-s7a'); rollbackDispatchesCopy(path.join(s7bState, 'scoutbox.db'), s7aState); const s6aState = tempDir('s2-snap-rb-s6a'); rollbackNotificationsCopy(path.join(s7aState, 'scoutbox.db'), s6aState); // then S7b on its output, then S7a
-  const s5State = tempDir('s2-snap-rb-s5'); rollbackOneTimeCodesCopy(path.join(s6aState, 'scoutbox.db'), s5State); // then S6a: the copy carries 0008
-  rollbackPlayerSubrecordsCopy(path.join(s5State, 'scoutbox.db'), s4aState); // then S5: it carries 0007
-  rollbackCoreIdentityCopy(path.join(s4aState, 'scoutbox.db'), s3State);
-  rollbackOrgsCopy(path.join(s3State, 'scoutbox.db'), s2State);
-  rollbackSessionsCopy(path.join(s2State, 'scoutbox.db'), out);
-  tool = openStore(out); snap = tool.load();
-  assert.deepEqual(snap.db.sessions, [], 'the empty legacy blob, not the (empty) table, is what a tool reads');
-  assert.deepEqual(snap.db.orgs.map((o) => o.id), ['org-a', 'org-b'], 'the organisations came back as a blob through the S3 rollback');
-  assert.deepEqual(snap.db.players.map((p) => p.id), ['pl-1', 'pl-2'], 'the players came back as a blob through the S4a rollback');
-  snap.db.sessions.push({ token: 'post-rollback-token', sid: 'sid-rb', kind: 'player', refId: 'pl-1', createdAt: Date.now() });
-  tool.save(snap);
-  assert.equal(JSON.parse(tool.sqlite.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value).length, 1, 'a pre-S2 build\'s session lands in the blob');
-  assert.equal(tool.sqlite.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0);
-  tool.sqlite.close();
-  // Re-upgrade imports that blob row.
-  store = openStore(out, { tableBacked: TABLE_BACKED });
-  layer = attachDataLayer({ db: { ...store.load().db }, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  assert.ok(layer.sessions.byToken('post-rollback-token')); assert.equal(layer.sessions.byToken('pre-cutover-token'), null);
-  store.sqlite.close();
-  fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(out, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 test('legacy db.json (review correction 2): sessions and staff in a pre-SQLite snapshot survive the JSON-to-SQLite upgrade and the cutover', () => {
   const dir = tempDir('s2-dbjson');
@@ -593,47 +549,6 @@ await atest('busy timeout: a save waits for a concurrent writer in another proce
   };
   // Awaited by the harness: the check counts only once every assertion above has passed.
   try { await run(); } finally { try { holder.kill(); } catch { /* done */ } store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true }); }
-});
-
-// ------------------------------------------------------------- rollback
-test('rollback: the tool produces a copy with the cutover record removed, the table emptied, an empty legacy blob and every other collection intact; it refuses a later schema', () => {
-  const dir = tempDir('s2-rb-src'); preS2File(dir, { extra: { notes: [{ id: 'n1' }] } });
-  const s = openRaw(dir);
-  runDataMigrations(s, [m0001, m0002, m0003], { context: { sessionTtlMs: TTL } }); // the S2 state this tool rolls back; an S3 file must go through orgsRollback first (asserted below)
-  const repo = createSessionsRepository({ sqlite: s, sessionTtlMs: TTL }); repo.attach();
-  const fresh = repo.create('player', 'pl-1');
-  s.close();
-  const before = fileDigest(dir);
-  const out = tempDir('s2-rb-out');
-  const result = rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), out);
-  assert.equal(result.sessionsRemoved, 6); assert.equal(result.recordRemoved, true);
-  assert.equal(fileDigest(dir), before, 'the source is untouched');
-  const o = openRaw(out);
-  assert.equal(o.prepare('SELECT COUNT(*) AS n FROM data_migrations WHERE id = ?').get(SESSIONS_CUTOVER_MIGRATION).n, 0);
-  assert.deepEqual(o.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id), ['0001_org_users', '0002_core_identity_shadow'], 'S0 and S1 records stay');
-  assert.equal(o.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0);
-  assert.equal(o.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value, '[]');
-  assert.equal(o.prepare("SELECT value FROM collections WHERE name = 'notes'").get().value, '[{"id":"n1"}]', 'other collections are kept');
-  assert.equal(o.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 1);
-  assert.ok(!fs.readFileSync(path.join(out, 'scoutbox.db'), 'utf8').includes(sha256(fresh.token)), 'the vacuumed copy holds no session hash');
-  o.close();
-  // The pre-S2 store (snapshot/server mode without the sessions table in TABLE_BACKED) reads an empty sessions collection.
-  const legacyRead = new DatabaseSync(path.join(out, 'scoutbox.db'));
-  assert.deepEqual(JSON.parse(legacyRead.prepare("SELECT value FROM collections WHERE name = 'sessions'").get().value), []);
-  legacyRead.close();
-  // Refuse to touch a database that carries a later schema step.
-  const later = openRaw(dir); later.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0004_orgs_live', 1)").run(); later.close();
-  const out2 = tempDir('s2-rb-out2');
-  const beforeRefusal = fileDigest(dir);
-  assert.throws(() => rollbackSessionsCopy(path.join(dir, 'scoutbox.db'), out2), (err) => err.code === 'LATER_SCHEMA' && /0004_orgs_live/.test(err.message));
-  assert.ok(!fs.existsSync(path.join(out2, 'scoutbox.db')), 'a refused rollback leaves no output file (the untouched copy would look like a finished rollback)');
-  assert.deepEqual(fs.readdirSync(out2), [], 'no WAL or shm remnant of the copy either');
-  assert.equal(fileDigest(dir), beforeRefusal, 'the source is untouched by a refusal too');
-  // The CLI exits 4 on that refusal and 0 on success.
-  const script = path.join(HERE, 'sessionsRollback.mjs');
-  const cliOut = tempDir('s2-rb-cli');
-  try { execFileSync(process.execPath, [script, dir, path.join(cliOut, 'x')], { stdio: 'pipe' }); assert.fail('should refuse'); } catch (err) { assert.equal(err.status, 4); }
-  for (const d of [dir, out, out2, cliOut]) fs.rmSync(d, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- through the real server

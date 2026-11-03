@@ -1,12 +1,11 @@
 // S8d — signing packages, completed signings, follow-ups and outcome reports as typed tables with EXPLICIT writes
-// (repositories/signingsFollowUps.mjs, migration 0018, repositories/signingsFollowUpsRollback.mjs — the chain link kept
-// until the merge): docs/architecture/s8d-design-note.md under the rules of 30 October 2026 (CLAUDE.md). What this
-// suite proves: the cutover types every field into its column, normalises exactly what the note lists and reports it
+// (repositories/signingsFollowUps.mjs, migration 0018): docs/architecture/s8d-design-note.md under the rules of
+// 30 October 2026 (CLAUDE.md). What this suite proves: the cutover types every field into its column, normalises exactly what the note lists and reports it
 // with ids, stops on a row it cannot type (nothing dropped), names every missing reference and every uniqueness rule
 // with ids; the repository's operations write rows at once and return fresh records, the views are read-only arrays of
 // frozen records, a unit of work rolls rows AND mirrors back (a statement failure, a real COMMIT failure, the deferred
 // completion key), the completion cycle commits in one unit; the snapshot write of a backup/restore (full, partial,
-// [], a legacy-shaped backup, junk, a retained dependant) and the live counters; the chain link to the S8c tool.
+// [], a legacy-shaped backup, junk, a retained dependant) and the live counters.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 //
 // FAILING-FIRST NOTE (recorded on the unchanged c0022be tree, before the implementation): every [cutover] and
@@ -37,11 +36,8 @@ const MIGRATION = '0018_signings_follow_ups'; const S8C = '0017_recruitment_cont
 const COLLECTIONS = ['signingPackages', 'signings', 'followUps', 'outcomeReports'];
 const TABLES = ['signing_packages', 'signing_revisions', 'signing_documents', 'signing_revision_parties', 'signing_history', 'signings', 'signing_parties', 'follow_ups', 'outcome_reports', 'outcome_report_confirmations'];
 const EARLIER = ['recruitment_requests', 'trials', 'recruitment_cases', 'room_decisions', 'recruitment_contacts', 'recruitment_offers', 'offer_revisions'];
-let mod = null; let rollbackMod = null; let chainMod = null;
+let mod = null;
 try { mod = await import('../repositories/signingsFollowUps.mjs'); } catch { mod = null; }
-try { rollbackMod = await import('../repositories/signingsFollowUpsRollback.mjs'); } catch { rollbackMod = null; }
-try { chainMod = await import('../repositories/rollbackChain.mjs'); } catch { chainMod = null; }
-const s8cRollbackMod = await import('../repositories/recruitmentContactsOffersRollback.mjs');
 const need = () => { assert.ok(mod?.createSigningsFollowUpsRepository, 'repositories/signingsFollowUps.mjs exports createSigningsFollowUpsRepository (the S8d repository module)'); return mod; };
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const withRo = (dir, fn) => { const s = second(dir); try { return fn(s); } finally { s.close(); } };
@@ -273,27 +269,6 @@ test('[snapshot] readTableBacked / writeTableBacked (snapshot mode): a save with
   S.save({ recruitmentOffers: offers, recruitmentContacts: contacts, signingPackages: [], signings: [legacySigning()], followUps: [], outcomeReports: [] }, { omit: ['requests', 'trials'] });
   withRo(d, (s) => { assert.equal(s.prepare('SELECT count(*) AS n FROM signing_packages').get().n, 0); assert.equal(s.prepare("SELECT count(*) AS n FROM recruitment_offers WHERE id = 'rof-1'").get().n, 0, 'the offer departed with its package'); assert.equal(s.prepare("SELECT count(*) AS n FROM idempotency_keys WHERE owner_table = 'signing_packages'").get().n, 0, 'the packages\' key rows went with them'); assert.equal(s.prepare('PRAGMA foreign_key_check').all().length, 0); });
   S.close(); rm(d);
-});
-
-test('[chain] the S8d step-back (the first link of the existing rollback chain, kept until the merge): the source is never modified; the copy gets the four blobs back as the typed records in insertion order, idempotency_keys recreated with the S8c owner CHECK and every S8a/S8b/S8c key row kept, the ten tables dropped, the record and the meta key removed, the revision advanced; its refusals (NOT_CUT_OVER, OUTPUT_NOT_EMPTY, a synthetic commit failure leaving nothing); the S8c tool refuses a 0018 file with LATER_SCHEMA and accepts the step-back\'s output; rollbackToPreS8c runs both; re-upgrading the copy imports the blobs back as the same rows', () => {
-  need(); assert.ok(rollbackMod?.rollbackSigningsFollowUpsCopy, 'the S8d step-back module'); assert.ok(chainMod?.rollbackToPreS8c, 'the chain helper');
-  const d = file('chain'); const L = serverOpen(d); L.repo.followUps.patch('fup-sign-2-6m', { status: 'due', notifiedAt: NOW }); const expected = L.repo.exportAll(); L.close();
-  const sourceBefore = withRo(d, (s) => [fullDump(s), meta(s, 'saveSeq')]);
-  const out = tempDir('s8d-rb'); const r = rollbackMod.rollbackSigningsFollowUpsCopy(dbFile(d), out);
-  assert.deepEqual([r.signingPackages, r.signings, r.followUps, r.outcomeReports], [2, 2, 3, 1]); assert.deepEqual(withRo(d, (s) => [fullDump(s), meta(s, 'saveSeq')]), sourceBefore, 'the source is untouched');
-  const c = new DatabaseSync(dbFile(out), { readOnly: true });
-  for (const n of COLLECTIONS) assert.deepEqual(blob(c, n), plain(expected[n]), `${n} blob`);
-  assert.equal(blob(c, 'followUps').find((f) => f.id === 'fup-sign-2-6m').status, 'due', 'a write after the cutover is in the blob');
-  for (const t of TABLES) assert.equal(tableExistsIn(c, t), false, `${t} dropped`); assert.equal(applied(c).includes(MIGRATION), false); assert.ok(applied(c).includes(S8C)); assert.equal(meta(c, 'signingsFollowUpsCutover'), undefined);
-  assert.doesNotMatch(ddlOf(c, 'idempotency_keys'), /signing_packages/); assert.match(ddlOf(c, 'idempotency_keys'), /'recruitment_offers'/); assert.equal(c.prepare('PRAGMA foreign_key_check').all().length, 0); c.close();
-  const notCut = tempDir('s8d-notcut'); preS8dFile(notCut); const o2 = tempDir('s8d-o2'); assert.throws(() => rollbackMod.rollbackSigningsFollowUpsCopy(dbFile(notCut), o2), (e) => e.code === 'NOT_CUT_OVER'); assert.equal(fs.readdirSync(o2).length, 0);
-  fs.writeFileSync(path.join(o2, 'x'), ''); assert.throws(() => rollbackMod.rollbackSigningsFollowUpsCopy(dbFile(d), o2), (e) => e.code === 'OUTPUT_NOT_EMPTY');
-  const o3 = tempDir('s8d-o3'); assert.throws(() => rollbackMod.rollbackSigningsFollowUpsCopy(dbFile(d), o3, { _failBeforeCommit: true }), /synthetic commit failure/); assert.equal(fs.readdirSync(o3).length, 0);
-  const o4 = tempDir('s8d-o4'); assert.throws(() => s8cRollbackMod.rollbackRecruitmentContactsOffersCopy(dbFile(d), o4), (e) => e.code === 'LATER_SCHEMA' && /0018_signings_follow_ups/.test(e.message), 'the S8c tool refuses a 0018 file');
-  s8cRollbackMod.rollbackRecruitmentContactsOffersCopy(dbFile(out), o4); assert.ok(fs.existsSync(dbFile(o4)), 'and accepts the step-back\'s output');
-  const o5 = tempDir('s8d-o5'); const both = chainMod.rollbackToPreS8c(dbFile(d), o5); assert.equal(both.recruitmentContacts, 6); assert.deepEqual(both.s8d, { signingPackages: 2, signings: 2, followUps: 3, outcomeReports: 1 }); assert.equal(applied(new DatabaseSync(dbFile(o5), { readOnly: true })).includes(S8C), false);
-  const up = openRaw(out); migrateAll(up); assert.deepEqual(plain(readTableBacked(up).followUps), plain(expected.followUps)); assert.deepEqual(plain(readTableBacked(up).signingPackages), plain(expected.signingPackages)); up.close();
-  rm(d, out, notCut, o2, o3, o4, o5);
 });
 
 console.log(`\n${passed} signings/follow-ups checks passed`);

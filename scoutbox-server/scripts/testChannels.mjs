@@ -1,5 +1,5 @@
-// S7d — message threads as tables (repositories/channels.mjs, migration 0012,
-// repositories/channelsRollback.mjs), the bounded storage migration the Founder
+// S7d — message threads as tables (repositories/channels.mjs, migration 0012),
+// the bounded storage migration the Founder
 // approved through D-A (messaging first with a transitional code-checked request
 // reference) and D-B (today's explicit deletion of a deleted player's threads
 // reproduced; retention left open). The migration from the legacy blob (the
@@ -13,7 +13,7 @@
 // failed ordinary save keeping its pending state versus an aborted unit restoring the
 // pre-unit state); the snapshot dispatcher and the FINAL-STATE assertion in every
 // direction (channels only, requests only, identity only, coordinated, malformed,
-// absence versus empty array, parent-prune order); the copy-only rollback tool.
+// absence versus empty array, parent-prune order).
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 //
 // FAILING-FIRST NOTE (recorded on the unchanged b67bce5 tree before the implementation):
@@ -27,7 +27,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
@@ -37,7 +36,6 @@ import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump } from '.
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const dbFile = (dir) => path.join(dir, 'scoutbox.db');
 let counter = 9000;
@@ -80,11 +78,9 @@ function s7cFile(dir, { channels, requests = REQUESTS(), rawBlobs, extra: more =
   runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } });
   s.close();
 }
-const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id <= MIGRATION), { now, context: { sessionTtlMs: TTL } }); // up to 0012: this suite exercises the S7d step and its tool (S6b's 0013 and its tool have their own suite, testSafetyAudit.mjs)
+const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id <= MIGRATION), { now, context: { sessionTtlMs: TTL } }); // up to 0012: this suite exercises the S7d step (S6b's 0013 and its tool have their own suite, testSafetyAudit.mjs)
 let mod = null;
 try { mod = await import('../repositories/channels.mjs'); } catch { mod = null; }
-let rollbackMod = null;
-try { rollbackMod = await import('../repositories/channelsRollback.mjs'); } catch { rollbackMod = null; }
 const needModule = () => { assert.ok(mod, 'repositories/channels.mjs exists (the S7d repository module)'); return mod; };
 /** A live server-mode store with the data layer attached: the repository in its STAGED mode, as the server runs it. */
 function live(dir, { now = () => NOW } = {}) {
@@ -385,46 +381,5 @@ test('[cutover] the FINAL-STATE assertion, every direction (review §11.5): chan
   save({ ...base, orgs: [], users: [], sessions: [], channels: [], requests: [] }); assert.deepEqual(channelIds(dir), []); assert.equal(rowsOf(dir, 'orgs').length, 0, 'an organisation removed together with its channels (and its staff and their sessions, which reference it too; since S8a the requests, which reference the organisation and its staff, go with it)');
   tool.sqlite.close(); rm(dir);
 });
-
-// ============================================================= [cutover] the copy-only rollback to the accepted pre-S7d build
-test('[cutover] rollback (copy-only): every thread is written back into the channels blob in insertion order with its messages in array order (extras first, absence preserved, both attachment shapes, clientMsgId present or absent, the post-cutover thread and message included), the three tables are dropped, the 0012 record and its meta key removed, saveSeq advanced, every other table byte-identical (the S7a–S7c tables included), the source untouched; the real migration re-upgrades the copy to the same rows; the S7c tool refuses a 0012 file (LATER_SCHEMA); refusals leave no output: a later schema step (exit 4), a file that never applied 0012 (exit 5), a non-empty output directory (exit 1), a recorded 0012 whose tables are missing (exit 10), an injected COMMIT failure inside the tool', () => {
-  assert.ok(rollbackMod, 'repositories/channelsRollback.mjs exists'); const { rollbackChannelsCopy } = rollbackMod;
-  const { execFileSync } = awaitSync();
-  const src = tempDir('ch-rb-src');
-  const g = guardianChannel({ messages: [message({ id: 'm-g', sender: { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' }, attachment: trialReport() })] }); delete g.scoutName;
-  const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me"}}');
-  const threads = [channel({ ...special, orgUserIdForNotify: 'usr-legacy', messages: [message({ id: 'm-1', ts: NOW }), message({ id: 'm-2', ts: NOW, attachment: clip(), clientMsgId: 'c' })] }), g];
-  s7cFile(src, { channels: threads });
-  { const s = openRaw(src); migrate(s); const repo = bare(s); repo.open(channel({ id: 'chan-after', requestId: 'req-free' })); repo.appendMessage('chan-after', message({ id: 'm-after' })); repo.markRead('chan-1', 'org', NOW + 7); s.close(); }
-  const before = { dump: dump(openRaw(src), { except: ['channels', 'messages', 'message_attachments', 'collections', 'meta', 'data_migrations'] }), bytes: fs.statSync(dbFile(src)).size, saveSeq: seqOf(src) };
-  const out = tempDir('ch-rb-out');
-  const result = rollbackChannelsCopy(dbFile(src), out, { now: NOW });
-  assert.equal(result.output, dbFile(out)); assert.deepEqual(result.counts, { channels: 3, messages: 4 }); assert.equal(result.recordRemoved, true); assert.equal(result.saveSeq, before.saveSeq + 1);
-  assert.equal(fs.statSync(dbFile(src)).size, before.bytes, 'the source is untouched'); assert.equal(seqOf(src), before.saveSeq); assert.ok(tableExistsIn(src, 'channels'));
-  const o = openRaw(out);
-  assert.ok(!applied(o).includes(MIGRATION)); for (const t of ['channels', 'messages', 'message_attachments']) assert.equal(o.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t), undefined); assert.equal(meta(o, 'channelsCutover'), undefined);
-  const back = blob(o, 'channels');
-  assert.deepEqual(back.map((c) => c.id), ['chan-1', 'chan-g', 'chan-after']); assert.deepEqual(back[0].messages.map((m) => m.id), ['m-1', 'm-2']); assert.equal(back[0].readBy.org, NOW + 7); assert.equal(back[0].orgUserIdForNotify, 'usr-legacy'); assert.ok(Object.hasOwn(back[0], '__proto__')); assert.deepEqual(Object.keys(back[0]).slice(0, 2), ['__proto__', 'orgUserIdForNotify'], 'extras first');
-  assert.equal(Object.hasOwn(back[1], 'scoutName'), false, 'absence preserved'); assert.deepEqual(back[1].messages[0].attachment, trialReport()); assert.deepEqual(back[0].messages[1].attachment, clip()); assert.equal(back[0].messages[1].clientMsgId, 'c'); assert.equal(Object.hasOwn(back[0].messages[0], 'clientMsgId'), false);
-  assert.deepEqual(back[2].messages.map((m) => m.id), ['m-after'], 'the post-cutover thread and message');
-  assert.equal(dump(o, { except: ['channels', 'messages', 'message_attachments', 'collections', 'meta', 'data_migrations'] }), before.dump, 'every other table byte-identical');
-  // Re-upgrade: the same rows.
-  const beforeUp = JSON.stringify(back); migrate(o); assert.ok(applied(o).includes(MIGRATION)); assert.equal(JSON.stringify(needModule().CHANNELS_TABLE.read(o)), beforeUp, 're-upgraded to the same rows'); assert.equal(blob(o, 'channels'), undefined);
-  o.close();
-  // The S7c tool refuses the 0012 file.
-  try { execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), src, tempDir('ch-s7ctool')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
-  // Refusals through the CLI.
-  const cli = (dir, outDir) => { try { execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), dir, outDir], { stdio: 'pipe' }); return 0; } catch (e) { return e.status; } };
-  const later = tempDir('ch-rb-later'); { fs.copyFileSync(dbFile(src), dbFile(later)); const s = openRaw(later); s.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0099_future', 1)").run(); s.close(); }
-  const laterOut = tempDir('ch-rb-later-out'); assert.equal(cli(later, laterOut), 4); assert.deepEqual(fs.readdirSync(laterOut), [], 'no output');
-  const never = tempDir('ch-rb-never'); s7cFile(never, { channels: [] }); const neverOut = tempDir('ch-rb-never-out'); assert.equal(cli(never, neverOut), 5); assert.deepEqual(fs.readdirSync(neverOut), []);
-  const full = tempDir('ch-rb-full'); fs.writeFileSync(path.join(full, 'keep.txt'), 'x'); assert.equal(cli(src, full), 1); assert.deepEqual(fs.readdirSync(full), ['keep.txt']);
-  const missing = tempDir('ch-rb-missing'); { fs.copyFileSync(dbFile(src), dbFile(missing)); const s = openRaw(missing); s.exec('DROP TABLE message_attachments; DROP TABLE messages;'); s.close(); } const missingOut = tempDir('ch-rb-missing-out'); assert.equal(cli(missing, missingOut), 10); assert.deepEqual(fs.readdirSync(missingOut), []);
-  const injected = tempDir('ch-rb-inject-out');
-  assert.throws(() => rollbackChannelsCopy(dbFile(src), injected, { now: NOW, _failBeforeCommit: true }), /synthetic commit failure/); assert.deepEqual(fs.readdirSync(injected), [], 'a failure removes the output');
-  rm(src, out, later, laterOut, never, neverOut, full, missing, missingOut, injected);
-});
-function awaitSync() { return { execFileSync: (...a) => execFileSyncRef(...a) }; }
-import { execFileSync as execFileSyncRef } from 'node:child_process';
 
 console.log(`\n${passed} channel checks passed`);

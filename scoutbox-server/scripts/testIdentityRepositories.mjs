@@ -118,8 +118,7 @@ test('authority: the repositories attach only behind the cutover record, refuse 
   s.prepare('INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)').run(CORE_IDENTITY_LIVE_MIGRATION, NOW);
   assert.throws(() => createIdentityRepositories({ sqlite: s }), /S1 shadow definition \(no facets_json column\)/, 'the record alone is not enough: the tables are the shadow');
   prepareLiveIdentitySchema(s, { initState: 'pending', now: NOW });
-  const warnings = [];
-  const identity = createIdentityRepositories({ sqlite: s, now: () => NOW, warn: (m) => warnings.push(m) });
+  const identity = createIdentityRepositories({ sqlite: s, now: () => NOW });
   assert.equal(identity.initState(), 'pending'); assert.equal(identity.players.count(), 0, 'construction loads nothing');
   assert.throws(() => identity.attach(FIXTURE().players, FIXTURE().guardians), /initialisation is pending/, 'attach() is not how a first installation starts');
   // The Founder's rule: a legacy minor without any guardian link refuses the whole initialisation; nothing is written; the state stays pending.
@@ -138,11 +137,10 @@ test('authority: the repositories attach only behind the cutover record, refuse 
   assert.deepEqual({ players: r.players, guardians: r.guardians, links: r.links }, { players: 4, guardians: 3, links: 4 });
   assert.equal(identity.initState(), 'done'); assert.equal(identity.players.count(), 4); assert.equal(identity.guardians.count(), 3);
   assert.throws(() => identity.initialize(FIXTURE(), { now: NOW }), /already initialised/);
-  // Attaching again (a restart) never imports: a stale array naming unknown records is reported and ignored.
-  const again = createIdentityRepositories({ sqlite: s, now: () => NOW, warn: (m) => warnings.push(m) });
+  // Attaching again (a restart) never imports: a stale array naming unknown records is ignored.
+  const again = createIdentityRepositories({ sqlite: s, now: () => NOW });
   again.attach([...FIXTURE().players, { ...adult(), id: 'pl-stale' }], [{ ...gSignup(), id: 'gd-stale', email: 'stale@example.test' }]);
   assert.equal(again.players.count(), 4); assert.equal(again.guardians.count(), 3);
-  assert.ok(warnings.some((w) => /players table holds 4 row\(s\).*1 record\(s\) the table does not hold was ignored/.test(w)), JSON.stringify(warnings));
   s.close();
   // An intentionally empty authoritative domain stays empty: pending + empty initialisation → done; later attaches with stale arrays import nothing.
   const e = freshShadowDb(); prepareLiveIdentitySchema(e, { initState: 'pending', now: NOW });

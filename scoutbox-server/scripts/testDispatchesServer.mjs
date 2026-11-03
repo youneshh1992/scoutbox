@@ -10,12 +10,11 @@
 // provider ids); the acknowledgment unit under a real COMMIT failure; dispatch
 // rows retained after an ordinary account deletion; a configured synthetic
 // webhook endpoint's delivery row persisted with the failed dispatch; a SIGKILL
-// mid-retry; the admin backup and its restore; the copy-only rollback booted by
-// the accepted 0641b2c build (SCOUTBOX_PRE_S7B_SERVER). Every database read goes
+// mid-retry; the admin backup and its restore. Every database read goes
 // through a second read-only connection. Nothing here touches DATA_DIR or real
 // data. Run with: npm test
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -29,8 +28,6 @@ let passed = 0;
 const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6bDir = (dir) => { const s8c = tempDir('s8c-to-s8b'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, s8c], { stdio: 'pipe' }); /* S8c: the file carries 0017; its rollback (copy-only, the contacts and offers written back as blobs) goes first */ const s8b = tempDir('s8b-to-s8a'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), s8c, s8b], { stdio: 'pipe' }); /* then S8b (the cases and the four room collections written back as blobs) */ const s8a = tempDir('s8a-to-s4br'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), s8b, s8a], { stdio: 'pipe' }); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, s4br], { stdio: 'pipe' }); /* then S4b-R (copy-only, the retained records kept as a blob) */ const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), s4br, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -42,10 +39,10 @@ const freePort = () => new Promise((resolve, reject) => { const s = net.createSe
 const children = new Set();
 process.on('exit', () => { for (const p of children) { try { p.kill('SIGKILL'); } catch { /* gone */ } } });
 
-async function boot(dir, env = {}, server = SERVER) {
+async function boot(dir, env = {}) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     children.add(proc); proc.on('exit', () => children.delete(proc));
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {
@@ -301,8 +298,8 @@ await test('crash recovery: a SIGKILL while an e-mail dispatch is retrying loses
   await S.stop(); rm(dir);
 });
 
-// ------------------------------------------------------------- 8. backup, restore, rollback, the old build
-await test('backup/restore and the old-build rollback proof: the admin backup exports `dispatches` explicitly in the legacy shape with nested attempts (a backup restores on any build); a restore into a NEW directory imports them (migration 0010) with the same rows, attempts, clocks and orphan count; a backup whose dispatch entry is malformed is refused at boot (DISPATCHES_IMPORT_BLOCKED) and creates no table; the S7a rollback tool refuses the S7b file (exit 4); with SCOUTBOX_PRE_S7B_SERVER set, the copy-only rollback of the live directory boots on the accepted 0641b2c build, which shows the same delivery records and keeps writing to its blob', async () => {
+// ------------------------------------------------------------- 8. backup and restore
+await test('backup/restore: the admin backup exports `dispatches` explicitly in the legacy shape with nested attempts (a backup restores on any build); a restore into a NEW directory imports them (migration 0010) with the same rows, attempts, clocks and orphan count; a backup whose dispatch entry is malformed is refused at boot (DISPATCHES_IMPORT_BLOCKED) and creates no table', async () => {
   const dir = tempDir('s7b-backup'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara'); const kola = await playerLogin(S, 'pl-adeyemi');
   await inject(S, 1);
@@ -326,33 +323,7 @@ await test('backup/restore and the old-build rollback proof: the admin backup ex
   const bad = tempDir('s7b-bad'); fs.cpSync(bk.body.dir, bad, { recursive: true });
   { const j = JSON.parse(fs.readFileSync(path.join(bad, 'db.json'), 'utf8')); j.db.dispatches[0].attempts = [{ at: 1 }]; fs.writeFileSync(path.join(bad, 'db.json'), JSON.stringify(j)); }
   const refusedBoot = await bootRefuses(bad); assert.match(refusedBoot.log, /DISPATCHES_IMPORT_BLOCKED/); assert.equal(refusedBoot.log.includes('example.test'), false, 'no address in the log'); assert.equal(live(bad), false);
-  // The S7a tool refuses the S7b file.
-  try { execFileSync(process.execPath, [path.join(HERE, 'notificationsRollback.mjs'), dir, tempDir('s7b-s7atool')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
-  // The copy-only rollback booted by the accepted build. S7c: the file carries 0011, so the S7b tool refuses it (exit 4)
-  // and the chain starts with the S7c tool (copy-only); the S7b tool then runs on that copy.
-  try { execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), dir, tempDir('s7b-s7btool')], { stdio: 'pipe' }); assert.fail('must refuse'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
-  const s7cCopy = tempDir('s7b-rollback-s7d'); const s7bCopy = tempDir('s7b-rollback-s7c'); const copy = tempDir('s7b-rollback');
-  execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), s7cCopy], { encoding: 'utf8' }); // S7d first (the file carries 0012), then S7c on its output
-  execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), s7cCopy, s7bCopy], { encoding: 'utf8' });
-  const out = execFileSync(process.execPath, [path.join(HERE, 'dispatchesRollback.mjs'), s7bCopy, copy], { encoding: 'utf8' });
-  assert.match(out, /written back as a blob/); assert.equal(live(copy), false); assert.deepEqual(stored(copy), all, 'the blob holds every row and attempt in order');
-  const OLD = process.env.SCOUTBOX_PRE_S7B_SERVER;
-  if (OLD && fs.existsSync(OLD)) {
-    const old = await boot(copy, {}, OLD);
-    assert.ok(!/0010_dispatches/.test(old.log()), 'the accepted build knows nothing of 0010');
-    const oldAdmin = await (async () => (await old.j('GET', '/admin/delivery', undefined, null, A)).body)();
-    const pick = (d) => ({ id: d.id, status: d.status, attempts: d.attempts, deliveredAt: d.deliveredAt, openedAt: d.openedAt, providerMessageId: d.providerMessageId });
-    assert.deepEqual(oldAdmin.recent.slice().reverse().map(pick), all.map(pick), 'the old build shows the same delivery records, attempts and clocks');
-    const oldMaria = await orgLogin(old, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const oldAmara = await guardianLogin(old, 'gd-amara');
-    const n = await guardianNotice(old, oldMaria, oldAmara, 'trial');
-    await until(async () => { await sweep(old); return (blobRows(copy, 'dispatches') ?? []).some((d) => d.notificationId === n.id); });
-    assert.ok((blobRows(copy, 'dispatches') ?? []).some((d) => d.notificationId === n.id), 'the accepted build keeps writing to the blob of the copy');
-    await old.stop();
-    console.log('    (accepted 0641b2c build booted the rollback copy: same delivery records, new writes accepted)');
-  } else {
-    console.log('    (SCOUTBOX_PRE_S7B_SERVER not set: the old-build boot of the rollback copy was SKIPPED; the blob shape was checked by this process only)');
-  }
-  rm(dir, restored, bad, s7bCopy, copy);
+  rm(dir, restored, bad);
 });
 
 

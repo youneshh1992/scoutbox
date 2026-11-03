@@ -6,14 +6,11 @@
 // setItems / patchItem with a real store (standalone COMMIT failure, a caught
 // failure inside a unit, a real COMMIT failure, retry), snapshot replacement
 // under the child foreign keys, media ownership through player_media, the
-// audience allowlists, and the copy-only rollback tool with its refusals and the
-// re-upgrade round trip. Every database is a throwaway file with synthetic
+// audience allowlists. Every database is a throwaway file with synthetic
 // records. Run with: npm test
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
@@ -24,40 +21,23 @@ import {
 } from '../repositories/playerSubrecords.mjs';
 import { createIdentityRepositories, IDENTITY_SNAPSHOT } from '../repositories/identity.mjs';
 import { createMediaDeletionsQueue, liveMediaReferences, assertMediaQueueConsistent } from '../repositories/mediaDeletions.mjs';
-import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
-import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
-import { rollbackNotificationsCopy } from '../repositories/notificationsRollback.mjs';
-import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
-import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
-import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
-import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
-import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
-import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
-import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
-import { rollbackToPreS8c as rollbackRecruitmentContactsOffersCopy } from '../repositories/rollbackChain.mjs'; // S8d: the S8d step-back then the S8c tool, as one link (a live file carries 0018)
 import { readTrialsCollection, RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
 import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.mjs';
 import { SIGNINGS_FOLLOWUPS_TABLES } from '../repositories/signingsFollowUps.mjs';
-import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
 import { PLAYER_SUBRECORDS_CUTOVER_META, BLOCKED } from '../repositories/migrations/0007_player_subrecords.mjs';
 import { orgPlayerView } from '../views/playerViews.mjs';
 import { openStore } from '../store.mjs';
 import { prepareLiveIdentitySchema } from './identityLiveTestSchema.mjs';
 import {
-  NOW, DAY, TTL, tempDir, clone, adult, child, seeded, gPrimary, gCo, gSignup, FIXTURE, ORGS, USERS, SESSIONS, EXTRA,
-  s3File, freshFile, openRaw, migrate, applied, blob, dump, meta, sessionRows, filesDigest, failRunAt, identityDump,
+  NOW, DAY, TTL, tempDir, clone, adult, child, seeded, gPrimary, gCo, FIXTURE, ORGS, USERS, SESSIONS, EXTRA,
+  s3File, freshFile, openRaw, migrate, applied, blob, dump, meta, sessionRows, filesDigest, failRunAt,
 } from './coreIdentityTestFixtures.mjs';
-// S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s8c = tempDir('s8c-to-s8b'); rollbackRecruitmentContactsOffersCopy(file, s8c); /* S8c: the file carries 0017; its rollback (copy-only, the contacts and offers written back as blobs) goes first */ const s8b = tempDir('s8b-to-s8a'); rollbackRecruitmentCasesCopy(path.join(s8c, 'scoutbox.db'), s8b); /* then S8b: the file carries 0016; its rollback (copy-only, the cases and the four room collections written back as blobs) goes first */ const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(path.join(s8b, 'scoutbox.db'), s8a); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const dbFile = (dir) => path.join(dir, 'scoutbox.db');
-/** S6a: a live file carries 0008, which the S5 tool refuses outright (LATER_SCHEMA); the chain is the S6a rollback (copy-only, codes invalidated, everything else kept) and then the S5 tool on ITS output. Returns the S5-shaped copy's directory. */
-const s5Copy = (dir) => { const s7c = tempDir('s7d-to-s7c'); rollbackChannelsCopy(preS6b(dbFile(dir)), s7c); /* S7d first: the live file carries 0012 */ const s7b = tempDir('s7c-to-s7b'); rollbackOutboxPushCopy(dbFile(s7c), s7b); const s7a = tempDir('s7b-to-s7a'); rollbackDispatchesCopy(dbFile(s7b), s7a); const s6a = tempDir('s7a-to-s6a'); rollbackNotificationsCopy(dbFile(s7a), s6a); const out = tempDir('s6a-to-s5'); rollbackOneTimeCodesCopy(dbFile(s6a), out); return out; }; // S7a: the live file carries 0009 too; the S7a rollback (copy-only, nothing lost) goes first
 let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const sameJson = (a, b, what) => assert.equal(JSON.stringify(b), JSON.stringify(a), `${what}: byte-identical JSON`);
@@ -560,94 +540,6 @@ test('audience allowlists are unchanged by the storage move: an organisation nev
   p.medical.shared = true; assert.equal(orgPlayerView(p, org, helpers).medical.records.length, 2);
 });
 
-// ------------------------------------------------------------------ the rollback tool
-function liveWithHistory(dir) {
-  const t = boot(dir, { players: [adult(), rich(), sparse(), noKeys()], guardians: [gSignup()], trialList: trials() });
-  t.players.addItem('pl-adult', 'media', { id: 'med-post', title: 'Post-S5 clip', kind: 'video', uploadedAt: '2026-10-02T00:00:00.000Z', url: '/media/med-post', views: 1, tags: { pace: 1 }, verifiedClip: null });
-  t.players.addItem('pl-rich', 'badges', 'PostS5'); t.players.patchItem('pl-rich', 'media', { id: 'med-r1' }, { views: 10 });
-  t.players.addItem('pl-nokeys', 'timeline', { year: '2026', event: 'Gained a key' });
-  t.players.remove('pl-sparse');
-  addTrial(t, report('rep-3', 'pl-adult', NOW));
-  t.players.byId('pl-rich').unknownBag.touched = true;
-  const minted = t.layer.sessions.create('player', 'pl-adult').token;
-  t.store.save(t.snapshot());
-  const expected = { players: clone(t.db.players), live: identityDump(t.store.sqlite), sessions: sessionRows(t.store.sqlite), saveSeq: Number(meta(t.store.sqlite, 'saveSeq')), minted, rows: Object.fromEntries(SUBRECORD_TABLES.map((x) => [x, count(t.store.sqlite, x)])) };
-  t.close();
-  return expected;
-}
-
-test('rollback: the copy-only tool rebuilds the S4a representation — every array (post-S5 inserts, updates and removals included) back inside facets_json under its own key, trialReports rebuilt from the trials in filing order (a report filed after S5 included), the twelve tables dropped, the 0007 record and meta key gone, the revision advanced, sessions and every other collection untouched, the source byte-identical; the S4a decoder reads the copy as the records the S5 server served; the real migration brings the copy back to the live state row for row; the S4a→S3 tool refuses the S5 file and accepts the copy', () => {
-  const src = tempDir('s5-rb-src'); const expected = liveWithHistory(src);
-  const srcBefore = filesDigest(src); const sIn = openRaw(src); const logicalBefore = dump(sIn); sIn.close();
-  const out = tempDir('s5-rb-out');
-  // S6a: the live file carries 0008, which this tool refuses outright; the S6a rollback (copy-only) goes first, and this tool runs on ITS output (two revisions advance).
-  const result = rollbackPlayerSubrecordsCopy(dbFile(s5Copy(src)), out);
-  assert.equal(filesDigest(src)['scoutbox.db'], srcBefore['scoutbox.db'], 'the source main file is byte-identical');
-  { const sIn2 = openRaw(src); assert.equal(dump(sIn2), logicalBefore, 'the source content is unchanged'); sIn2.close(); }
-  assert.equal(result.output, dbFile(out)); assert.equal(result.recordRemoved, true); assert.equal(result.players, 3); assert.equal(result.saveSeq, expected.saveSeq + 12); // S8d, S8c, S8b, S8a, S4b-R, S6b, S7d, S7c, S7b, S7a, S6a and this tool each advanced it once // S8a, S4b-R, S6b, S7d, S7c, S7b, S7a, S6a and this tool each advance the revision once assert.deepEqual(result.rows, expected.rows);
-  assert.deepEqual(fs.readdirSync(out), ['scoutbox.db']);
-  const o = openRaw(out);
-  assert.deepEqual(applied(o), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions']);
-  assert.equal(meta(o, PLAYER_SUBRECORDS_CUTOVER_META), undefined); for (const x of SUBRECORD_TABLES) assert.equal(o.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(x), undefined, `${x} dropped`);
-  const decoded = o.prepare(`SELECT ${PLAYER_COLUMNS.join(', ')} FROM players ORDER BY rowid`).all().map((r) => playerFromRow(r));
-  assert.equal(JSON.stringify(decoded), JSON.stringify(expected.players), 'the S4a decoder reads exactly what the S5 server served');
-  const facets = JSON.parse(o.prepare("SELECT facets_json FROM players WHERE id = 'pl-rich'").get().facets_json);
-  assert.deepEqual(facets.badges, ['Finisher', 'Captain', 'Finisher', 'PostS5']); assert.equal(facets.media[0].views, 10); assert.equal(facets.medical.records.length, 2); assert.deepEqual(facets.trialReports.map((r) => r.id), ['rep-1', 'rep-2']);
-  assert.deepEqual(JSON.parse(o.prepare("SELECT facets_json FROM players WHERE id = 'pl-adult'").get().facets_json).trialReports.map((r) => r.id), ['rep-3'], 'a report filed after S5 is in the copy the S4a build reads');
-  assert.equal(JSON.parse(o.prepare("SELECT facets_json FROM players WHERE id = 'pl-nokeys'").get().facets_json).timeline.length, 1);
-  assert.equal(o.prepare("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-sparse'").get().n, 0, 'the removed player is not resurrected');
-  assert.deepEqual(sessionRows(o), expected.sessions); assert.deepEqual(o.prepare('PRAGMA foreign_key_check').all(), []); assert.equal(o.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
-  assert.equal(count(o, 'media_deletions'), 0, 'the queue table stays (both builds have it)');
-  // Round trip: the real migration cuts the copy over again.
-  assert.deepEqual(migrate(o, { now: NOW + DAY }).ran, [PLAYER_SUBRECORDS_MIGRATION, '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], 'the real migration brings the copy back (0008 follows, as the S6a copy had removed it)');
-  assert.equal(identityDump(o), expected.live, 'players, guardians and links identical to the pre-rollback live state, facets included');
-  for (const x of SUBRECORD_TABLES) assert.equal(count(o, x), expected.rows[x], `${x} rows back`);
-  const identity = createIdentityRepositories({ sqlite: o, now: () => NOW, trialReports: (id) => trialReportsFor(readTrialsCollection(o), id) }); identity.attach();
-  assert.equal(JSON.stringify(identity.players.view), JSON.stringify(expected.players));
-  o.close();
-  // The S4a→S3 tool: refuses the S5 file, accepts the S5 tool's output.
-  const out2 = tempDir('s5-rb-out2'); const out3 = tempDir('s5-rb-out3');
-  assert.throws(() => rollbackCoreIdentityCopy(dbFile(src), out2), (err) => err.code === 'LATER_SCHEMA' && /0007_player_subrecords/.test(err.message)); assert.deepEqual(fs.readdirSync(out2), []);
-  rollbackPlayerSubrecordsCopy(dbFile(s5Copy(src)), out2);
-  assert.equal(rollbackCoreIdentityCopy(dbFile(out2), out3).players, 3);
-  const o3 = openRaw(out3); assert.equal(blob(o3, 'players').find((p) => p.id === 'pl-rich').badges.length, 4, 'the arrays travelled into the S3 blob'); o3.close();
-  rm(src, out, out2, out3);
-});
-
-test('rollback refusals leave no output and never touch the source: a later schema step (exit 4), a file that never applied 0007 (exit 5), a non-empty output directory (exit 1), a recorded 0007 whose tables are missing (exit 10), a trials collection that is not an array while a player carries trialReports (exit 9), an injected COMMIT failure inside the tool; the CLI writes the copy and reports it', () => {
-  const src = tempDir('s5-rf-src'); liveWithHistory(src);
-  const before = filesDigest(src); const sIn = openRaw(src); const logicalBefore = dump(sIn); sIn.close();
-  const srcS5 = s5Copy(src); // S6a: the S5-shaped copy this tool works on (the live file carries 0008 and is refused as a later schema)
-  const script = path.join(HERE, 'playerSubrecordsRollback.mjs');
-  const run = (...a) => { try { execFileSync(process.execPath, [script, ...a], { stdio: 'pipe' }); return 0; } catch (err) { return err.status; } };
-  const later = tempDir('s5-rf-later'); fs.copyFileSync(dbFile(srcS5), dbFile(later));
-  { const l = openRaw(later); l.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0008_future_step', 1)").run(); l.close(); }
-  const out1 = tempDir('s5-rf-o1'); assert.throws(() => rollbackPlayerSubrecordsCopy(dbFile(later), out1), (err) => err.code === 'LATER_SCHEMA' && /0008_future_step/.test(err.message)); assert.deepEqual(fs.readdirSync(out1), []);
-  const s4a = tempDir('s5-rf-s4a'); s4aFile(s4a);
-  const out2 = tempDir('s5-rf-o2'); assert.throws(() => rollbackPlayerSubrecordsCopy(dbFile(s4a), out2), (err) => err.code === 'NOT_CUT_OVER'); assert.deepEqual(fs.readdirSync(out2), []);
-  const out3 = tempDir('s5-rf-o3'); fs.writeFileSync(path.join(out3, 'keep.txt'), 'x');
-  assert.throws(() => rollbackPlayerSubrecordsCopy(dbFile(src), out3), (err) => err.code === 'OUTPUT_NOT_EMPTY'); assert.deepEqual(fs.readdirSync(out3), ['keep.txt']);
-  const odd = tempDir('s5-rf-odd'); fs.copyFileSync(dbFile(srcS5), dbFile(odd));
-  { const od = openRaw(odd); od.exec('DROP TABLE player_media_tags; DROP TABLE player_media;'); od.close(); }
-  const out4 = tempDir('s5-rf-o4'); assert.throws(() => rollbackPlayerSubrecordsCopy(dbFile(odd), out4), (err) => err.code === 'UNEXPECTED_SCHEMA' && /player_media/.test(err.message)); assert.deepEqual(fs.readdirSync(out4), []);
-  const badTrials = tempDir('s5-rf-trials'); fs.copyFileSync(dbFile(srcS5), dbFile(badTrials));
-  { const bt = openRaw(badTrials); bt.prepare("UPDATE collections SET value = '{\"not\":\"a list\"}' WHERE name = 'trials'").run(); bt.close(); }
-  const out5 = tempDir('s5-rf-o5'); assert.throws(() => rollbackPlayerSubrecordsCopy(dbFile(badTrials), out5), (err) => err.code === 'TRIALS_UNREADABLE'); assert.deepEqual(fs.readdirSync(out5), []);
-  const proto = DatabaseSync.prototype; const exec = proto.exec; let fired = 0;
-  proto.exec = function patched(sql) { if (sql === 'COMMIT' && !fired) { fired += 1; throw new Error('injected COMMIT failure in the S5 rollback tool'); } return exec.call(this, sql); };
-  const out6 = tempDir('s5-rf-o6');
-  try { assert.throws(() => rollbackPlayerSubrecordsCopy(dbFile(srcS5), out6), /injected COMMIT failure/); } finally { proto.exec = exec; }
-  assert.equal(fired, 1); assert.deepEqual(fs.readdirSync(out6), []);
-  assert.equal(filesDigest(src)['scoutbox.db'], before['scoutbox.db']); { const s2 = openRaw(src); assert.equal(dump(s2), logicalBefore); s2.close(); }
-  assert.equal(run(later, path.join(tempDir('s5-rf-cli'), 'x')), 4); assert.equal(run(s4a, path.join(tempDir('s5-rf-cli2'), 'x')), 5); assert.equal(run(src, out3), 1); assert.equal(run(src), 1);
-  assert.equal(run(odd, path.join(tempDir('s5-rf-cli3'), 'x')), 10); assert.equal(run(badTrials, path.join(tempDir('s5-rf-cli4'), 'x')), 9);
-  const cliOut = path.join(tempDir('s5-rf-cli5'), 'copy');
-  assert.equal(run(src, path.join(tempDir('s5-rf-cli6'), 'x')), 4, 'S6a: the CLI refuses the live file carrying 0008 (LATER_SCHEMA)');
-  const json = JSON.parse(execFileSync(process.execPath, [script, srcS5, cliOut, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
-  assert.equal(json.players, 3); assert.equal(json.recordRemoved, true); assert.ok(fs.existsSync(path.join(cliOut, 'scoutbox.db')));
-  rm(src, srcS5, later, s4a, odd, badTrials, out1, out2, out3, out4, out5, out6, path.dirname(cliOut));
-});
-
 // ------------------------------------------------------------------ review of 132eda2 (three findings, corrected failing-first)
 test('review of 132eda2, finding 1: a snapshot save never discards a trialReports copy — a copy with no trial report of that id, one whose content differs, one in a different order, a duplicated entry, each refuses the WHOLE save (player and report ids named; the unrelated edit and the save revision rolled back) whether the snapshot supplies the trials or omits them (the retained trials judge); a trials collection that is not an array is refused while a copy exists; a consistent whole replacement, a trials-only write (the derived view changes), a record without the key (no claim) and a null (no claim) are accepted; an injected COMMIT failure of an accepted save rolls everything back and the retry lands; the same rule at insert, restore and initialize', () => {
   const dir = tempDir('s5-f1');
@@ -706,7 +598,7 @@ test('review of 132eda2, finding 1: a snapshot save never discards a trialReport
   f.close(); rm(dir, fresh);
 });
 
-test('review of 132eda2, finding 2: the derived trialReports follows the trials for EVERY accepted shape — a record whose key was absent, null or an empty array shows a newly filed report at once on the held view, on a fresh lookup, in a spread, in JSON (the backup\'s serialisation) and in the club view (its own club only); the empty-state shape is preserved (absent stays absent, null stays null, [] stays []) in memory, in the row\'s shape metadata, after a reopen and in the rollback copy; a unit of work that fails restores the shape; players.restore adopts the restored record\'s shape', () => {
+test('review of 132eda2, finding 2: the derived trialReports follows the trials for EVERY accepted shape — a record whose key was absent, null or an empty array shows a newly filed report at once on the held view, on a fresh lookup, in a spread, in JSON (the backup\'s serialisation) and in the club view (its own club only); the empty-state shape is preserved (absent stays absent, null stays null, [] stays []) in memory, in the row\'s shape metadata, after a reopen; a unit of work that fails restores the shape; players.restore adopts the restored record\'s shape', () => {
   const dir = tempDir('s5-f2');
   const t = boot(dir, { players: [noKeys(), { ...adult(), id: 'pl-null', trialReports: null }, { ...adult(), id: 'pl-empty' }], guardians: [] });
   const ids = { absent: 'pl-nokeys', null: 'pl-null', empty: 'pl-empty' };
@@ -741,20 +633,16 @@ test('review of 132eda2, finding 2: the derived trialReports follows the trials 
   assert.equal(r.players.byId('pl-null').trialReports, null); assert.ok(JSON.stringify(r.players.byId('pl-null')).includes('"trialReports":null'));
   assert.deepEqual([...r.players.byId('pl-empty').trialReports], []);
   r.store.save(r.snapshot()); r.close();
-  const out = tempDir('s5-f2-rb'); rollbackPlayerSubrecordsCopy(dbFile(s5Copy(dir)), out); const o = openRaw(out);
-  const fac = (id) => JSON.parse(o.prepare('SELECT facets_json FROM players WHERE id = ?').get(id).facets_json);
-  assert.equal('trialReports' in fac('pl-nokeys'), false, 'the rollback copy: no key'); assert.ok('trialReports' in fac('pl-null') && fac('pl-null').trialReports === null, 'the rollback copy: null (the S4a layout keeps a null facet as null)'); assert.deepEqual(fac('pl-empty').trialReports, [], 'the rollback copy: []');
-  o.close();
   r = reopen(dir);
   let err = null; try { r.unit(() => { r.players.restore('pl-nokeys', { ...clone(r.players.byId('pl-nokeys')), trialReports: [] }); r.store.failCommitOfOpenTransaction(); }); } catch (e) { err = e; }
   assert.equal(err?.unitOfWork, 'rolled_back'); assert.equal('trialReports' in r.players.byId('pl-nokeys'), false, 'the shape is restored with the record');
   r.players.restore('pl-nokeys', { ...clone(r.players.byId('pl-nokeys')), trialReports: [] }); assert.deepEqual([...r.players.byId('pl-nokeys').trialReports], [], 'restore adopts the [] shape');
   const noKey = clone(r.players.byId('pl-null')); delete noKey.trialReports; r.players.restore('pl-null', noKey); assert.equal('trialReports' in r.players.byId('pl-null'), false, 'restore adopts the absent shape');
   addTrial(r, report('rep-late', 'pl-null', NOW)); assert.deepEqual(r.players.byId('pl-null').trialReports.map((x) => x.id), ['rep-late'], 'the adopted shape follows the trials too');
-  r.close(); rm(dir, out);
+  r.close(); rm(dir);
 });
 
-test('review of 132eda2, finding 3: a whole-null medical or programme update is refused while the player has records or completions (rows of the child table) — everything unchanged, the error naming the player, the rows and the explicit clearing operation; a scalar sub-key update keeps the rows and the held references; a failure inside a unit after the mutation and a real COMMIT failure leave the rows; the explicit clear (setItems to []) then null, a null composite without rows and the key appearing again are supported; export, reopen and rollback agree with the rows; a deliberately inconsistent file (a null composite over child rows, written outside the repositories) is refused by the export, the boot and the rollback tool — the source untouched, no output, exit 11', () => {
+test('review of 132eda2, finding 3: a whole-null medical or programme update is refused while the player has records or completions (rows of the child table) — everything unchanged, the error naming the player, the rows and the explicit clearing operation; a scalar sub-key update keeps the rows and the held references; a failure inside a unit after the mutation and a real COMMIT failure leave the rows; the explicit clear (setItems to []) then null, a null composite without rows and the key appearing again are supported; export and reopen agree with the rows; a deliberately inconsistent file (a null composite over child rows, written outside the repositories) is refused by the export and the boot — the source untouched', () => {
   const dir = tempDir('s5-f3');
   const t = boot(dir, { players: [adult(), rich()], guardians: [], trialList: trials() });
   t.players.addItem('pl-adult', 'medical.records', { id: 'md-a1', type: 'note', title: 'Synthetic note' });
@@ -788,11 +676,8 @@ test('review of 132eda2, finding 3: a whole-null medical or programme update is 
   const inconsistent = (fn, label) => { let e = null; try { fn(); } catch (x) { e = x; } assert.ok(e, `${label}: must refuse`); assert.equal(e.code, 'INCONSISTENT_ROWS', `${label}: ${e.message}`); assert.match(e.message, /players pl-rich: medical is null .* 2 medical\.records row\(s\) .* player_medical_records/, label); };
   { const st = openStore(bad); inconsistent(() => st.load(), 'the snapshot store (a backup)'); st.sqlite.close(); }
   { const b = openRaw(bad); inconsistent(() => IDENTITY_SNAPSHOT.read(b), 'the identity snapshot read'); inconsistent(() => createIdentityRepositories({ sqlite: b, now: () => NOW }).attach(), 'the boot'); b.close(); }
-  const badS5 = s5Copy(bad); // S6a: the S6a tool copies without decoding players, so the inconsistent file reaches this tool as an S5-shaped copy
-  const out = tempDir('s5-f3-rb'); inconsistent(() => rollbackPlayerSubrecordsCopy(dbFile(badS5), out), 'the rollback tool'); assert.deepEqual(fs.readdirSync(out), [], 'no output');
   assert.equal(filesDigest(bad)['scoutbox.db'], digest['scoutbox.db'], 'the source is untouched');
-  let status = 0; try { execFileSync(process.execPath, [path.join(HERE, 'playerSubrecordsRollback.mjs'), badS5, path.join(tempDir('s5-f3-cli'), 'x')], { stdio: 'pipe' }); } catch (e) { status = e.status; } assert.equal(status, 11);
-  rm(dir, bad, out);
+  rm(dir, bad);
 });
 
 console.log(`\n${passed} player sub-record checks passed`);

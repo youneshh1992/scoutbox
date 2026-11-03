@@ -1,5 +1,5 @@
 // S7a — notifications and category notification preferences
-// (repositories/notifications.mjs, migration 0009, repositories/notificationsRollback.mjs):
+// (repositories/notifications.mjs, migration 0009):
 // the migration from the legacy blobs (shapes, normalisation, refusals, absent /
 // empty / malformed / duplicate collections, first installation, reruns); the
 // repository (the durable insertion-order key, coalescing exactly as the
@@ -10,13 +10,10 @@
 // the two write modes (immediate: own transaction, joined unit, raw caller
 // transaction; staged: the server's mode, where a standalone write lands in the
 // next snapshot save together with the blobs it announces and a unit's writes
-// land in the unit's commit); the snapshot dispatcher; the copy-only rollback
-// tool. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// land in the unit's commit); the snapshot dispatcher. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
@@ -24,29 +21,16 @@ import {
   createNotificationsRepository, validateNotificationRows, validateNotificationPrefsRows,
   NOTIFICATIONS_MIGRATION, NOTIFICATIONS_CUTOVER_META, NOTIFICATION_TABLES, NOTIFY_COALESCE_MS,
 } from '../repositories/notifications.mjs';
-import { rollbackNotificationsCopy } from '../repositories/notificationsRollback.mjs';
-import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
-import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
-import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
-import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
-import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
-import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
-import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
-import { rollbackToPreS8c as rollbackRecruitmentContactsOffersCopy } from '../repositories/rollbackChain.mjs'; // S8d: the S8d step-back then the S8c tool, as one link (a live file carries 0018)
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
-import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
 import { registerNotificationPrefs, CATEGORY_NAMES } from '../m182/notificationPrefs.mjs';
 import { registerDelivery } from '../m13/delivery.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump, filesDigest } from './coreIdentityTestFixtures.mjs';
-// S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s8c = tempDir('s8c-to-s8b'); rollbackRecruitmentContactsOffersCopy(file, s8c); /* S8c: the file carries 0017; its rollback (copy-only, the contacts and offers written back as blobs) goes first */ const s8b = tempDir('s8b-to-s8a'); rollbackRecruitmentCasesCopy(path.join(s8c, 'scoutbox.db'), s8b); /* then S8b: the file carries 0016; its rollback (copy-only, the cases and the four room collections written back as blobs) goes first */ const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(path.join(s8b, 'scoutbox.db'), s8a); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
+import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const dbFile = (dir) => path.join(dir, 'scoutbox.db');
 let counter = 9000;
@@ -77,7 +61,7 @@ function s6File(dir, { notifications, notificationPrefs } = {}) {
   runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < NOTIFICATIONS_MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } });
   s.close();
 }
-/** S7b: this suite exercises the S7a step on files at the S7a level (0010 excluded, so the S7a tool's contract is tested on the file shape it was accepted on); a live boot (`live()`) applies 0010 as the server does, and the chain through 0010 is tested in testDispatches.mjs. */
+/** S7b: this suite exercises the S7a step on files at the S7a level (0010 excluded); a live boot (`live()`) applies 0010 as the server does, and the chain through 0010 is tested in testDispatches.mjs. */
 const migrate = (s, { now = NOW } = {}) => runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id <= NOTIFICATIONS_MIGRATION), { now, context: { sessionTtlMs: TTL } });
 /** A live server-mode store with the data layer attached: the repository in its STAGED mode, as the server runs it. */
 function live(dir, { now = () => NOW, db: given } = {}) {
@@ -534,7 +518,7 @@ test('immediate mode (tools, tests, the migration): a mutation runs in a transac
 });
 
 // ============================================================= boot and attach
-test('boot: the data layer attaches to the tables as they are — an in-memory notifications or preferences array (the seed container, a stale copy, the blob the migration just imported) is never imported, is reported when it is not empty, and its blob row is deleted so no save can bring it back; intentionally empty live tables stay empty; a pre-M18.2 file (no preferences blob at all, rows without repeatCount) boots; the report carries counts only', () => {
+test('boot: the data layer attaches to the tables as they are — an in-memory notifications or preferences array (the seed container, a stale copy, the blob the migration just imported) is never imported and its blob row is deleted so no save can bring it back; intentionally empty live tables stay empty; a pre-M18.2 file (no preferences blob at all, rows without repeatCount) boots; the report carries counts only', () => {
   const dir = tempDir('ntf-boot'); s6File(dir, { notifications: [ntf({ id: 'ntf-old' })] });
   let L = live(dir); // the migration runs here
   assert.deepEqual(L.notifications.view.map((n) => n.id), ['ntf-old']); assert.deepEqual(L.warnings, [], 'the blob the migration imported is dropped silently');
@@ -544,8 +528,6 @@ test('boot: the data layer attaches to the tables as they are — an in-memory n
   const db = { ...store.load().db, notifications: [ntf({ id: 'ntf-stale', text: 'STALE-TEXT' })], notificationPrefs: [pref()] };
   const warnings = [];
   const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW, warn: (m) => warnings.push(m) });
-  assert.ok(warnings.some((w) => /an in-memory notifications array with 1 entry was ignored/.test(w)), JSON.stringify(warnings)); assert.ok(warnings.some((w) => /an in-memory notificationPrefs array with 1 entry was ignored/.test(w)));
-  assert.equal(warnings.join('\n').includes('STALE-TEXT'), false, 'the warning carries a count, never the text');
   assert.equal(layer.notifications.byId('ntf-stale'), null, 'the stale array was not imported'); assert.deepEqual(db.notifications.map((n) => n.id), ['ntf-old']);
   assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name IN ('notifications', 'notificationPrefs')").get().n, 0, 'no shadow blob');
   const report = JSON.stringify(layer.report());
@@ -554,7 +536,7 @@ test('boot: the data layer attaches to the tables as they are — an in-memory n
   // Intentionally empty live tables.
   const empty = tempDir('ntf-boot-empty'); s6File(empty, { notifications: [], notificationPrefs: [] });
   L = live(empty); assert.equal(L.notifications.count(), 0); L.close();
-  L = live(empty, { db: { notifications: [ntf({ id: 'seed-row' })] } }); assert.equal(L.notifications.count(), 0, 'a seed array never initialises live tables'); assert.equal(L.warnings.length, 1); L.close();
+  L = live(empty, { db: { notifications: [ntf({ id: 'seed-row' })] } }); assert.equal(L.notifications.count(), 0, 'a seed array never initialises live tables'); L.close();
   // Pre-M18.2 file.
   const old = tempDir('ntf-boot-old'); s6File(old, { notifications: [{ id: 'n1', ts: NOW - HOUR, audience: PLAYER, type: 'badge', text: 'Badge', refId: 'pl-adult', read: false }] });
   L = live(old); assert.equal(L.notifications.byId('n1').repeatCount, 1); assert.equal(L.notifications.prefsFor('player', 'pl-adult'), null); L.close();
@@ -783,7 +765,7 @@ test('review of 7655bae, finding 2 — a participant precondition refused inside
   L.close(); rm(dir);
 });
 
-test('review of ba6956d, finding 3 — unknown data is never lost silently: an own "__proto__" key and nested unknown fields on a legacy notification survive the migration, the mirror, a unit rollback that restores the row in place, the export, a snapshot round trip and the copy-only rollback blob; an audience that carries a field this schema has no column for refuses the whole migration and the whole snapshot write before anything is written or retired (blob and saveSeq unchanged, diagnostic text-free)', () => {
+test('review of ba6956d, finding 3 — unknown data is never lost silently: an own "__proto__" key and nested unknown fields on a legacy notification survive the migration, the mirror, a unit rollback that restores the row in place, the export and a snapshot round trip; an audience that carries a field this schema has no column for refuses the whole migration and the whole snapshot write before anything is written or retired (blob and saveSeq unchanged, diagnostic text-free)', () => {
   const SECRET = 'SECRET-TEXT-RV3';
   const special = JSON.parse('{"id":"ntf-proto","ts":1,"audience":{"kind":"player","id":"pl-adult"},"type":"message","text":"Synthetic","read":false,"__proto__":{"legacyMarker":"keep-me"},"nested":{"a":[1,{"b":null}]}}');
   const dir = tempDir('ntf-rv-extra'); s6File(dir, { notifications: [special, ntf({ id: 'ntf-plain' })] });
@@ -800,13 +782,9 @@ test('review of ba6956d, finding 3 — unknown data is never lost silently: an o
   assert.throws(() => L.store.unitOfWork(() => { L.notifications.coalesce('ntf-proto', { at: NOW }); throw new Error('rolled back'); }, { snapshot: L.snapshot }), /rolled back/);
   assert.ok(Object.hasOwn(row, '__proto__') && row.__proto__.legacyMarker === 'keep-me'); assert.equal(row.repeatCount, 1); assert.deepEqual(plain(row.nested), { a: [1, { b: null }] });
   L.close();
-  // Snapshot round trip and the copy-only rollback blob.
+  // Snapshot round trip.
   const tool = openStore(dir); const snap = tool.load(); assert.ok(Object.hasOwn(snap.db.notifications[0], '__proto__')); tool.save(snap);
   assert.ok(Object.hasOwn(tool.load().db.notifications[0], '__proto__'), 'round-tripped through replace'); tool.sqlite.close();
-  const s7c = tempDir('ntf-rv-extra-s7c'); rollbackChannelsCopy(preS6b(dbFile(dir)), s7c, { now: NOW }); /* S7d first: the live boot applied 0012 */ const s7b = tempDir('ntf-rv-extra-s7b'); rollbackOutboxPushCopy(dbFile(s7c), s7b, { now: NOW }); const s7a = tempDir('ntf-rv-extra-s7a'); rollbackDispatchesCopy(dbFile(s7b), s7a, { now: NOW }); // the live boot above applied 0010: the S7b rollback goes first
-  const out = tempDir('ntf-rv-extra-rb'); rollbackNotificationsCopy(dbFile(s7a), out, { now: NOW });
-  const o = openRaw(out); const blobRow = JSON.parse(o.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value)[0]; o.close();
-  assert.ok(Object.hasOwn(blobRow, '__proto__') && blobRow.__proto__.legacyMarker === 'keep-me', 'the pre-S7a build reads the key back');
   // An audience with an unknown field: refused whole, nothing written or retired.
   const bad = tempDir('ntf-rv-aud'); s6File(bad, { notifications: [ntf({ id: 'ntf-aud', text: SECRET, audience: { kind: 'org_user', id: 'usr-1', name: 'Maria' } })] });
   const b = openRaw(bad); const blobBefore = b.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value; const seqBefore = meta(b, 'saveSeq');
@@ -819,68 +797,11 @@ test('review of ba6956d, finding 3 — unknown data is never lost silently: an o
   const s2 = t2.load(); s2.db.notifications = [ntf({ id: 'n', audience: { kind: 'player', id: 'pl-adult', extra: 1 } })]; s2.db.notes = [{ id: 'unrelated' }];
   assert.throws(() => t2.save(s2), /audience carries unknown field\(s\) extra/); assert.equal(dump(t2.sqlite), before); assert.equal(t2.revision(), seq); t2.sqlite.close();
   assert.throws(() => validateNotificationRows([ntf({ actionRequired: { deadline: null, ackedAt: null, ackedBy: null, extra: true } })]), /actionRequired carries unknown field\(s\) extra/);
-  rm(dir, out, bad, snapDir);
+  rm(dir, bad, snapDir);
 });
-
-// ============================================================= rollback (copy-only, to the pre-S7a build 812e13b)
-test('rollback: the copy-only tool writes the notifications and notificationPrefs blobs the pre-S7a build reads — EVERY row, in insertion order, timestamps (refreshed and tied), repeat counts, acknowledgment contracts, unknown fields and the stored preferences exactly as they are — drops the three tables and the 0009 record, advances the revision, never touches the source, keeps every other table exactly; the real migration re-upgrades the copy to the same rows; the S6a tool refuses the S7a file (LATER_SCHEMA) and accepts the copy', () => {
-  const src = tempDir('ntf-rb-src'); s6File(src, { notifications: [ntf({ id: 'ntf-1', extra: 'kept' })], notificationPrefs: [pref({ categories: { compliance: false, mentions: false } })] });
-  { const s = openRaw(src); migrate(s); const r = bare(s); r.create({ audience: PLAYER, type: 'transition', text: 'After the cutover.', refId: 'trn-1', category: 'security_account', deferredPush: true, actionRequired: { deadline: NOW + HOUR }, at: NOW - 2 * HOUR });
-    const tie = r.create({ audience: PLAYER, type: 'case', text: 'tie', refId: null, category: null, deferredPush: false, at: NOW - 2 * HOUR }); r.coalesce('ntf-1', { at: NOW + MIN }); r.ack(tie.id, PLAYER, { at: NOW }); r.updatePrefs('player', 'pl-adult', { categories: { combine: false }, emailIntent: true }); s.close(); }
-  const expectedRows = (() => { const s = openRaw(src); try { return bare(s).exportRows(); } finally { s.close(); } })();
-  const expectedPrefs = (() => { const s = openRaw(src); try { return bare(s).exportPrefs(); } finally { s.close(); } })();
-  assert.equal(expectedRows.length, 3); assert.equal(expectedRows[0].ts, NOW + MIN, 'the first row carries the newest clock: the order is not the clock');
-  const digest = filesDigest(src); const content = (() => { const s = openRaw(src); try { return dump(s); } finally { s.close(); } })();
-  const out = tempDir('ntf-rb-out');
-  const result = rollbackNotificationsCopy(dbFile(src), out, { now: NOW });
-  assert.deepEqual(result.counts, { notifications: 3, notificationPrefs: 2 }); assert.equal(result.recordRemoved, true);
-  assert.equal(filesDigest(src)['scoutbox.db'], digest['scoutbox.db'], 'the source main file is byte-identical');
-  { const s = openRaw(src); assert.equal(dump(s), content, 'the source content is unchanged'); s.close(); }
-  const o = openRaw(out);
-  for (const t of NOTIFICATION_TABLES) assert.equal(tableExists(o, t), false, t);
-  assert.equal(applied(o).includes(NOTIFICATIONS_MIGRATION), false); assert.equal(meta(o, NOTIFICATIONS_CUTOVER_META), undefined);
-  assert.deepEqual(blob(o, 'notifications'), expectedRows, 'every row, in order, as the pre-S7a build reads it'); assert.deepEqual(blob(o, 'notificationPrefs'), expectedPrefs);
-  assert.equal(legacyCoalesceTarget(blob(o, 'notifications'), ORG_USER, 'message', ntf().text, 'chan-1', NOW + 2 * MIN)?.id, 'ntf-1', 'the pre-S7a scan over the reconstructed blob finds what it found before');
-  for (const t of ['players', 'guardians', 'orgs', 'sessions', 'org_users', 'guardian_children', 'pairing_codes', 'email_challenges']) assert.equal(JSON.stringify(o.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()), (() => { const s = openRaw(src); try { return JSON.stringify(s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()); } finally { s.close(); } })(), `${t} untouched`);
-  assert.equal(Number(meta(o, 'saveSeq')), result.saveSeq);
-  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [NOTIFICATIONS_MIGRATION], 're-upgrade: 0009 runs again on the reconstructed blobs');
-  assert.deepEqual(bare(o).exportRows(), expectedRows, 'and reproduces the rows'); assert.deepEqual(bare(o).exportPrefs(), expectedPrefs);
-  o.close();
-  const s6out = tempDir('ntf-rb-s6'); const s6out2 = tempDir('ntf-rb-s6b');
-  assert.throws(() => rollbackOneTimeCodesCopy(dbFile(src), s6out), (err) => err.code === 'LATER_SCHEMA' && /0009_notifications/.test(err.message)); assert.deepEqual(fs.readdirSync(s6out), []);
-  const out2 = tempDir('ntf-rb-out2'); rollbackNotificationsCopy(dbFile(src), out2, { now: NOW });
-  assert.equal(rollbackOneTimeCodesCopy(dbFile(out2), s6out2).recordRemoved, true, 'the S6a tool accepts the S7a copy');
-  rm(src, out, out2, s6out, s6out2);
-});
-
-test('rollback refusals leave no output and never touch the source: a later schema step (exit 4), a file that never applied 0009 (exit 5), a non-empty output directory (exit 1), a recorded 0009 whose tables are missing (exit 10), an injected COMMIT failure inside the tool; the CLI reports the counts', () => {
-  const src = tempDir('ntf-rf-src'); s6File(src, { notifications: [ntf()] }); { const s = openRaw(src); migrate(s); s.close(); }
-  const digest = filesDigest(src);
-  const script = path.join(HERE, 'notificationsRollback.mjs');
-  const run = (...a) => { try { return { status: 0, out: execFileSync(process.execPath, [script, ...a], { stdio: 'pipe', encoding: 'utf8' }) }; } catch (err) { return { status: err.status }; } };
-  const later = tempDir('ntf-rf-later'); fs.copyFileSync(dbFile(src), dbFile(later)); { const l = openRaw(later); l.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0010_future_step', 1)").run(); l.close(); }
-  const o1 = tempDir('ntf-rf-o1'); assert.throws(() => rollbackNotificationsCopy(dbFile(later), o1), (e) => e.code === 'LATER_SCHEMA' && /0010_future_step/.test(e.message)); assert.deepEqual(fs.readdirSync(o1), []);
-  assert.equal(run(later, path.join(tempDir('ntf-rf-c1'), 'x')).status, 4);
-  const s6 = tempDir('ntf-rf-s6'); s6File(s6);
-  const o2 = tempDir('ntf-rf-o2'); assert.throws(() => rollbackNotificationsCopy(dbFile(s6), o2), (e) => e.code === 'NOT_CUT_OVER'); assert.equal(run(s6, path.join(tempDir('ntf-rf-c2'), 'x')).status, 5);
-  const o3 = tempDir('ntf-rf-o3'); fs.writeFileSync(path.join(o3, 'keep.txt'), 'x'); assert.throws(() => rollbackNotificationsCopy(dbFile(src), o3), (e) => e.code === 'OUTPUT_NOT_EMPTY'); assert.deepEqual(fs.readdirSync(o3), ['keep.txt']); assert.equal(run(src, o3).status, 1);
-  const odd = tempDir('ntf-rf-odd'); fs.copyFileSync(dbFile(src), dbFile(odd)); { const d = openRaw(odd); d.exec('DROP TABLE notification_pref_categories'); d.close(); }
-  const o4 = tempDir('ntf-rf-o4'); assert.throws(() => rollbackNotificationsCopy(dbFile(odd), o4), (e) => e.code === 'UNEXPECTED_SCHEMA' && /notification_pref_categories/.test(e.message)); assert.equal(run(odd, path.join(tempDir('ntf-rf-c4'), 'x')).status, 10);
-  const proto = DatabaseSync.prototype; const exec = proto.exec; let fired = 0;
-  proto.exec = function patched(sql) { if (sql === 'COMMIT' && !fired) { fired += 1; throw new Error('injected COMMIT failure in the S7a rollback tool'); } return exec.call(this, sql); };
-  const o5 = tempDir('ntf-rf-o5');
-  try { assert.throws(() => rollbackNotificationsCopy(dbFile(src), o5), /injected COMMIT failure/); } finally { proto.exec = exec; }
-  assert.equal(fired, 1); assert.deepEqual(fs.readdirSync(o5), [], 'no usable partial output');
-  const ok = run(src, path.join(tempDir('ntf-rf-ok'), 'copy'));
-  assert.equal(ok.status, 0); assert.match(ok.out, /1 notification\(s\) and 0 preference record\(s\) written back as blobs/);
-  assert.equal(ok.out.includes(ntf().text), false, 'the CLI never prints a notification text');
-  assert.equal(filesDigest(src)['scoutbox.db'], digest['scoutbox.db'], 'the source was never touched');
-  rm(src, later, s6, odd, o1, o2, o3, o4, o5);
-});
-
 
 // ============================================================= review of ac50b60 — the notification extras follow-up (the S7b finding-2 class)
-test('review of ac50b60 — nested unknown data on a notification is DETACHED at ingress, export and transaction snapshots: a legacy row imported with futureField { labels: [...] } and own prototype-like keys at depth exports a copy (mutating an export, or a second export, never changes the mirror or the stored JSON); an export mutation inside an aborted unit does not survive the rollback; a repository write inside an aborted unit and a real COMMIT failure leave the held view on the restored row; a reload (restart), the snapshot dispatcher and the copy-only rollback reproduce the stored JSON; unsupported non-JSON values refuse the import and the snapshot write whole; coalescing, preferences and the acknowledgment are unchanged', () => {
+test('review of ac50b60 — nested unknown data on a notification is DETACHED at ingress, export and transaction snapshots: a legacy row imported with futureField { labels: [...] } and own prototype-like keys at depth exports a copy (mutating an export, or a second export, never changes the mirror or the stored JSON); an export mutation inside an aborted unit does not survive the rollback; a repository write inside an aborted unit and a real COMMIT failure leave the held view on the restored row; a reload (restart) and the snapshot dispatcher reproduce the stored JSON; unsupported non-JSON values refuse the import and the snapshot write whole; coalescing, preferences and the acknowledgment are unchanged', () => {
   const dir = tempDir('ntf-rv-extras');
   const special = JSON.parse('{"__proto__":{"legacyMarker":"keep-me","inner":{"__proto__":["deep"],"toString":null}},"constructor":{"toString":[1,{"__proto__":{"x":false}}]},"futureField":{"labels":["original"],"n":null,"b":true,"list":[[1,2],{"k":"v"}]}}');
   const expectedExtras = plain(special); // a JSON round-trip keeps the own "__proto__" key an own key
@@ -902,7 +823,7 @@ test('review of ac50b60 — nested unknown data on a notification is DETACHED at
   L.store.sqlite.exec('CREATE TEMP TABLE rv_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE rv_child (parent_id TEXT NOT NULL REFERENCES rv_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER rv_commit AFTER UPDATE ON notifications BEGIN INSERT INTO rv_child (parent_id) VALUES (\'missing-on-purpose\'); END');
   assert.throws(() => L.store.unitOfWork(() => { L.notifications.markRead('org_user', 'usr-1'); }, { snapshot: L.snapshot }), /FOREIGN KEY constraint failed/);
   assert.equal(held.read, false); assert.deepEqual(extrasOf(held), expectedExtras); L.store.sqlite.exec('DROP TRIGGER rv_commit');
-  // Stored, reloaded (a restart), round-tripped through the snapshot dispatcher and the copy-only rollback blob: the same JSON.
+  // Stored, reloaded (a restart), round-tripped through the snapshot dispatcher: the same JSON.
   const storedExtra = JSON.parse(rowsOf(dir, 'notifications', 'seq')[0].extra_json); assert.deepEqual(storedExtra, expectedExtras); assert.ok(Object.hasOwn(storedExtra, '__proto__'));
   L.notifications.reload(); assert.deepEqual(extrasOf(L.notifications.byId('ntf-x')), expectedExtras, 'after a reload');
   // Coalescing, the acknowledgment and the preferences are unchanged around a row with extras.
@@ -911,7 +832,6 @@ test('review of ac50b60 — nested unknown data on a notification is DETACHED at
   L.notifications.updatePrefs('org_user', 'usr-1', { categories: { mentions: false } }); assert.equal(L.notifications.prefsFor('org_user', 'usr-1').categories.mentions, false);
   L.save(); L.close();
   { const tool = openStore(dir); const snap = tool.load(); assert.deepEqual(extrasOf(snap.db.notifications[0]), expectedExtras); tool.save(snap); assert.deepEqual(extrasOf(tool.load().db.notifications[0]), expectedExtras, 'round-tripped through replace'); tool.sqlite.close(); }
-  { const s7c = tempDir('ntf-rv-extras-s7c'); rollbackChannelsCopy(preS6b(dbFile(dir)), s7c, { now: NOW }); const s7b = tempDir('ntf-rv-extras-s7b'); rollbackOutboxPushCopy(dbFile(s7c), s7b, { now: NOW }); const s7a = tempDir('ntf-rv-extras-s7a'); rollbackDispatchesCopy(dbFile(s7b), s7a, { now: NOW }); const out = tempDir('ntf-rv-extras-rb'); rollbackNotificationsCopy(dbFile(s7a), out, { now: NOW }); const o = openRaw(out); const back = JSON.parse(o.prepare("SELECT value FROM collections WHERE name = 'notifications'").get().value)[0]; o.close(); assert.deepEqual(extrasOf(back), expectedExtras, 'the rollback blob carries the same JSON'); rm(s7a, out); }
   // Unsupported non-JSON values refuse the import and the snapshot write whole (nothing written, nothing retired).
   const SECRET = 'SECRET-TEXT-RV4';
   for (const [label, value] of [['a function', () => 1], ['an undefined inside an object', { x: undefined }], ['a bigint', 1n], ['a non-finite number', Number.POSITIVE_INFINITY], ['a class instance', new Date(0)]]) {

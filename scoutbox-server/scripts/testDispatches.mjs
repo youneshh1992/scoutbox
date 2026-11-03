@@ -1,5 +1,5 @@
 // S7b — delivery dispatch records and their attempts as tables
-// (repositories/dispatches.mjs, migration 0010, repositories/dispatchesRollback.mjs):
+// (repositories/dispatches.mjs, migration 0010):
 // the migration from the legacy `dispatches` blob (the one 18-key literal every
 // build since M13 wrote, nested attempts of the two shapes, extras, orphan
 // references counted — never refused — absent / empty / malformed / duplicate
@@ -9,13 +9,11 @@
 // (insertion order, the first-match provider lookup with duplicates, an
 // explicit null and a missing id, the two write modes with owned-transaction
 // memory restore, joined units, real COMMIT failure, hook registration); the
-// snapshot dispatcher (omitted / empty / malformed collections); the copy-only
-// rollback tool. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
+// snapshot dispatcher (omitted / empty / malformed collections). Temporary
+// databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
@@ -23,15 +21,12 @@ import {
   createDispatchesRepository, validateDispatchRows,
   DISPATCHES_MIGRATION, DISPATCHES_CUTOVER_META, DISPATCH_TABLES, DISPATCH_KEYS,
 } from '../repositories/dispatches.mjs';
-import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
-import { rollbackNotificationsCopy } from '../repositories/notificationsRollback.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, s3File, openRaw, applied, blob, meta, dump } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
 function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const dbFile = (dir) => path.join(dir, 'scoutbox.db');
 let counter = 9000;
@@ -334,49 +329,6 @@ test('snapshot dispatcher: a tool that loads and saves the whole file round-trip
   tool.save({ ...snap, db: { ...snap.db, dispatches: [] } }); assert.deepEqual(idsOf(dir), []); assert.equal(attemptsOf(dir).length, 0); assert.equal(blobOf(dir, 'dispatches'), null);
   tool.sqlite.close(); rm(dir);
 });
-
-// ============================================================= the copy-only rollback to the accepted 0641b2c build
-test('rollback (copy-only): every dispatch and every attempt is written back into the dispatches blob in insertion order and in the shapes that build wrote (a note row as {at, note}, a send row as {at, ok, error}, a fractional callback clock, an orphan reference, the own special key), the two tables are dropped, the 0010 record and its meta key removed, saveSeq advanced, every other table byte-identical, the source untouched; the real migration re-upgrades the copy to the same rows; the S7a tool refuses a 0010 file (LATER_SCHEMA); refusals leave no output: a later schema step (exit 4), a file that never applied 0010 (exit 5), a non-empty output directory (exit 1), a recorded 0010 whose tables are missing (exit 10), an injected COMMIT failure inside the tool', () => {
-  const src = tempDir('dsp-rb-src');
-  const special = JSON.parse('{"id":"dsp-proto","notificationId":"ntf-gone","audience":{"kind":"player","id":"pl-x"},"channel":"email","to":null,"provider":"local-fake","status":"skipped","skipReason":"no email on record","providerMessageId":null,"attempts":[],"nextAt":1,"actionDeadline":null,"createdAt":1,"deliveredAt":null,"openedAt":null,"actionedAt":null,"failedAt":null,"failReason":null,"__proto__":{"legacyMarker":"keep-me"}}');
-  const legacy = [inApp('dsp-1', 'ntf-1'), dsp({ id: 'dsp-2', attempts: [{ at: 1, note: 'quiet hours re-check' }, { at: 2, ok: false, error: 'e' }, { at: 3, ok: true, error: null }], deliveredAt: FRACTIONAL, openedAt: FRACTIONAL, status: 'opened' }), special];
-  s7aFile(src, { dispatches: legacy });
-  { const s = openRaw(src); runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id <= DISPATCHES_MIGRATION), { now: NOW, context: { sessionTtlMs: TTL } }); const repo = bare(s); repo.create(dsp({ id: 'dsp-after', attempts: [{ at: 4, ok: true, error: null }] })); s.close(); } // S7c: this proof is the S7b tool on an S7b-level file (a file carrying 0011 is refused by it — LATER_SCHEMA, proven in testOutboxPush.mjs)
-  const srcBytes = fs.readFileSync(dbFile(src)); const srcDump = (() => { const s = openRaw(src); try { return dump(s); } finally { s.close(); } })();
-  const out = tempDir('dsp-rb-out');
-  const result = rollbackDispatchesCopy(dbFile(src), out, { now: NOW });
-  assert.deepEqual(result.counts, { dispatches: 4, attempts: 4 }); assert.equal(result.recordRemoved, true);
-  assert.ok(fs.readFileSync(dbFile(src)).equals(srcBytes), 'the source file is untouched'); { const s = openRaw(src); try { assert.deepEqual(dump(s), srcDump); } finally { s.close(); } }
-  const o = openRaw(out);
-  const back = JSON.parse(o.prepare("SELECT value FROM collections WHERE name = 'dispatches'").get().value);
-  assert.equal(JSON.stringify(back.slice(0, 3)), JSON.stringify(legacy.map(extrasFirst)), 'byte-identical to what that build wrote (unknown fields first), the special key and the fractional clock included'); assert.equal(back[3].id, 'dsp-after'); assert.deepEqual(back[3].attempts, [{ at: 4, ok: true, error: null }], 'nothing written after the cutover is lost');
-  assert.ok(Object.hasOwn(back[2], '__proto__') && back[2].__proto__.legacyMarker === 'keep-me'); assert.equal(back[1].deliveredAt, FRACTIONAL);
-  for (const t of DISPATCH_TABLES) assert.equal(tableExists(o, t), false);
-  assert.equal(applied(o).includes(DISPATCHES_MIGRATION), false); assert.equal(meta(o, DISPATCHES_CUTOVER_META), undefined); assert.equal(Number(meta(o, 'saveSeq')), Number(meta(openRaw(src), 'saveSeq')) + 1);
-  assert.equal(o.prepare('PRAGMA integrity_check').get().integrity_check, 'ok'); assert.ok(tableExists(o, 'notifications'), 'the S7a tables are untouched');
-  // Re-upgrade: the real migration brings the copy back to the same rows.
-  assert.deepEqual(migrate(o, { now: NOW + MIN }).ran, [DISPATCHES_MIGRATION, '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // S7c: the rollback copy predates 0011 too
-  assert.equal(JSON.stringify(bare(o).exportRows()), JSON.stringify(back), 'the same rows after the re-upgrade'); assert.equal(JSON.parse(meta(o, DISPATCHES_CUTOVER_META)).dispatches.orphanReferences, 1);
-  o.close();
-  // The S7a tool refuses a 0010 file: no partial downgrade.
-  const s7aOut = tempDir('dsp-rb-s7a'); assert.throws(() => rollbackNotificationsCopy(dbFile(src), s7aOut), (e) => e.code === 'LATER_SCHEMA' && /0010_dispatches/.test(e.message)); assert.deepEqual(fs.readdirSync(s7aOut), []);
-  // Refusals and the CLI.
-  const script = path.join(HERE, 'dispatchesRollback.mjs');
-  const run = (args) => { try { return { code: 0, out: execFileSync(process.execPath, [script, ...args], { encoding: 'utf8', stdio: 'pipe' }) }; } catch (e) { return { code: e.status, out: `${e.stdout}${e.stderr}` }; } };
-  const later = tempDir('dsp-rb-later'); fs.copyFileSync(dbFile(src), dbFile(later)); { const l = openRaw(later); l.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0011_future_step', 1)").run(); l.close(); }
-  const o1 = tempDir('dsp-rb-o1'); assert.throws(() => rollbackDispatchesCopy(dbFile(later), o1), (e) => e.code === 'LATER_SCHEMA' && /0011_future_step/.test(e.message)); assert.deepEqual(fs.readdirSync(o1), []); assert.equal(run([later, tempDir('dsp-rb-o1b')]).code, 4);
-  const notCut = tempDir('dsp-rb-notcut'); s7aFile(notCut, { dispatches: [] }); const o2 = tempDir('dsp-rb-o2'); assert.throws(() => rollbackDispatchesCopy(dbFile(notCut), o2), (e) => e.code === 'NOT_CUT_OVER'); assert.deepEqual(fs.readdirSync(o2), []); assert.equal(run([notCut, tempDir('dsp-rb-o2b')]).code, 5);
-  const o3 = tempDir('dsp-rb-o3'); fs.writeFileSync(path.join(o3, 'keep.txt'), 'x'); assert.throws(() => rollbackDispatchesCopy(dbFile(src), o3), (e) => e.code === 'OUTPUT_NOT_EMPTY'); assert.equal(run([src, o3]).code, 1); assert.deepEqual(fs.readdirSync(o3), ['keep.txt']);
-  const odd = tempDir('dsp-rb-odd'); fs.copyFileSync(dbFile(src), dbFile(odd)); { const x = openRaw(odd); x.exec('DROP TABLE dispatch_attempts'); x.close(); } const o4 = tempDir('dsp-rb-o4'); assert.throws(() => rollbackDispatchesCopy(dbFile(odd), o4), (e) => e.code === 'UNEXPECTED_SCHEMA'); assert.deepEqual(fs.readdirSync(o4), []); assert.equal(run([odd, tempDir('dsp-rb-o4b')]).code, 10);
-  const proto = DatabaseSync.prototype; const exec = proto.exec; let fired = 0;
-  proto.exec = function patched(sql) { if (sql === 'COMMIT' && !fired) { fired += 1; throw new Error('injected COMMIT failure in the S7b rollback tool'); } return exec.call(this, sql); };
-  const o5 = tempDir('dsp-rb-o5');
-  try { assert.throws(() => rollbackDispatchesCopy(dbFile(src), o5), /injected COMMIT failure/); } finally { proto.exec = exec; }
-  assert.deepEqual(fs.readdirSync(o5), [], 'a failure inside the tool leaves no output');
-  const cli = run([src, tempDir('dsp-rb-cli'), '--json']); assert.equal(cli.code, 0); assert.deepEqual(JSON.parse(cli.out).counts, { dispatches: 4, attempts: 4 });
-  rm(src, out, s7aOut, later, o1, notCut, o2, o3, odd, o4, o5);
-});
-
 
 // ============================================================= review of 26d492b (three independently reproduced findings)
 test('review of 26d492b, finding 1 — EVERY patch refusal is a participant failure: a null or non-object patch, a missing row, an unknown field and an invalid value each refuse INSIDE the joined boundary, so a unit that catches the refusal still rolls back — the earlier patch of the same unit, the blob row it appended, the status in the table (second connection) and saveSeq are all as before, the held view shows the restored row — caught and uncaught, for the staged repository and for an immediate one participating in the same store unit, and for a repository whose hook is not registered; a write pending BEFORE the refused unit stays pending and lands with the successful retry; a valid empty patch stays a no-op', () => {

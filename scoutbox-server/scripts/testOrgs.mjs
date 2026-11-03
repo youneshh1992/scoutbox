@@ -1,10 +1,10 @@
 // Behavioural tests for migration plan step S3: organisations become
 // table-backed (scalars in columns, every other field in facets_json), org_users
-// is rebuilt STRICT with the organisation foreign key, and a rollback tool
-// produces a pre-S3 copy. Everything runs on throwaway databases under the OS
-// temp directory with synthetic fixtures; nothing touches DATA_DIR. Run with: npm test
+// is rebuilt STRICT with the organisation foreign key. Everything runs on
+// throwaway databases under the OS temp directory with synthetic fixtures;
+// nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,19 +13,6 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
 import { createOrgsRepository, validateOrgRecord, toRow, fromRow, ORGS_TABLE, ORGS_CUTOVER_MIGRATION, MIGRATED_KEYS } from '../repositories/orgs.mjs';
-import { rollbackOrgsCopy } from '../repositories/orgsRollback.mjs';
-import { rollbackCoreIdentityCopy } from '../repositories/coreIdentityRollback.mjs';
-import { rollbackPlayerSubrecordsCopy } from '../repositories/playerSubrecordsRollback.mjs';
-import { rollbackOneTimeCodesCopy } from '../repositories/oneTimeCodesRollback.mjs';
-import { rollbackNotificationsCopy } from '../repositories/notificationsRollback.mjs';
-import { rollbackDispatchesCopy } from '../repositories/dispatchesRollback.mjs';
-import { rollbackOutboxPushCopy } from '../repositories/outboxPushRollback.mjs';
-import { rollbackChannelsCopy } from '../repositories/channelsRollback.mjs';
-import { rollbackSafetyAuditCopy } from '../repositories/safetyAuditRollback.mjs';
-import { rollbackPlayerErasureCopy } from '../repositories/playerErasureRollback.mjs';
-import { rollbackRecruitmentCopy } from '../repositories/recruitmentRollback.mjs';
-import { rollbackRecruitmentCasesCopy } from '../repositories/recruitmentCasesRollback.mjs';
-import { rollbackToPreS8c as rollbackRecruitmentContactsOffersCopy } from '../repositories/rollbackChain.mjs'; // S8d: the S8d step-back then the S8c tool, as one link (a live file carries 0018)
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
@@ -40,8 +27,6 @@ import { openStore } from '../store.mjs';
 const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { pickPort } from './testPort.mjs';
-// S6b: a file this tree wrote carries 0013 too; the S7d tool refuses a later schema step, so the rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6b = (file) => { const s8c = tempDir('s8c-to-s8b'); rollbackRecruitmentContactsOffersCopy(file, s8c); /* S8c: the file carries 0017; its rollback (copy-only, the contacts and offers written back as blobs) goes first */ const s8b = tempDir('s8b-to-s8a'); rollbackRecruitmentCasesCopy(path.join(s8c, 'scoutbox.db'), s8b); /* then S8b: the file carries 0016; its rollback (copy-only, the cases and the four room collections written back as blobs) goes first */ const s8a = tempDir('s8a-to-s4br'); rollbackRecruitmentCopy(path.join(s8b, 'scoutbox.db'), s8a); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); rollbackPlayerErasureCopy(path.join(s8a, 'scoutbox.db'), s4br); /* then S4b-R */ const out = tempDir('s6b-to-s7d'); rollbackSafetyAuditCopy(path.join(s4br, 'scoutbox.db'), out); return path.join(out, 'scoutbox.db'); };
 
 let passed = 0;
 // TEST_ONLY=<substring> runs the matching checks alone (reproductions and reviews); unset, every check runs.
@@ -589,64 +574,6 @@ test('snapshot mode: before the cutover record the orgs blob is authoritative; a
   assert.deepEqual(db2.orgs.map((o) => o.id), ['org-pro', 'org-grass', 'org-tool']); assert.equal(db2.orgs[0].suspended, true);
   assert.ok(layer.sessions.byToken('legacy-maria-token') && layer.sessions.byToken('legacy-sam-token'), 'staff sessions survived every refused and accepted save');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
-});
-
-// ------------------------------------------------------------- rollback
-test('rollback: the tool produces a pre-S3 copy — orgs back in the blob with every field, org_users back to the S0 definition with every row, sessions untouched, source unchanged; it refuses a later schema and a file that never cut over', () => {
-  const dir = tempDir('s3-rb-src'); s2File(dir, { extra: { notes: [{ id: 'n1' }] } });
-  let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { ...store.load().db };
-  const layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  layer.orgs.update('org-pro', { suspended: true }); db.orgs[0].squad.push({ id: 'sq-after', name: 'After S3' });
-  layer.orgs.insert({ id: 'org-after', name: 'After FC', type: 'club', level: 'pro', plan: 'Pro' });
-  const minted = layer.sessions.create('org', 'org-pro', { userId: 'usr-pro' });
-  store.save({ savedAt: 2, idCounter: 1000, db }); store.sqlite.close();
-  const before = fileDigest(dir);
-  const out = tempDir('s3-rb-out');
-  // The file is at S4a after the boot: the S3 tool refuses it until the S4a rollback produced the S3-shaped copy it works on.
-  assert.throws(() => rollbackOrgsCopy(path.join(dir, 'scoutbox.db'), tempDir('s3-rb-refused')), (err) => err.code === 'LATER_SCHEMA' && /0005_core_identity_live, 0006_media_deletions/.test(err.message));
-  // S5: the file carries 0007 too; the chain is the S5 rollback, then the S4a rollback, then this tool.
-  const s7cState = tempDir('s3-rb-s7c'); rollbackChannelsCopy(preS6b(path.join(dir, 'scoutbox.db')), s7cState); // S7d first (the file carries 0012),
-  const s7bState = tempDir('s3-rb-s7b'); rollbackOutboxPushCopy(path.join(s7cState, 'scoutbox.db'), s7bState); // then S7c on its output,
-  const s7aState = tempDir('s3-rb-s7a'); rollbackDispatchesCopy(path.join(s7bState, 'scoutbox.db'), s7aState); const s6aState = tempDir('s3-rb-s6a'); rollbackNotificationsCopy(path.join(s7aState, 'scoutbox.db'), s6aState); // then S7b on its output, then S7a
-  const s5State = tempDir('s3-rb-s5'); rollbackOneTimeCodesCopy(path.join(s6aState, 'scoutbox.db'), s5State); // then S6a: the copy carries 0008
-  const s4aState = tempDir('s3-rb-s4a'); rollbackPlayerSubrecordsCopy(path.join(s5State, 'scoutbox.db'), s4aState);
-  const s3State = tempDir('s3-rb-s3');
-  rollbackCoreIdentityCopy(path.join(s4aState, 'scoutbox.db'), s3State);
-  const result = rollbackOrgsCopy(path.join(s3State, 'scoutbox.db'), out);
-  assert.equal(fileDigest(dir), before, 'the source is untouched');
-  assert.equal(result.organisations, 4); assert.equal(result.staff, 3); assert.equal(result.sessions, 4); assert.equal(result.recordRemoved, true);
-  const o = openRaw(out);
-  assert.deepEqual(o.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live']);
-  const blob = JSON.parse(o.prepare("SELECT value FROM collections WHERE name = 'orgs'").get().value);
-  assert.deepEqual(blob.map((x) => x.id), ['org-pro', 'org-grass', 'org-agency', 'org-after']);
-  assert.equal(blob[0].suspended, true); assert.equal(blob[0].squad.at(-1).name, 'After S3'); assert.equal(JSON.stringify(blob[2]), JSON.stringify(ORGS()[2]), 'post-S3 changes are kept; an untouched record is identical');
-  assert.equal(o.prepare('SELECT COUNT(*) AS n FROM orgs').get().n, 0, 'the S1 shadow table is empty');
-  assert.ok(!/facets_json/.test(o.prepare("SELECT sql FROM sqlite_master WHERE name = 'orgs'").get().sql), 'the S1 definition');
-  assert.equal(o.prepare("SELECT COUNT(*) AS n FROM meta WHERE key IN ('orgsCutover', 'orgsInit')").get().n, 0, 'the S3 bookkeeping is gone with the record');
-  const staffSql = o.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql;
-  assert.ok(!/STRICT/.test(staffSql) && !/REFERENCES/.test(staffSql), 'org_users is back to the S0 definition');
-  assert.equal(o.prepare('SELECT COUNT(*) AS n FROM org_users').get().n, 3);
-  assert.deepEqual(o.prepare('SELECT sid FROM sessions ORDER BY sid').all().map((r) => r.sid).length, 4, 'every session, the one minted after S3 included, is kept');
-  assert.ok(o.prepare('SELECT 1 FROM sessions WHERE token_hash = ?').get(sha256(minted.token)));
-  assert.match(o.prepare("SELECT sql FROM sqlite_master WHERE name = 'sessions'").get().sql, /REFERENCES org_users\(id\)/);
-  assert.deepEqual(o.prepare('PRAGMA foreign_key_check').all(), []);
-  assert.equal(o.prepare("SELECT value FROM collections WHERE name = 'notes'").get().value, '[{"id":"n1"}]');
-  o.close();
-  // The S2 data layer (the previous build's repositories: 0001–0003) attaches to the copy and reads the sessions.
-  // Refusals: a later schema step, and a file that never cut over.
-  const later = openRaw(s3State); later.prepare("INSERT INTO data_migrations (id, applied_at) VALUES ('0007_future_step', 1)").run(); later.close();
-  const out2 = tempDir('s3-rb-out2');
-  assert.throws(() => rollbackOrgsCopy(path.join(s3State, 'scoutbox.db'), out2), (err) => err.code === 'LATER_SCHEMA' && /0007_future_step/.test(err.message));
-  assert.deepEqual(fs.readdirSync(out2), [], 'a refused rollback leaves no output');
-  const out3 = tempDir('s3-rb-out3');
-  assert.throws(() => rollbackOrgsCopy(path.join(out, 'scoutbox.db'), out3), (err) => err.code === 'NOT_CUT_OVER');
-  assert.deepEqual(fs.readdirSync(out3), []);
-  // CLI exit codes.
-  const script = path.join(HERE, 'orgsRollback.mjs');
-  try { execFileSync(process.execPath, [script, dir, path.join(tempDir('s3-rb-cli'), 'x')], { stdio: 'pipe' }); assert.fail('should refuse'); } catch (err) { assert.equal(err.status, 4); }
-  try { execFileSync(process.execPath, [script, out, path.join(tempDir('s3-rb-cli2'), 'x')], { stdio: 'pipe' }); assert.fail('should refuse'); } catch (err) { assert.equal(err.status, 5); }
-  for (const d of [dir, out, out2, out3]) fs.rmSync(d, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- through the real server

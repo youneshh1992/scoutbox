@@ -14,18 +14,16 @@
 // failed ordinary save at the REAL COMMIT keeping the message in memory and landing
 // it ONCE with the next save, a legacy orgUserIdForNotify and unknown fields carried
 // through the import, the admin backup in the legacy shape, a restore importing
-// through 0012, the S7c tool refusing the file, the copy-only rollback booted by the
-// accepted b67bce5 build (SCOUTBOX_PRE_S7D_SERVER: it reads the same threads and posts a
-// message into its blob) and the re-upgrade. Every database read goes through a
+// through 0012. Every database read goes through a
 // second read-only connection. Nothing here touches DATA_DIR or real data. Run with: npm test
 //
 // FAILING-FIRST NOTE (recorded on the unchanged b67bce5 tree before the implementation):
 // [compat] tests read the threads through a storage adapter (the tables after the
 // cutover, the blob before it) and PASS on both trees — they are the behaviour the
 // migration must preserve; [cutover] tests assert the 0012 record, the tables, the
-// absence of the blob and the rollback tool and FAIL on b67bce5 on concrete assertions.
+// absence of the blob and FAIL on b67bce5 on concrete assertions.
 import assert from 'node:assert/strict';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -38,8 +36,6 @@ let passed = 0;
 const only = process.env.TEST_ONLY || '';
 async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// S6b: a file this build wrote carries 0013 too; the S7d tool refuses a later schema step, so every rollback chain starts with the S6b tool's copy-only output (nothing lost) and the S7d tool works on that.
-const preS6bDir = (dir) => { const s8c = tempDir('s8c-to-s8b'); execFileSync(process.execPath, [path.join(HERE, 'rollbackToPreS8c.mjs') /* S8d: the S8d step-back then the S8c tool (a live file carries 0018) */, dir, s8c], { stdio: 'pipe' }); /* S8c: the file carries 0017; its rollback (copy-only, the contacts and offers written back as blobs) goes first */ const s8b = tempDir('s8b-to-s8a'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentCasesRollback.mjs'), s8c, s8b], { stdio: 'pipe' }); /* then S8b (the cases and the four room collections written back as blobs) */ const s8a = tempDir('s8a-to-s4br'); execFileSync(process.execPath, [path.join(HERE, 'recruitmentRollback.mjs'), s8b, s8a], { stdio: 'pipe' }); /* then S8a (requests and trials written back as blobs) */ const s4br = tempDir('s4br-to-s6b'); execFileSync(process.execPath, [path.join(HERE, 'playerErasureRollback.mjs'), s8a, s4br], { stdio: 'pipe' }); /* then S4b-R (copy-only, the retained records kept as a blob) */ const out = tempDir('s6b-to-s7d'); execFileSync(process.execPath, [path.join(HERE, 'safetyAuditRollback.mjs'), s4br, out], { stdio: 'pipe' }); return out; };
 const SERVER = path.join(HERE, '..', 'server.mjs');
 const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
 const A = { 'x-admin-key': 'scoutbox-admin' };
@@ -315,8 +311,8 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0012
   await S.stop(); rm(dir);
 });
 
-await test('[cutover] the admin backup, a restore, the S7c tool\'s refusal, legacy and unknown fields through the import, the copy-only rollback booted by the accepted pre-S7d build and the re-upgrade: the backup\'s channels equal the stored threads exactly and a restore into a NEW directory imports them through 0012 row for row (counts-only record, no blob left); the S7c rollback tool refuses the file (exit 4); a rollback copy of a file with two threads has its blob written back in the legacy shape (then given a legacy orgUserIdForNotify and unknown fields at channel, message, attachment, readBy and sender level by hand, as an older file might carry); this build imports the copy through 0012 losslessly (the admin audit and the backup show the fields exactly; the cutover record counts only; the route that notifies the org reads orgUserIdForNotify as before; the backup and a restore carry the fields); with SCOUTBOX_PRE_S7D_SERVER set, the accepted build boots the rollback copy, lists the same threads, posts a message into its blob and this build re-upgrades the copy with that message included', async () => {
-  const dir = tempDir('s7d-rollback'); let S = await boot(dir);
+await test('[cutover] the admin backup, a restore, and legacy and unknown fields through the import: the backup\'s channels equal the stored threads exactly and a restore into a NEW directory imports them through 0012 row for row (counts-only record, no blob left); the backup\'s legacy-shape channels of a file with two threads, given a legacy orgUserIdForNotify and unknown fields at channel, message, attachment, readBy and sender level by hand (as an older file might carry), are imported by a restore through 0012 losslessly (the admin audit and the backup show the fields exactly; the cutover record counts only; the route that notifies the org reads orgUserIdForNotify as before; the backup and a restore carry the fields)', async () => {
+  const dir = tempDir('s7d-backup'); let S = await boot(dir);
   const maria = await orgLogin(S); let kola = await playerLogin(S, 'pl-adeyemi'); const amara = await guardianLogin(S, 'gd-amara');
   const { channel: adult } = await adultThread(S, maria, kola); const { channel: guardian } = await guardianThread(S, maria, amara);
   assert.equal((await S.j('POST', `/org/channels/${adult.id}/messages`, { text: 'Synthetic one.' }, maria)).status, 201);
@@ -333,22 +329,16 @@ await test('[cutover] the admin backup, a restore, the S7c tool\'s refusal, lega
   assert.equal(JSON.stringify(stored(restored0)), JSON.stringify(original), 'row for row'); assert.equal(q1(restored0, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0, 'no blob left behind');
   const record0 = JSON.parse(q1(restored0, "SELECT value FROM meta WHERE key = 'channelsCutover'").value); assert.deepEqual([record0.imported, record0.messages, record0.attachments], [2, 3, 1]); assert.doesNotMatch(JSON.stringify(record0), /Synthetic/, 'counts only');
   await S.stop();
-  // The S7c tool refuses the S7d file (LATER_SCHEMA).
-  try { execFileSync(process.execPath, [path.join(HERE, 'outboxPushRollback.mjs'), dir, tempDir('s7d-s7ctool')], { stdio: 'pipe' }); assert.fail('the S7c tool must refuse a 0012 file'); } catch (e) { assert.equal(e.status, 4, String(e.stderr)); }
-  // The copy-only rollback, then legacy/unknown fields written into the blob by hand (what an older file might carry).
-  const copy = tempDir('s7d-copy');
-  const out = execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), copy], { encoding: 'utf8' }); // fails on b67bce5: no such tool
-  assert.match(out, /written back/); assert.equal(live(copy), false); assert.deepEqual(stored(copy), original, 'the blob holds every thread in order, in the legacy shape');
-  assert.ok(live(dir), 'the source is untouched'); assert.deepEqual(stored(dir), original);
+  // The backup's legacy-shape channels, given legacy/unknown fields by hand (what an older file might carry).
   const SECRET = 'SECRET-LEGACY-MARKER-91';
-  { const s = new DatabaseSync(path.join(copy, 'scoutbox.db')); const rows = JSON.parse(s.prepare("SELECT value FROM collections WHERE name = 'channels'").get().value);
-    rows[0].orgUserIdForNotify = 'usr-legacy-notify'; rows[0].futureChannelField = { nested: [1, SECRET] }; rows[0].readBy.futureReadByField = 7;
-    rows[0].messages[1].futureMessageField = true; rows[0].messages[1].sender.futureSenderField = 'kept'; rows[0].messages[1].attachment.futureAttachmentField = 'kept';
-    delete rows[1].scoutRole; // an ABSENT optional key next to present-and-null ones
-    s.prepare("UPDATE collections SET value = ? WHERE name = 'channels'").run(JSON.stringify(rows)); s.close(); }
-  const legacy = canon(stored(copy)); // the blob as edited by hand (the added keys sit last there); the tables give the export convention back — unknown keys first at every level
-  // This build imports the hand-edited copy.
-  const up = tempDir('s7d-up'); fs.cpSync(copy, up, { recursive: true });
+  const rows = JSON.parse(JSON.stringify(snapshot0.db.channels));
+  rows[0].orgUserIdForNotify = 'usr-legacy-notify'; rows[0].futureChannelField = { nested: [1, SECRET] }; rows[0].readBy.futureReadByField = 7;
+  rows[0].messages[1].futureMessageField = true; rows[0].messages[1].sender.futureSenderField = 'kept'; rows[0].messages[1].attachment.futureAttachmentField = 'kept';
+  delete rows[1].scoutRole; // an ABSENT optional key next to present-and-null ones
+  const legacy = canon(rows); // the blob as edited by hand (the added keys sit last there); the tables give the export convention back — unknown keys first at every level
+  // This build imports the hand-edited snapshot through a restore.
+  const up = tempDir('s7d-up'); fs.cpSync(bk0.body.dir, up, { recursive: true });
+  fs.writeFileSync(path.join(up, 'db.json'), JSON.stringify({ ...snapshot0, db: { ...snapshot0.db, channels: rows } }));
   S = await boot(up); assert.ok(live(up), 'imported through 0012');
   assert.equal(q1(up, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0, 'the blob is retired');
   const record = JSON.parse(q1(up, "SELECT value FROM meta WHERE key = 'channelsCutover'").value); assert.deepEqual([record.imported, record.messages, record.attachments, record.withExtraFields, record.withAbsentKeys], [2, 3, 1, 1, 1]); assert.doesNotMatch(JSON.stringify(record) + S.log(), new RegExp(SECRET), 'counts only; no value in the log');
@@ -367,27 +357,7 @@ await test('[cutover] the admin backup, a restore, the S7c tool\'s refusal, lega
   const restored = tempDir('s7d-restored'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored)); assert.equal(JSON.stringify(stored(restored)), JSON.stringify(snapshot.db.channels), 'row for row'); assert.equal(q1(restored, "SELECT COUNT(*) AS n FROM collections WHERE name = 'channels'").n, 0);
   await S.stop();
-  // The accepted build boots the (unedited) rollback copy of the original file.
-  const copy2 = tempDir('s7d-copy2'); execFileSync(process.execPath, [path.join(HERE, 'channelsRollback.mjs'), preS6bDir(dir), copy2], { encoding: 'utf8' }); assert.deepEqual(stored(copy2), original);
-  const OLD = process.env.SCOUTBOX_PRE_S7D_SERVER;
-  if (OLD && fs.existsSync(OLD)) {
-    const old = await boot(copy2, {}, OLD);
-    assert.ok(!/0012_channels/.test(old.log()), 'the accepted build knows nothing of 0012'); assert.equal(live(copy2), false);
-    const oldAudit = (await old.j('GET', '/admin/channels', undefined, null, A)).body; assert.deepEqual(oldAudit, original, 'the old build lists the same threads, messages and receipts');
-    const oldMaria = await orgLogin(old); const oldKola = await playerLogin(old, 'pl-adeyemi');
-    assert.deepEqual((await old.j('GET', '/player/channels', undefined, oldKola)).body.map((c) => [c.id, c.messages.map((x) => x.id)]), [[adult.id, original[0].messages.map((x) => x.id)]]);
-    const oldMsg = await old.j('POST', `/org/channels/${adult.id}/messages`, { text: 'Synthetic message from the accepted build.', clientMsgId: 'client-old' }, oldMaria); assert.equal(oldMsg.status, 201, oldMsg.text);
-    assert.deepEqual(stored(copy2)[0].messages.map((x) => x.id), [...original[0].messages.map((x) => x.id), oldMsg.body.id], 'the old build keeps writing to its blob');
-    await old.stop();
-    console.log('    (pre-S7d build booted the rollback copy: same threads, a new message accepted)');
-    const re = await boot(copy2); assert.ok(live(copy2), 'this build re-upgraded the copy');
-    const reRows = stored(copy2); assert.deepEqual(reRows[0].messages.map((x) => x.id), [...original[0].messages.map((x) => x.id), oldMsg.body.id], 'the old build\'s message included'); assert.equal(reRows[0].messages.at(-1).clientMsgId, 'client-old'); assert.deepEqual(reRows[1], original[1]);
-    assert.deepEqual((await re.j('GET', '/admin/channels', undefined, null, A)).body, reRows);
-    await re.stop();
-  } else {
-    console.log('    (SCOUTBOX_PRE_S7D_SERVER not set: the pre-S7d boot of the rollback copy was not exercised here)');
-  }
-  rm(dir, bk0.body.dir, restored0, copy, up, bk.body.dir, restored, copy2);
+  rm(dir, bk0.body.dir, restored0, up, bk.body.dir, restored);
 });
 
 console.log(`\n${passed} channel server checks passed`);

@@ -1,13 +1,9 @@
-// S4a, first bounded part: player/guardian mapping, validation and the
-// read-only preflight (repositories/identityMapping.mjs,
-// repositories/identityPreflight.mjs, scripts/preflightCoreIdentity.mjs).
+// S4a, first bounded part: player/guardian mapping and validation
+// (repositories/identityMapping.mjs, repositories/identityPreflight.mjs).
 // Nothing here boots a server or touches DATA_DIR: every database is a
 // temporary file or in memory, every record is synthetic. Run with: npm test
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -20,7 +16,6 @@ import {
   PREFLIGHT_STATUS, MINOR_WITHOUT_LINK_REASON, AUTHORISES_NOTHING,
 } from '../repositories/identityPreflight.mjs';
 import { transaction } from '../repositories/database.mjs';
-import { openStore } from '../store.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -30,9 +25,7 @@ const ROOT = path.join(HERE, '..', '..');
 const DAY = 86_400_000;
 // A fixed evaluation instant (2026-10-11T12:00:00Z) so adult/minor is reproducible.
 const NOW = Date.UTC(2026, 9, 11, 12);
-const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 const clone = (v) => JSON.parse(JSON.stringify(v));
-const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 const memDb = () => { const s = new DatabaseSync(':memory:'); createCandidateSchema(s); return s; };
 
 // ------------------------------------------------------------------ fixtures
@@ -469,67 +462,6 @@ test('SQL: the candidate DDL (what migration 0005 creates) is exactly the docume
   docs.close(); cand.close();
 });
 
-// ------------------------------------------------------------------ the preflight command
-test('preflight: run on a data directory it leaves the source byte-identical, applies no migration, starts no server, reads only the two blobs, and prints a deterministic report with the right exit code', () => {
-  const dir = tempDir('preflight-src');
-  const snap = consistentSnapshot();
-  // A plain snapshot store (no data layer, no migrations): exactly a backup or a pre-S0 file.
-  const store = openStore(dir);
-  store.save({ savedAt: NOW, idCounter: 9100, db: { ...snap, orgs: [], users: [], sessions: [], requests: [{ id: 'req-1' }] } });
-  store.sqlite.close();
-  const file = path.join(dir, 'scoutbox.db');
-  const before = sha256(fs.readFileSync(file));
-  const walBefore = fs.existsSync(`${file}-wal`) ? sha256(fs.readFileSync(`${file}-wal`)) : null;
-  const script = path.join(HERE, 'preflightCoreIdentity.mjs');
-  const run = (...extra) => spawnSync(process.execPath, [script, dir, '--now', String(NOW), ...extra], { encoding: 'utf8' });
-  const a = run('--json'); const b = run('--json');
-  assert.equal(a.status, 0, a.stderr + a.stdout);
-  assert.equal(a.stdout, b.stdout, 'two runs print the same report');
-  const out = JSON.parse(a.stdout);
-  assert.equal(out.status, 'complete'); assert.deepEqual(out.source.blobs, ['players', 'guardians']); assert.deepEqual(out.source.migrationsRecorded, []);
-  assert.equal(out.source.alreadyCutOver, false); assert.deepEqual(out.candidate, { guardians: 3, players: 4, links: 4 }); assert.equal(out.authorises, AUTHORISES_NOTHING);
-  for (const secret of ['example.com', 'scrypt$', 'K7Q2ZP', 'Parent One']) assert.equal(a.stdout.includes(secret), false, `${secret} is not printed`);
-  assert.equal(sha256(fs.readFileSync(file)), before, 'the source file is byte-identical');
-  // A read-only open of a WAL-mode file makes SQLite create its -wal/-shm side files when they are missing; they hold
-  // nothing (no frame was written). What matters is that no content was written anywhere: an empty log, or the one that
-  // was there before, and a main file that did not change.
-  const walAfter = fs.existsSync(`${file}-wal`) ? fs.readFileSync(`${file}-wal`) : null;
-  assert.ok(walAfter === null || walAfter.length === 0 || sha256(walAfter) === walBefore, 'no write-ahead-log frame was written');
-  const ro = new DatabaseSync(file, { readOnly: true });
-  assert.equal(ro.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('data_migrations', 'guardians', 'players', 'guardian_children', 'org_users')").get().n, 0, 'no migration ran against the source');
-  ro.close();
-  const text = run();
-  assert.equal(text.status, 0); assert.match(text.stdout, /status: complete/); assert.match(text.stdout, /not written anywhere/); assert.match(text.stdout, /does not approve/);
-  // Invalid sources (a malformed record, or a legacy minor without a link) exit 2 and never print a candidate.
-  const blockedDir = tempDir('preflight-blocked');
-  const s2 = openStore(blockedDir); const blocked = consistentSnapshot(); blocked.players.push(childOf(null, 'pl-legacy', '2013-01-01'));
-  s2.save({ savedAt: NOW, idCounter: 1, db: { ...blocked, orgs: [], users: [], sessions: [] } }); s2.sqlite.close();
-  const rb = spawnSync(process.execPath, [script, blockedDir, '--now', String(NOW)], { encoding: 'utf8' });
-  assert.equal(rb.status, 2, rb.stdout); assert.match(rb.stdout, /refused players pl-legacy: a minor on the evaluation date with no guardian link/); assert.match(rb.stdout, /legacy minors without any guardian link .*: pl-legacy/); assert.match(rb.stdout, /status: invalid/); assert.match(rb.stdout, /candidate: none/);
-  const invalidJson = path.join(tempDir('preflight-json'), 'snapshot.json');
-  fs.writeFileSync(invalidJson, JSON.stringify({ db: { players: [{ ...adultSignup(), foot: 'both' }], guardians: [] } }));
-  const ri = spawnSync(process.execPath, [script, invalidJson, '--now', String(NOW), '--json'], { encoding: 'utf8' });
-  assert.equal(ri.status, 2); const oi = JSON.parse(ri.stdout); assert.equal(oi.status, 'invalid'); assert.equal(oi.source.kind, 'json'); assert.equal(oi.candidate, null);
-  assert.equal(spawnSync(process.execPath, [script], { encoding: 'utf8' }).status, 1);
-  assert.equal(spawnSync(process.execPath, [script, path.join(dir, 'nowhere')], { encoding: 'utf8' }).status, 4);
-  // The command's module graph never reaches the server, the data layer's attach or the migration runner.
-  const src = fs.readFileSync(script, 'utf8');
-  for (const forbidden of ['server.mjs', 'attachDataLayer', 'runDataMigrations', '.listen(']) assert.equal(src.includes(forbidden), false, `${forbidden} is not used by the preflight`);
-  fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(blockedDir, { recursive: true, force: true }); fs.rmSync(path.dirname(invalidJson), { recursive: true, force: true });
-});
-
-test('preflight: a file that already records the live cutover is reported invalid rather than re-validated as blobs', () => {
-  const dir = tempDir('preflight-cut');
-  const store = openStore(dir);
-  store.save({ savedAt: NOW, idCounter: 1, db: { players: [], guardians: [], orgs: [], users: [], sessions: [] } });
-  store.sqlite.exec("CREATE TABLE data_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL); INSERT INTO data_migrations VALUES ('0005_core_identity_live', 1)");
-  store.sqlite.close();
-  const r = spawnSync(process.execPath, [path.join(HERE, 'preflightCoreIdentity.mjs'), dir, '--json', '--now', String(NOW)], { encoding: 'utf8' });
-  assert.equal(r.status, 2); const out = JSON.parse(r.stdout);
-  assert.equal(out.source.alreadyCutOver, true); assert.match(out.refusals[0].reason, /already recorded/); assert.equal(out.candidate, null);
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
 test('mapping: the migrated key sets name exactly the columns the schema owns (a drift between the spec and the DDL fails here)', () => {
   const s = memDb();
   const playerCols = new Set(s.prepare('PRAGMA table_info(players)').all().map((c) => c.name));
@@ -678,30 +610,6 @@ test('review 3: the same records through the preflight, real temporary SQLite st
   assertProtoKept(p, out.players[0], 'player via SQLite'); assertProtoKept(g, out.guardians[0], 'guardian via SQLite');
   assert.ok(Object.hasOwn(out.players[0].stats, 'constructor')); assert.ok(Object.hasOwn(out.guardians[0].notificationPrefs, '__proto__'));
   assertPrototypesClean();
-});
-
-test('review: the preflight command reports the malformed references and the out-of-range integers as invalid — exit 2, no candidate, reasons by id and field, no record or secret printed', () => {
-  const dir = tempDir('preflight-review');
-  const script = path.join(HERE, 'preflightCoreIdentity.mjs');
-  const run = (name, db) => {
-    const file = path.join(dir, `${name}.json`);
-    fs.writeFileSync(file, JSON.stringify({ db }));
-    const r = spawnSync(process.execPath, [script, file, '--json', '--now', String(NOW)], { encoding: 'utf8' });
-    assert.equal(r.status, 2, `${name}: exit 2 (${r.stdout}${r.stderr})`);
-    const out = JSON.parse(r.stdout);
-    assert.equal(out.status, 'invalid'); assert.equal(out.candidate, null);
-    for (const secret of ['scrypt$', 'K7Q2ZP', 'example.com']) assert.equal(r.stdout.includes(secret), false, `${name}: ${secret} not printed`);
-    return out;
-  };
-  const a = run('empty-guardian-id', { players: [{ ...adultSignup(), guardianId: '' }], guardians: [guardianSignup()] });
-  assert.ok(a.refusals.some((x) => x.collection === 'players' && x.id === 'pl-9001' && /guardianId is empty/.test(x.reason)), JSON.stringify(a.refusals));
-  const b = run('empty-co-guardian-of', { players: [], guardians: [{ ...guardianSignup(), coGuardianOf: '' }] });
-  assert.ok(b.refusals.some((x) => x.collection === 'guardians' && x.id === 'gd-9001' && /coGuardianOf is empty/.test(x.reason)), JSON.stringify(b.refusals));
-  const c = run('integer-range', { players: [{ ...adultSignup(), heightCm: 1e20, stats: { goals: 2 ** 53 } }], guardians: [{ ...guardianSignup(), createdAt: 2 ** 53 }] });
-  assert.ok(c.refusals.some((x) => x.id === 'pl-9001' && /heightCm is 100000000000000000000, not a safe integer/.test(x.reason)), JSON.stringify(c.refusals));
-  assert.ok(c.refusals.some((x) => x.id === 'pl-9001' && /stats.goals is 9007199254740992, not a safe integer/.test(x.reason)));
-  assert.ok(c.refusals.some((x) => x.id === 'gd-9001' && /createdAt is 9007199254740992, not a safe integer/.test(x.reason)));
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 console.log(`\n${passed} core-identity mapping checks passed`);

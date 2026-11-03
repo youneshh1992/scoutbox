@@ -148,10 +148,7 @@ CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, ow
 -- recruitment_cases and room_decisions, and the CASE id for case_decision_drafts and
 -- case_transaction_handoffs (one row per case, primary key case_id; their own `id` columns are data the
 -- parent-scoped tables admit twice — corrected after the independent review of b7c0dd0, F2, whose
--- build keyed them by the child id; the format is RECORDED — migration 0016 writes
--- meta.recruitmentCasesKeyFormat = 'case-owned-keys/1' in the same transaction as the rows, and every
--- reader, writer and the rollback tool refuse a 0016 file that records anything else or nothing
--- (RECRUITMENT_CASES_FORMAT_UNSUPPORTED) before decoding a row — the review of 2fe05df, R1); ref_id /
+-- build keyed them by the child id); ref_id /
 -- actor_id are NOT columns — a decision's draft id is the
 -- draft_id column of room_decisions; the contacts and offers lines are implemented by 0017 (S8c) — a
 -- contact's and an offer's rows under the record's OWN id —; the packages lines stay drafts for S8d):

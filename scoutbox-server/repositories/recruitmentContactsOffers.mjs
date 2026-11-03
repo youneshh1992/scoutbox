@@ -82,7 +82,7 @@ import { markView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied } from './database.mjs';
 import { EXTRA_CHECK, ABSENT_CHECK, JSON_CHECK, describe, isPlainObject, nonEmpty, tableExists, setOwn, clone, parseJson, ids, sqlType, columnsOf, childSpecs, encode, decodeLevel, rowMeta, metaOf, columnAdmits, toColumn, fromColumn, copyRecord, recruitmentLive, readRequests } from './recruitment.mjs';
-import { S8B_KEY_OWNERS, recruitmentCasesLive, assertKeyFormat } from './recruitmentCases.mjs';
+import { S8B_KEY_OWNERS, recruitmentCasesLive } from './recruitmentCases.mjs';
 
 export const RECRUITMENT_CONTACTS_OFFERS_MIGRATION = '0017_recruitment_contacts_offers';
 /** `meta` key holding the cutover record: counts only, never data. */
@@ -233,7 +233,6 @@ export function deleteRecord(sqlite, coll, id) {
 }
 /** Read every parent record of a collection with its children, in `seq` order: fresh objects from the file. */
 export function readRecords(sqlite, coll) {
-  assertKeyFormat(sqlite, { label: `reading ${coll.name}` }); // a file of another S8b format is never decoded (the R1 rule of 2fe05df applies to every reader)
   const S = stmts(sqlite);
   const groups = new Map(); const seen = new Set();
   for (const c of coll.children) { if (c.ownerTable || seen.has(c.table)) continue; seen.add(c.table); for (const r of S.children[c.table].select.all()) { const key = `${c.table}|${c.ownerCols.map((col) => r[col]).join('|')}`; if (!groups.has(key)) groups.set(key, []); groups.get(key).push({ ...r }); } }
@@ -510,7 +509,6 @@ export const CONTACTS_OFFERS_SNAPSHOT = {
   begin(sqlite, db, { requests, cases, orgs, users, guardians, label = 'the snapshot' } = {}) {
     if (!recruitmentContactsOffersLive(sqlite)) return null;
     if (!sqlite.isTransaction) throw new Error('recruitmentContactsOffers: begin() runs inside the caller\'s transaction');
-    assertKeyFormat(sqlite, { label });
     const supplied = suppliedOf(db);
     const any = RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.some((n) => supplied[n] !== undefined);
     if (!any && requests === undefined && cases === undefined && guardians === undefined) return null;
@@ -614,7 +612,6 @@ export function createRecruitmentContactsOffersRepository({ sqlite, now = Date.n
     // ---------------------------------------------------------- the two save hooks (α: P F0 R before the S8b core hook | … the recruitment hook … | β: A′ D′ G)
     flushPre() {
       if (!sqlite.isTransaction) throw new Error('recruitmentContactsOffers.flushPre runs inside a save transaction; the store reports its commit or rollback afterwards');
-      assertKeyFormat(sqlite, { label: 'the save' });
       const { changed, removed, touched } = changes();
       const rec = recruitment ? recruitment() : null;
       const departingRequests = rec ? rec.departures().requests : [];

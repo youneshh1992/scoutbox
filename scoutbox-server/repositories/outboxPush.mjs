@@ -72,8 +72,7 @@
  * THE ORDERING KEY. Array position was the only total order (ids are minted by
  * one counter and do not sort as strings; timestamps may tie). `seq INTEGER
  * PRIMARY KEY` is that order, durable: assigned at insert, preserved by the
- * migration (array position), by backup/restore and by the rollback (rows
- * written back in `seq` order). No new externally visible id is minted.
+ * migration (array position) and by backup/restore. No new externally visible id is minted.
  *
  * WHERE A ROW BECOMES DURABLE (nothing new; the review of 6ca66ba, D1). The
  * server attaches this repository in STAGED mode: a mutation changes the
@@ -125,11 +124,7 @@
  *   NULL in both, any other value JSON-encoded in `to_json` (CHECK: valid JSON
  *   that is neither a JSON string nor JSON null; one of the two columns is NULL)
  *   and decoded on read into the value and type the writer handed over. Migration
- *   0011's DDL is amended IN PLACE (it was registered but never accepted or
- *   released); a scratch database created by the 40aa05c build — the 0011
- *   record present, `outbox` without `to_json` — is refused at attach by name
- *   (OUTBOX_PUSH_SCHEMA_STALE, nothing changed); the rollback tool reads that
- *   shape, and the re-upgrade creates the corrected table. A value JSON cannot
+ *   0011's DDL is amended IN PLACE. A value JSON cannot
  *   carry is still refused by name — except the non-finite numbers JSON syntax
  *   itself produces, which the review of 78c14b9 showed reach the destination
  *   INSIDE such an array (raw `[1e400,"…"]`, `[[-1e400],"…"]`): the destination
@@ -365,8 +360,6 @@ const TOKEN_SELECT = 'SELECT seq, ref_kind, ref_id, token_json, registered_at, e
 const TOKEN_INSERT = 'INSERT INTO push_tokens (ref_kind, ref_id, token_json, registered_at, extra_json) VALUES (@ref_kind, @ref_id, @token_json, @registered_at, @extra_json)';
 /** A replaced token row goes by its own seq — never by JSON text: +Infinity, -Infinity and a persisted null all read "null" (review of 40aa05c, F1). */
 const TOKEN_DELETE_BY_SEQ = 'DELETE FROM push_tokens WHERE seq = ?';
-/** Whether the outbox table carries the corrected destination pair (a table created by the unaccepted 40aa05c build has to_address only). */
-const outboxHasToJson = (sqlite) => !!sqlite.prepare("SELECT 1 FROM pragma_table_info('outbox') WHERE name = 'to_json'").get();
 /** The destination's two columns: a string in to_address, null as NULL/NULL, any other JSON value encoded in to_json. */
 const destinationColumns = (to) => {
   if (typeof to === 'string') return { to_address: to, to_json: null };
@@ -374,10 +367,6 @@ const destinationColumns = (to) => {
   return json === 'null' ? { to_address: null, to_json: null } : { to_address: null, to_json: json };
 };
 const destinationOf = (r) => (r.to_json != null ? parseJson(r.to_json, 'to') : r.to_address);
-/** A live file whose outbox table lacks to_json was created by the unaccepted 40aa05c build: refused by name before any statement is prepared or any row read; nothing is changed. */
-function refuseStaleOutbox(sqlite) {
-  if (outboxPushLive(sqlite) && !outboxHasToJson(sqlite)) throw Object.assign(new Error(`OUTBOX_PUSH_SCHEMA_STALE: outbox/push: the outbox table has no to_json column — the shape the unaccepted 40aa05c build of migration ${OUTBOX_PUSH_MIGRATION} created (a scratch database; no real database carries it); nothing was changed. Roll it back on a copy with scripts/outboxPushRollback.mjs, which reads this shape, and boot this build on the copy to re-upgrade it`), { code: 'OUTBOX_PUSH_SCHEMA_STALE' });
-}
 const extraJsonOf = (row, known) => { const extra = {}; for (const k of Object.keys(row)) if (!known.includes(k)) setOwn(extra, k, cloneJson(row[k], k).value); return Object.keys(extra).length ? JSON.stringify(extra) : null; };
 const sourceOfRow = (row) => (Object.hasOwn(row, 'transport') ? 'mailer' : 'delivery');
 function outboxParams(row) {
@@ -401,8 +390,7 @@ const copyRow = (row, keptKey = null) => { const c = {}; for (const k of Object.
 const copyTokenRow = (row) => copyRow(row, 'token');
 const copyOutboxRow = (row) => copyRow(row, 'to'); // the destination keeps its live non-finite elements in every detached copy (review of 78c14b9)
 
-/** Reads the corrected table, and the 40aa05c shape without to_json (every destination there is a string or null) so the rollback tool and the snapshot reader can take a scratch database back. */
-const readOutbox = (sqlite) => sqlite.prepare(`${outboxHasToJson(sqlite) ? OUTBOX_SELECT : OUTBOX_SELECT.replace('to_json', 'NULL AS to_json')} ORDER BY seq`).all().map(outboxFromDb);
+const readOutbox = (sqlite) => sqlite.prepare(`${OUTBOX_SELECT} ORDER BY seq`).all().map(outboxFromDb);
 const readPushLog = (sqlite) => sqlite.prepare(`${PUSH_SELECT} ORDER BY seq`).all().map(pushFromDb);
 const readTokenRows = (sqlite) => sqlite.prepare(`${TOKEN_SELECT} ORDER BY seq`).all().map((r) => ({ seq: r.seq, row: tokenFromDb(r) }));
 const readTokens = (sqlite) => readTokenRows(sqlite).map((x) => x.row);
@@ -474,7 +462,6 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
   if (!sqlite) throw new TypeError('the outbox/push repository needs a SQLite connection (node:sqlite); these records have no in-memory or JSON fallback');
   if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the outbox/push repository needs the store\'s participant API `unit` ({ active(), join(work) }) or null; a unit without join() could not report an operation\'s failure to the unit of work');
   if (staged && !unit) throw new TypeError('the outbox/push repository in staged mode needs the store\'s participant API `unit` and the store must register its saveHook()');
-  refuseStaleOutbox(sqlite); // review of 40aa05c, F2: a 40aa05c scratch file, before the statements below are prepared against it
   const stmt = {
     cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
     outbox: sqlite.prepare(OUTBOX_INSERT), delivered: sqlite.prepare('UPDATE outbox SET delivered = ? WHERE id = ?'),
@@ -491,7 +478,6 @@ export function createOutboxPushRepository({ sqlite, now = Date.now, log = () =>
   const load = () => {
     outboxRows.length = 0; outboxById.clear(); pushRows.length = 0; tokenRows.length = 0;
     if (!outboxPushLive(sqlite)) return;
-    refuseStaleOutbox(sqlite);
     for (const r of readOutbox(sqlite)) { outboxRows.push(r); outboxById.set(r.id, r); }
     for (const r of readPushLog(sqlite)) pushRows.push(r);
     for (const { seq, row } of readTokenRows(sqlite)) { tokenRows.push(row); tokenSeq.set(row, seq); }
