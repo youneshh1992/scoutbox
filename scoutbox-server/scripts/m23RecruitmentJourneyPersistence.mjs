@@ -248,13 +248,20 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
     const k = db.recruitmentCases.find((x) => x.id === SP); let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
     for (const to of ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', by: { kind: 'org', id: 'legacy', name: 'Legacy' }, detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
     k.room.rev = (k.room.rev ?? 1) + 6;
-    // A REAL Offer (Kola's, cloned whole) re-homed on this case with its current-revision pointer broken: every other field is sound, only the pointer is stale.
+    // A REAL Offer (Kola's, cloned) re-homed on this case with its current-revision pointer stale: every field is sound,
+    // only the pointer is behind — it names revision 1 while revision 2 is out. (S8c, typed since §4.3: a pointer naming
+    // a revision the Offer does not hold at all is a row the tables cannot hold; that save is REFUSED, naming the row.)
     const src = db.recruitmentOffers.find((o) => o.id === OID);
     const clone = JSON.parse(JSON.stringify(src));
-    clone.id = 'rof-p81p-stale'; clone.caseId = SP; clone.playerId = 'pl-martin'; clone.status = 'ISSUED'; clone.responses = []; clone.currentRevisionId = 'rofr-missing';
-    for (const rv of clone.revisions) { rv.status = 'ISSUED'; rv.response = null; rv.respondedAt = null; if (rv.recipientSnapshot) rv.recipientSnapshot.playerId = 'pl-martin'; }
+    const { discardedByResponseId: _d, ...r0 } = clone.revisions[0];
+    const rev1 = { ...r0, id: 'rofr-p81p-1', revisionNumber: 1, status: 'ISSUED', documents: [], response: null, respondedAt: null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null, recipientSnapshot: r0.recipientSnapshot ? { ...r0.recipientSnapshot, playerId: 'pl-martin' } : null };
+    Object.assign(clone, { id: 'rof-p81p-stale', caseId: SP, playerId: 'pl-martin', status: 'ISSUED', responses: [], readReceipts: [], history: [], agentShare: null, lifecycle: null, keys: { create: null, issue: [], withdraw: [], revise: [] }, revisions: [rev1, { ...rev1, id: 'rofr-p81p-2', revisionNumber: 2 }], currentRevisionId: 'rofr-missing' });
+    const st0 = openStore(DATA); const snap = st0.load(); const onDisk = JSON.stringify(snap.db.recruitmentOffers);
+    let refused = null; try { st0.save({ ...snap, db: { ...db, recruitmentOffers: [...db.recruitmentOffers, clone] } }); } catch (e) { refused = e; }
+    neg(!!refused && /rof-p81p-stale\.currentRevisionId names rofr-missing, not a revision of this offer/.test(refused.message) && JSON.stringify(openStore(DATA).load().db.recruitmentOffers) === onDisk, `5.2 a pointer at a revision the Offer does not hold cannot be stored: the save refuses it, naming the row (${String(refused?.message ?? 'no refusal').slice(0, 100)})`);
+    clone.currentRevisionId = 'rofr-p81p-1';
     db.recruitmentOffers.push(clone);
-    const st0 = openStore(DATA); const snap = st0.load(); snap.db = db; st0.save(snap);
+    snap.db = db; st0.save(snap);
   }
   S = await bootOn(DATA, PORT); ok(S.up, '5.2 booted on the planted store'); await login();
   const spFps = [];
@@ -263,7 +270,7 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
     if (i === 1) neg(jr.journey.classification === 'integrity_error' && jr.journey.integrity.includes('RECORD_CORRUPT') && jr.journey.resources.offerId === null && jr.journey.nextAction.blockedBy.includes('INTEGRITY_ERROR'), `5.2 a stale Offer pointer: integrity_error, RECORD_CORRUPT (the corrupt Offer names this case and is omitted, never a quiet legacy read), no current Offer, the act blocked (${jr.journey.integrity.join(',')}) (D-P81-17)`);
     db = await stopStart(`5.2 restart ${i}`);
     const o = db.recruitmentOffers.find((x) => x.id === 'rof-p81p-stale');
-    neg(o && o.currentRevisionId === 'rofr-missing' && o.revisions.length === 1 && db.recruitmentCases.find((x) => x.id === SP).room.status === 'offer_made', `5.2 restart ${i}: the pointer is still stale on disk (never repaired, never re-pointed)`);
+    neg(o && o.currentRevisionId === 'rofr-p81p-1' && o.revisions.length === 2 && db.recruitmentCases.find((x) => x.id === SP).room.status === 'offer_made', `5.2 restart ${i}: the pointer is still stale on disk (never repaired, never re-pointed)`);
   }
   neg(spFps.every((f) => f === spFps[0]), '5.2 the integrity_error projection is identical across three restarts');
   // 5.3 cross-case: an ended case and a second case for the same player — nothing inherited, before and after a restart (D-P81-15).

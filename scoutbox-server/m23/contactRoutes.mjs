@@ -18,11 +18,15 @@
  * WHAT A SEND IS
  *
  * All mutations of one send — the request row, the Contact, the case's
- * lifecycle entry — happen synchronously in one handler with no await
- * between them, and are written by ONE `persistNow()`. The snapshot store
- * saves in one SQLite transaction, so the disk either holds all of them or
- * none. The case cannot say `contacted` on disk while the Contact that
- * justifies it was lost.
+ * lifecycle entry — happen in ONE unit of work (store.unitOfWork): one SQLite
+ * transaction, so the disk either holds all of them or none, and memory is
+ * restored if it fails. The case cannot say `contacted` on disk while the
+ * Contact that justifies it was lost.
+ *
+ * S8c: a Contact is changed only through the repository —
+ * `contacts.create(record)` and `contacts.update(id, (draft) => …)`, which
+ * type the record and write its rows at once. The records the views hand out
+ * are read-only.
  */
 
 import { visibleToOrg } from '../domain.mjs';
@@ -40,11 +44,10 @@ import {
 
 export function registerContact(ctx) {
   const {
-    db, orgRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked, isAdult,
+    db, orgRouter, nextId, notify, broadcast, findPlayer, isBlocked, isAdult,
     rateLimit, mailer, isLead, moderateOrRefuse, issueRecruitmentRequest,
-    // S8c: the recruitment contacts/offers repository (storage only). A NEW contact enters through `addContact` (the
-    // former `push` sites below); every other write stays an in-place edit of the record and lands in the next save.
-    recruitmentContactsOffers,
+    // S8c: the recruitment contacts/offers repository. Every write is an explicit operation inside `unit`.
+    recruitmentContactsOffers, unit, afterCommit,
     // M23 P5.6E — the ONE cross-app integration seam. It is a HOLDER: M23 is
     // registered before the Agent, Compliance and Integration layers, so the
     // methods arrive later. Until they do, `agentRoute` is absent and every
@@ -53,6 +56,8 @@ export function registerContact(ctx) {
     agentIntegration = null,
   } = ctx;
 
+  if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.contacts) throw new TypeError('registerContact needs the contacts/offers repository, unit and afterCommit from the data layer');
+  const contacts = recruitmentContactsOffers.contacts;
   const now = () => Date.now();
   const store = () => (Array.isArray(db.recruitmentContacts) ? db.recruitmentContacts : null);
   const actorOf = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
@@ -220,20 +225,23 @@ export function registerContact(ctx) {
   function advanceCase(req, room, c, at) {
     const role = roleFor(req, room);
     const verdict = canTransitionRecruitmentCase(room, 'recordContact', { role, evidence: ctx.recruitmentEvidenceProvider, now: at });
+    let moved = null; let lifecycle;
     if (verdict.ok) {
       const { from, to } = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger: `contact:${c.id}` });
       const last = room.history[room.history.length - 1];
       if (last?.action === 'room_status_changed') {
         last.detail = { ...last.detail, lifecycleAction: 'recordContact', clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, contactId: c.id };
       }
-      c.lifecycle = { applied: true, from, to, at };
-      return { from, to };
+      lifecycle = { applied: true, from, to, at };
+      moved = { from, to };
+    } else {
+      // LIFECYCLE_NO_CHANGE (already contacted) is the expected second answer.
+      // Anything else is recorded so the mismatch is visible, never hidden.
+      lifecycle = { applied: false, reason: verdict.error, at };
+      if (verdict.error !== 'LIFECYCLE_NO_CHANGE') console.error(`CONTACT lifecycle_not_applied ${c.id} ${verdict.error}`);
     }
-    // LIFECYCLE_NO_CHANGE (already contacted) is the expected second answer.
-    // Anything else is recorded so the mismatch is visible, never hidden.
-    c.lifecycle = { applied: false, reason: verdict.error, at };
-    if (verdict.error !== 'LIFECYCLE_NO_CHANGE') console.error(`CONTACT lifecycle_not_applied ${c.id} ${verdict.error}`);
-    return null;
+    // The Contact records what happened to the case, written with the move.
+    return { moved, contact: contacts.update(c.id, (d) => { d.lifecycle = lifecycle; }) };
   }
 
   // ---------------------------------------------------------------- list
@@ -338,13 +346,15 @@ export function registerContact(ctx) {
     };
     record(c, 'contact_created', by, { channel: 'in_app', contactMode: mode }, at);
     bumpRev(c, { by: req.orgUser, at });
-    recruitmentContactsOffers.addContact(c); // S8c: the record itself is kept; its row lands in persistNow()'s save
     // NOTHING ELSE. No case history, no notification, no request row, no
     // outbox entry, no delivery state, and — even where an agent would be a
     // valid party — no agent is told anything. A draft is a record of intent.
-    persistNow();
-    broadcast('contact_created', { orgId: room.orgId, roomId: room.id, contactId: c.id });
-    res.status(201).json({ contact: contactView(c), routing: routingView(routing, route) });
+    const stored = unit(() => {
+      const fresh = contacts.create(c);
+      broadcast('contact_created', { orgId: room.orgId, roomId: room.id, contactId: c.id });
+      return fresh;
+    });
+    res.status(201).json({ contact: contactView(stored), routing: routingView(routing, route) });
   });
 
   orgRouter.patch('/rooms/:id/contacts/:cid', (req, res) => {
@@ -370,15 +380,16 @@ export function registerContact(ctx) {
     if (!moderateOrRefuse(res, `${content.subject ?? ''}\n${content.body}`, { kind: 'recruitment_contact', orgId: req.org.id, userId: req.orgUser.id })) return;
 
     const at = now();
-    const changed = [];
-    if (content.subject !== c.subject) { c.subject = content.subject; changed.push('subject'); }
-    if (content.body !== c.body) { c.body = content.body; changed.push('body'); }
-    if (mode !== (c.contactMode ?? 'player_only')) { c.contactMode = mode; changed.push('contactMode'); }
-    c.updatedAt = at;
-    record(c, 'contact_edited', actorOf(req), { fields: changed }, at);
-    bumpRev(c, { by: req.orgUser, at });
-    persistNow();
-    res.json({ contact: contactView(c), routing: routingView(routing, route) });
+    const stored = unit(() => contacts.update(c.id, (d) => {
+      const changed = [];
+      if (content.subject !== d.subject) { d.subject = content.subject; changed.push('subject'); }
+      if (content.body !== d.body) { d.body = content.body; changed.push('body'); }
+      if (mode !== (d.contactMode ?? 'player_only')) { d.contactMode = mode; changed.push('contactMode'); }
+      d.updatedAt = at;
+      record(d, 'contact_edited', actorOf(req), { fields: changed }, at);
+      bumpRev(d, { by: req.orgUser, at });
+    }));
+    res.json({ contact: contactView(stored), routing: routingView(routing, route) });
   });
 
   orgRouter.post('/rooms/:id/contacts/:cid/cancel', (req, res) => {
@@ -391,16 +402,17 @@ export function registerContact(ctx) {
     if (!verdict.ok) return err(res, verdict.error, verdict.message);
     if (!revGate(req, res, c)) return;
     const at = now();
-    c.status = 'cancelled';
-    c.cancelledAt = at;
-    c.cancelledBy = actorOf(req);
-    c.updatedAt = at;
     // The draft text is KEPT. Cancelling records that nothing was sent; it does
     // not erase what was written (§25).
-    record(c, 'contact_cancelled', actorOf(req), null, at);
-    bumpRev(c, { by: req.orgUser, at });
-    persistNow();
-    res.json({ contact: contactView(c) });
+    const stored = unit(() => contacts.update(c.id, (d) => {
+      d.status = 'cancelled';
+      d.cancelledAt = at;
+      d.cancelledBy = actorOf(req);
+      d.updatedAt = at;
+      record(d, 'contact_cancelled', actorOf(req), null, at);
+      bumpRev(d, { by: req.orgUser, at });
+    }));
+    res.json({ contact: contactView(stored) });
   });
 
   // ----------------------------------------------------------------- send
@@ -453,7 +465,7 @@ export function registerContact(ctx) {
 
     const at = now();
     const by = actorOf(req);
-    c.keys.send = { key: key.key ?? null, fp: payloadFingerprint({ contactId: c.id }) };
+    const sendKey = { key: key.key ?? null, fp: payloadFingerprint({ contactId: c.id }) };
 
     // ---- the transport. The in-app Inbox is the transport of record: the
     // request row is the message in the recipient's mailbox. A refusal here
@@ -461,100 +473,107 @@ export function registerContact(ctx) {
     // caller) leaves an honest `failed` attempt and no recipient object.
     const inject = db.deliveryFailInject;
     if (inject && Number(inject.contact ?? 0) > 0) {
-      inject.contact = Number(inject.contact) - 1;
-      c.status = 'failed';
-      c.failedAt = at;
-      c.failureCode = 'TRANSPORT_REFUSED';
-      c.attempts.push({ at, ok: false, code: 'TRANSPORT_REFUSED' });
-      c.updatedAt = at;
-      record(c, 'contact_send_failed', by, { code: 'TRANSPORT_REFUSED', attempt: c.attempts.length }, at);
-      bumpRev(c, { by: req.orgUser, at });
-      persistNow();
-      console.error(`CONTACT transport_failed ${c.id} attempt=${c.attempts.length}`);
-      broadcast('contact_failed', { orgId: room.orgId, roomId: room.id, contactId: c.id });
-      return res.json({ contact: contactView(c), delivered: false });
+      const failed = unit(() => {
+        inject.contact = Number(inject.contact) - 1;
+        const fresh = contacts.update(c.id, (d) => {
+          d.keys.send = sendKey;
+          d.status = 'failed';
+          d.failedAt = at;
+          d.failureCode = 'TRANSPORT_REFUSED';
+          d.attempts.push({ at, ok: false, code: 'TRANSPORT_REFUSED' });
+          d.updatedAt = at;
+          record(d, 'contact_send_failed', by, { code: 'TRANSPORT_REFUSED', attempt: d.attempts.length }, at);
+          bumpRev(d, { by: req.orgUser, at });
+        });
+        broadcast('contact_failed', { orgId: room.orgId, roomId: room.id, contactId: c.id });
+        return fresh;
+      });
+      console.error(`CONTACT transport_failed ${c.id} attempt=${failed.attempts.length}`);
+      return res.json({ contact: contactView(failed), delivered: false });
     }
-
-    const request = issueRecruitmentRequest({
-      org: req.org, orgUser: req.orgUser, player, type: 'contact',
-      message: c.body, subject: c.subject, contactId: c.id,
-      guardianId: recipient.guardianId, at,
-    }, { persist: false });
-
-    c.status = 'delivered';
-    c.recipient = recipient;
-    c.requestId = request.id;
-    c.sentBy = by;
-    c.sentAt = at;
-    c.deliveredAt = at;
-    c.failedAt = null;
-    c.failureCode = null;
-    c.attempts.push({ at, ok: true, code: null });
-    c.updatedAt = at;
-    // §22 — WHO WAS VALIDLY ROUTED, at this moment, as roles and ids. A later
-    // change to the relationship does not rewrite it and the next contact is
-    // routed from the authority in force then. The snapshot is what the agent's
-    // own read is filtered by, so it is the record of participation, not a label.
-    c.routingSnapshot = agentIntegration?.contactTargetSnapshot
-      ? agentIntegration.contactTargetSnapshot(route, at)
-      : { at, mode: route.mode, player: true, guardian: recipient.type === 'guardian', agent: null, honest: 'Routed to the recipient only: no agent authority could be resolved when this was sent.' };
-    record(c, 'contact_sent', by, {
-      channel: 'in_app', recipientType: recipient.type, attempt: c.attempts.length,
-      mode: route.mode, agentParty: !!route.agent,
-    }, at);
-    // A club that asked for the agent and did not get one is told so IN THE
-    // RECORD, not only in the response: the history is where a club later looks
-    // to understand who saw a message.
-    if ((c.contactMode ?? 'player_only') !== 'player_only' && !route.agent) {
-      record(c, 'contact_agent_routing_refused', by, { reasonCode: route.agentRefusal ?? 'NO_REPRESENTATION' }, at);
-    }
-    bumpRev(c, { by: req.orgUser, at });
-
-    const moved = advanceCase(req, room, c, at);
 
     // A courtesy email copy to the GUARDIAN only (a player record carries no
     // email). It is a notification that something is waiting in ScoutBox —
-    // never the body, never the transport of record, never "delivered".
-    c.emailCopy = null;
-    let emailJob = null;
-    if (recipient.type === 'guardian' && mailer) {
-      const g = (db.guardians ?? []).find((x) => x.id === recipient.guardianId);
-      if (g?.email) {
-        c.emailCopy = { state: 'queued', to: 'guardian', outboxId: null, at };
-        emailJob = mailer.send({
-          to: g.email,
-          subject: `${req.org.name} has sent a message about ${player.name} on ScoutBox`,
-          text: `Hi ${g.name},\n\n${req.org.name} (${req.orgUser.role || 'Scout'}: ${req.orgUser.name}) has sent a message about ${player.name} in ScoutBox.\n\nOpen your ScoutBox guardian Inbox to read it and respond. Nothing about this contact happens outside ScoutBox unless you choose to accept it.`,
-        });
-      } else {
-        c.emailCopy = { state: 'not_available', to: 'guardian', outboxId: null, at };
-      }
-    }
+    // never the body, never the transport of record, never "delivered". The
+    // provider is called after COMMIT; its outcome is a later write of its own.
+    const guardian = recipient.type === 'guardian' && mailer ? (db.guardians ?? []).find((x) => x.id === recipient.guardianId) ?? null : null;
+    const emailCopy = recipient.type === 'guardian' && mailer ? { state: guardian?.email ? 'queued' : 'not_available', to: 'guardian', outboxId: null, at } : null;
 
-    // M23 P5.6E §24 — the agent hears through the canonical notification stream
-    // into the Agent workspace's OWN Inbox. No second Inbox is created, no
-    // `db.requests` row is written for the agent, and the agent cannot answer:
-    // accepting or declining belongs to the person the message is about. The text
-    // carries the club's name and nothing about the club's recruitment process.
-    if (route.agent?.agentUserId) {
-      notify({ kind: 'org_user', id: route.agent.agentUserId }, 'representation_contact',
-        `${req.org.name} has sent your client a message and routed you a copy. Your client answers it themselves, in their own Inbox.`, c.id);
-      broadcast('contact_agent_routed', { orgId: room.orgId, contactId: c.id, agentUserId: route.agent.agentUserId });
-    }
-
-    persistNow();
-    broadcast('contact_sent', { orgId: room.orgId, roomId: room.id, contactId: c.id });
-    if (emailJob) {
-      emailJob.then((rec) => {
-        c.emailCopy = { state: mailer.transport === 'dev-outbox' ? 'local_outbox' : (rec?.delivered ? 'accepted_by_provider' : 'failed'), to: 'guardian', outboxId: rec?.id ?? null, at: rec?.ts ?? Date.now() };
-        persistNow();
-      }).catch(() => {
-        c.emailCopy = { state: 'failed', to: 'guardian', outboxId: null, at: Date.now() };
-        persistNow();
+    let moved = null;
+    const sent = unit(() => {
+      const request = issueRecruitmentRequest({
+        org: req.org, orgUser: req.orgUser, player, type: 'contact',
+        message: c.body, subject: c.subject, contactId: c.id,
+        guardianId: recipient.guardianId, at,
+      }, { persist: false });
+      // The Contact is delivered BEFORE the case is asked to move: the evidence
+      // provider reads this Contact as the evidence for `recordContact`.
+      const delivered = contacts.update(c.id, (d) => {
+        d.keys.send = sendKey;
+        d.status = 'delivered';
+        d.recipient = recipient;
+        d.requestId = request.id;
+        d.sentBy = by;
+        d.sentAt = at;
+        d.deliveredAt = at;
+        d.failedAt = null;
+        d.failureCode = null;
+        d.attempts.push({ at, ok: true, code: null });
+        d.updatedAt = at;
+        // §22 — WHO WAS VALIDLY ROUTED, at this moment, as roles and ids. A later
+        // change to the relationship does not rewrite it and the next contact is
+        // routed from the authority in force then. The snapshot is what the agent's
+        // own read is filtered by, so it is the record of participation, not a label.
+        d.routingSnapshot = agentIntegration?.contactTargetSnapshot
+          ? agentIntegration.contactTargetSnapshot(route, at)
+          : { at, mode: route.mode, player: true, guardian: recipient.type === 'guardian', agent: null, honest: 'Routed to the recipient only: no agent authority could be resolved when this was sent.' };
+        record(d, 'contact_sent', by, {
+          channel: 'in_app', recipientType: recipient.type, attempt: d.attempts.length,
+          mode: route.mode, agentParty: !!route.agent,
+        }, at);
+        // A club that asked for the agent and did not get one is told so IN THE
+        // RECORD, not only in the response: the history is where a club later looks
+        // to understand who saw a message.
+        if ((d.contactMode ?? 'player_only') !== 'player_only' && !route.agent) {
+          record(d, 'contact_agent_routing_refused', by, { reasonCode: route.agentRefusal ?? 'NO_REPRESENTATION' }, at);
+        }
+        bumpRev(d, { by: req.orgUser, at });
+        d.emailCopy = emailCopy;
       });
+      const advanced = advanceCase(req, room, delivered, at);
+      moved = advanced.moved;
+
+      // M23 P5.6E §24 — the agent hears through the canonical notification stream
+      // into the Agent workspace's OWN Inbox. No second Inbox is created, no
+      // `db.requests` row is written for the agent, and the agent cannot answer:
+      // accepting or declining belongs to the person the message is about. The text
+      // carries the club's name and nothing about the club's recruitment process.
+      if (route.agent?.agentUserId) {
+        notify({ kind: 'org_user', id: route.agent.agentUserId }, 'representation_contact',
+          `${req.org.name} has sent your client a message and routed you a copy. Your client answers it themselves, in their own Inbox.`, c.id);
+        broadcast('contact_agent_routed', { orgId: room.orgId, contactId: c.id, agentUserId: route.agent.agentUserId });
+      }
+      broadcast('contact_sent', { orgId: room.orgId, roomId: room.id, contactId: c.id });
+      return advanced.contact;
+    });
+
+    if (emailCopy?.state === 'queued') {
+      // The provider's answer is its own explicit write, after the send committed.
+      const settle = (copy) => {
+        try { contacts.update(c.id, (d) => { d.emailCopy = copy; }); } catch (e) { console.error(`CONTACT email_copy_not_recorded ${c.id}: ${e?.message ?? e}`); }
+      };
+      afterCommit(() => mailer.send({
+        to: guardian.email,
+        subject: `${req.org.name} has sent a message about ${player.name} on ScoutBox`,
+        text: `Hi ${guardian.name},\n\n${req.org.name} (${req.orgUser.role || 'Scout'}: ${req.orgUser.name}) has sent a message about ${player.name} in ScoutBox.\n\nOpen your ScoutBox guardian Inbox to read it and respond. Nothing about this contact happens outside ScoutBox unless you choose to accept it.`,
+      }).then((rec) => {
+        settle({ state: mailer.transport === 'dev-outbox' ? 'local_outbox' : (rec?.delivered ? 'accepted_by_provider' : 'failed'), to: 'guardian', outboxId: rec?.id ?? null, at: rec?.ts ?? Date.now() });
+      }, () => {
+        settle({ state: 'failed', to: 'guardian', outboxId: null, at: Date.now() });
+      }));
     }
     res.json({
-      contact: contactView(c), delivered: true,
+      contact: contactView(sent), delivered: true,
       routing: routingView(routing, route),
       case: moved ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status },
     });
@@ -614,11 +633,15 @@ export function registerContact(ctx) {
     };
     record(c, 'contact_external_recorded', by, { channel: check.channel, occurredAt: check.occurredAt, recipientType: routing.recipient.type }, at);
     bumpRev(c, { by: req.orgUser, at });
-    recruitmentContactsOffers.addContact(c); // S8c
-    const moved = advanceCase(req, room, c, at);
-    persistNow();
-    broadcast('contact_external_recorded', { orgId: room.orgId, roomId: room.id, contactId: c.id });
-    res.status(201).json({ contact: contactView(c), case: moved ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status } });
+    let moved = null;
+    const stored = unit(() => {
+      // Written BEFORE the case is asked to move: the evidence provider reads it.
+      const advanced = advanceCase(req, room, contacts.create(c), at);
+      moved = advanced.moved;
+      broadcast('contact_external_recorded', { orgId: room.orgId, roomId: room.id, contactId: c.id });
+      return advanced.contact;
+    });
+    res.status(201).json({ contact: contactView(stored), case: moved ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status } });
   });
 
   // ------------------------------------------------------------- response
@@ -626,20 +649,23 @@ export function registerContact(ctx) {
   /**
    * Called by the EXISTING respond routes once a `db.requests` row that a
    * Contact created has been accepted or declined. The recipient never
-   * addresses the Contact; the Contact learns of the answer.
+   * addresses the Contact; the Contact learns of the answer — in the respond
+   * route's unit of work, so the answer and the Contact commit together.
    */
   ctx.onRequestResponded = ({ request, accept, message = null, by, at = Date.now() }) => {
     const s = store();
     if (!s || !request?.contactId) return null;
-    const c = s.find((x) => x && x.id === request.contactId && x.requestId === request.id);
-    if (!c || c.status !== 'delivered') return null;
+    const found = s.find((x) => x && x.id === request.contactId && x.requestId === request.id);
+    if (!found || found.status !== 'delivered') return null;
     const kind = accept ? 'accepted' : 'declined';
-    c.status = 'responded';
-    c.respondedAt = at;
-    c.response = { kind, message: message || null, by, at };
-    c.updatedAt = at;
-    record(c, 'contact_responded', { kind: by, name: by === 'guardian' ? 'Guardian' : 'Player' }, { kind }, at);
-    bumpRev(c, { by: null, at });
+    const c = contacts.update(found.id, (d) => {
+      d.status = 'responded';
+      d.respondedAt = at;
+      d.response = { kind, message: message || null, by, at };
+      d.updatedAt = at;
+      record(d, 'contact_responded', { kind: by, name: by === 'guardian' ? 'Guardian' : 'Player' }, { kind }, at);
+      bumpRev(d, { by: null, at });
+    });
 
     // The sender already hears through the respond route's own notification.
     // The room's owner and lead scout hear too, if they are different people;

@@ -98,7 +98,7 @@ function baseDb() {
 
 const soundContact = (over = {}) => ({
   id: 'rct-1', orgId: 'org-x', caseId: 'case-x', playerId: 'pl-x', status: 'delivered', channel: 'in_app',
-  recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false }, subject: 'Hello', body: 'Hi Xavier.', summary: null,
+  recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false }, contactMode: 'player_only', routingSnapshot: null, subject: 'Hello', body: 'Hi Xavier.', summary: null,
   createdBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, createdAt: 2000, updatedAt: 2001,
   sentBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' }, sentAt: 2001, deliveredAt: 2001, failedAt: null, failureCode: null,
   attempts: [{ at: 2001, ok: true, code: null }], requestId: 'req-1', emailCopy: null, lifecycle: null,
@@ -198,13 +198,12 @@ function expect422(r) { return r.status === 409 && r.body?.error === 'CONTACT_ID
 section('§143 — corrupt Contact rows are named and omitted, never fabricated, and never take the server down');
 const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
 {
-  // S8c (migration 0017): the contacts are rows of a table. Two of the entries this section used to plant are states the
-  // TABLE cannot hold and the blob store merely tolerated — an entry that is not a record (`null`) and a second record
-  // with an id the collection already has — and a contact naming a request that is not in the file is a dangling key. The
-  // cutover REFUSES such a file with CONTACTS_OFFERS_IMPORT_BLOCKED naming the position or id, leaves it exactly as it
-  // was (the next boot refuses the same way) and repairs nothing; asserted below on three copies. Every row defect the
-  // tables CARRY losslessly (an unknown status word, a missing recipient, an off-type history, an off-type timestamp, a
-  // prototype-named channel, an impossible state, an unknown history event) is still planted and still judged on read.
+  // S8c (migration 0017; typed since §4.3): the contacts are rows of typed tables. A row the columns cannot hold — an
+  // entry that is not a record, a duplicated id, an unknown status word, an off-type history or timestamp, a channel
+  // the vocabulary does not know, a record missing the writer's fields — and a contact naming a request that is not in
+  // the file are REFUSED by the save, naming the entry, and nothing is written; asserted below, one directory each. The
+  // defects a typed row CAN carry (a delivered contact with no recipient, a contact answered but never delivered, a row
+  // of another organisation, a player disagreeing with its case) are still planted and still judged on read.
   const REQ = { playerId: 'pl-x', playerName: 'Xavier Adult', orgId: 'org-x', orgName: 'X FC', userId: 'usr-owner', scoutName: 'Owner', scoutRole: 'Head of Recruitment', type: 'contact', message: 'Hi Xavier.', status: 'pending', createdAt: 2001, routedTo: 'player', guardianId: null, contactChannel: null };
   // Since §4.2 a snapshot is written straight into the tables (store.mjs, snapshot mode): the save itself refuses such a
   // file, names the entry, and writes nothing; there is no blob for a later boot to import.
@@ -217,46 +216,54 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
     neg(!!refused && pattern.test(msg), `${label}: the save refuses the snapshot and names the entry (${(pattern.exec(msg) ?? ['NOT named'])[0]})`);
     if (!refused || !pattern.test(msg)) console.error(`   ${label}: refused=${!!refused}; ${msg.slice(0, 700)}`);
     neg(openStore(dir).load() === null, `${label}: nothing was written — nothing imported, dropped or repaired`);
-    const s = await bootOn(dir, port);
-    neg(s.up, `${label}: a server started on the directory boots from its seed (the refused snapshot left nothing behind)`);
-    if (s.up) await s.stop();
+    if (port) {
+      const s = await bootOn(dir, port);
+      neg(s.up, `${label}: a server started on the directory boots from its seed (the refused snapshot left nothing behind)`);
+      if (s.up) await s.stop();
+    }
   };
-  await refusedAtCutover('a null entry', PORT + 4, [soundContact(), null], [{ ...REQ, id: 'req-1', contactId: 'rct-1' }], /recruitmentContacts entry #1 is not an object \(null\)/);
-  await refusedAtCutover('a duplicated id', PORT + 5, [soundContact(), soundContact({ id: 'rct-1', requestId: null })], [{ ...REQ, id: 'req-1', contactId: 'rct-1' }], /duplicates the id of an earlier entry \(rct-1\)/);
-  await refusedAtCutover('a request that is not in the file', PORT + 6, [soundContact({ requestId: 'req-ghost' })], [], /CONTACT_REQUEST_DANGLING[^\n]*rct-1 → req-ghost/);
+  const req1 = [{ ...REQ, id: 'req-1', contactId: 'rct-1' }];
+  await refusedAtCutover('a null entry', PORT + 4, [soundContact(), null], req1, /recruitmentContacts entry #1 is not an object \(null\)/);
+  await refusedAtCutover('a duplicated id', PORT + 5, [soundContact(), soundContact({ id: 'rct-1', requestId: null })], req1, /duplicates the id of an earlier entry \(rct-1\)/);
+  await refusedAtCutover('a request that is not in the file', PORT + 6, [soundContact({ requestId: 'req-ghost' })], [], /CONTACTS_OFFERS_REFERENCE_MISSING[^\n]*rct-1 → recruitment_requests/);
+  await refusedAtCutover('an unknown status word', null, [soundContact({ id: 'rct-badstatus', status: 'sent', requestId: null })], [], /rct-badstatus\.status must be one of draft\|delivered/);
+  await refusedAtCutover('a history that is not a list', null, [soundContact({ id: 'rct-nohist', history: 'not-a-list', requestId: null })], [], /rct-nohist\.history must be a list/);
+  await refusedAtCutover('a timestamp that is not an instant', null, [soundContact({ id: 'rct-badts', deliveredAt: 'yesterday', requestId: null })], [], /rct-badts\.deliveredAt must be an integer or null/);
+  await refusedAtCutover('a prototype-key channel', null, [soundContact({ id: 'rct-badchan', channel: 'constructor', requestId: null })], [], /rct-badchan\.channel must be one of in_app\|phone/);
+  await refusedAtCutover('a record missing the writer\'s fields', null, [{ id: 'rct-partial', orgId: 'org-x', caseId: 'case-x', playerId: 'pl-x', status: 'draft', channel: 'in_app', history: [], rev: 1 }], [], /rct-partial\.contactMode must be one of player_only\|both/);
+  // Pure: the read-time integrity function still names each of those defects, should one ever reach it.
+  const unstorable = [soundContact({ id: 'rct-badstatus', status: 'sent' }), soundContact({ id: 'rct-nohist', history: 'not-a-list' }), soundContact({ id: 'rct-badts', deliveredAt: 'yesterday' }), soundContact({ id: 'rct-badchan', channel: 'constructor' })];
+  ok(unstorable.every((c) => contactIntegrity(c, { orgId: 'org-x', caseId: 'case-x' }).length > 0), 'the integrity check still names a problem on each of the four unstorable rows');
 
   const db = baseDb();
   db.orgs.push({ id: 'org-other', name: 'Other FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, squad: [], location: { lat: 51.5, lng: -0.1 } }); // the foreign row's organisation exists (org_id is a real key); the tenant filter below is unchanged
   db.recruitmentContacts = [
     soundContact(),                                                                  // sound
-    soundContact({ id: 'rct-badstatus', status: 'sent' }),                           // invalid status
     soundContact({ id: 'rct-norecip', recipient: null }),                             // delivered with no recipient
     soundContact({ id: 'rct-wrongorg', orgId: 'org-other' }),                         // another org's row on this case id
     soundContact({ id: 'rct-wrongplayer', playerId: 'pl-other' }),                    // wrong player (still this org/case) — sound structurally, reported by case? no: playerId is free
-    soundContact({ id: 'rct-nohist', history: 'not-a-list' }),                        // malformed history
-    soundContact({ id: 'rct-badts', deliveredAt: 'yesterday' }),                      // malformed timestamp
-    soundContact({ id: 'rct-badchan', channel: 'constructor' }),                      // prototype-key channel
     soundContact({ id: 'rct-impossible', status: 'responded', deliveredAt: null, respondedAt: 5 }), // impossible: responded but never delivered
-    { id: 'rct-unknownevent', orgId: 'org-x', caseId: 'case-x', playerId: 'pl-x', status: 'draft', channel: 'in_app', history: [{ id: 'aud-99', at: 1, action: '__teleported__', by: null, detail: null }], rev: 1 }, // unknown history event on a sound draft
-  ].map((c, i) => (c.requestId === 'req-1' ? { ...c, requestId: `rq-${i + 1}` } : c)); // each sent row with its OWN request (the pair), as the writer produces; the request ids carry no contact id (the journey check below looks for the corrupt ids)
+    soundContact({ id: 'rct-unknownevent', status: 'draft', recipient: null, sentBy: null, sentAt: null, deliveredAt: null, attempts: [], requestId: null, keys: { create: null, send: null, record: null }, history: [{ id: 'aud-99', at: 1, action: '__teleported__', by: null, detail: null }], rev: 1 }), // unknown history event on a sound draft
+  ].map((c, i) => (c.requestId === 'req-1' ? { ...c, requestId: `rq-${i + 1}` } : c)) // each sent row with its OWN request (the pair), as the writer produces; the request ids carry no contact id (the journey check below looks for the corrupt ids)
+    .map((c, i) => (i === 0 ? c : { ...c, history: c.history.map((h) => ({ ...h, id: `${h.id}-${i}` })) })); // a history entry's id is unique across contacts, as the writer's nextId makes it
   db.requests = db.recruitmentContacts.filter((c) => c.requestId).map((c) => ({ ...REQ, id: c.requestId, contactId: c.id, orgId: c.orgId, playerId: c.playerId }));
   // `rct-wrongorg` is NOT in this list: a row carrying another organisation's
   // id is that organisation's row, whatever case id it names. It is filtered
   // by tenant before the shape check, never listed, never counted and, by id,
   // answers the concealing 404 — a foreign row must not become a corruption
   // oracle for the club that can see the case.
-  const expectedOmitted = ['rct-badstatus', 'rct-norecip', 'rct-nohist', 'rct-badts', 'rct-badchan', 'rct-impossible'];
+  const expectedOmitted = ['rct-norecip', 'rct-impossible'];
   // Pure: the integrity function names each problem.
   const named = db.recruitmentContacts.filter((c) => c && expectedOmitted.includes(c.id)).map((c) => [c.id, contactIntegrity(c, { orgId: 'org-x', caseId: 'case-x' })]);
   ok(named.every(([, p]) => p.length > 0), `the integrity check names a problem on every one of the ${named.length} corrupt rows`);
   neg(contactIntegrity(soundContact({ id: 'rct-wrongplayer', playerId: 'pl-other' }), { orgId: 'org-x', caseId: 'case-x' }).length === 0, 'a row whose player disagrees with its case is structurally sound — the case check, not the shape check, is where that is caught (below)');
-  ok(contactIntegrity(db.recruitmentContacts[9]).length === 0, 'a sound draft with an unknown history event is not corrupt — the event is simply not a milestone');
+  ok(contactIntegrity(db.recruitmentContacts[5]).length === 0, 'a sound draft with an unknown history event is not corrupt — the event is simply not a milestone');
 
   openStore(CORRUPT_DIR).save({ savedAt: Date.now(), idCounter: 500, db });
   const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
   const before = JSON.stringify(canon(db.recruitmentContacts));
   const s = await bootOn(CORRUPT_DIR, PORT + 1);
-  ok(s.up, 'the server boots with ten rows, six of them corrupt and one foreign');
+  ok(s.up, 'the server boots with six rows, two of them corrupt and one foreign');
   if (!s.up) { console.error(`   the server did not come up; its log ends:\n${s.log().slice(-1500)}`); process.exit(1); }
   const owner = (await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })).body;
   const list = await s.j('GET', '/org/rooms/case-x/contacts', undefined, owner.token);
@@ -271,21 +278,21 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
     neg(one.status === 500 && one.body?.error === 'CONTACT_STATE_UNKNOWN', `${id} by id answers 500 CONTACT_STATE_UNKNOWN — corruption reads as corruption`);
     neg(!JSON.stringify(one.body).includes('status_unknown') && !JSON.stringify(one.body).includes('recipient_missing'), `${id}: the diagnostic names stay in the log, not the body`);
   }
-  neg(/CONTACT integrity rct-badstatus: status_unknown/.test(s.log()), 'the log names the row and the problem');
+  neg(/CONTACT integrity rct-norecip: recipient_missing/.test(s.log()), 'the log names the row and the problem');
   const foreign = await s.j('GET', '/org/rooms/case-x/contacts/rct-wrongorg', undefined, owner.token);
   neg(foreign.status === 404 && foreign.body?.error === 'CONTACT_NOT_FOUND', 'a row carrying another organisation\'s id on this case answers the concealing 404, not a corruption report');
   neg(!ids.includes('rct-wrongorg'), 'and is not listed');
   const jr = await s.j('GET', '/org/rooms/case-x/journey', undefined, owner.token);
-  ok(jr.status === 200 && jr.body.contact.omitted === expectedOmitted.length, 'the journey projects, omits the same six and counts them');
-  neg(!JSON.stringify(jr.body).includes('rct-badstatus') && !JSON.stringify(jr.body).includes('sent'), 'no corrupt row and no invented state reaches the journey');
+  ok(jr.status === 200 && jr.body.contact.omitted === expectedOmitted.length, 'the journey projects, omits the same two and counts them');
+  neg(!JSON.stringify(jr.body).includes('rct-norecip') && !JSON.stringify(jr.body).includes('rct-impossible'), 'no corrupt row and no invented state reaches the journey');
   neg(!JSON.stringify(jr.body.history.entries).includes('__teleported__'), 'an unknown history event is not rendered as a milestone');
   // The evidence provider ignores corrupt rows but still sees the sound one.
   const ev = createEvidenceProvider({ signings: [], recruitmentContacts: db.recruitmentContacts.filter((c) => c && expectedOmitted.includes(c.id)) }).check('contact_delivered', { kase: db.recruitmentCases[0] });
-  neg(ev.satisfied === false && ev.reason === 'no_contact_delivered', 'six corrupt "delivered" rows are NOT evidence of contact');
+  neg(ev.satisfied === false && ev.reason === 'no_contact_delivered', 'the corrupt "delivered" rows are NOT evidence of contact');
   const ev2 = createEvidenceProvider({ signings: [], recruitmentContacts: db.recruitmentContacts }).check('contact_delivered', { kase: db.recruitmentCases[0] });
   ok(ev2.satisfied === true && ev2.sourceId === 'rct-1', 'the sound row beside them is');
   const after = await s.stop();
-  neg(JSON.stringify(canon(after.recruitmentContacts)) === before, 'shutdown wrote the corrupt rows back UNCHANGED in every key and value — reported, never repaired (the off-type history and timestamp, the unknown status word and the impossible state carried as written)');
+  neg(JSON.stringify(canon(after.recruitmentContacts)) === before, 'shutdown wrote the corrupt rows back UNCHANGED in every key and value — reported, never repaired (the missing recipient and the impossible state carried as written)');
   // Boot-time integrity: contacts are not part of the M18.2 report's subject, and must not make it lie.
   const rep = integrityReport(after);
   ok(rep.stores.ok === true, 'the boot integrity report still finds every required store present');

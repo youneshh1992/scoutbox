@@ -233,19 +233,27 @@ section('3 — after the reboot: identical views, keys replay, immutability and 
 section('4 — a corrupt Offer row is named and refused, never repaired, and never moves a case');
 {
   const db = R.db;
-  const corrupt = { ...db.recruitmentOffers.find((o) => o.id === R.sven.OID), id: 'rof-corrupt', revisions: [], currentRevisionId: 'rofr-none', status: 'ISSUED' };
-  const fake = { id: 'rof-fake-accepted', orgId: 'org-eastport', caseId: R.kola.RID, playerId: 'pl-adeyemi', type: 'direct_recruitment', status: 'ACCEPTED', currentRevisionId: 'rofr-f1', revisions: [{ id: 'rofr-f1', revisionNumber: 1, status: 'ACCEPTED', terms: {}, issuedAt: T0, expiresAt: T0 + DAY, recipientSnapshot: { type: 'player', playerId: 'pl-adeyemi' } }], responses: [], readReceipts: [], history: [], keys: {}, createdAt: T0, rev: 1 };
-  db.recruitmentOffers.push(corrupt, fake);
+  // S8c (typed since §4.3): an Offer with no revision is a row the tables cannot hold. The save REFUSES it, naming the
+  // row, and writes nothing — the directory keeps the five sound rows. An ACCEPTED row with no response is a typed row
+  // (every field valid) whose states disagree: it is still planted, and still judged on read.
+  const corrupt = { ...structuredClone(db.recruitmentOffers.find((o) => o.id === R.sven.OID)), id: 'rof-corrupt', revisions: [], currentRevisionId: 'rofr-none', status: 'ISSUED' };
+  const stored = JSON.stringify(openStore(DIR).load().db.recruitmentOffers);
+  let refused = null; try { openStore(DIR).save({ db: { ...db, recruitmentOffers: [...db.recruitmentOffers, corrupt] } }); } catch (e) { refused = e; }
+  neg(!!refused && /rof-corrupt\.revisions must hold at least one revision/.test(refused.message) && JSON.stringify(openStore(DIR).load().db.recruitmentOffers) === stored, `4.2 an Offer with no revision cannot be stored: the save refuses it, naming the row, and nothing was written (${String(refused?.message ?? 'no refusal').slice(0, 120)})`);
+  const kolaOffer = db.recruitmentOffers.find((o) => o.id === R.kola.OID);
+  const { discardedByResponseId: _d, ...kolaRev } = structuredClone(kolaOffer.revisions[0]);
+  const fake = { ...structuredClone(kolaOffer), id: 'rof-fake-accepted', status: 'ACCEPTED', currentRevisionId: 'rofr-f1', revisions: [{ ...kolaRev, id: 'rofr-f1', revisionNumber: 1, status: 'ACCEPTED', documents: [], issuedAt: T0, expiresAt: T0 + DAY, respondedAt: null, response: null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null }], responses: [], readReceipts: [], history: [], keys: { create: null, issue: [], withdraw: [], revise: [] }, agentShare: null, lifecycle: null, createdAt: T0, rev: 1 };
+  db.recruitmentOffers.push(fake);
   const kolaCase = db.recruitmentCases.find((c) => c.id === R.kola.RID);
   const kolaStage = kolaCase.room.status;
   openStore(DIR).save({ db });
   const s = await bootOn(DIR, PORT);
-  ok(s.up, '4.1 the server boots with two corrupt rows present — corruption is not fatal to the process');
+  ok(s.up, '4.1 the server boots with a corrupt row present — corruption is not fatal to the process');
   const { j } = s;
   const maria = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
   const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body.token;
-  const r = await j('GET', '/org/offers/rof-corrupt', undefined, maria.token);
-  neg(r.status === 500 && r.body.error === 'OFFER_STATE_UNKNOWN' && !has(r.body, 'revisions') && !has(r.body, 'stack'), '4.2 the club reading the corrupt row gets a generic 500 OFFER_STATE_UNKNOWN — named, not repaired, nothing internal in the body');
+  const r = await j('GET', '/org/offers/rof-fake-accepted', undefined, maria.token);
+  neg(r.status === 500 && r.body.error === 'OFFER_STATE_UNKNOWN' && !has(r.body, 'revisions') && !has(r.body, 'stack'), '4.2b the club reading the corrupt row gets a generic 500 OFFER_STATE_UNKNOWN — named, not repaired, nothing internal in the body');
   neg((await j('GET', '/org/offers/rof-fake-accepted', undefined, maria.token)).status === 500, '4.3 an ACCEPTED row with no response is corruption too');
   const jr = (await j('GET', `/org/rooms/${R.kola.RID}/journey`, undefined, maria.token)).body;
   neg(jr.lifecycle.currentStage === kolaStage && !has(jr.offer.records, 'rof-fake-accepted') && jr.offer.records.some((o) => o.id === R.kola.OID), '4.4 Kola\'s case did not move and the journey omits the fake row while listing the real one');
@@ -253,7 +261,7 @@ section('4 — a corrupt Offer row is named and refused, never repaired, and nev
   neg(!(await j('GET', '/player/offers', undefined, kola, at(T0))).body.items.some((o) => o.id === 'rof-fake-accepted'), '4.6 the recipient list omits it');
   ok((await j('GET', `/org/offers/${R.kim.OID}`, undefined, maria.token, at(T0 + 3 * H))).body.offer.status === 'ACCEPTED', '4.7 a sound neighbour still reads');
   const db2 = await s.stop();
-  neg(db2.recruitmentOffers.length === 7 && db2.recruitmentOffers.find((o) => o.id === 'rof-corrupt').revisions.length === 0, '4.8 nothing was repaired or dropped on boot or on stop');
+  neg(db2.recruitmentOffers.length === 6 && db2.recruitmentOffers.find((o) => o.id === 'rof-fake-accepted').responses.length === 0 && db2.recruitmentOffers.find((o) => o.id === 'rof-fake-accepted').status === 'ACCEPTED', '4.8 nothing was repaired or dropped on boot or on stop');
   R.db2 = db2;
 }
 
@@ -263,32 +271,42 @@ section('5 — P6.1: lazy expiry, temporal corruption, unknown statuses, legacy 
   const db = R.db2;
   const fresh = (base, id, patch) => ({ ...structuredClone(base), id, keys: { create: null, issue: [], withdraw: [], revise: [] }, responses: [], readReceipts: [], history: [], ...patch });
   const issuedRow = db.recruitmentOffers.find((o) => o.id === R.chi.OID); // an ISSUED→DECLINED shape to clone from
-  const rev = ({ rid, ...patch }) => ({ ...structuredClone(issuedRow.revisions[0]), id: `rofr-${rid}`, revisionNumber: 1, status: 'ISSUED', respondedAt: null, response: null, ...patch });
+  const rev = ({ rid, ...patch }) => { const { discardedByResponseId: _d, ...base } = structuredClone(issuedRow.revisions[0]); return { ...base, id: `rofr-${rid}`, revisionNumber: 1, status: 'ISSUED', documents: [], respondedAt: null, response: null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null, ...patch }; };
+  // A typed response (m28 respondHandler's literal) by Chi.
+  const answer = (id, revisionId, responseType, occurredAt) => ({ id, revisionId, responseType, actorType: 'player', actorId: 'pl-okafor', actorName: null, forPlayerId: issuedRow.playerId, occurredAt, reason: null, clientKey: null });
   // a) an ISSUED row whose expiry has passed at the read instant: stored ISSUED, read EXPIRED, never rewritten
   const svenCase = db.recruitmentCases.find((c) => c.id === R.sven.RID);
   const lazy = fresh(issuedRow, 'rof-lazy', { caseId: R.sven.RID, playerId: 'pl-svensson', status: 'ISSUED', currentRevisionId: 'rofr-lazy', revisions: [rev({ rid: 'lazy', createdAt: T0, issuedAt: T0, expiresAt: T0 + 2 * H, recipientSnapshot: { ...issuedRow.revisions[0].recipientSnapshot, playerId: 'pl-svensson' } })] });
   // b) temporal corruption: issued before created; responded before issued; expiry beyond the bound; a future issue instant
   const tIssuedBeforeCreated = fresh(issuedRow, 'rof-t1', { status: 'ISSUED', currentRevisionId: 'rofr-t1', revisions: [rev({ rid: 't1', createdAt: T0 + H, issuedAt: T0, expiresAt: T0 + DAY })] });
   const tExpiryBound = fresh(issuedRow, 'rof-t2', { status: 'ISSUED', currentRevisionId: 'rofr-t2', revisions: [rev({ rid: 't2', createdAt: T0, issuedAt: T0, expiresAt: T0 + 400 * DAY })] });
-  const tRespondedBeforeIssued = fresh(issuedRow, 'rof-t3', { status: 'DECLINED', currentRevisionId: 'rofr-t3', revisions: [rev({ rid: 't3', createdAt: T0, issuedAt: T0 + H, expiresAt: T0 + DAY, status: 'DECLINED', respondedAt: T0, response: { responseType: 'declined', actorType: 'player', actorId: 'pl-okafor', at: T0 } })], responses: [{ id: 'rsp-t3', revisionId: 'rofr-t3', responseType: 'declined', at: T0, actorType: 'player', actorId: 'pl-okafor' }] });
+  const tRespondedBeforeIssued = fresh(issuedRow, 'rof-t3', { status: 'DECLINED', currentRevisionId: 'rofr-t3', revisions: [rev({ rid: 't3', createdAt: T0, issuedAt: T0 + H, expiresAt: T0 + DAY, status: 'DECLINED', respondedAt: T0, response: { id: 'rsp-t3' } })], responses: [answer('rsp-t3', 'rofr-t3', 'declined', T0)] });
   const tUnknownStatus = fresh(issuedRow, 'rof-t4', { status: 'SIGNED', currentRevisionId: 'rofr-t4', revisions: [rev({ rid: 't4', status: 'SIGNED' })] });
   const tRevisionUnknown = fresh(issuedRow, 'rof-t5', { status: 'ISSUED', currentRevisionId: 'rofr-t5', revisions: [rev({ rid: 't5', status: 'countersigned' })] });
   const tPointer = fresh(issuedRow, 'rof-t6', { status: 'ISSUED', currentRevisionId: 'rofr-t6a', revisions: [rev({ rid: 't6a', revisionNumber: 1, status: 'SUPERSEDED', supersededByRevisionId: 'rofr-t6b' }), rev({ rid: 't6b', revisionNumber: 2, status: 'ISSUED', supersedesRevisionId: 'rofr-t6a' })] }); // pointer at a non-latest revision
   const tNegativeNumber = fresh(issuedRow, 'rof-t7', { status: 'ISSUED', currentRevisionId: 'rofr-t7', revisions: [rev({ rid: 't7', revisionNumber: 0 })] });
   // c) case/Offer disagreement: an ACCEPTED Offer on a case the lifecycle says declined
   const chiCase = db.recruitmentCases.find((c) => c.id === R.chi.RID);
-  const disagree = fresh(issuedRow, 'rof-t8', { status: 'ACCEPTED', currentRevisionId: 'rofr-t8', revisions: [rev({ rid: 't8', status: 'ACCEPTED', respondedAt: T0 + 2 * H, response: { responseType: 'accepted', actorType: 'player', actorId: 'pl-okafor', at: T0 + 2 * H } })], responses: [{ id: 'rsp-t8', revisionId: 'rofr-t8', responseType: 'accepted', at: T0 + 2 * H, actorType: 'player', actorId: 'pl-okafor' }] });
+  const disagree = fresh(issuedRow, 'rof-t8', { status: 'ACCEPTED', currentRevisionId: 'rofr-t8', revisions: [rev({ rid: 't8', status: 'ACCEPTED', respondedAt: T0 + 2 * H, response: { id: 'rsp-t8' } })], responses: [answer('rsp-t8', 'rofr-t8', 'accepted', T0 + 2 * H)] });
   // d) a legacy row: a case at offer_made with no Offer row at all (a pre-P6 lifecycle written by the legacy status writer)
   const legacyCase = db.recruitmentCases.find((c) => c.id === R.kim.RID);
   void legacyCase;
   const martinCase = { ...structuredClone(svenCase), id: 'case-legacy-made', playerId: 'pl-martin', room: { ...structuredClone(svenCase.room), status: 'offer_made', id: 'case-legacy-made' }, history: [] };
   db.recruitmentCases.push(martinCase);
-  db.recruitmentOffers.push(lazy, tIssuedBeforeCreated, tExpiryBound, tRespondedBeforeIssued, tUnknownStatus, tRevisionUnknown, tPointer, tNegativeNumber, disagree);
+  // S8c (typed since §4.3): an unknown Offer status, an unknown revision status and a revision number below 1 are
+  // values the columns cannot hold — each save is REFUSED, naming the row, and the directory is unchanged. The other
+  // planted rows are typed rows whose values disagree (time order, bounds, pointers, the case): judged on read.
+  const storedNow = JSON.stringify(openStore(DIR).load().db.recruitmentOffers);
+  for (const [row, pattern, why] of [[tUnknownStatus, /rof-t4[ .][^;]*status must be one of DRAFT\|ISSUED/, 'an unknown Offer status'], [tRevisionUnknown, /rof-t5 revisions\[0\]\.status must be one of DRAFT\|ISSUED/, 'an unknown revision status'], [tNegativeNumber, /rof-t7 revisions\[0\]\.revisionNumber must be at least 1/, 'a revision number below 1']]) {
+    let refusal = null; try { openStore(DIR).save({ db: { ...db, recruitmentOffers: [...db.recruitmentOffers, row] } }); } catch (e) { refusal = e; }
+    neg(!!refusal && pattern.test(refusal.message) && JSON.stringify(openStore(DIR).load().db.recruitmentOffers) === storedNow, `5.0 ${row.id} (${why}) cannot be stored: the save refuses it, naming the row, nothing written (${String(refusal?.message ?? 'no refusal').slice(0, 120)})`);
+  }
+  db.recruitmentOffers.push(lazy, tIssuedBeforeCreated, tExpiryBound, tRespondedBeforeIssued, tPointer, disagree);
   const rowsBefore = JSON.stringify(db.recruitmentOffers);
   const casesBefore = JSON.stringify(db.recruitmentCases.map((c) => [c.id, c.room?.status ?? null]));
   openStore(DIR).save({ db });
   const s = await bootOn(DIR, PORT);
-  ok(s.up && !/applied/.test(s.log()), '5.1 the server boots over nine planted rows and a legacy case — no migration, no crash');
+  ok(s.up && !/applied/.test(s.log()), '5.1 the server boots over six planted rows and a legacy case — no migration, no crash');
   const { j } = s;
   const maria = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
   const sven = (await j('POST', '/auth/player/login', { playerId: 'pl-svensson' })).body.token;
@@ -298,7 +316,7 @@ section('5 — P6.1: lazy expiry, temporal corruption, unknown statuses, legacy 
   neg((await j('GET', '/org/offers/rof-lazy', undefined, maria.token, at(T0 + 3 * H))).body.offer.status === 'EXPIRED' && (await j('GET', '/org/offers/rof-lazy', undefined, maria.token, at(T0 + 3 * H))).body.offer.currentRevision.storedStatus === 'ISSUED', '5.3 after it, EXPIRED is derived at read time; the stored status is still ISSUED');
   neg((await j('POST', '/player/offers/rof-lazy/accept', { revisionId: 'rofr-lazy', clientKey: key() }, sven, at(T0 + 3 * H))).body.error === 'OFFER_EXPIRED', '5.4 and an acceptance after expiry is refused after the restart — no background job was needed');
   // b) temporal corruption and unknown statuses fail closed, named, never repaired
-  for (const [id, why] of [['rof-t1', 'issued before it was created'], ['rof-t2', 'an expiry beyond the bound'], ['rof-t3', 'responded before it was issued'], ['rof-t4', 'an unknown Offer status'], ['rof-t5', 'an unknown revision status'], ['rof-t6', 'a current-revision pointer at a superseded revision'], ['rof-t7', 'a revision number below 1']]) {
+  for (const [id, why] of [['rof-t1', 'issued before it was created'], ['rof-t2', 'an expiry beyond the bound'], ['rof-t3', 'responded before it was issued'], ['rof-t6', 'a current-revision pointer at a superseded revision']]) {
     const r = await j('GET', `/org/offers/${id}`, undefined, maria.token, at(T0 + H));
     neg(r.status === 500 && r.body.error === 'OFFER_STATE_UNKNOWN' && !has(r.body, 'revisions') && !has(r.body, 'stack'), `5.5 ${id} (${why}): 500 OFFER_STATE_UNKNOWN, nothing internal in the body`);
     const m = await j('POST', `/org/offers/${id}/withdraw`, { expectedRev: 1, clientKey: key() }, maria.token, at(T0 + H));

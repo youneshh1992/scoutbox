@@ -1591,6 +1591,9 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
   }
   const respondedAt = Date.now();
+  // One unit of work: the answer, the Contact (S8c, an explicit write), the
+  // channel and the trial commit together or not at all (P4A-D15).
+  unit(() => {
   request.status = accept ? 'accepted' : 'declined';
   request.respondedAt = respondedAt;
   request.respondedBy = 'guardian';
@@ -1622,8 +1625,8 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
     notify({ kind: 'org_user', id: request.userId }, 'declined', `The guardian of ${child.name} declined your ${request.type} request.`, request.id);
     notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian declined the ${request.type} with ${request.orgName}.`, request.id);
   }
-  persistNow();
   broadcast('requests', { playerId: child.id });
+  });
   res.json(requestForRecipient(request));
 });
 
@@ -3444,6 +3447,9 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
   }
   const respondedAt = Date.now();
+  // One unit of work: the answer, the Contact (S8c, an explicit write), the
+  // channel and the trial commit together or not at all (P4A-D15).
+  unit(() => {
   request.status = accept ? 'accepted' : 'declined';
   request.respondedAt = respondedAt;
   request.respondedBy = 'player'; // P4A-D13: both respond paths stamp who answered
@@ -3466,8 +3472,8 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
     if (request.type === 'trial') m23Ctx?.onTrialDeclined?.({ request, at: respondedAt, actor: { kind: 'player', id: req.player.id, name: req.player.name }, message: replyCheck.reply });
     notify({ kind: 'org_user', id: request.userId }, 'declined', `${req.player.name} declined your ${request.type} request.`, request.id);
   }
-  persistNow();
   broadcast('requests', { playerId: req.player.id });
+  });
   res.json(requestForRecipient(request));
 });
 
@@ -4293,9 +4299,7 @@ function deletePlayerData(playerId) {
     if (c?.playerId === playerId) { c.playerName = null; c.subjectRemovedAt = at; }
   }
   for (const a of db.assessments ?? []) if (a?.playerId === playerId) a.playerName = null;
-  for (const c of db.recruitmentContacts ?? []) {
-    if (c?.playerId === playerId && c.response) c.response = { ...c.response, message: null };
-  }
+  recruitmentContactsOffers.contacts.redactPlayer(playerId); // S8c: the reply's words go; the contact stays
   for (const ot of db.openTrials ?? []) {
     for (const reg of ot.registrations ?? []) if (reg.playerId === playerId) reg.playerName = null;
   }
@@ -4847,7 +4851,8 @@ const m23Ctx = registerM23({
   agentIntegration,
   recruitmentEvidenceProvider: recruitmentEvidence,
   recruitmentCases, // S8b: the formal decision row enters through the repository (and leaves it on a transport failure)
-  recruitmentContactsOffers, // S8c: a new contact enters through the repository (addContact); every other write is an in-place edit
+  recruitmentContactsOffers, // S8c: contacts are explicit repository writes (contacts.create / update), inside a unit of work
+  unit, afterCommit: (fn) => store.afterCommit(fn),
   ...m19Ctx,
   isAdult,
   // M17's room seams live on the object registerM17 returned; registerM18
@@ -4961,7 +4966,8 @@ Object.assign(agentIntegration, m27Ctx.seam);
 // (an agent's basis and scope) and P5.6D's readiness seam, by reference.
 m28Ctx = registerOffers({
   ...m19Ctx,
-  recruitmentContactsOffers, // S8c: a new offer enters through the repository (addOffer); every other write is an in-place edit
+  recruitmentContactsOffers, // S8c: offers are explicit repository writes (offers.create / update), inside a unit of work
+  unit, afterCommit: (fn) => store.afterCommit(fn),
   faults: faultLayer, // M23 P8.1 — the development fault seam after an answer moved the case
   isAdult,
   storage,

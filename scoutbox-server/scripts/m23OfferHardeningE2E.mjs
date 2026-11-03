@@ -657,11 +657,14 @@ section('O — partial failure: authoritative state first, side effects never tu
   const i = await issue(c.body.offer.id, { expectedRev: 1, clientKey: KI });
   ok(i.status === 200, 'O1 an issue succeeds');
   // Every post-persist side effect is wrapped: the m28 source proves it, and the route order is persist → effects.
+  // S8c (§4.3): an Offer write is a repository operation inside a unit of work (`unit(…)`, or `inUnit(res, …)` where
+  // the case may refuse the move); the side effects follow the unit's COMMIT.
   const src = readFileSync(path.join(HERE, '..', 'm28', 'index.mjs'), 'utf8');
-  const persistIdx = [...src.matchAll(/persistNow\(\);/g)].map((m) => m.index);
+  const unitIdx = [...src.matchAll(/\b(unit|inUnit)\((res, )?\(\) =>/g)].map((m) => m.index);
   const bareBroadcast = [...src.matchAll(/^\s*broadcast\?\.\(/gm)].length;
-  neg(bareBroadcast === 0 && /const safe = \(label, fn\)/.test(src) && persistIdx.length >= 6, 'O2 every broadcast/notification after a persisted write is wrapped in safe() — a throwing side effect is logged, not surfaced as a 500');
-  neg(/catch \(e\) \{ console\.error\(`OFFER lifecycle_writer_threw/.test(src) && /rollback\(\);\n\s+return err\(res, 'OFFER_LIFECYCLE_CONFLICT'/.test(src), 'O3 a lifecycle writer that throws is caught and the Offer change rolled back — no half-written state');
+  neg(bareBroadcast === 0 && /const safe = \(label, fn\)/.test(src) && unitIdx.length >= 6, 'O2 every broadcast/notification after a persisted write is wrapped in safe() — a throwing side effect is logged, not surfaced as a 500');
+  // The case refusing the move is thrown INSIDE the unit, which rolls the Offer rows, the mirrors and the case back together.
+  neg(/catch \(e\) \{ console\.error\(`OFFER lifecycle_writer_threw/.test(src) && /throw new OfferRefusal\(\{ error: 'OFFER_LIFECYCLE_CONFLICT'/.test(src) && /try \{ return \{ value: unit\(work\) \}; \} catch \(e\) \{\n\s+if \(!\(e instanceof OfferRefusal\)\) throw e;/.test(src), 'O3 a lifecycle writer that throws is caught and the Offer change rolled back — no half-written state');
   // A replay after a "lost response" returns the committed truth.
   const replay = await issue(c.body.offer.id, { expectedRev: 1, clientKey: KI });
   ok(replay.status === 200 && replay.body.idempotent === true && replay.body.offer.status === 'ISSUED' && (await stage(RID)) === 'offer_made', 'O4 a retry after a lost response returns the committed state, moving nothing again');

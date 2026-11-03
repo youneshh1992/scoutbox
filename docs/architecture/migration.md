@@ -79,12 +79,12 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S4b-R | retained record on player deletion | `0014_player_erasure` | `identity.mjs` | direct | done |
 | S8a | recruitment requests, trials | `0015_recruitment` | `recruitment.mjs` | **in-place edits + fingerprint at save** | done |
 | S8b | cases, rooms, decisions | `0016_recruitment_cases` | `recruitmentCases.mjs` | **fingerprint** | done |
-| S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **fingerprint** | implemented; accept on green tests |
+| S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **explicit, typed** (§4.3, 3 Nov) | implemented; accept on green tests |
 | S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed** | implemented; accept on green tests |
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3 |
+| — | recruitment end-state proof | — | — | — | §4.3: S8c done (3 Nov); S8a and S8b next |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -94,7 +94,8 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S14 | retire the blob | | | | not started |
 
 The lossless side columns (`extra_json`, `absent_keys_json`, `offtype_json`) of the old fidelity rule were dropped
-from S0–S7 and S6b on 3 November. S8a–S8c still carry them; they go in §4.3.
+from S0–S7 and S6b on 3 November, and from S8c when it moved to explicit writes (§4.3). S8a and S8b still carry
+them; they go in §4.3.
 
 ## 4. The order of work
 
@@ -166,6 +167,25 @@ a second pass:
 
 Doing the same for players and guardians (S4a's whole-snapshot identity replace) would also settle the A0–A3
 foreign-key questions. That's a candidate for later.
+
+**S8c done 3 November** (branch `migrate/s8c-explicit-writes`). Contacts and offers are ten typed tables with the
+vocabulary and length CHECKs, no side columns, and their idempotency keys as columns plus `offer_keys` rows (no longer
+in `idempotency_keys`). Migration `0017` was amended in place: re-seed a development database. The repository offers
+`contacts.create` / `update` / `redactPlayer` and the same for offers; `update(id, (draft) => …)` hands the route a
+plain copy, types the whole record and writes it at once, and refuses an unknown field rather than drop it. Every
+contact and offer route runs in one unit of work, and so do the two request-respond routes (the answer and the
+contact commit together). A lifecycle refusal is thrown inside the unit, which replaces the offer routes' hand-written
+rollback. The guardian e-mail copy is sent after COMMIT. What we learned, for S8a and S8b:
+
+- S8c went first because it is a leaf. Its `case_id` and `request_id` keys are `DEFERRABLE INITIALLY DEFERRED`
+  because cases and requests are still written by their staged hooks at the unit's COMMIT. When S8a and S8b become
+  explicit, those keys can go back to immediate `RESTRICT`.
+- Requests and trials point at cases, and cases link back to requests and trials, so S8a and S8b depend on each other.
+  Convert them in one PR, or convert one with deferred keys as S8c did.
+- Four end-to-end batteries planted records the typed tables now refuse (an offer with no revision, a pointer at a
+  missing revision, unknown status words, partial literals). Those assertions now check that the save refuses the
+  record and names its id. Corruption a typed row can still carry (a delivered contact with no recipient, an ACCEPTED
+  revision with no response, a stale but resolvable pointer) is still planted and still judged on read.
 
 ### 4.4 The end-to-end test estate
 

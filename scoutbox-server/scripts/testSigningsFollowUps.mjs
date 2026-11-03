@@ -90,7 +90,7 @@ test('[schema] migration 0018 is registered last and creates the ten typed STRIC
   for (const t of TABLES) { assert.doesNotMatch(ddlOf(e, t), /absent_keys_json|offtype_json|extra_json/, `${t} has no lossless side column`); assert.match(ddlOf(e, t), /STRICT/); }
   assert.match(ddlOf(e, 'signing_packages'), /completion_signing_id\s+TEXT REFERENCES signings\(id\) DEFERRABLE INITIALLY DEFERRED/);
   assert.match(ddlOf(e, 'signings'), /CHECK \(method IN \('CANONICAL_COMPLETION','LEGACY_RECORDED'\)\)/);
-  assert.match(ddlOf(e, 'idempotency_keys'), /'signing_packages'/); assert.match(ddlOf(e, 'idempotency_keys'), /'recruitment_offers'/);
+  assert.match(ddlOf(e, 'idempotency_keys'), /'signing_packages'/); assert.match(ddlOf(e, 'idempotency_keys'), /'room_decisions'/);
   for (const n of COLLECTIONS) assert.equal(e.prepare('SELECT count(*) AS n FROM collections WHERE name = ?').get(n).n, 0, `no ${n} blob`);
   e.close(); rm(empty);
   // the fixtures

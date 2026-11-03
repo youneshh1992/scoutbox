@@ -26,8 +26,8 @@
  * lets the completion unit write the signing row and then the package, and a snapshot remove the pair in one save.
  *
  * References: `org_id` → orgs, `case_id` → recruitment_cases, `offer_id` → recruitment_offers, the staff ids →
- * org_users (RESTRICT, as drafted). `offer_revision_id` stays a plain indexed column (offer_revisions.id is indexed,
- * not unique — S8c as accepted; this step alters no accepted table). Player ids: NO key, tolerant and counted —
+ * org_users (RESTRICT, as drafted). `offer_revision_id` stays a plain indexed column checked in code (offer_revisions.id
+ * became the primary key when S8c moved to typed tables, migration.md §4.3; turning this into a real key is a later change). Player ids: NO key, tolerant and counted —
  * Q7a/Q8a/Q8c-a applied a fourth time, not re-asked. Guardian and party ids: polymorphic, no key.
  */
 import { S8C_KEY_OWNERS } from './recruitmentContactsOffers.mjs';

@@ -1,7 +1,7 @@
 // S8c test fixtures: recruitment contacts and offers in the EXACT shapes the writers produce (m23/contactRoutes.mjs the
-// draft :319-335, the external record :598-611, the send :453-508, the response hook :628-639, the edit :371-398;
-// m28/index.mjs the offer :326-340, the edit :384-394, the issue :460-479, the withdraw :516-527, the revise :569-580,
-// the response :742-772, the share :796-809, the receipt :654, the deletion unit :894-896). Synthetic ids and names only.
+// draft, the external record, the send, the response hook, the edit; m28/index.mjs the offer, the edit, the issue, the
+// withdraw, the revise, the response, the share, the receipt, the deletion unit). Every record is valid: the typed
+// tables refuse junk, and the suites build junk from these with an override. Synthetic ids and names only.
 // Shared by testRecruitmentContactsOffers.mjs and testRecruitmentContactsOffersServer.mjs. The ids agree with the S8a
 // and S8b fixtures: case-1 is the room of pl-adult (req-p4b), case-2 the case of pl-child1 (req-minor, guardian
 // gd-primary), case-gone the tombstoned case of the historically missing pl-gone-long-ago.
@@ -50,17 +50,15 @@ export const nullKeyContact = (over = {}) => draftContact({
   keys: { create: { key: 'k-c3', fp: 'fp3' }, send: { key: null, fp: '{"contactId":"rct-3"}' }, record: null },
   history: [chist('aud-rc6', TX.sent, 'contact_sent', { channel: 'in_app', recipientType: 'player', attempt: 1, mode: 'player_only', agentParty: false }), chist('aud-rc7', TX.sent, 'contact_agent_routing_refused', { reasonCode: 'NO_REPRESENTATION' })], ...over,
 });
-/** The attested external record (contactRoutes.mjs:598-611) with a prototype-named own key inside a history detail. */
+/** The attested external record (contactRoutes.mjs, the external route): no body, a summary, the record key. */
 export const externalContact = (over = {}) => draftContact({
   id: 'rct-4', caseId: 'case-2', playerId: 'pl-child1', status: 'recorded', channel: 'phone', recipient: { type: 'player', playerId: 'pl-child1', guardianId: null, minor: false }, subject: null, body: null, summary: 'Spoke on the phone.',
   lifecycle: { applied: true, from: 'contact_planned', to: 'contacted', at: TX.sent }, occurredAt: TX.sent - HOUR, recordedBy: ACTOR, recordedAt: TX.sent,
   keys: { create: null, send: null, record: { key: 'k-rec-4', fp: 'fp-rec' } },
-  history: [chist('aud-rc8', TX.sent, 'contact_external_recorded', Object.defineProperty({ channel: 'phone', occurredAt: TX.sent - HOUR, recipientType: 'player' }, '__proto__', { value: { planted: true }, enumerable: true, writable: true, configurable: true }))], ...over,
+  history: [chist('aud-rc8', TX.sent, 'contact_external_recorded', { channel: 'phone', occurredAt: TX.sent - HOUR, recipientType: 'player' })], ...over,
 });
-/** A pre-P5.6E literal: NO contactMode / routingSnapshot keys at all; cancelled; an unknown top-level key kept. */
-export const legacyContact = (over = {}) => { const c = draftContact({ id: 'rct-5', caseId: 'case-gone', playerId: 'pl-gone-long-ago', status: 'cancelled', subject: 'Old', body: 'Old body', updatedAt: TX.drafted + MIN, cancelledAt: TX.drafted + MIN, cancelledBy: ACTOR, keys: { create: null, send: null, record: null }, history: [chist('aud-rc9', TX.drafted + MIN, 'contact_cancelled')], legacyFlag: 'kept', ...over }); delete c.contactMode; delete c.routingSnapshot; return c; };
-/** Off-type values the blob store accepts (a string rev, a numeric subject, an object where a list is expected; an unknown empty list act). */
-export const offtypeContact = (over = {}) => draftContact({ id: 'rct-8', caseId: 'case-2', playerId: 'pl-child1', subject: 42, attempts: { not: 'a list' }, keys: { create: null, send: null, record: null, strange: [] }, history: [], rev: '1', ...over });
+/** A cancelled draft on the tombstoned case of a historically missing player (Q8c-a: written and counted). */
+export const cancelledContact = (over = {}) => draftContact({ id: 'rct-5', caseId: 'case-gone', playerId: 'pl-gone-long-ago', status: 'cancelled', subject: 'Old', body: 'Old body', updatedAt: TX.drafted + MIN, cancelledAt: TX.drafted + MIN, cancelledBy: ACTOR, keys: { create: null, send: null, record: null }, history: [chist('aud-rc9', TX.drafted + MIN, 'contact_cancelled')], ...over });
 
 export const TERMS = Object.freeze({ offerType: 'direct_recruitment', role: 'CM', squad: 'U21', startDate: '2027-07-01', endDate: null, conditions: null });
 /** m28/index.mjs:78-81 `hist()` — an offer history entry. */
@@ -90,25 +88,25 @@ export const acceptedOffer = (over = {}) => draftOffer({
   history: [ohist('aud-ro2', TX.issued, 'offer_issued', { revisionId: 'rofr-2', revisionNumber: 1, supersedes: null, expiresAt: TX.issued + 30 * DAY }), ohist('aud-ro3', TX.issued + HOUR, 'offer_viewed', { revisionId: 'rofr-2' }, { kind: 'guardian', id: 'gd-primary', name: null }), ohist('aud-ro4', TX.accepted, 'offer_draft_discarded', { revisionId: 'rofr-4', byResponseId: 'rofa-1' }, { kind: 'guardian', id: 'gd-primary', name: null }), ohist('aud-ro5', TX.accepted, 'offer_accepted', { revisionId: 'rofr-3', responseId: 'rofa-1', hadReason: false }, { kind: 'guardian', id: 'gd-primary', name: null })],
   updatedAt: TX.accepted, rev: 6, revAt: TX.accepted, revBy: null, subjectRemovedAt: TX.removed, ...over,
 });
-/** Declined by a guardian with a reason; a refused move recorded in `lifecycle` with `allowed`; a LEGACY non-array `keys.issue`. */
+/** Declined by a guardian with a reason; a refused move recorded in `lifecycle` with `allowed`. */
 export const declinedOffer = (over = {}) => draftOffer({
   id: 'rof-3', caseId: 'case-2', playerId: 'pl-child1', decisionId: null, status: 'DECLINED', currentRevisionId: 'rofr-5',
   revisions: [revision({ id: 'rofr-5', status: 'DECLINED', internalNote: null, expiresAt: TX.issued + 9 * DAY, issuedAt: TX.issued, issuedBy: BY, respondedAt: TX.accepted, response: { id: 'rofa-2' }, recipientSnapshot: { type: 'guardian', playerId: 'pl-child1', guardianId: 'gd-primary', minor: true, at: TX.issued }, rev: 2, revAt: TX.accepted })],
   responses: [{ id: 'rofa-2', revisionId: 'rofr-5', responseType: 'declined', actorType: 'guardian', actorId: 'gd-primary', actorName: 'Primary Parent', forPlayerId: 'pl-child1', occurredAt: TX.accepted, reason: 'Too far', clientKey: null }],
-  keys: { create: null, issue: { key: 'legacy-issue', revisionId: 'rofr-5' }, withdraw: [], revise: [] },
+  keys: { create: null, issue: [{ key: 'k-issue-5', revisionId: 'rofr-5' }], withdraw: [], revise: [] },
   lifecycle: { applied: false, action: 'considerOffer', reason: 'LIFECYCLE_NOT_ALLOWED', message: 'not from here', allowed: ['offer_accepted', 'withdrawn'], from: 'offer_declined', to: 'offer_declined', at: TX.accepted + MIN },
   history: [ohist('aud-ro6', TX.accepted, 'offer_declined', { revisionId: 'rofr-5', responseId: 'rofa-2', hadReason: true }, { kind: 'guardian', id: 'gd-primary', name: 'Primary Parent' })], updatedAt: TX.accepted + MIN, rev: 3, revAt: TX.accepted + MIN, revBy: REVBY, ...over,
 });
-/** Withdrawn with a reason; `keys` MISSING entirely and `readReceipts` absent (an older literal); an off-type recipient message; a historically missing current revision (the review's F1 case). */
-export const legacyOffer = (over = {}) => { const o = draftOffer({ id: 'rof-4', caseId: 'case-gone', playerId: 'pl-gone-long-ago', decisionId: 'rdec-1', status: 'WITHDRAWN', currentRevisionId: 'rofr-missing', revisions: [revision({ id: 'rofr-6', status: 'WITHDRAWN', recipientMessage: ['not', 'text'], internalNote: null, expiresAt: TX.issued + 9 * DAY, issuedAt: TX.issued, issuedBy: BY, withdrawnAt: TX.revised, withdrawnBy: BY, withdrawReason: 'Budget', recipientSnapshot: { type: 'player', playerId: 'pl-gone-long-ago', guardianId: null, minor: false, at: TX.issued }, rev: 2, revAt: TX.revised, revBy: REVBY })], lifecycle: { applied: true, action: 'considerOffer', from: 'offer_made', to: 'offer_consideration', at: TX.revised }, history: [ohist('aud-ro7', TX.revised, 'offer_withdrawn', { revisionId: 'rofr-6', wasIssued: true, hadReason: true })], updatedAt: TX.revised, rev: 2, revAt: TX.revised, revBy: REVBY, subjectRemovedAt: TX.removed, ...over }); delete o.keys; delete o.readReceipts; return o; };
+/** Withdrawn with a reason, on the tombstoned case of a historically missing player; no receipts; the subject removed. */
+export const withdrawnOffer = (over = {}) => draftOffer({ id: 'rof-4', caseId: 'case-gone', playerId: 'pl-gone-long-ago', decisionId: 'rdec-1', status: 'WITHDRAWN', currentRevisionId: 'rofr-6', revisions: [revision({ id: 'rofr-6', status: 'WITHDRAWN', recipientMessage: 'Welcome', internalNote: null, expiresAt: TX.issued + 9 * DAY, issuedAt: TX.issued, issuedBy: BY, withdrawnAt: TX.revised, withdrawnBy: BY, withdrawReason: 'Budget', recipientSnapshot: { type: 'player', playerId: 'pl-gone-long-ago', guardianId: null, minor: false, at: TX.issued }, rev: 2, revAt: TX.revised, revBy: REVBY })], keys: { create: null, issue: [], withdraw: [{ key: 'k-wd-6', revisionId: 'rofr-6' }], revise: [] }, lifecycle: { applied: true, action: 'considerOffer', from: 'offer_made', to: 'offer_consideration', at: TX.revised }, history: [ohist('aud-ro7', TX.revised, 'offer_withdrawn', { revisionId: 'rofr-6', wasIssued: true, hadReason: true })], updatedAt: TX.revised, rev: 2, revAt: TX.revised, revBy: REVBY, subjectRemovedAt: TX.removed, ...over });
 
 /** A contact's request (the S8a writer literal for a CONTACT, recruitmentTestFixtures.mjs:22-26 pattern): the pair the respond routes read both ways. */
 export const contactRequest = (id, contactId, over = {}) => p4bInvitation({ id, type: 'contact', subject: 'Next season', contactId, trialDetails: null, keys: { invite: { key: `client-${id}`, fp: `fp-${id}` } }, ...over });
 
-/** The standard S8c graph beside the S8a/S8b fixtures: six contacts and four offers. */
+/** The standard S8c graph beside the S8a/S8b fixtures: five contacts and four offers. */
 export const S8C_FIX = () => ({
-  recruitmentContacts: [draftContact(), respondedContact(), nullKeyContact(), externalContact(), legacyContact(), offtypeContact()],
-  recruitmentOffers: [draftOffer(), acceptedOffer(), declinedOffer(), legacyOffer()],
+  recruitmentContacts: [draftContact(), respondedContact(), nullKeyContact(), externalContact(), cancelledContact()],
+  recruitmentOffers: [draftOffer(), acceptedOffer(), declinedOffer(), withdrawnOffer()],
 });
 /** JSON-persisted shape (what the blob held): a live `undefined` is absence. */
 export const persisted = (v) => JSON.parse(JSON.stringify(v));

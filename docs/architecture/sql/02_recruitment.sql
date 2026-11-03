@@ -38,8 +38,8 @@
 -- (REGISTERED) creates the ten signing/follow-up definitions below (typed columns only, the fidelity rule) and
 -- broadens idempotency_keys to 'signing_packages'. Every table of this file is implemented now.
 -- =============================================================================
--- STATUS (S8c, 24 October 2026; IMPLEMENTED, PENDING INDEPENDENT ACCEPTANCE): migration 0017_recruitment_contacts_offers
--- (REGISTERED) creates the nine contact/offer definitions below and broadens idempotency_keys; Q8c-a tolerant, Q8c-b strict.
+-- STATUS (S8c, amended 3 November 2026): migration 0017_recruitment_contacts_offers (REGISTERED) creates the ten typed
+-- contact/offer definitions below, written by explicit operations; Q8c-a tolerant, Q8c-b strict.
 -- =============================================================================
 -- STATUS (S8a-core, 22 October 2026; INDEPENDENTLY ACCEPTED at 7a7efc6 — plan
 -- §D.8.11): the sixteen definitions below marked "LIVE since migration
@@ -98,10 +98,9 @@
 -- what S8b changed against ITS drafts is stated in each section's "draft versus
 -- implemented" note. Player references: NO key, tolerant and counted (Q8a).
 -- S8c (contacts, offers): migration 0017_recruitment_contacts_offers is
--- REGISTERED (implemented 24 October 2026, pending independent acceptance) —
--- the nine contact and offer definitions below are the ones it creates and
--- idempotency_keys carries their owners too; each section's 'draft versus
--- implemented' note states what changed against the drafts (review §3).
+-- REGISTERED (typed and explicit since 3 November 2026, migration.md §4.3) —
+-- the ten contact and offer definitions below are the ones it creates; their
+-- keys are their own columns and offer_keys, not idempotency_keys.
 -- Player references: NO key, tolerant and counted (Q8c-a); guardian
 -- references: NO key, strict in code (Q8c-b).
 -- S8d (signing packages, signings, follow-ups, outcome reports): migration
@@ -128,7 +127,7 @@
 --   different fp is a conflict. ref_id / actor_id of the drafted seven-column shape are not columns
 --   yet: a later step's owners that need them read them from entry_json or add the columns.
 CREATE TABLE idempotency_keys (
-  owner_table                      TEXT NOT NULL CHECK (owner_table IN ('recruitment_requests', 'trials', 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions', 'recruitment_contacts', 'recruitment_offers', 'signing_packages')),
+  owner_table                      TEXT NOT NULL CHECK (owner_table IN ('recruitment_requests', 'trials', 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions', 'signing_packages')),
   owner_id                         TEXT NOT NULL,
   position                         INTEGER NOT NULL,
   act                              TEXT NOT NULL,
@@ -150,8 +149,8 @@ CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, ow
 -- parent-scoped tables admit twice — corrected after the independent review of b7c0dd0, F2, whose
 -- build keyed them by the child id); ref_id /
 -- actor_id are NOT columns — a decision's draft id is the
--- draft_id column of room_decisions; the contacts and offers lines are implemented by 0017 (S8c) — a
--- contact's and an offer's rows under the record's OWN id —; the packages lines stay drafts for S8d):
+-- draft_id column of room_decisions; the contacts and offers keys are their own columns and offer_keys
+-- since §4.3, not rows here; the packages lines stay drafts for S8d):
 -- source: every `keys` object/list/map on db.recruitmentContacts, db.trials,
 --         db.requests, db.roomDecisions, recruitmentCases[].decisionDraft,
 --         recruitmentCases[].transactionHandoff, db.recruitmentOffers,
@@ -161,9 +160,6 @@ CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, ow
 --         act list at 50 and shift the oldest (trialRoutes.mjs:101) — a retention
 --         rule the migration keeps as data, not as a constraint
 -- mapping (source shape -> (owner_table, owner_id, act, key, fp, at, ref_id, actor_id)):
---   recruitmentContacts.keys.create {key,fp}   (contactRoutes.mjs:332) -> ('recruitment_contacts', id, 'create', key, fp, NULL, NULL, NULL)
---   recruitmentContacts.keys.send   {key|null,fp} (contactRoutes.mjs:453) -> (..., 'send', key, fp, NULL, NULL, NULL); a NULL key is never replayable and is not stored
---   recruitmentContacts.keys.record {key,fp}   (contactRoutes.mjs:608) -> (..., 'record', ...)
 --   requests.keys.invite {key,fp}              (trialRoutes.mjs:412)   -> ('recruitment_requests', id, 'invite', key, fp, NULL, NULL, NULL)
 --   trials.keys.accept {key:null, fp}          (server.mjs:2196)       -> NOT migrated: key is always null -- dead field; fp = {requestId, day} is derivable
 --   trials.keys.schedule|cancel|attendance|complete|link [{key,fp,at}] (trialRoutes.mjs:100) -> ('trials', id, act, key, fp, at, NULL, NULL)
@@ -171,8 +167,6 @@ CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, ow
 --   roomDecisions.keys.draft {key,fp} (copy of the finalized draft's create key) -> ('room_decisions', id, 'draft', key, fp, NULL, draft_id, NULL)
 --   decisionDraft.keys.create {key,fp}         (decisionRoutes.mjs:235) -> ('case_decision_drafts', id, 'create', key, fp, NULL, NULL, NULL)
 --   transactionHandoff.keys.invite {key}       (m27/index.mjs:692)     -> ('case_transaction_handoffs', id, 'invite', key, NULL, NULL, NULL, NULL)
---   recruitmentOffers.keys.create {key,fp}     (m28/index.mjs:338)     -> ('recruitment_offers', id, 'create', key, fp, NULL, NULL, NULL)
---   recruitmentOffers.keys.issue|withdraw|revise [{key,revisionId}] (m28/index.mjs:474/523/580) -> (..., act, key, NULL, NULL, revisionId, NULL)
 --   signingPackages.keys.start {key,fp}        (m29/index.mjs:407)     -> ('signing_packages', id, 'start', key, fp, NULL, NULL, NULL)
 --   signingPackages.keys.ready|supersede [{key,fp,revisionId,at}]      -> (..., act, key, fp, at, revisionId, NULL)
 --   signingPackages.keys.party [{key,fp,actorId,revisionId,at}] (m29/index.mjs:541) -> (..., 'party', key, fp, at, revisionId, actorId)
@@ -1208,329 +1202,277 @@ CREATE TABLE room_evidence_states (
 CREATE INDEX room_evidence_states_room_evidence ON room_evidence_states (room_id, evidence_id);
 
 -- =============================================================================
--- recruitment_contacts  (the club's internal record of one communication process)
+-- recruitment_contacts, recruitment_offers and their children (S8c)
 -- =============================================================================
--- S8c — IMPLEMENTED by migration 0017_recruitment_contacts_offers (repositories/recruitmentContactsOffers.mjs; the design
---   docs/architecture/s8c-readiness-review.md as independently accepted at 19f5ca8; the Founder's answers of 24 October 2026:
---   Q8c-a tolerant/counted player references, Q8c-b strict guardian checks). The DDL below is the definition the migration
---   creates, generated from the writer shapes (the S8a engine): seq + the writer's literal key for key, the three lossless
---   columns (absent_keys_json, offtype_json, extra_json), position-keyed children with raw_json for a non-object entry.
---   DRAFT VERSUS IMPLEMENTED (review §3): request_id → recruitment_requests ON DELETE RESTRICT KEPT (the one new real key;
---   the pair guard CONTACT_REQUEST_MISMATCH replaces the drafted UNIQUE request index, WITHDRAWN); org_id and case_id
---   RESTRICT keys KEPT; player_id NOT NULL, no key (Q8c-a); recipient_guardian_id PLAIN (the drafted guardians SET NULL
---   key WITHDRAWN; strict in code, Q8c-b); the staff keys KEPT but NULLABLE (created_by_user_id NOT NULL relaxed);
---   every status/channel/mode/state vocabulary CHECK, every length CHECK, the recipient_minor and the
---   contact_mode NOT NULL DEFAULT WITHDRAWN (the routes validate, the readers report and keep; absence is recorded);
---   recipient.playerId and routingSnapshot.honest STORED as written (the draft's 'derived' withdrawn);
---   the drafted cooldown and case indexes replaced by the readers' actual access paths; contact_history RESTRICT KEPT
---   (removed explicitly before its owner). source: db.recruitmentContacts (m23/contactRoutes.mjs:319 draft, :598 external
---   record); writers: m23/contactRoutes.mjs; server.mjs (the deletion unit nulls response.message in place).
+-- LIVE since migration 0017_recruitment_contacts_offers (amended in place on 3 November 2026, migration.md §4.3):
+-- repositories/recruitmentContactsOffers.mjs. Typed columns only, with the vocabulary and length CHECKs of
+-- m23/contact.mjs and m28/offer.mjs; no absent_keys_json, offtype_json, extra_json or raw_json. Written by explicit
+-- repository operations (contacts.create / update / redactPlayer, offers.create / update / redactPlayer).
+-- The idempotency keys are columns of their owner (create/send/record on a contact, create on an offer) and the rows
+-- of offer_keys (an offer's issue, withdraw and revise lists); neither uses idempotency_keys.
+-- case_id and a contact's request_id are DEFERRABLE INITIALLY DEFERRED (NO ACTION, checked at COMMIT): the cases and
+-- requests are still written by their staged repositories at the unit's commit. Player ids: no key, tolerant and
+-- counted (Q8c-a). Guardian ids: no key; a snapshot write naming a missing guardian is refused (Q8c-b). Every offer
+-- pointer (current revision, response, supersedes, superseded by, discarded by; a response's, a receipt's and a key's
+-- revision) names a row of the same offer, checked by the repository's typer. contact_history and offer_history are
+-- RESTRICT (removed explicitly before their owner); the other children cascade.
+-- source: db.recruitmentContacts (m23/contactRoutes.mjs), db.recruitmentOffers (m28/index.mjs).
 CREATE TABLE recruitment_contacts (
-  seq                              INTEGER PRIMARY KEY,
-  id                               TEXT NOT NULL UNIQUE,
-  org_id                           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
-  player_id                        TEXT NOT NULL,
-  status                           TEXT,
-  channel                          TEXT,
-  recipient_type                   TEXT,
-  recipient_player_id              TEXT,
-  recipient_guardian_id            TEXT,
-  recipient_minor                  INTEGER,
-  contact_mode                     TEXT,
-  routing_at                       INTEGER,
-  routing_mode                     TEXT,
-  routing_player                   INTEGER,
-  routing_guardian                 INTEGER,
-  routing_agent_user_id            TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  routing_agent_agreement_id       TEXT,
-  routing_honest                   TEXT,
-  subject                          TEXT,
-  body                             TEXT,
-  summary                          TEXT,
-  created_by_kind                  TEXT,
-  created_by_user_id               TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  created_by_name                  TEXT,
-  created_at                       INTEGER,
-  updated_at                       INTEGER,
-  sent_by_kind                     TEXT,
-  sent_by_user_id                  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  sent_by_name                     TEXT,
-  sent_at                          INTEGER,
-  delivered_at                     INTEGER,
-  failed_at                        INTEGER,
-  failure_code                     TEXT,
-  request_id                       TEXT REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
-  email_copy_state                 TEXT,
-  email_copy_to                    TEXT,
-  email_copy_outbox_id             TEXT,
-  email_copy_at                    INTEGER,
-  lifecycle_applied                INTEGER,
-  lifecycle_from                   TEXT,
-  lifecycle_to                     TEXT,
-  lifecycle_at                     INTEGER,
-  lifecycle_reason                 TEXT,
-  occurred_at                      INTEGER,
-  recorded_by_kind                 TEXT,
-  recorded_by_user_id              TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  recorded_by_name                 TEXT,
-  recorded_at                      INTEGER,
-  responded_at                     INTEGER,
-  response_kind                    TEXT,
-  response_message                 TEXT,
-  response_by                      TEXT,
-  response_at                      INTEGER,
-  cancelled_at                     INTEGER,
-  cancelled_by_kind                TEXT,
-  cancelled_by_user_id             TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  cancelled_by_name                TEXT,
-  rev                              INTEGER,
-  rev_at                           INTEGER,
-  rev_by_user_id                   TEXT,
-  rev_by_name                      TEXT,
-  policy_version                   INTEGER,
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) DEFERRABLE INITIALLY DEFERRED,
+  player_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IS NULL OR status IN ('draft','delivered','failed','responded','recorded','cancelled')),
+  channel TEXT NOT NULL CHECK (channel IS NULL OR channel IN ('in_app','phone','in_person','email_external','agent','other')),
+  contact_mode TEXT NOT NULL CHECK (contact_mode IS NULL OR contact_mode IN ('player_only','both')),
+  recipient_type TEXT CHECK (recipient_type IS NULL OR recipient_type IN ('player','guardian')),
+  recipient_player_id TEXT,
+  recipient_guardian_id TEXT,
+  recipient_minor INTEGER CHECK (recipient_minor IS NULL OR recipient_minor IN (0,1)),
+  routing_at INTEGER,
+  routing_mode TEXT CHECK (routing_mode IS NULL OR routing_mode IN ('player_only','both')),
+  routing_player INTEGER CHECK (routing_player IS NULL OR routing_player IN (0,1)),
+  routing_guardian INTEGER CHECK (routing_guardian IS NULL OR routing_guardian IN (0,1)),
+  routing_agent_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  routing_agent_agreement_id TEXT,
+  routing_honest TEXT,
+  subject TEXT CHECK (subject IS NULL OR length(subject) <= 120),
+  body TEXT CHECK (body IS NULL OR length(body) <= 2000),
+  summary TEXT CHECK (summary IS NULL OR length(summary) <= 500),
+  created_by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  created_by_name TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  sent_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  sent_by_name TEXT,
+  sent_at INTEGER,
+  delivered_at INTEGER,
+  failed_at INTEGER,
+  failure_code TEXT,
+  request_id TEXT REFERENCES recruitment_requests(id) DEFERRABLE INITIALLY DEFERRED,
+  email_copy_state TEXT CHECK (email_copy_state IS NULL OR email_copy_state IN ('queued','not_available','local_outbox','accepted_by_provider','failed')),
+  email_copy_to TEXT CHECK (email_copy_to IS NULL OR email_copy_to IN ('guardian')),
+  email_copy_outbox_id TEXT,
+  email_copy_at INTEGER,
+  lifecycle_applied INTEGER CHECK (lifecycle_applied IS NULL OR lifecycle_applied IN (0,1)),
+  lifecycle_from TEXT,
+  lifecycle_to TEXT,
+  lifecycle_reason TEXT,
+  lifecycle_at INTEGER,
+  occurred_at INTEGER,
+  recorded_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  recorded_by_name TEXT,
+  recorded_at INTEGER,
+  responded_at INTEGER,
+  response_kind TEXT CHECK (response_kind IS NULL OR response_kind IN ('accepted','declined')),
+  response_message TEXT CHECK (response_message IS NULL OR length(response_message) <= 500),
+  response_by TEXT CHECK (response_by IS NULL OR response_by IN ('player','guardian')),
+  response_at INTEGER,
+  cancelled_at INTEGER,
+  cancelled_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  cancelled_by_name TEXT,
+  create_key TEXT,
+  create_fp TEXT,
+  send_key TEXT,
+  send_fp TEXT,
+  record_key TEXT,
+  record_fp TEXT,
+  rev INTEGER NOT NULL CHECK (rev >= 0),
+  rev_at INTEGER,
+  rev_by_user_id TEXT,
+  rev_by_name TEXT,
+  policy_version INTEGER NOT NULL,
+  CHECK ((recipient_type IS NULL) = (recipient_minor IS NULL)),
+  CHECK ((routing_at IS NULL) = (routing_mode IS NULL)),
+  CHECK ((email_copy_state IS NULL) = (email_copy_to IS NULL)),
+  CHECK ((response_kind IS NULL) = (response_by IS NULL)),
+  CHECK (send_key IS NULL OR send_fp IS NOT NULL)
 ) STRICT;
 CREATE INDEX recruitment_contacts_case_org ON recruitment_contacts (case_id, org_id);
 CREATE INDEX recruitment_contacts_org_player ON recruitment_contacts (org_id, player_id);
 CREATE INDEX recruitment_contacts_request ON recruitment_contacts (request_id);
 CREATE INDEX recruitment_contacts_routing_agent ON recruitment_contacts (routing_agent_user_id);
 CREATE INDEX recruitment_contacts_player ON recruitment_contacts (player_id);
-
 CREATE TABLE contact_attempts (
-  contact_id                       TEXT NOT NULL REFERENCES recruitment_contacts(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  at                               INTEGER,
-  ok                               INTEGER,
-  code                             TEXT,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
+  contact_id TEXT NOT NULL REFERENCES recruitment_contacts(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  ok INTEGER NOT NULL CHECK (ok IS NULL OR ok IN (0,1)),
+  code TEXT,
   PRIMARY KEY (contact_id, position)
 ) STRICT;
-
-
 CREATE TABLE contact_history (
-  contact_id                       TEXT NOT NULL REFERENCES recruitment_contacts(id) ON DELETE RESTRICT,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  at                               INTEGER,
-  action                           TEXT,
-  by_kind                          TEXT,
-  by_user_id                       TEXT,
-  by_name                          TEXT,
-  detail_json                      TEXT CHECK (detail_json IS NULL OR json_valid(detail_json)),
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (contact_id, position)
+  id TEXT PRIMARY KEY,
+  contact_id TEXT NOT NULL REFERENCES recruitment_contacts(id) ON DELETE RESTRICT,
+  position INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  by_kind TEXT CHECK (by_kind IS NULL OR by_kind IN ('org','player','guardian')),
+  by_user_id TEXT,
+  by_name TEXT,
+  detail_json TEXT CHECK (detail_json IS NULL OR json_type(detail_json) = 'object'),
+  UNIQUE (contact_id, position)
 ) STRICT;
 CREATE INDEX contact_history_contact_at ON contact_history (contact_id, at);
-CREATE INDEX contact_history_id ON contact_history (id);
-
--- =============================================================================
--- recruitment_offers  (M23 P6 canonical Offer: container + exact revisions + responses)
--- =============================================================================
--- S8c — IMPLEMENTED by migration 0017_recruitment_contacts_offers (see the contacts note above). DRAFT VERSUS
---   IMPLEMENTED (review §3): current_revision_id NOT NULL REFERENCES offer_revisions WITHDRAWN as a key and NULLABLE —
---   a plain column under the ONE POINTER RULE together with offer_revisions.response_id, supersedes_revision_id,
---   superseded_by_revision_id and discarded_by_response_id (their drafted keys WITHDRAWN): every pointer stored as
---   written; classified over the FINAL offer collection — own target valid, a target naming no row of its kind under
---   any offer of the final collection an unresolved historical pointer (kept verbatim, counted), a target that exists
---   only under another offer of the final collection refused (OFFER_CHAIN_BROKEN); decision_id PLAIN (the room_decisions
---   SET NULL key WITHDRAWN; dangling ids counted); the one-live-offer-per-case UNIQUE index WITHDRAWN (it refuses a
---   state the routes produce); offer_revisions.id INDEXED, NOT UNIQUE and UNIQUE (offer_id, revision_number) WITHDRAWN
---   (duplicates are kept-corrupt records offerIntegrity reports) — S8d's drafted key to offer_revisions(id) needs a
---   decision then; offer_responses.revision_id UNIQUE, the document UNIQUE and the receipt PRIMARY KEY WITHDRAWN
---   (position-keyed children); recipient_guardian_id PLAIN (Q8c-b strict in code); player ids no key (Q8c-a);
---   agent_share_by_kind STORED as written; every vocabulary/length/date CHECK WITHDRAWN; EXPIRED never stored (read-time).
---   source: db.recruitmentOffers (m28/index.mjs:334); writers: m28/index.mjs (the deletion unit nulls names in place).
 CREATE TABLE recruitment_offers (
-  seq                              INTEGER PRIMARY KEY,
-  id                               TEXT NOT NULL UNIQUE,
-  org_id                           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  case_id                          TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
-  player_id                        TEXT NOT NULL,
-  type                             TEXT,
-  decision_id                      TEXT,
-  transaction_id                   TEXT,
-  status                           TEXT,
-  current_revision_id              TEXT,
-  agent_share_user_id              TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  agent_share_agreement_id         TEXT,
-  agent_share_at                   INTEGER,
-  agent_share_by_kind              TEXT,
-  agent_share_by_id                TEXT,
-  lifecycle_applied                INTEGER,
-  lifecycle_action                 TEXT,
-  lifecycle_reason                 TEXT,
-  lifecycle_message                TEXT,
-  lifecycle_allowed_json           TEXT CHECK (lifecycle_allowed_json IS NULL OR json_valid(lifecycle_allowed_json)),
-  lifecycle_from                   TEXT,
-  lifecycle_to                     TEXT,
-  lifecycle_at                     INTEGER,
-  created_at                       INTEGER,
-  created_by_kind                  TEXT,
-  created_by_user_id               TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  created_by_name                  TEXT,
-  created_by_role                  TEXT,
-  updated_at                       INTEGER,
-  rev                              INTEGER,
-  rev_at                           INTEGER,
-  rev_by_user_id                   TEXT,
-  rev_by_name                      TEXT,
-  policy_version                   INTEGER,
-  subject_removed_at               INTEGER,
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object'))
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) DEFERRABLE INITIALLY DEFERRED,
+  player_id TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IS NULL OR type IN ('direct_recruitment')),
+  decision_id TEXT,
+  transaction_id TEXT,
+  status TEXT NOT NULL CHECK (status IS NULL OR status IN ('DRAFT','ISSUED','ACCEPTED','DECLINED','WITHDRAWN','EXPIRED','SUPERSEDED')),
+  current_revision_id TEXT NOT NULL,
+  agent_share_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  agent_share_agreement_id TEXT,
+  agent_share_at INTEGER,
+  agent_share_by_kind TEXT CHECK (agent_share_by_kind IS NULL OR agent_share_by_kind IN ('player')),
+  agent_share_by_id TEXT,
+  create_key TEXT,
+  create_fp TEXT,
+  lifecycle_applied INTEGER CHECK (lifecycle_applied IS NULL OR lifecycle_applied IN (0,1)),
+  lifecycle_action TEXT,
+  lifecycle_reason TEXT,
+  lifecycle_message TEXT,
+  lifecycle_allowed_json TEXT CHECK (lifecycle_allowed_json IS NULL OR json_type(lifecycle_allowed_json) = 'array'),
+  lifecycle_from TEXT,
+  lifecycle_to TEXT,
+  lifecycle_at INTEGER,
+  created_at INTEGER NOT NULL,
+  created_by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  created_by_name TEXT,
+  created_by_role TEXT,
+  updated_at INTEGER NOT NULL,
+  rev INTEGER NOT NULL CHECK (rev >= 1),
+  rev_at INTEGER,
+  rev_by_user_id TEXT,
+  rev_by_name TEXT,
+  policy_version INTEGER NOT NULL,
+  subject_removed_at INTEGER,
+  CHECK ((agent_share_user_id IS NULL) = (agent_share_at IS NULL)),
+  CHECK ((create_key IS NULL) = (create_fp IS NULL))
 ) STRICT;
 CREATE INDEX recruitment_offers_case_org ON recruitment_offers (case_id, org_id);
 CREATE INDEX recruitment_offers_org_player ON recruitment_offers (org_id, player_id);
 CREATE INDEX recruitment_offers_agent_share ON recruitment_offers (agent_share_user_id);
 CREATE INDEX recruitment_offers_decision ON recruitment_offers (decision_id);
 CREATE INDEX recruitment_offers_player ON recruitment_offers (player_id);
-
 CREATE TABLE offer_revisions (
-  offer_id                         TEXT NOT NULL REFERENCES recruitment_offers(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  revision_number                  INTEGER,
-  status                           TEXT,
-  term_offer_type                  TEXT,
-  term_role                        TEXT,
-  term_squad                       TEXT,
-  term_start_date                  TEXT,
-  term_end_date                    TEXT,
-  term_conditions                  TEXT,
-  recipient_message                TEXT,
-  internal_note                    TEXT,
-  expires_at                       INTEGER,
-  created_at                       INTEGER,
-  created_by_kind                  TEXT,
-  created_by_user_id               TEXT,
-  created_by_name                  TEXT,
-  created_by_role                  TEXT,
-  updated_at                       INTEGER,
-  updated_by_kind                  TEXT,
-  updated_by_user_id               TEXT,
-  updated_by_name                  TEXT,
-  updated_by_role                  TEXT,
-  issued_at                        INTEGER,
-  issued_by_kind                   TEXT,
-  issued_by_user_id                TEXT,
-  issued_by_name                   TEXT,
-  issued_by_role                   TEXT,
-  withdrawn_at                     INTEGER,
-  withdrawn_by_kind                TEXT,
-  withdrawn_by_user_id             TEXT,
-  withdrawn_by_name                TEXT,
-  withdrawn_by_role                TEXT,
-  withdraw_reason                  TEXT,
-  responded_at                     INTEGER,
-  response_id                      TEXT,
-  supersedes_revision_id           TEXT,
-  superseded_by_revision_id        TEXT,
-  superseded_at                    INTEGER,
-  recipient_type                   TEXT,
-  recipient_player_id              TEXT,
-  recipient_guardian_id            TEXT,
-  recipient_minor                  INTEGER,
-  recipient_at                     INTEGER,
-  readiness_transaction_id         TEXT,
-  readiness_evaluated_at           INTEGER,
-  readiness_status                 TEXT,
-  readiness_blockers_json          TEXT CHECK (readiness_blockers_json IS NULL OR json_valid(readiness_blockers_json)),
-  rev                              INTEGER,
-  rev_at                           INTEGER,
-  rev_by_user_id                   TEXT,
-  rev_by_name                      TEXT,
-  discarded_by_response_id         TEXT,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (offer_id, position)
+  id TEXT PRIMARY KEY,
+  offer_id TEXT NOT NULL REFERENCES recruitment_offers(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  revision_number INTEGER NOT NULL CHECK (revision_number >= 1),
+  status TEXT NOT NULL CHECK (status IS NULL OR status IN ('DRAFT','ISSUED','ACCEPTED','DECLINED','WITHDRAWN','EXPIRED','SUPERSEDED')),
+  term_offer_type TEXT NOT NULL CHECK (term_offer_type IS NULL OR term_offer_type IN ('direct_recruitment')),
+  term_role TEXT CHECK (term_role IS NULL OR length(term_role) <= 80),
+  term_squad TEXT CHECK (term_squad IS NULL OR length(term_squad) <= 80),
+  term_start_date TEXT CHECK (term_start_date IS NULL OR length(term_start_date) = 10),
+  term_end_date TEXT CHECK (term_end_date IS NULL OR length(term_end_date) = 10),
+  term_conditions TEXT CHECK (term_conditions IS NULL OR length(term_conditions) <= 1000),
+  recipient_message TEXT CHECK (recipient_message IS NULL OR length(recipient_message) <= 2000),
+  internal_note TEXT CHECK (internal_note IS NULL OR length(internal_note) <= 2000),
+  expires_at INTEGER,
+  created_at INTEGER NOT NULL,
+  created_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  created_by_name TEXT,
+  created_by_role TEXT,
+  updated_at INTEGER NOT NULL,
+  updated_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  updated_by_name TEXT,
+  updated_by_role TEXT,
+  issued_at INTEGER,
+  issued_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  issued_by_name TEXT,
+  issued_by_role TEXT,
+  withdrawn_at INTEGER,
+  withdrawn_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  withdrawn_by_name TEXT,
+  withdrawn_by_role TEXT,
+  withdraw_reason TEXT CHECK (withdraw_reason IS NULL OR length(withdraw_reason) <= 400),
+  responded_at INTEGER,
+  response_id TEXT,
+  supersedes_revision_id TEXT,
+  superseded_by_revision_id TEXT,
+  superseded_at INTEGER,
+  recipient_type TEXT CHECK (recipient_type IS NULL OR recipient_type IN ('player','guardian')),
+  recipient_player_id TEXT,
+  recipient_guardian_id TEXT,
+  recipient_minor INTEGER CHECK (recipient_minor IS NULL OR recipient_minor IN (0,1)),
+  recipient_at INTEGER,
+  readiness_transaction_id TEXT,
+  readiness_evaluated_at INTEGER,
+  readiness_status TEXT,
+  readiness_blockers_json TEXT CHECK (readiness_blockers_json IS NULL OR json_type(readiness_blockers_json) = 'array'),
+  rev INTEGER NOT NULL CHECK (rev >= 1),
+  rev_at INTEGER,
+  rev_by_user_id TEXT,
+  rev_by_name TEXT,
+  discarded_by_response_id TEXT,
+  CHECK ((recipient_type IS NULL) = (recipient_at IS NULL)),
+  UNIQUE (offer_id, revision_number),
+  UNIQUE (offer_id, position)
 ) STRICT;
-CREATE INDEX offer_revisions_id ON offer_revisions (id);
 CREATE INDEX offer_revisions_offer_status ON offer_revisions (offer_id, status);
-
 CREATE TABLE offer_revision_documents (
-  offer_id                         TEXT NOT NULL REFERENCES recruitment_offers(id) ON DELETE CASCADE,
-  revision_position                INTEGER NOT NULL,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  evidence_id                      TEXT,
-  label                            TEXT,
-  mime                             TEXT,
-  bytes                            INTEGER,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (offer_id, revision_position, position)
+  id TEXT PRIMARY KEY,
+  revision_id TEXT NOT NULL REFERENCES offer_revisions(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  evidence_id TEXT NOT NULL,
+  label TEXT CHECK (label IS NULL OR length(label) <= 120),
+  mime TEXT,
+  bytes INTEGER,
+  UNIQUE (revision_id, position)
 ) STRICT;
-
-
 CREATE TABLE offer_responses (
-  offer_id                         TEXT NOT NULL REFERENCES recruitment_offers(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  revision_id                      TEXT,
-  response_type                    TEXT,
-  actor_type                       TEXT,
-  actor_id                         TEXT,
-  actor_name                       TEXT,
-  for_player_id                    TEXT,
-  occurred_at                      INTEGER,
-  reason                           TEXT,
-  client_key                       TEXT,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (offer_id, position)
+  id TEXT PRIMARY KEY,
+  offer_id TEXT NOT NULL REFERENCES recruitment_offers(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  revision_id TEXT NOT NULL,
+  response_type TEXT NOT NULL CHECK (response_type IS NULL OR response_type IN ('accepted','declined')),
+  actor_type TEXT NOT NULL CHECK (actor_type IS NULL OR actor_type IN ('player','guardian')),
+  actor_id TEXT NOT NULL,
+  actor_name TEXT,
+  for_player_id TEXT NOT NULL,
+  occurred_at INTEGER NOT NULL,
+  reason TEXT CHECK (reason IS NULL OR length(reason) <= 400),
+  client_key TEXT,
+  UNIQUE (offer_id, revision_id),
+  UNIQUE (offer_id, position)
 ) STRICT;
-CREATE INDEX offer_responses_id ON offer_responses (id);
-CREATE INDEX offer_responses_offer_client_key ON offer_responses (offer_id, client_key);
-
+CREATE UNIQUE INDEX offer_responses_offer_client_key ON offer_responses (offer_id, client_key) WHERE client_key IS NOT NULL;
 CREATE TABLE offer_read_receipts (
-  offer_id                         TEXT NOT NULL REFERENCES recruitment_offers(id) ON DELETE CASCADE,
-  position                         INTEGER NOT NULL,
-  revision_id                      TEXT,
-  viewer_kind                      TEXT,
-  viewer_id                        TEXT,
-  first_viewed_at                  INTEGER,
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (offer_id, position)
+  offer_id TEXT NOT NULL REFERENCES recruitment_offers(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  revision_id TEXT NOT NULL,
+  viewer_kind TEXT NOT NULL CHECK (viewer_kind IS NULL OR viewer_kind IN ('player','guardian')),
+  viewer_id TEXT NOT NULL,
+  first_viewed_at INTEGER NOT NULL,
+  PRIMARY KEY (offer_id, position),
+  UNIQUE (offer_id, revision_id, viewer_kind, viewer_id)
 ) STRICT;
-
-
 CREATE TABLE offer_history (
-  offer_id                         TEXT NOT NULL REFERENCES recruitment_offers(id) ON DELETE RESTRICT,
-  position                         INTEGER NOT NULL,
-  id                               TEXT,
-  at                               INTEGER,
-  action                           TEXT,
-  by_kind                          TEXT,
-  by_id                            TEXT,
-  by_name                          TEXT,
-  detail_json                      TEXT CHECK (detail_json IS NULL OR json_valid(detail_json)),
-  raw_json                         TEXT CHECK (raw_json IS NULL OR json_valid(raw_json)),
-  absent_keys_json                 TEXT CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array')),
-  offtype_json                     TEXT CHECK (offtype_json IS NULL OR (json_valid(offtype_json) AND json_type(offtype_json) = 'object')),
-  extra_json                       TEXT CHECK (extra_json IS NULL OR (json_valid(extra_json) AND json_type(extra_json) = 'object')),
-  PRIMARY KEY (offer_id, position)
+  id TEXT PRIMARY KEY,
+  offer_id TEXT NOT NULL REFERENCES recruitment_offers(id) ON DELETE RESTRICT,
+  position INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  by_kind TEXT CHECK (by_kind IS NULL OR by_kind IN ('org','player','guardian','admin','system')),
+  by_id TEXT,
+  by_name TEXT,
+  detail_json TEXT CHECK (detail_json IS NULL OR json_type(detail_json) = 'object'),
+  UNIQUE (offer_id, position)
 ) STRICT;
 CREATE INDEX offer_history_offer_at ON offer_history (offer_id, at);
-CREATE INDEX offer_history_id ON offer_history (id);
+CREATE TABLE offer_keys (
+  offer_id TEXT NOT NULL REFERENCES recruitment_offers(id) ON DELETE CASCADE,
+  act TEXT NOT NULL CHECK (act IS NULL OR act IN ('issue','withdraw','revise')),
+  position INTEGER NOT NULL,
+  key TEXT NOT NULL,
+  revision_id TEXT NOT NULL,
+  PRIMARY KEY (offer_id, act, position)
+) STRICT;
+CREATE INDEX offer_keys_key ON offer_keys (offer_id, act, key);
 
 -- =============================================================================
 -- signing_packages  (M23 P7 signing workflow over an ACCEPTED Offer revision)
@@ -1546,8 +1488,8 @@ CREATE INDEX offer_history_id ON offer_history (id);
 -- INITIALLY DEFERRED (NO ACTION; a RESTRICT would fire at once) so one unit of work records the signing and completes
 -- the package, and a snapshot removes the pair in one save; signings.signing_package_id -> signing_packages(id) is
 -- immediate. player_id columns: no key, tolerant and counted (Q7a/Q8a/Q8c-a).
--- offer_revision_id stays a plain indexed column checked in code (offer_revisions.id is not a unique key; the
--- pointer rule), as does rev_by_user_id. signings: rows without a
+-- offer_revision_id stays a plain indexed column checked in code (offer_revisions.id is the primary key since
+-- S8c's §4.3 rewrite; a real key is a later change), as does rev_by_user_id. signings: rows without a
 -- method import as LEGACY_RECORDED; firstQualifyingInteraction keeps {id, ts, type}; the dead cancelledAt /
 -- revokedAt / voidedAt fields are dropped and reported by the migration. idempotency_keys' owner CHECK gains
 -- 'signing_packages'.

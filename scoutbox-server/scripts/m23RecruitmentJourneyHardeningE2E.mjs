@@ -100,6 +100,19 @@ async function offline(mutate) {
   await relogin();
   return refused;
 }
+/**
+ * S8c (typed since §4.3): a contact or an offer planted offline is the writers' whole literal — the tables refuse a
+ * partial record. Every field is valid; what the plant makes wrong is the STATE (drift against the case), not the shape.
+ */
+const staffOf = (db) => { const u = db.users.find((x) => x.orgId === 'org-eastport' && x.name === 'Maria Keane'); return { contact: { kind: 'org', userId: u.id, name: u.name }, offer: { kind: 'org', id: u.id, name: u.name, role: u.role ?? null } }; };
+const plantedContact = (db, k, id, at) => { const by = staffOf(db).contact; return { id, orgId: 'org-eastport', caseId: k.id, playerId: k.playerId, status: 'delivered', channel: 'in_app', recipient: { type: 'player', playerId: k.playerId, guardianId: null, minor: false }, contactMode: 'player_only', routingSnapshot: null, subject: 'x', body: 'x', summary: null, createdBy: by, createdAt: at, updatedAt: at, sentBy: by, sentAt: at, deliveredAt: at, failedAt: null, failureCode: null, attempts: [{ at, ok: true, code: null }], requestId: null, emailCopy: null, lifecycle: null, occurredAt: null, recordedBy: null, recordedAt: null, respondedAt: null, response: null, cancelledAt: null, cancelledBy: null, keys: { create: null, send: null, record: null }, history: [], rev: 1, revAt: at, revBy: null, policyVersion: 1 }; };
+const plantedOffer = (db, k, status, respond, now) => {
+  const by = staffOf(db).offer; const rid = `rofr-drift-${k.id}`;
+  return { id: `rof-drift-${k.id}`, orgId: 'org-eastport', caseId: k.id, playerId: k.playerId, type: 'direct_recruitment', decisionId: null, transactionId: null, status, currentRevisionId: rid,
+    revisions: [{ id: rid, revisionNumber: 1, status, terms: { offerType: 'direct_recruitment', role: 'x', squad: null, startDate: '2027-07-01', endDate: '2029-06-30', conditions: null }, recipientMessage: null, internalNote: null, documents: [], expiresAt: now + 30 * DAY, createdAt: now - H, createdBy: by, updatedAt: now - H, updatedBy: by, issuedAt: now - H, issuedBy: by, withdrawnAt: null, withdrawnBy: null, withdrawReason: null, respondedAt: respond ? now : null, response: respond ? { id: `resp-d-${k.id}` } : null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null, recipientSnapshot: { type: 'player', playerId: k.playerId, guardianId: null, minor: false, at: now - H }, readinessSnapshot: null, rev: 1, revAt: now - H, revBy: null }],
+    responses: respond ? [{ id: `resp-d-${k.id}`, revisionId: rid, responseType: 'accepted', actorType: 'player', actorId: k.playerId, actorName: null, forPlayerId: k.playerId, occurredAt: now, reason: null, clientKey: null }] : [],
+    readReceipts: [], agentShare: null, keys: { create: null, issue: [], withdraw: [], revise: [] }, lifecycle: null, history: [], createdAt: now - H, createdBy: by, updatedAt: now, rev: 2, revAt: now, revBy: null, policyVersion: 1, subjectRemovedAt: null };
+};
 /** A plain restart (SIGTERM saves; nothing edited). */
 async function restart() { await down(server, 'SIGTERM'); server = await boot(); await relogin(); }
 const login = async (orgId, scoutName, role, platform) => (await j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) })).body;
@@ -530,7 +543,7 @@ const G = {};
     const kase = (id) => db.recruitmentCases.find((k) => k.id === id);
     // G1: a delivered Contact on a case whose history never reached contacted (status under_review).
     const k1 = kase(G.contact);
-    db.recruitmentContacts.push({ id: 'rct-drift-1', orgId: 'org-eastport', caseId: k1.id, playerId: k1.playerId, status: 'delivered', channel: 'in_app', recipient: { type: 'player' }, subject: 'x', body: 'x', createdAt: now, deliveredAt: now, rev: 1, history: [], attempts: [], keys: {} });
+    db.recruitmentContacts = [...db.recruitmentContacts, plantedContact(db, k1, 'rct-drift-1', now)];
     // G2: a completed Trial on a case whose history never reached trial_completed.
     const k2 = kase(G.trial);
     db.trials.push({ id: 'trial-drift-2', orgId: 'org-eastport', playerId: k2.playerId, caseId: k2.id, requestId: 'req-drift-2', status: 'reported', workflowState: 'completed', acceptedAt: now - 3 * H, acceptedBy: 'player', recipient: { type: 'player' }, schedule: { timezone: 'Europe/London', confirmedAt: now - 2 * H, revision: 1, sessions: [{ id: 's-d2', startsAt: now - 2 * H, endsAt: now - H, kind: 'training' }] }, completion: { state: 'completed', at: now - H }, history: [], attendance: [], rev: 2, keys: {} });
@@ -538,10 +551,9 @@ const G = {};
     // names the lead the suite logged in as); a row without userId is refused at the write with its id.
     db.requests.push({ id: 'req-drift-2', type: 'trial', orgId: 'org-eastport', playerId: k2.playerId, caseId: k2.id, userId: db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id, scoutName: 'Maria Keane', status: 'accepted', createdAt: now - 4 * H, routedTo: 'player', trialDetails: { proposedDate: '2027-01-01' } });
     // G3: an ISSUED revision on a case whose history never reached offer_made.
-    const mkOffer = (k, status, respond) => ({ id: `rof-drift-${k.id}`, orgId: 'org-eastport', caseId: k.id, playerId: k.playerId, type: 'direct_recruitment', status, createdAt: now - H, updatedAt: now, rev: 2, currentRevisionId: `rofr-drift-${k.id}`, revisions: [{ id: `rofr-drift-${k.id}`, revisionNumber: 1, status, issuedAt: now - H, respondedAt: respond ? now : null, expiresAt: now + 30 * DAY, terms: { role: 'x', startDate: '2027-07-01', endDate: '2029-06-30' }, recipientSnapshot: { type: 'player', playerId: k.playerId }, documents: [], rev: 1, response: respond ? { id: 'resp-d' } : null }], responses: respond ? [{ id: 'resp-d', revisionId: `rofr-drift-${k.id}`, responseType: 'accepted', actorType: 'player', actorId: k.playerId, occurredAt: now }] : [], history: [], keys: {} });
-    db.recruitmentOffers.push(mkOffer(kase(G.offer), 'ISSUED', false));
+    db.recruitmentOffers = [...db.recruitmentOffers, plantedOffer(db, kase(G.offer), 'ISSUED', false, now)];
     // G4: an ACCEPTED revision on a case whose history never reached offer_accepted.
-    db.recruitmentOffers.push(mkOffer(kase(G.accepted), 'ACCEPTED', true));
+    db.recruitmentOffers = [...db.recruitmentOffers, plantedOffer(db, kase(G.accepted), 'ACCEPTED', true, now)];
   });
   const g1 = await jb(G.contact); const g2 = await jb(G.trial); const g3 = await jb(G.offer); const g4 = await jb(G.accepted);
   neg(g1.classification === 'integrity_error' && g1.integrity.includes('EVIDENCE_AHEAD_OF_LIFECYCLE') && g1.nextAction.blockedBy.includes('INTEGRITY_ERROR'), 'G1 a delivered Contact the lifecycle never recorded: EVIDENCE_AHEAD_OF_LIFECYCLE, the act named and blocked');
@@ -921,14 +933,16 @@ section('R — corrupt current pointers and unknown states fail closed (§35, §
   const Hh = globalThis.__H; const K = globalThis.__K;
   // S8d: the package's status is a CHECKed column — the unknown word is refused at the save, naming the package; it is planted in its own save so the two other corruptions land
   let bogusPkg = null; const bogus = await offline((db) => { const pkg = db.signingPackages.find((p) => p.caseId === Hh.R5); bogusPkg = pkg?.id ?? null; if (pkg) pkg.status = 'BOGUS'; });
+  // S8c (typed since §4.3): a current-revision pointer naming a revision the Offer does not hold is refused at the
+  // save, naming the Offer (planted in its own save, like R2); the Offer reads as before.
+  let gone = null; const goneRefused = await offline((db) => { const o = db.recruitmentOffers.find((x) => x.id === K.OID); gone = o ?? null; db.recruitmentOffers = db.recruitmentOffers.map((x) => (x.id === K.OID ? { ...x, currentRevisionId: 'rofr-gone' } : x)); });
   await offline((db) => {
-    const o = db.recruitmentOffers.find((x) => x.id === K.OID); o.currentRevisionId = 'rofr-gone';
     const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); if (k) k.room.status = 'SIGNEDX';
   });
   const jK = await jb(K.RID);
-  neg(jK.resources.offerId === null && jK.classification === 'integrity_error' && jK.nextAction.blockedBy.includes('INTEGRITY_ERROR'), `R1 an Offer whose current-revision pointer names a missing revision is not current; the case is integrity_error and the act blocked (${jK.integrity.join(',')})`);
+  neg(gone && goneRefused && goneRefused.message.includes(`${K.OID}.currentRevisionId names rofr-gone, not a revision of this offer`) && jK.resources.offerId === K.OID && jK.classification !== 'integrity_error', `R1 an Offer whose current-revision pointer names a missing revision cannot be stored: the save refuses it, naming the Offer; the case reads as before (${String(goneRefused?.message ?? 'no refusal').slice(0, 100)}…)`);
   const issue = await j('POST', `/org/offers/${K.OID}/issue`, { expectedRev: 1, clientKey: key() }, maria.token, at(T0));
-  neg(issue.status >= 400, `R1b the domain route refuses the corrupt Offer (${issue.status} ${issue.body?.error})`);
+  neg(issue.status >= 400, `R1b the domain route still answers by its own rules (${issue.status} ${issue.body?.error})`);
   const jN = await jb(Hh.R5);
   neg(bogusPkg === null || (bogus && /SIGNINGS_IMPORT_BLOCKED/.test(bogus.message) && bogus.message.includes(bogusPkg) && bogus.message.includes('status must be one of') && jN.classification !== 'integrity_error'), `R2 (S8d) an unknown status word cannot be stored: the save refuses it, naming the package; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`);
   const j4 = await jb(globalThis.__B.R4);
@@ -936,7 +950,6 @@ section('R — corrupt current pointers and unknown states fail closed (§35, §
   const mv = await lifecycle(globalThis.__B.R4, 'startReview');
   neg(mv.status >= 400 && /LIFECYCLE_STATE_UNKNOWN|ROOM|LIFECYCLE/.test(mv.body?.error ?? ''), `R3b the lifecycle refuses to move an unknown state (${mv.status} ${mv.body?.error})`);
   await offline((db) => {
-    const o = db.recruitmentOffers.find((x) => x.id === K.OID); o.currentRevisionId = o.revisions[o.revisions.length - 1].id;
     const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); if (k) k.room.status = 'archived';
   });
   ok((await jb(K.RID)).classification !== 'integrity_error', 'R4 restored, the case reads sound again (nothing was repaired on read: the store was put right)');
@@ -965,7 +978,7 @@ section('S — partial legacy / canonical mixes: nothing invented (§37)');
     db.trials.push({ id: 'trial-p81-s1', orgId: 'org-eastport', playerId: k1.playerId, caseId: k1.id, requestId: 'req-p81-s1', status: 'reported', workflowState: 'completed', acceptedAt: now - 3 * H, acceptedBy: 'player', recipient: { type: 'player' }, schedule: { timezone: 'Europe/London', confirmedAt: now - 2 * H, revision: 1, sessions: [{ id: 's-s1', startsAt: now - 2 * H, endsAt: now - H, kind: 'training' }] }, completion: { state: 'completed', at: now - H }, history: [], attendance: [], rev: 2, keys: {} });
     // S2: canonical Contact lifecycle claim + legacy trial_completed (no Trial).
     const k2 = plant(S2, ['contact_planned', 'contacted', 'trial_requested', 'trial_scheduled', 'trial_completed']);
-    db.recruitmentContacts.push({ id: 'rct-p81-s2', orgId: 'org-eastport', caseId: k2.id, playerId: k2.playerId, status: 'delivered', channel: 'in_app', recipient: { type: 'player' }, subject: 'x', body: 'x', createdAt: now - 6 * H, deliveredAt: now - 6 * H, rev: 1, history: [], attempts: [], keys: {} });
+    db.recruitmentContacts = [...db.recruitmentContacts, plantedContact(db, k2, 'rct-p81-s2', now - 6 * H)];
   });
   const s1 = await jb(S1); const s2 = await jb(S2); const j1 = await journey(S1); const j2 = await journey(S2);
   ok(s1.classification === 'partially_canonical' && done(s1).includes('contact:lifecycle') && done(s1).includes('trial:canonical') && s1.resources.trialId === 'trial-p81-s1' && j1.contact.contacts.length === 0, 'S1 legacy contacted + canonical Trial: partially_canonical, the Trial current, no Contact invented');

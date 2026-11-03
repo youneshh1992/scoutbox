@@ -99,7 +99,7 @@ test('[schema] migration 0016 is registered before 0017 and 0018 and creates the
   const fresh = tempDir('s8b-fresh'); const f = openStore(fresh).sqlite;
   for (const t of TABLES) { assert.ok(tableExistsIn(f, t), `${t} exists`); assert.equal(f.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0); }
   for (const t of ['recruitment_requests', 'trials']) assert.ok(fkTargets(f, t).includes('case_id->recruitment_cases(id) RESTRICT'), `${t}.case_id is a real key: ${fkTargets(f, t)}`);
-  assert.match(ddlOf(f, 'idempotency_keys'), /owner_table IN \('recruitment_requests', 'trials', 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions', 'recruitment_contacts', 'recruitment_offers', 'signing_packages'\)/, 'the broadened owner CHECK (0016 adds the four S8b owners, 0017 the two S8c owners, 0018 the S8d one)');
+  assert.match(ddlOf(f, 'idempotency_keys'), /owner_table IN \('recruitment_requests', 'trials', 'recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions', 'signing_packages'\)/, 'the broadened owner CHECK (0016 adds the four S8b owners, 0018 the S8d one; S8c keeps its keys in its own columns)');
   for (const n of COLLECTIONS) assert.equal(f.prepare('SELECT count(*) AS n FROM collections WHERE name = ?').get(n).n, 0, `no ${n} blob`);
   f.close(); rm(fresh);
   const dir = file('mig'); const s = openRaw(dir);
