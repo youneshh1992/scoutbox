@@ -1,5 +1,17 @@
 # ScoutBox design system (M24A)
 
+> **Read [`../docs/design.md`](../docs/design.md) first.** The per-app approvals of 5–6 October 2026
+> supersede parts of this file, which describes the M24A baseline:
+>
+> - **Player** is dark-only and uses the system font (SF Pro on Apple). It has no theme switch.
+> - **Pro, Grassroots and Agent** have their own app-local palettes (charcoal, forest Clubhouse,
+>   black/violet). They have no workspace theme switch. The mint, dark-green and cream palettes below are history.
+> - **Trust & Safety** (admin) still uses the shared shell and `ThemeToggle` described here.
+> - **Icons** are Phosphor (MIT; see `icons.tsx` and `PHOSPHOR-LICENSE.txt`), not lucide.
+>
+> Inter for the portals, `tokens.css`, `platform.css`, AuthShell, CaseNav and the sub-note and
+> one-line rules are still accurate.
+
 The approved visual identity, implemented once and shared by the five
 applications. The authoritative reference is
 `reference/ScoutBox-Design-Explorer.html` (retained verbatim; open it in a
