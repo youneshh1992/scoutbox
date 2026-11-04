@@ -29,6 +29,7 @@ export function registerOperations(ctx) {
     orgRouter, playerRouter, guardianRouter, adminRouter,
     guardianOwnsChild, orgCanSee, moderateOrRefuse,
     storage, sessionFor, isBlocked, DATA_DIR, players, users, unit, signingsFollowUps, recruitment,
+    scoutingReads, opportunitiesCampaigns,
   } = ctx;
   if (!recruitment?.trials) throw new TypeError('registerOperations needs the recruitment repository (S8a) from the data layer');
   const trials = recruitment.trials; // S8a: an escalation or a reminder marker is an explicit write of the trial
@@ -327,14 +328,15 @@ export function registerOperations(ctx) {
       changed = true;
     }
 
-    // F5: outstanding application outcomes nag once after 7 days.
-    for (const a of db.applications) {
-      if (a.status === 'submitted' && !a.remindedAt && now - a.createdAt > 7 * 86_400_000) {
-        a.remindedAt = now;
+    // F5: outstanding application outcomes nag once after 7 days. S9d: an indexed query; the marker is committed
+    // with the notification, so a restart re-sends nothing.
+    for (const a of scoutingReads.applications.remindersDue(now - 7 * 86_400_000)) {
+      unit(() => {
+        opportunitiesCampaigns.applications.update(a.id, (d) => { d.remindedAt = now; });
         const lead = usersOf(a.orgId)[0];
-        if (lead) notify({ kind: 'org_user', id: lead.id }, 'application', `⏳ ${a.playerName}'s application has waited a week — every applicant gets an answer.`, a.id);
-        changed = true;
-      }
+        if (lead) notify({ kind: 'org_user', id: lead.id }, 'application', `⏳ ${a.playerName ?? 'A player'}'s application has waited a week — every applicant gets an answer.`, a.id);
+      });
+      changed = true;
     }
 
     // F9: overdue trial feedback escalates once — to the club AND into the

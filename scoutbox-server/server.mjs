@@ -200,7 +200,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -209,8 +209,8 @@ const onlyIf = (record, ok) => (record && ok(record) ? record : null);
 const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads, ...recruitment.reads, ...recruitmentCases.reads });
 // The scouting domain reads through SQL too (S9): `scoutingReads` (evidence, coachAffiliations, squadInvites; since S9b
 // templates, assessments, segments, playlists; since S9c tacticalSetups, squad, shadow, lookingFor, federationChecks,
-// vacancies).
-const scoutingReads = Object.freeze({ ...scoutingEvidence.reads, ...scoutingAssessments.reads, ...clubSetup.reads });
+// vacancies; since S9d opportunities, applications, campaigns, campaignSubmissions, playerPrefs).
+const scoutingReads = Object.freeze({ ...scoutingEvidence.reads, ...scoutingAssessments.reads, ...clubSetup.reads, ...opportunitiesCampaigns.reads });
 // Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
 // every module context as `byId` (`byId.player(id)`, `byId.org(id)`, …; null when there is none).
 const byId = createLookups({ players, guardians, users, orgs });
@@ -4661,6 +4661,7 @@ registerM12({
   scoutingEvidence, // S9a: evidence, coach affiliations and squad invitations are explicit repository writes
   scoutingAssessments, // S9b: templates, assessments, video segments and playlists are explicit repository writes
   clubSetup, // S9c: tactical setups, squads, shadow lists and vacancies are explicit repository writes
+  opportunitiesCampaigns, // S9d: opportunities, applications, campaigns and their submissions are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4673,6 +4674,7 @@ registerM12({
 const m13Ctx = registerM13({
   db, byId, scoutingReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
+  opportunitiesCampaigns, // S9d: player suitability preferences and approved summaries are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,

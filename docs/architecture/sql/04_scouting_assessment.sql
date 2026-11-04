@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 04_scouting_assessment.sql — ScoutBox target relational schema (SQLite, STRICT)
 --
--- Scope: M12 F1/F2/F4/F5/F6/F7/F10 collections + M13 F3 playerPrefs + the
+-- Scope: M12 F1/F2/F4/F5/F6/F7/F10 collections + M13 F3 playerPrefs (S9d) + the
 -- org-level fields `tactical`, `squad[]`, `lookingFor[]`, `federationCheck` (club setup tables since S9c).
 -- Sources: scoutbox-server/domains/scouting/passport.mjs, domains/scouting/scouting.mjs, domains/scouting/journeys.mjs,
 -- m12/shared.mjs (migrateM12), domains/scouting/suitability.mjs, m13/shared.mjs (migrateM13),
@@ -468,330 +468,247 @@ CREATE TABLE assessment_history (
 
 
 -- ----------------------------------------------------------------------------
--- source: db.opportunities  created at domains/scouting/journeys.mjs:30-51; `structured` added by
---         domains/scouting/suitability.mjs:92-103 (PUT /org/opportunities/:id/structured-requirements)
--- owner/writer: domains/scouting/journeys.mjs (create/close), domains/scouting/suitability.mjs (structured block, replaced wholesale)
--- lifecycle: status published -> closed (closed_at); "open" is derived (published AND deadline >= today)
--- mapping:
---   id -> id (opp-N)          orgId -> org_id         orgName -> org_name
---   orgLevel -> org_level (snapshot of org.level at creation, default 'pro'; the value
---     set of org.level belongs to 01_identity — no CHECK here)
---   type -> type              title -> title (<=120)  team -> team (<=60)
---   category -> category      ageGroup -> age_group (<=20)   role -> role (<=60)
---   description -> description (<=500)   schedule -> schedule (<=200, free text)
---   deadline -> deadline_date   capacity -> capacity
---   eligibility.minAge/maxAge -> elig_min_age / elig_max_age
---   eligibility.positionGroup -> elig_position_group (passthrough `?? 'any'`, unvalidated; no CHECK)
---   eligibility.category -> elig_category
---   eligibility.maxLevel -> elig_max_level ('semi_pro' forced for grassroots, else passthrough; no CHECK)
---   eligibility.radiusKm -> elig_radius_km (50 forced for grassroots)
---   requirements[] -> requirements_json (≤6 free-text lines ≤120, display only — free-form by design)
---   status -> status          createdBy -> created_by_name   createdAt -> created_at   closedAt -> closed_at
---   structured (null until PUT) -> structured_declared (1 once PUT ran; verdictsFor
---     distinguishes "no structured block" from "block with no fee")
---   structured.trainingSlots[] -> opportunity_training_slots
---   structured.relocationRequired -> relocation_required
---   structured.feeMinor -> fee_minor      structured.currency -> currency
---   structured.expensesCovered -> expenses_covered
---   structured.environment[] -> environment_json (≤8 tags ≤40; matched by equality at read — free-form tags)
---   structured.accommodations[] -> accommodations_json (≤8 free-text ≤80; matched by substring at read — free-form)
---   derived, not stored: open, applications/outstanding counts, distance, applied
+-- S9d: IMPLEMENTED, migration 0022_opportunities_campaigns REGISTERED (repositories/opportunitiesCampaigns.mjs, 4 Nov 2026).
+-- The definitions below are the migration's DDL; scripts/testSchemaDdl.mjs compares them column by column.
+-- The opportunity board and its applications, assessment campaigns and their submissions, and players' private
+-- suitability preferences. They were the blob collections db.opportunities, db.applications, db.campaigns,
+-- db.campaignSubmissions and db.playerPrefs; each name now throws.
+-- Sources: domains/scouting/journeys.mjs (F5 opportunities and applications, F6 campaigns), domains/scouting/suitability.mjs
+-- (preferences, structured requirements, approved summaries), m12/operations.mjs (the application reminder sweep);
+-- readers in m15 (the player's export), m24 / m27 (the agent's view of a client's board), m26 (a transaction's link).
+-- How the model differs from the first draft of this file:
+--   * No JSON columns. Requirements, environment tags and accommodations are rows of opportunity_texts (kind); drills and
+--     the rubric are campaign_drills / campaign_rubric; a file check's issues are codes in campaign_attempt_issues
+--     (media_missing | not_video | not_uploaded, decoded to the player-facing messages); the approved suitability summary
+--     is application_suitability rows (one per dimension); preference tags are player_pref_texts.
+--   * org_id is ON DELETE RESTRICT, not CASCADE (organisations are never deleted, O2). player_id has NO foreign key:
+--     tolerant, like recruitment and S9a-c (an application outlives the account, as before). The staff ids
+--     (outcome_by_user_id, review_by_user_id) are RESTRICT keys to org_users.
+--   * Vocabulary CHECKs: eligibility position group any|GK|DEF|MID|ATT, max level the player levels, org_level the
+--     organisation levels, ages 4-99 with min <= max, radius 0-1000 km, capacity >= 1; slot days mon..sun and HH:MM
+--     times with start < end. The routes refuse junk (400 FIELD_INVALID) instead of passing it through or coercing it.
+--   * An opportunity without structured requirements has structured_declared 0 and no currency; the outcome and the
+--     review are present exactly on resolved applications and reviewed attempts (CHECKs).
+--   * One live application per opportunity and player (partial unique index), one submission per campaign and player.
+--   * A guardian's withdrawal is recorded as the guardian's (the old code audited it as the player's). History uses the
+--     one entry shape; application_history is the shared history table.
+--   * player_prefs is keyed by player_id (no prf id) and a row exists only once the player or guardian saves: reading
+--     preferences no longer writes a row. Still private: no organisation-facing read exists.
 -- ----------------------------------------------------------------------------
 CREATE TABLE opportunities (
   id                  TEXT PRIMARY KEY,
-  org_id              TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  org_name            TEXT NOT NULL,                       -- snapshot
-  org_level           TEXT NOT NULL,                       -- snapshot
+  org_id              TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name            TEXT NOT NULL CHECK (length(org_name) <= 200),
+  org_level           TEXT NOT NULL CHECK (org_level IN ('pro','academy','agency','grassroots')),
   type                TEXT NOT NULL CHECK (type IN ('trial','open_day','programme','role')),
-  title               TEXT NOT NULL,
-  team                TEXT,
-  category            TEXT NOT NULL CHECK (category IN ('mens','womens','boys','girls','mixed')) DEFAULT 'mixed',
-  age_group           TEXT,
-  role                TEXT,
-  description         TEXT,
-  schedule            TEXT,
-  deadline_date       TEXT NOT NULL CHECK (length(deadline_date) = 10),
-  capacity            INTEGER,
-  elig_min_age        INTEGER,
-  elig_max_age        INTEGER,
-  elig_position_group TEXT NOT NULL DEFAULT 'any',
-  elig_category       TEXT NOT NULL CHECK (elig_category IN ('mens','womens','boys','girls','mixed')) DEFAULT 'mixed',
-  elig_max_level      TEXT,
-  elig_radius_km      REAL,
-  requirements_json   TEXT NOT NULL CHECK (json_valid(requirements_json)) DEFAULT '[]',
-  status              TEXT NOT NULL CHECK (status IN ('published','closed')) DEFAULT 'published',
-  created_by_name     TEXT NOT NULL,                       -- snapshot
+  title               TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+  team                TEXT CHECK (team IS NULL OR length(team) <= 60),
+  category            TEXT NOT NULL CHECK (category IN ('mens','womens','boys','girls','mixed')),
+  age_group           TEXT CHECK (age_group IS NULL OR length(age_group) <= 20),
+  role                TEXT CHECK (role IS NULL OR length(role) <= 60),
+  description         TEXT CHECK (description IS NULL OR length(description) <= 500),
+  schedule            TEXT CHECK (schedule IS NULL OR length(schedule) <= 200),
+  deadline            TEXT NOT NULL CHECK (length(deadline) = 10),
+  capacity            INTEGER CHECK (capacity IS NULL OR capacity >= 1),
+  elig_min_age        INTEGER CHECK (elig_min_age IS NULL OR elig_min_age BETWEEN 4 AND 99),
+  elig_max_age        INTEGER CHECK (elig_max_age IS NULL OR elig_max_age BETWEEN 4 AND 99),
+  elig_position_group TEXT NOT NULL CHECK (elig_position_group IN ('any','GK','DEF','MID','ATT')),
+  elig_category       TEXT NOT NULL CHECK (elig_category IN ('mens','womens','boys','girls','mixed')),
+  elig_max_level      TEXT CHECK (elig_max_level IS NULL OR elig_max_level IN ('amateur','semi_pro','pro')),
+  elig_radius_km      REAL CHECK (elig_radius_km IS NULL OR elig_radius_km BETWEEN 0 AND 1000),
+  status              TEXT NOT NULL CHECK (status IN ('published','closed')),
+  created_by_name     TEXT NOT NULL CHECK (length(created_by_name) <= 200),
   created_at          INTEGER NOT NULL,
   closed_at           INTEGER,
-  structured_declared INTEGER NOT NULL CHECK (structured_declared IN (0,1)) DEFAULT 0,
-  relocation_required INTEGER NOT NULL CHECK (relocation_required IN (0,1)) DEFAULT 0,
-  fee_minor           INTEGER,
-  currency            TEXT CHECK (length(currency) = 3 OR currency IS NULL),
-  expenses_covered    INTEGER NOT NULL CHECK (expenses_covered IN (0,1)) DEFAULT 0,
-  environment_json    TEXT NOT NULL CHECK (json_valid(environment_json)) DEFAULT '[]',
-  accommodations_json TEXT NOT NULL CHECK (json_valid(accommodations_json)) DEFAULT '[]'
+  structured_declared INTEGER NOT NULL CHECK (structured_declared IN (0,1)),
+  relocation_required INTEGER NOT NULL CHECK (relocation_required IN (0,1)),
+  fee_minor           INTEGER CHECK (fee_minor IS NULL OR fee_minor >= 0),
+  currency            TEXT CHECK (currency IS NULL OR (length(currency) = 3 AND currency GLOB '[A-Z][A-Z][A-Z]')),
+  expenses_covered    INTEGER NOT NULL CHECK (expenses_covered IN (0,1)),
+  CHECK ((status = 'closed') = (closed_at IS NOT NULL)),
+  CHECK (elig_min_age IS NULL OR elig_max_age IS NULL OR elig_min_age <= elig_max_age),
+  CHECK ((structured_declared = 1) = (currency IS NOT NULL)),
+  CHECK (structured_declared = 1 OR (relocation_required = 0 AND expenses_covered = 0 AND fee_minor IS NULL))
 ) STRICT;
-CREATE INDEX opportunities_org_id ON opportunities (org_id);                        -- org list
-CREATE INDEX opportunities_status_deadline_date ON opportunities (status, deadline_date);  -- board: published AND deadline >= today
-
--- ----------------------------------------------------------------------------
--- source: db.opportunities[].structured.trainingSlots[]  (≤10; domains/scouting/suitability.mjs:93-96)
--- owner/writer: domains/scouting/suitability.mjs; replaced wholesale with the structured block
--- mapping: (array position) -> ordinal (new), day -> day (3-letter lowercase),
---          start -> start_time ('HH:MM'), end -> end_time ('HH:MM'), tz -> tz (<=40)
--- notes: values are sliced, not validated (day may be '' or junk) — no CHECK beyond length.
--- ----------------------------------------------------------------------------
+CREATE INDEX opportunities_org ON opportunities (org_id);
+CREATE INDEX opportunities_status_deadline ON opportunities (status, deadline);
 CREATE TABLE opportunity_training_slots (
   opportunity_id TEXT NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
-  ordinal        INTEGER NOT NULL,
-  day            TEXT NOT NULL CHECK (length(day) <= 3),
-  start_time     TEXT NOT NULL CHECK (length(start_time) <= 5),
-  end_time       TEXT NOT NULL CHECK (length(end_time) <= 5),
-  tz             TEXT NOT NULL DEFAULT 'Europe/London',
-  PRIMARY KEY (opportunity_id, ordinal)
+  ordinal    INTEGER NOT NULL CHECK (ordinal >= 0),
+  day        TEXT NOT NULL CHECK (day IN ('mon','tue','wed','thu','fri','sat','sun')),
+  start_time TEXT NOT NULL CHECK (length(start_time) = 5 AND start_time GLOB '[0-2][0-9]:[0-5][0-9]' AND start_time <= '23:59'),
+  end_time   TEXT NOT NULL CHECK (length(end_time) = 5 AND end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND end_time <= '23:59'),
+  tz         TEXT NOT NULL CHECK (length(tz) BETWEEN 1 AND 40),
+  PRIMARY KEY (opportunity_id, ordinal),
+  CHECK (start_time < end_time)
 ) STRICT;
-
-
--- ----------------------------------------------------------------------------
--- source: db.applications  created at domains/scouting/journeys.mjs:103-107 (applyTo)
--- owner/writer: domains/scouting/journeys.mjs (apply / withdraw / outcome), m12/operations.mjs:315
---               (remindedAt sweep), domains/scouting/suitability.mjs:213-221 (suitabilitySummary)
--- lifecycle: status submitted -> withdrawn | accepted | declined; never deleted
--- mapping:
---   id -> id (apl-N)              opportunityId -> opportunity_id   orgId -> org_id
---   playerId -> player_id         playerName -> player_name
---   submittedBy.kind/id/name -> submitted_by_kind / submitted_by_id / submitted_by_name
---   note -> note (<=300)          status -> status
---   outcome.decision -> outcome_decision   outcome.note -> outcome_note (<=300)
---   outcome.byUserId -> outcome_by_user_id   outcome.byName -> outcome_by_name   outcome.at -> outcome_at
---   createdAt -> created_at       remindedAt -> reminded_at (7-day nag marker, operations.mjs:315)
---   suitabilitySummary.approvedAt -> suitability_approved_at
---   suitabilitySummary.approvedBy -> suitability_approved_by ('player' | 'guardian')
---   suitabilitySummary.verdicts[] -> suitability_verdicts_json ([{dimension, verdict}] over the
---     six fixed DIMENSIONS; written and cleared wholesale, read only as a whole by the org —
---     kept as JSON rather than a six-row child table; normalise if ever filtered on)
---   history[] -> applications_history
--- notes:
---   * Uniqueness: one non-withdrawn application per (opportunity, player) —
---     enforced by code today (journeys.mjs:95); partial unique index makes it structural.
---   * submitted_by_id is players.id or guardians.id by submitted_by_kind (no FK).
---   * Minors never self-submit; the guardian is the submitter.
---   * player_id RESTRICT: the club's record outlives the subject; the source
---     today leaves player_name in place after deletion (defect — should be nulled).
--- ----------------------------------------------------------------------------
+CREATE TABLE opportunity_texts (
+  opportunity_id TEXT NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL CHECK (kind IN ('requirement','environment','accommodation')),
+  ordinal        INTEGER NOT NULL CHECK (ordinal >= 0),
+  text           TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 120),
+  PRIMARY KEY (opportunity_id, kind, ordinal)
+) STRICT;
 CREATE TABLE applications (
-  id                        TEXT PRIMARY KEY,
-  opportunity_id            TEXT NOT NULL REFERENCES opportunities(id) ON DELETE RESTRICT,
-  org_id                    TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  player_id                 TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
-  player_name               TEXT,                          -- snapshot
-  submitted_by_kind         TEXT NOT NULL CHECK (submitted_by_kind IN ('player','guardian')),
-  submitted_by_id           TEXT NOT NULL,                 -- players.id | guardians.id
-  submitted_by_name         TEXT NOT NULL,                 -- snapshot
-  note                      TEXT,
-  status                    TEXT NOT NULL CHECK (status IN ('submitted','withdrawn','accepted','declined')) DEFAULT 'submitted',
-  outcome_decision          TEXT CHECK (outcome_decision IN ('accepted','declined') OR outcome_decision IS NULL),
-  outcome_note              TEXT,
-  outcome_by_user_id        TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  outcome_by_name           TEXT,                          -- snapshot
-  outcome_at                INTEGER,
-  created_at                INTEGER NOT NULL,
-  reminded_at               INTEGER,
-  suitability_approved_at   INTEGER,
-  suitability_approved_by   TEXT CHECK (suitability_approved_by IN ('player','guardian') OR suitability_approved_by IS NULL),
-  suitability_verdicts_json TEXT CHECK (json_valid(suitability_verdicts_json) OR suitability_verdicts_json IS NULL)
+  id                      TEXT PRIMARY KEY,
+  opportunity_id          TEXT NOT NULL REFERENCES opportunities(id) ON DELETE RESTRICT,
+  org_id                  TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id               TEXT NOT NULL,
+  player_name             TEXT CHECK (player_name IS NULL OR length(player_name) <= 200),
+  submitted_by_kind       TEXT NOT NULL CHECK (submitted_by_kind IN ('player','guardian')),
+  submitted_by_id         TEXT NOT NULL CHECK (length(submitted_by_id) BETWEEN 1 AND 80),
+  submitted_by_name       TEXT CHECK (submitted_by_name IS NULL OR length(submitted_by_name) <= 200),
+  note                    TEXT CHECK (note IS NULL OR length(note) <= 300),
+  status                  TEXT NOT NULL CHECK (status IN ('submitted','withdrawn','accepted','declined')),
+  outcome_note            TEXT CHECK (outcome_note IS NULL OR length(outcome_note) <= 300),
+  outcome_by_user_id      TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  outcome_by_name         TEXT CHECK (outcome_by_name IS NULL OR length(outcome_by_name) <= 200),
+  outcome_at              INTEGER,
+  created_at              INTEGER NOT NULL,
+  reminded_at             INTEGER,
+  suitability_approved_at INTEGER,
+  suitability_approved_by TEXT CHECK (suitability_approved_by IS NULL OR suitability_approved_by IN ('player','guardian')),
+  CHECK ((status IN ('accepted','declined')) = (outcome_at IS NOT NULL)),
+  CHECK ((outcome_at IS NULL) = (outcome_by_user_id IS NULL)),
+  CHECK (outcome_at IS NOT NULL OR (outcome_note IS NULL AND outcome_by_name IS NULL)),
+  CHECK ((suitability_approved_at IS NULL) = (suitability_approved_by IS NULL))
 ) STRICT;
-CREATE UNIQUE INDEX applications_live_opportunity_player ON applications (opportunity_id, player_id) WHERE status <> 'withdrawn';  -- enforced by code today
-CREATE INDEX applications_opportunity_id_status ON applications (opportunity_id, status);  -- counts, capacity, close gate, org list
-CREATE INDEX applications_player_id ON applications (player_id);                           -- player/guardian lists; m15 export
-CREATE INDEX applications_status_created_at ON applications (status, created_at);          -- reminder sweep (submitted older than 7 days)
-
--- ----------------------------------------------------------------------------
--- source: db.applications[].history[]  via audit() (m12/shared.mjs:72); append-only
--- owner/writer: domains/scouting/journeys.mjs
--- mapping: id -> id (aud-N), at -> at, byKind -> by_kind, byId -> by_id, byName -> by_name,
---          action -> action (submitted | withdrawn | accepted | declined), detail -> detail_json
--- notes: known defect — a guardian withdrawal is audited with byKind 'player'
---        (journeys.mjs:147); by_id is then the guardian's id. Carried as-is.
--- ----------------------------------------------------------------------------
-CREATE TABLE applications_history (
-  id             TEXT PRIMARY KEY,
-  application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE RESTRICT,
-  at             INTEGER NOT NULL,
-  by_kind        TEXT CHECK (by_kind IN ('player','guardian','org') OR by_kind IS NULL),
-  by_id          TEXT,
-  by_name        TEXT,
-  action         TEXT NOT NULL,
-  detail_json    TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+CREATE UNIQUE INDEX applications_one_live ON applications (opportunity_id, player_id) WHERE status <> 'withdrawn';
+CREATE INDEX applications_opportunity_status ON applications (opportunity_id, status);
+CREATE INDEX applications_player ON applications (player_id);
+CREATE INDEX applications_reminder_due ON applications (created_at) WHERE status = 'submitted' AND reminded_at IS NULL;
+CREATE TABLE application_suitability (
+  application_id TEXT NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  ordinal        INTEGER NOT NULL CHECK (ordinal >= 0),
+  dimension      TEXT NOT NULL CHECK (dimension IN ('schedule','travel','relocation','compensation','environment','accessibility')),
+  verdict        TEXT NOT NULL CHECK (verdict IN ('compatible','conflict','unknown')),
+  PRIMARY KEY (application_id, ordinal),
+  UNIQUE (application_id, dimension)
 ) STRICT;
-CREATE INDEX applications_history_application_id ON applications_history (application_id);
 
-
--- ----------------------------------------------------------------------------
--- source: db.campaigns  created at domains/scouting/journeys.mjs:230-254
--- owner/writer: domains/scouting/journeys.mjs
--- lifecycle: status is only ever 'published' — there is no close route; "open" is
---            derived (published AND deadline >= today). Never deleted.
--- mapping:
---   id -> id (cmp-N)      orgId -> org_id      orgName -> org_name     title -> title (<=120)
---   drills[] -> drills_json (≤6 of {name, instructions, recording{equipment,distance,surface,camera}};
---     a fixed definition captured at creation, never edited, never filtered on, and read
---     only whole (review queue, drills[0].name default) — kept as JSON)
---   deadline -> deadline_date       attemptsAllowed -> attempts_allowed (1..5)
---   eligibility.minAge/maxAge -> elig_min_age / elig_max_age
---   eligibility.positionGroup -> elig_position_group (passthrough, unvalidated)
---   eligibility.maxLevel -> elig_max_level ('semi_pro' forced for grassroots)
---   eligibility.radiusKm -> elig_radius_km (50 forced for grassroots)
---   (no eligibility.category on campaigns — unlike opportunities)
---   rubric[] -> rubric_json (≤8 of {criterion, guidance}; same justification as drills)
---   status -> status      createdBy -> created_by_name    createdAt -> created_at
---   derived, not stored: submissions / awaitingReview counts, mySubmission
--- ----------------------------------------------------------------------------
+CREATE TABLE application_history (
+  id          TEXT PRIMARY KEY,
+  application_id    TEXT NOT NULL REFERENCES applications(id) ON DELETE RESTRICT,
+  position    INTEGER NOT NULL,
+  at          INTEGER NOT NULL,
+  by_kind     TEXT CHECK (by_kind IS NULL OR by_kind IN ('player','guardian','org','admin')),
+  by_id       TEXT,
+  by_name     TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  action      TEXT NOT NULL,
+  detail      TEXT CHECK (detail IS NULL OR length(detail) <= 500),
+  UNIQUE (application_id, position)
+) STRICT;
 CREATE TABLE campaigns (
   id                  TEXT PRIMARY KEY,
-  org_id              TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  org_name            TEXT NOT NULL,                       -- snapshot
-  title               TEXT NOT NULL,
-  drills_json         TEXT NOT NULL CHECK (json_valid(drills_json)),
-  deadline_date       TEXT NOT NULL CHECK (length(deadline_date) = 10),
-  attempts_allowed    INTEGER NOT NULL CHECK (attempts_allowed BETWEEN 1 AND 5) DEFAULT 2,
-  elig_min_age        INTEGER,
-  elig_max_age        INTEGER,
-  elig_position_group TEXT NOT NULL DEFAULT 'any',
-  elig_max_level      TEXT,
-  elig_radius_km      REAL,
-  rubric_json         TEXT NOT NULL CHECK (json_valid(rubric_json)) DEFAULT '[]',
-  status              TEXT NOT NULL CHECK (status IN ('published')) DEFAULT 'published',
-  created_by_name     TEXT NOT NULL,                       -- snapshot
-  created_at          INTEGER NOT NULL
+  org_id              TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name            TEXT NOT NULL CHECK (length(org_name) <= 200),
+  title               TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),
+  deadline            TEXT NOT NULL CHECK (length(deadline) = 10),
+  attempts_allowed    INTEGER NOT NULL CHECK (attempts_allowed BETWEEN 1 AND 5),
+  elig_min_age        INTEGER CHECK (elig_min_age IS NULL OR elig_min_age BETWEEN 4 AND 99),
+  elig_max_age        INTEGER CHECK (elig_max_age IS NULL OR elig_max_age BETWEEN 4 AND 99),
+  elig_position_group TEXT NOT NULL CHECK (elig_position_group IN ('any','GK','DEF','MID','ATT')),
+  elig_max_level      TEXT CHECK (elig_max_level IS NULL OR elig_max_level IN ('amateur','semi_pro','pro')),
+  elig_radius_km      REAL CHECK (elig_radius_km IS NULL OR elig_radius_km BETWEEN 0 AND 1000),
+  status              TEXT NOT NULL CHECK (status IN ('published')),
+  created_by_name     TEXT NOT NULL CHECK (length(created_by_name) <= 200),
+  created_at          INTEGER NOT NULL,
+  CHECK (elig_min_age IS NULL OR elig_max_age IS NULL OR elig_min_age <= elig_max_age)
 ) STRICT;
-CREATE INDEX campaigns_org_id ON campaigns (org_id);                              -- org list
-CREATE INDEX campaigns_status_deadline_date ON campaigns (status, deadline_date);  -- player/guardian open campaigns
-
--- ----------------------------------------------------------------------------
--- source: db.campaignSubmissions  created at domains/scouting/journeys.mjs:314
--- owner/writer: domains/scouting/journeys.mjs (one row per campaign+player, created on first attempt)
--- lifecycle: none on the row; attempts carry the states
--- mapping: id -> id (csb-N), campaignId -> campaign_id, orgId -> org_id, playerId -> player_id,
---          playerName -> player_name, submittedBy.kind/id/name -> submitted_by_kind /
---          submitted_by_id / submitted_by_name (the FIRST submitter; later attempts may come
---          from the other actor and are not recorded on the row — carried as-is),
---          attempts[] -> campaign_submission_attempts, createdAt -> created_at
--- notes: unique (campaign_id, player_id) enforced by code today (find-or-create).
---        player_id RESTRICT: the club's review record outlives the subject.
--- ----------------------------------------------------------------------------
+CREATE INDEX campaigns_org ON campaigns (org_id);
+CREATE INDEX campaigns_status_deadline ON campaigns (status, deadline);
+CREATE TABLE campaign_drills (
+  campaign_id  TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  ordinal      INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 5),
+  name         TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 80),
+  instructions TEXT NOT NULL CHECK (length(instructions) <= 400),
+  equipment    TEXT NOT NULL CHECK (length(equipment) <= 120),
+  distance     TEXT NOT NULL CHECK (length(distance) <= 120),
+  surface      TEXT NOT NULL CHECK (length(surface) <= 120),
+  camera       TEXT NOT NULL CHECK (length(camera) <= 120),
+  PRIMARY KEY (campaign_id, ordinal),
+  UNIQUE (campaign_id, name)
+) STRICT;
+CREATE TABLE campaign_rubric (
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  ordinal     INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 7),
+  criterion   TEXT NOT NULL CHECK (length(criterion) BETWEEN 1 AND 100),
+  guidance    TEXT NOT NULL CHECK (length(guidance) <= 200),
+  PRIMARY KEY (campaign_id, ordinal)
+) STRICT;
 CREATE TABLE campaign_submissions (
   id                TEXT PRIMARY KEY,
   campaign_id       TEXT NOT NULL REFERENCES campaigns(id) ON DELETE RESTRICT,
-  org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  player_id         TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
-  player_name       TEXT,                                  -- snapshot
+  org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id         TEXT NOT NULL,
+  player_name       TEXT CHECK (player_name IS NULL OR length(player_name) <= 200),
   submitted_by_kind TEXT NOT NULL CHECK (submitted_by_kind IN ('player','guardian')),
-  submitted_by_id   TEXT NOT NULL,                         -- players.id | guardians.id
-  submitted_by_name TEXT NOT NULL,                         -- snapshot
-  created_at        INTEGER NOT NULL
+  submitted_by_id   TEXT NOT NULL CHECK (length(submitted_by_id) BETWEEN 1 AND 80),
+  submitted_by_name TEXT CHECK (submitted_by_name IS NULL OR length(submitted_by_name) <= 200),
+  created_at        INTEGER NOT NULL,
+  UNIQUE (campaign_id, player_id)
 ) STRICT;
-CREATE UNIQUE INDEX campaign_submissions_campaign_id_player_id ON campaign_submissions (campaign_id, player_id);  -- enforced by code today
-CREATE INDEX campaign_submissions_player_id ON campaign_submissions (player_id);
-
--- ----------------------------------------------------------------------------
--- source: db.campaignSubmissions[].attempts[]  created at domains/scouting/journeys.mjs:324-332
--- owner/writer: domains/scouting/journeys.mjs (submit; org review)
--- lifecycle: status failed_checks (terminal) | submitted -> accepted | returned
--- mapping:
---   id -> id (att-N; prefix shared with players[].attendance[] — still globally unique)
---   mediaId -> media_id (as sent; may be null or name a media the file check already
---     flagged as missing — so NO FK, by design the failed attempt keeps the bad id)
---   drillName -> drill_name (<=80; defaults to drills[0].name)   note -> note (<=300)
---   fileChecks.passed -> file_checks_passed      fileChecks.issues[] -> file_check_issues_json
---     (machine-generated message strings, display only — free-form)
---   fileChecks.checkedAt -> file_checked_at      fileChecks.kind -> file_check_kind
---   status -> status
---   review.byUserId/byName/at -> review_by_user_id / review_by_name / reviewed_at
---   review.kind -> review_kind   review.reasons -> review_reasons (<=400)
---   review.rubricNotes -> review_rubric_notes (<=400)
---   submittedAt -> submitted_at
---   derived, not stored: mediaUrl
--- notes: the "machine checks files, a human checks football" split is the two
---        column groups; an attempt is never 'verified'.
--- ----------------------------------------------------------------------------
-CREATE TABLE campaign_submission_attempts (
-  id                     TEXT PRIMARY KEY,
-  submission_id          TEXT NOT NULL REFERENCES campaign_submissions(id) ON DELETE CASCADE,
-  media_id               TEXT,                             -- player_media.id as sent; no FK (see header)
-  drill_name             TEXT,
-  note                   TEXT,
-  file_checks_passed     INTEGER NOT NULL CHECK (file_checks_passed IN (0,1)) DEFAULT 0,
-  file_check_issues_json TEXT NOT NULL CHECK (json_valid(file_check_issues_json)) DEFAULT '[]',
-  file_checked_at        INTEGER NOT NULL,
-  file_check_kind        TEXT NOT NULL CHECK (file_check_kind IN ('automated_file_check')) DEFAULT 'automated_file_check',
-  status                 TEXT NOT NULL CHECK (status IN ('submitted','failed_checks','accepted','returned')),
-  review_by_user_id      TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  review_by_name         TEXT,                             -- snapshot
-  reviewed_at            INTEGER,
-  review_kind            TEXT CHECK (review_kind IN ('human_review') OR review_kind IS NULL),
-  review_reasons         TEXT,
-  review_rubric_notes    TEXT,
-  submitted_at           INTEGER NOT NULL
-) STRICT;
-CREATE INDEX campaign_submission_attempts_submission_id_status ON campaign_submission_attempts (submission_id, status);  -- attempt counting, review queue, awaitingReview
-
-
--- ----------------------------------------------------------------------------
--- source: db.playerPrefs  created at domains/scouting/suitability.mjs:15-25 (blankPrefs) — created on GET (prefsFor)
--- owner/writer: domains/scouting/suitability.mjs (adult player, or guardian for a minor)
--- lifecycle: one row per player; updated in place; never deleted
--- mapping:
---   id -> id (prf-N)                 playerId -> player_id (UNIQUE)
---   commitments[] -> player_pref_slots (kind 'commitment')
---   availableSlots[] -> player_pref_slots (kind 'available')
---   travelLimitKm -> travel_limit_km (0..500)    transport -> transport
---   relocation -> relocation (ADULTS ONLY: the guardian path forces null)
---   ambitions -> ambitions (<=300)
---   environment[] -> environment_json (≤8 tags ≤40, matched by equality at read — free-form tags)
---   accessibility[] -> accessibility_json (≤8 free-text ≤80 needs, substring-matched at read — free-form)
---   compensation.maxFeeMinor -> max_fee_minor    compensation.currency -> currency
---   compensation.expensesNeeded -> expenses_needed
---   updatedAt -> updated_at (null until the first PUT)
--- notes:
---   * PRIVATE to the player/guardian: clubs never read this table; only the
---     approved verdict summary on applications leaves it.
---   * accessibility_json is sensitive (health-adjacent needs) — treat as special
---     category data for retention/export purposes.
---   * Writes on GET: a row is minted (and persisted) by a plain GET.
--- ----------------------------------------------------------------------------
-CREATE TABLE player_prefs (
+CREATE INDEX campaign_submissions_player ON campaign_submissions (player_id);
+CREATE TABLE campaign_attempts (
   id                 TEXT PRIMARY KEY,
-  player_id          TEXT NOT NULL UNIQUE REFERENCES players(id) ON DELETE CASCADE,
-  travel_limit_km    REAL CHECK (travel_limit_km BETWEEN 0 AND 500 OR travel_limit_km IS NULL),
-  transport          TEXT CHECK (transport IN ('own','public','lift_needed') OR transport IS NULL),
-  relocation         TEXT CHECK (relocation IN ('yes','no','discuss') OR relocation IS NULL),
-  ambitions          TEXT,
-  environment_json   TEXT NOT NULL CHECK (json_valid(environment_json)) DEFAULT '[]',
-  accessibility_json TEXT NOT NULL CHECK (json_valid(accessibility_json)) DEFAULT '[]',  -- sensitive
-  max_fee_minor      INTEGER,
-  currency           TEXT NOT NULL CHECK (length(currency) = 3) DEFAULT 'GBP',
-  expenses_needed    INTEGER NOT NULL CHECK (expenses_needed IN (0,1)) DEFAULT 0,
-  updated_at         INTEGER
+  submission_id      TEXT NOT NULL REFERENCES campaign_submissions(id) ON DELETE CASCADE,
+  ordinal            INTEGER NOT NULL CHECK (ordinal >= 0),
+  media_id           TEXT CHECK (media_id IS NULL OR length(media_id) <= 80),
+  drill_name         TEXT NOT NULL CHECK (length(drill_name) BETWEEN 1 AND 80),
+  note               TEXT CHECK (note IS NULL OR length(note) <= 300),
+  file_checks_passed INTEGER NOT NULL CHECK (file_checks_passed IN (0,1)),
+  file_checked_at    INTEGER NOT NULL,
+  status             TEXT NOT NULL CHECK (status IN ('submitted','failed_checks','accepted','returned')),
+  review_by_user_id  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  review_by_name     TEXT CHECK (review_by_name IS NULL OR length(review_by_name) <= 200),
+  reviewed_at        INTEGER,
+  review_reasons     TEXT CHECK (review_reasons IS NULL OR length(review_reasons) <= 400),
+  review_rubric_notes TEXT CHECK (review_rubric_notes IS NULL OR length(review_rubric_notes) <= 400),
+  submitted_at       INTEGER NOT NULL,
+  UNIQUE (submission_id, ordinal),
+  CHECK ((status = 'failed_checks') = (file_checks_passed = 0)),
+  CHECK ((status IN ('accepted','returned')) = (reviewed_at IS NOT NULL)),
+  CHECK ((reviewed_at IS NULL) = (review_by_user_id IS NULL)),
+  CHECK (reviewed_at IS NOT NULL OR (review_by_name IS NULL AND review_reasons IS NULL AND review_rubric_notes IS NULL)),
+  CHECK (status <> 'returned' OR review_reasons IS NOT NULL)
 ) STRICT;
-
--- ----------------------------------------------------------------------------
--- source: db.playerPrefs[].commitments[] and .availableSlots[]  (≤20 each; domains/scouting/suitability.mjs:34-40)
--- owner/writer: domains/scouting/suitability.mjs; each list replaced wholesale
--- mapping: (list name) -> kind, (array position) -> ordinal (new), day -> day (3-letter lowercase),
---          start -> start_time ('HH:MM'), end -> end_time ('HH:MM'), tz -> tz (<=40),
---          label -> label (<=60; e.g. "school", "work" — personal data)
--- ----------------------------------------------------------------------------
+CREATE INDEX campaign_attempts_status ON campaign_attempts (submission_id, status);
+CREATE TABLE campaign_attempt_issues (
+  attempt_id TEXT NOT NULL REFERENCES campaign_attempts(id) ON DELETE CASCADE,
+  ordinal    INTEGER NOT NULL CHECK (ordinal >= 0),
+  issue      TEXT NOT NULL CHECK (issue IN ('media_missing','not_video','not_uploaded')),
+  PRIMARY KEY (attempt_id, ordinal),
+  UNIQUE (attempt_id, issue)
+) STRICT;
+CREATE TABLE player_prefs (
+  player_id       TEXT PRIMARY KEY,
+  travel_limit_km REAL CHECK (travel_limit_km IS NULL OR travel_limit_km BETWEEN 0 AND 500),
+  transport       TEXT CHECK (transport IS NULL OR transport IN ('own','public','lift_needed')),
+  relocation      TEXT CHECK (relocation IS NULL OR relocation IN ('yes','no','discuss')),
+  ambitions       TEXT CHECK (ambitions IS NULL OR length(ambitions) <= 300),
+  max_fee_minor   INTEGER CHECK (max_fee_minor IS NULL OR max_fee_minor >= 0),
+  currency        TEXT NOT NULL CHECK (length(currency) = 3 AND currency GLOB '[A-Z][A-Z][A-Z]'),
+  expenses_needed INTEGER NOT NULL CHECK (expenses_needed IN (0,1)),
+  updated_at      INTEGER NOT NULL
+) STRICT;
 CREATE TABLE player_pref_slots (
-  pref_id    TEXT NOT NULL REFERENCES player_prefs(id) ON DELETE CASCADE,
+  player_id  TEXT NOT NULL REFERENCES player_prefs(player_id) ON DELETE CASCADE,
   kind       TEXT NOT NULL CHECK (kind IN ('commitment','available')),
-  ordinal    INTEGER NOT NULL,
-  day        TEXT NOT NULL CHECK (length(day) <= 3),
-  start_time TEXT NOT NULL CHECK (length(start_time) <= 5),
-  end_time   TEXT NOT NULL CHECK (length(end_time) <= 5),
-  tz         TEXT NOT NULL DEFAULT 'Europe/London',
-  label      TEXT,                                         -- personal data
-  PRIMARY KEY (pref_id, kind, ordinal)
+  ordinal    INTEGER NOT NULL CHECK (ordinal >= 0),
+  day        TEXT NOT NULL CHECK (day IN ('mon','tue','wed','thu','fri','sat','sun')),
+  start_time TEXT NOT NULL CHECK (length(start_time) = 5 AND start_time GLOB '[0-2][0-9]:[0-5][0-9]' AND start_time <= '23:59'),
+  end_time   TEXT NOT NULL CHECK (length(end_time) = 5 AND end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND end_time <= '23:59'),
+  tz         TEXT NOT NULL CHECK (length(tz) BETWEEN 1 AND 40),
+  label      TEXT CHECK (label IS NULL OR length(label) <= 60),
+  PRIMARY KEY (player_id, kind, ordinal),
+  CHECK (start_time < end_time)
+) STRICT;
+CREATE TABLE player_pref_texts (
+  player_id TEXT NOT NULL REFERENCES player_prefs(player_id) ON DELETE CASCADE,
+  kind      TEXT NOT NULL CHECK (kind IN ('environment','accessibility')),
+  ordinal   INTEGER NOT NULL CHECK (ordinal >= 0),
+  text      TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 80),
+  PRIMARY KEY (player_id, kind, ordinal)
 ) STRICT;
 
 

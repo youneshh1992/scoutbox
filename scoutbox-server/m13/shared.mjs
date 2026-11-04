@@ -14,7 +14,7 @@ export function migrateM13(db, players) {
   db.apiKeys ??= [];              // F1 — scoped org API credentials (hash only)
   db.webhookEndpoints ??= [];     // F1 — outgoing webhook destinations + secrets
   db.webhookDeliveries ??= [];    // F1 — durable delivery attempts (bounded retries)
-  db.playerPrefs ??= [];          // F3 — private suitability preferences
+  // F3 private suitability preferences: the player_prefs tables of the opportunities and campaigns repository (S9d).
   db.transitionCases ??= [];      // F2 — consent-based academy transition cases
   db.representations ??= [];      // F10 — adult representation relationships
   db.exposureEvents ??= [];       // F4 — deduplicated exposure funnel events

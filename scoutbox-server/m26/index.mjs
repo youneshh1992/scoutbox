@@ -65,6 +65,7 @@ export function registerTransactions(rawCtx) {
     // not cite a recruitment case at all, which is the fail-closed answer.
     integration = null,
     recruitmentReads, // §4.3 step 2: the trials are read through SQL
+    scoutingReads, // S9d: the opportunities are read through SQL
   } = rawCtx;
 
   // Registration-time presence (migration 2307 guarantees these; this is the
@@ -968,7 +969,7 @@ export function registerTransactions(rawCtx) {
     if (!writableOr(res, tx, 'links')) return;
     const opportunityId = str(req.body?.opportunityId, 60);
     if (!opportunityId) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'opportunityId' }, 'links');
-    const opp = (db.opportunities ?? []).find((o) => o && o.id === opportunityId);
+    const opp = scoutingReads.opportunities.byId(opportunityId); // S9d: read through SQL
     // A link to an opportunity the agent cannot see would disclose that it
     // exists, so an unknown and an invisible opportunity answer alike.
     const engaging = partiesOf(tx).find((p) => !p.removed && p.partyRole === 'engaging_entity');

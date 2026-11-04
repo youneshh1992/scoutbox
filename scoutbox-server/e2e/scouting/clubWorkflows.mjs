@@ -471,6 +471,26 @@ r = await post(`/org/opportunities/${oppId}/close`, {}, bearer(MARIA));
 ok(r.status === 200, 'opportunity closes once every applicant has an answer');
 r = await j('/player/applications', {}, bearer(KOLA));
 ok(r.body[0].status === 'accepted' && r.body[0].opportunity.title.includes('U23'), 'player sees application status + final outcome');
+// S9d: junk is refused with the field named, not coerced or passed through.
+for (const [body, field] of [
+  [{ type: 'trial', title: 'X', deadline: future, category: 'veterans' }, 'category'],
+  [{ type: 'trial', title: 'X', deadline: future, eligibility: { positionGroup: 'FWD' } }, 'eligibility.positionGroup'],
+  [{ type: 'trial', title: 'X', deadline: future, eligibility: { minAge: 30, maxAge: 20 } }, 'eligibility.maxAge'],
+  [{ type: 'trial', title: 'X', deadline: future, capacity: 'lots' }, 'capacity'],
+  [{ type: 'trial', title: 'X', deadline: future, requirements: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }, 'requirements'],
+]) {
+  r = await post('/org/opportunities', body, bearer(MARIA));
+  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `S9d an opportunity with a bad ${field} is refused, naming the field`);
+}
+// S9d: a guardian's withdrawal is recorded as the guardian's act.
+r = await post(`/guardian/applications/${(await j('/guardian/applications', {}, bearer(AMARA))).body.find((a) => a.opportunityId === oppKids).id}/withdraw`, {}, bearer(AMARA));
+ok(r.status === 200 && r.body.application.status === 'withdrawn' && r.body.application.history.at(-1).byKind === 'guardian' && r.body.application.history.at(-1).byId === 'gd-amara', 'S9d a guardian withdrawal is recorded as the guardian\'s');
+// S9d: the club's opportunity list pages by cursor, newest first, with the application counts.
+r = await j('/org/opportunities?limit=1', {}, bearer(MARIA));
+ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].id === oppKids && typeof r.body.nextCursor === 'string' && r.body.items[0].applications === 0, 'S9d the club opportunity list pages, newest first, with live application counts');
+r = await j(`/org/opportunities?limit=1&cursor=${r.body.nextCursor}`, {}, bearer(MARIA));
+ok(r.body.items[0]?.id === oppId && r.body.items[0].applications === 1 && r.body.items[0].outstanding === 0 && r.body.items[0].open === false, 'S9d the next page continues where the first stopped');
+ok((await j('/org/opportunities?cursor=junk', {}, bearer(MARIA))).status === 400, 'S9d a junk cursor is refused');
 
 // ========================================================= §6 campaigns
 r = await post('/org/campaigns', { title: 'Remote sprint assessment', deadline: future, attemptsAllowed: 2,
@@ -498,6 +518,19 @@ r = await post(`/player/campaigns/${campId}/submit`, { mediaId: sprintMedia, dri
 ok(r.status === 201, 'returned attempt frees the slot — resubmission accepted');
 r = await post(`/org/campaign-attempts/${(r.body.attempt.id)}/review`, { decision: 'accepted', rubricNotes: 'Clean run, both cones visible.' }, bearer(MARIA));
 ok(r.status === 200, 'reviewer accepts the resubmission');
+// S9d: campaign junk is refused (it used to be cut off or clamped), and an attempt names one of the campaign's drills.
+for (const [body, field] of [
+  [{ title: 'X', deadline: future, drills: [{ name: 'a' }], attemptsAllowed: 9 }, 'attemptsAllowed'],
+  [{ title: 'X', deadline: future, drills: Array.from({ length: 7 }, (_, i) => ({ name: `d${i}` })) }, 'drills'],
+  [{ title: 'X', deadline: future, drills: [{ name: 'a' }, { name: 'a' }] }, 'drills[1].name'],
+]) {
+  r = await post('/org/campaigns', body, bearer(MARIA));
+  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `S9d a campaign with a bad ${field} is refused, naming the field`);
+}
+r = await post(`/player/campaigns/${campId}/submit`, { mediaId: sprintMedia, drillName: 'keepy-uppies' }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'drillName', 'S9d an attempt at a drill the campaign does not have is refused');
+r = await j('/org/campaigns', {}, bearer(MARIA));
+ok(r.body.items[0]?.id === campId && r.body.items[0].submissions === 1 && r.body.items[0].awaitingReview === 0 && 'nextCursor' in r.body, 'S9d the club campaign list pages, with submission counts');
 r = await j('/player/drill-guidance', {}, bearer(KOLA));
 ok(r.body.items.every((g) => g.coachReview.status === 'unreviewed') && r.body.note.includes('honestly'), 'drill library shows unreviewed guidance as unreviewed');
 

@@ -9,6 +9,16 @@
  * Junk is refused at the route (400), never clamped: a non-integer or out-of-range limit, or a cursor that does not
  * decode to the query's key shape.
  */
+/**
+ * The older offset convention some lists keep (the apps' `{ total, limit, offset, items }` shape): `limit` 1–200
+ * (default 50) and `offset` from 0, floored and clamped to safe integers, so junk reads as the defaults, never a 500.
+ */
+export const offsetPage = (req) => {
+  const limit = Math.min(Math.max(Math.floor(Number(req.query?.limit)) || 50, 1), 200);
+  const offset = Math.max(Math.floor(Number(req.query?.offset)) || 0, 0);
+  return { limit, offset: Number.isSafeInteger(offset) ? offset : 0 };
+};
+
 export const PAGE_LIMITS = Object.freeze({ default: 50, max: 100 });
 
 const pageError = (error, message) => Object.assign(new Error(`${error}: ${message}`), { code: error, status: 400, pageError: true });

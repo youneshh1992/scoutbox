@@ -421,6 +421,11 @@ let TX1;
   ok(/not a statement of legal validity/.test(create.body.transaction.honest) && /no offer exists/i.test(create.body.transaction.offerBoundary.honest), 'A19 the projection states plainly what "ready" does and does not mean (§17, §77)');
   ok((await j('POST', '/org/agent/transactions', { ...body, clientKey: 'tx-1' }, ANA.token)).body.idempotent === true, 'X1 replaying the create with its key returns the same transaction (§69)');
   neg(expect(collect('X2', await j('POST', '/org/agent/transactions', { ...body, type: 'loan', clientKey: 'tx-1' }, ANA.token)), 409, 'TRANSACTION_IDEMPOTENCY_CONFLICT'), 'X2 the same key with a different payload is a collision (#28)');
+  // S9d: a transaction links an opportunity of its engaging club, read through SQL (this route reached no battery before).
+  neg(expect(collect('OL1', await j('POST', `/org/agent/transactions/${TX1}/links`, { opportunityId: 'opp-does-not-exist' }, ANA.token)), 400, 'TRANSACTION_INPUT_INVALID'), 'OL1 an unknown opportunity cannot be linked');
+  const linkOpp = await j('POST', '/org/opportunities', { type: 'trial', title: 'Linkable trial', deadline: '2099-01-01' }, maria.token);
+  const linked = await j('POST', `/org/agent/transactions/${TX1}/links`, { opportunityId: linkOpp.body?.opportunity?.id }, ANA.token);
+  ok(linkOpp.status === 201 && linked.status === 200, `OL2 an opportunity of the engaging club links to the transaction (${linked.status} ${linked.body?.error ?? ''})`);
 }
 
 // ============================================================ B/C — party identity and history

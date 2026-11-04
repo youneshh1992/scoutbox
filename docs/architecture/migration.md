@@ -64,7 +64,7 @@ routes still miss the bar: they are listed, and deferred, at the end of §4.3 st
 
 ## 3. Status
 
-21 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0022`. Each
+22 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0023`. Each
 step takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Write model | Status |
@@ -93,7 +93,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S9a | evidence passport, coach affiliations, squad invitations | `0019_scouting_evidence` | `scoutingEvidence.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S9b | assessment templates, assessments, video segments, playlists | `0020_scouting_assessments` | `scoutingAssessments.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S9c | tactical setup, squad, shadow list, looking-for, federation check, vacancies | `0021_club_setup` | `clubSetup.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
-| S9d | opportunities, applications, campaigns, player preferences | | | | not started |
+| S9d | opportunities, applications, campaigns, player preferences | `0022_opportunities_campaigns` | `opportunitiesCampaigns.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S10 | verification and passport | | | | not started |
 | S11 | agents, compliance, transactions | | | | not started |
 | S12 | development, Box Cam, discovery | | | | not started |
@@ -349,6 +349,23 @@ squad member does, except as "considered" in Nobody Missed. For S10/S11, which r
 `RETIRED_FACETS` makes reading or writing it on an org record throw, and `orgSafe` (login, admin clubs) must then add
 what the apps read from `session.org` explicitly. A whole-replace save of a list with dependants (tactical roles) diffs
 by id, so kept rows keep their dependants and dropped ones leave them `SET NULL`.
+
+**S9d as built (4 November).** `repositories/opportunitiesCampaigns.mjs`, migration `0022`, read through `scoutingReads`
+(`opportunities`, `applications`, `campaigns`, `campaignSubmissions`, `playerPrefs`). No JSON columns: requirements, tags and
+accommodations are `opportunity_texts` rows, drills and the rubric their own tables, a file check's issues are codes, the
+approved suitability summary is one row per dimension. Player and media ids carry no key (tolerant); org and staff ids
+RESTRICT; an application's opportunity and a submission's campaign RESTRICT inside the domain. One live application per
+opportunity and player, one submission per campaign and player. Applying, an outcome, an attempt and a review each commit
+as one unit with their notifications (and the ledger row); the reminder sweep is an indexed query whose marker commits
+with its notification. Routes refuse junk (`400 FIELD_INVALID`, field named): unknown categories, position groups and
+levels, bad ages, radius and capacity, too many requirements, drills or rubric lines and out-of-range attempts (all
+cut off or clamped before), duplicate drill names, an attempt at a drill the campaign lacks, bad slot days, times and
+time zones, bad currencies, fees, transports and relocations. Behaviour changes: reading preferences no longer
+creates a row (a player who never saved gets the blank defaults, without an `id`); a guardian's withdrawal is recorded
+as the guardian's; `GET /org/opportunities` and `GET /org/campaigns` page by cursor (the apps read the first page). The
+player board still checks eligibility in code over the open opportunities (an indexed query); it pages with discovery
+(S12). **Left as before, for the Founder (retention, `decisions.md` Q6):** an account deletion keeps the player's
+applications, campaign submissions and private preferences (accessibility needs included) under the old id.
 
 ### 4.6 S14: retire the blob
 

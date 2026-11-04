@@ -127,7 +127,7 @@ module registration → integrity report → listen.
   to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
   repository). The whole recruitment domain (cases and Room records, requests, trials,
   contacts, offers, signing packages, signings, follow-ups, outcome reports) has moved, and so
-  have the scouting evidence passport, coach affiliations and squad invitations (S9a) the assessment templates, assessments, video segments and playlists (S9b), and a club's tactical setup, squad, shadow list, looking-for, federation request and vacancies (S9c, which also retired the organisation facets `tactical`, `squad`, `lookingFor` and `federationCheck`: reading one on an organisation throws): ask the repository (`recruitmentContactsOffers.contacts.forCase`,
+  have the scouting evidence passport, coach affiliations and squad invitations (S9a) the assessment templates, assessments, video segments and playlists (S9b), and a club's tactical setup, squad, shadow list, looking-for, federation request and vacancies (S9c, which also retired the organisation facets `tactical`, `squad`, `lookingFor` and `federationCheck`: reading one on an organisation throws), and the opportunity board, applications, assessment campaigns and players' private suitability preferences (S9d): ask the repository (`recruitmentContactsOffers.contacts.forCase`,
   `signingsFollowUps.signings.forOrgPlayer`, `scoutingEvidence.evidence.currentForPlayer`, …, or the read-only `recruitmentReads`
   and `scoutingReads` every module context carries). A list that grows without limit pages by cursor through
   `domains/platform/paging.mjs` (`readPage` at the route, a `pageFor…` query in the
@@ -190,7 +190,7 @@ When you move a blob domain to tables:
 - After attach, an in-memory array (seed, `??= []` default, stale copy) is never imported
   into a live table.
 
-The latest table migration is `0021_club_setup`.
+The latest table migration is `0022_opportunities_campaigns`.
 
 **Snapshot mode.** `openStore(dir)` without options is for tools and fixtures. It runs the
 table migrations when it opens the file, then reads and writes the whole database in the

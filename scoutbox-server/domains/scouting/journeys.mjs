@@ -7,7 +7,44 @@
 import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../../domain.mjs';
 import { parseStrictDateOnly, parseDateOrInstant, isExpiredAt, isAbsent } from '../../temporal.mjs';
 import { trialFamilyView, trialOutcomeLine } from '../recruitment/lifecycle/trial.mjs';
-import { readPage, sendPageError } from '../platform/paging.mjs';
+import { readPage, sendPageError, pageOf, offsetPage } from '../platform/paging.mjs';
+import { OPPORTUNITY_TYPES, OPPORTUNITY_CATEGORIES, OPPORTUNITIES_CAMPAIGNS_LIMITS as OL, FILE_CHECK_ISSUES, typeEligibility } from '../../repositories/opportunitiesCampaigns.mjs';
+import { storedName } from './passport.mjs';
+
+// Responses are built from explicit allowlists, never by spreading a stored record.
+const eligibilityView = (e) => ({ minAge: e.minAge, maxAge: e.maxAge, positionGroup: e.positionGroup, ...(e.category !== undefined ? { category: e.category } : {}), maxLevel: e.maxLevel, radiusKm: e.radiusKm });
+const slotView = (s) => ({ day: s.day, start: s.start, end: s.end, tz: s.tz });
+export const opportunityView = (o) => ({
+  id: o.id, orgId: o.orgId, orgName: o.orgName, orgLevel: o.orgLevel, type: o.type, title: o.title, team: o.team, category: o.category,
+  ageGroup: o.ageGroup, role: o.role, description: o.description, schedule: o.schedule, deadline: o.deadline, capacity: o.capacity,
+  eligibility: eligibilityView(o.eligibility), requirements: [...o.requirements], status: o.status, createdBy: o.createdBy, createdAt: o.createdAt, closedAt: o.closedAt,
+  structured: o.structured ? { trainingSlots: o.structured.trainingSlots.map(slotView), relocationRequired: o.structured.relocationRequired, feeMinor: o.structured.feeMinor, currency: o.structured.currency, expensesCovered: o.structured.expensesCovered, environment: [...o.structured.environment], accommodations: [...o.structured.accommodations] } : null,
+});
+const historyView = (h) => ({ id: h.id, at: h.at, byKind: h.byKind, byId: h.byId, byName: h.byName, action: h.action, detail: h.detail });
+export const applicationView = (a) => ({
+  id: a.id, opportunityId: a.opportunityId, orgId: a.orgId, playerId: a.playerId, playerName: a.playerName,
+  submittedBy: { kind: a.submittedBy.kind, id: a.submittedBy.id, name: a.submittedBy.name }, note: a.note, status: a.status,
+  outcome: a.outcome ? { decision: a.outcome.decision, note: a.outcome.note, byUserId: a.outcome.byUserId, byName: a.outcome.byName, at: a.outcome.at } : null,
+  createdAt: a.createdAt, remindedAt: a.remindedAt,
+  suitabilitySummary: a.suitabilitySummary ? { approvedAt: a.suitabilitySummary.approvedAt, approvedBy: a.suitabilitySummary.approvedBy, verdicts: a.suitabilitySummary.verdicts.map((v) => ({ dimension: v.dimension, verdict: v.verdict })) } : null,
+  history: a.history.map(historyView),
+});
+const campaignView = (c) => ({
+  id: c.id, orgId: c.orgId, orgName: c.orgName, title: c.title,
+  drills: c.drills.map((d) => ({ name: d.name, instructions: d.instructions, recording: { equipment: d.recording.equipment, distance: d.recording.distance, surface: d.recording.surface, camera: d.recording.camera } })),
+  deadline: c.deadline, attemptsAllowed: c.attemptsAllowed, eligibility: eligibilityView(c.eligibility), rubric: c.rubric.map((r) => ({ criterion: r.criterion, guidance: r.guidance })),
+  status: c.status, createdBy: c.createdBy, createdAt: c.createdAt,
+});
+const attemptView = (a) => ({
+  id: a.id, mediaId: a.mediaId, drillName: a.drillName, note: a.note,
+  fileChecks: { passed: a.fileChecks.passed, issues: [...a.fileChecks.issues], checkedAt: a.fileChecks.checkedAt, kind: a.fileChecks.kind }, status: a.status,
+  review: a.review ? { byUserId: a.review.byUserId, byName: a.review.byName, at: a.review.at, kind: a.review.kind, reasons: a.review.reasons, rubricNotes: a.review.rubricNotes } : null,
+  submittedAt: a.submittedAt,
+});
+const submissionView = (s) => ({
+  id: s.id, campaignId: s.campaignId, orgId: s.orgId, playerId: s.playerId, playerName: s.playerName,
+  submittedBy: { kind: s.submittedBy.kind, id: s.submittedBy.id, name: s.submittedBy.name }, attempts: s.attempts.map(attemptView), createdAt: s.createdAt,
+});
 
 export function registerJourneys(ctx) {
   const {
@@ -15,68 +52,87 @@ export function registerJourneys(ctx) {
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, requireLead, isLead, moderateOrRefuse, isAdult,
     checkEligibility, distanceBand, guardianOwnsChild, recordActivity, DRILLS,
-    players, users, unit, recruitment,
+    players, users, unit, recruitment, opportunitiesCampaigns,
   } = ctx;
+  if (typeof opportunitiesCampaigns?.opportunities?.create !== 'function') throw new TypeError('registerJourneys needs the opportunities and campaigns repository from the data layer');
   // S8a: a trial-day change is an explicit write of the trial (recruitment.trials.update); the records the views hand out are read-only.
   const trials = recruitment?.trials;
   if (!trials) throw new TypeError('registerJourneys needs the recruitment repository from the data layer');
 
   // ================================================================== F5
-  const OPP_TYPES = ['trial', 'open_day', 'programme', 'role'];
+  // S9d: opportunities and applications are rows of the opportunities and campaigns repository
+  // (repositories/opportunitiesCampaigns.mjs), written by explicit operations and read through SQL. Junk is refused with
+  // the field named (400 FIELD_INVALID); over-long text is still shortened.
+  const OPP_TYPES = OPPORTUNITY_TYPES;
+  const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
+  const optionalText = (v) => v === undefined || v === null || typeof v === 'string';
+  const textOrNull = (v, max) => (v ? v.slice(0, max) : null);
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  /**
+   * The eligibility a club may set, typed, with the grassroots rules forced (amateur and semi-pro only, the 50 km
+   * radius). Returns the record, or undefined after a 400.
+   */
+  function eligibilityOrRefuse(res, raw, org, { category } = {}) {
+    if (raw !== undefined && raw !== null && (typeof raw !== 'object' || Array.isArray(raw))) return fieldInvalid(res, 'eligibility', 'eligibility is an object.');
+    const e = raw ?? {};
+    const known = ['minAge', 'maxAge', 'positionGroup', 'maxLevel', 'radiusKm', ...(category === undefined ? [] : ['category'])];
+    const extra = Object.keys(e).find((k) => !known.includes(k));
+    if (extra) return fieldInvalid(res, `eligibility.${extra}`, `eligibility has no field ${extra}.`);
+    const grassroots = org.level === 'grassroots';
+    const record = {
+      minAge: e.minAge ?? null, maxAge: e.maxAge ?? null, positionGroup: e.positionGroup ?? 'any',
+      ...(category === undefined ? {} : { category: ['mens', 'womens', 'boys', 'girls'].includes(category) ? category : 'mixed' }),
+      maxLevel: grassroots ? 'semi_pro' : (e.maxLevel ?? null),
+      // The 50 km rule is not optional for grassroots orgs.
+      radiusKm: grassroots ? GRASSROOTS_RADIUS_KM : (e.radiusKm ?? null),
+    };
+    const t = typeEligibility(record, 'eligibility', { withCategory: category !== undefined });
+    if (!t.ok) { const field = /eligibility\.(\w+)/.exec(t.reason)?.[1]; return fieldInvalid(res, field ? `eligibility.${field}` : 'eligibility', `eligibility: ${t.reason.replace(/^eligibility\./, '')}.`); }
+    return t.record;
+  }
 
   orgRouter.post('/opportunities', (req, res) => {
     const b = req.body ?? {};
     if (!OPP_TYPES.includes(b.type)) return res.status(400).json({ error: 'TYPE_INVALID', allowed: OPP_TYPES });
-    if (!b.title || !String(b.title).trim()) return res.status(400).json({ error: 'TITLE_REQUIRED' });
+    if (typeof b.title !== 'string' || !b.title.trim()) return res.status(400).json({ error: 'TITLE_REQUIRED' });
     if (!b.deadline) return res.status(400).json({ error: 'DEADLINE_REQUIRED' });
     if (!parseStrictDateOnly(b.deadline).ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'deadline', message: 'A deadline is a calendar day written YYYY-MM-DD.', expected: 'YYYY-MM-DD' });
+    for (const f of ['team', 'ageGroup', 'role', 'description', 'schedule']) if (!optionalText(b[f])) return fieldInvalid(res, f, `${f} is text.`);
+    if (b.category !== undefined && b.category !== null && !OPPORTUNITY_CATEGORIES.includes(b.category)) return fieldInvalid(res, 'category', `category is one of ${OPPORTUNITY_CATEGORIES.join(', ')}.`);
+    if (b.capacity !== undefined && b.capacity !== null && !(Number.isSafeInteger(b.capacity) && b.capacity >= 1)) return fieldInvalid(res, 'capacity', 'capacity is a whole number of places (1 or more), or null for no limit.');
+    if (b.requirements !== undefined && b.requirements !== null && (!Array.isArray(b.requirements) || b.requirements.length > OL.requirements || b.requirements.some((r) => typeof r !== 'string' || !r.trim()))) return fieldInvalid(res, 'requirements', `requirements is a list of at most ${OL.requirements} lines of text.`);
     if (b.description && !moderateOrRefuse(res, b.description, { kind: 'opportunity', orgId: req.org.id })) return;
-    const elig = b.eligibility ?? {};
-    const opp = {
-      id: nextId('opp'), orgId: req.org.id, orgName: req.org.name, orgLevel: req.org.level ?? 'pro',
-      type: b.type, title: String(b.title).slice(0, 120), team: b.team ? String(b.team).slice(0, 60) : null,
-      category: ['mens', 'womens', 'boys', 'girls', 'mixed'].includes(b.category) ? b.category : 'mixed',
-      ageGroup: b.ageGroup ? String(b.ageGroup).slice(0, 20) : null,
-      role: b.role ? String(b.role).slice(0, 60) : null,
-      description: b.description ? String(b.description).slice(0, 500) : null,
-      schedule: b.schedule ? String(b.schedule).slice(0, 200) : null,
-      deadline: String(b.deadline).slice(0, 10),
-      capacity: Number(b.capacity) || null,
-      eligibility: {
-        minAge: elig.minAge != null ? Number(elig.minAge) : null,
-        maxAge: elig.maxAge != null ? Number(elig.maxAge) : null,
-        positionGroup: elig.positionGroup ?? 'any',
-        category: opp0Category(b.category),
-        maxLevel: req.org.level === 'grassroots' ? 'semi_pro' : (elig.maxLevel ?? null),
-        // The 50 km rule is not optional for grassroots orgs.
-        radiusKm: req.org.level === 'grassroots' ? GRASSROOTS_RADIUS_KM : (elig.radiusKm != null ? Number(elig.radiusKm) : null),
-      },
-      requirements: Array.isArray(b.requirements) ? b.requirements.slice(0, 6).map((r) => String(r).slice(0, 120)) : [],
-      status: 'published', createdBy: req.orgUser.name, createdAt: Date.now(), closedAt: null,
-    };
-    db.opportunities.push(opp);
-    persistNow();
+    const category = b.category ?? 'mixed';
+    const eligibility = eligibilityOrRefuse(res, b.eligibility, req.org, { category });
+    if (!eligibility) return;
+    const opp = opportunitiesCampaigns.opportunities.create({
+      id: nextId('opp'), orgId: req.org.id, orgName: storedName(req.org.name), orgLevel: req.org.level ?? 'pro',
+      type: b.type, title: b.title.slice(0, OL.title), team: textOrNull(b.team, OL.team), category,
+      ageGroup: textOrNull(b.ageGroup, OL.ageGroup), role: textOrNull(b.role, OL.role), description: textOrNull(b.description, OL.description),
+      schedule: textOrNull(b.schedule, OL.schedule), deadline: b.deadline, capacity: b.capacity ?? null, eligibility,
+      requirements: (b.requirements ?? []).map((r) => r.slice(0, OL.requirement)),
+      status: 'published', createdBy: storedName(req.orgUser.name), createdAt: Date.now(), closedAt: null, structured: null,
+    });
     broadcast('opportunities', {});
-    res.status(201).json({ opportunity: opp });
-    function opp0Category(c) { return ['mens', 'womens', 'boys', 'girls'].includes(c) ? c : 'mixed'; }
+    res.status(201).json({ opportunity: opportunityView(opp) });
   });
 
-  const oppOpen = (o) => o.status === 'published' && o.deadline >= new Date().toISOString().slice(0, 10);
+  const oppOpen = (o) => o.status === 'published' && o.deadline >= today();
 
+  // §4.3: a club's opportunities grow without limit (they are closed, never deleted), so the list pages, newest first.
   orgRouter.get('/opportunities', (req, res) => {
-    const mine = db.opportunities.filter((o) => o.orgId === req.org.id);
-    res.json(mine.map((o) => ({
-      ...o,
-      open: oppOpen(o),
-      applications: db.applications.filter((a) => a.opportunityId === o.id && a.status !== 'withdrawn').length,
-      outstanding: db.applications.filter((a) => a.opportunityId === o.id && a.status === 'submitted').length,
-    })));
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    const { items, nextCursor } = pageOf(scoutingReads.opportunities.page(req.org.id, page).rows, page.limit, (r) => r.key);
+    const counts = scoutingReads.opportunities.applicationCounts(items.map((r) => r.opportunity.id));
+    res.json({ items: items.map((r) => ({ ...opportunityView(r.opportunity), open: oppOpen(r.opportunity), ...counts[r.opportunity.id] })), nextCursor });
   });
 
   // M23 P5.6B: the board is a pure module-level function so the Agent
   // workspace can project a confirmed client's board through exactly the
   // same eligibility and mutual-visibility rules — one engine, not two.
-  const boardFor = (player) => opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand });
+  const boardFor = (player) => opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads, orgOf: byId.org });
 
   playerRouter.get('/opportunity-board', (req, res) => {
     res.json({ items: boardFor(req.player), minor: req.playerIsMinor, note: req.playerIsMinor ? 'Applications for under-18s are made by your parent/guardian.' : null });
@@ -90,35 +146,39 @@ export function registerJourneys(ctx) {
   });
 
   function applyTo(req, res, player, submitter) {
-    const o = db.opportunities.find((x) => x.id === req.params.id);
+    const o = scoutingReads.opportunities.byId(req.params.id);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
     if (!oppOpen(o)) return res.status(409).json({ error: 'OPPORTUNITY_CLOSED' });
     const org = byId.org(o.orgId);
     if (!org || !orgCanSee(org, player)) return res.status(403).json({ error: 'NOT_ELIGIBLE', reasons: ['this club cannot work with this profile'] });
     const { eligible, reasons } = checkEligibility(o.eligibility, player, org);
     if (!eligible) return res.status(403).json({ error: 'NOT_ELIGIBLE', reasons });
-    if (db.applications.some((a) => a.opportunityId === o.id && a.playerId === player.id && a.status !== 'withdrawn')) {
-      return res.status(409).json({ error: 'ALREADY_APPLIED' });
-    }
-    if (o.capacity && db.applications.filter((a) => a.opportunityId === o.id && a.status !== 'withdrawn').length >= o.capacity) {
+    if (scoutingReads.applications.liveFor(o.id, player.id)) return res.status(409).json({ error: 'ALREADY_APPLIED' });
+    if (o.capacity && scoutingReads.opportunities.applicationCounts([o.id])[o.id].applications >= o.capacity) {
       return res.status(409).json({ error: 'CAPACITY_FULL' });
     }
-    const note = req.body?.note ? String(req.body.note).slice(0, 300) : null;
+    if (!optionalText(req.body?.note)) return fieldInvalid(res, 'note', 'note is text.');
+    const note = textOrNull(req.body?.note, OL.note);
     if (note && !moderateOrRefuse(res, note, { kind: 'application', playerId: player.id, orgId: o.orgId })) return;
-    const appn = {
-      id: nextId('apl'), opportunityId: o.id, orgId: o.orgId, playerId: player.id, playerName: player.name,
-      submittedBy: submitter, note, status: 'submitted', outcome: null,
-      createdAt: Date.now(), history: [],
-    };
-    audit(appn, submitter.kind, submitter.id, submitter.name, 'submitted');
-    db.applications.push(appn);
-    ledgerAppend({ type: 'opportunity_application', playerId: player.id, orgId: o.orgId, orgName: o.orgName, userId: null, scoutName: submitter.name });
-    notify({ kind: 'org_user', id: usersOf(o.orgId)[0]?.id ?? '' }, 'application', `📥 ${player.name} applied to "${o.title}".`, appn.id);
-    persistNow();
+    const at = Date.now();
+    // ONE unit of work: the application, its ledger row and the club's notification commit together.
+    const appn = unit(() => {
+      const created = opportunitiesCampaigns.applications.create({
+        id: nextId('apl'), opportunityId: o.id, orgId: o.orgId, playerId: player.id, playerName: storedName(player.name),
+        submittedBy: { kind: submitter.kind, id: submitter.id, name: storedName(submitter.name) }, note, status: 'submitted', outcome: null,
+        createdAt: at, remindedAt: null, suitabilitySummary: null,
+        history: [historyEntry(submitter.kind, submitter.id, submitter.name, 'submitted', at)],
+      });
+      ledgerAppend({ type: 'opportunity_application', playerId: player.id, orgId: o.orgId, orgName: o.orgName, userId: null, scoutName: submitter.name });
+      notify({ kind: 'org_user', id: usersOf(o.orgId)[0]?.id ?? '' }, 'application', `📥 ${player.name} applied to "${o.title}".`, created.id);
+      return created;
+    });
     broadcast('applications', { playerId: player.id });
-    res.status(201).json({ application: appn });
+    res.status(201).json({ application: applicationView(appn) });
   }
   const usersOf = (orgId) => users.listByOrg(orgId).filter((u) => !u.removedAt);
+  /** One history entry in the shared shape (detail is plain text or null). */
+  const historyEntry = (byKind, byId_, byName, action, at = Date.now()) => ({ id: nextId('aud'), at, byKind, byId: byId_, byName: storedName(byName), action, detail: null });
 
   playerRouter.post('/opportunities/:id/apply', (req, res) => {
     if (req.playerIsMinor) {
@@ -136,68 +196,81 @@ export function registerJourneys(ctx) {
     applyTo(req, res, child, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name });
   });
 
+  // A player's (or a guardian's children's) applications: a per-player list, not paged.
   function myApplications(playerIds) {
-    return db.applications.filter((a) => playerIds.includes(a.playerId)).map((a) => ({
-      ...a, opportunity: (({ id, title, orgName, type, deadline }) => ({ id, title, orgName, type, deadline }))(db.opportunities.find((o) => o.id === a.opportunityId) ?? {}),
-    }));
+    const list = scoutingReads.applications.forPlayers(playerIds);
+    const opps = new Map();
+    for (const a of list) if (!opps.has(a.opportunityId)) opps.set(a.opportunityId, scoutingReads.opportunities.byId(a.opportunityId));
+    return list.map((a) => {
+      const o = opps.get(a.opportunityId);
+      return { ...applicationView(a), opportunity: o ? { id: o.id, title: o.title, orgName: o.orgName, type: o.type, deadline: o.deadline } : {} };
+    });
   }
   playerRouter.get('/applications', (req, res) => res.json(myApplications([req.player.id])));
   guardianRouter.get('/applications', (req, res) => res.json(myApplications(req.guardian.childIds)));
 
-  function withdrawApplication(req, res, allowedPlayerIds) {
-    const a = db.applications.find((x) => x.id === req.params.id && allowedPlayerIds.includes(x.playerId));
+  function withdrawApplication(req, res, allowedPlayerIds, actor) {
+    const a = scoutingReads.applications.ofPlayers(req.params.id, allowedPlayerIds);
     if (!a) return res.status(404).json({ error: 'APPLICATION_NOT_FOUND' });
     if (a.status !== 'submitted') return res.status(409).json({ error: 'NOT_WITHDRAWABLE', status: a.status });
-    a.status = 'withdrawn';
-    audit(a, 'player', req.player?.id ?? req.guardian.id, req.player?.name ?? req.guardian.name, 'withdrawn');
-    persistNow();
-    res.json({ application: a });
+    // S9d: a guardian's withdrawal is recorded as the guardian's (it used to be audited as the player's).
+    const withdrawn = opportunitiesCampaigns.applications.update(a.id, (d) => { d.status = 'withdrawn'; d.history.push(historyEntry(actor.kind, actor.id, actor.name, 'withdrawn')); });
+    res.json({ application: applicationView(withdrawn) });
   }
   playerRouter.post('/applications/:id/withdraw', (req, res) => {
     if (req.playerIsMinor) return res.status(403).json({ error: 'GUARDIAN_MANAGED' });
-    withdrawApplication(req, res, [req.player.id]);
+    withdrawApplication(req, res, [req.player.id], { kind: 'player', id: req.player.id, name: req.player.name });
   });
-  guardianRouter.post('/applications/:id/withdraw', (req, res) => withdrawApplication(req, res, req.guardian.childIds));
+  guardianRouter.post('/applications/:id/withdraw', (req, res) => withdrawApplication(req, res, req.guardian.childIds, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }));
 
+  // One opportunity's applications: offset paging (the apps' shape), in SQL.
   orgRouter.get('/opportunities/:id/applications', (req, res) => {
-    const o = db.opportunities.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const o = scoutingReads.opportunities.ofOrg(req.params.id, req.org.id);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
-    res.json(paginate(req, db.applications.filter((a) => a.opportunityId === o.id)));
+    const { limit, offset } = offsetPage(req);
+    const { total, items } = scoutingReads.applications.pageForOpportunity(o.id, { limit, offset });
+    res.json({ total, limit, offset, items: items.map(applicationView) });
   });
 
   orgRouter.post('/applications/:id/outcome', (req, res) => {
-    const a = db.applications.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const a = scoutingReads.applications.ofOrg(req.params.id, req.org.id);
     if (!a) return res.status(404).json({ error: 'APPLICATION_NOT_FOUND' });
     if (a.outcome) return res.status(409).json({ error: 'ALREADY_RESOLVED' });
     if (a.status === 'withdrawn') return res.status(409).json({ error: 'WITHDRAWN' });
     const { decision, note } = req.body ?? {};
     if (!['accepted', 'declined'].includes(decision)) return res.status(400).json({ error: 'DECISION_INVALID' });
+    if (!optionalText(note)) return fieldInvalid(res, 'note', 'note is text.');
     if (note && !moderateOrRefuse(res, note, { kind: 'application_outcome', playerId: a.playerId, orgId: req.org.id })) return;
-    a.status = decision;
-    a.outcome = { decision, note: note ? String(note).slice(0, 300) : null, byUserId: req.orgUser.id, byName: req.orgUser.name, at: Date.now() };
-    audit(a, 'org', req.orgUser.id, req.orgUser.name, decision);
+    const at = Date.now();
     const p = findPlayer(a.playerId);
-    const text = decision === 'accepted'
-      ? `✅ ${req.org.name} accepted the application to "${db.opportunities.find((o) => o.id === a.opportunityId)?.title}". They'll follow up through ScoutBox.`
-      : `${req.org.name} on your application: ${a.outcome.note ?? 'not this time — keep playing, keep logging.'}`;
-    if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'application', text, a.id);
-    else if (p) notify({ kind: 'player', id: p.id }, 'application', text, a.id);
-    persistNow();
+    const title = scoutingReads.opportunities.byId(a.opportunityId)?.title;
+    const resolved = unit(() => {
+      const fresh = opportunitiesCampaigns.applications.update(a.id, (d) => {
+        d.status = decision;
+        d.outcome = { decision, note: textOrNull(note, OL.outcomeNote), byUserId: req.orgUser.id, byName: storedName(req.orgUser.name), at };
+        d.history.push(historyEntry('org', req.orgUser.id, req.orgUser.name, decision, at));
+      });
+      const text = decision === 'accepted'
+        ? `✅ ${req.org.name} accepted the application to "${title}". They'll follow up through ScoutBox.`
+        : `${req.org.name} on your application: ${fresh.outcome.note ?? 'not this time — keep playing, keep logging.'}`;
+      if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'application', text, a.id);
+      else if (p) notify({ kind: 'player', id: p.id }, 'application', text, a.id);
+      return fresh;
+    });
     broadcast('applications', { playerId: a.playerId });
-    res.json({ application: a });
+    res.json({ application: applicationView(resolved) });
   });
 
   // No-ghosting extends to the board: closing an opportunity with unresolved
   // applications is refused; the sweep (operations.mjs) nags outstanding ones.
   orgRouter.post('/opportunities/:id/close', (req, res) => {
-    const o = db.opportunities.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const o = scoutingReads.opportunities.ofOrg(req.params.id, req.org.id);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
-    const outstanding = db.applications.filter((a) => a.opportunityId === o.id && a.status === 'submitted');
-    if (outstanding.length) return res.status(409).json({ error: 'OUTCOMES_OUTSTANDING', count: outstanding.length, message: 'Every applicant gets an answer before the door closes.' });
-    o.status = 'closed';
-    o.closedAt = Date.now();
-    persistNow();
-    res.json({ opportunity: o });
+    const { outstanding } = scoutingReads.opportunities.applicationCounts([o.id])[o.id];
+    if (outstanding) return res.status(409).json({ error: 'OUTCOMES_OUTSTANDING', count: outstanding, message: 'Every applicant gets an answer before the door closes.' });
+    if (o.status === 'closed') return res.json({ opportunity: opportunityView(o) }); // closing twice keeps the first close
+    const closed = opportunitiesCampaigns.opportunities.update(o.id, (d) => { d.status = 'closed'; d.closedAt = Date.now(); });
+    res.json({ opportunity: opportunityView(closed) });
   });
 
   // ================================================================== F6
@@ -227,60 +300,78 @@ export function registerJourneys(ctx) {
     res.json({ guidance: g });
   });
 
+  /** A campaign's drills from a request: the recording defaults fill what is absent; wrong types are refused. */
+  function drillsOrRefuse(res, drills) {
+    if (drills.length > OL.drills) return fieldInvalid(res, 'drills', `a campaign has at most ${OL.drills} drills.`);
+    const out = []; const names = new Set();
+    for (const [i, d] of drills.entries()) {
+      const at = `drills[${i}]`;
+      if (!d || typeof d !== 'object' || Array.isArray(d)) return fieldInvalid(res, at, 'a drill is an object { name, instructions, recording }.');
+      if (typeof d.name !== 'string' || !d.name.trim()) return fieldInvalid(res, `${at}.name`, 'every drill has a name.');
+      if (!optionalText(d.instructions)) return fieldInvalid(res, `${at}.instructions`, 'instructions is text.');
+      if (d.recording !== undefined && d.recording !== null && (typeof d.recording !== 'object' || Array.isArray(d.recording))) return fieldInvalid(res, `${at}.recording`, 'recording is an object.');
+      const r = d.recording ?? {};
+      for (const f of ['equipment', 'distance', 'surface', 'camera']) if (!optionalText(r[f])) return fieldInvalid(res, `${at}.recording.${f}`, `${f} is text.`);
+      const name = d.name.slice(0, OL.drillName);
+      if (names.has(name)) return fieldInvalid(res, `${at}.name`, `two drills are called "${name}".`);
+      names.add(name);
+      out.push({
+        name, instructions: (d.instructions ?? '').slice(0, OL.instructions),
+        recording: {
+          equipment: (r.equipment ?? 'Any phone camera').slice(0, OL.recording), distance: (r.distance ?? 'Full area in frame').slice(0, OL.recording),
+          surface: (r.surface ?? 'Flat grass/turf').slice(0, OL.recording), camera: (r.camera ?? 'Fixed, side-on').slice(0, OL.recording),
+        },
+      });
+    }
+    return out;
+  }
+
   orgRouter.post('/campaigns', (req, res) => {
     const b = req.body ?? {};
-    if (!b.title || !Array.isArray(b.drills) || !b.drills.length) return res.status(400).json({ error: 'TITLE_AND_DRILLS_REQUIRED' });
+    if (typeof b.title !== 'string' || !b.title.trim() || !Array.isArray(b.drills) || !b.drills.length) return res.status(400).json({ error: 'TITLE_AND_DRILLS_REQUIRED' });
     if (!b.deadline) return res.status(400).json({ error: 'DEADLINE_REQUIRED' });
     if (!parseStrictDateOnly(b.deadline).ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'deadline', message: 'A deadline is a calendar day written YYYY-MM-DD.', expected: 'YYYY-MM-DD' });
-    const camp = {
-      id: nextId('cmp'), orgId: req.org.id, orgName: req.org.name,
-      title: String(b.title).slice(0, 120),
-      drills: b.drills.slice(0, 6).map((d) => ({
-        name: String(d.name ?? '').slice(0, 80),
-        instructions: String(d.instructions ?? '').slice(0, 400),
-        recording: {
-          equipment: String(d.recording?.equipment ?? 'Any phone camera').slice(0, 120),
-          distance: String(d.recording?.distance ?? 'Full area in frame').slice(0, 120),
-          surface: String(d.recording?.surface ?? 'Flat grass/turf').slice(0, 120),
-          camera: String(d.recording?.camera ?? 'Fixed, side-on').slice(0, 120),
-        },
-      })),
-      deadline: String(b.deadline).slice(0, 10),
-      attemptsAllowed: Math.min(Math.max(Number(b.attemptsAllowed) || 2, 1), 5),
-      eligibility: {
-        minAge: b.eligibility?.minAge != null ? Number(b.eligibility.minAge) : null,
-        maxAge: b.eligibility?.maxAge != null ? Number(b.eligibility.maxAge) : null,
-        positionGroup: b.eligibility?.positionGroup ?? 'any',
-        maxLevel: req.org.level === 'grassroots' ? 'semi_pro' : (b.eligibility?.maxLevel ?? null),
-        radiusKm: req.org.level === 'grassroots' ? GRASSROOTS_RADIUS_KM : (b.eligibility?.radiusKm != null ? Number(b.eligibility.radiusKm) : null),
-      },
-      rubric: Array.isArray(b.rubric) ? b.rubric.slice(0, 8).map((r) => ({ criterion: String(r.criterion ?? '').slice(0, 100), guidance: String(r.guidance ?? '').slice(0, 200) })) : [],
-      status: 'published', createdBy: req.orgUser.name, createdAt: Date.now(),
-    };
-    db.campaigns.push(camp);
-    persistNow();
+    const attemptsAllowed = b.attemptsAllowed ?? 2;
+    if (!Number.isSafeInteger(attemptsAllowed) || attemptsAllowed < 1 || attemptsAllowed > OL.attemptsAllowed) return fieldInvalid(res, 'attemptsAllowed', `attemptsAllowed is a whole number from 1 to ${OL.attemptsAllowed}.`);
+    const drills = drillsOrRefuse(res, b.drills);
+    if (!drills) return;
+    const rubricIn = b.rubric ?? [];
+    if (!Array.isArray(rubricIn) || rubricIn.length > OL.rubric) return fieldInvalid(res, 'rubric', `rubric is a list of at most ${OL.rubric} criteria.`);
+    const rubric = [];
+    for (const [i, r] of rubricIn.entries()) {
+      if (!r || typeof r !== 'object' || typeof r.criterion !== 'string' || !r.criterion.trim() || !optionalText(r.guidance)) return fieldInvalid(res, `rubric[${i}]`, 'a rubric line is { criterion, guidance } (text).');
+      rubric.push({ criterion: r.criterion.slice(0, OL.criterion), guidance: (r.guidance ?? '').slice(0, OL.guidance) });
+    }
+    const eligibility = eligibilityOrRefuse(res, b.eligibility, req.org);
+    if (!eligibility) return;
+    const camp = opportunitiesCampaigns.campaigns.create({
+      id: nextId('cmp'), orgId: req.org.id, orgName: storedName(req.org.name), title: b.title.slice(0, OL.title), drills, deadline: b.deadline,
+      attemptsAllowed, eligibility, rubric, status: 'published', createdBy: storedName(req.orgUser.name), createdAt: Date.now(),
+    });
     broadcast('campaigns', {});
-    res.status(201).json({ campaign: camp });
+    res.status(201).json({ campaign: campaignView(camp) });
   });
 
+  // §4.3: a club's campaigns grow without limit (never deleted), so the list pages, newest first.
   orgRouter.get('/campaigns', (req, res) => {
-    res.json(db.campaigns.filter((c) => c.orgId === req.org.id).map((c) => ({
-      ...c,
-      submissions: db.campaignSubmissions.filter((s) => s.campaignId === c.id).length,
-      awaitingReview: db.campaignSubmissions.filter((s) => s.campaignId === c.id && s.attempts.some((a) => a.status === 'submitted' && a.fileChecks.passed)).length,
-    })));
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    const { items, nextCursor } = pageOf(scoutingReads.campaigns.page(req.org.id, page).rows, page.limit, (r) => r.key);
+    const counts = scoutingReads.campaigns.submissionCounts(items.map((r) => r.campaign.id));
+    res.json({ items: items.map((r) => ({ ...campaignView(r.campaign), ...counts[r.campaign.id] })), nextCursor });
   });
 
-  const campOpen = (c) => c.status === 'published' && c.deadline >= new Date().toISOString().slice(0, 10);
+  const campOpen = (c) => c.status === 'published' && c.deadline >= today();
 
   function campaignsFor(player) {
-    return db.campaigns.filter(campOpen).map((c) => {
+    const mine = new Map(scoutingReads.campaignSubmissions.forPlayer(player.id).map((s) => [s.campaignId, s]));
+    return scoutingReads.campaigns.openOn(today()).map((c) => {
       const org = byId.org(c.orgId);
       if (!org || org.suspended || !orgCanSee(org, player)) return null;
       const { eligible } = checkEligibility(c.eligibility, player, org);
       if (!eligible) return null;
-      const sub = db.campaignSubmissions.find((s) => s.campaignId === c.id && s.playerId === player.id);
-      return { ...c, mySubmission: sub ?? null };
+      const sub = mine.get(c.id);
+      return { ...campaignView(c), mySubmission: sub ? submissionView(sub) : null };
     }).filter(Boolean);
   }
 
@@ -288,6 +379,7 @@ export function registerJourneys(ctx) {
   guardianRouter.get('/children/:id/campaigns', (req, res) => {
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
     const child = findPlayer(req.params.id);
+    if (!child) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     res.json({ items: campaignsFor(child) });
   });
 
@@ -295,50 +387,56 @@ export function registerJourneys(ctx) {
   // it is inside the size cap. Says nothing about drill execution.
   function fileChecks(player, mediaId) {
     const issues = [];
-    const media = player.media.find((m) => m.id === mediaId);
-    if (!media) issues.push('attach the recorded video before submitting');
+    const media = mediaId ? player.media.find((m) => m.id === mediaId) : null;
+    if (!media) issues.push(FILE_CHECK_ISSUES.media_missing);
     else {
-      if (media.kind !== 'video') issues.push('the attached file is not a video');
+      if (media.kind !== 'video') issues.push(FILE_CHECK_ISSUES.not_video);
       if (!media.url && !db.mediaBlobs?.[media.id] && !media.id.startsWith('media-seed')) {
         // url null AND no stored blob → metadata-only entry
-        issues.push('the video file itself was never uploaded');
+        issues.push(FILE_CHECK_ISSUES.not_uploaded);
       }
     }
     return { passed: issues.length === 0, issues, checkedAt: Date.now(), kind: 'automated_file_check' };
   }
 
   function submitAttempt(req, res, player, submitter) {
-    const camp = db.campaigns.find((c) => c.id === req.params.id);
+    const camp = scoutingReads.campaigns.byId(req.params.id);
     if (!camp) return res.status(404).json({ error: 'CAMPAIGN_NOT_FOUND' });
     if (!campOpen(camp)) return res.status(409).json({ error: 'CAMPAIGN_CLOSED' });
     const org = byId.org(camp.orgId);
     const { eligible, reasons } = checkEligibility(camp.eligibility, player, org);
     if (!org || !orgCanSee(org, player) || !eligible) return res.status(403).json({ error: 'NOT_ELIGIBLE', reasons: reasons ?? [] });
-    let sub = db.campaignSubmissions.find((s) => s.campaignId === camp.id && s.playerId === player.id);
-    if (!sub) {
-      sub = { id: nextId('csb'), campaignId: camp.id, orgId: camp.orgId, playerId: player.id, playerName: player.name, submittedBy: submitter, attempts: [], createdAt: Date.now() };
-      db.campaignSubmissions.push(sub);
-    }
+    const existing = scoutingReads.campaignSubmissions.forCampaignPlayer(camp.id, player.id);
     // Only attempts that actually reached review (or passed it) count against
     // the policy — a failed FILE check never burns a football attempt.
-    const activeAttempts = sub.attempts.filter((a) => ['submitted', 'accepted'].includes(a.status)).length;
+    const activeAttempts = (existing?.attempts ?? []).filter((a) => ['submitted', 'accepted'].includes(a.status)).length;
     if (activeAttempts >= camp.attemptsAllowed) return res.status(409).json({ error: 'ATTEMPTS_EXHAUSTED', allowed: camp.attemptsAllowed });
     const { mediaId, drillName, note } = req.body ?? {};
+    if (!optionalText(mediaId) || (mediaId && mediaId.length > 80)) return fieldInvalid(res, 'mediaId', 'mediaId is the id of one of the player\'s media items.');
+    if (drillName !== undefined && drillName !== null && !camp.drills.some((d) => d.name === drillName)) return fieldInvalid(res, 'drillName', `drillName is one of this campaign's drills: ${camp.drills.map((d) => d.name).join(', ')}.`);
+    if (!optionalText(note)) return fieldInvalid(res, 'note', 'note is text.');
+    if ((existing?.attempts.length ?? 0) >= OL.attempts) return res.status(409).json({ error: 'ATTEMPTS_EXHAUSTED', allowed: camp.attemptsAllowed, message: 'This submission holds as many attempts as it can.' });
     if (note && !moderateOrRefuse(res, note, { kind: 'campaign_note', playerId: player.id, orgId: camp.orgId })) return;
     const checks = fileChecks(player, mediaId);
     const attempt = {
-      id: nextId('att'), mediaId: mediaId ?? null, drillName: drillName ? String(drillName).slice(0, 80) : camp.drills[0]?.name,
-      note: note ? String(note).slice(0, 300) : null,
+      id: nextId('att'), mediaId: mediaId || null, drillName: drillName ?? camp.drills[0].name,
+      note: textOrNull(note, OL.note),
       fileChecks: checks,
       // Human review is a SEPARATE state — an attempt passing file checks is
       // "submitted", never "verified".
       status: checks.passed ? 'submitted' : 'failed_checks',
       review: null, submittedAt: Date.now(),
     };
-    sub.attempts.push(attempt);
-    if (checks.passed) notify({ kind: 'org_user', id: usersOf(camp.orgId)[0]?.id ?? '' }, 'campaign', `🎬 ${player.name} submitted an attempt to "${camp.title}" — human review needed.`, sub.id);
-    persistNow();
-    res.status(201).json({ attempt, submission: sub, note: checks.passed ? 'File checks passed. A coach still has to review the drill itself — that is a separate, human step.' : 'Automated file checks failed — fix the issues and resubmit.' });
+    // ONE unit of work: the submission (created on the first attempt), the attempt and the club's notification.
+    const sub = unit(() => {
+      const s = existing
+        ? opportunitiesCampaigns.submissions.update(existing.id, (d) => { d.attempts.push(attempt); })
+        : opportunitiesCampaigns.submissions.create({ id: nextId('csb'), campaignId: camp.id, orgId: camp.orgId, playerId: player.id, playerName: storedName(player.name), submittedBy: { kind: submitter.kind, id: submitter.id, name: storedName(submitter.name) }, attempts: [attempt], createdAt: Date.now() });
+      if (checks.passed) notify({ kind: 'org_user', id: usersOf(camp.orgId)[0]?.id ?? '' }, 'campaign', `🎬 ${player.name} submitted an attempt to "${camp.title}" — human review needed.`, s.id);
+      return s;
+    });
+    const stored = sub.attempts.find((a) => a.id === attempt.id);
+    res.status(201).json({ attempt: attemptView(stored), submission: submissionView(sub), note: checks.passed ? 'File checks passed. A coach still has to review the drill itself — that is a separate, human step.' : 'Automated file checks failed — fix the issues and resubmit.' });
   }
 
   playerRouter.post('/campaigns/:id/submit', (req, res) => {
@@ -348,46 +446,51 @@ export function registerJourneys(ctx) {
   });
   guardianRouter.post('/children/:childId/campaigns/:id/submit', (req, res) => {
     if (!guardianOwnsChild(req.guardian, req.params.childId)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
-    submitAttempt(req, res, findPlayer(req.params.childId), { kind: 'guardian', id: req.guardian.id, name: req.guardian.name });
+    const child = findPlayer(req.params.childId);
+    if (!child) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+    submitAttempt(req, res, child, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name });
   });
 
+  // One campaign's review queue: a per-campaign list, not paged.
   orgRouter.get('/campaigns/:id/review-queue', (req, res) => {
-    const camp = db.campaigns.find((c) => c.id === req.params.id && c.orgId === req.org.id);
+    const camp = scoutingReads.campaigns.ofOrg(req.params.id, req.org.id);
     if (!camp) return res.status(404).json({ error: 'CAMPAIGN_NOT_FOUND' });
-    const queue = db.campaignSubmissions
-      .filter((s) => s.campaignId === camp.id)
-      .flatMap((s) => s.attempts.filter((a) => a.status === 'submitted').map((a) => ({ submissionId: s.id, playerId: s.playerId, playerName: s.playerName, attempt: { ...a, mediaUrl: a.mediaId ? `/media/${a.mediaId}` : null } })));
+    const queue = scoutingReads.campaignSubmissions.forCampaign(camp.id)
+      .flatMap((s) => s.attempts.filter((a) => a.status === 'submitted').map((a) => ({ submissionId: s.id, playerId: s.playerId, playerName: s.playerName, attempt: { ...attemptView(a), mediaUrl: a.mediaId ? `/media/${a.mediaId}` : null } })));
     res.json({ campaign: { id: camp.id, title: camp.title, rubric: camp.rubric }, queue });
   });
 
   orgRouter.post('/campaign-attempts/:id/review', (req, res) => {
-    const sub = db.campaignSubmissions.find((s) => s.orgId === req.org.id && s.attempts.some((a) => a.id === req.params.id));
+    const found = scoutingReads.campaignSubmissions.byAttempt(req.params.id);
+    const sub = found && found.orgId === req.org.id ? found : null;
     const attempt = sub?.attempts.find((a) => a.id === req.params.id);
     if (!attempt) return res.status(404).json({ error: 'ATTEMPT_NOT_FOUND' });
     if (attempt.status !== 'submitted') return res.status(409).json({ error: 'NOT_REVIEWABLE', status: attempt.status });
     const { decision, reasons, rubricNotes } = req.body ?? {};
     if (!['accepted', 'returned'].includes(decision)) return res.status(400).json({ error: 'DECISION_INVALID' });
-    if (decision === 'returned' && (!reasons || !String(reasons).trim())) {
+    if (!optionalText(reasons)) return fieldInvalid(res, 'reasons', 'reasons is text.');
+    if (!optionalText(rubricNotes)) return fieldInvalid(res, 'rubricNotes', 'rubricNotes is text.');
+    if (decision === 'returned' && (!reasons || !reasons.trim())) {
       return res.status(400).json({ error: 'REASONS_REQUIRED', message: 'A returned attempt tells the player exactly what to fix and how to resubmit.' });
     }
-    if (reasons && !moderateOrRefuse(res, String(reasons), { kind: 'campaign_review', playerId: sub.playerId, orgId: req.org.id })) return;
-    attempt.status = decision;
-    attempt.review = {
-      byUserId: req.orgUser.id, byName: req.orgUser.name, at: Date.now(),
-      kind: 'human_review',
-      reasons: reasons ? String(reasons).slice(0, 400) : null,
-      rubricNotes: rubricNotes ? String(rubricNotes).slice(0, 400) : null,
-    };
+    if (reasons && !moderateOrRefuse(res, reasons, { kind: 'campaign_review', playerId: sub.playerId, orgId: req.org.id })) return;
     const p = findPlayer(sub.playerId);
-    const camp = db.campaigns.find((c) => c.id === sub.campaignId);
-    const text = decision === 'accepted'
-      ? `✅ Your "${camp?.title}" attempt was reviewed and accepted by ${req.org.name}.`
-      : `↩️ ${req.org.name} returned your "${camp?.title}" attempt: ${attempt.review.reasons} — you can resubmit.`;
-    if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'campaign', `${p.name}: ${text}`, sub.id);
-    if (p) notify({ kind: 'player', id: p.id }, 'campaign', text, sub.id);
-    if (p && decision === 'accepted') recordActivity(p);
-    persistNow();
-    res.json({ attempt });
+    const camp = scoutingReads.campaigns.byId(sub.campaignId);
+    const reviewed = unit(() => {
+      const fresh = opportunitiesCampaigns.submissions.update(sub.id, (d) => {
+        const a = d.attempts.find((x) => x.id === attempt.id);
+        a.status = decision;
+        a.review = { byUserId: req.orgUser.id, byName: storedName(req.orgUser.name), at: Date.now(), kind: 'human_review', reasons: textOrNull(reasons, OL.reasons), rubricNotes: textOrNull(rubricNotes, OL.rubricNotes) };
+      }).attempts.find((x) => x.id === attempt.id);
+      const text = decision === 'accepted'
+        ? `✅ Your "${camp?.title}" attempt was reviewed and accepted by ${req.org.name}.`
+        : `↩️ ${req.org.name} returned your "${camp?.title}" attempt: ${fresh.review.reasons} — you can resubmit.`;
+      if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'campaign', `${p.name}: ${text}`, sub.id);
+      if (p) notify({ kind: 'player', id: p.id }, 'campaign', text, sub.id);
+      if (p && decision === 'accepted') recordActivity(p);
+      return fresh;
+    });
+    res.json({ attempt: attemptView(reviewed) });
   });
 
   // ================================================================== F8
@@ -832,22 +935,25 @@ export function registerJourneys(ctx) {
 /**
  * The player's opportunity board — what they could actually apply to, with
  * eligibility computed the same way the application gate computes it.
- * Pure over the db and the injected rules; shared by the player, guardian and
- * (M23 P5.6B) Agent client-workspace readers.
+ * Pure over the reads and the injected rules; shared by the player, guardian and
+ * (M23 P5.6B) Agent client-workspace readers. S9d: the open opportunities come
+ * from SQL (published, deadline today or later) and the player's own live
+ * applications in one query; the open days are still db.openTrials (S13).
  */
-export function opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand }) {
+export function opportunityBoardFor(db, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads, orgOf }) {
+  if (!scoutingReads?.opportunities || typeof orgOf !== 'function') throw new TypeError('opportunityBoardFor needs scoutingReads and orgOf');
   const today = new Date().toISOString().slice(0, 10);
-  const open = (o) => o.status === 'published' && o.deadline >= today;
+  const mine = new Map(scoutingReads.applications.forPlayers([player.id]).filter((a) => a.status !== 'withdrawn').map((a) => [a.opportunityId, a]));
   const rows = [];
-  for (const o of (db.opportunities ?? []).filter(open)) {
-    const org = db.orgs.find((x) => x.id === o.orgId);
+  for (const o of scoutingReads.opportunities.openOn(today)) {
+    const org = orgOf(o.orgId);
     if (!org || org.suspended) continue;
     if (!orgCanSee(org, player)) continue; // visibility is mutual: an org that can't see the player can't receive their application
     const { eligible } = checkEligibility(o.eligibility, player, org);
     if (!eligible) continue;
-    const existing = (db.applications ?? []).find((a) => a.opportunityId === o.id && a.playerId === player.id && a.status !== 'withdrawn');
+    const existing = mine.get(o.id);
     rows.push({
-      ...o, via: 'opportunity',
+      ...opportunityView(o), via: 'opportunity',
       distance: distanceBand(org.location, player.location),
       applied: existing ? { id: existing.id, status: existing.status } : null,
     });
@@ -855,7 +961,7 @@ export function opportunityBoardFor(db, player, { orgCanSee, checkEligibility, d
   // Existing grassroots open days ride the same board — integrated, not
   // duplicated: they keep their own registration flow and records.
   for (const t of (db.openTrials ?? []).filter((t) => t.date >= today)) {
-    const org = db.orgs.find((x) => x.id === t.orgId);
+    const org = orgOf(t.orgId);
     if (!org || org.suspended || !orgCanSee(org, player)) continue;
     rows.push({
       id: t.id, via: 'open_trial', type: 'open_day', orgId: t.orgId, orgName: org.name,

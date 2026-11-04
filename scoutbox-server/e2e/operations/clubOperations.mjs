@@ -447,6 +447,15 @@ let oppId = null;
   }, maria.token);
   ok(r.status === 200, 'club attaches structured requirements to an opportunity');
 
+  // S9d: reading preferences writes nothing; junk is refused with the field named.
+  r = await j('GET', '/player/preferences', undefined, adeyemi.token);
+  ok(r.status === 200 && r.body.preferences.updatedAt === null && r.body.private === true, 'preferences read before any save are the blank defaults');
+  for (const [body, field] of [[{ transport: 'horse' }, 'transport'], [{ travelLimitKm: 'far' }, 'travelLimitKm'], [{ commitments: [{ day: 'tuesday', start: '16:00', end: '18:00', tz: 'Europe/London' }] }, 'commitments[0].day'], [{ commitments: [{ day: 'tue', start: '18:00', end: '16:00', tz: 'Europe/London' }] }, 'commitments[0].end']]) {
+    r = await j('PUT', '/player/preferences', body, adeyemi.token);
+    ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `preferences with a bad ${field} are refused, naming the field`);
+  }
+  r = await j('PUT', `/org/opportunities/${oppId}/structured-requirements`, { trainingSlots: [{ day: 'tue', start: '17:00', end: '18:30', tz: 'Mars/Olympus' }] }, maria.token);
+  ok(r.status === 400 && r.body.field === 'trainingSlots[0].tz', 'structured requirements with an unknown time zone are refused');
   r = await j('PUT', '/player/preferences', {
     commitments: [{ day: 'tue', start: '16:00', end: '18:00', tz: 'Europe/London', label: 'college class' }],
     travelLimitKm: 20, environment: ['competitive'],

@@ -6,6 +6,7 @@
 // and "insufficient evidence" is a first-class display state.
 
 import { parseDateOrInstant, parseStrictDateOnly, isAbsent, readInstant } from '../../temporal.mjs';
+import { offsetPage } from '../platform/paging.mjs';
 import { CLAIM_TYPES, EVIDENCE_LIMITS as LIMITS } from '../../repositories/scoutingEvidence.mjs';
 
 // S9a (migration 0019): the evidence, coach affiliations and squad invitations are typed tables of the scouting evidence
@@ -44,7 +45,6 @@ export function registerPassport(ctx) {
   /** The player's own record, or null. */
   const ownEvidence = (id, playerId) => { const e = scoutingReads.evidence.byId(id); return e && e.playerId === playerId ? e : null; };
   /** The admin lists' offset paging (the `{ total, limit, offset, items }` shape the admin app reads). */
-  const offsetPage = (req) => ({ limit: Math.min(Math.max(Math.floor(Number(req.query.limit)) || 50, 1), 200), offset: Math.max(Math.floor(Number(req.query.offset)) || 0, 0) });
 
   // ------------------------------------------------------------ evidence core
   /** The evidence record a route creates (not yet written): one event, one clock read. */

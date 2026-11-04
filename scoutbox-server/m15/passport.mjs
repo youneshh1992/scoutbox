@@ -18,6 +18,7 @@ import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../m16/dril
 // never copies them. Computed with the pure engine so this stays independent
 // of module registration order.
 import { combineProtocol as combineProtocolDef, personalBest as combinePersonalBest, formatCombineValue } from '../m16/combineShared.mjs';
+import { applicationView } from '../domains/scouting/journeys.mjs';
 
 const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
 
@@ -123,9 +124,10 @@ export function registerPassportCore(ctx) {
       id: o.id, orgId: o.orgId, orgName: orgOf(o.orgId)?.name ?? null, createdAt: o.createdAt,
       status: o.status, completedAt: o.completedAt ?? null, sharingOrgIds: o.sharing?.orgIds ?? [],
     }));
-    const applications = db.applications.filter((a) => a.playerId === pid).map((a) => ({
-      ...a, orgName: orgOf(a.orgId)?.name ?? null,
-      opportunityTitle: db.opportunities.find((o) => o.id === a.opportunityId)?.title ?? null,
+    // S9d: read through SQL, and built from an allowlist (the player's own application, as before).
+    const applications = ctx.scoutingReads.applications.forPlayers([pid]).map((a) => ({
+      ...applicationView(a), orgName: orgOf(a.orgId)?.name ?? null,
+      opportunityTitle: ctx.scoutingReads.opportunities.byId(a.opportunityId)?.title ?? null,
     }));
     const transitions = db.transitionCases.filter((t) => t.playerId === pid);
     // History: every legacy M13 F10 row that was once confirmed, whatever became

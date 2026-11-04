@@ -50,7 +50,8 @@
 
 export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   apiKeys: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  applications: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
+  // applications: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
+  // (scoutingReads). db.applications throws.
   archetypes: { guarantee: 'migration', owner: 'core', reason: 'product configuration, restored from catalogue.mjs; empty is a lie with consequences (D2)' },
   // blocks, reports, moderationLog, orgNotes, ledger, opsEvents, sourceChanges, idvQueue: no longer blob collections since S6b —
   // the rows live in blocks / reports / moderation_log / org_notes / ledger / ops_events / source_changes / idv_queue (migration
@@ -69,8 +70,10 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   boxSessionEvents: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
   boxSessions: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
   calibrationSessions: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  campaignSubmissions: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
-  campaigns: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
+  // campaignSubmissions: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
+  // (scoutingReads). db.campaignSubmissions throws.
+  // campaigns: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
+  // (scoutingReads). db.campaigns throws.
   // channels: no longer a blob collection since S7d — the threads live in channels / messages / message_attachments
   // (migration 0012, repositories/channels.mjs); the data layer defines a read-only view at db.channels (insertion
   // order, messages nested in array order), written only through the channels repository (the acceptance routes'
@@ -127,7 +130,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   notificationPrefs: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by the migration registry (m182_004); since S7a a read-only view over notification_prefs, written only through the notifications repository' },
   notifications: { guarantee: 'migration', owner: 'core', reason: 'container guaranteed by the migration registry (m182_002); since S7a a read-only view over the notifications table, written only through the notifications repository' },
   openTrials: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
-  opportunities: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
+  // opportunities: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
+  // (scoutingReads). db.opportunities throws.
   opsEvents: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration; since S6b a read-only view over the ops_events table, written only through the safetyAudit repository (every kind an ordinary row)' },
   orgInvites: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   orgNotes: { guarantee: 'migration', owner: 'core', reason: 'a club private notes on a player; same first-write defect as idvQueue; since S6b a read-only view over the org_notes table, written only through the safetyAudit repository' },
@@ -146,7 +150,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   passportPrefs: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
   passportShares: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
   plans: { guarantee: 'migration', owner: 'core', reason: 'product configuration, restored from catalogue.mjs; empty would silently move a Grassroots attribution window from 12 to 18 months (D2)' },
-  playerPrefs: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
+  // playerPrefs: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
+  // (scoutingReads). db.playerPrefs throws.
   players: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   // playersRetained: never a production db.* read — the retained records live in players_retained (migration 0014,
   // repositories/identity.mjs) and the backup reads them through players.retainedRecords(); the data layer defines a

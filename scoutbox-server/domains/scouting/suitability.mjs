@@ -4,105 +4,124 @@
 // explicitly approved. Suitability NEVER overrides mandatory eligibility
 // (which stays in the M12 checkEligibility path) and never widens the
 // grassroots 50 km ceiling.
+import { blankPreferences, typePreferences, typeStructured } from '../../repositories/opportunitiesCampaigns.mjs';
+import { opportunityView } from './journeys.mjs';
+
+// S9d: preferences, structured requirements and approved summaries are rows of the opportunities and campaigns
+// repository (repositories/opportunitiesCampaigns.mjs), written by explicit operations and read through SQL. Reading
+// preferences writes nothing: a player who never saved any gets the blank defaults. Junk is refused with the field
+// named (400 FIELD_INVALID); over-long text is still shortened.
+const prefsView = (p) => ({
+  commitments: p.commitments.map((s) => ({ day: s.day, start: s.start, end: s.end, tz: s.tz, label: s.label })),
+  availableSlots: p.availableSlots.map((s) => ({ day: s.day, start: s.start, end: s.end, tz: s.tz, label: s.label })),
+  travelLimitKm: p.travelLimitKm, transport: p.transport, relocation: p.relocation, ambitions: p.ambitions,
+  environment: [...p.environment], accessibility: [...p.accessibility],
+  compensation: { maxFeeMinor: p.compensation.maxFeeMinor, currency: p.compensation.currency, expensesNeeded: p.compensation.expensesNeeded },
+  updatedAt: p.updatedAt,
+});
+/** The field a typer's reason names (`<label>.<path> <what>`), and the reason without the label, for a 400. */
+const named = (reason, label) => {
+  if (!reason.startsWith(`${label}.`)) return { field: 'body', message: reason };
+  const rest = reason.slice(label.length + 1);
+  return { field: rest.split(' ')[0].replace(/\.\[/g, '[').replace(/\.$/, '') || 'body', message: rest.replace(/\.\[/g, '[').replace(/\. /, ' ') };
+};
+
 export function registerSuitability(ctx) {
   const {
-    db, byId, orgRouter, playerRouter, guardianRouter, nextId, persistNow,
-    findPlayer, isAdult, haversineKm, slotsOverlap, coarseArea, paginate,
+    byId, orgRouter, playerRouter, guardianRouter, scoutingReads, opportunitiesCampaigns,
+    findPlayer, isAdult, haversineKm, slotsOverlap, coarseArea,
   } = ctx;
+  if (typeof opportunitiesCampaigns?.preferences?.save !== 'function') throw new TypeError('registerSuitability needs the opportunities and campaigns repository from the data layer');
 
   const DIMENSIONS = ['schedule', 'travel', 'relocation', 'compensation', 'environment', 'accessibility'];
+  const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
 
-  const blankPrefs = (playerId) => ({
-    id: nextId('prf'), playerId,
-    commitments: [],      // busy slots: [{day,start,end,tz,label}] — education/work
-    availableSlots: [],   // free-to-train slots: same shape
-    travelLimitKm: null, transport: null,          // 'own', 'public', 'lift_needed'
-    relocation: null,                              // adults only: 'yes' | 'no' | 'discuss'
-    ambitions: null, environment: [],              // e.g. ['competitive','development_focus']
-    accessibility: [],                             // optional needs, player-controlled
-    compensation: { maxFeeMinor: null, currency: 'GBP', expensesNeeded: false },
-    updatedAt: null,
-  });
+  const prefsFor = (playerId) => scoutingReads.playerPrefs.forPlayer(playerId) ?? blankPreferences(playerId);
 
-  const prefsFor = (playerId) => {
-    let p = db.playerPrefs.find((x) => x.playerId === playerId);
-    if (!p) { p = blankPrefs(playerId); db.playerPrefs.push(p); }
-    return p;
-  };
-
-  function applyPrefs(prefs, body, { adult }) {
-    const cleanSlot = (s) => ({
-      day: String(s.day ?? '').toLowerCase().slice(0, 3), start: String(s.start ?? '').slice(0, 5),
-      end: String(s.end ?? '').slice(0, 5), tz: String(s.tz ?? 'Europe/London').slice(0, 40),
-      label: s.label ? String(s.label).slice(0, 60) : null,
-    });
-    if (Array.isArray(body.commitments)) prefs.commitments = body.commitments.slice(0, 20).map(cleanSlot);
-    if (Array.isArray(body.availableSlots)) prefs.availableSlots = body.availableSlots.slice(0, 20).map(cleanSlot);
-    if (body.travelLimitKm !== undefined) prefs.travelLimitKm = body.travelLimitKm === null ? null : Math.max(0, Math.min(500, Number(body.travelLimitKm) || 0));
-    if (body.transport !== undefined) prefs.transport = ['own', 'public', 'lift_needed', null].includes(body.transport) ? body.transport : prefs.transport;
-    if (body.relocation !== undefined) {
-      // Relocation preference is an ADULT field — never collected for minors.
-      prefs.relocation = adult && ['yes', 'no', 'discuss', null].includes(body.relocation) ? body.relocation : null;
-    }
-    if (body.ambitions !== undefined) prefs.ambitions = body.ambitions ? String(body.ambitions).slice(0, 300) : null;
-    if (Array.isArray(body.environment)) prefs.environment = body.environment.slice(0, 8).map((e) => String(e).slice(0, 40));
-    if (Array.isArray(body.accessibility)) prefs.accessibility = body.accessibility.slice(0, 8).map((e) => String(e).slice(0, 80));
-    if (body.compensation) {
-      prefs.compensation = {
-        maxFeeMinor: body.compensation.maxFeeMinor === null ? null : (Number.isInteger(body.compensation.maxFeeMinor) ? body.compensation.maxFeeMinor : prefs.compensation.maxFeeMinor),
-        currency: String(body.compensation.currency ?? prefs.compensation.currency).slice(0, 3),
-        expensesNeeded: body.compensation.expensesNeeded === true,
+  /**
+   * Apply a PUT body to the stored (or blank) preferences: the fields sent replace the ones stored. Returns the whole
+   * typed record, or undefined after a 400.
+   */
+  function prefsOrRefuse(res, playerId, body, { adult }) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return fieldInvalid(res, 'body', 'Preferences are a JSON object.');
+    const known = ['commitments', 'availableSlots', 'travelLimitKm', 'transport', 'relocation', 'ambitions', 'environment', 'accessibility', 'compensation'];
+    const extra = Object.keys(body).find((k) => !known.includes(k));
+    if (extra) return fieldInvalid(res, extra, `Preferences have no field ${extra}.`);
+    const next = JSON.parse(JSON.stringify(prefsFor(playerId)));
+    const shorten = (v, max) => (typeof v === 'string' ? v.slice(0, max) : v);
+    const slotsIn = (list) => (Array.isArray(list) ? list.map((x) => (x && typeof x === 'object' ? { ...x, label: x.label === undefined || x.label === '' ? null : shorten(x.label, 60) } : x)) : list);
+    if (body.commitments !== undefined) next.commitments = slotsIn(body.commitments);
+    if (body.availableSlots !== undefined) next.availableSlots = slotsIn(body.availableSlots);
+    // A travel limit beyond 500 km is held at 500 (as it always was); a non-number is refused by the typer.
+    if (body.travelLimitKm !== undefined) next.travelLimitKm = typeof body.travelLimitKm === 'number' && Number.isFinite(body.travelLimitKm) ? Math.max(0, Math.min(500, body.travelLimitKm)) : body.travelLimitKm;
+    if (body.transport !== undefined) next.transport = body.transport;
+    // Relocation preference is an ADULT field — never collected for minors.
+    if (body.relocation !== undefined) next.relocation = adult ? body.relocation : null;
+    if (body.ambitions !== undefined) next.ambitions = body.ambitions ? shorten(body.ambitions, 300) : null;
+    if (body.environment !== undefined) next.environment = Array.isArray(body.environment) ? body.environment.map((e) => shorten(e, 40)) : body.environment;
+    if (body.accessibility !== undefined) next.accessibility = Array.isArray(body.accessibility) ? body.accessibility.map((e) => shorten(e, 80)) : body.accessibility;
+    if (body.compensation !== undefined) {
+      const c = body.compensation;
+      if (!c || typeof c !== 'object' || Array.isArray(c)) return fieldInvalid(res, 'compensation', 'compensation is an object { maxFeeMinor, currency, expensesNeeded }.');
+      next.compensation = {
+        maxFeeMinor: c.maxFeeMinor === undefined ? next.compensation.maxFeeMinor : c.maxFeeMinor,
+        currency: c.currency === undefined ? next.compensation.currency : c.currency,
+        expensesNeeded: c.expensesNeeded === undefined ? false : c.expensesNeeded,
       };
     }
-    prefs.updatedAt = Date.now();
+    next.updatedAt = Date.now();
+    const t = typePreferences(next, 'preferences');
+    if (!t.ok) { const n = named(t.reason, `preferences ${playerId}`); return fieldInvalid(res, n.field, `Preferences: ${n.message}.`); }
+    return t.record;
   }
 
   playerRouter.get('/preferences', (req, res) => {
-    res.json({ preferences: prefsFor(req.player.id), private: true, note: 'Clubs never see this — only summaries you approve on an application.' });
+    res.json({ preferences: prefsView(prefsFor(req.player.id)), private: true, note: 'Clubs never see this — only summaries you approve on an application.' });
   });
 
   playerRouter.put('/preferences', (req, res) => {
     if (req.playerIsMinor) return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Suitability preferences for under-18s are set by your parent/guardian.' });
-    const prefs = prefsFor(req.player.id);
-    applyPrefs(prefs, req.body ?? {}, { adult: true });
-    persistNow();
-    res.json({ preferences: prefs });
+    const prefs = prefsOrRefuse(res, req.player.id, req.body ?? {}, { adult: true });
+    if (!prefs) return;
+    res.json({ preferences: prefsView(opportunitiesCampaigns.preferences.save(prefs)) });
   });
 
   guardianRouter.get('/children/:id/preferences', (req, res) => {
     if (!req.guardian.childIds.includes(req.params.id)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
-    res.json({ preferences: prefsFor(req.params.id), private: true });
+    res.json({ preferences: prefsView(prefsFor(req.params.id)), private: true });
   });
 
   guardianRouter.put('/children/:id/preferences', (req, res) => {
     if (!req.guardian.childIds.includes(req.params.id)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
-    const prefs = prefsFor(req.params.id);
-    applyPrefs(prefs, req.body ?? {}, { adult: false });
-    persistNow();
-    res.json({ preferences: prefs });
+    const prefs = prefsOrRefuse(res, req.params.id, req.body ?? {}, { adult: false });
+    if (!prefs) return;
+    res.json({ preferences: prefsView(opportunitiesCampaigns.preferences.save(prefs)) });
   });
 
   // ---------------------------------------------- structured requirements
   // Additive: an opportunity may declare structured requirements; free-text
-  // `schedule`/`requirements` from M12 stay untouched.
+  // `schedule`/`requirements` from M12 stay untouched. Replaced whole.
   orgRouter.put('/opportunities/:id/structured-requirements', (req, res) => {
-    const o = db.opportunities.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const o = scoutingReads.opportunities.ofOrg(req.params.id, req.org.id);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
     const b = req.body ?? {};
-    o.structured = {
-      trainingSlots: (Array.isArray(b.trainingSlots) ? b.trainingSlots : []).slice(0, 10).map((s) => ({
-        day: String(s.day ?? '').toLowerCase().slice(0, 3), start: String(s.start ?? '').slice(0, 5),
-        end: String(s.end ?? '').slice(0, 5), tz: String(s.tz ?? 'Europe/London').slice(0, 40),
-      })),
-      relocationRequired: b.relocationRequired === true,
-      feeMinor: Number.isInteger(b.feeMinor) ? b.feeMinor : null, // participation cost, if any
-      currency: String(b.currency ?? 'GBP').slice(0, 3),
-      expensesCovered: b.expensesCovered === true,
-      environment: (Array.isArray(b.environment) ? b.environment : []).slice(0, 8).map((e) => String(e).slice(0, 40)),
-      accommodations: (Array.isArray(b.accommodations) ? b.accommodations : []).slice(0, 8).map((e) => String(e).slice(0, 80)),
+    if (typeof b !== 'object' || Array.isArray(b)) return fieldInvalid(res, 'body', 'Structured requirements are a JSON object.');
+    const shorten = (list, max) => (Array.isArray(list) ? list.map((e) => (typeof e === 'string' ? e.slice(0, max) : e)) : list);
+    const structured = {
+      trainingSlots: b.trainingSlots ?? [],
+      relocationRequired: b.relocationRequired ?? false,
+      feeMinor: b.feeMinor ?? null, // participation cost, if any
+      currency: b.currency ?? 'GBP',
+      expensesCovered: b.expensesCovered ?? false,
+      environment: shorten(b.environment ?? [], 40),
+      accommodations: shorten(b.accommodations ?? [], 80),
     };
-    persistNow();
-    res.json({ opportunity: { id: o.id, structured: o.structured } });
+    const extra = Object.keys(b).find((k) => !Object.hasOwn(structured, k));
+    if (extra) return fieldInvalid(res, extra, `Structured requirements have no field ${extra}.`);
+    const t = typeStructured(structured, 'structured');
+    if (!t.ok) { const n = named(t.reason, 'structured'); return fieldInvalid(res, n.field, `Structured requirements: ${n.message}.`); }
+    const saved = opportunitiesCampaigns.opportunities.update(o.id, (d) => { d.structured = t.record; });
+    res.json({ opportunity: { id: saved.id, structured: opportunityView(saved).structured } });
   });
 
   // -------------------------------------------------------- the comparison
@@ -177,7 +196,7 @@ export function registerSuitability(ctx) {
   }
 
   playerRouter.get('/suitability/:oppId', (req, res) => {
-    const o = db.opportunities.find((x) => x.id === req.params.oppId);
+    const o = scoutingReads.opportunities.byId(req.params.oppId);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
     const prefs = prefsFor(req.player.id);
     const org = byId.org(o.orgId);
@@ -190,7 +209,7 @@ export function registerSuitability(ctx) {
   guardianRouter.get('/children/:id/suitability/:oppId', (req, res) => {
     if (!req.guardian.childIds.includes(req.params.id)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
     const child = findPlayer(req.params.id);
-    const o = db.opportunities.find((x) => x.id === req.params.oppId);
+    const o = scoutingReads.opportunities.byId(req.params.oppId);
     if (!child || !o) return res.status(404).json({ error: 'NOT_FOUND' });
     const org = byId.org(o.orgId);
     res.json({ opportunityId: o.id, verdicts: verdictsFor(child, prefsFor(child.id), o, org) });
@@ -205,30 +224,31 @@ export function registerSuitability(ctx) {
       const playerId = actorKind === 'guardian' ? req.params.id : req.player.id;
       if (actorKind === 'guardian' && !req.guardian.childIds.includes(playerId)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
       if (actorKind === 'player' && req.playerIsMinor) return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Sharing anything with a club is a guardian decision for under-18s.' });
-      const a = db.applications.find((x) => x.id === req.body?.applicationId && x.playerId === playerId);
+      const applicationId = req.body?.applicationId;
+      const a = typeof applicationId === 'string' ? scoutingReads.applications.ofPlayers(applicationId, [playerId]) : null;
       if (!a) return res.status(404).json({ error: 'APPLICATION_NOT_FOUND' });
       const player = findPlayer(playerId);
-      const o = db.opportunities.find((x) => x.id === a.opportunityId);
+      if (!player) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+      const o = scoutingReads.opportunities.byId(a.opportunityId);
       const org = byId.org(a.orgId);
-      if (req.body?.share === false) { a.suitabilitySummary = null; persistNow(); return res.json({ shared: false }); }
+      if (req.body?.share === false) { opportunitiesCampaigns.applications.update(a.id, (d) => { d.suitabilitySummary = null; }); return res.json({ shared: false }); }
       const verdicts = verdictsFor(player, prefsFor(playerId), o, org);
       // Summary = dimension + verdict ONLY. Reasons stay private: they can
       // contain commitments, needs and limits.
-      a.suitabilitySummary = {
-        approvedAt: Date.now(), approvedBy: actorKind,
-        verdicts: verdicts.map(({ dimension, verdict }) => ({ dimension, verdict })),
-      };
-      persistNow();
-      res.json({ shared: true, summary: a.suitabilitySummary });
+      const saved = opportunitiesCampaigns.applications.update(a.id, (d) => {
+        d.suitabilitySummary = { approvedAt: Date.now(), approvedBy: actorKind, verdicts: verdicts.map(({ dimension, verdict }) => ({ dimension, verdict })) };
+      });
+      res.json({ shared: true, summary: summaryView(saved.suitabilitySummary) });
     };
   }
+  const summaryView = (sm) => ({ approvedAt: sm.approvedAt, approvedBy: sm.approvedBy, verdicts: sm.verdicts.map((v) => ({ dimension: v.dimension, verdict: v.verdict })) });
   playerRouter.post('/suitability/share', shareHandler('player'));
   guardianRouter.post('/children/:id/suitability/share', shareHandler('guardian'));
 
   orgRouter.get('/applications/:id/suitability', (req, res) => {
-    const a = db.applications.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const a = scoutingReads.applications.ofOrg(req.params.id, req.org.id);
     if (!a) return res.status(404).json({ error: 'APPLICATION_NOT_FOUND' });
     if (!a.suitabilitySummary) return res.json({ summary: null, note: 'The player/guardian has not shared a suitability summary for this application.' });
-    res.json({ summary: a.suitabilitySummary, note: 'Verdict summary approved by the player/guardian. Underlying preferences are private.' });
+    res.json({ summary: summaryView(a.suitabilitySummary), note: 'Verdict summary approved by the player/guardian. Underlying preferences are private.' });
   });
 }

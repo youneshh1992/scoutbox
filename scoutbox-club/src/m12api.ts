@@ -207,13 +207,17 @@ export const httpM12: M12Api = {
   addShadow: (s, playerId, roleId) => P(s, '/org/squad/shadow', { playerId, roleId }),
   squadPlanner: (s) => G(s, '/org/squad-planner'),
 
-  listOpportunities: (s) => G(s, '/org/opportunities'),
+  // The server pages the opportunity list ({ items, nextCursor }, newest first); this reads the first page. "Load more"
+  // is needed once a club has more than 50 opportunities.
+  listOpportunities: async (s) => (await G(s, '/org/opportunities')).items,
   createOpportunity: async (s, input) => (await P(s, '/org/opportunities', input)).opportunity,
   listApplications: async (s, id) => (await G(s, `/org/opportunities/${id}/applications`)).items,
   resolveApplication: (s, id, decision, note) => P(s, `/org/applications/${id}/outcome`, { decision, note }),
   closeOpportunity: (s, id) => P(s, `/org/opportunities/${id}/close`),
 
-  listCampaigns: (s) => G(s, '/org/campaigns'),
+  // The server pages the campaign list ({ items, nextCursor }, newest first); this reads the first page. "Load more" is
+  // needed once a club has more than 50 campaigns.
+  listCampaigns: async (s) => (await G(s, '/org/campaigns')).items,
   createCampaign: async (s, input) => (await P(s, '/org/campaigns', input)).campaign,
   reviewQueue: (s, id) => G(s, `/org/campaigns/${id}/review-queue`),
   reviewAttempt: (s, id, decision, reasons, rubricNotes) => P(s, `/org/campaign-attempts/${id}/review`, { decision, reasons, rubricNotes }),
