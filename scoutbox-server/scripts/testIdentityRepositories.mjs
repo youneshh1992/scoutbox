@@ -175,7 +175,7 @@ test('persistence: every creation shape — adult signup, guardian-created child
 });
 
 // ------------------------------------------------------------------ guards
-test('guards: the views refuse writes to the collections, to column-backed fields (nested location/stats/prefs, medical.shared/conditionStatus, programme.track/startedAt), to childIds and (S5) to every sub-record array and its items, while emailCode, unknown and prototype-named facet keys stay writable in place and are flushed by the next save; the arrays change only through addItem', () => {
+test('guards: the views refuse writes to the collections, to column-backed fields (nested location/stats/prefs, medical.shared/conditionStatus, programme.track/startedAt), to childIds, (S5) to every sub-record array and its items and (S4a-E) to every facet key and nested facet value; the arrays change only through addItem, the coGuardians list only through guardians.update, and each write is in the row when the call returns', () => {
   const dir = tempDir('idrepo-guards');
   const t = boot(dir, { ...FIXTURE() });
   const p = t.players.byId('pl-seeded'); const g = t.guardians.byId('gd-primary'); const sg = t.guardians.byId('gd-signup');
@@ -185,23 +185,22 @@ test('guards: the views refuse writes to the collections, to column-backed field
   // S5: the arrays and their items are rows of the player_* tables, served read-only.
   for (const fn of [() => { p.badges.push('x'); }, () => { p.badges = []; }, () => { p.media[0].views = 9; }, () => { p.media[0].tags.pace = 3; }, () => { p.attendance.length = 0; }, () => { p.medical.records.push({}); }, () => { p.medical.records = []; }, () => { p.programme.completed.pop(); }, () => { delete p.drills; }, () => { p.trialReports.push({}); }, () => { p.trialReports = []; }]) assert.throws(fn, refused);
   for (const fn of [() => { g.childIds.push('pl-x'); }, () => { g.childIds = []; }, () => { g.childIds.length = 0; }, () => { g.email = 'x@example.test'; }, () => { g.notificationPrefs.quietStart = '1'; }, () => { g.coGuardianOf = 'gd-co'; }]) assert.throws(fn, refused);
-  // Sub-records go through the repository (rows at once); facet writes (unknown keys) work in place and persist through the save hook.
+  // S4a-E: a facet key, a prototype-named key and a nested facet value are refused like every other field (there is no save-time flush to find them).
+  for (const fn of [() => { p.unknownBag = { a: 1 }; }, () => { p.constructor = 'changed'; }, () => { delete p.futureField; }, () => { sg.emailCode = null; }, () => { sg.someFutureField = true; }, () => { g.coGuardians.push({ id: 'gd-x', name: 'X', email: 'x@example.test' }); }, () => { g.coGuardians[0].name = 'Y'; }]) assert.throws(fn, refused);
+  assert.throws(() => t.guardians.update('gd-signup', { someFutureField: true }), /not a guardian field/);
+  // Sub-records and the coGuardians list go through the repository: in the rows when the call returns.
   t.players.addItem('pl-seeded', 'medical.records', { id: 'md-new', type: 'clearance', title: 'ok', date: '2026-10-01', cleared: true });
   t.players.addItem('pl-seeded', 'programme.completed', { sessionId: 's2', ts: NOW });
-  t.players.addItem('pl-seeded', 'badges', 'Captain'); p.unknownBag = { a: 1 }; p.constructor = 'changed';
-  sg.emailCode = null; sg.someFutureField = true; g.coGuardians.push({ id: 'gd-x', name: 'X', email: 'x@example.test' });
-  assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 3);
+  t.players.addItem('pl-seeded', 'badges', 'Captain');
+  t.guardians.update('gd-primary', { coGuardians: [...g.coGuardians, { id: 'gd-x', name: 'X', email: 'x@example.test' }] });
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 2, 'the row is committed at once'); assert.equal(t.facets('players', 'pl-seeded').medical, undefined, 'no array in the facets');
-  assert.equal(t.facets('players', 'pl-seeded').unknownBag, undefined, 'not yet flushed');
-  t.store.save(t.snapshot());
-  assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 0);
-  assert.deepEqual(t.facets('players', 'pl-seeded').unknownBag, { a: 1 }); assert.equal(t.facets('players', 'pl-seeded').constructor, 'changed'); assert.equal(t.facets('guardians', 'gd-signup').emailCode, null);
-  assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-seeded'").medical_shared, 1, 'the column-backed sub-key is untouched by facet writes');
+  assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 2, 'the list is in the row at once'); assert.equal(g.coGuardians.length, 2);
+  assert.equal(t.raw("SELECT medical_shared FROM players WHERE id = 'pl-seeded'").medical_shared, 1, 'the column-backed sub-key is untouched');
   t.close();
   const r = reopen(dir);
   const p2 = r.players.byId('pl-seeded');
-  assert.equal(p2.medical.records.length, 2); assert.equal(p2.programme.completed.length, 2); assert.deepEqual([...p2.badges], ['Finisher', 'Captain']); assert.deepEqual(p2.unknownBag, { a: 1 }); assert.equal(p2.constructor, 'changed');
-  assert.equal(r.guardians.byId('gd-signup').emailCode, null); assert.equal(r.guardians.byId('gd-signup').someFutureField, true); assert.equal(r.guardians.byId('gd-primary').coGuardians.length, 2);
+  assert.equal(p2.medical.records.length, 2); assert.equal(p2.programme.completed.length, 2); assert.deepEqual([...p2.badges], ['Finisher', 'Captain']); assert.equal(p2.constructor, 'own-constructor', 'the stored prototype-named key is unchanged');
+  assert.equal(r.guardians.byId('gd-primary').coGuardians.length, 2);
   r.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -217,7 +216,7 @@ test('updates: players.update replaces location/stats/prefs whole and merges med
   assert.equal(t.raw("SELECT stats_assists FROM players WHERE id = 'pl-seeded'").stats_assists, null, 'stats replaced whole');
   for (const [patch, re] of [
     [{ guardianId: 'gd-primary' }, /guardianId changes only through link/], [{ medical: { records: [] } }, /"medical.records" is a player sub-record/], [{ programme: { completed: [] } }, /"programme.completed" is a player sub-record/],
-    [{ badges: [] }, /"badges" is a player sub-record/], [{ trialReports: [] }, /derived from the trials collection/], [{ unknownBag: 1 }, /not a column-backed player field/], [{ foot: 'both' }, /foot is not one of/], [{ heightCm: 2 ** 53 }, /not a safe integer/], [{ id: 'other' }, /never changes/],
+    [{ badges: [] }, /"badges" is a player sub-record/], [{ trialReports: [] }, /derived from the trials collection/], [{ unknownBag: 1 }, /not a player field/], [{ foot: 'both' }, /foot is not one of/], [{ heightCm: 2 ** 53 }, /not a safe integer/], [{ id: 'other' }, /never changes/],
   ]) assert.throws(() => t.players.update('pl-seeded', patch), re);
   assert.equal(p.foot, 'right', 'a refused update changes nothing');
   // restore: the signing rollback's whole-record write.
@@ -309,21 +308,21 @@ test('guardians: a duplicate e-mail (compared case-insensitively) is refused on 
 });
 
 // ------------------------------------------------------------------ the two failure contracts
-test('ordinary save: a facet edit in a FAILED ordinary save stays pending (memory is the intended state) and the next ordinary save persists it — for players and guardians', () => {
+test('ordinary save: a player or guardian write is in its row when the call returns, so a FAILED ordinary save neither loses nor delays it, and the next save leaves it as it is — for players and guardians', () => {
   const dir = tempDir('idrepo-s3');
   const t = boot(dir, { ...FIXTURE() });
-  t.players.byId('pl-adult').pendingNote = 'Pending'; t.guardians.byId('gd-primary').coGuardians.push({ id: 'gd-p', name: 'P', email: 'p@example.test' });
+  t.players.update('pl-adult', { city: 'Pending' }); t.guardians.update('gd-primary', { coGuardians: [...t.guardians.byId('gd-primary').coGuardians, { id: 'gd-p', name: 'P', email: 'p@example.test' }] });
   t.db.vouches[0].big = 1n;
   assert.throws(() => t.store.save(t.snapshot()), /BigInt/);
-  assert.equal(t.facets('players', 'pl-adult').pendingNote, undefined); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 1);
-  assert.equal(t.players.byId('pl-adult').pendingNote, 'Pending', 'memory is not undone'); assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 2);
+  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Pending'); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 2);
+  assert.equal(t.players.byId('pl-adult').city, 'Pending', 'memory is not undone');
   delete t.db.vouches[0].big;
   t.store.save(t.snapshot());
-  assert.equal(t.facets('players', 'pl-adult').pendingNote, 'Pending'); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 2); assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 0);
+  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Pending'); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 2);
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** The multi-collection operation under test: a guardian with a child (row + link), an org facet, a blob edit, a player facet edit, a player update and a session, in one real unit of work. */
+/** The multi-collection operation under test: a guardian with a child (row + link), an org facet, a blob edit, a player update, a sub-record and a session, in one real unit of work. */
 function operation(t, { fail = null, afterCommit = null } = {}) {
   const seededPlayer = t.players.byId('pl-seeded');
   let token = null;
@@ -350,8 +349,8 @@ function assertOperationAbsent(t, { unrelatedSaved }) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 1);
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0);
   assert.equal(t.blob('vouches')[0].status, 'pending'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'guardian'").n, 0);
-  // Unrelated edits made BEFORE the unit: in the database only after an ordinary save.
-  assert.equal(t.facets('players', 'pl-adult').pendingNote, unrelatedSaved ? 'PreUnit' : undefined); assert.equal(t.blob('vouches').length, unrelatedSaved ? 2 : 1);
+  // Unrelated edits made BEFORE the unit: the player write committed at once (S4a-E); the blob edit only after an ordinary save.
+  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit'); assert.equal(t.blob('vouches').length, unrelatedSaved ? 2 : 1);
   assert.equal(t.invariantBreaks(), 0);
 }
 function assertMemoryRestored(t, refs) {
@@ -361,8 +360,8 @@ function assertMemoryRestored(t, refs) {
   assert.equal(t.players.byId('pl-seeded').medical.records, seededRecords, 'same nested array'); assert.equal(seededRecords.length, 1);
   assert.equal(t.guardians.byId('gd-co').childIds, coKids, 'same childIds view'); assert.deepEqual([...coKids], coKidsBefore);
   assert.equal(t.db.orgs[0].squad.length, 0); assert.equal(t.db.vouches[0].status, 'pending'); assert.equal(t.db.vouches[0].history.length, 0); assert.equal(t.db.vouches[0].big, undefined);
-  // Pre-unit edits survive, still pending.
-  assert.equal(adultView.pendingNote, 'PreUnit'); assert.equal(t.db.vouches.length, 2); assert.equal(t.players.uncommitted(), 1);
+  // Pre-unit edits survive.
+  assert.equal(adultView.city, 'PreUnit'); assert.equal(t.db.vouches.length, 2);
 }
 function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardians WHERE id = 'gd-new'").n, 1); assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-new'").n, 1);
@@ -371,11 +370,11 @@ function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM player_medical_records WHERE player_id = 'pl-seeded'").n, 2); assert.equal(t.players.byId('pl-seeded').medical.records.length, 2); assert.equal(t.facets('guardians', 'gd-new').emailCode, 'ABC123');
   assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 1);
   assert.equal(t.blob('vouches')[0].status, 'accepted'); assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
-  assert.equal(t.facets('players', 'pl-adult').pendingNote, 'PreUnit', 'the pre-unit edit landed with the unit');
-  assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 0); assert.equal(t.invariantBreaks(), 0);
+  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit', 'the pre-unit write is kept');
+  assert.equal(t.invariantBreaks(), 0);
 }
 const prepare = (t) => {
-  const adultView = t.players.byId('pl-adult'); adultView.pendingNote = 'PreUnit'; t.db.vouches.push({ id: 'vch-2', status: 'pending', history: [] }); // unrelated edits, pending before the unit
+  const adultView = t.players.update('pl-adult', { city: 'PreUnit' }); t.db.vouches.push({ id: 'vch-2', status: 'pending', history: [] }); // unrelated edits before the unit: a committed player write, a pending blob edit
   return { adultView, seededRecords: t.players.byId('pl-seeded').medical.records, coKids: t.guardians.byId('gd-co').childIds, coKidsBefore: [...t.guardians.byId('gd-co').childIds] };
 };
 
@@ -403,7 +402,7 @@ test('unit of work: a failure after the row and link writes (blob write) rolls t
   assert.match(err.message, /BigInt/); assert.equal(err.unitOfWork, 'rolled_back'); assert.equal(ran, false); assert.equal(t.store.sqlite.isTransaction, false);
   assertOperationAbsent(t, { unrelatedSaved: false }); assertMemoryRestored(t, refs);
   t.store.save(t.snapshot());
-  assertOperationAbsent(t, { unrelatedSaved: true }); assert.equal(t.players.uncommitted(), 0);
+  assertOperationAbsent(t, { unrelatedSaved: true });
   const { token } = operation(t);
   assertOperationPersisted(t, token);
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
@@ -432,21 +431,22 @@ test('unit of work: a failure thrown by the work after every write, a failure du
   assertOperationPersisted(t, operation(t).token); t.store.sqlite.exec = exec; t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('unit of work: a facet changed inside a unit, written by a row update\'s intermediate value and changed back before COMMIT, is overwritten — view and table agree after commit and after rollback, for a player\'s mixed composite and for a guardian facet', () => {
+test('unit of work: a record written twice inside a unit (a value, then back) ends with the final value — view and table agree after commit; a failed unit restores the held view, its composite and the guardian list in place, whatever was written in between', () => {
   const dir = tempDir('idrepo-uow-revert');
   const t = boot(dir, { ...FIXTURE() });
-  const p = t.players.byId('pl-adult'); const g = t.guardians.byId('gd-primary');
+  const p = t.players.byId('pl-adult'); const g = t.guardians.byId('gd-primary'); const coList = [...g.coGuardians]; const medical = p.medical;
   t.unit(() => {
-    p.scratch = ['tmp']; t.players.update('pl-adult', { medical: { conditionStatus: 'fit' } }); p.scratch = [];
-    g.coGuardians.push({ id: 'gd-tmp', name: 'T', email: 't@example.test' }); t.guardians.update('gd-primary', { idvReference: 'idv-2' }); g.coGuardians.pop();
+    t.players.update('pl-adult', { city: 'Tmp', medical: { conditionStatus: 'fit' } }); t.players.update('pl-adult', { city: 'Final' });
+    t.guardians.update('gd-primary', { coGuardians: [...coList, { id: 'gd-tmp', name: 'T', email: 't@example.test' }] }); t.guardians.update('gd-primary', { idvReference: 'idv-2' }); t.guardians.update('gd-primary', { coGuardians: coList });
   });
-  assert.deepEqual(p.scratch, []); assert.deepEqual(t.facets('players', 'pl-adult').scratch, [], 'the final value, not the intermediate one');
+  assert.equal(p.city, 'Final'); assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Final', 'the final value, not the intermediate one');
   assert.equal(t.raw("SELECT medical_condition_status FROM players WHERE id = 'pl-adult'").medical_condition_status, 'fit');
   assert.equal(g.coGuardians.length, 1); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 1); assert.equal(t.raw("SELECT idv_reference FROM guardians WHERE id = 'gd-primary'").idv_reference, 'idv-2');
-  assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 0);
-  // The same shape, then a failure: the committed values stay and memory is restored.
-  assert.throws(() => t.unit(() => { p.scratch = ['x']; t.players.update('pl-adult', { medical: { conditionStatus: 'injured' } }); p.scratch = []; throw new Error('late'); }), /late/);
-  assert.deepEqual(p.scratch, []); assert.equal(p.medical.conditionStatus, 'fit'); assert.equal(t.raw("SELECT medical_condition_status FROM players WHERE id = 'pl-adult'").medical_condition_status, 'fit'); assert.equal(t.players.uncommitted(), 0);
+  // The same shape, then a failure: the committed values stay and memory is restored in place.
+  const heldList = g.coGuardians;
+  assert.throws(() => t.unit(() => { t.players.update('pl-adult', { city: 'X', medical: { conditionStatus: 'injured' } }); t.guardians.update('gd-primary', { coGuardians: [] }); throw new Error('late'); }), /late/);
+  assert.equal(p.city, 'Final'); assert.equal(p.medical, medical, 'the same composite object'); assert.equal(p.medical.conditionStatus, 'fit'); assert.equal(g.coGuardians, heldList, 'the same list object'); assert.equal(g.coGuardians.length, 1);
+  assert.equal(t.raw("SELECT medical_condition_status FROM players WHERE id = 'pl-adult'").medical_condition_status, 'fit'); assert.equal(t.facets('guardians', 'gd-primary').coGuardians.length, 1);
   // Nested: a joined unit that fails inside a caller that swallows the error poisons the whole unit.
   assert.throws(() => t.unit(() => { t.players.update('pl-adult', { academyPlus: true }); try { t.unit(() => { t.guardians.update('gd-primary', { name: 'Nope' }); throw new Error('inner'); }); } catch { /* swallowed */ } }), /cannot commit/);
   assert.equal(p.academyPlus, false); assert.equal(g.name, 'Primary Parent'); assert.equal(t.raw("SELECT academy_plus FROM players WHERE id = 'pl-adult'").academy_plus, 0);
@@ -504,15 +504,14 @@ function standaloneCommitFails(t, fn) {
   assert.equal(t.store.sqlite.isTransaction, false);
 }
 
-test('review 1: a standalone operation whose COMMIT fails restores repository memory as well as SQL — update, insert with link, remove, link, ageUp, guardians.insert and guardians.update leave held views, nested arrays, childIds, indexes, counts and facet tracking as before; a pending facet edit made earlier stays pending, a later ordinary save persists no fragment, an explicit retry succeeds and a reopen agrees', () => {
+test('review 1: a standalone operation whose COMMIT fails restores repository memory as well as SQL — update, insert with link, remove, link, ageUp, guardians.insert and guardians.update leave held views, nested arrays, childIds, indexes and counts as before; a write committed earlier stays, a later ordinary save persists no fragment, an explicit retry succeeds and a reopen agrees', () => {
   const dir = tempDir('idrepo-standalone-commit');
   const t = boot(dir, { ...FIXTURE() });
   const adultView = t.players.byId('pl-adult'); const seededView = t.players.byId('pl-seeded'); const primary = t.guardians.byId('gd-primary'); const kids = primary.childIds; const co = t.guardians.byId('gd-co'); const coKids = co.childIds;
-  adultView.pendingNote = 'PendingBefore'; // an unrelated facet edit, pending before every failed operation
+  t.players.update('pl-adult', { city: 'Before' }); // an unrelated write, committed before every failed operation
   const records = seededView.medical.records;
-  const snapshotCounts = () => ({ players: t.players.count(), guardians: t.guardians.count(), rows: t.raw('SELECT COUNT(*) AS n FROM players').n + t.raw('SELECT COUNT(*) AS n FROM guardians').n + t.raw('SELECT COUNT(*) AS n FROM guardian_children').n, uncommitted: t.players.uncommitted() + t.guardians.uncommitted() });
+  const snapshotCounts = () => ({ players: t.players.count(), guardians: t.guardians.count(), rows: t.raw('SELECT COUNT(*) AS n FROM players').n + t.raw('SELECT COUNT(*) AS n FROM guardians').n + t.raw('SELECT COUNT(*) AS n FROM guardian_children').n });
   const before = snapshotCounts();
-  assert.equal(before.uncommitted, 1);
   // update (a scalar and a split composite)
   standaloneCommitFails(t, () => t.players.update('pl-seeded', { name: 'After', medical: { shared: false } }));
   assert.equal(seededView.name, 'Seeded Adult'); assert.equal(seededView.medical.shared, true); assert.equal(seededView.medical.records, records); assert.equal(t.raw("SELECT name FROM players WHERE id = 'pl-seeded'").name, 'Seeded Adult');
@@ -532,17 +531,17 @@ test('review 1: a standalone operation whose COMMIT fails restores repository me
   assert.equal(t.guardians.byId('gd-new'), null); assert.equal(t.guardians.emailTaken('new@example.test'), false); assert.equal(t.db.guardians.length, 3);
   standaloneCommitFails(t, () => t.guardians.update('gd-primary', { name: 'Renamed', idvReference: 'idv-9' }));
   assert.equal(primary.name, 'Primary Parent'); assert.equal(primary.idvReference, 'idv-1'); assert.equal(t.raw("SELECT name FROM guardians WHERE id = 'gd-primary'").name, 'Primary Parent');
-  assert.deepEqual(snapshotCounts(), before, 'counts, rows and facet tracking are exactly as before every failed operation');
+  assert.deepEqual(snapshotCounts(), before, 'counts and rows are exactly as before every failed operation');
   assert.equal(t.invariantBreaks(), 0);
-  // A later ordinary save persists the earlier pending edit and nothing else.
+  // A later ordinary save persists no fragment; the earlier write stays.
   t.store.save(t.snapshot());
-  assert.equal(t.facets('players', 'pl-adult').pendingNote, 'PendingBefore'); assert.equal(t.raw("SELECT name FROM players WHERE id = 'pl-seeded'").name, 'Seeded Adult'); assert.equal(t.players.uncommitted() + t.guardians.uncommitted(), 0);
+  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'Before'); assert.equal(t.raw("SELECT name FROM players WHERE id = 'pl-seeded'").name, 'Seeded Adult');
   // Explicit retries succeed.
   t.players.update('pl-seeded', { name: 'Retry' }); t.players.insert(child('pl-new', 'gd-primary', '2015-05-05')); t.guardians.update('gd-primary', { name: 'Renamed' });
   assert.equal(seededView.name, 'Retry'); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-new']);
   t.close();
   const r = reopen(dir);
-  assert.equal(r.players.byId('pl-seeded').name, 'Retry'); assert.equal(r.players.byId('pl-new').guardianId, 'gd-primary'); assert.equal(r.guardians.byId('gd-primary').name, 'Renamed'); assert.equal(r.guardians.byId('gd-new'), null); assert.equal(r.players.byId('pl-adult').pendingNote, 'PendingBefore'); assert.equal(r.invariantBreaks(), 0);
+  assert.equal(r.players.byId('pl-seeded').name, 'Retry'); assert.equal(r.players.byId('pl-new').guardianId, 'gd-primary'); assert.equal(r.guardians.byId('gd-primary').name, 'Renamed'); assert.equal(r.guardians.byId('gd-new'), null); assert.equal(r.players.byId('pl-adult').city, 'Before'); assert.equal(r.invariantBreaks(), 0);
   r.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -567,7 +566,7 @@ test('review 2: inside a real unit, a repository operation that fails after its 
   assert.equal(t.players.byId('pl-half'), null); assert.equal(primary.childIds, kids); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']); assert.equal(t.db.vouches[0].status, 'pending');
   assertMemoryRestored(t, refs);
   t.store.save(t.snapshot());
-  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.facets('players', 'pl-adult').pendingNote, 'PreUnit');
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM players WHERE id = 'pl-half'").n, 0); assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-adult'").city, 'PreUnit');
   t.store.sqlite.exec('DROP TRIGGER review_fail_link');
   t.unit(() => t.players.insert(child('pl-half', 'gd-primary', '2015-01-01')));
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM guardian_children WHERE player_id = 'pl-half'").n, 1); assert.deepEqual([...kids], ['pl-child1', 'pl-child2', 'pl-half']);

@@ -48,12 +48,12 @@ export function lookupCredential({ providerId, identifier, holderName }) {
 
 export function registerVerificationReview(ctx) {
   const {
-    db, users, orgs, orgRouter, adminRouter, nextId, persist, persistNow, notify, idx,
+    db, byId, users, orgs, orgRouter, adminRouter, nextId, persist, persistNow, notify, idx,
     verEvent, createClaim, transition, addEvidence, storeEvidenceFile,
     effectiveStatus, vmetric, requireVer, hasVerLevel,
   } = ctx;
 
-  const orgOf = (id) => db.orgs.find((o) => o.id === id) ?? null;
+  const orgOf = (id) => byId.org(id) ?? null;
   const claimById = (id) => db.verClaims.find((c) => c.id === id);
   // M14.1 attribution: the admin surface authenticates with one SHARED key
   // (prototype F12 architecture) — individual Trust & Safety accounts do not
@@ -250,7 +250,7 @@ export function registerVerificationReview(ctx) {
   });
   function adminClaimRow(c) {
     const org = c.organisationId ? orgOf(c.organisationId) : null;
-    const subject = c.subjectType === 'user' ? db.users.find((u) => u.id === c.subjectId) : orgOf(c.subjectId);
+    const subject = c.subjectType === 'user' ? byId.user(c.subjectId) : orgOf(c.subjectId);
     return {
       id: c.id, claimType: c.claimType, status: c.status, role: c.role,
       subject: { type: c.subjectType, id: c.subjectId, name: subject?.name ?? '(unknown)' },
@@ -263,7 +263,7 @@ export function registerVerificationReview(ctx) {
   adminRouter.get('/verification/cases/:id', (req, res) => {
     const c = claimById(req.params.id);
     if (!c) return res.status(404).json({ error: 'CASE_NOT_FOUND' });
-    const subjectUser = c.subjectType === 'user' ? db.users.find((u) => u.id === c.subjectId) : null;
+    const subjectUser = c.subjectType === 'user' ? byId.user(c.subjectId) : null;
     res.json({
       claim: c, row: adminClaimRow(c),
       evidence: db.verEvidence.filter((e) => c.evidenceIds.includes(e.id)),
@@ -488,7 +488,7 @@ export function registerVerificationReview(ctx) {
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     if (!reasonRequired(req, res)) return;
     if (!org.verified) return res.status(409).json({ error: 'ORG_NOT_VERIFIED', message: 'Verify the organisation first — root authority only exists inside a verified organisation.' });
-    const user = db.users.find((u) => u.id === req.body?.userId && u.orgId === org.id && !u.removedAt);
+    const user = byId.user(req.body?.userId, (u) => u.orgId === org.id && !u.removedAt);
     if (!user) return res.status(404).json({ error: 'USER_NOT_FOUND' });
     if (db.verAdmins.some((a) => a.orgId === org.id && a.userId === user.id && a.level === 'verification_root_admin' && a.status === 'active')) {
       return res.status(409).json({ error: 'ALREADY_ROOT_ADMIN' });

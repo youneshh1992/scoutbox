@@ -13,6 +13,8 @@
 -- projection is retired. The twelve player_* child tables are LIVE since migration 0007_player_subrecords (S5,
 -- REGISTERED: the arrays move out of facets_json into their tables; see the sub-record section below), so facets_json on
 -- players now holds unknown fields and shape metadata only (medical.records and programme.completed are tables too).
+-- Since migration.md §4.3.1 (S4a-E, 4 November 2026) every write is explicit: nothing edits a record in place and no
+-- save rewrites facets_json; guardians.update writes the coGuardians list, and players.update refuses an unknown field.
 -- The media-deletion queue (migration 0006) is in 08_operations_integrations.sql.
 
 -- source: db.orgs  (seed.mjs:15-88; registration server.mjs:1734; T&S org creation m14/review.mjs:382)

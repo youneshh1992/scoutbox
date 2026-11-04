@@ -14,7 +14,7 @@ const STALE_DAYS = 180;
 
 export function registerInsight(ctx) {
   const {
-    db, orgRouter, playerRouter, adminRouter, nextId, persist, persistNow,
+    db, byId, orgRouter, playerRouter, adminRouter, nextId, persist, persistNow,
     notify, findPlayer, isAdult, orgCanSee, paginate, histAppend, suppress,
     isLead, requireLead, playerViewForOrg,
   } = ctx;
@@ -211,7 +211,7 @@ export function registerInsight(ctx) {
     // Reference footage must be footage this org can legitimately see NOW.
     const mediaId = req.body?.mediaId ? String(req.body.mediaId) : null;
     if (mediaId) {
-      const owner = db.players.find((p) => p.media.some((m) => m.id === mediaId));
+      const owner = byId.mediaOwner(mediaId);
       if (!owner || !orgCanSee(req.org, owner)) return res.status(403).json({ error: 'FOOTAGE_NOT_ACCESSIBLE', message: 'Calibration footage must be footage your organisation can legitimately access.' });
     }
     const participants = (Array.isArray(req.body?.participantUserIds) ? req.body.participantUserIds : [])
@@ -232,7 +232,7 @@ export function registerInsight(ctx) {
   function sessionView(s, req) {
     const mySubmitted = s.submissions.some((x) => x.userId === req.orgUser.id);
     const released = s.status === 'closed' || mySubmitted;
-    const owner = s.mediaId ? db.players.find((p) => p.media.some((m) => m.id === s.mediaId)) : null;
+    const owner = s.mediaId ? byId.mediaOwner(s.mediaId) : null;
     const footageAccessible = owner ? orgCanSee(req.org, owner) : false;
     return {
       ...s,

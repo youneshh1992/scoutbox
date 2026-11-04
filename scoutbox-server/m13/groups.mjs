@@ -8,7 +8,7 @@
 // receiving club could not hold on its own.
 export function registerGroups(ctx) {
   const {
-    db, orgRouter, adminRouter, nextId, persistNow, notify, findPlayer,
+    db, byId, orgRouter, adminRouter, nextId, persistNow, notify, findPlayer,
     orgCanSee, paginate, isLead, requireLead, suppress, sameGroupLive,
   } = ctx;
   // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
@@ -21,7 +21,7 @@ export function registerGroups(ctx) {
   // ------------------------------------------------------- administration
   adminRouter.post('/groups', (req, res) => {
     const { name, adminOrgId } = req.body ?? {};
-    const admin = db.orgs.find((o) => o.id === adminOrgId);
+    const admin = byId.org(adminOrgId);
     if (!name?.trim() || !admin) return res.status(400).json({ error: 'GROUP_FIELDS', message: 'name and a valid adminOrgId are required.' });
     const g = {
       id: nextId('grp'), name: String(name).slice(0, 100),
@@ -40,7 +40,7 @@ export function registerGroups(ctx) {
     res.json({
       items: groupsOf(req.org.id).map((g) => ({
         ...g,
-        members: g.memberOrgIds.map((id) => { const o = db.orgs.find((x) => x.id === id); return o ? { id: o.id, name: o.name, level: o.level ?? 'pro' } : null; }).filter(Boolean),
+        members: g.memberOrgIds.map((id) => { const o = byId.org(id); return o ? { id: o.id, name: o.name, level: o.level ?? 'pro' } : null; }).filter(Boolean),
         youAdmin: isGroupAdmin(g, req.org.id),
       })),
       invites: db.groups.filter((g) => g.pendingInvites.some((i) => i.orgId === req.org.id)).map((g) => ({ groupId: g.id, name: g.name })),
@@ -53,7 +53,7 @@ export function registerGroups(ctx) {
     if (!requireLead(req, res)) return;
     const g = db.groups.find((x) => x.id === req.params.id);
     if (!g || !isGroupAdmin(g, req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
-    const target = db.orgs.find((o) => o.id === req.body?.orgId);
+    const target = byId.org(req.body?.orgId);
     if (!target) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     if (target.type === 'agency') return res.status(403).json({ error: 'AGENCIES_EXCLUDED', message: 'Agency organisations cannot join club/federation workspaces.' });
     if (g.memberOrgIds.includes(target.id) || g.pendingInvites.some((i) => i.orgId === target.id)) return res.status(409).json({ error: 'ALREADY_INVITED' });
@@ -164,7 +164,7 @@ export function registerGroups(ctx) {
     const recipients = (Array.isArray(toOrgIds) ? toOrgIds : []).filter((id) => g.memberOrgIds.includes(id) && id !== req.org.id);
     res.json({
       recipients: recipients.map((id) => {
-        const org = db.orgs.find((o) => o.id === id);
+        const org = byId.org(id);
         return { orgId: id, orgName: org?.name, wouldSee: resourceViewFor({ fromOrgId: req.org.id, resourceKind, resourceId }, org) };
       }),
       note: 'Per-recipient preview through the same rules the real read uses.',
@@ -179,7 +179,7 @@ export function registerGroups(ctx) {
     if (!RESOURCE_KINDS.includes(resourceKind) || !resourceOwnerOk(resourceKind, resourceId, req.org.id)) {
       return res.status(400).json({ error: 'RESOURCE_INVALID', message: 'You can only share resources your organisation owns.' });
     }
-    const recipients = (Array.isArray(toOrgIds) ? toOrgIds : []).filter((id) => g.memberOrgIds.includes(id) && id !== req.org.id && db.orgs.find((o) => o.id === id)?.type !== 'agency');
+    const recipients = (Array.isArray(toOrgIds) ? toOrgIds : []).filter((id) => g.memberOrgIds.includes(id) && id !== req.org.id && byId.org(id)?.type !== 'agency');
     if (!recipients.length) return res.status(400).json({ error: 'RECIPIENTS_REQUIRED', message: 'Name at least one other member organisation.' });
     const grant = {
       id: nextId('gnt'), groupId: g.id, fromOrgId: req.org.id, fromOrgName: req.org.name,
@@ -229,7 +229,7 @@ export function registerGroups(ctx) {
     const g = db.groups.find((x) => x.id === req.params.id);
     if (!g || !isGroupAdmin(g, req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
     const memberRows = g.memberOrgIds.map((orgId) => {
-      const org = db.orgs.find((o) => o.id === orgId);
+      const org = byId.org(orgId);
       const assessments = db.assessments.filter((a) => a.orgId === orgId && a.state !== 'draft').length;
       const signings = reads.signings.countForOrg(orgId);
       return { orgId, orgName: org?.name, assessments: suppress(assessments) ? '<3' : assessments, signings: suppress(signings) ? '<3' : signings };

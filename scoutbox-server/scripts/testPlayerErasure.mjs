@@ -235,8 +235,8 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   const sessionsBefore = t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n; assert.equal(sessionsBefore, 1);
   const stateOf = () => JSON.stringify({ row: t.row('pl-child1'), children: t.childRows('pl-child1'), links: t.links('pl-child1'), sessions: t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n, queue: t.raw('SELECT COUNT(*) AS n FROM media_deletions').n, codes: t.raw("SELECT COUNT(*) AS n FROM pairing_codes WHERE player_id = 'pl-child1'").n, ledger: t.all('SELECT * FROM ledger ORDER BY seq') });
   const before = stateOf(); const r0 = t.revision();
-  // An unrelated pending facet edit, made before the unit (the seeded adult's unknown field).
-  t.players.byId('pl-seeded').futureField.nested.push(3);
+  // An unrelated write committed before the unit (S4a-E: every write is explicit; there is no pending edit to carry).
+  t.players.update('pl-seeded', { city: 'Northgate' });
   const attempt = (label, failHow) => {
     assert.throws(() => t.unit(() => {
       t.mediaDeletions.enqueue(['med-x'], { playerId: 'pl-child1', at: NOW });
@@ -251,7 +251,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
     assert.equal(t.guardians.byId('gd-primary').childIds, kids, `${label}: the held childIds array`); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']);
     assert.equal(t.players.isRetained('pl-child1'), false); assert.equal(t.players.retainedCount(), 0); assert.equal(t.db.players.some((p) => p.id === 'pl-child1'), true);
     assert.deepEqual(t.players.byGuardian('gd-primary').map((p) => p.id), ['pl-child1', 'pl-child2']); assert.deepEqual(t.guardians.linksOf('pl-child1'), [{ guardianId: 'gd-primary', role: 'primary' }, { guardianId: 'gd-co', role: 'co' }]);
-    assert.deepEqual(t.players.byId('pl-seeded').futureField.nested, [1, 2, 3], `${label}: the unrelated pending edit survives`);
+    assert.equal(t.players.byId('pl-seeded').city, 'Northgate', `${label}: the unrelated earlier write survives`);
   };
   attempt('failure after the writes', () => { throw new Error('synthetic failure after the erase'); });
   attempt('failure at the real COMMIT', () => t.store.failCommitOfOpenTransaction());
@@ -262,7 +262,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   assert.equal(t.players.byId('pl-child1'), null); assert.deepEqual([...kids], ['pl-child2']); assert.equal(t.players.retainedCount(), 1);
   assert.throws(() => t.unit(() => t.players.erase('pl-child1', { at: NOW })), /retained/);
   t.save(); assert.equal(JSON.stringify(t.all('SELECT * FROM ledger ORDER BY seq')), ledgerBefore, 'the ledger row naming the deleted child is exactly as it was');
-  assert.deepEqual(JSON.parse(t.raw("SELECT facets_json FROM players WHERE id = 'pl-seeded'").facets_json).futureField.nested, [1, 2, 3], 'the unrelated edit persisted with the next save');
+  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-seeded'").city, 'Northgate', 'the unrelated earlier write is in the row');
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 

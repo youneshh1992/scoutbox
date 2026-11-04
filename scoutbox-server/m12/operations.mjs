@@ -25,10 +25,10 @@ const MILESTONES = { '3m': 91, '6m': 182, '12m': 365 };
 
 export function registerOperations(ctx) {
   const {
-    db, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    db, byId, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     guardianOwnsChild, orgCanSee, moderateOrRefuse,
-    storage, sessionFor, isBlocked, DATA_DIR, players, unit, signingsFollowUps, recruitment,
+    storage, sessionFor, isBlocked, DATA_DIR, players, users, unit, signingsFollowUps, recruitment,
   } = ctx;
   if (!recruitment?.trials) throw new TypeError('registerOperations needs the recruitment repository (S8a) from the data layer');
   const trials = recruitment.trials; // S8a: an escalation or a reminder marker is an explicit write of the trial
@@ -37,7 +37,7 @@ export function registerOperations(ctx) {
   const LIMITS = { progression: 200, endReason: 200, note: 300 };
   const tooLong = (res, field, value, max) => { if (value === undefined || value === null) return false; if (typeof value !== 'string') { res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be text.` }); return true; } if (value.length > max) { res.status(400).json({ error: 'FIELD_TOO_LONG', field, max, message: `Keep ${field} under ${max} characters.` }); return true; } return false; };
 
-  const usersOf = (orgId) => db.users.filter((u) => u.orgId === orgId && !u.removedAt);
+  const usersOf = (orgId) => users.listByOrg(orgId).filter((u) => !u.removedAt);
 
   // ================================================================== F11
   function scheduleFollowUps(signing) {
@@ -57,7 +57,7 @@ export function registerOperations(ctx) {
   function followUpView(f) {
     const report = outcomes.forFollowUp(f.id);
     const p = findPlayer(f.playerId);
-    const org = db.orgs.find((o) => o.id === f.orgId);
+    const org = byId.org(f.orgId);
     return {
       ...f, playerName: p?.name ?? 'departed player', orgName: org?.name ?? f.orgId,
       report,
@@ -276,14 +276,14 @@ export function registerOperations(ctx) {
   });
 
   ctx.app.get('/media/:id/captions', (req, res) => {
-    const owner = db.players.find((p) => p.media.some((m) => m.id === req.params.id));
+    const owner = byId.mediaOwner(req.params.id);
     const m = owner?.media.find((x) => x.id === req.params.id);
     if (!m) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
     const session = sessionFor(req);
     const entitled = session && (
       (session.kind === 'player' && owner.id === session.refId) ||
       (session.kind === 'guardian' && owner.guardianId === session.refId) ||
-      (session.kind === 'org' && (() => { const org = db.orgs.find((o) => o.id === session.refId); return org && !org.suspended && visibleToOrg(owner, org) && !isBlocked(owner.id, org.id); })())
+      (session.kind === 'org' && (() => { const org = byId.org(session.refId); return org && !org.suspended && visibleToOrg(owner, org) && !isBlocked(owner.id, org.id); })())
     );
     if (!entitled) return res.status(401).json({ error: 'MEDIA_AUTH_REQUIRED' });
     if (!m.captions) return res.status(404).json({ error: 'NO_CAPTIONS', message: 'This video has no caption track yet.' });
@@ -317,7 +317,7 @@ export function registerOperations(ctx) {
     }
     for (let f of fu.dueUnnotified()) {
       f = fu.patch(f.id, { notifiedAt: now }); // committed BEFORE anything else → restart cannot double-send
-      const org = db.orgs.find((o) => o.id === f.orgId);
+      const org = byId.org(f.orgId);
       const p = findPlayer(f.playerId);
       const lead = usersOf(f.orgId)[0];
       if (lead) notify({ kind: 'org_user', id: lead.id }, 'outcome', `⏰ ${f.milestone} follow-up due for ${p?.name ?? 'a signed player'} — file the outcome report.`, f.id);

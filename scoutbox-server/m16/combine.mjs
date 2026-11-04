@@ -33,7 +33,7 @@ const PROD_PROVIDER_ID = 'web_client'; // the best honest production provider he
 
 export function registerCombine(ctx) {
   const {
-    db, playerRouter, guardianRouter, orgRouter, adminRouter, nextId,
+    db, byId, playerRouter, guardianRouter, orgRouter, adminRouter, nextId,
     persistNow, notify, ledgerAppend, broadcast, findPlayer, isBlocked,
     moderateOrRefuse, vmetric, testProviderEnabled,
   } = ctx;
@@ -488,8 +488,8 @@ export function registerCombine(ctx) {
       if (requiredDone(r).size >= r.protocolIds.length) {
         r.state = 'completed'; r.completedAt = Date.now();
         vmetric('combine_request_completed');
-        const org = db.orgs.find((o) => o.id === r.orgId);
-        const lead = db.users.find((u) => u.id === r.requestedBy?.userId && !u.removedAt);
+        const org = byId.org(r.orgId);
+        const lead = byId.user(r.requestedBy?.userId, (u) => !u.removedAt);
         if (lead) notify({ kind: 'org_user', id: lead.id }, 'combine', `${player.name} completed your Club Combine${r.title ? `: ${r.title}` : ''}.`, r.id);
         ledgerAppend?.({ type: 'combine_request_completed', playerId: player.id, orgId: r.orgId, orgName: org?.name, detail: { requestId: r.id } });
       }

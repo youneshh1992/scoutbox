@@ -74,7 +74,7 @@ export const M21_STORES = Object.freeze([
 
 export function registerDevelopment(ctx) {
   const {
-    db, nextId, persistNow, notify, broadcast, findPlayer, orgCanSee, isLead,
+    db, byId, nextId, persistNow, notify, broadcast, findPlayer, orgCanSee, isLead,
     orgRouter, playerRouter, guardianRouter, audit, isAdult,
     recruitmentReads: reads, // §4.3 step 2: the trials are read through SQL
   } = ctx;
@@ -663,7 +663,7 @@ export function registerDevelopment(ctx) {
       if (limited('development_plan_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_plan_write'));
 
       const orgId = String(req.body?.orgId ?? '');
-      const org = db.orgs.find((o) => o.id === orgId);
+      const org = byId.org(orgId);
       // The organisation must be one that can actually see this player.
       // Sharing with a club that cannot see the player would create access
       // the visibility rules deny everywhere else.

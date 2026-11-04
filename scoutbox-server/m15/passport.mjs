@@ -23,7 +23,7 @@ const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
 
 export function registerPassportCore(ctx) {
   const {
-    db, playerRouter, guardianRouter, orgRouter, adminRouter,
+    db, byId, playerRouter, guardianRouter, orgRouter, adminRouter,
     nextId, persist, persistNow, notify, ledgerAppend, findPlayer, isBlocked,
     moderateOrRefuse, vmetric,
   } = ctx;
@@ -33,7 +33,7 @@ export function registerPassportCore(ctx) {
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
-  const orgOf = (id) => db.orgs.find((o) => o.id === id) ?? null;
+  const orgOf = (id) => byId.org(id) ?? null;
   const prefsFor = (playerId) => {
     let p = db.passportPrefs.find((x) => x.playerId === playerId);
     if (!p) {
@@ -145,7 +145,7 @@ export function registerPassportCore(ctx) {
         startAt: a.startAt ?? null, endAt: a.endAt ?? null, confirmedAt: a.confirmedAt ?? null,
         agentUserId: a.agentUserId,
         agentDisplayName: (db.agentProfiles ?? []).find((x) => x && x.userId === a.agentUserId)?.displayName
-          ?? db.users.find((u) => u && u.id === a.agentUserId)?.name ?? null,
+          ?? byId.user(a.agentUserId)?.name ?? null,
         agencyName: orgOf(a.agencyOrgId)?.name ?? null,
       }));
     const achievements = db.passportAchievements.filter((a) => a.playerId === pid);

@@ -27,7 +27,7 @@ const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened
 
 export function registerDelivery(ctx) {
   const {
-    db, users, notifications, dispatches, outbox, safetyAudit, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+    db, byId, users, notifications, dispatches, outbox, safetyAudit, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
     nextId, persist, persistNow, notify, findPlayer, isAdult,
     signBody, timingSafeEq, paginate,
   } = ctx;
@@ -86,10 +86,10 @@ export function registerDelivery(ctx) {
         dests.push({ channel: 'email', to: null, skip: 'no email on record' });
       }
     } else if (a.kind === 'guardian') {
-      const g = db.guardians.find((x) => x.id === a.id);
+      const g = byId.guardian(a.id);
       dests.push({ channel: 'email', to: g?.email ?? null, skip: g?.email ? undefined : 'no email on record' });
     } else if (a.kind === 'org_user') {
-      const u = db.users.find((x) => x.id === a.id);
+      const u = byId.user(a.id);
       if (u?.deliveryPrefs?.channels?.email === false) dests.push({ channel: 'email', to: null, skip: 'channel disabled by user preference' });
       else dests.push({ channel: 'email', to: u?.email ?? null, skip: u?.email ? undefined : 'no email on record' });
     }
@@ -153,7 +153,7 @@ export function registerDelivery(ctx) {
       } else if (sends >= MAX_ATTEMPTS) {
         dispatches.patch(d.id, { status: 'failed', failedAt: Date.now(), failReason: result.error });
         opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'delivery_failed', detail: { dispatchId: d.id, channel: d.channel } });
-        ctx.emitWebhook?.(d.audience.kind === 'org_user' ? (db.users.find((u) => u.id === d.audience.id)?.orgId ?? null) : null, 'delivery.failed', { dispatchId: d.id });
+        ctx.emitWebhook?.(d.audience.kind === 'org_user' ? (byId.user(d.audience.id)?.orgId ?? null) : null, 'delivery.failed', { dispatchId: d.id });
       } else {
         dispatches.patch(d.id, { status: 'retrying', nextAt: Date.now() + RETRY_MS[sends] });
       }

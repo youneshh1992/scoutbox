@@ -116,6 +116,13 @@ module registration → integrity report → listen.
   at once. A route that edits a record and then reads it must use the record `update`
   returns; the one it held before is the old version. Don't call `update` for a record from
   inside its own `update` (it is refused): make the second change after the first returns.
+- **Look records up by id through the index.** Every module context carries `byId`
+  (`domains/platform/lookups.mjs`): `byId.player(id)`, `byId.guardian(id)`, `byId.user(id)`,
+  `byId.org(id)` and `byId.mediaOwner(clipId)`, each answering the record view or null, with an
+  optional further condition (`byId.user(id, (u) => u.orgId === org.id && !u.removedAt)`). Never
+  `db.players.find((p) => p.id === id)`: that scans the whole collection on every call. Players
+  and guardians are read-only views; every change is a repository operation, written at once
+  (S4a-E), so a save has nothing of theirs to find.
 - **Read SQL where the domain has no view.** Since §4.3 step 2 a domain whose reads moved
   to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
   repository). The whole recruitment domain (cases and Room records, requests, trials,

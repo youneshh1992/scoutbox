@@ -285,7 +285,6 @@ test('repository: addItem / setItems / patchItem are the one write path — a ro
   assert.equal(p.media, media, 'same array object'); assert.equal(media.length, 1); assert.equal(view[0].title, 'First clip');
   assert.equal(second.prepare("SELECT title FROM player_media WHERE id = 'med-a1'").get().title, 'First clip', 'committed before the call returned');
   assert.equal(t.raw("SELECT facets_json FROM players WHERE id = 'pl-adult'").facets_json, facetsBefore, 'the key existed: the facets are untouched');
-  assert.equal(t.players.uncommitted(), 0);
   assert.throws(() => { view.push({}); }, /addItem/); assert.throws(() => { view[0].views = 1; }, /addItem/); assert.throws(() => { p.media = []; }, /identity repositories/);
   // A record created without the key has the array, empty; an item's unknown field is not stored anywhere.
   assert.deepEqual([...t.players.byId('pl-nokeys').drillResults], []);
@@ -293,7 +292,6 @@ test('repository: addItem / setItems / patchItem are the one write path — a ro
   t.players.addItem('pl-nokeys', 'drillResults', { id: 'dr-n1', drillId: 'd', metric: 'm', value: 1, verified: false, ts: NOW, coachNote: 'junk' });
   assert.equal(t.players.byId('pl-nokeys').drillResults.length, 1); assert.equal('coachNote' in t.players.byId('pl-nokeys').drillResults[0], false, 'not kept in memory');
   assert.equal(t.raw("SELECT facets_json FROM players WHERE id = 'pl-nokeys'").facets_json, nkFacets, 'the facets are untouched');
-  assert.equal(t.players.uncommitted(), 0);
   // patchItem: a clip's views and tags; the item keeps its identity.
   const clip = t.players.byId('pl-rich').media[0]; const richMedia = t.players.byId('pl-rich').media;
   t.players.patchItem('pl-rich', 'media', { id: 'med-r1' }, { views: 4, tags: { pace: 3, vision: 1, composure: 1 } });
@@ -534,7 +532,6 @@ test('review of 132eda2, finding 2: the derived trialReports follows the trials 
     assert.deepEqual(orgPlayerView(v, { id: 'org-other', level: 'pro', location: null }, helpers).trialReports, [], `${k}: another club sees none`);
     assert.throws(() => { v.trialReports.push({}); }, /derived from the trials collection/, `${k}: read-only`);
   }
-  assert.equal(t.players.uncommitted(), 0, 'a report is not a facet change: nothing to flush');
   t.store.save(t.snapshot());
   const m = (id) => t.facets(id).__meta;
   assert.equal(m('pl-nokeys').order.includes('trialReports'), false, 'absent: the shape metadata still says absent'); assert.ok(m('pl-null').nulls.includes('trialReports'), 'null: still null'); assert.ok(m('pl-empty').order.includes('trialReports') && !m('pl-empty').nulls.includes('trialReports'), 'array: still an array');

@@ -101,6 +101,7 @@ import {
 } from './domain.mjs';
 import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIanaZone, localParts } from './temporal.mjs';
 import { readPage, sendPageError } from './domains/platform/paging.mjs';
+import { createLookups } from './domains/platform/lookups.mjs';
 
 /**
  * M23 P5.7: a DATE_ONLY a client typed (open day, match day, friendly,
@@ -205,6 +206,9 @@ const { users, sessions, orgs, players, guardians, identity, mediaDeletions, cod
 // A record the caller may use, or null: `onlyIf(repo.byId(id), (r) => r.orgId === orgId)`.
 const onlyIf = (record, ok) => (record && ok(record) ? record : null);
 const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads, ...recruitment.reads, ...recruitmentCases.reads });
+// Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
+// every module context as `byId` (`byId.player(id)`, `byId.org(id)`, …; null when there is none).
+const byId = createLookups({ players, guardians, users, orgs });
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -251,31 +255,9 @@ if (!integrity.stores.ok) {
   console.error(`INTEGRITY STORE_MISSING ${integrity.stores.missing.join(', ')} — required collection(s) absent after migration; nothing was repaired.`);
 }
 
-// Normalise media items (older shapes) + load the seeded sample clips. Since
-// S5 the media items and the season history are rows of their tables: a
-// default is written through the repository only where the stored item lacks
-// the field (as the in-place `??=` did: absent or null), one row per item; the
-// column-backed defaults (notificationPrefs, firstTeamSeeker, programme) go
-// through the repository the same way, only where the stored record lacks the
-// field — an existing value, null included, is left alone.
-for (const p of [...db.players]) {
-  for (const m of [...(p.media ?? [])]) {
-    const patch = {};
-    if (m.views == null) patch.views = 0;
-    if (m.tags == null) patch.tags = {};          // tag → count (from scouts, aggregated anonymously)
-    if (m.verifiedClip == null) patch.verifiedClip = null; // attendance id when footage is provably from a confirmed fixture
-    if (m.url == null) patch.url = null;
-    if (Object.keys(patch).length) players.patchItem(p.id, 'media', { id: m.id }, patch);
-  }
-  if (p.seasonHistory == null) players.setItems(p.id, 'seasonHistory', []);
-}
-for (const p of [...db.players]) {
-  const patch = {};
-  if (p.notificationPrefs === undefined) patch.notificationPrefs = null;
-  if (p.firstTeamSeeker === undefined) patch.firstTeamSeeker = false;
-  if (p.programme === undefined) patch.programme = null;
-  if (Object.keys(patch).length) players.update(p.id, patch);
-}
+// Player defaults (firstTeamSeeker, notificationPrefs, programme) are set when a player is created
+// (repositories/identity.mjs PLAYER_CREATION_DEFAULTS); a media item reads back from its row with every field. No boot
+// pass over the players (migration.md §4.3.1).
 db.savedSearches ??= [];
 // db.signings: no db collection since §4.3 step 2 — the signings repository's queries (signingsFollowUps.signings.*).
 // db.pairingCodes: the data layer's hash-free read-only view since S6a (rows of pairing_codes; repositories/oneTimeCodes.mjs) — never assigned here.
@@ -341,7 +323,7 @@ if (!snapshotLoaded) {
   for (const sample of SAMPLE_CLIPS) {
     try {
       const data = fs.readFileSync(path.join(ASSETS_DIR, sample.file));
-      const player = db.players.find((p) => p.id === sample.playerId);
+      const player = byId.player(sample.playerId);
       const media = player?.media.find((m) => m.title === sample.title);
       if (!media) continue;
       storage.saveDataUrl(media.id, `data:video/webm;base64,${data.toString('base64')}`);
@@ -502,7 +484,7 @@ const EVENT_LOG_CAP = 500;
 function sseIdentityFor(session) {
   if (!session) return null;
   if (session.kind === 'org') {
-    const org = db.orgs.find((o) => o.id === session.refId);
+    const org = byId.org(session.refId);
     return org && !org.suspended ? { kind: 'org', orgId: org.id, userId: session.userId } : null;
   }
   if (session.kind === 'player') {
@@ -510,7 +492,7 @@ function sseIdentityFor(session) {
     return p ? { kind: 'player', playerId: p.id } : null;
   }
   if (session.kind === 'guardian') {
-    const g = db.guardians.find((x) => x.id === session.refId);
+    const g = byId.guardian(session.refId);
     return g ? { kind: 'guardian', guardianId: g.id } : null;
   }
   return null;
@@ -520,7 +502,7 @@ function sseIdentityFor(session) {
 // captured at connect never grandfathers a suspended org or a lifted
 // entitlement into continuing to receive events.
 function liveOrg(identity) {
-  const org = db.orgs.find((o) => o.id === identity.orgId);
+  const org = byId.org(identity.orgId);
   return org && !org.suspended ? org : null;
 }
 
@@ -535,7 +517,7 @@ function shouldDeliver(identity, event, payload) {
   if (identity.kind === 'org' && !org) return false;
   if (identity.kind === 'org' && identity.userId) {
     // Staff removal takes effect on open streams too, not just reconnects.
-    const u = db.users.find((x) => x.id === identity.userId);
+    const u = byId.user(identity.userId);
     if (!u || u.removedAt) return false;
   }
   if (event === 'typing' || event === 'messages') {
@@ -700,7 +682,7 @@ function orgSafe(o) {
 }
 
 function findPlayer(id) {
-  return db.players.find((p) => p.id === id);
+  return byId.player(id);
 }
 
 function ledgerAppend(entry) {
@@ -841,7 +823,7 @@ function pushDeferred(audience, now = new Date()) {
     prefs = p?.notificationPrefs;
     minor = p ? !isAdult(p) : false;
   } else if (audience.kind === 'guardian') {
-    prefs = db.guardians.find((g) => g.id === audience.id)?.notificationPrefs;
+    prefs = byId.guardian(audience.id)?.notificationPrefs;
   }
   const zone = validateIanaZone(prefs?.timezone).ok ? prefs.timezone : PLATFORM_HOME_ZONE;
   const wall = localParts(now.getTime(), zone);
@@ -1061,7 +1043,7 @@ function channelClosedForOrg(channel, org) {
 }
 
 function channelClosedForCounterparty(channel, playerId) {
-  const org = db.orgs.find((o) => o.id === channel.orgId);
+  const org = byId.org(channel.orgId);
   if (!org) return { error: 'CHANNEL_CLOSED', message: 'This organisation no longer exists.' };
   if (org.suspended) return { error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review — the thread is paused.' };
   if (isBlocked(playerId, org.id)) return { error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block to continue the conversation.' };
@@ -1379,7 +1361,7 @@ app.post('/auth/guardian/signup', async (req, res) => {
 
 app.post('/auth/guardian/verify-email', (req, res) => {
   const { guardianId, code } = req.body || {};
-  const g = db.guardians.find((x) => x.id === guardianId);
+  const g = byId.guardian(guardianId);
   if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
   if (g.emailVerified) return res.json({ emailVerified: true });
   if (!code || !g.emailCodeHash || !timingSafeEqStr(hashCode(code), g.emailCodeHash)) {
@@ -1418,7 +1400,7 @@ app.post('/auth/guardian/login', (req, res) => {
 
 function guardianAuth(req, res, next) {
   const session = sessionFor(req);
-  const g = session?.kind === 'guardian' ? db.guardians.find((x) => x.id === session.refId) : null;
+  const g = session?.kind === 'guardian' ? byId.guardian(session.refId) : null;
   if (!g) return res.status(401).json({ error: 'GUARDIAN_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
   req.guardian = g;
   next();
@@ -1719,11 +1701,11 @@ guardianRouter.post('/coguardian', (req, res) => {
     childIds: [...req.guardian.childIds],
     coGuardianOf: req.guardian.id,
   };
-  // One unit of work: the co-guardian's row and its co links (one per child), and the primary's coGuardians facet.
+  // One unit of work: the co-guardian's row and its co links (one per child), and the primary's coGuardians list.
   try {
     unit(() => {
       guardians.insert(co);
-      req.guardian.coGuardians = [...(req.guardian.coGuardians ?? []), { id: co.id, name, email }];
+      guardians.update(req.guardian.id, { coGuardians: [...(req.guardian.coGuardians ?? []), { id: co.id, name, email }] });
     });
   } catch (e) {
     if (/EMAIL_IN_USE/.test(String(e?.message))) return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists.' });
@@ -1775,7 +1757,7 @@ guardianRouter.post('/block', (req, res) => {
   if (!optText(reason)) return badField(res, 'reason');
   if (!db.orgs.some((o) => o.id === orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   safetyAudit.blocks.append({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
-  ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'guardian' });
+  ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: byId.org(orgId)?.name ?? orgId, userId: null, scoutName: 'guardian' });
   broadcast('players');
   res.status(201).json({ blocked: true });
 });
@@ -1814,7 +1796,7 @@ function handleReport(req, res, actor) {
     // Immediate suspension pending review: the org loses access to the
     // reporter's players and its pending requests to them freeze.
     const playerIds = actor.by === 'guardian'
-      ? db.guardians.find((g) => g.id === actor.byId)?.childIds ?? []
+      ? byId.guardian(actor.byId)?.childIds ?? []
       : actor.by === 'player' ? [actor.byId] : [];
     unit(() => {
       for (const pid of playerIds) {
@@ -1896,7 +1878,7 @@ app.post('/auth/org/register-grassroots', (req, res) => {
 app.post('/auth/org/login', (req, res) => {
   const { orgId, scoutName, role, platform } = req.body || {};
   if (loginLockedOut(res, `org:${orgId}`)) return;
-  const org = db.orgs.find((o) => o.id === orgId);
+  const org = byId.org(orgId);
   if (!org) { noteLoginFailure(`org:${orgId}`); return res.status(404).json({ error: 'ORG_NOT_FOUND' }); }
   // Hard platform separation: a grassroots club exists only on ScoutBox
   // Grassroots; every other org exists only on ScoutBox. No crossover.
@@ -2021,7 +2003,7 @@ app.post('/auth/org/login', (req, res) => {
 function orgAuth(req, res, next) {
   const session = sessionFor(req);
   if (session?.kind !== 'org') return res.status(401).json({ error: 'ORG_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
-  const org = db.orgs.find((o) => o.id === session.refId);
+  const org = byId.org(session.refId);
   if (!org) return res.status(401).json({ error: 'ORG_AUTH_REQUIRED' });
   const user = users.byId(session.userId);
   if (!user || user.orgId !== org.id) return res.status(401).json({ error: 'USER_UNKNOWN' });
@@ -2568,7 +2550,7 @@ function matchesSearch(view, f) {
 // Called whenever a player joins: alert every saved search that matches.
 function checkSavedSearches(player) {
   for (const ss of db.savedSearches) {
-    const org = db.orgs.find((o) => o.id === ss.orgId);
+    const org = byId.org(ss.orgId);
     if (!org) continue;
     const view = playerViewForOrg(player, org);
     if (view && matchesSearch(view, ss.filters ?? {})) {
@@ -3084,7 +3066,7 @@ function pathwayRecord(org) {
     ...db.openTrials.filter((t) => t.orgId === org.id).flatMap((t) => (t.registrations ?? []).filter((r) => r.playerId === pid).map((r) => r.ts)),
   );
   const progressed = [...involvedIds].filter((pid) => {
-    const upward = signingsFollowUps.signings.forPlayer(pid).find((sg) => sg.orgId !== org.id && (db.orgs.find((o) => o.id === sg.orgId)?.level ?? '') !== 'grassroots');
+    const upward = signingsFollowUps.signings.forPlayer(pid).find((sg) => sg.orgId !== org.id && (byId.org(sg.orgId)?.level ?? '') !== 'grassroots');
     return upward && upward.ts > firstInvolvement(pid);
   });
   return { progressed: progressed.length, pathwayClub: progressed.length >= 1 };
@@ -3145,10 +3127,10 @@ orgRouter.get('/friendlies', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const nearby = db.friendlies.filter((f) => {
     if (f.orgId === req.org.id) return true;
-    const other = db.orgs.find((o) => o.id === f.orgId);
+    const other = byId.org(f.orgId);
     return other?.location && req.org.location && haversineKm(other.location, req.org.location) <= GRASSROOTS_RADIUS_KM;
   }).map((f) => {
-    const other = db.orgs.find((o) => o.id === f.orgId);
+    const other = byId.org(f.orgId);
     return {
       ...f,
       mine: f.orgId === req.org.id,
@@ -3356,7 +3338,7 @@ playerRouter.get('/me', (req, res) => {
 playerRouter.post('/aging-up/complete', (req, res) => {
   if (!isAdult(req.player)) return res.status(403).json({ error: 'STILL_A_MINOR', message: 'The transition unlocks on your 18th birthday (age of majority in your country).' });
   if (!req.player.guardianId) return res.status(400).json({ error: 'ALREADY_OWNED', message: 'You already own this account.' });
-  const guardian = db.guardians.find((g) => g.id === req.player.guardianId);
+  const guardian = byId.guardian(req.player.guardianId);
   // One unit of work: the primary link goes on both sides (players.ageUp), the
   // timeline entry, the ledger row and the two notifications commit together;
   // the pushes and the broadcast go out after COMMIT.
@@ -3948,7 +3930,7 @@ playerRouter.post('/open-trials/:id/register', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
   const trial = db.openTrials.find((t) => t.id === req.params.id);
   if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
-  const org = db.orgs.find((o) => o.id === trial.orgId);
+  const org = byId.org(trial.orgId);
   if (!org || !req.player.location || !org.location || haversineKm(org.location, req.player.location) > GRASSROOTS_RADIUS_KM) {
     return res.status(403).json({ error: 'OUT_OF_RADIUS', message: 'Open days are local — this one is beyond 50km of you.' });
   }
@@ -4044,7 +4026,7 @@ playerRouter.post('/block', (req, res) => {
   if (!reqText(orgId, 200)) return badField(res, 'orgId');
   if (!optText(reason)) return badField(res, 'reason');
   safetyAudit.blocks.append({ id: nextId('blk'), playerId: req.player.id, orgId, by: 'player', reason: reason || '', ts: Date.now() });
-  ledgerAppend({ type: 'org_blocked_by_player', playerId: req.player.id, orgId, orgName: db.orgs.find((o) => o.id === orgId)?.name ?? orgId, userId: null, scoutName: 'player' });
+  ledgerAppend({ type: 'org_blocked_by_player', playerId: req.player.id, orgId, orgName: byId.org(orgId)?.name ?? orgId, userId: null, scoutName: 'player' });
   broadcast('players');
   res.status(201).json({ blocked: true });
 });
@@ -4117,7 +4099,7 @@ guardianRouter.get('/children/:id/open-trials', (req, res) => {
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
   if (!child.location) return res.json({ openTrials: [], note: 'Set a location on the profile to see local open days.' });
   const list = db.openTrials
-    .map((t) => ({ t, org: db.orgs.find((o) => o.id === t.orgId) }))
+    .map((t) => ({ t, org: byId.org(t.orgId) }))
     .filter(({ org }) => org?.level === 'grassroots' && org.location && haversineKm(org.location, child.location) <= GRASSROOTS_RADIUS_KM)
     .filter(({ org }) => visibleToOrg(child, org)) // only clubs that may see the child at all
     .map(({ t, org }) => ({
@@ -4135,7 +4117,7 @@ guardianRouter.post('/open-trials/:id/register', (req, res) => {
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
   const trial = db.openTrials.find((t) => t.id === req.params.id);
   if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
-  const org = db.orgs.find((o) => o.id === trial.orgId);
+  const org = byId.org(trial.orgId);
   if (!org || !visibleToOrg(child, org)) {
     return res.status(403).json({ error: 'VERIFIED_CLUBS_ONLY', message: 'Only verified, local clubs can receive an under-18 registration.' });
   }
@@ -4517,7 +4499,7 @@ adminRouter.post('/reports/:id/resolve', (req, res) => {
   // `report` reflects the change; the row lands in the persist() below).
   safetyAudit.reports.patch(report.id, { status: action === 'dismiss' ? 'resolved' : 'resolved', resolvedAt: Date.now(), outcome: String(outcome).trim() });
   if (action === 'suspend_org' && report.targetOrgId) {
-    const org = db.orgs.find((o) => o.id === report.targetOrgId);
+    const org = byId.org(report.targetOrgId);
     if (org) orgs.update(org.id, { suspended: true });
   }
   const audienceKind = report.by === 'org_user' ? 'org_user' : report.by;
@@ -4534,7 +4516,7 @@ adminRouter.get('/clubs', (_req, res) => {
 // rotates) the club password. This is how real Pro and Grassroots users sign
 // in when dev shortcuts are off.
 adminRouter.post('/clubs/:id/credentials', (req, res) => {
-  const org = db.orgs.find((o) => o.id === req.params.id);
+  const org = byId.org(req.params.id);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   const { password } = req.body || {};
   if (!password || String(password).length < 8) {
@@ -4546,7 +4528,7 @@ adminRouter.post('/clubs/:id/credentials', (req, res) => {
 });
 
 adminRouter.post('/clubs/:id/verification', (req, res) => {
-  const org = db.orgs.find((o) => o.id === req.params.id);
+  const org = byId.org(req.params.id);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   const { verified, safeguardingContractSigned, verifiedDomain, suspended } = req.body || {};
   orgs.update(org.id, {
@@ -4569,7 +4551,7 @@ adminRouter.get('/guardians', (_req, res) => {
 });
 
 adminRouter.post('/guardians/:id/idv', (req, res) => {
-  const g = db.guardians.find((x) => x.id === req.params.id);
+  const g = byId.guardian(req.params.id);
   if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
   const approved = !!req.body?.approved;
   // One unit of work: the column and the review-queue row commit together
@@ -4606,12 +4588,12 @@ adminRouter.get('/channels', (_req, res) => res.json(db.channels.map((c) => ({ .
 // a suspension, or a radius/level change takes effect on the next byte.
 function sessionMayAccessMedia(session, mediaId) {
   if (!session) return false;
-  const owner = db.players.find((p) => p.media.some((m) => m.id === mediaId));
+  const owner = byId.mediaOwner(mediaId);
   if (!owner) return false;
   if (session.kind === 'player') return owner.id === session.refId;
   if (session.kind === 'guardian') return owner.guardianId === session.refId;
   if (session.kind === 'org') {
-    const org = db.orgs.find((o) => o.id === session.refId);
+    const org = byId.org(session.refId);
     return !!org && !org.suspended && visibleToOrg(owner, org) && !isBlocked(owner.id, org.id);
   }
   return false;
@@ -4661,7 +4643,7 @@ function revokeOrgUserAccess(userId) {
 }
 
 registerM12({
-  db, recruitmentReads, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, recruitmentReads, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
   signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
@@ -4674,7 +4656,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4688,7 +4670,7 @@ const m13Ctx = registerM13({
 // under m14/. Returns its context so the legacy admin verification route can
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
-  db, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4700,14 +4682,14 @@ const m14Ctx = registerM14({
 // write to it (M15 preferences) and the system that reads it (M18 Second Look),
 // so a change carries the clock of the moment it happened rather than one
 // borrowed from a record describing a different event.
-const srcCtx = { db, nextId, persistNow, safetyAudit }; // S6b: source changes are rows of source_changes, written through the repository
+const srcCtx = { db, byId, nextId, persistNow, safetyAudit }; // S6b: source changes are rows of source_changes, written through the repository
 registerSourceChanges(srcCtx);
 
 // M18.2 — preferences, audit and fault injection. Registered here, after the
 // routers exist and before the milestone modules that emit notifications, so
 // the preference gate is in place for every notify() call that follows.
 m182Ctx = {
-  db, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
+  db, byId, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
   // The same standing-gate composition M12's shared helpers use.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
@@ -4729,7 +4711,7 @@ const rateLimit = createRateLimiter();
 // records. Registered after M14 so it can read verification stores; it
 // receives the same context and adds no new authorization surface.
 const m15Ctx = registerM15({
-  db, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
@@ -4737,7 +4719,7 @@ const m15Ctx = registerM15({
 });
 const m16Ctx = registerM16({
   rateLimit,
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   players, unit, // S5: a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
@@ -4748,7 +4730,7 @@ const m16Ctx = registerM16({
 // Registered last because it consumes all of them; it adds no storage and no
 // authorization surface (a Trust Score grants nothing).
 const m162Ctx = registerM162({
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
@@ -4763,7 +4745,7 @@ const m162Ctx = registerM162({
 const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
-  db, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
@@ -4796,7 +4778,7 @@ const m17Ctx = registerM17({
 // M18 registers no player, guardian or public route at all.
 const m18Ctx = registerM18({
   rateLimit,
-  db, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, sessionFor, mailer, orgSafe, recordActivity, revokeOrgUserAccess,

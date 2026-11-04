@@ -40,7 +40,7 @@ export function parseCsv(text) {
 
 export function registerImports(ctx) {
   const {
-    db, orgRouter, adminRouter, app, nextId, persist, persistNow, notify,
+    db, byId, orgRouter, adminRouter, app, nextId, persist, persistNow, notify,
     requireLead, isLead, orgCanSee, paginate, histAppend, webhookUrlProblem,
     signBody, timingSafeEq, findPlayer, players, unit, safetyAudit,
   } = ctx;
@@ -291,7 +291,7 @@ export function registerImports(ctx) {
       if (!k) return res.status(401).json({ error: 'API_KEY_INVALID' });
       if (!k.scopes.includes(requiredScope)) return res.status(403).json({ error: 'SCOPE_MISSING', required: requiredScope, held: k.scopes });
       k.lastUsedAt = Date.now();
-      req.apiOrg = db.orgs.find((o) => o.id === k.orgId);
+      req.apiOrg = byId.org(k.orgId);
       if (!req.apiOrg || req.apiOrg.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
       next();
     };

@@ -11,11 +11,11 @@ import { readPage, sendPageError } from '../domains/platform/paging.mjs';
 
 export function registerJourneys(ctx) {
   const {
-    db, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    db, byId, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, requireLead, isLead, moderateOrRefuse, isAdult,
     checkEligibility, distanceBand, guardianOwnsChild, recordActivity, DRILLS,
-    players, unit, recruitment,
+    players, users, unit, recruitment,
   } = ctx;
   // S8a: a trial-day change is an explicit write of the trial (recruitment.trials.update); the records the views hand out are read-only.
   const trials = recruitment?.trials;
@@ -93,7 +93,7 @@ export function registerJourneys(ctx) {
     const o = db.opportunities.find((x) => x.id === req.params.id);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
     if (!oppOpen(o)) return res.status(409).json({ error: 'OPPORTUNITY_CLOSED' });
-    const org = db.orgs.find((x) => x.id === o.orgId);
+    const org = byId.org(o.orgId);
     if (!org || !orgCanSee(org, player)) return res.status(403).json({ error: 'NOT_ELIGIBLE', reasons: ['this club cannot work with this profile'] });
     const { eligible, reasons } = checkEligibility(o.eligibility, player, org);
     if (!eligible) return res.status(403).json({ error: 'NOT_ELIGIBLE', reasons });
@@ -118,7 +118,7 @@ export function registerJourneys(ctx) {
     broadcast('applications', { playerId: player.id });
     res.status(201).json({ application: appn });
   }
-  const usersOf = (orgId) => db.users.filter((u) => u.orgId === orgId && !u.removedAt);
+  const usersOf = (orgId) => users.listByOrg(orgId).filter((u) => !u.removedAt);
 
   playerRouter.post('/opportunities/:id/apply', (req, res) => {
     if (req.playerIsMinor) {
@@ -275,7 +275,7 @@ export function registerJourneys(ctx) {
 
   function campaignsFor(player) {
     return db.campaigns.filter(campOpen).map((c) => {
-      const org = db.orgs.find((o) => o.id === c.orgId);
+      const org = byId.org(c.orgId);
       if (!org || org.suspended || !orgCanSee(org, player)) return null;
       const { eligible } = checkEligibility(c.eligibility, player, org);
       if (!eligible) return null;
@@ -311,7 +311,7 @@ export function registerJourneys(ctx) {
     const camp = db.campaigns.find((c) => c.id === req.params.id);
     if (!camp) return res.status(404).json({ error: 'CAMPAIGN_NOT_FOUND' });
     if (!campOpen(camp)) return res.status(409).json({ error: 'CAMPAIGN_CLOSED' });
-    const org = db.orgs.find((o) => o.id === camp.orgId);
+    const org = byId.org(camp.orgId);
     const { eligible, reasons } = checkEligibility(camp.eligibility, player, org);
     if (!org || !orgCanSee(org, player) || !eligible) return res.status(403).json({ error: 'NOT_ELIGIBLE', reasons: reasons ?? [] });
     let sub = db.campaignSubmissions.find((s) => s.campaignId === camp.id && s.playerId === player.id);
@@ -409,7 +409,7 @@ export function registerJourneys(ctx) {
     }
     const rec = {
       id: nextId('obj'), playerId: player.id, sourceFeedbackId: a.id, orgId: a.orgId,
-      reviewer: { userId: a.publishedFeedback.byUserId, name: a.publishedFeedback.byName, orgName: db.orgs.find((o) => o.id === a.orgId)?.name },
+      reviewer: { userId: a.publishedFeedback.byUserId, name: a.publishedFeedback.byName, orgName: byId.org(a.orgId)?.name },
       objectives: objectives.map((o) => ({
         id: nextId('objx'), text: String(o.text ?? '').slice(0, 200),
         exerciseRefs: Array.isArray(o.exerciseRefs) ? o.exerciseRefs.slice(0, 4) : [],

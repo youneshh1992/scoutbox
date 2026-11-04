@@ -11,7 +11,7 @@ const CLAIM_TYPES = ['statistic', 'attendance', 'assessment_result', 'reference'
 
 export function registerPassport(ctx) {
   const {
-    db, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    db, byId, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, guardianOwnsChild, freshness, activeAffiliation,
     moderateOrRefuse, isAdult,
@@ -403,7 +403,7 @@ export function registerPassport(ctx) {
     invite.status = accept ? 'approved' : 'declined';
     invite.respondedAt = Date.now();
     if (accept) {
-      const org = db.orgs.find((o) => o.id === invite.orgId);
+      const org = byId.org(invite.orgId);
       org.squad ??= [];
       if (!org.squad.some((s) => s.playerId === invite.playerId)) {
         org.squad.push({ id: nextId('sq'), playerId: invite.playerId, name: invite.playerName, source: 'invite_approved', approvedBy: approverLabel, addedAt: Date.now() });

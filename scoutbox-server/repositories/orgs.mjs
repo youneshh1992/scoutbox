@@ -294,6 +294,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
   const records = [];                 // plain record objects (scalars + facets), insertion order
   const proxies = [];                 // the view records, same order
   const byIdMap = new Map();          // id → plain record
+  const viewById = new Map();         // id → its view (records[i] ↔ proxies[i]), so a lookup by id never scans
   const committedFacets = new Map();  // id → facets_json as last COMMITTED, for change detection
   const pendingFacets = new Map();    // id → facets_json written by a flush whose transaction has not committed yet
 
@@ -357,7 +358,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
   const remember = (rec, facetsJson) => {
     records.push(rec); byIdMap.set(rec.id, rec);
     if (inUnit()) pendingFacets.set(rec.id, facetsJson); else committedFacets.set(rec.id, facetsJson);
-    const view = recordView(rec); proxies.push(view); return view;
+    const view = recordView(rec); proxies.push(view); viewById.set(rec.id, view); return view;
   };
   /** `db.orgs`: the records, read-only as an array (push/splice/assignment throw); each element is a record view. */
   const view = markView(new Proxy(proxies, {
@@ -367,7 +368,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
   }));
 
   const load = () => {
-    records.length = 0; proxies.length = 0; byIdMap.clear(); committedFacets.clear(); pendingFacets.clear();
+    records.length = 0; proxies.length = 0; byIdMap.clear(); viewById.clear(); committedFacets.clear(); pendingFacets.clear();
     for (const r of stmt.all.all()) remember(fromRow(r), r.facets_json);
   };
   const readInitState = () => {
@@ -398,7 +399,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
 
   const repo = {
     view,
-    byId: (id) => (id && byIdMap.has(id) ? proxies[records.indexOf(byIdMap.get(id))] : null),
+    byId: (id) => (id && viewById.get(id)) || null,
     count: () => records.length,
     cutOver: () => !!stmt.cutover.get(ORGS_CUTOVER_MIGRATION),
     /** `pending` (a first installation that has not been initialised yet) or `done`. */
@@ -494,7 +495,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
       // inside a unit of work, pending until the store reports the commit.
       if (inUnit()) pendingFacets.set(id, row.facets_json);
       else { committedFacets.set(id, row.facets_json); pendingFacets.delete(id); }
-      return proxies[records.indexOf(rec)];
+      return viewById.get(id);
     },
 
     /**
@@ -546,6 +547,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
       restoreGraph(state.graph);
       proxies.length = 0; for (const p of state.proxies) proxies.push(p);
       byIdMap.clear(); for (const [id, rec] of state.byId) byIdMap.set(id, rec);
+      viewById.clear(); records.forEach((rec, i) => viewById.set(rec.id, proxies[i]));
       committedFacets.clear(); for (const [id, json] of state.committed) committedFacets.set(id, json);
       pendingFacets.clear(); for (const [id, json] of state.pending) pendingFacets.set(id, json);
     },

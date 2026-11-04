@@ -12,7 +12,7 @@ import { latestDrill, DRILLS } from './drills.mjs';
 
 export function registerBoxTraining(ctx) {
   const {
-    db, playerRouter, guardianRouter, orgRouter, adminRouter, nextId,
+    db, byId, playerRouter, guardianRouter, orgRouter, adminRouter, nextId,
     persistNow, notify, ledgerAppend, findPlayer, isBlocked, vmetric,
     moderateOrRefuse, broadcast,
   } = ctx;
@@ -167,7 +167,7 @@ export function registerBoxTraining(ctx) {
       if (a.state === 'completed') {
         vmetric('box_assignment_completed');
         const p = findPlayer(a.playerId);
-        const lead = db.users.find((u) => u.id === a.assignedBy.userId && !u.removedAt);
+        const lead = byId.user(a.assignedBy.userId, (u) => !u.removedAt);
         if (lead && p) notify({ kind: 'org_user', id: lead.id }, 'box_cam', `${p.name} completed Box Training: ${latestDrill(a.drillId)?.title ?? a.drillId} (${session.verifiedReps != null ? `${session.verifiedReps} verified` : fmtMs(session.verifiedActiveMs)}).`, a.id);
       }
     } else if (a.state === 'assigned' || a.state === 'accepted') {
@@ -193,7 +193,7 @@ export function registerBoxTraining(ctx) {
       if (c.status !== 'active' || c.endsAt < now) return false;
       if (c.adultOnly && !isAdult(player)) return false;
       if (c.publisher.kind === 'org') {
-        const org = db.orgs.find((o) => o.id === c.publisher.orgId);
+        const org = byId.org(c.publisher.orgId);
         // A challenge NEVER bypasses standing visibility: if the publishing
         // org may not see this player, the player never sees the challenge.
         if (!org || org.suspended || !orgCanSee(org, player)) return false;
@@ -299,7 +299,7 @@ export function registerBoxTraining(ctx) {
     const sessions = db.boxSessions.filter((s) => s.playerId === player.id && TERMINAL_STATES.has(s.status) && !['cancelled', 'invalidated'].includes(s.verificationState));
     return {
       objectives: objectives.map((o) => ({
-        id: o.id, orgId: o.orgId, orgName: db.orgs.find((x) => x.id === o.orgId)?.name ?? null,
+        id: o.id, orgId: o.orgId, orgName: byId.org(o.orgId)?.name ?? null,
         status: o.status, createdAt: o.createdAt,
         objectives: (o.objectives ?? []).map((x) => x.text),
         assignments: assignments.filter((a) => a.objectiveId === o.id).map(assignmentView),

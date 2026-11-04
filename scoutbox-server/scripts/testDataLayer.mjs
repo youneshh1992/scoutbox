@@ -250,7 +250,7 @@ test('attachDataLayer: db.users becomes the repository view and cannot be replac
   // Every core identity table is live (S0–S4a) and the media-deletion queue exists; there is no shadow to report.
   assert.deepEqual(layer.report().tables, ['blocks', 'channels', 'dispatch_attempts', 'dispatches', 'email_challenges', 'guardian_children', 'guardians', 'idv_queue', 'ledger', 'media_deletions', 'message_attachments', 'messages', 'moderation_log', 'notification_pref_categories', 'notification_prefs', 'notifications', 'ops_events', 'org_notes', 'org_users', 'orgs', 'outbox', 'pairing_codes', 'player_activity_log', 'player_attendance', 'player_badges', 'player_drill_results', 'player_drills', 'player_external_ids', 'player_media', 'player_media_tags', 'player_medical_records', 'player_programme_completions', 'player_season_history', 'player_timeline', 'players', 'push_log', 'push_tokens', 'reports', 'sessions', 'source_changes', ...RECRUITMENT_TABLES, ...RECRUITMENT_CASES_TABLES, 'idempotency_keys', ...RECRUITMENT_CONTACTS_OFFERS_TABLES, ...SIGNINGS_FOLLOWUPS_TABLES].sort()); // S8a: the sixteen request and trial tables; S8b: the twenty-five case and room tables and the shared idempotency_keys; S8c: the ten contact and offer tables
   assert.equal('shadow' in layer.report(), false, 'the projection is retired');
-  assert.deepEqual(layer.report().identity, { initState: 'done', uncommittedFacets: 0 });
+  assert.deepEqual(layer.report().identity, { initState: 'done' });
   assert.deepEqual(layer.report().mediaDeletions, { queued: 0, conflicts: 0 });
   for (const name of ['players', 'guardians']) {
     assert.throws(() => { db[name] = []; }, TypeError, `${name} cannot be replaced`);
@@ -285,7 +285,7 @@ test('store (snapshot mode): load merges table-backed collections in from their 
   const tool = openStore(dir);
   const snap = tool.load();
   assert.deepEqual(snap.db.users, [{ id: 'usr-1', orgId: 'o', name: 'A', role: 'Scout', createdAt: 1 }]);
-  assert.deepEqual(snap.db.players, [{ ...PLAYER, media: [], attendance: [], timeline: [], badges: [], drills: [], drillResults: [], activityLog: [], externalIds: [], seasonHistory: [] }]); // every sub-record array is on every record (S5 typed tables)
+  assert.deepEqual(snap.db.players, [{ ...PLAYER, firstTeamSeeker: false, notificationPrefs: null, programme: null, media: [], attendance: [], timeline: [], badges: [], drills: [], drillResults: [], activityLog: [], externalIds: [], seasonHistory: [] }]); // the creation defaults (§4.3.1: set when a player is created, not by a boot pass); every sub-record array is on every record (S5 typed tables)
   assert.deepEqual(snap.db.guardians, []);
   // Writing a changed snapshot lands in the table, not in a blob.
   snap.db.users.push({ id: 'usr-2', orgId: 'o', name: 'B', role: 'Manager', createdAt: 2, mfa: { secretB32: 'S', enabledAt: 3, recoveryHashes: [] } });

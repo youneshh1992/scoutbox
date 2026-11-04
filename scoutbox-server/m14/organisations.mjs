@@ -23,7 +23,7 @@ const AFFILIATION_TYPE = (org) =>
 
 export function registerOrganisationVerification(ctx) {
   const {
-    db, app, orgRouter, playerRouter, guardianRouter, nextId, persist, persistNow,
+    db, byId, app, orgRouter, playerRouter, guardianRouter, nextId, persist, persistNow,
     notify, mailer, idx, verEvent, createClaim, transition, addEvidence,
     storeEvidenceFile, requireVer, vmetric, publicProfileForUser, publicProfileForOrg,
     mintToken, consumeToken, effectiveStatus, orgCanAttest, verLevelFor,
@@ -40,10 +40,10 @@ export function registerOrganisationVerification(ctx) {
 
   const openStates = ['unverified', 'collecting_evidence', 'pending', 'automated_checks_passed', 'requires_human_review'];
   const userClaims = (userId) => idx.claimsFor('user', userId);
-  const orgOf = (id) => db.orgs.find((o) => o.id === id) ?? null;
+  const orgOf = (id) => byId.org(id) ?? null;
   const reviewersOf = (orgId, atLeast = 'verification_reviewer') =>
     db.verAdmins.filter((a) => a.orgId === orgId && a.status === 'active' && verLevelRank(a.level) >= verLevelRank(atLeast))
-      .map((a) => db.users.find((u) => u.id === a.userId && !u.removedAt)).filter(Boolean);
+      .map((a) => byId.user(a.userId, (u) => !u.removedAt)).filter(Boolean);
   const notifyReviewers = (orgId, text, refId) => {
     for (const u of reviewersOf(orgId)) notify({ kind: 'org_user', id: u.id }, 'verification', text, refId);
   };
@@ -331,7 +331,7 @@ export function registerOrganisationVerification(ctx) {
     // status of 'verified' does not count when org standing, account removal
     // or expiry suppresses it at read time.
     const effCurrent = (c) => {
-      const u = db.users.find((x) => x.id === c.subjectId);
+      const u = byId.user(c.subjectId);
       return effectiveStatus(c, { org: req.org, subjectRemoved: !u || !!u.removedAt, now }).current;
     };
     res.json({
@@ -352,7 +352,7 @@ export function registerOrganisationVerification(ctx) {
   // Prepared request rows (§8): identity state, email/domain status, risk
   // flags and history — the admin decides on a PACKAGED case.
   const requestRow = (claim) => {
-    const user = db.users.find((u) => u.id === claim.subjectId);
+    const user = byId.user(claim.subjectId);
     const identity = userClaims(claim.subjectId).find((c) => c.claimType === 'PERSON_IDENTITY');
     return {
       claimId: claim.id, claimType: claim.claimType, pairId: claim.metadata?.pairId ?? null,
@@ -460,7 +460,7 @@ export function registerOrganisationVerification(ctx) {
     if (role) rows = rows.filter((c) => (c.role ?? '').toLowerCase().includes(String(role).toLowerCase()));
     res.json({
       items: rows.map((c) => {
-        const u = db.users.find((x) => x.id === c.subjectId);
+        const u = byId.user(c.subjectId);
         const eff = effectiveStatus(c, { org: req.org });
         return {
           claimId: c.id, person: { id: u?.id, name: u?.name }, claimType: c.claimType, role: c.role,
@@ -581,7 +581,7 @@ export function registerOrganisationVerification(ctx) {
     if (!requireVer(req, res, 'verification_viewer')) return;
     res.json({
       items: db.verAdmins.filter((a) => a.orgId === req.org.id).map((a) => ({
-        ...a, person: { id: a.userId, name: db.users.find((u) => u.id === a.userId)?.name ?? '(removed)' },
+        ...a, person: { id: a.userId, name: byId.user(a.userId)?.name ?? '(removed)' },
       })),
       transfers: db.verRootTransfers?.filter((t) => t.orgId === req.org.id) ?? [],
     });
@@ -597,7 +597,7 @@ export function registerOrganisationVerification(ctx) {
       persistNow();
       return res.status(403).json({ error: 'SELF_PROMOTION_FORBIDDEN', message: 'You cannot change your own verification authority.' });
     }
-    const target = db.users.find((u) => u.id === userId && u.orgId === req.org.id && !u.removedAt);
+    const target = byId.user(userId, (u) => u.orgId === req.org.id && !u.removedAt);
     if (!target) return res.status(404).json({ error: 'USER_NOT_FOUND' });
     if (level === 'verification_root_admin') {
       // §28 dual control: a second root admin (or Trust & Safety) must approve.
@@ -732,7 +732,7 @@ export function registerOrganisationVerification(ctx) {
     return acceptInvite(res, req.body?.code, req.player, null, req.body?.email ?? null);
   });
   guardianRouter.post('/invites/accept', (req, res) => {
-    const child = db.players.find((p) => p.id === req.body?.childId && req.guardian.childIds.includes(p.id));
+    const child = byId.player(req.body?.childId, (p) => req.guardian.childIds.includes(p.id));
     if (!child) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
     return acceptInvite(res, req.body?.code, child, req.guardian);
   });

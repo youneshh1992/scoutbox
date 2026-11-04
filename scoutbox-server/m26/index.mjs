@@ -57,7 +57,7 @@ const HONEST_TRANSACTION = 'A ScoutBox transaction is a permissioned workspace. 
 
 export function registerTransactions(rawCtx) {
   const {
-    db, orgRouter, playerRouter, tsRouter, nextId, persistNow, notify, broadcast,
+    db, byId, orgRouter, playerRouter, tsRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isBlocked, isAdult, orgCanSee, rateLimit, agent, compliance,
     // M23 P5.6E — the cross-app integration seam. A HOLDER filled in after this
     // module registers: it carries the recruitment-case handoff binding and the
@@ -107,7 +107,7 @@ export function registerTransactions(rawCtx) {
   const txById = (id) => db.agentTransactions.find((t) => t && t.id === id) ?? null;
   const repsOf = (txId) => db.transactionRepresentations.filter((r) => r && r.transactionId === txId);
   const docsOf = (txId) => db.transactionDocuments.filter((d) => d && d.transactionId === txId && !d.removedAt);
-  const orgById = (id) => db.orgs.find((o) => o && o.id === id) ?? null;
+  const orgById = (id) => byId.org(id) ?? null;
   const activeAffiliationOf = (userId, orgId) => (db.agencyAffiliations ?? []).find((a) => a && a.userId === userId && a.agencyOrgId === orgId && affiliationActive(a, now())) ?? null;
 
   // ============================================================ compliance integration

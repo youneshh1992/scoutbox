@@ -49,7 +49,7 @@ const REVIEWER_LEGACY_NOTE = 'Records made before P5.6C through the shared admin
 
 export function registerCompliance(rawCtx) {
   const {
-    db, app, orgRouter, playerRouter, adminRouter, tsRouter, nextId, persistNow, notify, broadcast,
+    db, byId, app, orgRouter, playerRouter, adminRouter, tsRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isBlocked, isAdult, orgCanSee, moderateOrRefuse, rateLimit,
     hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins, agent, verificationProvider,
   } = rawCtx;
@@ -381,13 +381,13 @@ export function registerCompliance(rawCtx) {
   // ============================================================ contexts
   const contextById = (id) => db.complianceContexts.find((c) => c && c.id === id) ?? null;
   const partyName = (party, org) => {
-    if (party.subjectKind === 'club') return db.orgs.find((o) => o.id === party.subjectId)?.name ?? null;
+    if (party.subjectKind === 'club') return byId.org(party.subjectId)?.name ?? null;
     const pl = findPlayer(party.subjectId);
     return pl && orgCanSee(org, pl) ? pl.name : null;
   };
   const lastEvaluation = (c) => c.evaluations?.[c.evaluations.length - 1] ?? null;
   function contextForAgent(c) {
-    const org = db.orgs.find((o) => o.id === c.agencyOrgId);
+    const org = byId.org(c.agencyOrgId);
     const ev = lastEvaluation(c);
     return {
       id: c.id, type: c.type, status: c.status, jurisdictions: c.jurisdictions, scope: resolveScope(c.jurisdictions).scope,
@@ -420,7 +420,7 @@ export function registerCompliance(rawCtx) {
     return !!ia && ia === b.parties.find((p) => p.partyRole === 'individual' && !p.removed)?.subjectId && (ka === kb || a.parties.filter((p) => !p.removed).every((p) => b.parties.some((q) => !q.removed && q.partyRole === p.partyRole && q.subjectId === p.subjectId)));
   };
   function engineInput(c, { proposed = null } = {}) {
-    const org = db.orgs.find((o) => o.id === c.agencyOrgId);
+    const org = byId.org(c.agencyOrgId);
     const reps = c.representations.filter((r) => r.status !== 'withdrawn').map(repInput);
     if (proposed) reps.push(proposed);
     // Connected agents (same agency, FA 6.5 / FFAR 12(10)): a colleague's verified
@@ -502,7 +502,7 @@ export function registerCompliance(rawCtx) {
       return { id: nextId('cpt'), partyRole, subjectKind, subjectId: pl.id, addedAt: now(), removed: false };
     }
     if (partyRole === 'individual') { sendComplianceError(res, { error: 'CONTEXT_INPUT_INVALID', field: 'parties', message: 'A club is an engaging or releasing entity.' }, 'party'); return null; }
-    const org = db.orgs.find((o) => o.id === subjectId && o.type === 'club');
+    const org = byId.org(subjectId, (o) => o.type === 'club');
     if (!org) { sendComplianceError(res, { error: 'PARTY_NOT_FOUND' }, 'party'); return null; }
     return { id: nextId('cpt'), partyRole, subjectKind, subjectId: org.id, addedAt: now(), removed: false };
   };
@@ -678,11 +678,11 @@ export function registerCompliance(rawCtx) {
   const consentForParty = (k) => {
     const c = contextById(k.contextId);
     const ag = profileOf(k.agentUserId);
-    const org = db.orgs.find((o) => o.id === k.agencyOrgId);
+    const org = byId.org(k.agencyOrgId);
     return {
       id: k.id, kind: k.kind, status: consentStatusOf(k), partyRole: k.partyRole,
       agent: { userId: k.agentUserId, displayName: ag?.displayName ?? null, agency: org?.name ?? null, licence: ag ? facetStatesOf(ag).fifa_licence : 'UNVERIFIED' },
-      context: c ? { id: c.id, type: c.type, jurisdictions: c.jurisdictions, parties: c.parties.filter((p) => !p.removed).map((p) => ({ partyRole: p.partyRole, subjectKind: p.subjectKind, name: p.subjectKind === 'club' ? (db.orgs.find((o) => o.id === p.subjectId)?.name ?? null) : (p.subjectId === k.subject?.id ? 'You' : null) })) } : null,
+      context: c ? { id: c.id, type: c.type, jurisdictions: c.jurisdictions, parties: c.parties.filter((p) => !p.removed).map((p) => ({ partyRole: p.partyRole, subjectKind: p.subjectKind, name: p.subjectKind === 'club' ? (byId.org(p.subjectId)?.name ?? null) : (p.subjectId === k.subject?.id ? 'You' : null) })) } : null,
       otherPartyRoles: k.regarding ?? [], particulars: k.particulars ?? null, policyVersions: k.policyVersions ?? [], ruleIds: k.ruleIds ?? [],
       requestedAt: k.requestedAt, grantedAt: k.grantedAt ?? null, declinedAt: k.declinedAt ?? null, revokedAt: revokedAtOf(k), ...revMeta(k),
       honest: 'You may decline. Consent is specific to this agent, this transaction context and these parties; it can be revoked at any time, and a revocation stops any future regulated action that needs it. ScoutBox records your answer; it does not advise you.',

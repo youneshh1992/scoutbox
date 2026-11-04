@@ -15,7 +15,7 @@ const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision',
 import { readPage, sendPageError, pageSorted } from '../domains/platform/paging.mjs';
 export function registerScouting(ctx) {
   const {
-    db, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    db, byId, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter,
     orgCanSee, paginate, audit, isLead, requireLead, moderateOrRefuse, isAdult,
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
@@ -343,7 +343,7 @@ export function registerScouting(ctx) {
 
   const feedbackViewFor = (playerId) => db.assessments
     .filter((a) => a.playerId === playerId && a.publishedFeedback)
-    .map((a) => ({ id: a.id, orgId: a.orgId, orgName: db.orgs.find((o) => o.id === a.orgId)?.name ?? 'Club', byName: a.publishedFeedback.byName, text: a.publishedFeedback.text, at: a.publishedFeedback.at }));
+    .map((a) => ({ id: a.id, orgId: a.orgId, orgName: byId.org(a.orgId)?.name ?? 'Club', byName: a.publishedFeedback.byName, text: a.publishedFeedback.text, at: a.publishedFeedback.at }));
 
   playerRouter.get('/feedback', (req, res) => {
     if (req.playerIsMinor) {
@@ -365,7 +365,7 @@ export function registerScouting(ctx) {
   // entitlement rules from M11.1.
 
   function mediaOwner(mediaId) {
-    return db.players.find((p) => p.media.some((m) => m.id === mediaId));
+    return byId.mediaOwner(mediaId);
   }
 
   orgRouter.post('/media/:id/segments', (req, res) => {
@@ -497,7 +497,7 @@ export function registerScouting(ctx) {
     const c = findCase(req, res);
     if (!c) return;
     if (c.ownerUserId !== req.orgUser.id && !isLead(req.orgUser)) return res.status(403).json({ error: 'OWNER_OR_LEAD_REQUIRED' });
-    const u = db.users.find((x) => x.id === req.body?.userId && x.orgId === req.org.id && !x.removedAt);
+    const u = byId.user(req.body?.userId, (x) => x.orgId === req.org.id && !x.removedAt);
     if (!u) return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
     const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
     if (dueAt === undefined) return;
@@ -657,7 +657,7 @@ export function registerScouting(ctx) {
   orgRouter.post('/staff/:userId/remove', (req, res) => {
     if (!requireLead(req, res)) return;
     if (req.params.userId === req.orgUser.id) return res.status(400).json({ error: 'CANNOT_REMOVE_SELF' });
-    const u = db.users.find((x) => x.id === req.params.userId && x.orgId === req.org.id);
+    const u = byId.user(req.params.userId, (x) => x.orgId === req.org.id);
     if (!u) return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
     if (u.removedAt) return res.status(409).json({ error: 'ALREADY_REMOVED' });
     users.update(u.id, { removedAt: Date.now(), removedBy: req.orgUser.name });

@@ -21,10 +21,10 @@ try {
   store.save({ savedAt: 1, idCounter: 1000, db });
   out.steps.push('saved');
   db.orgs[0].squad.push({ id: 'sq-1', name: 'Kid', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
-  db.players[0].big = 1n; // JSON cannot serialise a BigInt: the save fails after the facets were flushed
+  db.unrelated = [1n]; // JSON cannot serialise a BigInt: the blob write fails after the facets were flushed
   try { store.save({ savedAt: 2, idCounter: 1000, db }); out.steps.push('failed-save-did-not-throw'); } catch (err) { out.steps.push(`failed-save-threw: ${String(err.message).slice(0, 60)}`); }
   out.rolledBack = JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-1'").get().facets_json).squad.length === 0;
-  delete db.players[0].big;
+  db.unrelated = [];
   store.save({ savedAt: 3, idCounter: 1000, db });
   out.steps.push('retried');
   out.squadRows = JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-1'").get().facets_json).squad.length;

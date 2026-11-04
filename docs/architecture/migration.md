@@ -73,7 +73,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S1 | identity shadow | `0002_core_identity_shadow` | (retired) | — | done |
 | S2 | sessions | `0003_sessions_live` | `sessions.mjs` | direct | done |
 | S3 | organisations | `0004_orgs_live` | `orgs.mjs` (+ `facets_json`) | facets flushed at save | done |
-| S4a | players, guardians | `0005_core_identity_live`, `0006_media_deletions` | `identity.mjs`, `mediaDeletions.mjs` | calls + whole-snapshot replace | done |
+| S4a | players, guardians | `0005_core_identity_live`, `0006_media_deletions` | `identity.mjs`, `mediaDeletions.mjs` | explicit since §4.3.1 (snapshot mode still replaces whole) | done |
 | S5 | player sub-records (12 tables) | `0007_player_subrecords` | `playerSubrecords.mjs` | via identity | done |
 | S6a | one-time codes | `0008_one_time_codes` | `oneTimeCodes.mjs` | direct | done |
 | S7a–d | notifications, dispatches, outbox/push, message threads | `0009`–`0012` | `notifications.mjs`, `dispatches.mjs`, `outboxPush.mjs`, `channels.mjs` | staged, written at save | done |
@@ -87,7 +87,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
 | — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 measured (4 Nov): fails §2, fixes listed in §4.3 |
-| — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | §4.3.1, next; before S9 |
+| — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left (§4.3.1) |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -188,7 +188,7 @@ about 320 kB to the write-ahead log at any size, so no request rewrites the file
 proportion to the whole player base. The causes, from CPU profiles, in the order to fix them. Items 1 and 2 are not
 recruitment's and every later domain would inherit them, so they are §4.3.1. Fix items 3–6 after it and re-measure.
 
-1. **Every write walks every player** (`identity.flushDomain`). §4.3.1.
+1. **Every write walks every player** (`identity.flushDomain`). Fixed by §4.3.1.
 2. **`findPlayer`, `usersOf` and `db.orgs.find` are linear scans**, called per item by the audit feed and the
    sweeps. §4.3.1.
 3. **The trial-reminder sweep visits every confirmed, open trial every minute** and calls `findPlayer` for each
@@ -205,31 +205,44 @@ A backlog is a separate risk: the boot runs the sweeps before it listens, one tr
 due item (3,000 stale graphs at 10k players booted in 68 s instead of 23 s). The script moves the fixtures' instants to
 today so it measures the steady state.
 
-### 4.3.1 Remove the costs that grow with the whole player base (before S9)
+### 4.3.1 Remove the costs that grow with the whole player base (done 4 November)
 
-Found by §4.3 step 4. Two foundations make every request slower as the platform grows, whatever the domain: a write
-costs CPU in proportion to every player (2.4 s per Room comment at 10k players, 6.4 s at 30k), and a lookup by id scans
-a whole collection. Each domain migrated on top of them inherits both, so this comes before S9.
+Found by §4.3 step 4: a write cost CPU in proportion to every player, and a lookup by id scanned a whole collection.
 
-1. **Lookups by id use the index.** `findPlayer` (`server.mjs:702`, 184 callers), `usersOf` and the `db.orgs.find`
-   / `db.users` scans (about 120 more) go through the repositories' maps: `players.byId` and `users.byId` exist;
-   `orgs.byId` exists but searches with `records.indexOf` (`repositories/orgs.mjs:401`) and needs the map to hold the
-   view. One small change, no behaviour change. It removes most of the audit feed's time and the sweeps' per-item scan.
-2. **Explicit identity writes (S4a-E).** Players and guardians move to the S8 pattern: routes call repository
-   operations (most already do: `players.update`, `patchItem`, `setItems`), each write types and writes its rows, and
-   the save no longer rebuilds and compares every player's row (`identity.flushDomain`, `repositories/identity.mjs:1026`,
-   with one trial-report query per player). The read-only view stays for readers until they move to queries. This
-   settles A0–A3 (§6).
-3. **Then re-measure the unit of work itself.** `store.unitOfWork` copies the whole in-memory database at the start
-   (`captureGraph`, `store.mjs:294`) and every repository with a mirror captures its own state (`snapshotState`; the
-   organisations capture every record). Measure what is left after 1 and 2; remove what no longer has an in-memory
-   state to restore.
-4. **The boot's default backfill** (`server.mjs:271`) writes one transaction per player that lacks a default; it is
-   cheap on a seeded database but becomes one statement once the identity writes are explicit.
+1. **Lookups by id use the index.** Every module context carries `byId` (`domains/platform/lookups.mjs`:
+   `byId.player`, `guardian`, `user`, `org`, `mediaOwner`), and about 100 `db.<collection>.find(… id === …)` scans
+   went through it, `findPlayer` and the media-owner scans included. `usersOf` reads the staff repository's per-club
+   index. Lookups that are not by id (by name, e-mail, external id) still scan; none is on a hot path.
+2. **Explicit identity writes (S4a-E).** Player and guardian records are read-only views: every write, a facet
+   included, is a repository operation written at once. The only in-place writer left was the co-guardian route
+   (`guardians.update(id, { coGuardians })`). The save no longer rebuilds every player's row, and a unit of work no
+   longer copies every player: each operation records the records it touches, and a rollback restores those. The
+   server never rewrites the identity tables now; only snapshot mode (fixtures, tools) still replaces them whole.
+3. **The unit of work, re-measured** (an empty unit on the 30k-player database: 23 ms). What is left is not the
+   players': the organisations capture and flush every record per unit (about 14 ms for 1,500 clubs), because their
+   facets (`squad`, `tactical`, `lookingFor`, `verification`, `agencySettings`, …) are still edited in place, and the
+   blob collections' memento costs about 4 ms. Both go as S9–S11 move those facets and collections into tables (or
+   sooner, by making the organisations' facet writes explicit the same way).
+4. **The boot's default backfill is gone.** A player gets `firstTeamSeeker`, `notificationPrefs` and `programme`
+   when it is created (`PLAYER_CREATION_DEFAULTS`); the media pass rewrote every clip row on every boot and changed
+   nothing.
 
-Done when: `npm run perf:recruitment -- 30000 1000 500` shows a Room comment and the offers lists under 50 ms and the
-audit feed's time no longer growing between 10k and 30k players, and a unit test asserts that a write's cost does
-not grow with the player count (for example, the number of statements a save runs).
+`scripts/testUnitOfWork.mjs` asserts that a player write, inside and outside a unit, and the save after it run the
+same number of SQL statements with 20 and 2,000 players (before: 104 against 4,064).
+
+Measured with `npm run perf:recruitment` (busy club, medians, before → after):
+
+| | 10k players | 30k players |
+|---|---|---|
+| `GET /org/audit` | 3.1 s → 0.50 s | 9.0 s → 0.51 s |
+| `POST /org/rooms/:id/comments` | 2.4 s → 26 ms | 6.4 s → 51 ms |
+| `GET /player/offers` | 1.3 s → 13 ms | 3.5 s → 31 ms |
+| boot | 9 s → 3.1 s | 18 s → 4.4 s |
+
+The audit feed no longer grows with the player base, and the offers lists are under 50 ms. The comment is at the
+50 ms bar and still doubles from 10k to 30k: the synthetic population has one club per 20 players, so the
+organisations' per-unit cost (item 3) grows with it. The other figures of the §4.3 table are unchanged; items 3–6 of
+§4.3 are next.
 
 ### 4.4 The end-to-end test estate
 

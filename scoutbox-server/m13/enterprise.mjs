@@ -62,7 +62,7 @@ export function requestInstrumentation() {
 
 export function registerEnterprise(ctx) {
   const {
-    db, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, players, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
+    db, byId, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, players, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
     storage, DATA_DIR, backupDatabase,
   } = ctx;
@@ -113,7 +113,7 @@ export function registerEnterprise(ctx) {
     const inv = db.orgInvites.find((i) => i.token === String(token ?? ''));
     if (!inv || inv.status !== 'pending') return res.status(404).json({ error: 'INVITE_INVALID' });
     if (inv.expiresAt < Date.now()) { inv.status = 'expired'; persist(); return res.status(410).json({ error: 'INVITE_EXPIRED' }); }
-    const org = db.orgs.find((o) => o.id === inv.orgId);
+    const org = byId.org(inv.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
     let user = db.users.find((u) => u.orgId === org.id && u.name.toLowerCase() === inv.name.toLowerCase() && !u.removedAt);
     if (!user) user = users.insert({ orgId: org.id, name: scoutName?.trim() || inv.name, role: inv.role });
@@ -274,7 +274,7 @@ export function registerEnterprise(ctx) {
 
   app.post('/auth/sso/start', (req, res) => {
     if (testIdpOnly(res)) return;
-    const org = db.orgs.find((o) => o.id === req.body?.orgId);
+    const org = byId.org(req.body?.orgId);
     const cfg = org && db.ssoConfigs.find((c) => c.orgId === org.id);
     if (!cfg) return res.status(404).json({ error: 'SSO_NOT_CONFIGURED', message: 'This organisation has no identity provider configured.' });
     const st = {
@@ -308,7 +308,7 @@ export function registerEnterprise(ctx) {
     const tok = verifyToken(code);
     if (!tok || tok.typ !== 'code' || tok.exp < Date.now()) return res.status(401).json({ error: 'SSO_TOKEN_INVALID' });
     if (tok.nonce !== st.nonce) return res.status(401).json({ error: 'SSO_NONCE_MISMATCH', message: 'The token was not minted for this sign-in attempt.' });
-    const org = db.orgs.find((o) => o.id === st.orgId);
+    const org = byId.org(st.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
     // Account linking requires PROOF: the user's email was bound by an
     // accepted invite (or a previous linked login). An SSO assertion for an
@@ -384,7 +384,7 @@ export function registerEnterprise(ctx) {
     if (!t) return res.status(404).json({ error: 'TICKET_NOT_FOUND' });
     t.replies.push({ at: Date.now(), by: 'Trust & Safety', text: String(req.body?.text ?? '').slice(0, 2000) });
     if (req.body?.close) t.status = 'closed';
-    const lead = db.users.find((u) => u.id === t.byUserId);
+    const lead = byId.user(t.byUserId);
     if (lead) notify({ kind: 'org_user', id: lead.id }, 'support', `Support replied on “${t.subject}”.`, t.id);
     persistNow();
     res.json({ ticket: t });
@@ -399,7 +399,7 @@ export function registerEnterprise(ctx) {
       status: 'requested', requestedAt: Date.now(), approvedBy: null, approvedAt: null, expiresAt: null, accessLog: [],
     };
     db.supportAccessGrants.push(g);
-    const lead = db.users.find((u) => u.id === t.byUserId);
+    const lead = byId.user(t.byUserId);
     if (lead) notify({ kind: 'org_user', id: lead.id }, 'support', `Trust & Safety asks for time-limited access (${hours}h) to investigate “${t.subject}”. A lead can approve it from the Support screen.`, t.id);
     persistNow();
     res.status(201).json({ grant: g, note: 'Access starts only after an organisation lead approves, and every read is logged.' });

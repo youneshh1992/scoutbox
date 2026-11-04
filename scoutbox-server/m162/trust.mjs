@@ -22,7 +22,7 @@ import {
 
 export function registerTrust(ctx) {
   const {
-    db, playerRouter, guardianRouter, orgRouter, adminRouter,
+    db, byId, playerRouter, guardianRouter, orgRouter, adminRouter,
     findPlayer, isBlocked, vmetric,
   } = ctx;
 
@@ -42,7 +42,7 @@ export function registerTrust(ctx) {
     const claims = (db.verClaims ?? []).filter((c) => c.claimType === 'PERSON_IDENTITY' && c.subjectId === player.id);
     let best = null;
     for (const c of claims) {
-      const eff = effectiveStatus(c, { org: c.organisationId ? db.orgs.find((o) => o.id === c.organisationId) : null, now: Date.now() });
+      const eff = effectiveStatus(c, { org: c.organisationId ? byId.org(c.organisationId) : null, now: Date.now() });
       if (!eff.displayable) continue;
       const assurance = assuranceForClaim(c);
       if (!assurance) continue;
@@ -170,7 +170,7 @@ export function registerTrust(ctx) {
   function assessmentSource(player) {
     return (db.assessments ?? [])
       .filter((a) => a.playerId === player.id && ['submitted', 'reviewed', 'published'].includes(a.state ?? ''))
-      .map((a) => ({ key: `asmt:${a.id}`, verifiedSource: !!db.orgs.find((o) => o.id === a.orgId)?.verified }));
+      .map((a) => ({ key: `asmt:${a.id}`, verifiedSource: !!byId.org(a.orgId)?.verified }));
   }
 
   /** Build the full Trust Profile for a player. `full` is an already-built

@@ -6,7 +6,7 @@
 // grassroots 50 km ceiling.
 export function registerSuitability(ctx) {
   const {
-    db, orgRouter, playerRouter, guardianRouter, nextId, persistNow,
+    db, byId, orgRouter, playerRouter, guardianRouter, nextId, persistNow,
     findPlayer, isAdult, haversineKm, slotsOverlap, coarseArea, paginate,
   } = ctx;
 
@@ -180,7 +180,7 @@ export function registerSuitability(ctx) {
     const o = db.opportunities.find((x) => x.id === req.params.oppId);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
     const prefs = prefsFor(req.player.id);
-    const org = db.orgs.find((x) => x.id === o.orgId);
+    const org = byId.org(o.orgId);
     res.json({
       opportunityId: o.id, verdicts: verdictsFor(req.player, prefs, o, org),
       note: 'Suitability is guidance from YOUR private preferences. Eligibility rules (age, level, distance for grassroots) are separate and always apply.',
@@ -192,7 +192,7 @@ export function registerSuitability(ctx) {
     const child = findPlayer(req.params.id);
     const o = db.opportunities.find((x) => x.id === req.params.oppId);
     if (!child || !o) return res.status(404).json({ error: 'NOT_FOUND' });
-    const org = db.orgs.find((x) => x.id === o.orgId);
+    const org = byId.org(o.orgId);
     res.json({ opportunityId: o.id, verdicts: verdictsFor(child, prefsFor(child.id), o, org) });
   });
 
@@ -209,7 +209,7 @@ export function registerSuitability(ctx) {
       if (!a) return res.status(404).json({ error: 'APPLICATION_NOT_FOUND' });
       const player = findPlayer(playerId);
       const o = db.opportunities.find((x) => x.id === a.opportunityId);
-      const org = db.orgs.find((x) => x.id === a.orgId);
+      const org = byId.org(a.orgId);
       if (req.body?.share === false) { a.suitabilitySummary = null; persistNow(); return res.json({ shared: false }); }
       const verdicts = verdictsFor(player, prefsFor(playerId), o, org);
       // Summary = dimension + verdict ONLY. Reasons stay private: they can

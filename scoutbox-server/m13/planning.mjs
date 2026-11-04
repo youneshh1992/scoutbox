@@ -54,7 +54,7 @@ export function computeScenarioTotals(scenario) {
 
 export function registerPlanning(ctx) {
   const {
-    db, orgRouter, nextId, persistNow, notify, findPlayer, orgCanSee,
+    db, byId, orgRouter, nextId, persistNow, notify, findPlayer, orgCanSee,
     paginate, histAppend, isLead, requireLead, canViewFinance, haversineKm,
     validAmountMinor, convertMinor, CURRENCIES,
     recruitmentCases, // S8b: a budget change is one explicit write of its case (cases.update)
@@ -83,7 +83,7 @@ export function registerPlanning(ctx) {
   // duplicated into new rows.
   function observableFixtures(org) {
     const own = db.fixtures.filter((f) => f.orgId === org.id);
-    const orgLoc = (orgId) => db.orgs.find((o) => o.id === orgId)?.location ?? null;
+    const orgLoc = (orgId) => byId.org(orgId)?.location ?? null;
     const friendlies = (db.friendlies ?? []).map((fr) => ({
       id: `fr-${fr.id}`, source: 'friendly_board', competition: 'Friendly',
       home: fr.orgName ?? 'Host club', away: fr.status === 'open' ? 'open invitation' : 'confirmed opponent',
@@ -91,7 +91,7 @@ export function registerPlanning(ctx) {
     })).filter((f) => f.date);
     const trials = (db.openTrials ?? []).map((t) => ({
       id: `tr-${t.id}`, source: 'open_trial', competition: 'Open trial',
-      home: t.orgName ?? db.orgs.find((o) => o.id === t.orgId)?.name ?? 'Club', away: '—',
+      home: t.orgName ?? byId.org(t.orgId)?.name ?? 'Club', away: '—',
       date: t.date ?? null, location: orgLoc(t.orgId),
     })).filter((f) => f.date);
     return [...own, ...friendlies, ...trials];
@@ -135,14 +135,14 @@ export function registerPlanning(ctx) {
     const b = req.body ?? {};
     const fixture = observableFixtures(req.org).find((f) => f.id === b.fixtureId);
     if (!fixture) return res.status(404).json({ error: 'FIXTURE_NOT_FOUND' });
-    const scout = db.users.find((u) => u.id === b.scoutUserId && u.orgId === req.org.id && !u.removedAt);
+    const scout = byId.user(b.scoutUserId, (u) => u.orgId === req.org.id && !u.removedAt);
     if (!scout) return res.status(404).json({ error: 'SCOUT_NOT_FOUND' });
     // Targets: only players this org can currently see. Never a leak path.
     const targets = (Array.isArray(b.targetPlayerIds) ? b.targetPlayerIds : [])
       .map(findPlayer).filter((p) => p && orgCanSee(req.org, p)).map((p) => p.id);
     const warnings = [];
     const dup = db.coverageAssignments.find((a) => a.orgId === req.org.id && a.fixtureId === fixture.id && !a.cancelledAt);
-    if (dup) warnings.push(`Duplicate visit: ${db.users.find((u) => u.id === dup.scoutUserId)?.name ?? 'a scout'} is already assigned to this fixture.`);
+    if (dup) warnings.push(`Duplicate visit: ${byId.user(dup.scoutUserId)?.name ?? 'a scout'} is already assigned to this fixture.`);
     const clash = db.coverageAssignments.find((a) => a.orgId === req.org.id && a.scoutUserId === scout.id && a.fixtureDate === fixture.date && !a.cancelledAt);
     if (clash) warnings.push(`Conflict: ${scout.name} already has an assignment on ${fixture.date}.`);
     const a = {

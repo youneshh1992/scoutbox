@@ -6,7 +6,7 @@
 // live on every route, never a stored flag).
 export function registerTransitions(ctx) {
   const {
-    db, orgRouter, playerRouter, guardianRouter, adminRouter, nextId,
+    db, byId, orgRouter, playerRouter, guardianRouter, adminRouter, nextId,
     persistNow, notify, notifyAction, ledgerAppend, findPlayer, isAdult,
     orgCanSee, histAppend, paginate, emitWebhook, players, unit,
   } = ctx;
@@ -29,7 +29,7 @@ export function registerTransitions(ctx) {
     return {
       media: player.media.filter((m) => pack.mediaIds.includes(m.id)).map((m) => ({ id: m.id, title: m.title, url: m.url })),
       evidence: db.evidence.filter((e) => pack.evidenceIds.includes(e.id)).map((e) => ({ id: e.id, kind: e.kind, tier: e.tier, summary: e.summary, recordedAt: e.recordedAt })),
-      publishedFeedback: db.assessments.filter((a) => pack.feedbackIds.includes(a.id)).map((a) => ({ id: a.id, orgName: db.orgs.find((o) => o.id === a.orgId)?.name ?? 'club', text: a.publishedFeedback.text, at: a.publishedFeedback.at })),
+      publishedFeedback: db.assessments.filter((a) => pack.feedbackIds.includes(a.id)).map((a) => ({ id: a.id, orgName: byId.org(a.orgId)?.name ?? 'club', text: a.publishedFeedback.text, at: a.publishedFeedback.at })),
     };
   }
 
@@ -82,7 +82,7 @@ export function registerTransitions(ctx) {
 
   function addRecipient(req, res, t, actor) {
     if (t.status !== 'open') return res.status(409).json({ error: 'CASE_CLOSED', status: t.status });
-    const org = db.orgs.find((o) => o.id === req.body?.orgId);
+    const org = byId.org(req.body?.orgId);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     const player = findPlayer(t.playerId);
     // The receiving club must be able to see this player under ALL standing
@@ -131,7 +131,7 @@ export function registerTransitions(ctx) {
 
   function placeCase(req, res, t, actor) {
     if (t.status !== 'open') return res.status(409).json({ error: 'CASE_CLOSED', status: t.status });
-    const org = db.orgs.find((o) => o.id === req.body?.orgId);
+    const org = byId.org(req.body?.orgId);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     t.status = 'placed';
     t.placement = { orgId: org.id, orgName: org.name, at: Date.now(), note: req.body?.note ? String(req.body.note).slice(0, 300) : null };

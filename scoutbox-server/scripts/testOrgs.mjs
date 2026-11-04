@@ -244,12 +244,12 @@ test('correction 1: facet change tracking reflects committed state only — a sa
   // (a) The failure is in a LATER write of the same save: an unrelated collection that cannot be serialised.
   pro.squad.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
   grass.lookingFor = ['GK'];
-  db.players[0].big = 1n;
+  db.unrelated = [1n]; // a blob collection JSON cannot serialise
   assert.throws(() => store.save({ savedAt: 2, idCounter: 1000, db }), /BigInt/);
   assert.equal(store.sqlite.isTransaction, false, 'the transaction was rolled back');
   assert.deepEqual(facetsOf('org-pro').squad, [], 'the flushed squad change was rolled back with the rest of the save');
   assert.deepEqual(facetsOf('org-grass').lookingFor, ['ST', 'CB'], 'so was the second organisation');
-  delete db.players[0].big;
+  db.unrelated = [];
   store.save({ savedAt: 3, idCounter: 1000, db });
   assert.equal(facetsOf('org-pro').squad.length, 1, 'the retry persists the change the failed save had already flushed');
   assert.deepEqual(facetsOf('org-grass').lookingFor, ['GK'], 'for every organisation that had a pending change');

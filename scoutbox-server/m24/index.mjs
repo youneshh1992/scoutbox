@@ -39,7 +39,7 @@ import {
 export function registerAgent(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
-    db, users, notifications, orgRouter, playerRouter, adminRouter, nextId, persistNow, notify, broadcast,
+    db, byId, users, notifications, orgRouter, playerRouter, adminRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isBlocked, playerViewForOrg, orgSafe, revokeOrgUserAccess, rateLimit, isAdult,
     orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider,
   } = ctx;
@@ -319,7 +319,7 @@ export function registerAgent(rawCtx) {
   const memberRows = (org) => (db.agencyAffiliations ?? [])
     .filter((a) => a && a.agencyOrgId === org.id)
     .map((a) => {
-      const u = db.users.find((x) => x.id === a.userId);
+      const u = byId.user(a.userId);
       const p = profileOf(a.userId);
       return {
         affiliationId: a.id, userId: a.userId, name: u?.name ?? null, role: u?.role ?? null,
@@ -418,7 +418,7 @@ export function registerAgent(rawCtx) {
     bumpRev(aff, { by: req.orgUser, at: now() });
     // Current agency access ends now; the person's agent profile and every
     // historical attribution stay exactly as they are.
-    const user = db.users.find((u) => u.id === aff.userId);
+    const user = byId.user(aff.userId);
     if (user && !user.removedAt) users.update(user.id, { removedAt: now() });
     revokeOrgUserAccess?.(aff.userId);
     persistNow();
@@ -702,9 +702,9 @@ export function registerAgent(rawCtx) {
 
   // ============================================================ PLAYER: My Agent
   const agentIdentityForClient = (a) => {
-    const user = a.agentUserId ? db.users.find((u) => u.id === a.agentUserId) : null;
+    const user = a.agentUserId ? byId.user(a.agentUserId) : null;
     const p = a.agentUserId ? profileOf(a.agentUserId) : null;
-    const org = db.orgs.find((o) => o.id === a.agencyOrgId);
+    const org = byId.org(a.agencyOrgId);
     const fifa = p ? effectiveFacetState(p.facets?.fifa_licence, now()) : null;
     return {
       userId: a.agentUserId, displayName: p?.displayName ?? user?.name ?? (a.legacy?.representativeName ?? null),

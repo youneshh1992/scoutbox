@@ -190,6 +190,7 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
   if (!sqlite) throw new TypeError('the staff repository needs a SQLite connection (node:sqlite); the data layer has no in-memory fallback');
   const rows = [];                 // plain targets, insertion order
   const byIdMap = new Map();       // id → plain target
+  const byOrgMap = new Map();      // orgId → plain targets, insertion order
   const view = readonlyView(rows, 'a staff record');
   // Writes commit on their own. This repository's in-memory rows are NOT yet
   // integrated with the store's unit of work (no snapshotState/restoreState),
@@ -205,7 +206,8 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
   const updateStmt = sqlite.prepare(`UPDATE org_users SET org_id = @org_id, name = @name, role = @role, email = @email, sso_subject = @sso_subject, created_at = @created_at,
     removed_at = @removed_at, removed_by = @removed_by, provenance = @provenance, mfa_json = @mfa_json, delivery_prefs_json = @delivery_prefs_json WHERE id = @id`);
 
-  const remember = (target) => { rows.push(target); byIdMap.set(target.id, target); return readonlyView(target, 'a staff record'); };
+  const indexOrg = (target) => { if (!byOrgMap.has(target.orgId)) byOrgMap.set(target.orgId, []); byOrgMap.get(target.orgId).push(target); };
+  const remember = (target) => { rows.push(target); byIdMap.set(target.id, target); indexOrg(target); return readonlyView(target, 'a staff record'); };
 
   function validate(row, { creating = false } = {}) {
     if (typeof row.orgId !== 'string' || !row.orgId) throw new TypeError('a staff record needs an orgId');
@@ -227,7 +229,7 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
       const hit = rows.find((u) => u.orgId === orgId && u.name.toLowerCase() === wanted);
       return hit ? readonlyView(hit, 'a staff record') : null;
     },
-    listByOrg: (orgId) => rows.filter((u) => u.orgId === orgId).map((u) => readonlyView(u, 'a staff record')),
+    listByOrg: (orgId) => (byOrgMap.get(orgId) ?? []).map((u) => readonlyView(u, 'a staff record')),
     count: () => rows.length,
 
     /** Create a staff record; the id is assigned here, never by the caller. */
@@ -265,8 +267,11 @@ export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = (
       }
       validate(next);
       updateStmt.run(toParams(next));
+      const movedOrg = next.orgId !== target.orgId;
+      if (movedOrg) { const list = byOrgMap.get(target.orgId); list.splice(list.indexOf(target), 1); }
       for (const key of Object.keys(target)) if (!(key in next)) delete target[key];
       Object.assign(target, next);
+      if (movedOrg) { byOrgMap.clear(); for (const u of rows) indexOrg(u); } // keeps each organisation's list in insertion order
       return readonlyView(target, 'a staff record');
     },
 

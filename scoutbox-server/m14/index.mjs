@@ -20,7 +20,7 @@ import { registerVerificationReview } from './review.mjs';
 
 export function registerM14(ctx) {
   migrateM14(ctx.db);
-  const { db, nextId, persist } = ctx;
+  const { db, byId, nextId, persist } = ctx;
   const idx = buildClaimIndex(db);
 
   // -------- verification metrics (§61): counters only, never names/emails.
@@ -152,7 +152,7 @@ export function registerM14(ctx) {
     // the removed state feeds the read-time engine on every projection — no
     // cached boolean can bypass it. Closed historical periods stay visible
     // as history per §15 (truth is not erased).
-    const user = db.users.find((u) => u.id === userId);
+    const user = byId.user(userId);
     return toPublicVerificationProfile({
       subjectType: 'user', subjectId: userId,
       claims: idx.claimsFor('user', userId), orgsById: orgsById(),
@@ -160,7 +160,7 @@ export function registerM14(ctx) {
     });
   }
   function publicProfileForOrg(orgId, now = Date.now()) {
-    const org = db.orgs.find((o) => o.id === orgId);
+    const org = byId.org(orgId);
     const profile = toPublicVerificationProfile({
       subjectType: 'org', subjectId: orgId,
       claims: idx.claimsFor('org', orgId), orgsById: orgsById(), now,

@@ -28,13 +28,10 @@
  * are rows of the `player_*` tables written only through `addItem` /
  * `setItems` / `patchItem` (and `insert` / `restore`), served read-only on the
  * record; `trialReports` is derived from the trials collection and written
- * nowhere; everything else (`coGuardians`, the guardian's outstanding
- * `emailCode`, unknown fields) is a facet mutated in place on the record the
- * views serve and flushed inside every save, counted as persisted only once
- * that save committed. The record views refuse a write to a column-backed
- * field — nested values of `location`, `stats`, `notificationPrefs`,
- * `medical.shared`, `medical.conditionStatus`, `programme.track`,
- * `programme.startedAt` included — to `childIds`, and to every array and item.
+ * nowhere; the guardian's `coGuardians` list is kept in `facets_json` and
+ * written by `guardians.update`. Every write is explicit (S4a-E, migration.md
+ * §4.3.1): the record views refuse every write — a field, a facet, a nested
+ * value, `childIds`, an array or its items — and a save has nothing to find.
  *
  * Relationships. `players.guardian_id` and the `primary` row of
  * `guardian_children` are written together by every link change and can no
@@ -56,13 +53,12 @@
  * transaction of their own (refused inside anyone else's: the bookkeeping
  * could not follow a foreign rollback) and a failure anywhere up to and
  * including COMMIT leaves SQL and memory — records, held references, link
- * arrays, indexes, views, facet tracking — exactly as they were; the
- * operation is simply retried. Inside a unit the operation joins it through
- * the store's `unit.join`, so a failure after a statement poisons the whole
- * unit even when the caller catches the error (the unit cannot commit the
- * fragment), and the save hook's `snapshotState` / `restoreState` put the
- * bookkeeping back when the unit rolls back. Ordinary saves keep the S3
- * contract: a failed flush leaves facet edits pending for the next save.
+ * arrays, indexes, views — exactly as they were; the operation is simply
+ * retried. Inside a unit the operation joins it through the store's
+ * `unit.join`, so a failure after a statement poisons the whole unit even when
+ * the caller catches the error (the unit cannot commit the fragment), and the
+ * participant's `snapshotState` / `restoreState` put back the records the unit
+ * touched when it rolls back (the undo log below).
  */
 import { readonlyView, markView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
@@ -72,7 +68,7 @@ import { requireRuntime } from '../runtime.mjs';
 import { isAdult } from '../domain.mjs';
 import {
   playerToRow, playerFromRow, guardianToRow, guardianFromRow, validateGuardianRecord,
-  PLAYER_COLUMNS, GUARDIAN_COLUMNS, PLAYER_MIGRATED_KEYS, GUARDIAN_MIGRATED_KEYS, PLAYER_COMPOSITES, GUARDIAN_COMPOSITES, RESERVED_KEYS,
+  PLAYER_COLUMNS, GUARDIAN_COLUMNS, PLAYER_MIGRATED_KEYS, GUARDIAN_MIGRATED_KEYS, PLAYER_COMPOSITES,
   PLAYER_SUBRECORD_KEYS, PLAYER_COMPOSITE_SUBRECORDS, PLAYER_DERIVED_KEYS,
 } from './identityMapping.mjs';
 import { validateCoreIdentity, writeCandidate, publicReport, playerRowFor, CORE_IDENTITY_LIVE_MIGRATION } from './identityPreflight.mjs';
@@ -89,8 +85,16 @@ import {
 export const CORE_IDENTITY_INIT_META = 'coreIdentityInit';
 /** The two collections the identity repositories own; coupled through the link rows. */
 export const IDENTITY_COLLECTIONS = Object.freeze(['players', 'guardians']);
-/** Composites whose remainder is a mutable facet: only the column-backed sub-keys are guarded. */
+/** Composites merged sub-key by sub-key by players.update (their sub-record arrays are rows, written through addItem / setItems / patchItem). */
 export const PLAYER_SPLIT_COMPOSITES = Object.freeze(['medical', 'programme']);
+/**
+ * The fields every player record has from its creation (players.insert and the first installation), so every reader
+ * sees one shape. A field the record already carries, null included, is kept.
+ */
+export const PLAYER_CREATION_DEFAULTS = Object.freeze({ firstTeamSeeker: false, notificationPrefs: null, programme: null });
+const withCreationDefaults = (rec) => { for (const [k, v] of Object.entries(PLAYER_CREATION_DEFAULTS)) if (!Object.hasOwn(rec, k)) Object.defineProperty(rec, k, { value: v, writable: true, enumerable: true, configurable: true }); return rec; };
+/** The guardian fields kept in `facets_json` that guardians.update writes (the primary's list of co-guardians). */
+export const GUARDIAN_FACET_KEYS = Object.freeze(['coGuardians']);
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const hasOwn = (o, k) => Object.hasOwn(o, k);
@@ -392,7 +396,6 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     allLinks: sqlite.prepare('SELECT guardian_id, player_id, role FROM guardian_children ORDER BY rowid'),
     insertPlayer: sqlite.prepare(insertSql('players', PLAYER_COLUMNS)),
     updatePlayer: sqlite.prepare(updateSql('players', PLAYER_COLUMNS)),
-    playerFacets: sqlite.prepare('UPDATE players SET facets_json = @facets_json WHERE id = @id'),
     // The column and the row's shape metadata (facets_json.__meta: is guardianId present, is it null) change together.
     setPlayerGuardian: sqlite.prepare('UPDATE players SET guardian_id = @guardian_id, facets_json = @facets_json WHERE id = @id'),
     deletePlayer: sqlite.prepare('DELETE FROM players WHERE id = ?'),
@@ -400,12 +403,12 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     deleteLinksOf: sqlite.prepare('DELETE FROM guardian_children WHERE player_id = ?'),
     insertGuardian: sqlite.prepare(insertSql('guardians', GUARDIAN_COLUMNS)),
     updateGuardian: sqlite.prepare(updateSql('guardians', GUARDIAN_COLUMNS)),
-    guardianFacets: sqlite.prepare('UPDATE guardians SET facets_json = @facets_json WHERE id = @id'),
     insertLink: sqlite.prepare('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (?, ?, ?)'),
     deleteLink: sqlite.prepare('DELETE FROM guardian_children WHERE guardian_id = ? AND player_id = ?'),
     countPlayers: sqlite.prepare('SELECT COUNT(*) AS n FROM players'),
     countGuardians: sqlite.prepare('SELECT COUNT(*) AS n FROM guardians'),
     countLinks: sqlite.prepare('SELECT COUNT(*) AS n FROM guardian_children'),
+    mediaOwner: sqlite.prepare('SELECT player_id FROM player_media WHERE id = ?'),
     meta: sqlite.prepare('SELECT value FROM meta WHERE key = ?'),
     setMeta: sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
     sub: prepareSubrecordStatements(sqlite),
@@ -413,8 +416,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
 
   // ------------------------------------------------------------ in-memory state
   // One domain each: plain records (the view targets), their views in the same
-  // order, the id index, and the facet tracking (committed-only, S3 correction 1).
-  const makeDomain = (name) => ({ name, records: [], proxies: [], byId: new Map(), committed: new Map(), pending: new Map() });
+  // order, the id index and the record → view index (so a lookup never scans).
+  // Memory follows the tables: an operation changes it only after its statements ran.
+  const makeDomain = (name) => ({ name, records: [], proxies: [], byId: new Map(), views: new Map() });
   const P = makeDomain('players');
   const G = makeDomain('guardians');
   const R = new Map(); // S4b-R: id → the retained record (frozen); never a view, never in P
@@ -425,7 +429,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
   const isSubKey = (key) => typeof key === 'string' && PLAYER_SUBRECORD_KEYS.includes(key);
   const isDerivedKey = (key) => typeof key === 'string' && PLAYER_DERIVED_KEYS.includes(key);
 
-  // Whole guards (every nested write refused): location, stats, notificationPrefs. Stable identity per object.
+  // Nested values (composites, facets, the arrays' items): every write refused, at any depth. Stable identity per object.
   const guards = new WeakMap();
   const guard = (value, domain, key) => {
     if (value === null || typeof value !== 'object') return value;
@@ -442,32 +446,14 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     }
     return g;
   };
-  // Split guards (medical, programme): the column-backed sub-keys are refused, the
-  // table-backed sub-keys (records, completed — S5) are served read-only, the
-  // remainder (an unknown sub-key) stays a plain mutable facet.
-  const splitGuards = new WeakMap();
-  const splitGuard = (value, domain, key, columnSubs) => {
-    if (!isPlainObject(value)) return value;
-    let g = splitGuards.get(value);
-    if (!g) {
-      const columnBacked = (prop) => hasOwn(columnSubs, prop);
-      const tableBacked = (prop) => (PLAYER_COMPOSITE_SUBRECORDS[key] ?? []).includes(prop);
-      g = markView(new Proxy(value, {
-        get(t, prop, receiver) { const v = Reflect.get(t, prop, receiver); return tableBacked(prop) ? readonlyView(v, SUB_LABEL(`${key}.${String(prop)}`)) : v; },
-        set(t, prop, v) { if (columnBacked(prop)) return refuseNested(domain, `${key}.${String(prop)}`); if (tableBacked(prop)) return refuse(SUB_LABEL(`${key}.${String(prop)}`)); setOwn(t, prop, v); return true; },
-        deleteProperty(t, prop) { if (columnBacked(prop) || tableBacked(prop)) return refuseNested(domain, `${key}.${String(prop)}`); delete t[prop]; return true; },
-        defineProperty(t, prop, desc) { if (columnBacked(prop) || tableBacked(prop)) return refuseNested(domain, `${key}.${String(prop)}`); return Reflect.defineProperty(t, prop, desc); },
-        setPrototypeOf() { return refuseNested(domain, key); },
-      }));
-      splitGuards.set(value, g);
-    }
-    return g;
-  };
-
+  /**
+   * The view of one record: reads are the plain record, every nested object served through a guard; every write —
+   * a field, a facet, a nested value, an array or its items — is refused. Records change only through the
+   * repository's operations, which write their rows at once (S4a-E, migration.md §4.3.1): nothing is left for a save
+   * to find.
+   */
   const recordView = (target, domain) => {
-    const migrated = domain === 'players' ? PLAYER_MIGRATED_KEYS : GUARDIAN_MIGRATED_KEYS;
-    const composites = domain === 'players' ? PLAYER_COMPOSITES : GUARDIAN_COMPOSITES;
-    const protectedKey = (key) => migrated.has(key) || (domain === 'guardians' && key === 'childIds') || (domain === 'players' && (isSubKey(key) || isDerivedKey(key))) || RESERVED_KEYS.includes(key);
+    const refuseField = (key) => refuse(`a ${domain} record (field "${String(key)}")`);
     const hidden = (t, key) => domain === 'players' && hiddenDerived(t, key);
     return markView(new Proxy(target, {
       // The derived key of a record that never had it: hidden while no report names the player (the record's shape), shown — enumerable — once one does. The target property is configurable, so the view may report both.
@@ -485,14 +471,11 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
         // S5: the arrays (rows of the child tables) and the derived trial reports are served read-only, items included.
         if (domain === 'players' && isSubKey(key)) return readonlyView(value, SUB_LABEL(key));
         if (domain === 'players' && isDerivedKey(key)) return readonlyView(value, `a player's ${key} (derived from the trials collection; written nowhere)`);
-        if (typeof key === 'string' && hasOwn(composites, key)) {
-          return domain === 'players' && PLAYER_SPLIT_COMPOSITES.includes(key) ? splitGuard(value, domain, key, composites[key]) : guard(value, domain, key);
-        }
-        return value;
+        return guard(value, domain, key);
       },
-      set(t, key, value) { if (protectedKey(key)) return refuse(`a ${domain} record (field "${String(key)}")`); setOwn(t, key, value); return true; },
-      deleteProperty(t, key) { if (protectedKey(key)) return refuse(`a ${domain} record (field "${String(key)}")`); delete t[key]; return true; },
-      defineProperty(t, key, desc) { if (protectedKey(key)) return refuse(`a ${domain} record (field "${String(key)}")`); return Reflect.defineProperty(t, key, desc); },
+      set(_t, key) { return refuseField(key); },
+      deleteProperty(_t, key) { return refuseField(key); },
+      defineProperty(_t, key) { return refuseField(key); },
       setPrototypeOf() { return refuse(`a ${domain} record`); },
     }));
   };
@@ -542,31 +525,28 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
   };
   /** A derived key the record never had while no report names the player: hidden from the view (not `in`, not enumerable, no descriptor). */
   const hiddenDerived = (t, key) => isDerivedKey(key) && trialShape.get(t.id) === 'absent' && Reflect.get(t, key) === undefined;
-  /** Row written by this operation: committed when autocommit, pending while a unit of work is open. */
-  const noteRow = (domain, id, facetsJson) => { if (inUnit()) domain.pending.set(id, facetsJson); else { domain.committed.set(id, facetsJson); domain.pending.delete(id); } };
-  const remember = (domain, rec, facetsJson) => {
+  const remember = (domain, rec) => {
     domain.records.push(rec); domain.byId.set(rec.id, rec);
-    noteRow(domain, rec.id, facetsJson);
-    const view = recordView(rec, domain.name); domain.proxies.push(view); return view;
+    const view = recordView(rec, domain.name); domain.proxies.push(view); domain.views.set(rec, view); return view;
   };
   const forget = (domain, rec) => {
     const i = domain.records.indexOf(rec);
     if (i >= 0) { domain.records.splice(i, 1); domain.proxies.splice(i, 1); }
-    domain.byId.delete(rec.id); domain.committed.delete(rec.id); domain.pending.delete(rec.id);
+    domain.byId.delete(rec.id); domain.views.delete(rec);
     if (domain === P) trialShape.delete(rec.id);
   };
-  const viewOf = (domain, rec) => domain.proxies[domain.records.indexOf(rec)] ?? null;
-  const clear = (domain) => { domain.records.length = 0; domain.proxies.length = 0; domain.byId.clear(); domain.committed.clear(); domain.pending.clear(); if (domain === P) trialShape.clear(); };
+  const viewOf = (domain, rec) => domain.views.get(rec) ?? null;
+  const clear = (domain) => { domain.records.length = 0; domain.proxies.length = 0; domain.byId.clear(); domain.views.clear(); if (domain === P) trialShape.clear(); };
 
   /** Read everything from the tables: guardians with their childIds from the link rows (rowid order), then players with their arrays from the child tables (position order). */
   const load = () => {
     clear(P); clear(G);
     const links = new Map();
     for (const l of stmt.allLinks.all()) { if (!links.has(l.guardian_id)) links.set(l.guardian_id, []); links.get(l.guardian_id).push(l.player_id); }
-    for (const r of stmt.allGuardians.all()) remember(G, guardianFromRow(r, links.get(r.id) ?? []), r.facets_json);
+    for (const r of stmt.allGuardians.all()) remember(G, guardianFromRow(r, links.get(r.id) ?? []));
     const children = readAllChildren(stmt.sub);
     // Decoded with an EMPTY derived list so the data value is exactly the record's empty-state shape (absent / null / []); the accessor then serves the live reports. A row whose shape hides existing child rows is refused by the decoder (INCONSISTENT_ROWS): the boot does not attach to it.
-    for (const r of stmt.allPlayers.all()) remember(P, deriveTrialReports(playerFromRow(r, { children: children.get(r.id) ?? emptyChildren(), trialReports: [] })), r.facets_json);
+    for (const r of stmt.allPlayers.all()) remember(P, deriveTrialReports(playerFromRow(r, { children: children.get(r.id) ?? emptyChildren(), trialReports: [] })));
     R.clear(); for (const r of stmt.allRetained.all()) R.set(r.id, Object.freeze(retainedRecordFromRow(r)));
   };
   const readInitState = () => {
@@ -656,6 +636,47 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
   /** A refused sub-record write: the field and the reason, never a value. */
   const subRefusal = (message) => Object.assign(new TypeError(message), { code: 'PLAYER_SUBRECORD_INVALID' });
 
+  // ------------------------------------------------------------ unit-of-work rollback (S4a-E)
+  /**
+   * Inside a unit of work every operation records what it is about to change in memory before changing it: each
+   * record it touches (captured in place, by identity: held references see the old values after a rollback), the
+   * record's derived-key shape, and the collections' membership when it adds or removes a record. A rolled-back unit
+   * restores exactly that, so the cost of a unit follows what it touched, never the number of players
+   * (migration.md §4.3.1). `undo` exists only while a unit is open (`snapshotState` opens it).
+   */
+  let undo = null;
+  const recording = () => undo !== null && inUnit();
+  const touchShape = (id) => { if (recording() && !undo.shapes.has(id)) undo.shapes.set(id, trialShape.get(id)); };
+  const touch = (...recs) => {
+    if (!recording()) return;
+    for (const rec of recs) {
+      if (!rec || undo.records.has(rec)) continue;
+      undo.records.set(rec, captureGraph([rec]));
+      if (P.byId.get(rec.id) === rec) touchShape(rec.id);
+    }
+  };
+  const touchMembership = () => {
+    if (!recording() || undo.membership) return;
+    undo.membership = { P: [P.records.slice(), P.proxies.slice()], G: [G.records.slice(), G.proxies.slice()], retained: new Map(R) };
+  };
+  /** The guardians whose childIds list the player (an operation that removes the player changes their lists). */
+  const listingGuardians = (playerId) => G.records.filter((g) => (childIdsOf(g) ?? []).includes(playerId));
+  const rollBack = (state) => {
+    if (state.membership) {
+      for (const [d, [records, proxies]] of [[P, state.membership.P], [G, state.membership.G]]) {
+        d.records.length = 0; d.proxies.length = 0; d.byId.clear(); d.views.clear();
+        records.forEach((rec, i) => { d.records.push(rec); d.proxies.push(proxies[i]); d.byId.set(rec.id, rec); d.views.set(rec, proxies[i]); });
+      }
+      R.clear(); for (const [id, rec] of state.membership.retained) R.set(id, rec);
+    }
+    for (const memento of state.records.values()) restoreGraph(memento); // data properties only: the derived accessors are re-installed below
+    for (const [id, shape] of state.shapes) {
+      if (shape === undefined) { trialShape.delete(id); continue; }
+      const rec = P.byId.get(id);
+      if (rec) deriveTrialReports(rec, shape); else trialShape.set(id, shape);
+    }
+  };
+
   // ------------------------------------------------------------ link operations (both sides, one transaction)
   function link(guardianId, playerId, role = 'co') {
     requireAutocommit('link');
@@ -670,8 +691,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       stmt.insertLink.run(guardianId, playerId, role);
       if (row) stmt.setPlayerGuardian.run({ id: playerId, guardian_id: guardianId, facets_json: row.facets_json });
     }, () => {
+      touch(g, p);
       ensureChildIds(g).push(playerId);
-      if (row) { setOwn(p, 'guardianId', guardianId); noteRow(P, p.id, row.facets_json); }
+      if (row) setOwn(p, 'guardianId', guardianId);
     });
     return { guardianId, playerId, role };
   }
@@ -688,8 +710,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       if (stmt.deleteLink.run(guardianId, playerId).changes !== 1) throw new Error(`the link ${guardianId}/${playerId} is not in the table although the view lists it`);
       if (row) stmt.setPlayerGuardian.run({ id: playerId, guardian_id: null, facets_json: row.facets_json });
     }, () => {
+      touch(g, p);
       ids.splice(ids.indexOf(playerId), 1);
-      if (row) { setOwn(p, 'guardianId', null); noteRow(P, p.id, row.facets_json); }
+      if (row) setOwn(p, 'guardianId', null);
     });
     return { guardianId, playerId, role: wasPrimary ? 'primary' : 'co' };
   }
@@ -698,10 +721,11 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
   const players = {
     view: playersView,
     byId: (id) => (id && P.byId.has(id) ? viewOf(P, P.byId.get(id)) : null),
+    /** The player whose media list holds this clip id (clip ids are unique across players), or null. */
+    byMediaId: (mediaId) => { if (typeof mediaId !== 'string' || !mediaId) return null; const r = stmt.mediaOwner.get(mediaId); return r ? players.byId(r.player_id) : null; },
     /** Players whose PRIMARY guardian is this guardian (players.guardian_id). */
     byGuardian: (guardianId) => P.records.filter((p) => p.guardianId === guardianId).map((p) => viewOf(P, p)),
     count: () => P.records.length,
-    uncommitted: () => P.records.filter((rec) => toRowOf(P, rec).facets_json !== P.committed.get(rec.id)).length,
 
     /**
      * Create a player. A record with `guardianId` is created together with its
@@ -711,7 +735,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
      */
     insert(fields) {
       requireAutocommit('players.insert');
-      const rec = clone(fields);
+      const rec = isPlainObject(fields) ? withCreationDefaults(clone(fields)) : fields;
       const v = validatePlayerRecord(rec);
       if (!v.ok) throw new TypeError(`a player record was refused: ${v.problems.join('; ')}`);
       if (R.has(rec.id)) throw new Error(`player ${rec.id} was deleted and its id is retained; a deleted account is not created again under its id`);
@@ -730,8 +754,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
         writeChildRows(stmt.sub, rec); // S5: the record's arrays, as rows, in the same transaction
         if (guardian) stmt.insertLink.run(guardian.id, rec.id, 'primary');
       }, () => {
+        touch(guardian); touchMembership(); touchShape(rec.id);
         if (guardian) ensureChildIds(guardian).push(rec.id);
-        return remember(P, deriveTrialReports(rec), row.facets_json);
+        return remember(P, deriveTrialReports(rec));
       });
     },
 
@@ -755,11 +780,11 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
         if (key === 'id' || patch[key] === undefined) continue;
         if (isSubKey(key)) throw new TypeError(`"${key}" is a player sub-record (rows of ${SUBRECORD_SPECS[key].table}); players.update does not change it — use players.addItem / setItems / patchItem`);
         if (isDerivedKey(key)) throw new TypeError(`"${key}" is derived from the trials collection and is written nowhere`);
-        if (!PLAYER_MIGRATED_KEYS.has(key)) throw new TypeError(`"${key}" is not a column-backed player field; write it on the record (it is kept in the facets)`);
+        if (!PLAYER_MIGRATED_KEYS.has(key)) throw new TypeError(`"${key}" is not a player field; players.update changes the column-backed fields only (a record is never written in place)`);
         if (PLAYER_SPLIT_COMPOSITES.includes(key) && isPlainObject(patch[key])) {
           for (const sub of Object.keys(patch[key])) {
             if ((PLAYER_COMPOSITE_SUBRECORDS[key] ?? []).includes(sub)) throw new TypeError(`"${key}.${sub}" is a player sub-record (rows of ${SUBRECORD_SPECS[`${key}.${sub}`].table}); players.update does not change it — use players.addItem / setItems / patchItem`);
-            if (!hasOwn(PLAYER_COMPOSITES[key], sub)) throw new TypeError(`"${key}.${sub}" is a facet (mutate it on the record); players.update changes only ${Object.keys(PLAYER_COMPOSITES[key]).join('/')}`);
+            if (!hasOwn(PLAYER_COMPOSITES[key], sub)) throw new TypeError(`"${key}.${sub}" is not a player field; players.update changes only ${Object.keys(PLAYER_COMPOSITES[key]).join('/')}`);
           }
         }
         // A whole-null split composite while its child rows exist would hide them from every view, export and rollback (review of 132eda2, finding 3): refused; clearing the rows is an explicit, separate operation.
@@ -775,9 +800,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       if (!v.ok) throw new TypeError(`a player update was refused: ${v.problems.join('; ')}`);
       const row = toRowOf(P, next);
       atomically(() => stmt.updatePlayer.run(row), () => {
+        touch(rec);
         applyPatch(rec, patch, { split: PLAYER_SPLIT_COMPOSITES });
         for (const [k, subs] of Object.entries(PLAYER_COMPOSITE_SUBRECORDS)) if (isPlainObject(rec[k])) for (const sub of subs) ensureSubArray(rec, `${k}.${sub}`); // a composite set whole reads back with its (empty) sub-array
-        noteRow(P, id, row.facets_json);
       });
       return viewOf(P, rec);
     },
@@ -798,7 +823,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       const shape = shapeOf(next);
       placeSubrecords(next);
       const row = toRowOf(P, next, { shape });
-      atomically(() => { stmt.updatePlayer.run(row); deleteChildRows(stmt.sub, id); writeChildRows(stmt.sub, next); }, () => { replaceContent(rec, next); noteRow(P, id, row.facets_json); });
+      atomically(() => { stmt.updatePlayer.run(row); deleteChildRows(stmt.sub, id); writeChildRows(stmt.sub, next); }, () => { touch(rec); replaceContent(rec, next); });
       return viewOf(P, rec);
     },
 
@@ -825,6 +850,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
         stmt.sub[key].insert.run(row);
         if (tags) for (const t of tags) stmt.sub.tags.insert.run(t);
       }, () => {
+        touch(rec);
         ensureSubArray(rec, key).push(stored);
       });
       return readonlyView(getSubrecords(rec, key), SUB_LABEL(key));
@@ -842,6 +868,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
         stmt.sub[key].deleteAll.run(id); // the clips' tag rows cascade with the clips
         writeArrayRows(stmt.sub, key, id, next);
       }, () => {
+        touch(rec);
         const arr = ensureSubArray(rec, key);
         arr.length = 0; for (const it of next) arr.push(storedItem(key, it));
       });
@@ -879,6 +906,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
         if (stmt.sub[key].update.run(row).changes !== 1) throw new Error(`players.patchItem: the ${key} row of player ${id} at position ${index} is not in the table although the view lists it`);
         if (tagsChanged) { stmt.sub.tags.deleteMedia.run(merged.id); for (const t of tags ?? []) stmt.sub.tags.insert.run(t); }
       }, () => {
+        touch(rec);
         const target = list[index]; // the same object (held references stay valid), its content the stored item's
         for (const k of Object.keys(target)) delete target[k];
         for (const k of Object.keys(stored)) setOwn(target, k, stored[k]);
@@ -908,7 +936,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       return atomically(() => {
         if (stmt.deletePlayer.run(id).changes !== 1) throw new Error(`player ${id} is not in the table although the view lists it`);
       }, () => {
-        for (const g of G.records) { const ids = childIdsOf(g); if (ids) { const i = ids.indexOf(id); if (i >= 0) ids.splice(i, 1); } }
+        const listing = listingGuardians(id);
+        touch(p, ...listing); touchMembership();
+        for (const g of listing) { const ids = childIdsOf(g); ids.splice(ids.indexOf(id), 1); }
         forget(P, p);
         return true;
       });
@@ -938,7 +968,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
         stmt.deleteLinksOf.run(id);
         if (stmt.erasePlayer.run(params).changes !== 1) throw new Error(`player ${id} is not in the table as a live row although the view lists it`);
       }, () => {
-        for (const g of G.records) { const ids = childIdsOf(g); if (ids) { const i = ids.indexOf(id); if (i >= 0) ids.splice(i, 1); } }
+        const listing = listingGuardians(id);
+        touch(p, ...listing); touchMembership();
+        for (const g of listing) { const ids = childIdsOf(g); ids.splice(ids.indexOf(id), 1); }
         forget(P, p);
         R.set(id, record);
         return { id, deletedAt: at };
@@ -965,7 +997,6 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     linksOf: (playerId) => G.records.filter((g) => (childIdsOf(g) ?? []).includes(playerId)).map((g) => ({ guardianId: g.id, role: P.byId.get(playerId)?.guardianId === g.id ? 'primary' : 'co' })),
     childIds: (id) => (childIdsOf(G.byId.get(id) ?? {}) ?? []).slice(),
     count: () => G.records.length,
-    uncommitted: () => G.records.filter((rec) => guardianToRow(rec).facets_json !== G.committed.get(rec.id)).length,
 
     /**
      * Create a guardian. `childIds` given here become link rows in the same
@@ -993,10 +1024,10 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       return atomically(() => {
         stmt.insertGuardian.run(row);
         for (const childId of kids) stmt.insertLink.run(rec.id, childId, P.byId.get(childId).guardianId === rec.id ? 'primary' : 'co');
-      }, () => remember(G, rec, row.facets_json));
+      }, () => { touchMembership(); return remember(G, rec); });
     },
 
-    /** Change column-backed fields (`childIds` only through link/unlink/ageUp; `notificationPrefs` replaced whole). */
+    /** Change column-backed fields and the `coGuardians` list (`childIds` only through link/unlink/ageUp; `notificationPrefs` and `coGuardians` replaced whole). */
     update(id, patch) {
       requireAutocommit('guardians.update');
       const rec = G.byId.get(id);
@@ -1006,7 +1037,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       if (hasOwn(patch, 'childIds')) throw new TypeError('childIds changes only through link / unlink / ageUp');
       for (const key of Object.keys(patch)) {
         if (key === 'id' || patch[key] === undefined) continue;
-        if (!GUARDIAN_MIGRATED_KEYS.has(key)) throw new TypeError(`"${key}" is not a column-backed guardian field; write it on the record (it is kept in the facets)`);
+        if (!GUARDIAN_MIGRATED_KEYS.has(key) && !GUARDIAN_FACET_KEYS.includes(key)) throw new TypeError(`"${key}" is not a guardian field; guardians.update changes the column-backed fields and ${GUARDIAN_FACET_KEYS.join(', ')} (a record is never written in place)`);
       }
       const next = nextRecord(rec, patch);
       const v = validateGuardianRecord(next);
@@ -1014,7 +1045,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       if (hasOwn(patch, 'email')) { const taken = emailTakenBy(next.email, id); if (taken) throw new Error(`EMAIL_IN_USE: another guardian (${taken}) already uses this e-mail (compared case-insensitively)`); }
       if (hasOwn(patch, 'coGuardianOf') && present(next.coGuardianOf)) { if (next.coGuardianOf === id) throw new Error('coGuardianOf cannot name the guardian itself'); if (!G.byId.has(next.coGuardianOf)) throw new Error(`coGuardianOf names guardian ${next.coGuardianOf}, which does not exist`); }
       const row = guardianToRow(next);
-      atomically(() => stmt.updateGuardian.run(row), () => { applyPatch(rec, patch); noteRow(G, id, row.facets_json); });
+      atomically(() => stmt.updateGuardian.run(row), () => { touch(rec); applyPatch(rec, patch); });
       return viewOf(G, rec);
     },
 
@@ -1022,48 +1053,14 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
     unlink,
   };
 
-  // ------------------------------------------------------------ save hook (both domains, one participant)
-  const flushDomain = (domain, facetsStmt) => {
-    let changed = 0;
-    for (const rec of domain.records) {
-      const row = toRowOf(domain, rec);
-      // Compare with what the transaction already wrote (an insert/update inside a unit), else with the committed value (review correction 3 of the foundation).
-      const stored = domain.pending.has(rec.id) ? domain.pending.get(rec.id) : domain.committed.get(rec.id);
-      if (row.facets_json === stored) continue;
-      facetsStmt.run({ id: rec.id, facets_json: row.facets_json });
-      domain.pending.set(rec.id, row.facets_json);
-      changed += 1;
-    }
-    return changed;
-  };
+  // ------------------------------------------------------------ unit-of-work participant (both domains)
+  // Nothing to flush: every operation wrote its rows at once. The participant only opens the undo log of a unit and
+  // restores what the unit touched when it rolls back.
   const hook = {
-    flush() {
-      if (!sqlite.isTransaction) throw new Error('identity.flush runs inside a save transaction; the store reports its commit or rollback afterwards');
-      return flushDomain(G, stmt.guardianFacets) + flushDomain(P, stmt.playerFacets);
-    },
-    commit() { for (const d of [P, G]) { for (const [id, json] of d.pending) d.committed.set(id, json); d.pending.clear(); } },
-    rollback() { P.pending.clear(); G.pending.clear(); },
-    snapshotState: () => ({
-      graph: captureGraph([P.records, G.records]),
-      P: { proxies: P.proxies.slice(), byId: new Map(P.byId), committed: new Map(P.committed), pending: new Map(P.pending) },
-      G: { proxies: G.proxies.slice(), byId: new Map(G.byId), committed: new Map(G.committed), pending: new Map(G.pending) },
-      shapes: new Map(trialShape),
-      retained: new Map(R),
-    }),
-    restoreState(state) {
-      if (!state) return;
-      restoreGraph(state.graph); // data properties only: the derived accessors are not data the memento owns
-      for (const [d, s] of [[P, state.P], [G, state.G]]) {
-        d.proxies.length = 0; for (const p of s.proxies) d.proxies.push(p);
-        d.byId.clear(); for (const [id, rec] of s.byId) d.byId.set(id, rec);
-        d.committed.clear(); for (const [id, json] of s.committed) d.committed.set(id, json);
-        d.pending.clear(); for (const [id, json] of s.pending) d.pending.set(id, json);
-      }
-      // The empty-state shapes go back with the records (a restore inside the failed unit may have adopted another); the accessor is re-installed with the captured shape.
-      trialShape.clear(); for (const [id, shape] of state.shapes ?? []) trialShape.set(id, shape);
-      R.clear(); for (const [id, rec] of state.retained ?? []) R.set(id, rec);
-      for (const rec of P.records) if (trialShape.has(rec.id)) deriveTrialReports(rec, trialShape.get(rec.id));
-    },
+    snapshotState() { undo = { records: new Map(), shapes: new Map(), membership: null }; return undo; },
+    restoreState(state) { try { if (state) rollBack(state); } finally { undo = null; } },
+    commit() { undo = null; },
+    rollback() { undo = null; },
   };
 
   // ------------------------------------------------------------ boot
@@ -1105,7 +1102,9 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       const stored = stmt.countPlayers.get().n + stmt.countGuardians.get().n + stmt.countLinks.get().n;
       if (stored) throw new Error(`core identity: initialisation is pending but the tables already hold ${stored} row(s) written outside the repositories; refusing to initialise over them`);
       if (sqlite.isTransaction) throw new Error('core identity: initialize() runs in a transaction of its own and cannot start inside an open transaction');
-      const report = validateCoreIdentity(given, { now: at });
+      // The first installation's players get the creation defaults, like every player created later (the caller's records are not modified).
+      const withDefaults = isPlainObject(given) && Array.isArray(given.players) ? { ...given, players: given.players.map((p) => (isPlainObject(p) ? withCreationDefaults(clone(p)) : p)) } : given;
+      const report = validateCoreIdentity(withDefaults, { now: at });
       if (report.status !== 'complete') {
         const err = new Error(`CORE_IDENTITY_CUTOVER_BLOCKED: ${report.refusals.length} refusal(s); nothing was written and initialisation stays pending — ${report.refusals.slice(0, 20).map((r) => `${r.collection} ${r.id ?? '(collection)'}: ${r.reason}`).join('; ')}${report.legacyMinorsWithoutLink.length ? `; legacy minors without any guardian link (resolve by hand before the cutover): ${report.legacyMinorsWithoutLink.join(', ')}` : ''}`);
         err.code = 'CORE_IDENTITY_CUTOVER_BLOCKED';
@@ -1131,8 +1130,8 @@ export function createIdentityRepositories({ sqlite, log = () => {}, warn = () =
       return { engine: 'sqlite', ...counts, imported: counts.players + counts.guardians };
     },
 
-    saveHook: () => ({ flush: () => hook.flush(), commit: () => hook.commit(), rollback: () => hook.rollback(), snapshotState: () => hook.snapshotState(), restoreState: (s) => hook.restoreState(s) }),
-    report: () => ({ players: P.records.length, retained: R.size, guardians: G.records.length, links: stmt.countLinks.get().n, initState: readInitState(), uncommittedFacets: players.uncommitted() + guardians.uncommitted() }),
+    saveHook: () => ({ commit: () => hook.commit(), rollback: () => hook.rollback(), snapshotState: () => hook.snapshotState(), restoreState: (s) => hook.restoreState(s) }),
+    report: () => ({ players: P.records.length, retained: R.size, guardians: G.records.length, links: stmt.countLinks.get().n, initState: readInitState() }),
   };
   return identity;
 }

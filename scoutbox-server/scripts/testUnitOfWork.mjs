@@ -9,6 +9,7 @@
 // synthetic fixtures. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -498,6 +499,45 @@ await test('participant API: store.unit.join runs an operation inside the open u
   t.unit(() => { t.store.unit.join(() => t.layer.orgs.update('org-pro', { suspended: true })); });
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('cost (migration.md §4.3.1): a player write — standalone, inside a unit of work with a blob edit, and the ordinary save after it — runs exactly as many SQL statements with 2,000 players as with 20, and a rolled-back unit still restores the record it touched', () => {
+  // Every statement the process runs is counted: StatementSync run / get / all / iterate and DatabaseSync exec.
+  const counted = { on: false, n: 0 };
+  const restore = [];
+  for (const [proto, names] of [[StatementSync.prototype, ['run', 'get', 'all', 'iterate']], [DatabaseSync.prototype, ['exec']]]) {
+    for (const name of names) {
+      const original = proto[name];
+      proto[name] = function counting(...args) { if (counted.on) counted.n += 1; return original.apply(this, args); };
+      restore.push(() => { proto[name] = original; });
+    }
+  }
+  try {
+    const statementsFor = (n) => {
+      const dir = tempDir(`cost-${n}`);
+      const db = { ...fixtureDb(), players: Array.from({ length: n }, (_, i) => ({ id: `pl-${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB', city: 'Start', trialReports: [] })), vouches: [] }; // the seed's shape: a trialReports list, derived from the trials
+      const t = boot(dir, db);
+      const players = t.layer.players;
+      counted.n = 0; counted.on = true;
+      players.update('pl-7', { city: 'Standalone' });
+      t.unit(() => { players.update('pl-7', { city: 'In a unit' }); t.db.vouches.push({ id: 'vch-c', playerId: 'pl-7', status: 'pending', history: [] }); });
+      t.store.save(t.snapshot());
+      counted.on = false;
+      const statements = counted.n;
+      // A unit that fails after the write: the held record is restored in place, the row is unchanged.
+      const held = players.byId('pl-7');
+      assert.throws(() => t.unit(() => { players.update('pl-7', { city: 'Rolled back' }); throw new Error('late'); }), /late/);
+      assert.equal(held.city, 'In a unit'); assert.equal(players.byId('pl-7'), held); assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-7'").city, 'In a unit');
+      assert.equal(players.byId(`pl-${n - 1}`).city, 'Start', 'an untouched player is unchanged');
+      t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+      return statements;
+    };
+    const small = statementsFor(20); const large = statementsFor(2000);
+    assert.ok(small > 0, 'the counter saw the statements');
+    assert.equal(large, small, `a write's statements do not grow with the player count (20 players: ${small}, 2,000 players: ${large})`);
+  } finally {
+    for (const undo of restore) undo();
+  }
 });
 
 console.log(`\n${passed} unit-of-work checks passed`);

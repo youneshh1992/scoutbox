@@ -145,7 +145,7 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
 
   /** Everything a save transaction writes between BEGIN and COMMIT (flush hooks, blobs, meta, optional projection). */
   function writeBody(snapshot, { asSnapshot }) {
-    if (!asSnapshot) for (const hook of hooks) hook.flush();
+    if (!asSnapshot) for (const hook of hooks) hook.flush?.();
     const inTables = new Set(asSnapshot ? writeTableBacked(sqlite, snapshot.db) : []);
     for (const [name, value] of Object.entries(snapshot.db)) {
       if ((!asSnapshot && skip.has(name)) || inTables.has(name)) { deleteCollection.run(name); continue; }
@@ -319,11 +319,11 @@ export function openStore(dataDir, { tableBacked = null } = {}) {
   const store = {
     engine: 'sqlite',
     sqlite,
-    /** Register a save hook `{ flush, commit?, rollback? }` (or a bare flush function) for every server-mode save transaction (see `hooks`). */
+    /** Register a save hook `{ flush?, commit?, rollback?, snapshotState?, restoreState? }` (or a bare flush function) for every server-mode save transaction and unit of work (see `hooks`). */
     setSaveHook(hook) {
       if (typeof hook === 'function') hooks.push({ flush: hook });
-      else if (hook && typeof hook.flush === 'function') hooks.push(hook);
-      else throw new TypeError('a save hook is { flush, commit?, rollback? } or a flush function');
+      else if (hook && (typeof hook.flush === 'function' || typeof hook.snapshotState === 'function')) hooks.push(hook);
+      else throw new TypeError('a save hook is { flush?, commit?, rollback?, snapshotState?, restoreState? } with a flush or a snapshotState, or a flush function');
     },
     load() {
       const rows = sqlite.prepare('SELECT name, value FROM collections').all();
