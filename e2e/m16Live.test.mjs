@@ -2,7 +2,7 @@
 // a fake camera device (Chromium fake-media flags) so the live Box Cam
 // capture flow runs end to end. The web-limited provider verifies presence
 // + active duration; the deep integrity/abuse coverage lives in
-// scripts/m16E2E.mjs — this suite proves the cross-app product journey.
+// e2e/development/boxCam.mjs — this suite proves the cross-app product journey.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';

@@ -23,7 +23,7 @@
 //                      family cannot progress; N15 a11y; N16 FR
 //
 // Every refusal here asserts its exact status AND code. The exhaustive
-// invariants live in scoutbox-server/scripts/m23DecisionE2E.mjs; this suite
+// invariants live in scoutbox-server/e2e/recruitment/decisions.mjs; this suite
 // proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';

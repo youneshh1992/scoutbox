@@ -29,7 +29,7 @@
  *
  * The definitions in M20_METRICS.md and the registry here are the same
  * definitions; `assertMetricRegistry` is what stops them drifting apart, and
- * m20E2E cross-checks the file against the registry.
+ * e2e/recruitment/analytics cross-checks the file against the registry.
  */
 
 export const RECRUITMENT_ANALYTICS_POLICY_VERSION = 1;

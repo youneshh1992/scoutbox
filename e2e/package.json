@@ -1,7 +1,7 @@
 {
   "name": "e2e",
   "version": "1.0.0",
-  "description": "Playwright checks over the **self-contained demo bundles** — the same single HTML files that get published as the app tabs. (The live API has its own suite: `scoutbox-server/scripts/apiE2E.mjs`, run by CI.)",
+  "description": "Playwright checks over the **self-contained demo bundles** — the same single HTML files that get published as the app tabs. (The live API has its own suite: `scoutbox-server/e2e/platform/api.mjs`, run by CI.)",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

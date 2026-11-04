@@ -139,7 +139,6 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 - Lifecycle events are not emitted until a share boundary exists. Atomicity failure-injection was not built (M23_MATRIX).
 - Design debt (PRE_M24_DEFECT_REGISTER): a functionless club "Network / Representation" screen; >500 kB bundles with no code splitting; about 87 English-only Player strings; clickable divs and a `useDialog` copied into three apps.
 - Box Cam: replay attacks are not solved and over-cadence detection is partial (M22_CAPABILITIES).
-- CI does not yet run `m23Persistence`, `m23BootContract` or `m23AgentTransactionPersistence` (they fail; .github/workflows/ci.yml).
 
 ## Also worth knowing
 

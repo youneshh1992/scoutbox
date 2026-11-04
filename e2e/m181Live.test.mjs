@@ -13,7 +13,7 @@
 // H10 "Trust Score" means evidence confidence everywhere; the older number
 //     is called Profile completeness
 //
-// The exhaustive invariants live in scripts/m181E2E.mjs. This suite proves the
+// The exhaustive invariants live in e2e/platform/productionHardening.mjs. This suite proves the
 // real UI drives them — in particular that the client SENDS the concurrency
 // token, which no server-side test can establish.
 import { spawn, execSync } from 'node:child_process';

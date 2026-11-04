@@ -32,7 +32,7 @@
 //                 has no consent card; N9 a non-signatory club user reads the
 //                 ask but cannot answer it
 //
-// Exhaustive invariants live in scoutbox-server/scripts/m23AgentComplianceE2E.mjs;
+// Exhaustive invariants live in scoutbox-server/e2e/agents/compliance.mjs;
 // this suite proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';

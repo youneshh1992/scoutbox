@@ -16,7 +16,7 @@
  *
  * With a table there is no default. `httpStatusFor` returns `null` for a code
  * it has never been told about, the caller answers 500 and says so in the log,
- * and `m23E2E` fails the moment a producible code is missing from the table.
+ * and `e2e/recruitment/lifecycle` fails the moment a producible code is missing from the table.
  *
  * Null-prototype, because it is indexed by strings that originate in request
  * bodies and stored records. `M23_ERROR_HTTP['constructor']` must be absent,
@@ -268,7 +268,7 @@ const PUBLIC_ERROR_FIELDS = [
   // and echo the `supersedes` id the caller named. All of it is the caller's
   // own input or vocabulary; none of it is a person or a record. The reason
   // code lists (`unknown`, `prohibited`) stay internal, as they were for the
-  // lifecycle route (m23E2E Y11 pins that shape).
+  // lifecycle route (e2e/recruitment/lifecycle Y11 pins that shape).
   'lifecycle', 'ref', 'supersedes',
 ];
 

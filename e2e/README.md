@@ -2,7 +2,7 @@
 
 Playwright checks over the **self-contained demo bundles** — the same single
 HTML files that get published as the app tabs. (The live API has its own
-suite: `scoutbox-server/scripts/apiE2E.mjs`, run by CI.)
+suite: `scoutbox-server/e2e/platform/api.mjs`, run by CI.)
 
 ```bash
 node e2e/buildDemos.mjs        # build the per-app demo bundles into e2e/dist/

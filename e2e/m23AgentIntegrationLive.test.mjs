@@ -30,7 +30,7 @@
 //                Offer control anywhere on the handoff path; N8 a foreign agency
 //                sees no invitation; N9 no page errors in any context.
 //
-// Exhaustive invariants live in scoutbox-server/scripts/m23AgentIntegrationE2E.mjs;
+// Exhaustive invariants live in scoutbox-server/e2e/agents/crossApp.mjs;
 // this suite proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';

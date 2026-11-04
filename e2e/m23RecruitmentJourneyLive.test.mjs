@@ -1,7 +1,7 @@
 // M23 P8 LIVE — the full recruitment journey driven through the real Pro
 // workspace, the real player app and the real agent app against a real
 // server. The exhaustive invariants live in
-// scoutbox-server/scripts/m23RecruitmentJourneyE2E.mjs; this suite proves that
+// scoutbox-server/e2e/recruitment/journey.mjs; this suite proves that
 // what the interfaces show and do follows them.
 //
 //   A  CLUB PATH      Maria walks Kola from watching to signed inside ONE Room:

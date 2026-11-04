@@ -14,7 +14,7 @@
 // J10 the new panels fit a 390px phone and are operable from the keyboard;
 //     a destructive action states its consequence before acting
 //
-// The exhaustive invariants live in scoutbox-server/scripts/m182E2E.mjs. This
+// The exhaustive invariants live in scoutbox-server/e2e/platform/contracts.mjs. This
 // suite proves the real UI drives them: the conflict notice the person sees,
 // the dialog the browser raises, the request the client actually sends.
 import { spawn, execSync } from 'node:child_process';

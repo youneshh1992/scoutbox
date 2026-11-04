@@ -9,7 +9,7 @@
 // R12 the player cannot reach the Room API at all
 //
 // The deep engine invariants (the whole transition table, all 48 abuse cases,
-// tenant isolation at the API level) live in scripts/m17E2E.mjs; this suite
+// tenant isolation at the API level) live in e2e/recruitment/rooms.mjs; this suite
 // proves the real UI drives them.
 import { spawn, execSync } from 'node:child_process';
 import { roomTab, roomPanelLabel } from './caseNavHelpers.mjs';
@@ -70,7 +70,7 @@ const j = async (p, opts = {}, headers = {}) => {
 const browser = await chromium.launch({ executablePath: EXE });
 // A context per actor: a scout at Eastport, a rival club, a player. A second
 // Eastport scout is not needed here — the blind-assessment rule is proven
-// against the real access list in scripts/m17E2E.mjs.
+// against the real access list in e2e/recruitment/rooms.mjs.
 const ctxA = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const ctxRival = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const ctxPlayer = await browser.newContext({ viewport: { width: 480, height: 1200 } });

@@ -22,7 +22,7 @@
 //                 lifecycle shortcut; N15 second invitation while pending
 //
 // Every refusal here asserts its exact status AND code. The exhaustive
-// invariants live in scoutbox-server/scripts/m23TrialE2E.mjs; this suite
+// invariants live in scoutbox-server/e2e/recruitment/trials.mjs; this suite
 // proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';

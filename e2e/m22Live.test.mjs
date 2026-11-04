@@ -365,7 +365,7 @@ let liveResult = null;
 //
 // §112 permits this only as a controlled TEST-ONLY exercise. There is no route
 // that injects a validation record, and that absence is itself the assertion:
-// the wiring is proven in-process by scripts/m22Blocker.mjs, which constructs
+// the wiring is proven in-process by e2e/development/combineProductionGate.mjs, which constructs
 // the record in a local object that no request can reach.
 {
   const probes = [

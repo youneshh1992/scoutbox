@@ -570,7 +570,7 @@ export const MIGRATIONS = [
  * for production to be healthy" are different claims, and only the first one is
  * what this list makes.
  *
- * Asserted by `scripts/m23Persistence.mjs` against a snapshot that has been
+ * Asserted by `e2e/platform/storeGuarantees.mjs` against a snapshot that has been
  * through `runMigrations` and nothing else — no seed, no fixtures, no demo.
  */
 export const PRODUCTION_REQUIRED_STORES = MIGRATION_GUARANTEED.filter((s) => s !== 'reputationSeed');

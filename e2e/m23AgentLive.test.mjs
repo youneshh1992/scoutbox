@@ -21,7 +21,7 @@
 //                  scroll, drawer works; N7 a11y (tabs, labels); N8 FR;
 //                  N9 player app 390 My Agent visible; N10 minor has no card
 //
-// Exhaustive invariants live in scoutbox-server/scripts/m23AgentE2E.mjs;
+// Exhaustive invariants live in scoutbox-server/e2e/agents/core.mjs;
 // this suite proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';

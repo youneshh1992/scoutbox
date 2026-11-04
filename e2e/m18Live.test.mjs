@@ -16,7 +16,7 @@
 // M10 the grassroots ceilings and the visibility gates survive intact
 //
 // The exhaustive engine invariants, all 60 abuse cases and S1–S8 / N1–N8 live
-// in scripts/m18E2E.mjs. This suite proves the real UI drives them, and that
+// in e2e/discovery/secondLookAndNobodyMissed.mjs. This suite proves the real UI drives them, and that
 // nothing here reopens a room, resolves a reason or ranks a player by itself.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';

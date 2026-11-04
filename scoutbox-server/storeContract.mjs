@@ -40,7 +40,7 @@
 //
 // WHAT THIS FILE IS NOT
 //
-// It is metadata, and metadata is a claim. `scripts/m23BootContract.mjs` boots
+// It is metadata, and metadata is a claim. `e2e/platform/bootContract.mjs` boots
 // a real server on a bare migrated database and checks every claim here
 // against what the composed process actually holds — a store marked
 // 'migration' must exist after migrations ALONE, a store marked 'module' must

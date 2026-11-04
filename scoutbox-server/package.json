@@ -11,7 +11,7 @@
     "start": "node server.mjs",
     "test": "node scripts/runTests.mjs",
     "perf:recruitment": "node scripts/recruitmentPerf.mjs",
-    "e2e": "node scripts/apiE2E.mjs"
+    "e2e": "node e2e/platform/api.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

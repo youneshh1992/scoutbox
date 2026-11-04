@@ -19,7 +19,7 @@
 //                 390px: the Contact tab has no horizontal scroll
 //
 // Every refusal here asserts its exact status AND code. The exhaustive
-// invariants live in scoutbox-server/scripts/m23ContactE2E.mjs; this suite
+// invariants live in scoutbox-server/e2e/recruitment/contacts.mjs; this suite
 // proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';

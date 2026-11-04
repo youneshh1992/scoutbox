@@ -18,10 +18,10 @@ fixed on 3 November; these were found while fixing it.
   reproduce in 18 further runs under heavy load. Its strictest check compares the backup with the source table for
   table, so anything the server writes after the copy (other than the `backup_created` event) fails it. If it fails
   again, the runner prints the whole log: note which table differed.
-- **`scripts/m182E2E.mjs` fails one check**: `orgPanels.tsx` is no longer byte-identical in `scoutbox-club` and
+- **`e2e/platform/contracts.mjs` fails one check**: `orgPanels.tsx` is no longer byte-identical in `scoutbox-club` and
   `scoutbox-grassroots` (which must share business logic). Grassroots shows audit entries as structured facts since
   `7f93a14` (1 Nov); Club still shows one sentence. Deciding which one both apps use is a design question. Not in CI.
-- **`scripts/m23AgentPersistence.mjs` fails one check** ("the migrated staff member is an assistant"). It boots over a
+- **`e2e/agents/corePersistence.mjs` fails one check** ("the migrated staff member is an assistant"). It boots over a
   schema-2304 blob snapshot, but `server.mjs` runs the `m182` steps before `attachDataLayer`, and staff accounts are
   table-backed since S0, so `m240_001_agent_core_stores` sees no `db.users` and gives the staff member no
   affiliation. Only an old development-build file reaches this. It goes when S11 moves the affiliations into tables

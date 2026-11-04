@@ -845,7 +845,7 @@ CREATE INDEX invoices_org_id_created_at ON invoices(org_id, created_at);
 -- notes: read by name = orgs.plan (server.mjs:1112 /meta full dump; 3064, 3078 and m29/index.mjs:260 by key with
 --        `?? 18` fallback). orgs.plan (01_identity) should REFERENCE plans(name) — declared there, not here.
 --        An EMPTY table reproduces the M23-D2 billing bug (catalogue.mjs:24-29): the migration must insert the
---        four rows. `customised` seen in scripts/m23Persistence.mjs:84 is a test fixture, not a product field.
+--        four rows. `customised` seen in e2e/platform/storeGuarantees.mjs:84 is a test fixture, not a product field.
 -- ---------------------------------------------------------------------
 CREATE TABLE plans (
   name                      TEXT PRIMARY KEY CHECK (name IN ('Grassroots', 'Academy', 'Pro', 'Agency')),

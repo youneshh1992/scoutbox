@@ -22,7 +22,7 @@
 // D12  the screen fits a 390px phone, is keyboard-operable, and carries none
 //      of the forbidden vocabulary — in English or in French
 //
-// The exhaustive invariants live in scoutbox-server/scripts/m20E2E.mjs. This
+// The exhaustive invariants live in scoutbox-server/e2e/recruitment/analytics.mjs. This
 // suite proves the real UI drives them.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';

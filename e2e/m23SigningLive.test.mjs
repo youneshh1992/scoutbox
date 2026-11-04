@@ -35,8 +35,8 @@
 //                      a11y; FR; sentinel sweeps across every page and API
 //
 // Every refusal here asserts its exact status AND code. The exhaustive
-// invariants (50 adversarial cases) live in scoutbox-server/scripts/
-// m23SigningE2E.mjs; this suite proves the real interfaces drive them.
+// invariants (50 adversarial cases) live in scoutbox-server/e2e/
+// recruitment/signings.mjs; this suite proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';
 import { roomTab, playerCategory, playerSub } from './caseNavHelpers.mjs';

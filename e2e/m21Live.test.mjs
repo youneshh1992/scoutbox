@@ -17,7 +17,7 @@
 //      nothing
 // H12  390px: plan → goal → action → review → history is usable
 //
-// The exhaustive invariants live in scoutbox-server/scripts/m21E2E.mjs. This
+// The exhaustive invariants live in scoutbox-server/e2e/development/hub.mjs. This
 // suite proves the real interfaces drive them.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';

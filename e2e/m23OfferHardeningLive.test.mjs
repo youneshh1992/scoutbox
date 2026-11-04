@@ -1,7 +1,7 @@
 // M23 P6.1 LIVE — the Offer under adversarial conditions, driven through the
 // real Pro workspace, the real player app and the real agent app against a
 // real server. The exhaustive invariants live in
-// scoutbox-server/scripts/m23OfferHardeningE2E.mjs; this suite proves the real
+// scoutbox-server/e2e/recruitment/offersAdversarial.mjs; this suite proves the real
 // interfaces surface them honestly.
 //
 //   S1  STALE REV        the lead edits a draft the API changed underneath:

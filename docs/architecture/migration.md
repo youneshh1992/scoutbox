@@ -88,7 +88,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
 | — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 items 1–4 done (4 Nov); what still misses §2 is listed in §4.3 |
 | — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left |
-| — | end-to-end test estate | — | — | — | §4.4, any time before S9; steps 1–2 done (4 Nov) |
+| — | end-to-end test estate | — | — | — | §4.4, any time before S9; steps 1–2 done, step 3 moved, merges left (4 Nov) |
 | — | server code by domain | — | — | — | §4.4.1: recruitment and platform before S9, then per step |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -229,9 +229,9 @@ one club per 20 players (the organisations' per-unit cost above).
 
 ### 4.4 The end-to-end test estate
 
-The behavioural specification is spread over 67 milestone-named scripts in `scoutbox-server/scripts/` (`m12E2E.mjs`
-… `m23*`, `preM24SweepE2E.mjs`, about 3 MB). CI runs ten of them, plus `connectedE2E.mjs` and `apiE2E.mjs`. Some of
-the rest fail (see [`../known-issues.md`](../known-issues.md)), and nobody knows the state of the others.
+The behavioural specification was spread over 67 milestone-named scripts in `scoutbox-server/scripts/` (`m12E2E.mjs`
+… `m23*`, `preM24SweepE2E.mjs`, about 3 MB), of which CI ran thirteen plus `connectedE2E.mjs` and `apiE2E.mjs`. The
+correctness batteries now live in `scoutbox-server/e2e/<domain>/`, named after what they check.
 
 1. **Done (4 November).** Run every script once and record which pass, which fail and why (in the PR description).
    44 of 48 passed; the cheap failures are fixed, the rest are in `known-issues.md`.
@@ -242,9 +242,13 @@ the rest fail (see [`../known-issues.md`](../known-issues.md)), and nobody knows
    which the Combine production gate reads, and `boxCamCvHoldout` (was `m22Holdout`) writes `m22/holdout.json`. They
    are run by hand when the engine changes, never in CI.
 3. Regroup the batteries by domain, not milestone, using the domain names of `sql/*.sql` and `domains/` (identity,
-   recruitment, scouting, verification, agents, development, operations, platform). Move and rename first, with no
-   content changes, in one commit; merge duplicates in separate commits, with a count of checks before and after
-   each merge. Never delete a behavioural assertion.
+   recruitment, scouting, verification, agents, development, discovery, operations, platform). Move and rename first,
+   with no content changes, in one commit; merge duplicates in separate commits, with a count of checks before and
+   after each merge. Never delete a behavioural assertion. **Moved (4 November)**: 50 batteries, the same checks before
+   and after. Left to merge or split: the six `recruitment/*Persistence` batteries (much of them describes blob-era
+   storage the repository suites now cover), `platform/storeGuarantees` with `platform/bootContract`, and the
+   cross-domain `scouting/clubWorkflows` (was `m12E2E`) and `operations/clubOperations` (was `m13E2E`), split by
+   section into their domains.
 4. Put every passing battery in CI, through a runner like `scripts/runTests.mjs`: parallel, and refusing to run while
    a battery is unlisted. Fix the cheap failures; list any that stay out, with the reason, in `known-issues.md`.
 5. Name tests after what they check, not after the review that produced them ("review of 2fe05df, R1"). The unit

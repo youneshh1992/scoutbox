@@ -1,7 +1,7 @@
 // M23 P8.1 LIVE — the hardened journey through the real Pro workspace, the
 // real player app and the real agent app against a real server. The
 // exhaustive invariants live in
-// scoutbox-server/scripts/m23RecruitmentJourneyHardeningE2E.mjs; this suite
+// scoutbox-server/e2e/recruitment/journeyAdversarial.mjs; this suite
 // proves that the interfaces meet the same world: stale tabs, races, authority
 // loss, old links, late notifications, cases moving or ending under an open
 // tab, second cases and same-agency colleagues — and that nothing a client

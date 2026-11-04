@@ -28,7 +28,7 @@
 //                 tab, route or destination exists; N9 an archived transaction
 //                 refuses a new write
 //
-// Exhaustive invariants live in scoutbox-server/scripts/m23AgentTransactionE2E.mjs;
+// Exhaustive invariants live in scoutbox-server/e2e/agents/transactions.mjs;
 // this suite proves the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';

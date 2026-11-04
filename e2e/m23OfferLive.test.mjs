@@ -28,7 +28,7 @@
 //                      a11y; FR; sentinel sweeps across every page
 //
 // Every refusal here asserts its exact status AND code. The exhaustive
-// invariants live in scoutbox-server/scripts/m23OfferE2E.mjs; this suite proves
+// invariants live in scoutbox-server/e2e/recruitment/offers.mjs; this suite proves
 // the real interfaces drive them.
 
 import { spawn, execSync } from 'node:child_process';

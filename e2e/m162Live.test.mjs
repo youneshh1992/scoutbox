@@ -4,7 +4,7 @@
 // T8: a club sees the score and SAFE explanation only — never the raw
 // components, gaps or source internals — with the ability disclaimer.
 // The deep engine invariants (performance independence, grinding caps,
-// invalidation, the authorization boundary) live in scripts/m162E2E.mjs.
+// invalidation, the authorization boundary) live in e2e/verification/trustScore.mjs.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';

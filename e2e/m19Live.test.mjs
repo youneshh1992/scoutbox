@@ -22,7 +22,7 @@
 // M19-12  the screens fit a 390px phone, are keyboard-operable, and the
 //         forbidden vocabulary appears nowhere on them
 //
-// The exhaustive invariants live in scoutbox-server/scripts/m19E2E.mjs. This
+// The exhaustive invariants live in scoutbox-server/e2e/discovery/matchingAndWatchlists.mjs. This
 // suite proves the real UI drives them.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';

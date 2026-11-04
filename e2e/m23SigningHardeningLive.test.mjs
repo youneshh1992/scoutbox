@@ -1,6 +1,6 @@
 // M23 P7.1 LIVE — signing hardening driven through the real Pro workspace,
 // the real player app and the real agent app against a real server. The
-// exhaustive invariants live in scoutbox-server/scripts/m23SigningHardeningE2E.mjs;
+// exhaustive invariants live in scoutbox-server/e2e/recruitment/signingsAdversarial.mjs;
 // this suite proves that what the interfaces show and do follows them.
 //
 //   A  STALE CLUB ROLE   Maria presents a document and the player signs; her
