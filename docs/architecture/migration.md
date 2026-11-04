@@ -59,8 +59,8 @@ The migration is finished when:
 
 Moving storage alone isn't the goal. A domain that is in tables but still loaded whole into memory (explicit writes,
 but every read scanning a whole-collection mirror, as S8a–S8d were until 4 November) is only part-way there. The
-recruitment domain now reads through SQL and its unbounded lists page (§4.3 step 2), but does not meet the bar yet: the
-remaining work is listed under §4.3 step 4.
+recruitment domain now reads through SQL and its unbounded lists page (§4.3 step 2), and the step 4 fixes are in, but a few
+routes still miss the bar: they are listed at the end of §4.3 step 4.
 
 ## 3. Status
 
@@ -86,7 +86,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4: fails §2, remaining fixes listed in §4.3 |
+| — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 items 1–4 done (4 Nov); what still misses §2 is listed in §4.3 |
 | — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
@@ -188,7 +188,15 @@ the whole player base; §4.3.1 removed them. What is left, in the order to fix i
    of a tied instant so the merged page is exact) and merged with the sources not yet in tables. The cursor is opaque
    (`[at, id]`) and must name a row of the club's own feed. Busy club 496 → 22 ms, most of it the perf script's
    cloned graphs, where hundreds of entries share one millisecond; a typical club takes 1.1 ms.
-4. **The offers lists write a receipt on every read**; write only when a revision is unseen.
+4. **Done (4 November).** The offers list and read opened a unit of work on every request, which costs the
+   organisations' per-unit flush even when no receipt is new. They now open one only when a receipt is due
+   (`receiptDue`), so reading seen offers commits nothing. `/player/offers` 27 → 6 ms, `/guardian/offers` 27 → 1.8 ms.
+
+**What still misses §2 after items 1–4** (30k players, busy club, 4 November): `/org/recruitment-analytics` 890 ms
+(item 2); `/org/rooms` 124 ms and a Room 10–22 ms (the per-player Passport and Trust assembly, S10); `/player/journeys`
+38 ms, `/player/signings` 10 ms, `/org/trials` 11 ms (the page decodes each trial's ~14 child tables: batch-decode
+them like cases); the Room comment write 66 ms (the organisations' per-unit cost, §4.3.1). Decide which of these are
+hot paths before S9; the rest of recruitment is under 5 ms.
 
 A backlog is a separate risk: the boot runs the sweeps before it listens, one transaction and one notification per due
 item. The script moves the fixtures' instants to today so it measures the steady state.

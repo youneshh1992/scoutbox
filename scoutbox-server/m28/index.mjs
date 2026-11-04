@@ -680,10 +680,14 @@ export function registerOffers(rawCtx) {
   const recipientView = (o, at) => withSigning(o, at, offerRecipientView(o, at, { orgName: orgOf(o.orgId)?.name ?? null, caseOpen: caseOpenFor(o) }));
 
   /** A read receipt for the live revision (§40): a fact about delivery, never a status. Returns the stored Offer (unchanged when it was already recorded). */
-  function markViewed(o, { kind, id }, at) {
+  /** Does this viewer still need a receipt for the live revision? (No live revision: nothing to receipt.) */
+  function receiptDue(o, { kind, id }) {
     const cur = liveRevision(o);
-    if (!cur) return o;
-    if ((o.readReceipts ?? []).some((r) => r && r.revisionId === cur.id && r.viewerKind === kind && r.viewerId === id)) return o;
+    return !!cur && !(o.readReceipts ?? []).some((r) => r && r.revisionId === cur.id && r.viewerKind === kind && r.viewerId === id);
+  }
+  function markViewed(o, { kind, id }, at) {
+    if (!receiptDue(o, { kind, id })) return o;
+    const cur = liveRevision(o);
     return offers.update(o.id, (d) => {
       d.readReceipts.push({ revisionId: cur.id, viewerKind: kind, viewerId: id, firstViewedAt: at });
       hist(d, 'offer_viewed', { kind, id, name: null }, { revisionId: cur.id }, at);
@@ -696,7 +700,12 @@ export function registerOffers(rawCtx) {
       const actorId = by === 'guardian' ? req.guardian.id : req.player.id;
       const playerIds = by === 'guardian' ? req.guardian.childIds : [req.player.id];
       // The list shows the full terms, so listing IS the recipient's first sight of a revision: one receipt per live revision, persisted once.
-      const rows = unit(() => recipientOffers({ by, actorId, playerIds, at }).map((o) => markViewed(o, { kind: by, id: actorId }, at)));
+      // A unit of work is opened only when a receipt is new (§4.3 step 4): a list already seen is a read and nothing else.
+      const viewer = { kind: by, id: actorId };
+      const listed = recipientOffers({ by, actorId, playerIds, at });
+      const unseen = listed.filter((o) => receiptDue(o, viewer));
+      const marked = unseen.length ? new Map(unit(() => unseen.map((o) => [o.id, markViewed(o, viewer, at)]))) : new Map();
+      const rows = listed.map((o) => marked.get(o.id) ?? o);
       const items = rows.map((o) => ({ ...recipientView(o, at), playerName: findPlayer(o.playerId)?.name ?? null }));
       res.json({ items, note: 'Offers issued to you, as the club issued them. Read the exact revision; accept or decline before it expires. Accepting in ScoutBox is not a signing.' });
     };
@@ -709,7 +718,8 @@ export function registerOffers(rawCtx) {
       const o = recipientOffer(req, res, { by, actorId, playerIds });
       if (!o) return;
       const at = now(req);
-      const seen = unit(() => markViewed(o, { kind: by, id: actorId }, at));
+      const viewer = { kind: by, id: actorId };
+      const seen = receiptDue(o, viewer) ? unit(() => markViewed(o, viewer, at)) : o;
       res.json({ offer: recipientView(seen, at), history: offerHistoryView(seen, { forRecipient: true }) });
     };
   }
