@@ -16,7 +16,7 @@ import { CLAIM_TYPES, EVIDENCE_LIMITS as LIMITS } from '../../repositories/scout
 // it always was.
 
 /** A text field from a request: undefined/null → null; text → shortened to `max`; anything else → a 400 sent, returns undefined. */
-function textOrRefuse(res, raw, field, max, { required = false } = {}) {
+export function textOrRefuse(res, raw, field, max, { required = false } = {}) {
   if (raw === undefined || raw === null || (typeof raw === 'string' && !raw.trim())) {
     if (required) { res.status(400).json({ error: `${field.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}_REQUIRED`, field }); return undefined; }
     return null;
@@ -30,7 +30,7 @@ function textOrRefuse(res, raw, field, max, { required = false } = {}) {
  * come from other domains (a player's signup has no length limit; an org dispute stores "scout · club"), so they are
  * shortened here rather than refused: refusing would block a real user's action. See docs/known-issues.md.
  */
-const storedName = (name, max = LIMITS.name) => (name === undefined || name === null ? null : String(name).slice(0, max));
+export const storedName = (name, max = LIMITS.name) => (name === undefined || name === null ? null : String(name).slice(0, max));
 
 export function registerPassport(ctx) {
   const {

@@ -181,7 +181,7 @@ export function buildReportingContext({
     // The contacts, offers, packages and signings come from SQL (§4.3 step 2): `reads` is the data layer's recruitmentReads; a context built
     // without it (a unit fixture over plain collections) has none, as it had none without the collections.
     contacts: (reads.contacts?.forOrg(orgId) ?? []).filter((c) => keptRoomIds.has(c.caseId)),
-    assessments: (db.assessments ?? []).filter((a) => a && a.orgId === orgId),
+    assessments: reads.assessments?.forOrg(orgId) ?? [], // S9b: SQL
     offers: (reads.offers?.forOrg(orgId) ?? []).filter((o) => keptRoomIds.has(o.caseId)),
     packages: (reads.signingPackages?.forOrg(orgId) ?? []).filter((p) => keptRoomIds.has(p.caseId)),
     signings: reads.signings?.forOrg(orgId) ?? [],

@@ -46,8 +46,8 @@ export const EVIDENCE_LIMITS = Object.freeze({
 const L = EVIDENCE_LIMITS;
 
 // ------------------------------------------------------------------ DDL
-const txt = (col, max, { notNull = false } = {}) => `TEXT${notNull ? ' NOT NULL' : ''} CHECK (${notNull ? '' : `${col} IS NULL OR `}length(${col}) <= ${max})`;
-const historyTable = (table, owner, ownerTable) => `
+export const txt = (col, max, { notNull = false } = {}) => `TEXT${notNull ? ' NOT NULL' : ''} CHECK (${notNull ? '' : `${col} IS NULL OR `}length(${col}) <= ${max})`;
+export const historyTable = (table, owner, ownerTable) => `
 CREATE TABLE ${table} (
   id          TEXT PRIMARY KEY,
   ${owner}    TEXT NOT NULL REFERENCES ${ownerTable}(id) ON DELETE RESTRICT,
@@ -151,42 +151,43 @@ CREATE INDEX squad_invites_player_status ON squad_invites (player_id, status);
 `;
 
 // ------------------------------------------------------------------ typing (the one place a value is judged)
-const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const isInt = (v) => Number.isSafeInteger(v);
-const isStr = (v) => typeof v === 'string';
-const nonEmpty = (v) => isStr(v) && v.length > 0;
-const orNull = (v) => (v === undefined ? null : v);
-const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
-const bad = (at, field, what) => ({ ok: false, reason: `${at}.${field} ${what}` });
+// The helpers below are shared with the scouting assessments repository (S9b, scoutingAssessments.mjs).
+export const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+export const isInt = (v) => Number.isSafeInteger(v);
+export const isStr = (v) => typeof v === 'string';
+export const nonEmpty = (v) => isStr(v) && v.length > 0;
+export const orNull = (v) => (v === undefined ? null : v);
+export const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+export const bad = (at, field, what) => ({ ok: false, reason: `${at}.${field} ${what}` });
 const dayOnly = (v) => isStr(v) && /^\d{4}-\d{2}-\d{2}$/.test(v);
 /** Text that is optional (null/absent) or a string of at most `max` characters. */
-function optText(rec, at, field, max) {
+export function optText(rec, at, field, max) {
   const v = rec[field];
   if (v === undefined || v === null) return null;
   if (!isStr(v)) return bad(at, field, `must be text or null (got ${describe(v)})`);
   if (v.length > max) return bad(at, field, `exceeds ${max} characters`);
   return null;
 }
-function reqText(rec, at, field, max) {
+export function reqText(rec, at, field, max) {
   const v = rec[field];
   if (!nonEmpty(v)) return bad(at, field, `must be non-empty text (got ${describe(v)})`);
   if (v.length > max) return bad(at, field, `exceeds ${max} characters`);
   return null;
 }
-const optInstant = (rec, at, field) => (rec[field] === undefined || rec[field] === null || isInt(rec[field]) ? null : bad(at, field, `must be an integer instant or null (got ${describe(rec[field])})`));
-const reqInstant = (rec, at, field) => (isInt(rec[field]) ? null : bad(at, field, `must be an integer instant (got ${describe(rec[field])})`));
-const unknownFields = (rec, at, known) => { const extra = Object.keys(rec).filter((k) => !known.includes(k)); return extra.length ? { ok: false, reason: `${at} carries field(s) this build does not store: ${extra.join(', ')}` } : null; };
-const first = (...checks) => checks.find((c) => c) ?? null;
+export const optInstant = (rec, at, field) => (rec[field] === undefined || rec[field] === null || isInt(rec[field]) ? null : bad(at, field, `must be an integer instant or null (got ${describe(rec[field])})`));
+export const reqInstant = (rec, at, field) => (isInt(rec[field]) ? null : bad(at, field, `must be an integer instant (got ${describe(rec[field])})`));
+export const unknownFields = (rec, at, known) => { const extra = Object.keys(rec).filter((k) => !known.includes(k)); return extra.length ? { ok: false, reason: `${at} carries field(s) this build does not store: ${extra.join(', ')}` } : null; };
+export const first = (...checks) => checks.find((c) => c) ?? null;
 
 /** One history entry, the shared shape `{ id, at, byKind, byId, byName, action, detail }` (detail is text or null). */
-function typeHistory(h, at, kinds = HISTORY_BY_KINDS) {
+export function typeHistory(h, at, kinds = HISTORY_BY_KINDS) {
   if (!isPlainObject(h)) return { ok: false, reason: `${at} is not an object (${describe(h)})` };
   const problem = first(unknownFields(h, at, ['id', 'at', 'byKind', 'byId', 'byName', 'action', 'detail']), reqText(h, at, 'id', 80), reqInstant(h, at, 'at'), reqText(h, at, 'action', 80), optText(h, at, 'byId', 80), optText(h, at, 'byName', L.name), optText(h, at, 'detail', L.detail));
   if (problem) return problem;
   if (h.byKind !== undefined && h.byKind !== null && !kinds.includes(h.byKind)) return bad(at, 'byKind', `must be one of ${kinds.join('|')} or null (got ${describe(h.byKind)})`);
   return { ok: true, record: { id: h.id, at: h.at, byKind: orNull(h.byKind), byId: orNull(h.byId), byName: orNull(h.byName), action: h.action, detail: orNull(h.detail) } };
 }
-function typeList(list, at, typer, ...rest) {
+export function typeList(list, at, typer, ...rest) {
   if (list === undefined || list === null) return { ok: true, list: [] };
   if (!Array.isArray(list)) return bad(at, '', `must be an array (got ${describe(list)})`);
   const out = []; const seen = new Set();
@@ -290,8 +291,6 @@ const TYPERS = { evidence: typeEvidence, coachAffiliations: typeCoachAffiliation
 const TABLE_OF = { evidence: 'evidence', coachAffiliations: 'coach_affiliations', squadInvites: 'squad_invites' };
 
 // ------------------------------------------------------------------ rows
-const bool = (v) => (v ? 1 : 0);
-void bool;
 function statements(sqlite) {
   const p = (sql) => sqlite.prepare(sql);
   return {
@@ -334,8 +333,8 @@ function batchStatements(sqlite, st, { evidenceIds = [], affiliationIds = [] }) 
     affHistBy: childRowsOf(sqlite, 'coach_affiliation_history', 'affiliation_id', affiliationIds, { order: 'position' }),
   };
 }
-const histRow = (owner, h, position) => ({ id: h.id, owner, position, at: h.at, by_kind: h.byKind, by_id: h.byId, by_name: h.byName, action: h.action, detail: h.detail });
-const histOut = (h) => ({ id: h.id, at: h.at, byKind: h.by_kind, byId: h.by_id, byName: h.by_name, action: h.action, detail: h.detail });
+export const histRow = (owner, h, position) => ({ id: h.id, owner, position, at: h.at, by_kind: h.byKind, by_id: h.byId, by_name: h.byName, action: h.action, detail: h.detail });
+export const histOut = (h) => ({ id: h.id, at: h.at, byKind: h.by_kind, byId: h.by_id, byName: h.by_name, action: h.action, detail: h.detail });
 function evidenceRow(e, { selfRefs = true } = {}) {
   return {
     id: e.id, player_id: e.playerId, claim_type: e.claimType, label: e.label, value_number: typeof e.value === 'number' ? e.value : null, value_text: typeof e.value === 'string' ? e.value : null,
@@ -484,7 +483,7 @@ export const SCOUTING_EVIDENCE_SNAPSHOT = {
 };
 
 // ------------------------------------------------------------------ the repository
-const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
+export const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 const WRITES = new Set(['create', 'update']);
 /**
  * `createScoutingEvidenceRepository({ sqlite, unit, now, log })`: `evidence`, `coachAffiliations` and `squadInvites`,

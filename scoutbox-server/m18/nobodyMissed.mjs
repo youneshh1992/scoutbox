@@ -126,7 +126,7 @@ export function registerNobodyMissed(ctx) {
       room_open: !!openRoom,
       room_decided: endedRooms.length > 0 || decisions.length > 0,
       case_open: cases.some((c) => !c.room && c.stage !== 'closed'),
-      assessment_submitted: db.assessments.some((a) => a.orgId === org.id && a.playerId === playerId && a.state !== 'draft'),
+      assessment_submitted: ctx.scoutingReads.assessments.forOrgPlayer(org.id, playerId).some((a) => a.state !== 'draft'),
       trial: reads.trials.forOrgPlayer(org.id, playerId).length > 0,
       signing: reads.signings.forOrgPlayer(org.id, playerId).length > 0,
       shortlisted: (db.ledger ?? []).some((l) => l.type === 'shortlist' && l.orgId === org.id && l.playerId === playerId),

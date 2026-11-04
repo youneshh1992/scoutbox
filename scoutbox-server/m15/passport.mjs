@@ -104,8 +104,8 @@ export function registerPassportCore(ctx) {
     const careerEntries = db.passportCareerEntries.filter((c) => c.playerId === pid);
 
     const trials = reads.trials.forPlayer(pid);
-    const assessments = db.assessments
-      .filter((a) => a.playerId === pid && ['submitted', 'reviewed', 'published'].includes(a.state ?? '') || (a.playerId === pid && a.publishedFeedback))
+    const assessments = ctx.scoutingReads.assessments.forPlayer(pid)
+      .filter((a) => a.state !== 'draft')
       .map((a) => ({ ...a, orgName: orgOf(a.orgId)?.name ?? null }));
     const references = (db.verReferences ?? []).filter((r) => r.playerId === pid && r.status === 'active').map((r) => ({
       ...r,

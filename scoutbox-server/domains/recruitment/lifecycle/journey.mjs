@@ -12,7 +12,7 @@
  *   opts.reads.decisions   append-only decisions (M17; SQL since §4.3 step 2)
  *   opts.reads.requests    contact/trial requests (core; SQL since §4.3 step 2)
  *   opts.reads.trials      accepted trials (core; SQL since §4.3 step 2)
- *   db.assessments         assessments (M12)
+ *   opts.reads.assessments assessments (M12; SQL since S9b)
  *   opts.reads.offers      offers (M23 P4 — optional; read through SQL since §4.3 step 2)
  *   opts.reads.outcomeReports  post-signing outcomes (M12; optional; SQL since §4.3 step 2)
  *   opts.reads.signings    signings (core; required) and opts.reads.signingPackages (P7; optional), SQL since §4.3 step 2
@@ -55,7 +55,7 @@ import {
  * `recruitmentContacts` for the contacts); `opts.reads.offers`, `.signingPackages` and `.outcomeReports` are optional like their phases always were.
  */
 export const JOURNEY_REQUIRED_STORES = Object.freeze([
-  'assessments',
+  // S9b: the assessments are read through SQL too (`opts.reads.assessments`, required): no `db` collection is left.
 ]);
 
 /** Stores that are genuinely optional right now, because their phase has not shipped (none since §4.3 step 2: the outcome reports are an optional `reads` entry). */
@@ -161,6 +161,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   if (typeof reads.signings?.forOrgPlayer !== 'function' || typeof reads.signings?.byId !== 'function') missing.push('signings');
   if (typeof reads.requests?.forOrgPlayer !== 'function' || typeof reads.requests?.forCase !== 'function') missing.push('requests');
   if (typeof reads.trials?.forOrgPlayer !== 'function' || typeof reads.trials?.forCase !== 'function' || typeof reads.trials?.byId !== 'function') missing.push('trials');
+  if (typeof reads.assessments?.forOrgPlayer !== 'function') missing.push('assessments');
   const malformed = JOURNEY_REQUIRED_STORES.filter((k) => db?.[k] !== undefined && !Array.isArray(db[k]));
   if (missing.length || malformed.length) {
     return {
@@ -198,6 +199,8 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     // The club's other cases of this player (an earlier, ended case owns its own records) and this case's decisions.
     siblingCases: reads.cases.forOrgPlayer(kase.orgId, kase.playerId),
     decisions: reads.decisions.forRoom(kase.id),
+    // The club's assessments of this player (S9b: SQL).
+    assessments: reads.assessments.forOrgPlayer(kase.orgId, kase.playerId),
     offers: typeof reads.offers?.forCase === 'function' ? reads.offers.forCase(kase.id) : null,
     packages: typeof reads.signingPackages?.forCase === 'function' ? reads.signingPackages.forCase(kase.id) : null,
     signings: reads.signings.forOrgPlayer(kase.orgId, kase.playerId),
@@ -323,7 +326,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // `trials` list above stays the club's view of the player (P4).
   const trialRows = rec.trials.filter((t) => t?.orgId === kase.orgId && t.playerId === kase.playerId && t.caseId === kase.id && trials.some((x) => x.id === t.id));
   const trialInvitations = rec.caseRequests.filter((r) => r?.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId);
-  const trialAssessments = (db.assessments ?? []).filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId && a.context?.trialId && trialRows.some((x) => x.id === a.context.trialId));
+  const trialAssessments = rec.assessments.filter((a) => a.context?.trialId && trialRows.some((x) => x.id === a.context.trialId));
 
   const contacts = rec.requests
     .filter((r) => r?.orgId === kase.orgId && r.playerId === kase.playerId)
@@ -342,8 +345,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   }
   contactRecords.sort((a, b) => String(a.id).localeCompare(String(b.id)));
 
-  const assessments = db.assessments
-    .filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId)
+  const assessments = rec.assessments
     .map((a) => ({ id: a.id, state: a.state, at: a.submittedAt ?? a.createdAt }));
 
   // Optional stores: absent because their phase has not shipped. Structural
@@ -378,7 +380,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const trialsCorrupt = rec.caseTrials.filter((t) => t?.caseId === kase.id && t.orgId === kase.orgId && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length > 0).length;
   const corruptRecords = offersCorrupt + packagesCorrupt + trialsCorrupt + contactsOmitted;
   // P8.1 (D-P81-15): this case's assessments — never the ended case's (a Trial of another case, or written while another case was open).
-  const allAssessments = db.assessments.filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId && !ownedByAnotherCase(rec, kase, { caseId: trialCaseOf(rec, a.context?.trialId), at: a.createdAt }));
+  const allAssessments = rec.assessments.filter((a) => !ownedByAnotherCase(rec, kase, { caseId: trialCaseOf(rec, a.context?.trialId), at: a.createdAt }));
   const journeyBlock = journeyFor(db, rec, kase, {
     status, role, now,
     contacts: rec.contacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0),

@@ -13,6 +13,13 @@ const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 
 const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
 
 import { readPage, sendPageError } from '../platform/paging.mjs';
+import { parseStrictDateOnly } from '../../temporal.mjs';
+import { POSITION_GROUPS, ANCHOR_LEVELS, VERDICTS, VIEWINGS, ASSESSMENT_LIMITS as A_LIMITS } from '../../repositories/scoutingAssessments.mjs';
+import { textOrRefuse, storedName } from './passport.mjs';
+
+const CONTEXT_FIELDS = Object.freeze(['fixture', 'date', 'minutesWatched', 'viewing', 'opponentLevel']);
+const REF_FIELDS = Object.freeze(['segmentId', 'trialSessionId', 'boxSessionId', 't', 'label']);
+const nonEmptyText = (v) => typeof v === 'string' && v.trim().length > 0;
 export function registerScouting(ctx) {
   const {
     db, byId, scoutingReads, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
@@ -20,7 +27,10 @@ export function registerScouting(ctx) {
     orgCanSee, paginate, audit, isLead, requireLead, moderateOrRefuse, isAdult,
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
     recruitmentCases, dueAtOrRefuse, // S8b: every case change is an explicit repository operation (cases.create / update)
+    scoutingAssessments, unit, // S9b: templates, assessments, segments and playlists are explicit repository writes
   } = ctx;
+  if (typeof scoutingAssessments?.assessments?.create !== 'function' || typeof unit !== 'function') throw new TypeError('registerScouting needs the scouting assessments repository and unit from the data layer');
+  const { templates, assessments, segments, playlists } = scoutingAssessments;
   // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function' || typeof reads?.trials?.byId !== 'function') throw new TypeError('registerScouting needs recruitmentReads (signings, requests, trials) from the data layer');
@@ -29,65 +39,42 @@ export function registerScouting(ctx) {
   const orgTrial = (id, orgId) => { const t = reads.trials.byId(id); return t && t.orgId === orgId ? t : null; };
   const { cases } = recruitmentCases;
 
-  // ------------------------------------------------- template seeds (v1)
-  // Position-specific templates with DESCRIPTIVE anchors — a 3 means the
-  // sentence, not a feeling. Historical assessments snapshot their template.
-  if (db.assessmentTemplates.length === 0) {
-    const anchor = (a1, a3, a5) => ({ 1: a1, 3: a3, 5: a5 });
-    const T = (positionGroup, attributes) => ({
-      id: `tpl-${positionGroup.toLowerCase()}`, positionGroup, version: 1,
-      createdAt: Date.now(), createdBy: 'seed',
-      attributes: attributes.map(([id, label, anchors]) => ({ id, label, anchors })),
-    });
-    db.assessmentTemplates.push(
-      T('GK', [
-        ['shot_stopping', 'Shot stopping', anchor('Beaten by savable strikes', 'Makes the expected saves', 'Repeatedly saves strikes most keepers concede')],
-        ['distribution', 'Distribution', anchor('Kicks are a turnover', 'Safe short + adequate long', 'Starts attacks under pressure')],
-        ['command_of_area', 'Command of area', anchor('Stays rooted on crosses', 'Claims the straightforward ball', 'Owns the box, organises the line')],
-        ['one_v_one', '1v1', anchor('Commits early, easily rounded', 'Delays and narrows angles', 'Consistently wins clean 1v1s')],
-      ]),
-      T('DEF', [
-        ['positioning', 'Positioning', anchor('Caught ball-watching', 'Holds the line, tracks runners', 'Reads danger two passes early')],
-        ['duels', 'Duels (ground + air)', anchor('Loses most contests', 'Breaks even vs like-for-like', 'Dominant in both phases')],
-        ['first_pass', 'First pass out', anchor('Clears blind', 'Finds the free full-back', 'Breaks a line on the ground')],
-        ['recovery_pace', 'Recovery pace', anchor('Exposed in space', 'Copes with average movers', 'Recovers vs quick attackers')],
-      ]),
-      T('MID', [
-        ['receiving', 'Receiving under pressure', anchor('Hides from the ball', 'Keeps it simple, keeps it safe', 'Wants it in traffic, turns out of it')],
-        ['progression', 'Ball progression', anchor('Sideways and backwards only', 'Moves play forward when on', 'Consistently breaks lines by pass or carry')],
-        ['defensive_work', 'Defensive contribution', anchor('Jogs back', 'Screens and tracks adequately', 'Wins it back high, reads screens'), ],
-        ['tempo', 'Tempo control', anchor('Rushes everything', 'Plays at the game’s pace', 'Dictates the game’s pace')],
-      ]),
-      T('ATT', [
-        ['finishing', 'Finishing', anchor('Snatches at chances', 'Buries the clear ones', 'Finishes half-chances both feet')],
-        ['movement', 'Movement off the ball', anchor('Static, marks himself', 'Finds space in rotation', 'Constantly unbalances the back line')],
-        ['first_touch', 'First touch', anchor('Touch escapes under pressure', 'Controls with time', 'Kills any ball instantly under pressure')],
-        ['pressing', 'Pressing', anchor('No defensive effort', 'Presses on triggers', 'First defender, sets the press')],
-      ]),
-    );
-  }
-
-  const currentTemplateFor = (positionGroup) =>
-    db.assessmentTemplates.filter((t) => t.positionGroup === positionGroup).sort((a, b) => b.version - a.version)[0];
+  // ------------------------------------------------- templates
+  // Position-specific templates with DESCRIPTIVE anchors (a 3 means the sentence, not a feeling). The v1 templates are
+  // rows of migration 0020; a lead publishes a new version, and historical assessments keep the version they used.
+  // S9b: every template, assessment, segment and playlist change is an explicit repository operation
+  // (repositories/scoutingAssessments.mjs) and every read a query (scoutingReads). Junk is refused with the field named
+  // (400 FIELD_INVALID / DATE_INVALID); over-long text is still shortened, as it always was.
+  const { templates: templateReads, assessments: assessmentReads, segments: segmentReads, playlists: playlistReads } = scoutingReads;
+  const currentTemplateFor = (positionGroup) => templateReads.currentFor(positionGroup);
+  const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
 
   orgRouter.get('/assessment-templates', (req, res) => {
-    res.json({ templates: db.assessmentTemplates, note: 'New versions never alter historical reports — every assessment snapshots its template at creation.' });
+    res.json({ templates: templateReads.all(), note: 'New versions never alter historical reports — every assessment snapshots its template at creation.' });
   });
 
   orgRouter.post('/assessment-templates', (req, res) => {
     if (!requireLead(req, res)) return;
     const { positionGroup, attributes } = req.body ?? {};
-    if (!['GK', 'DEF', 'MID', 'ATT'].includes(positionGroup)) return res.status(400).json({ error: 'POSITION_GROUP_INVALID' });
-    if (!Array.isArray(attributes) || attributes.length < 2 || attributes.some((a) => !a.id || !a.label)) {
-      return res.status(400).json({ error: 'ATTRIBUTES_INVALID', message: 'At least two attributes, each with id + label (+ descriptive anchors).' });
+    if (!POSITION_GROUPS.includes(positionGroup)) return res.status(400).json({ error: 'POSITION_GROUP_INVALID' });
+    if (!Array.isArray(attributes) || attributes.length < 2 || attributes.length > A_LIMITS.attributes || attributes.some((a) => !a || typeof a !== 'object' || !nonEmptyText(a.id) || !nonEmptyText(a.label))) {
+      return res.status(400).json({ error: 'ATTRIBUTES_INVALID', message: `Two to ${A_LIMITS.attributes} attributes, each with id + label (+ descriptive anchors).` });
+    }
+    const attrs = [];
+    for (const [i, a] of attributes.entries()) {
+      const id = a.id.trim().slice(0, A_LIMITS.attrId);
+      if (attrs.some((x) => x.id === id)) return res.status(400).json({ error: 'ATTRIBUTES_INVALID', message: 'Each attribute id appears once.' });
+      const anchors = a.anchors ?? {};
+      if (!anchors || typeof anchors !== 'object' || Array.isArray(anchors) || Object.entries(anchors).some(([k, v]) => !ANCHOR_LEVELS.includes(k) || !nonEmptyText(v))) {
+        return fieldInvalid(res, `attributes[${i}].anchors`, `Anchors map the levels ${ANCHOR_LEVELS.join(', ')} to a descriptive sentence.`);
+      }
+      attrs.push({ id, label: a.label.trim().slice(0, A_LIMITS.attrLabel), anchors: Object.fromEntries(Object.entries(anchors).map(([k, v]) => [k, v.slice(0, A_LIMITS.anchor)])) });
     }
     const prev = currentTemplateFor(positionGroup);
-    const t = {
+    const t = templates.create({
       id: `tpl-${positionGroup.toLowerCase()}`, positionGroup, version: (prev?.version ?? 0) + 1,
-      createdAt: Date.now(), createdBy: req.orgUser.name,
-      attributes: attributes.map((a) => ({ id: String(a.id).slice(0, 40), label: String(a.label).slice(0, 80), anchors: a.anchors ?? {} })),
-    };
-    db.assessmentTemplates.push(t);
+      createdAt: Date.now(), createdBy: storedName(req.orgUser.name), attributes: attrs,
+    });
     persistNow();
     res.status(201).json({ template: t });
   });
@@ -97,15 +84,52 @@ export function registerScouting(ctx) {
     // The blind rule, enforced where the data leaves the server: a scout
     // sees OTHER scouts' assessments of a player only after submitting
     // their own (leads see everything — they commission the second opinion).
-    const mine = db.assessments.filter((a) => a.orgId === req.org.id && a.playerId === playerId);
+    const mine = assessmentReads.forOrgPlayer(req.org.id, playerId);
     if (isLead(req.orgUser)) return mine;
     const iSubmitted = mine.some((a) => a.scoutUserId === req.orgUser.id && a.state !== 'draft');
     return mine.filter((a) => a.scoutUserId === req.orgUser.id || (iSubmitted && a.state !== 'draft'));
   }
+  const ownAssessment = (req) => { const a = assessmentReads.byId(req.params.id); return a && a.orgId === req.org.id ? a : null; };
 
   function assessmentView(a) {
     const { history, ...rest } = a;
     return rest;
+  }
+
+  /**
+   * The ordinary context fields of a request (fixture, date, minutes watched, viewing, opponent level): checked and
+   * shortened. Returns the fields present in `context` or writes the refusal and returns undefined. The trial fields are
+   * judged by the callers (fixed at creation).
+   */
+  function contextFieldsOrRefuse(res, context) {
+    if (context === undefined || context === null) return {};
+    if (typeof context !== 'object' || Array.isArray(context)) { res.status(400).json({ error: 'CONTEXT_INVALID' }); return undefined; }
+    const unknown = Object.keys(context).find((k) => !CONTEXT_FIELDS.includes(k) && k !== 'trialId' && k !== 'trialSessionId');
+    if (unknown) return fieldInvalid(res, `context.${unknown}`, `An assessment's context holds ${[...CONTEXT_FIELDS, 'trialId', 'trialSessionId'].join(', ')}.`);
+    const out = {};
+    for (const [k, max] of [['fixture', A_LIMITS.fixture], ['opponentLevel', A_LIMITS.opponentLevel]]) {
+      if (!(k in context)) continue;
+      const v = textOrRefuse(res, context[k], `context.${k}`, max); if (v === undefined) return undefined; out[k] = v;
+    }
+    if ('date' in context) {
+      if (context.date === null || context.date === '') out.date = null;
+      else {
+        const d = parseStrictDateOnly(context.date);
+        if (!d.ok) { res.status(400).json({ error: 'DATE_INVALID', field: 'context.date', message: `date is a calendar day (YYYY-MM-DD) (${d.why}).`, expected: d.expected }); return undefined; }
+        out.date = context.date;
+      }
+    }
+    if ('minutesWatched' in context) {
+      const m = context.minutesWatched;
+      if (m === null) out.minutesWatched = null;
+      else if (typeof m === 'number' && Number.isFinite(m) && Math.round(m) >= 1 && Math.round(m) <= A_LIMITS.minutesWatched) out.minutesWatched = Math.round(m);
+      else return fieldInvalid(res, 'context.minutesWatched', `minutesWatched is a number of minutes from 1 to ${A_LIMITS.minutesWatched}.`);
+    }
+    if ('viewing' in context) {
+      if (context.viewing !== null && !VIEWINGS.includes(context.viewing)) return fieldInvalid(res, 'context.viewing', `viewing is ${VIEWINGS.join(' or ')}.`);
+      out.viewing = context.viewing;
+    }
+    return out;
   }
 
   /**
@@ -142,9 +166,9 @@ export function registerScouting(ctx) {
     if (req.query.playerId) {
       list = assessmentAccessList(req, String(req.query.playerId));
     } else if (isLead(req.orgUser)) {
-      list = db.assessments.filter((a) => a.orgId === req.org.id);
+      list = assessmentReads.forOrg(req.org.id);
     } else {
-      list = db.assessments.filter((a) => a.orgId === req.org.id && a.scoutUserId === req.orgUser.id);
+      list = assessmentReads.forOrgScout(req.org.id, req.orgUser.id);
     }
     // M23 P4B: `?trialId=` narrows to one Trial's assessments — through the
     // same access list (blind rule intact), never around it.
@@ -164,128 +188,163 @@ export function registerScouting(ctx) {
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
     const tmpl = currentTemplateFor(positionGroup ?? groupFor(p.position));
     if (!tmpl) return res.status(400).json({ error: 'NO_TEMPLATE' });
-    if (secondOpinionOf) {
-      const first = db.assessments.find((a) => a.id === secondOpinionOf && a.orgId === req.org.id);
-      if (!first) return res.status(404).json({ error: 'FIRST_OPINION_NOT_FOUND' });
+    if (secondOpinionOf !== undefined && secondOpinionOf !== null) {
+      if (typeof secondOpinionOf !== 'string') return fieldInvalid(res, 'secondOpinionOf', 'secondOpinionOf is an assessment id.');
+      const first = assessmentReads.byId(secondOpinionOf);
+      if (!first || first.orgId !== req.org.id) return res.status(404).json({ error: 'FIRST_OPINION_NOT_FOUND' });
       if (first.scoutUserId === req.orgUser.id) return res.status(400).json({ error: 'NOT_INDEPENDENT', message: 'A second opinion comes from a different scout.' });
     }
+    const fields = contextFieldsOrRefuse(res, context);
+    if (fields === undefined) return;
     // M23 P4B: an assessment may be written IN THE CONTEXT of a Trial (and
     // optionally one of its sessions). The Trial must be this org's, for
     // this player, still with a subject, and the author must hold the
     // room's `trial_assess` permission. The assessment stays an ordinary
-    // db.assessments row: same blind rule, same single feedback door.
+    // assessment: same blind rule, same single feedback door.
     const trialCtx = validateTrialContext(req, res, context, p);
     if (!trialCtx) return;
-    const a = {
-      id: nextId('ass'), orgId: req.org.id, playerId: p.id, playerName: p.name,
-      scoutUserId: req.orgUser.id, scoutName: req.orgUser.name,
-      templateId: tmpl.id, templateVersion: tmpl.version,
-      attributesSnapshot: tmpl.attributes, // immutability: the report keeps its scale
-      context: {
-        fixture: context?.fixture ? String(context.fixture).slice(0, 120) : null,
-        date: context?.date ?? null,
-        minutesWatched: Number(context?.minutesWatched) || null,
-        viewing: ['live', 'video'].includes(context?.viewing) ? context.viewing : null,
-        opponentLevel: context?.opponentLevel ? String(context.opponentLevel).slice(0, 60) : null,
-        trialId: trialCtx.trialId, trialSessionId: trialCtx.trialSessionId,
-      },
+    const draft = {
+      id: nextId('ass'), orgId: req.org.id, playerId: p.id, playerName: storedName(p.name),
+      scoutUserId: req.orgUser.id, scoutName: storedName(req.orgUser.name),
+      templateId: tmpl.id, templateVersion: tmpl.version, // immutability: the report keeps its scale (the version's attributes)
+      context: { fixture: null, date: null, minutesWatched: null, viewing: null, opponentLevel: null, ...fields, trialId: trialCtx.trialId, trialSessionId: trialCtx.trialSessionId },
       ratings: [], state: 'draft', recommendation: null,
       secondOpinionOf: secondOpinionOf ?? null,
-      createdAt: Date.now(), submittedAt: null, reviewedAt: null,
+      createdAt: Date.now(), submittedAt: null, reviewedAt: null, reviewNote: null,
       publishedFeedback: null, history: [],
     };
-    audit(a, 'org', req.orgUser.id, req.orgUser.name, 'created');
-    db.assessments.push(a);
+    audit(draft, 'org', req.orgUser.id, storedName(req.orgUser.name), 'created');
+    const a = assessments.create(draft);
     persistNow();
     res.status(201).json({ assessment: assessmentView(a) });
   });
 
+  /** One rating evidence reference from a request: checked and shortened, or the refusal written and undefined. */
+  function evidenceRefOrRefuse(res, ref, at) {
+    if (!ref || typeof ref !== 'object' || Array.isArray(ref)) return fieldInvalid(res, at, 'An evidence reference is an object.');
+    const unknown = Object.keys(ref).find((k) => !REF_FIELDS.includes(k));
+    if (unknown) return fieldInvalid(res, `${at}.${unknown}`, `An evidence reference holds ${REF_FIELDS.join(', ')}.`);
+    const out = {};
+    for (const k of ['segmentId', 'trialSessionId', 'boxSessionId']) {
+      if (ref[k] === undefined || ref[k] === null) continue;
+      if (typeof ref[k] !== 'string' || !ref[k] || ref[k].length > A_LIMITS.ref) return fieldInvalid(res, `${at}.${k}`, `${k} is an id.`);
+      out[k] = ref[k];
+    }
+    if (ref.t !== undefined && ref.t !== null) {
+      if (!(typeof ref.t === 'number' && Number.isFinite(ref.t) && ref.t >= 0)) return fieldInvalid(res, `${at}.t`, 't is a number of seconds, 0 or more.');
+      out.t = ref.t;
+    }
+    if (ref.label !== undefined && ref.label !== null) {
+      const l = textOrRefuse(res, ref.label, `${at}.label`, A_LIMITS.refLabel); if (l === undefined) return undefined; if (l !== null) out.label = l;
+    }
+    return out;
+  }
+
   orgRouter.put('/assessments/:id', (req, res) => {
-    const a = db.assessments.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const a = ownAssessment(req);
     if (!a) return res.status(404).json({ error: 'ASSESSMENT_NOT_FOUND' });
     if (a.scoutUserId !== req.orgUser.id) return res.status(403).json({ error: 'NOT_YOUR_ASSESSMENT' });
     if (a.state !== 'draft') return res.status(409).json({ error: 'NOT_A_DRAFT', message: 'Submitted assessments are immutable; commission a second opinion or a new viewing instead.' });
     const { ratings, context, recommendation } = req.body ?? {};
-    if (Array.isArray(ratings)) {
-      for (const r of ratings) {
+    // Every field is checked before anything is written.
+    let nextRatings;
+    if (ratings !== undefined && ratings !== null) {
+      if (!Array.isArray(ratings)) return fieldInvalid(res, 'ratings', 'ratings is a list.');
+      nextRatings = [];
+      for (const [i, r] of ratings.entries()) {
+        if (!r || typeof r !== 'object' || Array.isArray(r)) return fieldInvalid(res, `ratings[${i}]`, 'A rating is an object.');
         const attr = a.attributesSnapshot.find((x) => x.id === r.attrId);
         if (!attr) return res.status(400).json({ error: 'ATTR_UNKNOWN', attrId: r.attrId });
-        if (!r.notObserved && !(r.rating >= 1 && r.rating <= 5)) return res.status(400).json({ error: 'RATING_INVALID', message: 'Each attribute is 1–5, or explicitly "not observed" — never a silent zero.' });
+        if (nextRatings.some((x) => x.attrId === r.attrId)) return res.status(400).json({ error: 'ATTR_DUPLICATE', attrId: r.attrId, message: 'Each attribute is rated once.' });
+        if (!r.notObserved && !(Number.isInteger(r.rating) && r.rating >= 1 && r.rating <= 5)) return res.status(400).json({ error: 'RATING_INVALID', message: 'Each attribute is a whole number 1–5, or explicitly "not observed" — never a silent zero.' });
         if (r.confidence && !CONFIDENCE.includes(r.confidence)) return res.status(400).json({ error: 'CONFIDENCE_INVALID', allowed: CONFIDENCE });
-        if (Array.isArray(r.evidenceRefs)) {
-          for (const ref of r.evidenceRefs) {
-            if (ref.segmentId && !db.videoSegments.some((s) => s.id === ref.segmentId && s.orgId === req.org.id && s.playerId === a.playerId)) {
-              return res.status(400).json({ error: 'SEGMENT_INVALID', segmentId: ref.segmentId });
-            }
-            // M23 P4B: a rating may cite a Trial session, or a Box Cam session
-            // that is LINKED (and not unlinked) to this assessment's trial —
-            // by reference only. Nothing of the observation travels here.
-            if (ref.trialSessionId !== undefined || ref.boxSessionId !== undefined) {
-              const t = a.context?.trialId ? orgTrial(a.context.trialId, req.org.id) : null;
-              if (!t) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', message: 'Trial evidence references need an assessment written in the context of a trial.' });
-              const sessions = t.schedule?.sessions ?? [];
-              if (ref.trialSessionId !== undefined && !sessions.some((s) => s?.id === ref.trialSessionId)) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', field: 'trialSessionId' });
-              if (ref.boxSessionId !== undefined && !sessions.some((s) => (s?.evidence ?? []).some((e) => e?.kind === 'box_cam_session' && e.sessionId === ref.boxSessionId && !e.removedAt))) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', field: 'boxSessionId', message: 'Only a Box Cam session linked to this trial can be cited.' });
-            }
+        const note = textOrRefuse(res, r.note, `ratings[${i}].note`, A_LIMITS.ratingNote); if (note === undefined) return;
+        if (r.evidenceRefs !== undefined && r.evidenceRefs !== null && !Array.isArray(r.evidenceRefs)) return fieldInvalid(res, `ratings[${i}].evidenceRefs`, 'evidenceRefs is a list.');
+        const refs = [];
+        for (const [j, raw] of (r.evidenceRefs ?? []).slice(0, A_LIMITS.refs).entries()) {
+          const ref = evidenceRefOrRefuse(res, raw, `ratings[${i}].evidenceRefs[${j}]`); if (ref === undefined) return;
+          if (ref.segmentId) {
+            const s = segmentReads.byId(ref.segmentId);
+            if (!s || s.orgId !== req.org.id || s.playerId !== a.playerId) return res.status(400).json({ error: 'SEGMENT_INVALID', segmentId: ref.segmentId });
           }
+          // M23 P4B: a rating may cite a Trial session, or a Box Cam session
+          // that is LINKED (and not unlinked) to this assessment's trial —
+          // by reference only. Nothing of the observation travels here.
+          if (ref.trialSessionId !== undefined || ref.boxSessionId !== undefined) {
+            const t = a.context?.trialId ? orgTrial(a.context.trialId, req.org.id) : null;
+            if (!t) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', message: 'Trial evidence references need an assessment written in the context of a trial.' });
+            const sessions = t.schedule?.sessions ?? [];
+            if (ref.trialSessionId !== undefined && !sessions.some((s) => s?.id === ref.trialSessionId)) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', field: 'trialSessionId' });
+            if (ref.boxSessionId !== undefined && !sessions.some((s) => (s?.evidence ?? []).some((e) => e?.kind === 'box_cam_session' && e.sessionId === ref.boxSessionId && !e.removedAt))) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', field: 'boxSessionId', message: 'Only a Box Cam session linked to this trial can be cited.' });
+          }
+          refs.push(ref);
         }
+        nextRatings.push({ attrId: r.attrId, rating: r.notObserved ? null : r.rating, notObserved: !!r.notObserved, confidence: r.confidence ?? 'medium', note, evidenceRefs: refs });
       }
-      a.ratings = ratings.map((r) => ({
-        attrId: r.attrId, rating: r.notObserved ? null : Number(r.rating), notObserved: !!r.notObserved,
-        confidence: r.confidence ?? 'medium', note: r.note ? String(r.note).slice(0, 300) : null,
-        evidenceRefs: Array.isArray(r.evidenceRefs) ? r.evidenceRefs.slice(0, 6).map((ref) => (ref && typeof ref === 'object' && !Array.isArray(ref)
-          ? Object.fromEntries(['segmentId', 'trialSessionId', 'boxSessionId', 't', 'label'].filter((k) => ref[k] !== undefined).map((k) => [k, k === 'label' ? String(ref[k]).slice(0, 80) : ref[k]]))
-          : ref)) : [],
-      }));
     }
+    let nextContext;
     if (context) {
       // M23 P4B: the Trial context is fixed at creation — an assessment is
       // not re-pointed at another trial or session after the fact.
       if (typeof context !== 'object' || Array.isArray(context)) return res.status(400).json({ error: 'CONTEXT_INVALID' });
-      const { trialId, trialSessionId, ...rest } = context;
+      const { trialId, trialSessionId } = context;
       if ((trialId !== undefined && trialId !== a.context?.trialId) || (trialSessionId !== undefined && trialSessionId !== a.context?.trialSessionId)) {
         return res.status(409).json({ error: 'TRIAL_CONTEXT_IMMUTABLE', message: 'The trial an assessment belongs to is set when it is created.' });
       }
-      a.context = { ...a.context, ...rest };
+      const fields = contextFieldsOrRefuse(res, context);
+      if (fields === undefined) return;
+      nextContext = { ...a.context, ...fields };
     }
+    let nextRecommendation;
     if (recommendation) {
-      if (!['sign', 'monitor', 'pass'].includes(recommendation.verdict)) return res.status(400).json({ error: 'VERDICT_INVALID' });
-      a.recommendation = { verdict: recommendation.verdict, reasons: String(recommendation.reasons ?? '').slice(0, 500) };
+      if (!VERDICTS.includes(recommendation.verdict)) return res.status(400).json({ error: 'VERDICT_INVALID' });
+      const reasons = textOrRefuse(res, recommendation.reasons, 'recommendation.reasons', A_LIMITS.reasons); if (reasons === undefined) return;
+      nextRecommendation = { verdict: recommendation.verdict, reasons: reasons ?? '' };
     }
+    const next = assessments.update(a.id, (d) => {
+      if (nextRatings) d.ratings = nextRatings;
+      if (nextContext) d.context = nextContext;
+      if (nextRecommendation) d.recommendation = nextRecommendation;
+    });
     persistNow();
-    res.json({ assessment: assessmentView(a) });
+    res.json({ assessment: assessmentView(next) });
   });
 
   orgRouter.post('/assessments/:id/submit', (req, res) => {
-    const a = db.assessments.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const a = ownAssessment(req);
     if (!a) return res.status(404).json({ error: 'ASSESSMENT_NOT_FOUND' });
     if (a.scoutUserId !== req.orgUser.id) return res.status(403).json({ error: 'NOT_YOUR_ASSESSMENT' });
     if (a.state !== 'draft') return res.status(409).json({ error: 'ALREADY_SUBMITTED' });
     if (!a.ratings.length) return res.status(400).json({ error: 'RATINGS_REQUIRED' });
     if (!a.recommendation) return res.status(400).json({ error: 'RECOMMENDATION_REQUIRED', message: 'Every submitted assessment carries a final recommendation with reasons.' });
-    a.state = 'submitted';
-    a.submittedAt = Date.now();
-    audit(a, 'org', req.orgUser.id, req.orgUser.name, 'submitted');
-    ledgerAppend({ type: 'assessment_submitted', playerId: a.playerId, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+    // The submission and its ledger entry commit together.
+    const next = unit(() => {
+      const done = assessments.update(a.id, (d) => { d.state = 'submitted'; d.submittedAt = Date.now(); audit(d, 'org', req.orgUser.id, storedName(req.orgUser.name), 'submitted'); });
+      ledgerAppend({ type: 'assessment_submitted', playerId: a.playerId, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+      return done;
+    });
     persistNow();
     // M23 P8 — an open Room re-reads on this (org-private, ids only): a
     // colleague's submitted assessment changes the case's next action, and
     // nothing else told the Room. The subject is not named on the stream.
     broadcast('assessment_submitted', { orgId: req.org.id, assessmentId: a.id });
-    res.json({ assessment: assessmentView(a) });
+    res.json({ assessment: assessmentView(next) });
   });
 
   orgRouter.post('/assessments/:id/review', (req, res) => {
     if (!requireLead(req, res)) return;
-    const a = db.assessments.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const a = ownAssessment(req);
     if (!a) return res.status(404).json({ error: 'ASSESSMENT_NOT_FOUND' });
     if (a.state !== 'submitted') return res.status(409).json({ error: 'NOT_SUBMITTED' });
-    a.state = 'reviewed';
-    a.reviewedAt = Date.now();
-    a.reviewNote = req.body?.note ? String(req.body.note).slice(0, 300) : null;
-    audit(a, 'org', req.orgUser.id, req.orgUser.name, 'reviewed');
+    const note = textOrRefuse(res, req.body?.note, 'note', A_LIMITS.reviewNote); if (note === undefined) return;
+    const next = assessments.update(a.id, (d) => {
+      d.state = 'reviewed';
+      d.reviewedAt = Date.now();
+      d.reviewNote = note;
+      audit(d, 'org', req.orgUser.id, storedName(req.orgUser.name), 'reviewed');
+    });
     persistNow();
-    res.json({ assessment: assessmentView(a) });
+    res.json({ assessment: assessmentView(next) });
   });
 
   // Side-by-side comparison across scouts and dates. "Not observed" never
@@ -319,30 +378,37 @@ export function registerScouting(ctx) {
   // Publishing feedback is a deliberate, separate act — the ONLY door from
   // private recruitment records to the player/guardian side.
   orgRouter.post('/assessments/:id/publish-feedback', (req, res) => {
-    const a = db.assessments.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const a = ownAssessment(req);
     if (!a) return res.status(404).json({ error: 'ASSESSMENT_NOT_FOUND' });
     if (a.scoutUserId !== req.orgUser.id && !isLead(req.orgUser)) return res.status(403).json({ error: 'NOT_AUTHORISED' });
     if (a.state === 'draft') return res.status(409).json({ error: 'NOT_SUBMITTED', message: 'Submit the assessment before publishing feedback from it.' });
     if (a.publishedFeedback) return res.status(409).json({ error: 'ALREADY_PUBLISHED' });
-    const text = String(req.body?.text ?? '').trim();
+    const raw = req.body?.text;
+    if (raw !== undefined && raw !== null && typeof raw !== 'string') return fieldInvalid(res, 'text', 'text must be text.');
+    const text = (raw ?? '').trim();
     if (!text) return res.status(400).json({ error: 'TEXT_REQUIRED' });
     if (!moderateOrRefuse(res, text, { kind: 'published_feedback', playerId: a.playerId, orgId: req.org.id })) return;
     const p = findPlayer(a.playerId);
-    a.publishedFeedback = { text: text.slice(0, 800), byUserId: req.orgUser.id, byName: req.orgUser.name, at: Date.now() };
-    audit(a, 'org', req.orgUser.id, req.orgUser.name, 'published_feedback');
-    if (p && !isAdult(p) && p.guardianId) {
-      notify({ kind: 'guardian', id: p.guardianId }, 'feedback', `${req.org.name} published development feedback for ${p.name}.`, a.id);
-      notify({ kind: 'player', id: p.id }, 'feedback', `${req.org.name} shared development feedback with your parent/guardian.`, a.id);
-    } else if (p) {
-      notify({ kind: 'player', id: p.id }, 'feedback', `📋 ${req.org.name} published development feedback for you.`, a.id);
-    }
+    // The publication and its notifications commit together.
+    const next = unit(() => {
+      const done = assessments.update(a.id, (d) => {
+        d.publishedFeedback = { text: text.slice(0, A_LIMITS.feedback), byUserId: req.orgUser.id, byName: storedName(req.orgUser.name), at: Date.now() };
+        audit(d, 'org', req.orgUser.id, storedName(req.orgUser.name), 'published_feedback');
+      });
+      if (p && !isAdult(p) && p.guardianId) {
+        notify({ kind: 'guardian', id: p.guardianId }, 'feedback', `${req.org.name} published development feedback for ${p.name}.`, a.id);
+        notify({ kind: 'player', id: p.id }, 'feedback', `${req.org.name} shared development feedback with your parent/guardian.`, a.id);
+      } else if (p) {
+        notify({ kind: 'player', id: p.id }, 'feedback', `📋 ${req.org.name} published development feedback for you.`, a.id);
+      }
+      return done;
+    });
     persistNow();
     broadcast('feedback', { playerId: a.playerId });
-    res.json({ published: a.publishedFeedback });
+    res.json({ published: next.publishedFeedback });
   });
 
-  const feedbackViewFor = (playerId) => db.assessments
-    .filter((a) => a.playerId === playerId && a.publishedFeedback)
+  const feedbackViewFor = (playerId) => assessmentReads.withFeedbackForPlayer(playerId)
     .map((a) => ({ id: a.id, orgId: a.orgId, orgName: byId.org(a.orgId)?.name ?? 'Club', byName: a.publishedFeedback.byName, text: a.publishedFeedback.text, at: a.publishedFeedback.at }));
 
   playerRouter.get('/feedback', (req, res) => {
@@ -367,69 +433,75 @@ export function registerScouting(ctx) {
   function mediaOwner(mediaId) {
     return byId.mediaOwner(mediaId);
   }
+  const segmentView = (s) => ({ ...s, mediaUrl: `/media/${s.mediaId}` });
 
   orgRouter.post('/media/:id/segments', (req, res) => {
     const owner = mediaOwner(req.params.id);
     if (!owner) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
     if (!orgCanSee(req.org, owner)) return res.status(403).json({ error: 'NOT_VISIBLE' });
     const { startS, endS, labels, eventType, note, drawing } = req.body ?? {};
-    const s0 = Number(startS), s1 = Number(endS);
-    if (!(s0 >= 0) || !(s1 > s0) || s1 - s0 > 600) return res.status(400).json({ error: 'TIMESTAMPS_INVALID', message: 'start ≥ 0, end > start, segment ≤ 10 minutes.' });
-    if (note && !moderateOrRefuse(res, note, { kind: 'segment_note', playerId: owner.id, orgId: req.org.id })) return;
-    const seg = {
+    const isSeconds = (v) => typeof v === 'number' && Number.isFinite(v);
+    if (!isSeconds(startS) || !isSeconds(endS) || !(startS >= 0) || !(endS > startS) || endS - startS > A_LIMITS.segmentSeconds) return res.status(400).json({ error: 'TIMESTAMPS_INVALID', message: 'start ≥ 0, end > start, segment ≤ 10 minutes.' });
+    if (labels !== undefined && labels !== null && (!Array.isArray(labels) || labels.some((l) => typeof l !== 'string'))) return fieldInvalid(res, 'labels', 'labels is a list of short texts.');
+    const ev = textOrRefuse(res, eventType, 'eventType', A_LIMITS.eventType); if (ev === undefined) return;
+    const text = textOrRefuse(res, note, 'note', A_LIMITS.segmentNote); if (text === undefined) return;
+    if (drawing !== undefined && drawing !== null && (typeof drawing !== 'object' || Array.isArray(drawing) || JSON.stringify(drawing).length > A_LIMITS.drawing)) return fieldInvalid(res, 'drawing', `drawing is an object of overlay shapes (at most ${A_LIMITS.drawing} characters).`);
+    if (text && !moderateOrRefuse(res, text, { kind: 'segment_note', playerId: owner.id, orgId: req.org.id })) return;
+    const seg = segments.create({
       id: nextId('seg'), mediaId: req.params.id, playerId: owner.id, orgId: req.org.id,
-      createdBy: { userId: req.orgUser.id, name: req.orgUser.name },
-      startS: s0, endS: s1,
-      labels: Array.isArray(labels) ? labels.slice(0, 8).map((l) => String(l).slice(0, 30)) : [],
-      eventType: eventType ? String(eventType).slice(0, 40) : null,
-      note: note ? String(note).slice(0, 300) : null,
-      drawing: drawing && typeof drawing === 'object' ? drawing : null, // simple overlay shapes, stored as data
+      createdBy: { userId: req.orgUser.id, name: storedName(req.orgUser.name) },
+      startS, endS,
+      labels: (labels ?? []).map((l) => l.trim().slice(0, A_LIMITS.label)).filter(Boolean).slice(0, A_LIMITS.labels),
+      eventType: ev, note: text,
+      drawing: drawing ?? null, // simple overlay shapes, stored as data
       createdAt: Date.now(),
-    };
-    db.videoSegments.push(seg);
+    });
     persistNow();
-    res.status(201).json({ segment: { ...seg, mediaUrl: `/media/${seg.mediaId}` } });
+    res.status(201).json({ segment: segmentView(seg) });
   });
 
   orgRouter.get('/segments', (req, res) => {
-    let list = db.videoSegments.filter((s) => s.orgId === req.org.id);
-    if (req.query.playerId) list = list.filter((s) => s.playerId === req.query.playerId);
-    if (req.query.mediaId) list = list.filter((s) => s.mediaId === req.query.mediaId);
+    const playerId = req.query.playerId ? String(req.query.playerId) : null;
+    const mediaId = req.query.mediaId ? String(req.query.mediaId) : null;
     // Live entitlement: segments on players no longer visible do not travel.
-    list = list.filter((s) => orgCanSee(req.org, findPlayer(s.playerId)));
-    res.json(paginate(req, list.map((s) => ({ ...s, mediaUrl: `/media/${s.mediaId}` }))));
+    const list = segmentReads.forOrg(req.org.id, { playerId, mediaId }).filter((s) => orgCanSee(req.org, findPlayer(s.playerId)));
+    res.json(paginate(req, list.map(segmentView)));
   });
 
   orgRouter.get('/segments/:id', (req, res) => {
-    const s = db.videoSegments.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const found = segmentReads.byId(req.params.id);
+    const s = found && found.orgId === req.org.id ? found : null;
     if (!s) return res.status(404).json({ error: 'SEGMENT_NOT_FOUND' });
     const owner = findPlayer(s.playerId);
     if (!orgCanSee(req.org, owner)) return res.status(403).json({ error: 'NOT_VISIBLE' });
     const media = owner.media.find((m) => m.id === s.mediaId);
-    res.json({ segment: { ...s, mediaUrl: `/media/${s.mediaId}` }, media: media ? { id: media.id, title: media.title, kind: media.kind, verifiedClip: media.verifiedClip, captions: media.captions ? true : false } : null });
+    res.json({ segment: segmentView(s), media: media ? { id: media.id, title: media.title, kind: media.kind, verifiedClip: media.verifiedClip, captions: media.captions ? true : false } : null });
   });
 
   orgRouter.post('/playlists', (req, res) => {
-    const name = String(req.body?.name ?? '').trim();
+    const raw = req.body?.name;
+    if (raw !== undefined && raw !== null && typeof raw !== 'string') return fieldInvalid(res, 'name', 'name must be text.');
+    const name = (raw ?? '').trim();
     if (!name) return res.status(400).json({ error: 'NAME_REQUIRED' });
-    const pl = { id: nextId('pls'), orgId: req.org.id, name: name.slice(0, 80), createdBy: { userId: req.orgUser.id, name: req.orgUser.name }, segmentIds: [], createdAt: Date.now() };
-    db.playlists.push(pl);
+    const pl = playlists.create({ id: nextId('pls'), orgId: req.org.id, name: name.slice(0, A_LIMITS.playlistName), createdBy: { userId: req.orgUser.id, name: storedName(req.orgUser.name) }, segmentIds: [], createdAt: Date.now() });
     persistNow();
     res.status(201).json({ playlist: pl });
   });
 
   orgRouter.post('/playlists/:id/segments', (req, res) => {
-    const pl = db.playlists.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const found = playlistReads.byId(req.params.id);
+    const pl = found && found.orgId === req.org.id ? found : null;
     if (!pl) return res.status(404).json({ error: 'PLAYLIST_NOT_FOUND' });
-    const seg = db.videoSegments.find((s) => s.id === req.body?.segmentId && s.orgId === req.org.id);
+    const segFound = typeof req.body?.segmentId === 'string' ? segmentReads.byId(req.body.segmentId) : null;
+    const seg = segFound && segFound.orgId === req.org.id ? segFound : null;
     if (!seg) return res.status(404).json({ error: 'SEGMENT_NOT_FOUND' });
-    if (!pl.segmentIds.includes(seg.id)) pl.segmentIds.push(seg.id);
+    const next = pl.segmentIds.includes(seg.id) ? pl : playlists.update(pl.id, (d) => { d.segmentIds.push(seg.id); });
     persistNow();
-    res.json({ playlist: pl });
+    res.json({ playlist: next });
   });
 
   orgRouter.get('/playlists', (req, res) => {
-    res.json(db.playlists.filter((p) => p.orgId === req.org.id));
+    res.json(playlistReads.forOrg(req.org.id));
   });
 
   // ================================================================== F3

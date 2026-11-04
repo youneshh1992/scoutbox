@@ -57,6 +57,7 @@ export function registerTrial(ctx) {
     rateLimit, isLead, moderateOrRefuse, issueRecruitmentRequest, audit, orgCanSee, guardianManagedOnly,
     combineOrgMaySeeResults, testProviderEnabled = false, recruitment, unit,
     recruitmentReads, // §4.3 step 2: the cases are read through SQL
+    scoutingReads, // S9b: the assessments are read through SQL
   } = ctx;
   // S8a: every trial and request write is an explicit repository operation (trials.update / requests.update) inside `unit`.
   if (typeof unit !== 'function' || !recruitment?.trials) throw new TypeError('registerTrial needs the recruitment repository and unit from the data layer');
@@ -424,7 +425,7 @@ export function registerTrial(ctx) {
 
   /** Assessments in this trial's context that THIS user may see (the M12 blind rule). Existence and state only. */
   function assessmentsFor(req, t) {
-    const mine = (db.assessments ?? []).filter((a) => a && a.orgId === t.orgId && a.playerId === t.playerId && a.context?.trialId === t.id);
+    const mine = scoutingReads.assessments.forOrgPlayer(t.orgId, t.playerId).filter((a) => a.context?.trialId === t.id);
     const lead = isLead(req.orgUser);
     const iSubmitted = mine.some((a) => a.scoutUserId === req.orgUser.id && a.state !== 'draft');
     return mine

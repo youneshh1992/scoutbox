@@ -388,7 +388,7 @@ export function registerOperations(ctx) {
     for (const t of trials.completedUnreminded(now - 7 * 86_400_000)) {
       if (t.subjectRemovedAt || t.completion?.state !== 'completed' || t.reminders?.assessmentPending) continue;
       if (!Number.isFinite(t.completion.at) || now - t.completion.at < 7 * 86_400_000) continue;
-      if ((db.assessments ?? []).some((a) => a?.context?.trialId === t.id)) continue;
+      if (ctx.scoutingReads.assessments.anyForTrial(t.id)) continue;
       trials.update(t.id, (d) => { d.reminders.assessmentPending = now; });
       const lead = usersOf(t.orgId)[0];
       if (lead) notify({ kind: 'org_user', id: lead.id }, 'trial_day', `No assessment has been recorded for ${t.playerName}'s completed trial yet.`, t.id);

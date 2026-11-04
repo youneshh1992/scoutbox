@@ -89,7 +89,7 @@ export function registerDecision(ctx) {
 
   /** The same blind rule the Room applies (M12/M13): a scout reads a peer's submitted assessment only after submitting their own. */
   function assessmentsVisible(req, kase) {
-    const mine = (db.assessments ?? []).filter((a) => a && a.orgId === kase.orgId && a.playerId === kase.playerId);
+    const mine = reads.assessments.forOrgPlayer(kase.orgId, kase.playerId);
     const lead = isLead(req.orgUser);
     const ownNonDraft = mine.some((a) => a.scoutUserId === req.orgUser.id && a.state !== 'draft');
     const visible = mine.filter((a) => lead || a.scoutUserId === req.orgUser.id || (a.state !== 'draft' && ownNonDraft));

@@ -146,6 +146,20 @@ function evidenceQueries(rows) {
   };
 }
 
+/** The S9b assessment queries (scoutingReads.assessments) over a plain array, in array order. */
+function assessmentQueries(rows) {
+  const list = () => rows.filter(sound);
+  return {
+    byId: (id) => list().find((a) => a.id === id) ?? null,
+    forOrg: (orgId) => list().filter((a) => a.orgId === orgId),
+    forOrgPlayer: (orgId, playerId) => list().filter((a) => a.orgId === orgId && a.playerId === playerId),
+    forOrgScout: (orgId, userId) => list().filter((a) => a.orgId === orgId && a.scoutUserId === userId),
+    forPlayer: (playerId) => list().filter((a) => a.playerId === playerId),
+    withFeedbackForPlayer: (playerId) => list().filter((a) => a.playerId === playerId && a.publishedFeedback),
+    anyForTrial: (trialId) => list().some((a) => a.context?.trialId === trialId),
+  };
+}
+
 export function arrayReads(db) {
   const out = {};
   if (Array.isArray(db?.recruitmentContacts)) out.contacts = contactQueries(db.recruitmentContacts);
@@ -162,6 +176,7 @@ export function arrayReads(db) {
   if (Array.isArray(db?.roomDecisions)) out.decisions = roomRowQueries(db.roomDecisions, { orgPlayer: true });
   if (Array.isArray(db?.roomEvidenceState)) out.evidenceStates = roomRowQueries(db.roomEvidenceState);
   if (Array.isArray(db?.evidence)) out.evidence = evidenceQueries(db.evidence);
+  if (Array.isArray(db?.assessments)) out.assessments = assessmentQueries(db.assessments);
   return out;
 }
 

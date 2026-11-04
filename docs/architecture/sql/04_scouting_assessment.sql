@@ -314,261 +314,174 @@ CREATE TABLE org_federation_checks (
 
 
 -- ----------------------------------------------------------------------------
--- source: db.assessmentTemplates  created at domains/scouting/scouting.mjs:28-58 (seed v1) and :76-81 (new version)
--- owner/writer: domains/scouting/scouting.mjs (any org lead publishes a new version)
--- lifecycle: append-only; versions are immutable (nothing mutates a pushed template)
--- mapping:
---   id -> id ('tpl-gk' | 'tpl-def' | 'tpl-mid' | 'tpl-att' — reused across versions)
---   positionGroup -> position_group   version -> version
---   createdAt -> created_at           createdBy -> created_by_name ('seed' or the lead's name)
---   attributes[] -> assessment_template_attributes
--- notes:
---   * Composite PRIMARY KEY (id, version) — the survey's "template id lookups
---     return v1" defect is exactly the id reuse this key documents.
---   * GLOBAL: no org_id in the source — a lead of any org publishes a version
---     for every org (tenant defect, carried as-is).
+-- S9b: IMPLEMENTED, migration 0020_scouting_assessments REGISTERED (repositories/scoutingAssessments.mjs, 4 Nov 2026).
+-- The definitions below are the migration's DDL; scripts/testSchemaDdl.mjs compares them column by column.
+-- The migration also inserts the four v1 position templates (GK, DEF, MID, ATT), which used to be pushed into
+-- memory when the scouting module registered: every database, production included, has them from its first boot.
+-- Sources: domains/scouting/scouting.mjs (templates, assessments, segments, playlists); the readers in rooms,
+-- lifecycle, m13, m15, m162, m18, m20 and m21 read through scoutingReads.
+-- How the model differs from the first draft of this file:
+--   * player_id, media_id, context_trial_id and the trial/Box Cam session ids have NO foreign key: tolerant, like
+--     recruitment and S9a. An assessment outlives its player's account (the name is nulled); a trial is never deleted.
+--   * org_id is ON DELETE RESTRICT, not CASCADE (organisations are never deleted, O2), on every table.
+--   * attributesSnapshot is not stored: a template version never changes, so (template_id, template_version) names
+--     its attributes, joined on read. Template attributes keep their order (position); the anchors are five typed
+--     columns anchor_1..anchor_5, not anchors_json (the route accepts only the levels 1-5).
+--   * No context_extra_json: PUT /org/assessments/:id refuses an unknown context field (400 FIELD_INVALID), and
+--     context_date is a YYYY-MM-DD day (400 DATE_INVALID otherwise); minutes watched are a whole number 1-600.
+--   * Ratings keep their order (position, unique attr_id) and are whole numbers 1-5 (a half rating is refused);
+--     the evidence references are typed columns only, no raw_json (a reference that is not an object, or carries
+--     an unknown field, is refused). A cited segment is a RESTRICT key, checked to be the club's and the player's.
+--   * The state CHECKs: submitted_at exactly when not a draft, reviewed_at exactly when reviewed, the review note
+--     only after review, a recommendation's verdict and reasons together, published feedback whole and never on a
+--     draft. 'published' is not a state (m15/m162 used to filter on it; it was never written).
+--   * history uses the one entry shape {id, at, byKind, byId, byName, action, detail}, with its position.
+--   * video segment labels are a child table (video_segment_labels), not labels_json. drawing_json stays JSON: an
+--     overlay object the client draws and the server never reads (at most 4000 characters; no app sends one).
+--   * Playlist segments keep their order (position) and are unique per playlist; a segment is RESTRICT there.
+--   * Templates remain GLOBAL (KNOWN DEFECT, carried as-is): a lead of any club publishes a version for every club.
+--     A product decision for the Founder (migration.md §4.5).
 -- ----------------------------------------------------------------------------
 CREATE TABLE assessment_templates (
   id              TEXT NOT NULL,
   version         INTEGER NOT NULL CHECK (version >= 1),
   position_group  TEXT NOT NULL CHECK (position_group IN ('GK','DEF','MID','ATT')),
   created_at      INTEGER NOT NULL,
-  created_by_name TEXT NOT NULL,                           -- snapshot ('seed' for v1)
-  PRIMARY KEY (id, version)
+  created_by_name TEXT NOT NULL CHECK (length(created_by_name) <= 200),
+  PRIMARY KEY (id, version),
+  UNIQUE (position_group, version)
 ) STRICT;
-CREATE UNIQUE INDEX assessment_templates_position_group_version ON assessment_templates (position_group, version);  -- new; currentTemplateFor() = max(version) per group
-
--- ----------------------------------------------------------------------------
--- source: db.assessmentTemplates[].attributes[]  (domains/scouting/scouting.mjs:31 seed, :79 posted)
--- owner/writer: domains/scouting/scouting.mjs; immutable with the version
--- mapping: id -> attr_id (<=40), (array position) -> ordinal (new), label -> label (<=80),
---          anchors -> anchors_json (seed: {"1":..,"3":..,"5":..}; posted: `a.anchors ?? {}`,
---          an arbitrary object — free-form by design, kept as JSON)
--- ----------------------------------------------------------------------------
 CREATE TABLE assessment_template_attributes (
   template_id      TEXT NOT NULL,
   template_version INTEGER NOT NULL,
-  attr_id          TEXT NOT NULL,
-  ordinal          INTEGER NOT NULL,
-  label            TEXT NOT NULL,
-  anchors_json     TEXT NOT NULL CHECK (json_valid(anchors_json)) DEFAULT '{}',
-  PRIMARY KEY (template_id, template_version, attr_id),
+  position         INTEGER NOT NULL,
+  attr_id          TEXT NOT NULL CHECK (length(attr_id) <= 40),
+  label            TEXT NOT NULL CHECK (length(label) <= 80),
+  anchor_1         TEXT CHECK (anchor_1 IS NULL OR length(anchor_1) <= 200),
+  anchor_2         TEXT CHECK (anchor_2 IS NULL OR length(anchor_2) <= 200),
+  anchor_3         TEXT CHECK (anchor_3 IS NULL OR length(anchor_3) <= 200),
+  anchor_4         TEXT CHECK (anchor_4 IS NULL OR length(anchor_4) <= 200),
+  anchor_5         TEXT CHECK (anchor_5 IS NULL OR length(anchor_5) <= 200),
+  PRIMARY KEY (template_id, template_version, position),
+  UNIQUE (template_id, template_version, attr_id),
   FOREIGN KEY (template_id, template_version) REFERENCES assessment_templates(id, version) ON DELETE CASCADE
 ) STRICT;
-
-
--- ----------------------------------------------------------------------------
--- source: db.videoSegments  created at domains/scouting/scouting.mjs:370-380
--- owner/writer: domains/scouting/scouting.mjs (org-private workflow records; never edited or deleted)
--- lifecycle: none
--- mapping:
---   id -> id (seg-N)          mediaId -> media_id         playerId -> player_id   orgId -> org_id
---   createdBy.userId -> created_by_user_id   createdBy.name -> created_by_name
---   startS -> start_s          endS -> end_s
---   labels[] -> labels_json (≤8 free-form tags ≤30 chars; never queried individually — free-form by design)
---   eventType -> event_type (<=40)   note -> note (<=300)
---   drawing -> drawing_json (arbitrary overlay-shape object "stored as data" — free-form by design)
---   createdAt -> created_at
---   derived, not stored: mediaUrl
--- notes: annotations against the player's own media; cascade with the media and
---        the player. Org visibility is re-checked live on every read (orgCanSee).
--- ----------------------------------------------------------------------------
 CREATE TABLE video_segments (
   id                 TEXT PRIMARY KEY,
-  media_id           TEXT NOT NULL REFERENCES player_media(id) ON DELETE CASCADE,
-  player_id          TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  org_id             TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  media_id           TEXT NOT NULL,
+  player_id          TEXT NOT NULL,
+  org_id             TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
   created_by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  created_by_name    TEXT NOT NULL,                        -- snapshot
+  created_by_name    TEXT NOT NULL CHECK (length(created_by_name) <= 200),
   start_s            REAL NOT NULL CHECK (start_s >= 0),
   end_s              REAL NOT NULL CHECK (end_s > start_s AND end_s - start_s <= 600),
-  labels_json        TEXT NOT NULL CHECK (json_valid(labels_json)) DEFAULT '[]',
-  event_type         TEXT,
-  note               TEXT,
-  drawing_json       TEXT CHECK (json_valid(drawing_json) OR drawing_json IS NULL),
+  event_type         TEXT CHECK (event_type IS NULL OR length(event_type) <= 40),
+  note               TEXT CHECK (note IS NULL OR length(note) <= 300),
+  drawing_json       TEXT CHECK (drawing_json IS NULL OR (json_valid(drawing_json) AND json_type(drawing_json) = 'object' AND length(drawing_json) <= 4000)),
   created_at         INTEGER NOT NULL
 ) STRICT;
-CREATE INDEX video_segments_org_id_player_id ON video_segments (org_id, player_id);  -- GET /org/segments?playerId=
-CREATE INDEX video_segments_org_id_media_id ON video_segments (org_id, media_id);    -- GET /org/segments?mediaId=
-
--- ----------------------------------------------------------------------------
--- source: db.playlists  created at domains/scouting/scouting.mjs:406
--- owner/writer: domains/scouting/scouting.mjs
--- lifecycle: none (never closed or deleted)
--- mapping: id -> id (pls-N), orgId -> org_id, name -> name (<=80),
---          createdBy.userId -> created_by_user_id, createdBy.name -> created_by_name,
---          segmentIds[] -> playlist_segments, createdAt -> created_at
--- ----------------------------------------------------------------------------
+CREATE INDEX video_segments_org_player ON video_segments (org_id, player_id);
+CREATE INDEX video_segments_org_media ON video_segments (org_id, media_id);
+CREATE TABLE video_segment_labels (
+  segment_id TEXT NOT NULL REFERENCES video_segments(id) ON DELETE CASCADE,
+  position   INTEGER NOT NULL CHECK (position BETWEEN 0 AND 7),
+  label      TEXT NOT NULL CHECK (length(label) <= 30),
+  PRIMARY KEY (segment_id, position)
+) STRICT;
 CREATE TABLE playlists (
   id                 TEXT PRIMARY KEY,
-  org_id             TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  name               TEXT NOT NULL,
+  org_id             TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  name               TEXT NOT NULL CHECK (length(name) <= 80),
   created_by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  created_by_name    TEXT NOT NULL,                        -- snapshot
+  created_by_name    TEXT NOT NULL CHECK (length(created_by_name) <= 200),
   created_at         INTEGER NOT NULL
 ) STRICT;
-CREATE INDEX playlists_org_id ON playlists (org_id);
-
--- ----------------------------------------------------------------------------
--- source: db.playlists[].segmentIds[]  appended at domains/scouting/scouting.mjs:417 (deduplicated by the code)
--- owner/writer: domains/scouting/scouting.mjs
--- mapping: segmentIds[i] -> (playlist_id, segment_id); (array position) -> ordinal (new, keeps order)
--- ----------------------------------------------------------------------------
+CREATE INDEX playlists_org ON playlists (org_id);
 CREATE TABLE playlist_segments (
   playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
-  segment_id  TEXT NOT NULL REFERENCES video_segments(id) ON DELETE CASCADE,
-  ordinal     INTEGER NOT NULL,
-  PRIMARY KEY (playlist_id, segment_id)
+  position    INTEGER NOT NULL,
+  segment_id  TEXT NOT NULL REFERENCES video_segments(id) ON DELETE RESTRICT,
+  PRIMARY KEY (playlist_id, position),
+  UNIQUE (playlist_id, segment_id)
 ) STRICT;
-
-
--- ----------------------------------------------------------------------------
--- source: db.assessments  created at domains/scouting/scouting.mjs:170-187
--- owner/writer: domains/scouting/scouting.mjs (scout drafts/submits; lead reviews; publish-feedback);
---               server.mjs:3996 nulls playerName on account deletion
--- lifecycle: state draft -> submitted -> reviewed; never deleted; published_feedback is a
---            one-shot side door (ALREADY_PUBLISHED on a second attempt)
--- mapping:
---   id -> id (ass-N)                  orgId -> org_id            playerId -> player_id
---   playerName -> player_name (nullable: nulled by the deletion tombstone)
---   scoutUserId -> scout_user_id      scoutName -> scout_name
---   templateId/templateVersion -> template_id / template_version (composite FK)
---   attributesSnapshot -> derived, not stored: template versions are immutable and
---     append-only, so the snapshot always equals assessment_template_attributes for
---     (template_id, template_version); the join restores it exactly
---   context.fixture -> context_fixture (<=120)      context.date -> context_date
---   context.minutesWatched -> context_minutes_watched   context.viewing -> context_viewing
---   context.opponentLevel -> context_opponent_level (<=60)
---   context.trialId -> context_trial_id             context.trialSessionId -> context_trial_session_id
---   context.<any other key> -> context_extra_json (KNOWN DEFECT: PUT /assessments/:id
---     spreads `...rest` of the body's context into the record (scouting.mjs:240), so
---     arbitrary keys land here; retained until the route validates — deferred
---     normalisation, resolved when PUT is restricted to the five known keys)
---   ratings[] -> assessment_ratings (+ assessment_rating_evidence_refs)
---   state -> state                    recommendation.verdict -> recommendation_verdict
---   recommendation.reasons -> recommendation_reasons (<=500)
---   secondOpinionOf -> second_opinion_of_id
---   createdAt / submittedAt / reviewedAt -> created_at / submitted_at / reviewed_at
---   reviewNote -> review_note (<=300; only exists after review)
---   publishedFeedback.text/byUserId/byName/at -> published_feedback_text (<=800) /
---     published_feedback_by_user_id / published_feedback_by_name / published_feedback_at
---   history[] -> assessment_history
--- notes:
---   * Org-private: the blind rule (assessmentAccessList) is applied in code on
---     (org_id, player_id, scout_user_id, state) — hence that index.
---   * context_date is `context?.date ?? null`, never validated (any JSON value);
---     stored as TEXT without a format check (defect carried).
---   * context_trial_session_id names a session nested in trials.schedule.sessions[]
---     (02_recruitment.sql); referenced by id only, no FK.
---   * m15/passport.mjs:105 and m162/trust.mjs:172 filter on state 'published',
---     which is never written — the CHECK lists the three real states.
---   * player_id: the record outlives the subject (tombstone keeps the id, drops
---     the name) → ON DELETE RESTRICT; the player row is expected to be tombstoned.
--- ----------------------------------------------------------------------------
 CREATE TABLE assessments (
   id                            TEXT PRIMARY KEY,
-  org_id                        TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  player_id                     TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
-  player_name                   TEXT,                      -- snapshot; NULL after subject removal
+  org_id                        TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id                     TEXT NOT NULL,
+  player_name                   TEXT CHECK (player_name IS NULL OR length(player_name) <= 200),
   scout_user_id                 TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  scout_name                    TEXT NOT NULL,             -- snapshot
+  scout_name                    TEXT NOT NULL CHECK (length(scout_name) <= 200),
   template_id                   TEXT NOT NULL,
   template_version              INTEGER NOT NULL,
-  context_fixture               TEXT,
-  context_date                  TEXT,
-  context_minutes_watched       INTEGER,
-  context_viewing               TEXT CHECK (context_viewing IN ('live','video') OR context_viewing IS NULL),
-  context_opponent_level        TEXT,
-  context_trial_id              TEXT REFERENCES trials(id) ON DELETE RESTRICT,
-  context_trial_session_id      TEXT,                      -- trials.schedule.sessions[].id; no FK
-  context_extra_json            TEXT CHECK (json_valid(context_extra_json) OR context_extra_json IS NULL),
-  state                         TEXT NOT NULL CHECK (state IN ('draft','submitted','reviewed')) DEFAULT 'draft',
-  recommendation_verdict        TEXT CHECK (recommendation_verdict IN ('sign','monitor','pass') OR recommendation_verdict IS NULL),
-  recommendation_reasons        TEXT,
+  context_fixture               TEXT CHECK (context_fixture IS NULL OR length(context_fixture) <= 120),
+  context_date                  TEXT CHECK (context_date IS NULL OR length(context_date) = 10),
+  context_minutes_watched       INTEGER CHECK (context_minutes_watched IS NULL OR context_minutes_watched BETWEEN 1 AND 600),
+  context_viewing               TEXT CHECK (context_viewing IS NULL OR context_viewing IN ('live','video')),
+  context_opponent_level        TEXT CHECK (context_opponent_level IS NULL OR length(context_opponent_level) <= 60),
+  context_trial_id              TEXT,
+  context_trial_session_id      TEXT CHECK (context_trial_session_id IS NULL OR context_trial_id IS NOT NULL),
+  state                         TEXT NOT NULL CHECK (state IN ('draft','submitted','reviewed')),
+  recommendation_verdict        TEXT CHECK (recommendation_verdict IS NULL OR recommendation_verdict IN ('sign','monitor','pass')),
+  recommendation_reasons        TEXT CHECK (recommendation_reasons IS NULL OR length(recommendation_reasons) <= 500),
   second_opinion_of_id          TEXT REFERENCES assessments(id) ON DELETE RESTRICT,
   created_at                    INTEGER NOT NULL,
   submitted_at                  INTEGER,
   reviewed_at                   INTEGER,
-  review_note                   TEXT,
-  published_feedback_text       TEXT,
+  review_note                   TEXT CHECK (review_note IS NULL OR length(review_note) <= 300),
+  published_feedback_text       TEXT CHECK (published_feedback_text IS NULL OR length(published_feedback_text) <= 800),
   published_feedback_by_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  published_feedback_by_name    TEXT,                      -- snapshot
+  published_feedback_by_name    TEXT CHECK (published_feedback_by_name IS NULL OR length(published_feedback_by_name) <= 200),
   published_feedback_at         INTEGER,
-  FOREIGN KEY (template_id, template_version) REFERENCES assessment_templates(id, version) ON DELETE RESTRICT
+  FOREIGN KEY (template_id, template_version) REFERENCES assessment_templates(id, version) ON DELETE RESTRICT,
+  CHECK ((state = 'draft') = (submitted_at IS NULL)),
+  CHECK ((state = 'reviewed') = (reviewed_at IS NOT NULL)),
+  CHECK (review_note IS NULL OR state = 'reviewed'),
+  CHECK ((recommendation_verdict IS NULL) = (recommendation_reasons IS NULL)),
+  CHECK ((published_feedback_text IS NULL) = (published_feedback_by_user_id IS NULL) AND (published_feedback_text IS NULL) = (published_feedback_by_name IS NULL) AND (published_feedback_text IS NULL) = (published_feedback_at IS NULL)),
+  CHECK (published_feedback_text IS NULL OR state <> 'draft')
 ) STRICT;
-CREATE INDEX assessments_org_id_player_id_scout_user_id_state ON assessments (org_id, player_id, scout_user_id, state);  -- access list / blind rule / compare
-CREATE INDEX assessments_org_id_created_at ON assessments (org_id, created_at);        -- lead list newest first; m13 insight windows
-CREATE INDEX assessments_player_id_published_feedback_at ON assessments (player_id, published_feedback_at);  -- player/guardian feedback views; m15 export
-CREATE INDEX assessments_context_trial_id ON assessments (context_trial_id);            -- ?trialId= filter; m23 trial routes/journey
-
--- ----------------------------------------------------------------------------
--- source: db.assessments[].ratings[]  replaced wholesale at domains/scouting/scouting.mjs:224-230 (PUT while draft)
--- owner/writer: domains/scouting/scouting.mjs
--- mapping:
---   attrId -> attr_id        rating -> rating (NULL when notObserved)   notObserved -> not_observed
---   confidence -> confidence (default 'medium')   note -> note (<=300)
---   evidenceRefs[] -> assessment_rating_evidence_refs
--- notes: natural key (assessment_id, attr_id). The source does not reject a
---        duplicate attrId in one PUT (the compare view takes the first); the
---        migration keeps the first occurrence. "Not observed" is never a zero:
---        rating is NULL and not_observed = 1.
--- ----------------------------------------------------------------------------
+CREATE INDEX assessments_org_player ON assessments (org_id, player_id);
+CREATE INDEX assessments_org_scout ON assessments (org_id, scout_user_id);
+CREATE INDEX assessments_player_feedback ON assessments (player_id, published_feedback_at);
+CREATE INDEX assessments_trial ON assessments (context_trial_id);
 CREATE TABLE assessment_ratings (
   assessment_id TEXT NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
-  attr_id       TEXT NOT NULL,
-  rating        INTEGER CHECK (rating BETWEEN 1 AND 5 OR rating IS NULL),
-  not_observed  INTEGER NOT NULL CHECK (not_observed IN (0,1)) DEFAULT 0,
-  confidence    TEXT NOT NULL CHECK (confidence IN ('low','medium','high')) DEFAULT 'medium',
-  note          TEXT,
-  PRIMARY KEY (assessment_id, attr_id),
-  CHECK ((not_observed = 1 AND rating IS NULL) OR (not_observed = 0 AND rating IS NOT NULL))
+  position      INTEGER NOT NULL,
+  attr_id       TEXT NOT NULL CHECK (length(attr_id) <= 40),
+  rating        INTEGER CHECK (rating IS NULL OR rating BETWEEN 1 AND 5),
+  not_observed  INTEGER NOT NULL CHECK (not_observed IN (0,1)),
+  confidence    TEXT NOT NULL CHECK (confidence IN ('low','medium','high')),
+  note          TEXT CHECK (note IS NULL OR length(note) <= 300),
+  PRIMARY KEY (assessment_id, position),
+  UNIQUE (assessment_id, attr_id),
+  CHECK ((not_observed = 1) = (rating IS NULL))
 ) STRICT;
-
--- ----------------------------------------------------------------------------
--- source: db.assessments[].ratings[].evidenceRefs[]  (≤6 per rating; domains/scouting/scouting.mjs:227-229)
--- owner/writer: domains/scouting/scouting.mjs
--- mapping:
---   (array position) -> ordinal (new)      segmentId -> segment_id
---   trialSessionId -> trial_session_id     boxSessionId -> box_session_id
---   t -> t_s (unvalidated in the source; numeric values land here)
---   label -> label (<=80)
---   (non-object ref passed through as-is, scouting.mjs:229) -> raw_json  -- known defect: a
---     string/number ref is stored untouched; retained verbatim here, never as a column
--- notes: box_session_id names a Box Cam session linked to the trial
---        (trials.schedule.sessions[].evidence[], 02_recruitment.sql) — id only.
--- ----------------------------------------------------------------------------
-CREATE TABLE assessment_rating_evidence_refs (
+CREATE TABLE assessment_rating_refs (
   assessment_id    TEXT NOT NULL,
-  attr_id          TEXT NOT NULL,
-  ordinal          INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 5),
-  segment_id       TEXT REFERENCES video_segments(id) ON DELETE SET NULL,
-  trial_session_id TEXT,
-  box_session_id   TEXT,
-  t_s              REAL,
-  label            TEXT,
-  raw_json         TEXT CHECK (json_valid(raw_json) OR raw_json IS NULL),
-  PRIMARY KEY (assessment_id, attr_id, ordinal),
-  FOREIGN KEY (assessment_id, attr_id) REFERENCES assessment_ratings(assessment_id, attr_id) ON DELETE CASCADE
+  rating_position  INTEGER NOT NULL,
+  position         INTEGER NOT NULL CHECK (position BETWEEN 0 AND 5),
+  segment_id       TEXT REFERENCES video_segments(id) ON DELETE RESTRICT,
+  trial_session_id TEXT CHECK (trial_session_id IS NULL OR length(trial_session_id) <= 80),
+  box_session_id   TEXT CHECK (box_session_id IS NULL OR length(box_session_id) <= 80),
+  t_s              REAL CHECK (t_s IS NULL OR t_s >= 0),
+  label            TEXT CHECK (label IS NULL OR length(label) <= 80),
+  PRIMARY KEY (assessment_id, rating_position, position),
+  FOREIGN KEY (assessment_id, rating_position) REFERENCES assessment_ratings(assessment_id, position) ON DELETE CASCADE
 ) STRICT;
+CREATE INDEX assessment_rating_refs_segment ON assessment_rating_refs (segment_id);
 
--- ----------------------------------------------------------------------------
--- source: db.assessments[].history[]  via audit() (m12/shared.mjs:72); append-only
--- owner/writer: domains/scouting/scouting.mjs
--- mapping: id -> id (aud-N), at -> at, byKind -> by_kind ('org'), byId -> by_id (org_users.id here),
---          byName -> by_name, action -> action (created | submitted | reviewed | published_feedback),
---          detail -> detail_json (always null today)
--- ----------------------------------------------------------------------------
 CREATE TABLE assessment_history (
-  id            TEXT PRIMARY KEY,
-  assessment_id TEXT NOT NULL REFERENCES assessments(id) ON DELETE RESTRICT,
-  at            INTEGER NOT NULL,
-  by_kind       TEXT CHECK (by_kind IN ('org') OR by_kind IS NULL),
-  by_id         TEXT,
-  by_name       TEXT,
-  action        TEXT NOT NULL,
-  detail_json   TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  id          TEXT PRIMARY KEY,
+  assessment_id    TEXT NOT NULL REFERENCES assessments(id) ON DELETE RESTRICT,
+  position    INTEGER NOT NULL,
+  at          INTEGER NOT NULL,
+  by_kind     TEXT CHECK (by_kind IS NULL OR by_kind IN ('player','guardian','org','admin')),
+  by_id       TEXT,
+  by_name     TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  action      TEXT NOT NULL,
+  detail      TEXT CHECK (detail IS NULL OR length(detail) <= 500),
+  UNIQUE (assessment_id, position)
 ) STRICT;
-CREATE INDEX assessment_history_assessment_id ON assessment_history (assessment_id);
 
 
 -- ----------------------------------------------------------------------------

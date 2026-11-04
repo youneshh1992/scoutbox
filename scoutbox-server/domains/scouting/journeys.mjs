@@ -402,7 +402,8 @@ export function registerJourneys(ctx) {
 
   function createObjective(req, res, player, actor) {
     const { feedbackId, objectives } = req.body ?? {};
-    const a = db.assessments.find((x) => x.id === feedbackId && x.playerId === player.id && x.publishedFeedback);
+    const found = typeof feedbackId === 'string' ? ctx.scoutingReads.assessments.byId(feedbackId) : null;
+    const a = found && found.playerId === player.id && found.publishedFeedback ? found : null;
     if (!a) return res.status(404).json({ error: 'PUBLISHED_FEEDBACK_NOT_FOUND', message: 'Objectives grow from feedback a club chose to publish — private assessments cannot seed them.' });
     if (!Array.isArray(objectives) || objectives.length < 1 || objectives.length > 2) {
       return res.status(400).json({ error: 'ONE_OR_TWO_OBJECTIVES', message: 'One or two focused objectives — not a laundry list.' });

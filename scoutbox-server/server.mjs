@@ -199,15 +199,16 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
 // A record the caller may use, or null: `onlyIf(repo.byId(id), (r) => r.orgId === orgId)`.
 const onlyIf = (record, ok) => (record && ok(record) ? record : null);
 const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads, ...recruitment.reads, ...recruitmentCases.reads });
-// The scouting domain reads through SQL too (S9): `scoutingReads` (evidence, coachAffiliations, squadInvites).
-const scoutingReads = Object.freeze({ ...scoutingEvidence.reads });
+// The scouting domain reads through SQL too (S9): `scoutingReads` (evidence, coachAffiliations, squadInvites; since S9b
+// templates, assessments, segments, playlists).
+const scoutingReads = Object.freeze({ ...scoutingEvidence.reads, ...scoutingAssessments.reads });
 // Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
 // every module context as `byId` (`byId.player(id)`, `byId.org(id)`, …; null when there is none).
 const byId = createLookups({ players, guardians, users, orgs });
@@ -4310,7 +4311,7 @@ function deletePlayerData(playerId) {
   // S8a: each tombstone is an explicit write of the reduced record, in this unit.
   recruitment.tombstoneForPlayer(playerId, { request: (r) => tombstoneRequest(r, at), trial: (t) => tombstoneTrial(t, at) });
   recruitmentCases.redactPlayer(playerId, at); // S8b: the case's copy of the name goes, in this unit
-  for (const a of db.assessments ?? []) if (a?.playerId === playerId) a.playerName = null;
+  scoutingAssessments.assessments.redactPlayer(playerId); // S9b: the club keeps its assessments; the player's name goes, in this unit
   recruitmentContactsOffers.contacts.redactPlayer(playerId); // S8c: the reply's words go; the contact stays
   for (const ot of db.openTrials ?? []) {
     for (const reg of ot.registrations ?? []) if (reg.playerId === playerId) reg.playerName = null;
@@ -4648,6 +4649,7 @@ registerM12({
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
   signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   scoutingEvidence, // S9a: evidence, coach affiliations and squad invitations are explicit repository writes
+  scoutingAssessments, // S9b: templates, assessments, video segments and playlists are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4807,6 +4809,7 @@ const m18Ctx = registerM18({
 const m19Ctx = {
   ...m18Ctx,
   recruitmentReads, // §4.3 step 2: contacts and offers are read through SQL
+  scoutingReads, // S9: the evidence and the assessments are read through SQL
   users,
   notifications, // S7a: the Agent module's inbox and unread count read the repository
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),

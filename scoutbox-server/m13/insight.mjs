@@ -89,7 +89,7 @@ export function registerInsight(ctx) {
     // an aggregate lens on selection patterns, suppressed under n<3 and
     // explicitly not a discrimination verdict.
     const sinceTs = Date.now() - EXPOSURE_WINDOW_DAYS * 86_400_000;
-    const assessed = db.assessments.filter((a) => a.orgId === req.org.id && a.state !== 'draft' && a.createdAt >= sinceTs);
+    const assessed = ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft' && a.createdAt >= sinceTs);
     const quarters = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
     for (const a of assessed) {
       const p = findPlayer(a.playerId);
@@ -115,7 +115,7 @@ export function registerInsight(ctx) {
   // "Not yet assessed" queue — eligible, visible players with exposure but no
   // submitted assessment from this org, oldest exposure first.
   function reviewQueueFor(org) {
-    const assessedIds = new Set(db.assessments.filter((a) => a.orgId === org.id && a.state !== 'draft').map((a) => a.playerId));
+    const assessedIds = new Set(ctx.scoutingReads.assessments.forOrg(org.id).filter((a) => a.state !== 'draft').map((a) => a.playerId));
     const since = windowStartDay();
     const seen = new Map(); // playerId → first day seen
     for (const e of db.exposureEvents.filter((e) => e.orgId === org.id && e.day >= since)) {
@@ -138,11 +138,12 @@ export function registerInsight(ctx) {
     }));
     // Stale evaluations: assessed long ago, still on shortlist/watch.
     const staleCut = Date.now() - STALE_DAYS * 86_400_000;
-    const stale = db.assessments
-      .filter((a) => a.orgId === req.org.id && a.state !== 'draft' && a.createdAt < staleCut)
+    const submitted = ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft');
+    const stale = submitted
+      .filter((a) => a.createdAt < staleCut)
       .reduce((m, a) => { const cur = m.get(a.playerId); if (!cur || cur < a.createdAt) m.set(a.playerId, a.createdAt); return m; }, new Map());
     const staleItems = [...stale.entries()]
-      .filter(([pid, last]) => !db.assessments.some((a) => a.orgId === req.org.id && a.playerId === pid && a.state !== 'draft' && a.createdAt >= staleCut))
+      .filter(([pid, last]) => !submitted.some((a) => a.playerId === pid && a.createdAt >= staleCut))
       .map(([pid, last]) => ({ playerId: pid, playerName: findPlayer(pid)?.name, lastAssessedAt: last, note: `last assessed over ${STALE_DAYS} days ago` }))
       .filter((x) => { const p = findPlayer(x.playerId); return p && orgCanSee(req.org, p); });
     res.json({ queue: items.filter((i) => !i.deferredUntil), deferred: items.filter((i) => i.deferredUntil), staleEvaluations: staleItems });
@@ -161,7 +162,7 @@ export function registerInsight(ctx) {
   // rotation second, so an ineligible player can never enter through it.
   orgRouter.get('/discovery-rotation', (req, res) => {
     const week = Math.floor(dayKey() / 7);
-    const assessedIds = new Set(db.assessments.filter((a) => a.orgId === req.org.id && a.state !== 'draft').map((a) => a.playerId));
+    const assessedIds = new Set(ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft').map((a) => a.playerId));
     const pool = db.players.filter((p) => orgCanSee(req.org, p) && !assessedIds.has(p.id));
     const scored = pool.map((p) => ({
       p, r: crypto.createHash('sha256').update(`${p.id}:${req.org.id}:${week}`).digest()[0],
@@ -206,7 +207,7 @@ export function registerInsight(ctx) {
   // ======================================================== F5 calibration
   orgRouter.post('/calibration', (req, res) => {
     if (!requireLead(req, res)) return;
-    const tmpl = db.assessmentTemplates.find((t) => t.id === req.body?.templateId);
+    const tmpl = ctx.scoutingReads.templates.currentById(req.body?.templateId); // the current version (it used to be the first, v1)
     if (!tmpl) return res.status(404).json({ error: 'TEMPLATE_NOT_FOUND' });
     // Reference footage must be footage this org can legitimately see NOW.
     const mediaId = req.body?.mediaId ? String(req.body.mediaId) : null;
@@ -324,10 +325,11 @@ export function registerInsight(ctx) {
   // SINCE — with the causal disclaimer stated in the payload itself.
   orgRouter.get('/decision-review', (req, res) => {
     if (!requireLead(req, res)) return;
-    const decided = db.assessments.filter((a) => a.orgId === req.org.id && a.state !== 'draft' && a.recommendation);
+    const orgSubmitted = ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft');
+    const decided = orgSubmitted.filter((a) => a.recommendation);
     const items = decided.slice(-50).map((a) => {
       const laterSigning = reads.signings.forPlayer(a.playerId).find((s) => (s.ts ?? 0) > a.createdAt);
-      const laterAssessments = db.assessments.filter((x) => x.playerId === a.playerId && x.orgId === req.org.id && x.createdAt > a.createdAt && x.state !== 'draft').length;
+      const laterAssessments = orgSubmitted.filter((x) => x.playerId === a.playerId && x.createdAt > a.createdAt).length;
       return {
         assessmentId: a.id, playerName: a.playerName, scoutName: a.scoutName,
         recommendation: a.recommendation, at: a.createdAt,
@@ -377,7 +379,7 @@ export function registerInsight(ctx) {
       id: 'attribute_never_observed', version: RULES_VERSION,
       action: 'Plan an observation that covers the unobserved attribute.',
       evaluate(player, org) {
-        const subs = db.assessments.filter((a) => a.orgId === org.id && a.playerId === player.id && a.state !== 'draft');
+        const subs = ctx.scoutingReads.assessments.forOrgPlayer(org.id, player.id).filter((a) => a.state !== 'draft');
         if (!subs.length) return null;
         const gaps = [];
         const attrs = subs[subs.length - 1].attributesSnapshot ?? [];
@@ -393,7 +395,7 @@ export function registerInsight(ctx) {
       id: 'assessment_disagreement', version: RULES_VERSION,
       action: 'A third independent observation would resolve the split.',
       evaluate(player, org) {
-        const subs = db.assessments.filter((a) => a.orgId === org.id && a.playerId === player.id && a.state !== 'draft');
+        const subs = ctx.scoutingReads.assessments.forOrgPlayer(org.id, player.id).filter((a) => a.state !== 'draft');
         if (subs.length < 2) return null;
         for (const attr of subs[0].attributesSnapshot ?? []) {
           const vals = subs.map((a) => a.ratings.find((r) => r.attrId === attr.id)).filter((r) => r && !r.notObserved).map((r) => r.value);
@@ -408,7 +410,7 @@ export function registerInsight(ctx) {
       id: 'stale_assessment', version: RULES_VERSION,
       action: 'Schedule a re-observation — the picture is out of date.',
       evaluate(player, org) {
-        const subs = db.assessments.filter((a) => a.orgId === org.id && a.playerId === player.id && a.state !== 'draft');
+        const subs = ctx.scoutingReads.assessments.forOrgPlayer(org.id, player.id).filter((a) => a.state !== 'draft');
         if (!subs.length) return null;
         const latest = Math.max(...subs.map((a) => a.createdAt));
         if (latest > Date.now() - STALE_DAYS * 86_400_000) return null;

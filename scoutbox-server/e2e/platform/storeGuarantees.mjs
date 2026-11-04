@@ -47,6 +47,7 @@ import {
 import { integrityReport } from '../../domains/platform/integrity.mjs';
 import { PLANS } from '../../catalogue.mjs';
 import { openStore } from '../../store.mjs';
+import { TABLE_BACKED } from '../../repositories/index.mjs';
 import { ROOM_STATUSES, ROOM_STATUS_LABELS, TERMINAL_ROOM_STATUSES, stageForRoomStatus } from '../../domains/recruitment/rooms/shared.mjs';
 import { JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
 import { NULL_EVIDENCE_PROVIDER } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
@@ -496,7 +497,8 @@ console.log('\n— §47 — a PRE-M23 snapshot keeps all thirteen original statu
   // And it reads. A migrated-but-unreadable database is not migrated.
   // §4.3 step 2: the contacts, signings, requests and trials are tables now, not collections the migrations create; a pre-M23 database has none,
   // so the projection is given the empty contacts table it would read (rewritten: it described the old storage).
-  const out = buildRecruitmentJourney({ ...db, recruitmentContacts: [], signings: db.signings ?? [], requests: db.requests ?? [], trials: db.trials ?? [], roomDecisions: db.roomDecisions ?? [] }, 'old-signed', { kind: 'org_staff', orgId: 'org-legacy', role: 'room_lead' },
+  // S9b: likewise the assessments (migration 0020's table), which a pre-M23 database's blob does not carry.
+  const out = buildRecruitmentJourney({ ...db, recruitmentContacts: [], signings: db.signings ?? [], requests: db.requests ?? [], trials: db.trials ?? [], roomDecisions: db.roomDecisions ?? [], assessments: db.assessments ?? [] }, 'old-signed', { kind: 'org_staff', orgId: 'org-legacy', role: 'room_lead' },
     { now: 3000, evidence: NULL_EVIDENCE_PROVIDER });
   if (!out.ok) console.error(`   journey refused: ${JSON.stringify(out)}`);
   ok(out.ok === true && out.lifecycle?.currentStage === 'signed',
@@ -789,19 +791,22 @@ neg(counts.total === counts.migration + counts.moduleBoot + counts.optional + co
 
 section('§13/§14 — db.assessments and the D2 stores, checked by name');
 {
-  neg(byMigration.has('assessments'),
-    '§13 db.assessments exists after migrations alone — it no longer depends on M12 registration order');
-  neg(presentAfterBoot.has('assessments'), 'and after a full production boot');
+  // S9b (rewritten: it described the old storage): the assessments are a typed table created by data migration 0020,
+  // which every database runs before any module registers; the booted store reads them back from that table.
+  neg(!byMigration.has('assessments') && TABLE_BACKED.includes('assessments'),
+    '§13 the assessments are a table of migration 0020 — they do not depend on M12 registration order');
+  neg(presentAfterBoot.has('assessments'), 'and they are there after a full production boot');
   // The M23 journey's required stores are checked once, in part 1 (§4/§5).
 
   // §4.3 step 2 (rewritten: it described the old storage): the D2 `requests` and `trials` are typed tables read
   // through SQL, no db collection a migration creates; the recruitment suites prove they are there on every boot.
+  // S9b likewise for `assessments` (§13 above): a table, present after boot, created by a data migration.
   const D2 = ['blocks', 'reports', 'moderationLog', 'channels', 'reputationSeed', 'plans', 'archetypes',
     'assessments'];
   const absent = D2.filter((k) => !presentAfterBoot.has(k));
   for (const k of absent) console.error(`   D2 store absent after boot: db.${k}`);
   neg(absent.length === 0, `§14 all ${D2.length} D2 stores are present after a full production boot`);
-  neg(D2.every((k) => byMigration.has(k)), 'and all of them by migration, not by module registration');
+  neg(D2.every((k) => byMigration.has(k) || TABLE_BACKED.includes(k)), 'and all of them by migration (a snapshot step or a table\'s data migration), not by module registration');
 
   // The two that are configuration rather than containers must not be empty:
   // an empty plans table silently moves a Grassroots attribution window.

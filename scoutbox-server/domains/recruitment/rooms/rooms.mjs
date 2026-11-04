@@ -238,7 +238,7 @@ export function registerRooms(ctx) {
 
   /** Assessments for this org only, through M12's existing blind-until-submit rule. */
   function assessmentsFor(req, room) {
-    const mine = db.assessments.filter((a) => a.orgId === req.org.id && a.playerId === room.playerId);
+    const mine = ctx.scoutingReads.assessments.forOrgPlayer(req.org.id, room.playerId);
     const lead = isLead(req.orgUser);
     const ownNonDraft = mine.some((a) => a.scoutUserId === req.orgUser.id && a.state !== 'draft');
     return mine
@@ -260,7 +260,7 @@ export function registerRooms(ctx) {
   }
 
   const blindWithheld = (req, room) => {
-    const mine = db.assessments.filter((a) => a.orgId === req.org.id && a.playerId === room.playerId);
+    const mine = ctx.scoutingReads.assessments.forOrgPlayer(req.org.id, room.playerId);
     const visible = assessmentsFor(req, room).length;
     return mine.length - visible;
   };
@@ -922,7 +922,7 @@ export function registerRooms(ctx) {
           passportVersion: full?.passportVersion ?? null,
           passportRevision: ctx.passportRevisionOf?.(room.playerId) ?? null,
           evidenceIds: ctx.scoutingReads.evidence.currentForPlayer(room.playerId).map((e) => e.id),
-          assessmentIds: db.assessments.filter((a) => a.orgId === room.orgId && a.playerId === room.playerId && a.state !== 'draft').map((a) => a.id),
+          assessmentIds: ctx.scoutingReads.assessments.forOrgPlayer(room.orgId, room.playerId).filter((a) => a.state !== 'draft').map((a) => a.id),
           // Protocol coverage at decision time — which standardized tests had a
           // verified result, never the measured values themselves.
           combineResults: (ctx.combineProjection?.(room.playerId)?.results ?? [])

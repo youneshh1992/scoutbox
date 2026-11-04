@@ -64,7 +64,7 @@ routes still miss the bar: they are listed, and deferred, at the end of §4.3 st
 
 ## 3. Status
 
-19 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0020`. Each
+20 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0021`. Each
 step takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Write model | Status |
@@ -91,7 +91,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | end-to-end test estate | — | — | — | done (§4.4, 4 Nov) |
 | — | server code by domain | — | — | — | recruitment, platform and scouting done (§4.4.1, 4 Nov); the rest per step |
 | S9a | evidence passport, coach affiliations, squad invitations | `0019_scouting_evidence` | `scoutingEvidence.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
-| S9b | assessment templates, assessments, video segments, playlists | | | | not started |
+| S9b | assessment templates, assessments, video segments, playlists | `0020_scouting_assessments` | `scoutingAssessments.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S9c | tactical setup, squad, looking-for, federation check, vacancies | | | | not started |
 | S9d | opportunities, applications, campaigns, player preferences | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -326,6 +326,21 @@ dispute and coach lists keep their offset paging (the admin app's shape), now in
 `400 FIELD_INVALID` / `DATE_INVALID` naming the field; over-long text is still shortened. **Open for the Founder:** a coach
 affiliation is still matched to a staff member by display name. Keying it by staff account means only people with a
 ScoutBox login can be affiliated coaches, and the Grassroots "Coach name" box becomes a pick-list.
+
+**S9b as built (4 November).** `repositories/scoutingAssessments.mjs`, migration `0020`, which also inserts the four v1
+templates (they were pushed into memory at registration; every database now has them from its first boot). Modules
+read through `scoutingReads` (`templates`, `assessments`, `segments`, `playlists`); projectors that take `reads` get
+`reads.assessments`, and the M23 journey's last `db` store is gone (`JOURNEY_REQUIRED_STORES` is empty; a missing
+`reads.assessments` is reported as the missing `assessments` store). An assessment's attributes snapshot is the
+template version's attributes, joined on read; the anchors are five columns; segment labels, ratings, cited evidence
+and playlist segments are ordered child rows. Player, media, trial and session ids carry no key (tolerant); org and
+staff ids RESTRICT; the template, first opinion, cited segments and playlist segments are RESTRICT keys inside the
+domain. A submission with its ledger entry, and a publication with its notifications, each commit as one unit. Routes
+refuse junk (`400 FIELD_INVALID` / `DATE_INVALID`, field named; half ratings, duplicate attributes, unknown context or
+reference fields, non-object references and drawings, non-numeric segment times); over-long text is still shortened.
+The calibration and group-template routes now pin a template's current version rather than v1. The club assessment
+and segment lists keep their offset paging (`paginate`), over SQL-narrowed rows. **Open for the Founder:** templates
+are still shared by every club, so one club's lead publishing a new version changes it for all.
 
 ### 4.6 S14: retire the blob
 

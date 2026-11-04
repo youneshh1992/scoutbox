@@ -285,6 +285,50 @@ r = await post('/org/playlists', { name: 'Pressing candidates' }, bearer(MARIA))
 const plId = r.body.playlist.id;
 r = await post(`/org/playlists/${plId}/segments`, { segmentId: segId }, bearer(MARIA));
 ok(r.status === 200 && r.body.playlist.segmentIds.includes(segId), 'playlist collects segments');
+r = await post(`/org/playlists/${plId}/segments`, { segmentId: segId }, bearer(MARIA));
+ok(r.status === 200 && r.body.playlist.segmentIds.filter((s) => s === segId).length === 1, 'adding a segment twice keeps it once');
+// S9b: valid input only — junk is refused with the field named, and nothing is written
+{
+  const draftA = (await post('/org/assessments', { playerId: 'pl-adeyemi', positionGroup: 'ATT', context: { fixture: 'Eastport 3–0 Harbour', date: '2026-10-31', minutesWatched: 75 } }, bearer(SAM))).body.assessment;
+  ok(draftA?.context.date === '2026-10-31' && draftA.context.minutesWatched === 75, 'S9b a valid context is stored as sent');
+  for (const [context, field, code] of [
+    [{ mood: 'tense' }, 'context.mood', 'FIELD_INVALID'], [{ date: 'last week' }, 'context.date', 'DATE_INVALID'],
+    [{ minutesWatched: 'ninety' }, 'context.minutesWatched', 'FIELD_INVALID'], [{ viewing: 'radio' }, 'context.viewing', 'FIELD_INVALID'], [{ fixture: 7 }, 'context.fixture', 'FIELD_INVALID'],
+  ]) {
+    const bad = await post('/org/assessments', { playerId: 'pl-adeyemi', positionGroup: 'ATT', context }, bearer(SAM));
+    ok(bad.status === 400 && bad.body.error === code && bad.body.field === field, `S9b an assessment context with a junk ${field} is refused (400 ${code}, field named)`);
+    const badPut = await put(`/org/assessments/${draftA.id}`, { context }, bearer(SAM));
+    ok(badPut.status === 400 && badPut.body.field === field, `S9b and the same junk is refused when a draft is edited (${field})`);
+  }
+  const rating = (extra) => ({ ratings: [{ attrId: 'finishing', rating: 4, ...extra }] });
+  for (const [body, check, label] of [
+    [rating({ rating: 3.5 }), (b) => b.error === 'RATING_INVALID', 'a half rating'],
+    [{ ratings: [{ attrId: 'finishing', rating: 4 }, { attrId: 'finishing', rating: 2 }] }, (b) => b.error === 'ATTR_DUPLICATE', 'an attribute rated twice'],
+    [rating({ note: { text: 'x' } }), (b) => b.field === 'ratings[0].note', 'a note that is not text'],
+    [rating({ evidenceRefs: ['clip at 12s'] }), (b) => b.field === 'ratings[0].evidenceRefs[0]', 'a reference that is not an object'],
+    [rating({ evidenceRefs: [{ segmentId: segId, colour: 'red' }] }), (b) => b.field === 'ratings[0].evidenceRefs[0].colour', 'a reference with an unknown field'],
+    [rating({ evidenceRefs: [{ segmentId: segId, t: -3 }] }), (b) => b.field === 'ratings[0].evidenceRefs[0].t', 'a negative timestamp'],
+    [{ ratings: 'four' }, (b) => b.field === 'ratings', 'ratings that are not a list'],
+    [{ recommendation: { verdict: 'sign', reasons: ['fast'] } }, (b) => b.field === 'recommendation.reasons', 'reasons that are not text'],
+  ]) {
+    const bad = await put(`/org/assessments/${draftA.id}`, body, bearer(SAM));
+    ok(bad.status === 400 && check(bad.body), `S9b ${label} is refused (400)`);
+  }
+  const after = (await j(`/org/assessments?playerId=pl-adeyemi`, {}, bearer(SAM))).body.items.find((a) => a.id === draftA.id);
+  ok(after.ratings.length === 0 && after.recommendation === null && after.context.minutesWatched === 75, 'S9b and no refused edit wrote anything');
+  const badSeg = await post(`/org/media/${mediaId}/segments`, { startS: '12', endS: 26 }, bearer(MARIA));
+  ok(badSeg.status === 400 && badSeg.body.error === 'TIMESTAMPS_INVALID', 'S9b segment timestamps that are not numbers are refused');
+  const badLabels = await post(`/org/media/${mediaId}/segments`, { startS: 1, endS: 2, labels: [{ tag: 'x' }] }, bearer(MARIA));
+  ok(badLabels.status === 400 && badLabels.body.field === 'labels', 'S9b segment labels that are not text are refused');
+  const badDrawing = await post(`/org/media/${mediaId}/segments`, { startS: 1, endS: 2, drawing: 'circle' }, bearer(MARIA));
+  ok(badDrawing.status === 400 && badDrawing.body.field === 'drawing', 'S9b a drawing that is not an object is refused');
+  const badAnchors = await post('/org/assessment-templates', { positionGroup: 'GK', attributes: [{ id: 'a', label: 'A', anchors: { 9: 'x' } }, { id: 'b', label: 'B' }] }, bearer(MARIA));
+  ok(badAnchors.status === 400 && badAnchors.body.field === 'attributes[0].anchors', 'S9b template anchors outside levels 1–5 are refused');
+  const badName = await post('/org/playlists', { name: ['x'] }, bearer(MARIA));
+  ok(badName.status === 400 && badName.body.field === 'name', 'S9b a playlist name that is not text is refused');
+  const templates = (await j('/org/assessment-templates', {}, bearer(MARIA))).body.templates;
+  ok(templates.filter((t) => t.positionGroup === 'GK').length === 1, 'S9b and the refused template published no version');
+}
 
 // ========================================================= §3 recruitment
 r = await post('/org/cases', { playerId: 'pl-svensson', priority: 'high' }, bearer(MARIA));

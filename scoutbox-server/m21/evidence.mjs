@@ -101,7 +101,7 @@ export function resolveEvidenceLink(link, { db, reads = {}, player, viewer, orgC
 
   switch (link.sourceType) {
     case 'passport_evidence': return resolvePassportEvidence(link, { reads, player, now });
-    case 'assessment': return resolveAssessment(link, { db, player, viewer });
+    case 'assessment': return resolveAssessment(link, { reads, player, viewer });
     case 'box_cam_session': return resolveBoxSession(link, { db, player });
     case 'combine_attempt': return resolveCombineAttempt(link, { db, player });
     case 'trial_report': return resolveTrialReport(link, { reads, player, viewer });
@@ -130,8 +130,8 @@ function resolvePassportEvidence(link, { reads, player, now }) {
  * the club chose to publish feedback — the same rule M12 applies when an
  * objective is seeded — and another organisation never sees it at all.
  */
-function resolveAssessment(link, { db, player, viewer }) {
-  const a = (db.assessments ?? []).find((x) => x.id === link.sourceId);
+function resolveAssessment(link, { reads, player, viewer }) {
+  const a = reads.assessments?.byId(link.sourceId) ?? null;
   if (!a || a.playerId !== player.id) return unavailable(link, 'evidence_not_found');
   const isOwningOrg = (viewer.kind === 'org_staff' || viewer.kind === 'grassroots_staff') && a.orgId === viewer.org?.id;
   const isSubject = viewer.kind === 'player_self' || viewer.kind === 'guardian';
@@ -267,7 +267,7 @@ export function recordBelongsToPlayer({ db, reads = {}, sourceType, sourceId, pl
   const find = (list) => (list ?? []).find((x) => x.id === sourceId && x.playerId === playerId) ?? null;
   switch (sourceType) {
     case 'passport_evidence': { const e = reads.evidence?.byId(sourceId) ?? null; return e && e.playerId === playerId ? e : null; }
-    case 'assessment': return find(db.assessments);
+    case 'assessment': { const a = reads.assessments?.byId(sourceId) ?? null; return a && a.playerId === playerId ? a : null; }
     case 'box_cam_session': return find(db.boxSessions);
     case 'combine_attempt': return find(db.combineAttempts);
     case 'trial_report': { const t = reads.trials?.byId(sourceId) ?? null; return t && t.playerId === playerId ? t : null; }

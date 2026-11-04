@@ -97,7 +97,7 @@ export function registerGroups(ctx) {
     if (!requireLead(req, res)) return;
     const g = db.groups.find((x) => x.id === req.params.id);
     if (!g || !isGroupAdmin(g, req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
-    const t = db.assessmentTemplates.find((x) => x.id === req.body?.templateId);
+    const t = ctx.scoutingReads.templates.currentById(req.body?.templateId);
     if (!t) return res.status(404).json({ error: 'TEMPLATE_NOT_FOUND' });
     if (!g.sharedTemplateIds.includes(t.id)) g.sharedTemplateIds.push(t.id);
     persistNow();
@@ -119,7 +119,7 @@ export function registerGroups(ctx) {
   function resourceOwnerOk(kind, id, orgId) {
     if (kind === 'shortlist') return id === '*'; // "my shortlist" as a whole
     if (kind === 'case') return ctx.recruitmentReads.cases.byId(id)?.orgId === orgId;
-    if (kind === 'assessment') return db.assessments.some((a) => a.id === id && a.orgId === orgId && a.state !== 'draft');
+    if (kind === 'assessment') { const a = ctx.scoutingReads.assessments.byId(id); return !!a && a.orgId === orgId && a.state !== 'draft'; }
     return false;
   }
 
@@ -145,7 +145,8 @@ export function registerGroups(ctx) {
       return { kind: 'case', case: { id: c.id, playerName: c.playerName, stage: c.stage, priority: c.priority, decision: c.decision } };
     }
     if (grant.resourceKind === 'assessment') {
-      const a = db.assessments.find((x) => x.id === grant.resourceId && x.orgId === grant.fromOrgId);
+      const found = ctx.scoutingReads.assessments.byId(grant.resourceId);
+      const a = found && found.orgId === grant.fromOrgId ? found : null;
       if (!a) return { kind: 'assessment', gone: true };
       if (!eligible(a.playerId)) return { kind: 'assessment', withheldNote: 'The assessed player is not visible to your organisation under the standing rules.' };
       return { kind: 'assessment', assessment: { id: a.id, playerName: a.playerName, scoutName: a.scoutName, templateId: a.templateId, ratings: a.ratings, recommendation: a.recommendation, context: a.context } };
@@ -230,7 +231,7 @@ export function registerGroups(ctx) {
     if (!g || !isGroupAdmin(g, req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
     const memberRows = g.memberOrgIds.map((orgId) => {
       const org = byId.org(orgId);
-      const assessments = db.assessments.filter((a) => a.orgId === orgId && a.state !== 'draft').length;
+      const assessments = ctx.scoutingReads.assessments.forOrg(orgId).filter((a) => a.state !== 'draft').length;
       const signings = reads.signings.countForOrg(orgId);
       return { orgId, orgName: org?.name, assessments: suppress(assessments) ? '<3' : assessments, signings: suppress(signings) ? '<3' : signings };
     });

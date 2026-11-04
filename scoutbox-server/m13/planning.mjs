@@ -173,7 +173,7 @@ export function registerPlanning(ctx) {
     if (a.observedAt) return res.status(409).json({ error: 'ALREADY_COMPLETED' });
     a.observedAt = Date.now();
     const assessmentId = req.body?.assessmentId;
-    if (assessmentId && db.assessments.some((x) => x.id === assessmentId && x.orgId === req.org.id)) a.assessmentIds.push(assessmentId);
+    if (assessmentId && ctx.scoutingReads.assessments.byId(assessmentId)?.orgId === req.org.id) a.assessmentIds.push(assessmentId);
     persistNow();
     res.json({ assignment: a });
   });

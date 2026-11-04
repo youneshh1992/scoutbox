@@ -403,7 +403,7 @@ export function registerDevelopment(ctx) {
 
       const candidates = [
         ...(reads.evidence?.forPlayer(player.id) ?? []).map((e) => ({ sourceType: 'passport_evidence', sourceId: e.id })),
-        ...(db.assessments ?? []).filter((a) => a.playerId === player.id).map((a) => ({ sourceType: 'assessment', sourceId: a.id })),
+        ...(reads.assessments?.forPlayer(player.id) ?? []).map((a) => ({ sourceType: 'assessment', sourceId: a.id })),
         ...(db.boxSessions ?? []).filter((s) => s.playerId === player.id).map((s) => ({ sourceType: 'box_cam_session', sourceId: s.id })),
         ...(db.combineAttempts ?? []).filter((a) => a.playerId === player.id).map((a) => ({ sourceType: 'combine_attempt', sourceId: a.id })),
         ...reads.trials.forPlayer(player.id).map((t) => ({ sourceType: 'trial_report', sourceId: t.id })),

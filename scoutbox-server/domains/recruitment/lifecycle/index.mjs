@@ -31,7 +31,9 @@ export function registerM23(rawCtx) {
   // The established seam: isLead, orgCanSee, audit and paginate come from one
   // place rather than being re-derived per milestone.
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
-  const { db, recruitmentReads, orgRouter, persistNow, isLead } = ctx;
+  const { db, recruitmentReads, scoutingReads, orgRouter, persistNow, isLead } = ctx;
+  // The journey reads the club's assessments too (S9b: scoutingReads).
+  const journeyReads = { ...recruitmentReads, ...scoutingReads };
   if (!recruitmentReads?.contacts || !recruitmentReads?.offers) throw new TypeError('registerM23 needs recruitmentReads (contacts, offers) from the data layer');
 
   /**
@@ -70,7 +72,7 @@ export function registerM23(rawCtx) {
       orgId: req.org.id,
       userId: req.orgUser.id,
       role: roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) }),
-    }, { now: nowOf(req), evidence: evidenceProvider(), historyLimit: req.query.limit, historyCursor: req.query.cursor, reads: recruitmentReads });
+    }, { now: nowOf(req), evidence: evidenceProvider(), historyLimit: req.query.limit, historyCursor: req.query.cursor, reads: journeyReads });
 
     if (!out.ok) return sendDomainError(res, out, 'journey');
     return res.json(out);

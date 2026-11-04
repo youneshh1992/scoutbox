@@ -115,8 +115,7 @@ export function registerSecondLook(ctx) {
       const filedAt = t.report?.filedAt ?? 0;
       if (t.status === 'reported' && filedAt > since) add('trial_completed', 'trial', t.id, filedAt);
     }
-    for (const a of db.assessments ?? []) {
-      if (a.playerId !== player.id || a.orgId !== org.id) continue;
+    for (const a of ctx.scoutingReads.assessments.forOrgPlayer(org.id, player.id)) {
       if (a.submittedAt && a.submittedAt > since) add('assessment_submitted', 'assessment', a.id, a.submittedAt);
     }
     for (const s of db.evidenceSuggestions ?? []) {
@@ -190,7 +189,7 @@ export function registerSecondLook(ctx) {
   /** Current canonical facts, for the snapshot comparison. */
   function currentFacts(player, org) {
     const evidenceIds = ctx.scoutingReads.evidence.currentForPlayer(player.id).map((e) => e.id);
-    const assessmentIds = db.assessments.filter((a) => a.orgId === org.id && a.playerId === player.id && a.state !== 'draft').map((a) => a.id);
+    const assessmentIds = ctx.scoutingReads.assessments.forOrgPlayer(org.id, player.id).filter((a) => a.state !== 'draft').map((a) => a.id);
     const combineResults = (ctx.combineProjection?.(player.id)?.results ?? []).map((r) => `${r.protocolId}@${r.protocolVersion}`);
     const trialIds = reads.trials.forOrgPlayer(org.id, player.id).map((t) => t.id);
     const references = (db.verReferences ?? []).filter((r) => r.playerId === player.id && r.status === 'active').length;

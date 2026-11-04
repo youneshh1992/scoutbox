@@ -52,8 +52,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   apiKeys: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   applications: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   archetypes: { guarantee: 'migration', owner: 'core', reason: 'product configuration, restored from catalogue.mjs; empty is a lie with consequences (D2)' },
-  assessmentTemplates: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
-  assessments: { guarantee: 'migration', owner: 'm12', reason: 'declared required by the M23 journey projection and guaranteed by nothing but a module ??= until the sweep found it' },
   // blocks, reports, moderationLog, orgNotes, ledger, opsEvents, sourceChanges, idvQueue: no longer blob collections since S6b —
   // the rows live in blocks / reports / moderation_log / org_notes / ledger / ops_events / source_changes / idv_queue (migration
   // 0013_safety_audit, repositories/safetyAudit.mjs). The entries stay because seed.mjs, the snapshot migrations m230_001 / m230_003
@@ -101,6 +99,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // emailChallenges: no longer a production db.* read since S6a — the rows live in email_challenges (migration 0008,
   // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free
   // read-only view at db.emailChallenges, like the other table-backed collections. (mediaDeletions is the precedent.)
+  // assessmentTemplates, assessments, videoSegments, playlists: never a db.* read since S9b — typed tables (migration
+  // 0020), read through repositories/scoutingAssessments.mjs (scoutingReads). db.<name> throws.
   // evidence, coachAffiliations, squadInvites: never a db.* read since S9a — typed tables (migration 0019), read through
   // repositories/scoutingEvidence.mjs (scoutingReads). db.<name> throws.
   evidenceSuggestions: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
@@ -151,7 +151,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // playersRetained: never a production db.* read — the retained records live in players_retained (migration 0014,
   // repositories/identity.mjs) and the backup reads them through players.retainedRecords(); the data layer defines a
   // read-only view at db.playersRetained, like the other table-backed collections.
-  playlists: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   prospects: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   pushLog: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_log table (defined by attachDataLayer), written only through the push log repository' },
   pushTokens: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_tokens table (defined by attachDataLayer), written only through the push tokens repository' },
@@ -206,7 +205,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   verRootRequests: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
   verRootTransfers: { guarantee: 'module', owner: 'm14', reason: 'was created inside the transfer route; moved to m14/shared.mjs beside its twelve siblings' },
   verTokens: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  videoSegments: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   vouches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   watchlistHistory: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   webhookDeliveries: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },

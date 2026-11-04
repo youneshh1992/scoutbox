@@ -158,7 +158,7 @@ export function resolveEvidenceRefs(refs, { db, reads = {}, kase, testProviderEn
   for (const ref of refs) {
     const mismatch = (message) => ({ ok: false, error: 'DECISION_CASE_MISMATCH', message, ref });
     if (ref.kind === 'assessment') {
-      const a = (db.assessments ?? []).find((x) => x && x.id === ref.id);
+      const a = reads.assessments?.byId(ref.id) ?? null;
       if (!a || a.orgId !== kase.orgId || a.playerId !== kase.playerId) return mismatch('That assessment is not one of this case\'s.');
       if (a.state === 'draft') return { ok: false, error: 'DECISION_EVIDENCE_INVALID', message: 'Only a submitted assessment can be cited by a decision.', ref };
       out.push({ kind: 'assessment', id: a.id, meta: { scoutName: a.scoutName ?? null, submittedAt: a.submittedAt ?? null, verdict: a.recommendation?.verdict ?? null, trialId: a.context?.trialId ?? null } });

@@ -279,10 +279,10 @@ export const MIGRATIONS = [
     // required), by M15's Passport projection, by M16.2's Trust evidence
     // source, by M13's group analytics and by M12's own routes. Empty is the
     // truthful default: no rows means no assessment was ever filed.
-    note: 'M23 sweep: db.assessments is a journey-required store and must survive a restore.',
-    up(db) {
-      db.assessments ??= [];
-    },
+    note: 'M23 sweep: the assessments store is journey-required and must survive a restore (since S9b a table of migration 0020).',
+    // S9b: the assessments are a typed table of the scouting assessments repository (migration 0020), which every
+    // database has before any module registers: there is no db.assessments to create. A recorded no-op (its id stays).
+    up() {},
   },
   {
     version: 2302,

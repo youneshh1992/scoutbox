@@ -30,6 +30,10 @@ fixed on 3 November; these were found while fixing it.
   again, the runner prints the whole log: note which table differed.
 - **`testWriterAtomicity` failed once in five full `npm test` runs** (4 Nov), and the log wasn't kept. It passed
   alone three times and in the next two full runs. If it fails again, keep the runner's log.
+- **`testRecruitmentContactsOffersServer` failed once in three full `npm test` runs** (4 Nov, S9b): "reading seen
+  offers commits nothing" (`data_version` 3, expected 2). It passed alone four times and in the next two full runs.
+  The check asserts that nothing commits in a 3-second window, so a late save of the earlier offer writes under load
+  is the likely cause. If it fails again, note what committed in the window.
 - **`e2e/platform/contracts.mjs` fails one check**: `orgPanels.tsx` is no longer byte-identical in `scoutbox-club` and
   `scoutbox-grassroots` (which must share business logic). Grassroots shows audit entries as structured facts since
   `7f93a14` (1 Nov); Club still shows one sentence. Deciding which one both apps use is a design question. A `knownFailure` check ("orgPanels.tsx drift"), so the

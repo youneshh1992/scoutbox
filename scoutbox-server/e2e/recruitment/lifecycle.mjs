@@ -1045,11 +1045,12 @@ section('X — stored corruption: a broken record is reported, never rendered as
   // list" are different operational problems and a log that conflates them
   // sends someone looking in the wrong place.
   {
-    // §4.3 step 2 (rewritten: assessments is the one db store left; the contacts are read through SQL queries).
+    // §4.3 step 2 and S9b (rewritten: it described the old storage). No db store is left: the contacts and the
+    // assessments are read through SQL queries, so an unusable one is a missing query, named; nothing is "malformed".
     const db = base(); db.assessments = null; delete db.recruitmentContacts;
     const out = build(db);
-    neg(out.malformed?.includes('assessments') && out.missing?.includes('recruitmentContacts'),
-      'X2b and names which store was absent and which was the wrong type');
+    neg(out.missing?.includes('assessments') && out.missing?.includes('recruitmentContacts') && out.malformed?.length === 0,
+      'X2b and names each store whose records it could not read');
   }
 
   // A corrupt case must not become a disclosure oracle. A player who receives

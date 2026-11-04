@@ -11,10 +11,8 @@ import { isLeadUser } from '../roles.mjs';
 export function migrateM12(db, players) {
   // F1 evidence, F10 coach affiliations and squad invitations: tables of the scouting evidence repository (S9a), read
   // through SQL (scoutingReads); no db.* here.
-  db.assessmentTemplates ??= []; // F2 — versioned, position-specific templates
-  db.assessments ??= [];         // F2 — scouting assessments
-  db.videoSegments ??= [];       // F7 — timestamped annotations against source media
-  db.playlists ??= [];           // F7 — role-scoped segment playlists
+  // F2 templates and assessments, F7 video segments and playlists: tables of the scouting assessments repository (S9b),
+  // read through SQL (scoutingReads); no db.* here.
   // F3 recruitment cases: tables of the recruitment-cases repository, read through SQL (§4.3 step 2); no db.* here.
   db.vacancies ??= [];           // F4 — role vacancies / briefs
   db.opportunities ??= [];       // F5 — structured opportunity board

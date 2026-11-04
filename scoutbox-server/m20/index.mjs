@@ -51,7 +51,9 @@ export function migrateM20(db) {
 }
 
 export function registerAnalytics(ctx) {
-  const { db, recruitmentReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
+  const { db, recruitmentReads, scoutingReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
+  // The reporting context reads the recruitment records and (S9b) the club's assessments through SQL.
+  const reportingReads = { ...recruitmentReads, ...scoutingReads };
   if (typeof recruitmentReads?.contacts?.forOrg !== 'function' || typeof recruitmentReads?.offers?.forOrg !== 'function' || typeof recruitmentReads?.signings?.forOrg !== 'function' || typeof recruitmentReads?.signingPackages?.forOrg !== 'function') throw new TypeError('registerAnalytics needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
   migrateM20(db);
 
@@ -139,7 +141,7 @@ export function registerAnalytics(ctx) {
   }
 
   const contextFor = (req, parsed) => buildReportingContext({
-    db, reads: recruitmentReads, org: req.org, window: parsed.window, now: now(), orgCanSee, findPlayer, filters: parsed.filters,
+    db, reads: reportingReads, org: req.org, window: parsed.window, now: now(), orgCanSee, findPlayer, filters: parsed.filters,
   });
 
   // ------------------------------------------------------------- the catalogue
@@ -249,6 +251,6 @@ export function registerAnalytics(ctx) {
 
   return {
     analyticsCatalogue: () => ({ policyVersion: RECRUITMENT_ANALYTICS_POLICY_VERSION, metrics: METRIC_IDS.length }),
-    buildReportingContext: (org, opts) => buildReportingContext({ db, reads: recruitmentReads, org, orgCanSee, findPlayer, ...opts }),
+    buildReportingContext: (org, opts) => buildReportingContext({ db, reads: reportingReads, org, orgCanSee, findPlayer, ...opts }),
   };
 }

@@ -168,8 +168,8 @@ export function registerTrust(ctx) {
    *  read, so a 4/10 and a 9/10 from the same verified evaluator are
    *  identical evidence. */
   function assessmentSource(player) {
-    return (db.assessments ?? [])
-      .filter((a) => a.playerId === player.id && ['submitted', 'reviewed', 'published'].includes(a.state ?? ''))
+    return ctx.scoutingReads.assessments.forPlayer(player.id)
+      .filter((a) => a.state !== 'draft')
       .map((a) => ({ key: `asmt:${a.id}`, verifiedSource: !!byId.org(a.orgId)?.verified }));
   }
 
