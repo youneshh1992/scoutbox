@@ -40,6 +40,9 @@ export function registerRooms(ctx) {
     faults = null,
     recruitmentCases, unit, dueAtOrRefuse, // S8b: every case and room write is an explicit repository operation, inside `unit` when it touches more than one row
   } = ctx;
+  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
+  const reads = ctx.recruitmentReads;
+  if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerRooms needs recruitmentReads (signings) from the data layer');
   if (typeof unit !== 'function' || !recruitmentCases?.cases) throw new TypeError('registerRooms needs the recruitment-cases repository and unit from the data layer');
   const { cases, comments, snapshots, decisions, evidenceStates } = recruitmentCases;
 
@@ -1327,7 +1330,8 @@ export function registerRooms(ctx) {
     if (trialId && !t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
     const r = requestId ? db.requests.find((x) => x.id === requestId && x.orgId === req.org.id && x.playerId === room.playerId) : null;
     if (requestId && !r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
-    const sg = signingId ? db.signings.find((x) => x.id === signingId && x.orgId === req.org.id && x.playerId === room.playerId) : null;
+    const found = signingId ? reads.signings.byId(signingId) : null;
+    const sg = found && found.orgId === req.org.id && found.playerId === room.playerId ? found : null;
     if (signingId && !sg) return res.status(404).json({ error: 'SIGNING_NOT_FOUND' });
     const fresh = touch(room, (d) => {
       if (t) {

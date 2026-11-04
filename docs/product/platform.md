@@ -79,6 +79,12 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 
 ## Server contracts (from the old operations runbook)
 
+- Paging: a list that grows without limit pages "continue from here" — `?limit=` (1–100, default 50) and
+  `?cursor=` (the previous page's `nextCursor`) give `{ items, nextCursor }`; `nextCursor` is null on the last page.
+  A bad limit or cursor is refused (400 `PAGE_LIMIT_INVALID` / `PAGE_CURSOR_INVALID`), never clamped. One helper:
+  `scoutbox-server/domains/platform/paging.mjs`. Paged so far: the club follow-ups (by due date) and the club
+  signings (newest first). The apps read only the first page; a "load more" is not built yet (decided 4 Nov 2026).
+
 - Sessions: the bearer token is returned once and stored only as SHA-256. No file, log,
   backup, `/capabilities` or admin view contains a plain token. Lifetime is
   `SESSION_TTL_DAYS` (30) measured from creation and judged against the current setting.

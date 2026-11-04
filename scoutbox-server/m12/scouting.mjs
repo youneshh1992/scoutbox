@@ -20,6 +20,9 @@ export function registerScouting(ctx) {
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
     recruitmentCases, dueAtOrRefuse, // S8b: every case change is an explicit repository operation (cases.create / update)
   } = ctx;
+  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
+  const reads = ctx.recruitmentReads;
+  if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerScouting needs recruitmentReads (signings) from the data layer');
   const { cases } = recruitmentCases;
 
   // ------------------------------------------------- template seeds (v1)
@@ -618,7 +621,8 @@ export function registerScouting(ctx) {
     // Every reference is checked before anything is written.
     if (requestId && !db.requests.some((x) => x.id === requestId && x.orgId === req.org.id && x.playerId === c.playerId)) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
     if (trialId && !db.trials.some((x) => x.id === trialId && x.orgId === req.org.id && x.playerId === c.playerId)) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
-    if (signingId && !db.signings.some((x) => x.id === signingId && x.orgId === req.org.id && x.playerId === c.playerId)) return res.status(404).json({ error: 'SIGNING_NOT_FOUND' });
+    const signing = signingId ? reads.signings.byId(signingId) : null;
+    if (signingId && !(signing && signing.orgId === req.org.id && signing.playerId === c.playerId)) return res.status(404).json({ error: 'SIGNING_NOT_FOUND' });
     const fresh = cases.update(c.id, (d) => {
       if (requestId && !d.links.requestIds.includes(requestId)) d.links.requestIds.push(requestId);
       if (trialId && !d.links.trialIds.includes(trialId)) d.links.trialIds.push(trialId);

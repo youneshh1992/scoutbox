@@ -652,7 +652,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   }
   const jr = await j('GET', '/org/rooms/case-matrix-trial_completed/journey', undefined, maria.token);
   ok(jr.status === 200 && jr.body.lifecycle.currentStage === 'trial_completed' && jr.body.trials.length >= 6 && jr.body.trials.every((t) => !('playerName' in t)), 'L7n the trial_completed case still carries its trial evidence (as tombstones) in the journey — not "no trial"');
-  const signings = (await j('GET', '/org/signings', undefined, maria.token)).body;
+  const signings = (await j('GET', '/org/signings', undefined, maria.token)).body.items;
   ok(signings.some((s) => s.id === 'sign-legacy-1'), 'L7d the signing record (the club\'s revenue event) is untouched');
   const legacyAfter = (await orgTrials(maria.token)).filter((t) => t.playerId === 'pl-carvalho');
   if (!(legacyAfter.length === 6 && legacyAfter.every((t) => t.playerName === null && Number.isFinite(t.subjectRemovedAt)))) console.error('   L7e rows:', JSON.stringify(legacyAfter.map((t) => [t.id, t.playerName, t.subjectRemovedAt])));

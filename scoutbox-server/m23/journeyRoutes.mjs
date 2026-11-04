@@ -23,7 +23,7 @@ import { currentSigningForOffer } from './journeyModel.mjs';
 
 export function registerJourneyRoutes(ctx) {
   const { db, recruitmentReads, playerRouter, guardianRouter, orgRouter, agent = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
-  if (!recruitmentReads?.contacts || !recruitmentReads?.offers) throw new TypeError('registerJourneyRoutes needs recruitmentReads (contacts, offers) from the data layer');
+  if (!recruitmentReads?.contacts || !recruitmentReads?.offers || !recruitmentReads?.signings || !recruitmentReads?.signingPackages) throw new TypeError('registerJourneyRoutes needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
   const evidence = () => ctx.recruitmentEvidenceProvider ?? undefined;
   const orgOf = (orgId) => (db.orgs ?? []).find((o) => o && o.id === orgId) ?? null;
   // The same per-request test clock the Offer and signing routes honour (development only).
@@ -184,11 +184,11 @@ export function registerJourneyRoutes(ctx) {
       }
       if (ref.startsWith('spk-') || ref.startsWith('sign-')) {
         let p = null;
-        if (ref.startsWith('sign-')) { const row = (db.signings ?? []).find((x) => x && x.id === ref); p = row?.signingPackageId ? (db.signingPackages ?? []).find((x) => x && x.id === row.signingPackageId) ?? null : null; }
-        else p = (db.signingPackages ?? []).find((x) => x && x.id === ref) ?? null;
+        if (ref.startsWith('sign-')) { const row = recruitmentReads.signings.byId(ref); p = row?.signingPackageId ? recruitmentReads.signingPackages.byId(row.signingPackageId) : null; }
+        else p = recruitmentReads.signingPackages.byId(ref);
         if (!p) return null;
         // The CURRENT package over the same Offer (a superseded or expired one resolves to the live one).
-        const current = currentSigningForOffer((db.signingPackages ?? []).filter((x) => x && x.offerId === p.offerId && x.orgId === p.orgId), at) ?? p;
+        const current = currentSigningForOffer(recruitmentReads.signingPackages.forOffer(p.offerId).filter((x) => x.orgId === p.orgId), at) ?? p;
         if (kind === 'org_user') {
           if (p.orgId === orgId) return room(caseFor(p.caseId, orgId), 'signing');
           const o = recruitmentReads.offers.byId(p.offerId);

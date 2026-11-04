@@ -168,10 +168,10 @@ ok(fin9.journey.completedStages.length === 10 && fin9.journey.classification ===
 // ================================================================ 2 — after the final reboot
 section('2 — after the final reboot: agreement, uniqueness, nothing fabricated');
 {
-  const rows = (await S.j('GET', '/org/signings', undefined, maria.token)).body.filter((s) => s.signingPackageId === SID);
+  const rows = (await S.j('GET', '/org/signings', undefined, maria.token)).body.items.filter((s) => s.signingPackageId === SID);
   ok(rows.length === 1, 'exactly one db.signings row for the package');
   const again = await S.j('POST', `/org/signings/${SID}/complete`, { expectedRev: 99, clientKey: key() }, maria.token, at(T0));
-  neg(again.status !== 200 && (await S.j('GET', '/org/signings', undefined, maria.token)).body.filter((s) => s.signingPackageId === SID).length === 1, 'a second completion after the reboot writes no second row');
+  neg(again.status !== 200 && (await S.j('GET', '/org/signings', undefined, maria.token)).body.items.filter((s) => s.signingPackageId === SID).length === 1, 'a second completion after the reboot writes no second row');
   const pj = await playerJourney();
   ok(pj.journey.stage === 'signed' && pj.journey.nextAction.code === 'NONE' && (await S.j('GET', '/org/players/pl-adeyemi', undefined, maria.token)).body.contractStatus === 'under_contract', 'the player\'s journey says signed; the player is under contract');
   neg((await S.j('POST', '/player/availability', { contractStatus: 'free_agent' }, kola.token)).status === 409, 'the canonical contract still owns the word after the reboot');

@@ -27,6 +27,9 @@ export function registerPassportCore(ctx) {
     nextId, persist, persistNow, notify, ledgerAppend, findPlayer, isBlocked,
     moderateOrRefuse, vmetric,
   } = ctx;
+  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
+  const reads = ctx.recruitmentReads;
+  if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerPassportCore needs recruitmentReads (signings) from the data layer');
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
@@ -90,8 +93,8 @@ export function registerPassportCore(ctx) {
         squads.push({ orgId: inv.orgId, orgName: o.name, rowId: inv.id, addedAt: inv.acceptedAt, orgVerified: !!o.verified });
       }
     }
-    const signings = db.signings.filter((s) => s.playerId === pid);
-    const outcomes = db.outcomeReports.filter((o) => o.playerId === pid).map((o) => ({ ...o, orgName: orgOf(o.orgId)?.name ?? null }));
+    const signings = reads.signings.forPlayer(pid);
+    const outcomes = reads.outcomeReports.forPlayer(pid).map((o) => ({ ...o, orgName: orgOf(o.orgId)?.name ?? null }));
     const signingRows = signings.map((s) => {
       const ended = outcomes.find((o) => o.signingId === s.id && ['released', 'ended', 'left'].includes(String(o.registrationStatus ?? '')));
       // Suspension suppresses the CURRENT relationship at read time (same

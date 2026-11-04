@@ -1237,6 +1237,7 @@ CREATE INDEX signing_packages_case_org_created ON signing_packages (case_id, org
 CREATE INDEX signing_packages_offer_org ON signing_packages (offer_id, org_id);
 CREATE INDEX signing_packages_player_updated ON signing_packages (player_id, updated_at);
 CREATE INDEX signing_packages_offer_revision ON signing_packages (offer_revision_id);
+CREATE INDEX signing_packages_org_player ON signing_packages (org_id, player_id);
 CREATE UNIQUE INDEX signing_packages_one_completed_per_offer ON signing_packages (offer_id) WHERE status = 'COMPLETED';
 
 -- source: db.signingPackages[].revisions[]  created at m29/index.mjs:397 (revision 1) and :701 (supersede)
@@ -1494,6 +1495,7 @@ CREATE TABLE outcome_reports (
   at                               INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX outcome_reports_org ON outcome_reports (org_id);
+CREATE INDEX outcome_reports_player ON outcome_reports (player_id);
 
 -- source: db.outcomeReports[].confirmations[]  created at m12/operations.mjs:97
 -- owner/writer: m12/operations.mjs respondOutcome   lifecycle: append-only; one per actor id per report

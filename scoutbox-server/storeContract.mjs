@@ -106,7 +106,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   evidenceSuggestions: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   exposureEvents: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   fixtures: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  followUps: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   friendlies: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   groupGrants: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   groups: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
@@ -138,7 +137,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // db.pushTokens (insertion order), written only through the repository (the mailer, the delivery centre's fake
   // provider, the push sender and POST /push/register).
   outbox: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the outbox table (defined by attachDataLayer), written only through the outbox repository' },
-  outcomeReports: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   // pairingCodes: no longer a production db.* read since S6a — the rows live in pairing_codes (migration 0008,
   // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free
   // read-only view at db.pairingCodes, like the other table-backed collections. (mediaDeletions is the precedent.)
@@ -161,6 +159,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   recruitmentCases: { guarantee: 'migration', owner: 'm12', reason: 'the canonical recruitment object (M12); the lifecycle lives on it' },
   // recruitmentContacts, recruitmentOffers: never a db.* read since §4.3 step 2 — the contacts and offers live in their
   // typed tables (migration 0017) and are read through repositories/recruitmentContactsOffers.mjs. db.<name> throws.
+  // signingPackages, signings, followUps, outcomeReports: the same since §4.3 step 2 — typed tables (migration 0018),
+  // read through repositories/signingsFollowUps.mjs.
   reports: { guarantee: 'migration', owner: 'core', reason: 'report-user/scout/club submissions (D2); since S6b a read-only view over the reports table, written only through handleReport / moderateOrRefuse and the resolve route → the safetyAudit repository (a report naming an unknown player is accepted, Q4)' },
   representations: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   // M23 P5.6B — ScoutBox Agent core. Guaranteed by migration 2305 so a
@@ -188,9 +188,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   savedSearches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   secondLookItems: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
   sessions: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
-  signings: { guarantee: 'migration', owner: 'core', reason: 'the evidence the signed lifecycle state rests on; exactly one writer in the repository — recordCompletedSigning in m29 since P7' },
-  // M23 P7 — the signing workflow. Guaranteed by migration 2308 (m280_001_signing_workflow).
-  signingPackages: { guarantee: 'migration', owner: 'm29', reason: 'P7: the signing workflow record — immutable signing revisions (document digest, required parties, contract days), party completion evidence, keys, history and rev; distinct from db.signings, the completed-signing record' },
   sourceChanges: { guarantee: 'migration', owner: 'm18.1', reason: 'M18.1 source-change clock, guaranteed by the migration registry; since S6b a read-only view over the source_changes table, written only through recordSourceChange → the safetyAudit repository (the 20 000 cap deletes the oldest rows)' },
   squadInvites: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   ssoConfigs: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },

@@ -27,8 +27,9 @@
  * the actor, their role, or a time; a write to `db.signings` outside
  * `recordCompletedSigning`; an accepted Offer turning into anything by itself.
  *
- * S8d (migration 0018; docs/architecture/s8d-design-note.md): `db.signingPackages` and `db.signings` are read-only
- * views of deep-frozen records over the typed tables. EVERY write is an explicit operation of the signings/follow-ups
+ * S8d (migration 0018; docs/architecture/s8d-design-note.md): the packages and signings are typed tables, read through
+ * the repository's SQL queries (`sp.*`, `sg.*`; §4.3 step 2 — there is no db.signingPackages or db.signings), which
+ * hand out deep-frozen records. EVERY write is an explicit operation of the signings/follow-ups
  * repository (`sp` = signingPackages: insert / patch / patchRevision / addRevision / setDocument / setParty / addKey /
  * addHistory / redactPlayer; `signings.record`) that writes its rows at once inside the route's unit of work and
  * returns the fresh record, which the route then uses; an in-place edit of a record throws. Nothing is fingerprinted at
@@ -78,15 +79,15 @@ export function registerSigning(rawCtx) {
   const caseAudit = (kase, ...args) => ctx.recruitmentCases.cases.update(kase.id, (d) => audit(d, ...args));
   if (typeof players?.update !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
   if (typeof signingsFollowUps?.signingPackages?.insert !== 'function' || typeof signingsFollowUps?.signings?.record !== 'function') throw new TypeError('registerSigning needs the signings/follow-ups repository (S8d) from the data layer');
-  const sp = signingsFollowUps.signingPackages;
+  const sp = signingsFollowUps.signingPackages; const sg = signingsFollowUps.signings; // §4.3 step 2: every read is a query of these
 
   /** A refusal raised INSIDE the completion unit: the unit rolls back, the route answers with this code (never a 500). */
   class SigningAbort extends Error {
     constructor(code, message, { why = code, moved = null } = {}) { super(why); this.code = code; this.userMessage = message; this.moved = moved; }
   }
 
-  // S8d: `db.signingPackages` is the repository's read-only view (defined by the data layer before any module
-  // registers); the former `??= []` boot-order guard is gone with the blob.
+  // S8d / §4.3 step 2: the packages and signings are read through the repository's SQL queries (sp.*, sg.*); there is
+  // no db.signingPackages or db.signings.
 
   const err = (res, error, message, extra = {}) => sendSigningError(res, { error, message, ...extra }, 'signing');
   const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
@@ -107,26 +108,17 @@ export function registerSigning(rawCtx) {
   /** bumpRev's rule (m181/concurrency.mjs) written through the repository: rev + 1, revAt, revBy, updatedAt. */
   const touch = (pkg, req, at, by = req?.orgUser ?? null) => sp.patch(pkg.id, { rev: (Number.isInteger(pkg.rev) ? pkg.rev : 1) + 1, revAt: at, revBy: by ? { userId: by.id ?? null, name: by.name ?? null } : null, updatedAt: at });
 
-  function storeOr500(res) {
-    if (!Array.isArray(db.signingPackages) || !Array.isArray(db.signings)) {
-      console.error('SIGNING store_missing db.signingPackages or db.signings is absent or not a list');
-      err(res, 'SIGNING_STORE_MISSING', 'Signings cannot be served right now.');
-      return null;
-    }
-    return db.signingPackages;
-  }
-
   // ------------------------------------------------------------- lookups
 
   const caseOf = (pkg) => (db.recruitmentCases ?? []).find((k) => k && k.id === pkg.caseId && k.orgId === pkg.orgId) ?? null;
   const offerOf = (pkg) => { const o = offerReads.byId(pkg.offerId); return o && o.orgId === pkg.orgId ? o : null; };
   const offerRevisionOf = (offer, id) => (offer?.revisions ?? []).find((r) => r && r.id === id) ?? null;
-  const packagesOf = (offerId, orgId) => (db.signingPackages ?? []).filter((p) => p && p.offerId === offerId && p.orgId === orgId);
-  const packagesOfCase = (kase) => (db.signingPackages ?? []).filter((p) => p && p.caseId === kase.id && p.orgId === kase.orgId);
+  const packagesOf = (offerId, orgId) => sp.forOffer(offerId).filter((p) => p.orgId === orgId);
+  const packagesOfCase = (kase) => sp.forCase(kase.id).filter((p) => p.orgId === kase.orgId);
   const subjectRemoved = (kase) => !!kase?.subjectRemovedAt || !findPlayer(kase?.playerId);
-  const completedRowFor = (pkg) => (db.signings ?? []).find((s) => s && s.signingPackageId === pkg.id) ?? null;
+  const completedRowFor = (pkg) => sg.forPackage(pkg.id);
 
-  const consistencyOf = (pkg, offer, kase, at) => signingConsistency(pkg, { offer, kase, rows: db.signings ?? null, player: findPlayer(pkg.playerId) ?? null }, at);
+  const consistencyOf = (pkg, offer, kase, at) => signingConsistency(pkg, { offer, kase, rows: [sg.forPackage(pkg.id)].filter(Boolean), player: findPlayer(pkg.playerId) ?? null }, at);
   /** A sound row whose Offer, case and completed record do not contradict it; anything else is omitted from every projection (the P6.1 rule). */
   function soundPackage(pkg, at) {
     if (!pkg || signingIntegrity(pkg).length) return false;
@@ -147,8 +139,8 @@ export function registerSigning(rawCtx) {
 
   /** A package of THIS organisation, sound, with its case and its Offer — or concealed. `need`: 'view' | 'manage' | 'lead'. */
   function packageFor(req, res, need) {
-    if (!storeOr500(res)) return null;
-    const pkg = db.signingPackages.find((p) => p && p.id === req.params.id && p.orgId === req.org.id) ?? null;
+    const found = sp.byId(req.params.id);
+    const pkg = found && found.orgId === req.org.id ? found : null;
     if (!pkg) { notFound(res, 'club'); return null; }
     const problems = signingIntegrity(pkg, { orgId: req.org.id });
     if (problems.length) { console.error(`SIGNING integrity ${pkg.id}: ${problems.join(',')}`); err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be read.'); return null; }
@@ -282,7 +274,7 @@ export function registerSigning(rawCtx) {
     if (pkg) {
       const existing = completedRowFor(pkg); if (existing) return { signing: existing, duplicate: true };
       // P7.1 §20, §29: one completed signing per Offer, whatever package claims it — a structural check, not a timing one.
-      const byOffer = (db.signings ?? []).find((s) => s && s.offerId && s.offerId === pkg.offerId) ?? null; if (byOffer) return { signing: byOffer, duplicate: true };
+      const byOffer = pkg.offerId ? sg.forOffer(pkg.offerId) : null; if (byOffer) return { signing: byOffer, duplicate: true };
     }
     const events = (db.ledger ?? []).filter((l) => l.playerId === player.id && l.orgId === org.id);
     const first = events[0] ?? null;
@@ -348,7 +340,7 @@ export function registerSigning(rawCtx) {
   function legacyRecordingBlocker(playerId, orgId, at = Date.now()) {
     const offers = offerReads.forOrgPlayer(orgId, playerId);
     if (offers.some((o) => canonicalOfferStatus(o, at) === 'ACCEPTED')) return { error: 'SIGNING_CANONICAL_REQUIRED', message: 'This player accepted a canonical Offer from your club: complete the signing through the signing workflow on the case.' };
-    if ((db.signingPackages ?? []).some((p) => p && p.orgId === orgId && p.playerId === playerId && (isLive(p, at) || effectiveStatus(p, at) === 'COMPLETED'))) return { error: 'SIGNING_CANONICAL_REQUIRED', message: 'A signing workflow exists for this player on your case: complete it there.' };
+    if (sp.forOrgPlayer(orgId, playerId).some((p) => (isLive(p, at) || effectiveStatus(p, at) === 'COMPLETED'))) return { error: 'SIGNING_CANONICAL_REQUIRED', message: 'A signing workflow exists for this player on your case: complete it there.' };
     return null;
   }
 
@@ -378,13 +370,12 @@ export function registerSigning(rawCtx) {
   orgRouter.get('/rooms/:id/signing', (req, res) => {
     const got = roomFor(req, res, 'offer_view');
     if (!got) return;
-    if (!storeOr500(res)) return;
     const { room: kase, role } = got;
     const at = now(req);
     const packages = packagesOfCase(kase).map((p) => ({ ...signingClubView(p, at, { orgName: orgOf(p.orgId)?.name ?? null }), integrity: [...signingIntegrity(p, { orgId: kase.orgId }), ...(offerOf(p) ? consistencyOf(p, offerOf(p), kase, at) : ['OFFER_MISSING'])] })).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     const live = packagesOfCase(kase).find((p) => isLive(p, at)) ?? null;
     const { blockers, accepted } = startBlockers(kase, role, at);
-    const legacySigning = (db.signings ?? []).find((s) => s && s.orgId === kase.orgId && s.playerId === kase.playerId && !s.signingPackageId) ?? null;
+    const legacySigning = sg.forOrgPlayer(kase.orgId, kase.playerId).find((s) => !s.signingPackageId) ?? null;
     res.json({
       packages, livePackageId: live?.id ?? null,
       legacySigning: legacySigning ? { id: legacySigning.id, at: legacySigning.ts ?? null, method: legacySigning.method ?? 'LEGACY_RECORDED' } : null,
@@ -396,7 +387,6 @@ export function registerSigning(rawCtx) {
   });
 
   orgRouter.post('/offers/:id/signing', (req, res) => {
-    if (!storeOr500(res)) return;
     const found = offerReads.byId(req.params.id);
     const offer = found && found.orgId === req.org.id ? found : null;
     if (!offer) return notFound(res, 'club');
@@ -634,7 +624,7 @@ export function registerSigning(rawCtx) {
     if (!revGate(req, res, pkg)) return;
     const rev = currentRevision(pkg);
     const offerRev = offerRevisionOf(offer, pkg.offerRevisionId);
-    const otherCompleted = packagesOf(pkg.offerId, pkg.orgId).some((p) => p.id !== pkg.id && effectiveStatus(p, at) === 'COMPLETED') || (db.signings ?? []).some((s) => s && s.offerId === pkg.offerId);
+    const otherCompleted = packagesOf(pkg.offerId, pkg.orgId).some((p) => p.id !== pkg.id && effectiveStatus(p, at) === 'COMPLETED') || !!sg.forOffer(pkg.offerId);
     const problems = completionGate(pkg, { documentProblem: rev?.document ? documentBytesProblem(pkg, rev.document) : 'missing', now: at, offer: offer ? { ...offer, status: canonicalOfferStatus(offer, at) } : null, offerRevision: offerRev ? { ...offerRev, status: effectiveRevisionStatus(offerRev, at) } : null, kase, otherCompleted, blocked: isBlocked(pkg.playerId, pkg.orgId) });
     if (problems.length) {
       const first = problems[0];
@@ -662,7 +652,7 @@ export function registerSigning(rawCtx) {
         const written = recordCompletedSigning({ player, org, actor: req.orgUser, at, pkg, rev });
         if (written.duplicate) throw new SigningAbort('SIGNING_ALREADY_COMPLETED', 'A completed signing record already exists for this package.', { why: 'duplicate_row' });
         signing = written.signing; effects = written.effects;
-        if (faults?.shouldFail?.('signing.complete.after_row')) throw new Error('simulated failure after the db.signings row (development fault layer)');
+        if (faults?.shouldFail?.('signing.complete.after_row')) throw new Error('simulated failure after the signings row (development fault layer)');
         let p = sp.patchRevision(pkg.id, rev.id, { status: 'COMPLETED', completedAt: at, completedBy: by });
         p = sp.patch(p.id, { status: 'COMPLETED', completion: { signingId: signing.id, completedAt: at, completedBy: by, contract: rev.contract, documentSha256: rev.document.sha256, lifecycle: null } });
         // The lifecycle asks the ONE validator with the real evidence provider — which now finds the row this completion just wrote.
@@ -770,8 +760,8 @@ export function registerSigning(rawCtx) {
   /** Packages presented to this person, re-authorised live: the addressed adult, over an Offer they accepted, on a sound row. */
   function recipientPackages({ by, actorId, playerIds, at }) {
     const out = [];
-    for (const p of db.signingPackages ?? []) {
-      if (!p || !playerIds.includes(p.playerId) || !soundPackage(p, at)) continue;
+    for (const p of [...new Set(playerIds)].flatMap((pid) => sp.forPlayer(pid))) {
+      if (!soundPackage(p, at)) continue;
       const rev = currentRevision(p);
       const presented = (p.revisions ?? []).some((r) => r && r.readyAt);
       if (!presented) continue; // a draft is invisible, not redacted
@@ -783,7 +773,6 @@ export function registerSigning(rawCtx) {
     return out.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   }
   function recipientPackage(req, res, { by, actorId, playerIds }) {
-    if (!storeOr500(res)) return null;
     const p = recipientPackages({ by, actorId, playerIds, at: now(req) }).find((x) => x.id === req.params.id) ?? null;
     if (!p) { notFound(res, by); return null; }
     return p;
@@ -791,7 +780,6 @@ export function registerSigning(rawCtx) {
   const recipientView = (p, at, by, actorId) => signingRecipientView(p, at, { orgName: orgOf(p.orgId)?.name ?? null, partyType: by === 'guardian' ? 'GUARDIAN' : 'PLAYER', forEntityId: actorId });
 
   playerRouter.get('/signings', (req, res) => {
-    if (!storeOr500(res)) return;
     const at = now(req);
     const items = recipientPackages({ by: 'player', actorId: req.player.id, playerIds: [req.player.id], at }).map((p) => recipientView(p, at, 'player', req.player.id));
     res.json({ items, note: 'Documents presented to you for signing, exactly as the club presented them. Confirming one records your signature on that exact document; nothing is signed until every required party has confirmed and the club completes the signing.' });
@@ -816,11 +804,10 @@ export function registerSigning(rawCtx) {
   });
 
   // Guardian routes are dormant: the pathway is closed in every jurisdiction, so the list is empty and every act is refused.
-  guardianRouter.get('/signings', (req, res) => { if (!storeOr500(res)) return; res.json({ items: [], note: 'Signing on behalf of a player under the age of majority is not open in this jurisdiction.' }); });
+  guardianRouter.get('/signings', (req, res) => { res.json({ items: [], note: 'Signing on behalf of a player under the age of majority is not open in this jurisdiction.' }); });
   guardianRouter.get('/signings/:id', (req, res) => notFound(res, 'guardian'));
   guardianRouter.get('/signings/:id/document', (req, res) => documentNotFound(res, 'guardian'));
   guardianRouter.post('/signings/:id/complete', (req, res) => {
-    if (!storeOr500(res)) return;
     const p = recipientPackages({ by: 'guardian', actorId: req.guardian.id, playerIds: req.guardian.childIds ?? [], at: now(req) }).find((x) => x.id === req.params.id);
     if (!p) return notFound(res, 'guardian');
     return err(res, 'SIGNING_PATHWAY_CLOSED', 'Signing on behalf of a player under the age of majority is not open in this jurisdiction.');
@@ -833,7 +820,6 @@ export function registerSigning(rawCtx) {
     const found = agent.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
     if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED', message: 'A summary row does not open a client\'s signings.' });
-    if (!storeOr500(res)) return;
     const a = found; const at = now(req);
     const decision = integration?.decide?.({ surface: 'client_private', clientId: a.clientId, agentUserId: req.orgUser.id, at }) ?? { allowed: false, code: 'BASIS' };
     if (decision.allowed !== true) return res.status(403).json({ error: decision.code, rule: decision.rule ?? null, message: 'This client\'s signings are not open to you right now.' });
@@ -842,8 +828,8 @@ export function registerSigning(rawCtx) {
     const licence = integration?.licenceCurrentFor ? integration.licenceCurrentFor(req.orgUser.id, a.jurisdiction ?? null, at) : false;
     if (licence !== true) return res.status(403).json({ error: 'LICENCE_NOT_CURRENT', rule: 'LICENCE', message: 'This client\'s signings are not open to you right now.' });
     const items = [];
-    for (const p of db.signingPackages ?? []) {
-      if (!p || p.playerId !== a.clientId || !soundPackage(p, at)) continue;
+    for (const p of sp.forPlayer(a.clientId)) {
+      if (!soundPackage(p, at)) continue;
       const offer = offerOf(p);
       if (!offer?.agentShare || offer.agentShare.agentUserId !== req.orgUser.id) continue; // the client shares the Offer; the signing rides on that share
       if (!(p.revisions ?? []).some((r) => r && r.readyAt)) continue; // a draft is the club's own
@@ -856,9 +842,8 @@ export function registerSigning(rawCtx) {
   // ================================================================== T&S (explicit, audited, never a party)
 
   adminRouter.post('/signings/:id/void', (req, res) => {
-    if (!storeOr500(res)) return;
     if (!req.reviewer?.id) return err(res, 'SIGNING_NOT_PERMITTED', 'Voiding a signing requires a named Trust & Safety reviewer.');
-    const pkg = db.signingPackages.find((p) => p && p.id === req.params.id) ?? null;
+    const pkg = sp.byId(req.params.id);
     if (!pkg) return notFound(res, 'admin');
     const at = now(req);
     const reason = cleanText(req.body?.reason, SIGNING_LIMITS.reason);

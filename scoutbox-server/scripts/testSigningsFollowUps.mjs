@@ -2,9 +2,10 @@
 // (repositories/signingsFollowUps.mjs, migration 0018): docs/architecture/s8d-design-note.md. What this suite proves:
 // the migration creates the typed tables; a snapshot save (fixtures, tools) types every field into its column,
 // normalises what the note lists, stops on a row it cannot type and names every missing reference and every
-// uniqueness rule with ids; the repository's operations write rows at once and return fresh records, the views are
-// read-only arrays of frozen records, a unit of work rolls rows AND mirrors back (a statement failure, a real COMMIT
-// failure, the deferred completion key), the completion cycle commits in one unit; the snapshot write (full, partial,
+// uniqueness rule with ids; the repository's operations write rows at once and return fresh records; there is no db.*
+// view (§4.3 step 2: a reader naming one throws) and every query, page and sweep query matches a scan of the tables; a
+// unit of work rolls the rows back (a statement failure, a real COMMIT failure, the deferred completion key) and a read
+// inside it sees its own writes; the completion cycle commits in one unit; the snapshot write (full, partial,
 // [], junk, a retained dependant) and the live counters.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 
@@ -148,25 +149,25 @@ test('[snapshot] every reference and every uniqueness rule is named with ids bef
 
 // ------------------------------------------------------------- the repository (explicit writes)
 
-test('[repository] the four views are read-only arrays of read-only records (a push, a field assignment and a nested edit throw, naming the repository); every operation writes its rows AT ONCE — a second read-only connection sees them before the save — and returns the fresh record while the record the caller held is unchanged: insert, patch, patchRevision, addRevision, setDocument, setParty, addKey, addHistory; signings.record; followUps.schedule and patch; outcomeReports.file and addConfirmation; a save writes nothing more; the counts; a unit-less operation runs in a transaction of its own', () => {
+test('[repository] there is no db.* view (reading or assigning one of the four throws, naming the repository) and every record a query returns is read-only (a field assignment and a nested edit throw); every operation writes its rows AT ONCE — a second read-only connection sees them before the save — and returns the fresh record while the record the caller held is unchanged: insert, patch, patchRevision, addRevision, setDocument, setParty, addKey, addHistory; signings.record; followUps.schedule and patch; outcomeReports.file and addConfirmation; a save writes nothing more; the counts; a unit-less operation runs in a transaction of its own', () => {
   need();
   const d = file('repo'); const L = serverOpen(d);
-  for (const n of COLLECTIONS) { assert.ok(Array.isArray(L.db[n]), `${n} is an array`); assert.throws(() => L.db[n].push({}), /written through its domain repository/, `${n}: push refused`); }
-  const held = L.db.signingPackages.find((p) => p.id === 'spk-1');
+  for (const n of COLLECTIONS) { assert.throws(() => L.db[n], new RegExp(`db\\.${n} is gone: read it through the signingsFollowUps repository`), `${n}: no view`); assert.throws(() => { L.db[n] = []; }, /is gone/); assert.equal(Object.keys(L.db).includes(n), false); }
+  const held = L.repo.signingPackages.byId('spk-1');
   assert.throws(() => { held.status = 'READY'; }, /written through its domain repository|read only|Cannot assign/, 'a field assignment on a record throws');
   assert.throws(() => { held.revisions[0].status = 'READY'; }, /written through its domain repository|read only|Cannot assign/, 'a nested edit throws');
-  assert.throws(() => { L.repo.signingPackages.byId('spk-1').status = 'READY'; }, /written through its domain repository/, 'a record a lookup returns is read-only too');
+  assert.throws(() => { L.repo.signingPackages.forCase(held.caseId)[0].status = 'READY'; }, /read only|Cannot assign/, 'a record a list query returns is read-only too');
   const sp = L.repo.signingPackages; const rev0 = L.revision();
   // insert
   const pkg3 = draftPackage({ id: 'spk-3', offerId: 'rof-2', caseId: 'case-2', playerId: 'pl-child1', offerRevisionId: 'rofr-3', revisions: [srevision({ id: 'spr-3' })], currentRevisionId: 'spr-3', keys: { start: { key: 'k-start-3', fp: 'fp3' } }, history: [] });
   const inserted = sp.insert(pkg3);
-  assert.equal(inserted.id, 'spk-3'); assert.throws(() => { inserted.status = 'READY'; }, /written through its domain repository/, 'a returned record is read-only'); assert.equal(L.db.signingPackages.length, 3);
+  assert.equal(inserted.id, 'spk-3'); assert.throws(() => { inserted.status = 'READY'; }, /read only|Cannot assign/, 'a returned record is read-only'); assert.equal(L.repo.counts().signingPackages, 3);
   withRo(d, (s) => { assert.equal(col(s, "SELECT status FROM signing_packages WHERE id = 'spk-3'"), 'DRAFT', 'the row is committed before any save'); assert.equal(col(s, "SELECT count(*) FROM signing_revision_parties WHERE revision_id = 'spr-3'"), 2); assert.equal(col(s, "SELECT key FROM idempotency_keys WHERE owner_table = 'signing_packages' AND owner_id = 'spk-3'"), 'k-start-3'); });
   assert.throws(() => sp.insert(pkg3), /SIGNINGS_DUPLICATE/);
   assert.throws(() => sp.insert(draftPackage({ id: 'spk-bad', status: 'OPEN' })), /SIGNINGS_INPUT_INVALID[\s\S]*spk-bad\.status/);
   // patch / patchRevision / setDocument / addHistory / addKey / setParty / addRevision
   const p1 = sp.patch('spk-1', { internalNote: 'changed', expiresAt: T.started + 40 * 24 * 3600 * 1000, updatedAt: NOW, rev: 2, revAt: NOW, revBy: { userId: BY.id, name: BY.name } });
-  assert.equal(p1.internalNote, 'changed'); assert.equal(held.internalNote, 'Internal: agreed verbally.', 'the held record is unchanged'); assert.equal(L.db.signingPackages.find((p) => p.id === 'spk-1').internalNote, 'changed', 'the view serves the fresh record');
+  assert.equal(p1.internalNote, 'changed'); assert.equal(held.internalNote, 'Internal: agreed verbally.', 'the held record is unchanged'); assert.equal(L.repo.signingPackages.byId('spk-1').internalNote, 'changed', 'a read serves the fresh record');
   assert.throws(() => sp.patch('spk-1', { playerId: 'pl-x' }), /not patched/); assert.throws(() => sp.patch('spk-1', { internalNote: 'x'.repeat(2001) }), /SIGNINGS_INPUT_INVALID[\s\S]*internalNote exceeds 2000/);
   const p2 = sp.setDocument('spk-1', 'spr-1', 'signing', sdoc('sgd-9')); assert.equal(p2.revisions[0].document.sha256, SHA); withRo(d, (s) => assert.equal(col(s, "SELECT evidence_id FROM signing_documents WHERE revision_id = 'spr-1' AND kind = 'signing'"), 'ver-sgn-1'));
   const p3 = sp.patchRevision('spk-1', 'spr-1', { status: 'READY', readyAt: NOW, readyBy: BY }); assert.equal(p3.revisions[0].status, 'READY'); assert.equal(p3.revisions[0].readyBy.name, BY.name);
@@ -182,7 +183,7 @@ test('[repository] the four views are read-only arrays of read-only records (a p
   const sg = L.repo.signings.record(legacySigning({ id: 'sign-9', playerId: 'pl-child2', note: null })); assert.equal(sg.method, 'LEGACY_RECORDED'); withRo(d, (s) => assert.equal(col(s, "SELECT method FROM signings WHERE id = 'sign-9'"), 'LEGACY_RECORDED'));
   assert.throws(() => L.repo.signings.record(legacySigning({ id: 'sign-10', playerId: 'pl-child2' })), /a standing legacy signing per organisation and player|UNIQUE/, 'the engine keeps the rule the typer cannot see across records');
   const f9 = L.repo.followUps.schedule({ id: 'fup-9', signingId: 'sign-9', playerId: 'pl-child2', orgId: 'org-pro', milestone: '3m', dueAt: NOW + 1, status: 'scheduled', notifiedAt: null, createdAt: NOW }); assert.equal(f9.status, 'scheduled');
-  const f9b = L.repo.followUps.patch('fup-9', { status: 'due', notifiedAt: NOW + 2 }); assert.equal(f9b.notifiedAt, NOW + 2); assert.equal(L.db.followUps.find((f) => f.id === 'fup-9').status, 'due');
+  const f9b = L.repo.followUps.patch('fup-9', { status: 'due', notifiedAt: NOW + 2 }); assert.equal(f9b.notifiedAt, NOW + 2); assert.equal(L.repo.followUps.byId('fup-9').status, 'due');
   assert.throws(() => L.repo.followUps.patch('fup-9', { milestone: '6m' }), /not patched/); assert.throws(() => L.repo.followUps.patch('fup-9', { status: 'done' }), /status must be one of scheduled\|due\|complete/);
   const r9 = L.repo.outcomeReports.file(outcomeReport({ id: 'out-9', followUpId: 'fup-9', signingId: 'sign-9', playerId: 'pl-child2', status: 'reported', confirmations: [] })); assert.equal(r9.status, 'reported');
   assert.throws(() => L.repo.outcomeReports.file(outcomeReport({ id: 'out-10', followUpId: 'fup-9', signingId: 'sign-9', playerId: 'pl-child2', confirmations: [] })), /follow_ups fup-9 already has a report/);
@@ -195,34 +196,87 @@ test('[repository] the four views are read-only arrays of read-only records (a p
   assert.deepEqual(L.layer.report().domains.signingsFollowUps.rows, { signingPackages: 3, signings: 3, followUps: 4, outcomeReports: 2 }); assert.equal(L.layer.report().domains.signingsFollowUps.pendingWrites, 0);
   L.close();
   // a restart reads the same records
-  const L2 = serverOpen(d); assert.deepEqual(plain(L2.db.signingPackages.find((p) => p.id === 'spk-1')), plain(p7)); assert.equal(L2.db.outcomeReports.find((r) => r.id === 'out-9').status, 'disputed'); L2.close(); rm(d);
+  const L2 = serverOpen(d); assert.deepEqual(plain(L2.repo.signingPackages.byId('spk-1')), plain(p7)); assert.equal(L2.repo.outcomeReports.byId('out-9').status, 'disputed'); L2.close(); rm(d);
 });
 
-test('[repository] the unit of work: several operations and a failure at the end — a thrown error, a refused typing inside a nested call, a REAL COMMIT failure — roll the rows AND the mirrors back (a second connection sees nothing; the views, the held references and the revision unchanged); the retry lands once; the completion cycle (the signing row, then the package\'s COMPLETED status with its completion naming the signing) commits in one unit through the deferred key, and a COMPLETED package without its signing row is refused at COMMIT; redactPlayer inside the deletion unit', () => {
+test('[repository] SQL reads (§4.3 step 2): byId and every list query return exactly what a scan of the tables would, in insertion order; the one-row lookups (forPackage, forOffer, forFollowUp) and the counts agree; the two pages walk the whole list in their order at every page size and end with a null cursor; the sweep queries pick exactly the scheduled-and-past and the due-and-unnotified follow-ups and the signings missing a milestone; the admin totals equal a count over the rows; `reads` carries no write', () => {
+  need();
+  const d = file('reads'); const L = serverOpen(d); const { signingPackages: sp, signings: sg, followUps: fu, outcomeReports: out } = L.repo;
+  // more rows than the fixture: a second legacy signing and its follow-ups, so the pages and the sweep have work
+  sg.record(legacySigning({ id: 'sign-r2', playerId: 'pl-child2', ts: T.started + 5, note: null }));
+  for (const [i, m] of ['3m', '6m'].entries()) fu.schedule({ id: `fup-r2-${m}`, signingId: 'sign-r2', playerId: 'pl-child2', orgId: 'org-pro', milestone: m, dueAt: NOW - 1000 + i, status: 'scheduled', notifiedAt: null, createdAt: NOW });
+  const all = L.repo.exportAll();
+  assert.ok(all.signingPackages.length >= 2 && all.signings.length >= 3 && all.followUps.length >= 5 && all.outcomeReports.length >= 1, 'the fixture has records to query');
+  const ids = (rows) => rows.map((r) => r.id);
+  const values = (list, key) => [...new Set(list.map(key).filter((v) => v !== null && v !== undefined)), 'nobody'];
+  const check = (label, got, want) => assert.deepEqual(ids(got), ids(want), label);
+  for (const n of COLLECTIONS) for (const r of all[n]) assert.deepEqual(plain(L.repo[n].byId(r.id)), plain(r), `${n}.byId ${r.id}`);
+  for (const bad of ['nope', undefined, null, 42]) for (const n of COLLECTIONS) assert.equal(L.repo[n].byId(bad), null);
+  for (const [key, q] of [['caseId', 'forCase'], ['offerId', 'forOffer'], ['playerId', 'forPlayer'], ['orgId', 'forOrg']]) for (const v of values(all.signingPackages, (p) => p[key])) check(`signingPackages.${q} ${v}`, sp[q](v), all.signingPackages.filter((p) => p[key] === v));
+  for (const p of all.signingPackages) check(`signingPackages.forOrgPlayer ${p.orgId}/${p.playerId}`, sp.forOrgPlayer(p.orgId, p.playerId), all.signingPackages.filter((x) => x.orgId === p.orgId && x.playerId === p.playerId));
+  for (const [key, q] of [['playerId', 'forPlayer'], ['orgId', 'forOrg']]) for (const v of values(all.signings, (s) => s[key])) check(`signings.${q} ${v}`, sg[q](v), all.signings.filter((s) => s[key] === v));
+  for (const s of all.signings) check(`signings.forOrgPlayer ${s.orgId}/${s.playerId}`, sg.forOrgPlayer(s.orgId, s.playerId), all.signings.filter((x) => x.orgId === s.orgId && x.playerId === s.playerId));
+  for (const v of values(all.signings, (s) => s.signingPackageId)) assert.equal(sg.forPackage(v)?.id ?? null, all.signings.find((s) => s.signingPackageId === v)?.id ?? null, `signings.forPackage ${v}`);
+  for (const v of values(all.signings, (s) => s.offerId)) assert.equal(sg.forOffer(v)?.id ?? null, all.signings.find((s) => s.offerId === v)?.id ?? null, `signings.forOffer ${v}`);
+  for (const v of values(all.signings, (s) => s.orgId)) assert.equal(sg.countForOrg(v), all.signings.filter((s) => s.orgId === v).length);
+  assert.equal(sg.count(), all.signings.length);
+  for (const [key, q] of [['signingId', 'forSigning'], ['playerId', 'forPlayer']]) for (const v of values(all.followUps, (f) => f[key])) check(`followUps.${q} ${v}`, fu[q](v), all.followUps.filter((f) => f[key] === v));
+  const players = values(all.followUps, (f) => f.playerId); check('followUps.forPlayers', fu.forPlayers([...players, 42, null, players[0]]), all.followUps.filter((f) => players.includes(f.playerId))); assert.deepEqual(fu.forPlayers([]), []);
+  for (const v of values(all.outcomeReports, (r) => r.playerId)) check(`outcomeReports.forPlayer ${v}`, out.forPlayer(v), all.outcomeReports.filter((r) => r.playerId === v));
+  for (const f of all.followUps) assert.equal(out.forFollowUp(f.id)?.id ?? null, all.outcomeReports.find((r) => r.followUpId === f.id)?.id ?? null, `outcomeReports.forFollowUp ${f.id}`);
+  // the pages
+  const walk = (pageFn, limit) => { const seen = []; let after = null; for (let i = 0; i < 50; i += 1) { const page = pageFn({ limit, after }); seen.push(...page.items); if (!page.nextCursor) return seen; after = JSON.parse(Buffer.from(page.nextCursor, 'base64url').toString('utf8')); } throw new Error('the pages never ended'); };
+  for (const org of values(all.followUps, (f) => f.orgId)) {
+    const want = all.followUps.filter((f) => f.orgId === org).sort((a, b) => (a.dueAt - b.dueAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const limit of [1, 2, 3, 100]) check(`followUps.pageForOrg ${org} by ${limit}`, walk((q) => fu.pageForOrg(org, q), limit), want);
+  }
+  for (const org of values(all.signings, (s) => s.orgId)) {
+    const want = all.signings.filter((s) => s.orgId === org).reverse();
+    for (const limit of [1, 2, 100]) check(`signings.pageForOrg ${org} by ${limit}`, walk((q) => sg.pageForOrg(org, q), limit), want);
+  }
+  const first = fu.pageForOrg('org-pro', { limit: 1 }); assert.equal(first.items.length, 1); assert.equal(typeof first.nextCursor, 'string');
+  // the sweep queries
+  const at = NOW;
+  check('followUps.dueToMark', fu.dueToMark(at), all.followUps.filter((f) => f.status === 'scheduled' && f.dueAt <= at).sort((a, b) => (a.dueAt - b.dueAt) || (a.id < b.id ? -1 : 1)));
+  check('followUps.dueUnnotified', fu.dueUnnotified(), all.followUps.filter((f) => f.status === 'due' && !f.notifiedAt).sort((a, b) => (a.dueAt - b.dueAt) || (a.id < b.id ? -1 : 1)));
+  for (const n of [1, 2, 3, 4]) check(`signings.missingFollowUps ${n}`, sg.missingFollowUps(n), all.signings.filter((s) => all.followUps.filter((f) => f.signingId === s.id).length < n));
+  // the admin totals
+  const totals = L.repo.outcomeTotalsByOrg();
+  for (const org of values(all.signings, (s) => s.orgId).filter((o) => o !== 'nobody')) {
+    const reports = all.outcomeReports.filter((r) => r.orgId === org);
+    assert.deepEqual(totals.get(org), { orgId: org, signings: all.signings.filter((s) => s.orgId === org).length, followUpsDue: all.followUps.filter((f) => f.orgId === org && f.status !== 'scheduled').length, reported: reports.length, confirmed: reports.filter((r) => r.status === 'confirmed').length, disputed: reports.filter((r) => r.status === 'disputed').length, retained: reports.filter((r) => r.registrationStatus === 'registered').length }, `totals ${org}`);
+  }
+  assert.equal(totals.has('nobody'), false);
+  // the read-only queries
+  for (const n of COLLECTIONS) { assert.ok(Object.isFrozen(L.repo.reads[n])); assert.equal(L.repo.reads[n].byId, L.repo[n].byId); for (const w of ['insert', 'patch', 'record', 'schedule', 'file', 'addConfirmation', 'redactPlayer']) assert.equal(L.repo.reads[n][w], undefined, `reads.${n} has no ${w}`); }
+  L.close(); rm(d);
+});
+
+test('[repository] the unit of work: several operations and a failure at the end — a thrown error, a refused typing inside a nested call, a REAL COMMIT failure — roll the rows back (a second connection sees nothing; a fresh read, the held references and the revision unchanged), while a read inside the unit sees its writes; the retry lands once; the completion cycle (the signing row, then the package\'s COMPLETED status with its completion naming the signing) commits in one unit through the deferred key, and a COMPLETED package without its signing row is refused at COMMIT; redactPlayer inside the deletion unit', () => {
   need();
   const d = file('unit'); const L = serverOpen(d); const sp = L.repo.signingPackages;
-  const before = withRo(d, fullDump); const rev0 = L.revision(); const held = L.db.signingPackages.find((p) => p.id === 'spk-1'); const views = plain([L.db.signingPackages, L.db.signings, L.db.followUps, L.db.outcomeReports]);
-  const work = (fail) => () => { sp.patch('spk-1', { internalNote: 'in unit' }); sp.setDocument('spk-1', 'spr-1', 'signing', sdoc('sgd-u')); L.repo.followUps.patch('fup-sign-2-6m', { status: 'due' }); L.repo.signings.record(legacySigning({ id: 'sign-u', playerId: 'pl-child2' })); if (fail === 'throw') throw new Error('synthetic failure after four writes'); if (fail === 'typed') sp.patch('spk-1', { status: 'OPEN' }); if (fail === 'commit') L.store.failCommitOfOpenTransaction(); };
+  const before = withRo(d, fullDump); const rev0 = L.revision(); const held = L.repo.signingPackages.byId('spk-1'); const views = plain(L.repo.exportAll());
+  const work = (fail) => () => { sp.patch('spk-1', { internalNote: 'in unit' }); sp.setDocument('spk-1', 'spr-1', 'signing', sdoc('sgd-u')); L.repo.followUps.patch('fup-sign-2-6m', { status: 'due' }); L.repo.signings.record(legacySigning({ id: 'sign-u', playerId: 'pl-child2' })); assert.equal(sp.byId('spk-1').internalNote, 'in unit', 'a read inside the unit sees its write'); assert.ok(L.repo.signings.byId('sign-u')); if (fail === 'throw') throw new Error('synthetic failure after four writes'); if (fail === 'typed') sp.patch('spk-1', { status: 'OPEN' }); if (fail === 'commit') L.store.failCommitOfOpenTransaction(); };
   for (const fail of ['throw', 'typed', 'commit']) {
     assert.throws(() => L.unit(work(fail)), fail === 'typed' ? /SIGNINGS_INPUT_INVALID/ : fail === 'commit' ? /FOREIGN KEY constraint failed/ : /synthetic failure/, fail);
     assert.equal(withRo(d, fullDump), before, `${fail}: nothing committed`); assert.equal(L.revision(), rev0);
-    assert.deepEqual(plain([L.db.signingPackages, L.db.signings, L.db.followUps, L.db.outcomeReports]), views, `${fail}: the mirrors restored`);
-    assert.deepEqual(plain(L.db.signingPackages.find((p) => p.id === 'spk-1')), plain(held), `${fail}: the same record is served again`); assert.equal(L.db.signings.some((s) => s.id === 'sign-u'), false); assert.equal(L.store.sqlite.isTransaction, false);
+    assert.deepEqual(plain(L.repo.exportAll()), views, `${fail}: a fresh read sees the rollback`);
+    assert.deepEqual(plain(L.repo.signingPackages.byId('spk-1')), plain(held), `${fail}: the same record is served again`); assert.equal(L.repo.signings.byId('sign-u'), null); assert.equal(L.store.sqlite.isTransaction, false);
   }
   L.unit(work(null));
-  assert.equal(withRo(d, (s) => col(s, "SELECT internal_note FROM signing_packages WHERE id = 'spk-1'")), 'in unit'); assert.equal(L.db.signings.some((s) => s.id === 'sign-u'), true); assert.equal(L.revision(), rev0 + 1, 'one commit');
+  assert.equal(withRo(d, (s) => col(s, "SELECT internal_note FROM signing_packages WHERE id = 'spk-1'")), 'in unit'); assert.ok(L.repo.signings.byId('sign-u')); assert.equal(L.revision(), rev0 + 1, 'one commit');
   // the completion cycle
   // on a second offer: rof-1 already carries the completed spk-2 (one COMPLETED package per offer, as m29 rules)
   sp.insert(draftPackage({ id: 'spk-c', caseId: 'case-2', playerId: 'pl-child1', offerId: 'rof-2', offerRevisionId: 'rofr-3', revisions: [srevision({ id: 'spr-c' })], currentRevisionId: 'spr-c', keys: { start: { key: 'k-start-c', fp: 'fpc' } }, history: [] }));
   sp.patchRevision('spk-c', 'spr-c', { status: 'IN_PROGRESS', readyAt: NOW, readyBy: BY }); sp.patch('spk-c', { status: 'IN_PROGRESS' });
   const signing = canonicalSigning({ id: 'sign-1', playerId: 'pl-child1', signingPackageId: 'spk-c', signingRevisionId: 'spr-c', offerId: 'rof-2', offerRevisionId: 'rofr-3', caseId: 'case-2' });
   assert.throws(() => L.unit(() => { sp.patchRevision('spk-c', 'spr-c', { status: 'COMPLETED', completedAt: NOW, completedBy: BY }); sp.patch('spk-c', { status: 'COMPLETED', completion: { signingId: 'sign-1', completedAt: NOW, completedBy: BY, contract: null, documentSha256: SHA, lifecycle: null } }); }), /FOREIGN KEY constraint failed/, 'a COMPLETED package whose signing row does not exist is refused at COMMIT (the deferred key)');
-  assert.equal(L.db.signingPackages.find((p) => p.id === 'spk-c').status, 'IN_PROGRESS', 'restored');
+  assert.equal(L.repo.signingPackages.byId('spk-c').status, 'IN_PROGRESS', 'restored');
   const done = L.unit(() => { L.repo.signings.record(signing); sp.patchRevision('spk-c', 'spr-c', { status: 'COMPLETED', completedAt: NOW, completedBy: BY }); return sp.patch('spk-c', { status: 'COMPLETED', completion: { signingId: 'sign-1', completedAt: NOW, completedBy: BY, contract: null, documentSha256: SHA, lifecycle: { from: 'offer_accepted', to: 'signed', at: NOW } } }); });
   assert.equal(done.status, 'COMPLETED'); assert.equal(done.completion.signingId, 'sign-1'); withRo(d, (s) => { assert.equal(col(s, "SELECT completion_signing_id FROM signing_packages WHERE id = 'spk-c'"), 'sign-1'); assert.equal(col(s, "SELECT signing_package_id FROM signings WHERE id = 'sign-1'"), 'spk-c'); assert.equal(s.prepare('PRAGMA foreign_key_check').all().length, 0); });
   // subject removal
   const touched = L.unit(() => sp.redactPlayer('pl-adult', NOW + 9)); assert.equal(touched.length, 2);
-  const r = L.db.signingPackages.find((p) => p.id === 'spk-2'); assert.equal(r.subjectRemovedAt, NOW + 9); assert.equal(r.revisions[0].requiredParties[0].completedBy.name, null, 'the player\'s name nulled'); assert.equal(r.revisions[0].requiredParties[1].completedBy.name, BY.name, 'the club signatory\'s kept'); assert.equal(r.history.find((h) => h.by?.kind === 'player').by.name, null);
+  const r = L.repo.signingPackages.byId('spk-2'); assert.equal(r.subjectRemovedAt, NOW + 9); assert.equal(r.revisions[0].requiredParties[0].completedBy.name, null, 'the player\'s name nulled'); assert.equal(r.revisions[0].requiredParties[1].completedBy.name, BY.name, 'the club signatory\'s kept'); assert.equal(r.history.find((h) => h.by?.kind === 'player').by.name, null);
   L.close(); rm(d);
 });
 

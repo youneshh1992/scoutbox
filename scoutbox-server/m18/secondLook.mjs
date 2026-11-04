@@ -28,6 +28,9 @@ export function registerSecondLook(ctx) {
     db, orgRouter, nextId, persistNow, notify, broadcast,
     findPlayer, orgCanSee, isLead, vmetric,
   } = ctx;
+  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
+  const reads = ctx.recruitmentReads;
+  if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerSecondLook needs recruitmentReads (signings) from the data layer');
 
   const now = () => Date.now();
   // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
@@ -154,8 +157,7 @@ export function registerSecondLook(ctx) {
     }
     // A confirmed current club: each of these rows carries the clock of the
     // moment the confirmation happened, so no timestamp is invented.
-    for (const sg of db.signings ?? []) {
-      if (sg.playerId !== player.id) continue;
+    for (const sg of reads.signings.forPlayer(player.id)) {
       if (!sg.endedAt && sg.ts > since) add('current_club_confirmed', 'signing', sg.id, sg.ts);
     }
     for (const o of db.orgs ?? []) {

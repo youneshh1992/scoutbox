@@ -480,9 +480,9 @@ console.log('\n— §47 — a PRE-M23 snapshot keeps all thirteen original statu
     '§50 while the D2 stores it never had are now present');
 
   // And it reads. A migrated-but-unreadable database is not migrated.
-  // §4.3 step 2: the contacts are a table now, not a collection the migrations create; a pre-M23 database has none,
+  // §4.3 step 2: the contacts and signings are tables now, not collections the migrations create; a pre-M23 database has none,
   // so the projection is given the empty contacts table it would read (rewritten: it described the old storage).
-  const out = buildRecruitmentJourney({ ...db, recruitmentContacts: [] }, 'old-signed', { kind: 'org_staff', orgId: 'org-legacy', role: 'room_lead' },
+  const out = buildRecruitmentJourney({ ...db, recruitmentContacts: [], signings: db.signings ?? [] }, 'old-signed', { kind: 'org_staff', orgId: 'org-legacy', role: 'room_lead' },
     { now: 3000, evidence: NULL_EVIDENCE_PROVIDER });
   if (!out.ok) console.error(`   journey refused: ${JSON.stringify(out)}`);
   ok(out.ok === true && out.lifecycle?.currentStage === 'signed',

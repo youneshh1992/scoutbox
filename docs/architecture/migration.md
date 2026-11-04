@@ -80,11 +80,11 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S8a | recruitment requests, trials | `0015_recruitment` | `recruitment.mjs` | **explicit, typed** (§4.3, 3 Nov) | done |
 | S8b | cases, rooms, decisions | `0016_recruitment_cases` | `recruitmentCases.mjs` | **explicit, typed** (§4.3, 4 Nov) | done |
 | S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **explicit, typed, SQL reads** (§4.3, 3–4 Nov) | done |
-| S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed** | implemented; accept on green tests |
+| S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed, SQL reads** (§4.3, 4 Nov) | done |
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3 steps 1 and 3 done (4 Nov); step 2: S8c done (4 Nov), then S8d, S8a, S8b; step 4 after |
+| — | recruitment end-state proof | — | — | — | §4.3 steps 1 and 3 done (4 Nov); step 2: S8c and S8d done (4 Nov), then S8a, S8b; step 4 after |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -262,6 +262,20 @@ What we learned, for the next repositories:
   quietly create or report an empty collection; the throwing getter found every remaining reader on the first run.
 - The "store missing" branches (`storeOr500`, `JOURNEY_REQUIRED_STORES`) were about the blob; their tests now check
   the same behaviour through the queries (a projector given no contact queries still reports the store missing).
+
+**Step 2: S8d reads through SQL, done 4 November** (on `feat/sqlite-schema`). Same pattern as S8c: no mirror, no view,
+`db.signingPackages` / `db.signings` / `db.followUps` / `db.outcomeReports` throw. The repository adds `forCase`,
+`forOffer`, `forPlayer`, `forOrg`, `forOrgPlayer` (packages and signings), the one-row `forPackage` / `forOffer`
+(signings) and `forFollowUp` (reports), `forSigning` / `forPlayers` (follow-ups), counts, and two new indexes
+(`signing_packages (org_id, player_id)`, `outcome_reports (player_id)`; `0018` amended in place: re-seed a development
+database). The paging convention lives in `domains/platform/paging.mjs` (the first module under `domains/`):
+`?limit=&cursor=` → `{ items, nextCursor }`, junk refused with 400. The club follow-ups (by due date, then id) and the club
+signings (newest first) page; the follow-ups response dropped `total` / `offset`, which no app read, and the signings
+response is an object instead of a bare array (no app reads it; the batteries read `.items`). The every-minute sweep is
+three indexed queries (signings missing a milestone, scheduled-and-past, due-and-unnotified) instead of a pass over every
+signing and follow-up; the admin outcome figures are one `GROUP BY`; the club track record reads the club's signings once
+and each involved player's signings by index. The journey and the evidence provider read the case's packages and the
+club's signings of the player through `reads`.
 
 ### 4.4 The end-to-end test estate
 

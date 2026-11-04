@@ -100,6 +100,7 @@ import {
   nextActions,
 } from './domain.mjs';
 import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIanaZone, localParts } from './temporal.mjs';
+import { readPage, sendPageError } from './domains/platform/paging.mjs';
 
 /**
  * M23 P5.7: a DATE_ONLY a client typed (open day, match day, friendly,
@@ -199,8 +200,8 @@ const dataLayer = attachDataLayer({
 });
 const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
-// module context as `recruitmentReads` (contacts, offers).
-const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads });
+// module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports).
+const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads });
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -273,7 +274,7 @@ for (const p of [...db.players]) {
   if (Object.keys(patch).length) players.update(p.id, patch);
 }
 db.savedSearches ??= [];
-db.signings ??= [];
+// db.signings: no db collection since §4.3 step 2 — the signings repository's queries (signingsFollowUps.signings.*).
 // db.pairingCodes: the data layer's hash-free read-only view since S6a (rows of pairing_codes; repositories/oneTimeCodes.mjs) — never assigned here.
 // db.notifications, db.notificationPrefs: the data layer's read-only views since S7a (rows of notifications / notification_prefs; repositories/notifications.mjs) — never assigned here; writes go through `notifications`.
 db.sessions ??= [];        // bearer-token sessions (all roles): already the data layer's read-only view since S2, so this never assigns; kept as the store's inventory line
@@ -722,11 +723,12 @@ function isBlocked(playerId, orgId) {
  */
 function canonicalContractFor(playerId, now = Date.now(), { exceptOrgId = null } = {}) {
   const today = new Date(now).toISOString().slice(0, 10);
-  for (const s of db.signings ?? []) {
-    if (!s || s.playerId !== playerId || !s.signingPackageId) continue;
+  for (const s of signingsFollowUps.signings.forPlayer(playerId)) {
+    if (!s.signingPackageId) continue;
     if (s.cancelledAt || s.revokedAt || s.voidedAt) continue;
     if (exceptOrgId && s.orgId === exceptOrgId) continue;
-    const pkg = (db.signingPackages ?? []).find((p) => p && p.id === s.signingPackageId && p.status === 'COMPLETED' && p.completion?.signingId === s.id);
+    const found = signingsFollowUps.signingPackages.byId(s.signingPackageId);
+    const pkg = found && found.status === 'COMPLETED' && found.completion?.signingId === s.id ? found : null;
     if (!pkg) continue;
     const end = s.contract?.endDate ?? pkg.completion?.contract?.endDate ?? null;
     if (typeof end === 'string' && end < today) continue;
@@ -2773,7 +2775,7 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   // one joining — the same invariant the canonical workflow keeps per package
   // and per Offer. The route also draws on the canonical closure budget, so it
   // is not an unmetered alias of `/signings/:id/complete`.
-  const standing = db.signings.find((s) => s && s.orgId === req.org.id && s.playerId === p.id && !s.signingPackageId && !s.cancelledAt && !s.revokedAt && !s.voidedAt);
+  const standing = signingsFollowUps.signings.forOrgPlayer(req.org.id, p.id).find((s) => !s.signingPackageId && !s.cancelledAt && !s.revokedAt && !s.voidedAt);
   if (standing) return res.status(409).json({ ok: false, error: 'SIGNING_ALREADY_RECORDED', message: 'A signing of this player by your club is already on record.', signingId: standing.id });
   if (rateLimit.limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
   if (!m29Ctx?.recordCompletedSigning) return res.status(500).json({ error: 'SIGNING_STORE_MISSING' });
@@ -2793,8 +2795,12 @@ orgRouter.post('/players/:id/signing', (req, res) => {
   res.status(201).json({ ok: true, signing });
 });
 
+// Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }. No app reads this list yet; one
+// that does will need a "load more" (the decision of 4 November 2026: no load-more UI yet).
 orgRouter.get('/signings', (req, res) => {
-  res.json(db.signings.filter((s) => s.orgId === req.org.id).slice().reverse());
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  res.json(signingsFollowUps.signings.pageForOrg(req.org.id, page));
 });
 
 orgRouter.get('/invoices', (req, res) => {
@@ -3052,17 +3058,18 @@ orgRouter.get('/matchdays', (req, res) => {
 // --------------------------------------------------- pathway club record
 // Grassroots reputation currency: not resale multiples — players developed.
 function pathwayRecord(org) {
+  const orgSignings = signingsFollowUps.signings.forOrg(org.id);
   const involvedIds = new Set([
-    ...db.signings.filter((sg) => sg.orgId === org.id).map((sg) => sg.playerId),
+    ...orgSignings.map((sg) => sg.playerId),
     ...(org.squad ?? []).map((e) => e.playerId).filter(Boolean),
     ...db.openTrials.filter((t) => t.orgId === org.id).flatMap((t) => (t.registrations ?? []).map((r) => r.playerId)),
   ]);
   const firstInvolvement = (pid) => Math.min(
-    ...db.signings.filter((sg) => sg.orgId === org.id && sg.playerId === pid).map((sg) => sg.ts),
+    ...orgSignings.filter((sg) => sg.playerId === pid).map((sg) => sg.ts),
     ...db.openTrials.filter((t) => t.orgId === org.id).flatMap((t) => (t.registrations ?? []).filter((r) => r.playerId === pid).map((r) => r.ts)),
   );
   const progressed = [...involvedIds].filter((pid) => {
-    const upward = db.signings.find((sg) => sg.playerId === pid && sg.orgId !== org.id && (db.orgs.find((o) => o.id === sg.orgId)?.level ?? '') !== 'grassroots');
+    const upward = signingsFollowUps.signings.forPlayer(pid).find((sg) => sg.orgId !== org.id && (db.orgs.find((o) => o.id === sg.orgId)?.level ?? '') !== 'grassroots');
     return upward && upward.ts > firstInvolvement(pid);
   });
   return { progressed: progressed.length, pathwayClub: progressed.length >= 1 };
@@ -3170,7 +3177,7 @@ orgRouter.get('/funnel', (req, res) => {
       { key: 'accepted', label: 'Requests accepted', count: requests.filter((r) => r.status === 'accepted').length },
       { key: 'trials', label: 'Trials booked', count: db.trials.filter((t) => t.orgId === req.org.id).length },
       { key: 'reports', label: 'Reports filed', count: db.trials.filter((t) => t.orgId === req.org.id && t.status === 'reported').length },
-      { key: 'signings', label: 'Signings', count: db.signings.filter((s) => s.orgId === req.org.id).length },
+      { key: 'signings', label: 'Signings', count: signingsFollowUps.signings.countForOrg(req.org.id) },
     ],
     byScout: Object.values(mine.reduce((acc, l) => {
       if (!l.scoutName) return acc;
@@ -4451,7 +4458,7 @@ adminRouter.get('/overview', (_req, res) => {
     blocks: db.blocks.length,
     moderationHits: db.moderationLog.length,
     channels: db.channels.length,
-    signings: db.signings.length,
+    signings: signingsFollowUps.signings.count(),
     invoices: db.invoices.length,
     emailsSent: db.outbox.length,
     pushesSent: db.pushLog.length,
@@ -4637,7 +4644,7 @@ function revokeOrgUserAccess(userId) {
 }
 
 registerM12({
-  db, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, recruitmentReads, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
   signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
@@ -4705,7 +4712,7 @@ const rateLimit = createRateLimiter();
 // records. Registered after M14 so it can read verification stores; it
 // receives the same context and adds no new authorization surface.
 const m15Ctx = registerM15({
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
@@ -4739,7 +4746,7 @@ const m162Ctx = registerM162({
 const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
@@ -4772,7 +4779,7 @@ const m17Ctx = registerM17({
 // M18 registers no player, guardian or public route at all.
 const m18Ctx = registerM18({
   rateLimit,
-  db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, sessionFor, mailer, orgSafe, recordActivity, revokeOrgUserAccess,

@@ -138,7 +138,8 @@ export const MIGRATIONS = [
     // on the first trial read — with or without M20.
     note: 'Collections the recruitment analytics projection reads. No analytics store is created.',
     up(db) {
-      for (const k of ['trials', 'signings', 'requests', 'dynamicWatchlists', 'watchlistHistory']) db[k] ??= [];
+      // The signings are a table read through SQL since §4.3 step 2, so this step no longer creates them.
+      for (const k of ['trials', 'requests', 'dynamicWatchlists', 'watchlistHistory']) db[k] ??= [];
     },
   },
   {
@@ -561,9 +562,9 @@ export const MIGRATIONS = [
     // P7 is NOT turned into a package: no historical signature is inferred
     // and no signature actor is invented (P7 §6).
     note: 'M23 P7: signing workflow store (signingPackages). One empty container; nothing is backfilled and no lifecycle state, player contract status or legacy signing row is reinterpreted as a signing package.',
-    up(db) {
-      db.signingPackages ??= [];
-    },
+    // Since §4.3 step 2 the packages are rows of signing_packages read through SQL only: there is no
+    // db.signingPackages to create. Kept as a recorded no-op (its id stays).
+    up() {},
   },
 ];
 

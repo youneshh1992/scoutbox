@@ -183,7 +183,7 @@ const aList = (rel, token, h = at(Date.now())) => j('GET', `/org/agent/clients/$
 const sv = (r) => r.body?.signing ?? {};
 const revOf = (r) => sv(r).currentRevision ?? {};
 const rev = async (SID, token) => (await sGet(SID, token)).body.signing.rev;
-const signings = async (token) => (await j('GET', '/org/signings', undefined, token)).body ?? [];
+const signings = async (token) => (await j('GET', '/org/signings', undefined, token)).body?.items ?? [];
 const rowsFor = async (SID, token) => (await signings(token)).filter((s) => s.signingPackageId === SID);
 const orgPlayer = async (id, token) => { const b = (await j('GET', `/org/players/${id}`, undefined, token)).body; return b?.player ?? b; };
 const setFaults = (rules) => j('POST', '/__faults', { rules });

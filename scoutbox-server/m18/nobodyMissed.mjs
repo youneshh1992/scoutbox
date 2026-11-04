@@ -30,6 +30,9 @@ export function registerNobodyMissed(ctx) {
     db, orgRouter, nextId, persistNow, findPlayer, orgCanSee,
     isLead, requireLead, playerViewForOrg, audit, vmetric, suppress,
   } = ctx;
+  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
+  const reads = ctx.recruitmentReads;
+  if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerNobodyMissed needs recruitmentReads (signings) from the data layer');
 
   const now = () => Date.now();
   // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
@@ -81,7 +84,7 @@ export function registerNobodyMissed(ctx) {
     // value, so the conjunct could never change the result. Removing it is
     // behaviour-preserving and removes a production read of a store that does
     // not exist, which is exactly the drift the store inventory now catches.
-    const clubConfirmed = !!(db.signings ?? []).find((s) => s.playerId === player.id);
+    const clubConfirmed = reads.signings.forPlayer(player.id).length > 0;
 
     return {
       playerId: player.id,
@@ -125,7 +128,7 @@ export function registerNobodyMissed(ctx) {
       case_open: cases.some((c) => !c.room && c.stage !== 'closed'),
       assessment_submitted: db.assessments.some((a) => a.orgId === org.id && a.playerId === playerId && a.state !== 'draft'),
       trial: (db.trials ?? []).some((t) => t.orgId === org.id && t.playerId === playerId),
-      signing: (db.signings ?? []).some((s) => s.orgId === org.id && s.playerId === playerId),
+      signing: reads.signings.forOrgPlayer(org.id, playerId).length > 0,
       shortlisted: (db.ledger ?? []).some((l) => l.type === 'shortlist' && l.orgId === org.id && l.playerId === playerId),
       review_deferred: (db.reviewLater ?? []).some((r) => r.orgId === org.id && r.playerId === playerId && r.dueAt > now()),
       squad: (org.squad ?? []).some((s) => s.playerId === playerId),

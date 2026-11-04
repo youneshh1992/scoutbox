@@ -14,8 +14,8 @@
  *   db.trials              accepted trials (core)
  *   db.assessments         assessments (M12)
  *   opts.reads.offers      offers (M23 P4 — optional; read through SQL since §4.3 step 2)
- *   db.outcomeReports      post-signing outcomes (M12)
- *   db.signings            signings (core)
+ *   opts.reads.outcomeReports  post-signing outcomes (M12; optional; SQL since §4.3 step 2)
+ *   opts.reads.signings    signings (core; required) and opts.reads.signingPackages (P7; optional), SQL since §4.3 step 2
  *
  * THE D2 CARRY-FORWARD (§26). A required store that is ABSENT is not an empty
  * recruitment history — it is a broken database, and reporting "nothing
@@ -49,16 +49,17 @@ import {
 } from './journeyModel.mjs';
 
 /**
- * `db` collections this projection may not proceed without. The contacts (required since P3) and the offers are read
- * through SQL since §4.3 step 2: `opts.reads.contacts` is required (a missing one is reported as the missing
- * `recruitmentContacts` store), `opts.reads.offers` is optional like the offers phase always was.
+ * `db` collections this projection may not proceed without. The contacts (required since P3), the offers, the signings,
+ * the signing packages and the outcome reports are read through SQL since §4.3 step 2: `opts.reads.contacts` and
+ * `opts.reads.signings` are required (a missing one is reported as the missing `recruitmentContacts` / `signings`
+ * store); `opts.reads.offers`, `.signingPackages` and `.outcomeReports` are optional like their phases always were.
  */
 export const JOURNEY_REQUIRED_STORES = Object.freeze([
-  'recruitmentCases', 'roomDecisions', 'requests', 'trials', 'assessments', 'signings',
+  'recruitmentCases', 'roomDecisions', 'requests', 'trials', 'assessments',
 ]);
 
-/** Stores that are genuinely optional right now, because their phase has not shipped. */
-export const JOURNEY_OPTIONAL_STORES = Object.freeze(['outcomeReports']);
+/** Stores that are genuinely optional right now, because their phase has not shipped (none since §4.3 step 2: the outcome reports are an optional `reads` entry). */
+export const JOURNEY_OPTIONAL_STORES = Object.freeze([]);
 
 export const JOURNEY_VIEWERS = Object.freeze([
   'org_staff', 'grassroots_staff', 'player_self', 'guardian', 'trust_safety',
@@ -155,6 +156,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // the log says which happened.
   const missing = JOURNEY_REQUIRED_STORES.filter((k) => db?.[k] === undefined);
   if (typeof reads.contacts?.forCase !== 'function' || typeof reads.contacts?.byId !== 'function') missing.push('recruitmentContacts');
+  if (typeof reads.signings?.forOrgPlayer !== 'function' || typeof reads.signings?.byId !== 'function') missing.push('signings');
   const malformed = JOURNEY_REQUIRED_STORES.filter((k) => db?.[k] !== undefined && !Array.isArray(db[k]));
   if (missing.length || malformed.length) {
     return {
@@ -184,12 +186,19 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     return { ok: false, error: 'CASE_NOT_A_ROOM', message: 'This recruitment case has no workspace.' };
   }
 
-  // The contacts and offers that name THIS case, read once (§4.3 step 2): every projection below filters these.
-  // `offers` is null when the offers store is not composed (the optional phase).
+  // The records of THIS case, read once (§4.3 step 2): every projection below filters these. The contacts, offers and
+  // packages that name the case; the club's signings of this player (a legacy row names no package). `offers` and
+  // `packages` are null when their store is not composed (the optional phases).
   const rec = {
     contacts: reads.contacts.forCase(kase.id),
     offers: typeof reads.offers?.forCase === 'function' ? reads.offers.forCase(kase.id) : null,
+    packages: typeof reads.signingPackages?.forCase === 'function' ? reads.signingPackages.forCase(kase.id) : null,
+    signings: reads.signings.forOrgPlayer(kase.orgId, kase.playerId),
+    outcomesAvailable: typeof reads.outcomeReports?.forPlayer === 'function',
     contactById: (id) => reads.contacts.byId(id),
+    /** The signing row a COMPLETED package names back (it must name the package too), or null. */
+    completedRowOf: (pkg) => { const row = reads.signings.byId(pkg.completion.signingId); return row && row.signingPackageId === pkg.id ? row : null; },
+    signingForPackage: (packageId) => (typeof reads.signings.forPackage === 'function' ? reads.signings.forPackage(packageId) : null),
   };
 
   // ---- §35/§36/§37 — hidden club interest.
@@ -342,9 +351,9 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // COMPLETED package on THIS case names back, else (legacy) the club's
   // un-packaged row for this player. A row that names another case's
   // package proves nothing here.
-  const packageRows = Array.isArray(db.signingPackages) ? db.signingPackages.filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId) : [];
-  const signing = supportingSigningRow(db, kase, packageRows) ?? null;
-  const outcomeAvailable = Array.isArray(db.outcomeReports);
+  const packageRows = rec.packages !== null ? rec.packages.filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId) : [];
+  const signing = supportingSigningRow(rec, kase, packageRows) ?? null;
+  const outcomeAvailable = rec.outcomesAvailable;
 
   // ---- M23 P8 — the journey block: stage, completed stages, current
   // resources, the server-derived next action and the classification.
@@ -357,7 +366,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const corruptRecords = offersCorrupt + packagesCorrupt + trialsCorrupt + contactsOmitted;
   // P8.1 (D-P81-15): this case's assessments — never the ended case's (a Trial of another case, or written while another case was open).
   const allAssessments = db.assessments.filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId && !ownedByAnotherCase(db, kase, { caseId: trialCaseOf(db, a.context?.trialId), at: a.createdAt }));
-  const journeyBlock = journeyFor(db, kase, {
+  const journeyBlock = journeyFor(db, rec, kase, {
     status, role, now,
     contacts: rec.contacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0),
     trials: trialRows, trialRequests: trialInvitations, assessments: allAssessments,
@@ -367,7 +376,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     foreign: foreignReferences(db, rec, kase),
     domainProblems: [
       ...offerRows.flatMap((o) => offerCaseConsistency(o, kase, now).filter((c) => offerCaseCorrupt([c]))),
-      ...soundPackages.flatMap((p) => signingConsistency(p, { offer: offerRows.find((o) => o.id === p.offerId) ?? null, kase, rows: db.signings, player: (db.players ?? []).find((x) => x?.id === kase.playerId) ?? null }, now).filter((c) => signingCorrupt([c]))),
+      ...soundPackages.flatMap((p) => signingConsistency(p, { offer: offerRows.find((o) => o.id === p.offerId) ?? null, kase, rows: [rec.signingForPackage(p.id)].filter(Boolean), player: (db.players ?? []).find((x) => x?.id === kase.playerId) ?? null }, now).filter((c) => signingCorrupt([c]))),
     ],
   });
 
@@ -434,8 +443,8 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
       signing: signing ? { id: signing.id, at: signing.ts, method: signing.method ?? 'LEGACY_RECORDED', signingPackageId: signing.signingPackageId ?? null } : null,
       // M23 P7 — the signing WORKFLOW, ids and the status word only. A case at
       // `signed` from before P7 has none, and none is invented for it.
-      signingPackages: Array.isArray(db.signingPackages)
-        ? db.signingPackages
+      signingPackages: rec.packages !== null
+        ? rec.packages
           .filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId && signingIntegrity(p, { orgId: kase.orgId }).length === 0)
           .map((p) => ({ id: p.id, status: signingEffectiveStatus(p, now), revisionNumber: signingCurrentRevision(p)?.revisionNumber ?? null, offerId: p.offerId, signingId: p.completion?.signingId ?? null }))
         : [],
@@ -486,7 +495,7 @@ function sharedRecordsFor(db, rec, kase, viewer, now = Date.now()) {
   // signing package PRESENTED to them, crossed the share boundary too. Ids,
   // status words and instants; no terms, no digest, no note.
   const offers = offersSharedWith(rec, kase, viewer, now).map(({ offer, revision, liveStatus }) => ({ kind: 'offer', id: offer.id, revisionId: revision?.id ?? null, revisionNumber: revision?.revisionNumber ?? null, status: liveStatus, at: revision?.issuedAt ?? offer.createdAt ?? null, respondedAt: revision?.respondedAt ?? null }));
-  const signings = packagesSharedWith(db, kase, viewer, now).map((p) => ({ kind: 'signing', id: p.id, status: signingEffectiveStatus(p, now), revisionNumber: signingCurrentRevision(p)?.revisionNumber ?? null, at: signingCurrentRevision(p)?.readyAt ?? p.createdAt ?? null, completedAt: p.completion?.completedAt ?? null }));
+  const signings = packagesSharedWith(rec, kase, viewer, now).map((p) => ({ kind: 'signing', id: p.id, status: signingEffectiveStatus(p, now), revisionNumber: signingCurrentRevision(p)?.revisionNumber ?? null, at: signingCurrentRevision(p)?.readyAt ?? p.createdAt ?? null, completedAt: p.completion?.completedAt ?? null }));
   return [...requests, ...trials, ...offers, ...signings];
 }
 
@@ -507,9 +516,9 @@ function offersSharedWith(rec, kase, viewer, now) {
 }
 
 /** Signing packages of this case presented (READY or later) with a required party for THIS recipient. */
-function packagesSharedWith(db, kase, viewer, now) {
-  if (!Array.isArray(db.signingPackages)) return [];
-  return db.signingPackages.filter((p) => {
+function packagesSharedWith(rec, kase, viewer, now) {
+  if (rec.packages === null) return [];
+  return rec.packages.filter((p) => {
     if (!p || p.caseId !== kase.id || p.orgId !== kase.orgId || p.playerId !== kase.playerId) return false;
     if (signingIntegrity(p, { orgId: kase.orgId }).length) return false;
     const rev = signingCurrentRevision(p);
@@ -526,8 +535,8 @@ function packagesSharedWith(db, kase, viewer, now) {
  * before P7 — the club's un-packaged row for this player. A row that belongs
  * to another case's package is not this case's evidence.
  */
-function supportingSigningRow(db, kase, packageRows) {
-  const rows = (db.signings ?? []).filter((s) => s && s.orgId === kase.orgId && s.playerId === kase.playerId && !s.cancelledAt && !s.revokedAt && !s.voidedAt);
+function supportingSigningRow(rec, kase, packageRows) {
+  const rows = rec.signings.filter((s) => s && s.orgId === kase.orgId && s.playerId === kase.playerId && !s.cancelledAt && !s.revokedAt && !s.voidedAt);
   for (const p of packageRows) {
     if (p.status !== 'COMPLETED' || !p.completion?.signingId) continue;
     const row = rows.find((s) => s.id === p.completion.signingId && s.signingPackageId === p.id);
@@ -546,7 +555,7 @@ function foreignReferences(db, rec, kase) {
       if (r.playerId !== undefined && r.playerId !== kase.playerId) out.add('PLAYER_MISMATCH');
     }
   };
-  check(rec.contacts); check(db.trials); check(db.requests); check(rec.offers); check(db.signingPackages);
+  check(rec.contacts); check(db.trials); check(db.requests); check(rec.offers); check(rec.packages);
   for (const d of db.roomDecisions ?? []) { if (d?.roomId === kase.id && (d.orgId !== kase.orgId || (d.playerId !== undefined && d.playerId !== kase.playerId))) out.add(d.orgId !== kase.orgId ? 'CLUB_MISMATCH' : 'PLAYER_MISMATCH'); }
   return [...out];
 }
@@ -556,7 +565,7 @@ function foreignReferences(db, rec, kase) {
  * stages with their basis, the current resource of each kind, ONE next
  * action for this viewer, and the validator's verdict. Reads; never writes.
  */
-function journeyFor(db, kase, f) {
+function journeyFor(db, rec, kase, f) {
   const contact = currentContactForCase(f.contacts);
   const trial = currentTrialForCase(f.trials);
   const trialRequest = (f.trialRequests ?? []).filter((r) => r?.status === 'pending' && !r.subjectRemovedAt).sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))[0] ?? null;
@@ -566,7 +575,7 @@ function journeyFor(db, kase, f) {
   const decision = decisionHead && decisionHead.kind === 'formal' ? decisionHead : null;
   const offer = currentOfferForCase(f.offers, f.now);
   const signing = currentSigningForCase(f.packages, f.now);
-  const facts = { ...f, kase, createdAt: kase.createdAt ?? null, history: Array.isArray(kase.history) ? kase.history : [], historyMalformed: kase.history !== undefined && !Array.isArray(kase.history), signingRowIds: new Set((db.signings ?? []).filter((s) => s && s.orgId === kase.orgId && s.playerId === kase.playerId).map((s) => s.id)) };
+  const facts = { ...f, kase, createdAt: kase.createdAt ?? null, history: Array.isArray(kase.history) ? kase.history : [], historyMalformed: kase.history !== undefined && !Array.isArray(kase.history), signingRowIds: new Set(rec.signings.filter((s) => s && s.orgId === kase.orgId && s.playerId === kase.playerId).map((s) => s.id)) };
   const blocked = (db.blocks ?? []).some((b) => b && b.playerId === kase.playerId && b.orgId === kase.orgId);
   const subjectRemoved = !!kase.subjectRemovedAt || !(db.players ?? []).some((p) => p?.id === kase.playerId);
   const verdict = validateRecruitmentJourney(facts);
@@ -613,9 +622,9 @@ function playerJourneyFor(db, rec, kase, viewer, shared, now) {
   const trialRows = db.trials.filter((t) => shared.some((s) => s.kind === 'trial' && s.id === t?.id));
   const offers = offersSharedWith(rec, kase, viewer, now);
   const offer = offers.length ? currentOfferForCase(offers.map((x) => x.offer), now) : null;
-  const packages = packagesSharedWith(db, kase, viewer, now);
+  const packages = packagesSharedWith(rec, kase, viewer, now);
   const signing = packages.length ? currentSigningForCase(packages, now) : null;
-  const signingRow = signing && signing.status === 'COMPLETED' && signing.completion?.signingId ? (db.signings ?? []).find((s) => s?.id === signing.completion.signingId && s.signingPackageId === signing.id) ?? null : null;
+  const signingRow = signing && signing.status === 'COMPLETED' && signing.completion?.signingId ? rec.completedRowOf(signing) : null;
   const stage = playerStageFor({ contacts: contactReqs, trialRequests: trialReqs, trials: trialRows, offer, signing, signingRow, now });
   const partyType = audience === 'guardian' ? 'GUARDIAN' : 'PLAYER';
   const partyId = audience === 'guardian' ? viewer.guardianId : viewer.playerId;
@@ -662,10 +671,10 @@ function agentJourneyFor(db, rec, kase, viewer, now) {
   const invitations = grants.has('trials') ? db.requests.filter((r) => r?.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId) : [];
   const offerRows = grants.has('offers') && rec.offers !== null ? rec.offers.filter((o) => o?.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && o.agentShare?.agentUserId === viewer.userId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0 && liveRevisionOf(o)) : [];
   const sharedOfferIds = new Set(offerRows.map((o) => o.id));
-  const packages = grants.has('signings') && Array.isArray(db.signingPackages) ? db.signingPackages.filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId && sharedOfferIds.has(p.offerId) && signingIntegrity(p, { orgId: kase.orgId }).length === 0 && signingCurrentRevision(p)?.readyAt) : [];
+  const packages = grants.has('signings') && rec.packages !== null ? rec.packages.filter((p) => p?.caseId === kase.id && p.orgId === kase.orgId && p.playerId === kase.playerId && sharedOfferIds.has(p.offerId) && signingIntegrity(p, { orgId: kase.orgId }).length === 0 && signingCurrentRevision(p)?.readyAt) : [];
   const offer = currentOfferForCase(offerRows, now);
   const signing = currentSigningForCase(packages, now);
-  const signingRow = signing?.status === 'COMPLETED' && signing.completion?.signingId ? (db.signings ?? []).find((s) => s?.id === signing.completion.signingId && s.signingPackageId === signing.id) ?? null : null;
+  const signingRow = signing?.status === 'COMPLETED' && signing.completion?.signingId ? rec.completedRowOf(signing) : null;
   const stage = playerStageFor({ contacts: contactRecords, trialRequests: invitations, trials: trialRows, offer, signing, signingRow, now });
   const timeline = timelineFor(kase, [], contactRecords, { trials: trialRows, invitations, assessments: [], offers: offerRows, packages, now })
     .filter((e) => timelineVisibleTo(e.kind, 'agent'))

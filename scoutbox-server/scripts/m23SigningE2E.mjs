@@ -64,7 +64,7 @@ const SHA_A = sha256(DOC_A); const SHA_B = sha256(DOC_B);
 section('A — model and store: vocabulary, validators, gates, integrity, error taxonomy, the closed minor pathway');
 {
   ok(SCHEMA_VERSION === 2308 && MIGRATIONS.length === 18 && MIGRATIONS.some((m) => m.id === 'm280_001_signing_workflow' && m.version === 2308), 'A1 schema 2308: exactly one migration past 2307, m280_001_signing_workflow');
-  ok(guaranteeFor('signingPackages') === 'migration' && guaranteeFor('signings') === 'migration', 'A2 signingPackages and signings are migration-guaranteed stores');
+  ok(guaranteeFor('signingPackages') === null && guaranteeFor('signings') === null, 'A2 signingPackages and signings are no db collections: tables read through SQL (§4.3 step 2; rewritten, it described the old storage)');
   neg(/nothing is backfilled/.test(String(MIGRATIONS.at(-1).note)) && /no lifecycle state, player contract status or legacy signing row is reinterpreted/.test(String(MIGRATIONS.at(-1).note)), 'A3 the migration declares it backfills nothing and reinterprets nothing');
   ok(SIGNING_STATUSES.length === 8 && SIGNING_STORED_STATUSES.length === 6 && !SIGNING_STORED_STATUSES.includes('EXPIRED') && !SIGNING_STORED_STATUSES.includes('SUPERSEDED'), 'A4 eight statuses; EXPIRED is derived and SUPERSEDED is a revision status — neither is ever stored on a package');
   neg(!SIGNING_STATUSES.includes('SIGNED'), 'A5 no SIGNED workflow status: the word belongs to the case lifecycle alone');
@@ -258,7 +258,7 @@ async function presented(token, playerId, opts = {}) {
   if (r.status !== 200) throw new Error(`ready ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
   return { ...x, SID, SREV: revOf(r).id, rev: sv(r).rev };
 }
-const signings = async (token = maria.token) => (await j('GET', '/org/signings', undefined, token)).body ?? [];
+const signings = async (token = maria.token) => (await j('GET', '/org/signings', undefined, token)).body?.items ?? [];
 const orgPlayer = async (id, token = maria.token) => (await j('GET', `/org/players/${id}`, undefined, token)).body;
 
 // ================================================================ B — start gate

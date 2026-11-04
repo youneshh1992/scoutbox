@@ -217,6 +217,8 @@ export const httpM12: M12Api = {
   playerObjectives: (s, playerId) => G(s, `/org/players/${playerId}/objectives`),
   reassessmentOutcome: (s, id, note, evidenceIds) => P(s, `/org/reassessments/${id}/outcome`, { note, evidenceIds }),
 
+  // The server pages this list by cursor ({ items, nextCursor }, first 50 by due date). Only the first page is read
+  // here: the follow-ups screen will need a "load more" that passes `?cursor=<nextCursor>` (not built yet, by decision).
   listFollowUps: async (s) => (await G(s, '/org/followups')).items,
   reportFollowUp: (s, id, input) => P(s, `/org/followups/${id}/report`, input),
 

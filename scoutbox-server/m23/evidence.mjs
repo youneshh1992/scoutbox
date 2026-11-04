@@ -84,8 +84,8 @@ function signingSupports(signing, kase, packages = null) {
  * Build the provider over a live database.
  *
  * `reads` carries the recruitment domains that are read through SQL rather than
- * `db` (§4.3 step 2): `contacts` and `offers` are the query objects of the
- * contacts/offers repository (`forOrgPlayer`, `forCase`). A missing one is a
+ * `db` (§4.3 step 2): `contacts` and `offers` (the contacts/offers repository),
+ * `signings` and `signingPackages` (the signings repository). A missing one is a
  * broken composition, answered as an unavailable store, never as "no record".
  *
  * Pure with respect to the database: it reads and returns a verdict. It never
@@ -109,12 +109,13 @@ export function createEvidenceProvider(db, reads = {}) {
       if (!kase) return { satisfied: false, reason: 'no_case' };
 
       if (kind === 'confirmed_join') {
-        const signings = db?.signings;
         // The D2 lesson: a missing store is not "no signings". If the
-        // collection is absent the database is broken, and answering
+        // queries are absent the composition is broken, and answering
         // "unsatisfied" would be indistinguishable from answering truthfully.
-        if (!Array.isArray(signings)) return { satisfied: false, reason: 'signings_store_unavailable' };
-        const hit = signings.find((s) => signingSupports(s, kase, db?.signingPackages));
+        if (typeof reads.signings?.forOrgPlayer !== 'function') return { satisfied: false, reason: 'signings_store_unavailable' };
+        // A package proves only the case it was opened on, so this case's packages are all signingSupports can use.
+        const packages = typeof reads.signingPackages?.forCase === 'function' ? reads.signingPackages.forCase(kase.id) : null;
+        const hit = reads.signings.forOrgPlayer(kase.orgId, kase.playerId).find((s) => signingSupports(s, kase, packages));
         return hit
           ? { satisfied: true, sourceType: 'signing', sourceId: hit.id }
           : { satisfied: false, reason: 'no_confirmed_join' };

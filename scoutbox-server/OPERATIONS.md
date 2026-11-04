@@ -117,9 +117,12 @@ module registration → integrity report → listen.
   inside its own `update` (it is refused): make the second change after the first returns.
 - **Read SQL where the domain has no view.** Since §4.3 step 2 a domain whose reads moved
   to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
-  repository). Contacts and offers are the first: ask the repository
-  (`recruitmentContactsOffers.contacts.byId` / `forCase` / `forOrgPlayer` / …, or the
-  read-only `recruitmentReads` every module context carries). Each record is a fresh,
+  repository). Contacts, offers, signing packages, signings, follow-ups and outcome reports
+  have moved: ask the repository (`recruitmentContactsOffers.contacts.forCase`,
+  `signingsFollowUps.signings.forOrgPlayer`, …, or the read-only `recruitmentReads` every
+  module context carries). A list that grows without limit pages by cursor through
+  `domains/platform/paging.mjs` (`readPage` at the route, a `pageFor…` query in the
+  repository that asks for one row more than the page). Each record is a fresh,
   deep-frozen decode; a query inside a unit of work sees the unit's own writes. Pure
   projectors take the queries as an argument (`reads`) rather than reading `db`.
 - **Units of work.** If one operation touches more than one table, or a table plus a

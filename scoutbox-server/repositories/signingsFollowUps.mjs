@@ -10,12 +10,11 @@
  * fields dropped, an unknown field dropped) and REPORTS each normalisation with the row id in the boot log and in
  * `meta.signingsFollowUpsCutover.notes`; nothing else is coerced.
  *
- * The first domain with EXPLICIT WRITES: the four `db.<collection>` arrays are read-only views over the repository's
- * mirrors of plain, deep-frozen records; every change is a repository operation that writes its rows at once — joined
- * into the open unit of work through the store's participant API, in a transaction of its own outside one — and then
- * re-reads the record from the tables into the mirror, so the mirror never holds a value the database does not. An
- * in-place edit of a record through a view or a returned record throws (read-only proxies); there is no fingerprinting and no save-time flush.
- * The mirrors are restored by the store's unit of work through `snapshotState` / `restoreState`.
+ * The first domain with EXPLICIT WRITES: every change is a repository operation that writes its rows at once — joined
+ * into the open unit of work through the store's participant API, in a transaction of its own outside one — and
+ * returns the record read back from the tables. Since §4.3 step 2 the READS are SQL too: there is no mirror and no
+ * db.* view (reading db.signingPackages, db.signings, db.followUps or db.outcomeReports throws); callers use the
+ * repository's queries, which hand out fresh, deep-frozen records, so an in-place edit throws.
  *
  * Tables (file 02): signing_packages, signing_revisions, signing_documents, signing_revision_parties, signing_history;
  * signings, signing_parties; follow_ups, outcome_reports, outcome_report_confirmations — ten definitions; the design
@@ -31,7 +30,7 @@
  * Q7a/Q8a/Q8c-a applied a fourth time, not re-asked. Guardian and party ids: polymorphic, no key.
  */
 import { idempotencyKeysDdl, isPlainObject, ids, tableExists } from './recruitment.mjs';
-import { readonlyView, markView } from './readonly.mjs';
+import { pageOf } from '../domains/platform/paging.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 
 export const SIGNINGS_FOLLOWUPS_MIGRATION = '0018_signings_follow_ups';
@@ -100,6 +99,7 @@ CREATE INDEX signing_packages_case_org_created ON signing_packages (case_id, org
 CREATE INDEX signing_packages_offer_org ON signing_packages (offer_id, org_id);
 CREATE INDEX signing_packages_player_updated ON signing_packages (player_id, updated_at);
 CREATE INDEX signing_packages_offer_revision ON signing_packages (offer_revision_id);
+CREATE INDEX signing_packages_org_player ON signing_packages (org_id, player_id);
 CREATE UNIQUE INDEX signing_packages_one_completed_per_offer ON signing_packages (offer_id) WHERE status = 'COMPLETED';
 CREATE TABLE signing_revisions (
   id                               TEXT PRIMARY KEY,
@@ -256,6 +256,7 @@ CREATE TABLE outcome_reports (
   at                               INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX outcome_reports_org ON outcome_reports (org_id);
+CREATE INDEX outcome_reports_player ON outcome_reports (player_id);
 CREATE TABLE outcome_report_confirmations (
   report_id                        TEXT NOT NULL REFERENCES outcome_reports(id) ON DELETE CASCADE,
   position                         INTEGER NOT NULL,
@@ -753,39 +754,60 @@ export const SIGNINGS_FOLLOWUPS_SNAPSHOT = {
   assert(sqlite, { label = 'the snapshot' } = {}) { assertKeys(sqlite, label); },
 };
 
-// ------------------------------------------------------------------ the repository (explicit writes; the mirrors; the participant)
+// ------------------------------------------------------------------ the repository (explicit writes; SQL reads)
+const WRITES = new Set(['insert', 'patch', 'patchRevision', 'addRevision', 'setDocument', 'setParty', 'addKey', 'addHistory', 'redactPlayer', 'record', 'schedule', 'file', 'addConfirmation']);
+const SIGNINGS_FOLLOWUPS_TABLES_OF = [['signingPackages', 'signing_packages'], ['signings', 'signings'], ['followUps', 'follow_ups'], ['outcomeReports', 'outcome_reports']];
+const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 /**
  * `createSigningsFollowUpsRepository({ sqlite, unit, now, log })`. Every operation runs through `operation`: joined into
  * the open unit of work (a failure poisons it), the caller's open raw transaction, or a transaction of its own; it
- * writes its rows and re-reads the affected record from the tables into the mirror. The arguments are the typed
- * values the routes validated; the columns' CHECKs are the last line, and a violation is a bug surfacing as a failed
- * unit (answered as a failure), never as a silently kept value.
+ * writes its rows and returns the affected record read back from the tables. The arguments are the typed values the
+ * routes validated; the columns' CHECKs are the last line, and a violation is a bug surfacing as a failed unit
+ * (answered as a failure), never as a silently kept value.
+ *
+ * READS ARE SQL (§4.3 step 2): no mirror and no db.* view. Every query decodes fresh, deep-frozen records (an in-place
+ * edit throws), in insertion (rowid) order unless it says otherwise, and runs on the one connection, so a read inside a
+ * unit of work sees the unit's own writes. The two lists that grow without limit page by cursor
+ * (domains/platform/paging.mjs): `followUps.pageForOrg` (due date, then id) and `signings.pageForOrg` (newest first).
  */
 export function createSigningsFollowUpsRepository({ sqlite, unit = null, now = Date.now, log = () => {} }) {
   if (!sqlite) throw new TypeError('the signings/follow-ups repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
   const inUnit = () => !!unit?.active?.();
   const operation = (fn) => (inUnit() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
-  const mirrors = { signingPackages: [], signings: [], followUps: [], outcomeReports: [] };
-  const views = Object.fromEntries(SIGNINGS_FOLLOWUPS_COLLECTIONS.map((n) => [n, readonlyView(mirrors[n], `a ${n} record`)]));
-  for (const v of Object.values(views)) markView(v);
-  const reload = () => { const all = SIGNINGS_FOLLOWUPS_SNAPSHOT.read(sqlite); for (const n of SIGNINGS_FOLLOWUPS_COLLECTIONS) { mirrors[n].length = 0; for (const r of all[n]) mirrors[n].push(r); } };
-  // The mirror holds plain records (a frozen object cannot sit behind a read-only proxy); the views and every record an
-  // operation returns are read-only proxies, so an in-place edit through either throws, naming the repository.
-  const replaceIn = (name, id, record) => { const i = mirrors[name].findIndex((r) => r.id === id); if (record === null) { if (i >= 0) mirrors[name].splice(i, 1); return null; } if (i >= 0) mirrors[name][i] = record; else mirrors[name].push(record); return readonlyView(record, `a ${name} record`); };
-  const refreshPackage = (id) => { const row = st.pkgById.get(id); return replaceIn('signingPackages', id, row ? decodePackage(st, row) : null); };
-  const refreshSigning = (id) => { const row = st.signingById.get(id); return replaceIn('signings', id, row ? decodeSigning(st, row) : null); };
-  const refreshFollowUp = (id) => { const row = st.fupById.get(id); return replaceIn('followUps', id, row ? decodeFollowUp(row) : null); };
-  const refreshOutcome = (id) => { const row = st.outById.get(id); return replaceIn('outcomeReports', id, row ? decodeOutcome(st, row) : null); };
-  const must = (name, id) => { const r = mirrors[name].find((x) => x.id === id); if (!r) throw refusal('SIGNINGS_NOT_FOUND', `${name} ${id} is not a record of the repository`); return r; };
+  const decode = {
+    signingPackages: (row) => deepFreeze(decodePackage(st, row)),
+    signings: (row) => deepFreeze(decodeSigning(st, row)),
+    followUps: (row) => deepFreeze(decodeFollowUp(row)),
+    outcomeReports: (row) => deepFreeze(decodeOutcome(st, row)),
+  };
+  const rowById = { signingPackages: st.pkgById, signings: st.signingById, followUps: st.fupById, outcomeReports: st.outById };
+  const read = (name, id) => { if (typeof id !== 'string') return null; const row = rowById[name].get(id); return row ? decode[name](row) : null; };
+  const exists = (name, id) => typeof id === 'string' && !!rowById[name].get(id);
+  const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.all(...args).map(decode[name]); };
+  const one = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => { const row = stmt.get(...args); return row ? decode[name](row) : null; }; };
+  const count = (sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.get(...args).n; };
+  const refreshPackage = (id) => read('signingPackages', id);
+  const refreshSigning = (id) => read('signings', id);
+  const refreshFollowUp = (id) => read('followUps', id);
+  const refreshOutcome = (id) => read('outcomeReports', id);
+  const must = (name, id) => { const r = read(name, id); if (!r) throw refusal('SIGNINGS_NOT_FOUND', `${name} ${id} is not a record of the repository`); return r; };
   const typedOr = (t) => { if (!t.ok) throw refusal('SIGNINGS_INPUT_INVALID', t.reason); return t.record; };
-  /** A package column update: the record re-typed whole after the change, so every CHECK the typer knows is applied before SQL. */
+  // The two cursor-paged lists: the key is part of the row (`page_key`, `page_id`), so a page never re-reads a record.
+  const signingPage = {
+    first: sqlite.prepare('SELECT rowid AS page_key, * FROM signings WHERE org_id = ? ORDER BY rowid DESC LIMIT ?'),
+    after: sqlite.prepare('SELECT rowid AS page_key, * FROM signings WHERE org_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?'),
+  };
+  const followUpPage = {
+    first: sqlite.prepare('SELECT * FROM follow_ups WHERE org_id = ? ORDER BY due_at, id LIMIT ?'),
+    after: sqlite.prepare('SELECT * FROM follow_ups WHERE org_id = ? AND (due_at > ? OR (due_at = ? AND id > ?)) ORDER BY due_at, id LIMIT ?'),
+  };
   const patchPackage = (id, change) => operation(() => { const cur = must('signingPackages', id); const next = typedOr(typeSigningPackage({ ...clone(cur), ...change }, 'signingPackages')); st.pkg.run(pkgRow(next)); return refreshPackage(id); });
   const patchRevision = (id, revisionId, change) => operation(() => { const cur = must('signingPackages', id); const revs = cur.revisions.map((r) => (r.id === revisionId ? { ...clone(r), ...change } : clone(r))); if (!revs.some((r) => r.id === revisionId)) throw refusal('SIGNINGS_NOT_FOUND', `signing_revisions ${revisionId} is not a revision of ${id}`); const next = typedOr(typeSigningPackage({ ...clone(cur), revisions: revs }, 'signingPackages')); const r = next.revisions.find((x) => x.id === revisionId); const i = next.revisions.indexOf(r); st.rev.run(revRow(id, r, i)); sqlite.prepare('DELETE FROM signing_documents WHERE revision_id = ?').run(revisionId); if (r.document) st.doc.run(docRow(r.id, 'signing', r.document)); if (r.executedDocument) st.doc.run(docRow(r.id, 'executed', r.executedDocument)); sqlite.prepare('DELETE FROM signing_revision_parties WHERE revision_id = ?').run(revisionId); r.requiredParties.forEach((pt, j) => st.party.run(partyRow(r.id, pt, j))); return refreshPackage(id); });
 
   const signingPackages = {
     /** The package the start route built (revision 1, its parties, the start key, no history yet). */
-    insert(raw) { return operation(() => { const p = typedOr(typeSigningPackage(raw, 'signingPackages')); if (mirrors.signingPackages.some((x) => x.id === p.id)) throw refusal('SIGNINGS_DUPLICATE', `signing_packages ${p.id} already exists`); writePackage(st, p); return refreshPackage(p.id); }); },
+    insert(raw) { return operation(() => { const p = typedOr(typeSigningPackage(raw, 'signingPackages')); if (exists('signingPackages', p.id)) throw refusal('SIGNINGS_DUPLICATE', `signing_packages ${p.id} already exists`); writePackage(st, p); return refreshPackage(p.id); }); },
     patch(id, change) { for (const k of Object.keys(change)) if (['id', 'revisions', 'keys', 'history', 'orgId', 'caseId', 'playerId', 'offerId', 'offerRevisionId', 'createdAt', 'createdBy'].includes(k)) throw new TypeError(`signingPackages.patch: ${k} is not patched; use the dedicated operation`); return patchPackage(id, change); },
     patchRevision(id, revisionId, change) { for (const k of Object.keys(change)) if (['id', 'revisionNumber', 'requiredParties', 'createdAt', 'createdBy'].includes(k)) throw new TypeError(`signingPackages.patchRevision: ${k} is not patched`); return patchRevision(id, revisionId, change); },
     /** A new revision (the supersede): appended; the caller patches the previous one and the package in the same unit. */
@@ -795,33 +817,86 @@ export function createSigningsFollowUpsRepository({ sqlite, unit = null, now = D
     addKey(id, act, entry) { return operation(() => { const cur = must('signingPackages', id); const keys = clone(cur.keys); if (act === 'start') keys.start = entry; else keys[act] = [...(keys[act] ?? []), entry]; const next = typedOr(typeSigningPackage({ ...clone(cur), keys }, 'signingPackages')); st.keysOf.run(id); for (const k of keyRows(id, next.keys)) st.key.run(k); return refreshPackage(id); }); },
     addHistory(id, entry) { return operation(() => { const cur = must('signingPackages', id); const next = typedOr(typeSigningPackage({ ...clone(cur), history: [...clone(cur.history), entry] }, 'signingPackages')); const h = next.history[next.history.length - 1]; st.hist.run(histRow(id, h, next.history.length - 1)); return refreshPackage(id); }); },
     /** Subject removal (the deletion unit): the record kept, the player's names nulled, subject_removed_at set. */
-    redactPlayer(playerId, at) { return operation(() => { const touched = []; for (const p of mirrors.signingPackages.filter((x) => x.playerId === playerId)) { sqlite.prepare("UPDATE signing_revision_parties SET completed_by_name = NULL WHERE completed_by_kind = 'player' AND revision_id IN (SELECT id FROM signing_revisions WHERE package_id = ?)").run(p.id); sqlite.prepare("UPDATE signing_history SET by_name = NULL WHERE by_kind = 'player' AND package_id = ?").run(p.id); sqlite.prepare('UPDATE signing_packages SET subject_removed_at = ? WHERE id = ?').run(at, p.id); touched.push(refreshPackage(p.id)); } return touched; }); },
-    byId: (id) => { const p = mirrors.signingPackages.find((x) => x.id === id); return p ? readonlyView(p, 'a signingPackages record') : null; },
+    redactPlayer(playerId, at) { return operation(() => { const touched = []; for (const p of sqlite.prepare('SELECT id FROM signing_packages WHERE player_id = ? ORDER BY rowid').all(playerId)) { sqlite.prepare("UPDATE signing_revision_parties SET completed_by_name = NULL WHERE completed_by_kind = 'player' AND revision_id IN (SELECT id FROM signing_revisions WHERE package_id = ?)").run(p.id); sqlite.prepare("UPDATE signing_history SET by_name = NULL WHERE by_kind = 'player' AND package_id = ?").run(p.id); sqlite.prepare('UPDATE signing_packages SET subject_removed_at = ? WHERE id = ?').run(at, p.id); touched.push(refreshPackage(p.id)); } return touched; }); },
+    byId: (id) => read('signingPackages', id),
+    forCase: list('signingPackages', 'SELECT * FROM signing_packages WHERE case_id = ? ORDER BY rowid'),
+    forOffer: list('signingPackages', 'SELECT * FROM signing_packages WHERE offer_id = ? ORDER BY rowid'),
+    forPlayer: list('signingPackages', 'SELECT * FROM signing_packages WHERE player_id = ? ORDER BY rowid'),
+    forOrg: list('signingPackages', 'SELECT * FROM signing_packages WHERE org_id = ? ORDER BY rowid'),
+    forOrgPlayer: list('signingPackages', 'SELECT * FROM signing_packages WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
   };
   const signings = {
-    record(raw) { return operation(() => { const s = typedOr(typeSigning(raw, 'signings')); if (mirrors.signings.some((x) => x.id === s.id)) throw refusal('SIGNINGS_DUPLICATE', `signings ${s.id} already exists`); writeSigning(st, s); return refreshSigning(s.id); }); },
-    byId: (id) => { const r = mirrors.signings.find((x) => x.id === id); return r ? readonlyView(r, 'a signings record') : null; },
+    record(raw) { return operation(() => { const s = typedOr(typeSigning(raw, 'signings')); if (exists('signings', s.id)) throw refusal('SIGNINGS_DUPLICATE', `signings ${s.id} already exists`); writeSigning(st, s); return refreshSigning(s.id); }); },
+    byId: (id) => read('signings', id),
+    forOrg: list('signings', 'SELECT * FROM signings WHERE org_id = ? ORDER BY rowid'),
+    forPlayer: list('signings', 'SELECT * FROM signings WHERE player_id = ? ORDER BY rowid'),
+    forOrgPlayer: list('signings', 'SELECT * FROM signings WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
+    /** The row a package's completion wrote (one per package), or null. */
+    forPackage: one('signings', 'SELECT * FROM signings WHERE signing_package_id = ?'),
+    /** The row recorded for an offer (one per offer), or null. */
+    forOffer: one('signings', 'SELECT * FROM signings WHERE offer_id = ?'),
+    countForOrg: count('SELECT COUNT(*) AS n FROM signings WHERE org_id = ?'),
+    count: count('SELECT COUNT(*) AS n FROM signings'),
+    /** Signings with fewer follow-ups than `milestones` (the sweep's backfill), in insertion order. */
+    missingFollowUps: list('signings', 'SELECT s.* FROM signings s WHERE (SELECT COUNT(*) FROM follow_ups f WHERE f.signing_id = s.id) < ? ORDER BY s.rowid'),
+    /** The organisation's signings, newest first, by cursor: `{ items, nextCursor }` (`after` from readPage(query, ['number'])). */
+    pageForOrg(orgId, { limit, after = null }) {
+      const rows = after ? signingPage.after.all(orgId, after[0], limit + 1) : signingPage.first.all(orgId, limit + 1);
+      const page = pageOf(rows, limit, (r) => [r.page_key]);
+      return { items: page.items.map(decode.signings), nextCursor: page.nextCursor };
+    },
   };
   const followUps = {
-    schedule(raw) { return operation(() => { const f = typedOr(typeFollowUp(raw, 'followUps')); if (mirrors.followUps.some((x) => x.id === f.id)) throw refusal('SIGNINGS_DUPLICATE', `follow_ups ${f.id} already exists`); st.fup.run(fupRow(f)); return refreshFollowUp(f.id); }); },
+    schedule(raw) { return operation(() => { const f = typedOr(typeFollowUp(raw, 'followUps')); if (exists('followUps', f.id)) throw refusal('SIGNINGS_DUPLICATE', `follow_ups ${f.id} already exists`); st.fup.run(fupRow(f)); return refreshFollowUp(f.id); }); },
     patch(id, change) { for (const k of Object.keys(change)) if (!['status', 'notifiedAt', 'dueAt'].includes(k)) throw new TypeError(`followUps.patch: ${k} is not patched`); return operation(() => { const cur = must('followUps', id); const f = typedOr(typeFollowUp({ ...clone(cur), ...change }, 'followUps')); st.fup.run(fupRow(f)); return refreshFollowUp(id); }); },
-    byId: (id) => { const r = mirrors.followUps.find((x) => x.id === id); return r ? readonlyView(r, 'a followUps record') : null; },
+    byId: (id) => read('followUps', id),
+    forSigning: list('followUps', 'SELECT * FROM follow_ups WHERE signing_id = ? ORDER BY rowid'),
+    forPlayer: list('followUps', 'SELECT * FROM follow_ups WHERE player_id = ? ORDER BY rowid'),
+    forPlayers(playerIds) { const want = [...new Set((playerIds ?? []).filter((p) => typeof p === 'string'))]; if (!want.length) return []; return sqlite.prepare(`SELECT * FROM follow_ups WHERE player_id IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want).map(decode.followUps); },
+    /** Scheduled follow-ups whose due instant has passed (the sweep marks them due). */
+    dueToMark: list('followUps', "SELECT * FROM follow_ups WHERE status = 'scheduled' AND due_at <= ? ORDER BY due_at, id"),
+    /** Due follow-ups nobody has been told about yet (the sweep notifies once). */
+    dueUnnotified: list('followUps', "SELECT * FROM follow_ups WHERE status = 'due' AND notified_at IS NULL ORDER BY due_at, id"),
+    /** The organisation's follow-ups by due date, then id, by cursor: `{ items, nextCursor }` (`after` from readPage(query, ['number', 'string'])). */
+    pageForOrg(orgId, { limit, after = null }) {
+      const rows = after ? followUpPage.after.all(orgId, after[0], after[0], after[1], limit + 1) : followUpPage.first.all(orgId, limit + 1);
+      const page = pageOf(rows, limit, (r) => [r.due_at, r.id]);
+      return { items: page.items.map(decode.followUps), nextCursor: page.nextCursor };
+    },
   };
   const outcomeReports = {
-    file(raw) { return operation(() => { const r = typedOr(typeOutcomeReport(raw, 'outcomeReports')); if (mirrors.outcomeReports.some((x) => x.id === r.id)) throw refusal('SIGNINGS_DUPLICATE', `outcome_reports ${r.id} already exists`); if (mirrors.outcomeReports.some((x) => x.followUpId === r.followUpId)) throw refusal('SIGNINGS_UNIQUENESS', `follow_ups ${r.followUpId} already has a report`); writeOutcome(st, r); return refreshOutcome(r.id); }); },
+    file(raw) { return operation(() => { const r = typedOr(typeOutcomeReport(raw, 'outcomeReports')); if (exists('outcomeReports', r.id)) throw refusal('SIGNINGS_DUPLICATE', `outcome_reports ${r.id} already exists`); if (sqlite.prepare('SELECT 1 FROM outcome_reports WHERE follow_up_id = ?').get(r.followUpId)) throw refusal('SIGNINGS_UNIQUENESS', `follow_ups ${r.followUpId} already has a report`); writeOutcome(st, r); return refreshOutcome(r.id); }); },
     addConfirmation(id, rawConfirmation, { status } = {}) { return operation(() => { const cur = must('outcomeReports', id); const r = typedOr(typeOutcomeReport({ ...clone(cur), confirmations: [...clone(cur.confirmations), rawConfirmation], ...(status ? { status } : {}) }, 'outcomeReports')); const c = r.confirmations[r.confirmations.length - 1]; st.out.run(outRow(r)); st.conf.run(confRow(r.id, c, r.confirmations.length - 1)); return refreshOutcome(id); }); },
-    byId: (id) => { const r = mirrors.outcomeReports.find((x) => x.id === id); return r ? readonlyView(r, 'a outcomeReports record') : null; },
+    byId: (id) => read('outcomeReports', id),
+    /** The report on a follow-up (one per follow-up), or null. */
+    forFollowUp: one('outcomeReports', 'SELECT * FROM outcome_reports WHERE follow_up_id = ?'),
+    forPlayer: list('outcomeReports', 'SELECT * FROM outcome_reports WHERE player_id = ? ORDER BY rowid'),
   };
 
+  /**
+   * The admin outcome figures per organisation with a signing: signings, follow-ups past `scheduled`, and the reports
+   * by status and registration — counted in SQL, one row per organisation.
+   */
+  const totalsStmt = sqlite.prepare(`SELECT s.org_id AS orgId, COUNT(*) AS signings,
+      (SELECT COUNT(*) FROM follow_ups f WHERE f.org_id = s.org_id AND f.status <> 'scheduled') AS followUpsDue,
+      (SELECT COUNT(*) FROM outcome_reports r WHERE r.org_id = s.org_id) AS reported,
+      (SELECT COUNT(*) FROM outcome_reports r WHERE r.org_id = s.org_id AND r.status = 'confirmed') AS confirmed,
+      (SELECT COUNT(*) FROM outcome_reports r WHERE r.org_id = s.org_id AND r.status = 'disputed') AS disputed,
+      (SELECT COUNT(*) FROM outcome_reports r WHERE r.org_id = s.org_id AND r.registration_status = 'registered') AS retained
+    FROM signings s GROUP BY s.org_id`);
+  const outcomeTotalsByOrg = () => new Map(totalsStmt.all().map((r) => [r.orgId, { ...r }]));
+  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.has(k))));
+  const counters = Object.fromEntries(SIGNINGS_FOLLOWUPS_TABLES_OF.map(([n, t]) => [n, sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t}`)]));
+
   return {
-    views, signingPackages, signings, followUps, outcomeReports,
-    /** Load the mirrors (the tables are authoritative once 0018 is recorded; nothing is imported from memory). */
-    attach() { if (!signingsFollowUpsLive(sqlite)) throw new Error(`the signings/follow-ups repository needs ${SIGNINGS_FOLLOWUPS_MIGRATION} recorded; it never imports an in-memory array`); reload(); return { counts: this.counts() }; },
-    /** The store participant: no flush (every write is already in the tables); the mirrors restored by the unit's rollback. */
-    hook() { return { flush() {}, snapshotState() { return Object.fromEntries(SIGNINGS_FOLLOWUPS_COLLECTIONS.map((n) => [n, mirrors[n].slice()])); }, restoreState(s) { if (!s) return; for (const n of SIGNINGS_FOLLOWUPS_COLLECTIONS) { mirrors[n].length = 0; for (const r of s[n]) mirrors[n].push(r); } } }; },
-    counts() { return Object.fromEntries(SIGNINGS_FOLLOWUPS_COLLECTIONS.map((n) => [n, mirrors[n].length])); },
+    signingPackages, signings, followUps, outcomeReports, outcomeTotalsByOrg,
+    /** The queries alone, for the pure projectors and providers that must not write. */
+    reads: Object.freeze({ signingPackages: readOnly(signingPackages), signings: readOnly(signings), followUps: readOnly(followUps), outcomeReports: readOnly(outcomeReports) }),
+    /** Check the tables are authoritative (0018 recorded); there is nothing to load. */
+    attach() { if (!signingsFollowUpsLive(sqlite)) throw new Error(`the signings/follow-ups repository needs ${SIGNINGS_FOLLOWUPS_MIGRATION} recorded; it never imports an in-memory array`); return { counts: this.counts() }; },
+    counts() { return Object.fromEntries(SIGNINGS_FOLLOWUPS_TABLES_OF.map(([n]) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return Object.fromEntries(SIGNINGS_FOLLOWUPS_COLLECTIONS.map((n) => [n, clone(mirrors[n])])); },
+    exportAll() { return SIGNINGS_FOLLOWUPS_SNAPSHOT.read(sqlite); },
     log,
     now,
   };

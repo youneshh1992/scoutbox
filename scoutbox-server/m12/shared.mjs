@@ -23,8 +23,7 @@ export function migrateM12(db, players) {
   db.campaigns ??= [];           // F6 — club-run assessment campaigns
   db.campaignSubmissions ??= []; // F6 — player submissions + review states
   db.devObjectives ??= [];       // F8 — development objectives
-  db.followUps ??= [];           // F11 — persisted post-signing follow-up jobs
-  db.outcomeReports ??= [];      // F11 — reported/confirmed/disputed outcomes
+  // F11 follow-ups and outcome reports: tables of the signings repository, read through SQL (§4.3 step 2); no db.* here.
   db.uploadSessions ??= [];      // F12 — resumable upload sessions
   for (const o of db.orgs) {
     o.tactical ??= null;         // F4 — formation + role definitions

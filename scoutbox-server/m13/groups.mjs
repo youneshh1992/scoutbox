@@ -11,6 +11,9 @@ export function registerGroups(ctx) {
     db, orgRouter, adminRouter, nextId, persistNow, notify, findPlayer,
     orgCanSee, paginate, isLead, requireLead, suppress, sameGroupLive,
   } = ctx;
+  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
+  const reads = ctx.recruitmentReads;
+  if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerGroups needs recruitmentReads (signings) from the data layer');
 
   const groupsOf = (orgId) => db.groups.filter((g) => g.memberOrgIds.includes(orgId));
   const isGroupAdmin = (group, orgId) => group.adminOrgIds.includes(orgId);
@@ -227,7 +230,7 @@ export function registerGroups(ctx) {
     const memberRows = g.memberOrgIds.map((orgId) => {
       const org = db.orgs.find((o) => o.id === orgId);
       const assessments = db.assessments.filter((a) => a.orgId === orgId && a.state !== 'draft').length;
-      const signings = db.signings.filter((s) => s.orgId === orgId).length;
+      const signings = reads.signings.countForOrg(orgId);
       return { orgId, orgName: org?.name, assessments: suppress(assessments) ? '<3' : assessments, signings: suppress(signings) ? '<3' : signings };
     });
     const grants = db.groupGrants.filter((gr) => gr.groupId === g.id);

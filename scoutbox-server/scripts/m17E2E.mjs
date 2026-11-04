@@ -753,7 +753,7 @@ section('R6/R11 — trials and signings are linked, never duplicated');
   neg(fakeSign.status === 404, '[30] a room cannot link a signing that is not its own');
   const trialsAfter = (await j('GET', '/org/trials', undefined, maria.token)).body;
   neg(((trialsAfter.items ?? trialsAfter).length ?? 0) === trialCount, '[29] no trial row was created by the room');
-  const signings = (await j('GET', '/org/signings', undefined, maria.token)).body;
+  const signings = (await j('GET', '/org/signings', undefined, maria.token)).body.items;
   neg(!JSON.stringify(signings).includes(ROOM), '[30] the room created no signing record');
   const roomNow = (await j('GET', `/org/rooms/${ROOM}`, undefined, maria.token)).body.room;
   ok(Array.isArray(roomNow.trials), 'R6: the room surfaces the org’s own trials for this player');

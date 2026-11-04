@@ -83,7 +83,7 @@ const S_NOTE = 'PRIVATE_SIGNING_NOTE_PERSISTS_7719';
 section('1 — the migration: 2307 → 2308 exactly once, fresh boot 2308, replay applies nothing, no fabrication');
 {
   ok(SCHEMA_VERSION === 2308 && MIGRATIONS.length === 18 && MIGRATIONS.at(-1).id === 'm280_001_signing_workflow' && MIGRATIONS.at(-1).version === 2308, '1.1 schema 2308, 18 migrations, the last is the signing store');
-  ok(guaranteeFor('signingPackages') === 'migration', '1.2 signingPackages is migration-guaranteed');
+  ok(guaranteeFor('signingPackages') === null, '1.2 signingPackages is no db collection: a table read through SQL (§4.3 step 2; rewritten, it described the old storage)');
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23sp-1-'));
   const s1 = await bootOn(DIR, PORT);
   ok(s1.up && (await s1.j('GET', '/healthz')).body.schemaVersion === 2308 && /applied .*m280_001_signing_workflow/.test(s1.log()), '1.3 a fresh store boots at 2308 with the signing step applied once');
@@ -211,7 +211,7 @@ const R = {};
   ok(Object.entries(R.before.stages).every(([w, st]) => R.before[`${w}_stage`] === st), '2.7 the six cases sit where the workflow put them');
   R.before.kimRecipient = (await j('GET', `/player/signings/${R.kim.SID}`, undefined, kimTok, at(T0 + 3 * H))).body.signing;
   R.before.kimDoc = (await j('GET', `/player/signings/${R.kim.SID}/document`, undefined, kimTok, at(T0 + 3 * H))).body;
-  R.before.rows = (await j('GET', '/org/signings', undefined, maria.token)).body;
+  R.before.rows = (await j('GET', '/org/signings', undefined, maria.token)).body.items;
   R.before.kimPlayer = (await j('GET', '/org/players/pl-kim', undefined, maria.token)).body;
   R.before.theoStatusAt = { before: (await j('GET', `/org/signings/${R.theo.SID}`, undefined, maria.token, at(T0 + 2 * H - 1))).body.signing.status, after: (await j('GET', `/org/signings/${R.theo.SID}`, undefined, maria.token, at(T0 + 2 * H))).body.signing.status };
   ok(R.before.theoStatusAt.before === 'READY' && R.before.theoStatusAt.after === 'EXPIRED', '2.8 Martin\'s package reads READY before and EXPIRED at its instant — derived');
@@ -246,14 +246,14 @@ section('3 — after the reboot: identical views, keys replay, completion refuse
   ok(JSON.stringify((await j('GET', `/player/signings/${R.kim.SID}`, undefined, kim, at(T0 + 3 * H))).body.signing) === JSON.stringify(R.before.kimRecipient), '3.5 Kim\'s recipient view is byte-identical');
   const doc = (await j('GET', `/player/signings/${R.kim.SID}/document`, undefined, kim, at(T0 + 3 * H))).body;
   ok(doc.document.sha256 === SHA && sha256(Buffer.from(doc.file.base64, 'base64')) === SHA && doc.file.base64 === R.before.kimDoc.file.base64, '3.6 the signed document\'s bytes are still there and still hash to the recorded digest');
-  ok(JSON.stringify((await j('GET', '/org/signings', undefined, maria.token)).body) === JSON.stringify(R.before.rows), '3.7 the db.signings rows are byte-identical');
+  ok(JSON.stringify((await j('GET', '/org/signings', undefined, maria.token)).body.items) === JSON.stringify(R.before.rows), '3.7 the db.signings rows are byte-identical');
   ok(JSON.stringify((await j('GET', '/org/players/pl-kim', undefined, maria.token)).body) === JSON.stringify(R.before.kimPlayer), '3.8 Kim\'s player record (under_contract, level, timeline) is byte-identical');
   // keys replay
   ok((await j('POST', `/org/offers/${R.kola.OID}/signing`, { internalNote: S_NOTE, clientKey: 'P-start-kola' }, maria.token, at(T0))).body.idempotent === true, '3.9 the start key replays');
   ok((await j('POST', `/org/signings/${R.kim.SID}/ready`, { expectedRev: 1, clientKey: 'P-ready-kim' }, maria.token, at(T0))).body.idempotent === true, '3.10 the ready key replays (before the rev is checked)');
   ok((await j('POST', `/player/signings/${R.kim.SID}/complete`, { revisionId: R.kim.SREV, documentSha256: SHA, clientKey: 'P-sign-kim' }, kim, at(T0))).body.idempotent === true, '3.11 the player\'s signature key replays');
   ok((await j('POST', `/org/signings/${R.kim.SID}/complete`, { expectedRev: 1, clientKey: 'P-complete-kim' }, maria.token, at(T0))).body.idempotent === true, '3.12 the completion key replays');
-  neg((await j('POST', `/org/signings/${R.kim.SID}/complete`, { expectedRev: R.before.kim.rev, clientKey: key() }, maria.token, at(T0))).body.error === 'SIGNING_ALREADY_COMPLETED' && (await j('GET', '/org/signings', undefined, maria.token)).body.filter((x) => x.signingPackageId === R.kim.SID).length === 1, '3.13 a fresh completion is refused: still one row');
+  neg((await j('POST', `/org/signings/${R.kim.SID}/complete`, { expectedRev: R.before.kim.rev, clientKey: key() }, maria.token, at(T0))).body.error === 'SIGNING_ALREADY_COMPLETED' && (await j('GET', '/org/signings', undefined, maria.token)).body.items.filter((x) => x.signingPackageId === R.kim.SID).length === 1, '3.13 a fresh completion is refused: still one row');
   neg((await j('POST', `/player/signings/${R.tan.SID}/complete`, { revisionId: R.tan.R1, documentSha256: SHA, clientKey: key() }, (await j('POST', '/auth/player/login', { playerId: 'pl-tanaka' })).body.token, at(T0 + 4 * H))).body.error === 'SIGNING_SUPERSEDED', '3.14 the superseded revision is still not signable');
   neg((await j('POST', `/player/signings/${R.theo.SID}/complete`, { revisionId: R.before.theo.currentRevision.id, documentSha256: SHA, clientKey: key() }, (await j('POST', '/auth/player/login', { playerId: 'pl-martin' })).body.token, at(T0 + 3 * H))).body.error === 'SIGNING_EXPIRED', '3.15 the expired package still refuses — lazily, with nothing written');
   // Tanaka completes revision 2 after the reboot: the lifecycle coupling survived.
@@ -351,7 +351,7 @@ section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a
   await cycle('1a', () => { writeFileSync(mediaFile(kimEv.mediaId), DOC2); }, async (s, tok) => {
     const kim = (await s.j('POST', '/auth/player/login', { playerId: 'pl-kim' })).body.token;
     neg((await s.j('GET', `/org/signings/${R.kim.SID}/document`, undefined, tok)).body?.error === 'SIGNING_STATE_UNKNOWN' && (await s.j('GET', `/player/signings/${R.kim.SID}/document`, undefined, kim, at(T0 + 3 * H))).body?.error === 'SIGNING_STATE_UNKNOWN', '5.1 the bytes on disk no longer hash to the digest every party confirmed: nobody is served them');
-    ok((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body.signing?.status === 'COMPLETED' && (await s.j('GET', '/org/signings', undefined, tok)).body.some((x) => x.id === kimRow.id), '5.1b the completed record and the package still read: the swap is on the bytes, the record is untouched');
+    ok((await s.j('GET', `/org/signings/${R.kim.SID}`, undefined, tok, at(T0 + 3 * H))).body.signing?.status === 'COMPLETED' && (await s.j('GET', '/org/signings', undefined, tok)).body.items.some((x) => x.id === kimRow.id), '5.1b the completed record and the package still read: the swap is on the bytes, the record is untouched');
   });
   await cycle('1b', () => { writeFileSync(mediaFile(kimEv.mediaId), originalBytes); }, async (s, tok) => {
     const d = (await s.j('GET', `/org/signings/${R.kim.SID}/document`, undefined, tok)).body;
@@ -416,14 +416,14 @@ section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a
     neg(boom.status === 500 && boom.body.error === 'SIGNING_STATE_UNKNOWN', '5.7a the completion fails after the lifecycle moved (before persistence) — and the server is now stopped by SIGTERM with the rolled-back state');
   });
   await cycle('7b', () => {}, async (s, tok) => {
-    ok((await s.j('GET', `/org/signings/${N.SID}`, undefined, tok, at(T0 + 5 * H))).body.signing.status === 'IN_PROGRESS' && (await s.j('GET', '/org/signings', undefined, tok)).body.every((x) => x.signingPackageId !== N.SID) && (await s.j('GET', `/org/rooms/${N.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'offer_accepted', '5.7b after the restart: IN_PROGRESS, no row, offer_accepted — the interrupted completion left nothing behind');
+    ok((await s.j('GET', `/org/signings/${N.SID}`, undefined, tok, at(T0 + 5 * H))).body.signing.status === 'IN_PROGRESS' && (await s.j('GET', '/org/signings', undefined, tok)).body.items.every((x) => x.signingPackageId !== N.SID) && (await s.j('GET', `/org/rooms/${N.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'offer_accepted', '5.7b after the restart: IN_PROGRESS, no row, offer_accepted — the interrupted completion left nothing behind');
     await s.j('POST', '/__faults', { rules: 'internal:signing.complete.effects:1' });
     const done = await s.j('POST', `/org/signings/${N.SID}/complete`, { expectedRev: (await s.j('GET', `/org/signings/${N.SID}`, undefined, tok)).body.signing.rev, clientKey: N.KC }, tok, at(T0 + 5 * H));
     ok(done.status === 200 && done.body.signing.status === 'COMPLETED', '5.7c the same key completes; the after-effects fail (simulated) — the authoritative writes were already persisted');
   });
   await cycle('7c', () => {}, async (s, tok) => {
     const replay = await s.j('POST', `/org/signings/${N.SID}/complete`, { expectedRev: 999, clientKey: N.KC }, tok, at(T0 + 5 * H));
-    ok(replay.status === 200 && replay.body.idempotent === true && (await s.j('GET', '/org/signings', undefined, tok)).body.filter((x) => x.signingPackageId === N.SID).length === 1 && (await s.j('GET', `/org/rooms/${N.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'signed', '5.7d after another restart the key replays, one row, the case signed: converged');
+    ok(replay.status === 200 && replay.body.idempotent === true && (await s.j('GET', '/org/signings', undefined, tok)).body.items.filter((x) => x.signingPackageId === N.SID).length === 1 && (await s.j('GET', `/org/rooms/${N.RID}/journey`, undefined, tok)).body.lifecycle.currentStage === 'signed', '5.7d after another restart the key replays, one row, the case signed: converged');
     neg((await s.j('POST', `/org/signings/${N.SID}/complete`, { expectedRev: 999, clientKey: key() }, tok, at(T0 + 5 * H))).body.error === 'SIGNING_ALREADY_COMPLETED', '5.7e a fresh completion is refused');
   });
   // 5.8 planted corruption from section 4 is STILL there and still refused: nothing repaired it across five restarts

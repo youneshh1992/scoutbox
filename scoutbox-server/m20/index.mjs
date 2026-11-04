@@ -47,12 +47,12 @@ const PAGE_DEFAULT = 25;
  * without it would have thrown on the first trial read, M20 or not.
  */
 export function migrateM20(db) {
-  for (const k of ['trials', 'signings', 'requests', 'dynamicWatchlists', 'watchlistHistory']) db[k] ??= [];
+  for (const k of ['trials', 'requests', 'dynamicWatchlists', 'watchlistHistory'] /* the signings are SQL (§4.3 step 2) */) db[k] ??= [];
 }
 
 export function registerAnalytics(ctx) {
   const { db, recruitmentReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
-  if (typeof recruitmentReads?.contacts?.forOrg !== 'function' || typeof recruitmentReads?.offers?.forOrg !== 'function') throw new TypeError('registerAnalytics needs recruitmentReads (contacts, offers) from the data layer');
+  if (typeof recruitmentReads?.contacts?.forOrg !== 'function' || typeof recruitmentReads?.offers?.forOrg !== 'function' || typeof recruitmentReads?.signings?.forOrg !== 'function' || typeof recruitmentReads?.signingPackages?.forOrg !== 'function') throw new TypeError('registerAnalytics needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
   migrateM20(db);
 
   // Counters only, and deliberately only two: how often the page was read and

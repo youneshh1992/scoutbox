@@ -158,7 +158,7 @@ const lifecycle = async (RID, action, extra = {}, token = maria.token) => j('POS
 const legacyStatus = async (RID, status, token = maria.token) => j('POST', `/org/rooms/${RID}/status`, { status, expectedRev: await caseRev(RID, token) }, token);
 const notifs = async (p, token) => (await j('GET', p, undefined, token)).body;
 const roomView = async (RID, token = maria.token) => (await j('GET', `/org/rooms/${RID}`, undefined, token)).body.room;
-const signings = async (token = maria.token) => (await j('GET', '/org/signings', undefined, token)).body ?? [];
+const signings = async (token = maria.token) => (await j('GET', '/org/signings', undefined, token)).body?.items ?? [];
 const SLOTS = (base) => [{ startsAt: base + 2 * H, endsAt: base + 4 * H, kind: 'training' }];
 const INVITE = (base, extra = {}) => ({ timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B, Dome Road' }, message: 'Come and train with the U23s.', instructions: 'Ask for Priya at reception.', slots: SLOTS(base), ...extra });
 const TERMS = { role: 'Central midfielder', squad: 'Under-23s', startDate: '2027-07-01', endDate: '2029-06-30', conditions: 'Subject to a medical.' };

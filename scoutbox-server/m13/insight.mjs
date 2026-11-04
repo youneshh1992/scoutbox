@@ -18,6 +18,9 @@ export function registerInsight(ctx) {
     notify, findPlayer, isAdult, orgCanSee, paginate, histAppend, suppress,
     isLead, requireLead, playerViewForOrg,
   } = ctx;
+  // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
+  const reads = ctx.recruitmentReads;
+  if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerInsight needs recruitmentReads (signings) from the data layer');
 
   // =========================================================== F4 exposure
   const dayKey = (ts = Date.now()) => Math.floor(ts / 86_400_000);
@@ -65,7 +68,7 @@ export function registerInsight(ctx) {
     const evidence = byKind('evidence_view');
     const sinceTs = Date.now() - EXPOSURE_WINDOW_DAYS * 86_400_000;
     const invited = new Set(db.requests.filter((r) => r.orgId === orgId && r.createdAt >= sinceTs).map((r) => r.playerId));
-    const outcomes = new Set(db.signings.filter((s) => s.orgId === orgId && (s.ts ?? 0) >= sinceTs).map((s) => s.playerId));
+    const outcomes = new Set(reads.signings.forOrg(orgId).filter((s) => (s.ts ?? 0) >= sinceTs).map((s) => s.playerId));
     return {
       windowDays: EXPOSURE_WINDOW_DAYS,
       definition: 'Unique players per stage within the window; events deduplicated per (player, kind, day). Denominator for each rate is the previous stage.',
@@ -323,7 +326,7 @@ export function registerInsight(ctx) {
     if (!requireLead(req, res)) return;
     const decided = db.assessments.filter((a) => a.orgId === req.org.id && a.state !== 'draft' && a.recommendation);
     const items = decided.slice(-50).map((a) => {
-      const laterSigning = db.signings.find((s) => s.playerId === a.playerId && (s.ts ?? 0) > a.createdAt);
+      const laterSigning = reads.signings.forPlayer(a.playerId).find((s) => (s.ts ?? 0) > a.createdAt);
       const laterAssessments = db.assessments.filter((x) => x.playerId === a.playerId && x.orgId === req.org.id && x.createdAt > a.createdAt && x.state !== 'draft').length;
       return {
         assessmentId: a.id, playerName: a.playerName, scoutName: a.scoutName,

@@ -202,7 +202,7 @@ const lifecycle = async (RID, action, extra = {}, token = maria.token) => j('POS
 const legacyStatus = async (RID, status, token = maria.token) => j('POST', `/org/rooms/${RID}/status`, { status, expectedRev: await caseRev(RID, token) }, token);
 const notifs = async (p, token) => (await j('GET', p, undefined, token)).body;
 const roomView = async (RID, token = maria.token) => (await j('GET', `/org/rooms/${RID}`, undefined, token)).body.room;
-const signings = async (token = maria.token) => (await j('GET', '/org/signings', undefined, token)).body ?? [];
+const signings = async (token = maria.token) => (await j('GET', '/org/signings', undefined, token)).body?.items ?? [];
 const orgPlayer = async (id, token = maria.token) => (await j('GET', `/org/players/${id}`, undefined, token)).body;
 const SLOTS = (base) => [{ startsAt: base + 2 * H, endsAt: base + 4 * H, kind: 'training' }];
 const INVITE = (base, extra = {}) => ({ timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B, Dome Road' }, message: 'Come and train with the U23s.', instructions: 'Ask for Priya at reception.', slots: SLOTS(base), ...extra });
@@ -629,7 +629,7 @@ section('I — analytics: every journey stage derives from the canonical record,
   // Mensah's case carried TWO packages (one cancelled, one completed) and a superseded revision: still one case at signing_started and one at signed.
   const before = { started: row('signing_started').value, signed: row('signed').value };
   ok(before.started >= 2 && before.signed >= 2, 'I5 Kola and Mensah: two cases started a signing and two signed');
-  neg(row('signing_started').value === row('signing_started').value && (await j('GET', '/org/signings', undefined, maria.token)).body.length >= 2, '#43 I6 two packages and a superseded revision on one case add nothing: signing_started counts the CASE once');
+  neg(row('signing_started').value === row('signing_started').value && (await j('GET', '/org/signings', undefined, maria.token)).body.items.length >= 2, '#43 I6 two packages and a superseded revision on one case add nothing: signing_started counts the CASE once');
   // Legacy cases (planted by hand): history only, never counted as progress.
   neg(row('trial_completed').historyOnly >= 1 && row('offer_issued').historyOnly >= 1, 'I7 the legacy cases reached trial_completed / offer_made in history with no record: reported as "history only", not counted');
   ok(m.intervals && typeof m.intervals.accepted_to_signed?.n === 'number' && (m.intervals.accepted_to_signed.n === 0 || Number.isFinite(m.intervals.accepted_to_signed.medianDays)), '#45 I8 time-to-stage intervals derive from the records\' own instants (medians in days)');

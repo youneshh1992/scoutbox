@@ -7,7 +7,8 @@
 // sweep (on boot + every 60 s). Restarts lose nothing and re-send nothing:
 // the marker that a reminder went out lives in the database, not in a timer.
 //
-// S8d (migration 0018): `db.followUps` and `db.outcomeReports` are read-only views of deep-frozen records over the
+// S8d (migration 0018): the follow-ups and outcome reports are read through the repository's SQL queries (§4.3 step 2;
+// there is no db.followUps or db.outcomeReports) — formerly read-only views of deep-frozen records over the
 // typed tables; every write is an explicit operation of the signings/follow-ups repository (followUps.schedule /
 // patch, outcomeReports.file / addConfirmation) that writes its rows at once — inside the route's unit of work, or in
 // a transaction of its own from the sweep — and returns the fresh record. Junk a client sends (a non-integer
@@ -18,6 +19,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { isAdult, visibleToOrg } from '../domain.mjs';
 import { deriveWorkflowState } from '../m23/trial.mjs';
+import { readPage, sendPageError } from '../domains/platform/paging.mjs';
 
 const MILESTONES = { '3m': 91, '6m': 182, '12m': 365 };
 
@@ -25,7 +27,7 @@ export function registerOperations(ctx) {
   const {
     db, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
-    paginate, guardianOwnsChild, orgCanSee, moderateOrRefuse,
+    guardianOwnsChild, orgCanSee, moderateOrRefuse,
     storage, sessionFor, isBlocked, DATA_DIR, players, unit, signingsFollowUps, recruitment,
   } = ctx;
   if (!recruitment?.trials) throw new TypeError('registerOperations needs the recruitment repository (S8a) from the data layer');
@@ -41,7 +43,7 @@ export function registerOperations(ctx) {
   function scheduleFollowUps(signing) {
     let added = 0;
     for (const [milestone, days] of Object.entries(MILESTONES)) {
-      if (db.followUps.some((f) => f.signingId === signing.id && f.milestone === milestone)) continue; // idempotent
+      if (fu.forSigning(signing.id).some((f) => f.milestone === milestone)) continue; // idempotent
       fu.schedule({
         id: nextId('fup'), signingId: signing.id, playerId: signing.playerId, orgId: signing.orgId,
         milestone, dueAt: (signing.signedAt ?? signing.ts ?? Date.now()) + days * 86_400_000,
@@ -53,7 +55,7 @@ export function registerOperations(ctx) {
   }
 
   function followUpView(f) {
-    const report = db.outcomeReports.find((r) => r.followUpId === f.id) ?? null;
+    const report = outcomes.forFollowUp(f.id);
     const p = findPlayer(f.playerId);
     const org = db.orgs.find((o) => o.id === f.orgId);
     return {
@@ -65,14 +67,19 @@ export function registerOperations(ctx) {
     };
   }
 
+  // By due date, then id, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
   orgRouter.get('/followups', (req, res) => {
-    res.json(paginate(req, db.followUps.filter((f) => f.orgId === req.org.id).map(followUpView).sort((a, b) => a.dueAt - b.dueAt)));
+    let page;
+    try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
+    const { items, nextCursor } = fu.pageForOrg(req.org.id, page);
+    res.json({ items: items.map(followUpView), nextCursor });
   });
 
   orgRouter.post('/followups/:id/report', (req, res) => {
-    const f = db.followUps.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const found = fu.byId(req.params.id);
+    const f = found && found.orgId === req.org.id ? found : null;
     if (!f) return res.status(404).json({ error: 'FOLLOWUP_NOT_FOUND' });
-    if (db.outcomeReports.some((r) => r.followUpId === f.id)) return res.status(409).json({ error: 'ALREADY_REPORTED' });
+    if (outcomes.forFollowUp(f.id)) return res.status(409).json({ error: 'ALREADY_REPORTED' });
     const { registrationStatus, matchesPlayed, progression, endReason, note } = req.body ?? {};
     if (!['registered', 'released', 'left', 'unknown'].includes(registrationStatus)) {
       return res.status(400).json({ error: 'REGISTRATION_STATUS_INVALID', allowed: ['registered', 'released', 'left', 'unknown'] });
@@ -99,8 +106,9 @@ export function registerOperations(ctx) {
   });
 
   function respondOutcome(req, res, playerIds, actor) {
-    const f = db.followUps.find((x) => x.id === req.params.id && playerIds.includes(x.playerId));
-    const report = f && db.outcomeReports.find((r) => r.followUpId === f.id);
+    const found = fu.byId(req.params.id);
+    const f = found && playerIds.includes(found.playerId) ? found : null;
+    const report = f && outcomes.forFollowUp(f.id);
     if (!report) return res.status(404).json({ error: 'REPORT_NOT_FOUND' });
     if (report.confirmations.some((c) => c.by.id === actor.id)) return res.status(409).json({ error: 'ALREADY_RESPONDED' });
     const { agree, note, experienceRating } = req.body ?? {};
@@ -115,14 +123,14 @@ export function registerOperations(ctx) {
   }
 
   playerRouter.get('/followups', (req, res) => {
-    res.json(db.followUps.filter((f) => f.playerId === req.player.id).map(followUpView));
+    res.json(fu.forPlayer(req.player.id).map(followUpView));
   });
   playerRouter.post('/followups/:id/respond', (req, res) => {
     if (req.playerIsMinor) return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Your parent/guardian confirms placement outcomes.' });
     respondOutcome(req, res, [req.player.id], { kind: 'player', id: req.player.id, name: req.player.name });
   });
   guardianRouter.get('/followups', (req, res) => {
-    res.json(db.followUps.filter((f) => req.guardian.childIds.includes(f.playerId)).map(followUpView));
+    res.json(fu.forPlayers(req.guardian.childIds).map(followUpView));
   });
   guardianRouter.post('/followups/:id/respond', (req, res) =>
     respondOutcome(req, res, req.guardian.childIds, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }));
@@ -131,26 +139,24 @@ export function registerOperations(ctx) {
   // under 3 records suppressed so no individual answer is inferable.
   adminRouter.get('/outcomes', (_req, res) => {
     const rows = [];
+    const totals = signingsFollowUps.outcomeTotalsByOrg(); // counted in SQL, one row per organisation with a signing
     for (const org of db.orgs) {
-      const signings = db.signings.filter((s) => s.orgId === org.id);
-      if (!signings.length) continue;
-      const fups = db.followUps.filter((f) => f.orgId === org.id);
-      const reports = db.outcomeReports.filter((r) => r.orgId === org.id);
-      if (signings.length < 3) {
+      const t = totals.get(org.id);
+      if (!t) continue;
+      if (t.signings < 3) {
         rows.push({ orgId: org.id, orgName: org.name, suppressed: true, note: 'Fewer than 3 signings — details suppressed to protect individual responses.' });
         continue;
       }
-      const due = fups.filter((f) => f.status !== 'scheduled');
       rows.push({
         orgId: org.id, orgName: org.name, suppressed: false,
-        signings: signings.length,
-        followUpsDue: due.length,
-        reported: reports.length,
-        confirmed: reports.filter((r) => r.status === 'confirmed').length,
-        disputed: reports.filter((r) => r.status === 'disputed').length,
-        unknown: due.length - reports.length,
-        retained: reports.filter((r) => r.registrationStatus === 'registered').length,
-        denominator: `retention counts confirmed+reported registrations over ${due.length} due follow-ups (${due.length - reports.length} unknown)`,
+        signings: t.signings,
+        followUpsDue: t.followUpsDue,
+        reported: t.reported,
+        confirmed: t.confirmed,
+        disputed: t.disputed,
+        unknown: t.followUpsDue - t.reported,
+        retained: t.retained,
+        denominator: `retention counts confirmed+reported registrations over ${t.followUpsDue} due follow-ups (${t.followUpsDue - t.reported} unknown)`,
       });
     }
     res.json({ rows, note: 'Missing data is counted as unknown, never as failure or success.' });
@@ -303,22 +309,22 @@ export function registerOperations(ctx) {
 
     // F11: backfill follow-ups for every signing (covers pre-M12 signings
     // and new ones without touching the signing endpoint), then mark due.
-    for (const s of db.signings) { if (scheduleFollowUps(s) > 0) changed = true; }
-    for (let f of db.followUps.slice()) {
-      if (f.status === 'scheduled' && f.dueAt <= now) {
-        f = fu.patch(f.id, { status: 'due' }); // S8d: committed at once (a transaction of its own)
-        changed = true;
-      }
-      if (f.status === 'due' && !f.notifiedAt) {
-        f = fu.patch(f.id, { notifiedAt: now }); // committed BEFORE anything else → restart cannot double-send
-        const org = db.orgs.find((o) => o.id === f.orgId);
-        const p = findPlayer(f.playerId);
-        const lead = usersOf(f.orgId)[0];
-        if (lead) notify({ kind: 'org_user', id: lead.id }, 'outcome', `⏰ ${f.milestone} follow-up due for ${p?.name ?? 'a signed player'} — file the outcome report.`, f.id);
-        if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'outcome', `How is ${p.name} getting on at ${org?.name}? A ${f.milestone} check-in is due — you can confirm or dispute the club's report.`, f.id);
-        else if (p) notify({ kind: 'player', id: p.id }, 'outcome', `How is it going at ${org?.name}? Your ${f.milestone} check-in is due.`, f.id);
-        changed = true;
-      }
+    // §4.3 step 2: three indexed queries, not a pass over every signing and follow-up.
+    for (const s of signingsFollowUps.signings.missingFollowUps(Object.keys(MILESTONES).length)) { if (scheduleFollowUps(s) > 0) changed = true; }
+    for (const f of fu.dueToMark(now)) {
+      fu.patch(f.id, { status: 'due' }); // S8d: committed at once (a transaction of its own)
+      changed = true;
+    }
+    for (let f of fu.dueUnnotified()) {
+      f = fu.patch(f.id, { notifiedAt: now }); // committed BEFORE anything else → restart cannot double-send
+      const org = db.orgs.find((o) => o.id === f.orgId);
+      const p = findPlayer(f.playerId);
+      const lead = usersOf(f.orgId)[0];
+      if (lead) notify({ kind: 'org_user', id: lead.id }, 'outcome', `⏰ ${f.milestone} follow-up due for ${p?.name ?? 'a signed player'} — file the outcome report.`, f.id);
+      if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'outcome', `How is ${p.name} getting on at ${org?.name}? A ${f.milestone} check-in is due — you can confirm or dispute the club's report.`, f.id);
+      else if (p) notify({ kind: 'player', id: p.id }, 'outcome', `How is it going at ${org?.name}? Your ${f.milestone} check-in is due.`, f.id);
+      changed = true;
+      changed = true;
     }
 
     // F5: outstanding application outcomes nag once after 7 days.
@@ -407,7 +413,7 @@ export function registerOperations(ctx) {
   // admin actions, not backdoors — they change WHEN, never WHAT.
   adminRouter.post('/sweep', (_req, res) => { sweep(); res.json({ ok: true }); });
   adminRouter.post('/followups/:id', (req, res) => {
-    const f = db.followUps.find((x) => x.id === req.params.id);
+    const f = fu.byId(req.params.id);
     if (!f) return res.status(404).json({ error: 'FOLLOWUP_NOT_FOUND' });
     if (!Number.isSafeInteger(req.body?.dueAt)) return res.status(400).json({ error: 'DUE_AT_REQUIRED', message: 'dueAt is an integer instant (milliseconds).' });
     let fresh;
