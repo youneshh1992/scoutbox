@@ -9,6 +9,7 @@
 // same unit's COMMIT; the deletion unit's redactions; a partial, an empty and a departing snapshot write.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
+import { checkHistoryFeed } from './historyFeedCheck.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -199,6 +200,7 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query return ex
     assert.equal(reads[name].byId, L.repo[name].byId);
   }
   assert.deepEqual(L.repo.counts(), { recruitmentContacts: all.contacts.length, recruitmentOffers: all.offers.length });
+  checkHistoryFeed('contacts.historyFeed', { feed: L.repo.contacts.historyFeed, count: L.repo.contacts.historyCount, records: all.contacts, ownerKey: 'contactId' });
   L.close(); rm(d);
 });
 

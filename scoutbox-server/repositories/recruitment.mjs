@@ -32,7 +32,7 @@
  * Refusals name tables, fields and ids — never a name, a message, a note, an address or a phone number.
  */
 import { pageOf } from '../domains/platform/paging.mjs';
-import { transaction, migrationApplied } from './database.mjs';
+import { transaction, migrationApplied, newestHistory } from './database.mjs';
 import { ORG_TYPES } from './orgs.mjs';
 import {
   TRIAL_WORKFLOW_STATES, TRIAL_SESSION_KINDS, TRIAL_ATTENDANCE_STATES, TRIAL_ATTENDANCE_SOURCES, TRIAL_COMPLETION_STATES,
@@ -641,6 +641,7 @@ const b = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
 const flagOut = (v) => (v === null ? null : v === 1);
 const actorRow = (p, a) => ({ [`${p}_kind`]: a?.kind ?? null, [`${p}_user_id`]: a?.kind === 'org' ? a.userId ?? null : null, [`${p}_actor_id`]: a && a.kind !== 'org' ? a.id ?? null : null, [`${p}_name`]: a?.name ?? null });
 const actorOut = (row, p) => (row[`${p}_kind`] === null ? null : row[`${p}_user_id`] === null && row[`${p}_actor_id`] === null && row[`${p}_name`] === null ? { kind: row[`${p}_kind`] } : row[`${p}_kind`] === 'org' ? { kind: 'org', userId: row[`${p}_user_id`], name: row[`${p}_name`] } : { kind: row[`${p}_kind`], id: row[`${p}_actor_id`], name: row[`${p}_name`] });
+const trialHistoryOut = (h) => ({ id: h.id, at: h.at, action: h.action, by: actorOut(h, 'by'), detail: h.detail_json === null ? null : JSON.parse(h.detail_json) });
 const venueRow = (p, v) => ({ [`${p}_name`]: v?.name ?? null, [`${p}_town`]: v?.town ?? null, [`${p}_address`]: v?.address ?? null });
 const venueOut = (row, p) => (row[`${p}_name`] === null ? null : { name: row[`${p}_name`], town: row[`${p}_town`], address: row[`${p}_address`] });
 const sessionRow = (s) => ({ id: s.id, kind: s.kind, starts_at: s.startsAt, ends_at: s.endsAt, ...venueRow('venue', s.venue), instructions: s.instructions });
@@ -804,7 +805,7 @@ function decodeTrial(st, row) {
     completion: row.completion_state === null ? null : { state: row.completion_state, at: row.completion_at, by: actorOut(row, 'completion_by'), reason: row.completion_reason, phase: row.completion_phase, cancelledBy: row.completion_cancelled_by },
     recipient: row.recipient_type === null ? null : { type: row.recipient_type, playerId: row.recipient_player_id, guardianId: row.recipient_guardian_id, minor: row.recipient_minor === 1, at: row.recipient_at },
     keys: Object.fromEntries(TRIAL_KEY_ACTS.map((act) => [act, keyRows.filter((k) => k.act === act).map((k) => ({ key: k.key, fp: k.fp, at: k.at }))])),
-    history: O.trial_history.all(row.id).map((h) => ({ id: h.id, at: h.at, action: h.action, by: actorOut(h, 'by'), detail: h.detail_json === null ? null : JSON.parse(h.detail_json) })),
+    history: O.trial_history.all(row.id).map(trialHistoryOut),
     reminders,
     lifecycle: row.lifecycle_applied === null ? null : row.lifecycle_applied === 1 ? { applied: true, from: row.lifecycle_from, to: row.lifecycle_to, at: row.lifecycle_at } : { applied: false, reason: row.lifecycle_reason, at: row.lifecycle_at },
     rev: row.rev, revAt: row.rev_at, revBy: row.rev_by_user_id === null && row.rev_by_name === null ? null : { userId: row.rev_by_user_id, name: row.rev_by_name },
@@ -983,6 +984,7 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     return pageOfRequestsBy.get(where)(args, page);
   };
   const pageOfTrials = newestFirst('trials', 'trials', () => 'org_id = ?');
+  const trialHistoryFrom = (orgId, actions) => ({ from: 'trial_history h JOIN trials t ON t.id = h.trial_id', where: `t.org_id = ? AND h.action IN (${actions.map(() => '?').join(', ') || 'NULL'})`, params: [orgId, ...actions] });
   const requests = {
     create: create('requests'), update: update('requests'),
     byId: (id) => read('requests', id),
@@ -1020,6 +1022,15 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     forCase: list('trials', 'SELECT * FROM trials WHERE case_id = ? ORDER BY rowid'),
     countForOrg: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ?'),
     countForOrgStatus: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ? AND status = ?'),
+    /**
+     * The history of the organisation's trials with one of `actions`, newest first, for a merged feed (the audit feed):
+     * `{ trialId, caseId, playerId, entry }`. See `newestHistory` (database.mjs) for `atMost` and `n`.
+     */
+    historyFeed(orgId, actions, atMost, n) {
+      return newestHistory(sqlite, { select: 'h.*, t.case_id AS owner_case_id, t.player_id AS owner_player_id', ...trialHistoryFrom(orgId, actions) }, atMost, n)
+        .map((h) => ({ trialId: h.trial_id, caseId: h.owner_case_id, playerId: h.owner_player_id, entry: trialHistoryOut(h) }));
+    },
+    historyCount(orgId, actions) { const f = trialHistoryFrom(orgId, actions); return sqlite.prepare(`SELECT COUNT(*) AS n FROM ${f.from} WHERE ${f.where}`).get(...f.params).n; },
     /** The players of the organisation's trials at `status` (a Set; nothing decoded). */
     playerIdsForOrgStatus: (orgId, status) => new Set(sqlite.prepare('SELECT DISTINCT player_id FROM trials WHERE org_id = ? AND status = ?').all(orgId, status).map((r) => r.player_id)),
     /** The club's Trials list, newest first, by cursor: `{ items, nextCursor }`. */

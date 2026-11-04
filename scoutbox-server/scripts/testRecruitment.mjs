@@ -10,6 +10,7 @@
 // unit's tombstones; the derived trial reports; the live report.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
+import { checkHistoryFeed } from './historyFeedCheck.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -176,6 +177,7 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query return ex
     check(`trials.reportOverdue ${at}`, trials.reportOverdue(at), all.trials.filter((t) => Number.isFinite(t.reportDueAt) && t.reportDueAt < at && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt));
     check(`trials.completedUnreminded ${at}`, trials.completedUnreminded(at), all.trials.filter((t) => t.completion?.state === 'completed' && t.completion.at <= at && !t.subjectRemovedAt && !t.reminders?.assessmentPending));
   }
+  checkHistoryFeed('trials.historyFeed', { feed: trials.historyFeed, count: trials.historyCount, records: all.trials, ownerKey: 'trialId' });
   const checks = (pendingOnly) => all.trials.flatMap((t) => (t.day?.staff ?? []).filter((x) => x.check && (!pendingOnly || x.check.status === 'pending')).map((x) => `${t.id}/${x.id}`));
   const walk = (pendingOnly, limit) => { const seen = []; let after = null; for (let i = 0; i < 50; i += 1) { const page = trials.staffChecksPage({ pendingOnly, limit, after }); seen.push(...page.items.map((r) => `${r.trialId}/${r.staffId}`)); if (!page.nextCursor) return seen; after = JSON.parse(Buffer.from(page.nextCursor, 'base64url').toString('utf8')); } throw new Error('the pages never ended'); };
   for (const pendingOnly of [true, false]) for (const limit of [1, 2, 100]) assert.deepEqual(walk(pendingOnly, limit), checks(pendingOnly), `staffChecksPage pendingOnly=${pendingOnly} by ${limit}`);

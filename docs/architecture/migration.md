@@ -183,7 +183,11 @@ the whole player base; §4.3.1 removed them. What is left, in the order to fix i
    all of it the Passport and Trust assembly for each of the 50 players on the page (a typical club's three Rooms
    take 12 ms), which belongs to S10; and `/org/recruitment-analytics` (870 ms) decodes every record of the club in
    eight kinds. It needs its own projections read in SQL, not the decoded records.
-3. **The audit feed builds the club's whole history** on each page, then slices it (0.5 s); page per source instead.
+3. **Done (4 November).** The audit feed built the club's whole history on each page. The Room, Contact and Trial
+   histories are now paged in SQL per source (`newestHistory` in `repositories/database.mjs`, which keeps every row
+   of a tied instant so the merged page is exact) and merged with the sources not yet in tables. The cursor is opaque
+   (`[at, id]`) and must name a row of the club's own feed. Busy club 496 → 22 ms, most of it the perf script's
+   cloned graphs, where hundreds of entries share one millisecond; a typical club takes 1.1 ms.
 4. **The offers lists write a receipt on every read**; write only when a revision is unseen.
 
 A backlog is a separate risk: the boot runs the sweeps before it listens, one transaction and one notification per due

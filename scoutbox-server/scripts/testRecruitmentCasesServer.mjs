@@ -201,6 +201,35 @@ await test('[routes] the deletion unit tombstones the person\'s cases in place (
   await S.stop(); rm(dir, restored, bk.body.dir);
 });
 
+await test('[routes] the audit feed pages each source in SQL (§4.3 step 4): walked one, two, three or fifty at a time it is the same rows, newest first with the id as the tie-break (ties planted across Rooms), every Room entry of the club exactly once and as many rows as `total`; a junk cursor, an old id cursor and another club\'s cursor are 400 AUDIT_CURSOR_INVALID', async () => {
+  const dir = tempDir('s8b-audit'); const S = await boot(dir);
+  const maria = await orgLogin(S);
+  for (let i = 0; i < 7; i += 1) { const p = await signupAdult(S, `Audit Adult ${i}`); const r = await roomFor(S, maria, p.pid); if (r.body?.room?.status === 'watching') assert.equal((await S.j('POST', `/org/rooms/${r.id}/lifecycle`, { action: 'startReview', expectedRev: await roomRev(S, maria, r.id) }, maria)).status, 200); }
+  // Plant ties: several entries of different Rooms in the same millisecond (a second connection; the server reads SQL).
+  const w = new DatabaseSync(path.join(dir, 'scoutbox.db')); w.exec('PRAGMA busy_timeout = 5000');
+  const tied = w.prepare("SELECT h.case_id, h.position FROM case_history h JOIN recruitment_cases c ON c.id = h.case_id WHERE c.org_id = 'org-eastport' ORDER BY h.rowid").all();
+  assert.ok(tied.length >= 10, 'enough history');
+  const at0 = Date.now() - 60_000;
+  tied.forEach((r, i) => { if (i % 2 === 0) w.prepare('UPDATE case_history SET at = ? WHERE case_id = ? AND position = ?').run(at0 + (i % 6 === 0 ? 0 : 1), r.case_id, r.position); });
+  w.close();
+  const walk = async (limit) => { const out = []; let cursor = null; let total = null; for (let n = 0; n < 500; n += 1) { const r = await S.j('GET', `/org/audit?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, undefined, maria); assert.equal(r.status, 200, r.text); total = r.body.total; out.push(...r.body.items); cursor = r.body.nextCursor; if (!cursor) return { out, total }; } throw new Error('the pages never ended'); };
+  const full = await walk(50);
+  const key = (e) => `${e.domain}|${e.target.id}|${e.id}`;
+  for (const limit of [1, 2, 3]) assert.deepEqual((await walk(limit)).out.map(key), full.out.map(key), `walked by ${limit}`);
+  assert.equal(full.out.length, full.total, 'total counts every row');
+  for (let i = 1; i < full.out.length; i += 1) { const a = full.out[i - 1]; const b = full.out[i]; assert.ok(a.at > b.at || (a.at === b.at && String(a.id).localeCompare(String(b.id)) >= 0), `newest first, then id: ${i}`); }
+  const roomRows = snap(dir, (q) => q.all("SELECT h.case_id, h.id FROM case_history h JOIN recruitment_cases c ON c.id = h.case_id WHERE c.org_id = 'org-eastport' AND c.room_status IS NOT NULL AND h.action IN ('room_created', 'room_status_changed')"));
+  assert.deepEqual(full.out.filter((e) => e.domain === 'recruitment_room' && ['room_created', 'room_status_changed'].includes(e.action)).map((e) => `${e.target.id}|${e.id}`).sort(), roomRows.map((r) => `${r.case_id}|${r.id}`).sort(), 'every Room entry once');
+  assert.ok(full.out.filter((e) => e.at === at0 || e.at === at0 + 1).length >= 4, 'the planted ties are in the feed');
+  const first = await S.j('GET', '/org/audit?limit=1', undefined, maria);
+  for (const bad of ['nope', first.body.items[0].id, Buffer.from(JSON.stringify([1, 'nobody'])).toString('base64url'), Buffer.from(JSON.stringify(['x', 1])).toString('base64url')]) {
+    const r = await S.j('GET', `/org/audit?cursor=${encodeURIComponent(bad)}`, undefined, maria); assert.equal(r.status, 400, bad); assert.equal(r.body.error, 'AUDIT_CURSOR_INVALID');
+  }
+  const rita = await orgLogin(S, 'org-harbour', 'Rita Vale', 'Head of Recruitment');
+  const foreign = await S.j('GET', `/org/audit?cursor=${encodeURIComponent(first.body.nextCursor)}`, undefined, rita); assert.equal(foreign.status, 400, "another club's cursor");
+  await S.stop(); rm(dir);
+});
+
 await test('[backup] the admin backup is a copy of the database: the five collections read back from it (insertion order, the budget lines, the decision keys reassembled, the comment); a restore into a NEW directory serves them row for row', async () => {
   const dir = tempDir('s8b-backup'); let S = await boot(dir);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Backup Adult'); const room = await roomFor(S, maria, a.pid); const RID = room.id;

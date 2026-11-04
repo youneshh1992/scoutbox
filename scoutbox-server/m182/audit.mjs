@@ -23,6 +23,7 @@
  */
 
 import { agentAuditRows } from '../m24/audit.mjs';
+import { encodeCursor } from '../domains/platform/paging.mjs';
 import { complianceAuditRows } from '../m25/audit.mjs';
 
 const PAGE_MAX = 50;
@@ -91,23 +92,52 @@ export function registerAudit(ctx) {
   const { db, recruitmentReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
   if (typeof recruitmentReads?.contacts?.forOrg !== 'function') throw new TypeError('registerAudit needs recruitmentReads (contacts) from the data layer');
 
-  function entriesFor(org) {
+  const ROOM_ACTION_LIST = [...ROOM_ACTIONS]; const CONTACT_ACTION_LIST = [...CONTACT_ACTIONS]; const TRIAL_ACTION_LIST = [...TRIAL_ACTIONS];
+  /** Newest first, id as the tie-break so two rows in the same millisecond keep their order between reads. */
+  const newestFirst = (a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id));
+  const subjectFor = (org, playerId) => { const p = findPlayer(playerId); return p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null }; };
+
+  /**
+   * The recruitment sources, read in SQL a page at a time (§4.3 step 4): the Room, Contact and Trial history entries
+   * at or before `atMost`, at least `n` of each source past any at `atMost` itself (repositories/database.mjs
+   * `newestHistory`), so the merged page is exact. The player is named only if the organisation may currently see them.
+   */
+  function recruitmentEntries(org, atMost, n) {
     const rows = [];
-    for (const c of recruitmentReads.cases.forOrg(org.id)) {
-      if (!c.room) continue;
-      // The player is named only if the organisation may currently see them.
-      const p = findPlayer(c.playerId);
-      const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };
-      for (const h of c.history ?? []) {
-        if (!ROOM_ACTIONS.has(h.action)) continue;
-        rows.push({
-          id: h.id, at: h.at, action: h.action, domain: 'recruitment_room',
-          actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
-          target: { type: 'room', id: c.id, ...subject },
-          detail: safeDetail(h.action, h.detail),
-        });
-      }
+    for (const { caseId, playerId, entry: h } of recruitmentReads.cases.roomHistoryFeed(org.id, ROOM_ACTION_LIST, atMost, n)) {
+      rows.push({
+        id: h.id, at: h.at, action: h.action, domain: 'recruitment_room',
+        actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
+        target: { type: 'room', id: caseId, ...subjectFor(org, playerId) },
+        detail: safeDetail(h.action, h.detail),
+      });
     }
+    // M23 P3: Contact lifecycle. The body, the summary and the reply never reach this feed.
+    for (const { contactId, caseId, playerId, entry: h } of recruitmentReads.contacts.historyFeed(org.id, CONTACT_ACTION_LIST, atMost, n)) {
+      rows.push({
+        id: h.id, at: h.at, action: h.action, domain: 'recruitment_contact',
+        actor: h.by?.kind === 'org' ? { userId: h.by.userId ?? null, name: h.by.name ?? null } : null,
+        target: { type: 'contact', id: contactId, roomId: caseId, ...subjectFor(org, playerId) },
+        detail: safeDetail(h.action, h.detail),
+      });
+    }
+    // M23 P4B: Trial history — the operational record of what happened, for the club that ran it.
+    for (const { trialId, caseId, playerId, entry: h } of recruitmentReads.trials.historyFeed(org.id, TRIAL_ACTION_LIST, atMost, n)) {
+      rows.push({
+        id: h.id, at: h.at, action: h.action, domain: 'recruitment_trial',
+        actor: h.by?.kind === 'org' ? { userId: h.by.userId ?? null, name: h.by.name ?? null } : null,
+        target: { type: 'trial', id: trialId, roomId: caseId ?? null, ...subjectFor(org, playerId) },
+        detail: safeDetail(h.action, h.detail),
+      });
+    }
+    return rows;
+  }
+  const recruitmentCount = (org) => recruitmentReads.cases.roomHistoryCount(org.id, ROOM_ACTION_LIST)
+    + recruitmentReads.contacts.historyCount(org.id, CONTACT_ACTION_LIST) + recruitmentReads.trials.historyCount(org.id, TRIAL_ACTION_LIST);
+
+  /** The sources not yet in tables (briefs, watchlists, development, agents, compliance, the ledger), read whole. */
+  function memoryEntries(org) {
+    const rows = [];
     for (const b of db.recruitmentBriefs ?? []) {
       if (b.orgId !== org.id) continue;
       for (const h of b.history ?? []) {
@@ -165,38 +195,6 @@ export function registerAudit(ctx) {
         });
       }
     }
-    // M23 P3: Contact lifecycle. The subject is named only if the organisation
-    // may currently see the player; the body, the summary and the reply never
-    // reach this feed.
-    for (const c of recruitmentReads.contacts.forOrg(org.id)) {
-      const p = findPlayer(c.playerId);
-      const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };
-      for (const h of c.history ?? []) {
-        if (!CONTACT_ACTIONS.has(h?.action)) continue;
-        rows.push({
-          id: h.id, at: h.at, action: h.action, domain: 'recruitment_contact',
-          actor: h.by?.kind === 'org' ? { userId: h.by.userId ?? null, name: h.by.name ?? null } : null,
-          target: { type: 'contact', id: c.id, roomId: c.caseId, ...subject },
-          detail: safeDetail(h.action, h.detail),
-        });
-      }
-    }
-    // M23 P4B: Trial history — the operational record of what happened, for
-    // the club that ran it. Subject named only where the org may see them.
-    for (const t of recruitmentReads.trials.forOrg(org.id)) {
-      if (!Array.isArray(t.history)) continue;
-      const p = findPlayer(t.playerId);
-      const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };
-      for (const h of t.history) {
-        if (!TRIAL_ACTIONS.has(h?.action)) continue;
-        rows.push({
-          id: h.id, at: h.at, action: h.action, domain: 'recruitment_trial',
-          actor: h.by?.kind === 'org' ? { userId: h.by.userId ?? null, name: h.by.name ?? null } : null,
-          target: { type: 'trial', id: t.id, roomId: t.caseId ?? null, ...subject },
-          detail: safeDetail(h.action, h.detail),
-        });
-      }
-    }
     // M23 P5.6B: the Agent domain — profile, affiliation and relationship
     // lifecycle for an agency organisation. Same rules: subject named only
     // where the org may see them; no reference numbers, no reason text.
@@ -212,27 +210,34 @@ export function registerAudit(ctx) {
         detail: null,
       });
     }
-    // Newest first, id as the tie-break so two rows in the same millisecond
-    // keep their order between reads.
-    rows.sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id)));
     return rows;
   }
+
+  /** A cursor is the [at, id] of the last row of a page, opaque to clients; anything else is null. */
+  const readCursor = (raw) => {
+    if (typeof raw !== 'string' || raw.length > 512) return null;
+    let key = null;
+    try { key = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')); } catch { return null; }
+    return Array.isArray(key) && key.length === 2 && Number.isFinite(key[0]) && typeof key[1] === 'string' ? { at: key[0], id: key[1] } : null;
+  };
 
   orgRouter.get('/audit', (req, res) => {
     if (!requireLead(req, res)) return;
     const limit = Math.min(PAGE_MAX, Math.max(1, Number(req.query.limit) || PAGE_DEFAULT));
-    const all = entriesFor(req.org);
-    let start = 0;
-    if (req.query.cursor) {
-      const idx = all.findIndex((r) => r.id === String(req.query.cursor));
-      if (idx < 0) return res.status(400).json({ error: 'AUDIT_CURSOR_INVALID', message: 'That page no longer exists — start again from the first page.' });
-      start = idx + 1;
-    }
-    const page = all.slice(start, start + limit);
+    const invalid = () => res.status(400).json({ error: 'AUDIT_CURSOR_INVALID', message: 'That page no longer exists — start again from the first page.' });
+    let after = null;
+    if (req.query.cursor) { after = readCursor(req.query.cursor); if (!after) return invalid(); }
+    const memory = memoryEntries(req.org);
+    const pool = [...recruitmentEntries(req.org, after ? after.at : null, limit + 1), ...memory];
+    // A cursor names a row of this organisation's feed (a cursor from another organisation's page is not one).
+    if (after && !pool.some((r) => r.at === after.at && r.id === after.id)) return invalid();
+    const rest = (after ? pool.filter((r) => newestFirst(r, after) > 0) : pool).sort(newestFirst);
+    const page = rest.slice(0, limit);
+    const last = page[page.length - 1];
     res.json({
       items: page,
-      nextCursor: start + limit < all.length ? page[page.length - 1].id : null,
-      total: all.length,
+      nextCursor: rest.length > limit ? encodeCursor([last.at, last.id]) : null,
+      total: memory.length + recruitmentCount(req.org),
       note: 'Operational history only: what happened and who did it. Notes, comments, decision text and assessments are never shown here.',
     });
   });

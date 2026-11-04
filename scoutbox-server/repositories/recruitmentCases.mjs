@@ -40,7 +40,7 @@
  *
  * Refusals name tables, fields and ids — never a name, a note, a body or a message.
  */
-import { transaction, migrationApplied } from './database.mjs';
+import { transaction, migrationApplied, newestHistory } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { describe, isPlainObject, nonEmpty, ids } from './recruitment.mjs';
 import {
@@ -921,6 +921,7 @@ function writeRoomRow(st, name, r) {
 function deleteRoomRow(st, name, id) { const table = PARENT[name]; for (const [t] of ROOM_CHILDREN[table]) st.roomChildDel[t].run(id); st.del[table].run(id); }
 function deleteCase(st, id) { for (const t of CASE_CHILDREN) st.caseChildDel[t].run(id); st.del.recruitment_cases.run(id); }
 
+const historyOut = (h) => ({ id: h.id, at: h.at, byKind: h.by_kind, byId: h.by_id, byName: h.by_name, action: h.action, detail: h.detail_json !== null ? JSON.parse(h.detail_json) : h.detail_text });
 function decodeCase(st, row) {
   const id = row.id; const O = st.of;
   const dr = st.draftOf.get(id); const ho = st.handoffOf.get(id);
@@ -947,7 +948,7 @@ function decodeCase(st, row) {
     decision: row.decision_at === null ? null : { outcome: row.decision_outcome, reasons: row.decision_reasons, byUserId: row.decision_by_user_id, byName: row.decision_by_name, approvedBy: row.decision_approved_by_name, at: row.decision_at },
     links: { requestIds: O.case_request_links.all(id).map((r) => r.request_id), trialIds: O.case_trial_links.all(id).map((r) => r.trial_id), signingId: row.links_signing_id },
     createdAt: row.created_at,
-    history: O.case_history.all(id).map((h) => ({ id: h.id, at: h.at, byKind: h.by_kind, byId: h.by_id, byName: h.by_name, action: h.action, detail: h.detail_json !== null ? JSON.parse(h.detail_json) : h.detail_text })),
+    history: O.case_history.all(id).map(historyOut),
     room,
     decisionDraft: !dr ? null : { id: dr.id, outcome: dr.outcome, reasonCodes: O.case_decision_draft_reason_codes.all(id).map((r) => r.code), note: dr.note, evidenceRefs: O.case_decision_draft_evidence_refs.all(id).map((r) => ({ kind: r.kind, id: r.ref_id, meta: jsonOut(r.meta_json) })), by: personOut(dr, 'by', ['role']), createdAt: dr.created_at, updatedAt: dr.updated_at, updatedBy: personOut(dr, 'updated_by', ['role']), rev: dr.rev, revAt: dr.rev_at, keys: { create: dr.create_key === null ? null : { key: dr.create_key, fp: dr.create_fp } } },
     transactionHandoff: !ho ? null : { id: ho.id, caseId: id, orgId: ho.org_id, playerId: ho.player_id, status: ho.status, invitedAt: ho.invited_at, invitedBy: ho.invited_by_user_id === null && ho.invited_by_name === null ? null : { kind: 'org', userId: ho.invited_by_user_id, name: ho.invited_by_name }, acceptedAt: ho.accepted_at, withdrawnAt: ho.withdrawn_at, transactionId: ho.transaction_id, representedAtInvitation: ho.represented_at_invitation === 1, invitedAgencyOrgId: ho.invited_agency_org_id, invitedAgentUserId: ho.invited_agent_user_id, keys: { invite: ho.invite_key === null ? null : { key: ho.invite_key } }, rev: ho.rev, revAt: ho.rev_at },
@@ -1235,6 +1236,16 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
       const f = roomWhere(viewer, filter);
       return sqlite.prepare(`SELECT c.id, c.player_id, c.player_name, c.room_status FROM recruitment_cases c WHERE ${['c.org_id = ?', 'c.room_status IS NOT NULL', ...f.where].join(' AND ')} ORDER BY c.rowid`).all(orgId, ...f.params).map(light);
     },
+    /**
+     * The history of the organisation's Rooms with one of `actions`, newest first, for a merged feed (the audit feed):
+     * `{ caseId, playerId, entry }` with the entry as a case's history holds it. See `newestHistory` for `atMost`/`n`.
+     */
+    roomHistoryFeed(orgId, actions, atMost, n) {
+      return newestHistory(sqlite, { select: 'h.*, c.player_id AS owner_player_id', ...roomHistoryFrom(orgId, actions) }, atMost, n)
+        .map((h) => ({ caseId: h.case_id, playerId: h.owner_player_id, entry: historyOut(h) }));
+    },
+    /** How many entries `roomHistoryFeed` holds in all. */
+    roomHistoryCount(orgId, actions) { const f = roomHistoryFrom(orgId, actions); return sqlite.prepare(`SELECT COUNT(*) AS n FROM ${f.from} WHERE ${f.where}`).get(...f.params).n; },
     /** Open and in-progress tasks of the organisation's cases due (an instant) before `at`, counted by case: `Map(caseId → n)`. */
     overdueTaskCounts(orgId, at) {
       return new Map(sqlite.prepare("SELECT t.case_id, COUNT(*) AS n FROM case_tasks t JOIN recruitment_cases c ON c.id = t.case_id WHERE c.org_id = ? AND t.status IN ('open', 'in_progress') AND t.due_at IS NOT NULL AND t.due_at <> 0 AND t.due_at < ? GROUP BY t.case_id").all(orgId, at).map((r) => [r.case_id, r.n]));
@@ -1261,6 +1272,7 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
     return { where, params };
   }
   const light = (r) => ({ id: r.id, playerId: r.player_id, playerName: r.player_name, status: r.room_status });
+  const roomHistoryFrom = (orgId, actions) => ({ from: 'case_history h JOIN recruitment_cases c ON c.id = h.case_id', where: `c.org_id = ? AND c.room_status IS NOT NULL AND h.action IN (${actions.map(() => '?').join(', ') || 'NULL'})`, params: [orgId, ...actions] });
   /**
    * Keyset paging over `recruitment_cases c`: `limit + 1` rows after the cursor, decoded in one batch. With `accept`,
    * rows are read in chunks and kept only when accepted (with their tags), until the page is full or the rows end.

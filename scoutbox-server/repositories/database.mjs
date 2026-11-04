@@ -79,6 +79,21 @@ export function transaction(sqlite, fn) {
 }
 
 /**
+ * A newest-first history feed, one page's worth (§4.3 step 4): the rows of `from` matching `where` with `h.at` at or
+ * before `atMost` (all when null), newest first, enough of them that `n` remain after any skipped at `atMost` itself,
+ * and every row that shares the oldest returned instant. A caller merging several feeds and ordering ties its own way
+ * (the audit feed orders them by id) can therefore never miss a row that belongs before one it was given.
+ * `from` names the history table as `h`; `select` is the column list.
+ */
+export function newestHistory(sqlite, { select, from, where, params = [] }, atMost, n) {
+  const upTo = atMost === null ? '' : ' AND h.at <= ?';
+  const p = atMost === null ? params : [...params, atMost];
+  const tied = atMost === null ? 0 : sqlite.prepare(`SELECT COUNT(*) AS n FROM ${from} WHERE ${where} AND h.at = ?`).get(...params, atMost).n;
+  const edge = sqlite.prepare(`SELECT h.at FROM ${from} WHERE ${where}${upTo} ORDER BY h.at DESC LIMIT 1 OFFSET ?`).get(...p, n - 1 + tied);
+  return sqlite.prepare(`SELECT ${select} FROM ${from} WHERE ${where}${upTo}${edge ? ' AND h.at >= ?' : ''} ORDER BY h.at DESC`).all(...p, ...(edge ? [edge.at] : []));
+}
+
+/**
  * Has this migration been recorded as applied? False when the bookkeeping
  * table does not exist yet. This is the ONLY way to tell whether a domain has
  * cut over: a table's existence or occupancy says nothing (the S1 shadow

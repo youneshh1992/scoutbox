@@ -31,7 +31,7 @@
  *
  * Refusals name tables, fields and ids — never a subject, a body, a note, a message or a name.
  */
-import { transaction, migrationApplied } from './database.mjs';
+import { transaction, migrationApplied, newestHistory } from './database.mjs';
 import { isPlainObject, ids, tableExists } from './recruitment.mjs';
 import { CONTACT_STATUSES, CONTACT_CHANNELS, CONTACT_MODES, CONTACT_LIMITS, RESPONSE_KINDS } from '../m23/contact.mjs';
 import { OFFER_STATUSES, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES, OFFER_RESPONSE_ACTORS } from '../m28/offer.mjs';
@@ -665,6 +665,7 @@ function deleteOffer(st, id) { for (const d of st.offerChildrenDel) d.run(id); s
 
 const flagOut = (v) => (v === null ? null : v === 1);
 const pick = (row, p, keys) => keys.every((k) => row[`${p}_${k}`] === null);
+const contactHistoryOut = (h) => ({ id: h.id, at: h.at, action: h.action, by: h.by_kind === null ? null : h.by_kind === 'org' ? { kind: 'org', userId: h.by_user_id, name: h.by_name } : { kind: h.by_kind, name: h.by_name }, detail: h.detail_json === null ? null : JSON.parse(h.detail_json) });
 function decodeContact(st, row) {
   const staffOut = (p) => (row[`${p}_user_id`] === null && row[`${p}_name`] === null ? null : { kind: 'org', userId: row[`${p}_user_id`], name: row[`${p}_name`] });
   const key = (act) => (row[`${act}_fp`] === null ? null : { key: row[`${act}_key`], fp: row[`${act}_fp`] });
@@ -682,7 +683,7 @@ function decodeContact(st, row) {
     response: row.response_kind === null ? null : { kind: row.response_kind, message: row.response_message, by: row.response_by, at: row.response_at },
     cancelledAt: row.cancelled_at, cancelledBy: staffOut('cancelled_by'),
     keys: { create: key('create'), send: key('send'), record: key('record') },
-    history: st.chistOf.all(row.id).map((h) => ({ id: h.id, at: h.at, action: h.action, by: h.by_kind === null ? null : h.by_kind === 'org' ? { kind: 'org', userId: h.by_user_id, name: h.by_name } : { kind: h.by_kind, name: h.by_name }, detail: h.detail_json === null ? null : JSON.parse(h.detail_json) })),
+    history: st.chistOf.all(row.id).map(contactHistoryOut),
     rev: row.rev, revAt: row.rev_at, revBy: row.rev_by_user_id === null && row.rev_by_name === null ? null : { userId: row.rev_by_user_id, name: row.rev_by_name }, policyVersion: row.policy_version,
   };
 }
@@ -885,12 +886,22 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
     write(name, next); return must(name, id);
   });
 
+  const contactHistoryFrom = (orgId, actions) => ({ from: 'contact_history h JOIN recruitment_contacts c ON c.id = h.contact_id', where: `c.org_id = ? AND h.action IN (${actions.map(() => '?').join(', ') || 'NULL'})`, params: [orgId, ...actions] });
   const contacts = {
     create: create('recruitmentContacts'), update: update('recruitmentContacts'),
     /** One contact by id, or null. Callers check the organisation and case they expect. */
     byId: (id) => read('recruitmentContacts', id),
     /** forCase(caseId), forOrgPlayer(orgId, playerId), forPlayer(playerId), forRequest(requestId), forAgent(agentUserId), forOrg(orgId). */
     ...queries('recruitmentContacts', CONTACT_READS),
+    /**
+     * The history of the organisation's contacts with one of `actions`, newest first, for a merged feed (the audit
+     * feed): `{ contactId, caseId, playerId, entry }`. See `newestHistory` (database.mjs) for `atMost` and `n`.
+     */
+    historyFeed(orgId, actions, atMost, n) {
+      return newestHistory(sqlite, { select: 'h.*, c.case_id AS owner_case_id, c.player_id AS owner_player_id', ...contactHistoryFrom(orgId, actions) }, atMost, n)
+        .map((h) => ({ contactId: h.contact_id, caseId: h.owner_case_id, playerId: h.owner_player_id, entry: contactHistoryOut(h) }));
+    },
+    historyCount(orgId, actions) { const f = contactHistoryFrom(orgId, actions); return sqlite.prepare(`SELECT COUNT(*) AS n FROM ${f.from} WHERE ${f.where}`).get(...f.params).n; },
     /** The deletion unit: the player's own words leave the contacts about them (the reply message); the records stay. */
     redactPlayer(playerId) {
       return operation(() => {

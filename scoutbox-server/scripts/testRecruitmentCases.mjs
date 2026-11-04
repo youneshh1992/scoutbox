@@ -10,6 +10,7 @@
 // snapshot is the snapshot row it names; the deletion unit's redaction.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
+import { checkHistoryFeed } from './historyFeedCheck.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -177,6 +178,7 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query of the fi
   for (const c of cases) check('cases.forOrgPlayer', R.cases.forOrgPlayer(c.orgId, c.playerId), cases.filter((x) => x.orgId === c.orgId && x.playerId === c.playerId));
   for (const v of values(cases, (c) => c.transactionHandoff?.invitedAgentUserId)) check(`cases.forHandoffAgent ${v}`, R.cases.forHandoffAgent(v), cases.filter((c) => c.transactionHandoff?.invitedAgentUserId === v));
   check('cases.withRoom', R.cases.withRoom(), cases.filter((c) => c.room)); assert.equal(R.cases.roomCount(), cases.filter((c) => c.room).length);
+  checkHistoryFeed('cases.roomHistoryFeed', { feed: R.cases.roomHistoryFeed, count: R.cases.roomHistoryCount, records: cases.filter((c) => c.room), ownerKey: 'caseId' });
   // §4.3 step 4: a list decodes its cases' children in one batch; each record is the one byId decodes on its own.
   const whole = (list) => assert.deepEqual(plain(list), plain(list.map((c) => R.cases.byId(c.id))), 'a batch-decoded list is the per-case decode');
   for (const v of values(cases, (c) => c.orgId)) whole(R.cases.forOrg(v)); whole(R.cases.withRoom()); whole(cases);
