@@ -59,8 +59,8 @@ The migration is finished when:
 
 Moving storage alone isn't the goal. A domain that is in tables but still loaded whole into memory (explicit writes,
 but every read scanning a whole-collection mirror, as S8a–S8d were until 4 November) is only part-way there. The
-recruitment domain now reads through SQL and its unbounded lists page (§4.3 step 2), but the measurement of step 4 shows
-it does not meet the bar yet; the work it found is listed at the end of §4.3.
+recruitment domain now reads through SQL and its unbounded lists page (§4.3 step 2), but does not meet the bar yet: the
+remaining work is listed under §4.3 step 4.
 
 ## 3. Status
 
@@ -86,8 +86,8 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 measured (4 Nov): fails §2, fixes listed in §4.3 |
-| — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left (§4.3.1) |
+| — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4: fails §2, remaining fixes listed in §4.3 |
+| — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -116,7 +116,8 @@ it runs the table migrations and writes through each domain's `*_SNAPSHOT` write
 
 The aim was to make one domain look like §2, so S9–S13 copy a finished pattern. Steps 1–3 (explicit writes, SQL reads
 with paging, no side columns) were done for S8a–S8d on 3–4 November; step 4 (the measurement) showed the §2 bar is not
-met, and the fixes are below and in §4.3.1. Code comments cite "§4.3 step 2" and "§4.3 step 4": keep those labels.
+met; §4.3.1 fixed part of it and the rest is listed below. Code comments cite "§4.3 step 2" and "§4.3 step 4":
+keep those labels.
 
 **The pattern, for S9–S13.** The S8 repositories are the reference; `signingsFollowUps.mjs` is the simplest.
 
@@ -164,85 +165,48 @@ Second Look, M19 watchlists: relevant to S12).
 Messages report picker show the newest 50. An older trial awaiting a report drops off the Trials screen, though the
 home figure still counts it.
 
-**Step 4: measured 4 November, the bar of §2 is not met** (`npm run perf:recruitment -- <players> <clones> <busy>`).
-The script builds synthetic players (`scripts/perfPopulation.mjs`) and clones the S8 fixtures' recruitment graph onto
-real clubs and players through a snapshot-mode save, then boots the real server and times the hot routes over HTTP,
-one write and the sweep queries. The busy club has 500 graphs (2,000 cases, 1,500 requests, 500 trials), a typical
-club one or two. Medians on a laptop, HTTP included:
+**Step 4: the measurement** (`npm run perf:recruitment -- <players> <clones> <busy>`). The script builds synthetic
+players (`scripts/perfPopulation.mjs`), clones the S8 fixtures' recruitment graph onto real clubs and players, boots the
+real server and times the hot routes over HTTP. The busy club has 500 graphs (2,000 cases, 1,500 requests, 500 trials);
+a typical club has one or two and is near 5 ms everywhere. The first run (4 November) failed §2 on costs that grew with
+the whole player base; §4.3.1 removed them. What is left, in the order to fix it, then re-measure:
 
-| Route (busy club unless named) | 10k players | 30k players | 100k, extrapolated | Cost grows with |
-|---|---|---|---|---|
-| `GET /org/audit` | 3.1 s | 9.0 s | ~30 s | club × players |
-| `GET /player/offers`, `/guardian/offers` | 1.3 s | 3.5 s | ~11 s | players (every read is a write) |
-| `POST /org/rooms/:id/comments` (any write) | 2.4 s | 6.4 s | ~21 s | players |
-| `GET /org/recruitment-analytics` | 1.2 s | 1.3 s | ~1.3 s | the club's cases |
-| `GET /org/rooms`, `/org/rooms/needs-attention` | 0.45 s | 0.5–0.6 s | ~0.6 s | the club's cases |
-| `GET /org/cases`, `/org/rooms-funnel` | 0.33 s | 0.34 s | ~0.35 s | the club's cases |
-| `GET /org/funnel`, `/player/journeys` | 40 ms | 42 ms | ~45 ms | the club's / player's cases |
-| `GET /org/trials`, a Room, a journey, `/player/signings` | 6–14 ms | 6–14 ms | same | the page |
-| requests, inboxes, counts, follow-ups, signings, Room tabs | 1–5 ms | 1–5 ms | same | the page |
+1. **The trial-reminder sweep visits every confirmed, open trial every minute** (`m12/operations.mjs`), looking up the
+   player before checking whether a reminder is due. Select only sessions starting within 48 hours, in SQL. With
+   10,000 open trials at 100k players it blocked the boot for over 18 minutes.
+2. **The busy club's Rooms, cases, funnel and analytics decode every case** with its child tables (at least 16 queries
+   a case) and filter and page in code, because the filters are per viewer: 0.3–1.3 s. They need a summary query over
+   `recruitment_cases` that filters and pages in SQL, with the per-viewer rules applied to the page.
+3. **The audit feed builds the club's whole history** on each page, then slices it (0.5 s); page per source instead.
+4. **The offers lists write a receipt on every read**; write only when a revision is unseen.
 
-A typical club is at or near 5 ms everywhere (its audit about 20 ms at 30k). Boot: 9 s at 10k players, 18 s at 30k,
-77 s at 100k with no recruitment; at 100k with 10,000 graphs it did not finish in 18 minutes (item 3). A comment adds
-about 320 kB to the write-ahead log at any size, so no request rewrites the file, but every write costs CPU in
-proportion to the whole player base. The causes, from CPU profiles, in the order to fix them. Items 1 and 2 are not
-recruitment's and every later domain would inherit them, so they are §4.3.1. Fix items 3–6 after it and re-measure.
+A backlog is a separate risk: the boot runs the sweeps before it listens, one transaction and one notification per due
+item. The script moves the fixtures' instants to today so it measures the steady state.
 
-1. **Every write walks every player** (`identity.flushDomain`). Fixed by §4.3.1.
-2. **`findPlayer`, `usersOf` and `db.orgs.find` are linear scans**, called per item by the audit feed and the
-   sweeps. §4.3.1.
-3. **The trial-reminder sweep visits every confirmed, open trial every minute** and calls `findPlayer` for each
-   before checking whether a reminder is due (`m12/operations.mjs:362`); with 10,000 open trials and 100k players
-   this blocked the boot for over 18 minutes. Select only sessions starting within 48 hours, in SQL.
-4. **The busy club's Rooms, cases, funnel and analytics decode every case** with its child tables (`decodeCase`, at
-   least 16 queries a case) and filter and page in code (`pageSorted`, because the filters are per viewer). They
-   need a summary query over `recruitment_cases` that filters and pages in SQL, with per-viewer rules applied to the
-   page.
-5. **The audit feed builds the club's whole history** on each page, then slices it; it should page per source.
-6. **The offers lists write a receipt on every read**; write only when a revision is unseen.
+### 4.3.1 Costs that grew with the whole player base (done 4 November)
 
-A backlog is a separate risk: the boot runs the sweeps before it listens, one transaction and one notification per
-due item (3,000 stale graphs at 10k players booted in 68 s instead of 23 s). The script moves the fixtures' instants to
-today so it measures the steady state.
+Lookups by id go through the repositories' indexes (`byId` on every module context, `domains/platform/lookups.mjs`;
+`usersOf` uses the staff index), and player and guardian writes are explicit repository operations (S4a-E), so a write
+or a unit of work no longer touches every player. `scripts/testUnitOfWork.mjs` holds that line: a player write costs
+the same number of SQL statements with 20 and 2,000 players. Players get their defaults at creation
+(`PLAYER_CREATION_DEFAULTS`), not by a boot backfill.
 
-### 4.3.1 Remove the costs that grow with the whole player base (done 4 November)
+Left over: an empty unit of work costs about 23 ms at 30k players, mostly the organisations (captured and flushed whole
+per unit, about 14 ms for 1,500 clubs, because their facets are still edited in place) and the blob collections'
+memento (about 4 ms). Both go as S9–S11 move those facets and collections into tables, or sooner by making the
+organisations' facet writes explicit like identity's.
 
-Found by §4.3 step 4: a write cost CPU in proportion to every player, and a lookup by id scanned a whole collection.
+Baseline, `npm run perf:recruitment` (busy club, medians, before → after):
 
-1. **Lookups by id use the index.** Every module context carries `byId` (`domains/platform/lookups.mjs`:
-   `byId.player`, `guardian`, `user`, `org`, `mediaOwner`), and about 100 `db.<collection>.find(… id === …)` scans
-   went through it, `findPlayer` and the media-owner scans included. `usersOf` reads the staff repository's per-club
-   index. Lookups that are not by id (by name, e-mail, external id) still scan; none is on a hot path.
-2. **Explicit identity writes (S4a-E).** Player and guardian records are read-only views: every write, a facet
-   included, is a repository operation written at once. The only in-place writer left was the co-guardian route
-   (`guardians.update(id, { coGuardians })`). The save no longer rebuilds every player's row, and a unit of work no
-   longer copies every player: each operation records the records it touches, and a rollback restores those. The
-   server never rewrites the identity tables now; only snapshot mode (fixtures, tools) still replaces them whole.
-3. **The unit of work, re-measured** (an empty unit on the 30k-player database: 23 ms). What is left is not the
-   players': the organisations capture and flush every record per unit (about 14 ms for 1,500 clubs), because their
-   facets (`squad`, `tactical`, `lookingFor`, `verification`, `agencySettings`, …) are still edited in place, and the
-   blob collections' memento costs about 4 ms. Both go as S9–S11 move those facets and collections into tables (or
-   sooner, by making the organisations' facet writes explicit the same way).
-4. **The boot's default backfill is gone.** A player gets `firstTeamSeeker`, `notificationPrefs` and `programme`
-   when it is created (`PLAYER_CREATION_DEFAULTS`); the media pass rewrote every clip row on every boot and changed
-   nothing.
+|                                | 10k players    | 30k players    |
+|--------------------------------|----------------|----------------|
+| `GET /org/audit`               | 3.1 s → 0.50 s | 9.0 s → 0.51 s |
+| `POST /org/rooms/:id/comments` | 2.4 s → 26 ms  | 6.4 s → 51 ms  |
+| `GET /player/offers`           | 1.3 s → 13 ms  | 3.5 s → 31 ms  |
+| boot                           | 9 s → 3.1 s    | 18 s → 4.4 s   |
 
-`scripts/testUnitOfWork.mjs` asserts that a player write, inside and outside a unit, and the save after it run the
-same number of SQL statements with 20 and 2,000 players (before: 104 against 4,064).
-
-Measured with `npm run perf:recruitment` (busy club, medians, before → after):
-
-| | 10k players | 30k players |
-|---|---|---|
-| `GET /org/audit` | 3.1 s → 0.50 s | 9.0 s → 0.51 s |
-| `POST /org/rooms/:id/comments` | 2.4 s → 26 ms | 6.4 s → 51 ms |
-| `GET /player/offers` | 1.3 s → 13 ms | 3.5 s → 31 ms |
-| boot | 9 s → 3.1 s | 18 s → 4.4 s |
-
-The audit feed no longer grows with the player base, and the offers lists are under 50 ms. The comment is at the
-50 ms bar and still doubles from 10k to 30k: the synthetic population has one club per 20 players, so the
-organisations' per-unit cost (item 3) grows with it. The other figures of the §4.3 table are unchanged; items 3–6 of
-§4.3 are next.
+The comment write is at the 50 ms bar and still doubles from 10k to 30k players, because the synthetic population has
+one club per 20 players (the organisations' per-unit cost above).
 
 ### 4.4 The end-to-end test estate
 
