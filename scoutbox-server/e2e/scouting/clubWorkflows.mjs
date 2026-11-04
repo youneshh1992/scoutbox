@@ -310,6 +310,8 @@ ok(r.status === 200 && r.body.playlist.segmentIds.filter((s) => s === segId).len
     [rating({ evidenceRefs: [{ segmentId: segId, t: -3 }] }), (b) => b.field === 'ratings[0].evidenceRefs[0].t', 'a negative timestamp'],
     [{ ratings: 'four' }, (b) => b.field === 'ratings', 'ratings that are not a list'],
     [{ recommendation: { verdict: 'sign', reasons: ['fast'] } }, (b) => b.field === 'recommendation.reasons', 'reasons that are not text'],
+    [rating({ confidence: '' }), (b) => b.error === 'CONFIDENCE_INVALID', 'an empty confidence'],
+    [rating({ confidence: false }), (b) => b.error === 'CONFIDENCE_INVALID', 'a confidence that is not a level'],
   ]) {
     const bad = await put(`/org/assessments/${draftA.id}`, body, bearer(SAM));
     ok(bad.status === 400 && check(bad.body), `S9b ${label} is refused (400)`);
@@ -324,6 +326,10 @@ ok(r.status === 200 && r.body.playlist.segmentIds.filter((s) => s === segId).len
   ok(badDrawing.status === 400 && badDrawing.body.field === 'drawing', 'S9b a drawing that is not an object is refused');
   const badAnchors = await post('/org/assessment-templates', { positionGroup: 'GK', attributes: [{ id: 'a', label: 'A', anchors: { 9: 'x' } }, { id: 'b', label: 'B' }] }, bearer(MARIA));
   ok(badAnchors.status === 400 && badAnchors.body.field === 'attributes[0].anchors', 'S9b template anchors outside levels 1–5 are refused');
+  for (const positionGroup of [true, ['MID'], {}]) {
+    const noTemplate = await post('/org/assessments', { playerId: 'pl-adeyemi', positionGroup }, bearer(SAM));
+    ok(noTemplate.status === 400 && noTemplate.body.error === 'NO_TEMPLATE', `S9b a position group of ${JSON.stringify(positionGroup)} names no template (400, not a server error)`);
+  }
   const badName = await post('/org/playlists', { name: ['x'] }, bearer(MARIA));
   ok(badName.status === 400 && badName.body.field === 'name', 'S9b a playlist name that is not text is refused');
   const templates = (await j('/org/assessment-templates', {}, bearer(MARIA))).body.templates;

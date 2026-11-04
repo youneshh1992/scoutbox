@@ -657,7 +657,7 @@ export function createScoutingAssessmentsRepository({ sqlite, unit = null, now =
     /** Every version of every template, in the order they were published. */
     all: () => templateRows.all().map(decodeTemplateRow),
     /** The newest version for a position group, or null. */
-    currentFor: (positionGroup) => decodeTemplateRow(latestOfGroup.get(positionGroup) ?? null),
+    currentFor: (positionGroup) => (typeof positionGroup === 'string' ? decodeTemplateRow(latestOfGroup.get(positionGroup) ?? null) : null),
     /** The newest version of template `id`, or null. */
     currentById: (id) => (typeof id === 'string' ? decodeTemplateRow(latestOfId.get(id) ?? null) : null),
     /** One exact version, or null. */

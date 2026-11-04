@@ -257,7 +257,7 @@ export function registerScouting(ctx) {
         if (!attr) return res.status(400).json({ error: 'ATTR_UNKNOWN', attrId: r.attrId });
         if (nextRatings.some((x) => x.attrId === r.attrId)) return res.status(400).json({ error: 'ATTR_DUPLICATE', attrId: r.attrId, message: 'Each attribute is rated once.' });
         if (!r.notObserved && !(Number.isInteger(r.rating) && r.rating >= 1 && r.rating <= 5)) return res.status(400).json({ error: 'RATING_INVALID', message: 'Each attribute is a whole number 1–5, or explicitly "not observed" — never a silent zero.' });
-        if (r.confidence && !CONFIDENCE.includes(r.confidence)) return res.status(400).json({ error: 'CONFIDENCE_INVALID', allowed: CONFIDENCE });
+        if (r.confidence !== undefined && r.confidence !== null && !CONFIDENCE.includes(r.confidence)) return res.status(400).json({ error: 'CONFIDENCE_INVALID', allowed: CONFIDENCE });
         const note = textOrRefuse(res, r.note, `ratings[${i}].note`, A_LIMITS.ratingNote); if (note === undefined) return;
         if (r.evidenceRefs !== undefined && r.evidenceRefs !== null && !Array.isArray(r.evidenceRefs)) return fieldInvalid(res, `ratings[${i}].evidenceRefs`, 'evidenceRefs is a list.');
         const refs = [];
