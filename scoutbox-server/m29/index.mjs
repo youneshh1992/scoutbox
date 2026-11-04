@@ -32,7 +32,7 @@
  * repository (`sp` = signingPackages: insert / patch / patchRevision / addRevision / setDocument / setParty / addKey /
  * addHistory / redactPlayer; `signings.record`) that writes its rows at once inside the route's unit of work and
  * returns the fresh record, which the route then uses; an in-place edit of a record throws. Nothing is fingerprinted at
- * save time; `persistNow()` only carries the blobs the route touched beside the rows (the case audit is S8b, staged).
+ * save time; `persistNow()` only carries the blobs the route touched beside the rows (the case audit is an explicit S8b write in the same unit).
  */
 
 import { createHash } from 'node:crypto';
@@ -70,6 +70,8 @@ export function registerSigning(rawCtx) {
     // S8d: the explicit-write repository of the four signing/follow-up collections.
     signingsFollowUps,
   } = ctx;
+  /** S8b: a case history entry is an explicit write of its case (never an in-place push on the read-only view). */
+  const caseAudit = (kase, ...args) => ctx.recruitmentCases.cases.update(kase.id, (d) => audit(d, ...args));
   if (typeof players?.update !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
   if (typeof signingsFollowUps?.signingPackages?.insert !== 'function' || typeof signingsFollowUps?.signings?.record !== 'function') throw new TypeError('registerSigning needs the signings/follow-ups repository (S8d) from the data layer');
   const sp = signingsFollowUps.signingPackages;
@@ -232,10 +234,8 @@ export function registerSigning(rawCtx) {
     if (verdict.ok) {
       const org = orgOf(room.orgId);
       let effect;
-      try { effect = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger, actor: actor ? { ...actor, org } : null }); }
+      try { effect = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger, actor: actor ? { ...actor, org } : null, statusDetail: { lifecycleAction: action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, ...keyDetail } }); }
       catch (e) { console.error(`SIGNING lifecycle_writer_threw ${action}: ${e?.message ?? e}`); return { applied: false, action, reason: 'writer_failed', from: room.room.status, to: null, at }; }
-      const last = room.history[room.history.length - 1];
-      if (last?.action === 'room_status_changed') last.detail = { ...last.detail, lifecycleAction: action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, ...keyDetail };
       return { applied: true, action, from: effect.from, to: effect.to, at };
     }
     if (verdict.error === 'LIFECYCLE_NO_CHANGE') return { applied: false, action, reason: 'already_there', from: room.room.status, to: room.room.status, at };
@@ -439,7 +439,7 @@ export function registerSigning(rawCtx) {
     };
     // S8d: the package, its history and the case audit commit as one unit of work.
     let stored;
-    try { stored = unit(() => { sp.insert(pkg); const fresh = hist(pkg, 'signing_created', by, { revisionId: rev.id, offerId: offer.id, offerRevisionId: acceptedRev.id }, at); audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_created', { signingPackageId: pkg.id, offerId: offer.id }); return fresh; }); }
+    try { stored = unit(() => { sp.insert(pkg); const fresh = hist(pkg, 'signing_created', by, { revisionId: rev.id, offerId: offer.id, offerRevisionId: acceptedRev.id }, at); caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_created', { signingPackageId: pkg.id, offerId: offer.id }); return fresh; }); }
     catch (e) { console.error(`SIGNING start_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be opened; nothing was recorded.'); }
     safe('broadcast', () => broadcast?.('signing_created', { orgId: stored.orgId, roomId: kase.id, signingPackageId: stored.id, offerId: offer.id }));
     res.status(201).json({ signing: signingClubView(stored, at, { orgName: req.org.name }) });
@@ -526,7 +526,7 @@ export function registerSigning(rawCtx) {
         p = sp.patch(p.id, { status: 'READY', expiresAt });
         if (key) p = addKey(p, 'ready', { key, fp, revisionId: rev.id, at });
         p = hist(p, 'signing_ready', by, { revisionId: rev.id, sha256: rev.document.sha256 }, at);
-        audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_ready', { signingPackageId: p.id, revisionId: rev.id });
+        caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_ready', { signingPackageId: p.id, revisionId: rev.id });
         return touch(p, req, at);
       });
     } catch (e) { console.error(`SIGNING ready_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be presented; nothing was recorded.'); }
@@ -576,7 +576,7 @@ export function registerSigning(rawCtx) {
         if (pkg.status === 'READY') p = sp.patch(p.id, { status: 'IN_PROGRESS' });
         if (key) p = addKey(p, 'party', { key, fp, actorId, revisionId: rev.id, at });
         p = hist(p, 'signing_party_completed', by, { revisionId: rev.id, partyType, sha256: rev.document.sha256 }, at);
-        audit(kase, actorKind, actorId, actorName, 'signing_party_completed', { signingPackageId: p.id, revisionId: rev.id, partyType });
+        caseAudit(kase, actorKind, actorId, actorName, 'signing_party_completed', { signingPackageId: p.id, revisionId: rev.id, partyType });
         p = touch(p, req, at, actorKind === 'org' ? req.orgUser : { id: actorId, name: actorName });
         if (faults?.shouldFail?.('signing.party.after_write')) throw new Error('simulated failure after the party evidence write (development fault layer)');
         return p;
@@ -665,10 +665,12 @@ export function registerSigning(rawCtx) {
         if (!moved.applied) throw new SigningAbort('SIGNING_LIFECYCLE_CONFLICT', moved.message ?? 'The case could not be moved to Signed; nothing was recorded.', { why: `lifecycle_${moved.reason}`, moved });
         p = sp.patch(p.id, { completion: { ...p.completion, lifecycle: { from: moved.from, to: moved.to, at } } });
         if (faults?.shouldFail?.('signing.complete.after_lifecycle')) throw new Error('simulated failure after the lifecycle moved (development fault layer)');
-        kase.links ??= {}; kase.links.signingId = signing.id;
         if (key) p = addKey(p, 'complete', { key, fp, signingId: signing.id, at });
         p = hist(p, 'signing_completed', by, { revisionId: rev.id, signingId: signing.id, sha256: rev.document.sha256 }, at);
-        audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_completed', { signingPackageId: p.id, signingId: signing.id, to: moved.to });
+        ctx.recruitmentCases.cases.update(kase.id, (d) => {
+          d.links.signingId = signing.id;
+          audit(d, 'org', req.orgUser.id, req.orgUser.name, 'signing_completed', { signingPackageId: p.id, signingId: signing.id, to: moved.to });
+        });
         p = touch(p, req, at);
         if (faults?.shouldFail?.('signing.complete.at_commit')) throw new Error('simulated failure at the commit of the completion unit (development fault layer)');
         return p;
@@ -707,7 +709,7 @@ export function registerSigning(rawCtx) {
           p = sp.patch(p.id, action === 'cancel' ? { status, cancelledAt: at, cancelledBy: by, cancelReason: reason.value } : { status, voidedAt: at, voidedBy: by, voidReason: reason.value });
           if (key) p = addKey(p, action, { key, fp, at });
           p = hist(p, `signing_${status.toLowerCase()}`, by, { revisionId: rev.id, hadReason: !!reason.value }, at);
-          audit(kase, 'org', req.orgUser.id, req.orgUser.name, `signing_${status.toLowerCase()}`, { signingPackageId: p.id });
+          caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, `signing_${status.toLowerCase()}`, { signingPackageId: p.id });
           return touch(p, req, at);
         });
       } catch (e) { console.error(`SIGNING ${action}_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be closed; nothing was recorded.'); }
@@ -749,7 +751,7 @@ export function registerSigning(rawCtx) {
         p = sp.patch(p.id, { currentRevisionId: rev.id, status: 'DRAFT' });
         if (key) p = addKey(p, 'supersede', { key, fp, revisionId: rev.id, at });
         p = hist(p, 'signing_superseded', by, { revisionId: rev.id, supersedes: prev.id, hadReason: !!reason.value }, at);
-        audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_superseded', { signingPackageId: p.id, revisionId: rev.id, supersedes: prev.id });
+        caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_superseded', { signingPackageId: p.id, revisionId: rev.id, supersedes: prev.id });
         return touch(p, req, at);
       });
     } catch (e) { console.error(`SIGNING supersede_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be superseded; nothing was recorded.'); }
@@ -865,7 +867,7 @@ export function registerSigning(rawCtx) {
         let p = sp.patchRevision(pkg.id, rev.id, { status: 'VOIDED' });
         p = sp.patch(p.id, { status: 'VOIDED', voidedAt: at, voidedBy: by, voidReason: reason.value });
         p = hist(p, 'signing_voided', by, { revisionId: rev.id, hadReason: true, byTrustAndSafety: true }, at);
-        const kase = caseOf(p); if (kase) audit(kase, 'admin', by.id, by.name, 'signing_voided', { signingPackageId: p.id, byTrustAndSafety: true });
+        const kase = caseOf(p); if (kase) caseAudit(kase, 'admin', by.id, by.name, 'signing_voided', { signingPackageId: p.id, byTrustAndSafety: true });
         return touch(p, null, at, { id: by.id, name: by.name });
       });
     } catch (e) { console.error(`SIGNING admin_void_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be voided; nothing was recorded.'); }

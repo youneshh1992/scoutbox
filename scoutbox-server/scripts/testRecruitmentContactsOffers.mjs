@@ -71,12 +71,12 @@ function snapshotOpen(dir) {
 
 // ------------------------------------------------------------- the schema and the typed snapshot
 
-test('[schema] migration 0017 is registered before 0018 and creates the ten typed STRICT tables (no lossless side column, the case and request keys deferred to COMMIT, the vocabulary CHECKs); a fresh database holds no row and no blob; the fixtures written by a snapshot save read back as the typed expectation, their keys as columns and offer_keys rows; the live counters count the historically missing player (Q8c-a); the step never runs twice', () => {
+test('[schema] migration 0017 is registered before 0018 and creates the ten typed STRICT tables (no lossless side column, the case key immediate and the request key deferred to COMMIT, the vocabulary CHECKs); a fresh database holds no row and no blob; the fixtures written by a snapshot save read back as the typed expectation, their keys as columns and offer_keys rows; the live counters count the historically missing player (Q8c-a); the step never runs twice', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id); assert.ok(ids.indexOf(MIGRATION) >= 0 && ids.indexOf(MIGRATION) < ids.indexOf('0018_signings_follow_ups'));
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
   const empty = tempDir('s8c-empty'); const e = openStore(empty).sqlite;
   for (const t of TABLES) { assert.ok(tableExistsIn(e, t), `${t} exists`); assert.equal(col(e, `SELECT count(*) FROM ${t}`), 0); assert.match(ddlOf(e, t), /STRICT/); assert.doesNotMatch(ddlOf(e, t), /absent_keys_json|offtype_json|extra_json|raw_json/, `${t} has no lossless side column`); }
-  assert.match(ddlOf(e, 'recruitment_contacts'), /case_id TEXT NOT NULL REFERENCES recruitment_cases\(id\) DEFERRABLE INITIALLY DEFERRED/);
+  assert.match(ddlOf(e, 'recruitment_contacts'), /case_id TEXT NOT NULL REFERENCES recruitment_cases\(id\) ON DELETE RESTRICT,/);
   assert.match(ddlOf(e, 'recruitment_contacts'), /request_id TEXT REFERENCES recruitment_requests\(id\) DEFERRABLE INITIALLY DEFERRED/);
   assert.match(ddlOf(e, 'recruitment_contacts'), /status TEXT NOT NULL CHECK \(status IS NULL OR status IN \('draft','delivered','failed','responded','recorded','cancelled'\)\)/);
   assert.match(ddlOf(e, 'offer_revisions'), /internal_note TEXT CHECK \(internal_note IS NULL OR length\(internal_note\) <= 2000\)/);
@@ -117,7 +117,7 @@ test('[snapshot][typed] a save STOPS with the id on a record the columns cannot 
   refusedSave('actor-empty', { recruitmentOffers: [acceptedOffer({ responses: [{ ...acceptedOffer().responses[0], actorId: '' }] })] }, /rof-2 responses\[0\]\.actorId must not be empty/);
   const emptyGuardian = acceptedOffer(); emptyGuardian.revisions[0].recipientSnapshot.guardianId = '';
   refusedSave('guardian-empty', { recruitmentOffers: [emptyGuardian] }, /recruitment_offers rof-2 → guardians ""/);
-  refusedSave('case', C({ caseId: 'case-nowhere' }), /CONTACTS_OFFERS_REFERENCE_MISSING[\s\S]*recruitment_contacts holds 1 row\(s\) naming a recruitment_cases row that is not there \(rct-1 → recruitment_cases\)/);
+  refusedSave('case', C({ caseId: 'case-nowhere' }), /CONTACTS_OFFERS_REFERENCE_MISSING[\s\S]*recruitment_contacts holds 1 row\(s\) naming a recruitment_cases row that is not there \(rct-1 → recruitment_cases case-nowhere\)/);
   refusedSave('request', C({ status: 'delivered', requestId: 'req-nowhere', recipient: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false } }), /rct-1 → recruitment_requests/);
   refusedSave('pair', { recruitmentContacts: [nullKeyContact()], more: { requests: [acceptedRequest(p4bInvitation({ contactId: 'rct-other' }), 'trial-1'), minorInvitation(), legacyTrialRequest()] } }, /CONTACT_REQUEST_MISMATCH[\s\S]*rct-3 → req-p4b/);
 });

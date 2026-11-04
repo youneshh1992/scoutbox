@@ -21,9 +21,9 @@
  * joins the open unit of work (store.unit) or runs a transaction of its own; the mirrors are restored by the unit's
  * rollback through `hook()`.
  *
- * References. `org_id` → orgs; `case_id` → recruitment_cases and a contact's `request_id` → recruitment_requests are
- * DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): the cases and requests are still written at the unit's commit
- * by their staged repositories, so a send writes its contact before the request row it names exists. Staff ids →
+ * References. `org_id` → orgs and `case_id` → recruitment_cases (RESTRICT). A contact's `request_id` →
+ * recruitment_requests is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a send writes its contact before the
+ * request row it names. Staff ids →
  * org_users. Player ids: no key, tolerant and counted (Q8c-a). Guardian ids: no key; a snapshot write naming a
  * guardian that is not in the final guardians table is refused (Q8c-b). The offer's own pointers (current revision,
  * response, supersedes, superseded by, discarded by, a receipt's or response's revision) must name a row of the
@@ -34,15 +34,12 @@
 import { readonlyView, markView } from './readonly.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 import { isPlainObject, ids, tableExists } from './recruitment.mjs';
-import { S8B_KEY_OWNERS } from './recruitmentCases.mjs';
 import { CONTACT_STATUSES, CONTACT_CHANNELS, CONTACT_MODES, CONTACT_LIMITS, RESPONSE_KINDS } from '../m23/contact.mjs';
 import { OFFER_STATUSES, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES, OFFER_RESPONSE_ACTORS } from '../m28/offer.mjs';
 
 export const RECRUITMENT_CONTACTS_OFFERS_MIGRATION = '0017_recruitment_contacts_offers';
 export const RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS = Object.freeze(['recruitmentContacts', 'recruitmentOffers']);
 export const RECRUITMENT_CONTACTS_OFFERS_TABLES = Object.freeze(['recruitment_contacts', 'contact_attempts', 'contact_history', 'recruitment_offers', 'offer_revisions', 'offer_revision_documents', 'offer_responses', 'offer_read_receipts', 'offer_history', 'offer_keys']);
-/** Contacts and offers keep their idempotency keys in their own columns; the shared table's owners are unchanged. */
-export const S8C_KEY_OWNERS = S8B_KEY_OWNERS;
 export const recruitmentContactsOffersLive = (sqlite) => migrationApplied(sqlite, RECRUITMENT_CONTACTS_OFFERS_MIGRATION);
 
 const CHANNELS = Object.keys(CONTACT_CHANNELS);
@@ -63,7 +60,7 @@ export const RECRUITMENT_CONTACTS_OFFERS_DDL = `
 CREATE TABLE recruitment_contacts (
   id TEXT PRIMARY KEY,
   org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) DEFERRABLE INITIALLY DEFERRED,
+  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
   player_id TEXT NOT NULL,
   status TEXT NOT NULL ${inList('status', CONTACT_STATUSES)},
   channel TEXT NOT NULL ${inList('channel', CHANNELS)},
@@ -157,7 +154,7 @@ CREATE INDEX contact_history_contact_at ON contact_history (contact_id, at);
 CREATE TABLE recruitment_offers (
   id TEXT PRIMARY KEY,
   org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) DEFERRABLE INITIALLY DEFERRED,
+  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
   player_id TEXT NOT NULL,
   type TEXT NOT NULL ${inList('type', OFFER_TYPES)},
   decision_id TEXT,
@@ -636,19 +633,26 @@ function statements(sqlite) {
     responsesOf: sqlite.prepare('SELECT * FROM offer_responses WHERE offer_id = ? ORDER BY position'), receiptsOf: sqlite.prepare('SELECT * FROM offer_read_receipts WHERE offer_id = ? ORDER BY position'),
     ohistOf: sqlite.prepare('SELECT * FROM offer_history WHERE offer_id = ? ORDER BY position'), okeysOf: sqlite.prepare('SELECT * FROM offer_keys WHERE offer_id = ? ORDER BY act, position'),
     ids: (table) => sqlite.prepare(`SELECT id FROM ${table} ORDER BY rowid`).all().map((r) => r.id),
+    caseExists: sqlite.prepare('SELECT 1 FROM recruitment_cases WHERE id = ?'),
     preparedBy: sqlite.prepare,
   };
   stmtCache.set(sqlite, s); return s;
 }
 
 /** Write a typed contact whole: the row upserted (its rowid, and so its place in the mirror, kept), the children replaced. */
+/** The case a contact or an offer names is written first (an immediate key): a miss is named with the ids. */
+function caseMustExist(st, table, r) {
+  if (!st.caseExists.get(r.caseId)) throw refusal('CONTACTS_OFFERS_REFERENCE_MISSING', `${table} holds 1 row(s) naming a recruitment_cases row that is not there (${r.id} → recruitment_cases ${r.caseId}); the write was rolled back`);
+}
 function writeContact(st, c) {
+  caseMustExist(st, 'recruitment_contacts', c);
   st.contact.run(contactRow(c));
   for (const d of st.contactChildrenDel) d.run(c.id);
   c.attempts.forEach((a, i) => st.attempt.run({ contact_id: c.id, position: i, at: a.at, ok: b(a.ok), code: a.code }));
   c.history.forEach((h, i) => st.chist.run({ id: h.id, contact_id: c.id, position: i, at: h.at, action: h.action, by_kind: h.by?.kind ?? null, by_user_id: h.by?.userId ?? null, by_name: h.by?.name ?? null, detail_json: json(h.detail) }));
 }
 function writeOffer(st, o) {
+  caseMustExist(st, 'recruitment_offers', o);
   st.offer.run(offerRow(o));
   for (const d of st.offerChildrenDel) d.run(o.id);
   o.revisions.forEach((r, i) => { st.revision.run(revisionRow(o.id, r, i)); r.documents.forEach((d, j) => st.doc.run({ id: d.id, revision_id: r.id, position: j, evidence_id: d.evidenceId, label: d.label, mime: d.mime, bytes: d.bytes })); });
@@ -820,8 +824,8 @@ export const CONTACTS_OFFERS_SNAPSHOT = {
 /**
  * `createRecruitmentContactsOffersRepository({ sqlite, unit, now, log })`. Every operation joins the open unit of work
  * (a failure poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and
- * re-reads the record into the mirror. A route that writes a contact naming a request or case created in the same
- * act runs inside a unit, whose COMMIT checks the deferred keys after the staged repositories wrote those rows.
+ * re-reads the record into the mirror. A route that writes a contact naming a request created in the same act runs
+ * inside a unit, whose COMMIT checks the deferred request key.
  */
 export function createRecruitmentContactsOffersRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the recruitment contacts/offers repository needs a SQLite connection (node:sqlite)');

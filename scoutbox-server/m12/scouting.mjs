@@ -6,7 +6,7 @@
 // blind SERVER-SIDE: another scout's report is not delivered to you until
 // your own is submitted. "Not observed" is never averaged as zero.
 
-import { roomRole, roomCan } from '../m17/shared.mjs';
+import { roomRole, roomCan, CASE_PRIORITIES, CASE_DECISION_OUTCOMES } from '../m17/shared.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
 const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
@@ -18,8 +18,9 @@ export function registerScouting(ctx) {
     orgRouter, playerRouter, guardianRouter,
     orgCanSee, paginate, audit, isLead, requireLead, moderateOrRefuse, isAdult,
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
-    recruitmentCases, // S8b: the cases live in their tables; a new case enters through the repository, every other change is in place
+    recruitmentCases, dueAtOrRefuse, // S8b: every case change is an explicit repository operation (cases.create / update)
   } = ctx;
+  const { cases } = recruitmentCases;
 
   // ------------------------------------------------- template seeds (v1)
   // Position-specific templates with DESCRIPTIVE anchors — a 3 means the
@@ -448,17 +449,19 @@ export function registerScouting(ctx) {
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
     if (vacancyId && !db.vacancies.some((v) => v.id === vacancyId && v.orgId === req.org.id)) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' });
-    const c = {
+    const due = dueAtOrRefuse(res, deadline, 'deadline');
+    if (due === undefined) return;
+    const draft = {
       id: nextId('case'), orgId: req.org.id, playerId: p.id, playerName: p.name,
       vacancyId: vacancyId ?? null, ownerUserId: req.orgUser.id, ownerName: req.orgUser.name,
-      stage: stagesFor(req.org)[0], priority: ['high', 'medium', 'low'].includes(priority) ? priority : 'medium',
-      deadline: deadline ?? null, restricted: !!restricted,
+      stage: stagesFor(req.org)[0], priority: CASE_PRIORITIES.includes(priority) ? priority : 'medium',
+      deadline: due, restricted: !!restricted,
       assignments: [], tasks: [], approvals: [], decision: null,
       links: { requestIds: [], trialIds: [], signingId: null },
       createdAt: Date.now(), history: [],
     };
-    audit(c, 'org', req.orgUser.id, req.orgUser.name, 'created', c.stage);
-    recruitmentCases.addCase(c); // S8b: the former `db.recruitmentCases.push(c)`; the row lands in the persistNow() below
+    audit(draft, 'org', req.orgUser.id, req.orgUser.name, 'created', draft.stage);
+    const c = cases.create(draft);
     persistNow();
     res.status(201).json({ case: caseView(c) });
   });
@@ -481,9 +484,10 @@ export function registerScouting(ctx) {
     if (c.ownerUserId !== req.orgUser.id && !isLead(req.orgUser)) return res.status(403).json({ error: 'OWNER_OR_LEAD_REQUIRED' });
     const u = db.users.find((x) => x.id === req.body?.userId && x.orgId === req.org.id && !x.removedAt);
     if (!u) return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
-    const asg = { id: nextId('asg'), userId: u.id, name: u.name, task: String(req.body?.task ?? 'Scout this player').slice(0, 200), dueAt: req.body?.dueAt ?? null, status: 'open', createdAt: Date.now() };
-    c.assignments.push(asg);
-    audit(c, 'org', req.orgUser.id, req.orgUser.name, 'assigned', `${u.name}: ${asg.task}`);
+    const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
+    if (dueAt === undefined) return;
+    const asg = { id: nextId('asg'), userId: u.id, name: u.name, task: String(req.body?.task ?? 'Scout this player').slice(0, 200), dueAt, status: 'open', createdAt: Date.now() };
+    cases.update(c.id, (d) => { d.assignments.push(asg); audit(d, 'org', req.orgUser.id, req.orgUser.name, 'assigned', `${u.name}: ${asg.task}`); });
     notify({ kind: 'org_user', id: u.id }, 'case', `📌 ${req.orgUser.name} assigned you: ${asg.task} (${c.playerName}).`, c.id);
     persistNow();
     res.status(201).json({ assignment: asg });
@@ -496,9 +500,11 @@ export function registerScouting(ctx) {
     // the Room task route already requires; a foreign or unknown user id is refused.
     const assigneeRaw = req.body?.assigneeUserId ? String(req.body.assigneeUserId) : null;
     if (assigneeRaw && !db.users.some((u) => u.id === assigneeRaw && u.orgId === req.org.id && !u.removedAt)) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
-    const t = { id: nextId('tsk'), title: String(req.body?.title ?? '').slice(0, 200), dueAt: req.body?.dueAt ?? null, assigneeUserId: assigneeRaw, status: 'open', createdAt: Date.now() };
+    const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
+    if (dueAt === undefined) return;
+    const t = { id: nextId('tsk'), title: String(req.body?.title ?? '').slice(0, 200), dueAt, assigneeUserId: assigneeRaw, status: 'open', createdAt: Date.now() };
     if (!t.title) return res.status(400).json({ error: 'TITLE_REQUIRED' });
-    c.tasks.push(t);
+    cases.update(c.id, (d) => { d.tasks.push(t); });
     persistNow();
     res.status(201).json({ task: t });
   });
@@ -506,13 +512,15 @@ export function registerScouting(ctx) {
   orgRouter.post('/cases/:id/tasks/:tid/complete', (req, res) => {
     const c = findCase(req, res);
     if (!c) return;
-    const t = c.tasks.find((x) => x.id === req.params.tid);
-    if (!t) return res.status(404).json({ error: 'TASK_NOT_FOUND' });
-    t.status = 'done';
-    t.completedAt = Date.now();
-    t.completedBy = req.orgUser.name;
+    if (!c.tasks.some((x) => x.id === req.params.tid)) return res.status(404).json({ error: 'TASK_NOT_FOUND' });
+    const fresh = cases.update(c.id, (d) => {
+      const t = d.tasks.find((x) => x.id === req.params.tid);
+      t.status = 'done';
+      t.completedAt = Date.now();
+      t.completedBy = req.orgUser.name;
+    });
     persistNow();
-    res.json({ task: t });
+    res.json({ task: fresh.tasks.find((x) => x.id === req.params.tid) });
   });
 
   orgRouter.post('/cases/:id/stage', (req, res) => {
@@ -545,10 +553,12 @@ export function registerScouting(ctx) {
     const { stage, reason } = req.body ?? {};
     if (!stages.includes(stage)) return res.status(400).json({ error: 'STAGE_INVALID', allowed: stages });
     if (stage === 'closed' && !c.decision) return res.status(409).json({ error: 'DECISION_REQUIRED', message: 'Close a case through a recorded decision — no silent drops.' });
-    audit(c, 'org', req.orgUser.id, req.orgUser.name, 'stage', `${c.stage} → ${stage}${reason ? `: ${reason}` : ''}`);
-    c.stage = stage;
+    const fresh = cases.update(c.id, (d) => {
+      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'stage', `${d.stage} → ${stage}${reason ? `: ${reason}` : ''}`);
+      d.stage = stage;
+    });
     persistNow();
-    res.json({ case: caseView(c) });
+    res.json({ case: caseView(fresh) });
   });
 
   // Decisions: on Pro, a "sign" decision by a non-lead needs lead approval
@@ -558,24 +568,25 @@ export function registerScouting(ctx) {
     const c = findCase(req, res);
     if (!c) return;
     const { outcome, reasons } = req.body ?? {};
-    if (!['sign', 'pass', 'monitor'].includes(outcome)) return res.status(400).json({ error: 'OUTCOME_INVALID' });
+    if (!CASE_DECISION_OUTCOMES.includes(outcome)) return res.status(400).json({ error: 'OUTCOME_INVALID' });
     if (!reasons || !String(reasons).trim()) return res.status(400).json({ error: 'REASONS_REQUIRED', message: 'Decisions carry reasons — they outlive the people who made them.' });
     const needsApproval = req.org.level !== 'grassroots' && outcome === 'sign' && !isLead(req.orgUser);
     if (needsApproval) {
       const appr = { id: nextId('apr'), decision: { outcome, reasons: String(reasons).slice(0, 500) }, requestedBy: { userId: req.orgUser.id, name: req.orgUser.name }, status: 'pending', requestedAt: Date.now(), resolvedBy: null };
-      c.approvals.push(appr);
-      audit(c, 'org', req.orgUser.id, req.orgUser.name, 'approval_requested', outcome);
+      cases.update(c.id, (d) => { d.approvals.push(appr); audit(d, 'org', req.orgUser.id, req.orgUser.name, 'approval_requested', outcome); });
       persistNow();
       return res.status(202).json({ approval: appr, note: 'A sign decision needs a recruitment lead’s approval.' });
     }
-    c.decision = { outcome, reasons: String(reasons).slice(0, 500), byUserId: req.orgUser.id, byName: req.orgUser.name, at: Date.now() };
-    // M23 — recording the decision is the point of this route; moving the case
-    // is not. On a Room the stage is derived from the lifecycle status, so
-    // writing it here would desync the two. The decision stands either way.
-    if (!c.room) c.stage = 'decision';
-    audit(c, 'org', req.orgUser.id, req.orgUser.name, 'decision', outcome);
+    const fresh = cases.update(c.id, (d) => {
+      d.decision = { outcome, reasons: String(reasons).slice(0, 500), byUserId: req.orgUser.id, byName: req.orgUser.name, at: Date.now() };
+      // M23 — recording the decision is the point of this route; moving the case
+      // is not. On a Room the stage is derived from the lifecycle status, so
+      // writing it here would desync the two. The decision stands either way.
+      if (!d.room) d.stage = 'decision';
+      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'decision', outcome);
+    });
     persistNow();
-    res.json({ case: caseView(c) });
+    res.json({ case: caseView(fresh) });
   });
 
   orgRouter.post('/cases/:id/approvals/:aid', (req, res) => {
@@ -585,40 +596,37 @@ export function registerScouting(ctx) {
     const appr = c.approvals.find((x) => x.id === req.params.aid);
     if (!appr || appr.status !== 'pending') return res.status(404).json({ error: 'APPROVAL_NOT_FOUND' });
     const approve = !!req.body?.approve;
-    appr.status = approve ? 'approved' : 'rejected';
-    appr.resolvedBy = { userId: req.orgUser.id, name: req.orgUser.name, at: Date.now() };
-    if (approve) {
-      c.decision = { ...appr.decision, byUserId: appr.requestedBy.userId, byName: appr.requestedBy.name, approvedBy: req.orgUser.name, at: Date.now() };
-      if (!c.room) c.stage = 'decision'; // derived on a Room — see the decision route
-    }
-    audit(c, 'org', req.orgUser.id, req.orgUser.name, approve ? 'approved' : 'rejected', appr.decision.outcome);
+    const fresh = cases.update(c.id, (d) => {
+      const a = d.approvals.find((x) => x.id === appr.id);
+      a.status = approve ? 'approved' : 'rejected';
+      a.resolvedBy = { userId: req.orgUser.id, name: req.orgUser.name, at: Date.now() };
+      if (approve) {
+        d.decision = { ...a.decision, byUserId: a.requestedBy.userId, byName: a.requestedBy.name, approvedBy: req.orgUser.name, at: Date.now() };
+        if (!d.room) d.stage = 'decision'; // derived on a Room — see the decision route
+      }
+      audit(d, 'org', req.orgUser.id, req.orgUser.name, approve ? 'approved' : 'rejected', a.decision.outcome);
+    });
     notify({ kind: 'org_user', id: appr.requestedBy.userId }, 'case', `${approve ? '✅ approved' : '❌ rejected'}: your ${appr.decision.outcome} decision on ${c.playerName}.`, c.id);
     persistNow();
-    res.json({ case: caseView(c) });
+    res.json({ case: caseView(fresh) });
   });
 
   orgRouter.post('/cases/:id/link', (req, res) => {
     const c = findCase(req, res);
     if (!c) return;
     const { requestId, trialId, signingId } = req.body ?? {};
-    if (requestId) {
-      const r = db.requests.find((x) => x.id === requestId && x.orgId === req.org.id && x.playerId === c.playerId);
-      if (!r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
-      if (!c.links.requestIds.includes(requestId)) c.links.requestIds.push(requestId);
-    }
-    if (trialId) {
-      const t = db.trials.find((x) => x.id === trialId && x.orgId === req.org.id && x.playerId === c.playerId);
-      if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
-      if (!c.links.trialIds.includes(trialId)) c.links.trialIds.push(trialId);
-    }
-    if (signingId) {
-      const s = db.signings.find((x) => x.id === signingId && x.orgId === req.org.id && x.playerId === c.playerId);
-      if (!s) return res.status(404).json({ error: 'SIGNING_NOT_FOUND' });
-      c.links.signingId = signingId;
-    }
-    audit(c, 'org', req.orgUser.id, req.orgUser.name, 'linked', JSON.stringify({ requestId, trialId, signingId }));
+    // Every reference is checked before anything is written.
+    if (requestId && !db.requests.some((x) => x.id === requestId && x.orgId === req.org.id && x.playerId === c.playerId)) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
+    if (trialId && !db.trials.some((x) => x.id === trialId && x.orgId === req.org.id && x.playerId === c.playerId)) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
+    if (signingId && !db.signings.some((x) => x.id === signingId && x.orgId === req.org.id && x.playerId === c.playerId)) return res.status(404).json({ error: 'SIGNING_NOT_FOUND' });
+    const fresh = cases.update(c.id, (d) => {
+      if (requestId && !d.links.requestIds.includes(requestId)) d.links.requestIds.push(requestId);
+      if (trialId && !d.links.trialIds.includes(trialId)) d.links.trialIds.push(trialId);
+      if (signingId) d.links.signingId = signingId;
+      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'linked', JSON.stringify({ requestId, trialId, signingId }));
+    });
     persistNow();
-    res.json({ case: caseView(c) });
+    res.json({ case: caseView(fresh) });
   });
 
   // Staff management: list + removal. Removal is immediate and structural

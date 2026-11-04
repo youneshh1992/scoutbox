@@ -146,20 +146,16 @@ export function registerM23(rawCtx) {
     // try the same impossible thing again.
     if (!guardRev(req, res, room.room, { errorCode: 'ROOM_VERSION_CONFLICT', current: { status: room.room.status } })) return undefined;
 
-    const { from, to } = ctx.applyLifecycleTransition({
+    // The action identity is recorded on the history entry the transition
+    // writes, so a replay can find it. The entry is the one M20 already reads;
+    // the keys are part of its detail, not a second entry.
+    const { from, to, room: fresh } = ctx.applyLifecycleTransition({
       req, room, to: verdict.to, reasonCodes: reasons.codes, trigger: `lifecycle:${action}`,
+      statusDetail: { lifecycleAction: action, clientKey, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION },
     });
 
-    // Record the action identity on the history entry the transition just
-    // wrote, so a replay can find it. The entry is the one M20 already reads;
-    // this adds keys to its detail, it does not add a second entry.
-    const last = room.history[room.history.length - 1];
-    if (last?.action === 'room_status_changed') {
-      last.detail = { ...last.detail, lifecycleAction: action, clientKey, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION };
-    }
-
     persistNow();
-    return res.json({ ok: true, action, from, to, ...revMeta(room.room) });
+    return res.json({ ok: true, action, from, to, ...revMeta(fresh.room) });
   });
 
   // ------------------------------------------------- vocabulary (read-only)

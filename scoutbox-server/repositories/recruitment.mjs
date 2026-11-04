@@ -25,10 +25,9 @@
  * rows at once and re-reads it from the tables into the mirror. An operation joins the open unit of work
  * (store.unit) or runs a transaction of its own; the mirrors are restored by the unit's rollback through `hook()`.
  *
- * References. `org_id` → orgs and `user_id` → org_users (RESTRICT). `case_id` (both tables) → recruitment_cases and
- * `recruitment_requests.trial_id` → trials are DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): the cases are still
- * written at the unit's commit by their staged repository (S8b), and a snapshot writes a request before the trial it
- * names. `trials.request_id` → recruitment_requests is immediate. Player ids: no key, tolerant and counted (Q7a).
+ * References. `org_id` → orgs, `user_id` → org_users and `case_id` (both tables) → recruitment_cases (RESTRICT).
+ * `recruitment_requests.trial_id` → trials is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a snapshot writes a
+ * request before the trial it names. `trials.request_id` → recruitment_requests is immediate. Player ids: no key, tolerant and counted (Q7a).
  * Guardian ids: no key (identity rewrites the guardians table), checked in code at every write (Q7c).
  *
  * Refusals name tables, fields and ids — never a name, a message, a note, an address or a phone number.
@@ -59,8 +58,8 @@ const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}:
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
 /**
- * The ONE shared idempotency_keys table of the case graph (S8b's drafts, handoffs and formal decisions; S8d's packages).
- * Its owner CHECK names the owner tables that exist; each migration that adds an owner rebuilds it.
+ * The shared idempotency_keys table (migration 0018: S8d's signing packages; the other steps keep their keys as
+ * columns). Its owner CHECK names the owner tables.
  */
 export const JSON_CHECK = (col) => `CHECK (${col} IS NULL OR json_valid(${col}))`;
 export function idempotencyKeysDdl(owners) {
@@ -118,7 +117,7 @@ CREATE TABLE recruitment_requests (
   routed_to TEXT NOT NULL ${inList('routed_to', PARTIES)},
   guardian_id TEXT,
   contact_channel_id TEXT,
-  case_id TEXT REFERENCES recruitment_cases(id) DEFERRABLE INITIALLY DEFERRED,
+  case_id TEXT REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
   trial_id TEXT REFERENCES trials(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
   recipient_type TEXT ${inList('recipient_type', PARTIES)},
   recipient_player_id TEXT,
@@ -154,7 +153,7 @@ ${venue('venue')},
 CREATE TABLE trials (
   id TEXT PRIMARY KEY,
   request_id TEXT NOT NULL UNIQUE REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
-  case_id TEXT REFERENCES recruitment_cases(id) DEFERRABLE INITIALLY DEFERRED,
+  case_id TEXT REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
   player_id TEXT NOT NULL,
   player_name TEXT,
   org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
@@ -709,20 +708,27 @@ function statements(sqlite) {
     revisionSessionsOf: sqlite.prepare('SELECT * FROM trial_revision_sessions WHERE trial_id = ? AND revision = ? ORDER BY position'),
     keysOf: sqlite.prepare('SELECT * FROM trial_keys WHERE trial_id = ? ORDER BY act, position'),
     guardian: sqlite.prepare('SELECT 1 FROM guardians WHERE id = ?'),
+    caseExists: sqlite.prepare('SELECT 1 FROM recruitment_cases WHERE id = ?'),
     ids: (table) => sqlite.prepare(`SELECT id FROM ${table} ORDER BY rowid`).all().map((r) => r.id),
     preparedBy: sqlite.prepare,
   };
   stmtCache.set(sqlite, s); return s;
 }
 
+/** The case a request or a trial names is written first (an immediate key): a miss is named with the ids. */
+function caseMustExist(st, table, r) {
+  if (r.caseId !== null && !st.caseExists.get(r.caseId)) throw refusal('RECRUITMENT_CASE_MISSING', `${table} holds 1 row naming a recruitment_cases row that is not there (${r.id} → recruitment_cases ${r.caseId}); the write was rolled back`);
+}
 /** Write a typed request whole: the row upserted (its rowid, and so its place in the mirror, kept), the slots replaced. */
 function writeRequest(st, q) {
+  caseMustExist(st, 'recruitment_requests', q);
   st.ins.recruitment_requests.run(requestRow(q));
   st.slotsDel.run(q.id);
   (q.trialDetails?.slots ?? []).forEach((s, i) => st.ins.request_trial_slots.run({ request_id: q.id, position: i, id: s.id, day: s.day, kind: s.kind, starts_at: s.startsAt, ends_at: s.endsAt, timezone: s.timezone, ...venueRow('venue', s.venue) }));
 }
 /** Write a typed trial whole: the row upserted, every child row replaced in list order. */
 function writeTrial(st, t) {
+  caseMustExist(st, 'trials', t);
   st.ins.trials.run(trialRow(t));
   for (const d of st.trialChildrenDel) d.run(t.id);
   const I = st.ins;
@@ -909,8 +915,7 @@ export const RECRUITMENT_SNAPSHOT = {
 /**
  * `createRecruitmentRepository({ sqlite, unit, now, log })`. Every operation joins the open unit of work (a failure
  * poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and re-reads
- * the record into the mirror. A route that writes a request or a trial naming a case created in the same act runs
- * inside a unit, whose COMMIT checks the deferred keys after the staged case repository wrote its rows.
+ * the record into the mirror. A case a request or a trial names must already be written (its key is immediate).
  */
 export function createRecruitmentRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the recruitment repository needs a SQLite connection (node:sqlite)');
@@ -952,7 +957,6 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
 
   return {
     views,
-    /** S8b reads the final requests and trials through these (ids, case ids, request ids). */
     requestsView: views.requests, trialsView: views.trials,
     requests: { create: create('requests'), update: update('requests'), byId: byId('requests') },
     trials: { create: create('trials'), update: update('trials'), byId: byId('trials') },
@@ -972,8 +976,6 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     trialReportsFor(playerId) {
       return mirrors.trials.filter((t) => t.playerId === playerId && t.report).map((t) => t.report).sort((a, b) => a.filedAt - b.filedAt);
     },
-    /** S8b's release set: an explicit write never removes a request or a trial, so a save has nothing to release. */
-    departures: () => ({ trials: [], requests: [] }),
     /** Load the mirrors (the tables are authoritative once 0015 is recorded; nothing is imported from memory). */
     attach() {
       if (!recruitmentLive(sqlite)) throw new Error(`the recruitment repository needs ${RECRUITMENT_MIGRATION} recorded; it never imports an in-memory array`);

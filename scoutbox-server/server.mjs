@@ -4299,9 +4299,7 @@ function deletePlayerData(playerId) {
   // case (M23 P2). The case's copy of the name goes with the person.
   // S8a: each tombstone is an explicit write of the reduced record, in this unit.
   recruitment.tombstoneForPlayer(playerId, { request: (r) => tombstoneRequest(r, at), trial: (t) => tombstoneTrial(t, at) });
-  for (const c of db.recruitmentCases ?? []) {
-    if (c?.playerId === playerId) { c.playerName = null; c.subjectRemovedAt = at; }
-  }
+  recruitmentCases.redactPlayer(playerId, at); // S8b: the case's copy of the name goes, in this unit
   for (const a of db.assessments ?? []) if (a?.playerId === playerId) a.playerName = null;
   recruitmentContactsOffers.contacts.redactPlayer(playerId); // S8c: the reply's words go; the contact stays
   for (const ot of db.openTrials ?? []) {
@@ -4739,7 +4737,7 @@ const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
   db, app, orgRouter, playerRouter, guardianRouter, adminRouter,
-  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases,
+  nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4955,6 +4953,7 @@ m27Ctx = registerIntegration({
   findRoomForRequest: m17Ctx.findRoomForRequest,
   agent: m24Ctx,
   compliance: m25Ctx.integrationSeam,
+  recruitmentCases, // S8b: the transaction handoff is an explicit write of its case
 });
 Object.assign(agentIntegration, m27Ctx.seam);
 
@@ -4971,6 +4970,7 @@ Object.assign(agentIntegration, m27Ctx.seam);
 // (an agent's basis and scope) and P5.6D's readiness seam, by reference.
 m28Ctx = registerOffers({
   ...m19Ctx,
+  recruitmentCases, // S8b: the case's history entries are explicit writes in the offer's unit
   recruitmentContactsOffers, // S8c: offers are explicit repository writes (offers.create / update), inside a unit of work
   unit, afterCommit: (fn) => store.afterCommit(fn),
   faults: faultLayer, // M23 P8.1 — the development fault seam after an answer moved the case
@@ -5002,10 +5002,7 @@ m29Ctx = registerSigning({
   refreshJourneyBadges,
   findRoomForRequest: m17Ctx.findRoomForRequest,
   applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
-  // M23 P8 — the lifecycle writer's own snapshot/restore, so a completion that
-  // fails after the case moved restores status, stage, rev and history together.
-  lifecycleSnapshot: m17Ctx.lifecycleSnapshot,
-  restoreLifecycle: m17Ctx.restoreLifecycle,
+  recruitmentCases, // S8b: the case's signing link and history are explicit writes in the completion unit
   recruitmentEvidenceProvider: recruitmentEvidence,
   agent: m24Ctx,
   integration: agentIntegration,

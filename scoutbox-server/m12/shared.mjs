@@ -1,6 +1,6 @@
 // M12 shared: additive migrations + helpers used by every feature module.
 import { isAdult, visibleToOrg, haversineKm } from '../domain.mjs';
-import { ageOrNull } from '../temporal.mjs';
+import { ageOrNull, parseDateOrInstant, isAbsent } from '../temporal.mjs';
 import { isLeadUser } from '../roles.mjs';
 
 // ------------------------------------------------------------- migrations
@@ -127,8 +127,20 @@ export function buildShared(ctx) {
     return km <= 5 ? 'under 5 km' : km <= 15 ? '5–15 km' : km <= 30 ? '15–30 km' : km <= 50 ? '30–50 km' : 'over 50 km';
   };
 
+  /**
+   * M23 P5.7: a due date (or a case deadline) is a calendar day or an instant that EXISTS, or it is absent.
+   * Returns the canonical stored value (a `YYYY-MM-DD` string or integer ms), null for absent, or undefined after
+   * sending a 400.
+   */
+  const dueAtOrRefuse = (res, raw, field = 'dueAt') => {
+    if (isAbsent(raw)) return null;
+    const p = parseDateOrInstant(raw, { dayEdge: 'end' });
+    if (!p.ok) { res.status(400).json({ error: 'DATE_INVALID', field, message: `A due date is a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset (${p.why}).`, expected: p.expected }); return undefined; }
+    return p.precision === 'day' ? p.value : p.ms;
+  };
+
   return {
-    isLead, requireLead, orgCanSee, paginate, audit, guardianOwnsChild,
+    isLead, requireLead, orgCanSee, paginate, audit, guardianOwnsChild, dueAtOrRefuse,
     EVIDENCE_TIERS, freshness, activeAffiliation, checkEligibility,
     distanceBand, isAdult, haversineKm,
   };

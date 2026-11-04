@@ -399,7 +399,7 @@ export function registerNobodyMissed(ctx) {
     if (!ctx.createRoomForPlayer) return res.status(503).json({ error: 'ROOM_ENGINE_UNAVAILABLE' });
     const out = ctx.createRoomForPlayer({
       req, player: ctxp.player, sourceContext: 'nobody_missed',
-      sourceRef: { briefId: ctxp.brief.id, briefVersion: ctxp.brief.version },
+      sourceRef: { id: ctxp.brief.id, version: ctxp.brief.version },
     });
     if (!out.ok) return res.status(out.status).json(out);
     const r = setReview(req, ctxp.brief, ctxp.player.id, {

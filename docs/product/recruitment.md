@@ -69,8 +69,14 @@ How a club takes a player from "watching" to a decision. The case lifecycle, the
   - org and staff ids.
 - A case cannot be removed while requests, trials, room rows, contacts or offers still
   name it.
-- One open Room per player per org (`ROOM_EXISTS`). Decision chains (`supersedes`) must
-  stay within the same Room.
+- One open Room per player per org (`ROOM_EXISTS`). Decision chains (`supersedes`) and a
+  decision's snapshot must stay within the same Room. A decision's snapshot is the Room
+  snapshot it names, not a copy.
+- A case deadline and an assignment or task due date are a calendar day or an instant;
+  anything else is refused (`DATE_INVALID`). A change to a Room, a task or a case's links
+  is checked whole before anything is written: a refused field leaves the rest unchanged.
+- A case's history has one entry shape, so the Room activity feed shows who invited,
+  withdrew or accepted a transaction handoff.
 - A contact and its request must agree. An offer's revision and response pointers must
   not point into another offer; unresolved historical pointers are kept.
 - `EXPIRED` offer status is computed when read, never stored.

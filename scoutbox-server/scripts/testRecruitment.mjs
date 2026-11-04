@@ -1,6 +1,6 @@
 // S8a — recruitment requests and accepted trials as typed tables with EXPLICIT writes (repositories/recruitment.mjs,
 // migration 0015; docs/architecture/migration.md §4.3). What this suite proves: the migration creates the sixteen typed
-// tables (no lossless side column, the vocabulary CHECKs, the case and trial keys deferred to COMMIT) and channels with
+// tables (no lossless side column, the vocabulary CHECKs, the case key immediate and the trial key deferred to COMMIT) and channels with
 // the real request key; a snapshot save (fixtures, tools) types every writer shape into its columns and reads back the
 // typed record, refuses a record it cannot type and names every missing reference with ids; the player references are
 // counted, never refused (Q7a), and a missing guardian is refused (Q7c); the repository's operations write rows at once
@@ -66,7 +66,7 @@ function snapshotOpen(dir) {
   return { store, db, save, revision: () => store.revision(), close: () => store.sqlite.close() };
 }
 
-test('[schema] migration 0015 is registered before 0016–0018 and creates the sixteen typed STRICT tables (no lossless side column, the vocabulary CHECKs, the case and trial keys deferred to COMMIT) and channels with the real request key; a fresh database holds no row and no blob', () => {
+test('[schema] migration 0015 is registered before 0016–0018 and creates the sixteen typed STRICT tables (no lossless side column, the vocabulary CHECKs, the case key immediate and the trial key deferred to COMMIT) and channels with the real request key; a fresh database holds no row and no blob', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id); assert.ok(ids.indexOf(MIGRATION) >= 0 && ids.indexOf(MIGRATION) < ids.indexOf('0016_recruitment_cases'), '0015 before 0016');
   for (const n of rec.RECRUITMENT_COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
   const d = tempDir('s8a-fresh'); const f = openStore(d).sqlite;
@@ -74,7 +74,7 @@ test('[schema] migration 0015 is registered before 0016–0018 and creates the s
     const sql = ddlOf(f, t); assert.ok(sql, `${t} exists`); assert.match(sql, /STRICT\s*$/, `${t} is STRICT`); assert.equal(col(f, `SELECT count(*) FROM ${t}`), 0);
     for (const c of ['raw_json', 'extra_json', 'absent_keys_json', 'offtype_json']) assert.ok(!f.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c), `${t}: no ${c}`);
   }
-  for (const t of ['recruitment_requests', 'trials']) assert.match(ddlOf(f, t), /case_id TEXT REFERENCES recruitment_cases\(id\) DEFERRABLE INITIALLY DEFERRED/, `${t}.case_id is deferred to COMMIT`);
+  for (const t of ['recruitment_requests', 'trials']) assert.match(ddlOf(f, t), /case_id TEXT REFERENCES recruitment_cases\(id\) ON DELETE RESTRICT,/, `${t}.case_id is an immediate key: the case is written first`);
   assert.match(ddlOf(f, 'recruitment_requests'), /trial_id TEXT REFERENCES trials\(id\) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED/);
   assert.match(ddlOf(f, 'trials'), /request_id TEXT NOT NULL UNIQUE REFERENCES recruitment_requests\(id\) ON DELETE RESTRICT/);
   assert.match(ddlOf(f, 'recruitment_requests'), /status IN \('pending','accepted','declined','suspended'\)/); assert.match(ddlOf(f, 'trials'), /workflow_state IN \('legacy_accepted'/); assert.match(ddlOf(f, 'trial_attendance'), /source IN \('checkin','manual'\)/);
@@ -140,15 +140,15 @@ test('[repository] explicit writes: the views and every returned record are read
   L.close(); rm(d);
 });
 
-test('[repository] a unit of work: a request and a trial written in a unit with the case the staged S8b repository creates at the same COMMIT (the deferred key) commit together; a unit that fails rolls the rows AND the mirrors back; a COMMIT whose deferred case key is missing refuses the whole unit', () => {
+test('[repository] a unit of work: a request and a trial written in a unit with the case created first in the same unit commit together; a unit that fails rolls the rows AND the mirrors back; a request naming a missing case refuses the whole unit with its ids', () => {
   const d = file('unit'); const L = serverOpen(d); const { requests, trials } = L.repo;
   const rows = withRo(d, recDump); const mirror = JSON.stringify(L.db.requests);
   assert.throws(() => L.unit(() => { requests.create(contactRequest({ id: 'req-u' })); trials.update('trial-1', (x) => { x.rev += 1; }); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
   assert.equal(withRo(d, recDump), rows, 'no row changed'); assert.equal(JSON.stringify(L.db.requests), mirror, 'the mirror is back'); assert.equal(trials.byId('trial-1').rev, 1);
-  assert.throws(() => L.unit(() => { requests.create(p4bInvitation({ id: 'req-ghost', caseId: 'case-ghost', trialId: null, keys: { invite: null } })); }), /FOREIGN KEY/, 'the deferred key is checked at COMMIT');
+  assert.throws(() => L.unit(() => { requests.create(p4bInvitation({ id: 'req-ghost', caseId: 'case-ghost', trialId: null, keys: { invite: null } })); }), /RECRUITMENT_CASE_MISSING[\s\S]*req-ghost → recruitment_cases case-ghost/, 'a request naming no case is refused with its ids (the case key is immediate)');
   assert.equal(L.db.requests.some((r) => r.id === 'req-ghost'), false); assert.equal(withRo(d, (s) => col(s, "SELECT count(*) FROM recruitment_requests WHERE id = 'req-ghost'")), 0);
   const kase = { ...CASES()[0], id: 'case-new' };
-  L.unit(() => { L.layer.recruitmentCases.addCase(kase); requests.create(p4bInvitation({ id: 'req-case-new', caseId: 'case-new', trialId: null, keys: { invite: null } })); });
+  L.unit(() => { L.layer.recruitmentCases.cases.create(kase); requests.create(p4bInvitation({ id: 'req-case-new', caseId: 'case-new', trialId: null, keys: { invite: null } })); });
   withRo(d, (s) => { assert.equal(col(s, "SELECT case_id FROM recruitment_requests WHERE id = 'req-case-new'"), 'case-new'); assert.equal(col(s, "SELECT count(*) FROM recruitment_cases WHERE id = 'case-new'"), 1); });
   L.close(); rm(d);
 });

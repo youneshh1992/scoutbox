@@ -103,9 +103,9 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
  * `recruitmentCases`, `roomComments`, `roomSnapshots`, `roomDecisions` and
  * `roomEvidenceState` (S8b, migration 0016) are the recruitment cases — the M12
  * case with its M17 Room facet, M23 decision draft, M27 transaction handoff and
- * M13 budget — and the four room collections, twenty-five tables, each record in
- * its writer's literal, in insertion order, children in list order, absence,
- * null, off-type and unknown fields kept losslessly (repositories/recruitmentCases.mjs).
+ * M13 budget — and the four room collections, twenty-five typed tables written by
+ * explicit operations; a record the columns cannot hold is refused
+ * (repositories/recruitmentCases.mjs).
  * `recruitmentContacts` and `recruitmentOffers` (S8c, migration 0017) are the
  * recruitment contacts and the offers with their revisions, documents,
  * responses, receipts, history and keys, ten typed tables written by explicit
@@ -213,19 +213,17 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   const requestsSupplied = Object.hasOwn(db, 'requests') && db.requests !== undefined;
   const trialsSupplied = Object.hasOwn(db, 'trials') && db.trials !== undefined;
   const casesSupplied = Object.hasOwn(db, 'recruitmentCases') && db.recruitmentCases !== undefined;
-  // S8b (readiness review §6, P A R | B | C D | E | F1 F2 F3 | G): the preflight
-  // of the five case collections against the FINAL combined graph (the supplied
-  // requests/trials included), A the supplied cases with their owned children,
-  // R the release of the link rows the S8a phases or the request prune would
-  // hit — BEFORE the S8a phases (the recruitment_requests/trials case key is
-  // satisfied because the cases are in place). `null` before the 0016 record:
-  // the caller writes the five blobs.
+  // S8b (typed, explicit): the five case collections typed (junk refused with
+  // ids; a supplied array IS the whole final collection, an omitted one is
+  // retained whole), their references named against the FINAL combined state
+  // (the supplied requests/trials included), and the cases (without their link
+  // rows) and room rows written — BEFORE the S8a, S8c and S8d rows, whose case
+  // keys are immediate. `null` before the 0016 record.
   // S8c: the supplied contacts and offers typed (junk refused with ids; a
   // supplied array IS the whole final collection, an omitted one is retained
   // WHOLE), the guardian references checked against the final guardians (Q8c-b),
-  // and the records a supplied collection no longer lists removed. Their case
-  // and request keys are deferred to COMMIT, so the order against the S8a/S8b
-  // writes below does not matter; the assertion at the end names any miss.
+  // and the records a supplied collection no longer lists removed. Their request
+  // key is deferred to COMMIT; the assertion at the end names any miss.
   // S8d (design note §2; typed, explicit): the four collections typed — junk refused with ids, a legacy backup's
   // rows normalised as the cutover normalises them — and their departures removed children first, BEFORE the S8c
   // departures so a package can leave with its offer; a retained dependant of a departing row refuses the save with
@@ -234,7 +232,7 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   if (signingsPlan) written.push(...signingsPlan.written);
   const contactsOffersPlan = CONTACTS_OFFERS_SNAPSHOT.begin(sqlite, db, { guardians: IDENTITY_COLLECTIONS.every((n) => present.includes(n)) ? db.guardians : undefined, label: 'the snapshot (contacts and offers)' });
   if (contactsOffersPlan) written.push(...contactsOffersPlan.written);
-  const casesPlan = RECRUITMENT_CASES_SNAPSHOT.begin(sqlite, db, { requests: requestsSupplied ? db.requests : undefined, trials: trialsSupplied ? db.trials : undefined, orgs: present.includes('orgs') ? db.orgs : undefined, users: present.includes('users') ? db.users : undefined, label: 'the snapshot (cases, rooms, requests and trials)' });
+  const casesPlan = RECRUITMENT_CASES_SNAPSHOT.begin(sqlite, db, { requests: requestsSupplied ? db.requests : undefined, trials: trialsSupplied ? db.trials : undefined, label: 'the snapshot (cases, rooms, requests and trials)' });
   if (casesPlan) written.push(...casesPlan.written);
   // S8a (typed, explicit): the supplied requests and trials typed (junk refused
   // with ids; a supplied array IS the whole final collection, an omitted one is
@@ -249,26 +247,24 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // S8d: the packages (their offers and cases are in place now), the signings, the follow-ups and the reports,
   // every reference and uniqueness rule of the FINAL combined state named with ids before the engine would.
   SIGNINGS_FOLLOWUPS_SNAPSHOT.write(sqlite, signingsPlan);
-  // S8b C and D: the supplied cases' link rows (their request/trial keys are
-  // satisfied now) with the released rows of the retained cases back verbatim;
-  // the supplied room collections.
+  // S8b: the supplied cases' link rows (their request and trial keys are
+  // satisfied now).
   RECRUITMENT_CASES_SNAPSHOT.links(sqlite, casesPlan);
-  RECRUITMENT_CASES_SNAPSHOT.rooms(sqlite, casesPlan);
   if (present.includes(CHANNELS_TABLE.name) && CHANNELS_TABLE.replace(sqlite, db[CHANNELS_TABLE.name], { requests: requestsSupplied ? db.requests : undefined })) written.push(CHANNELS_TABLE.name);
   // Rows the snapshot no longer lists go last, children before parents, so a
   // parent that is still referenced makes the foreign key refuse the save
   // instead of the row disappearing under its dependants. (The identity pair
-  // prunes inside its own replace, players before guardians.) S8b F1: the room
+  // prunes inside its own replace, players before guardians.) S8b: the room
   // rows a supplied room collection no longer lists go first (before their
-  // case). S8a-core phase 5 (S8b F2): the requests no longer listed — after the
-  // channels (a thread still naming one refuses the save; an intentional removal
-  // removes the thread in the same snapshot) and before the staff and
-  // organisations they reference. S8b F3: the cases no longer listed (each
-  // departing owner's history and key rows explicitly, then the parent) — after
-  // every request, trial and room row that named them, before the staff.
+  // case). S8a: the requests no longer listed — after the channels (a thread
+  // still naming one refuses the save; an intentional removal removes the
+  // thread in the same snapshot) and before the staff and organisations they
+  // reference. S8b: the cases no longer listed — after every request, trial,
+  // contact, offer, signing and room row that named them (a retained one
+  // refuses the save with ids), before the staff.
   RECRUITMENT_CASES_SNAPSHOT.pruneRooms(sqlite, casesPlan);
   if (written.includes('requests')) RECRUITMENT_SNAPSHOT.prune(sqlite, { requests: db.requests, label: 'the snapshot (requests and channels together)' });
-  RECRUITMENT_CASES_SNAPSHOT.pruneCases(sqlite, casesPlan);
+  RECRUITMENT_CASES_SNAPSHOT.pruneCases(sqlite, casesPlan, { label: 'the snapshot (cases and everything that names them)' });
   if (written.includes('users')) single('users').prune(sqlite, db.users); // the staff no longer listed (their sessions cascade), after the requests and cases that named them
   if (present.includes('sessions') && single('sessions').replace(sqlite, db.sessions)) written.push('sessions'); // against the FINAL staff rows
   for (const name of ['sessions', 'orgs']) {
@@ -330,8 +326,8 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   if (written.some((n) => RECRUITMENT_COLLECTIONS.includes(n)) || casesSupplied || written.some((n) => IDENTITY_COLLECTIONS.includes(n))) {
     assertRecruitmentConsistent(sqlite, { label: 'the snapshot (requests, trials, recruitmentCases and guardians together)' });
   }
-  // S8b G: whenever this snapshot touched the case graph — every link target in
-  // the final tables, the decision chain, foreign_key_check empty.
+  // S8b: whenever this snapshot touched the case graph — the decision chain and
+  // snapshots inside their room, foreign_key_check empty.
   if (casesPlan) RECRUITMENT_CASES_SNAPSHOT.assert(sqlite, { label: 'the snapshot (cases, rooms, requests and trials together)' });
   // S8c: whenever this snapshot touched the contact/offer graph — foreign_key_check
   // empty (the deferred case and request keys named with ids) and every
@@ -539,64 +535,28 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   // imports from memory. From here on `db.channels` is a read-only view over the
   // mirror; the message arrays inside it are read-only too.
   //
-  // S8a (migration 0015) — the recruitment requests and the accepted trials,
-  // sixteen typed tables with EXPLICIT writes (repositories/recruitment.mjs, the
-  // S8c pattern): the two views are read-only arrays over the mirrors; every
-  // change is a repository operation (requests.create / update, trials.create /
-  // update, tombstoneForPlayer) that writes its rows at once — inside the
-  // route's unit of work, whose COMMIT checks the deferred case keys after the
-  // staged S8b hooks wrote those rows. No flush; the participant hook restores
-  // the mirrors when a unit rolls back. An in-memory `requests` / `trials`
-  // array is a stale copy (the seed's empty containers, the snapshot
-  // migrations' `??= []`): dropped, its blob row deleted. The repository never
-  // imports from memory.
-  // S8b (migration 0016) — the recruitment cases and the four room collections,
-  // twenty-five tables, one participant with FOUR save hooks placed around the
-  // recruitment and channels hooks (readiness review §5–§6): hook 1 (the
-  // preflight against the mirrors, A the changed cases, R the release of the
-  // link rows the S8a phases would hit) BEFORE the recruitment hook — a case
-  // row is in place before a request or trial names it through the real key;
-  // hook 2 (C, the link rows back) AFTER it — their request/trial keys are
-  // satisfied; hook 3 (D the changed room rows, F1 the removed ones) before the
-  // channels; hook 4 (F3 the removed cases, G the final assertions) after the
-  // channels and the request prune the recruitment hook runs internally. STAGED
-  // mode (see repositories/recruitmentCases.mjs): the five views are read-only
-  // ARRAYS of plain, mutable records; every in-place change a route makes (a
-  // status move, a history entry, a task, a budget scenario, the draft, the
-  // handoff, a comment edit or tombstone, an evidence state, a superseded
-  // decision) lands in the next save's flush; a new record enters through
-  // addCase / addComment / addSnapshot / addDecision / addEvidenceState, the
-  // finalize route's transport-failure splice through removeDecision; the
-  // deletion unit's tombstones are in-place edits landing in the unit's commit.
-  // The player references are tolerant (Q8a); the organisation and staff keys
-  // are real. A `recruitmentCases` / `room*` array the caller holds in memory
-  // is either the blob the migration just imported from the file (a restored
-  // backup, a pre-S8b file: dropped, the tables are the record) or a stale copy
-  // (the seed's empty containers, the snapshot migrations' `??= []`), reported
-  // when it is not empty, dropped, and its blob row deleted so no save can bring
-  // it back. The repository never imports from memory.
-  // S8c (migration 0017) — the recruitment contacts and the offers, ten typed
-  // tables with EXPLICIT writes (repositories/recruitmentContactsOffers.mjs, the
-  // S8d template): the two views are read-only arrays over the mirrors; every
-  // change is a repository operation (contacts.create / update / redactPlayer,
-  // offers.create / update / redactPlayer) that writes its rows at once — inside
-  // the route's unit of work, whose COMMIT checks the deferred case and request
-  // keys after the staged S8a/S8b hooks wrote those rows. No flush; the
-  // participant hook restores the mirrors when a unit rolls back. An in-memory
-  // `recruitmentContacts` / `recruitmentOffers` array is a stale copy (the
-  // snapshot migrations' and the offer module's `??= []`): dropped, its blob row
-  // deleted. The repository never imports from memory.
+  // S8a (migration 0015), S8b (0016) and S8c (0017) — the recruitment requests
+  // and accepted trials (sixteen typed tables, repositories/recruitment.mjs),
+  // the recruitment cases with the four room collections (twenty-five,
+  // repositories/recruitmentCases.mjs) and the contacts and offers (ten,
+  // repositories/recruitmentContactsOffers.mjs), all with EXPLICIT writes: the
+  // views are read-only arrays over the mirrors; every change is a repository
+  // operation (create / update and the deletion unit's tombstones) that writes
+  // its rows at once — inside the route's unit of work when one is open. No
+  // flush; each participant hook restores its mirrors when a unit rolls back.
+  // The case keys of requests, trials, contacts and offers are immediate. An
+  // in-memory array of one of these collections is a stale copy (the seed's
+  // empty containers, the snapshot migrations' `??= []`): dropped, its blob row
+  // deleted. The repositories never import from memory.
   const recruitmentContactsOffers = createRecruitmentContactsOffersRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentContactsOffersBoot = recruitmentContactsOffers.attach();
   store.setSaveHook?.(recruitmentContactsOffers.hook());
-  const recruitmentCases = createRecruitmentCasesRepository({ sqlite, log, now, unit: store.unit, staged: true, recruitment: () => recruitment });
+  const recruitmentCases = createRecruitmentCasesRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentCasesBoot = recruitmentCases.attach();
-  store.setSaveHook?.(recruitmentCases.coreHook());
+  store.setSaveHook?.(recruitmentCases.hook());
   recruitment = createRecruitmentRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentBoot = recruitment.attach();
   store.setSaveHook?.(recruitment.hook());
-  store.setSaveHook?.(recruitmentCases.linksHook());
-  store.setSaveHook?.(recruitmentCases.roomsHook());
   for (const name of RECRUITMENT_CASES_COLLECTIONS) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
@@ -640,7 +600,6 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   const channels = createChannelsRepository({ sqlite, log, now, unit: store.unit, staged: true, requests: () => db.requests });
   const channelsBoot = channels.attach();
   store.setSaveHook?.(channels.saveHook());
-  store.setSaveHook?.(recruitmentCases.pruneHook()); // S8b hook 4: F3 and G, after the channels and the request prune
   if (Object.hasOwn(db, CHANNELS_TABLE.name)) {
     delete db[CHANNELS_TABLE.name];
     sqlite.prepare('DELETE FROM collections WHERE name = ?').run(CHANNELS_TABLE.name);
@@ -714,9 +673,9 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         dispatches: { mode: 'live', rows: dispatches.count(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: dispatches.pending(), writeMode: 'staged: a sweep\'s rows, attempts and status changes land in the next snapshot save with the outbox row, the injection counter and the ops/webhook rows written alongside; an acknowledgment lands in its unit\'s commit', notificationReference: 'indexed, no foreign key, no cascade (orphans after an ordinary deletion are retained; retention is an open decision)' },
         outboxPush: { mode: 'live', rows: outboxPush.counts(), pendingWrites: outboxPush.pending(), writeMode: 'staged: a mailer record lands in the save its route would have carried the blob in; a delivery record in the sweep\'s save with the dispatch rows; a push record — written after the notification\'s save committed — in the later save the sender\'s nextId() already schedules; a token in the route\'s persist()', tokens: 'a non-empty string (the route refuses anything else with 400 TOKEN_INVALID); no uniqueness constraint (re-registering the same token for the same session owner replaces its earlier rows)', destinations: 'a string address in to_address, or null (the routes refuse a non-string e-mail with 400)', typing: 'typed columns only: no extra_json; unknown keys are not stored; a wrong-typed field is refused by name; the cutover dropped unknown fields and normalised or dropped non-string destinations and tokens, each reported by id (meta.outboxPushCutover.notes)' },
         channels: { mode: 'live', rows: channels.counts(), pendingWrites: channels.pending(), writeMode: 'staged: a thread lands in the acceptance route\'s save with the request\'s answer; a message in postMessage\'s save before the sender hears 201; a receipt in its route\'s save; a deletion in the account-deletion unit', references: 'request_id unique and, since migration 0015 (S8a-core), a real foreign key to recruitment_requests (RESTRICT) — the D-A conversion — still checked in code at open; guardian_id checked in code at open and on every snapshot\'s final state (no foreign key, by bounded choice); org_id a foreign key (RESTRICT); player_id no lifecycle clause — the deleted player\'s threads are deleted explicitly, as before (D-B); messages and attachments cascade with their thread' },
-        recruitment: { mode: 'live', rows: recruitment.counts(), pendingWrites: recruitment.pending(), unresolvedPlayerReferences: unresolvedRecruitmentPlayers(sqlite), retainedPlayerReferences: retainedRecruitmentPlayers(sqlite), writeMode: 'explicit and typed: requests.create / update, trials.create / update and tombstoneForPlayer write a record\'s rows at once (inside the route\'s unit of work) and re-read it; the views are read-only; a record the typed columns cannot hold is refused with its id', references: 'player_id (both tables) no foreign key, TOLERANT (Q7a): live, retained and historically missing ids resolve, are counted here and never refused, fabricated or deleted. case_id (both tables) → recruitment_cases and recruitment_requests.trial_id → trials: DEFERRABLE INITIALLY DEFERRED (checked at COMMIT while the cases are written by their staged hooks). guardian_id and recipient_guardian_id no foreign key, STRICT in code (Q7c): checked at every write and on every snapshot\'s final state. trials.request_id NOT NULL UNIQUE → recruitment_requests (RESTRICT); org_id and user_id → orgs / org_users (RESTRICT); the child tables cascade with their owner. The direct request route keeps its REQUEST_PENDING rule (D2)' },
-        recruitmentCases: { mode: 'live', rows: recruitmentCases.counts(), pendingWrites: recruitmentCases.pending(), unresolvedPlayerReferences: unresolvedCasePlayers(sqlite), retainedPlayerReferences: retainedCasePlayers(sqlite), writeMode: 'staged: a record\'s in-place changes land in the next save\'s flush (the same save that carried its blob before: a room creation, a status move with its snapshot, a comment, a task, a decision draft, a formal decision, an evidence review, a budget scenario or a handoff in its route\'s persistNow(); an M12 case change in its route\'s save); a new record through addCase / addComment / addSnapshot / addDecision / addEvidenceState; the finalize route\'s transport-failure splice through removeDecision; the deletion unit\'s tombstones in the unit\'s commit. The write order of the readiness review §6 (P A R | the S8a phases | C D | the channels | F1 F2 F3 | G) through four save hooks placed around the recruitment and channels hooks', references: 'player_id (recruitment_cases, room_snapshots, room_decisions, case_transaction_handoffs) no foreign key, TOLERANT (Q8a, 23 October 2026): live, retained and historically missing ids resolve, are counted here and never refused, fabricated or deleted. org_id → orgs (RESTRICT) on every table that carries one; owner_user_id, room_lead_scout_user_id, decision_by_user_id, case_assignments.user_id and room_comments.author_user_id → org_users (RESTRICT). room_id (the four room tables) → recruitment_cases (RESTRICT): a retained room row names a case at the preflight with its table (CASE_STILL_REFERENCED), a supplied collection removes its rows before the case. recruitment_requests.case_id and trials.case_id → recruitment_cases (RESTRICT, rebuilt by 0016); case_request_links.request_id → recruitment_requests and case_trial_links.trial_id → trials (RESTRICT; released before the S8a phases and reinserted after them, never detached). case_history → recruitment_cases (RESTRICT, owned: removed explicitly before its owner); every other child cascades. The decision chain (supersedes / supersededById / supersession.of), client keys, vacancy, evidence, assessment, signing, transaction and agency ids are plain ids checked in code. The drafted recruitment_cases_one_open_room index is withdrawn: the routes keep their one-open-room rule' },
-        recruitmentContactsOffers: { mode: 'live', rows: recruitmentContactsOffers.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedContactOfferPlayers(sqlite), retainedPlayerReferences: retainedContactOfferPlayers(sqlite), writeMode: 'explicit: every change is a repository operation (contacts.create / update / redactPlayer; offers.create / update / redactPlayer) that writes its rows at once — inside the route\'s unit of work when one is open, in a transaction of its own otherwise — and re-reads the record from the tables; the views hold read-only records (an in-place edit throws); no flush, no fingerprint', typing: 'typed columns only (file 02): the vocabulary and length CHECKs; the idempotency keys as columns and offer_keys rows; no absent_keys_json, offtype_json, extra_json or raw_json; a record the columns cannot hold (an unknown field included) is refused with its id', references: 'player ids no foreign key, TOLERANT and counted (Q8c-a); guardian ids no foreign key, STRICT on a snapshot write (Q8c-b); org_id → orgs and the staff ids → org_users (RESTRICT); case_id → recruitment_cases and a contact\'s request_id → recruitment_requests DEFERRABLE INITIALLY DEFERRED (checked at COMMIT: those rows are written by their staged repositories at the unit\'s commit); every offer pointer (current revision, response, supersedes, superseded by, discarded by, a response\'s, receipt\'s or key\'s revision) names a row of the same offer; contact_history and offer_history → their owner (RESTRICT); every other child cascades' },
+        recruitment: { mode: 'live', rows: recruitment.counts(), pendingWrites: recruitment.pending(), unresolvedPlayerReferences: unresolvedRecruitmentPlayers(sqlite), retainedPlayerReferences: retainedRecruitmentPlayers(sqlite), writeMode: 'explicit and typed: requests.create / update, trials.create / update and tombstoneForPlayer write a record\'s rows at once (inside the route\'s unit of work) and re-read it; the views are read-only; a record the typed columns cannot hold is refused with its id', references: 'player_id (both tables) no foreign key, TOLERANT (Q7a): live, retained and historically missing ids resolve, are counted here and never refused, fabricated or deleted. case_id (both tables) → recruitment_cases (RESTRICT, immediate); recruitment_requests.trial_id → trials DEFERRABLE INITIALLY DEFERRED (a snapshot writes a request before its trial). guardian_id and recipient_guardian_id no foreign key, STRICT in code (Q7c): checked at every write and on every snapshot\'s final state. trials.request_id NOT NULL UNIQUE → recruitment_requests (RESTRICT); org_id and user_id → orgs / org_users (RESTRICT); the child tables cascade with their owner. The direct request route keeps its REQUEST_PENDING rule (D2)' },
+        recruitmentCases: { mode: 'live', rows: recruitmentCases.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedCasePlayers(sqlite), retainedPlayerReferences: retainedCasePlayers(sqlite), writeMode: 'explicit: every change is a repository operation (cases.create / update / redactPlayer; comments, decisions and evidenceStates create / update; snapshots.create) that writes its rows at once — inside the route\'s unit of work when one is open, in a transaction of its own otherwise — and re-reads the record from the tables; the views hold read-only records (an in-place edit throws); no flush, no fingerprint', typing: 'typed columns only (file 02): the vocabulary and length CHECKs; one case history entry shape; a decision\'s snapshot is the room_snapshots row it names; the idempotency keys as columns; no absent_keys_json, offtype_json, extra_json or raw_json; a record the columns cannot hold (an unknown field included) is refused with its id', references: 'player_id (recruitment_cases, room_snapshots, room_decisions, case_transaction_handoffs) no foreign key, TOLERANT (Q8a): live, retained and historically missing ids resolve, are counted here and never refused. org_id → orgs and the staff ids (owner, lead scout, M12 decision maker, assignee, comment author) → org_users (RESTRICT); room_id (the four room tables) → recruitment_cases (RESTRICT); a decision\'s snapshot_id → room_snapshots (RESTRICT); case_request_links → recruitment_requests and case_trial_links → trials (RESTRICT); the case_id of requests, trials, contacts and offers → recruitment_cases (RESTRICT, immediate). The decision chain and a decision\'s snapshot stay inside its room, checked at every write. The children cascade with their owner. The one-open-room rule is the routes\'' },
+        recruitmentContactsOffers: { mode: 'live', rows: recruitmentContactsOffers.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedContactOfferPlayers(sqlite), retainedPlayerReferences: retainedContactOfferPlayers(sqlite), writeMode: 'explicit: every change is a repository operation (contacts.create / update / redactPlayer; offers.create / update / redactPlayer) that writes its rows at once — inside the route\'s unit of work when one is open, in a transaction of its own otherwise — and re-reads the record from the tables; the views hold read-only records (an in-place edit throws); no flush, no fingerprint', typing: 'typed columns only (file 02): the vocabulary and length CHECKs; the idempotency keys as columns and offer_keys rows; no absent_keys_json, offtype_json, extra_json or raw_json; a record the columns cannot hold (an unknown field included) is refused with its id', references: 'player ids no foreign key, TOLERANT and counted (Q8c-a); guardian ids no foreign key, STRICT on a snapshot write (Q8c-b); org_id → orgs and the staff ids → org_users (RESTRICT); case_id → recruitment_cases (RESTRICT, immediate); a contact\'s request_id → recruitment_requests DEFERRABLE INITIALLY DEFERRED (a send writes its contact before the request); every offer pointer (current revision, response, supersedes, superseded by, discarded by, a response\'s, receipt\'s or key\'s revision) names a row of the same offer; contact_history and offer_history → their owner (RESTRICT); every other child cascades' },
         signingsFollowUps: { mode: 'live', rows: signingsFollowUps.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedSigningPlayers(sqlite), retainedPlayerReferences: retainedSigningPlayers(sqlite), writeMode: 'explicit: every change is a repository operation (signingPackages.insert / patch / patchRevision / addRevision / setDocument / setParty / addKey / addHistory / redactPlayer; signings.record; followUps.schedule / patch; outcomeReports.file / addConfirmation) that writes its rows at once — inside the route\'s unit of work when one is open, in a transaction of its own otherwise — and re-reads the record from the tables; the views hold deep-frozen records (an in-place edit throws); no flush, no fingerprint', typing: 'typed columns only (file 02): the vocabulary and length CHECKs; no absent_keys_json, offtype_json or extra_json; a record the columns cannot hold is refused with its id at the route, the cutover and a snapshot write; the cutover normalised exactly what the design note lists and reported each with the row id (meta.signingsFollowUpsCutover.notes)', references: 'player ids no foreign key, TOLERANT and counted (Q7a/Q8a/Q8c-a applied, not re-asked); guardian and party ids polymorphic, no key; org_id → orgs, case_id → recruitment_cases, offer_id → recruitment_offers, the staff ids → org_users (RESTRICT); signing_package_id and signing_revision_id → their tables (RESTRICT); completion_signing_id → signings (RESTRICT, DEFERRABLE INITIALLY DEFERRED: the completion unit writes the signing row and then the package); follow_ups.signing_id, outcome_reports.follow_up_id / signing_id (RESTRICT); offer_revision_id a plain indexed column checked in code (offer_revisions.id is the primary key since §4.3; a real key is a later change). The three uniqueness rules of file 02 are partial unique indexes and are named with ids before the engine would (one live and one completed package per offer; one signing per package, per offer, one standing legacy row per organisation and player; one follow-up per signing and milestone; one report per follow-up)' },
         safetyAudit: { mode: 'live', rows: safetyAudit.counts(), pendingWrites: safetyAudit.pending(), unresolvedPlayerReferences: unresolvedPlayerReferences(sqlite), retainedPlayerReferences: retainedPlayerReferences(sqlite), writeMode: 'staged: a block with its ledger row, a report with its suspension blocks, a note and a moderation hit land in the next save; a source change in its writer\'s save; an ops event in its caller\'s save; the IDV entry and the admin toggle land in their units\' commits', references: 'no foreign key on any of the eight tables. The five player references (blocks, reports, org_notes, ledger, source_changes) are tolerant historical references (Q4): an id that resolves to no player is counted here, never refused, never given a fabricated parent, never deleted; a count, not a claim about why it is absent. idv_queue.guardian_id is strict (Q4b): a write or import naming a missing guardian is refused and every snapshot that touches the queue or the identity pair is checked against the FINAL guardians table. A lifted block is deleted, as before (Q5). Organisation and staff references are historical pointers the routes never checked' },
       },

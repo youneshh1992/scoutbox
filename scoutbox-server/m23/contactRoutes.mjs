@@ -227,11 +227,7 @@ export function registerContact(ctx) {
     const verdict = canTransitionRecruitmentCase(room, 'recordContact', { role, evidence: ctx.recruitmentEvidenceProvider, now: at });
     let moved = null; let lifecycle;
     if (verdict.ok) {
-      const { from, to } = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger: `contact:${c.id}` });
-      const last = room.history[room.history.length - 1];
-      if (last?.action === 'room_status_changed') {
-        last.detail = { ...last.detail, lifecycleAction: 'recordContact', clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, contactId: c.id };
-      }
+      const { from, to } = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger: `contact:${c.id}`, statusDetail: { lifecycleAction: 'recordContact', clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, contactId: c.id } });
       lifecycle = { applied: true, from, to, at };
       moved = { from, to };
     } else {

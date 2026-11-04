@@ -160,7 +160,9 @@ section('2 — a snapshot with legacy + formal rows and a draft restores byte-fa
   db.recruitmentCases[0].decisionDraft = draftRow();
   db.recruitmentCases[0].room.status = 'on_hold';
   openStore(DIR).save({ db });
-  const beforeRows = db.roomDecisions.map(stableJson); const beforeDraft = stableJson(db.recruitmentCases[0].decisionDraft);
+  // The typed tables read every record back whole (an absent field reads null): the reference is the store as saved.
+  const saved = openStore(DIR).load().db;
+  const beforeRows = saved.roomDecisions.map(stableJson); const beforeDraft = stableJson(saved.recruitmentCases[0].decisionDraft);
   const s = await bootOn(DIR, PORT);
   ok(s.up, 'the server boots on the snapshot');
   const L = await lead(s);
@@ -194,15 +196,20 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
 {
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-corrupt-'));
   const db = baseDb();
-  const bad = [
+  // Eight defects. Six are values the typed columns cannot hold (S8b, §4.3): a save refuses each by its id. Two — a
+  // formal row with no actor and one citing a prohibited reason code — are rows the tables can carry: they are planted
+  // and judged on read.
+  const unstorable = [
     formalRow({ id: 'rdec-bad-outcome', outcome: 'accept', supersedes: null, supersededById: 'x1', createdAt: T0 + 1 }),
     formalRow({ id: 'rdec-bad-proto', outcome: '__proto__', supersedes: null, supersededById: 'x1', createdAt: T0 + 2 }),
-    formalRow({ id: 'rdec-bad-actor', by: null, supersedes: null, supersededById: 'x1', createdAt: T0 + 3 }),
     formalRow({ id: 'rdec-bad-time', createdAt: 'yesterday', supersedes: null, supersededById: 'x1' }),
     formalRow({ id: 'rdec-bad-reasons', reasonCodes: 'position_need', supersedes: null, supersededById: 'x1', createdAt: T0 + 4 }),
-    formalRow({ id: 'rdec-bad-code', reasonCodes: ['race'], supersedes: null, supersededById: 'x1', createdAt: T0 + 5 }),
     formalRow({ id: 'rdec-bad-refs', evidenceRefs: {}, supersedes: null, supersededById: 'x1', createdAt: T0 + 6 }),
     formalRow({ id: 'rdec-bad-rev', rev: 0, supersedes: null, supersededById: 'x1', createdAt: T0 + 7 }),
+  ];
+  const bad = [
+    formalRow({ id: 'rdec-bad-actor', by: null, supersedes: null, supersededById: 'x1', createdAt: T0 + 3 }),
+    formalRow({ id: 'rdec-bad-code', reasonCodes: ['race'], supersedes: null, supersededById: 'x1', createdAt: T0 + 5 }),
   ];
   // S8b (migration 0016): roomDecisions is a table. The cutover imports the blob through the repository's validation and
   // REFUSES a file the blob store tolerated — an entry that is not a record (positions named) or a chain pointer naming a
@@ -222,29 +229,31 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
       ok(openStore(D).load() === null, `${label}: nothing was written — nothing deleted, nothing repaired`);
     };
     await refused('three alien entries (null, a string, a number)', [null, 'string', 42], /roomDecisions entry #2 is not an object \(null\); roomDecisions entry #3 is not an object \(a string\); roomDecisions entry #4 is not an object \(a number\)/);
-    await refused('eight corrupt rows whose chain pointer names a decision that does not exist', bad, /DECISION_CHAIN_BROKEN: 8 decision chain reference\(s\).*rdec-bad-outcome \(room case-x\) names x1 \(supersededById\): no such decision/);
+    await refused('six corrupt rows the typed columns cannot hold', unstorable, /RECRUITMENT_CASES_INPUT_INVALID[\s\S]*6 roomDecisions entries refused[\s\S]*rdec-bad-outcome\.outcome[\s\S]*rdec-bad-proto\.outcome[\s\S]*rdec-bad-time\.createdAt[\s\S]*rdec-bad-reasons\.reasonCodes[\s\S]*rdec-bad-refs\.evidenceRefs[\s\S]*rdec-bad-rev\.rev/);
+    await refused('two corrupt rows whose chain pointer names a decision that does not exist', bad, /DECISION_CHAIN_BROKEN[\s\S]*rdec-bad-actor \(room case-x\) names x1 \(supersededById\): no such decision/);
   }
-  // The same eight defects, each row superseded by the real head, are carried losslessly and judged on read as before.
+  // The two storable defects, each row superseded by the real head, are stored and judged on read as before.
   for (const r of bad) r.supersededById = 'rdec-formal-2';
   db.roomDecisions.push(legacyRow({ supersededById: 'rdec-formal-2' }), headRow({ supersedes: 'rdec-legacy' }), ...bad);
   openStore(DIR).save({ db });
+  const savedRows = openStore(DIR).load().db.roomDecisions;
   const s = await bootOn(DIR, PORT + 1);
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
-  ok(s.up, 'the server boots with eight corrupt formal rows in the store');
+  ok(s.up, 'the server boots with two corrupt formal rows in the store');
   const L = await lead(s);
   const sf = await s.j('GET', '/org/rooms/case-x/decision', undefined, L.token);
   if (sf.status !== 200) console.error('   surface', sf.status, JSON.stringify(sf.body).slice(0, 300), s.log().split('\n').filter((l) => /Error|TypeError/.test(l)).slice(0, 4).join(' | '));
   ok(sf.status === 200 && sf.body.current?.id === 'rdec-formal-2' && sf.body.history.length === 2, 'the surface serves the sound head and the legacy row');
-  neg(sf.body.omitted === 8, `eight corrupt formal rows are counted as omitted (${sf.body.omitted})`);
+  neg(sf.body.omitted === 2, `two corrupt formal rows are counted as omitted (${sf.body.omitted})`);
   const log = s.log();
   neg(bad.every((r) => log.includes(`DECISION integrity ${r.id}`)), 'every corrupt row is NAMED in the server log with its problems');
-  neg(bad.every((r) => decisionIntegrity(r, { orgId: 'org-x', caseId: 'case-x' }).length > 0) && decisionIntegrity(headRow(), { orgId: 'org-x', caseId: 'case-x' }).length === 0, 'the pure integrity check agrees row by row');
+  neg([...unstorable, ...bad].every((r) => decisionIntegrity(r, { orgId: 'org-x', caseId: 'case-x' }).length > 0) && decisionIntegrity(headRow(), { orgId: 'org-x', caseId: 'case-x' }).length === 0, 'the pure integrity check agrees row by row (all eight defects)');
   const jr = await s.j('GET', '/org/rooms/case-x/journey', undefined, L.token);
   ok(jr.status === 200 && jr.body.decisions.formal?.id === 'rdec-formal-2', 'the journey still projects the sound head');
   const after = await s.stop();
-  neg(after.roomDecisions.filter((x) => x && typeof x === 'object').length === 10 && after.roomDecisions.some((x) => x?.id === 'rdec-bad-outcome' && x.outcome === 'accept'), 'the corrupt rows are still in the snapshot exactly as they were — omitted on read, never deleted or "repaired" on write');
-  if (stableJson(after.roomDecisions) !== stableJson(db.roomDecisions)) console.error('   store changed', stableJson(after.roomDecisions).slice(0, 300));
-  ok(stableJson(after.roomDecisions) === stableJson(db.roomDecisions), 'the whole store is identical in every key and value');
+  neg(after.roomDecisions.filter((x) => x && typeof x === 'object').length === 4 && after.roomDecisions.some((x) => x?.id === 'rdec-bad-code' && x.reasonCodes[0] === 'race'), 'the corrupt rows are still in the snapshot exactly as they were — omitted on read, never deleted or "repaired" on write');
+  if (stableJson(after.roomDecisions) !== stableJson(savedRows)) console.error('   store changed', stableJson(after.roomDecisions).slice(0, 300));
+  ok(stableJson(after.roomDecisions) === stableJson(savedRows), 'the whole store is identical in every key and value');
 
   // Duplicate final heads.
   const DIR2 = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-dup-'));
@@ -252,6 +261,7 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
   db2.roomDecisions.push(headRow({ id: 'rdec-head-a', supersedes: null }), headRow({ id: 'rdec-head-b', supersedes: null, createdAt: T0 + 21 }));
   db2.recruitmentCases[0].decisionDraft = draftRow();
   openStore(DIR2).save({ db: db2 });
+  const saved2 = openStore(DIR2).load().db;
   neg(duplicateFinalHeads(db2.roomDecisions).length === 2 && chainHead(db2.roomDecisions).id === 'rdec-head-b', 'the pure check names both heads (the chain reader alone would silently pick the later one)');
   const s2 = await bootOn(DIR2, PORT + 2);
   ok(s2.up, 'the server boots with two formal rows both claiming to be current');
@@ -262,7 +272,7 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
   neg(fin.status === 500 && fin.body.error === 'DECISION_STATE_UNKNOWN', 'nothing new is finalized on top of corruption');
   neg(s2.log().includes('duplicate_final_heads rdec-head-a,rdec-head-b'), 'the duplicate heads are named in the log');
   const after2 = await s2.stop();
-  ok(stableJson(after2.roomDecisions) === stableJson(db2.roomDecisions) && stableJson(after2.recruitmentCases[0].decisionDraft) === stableJson(db2.recruitmentCases[0].decisionDraft), 'the two heads and the draft are still there, untouched — a person decides which is true, not the boot');
+  ok(stableJson(after2.roomDecisions) === stableJson(saved2.roomDecisions) && stableJson(after2.recruitmentCases[0].decisionDraft) === stableJson(saved2.recruitmentCases[0].decisionDraft), 'the two heads and the draft are still there, untouched — a person decides which is true, not the boot');
 }
 
 // ======================================================= 4 — legacy rows
@@ -273,20 +283,22 @@ section('4 — legacy M17 rows read as advisory and keep their chain; P5 judges 
   db.roomDecisions.push(
     legacyRow({ id: 'rdec-l1', createdAt: T0, supersededById: 'rdec-l2' }),
     legacyRow({ id: 'rdec-l2', recommendation: 'offer', reasonCodes: [], note: null, createdAt: T0 + 1, supersedes: 'rdec-l1', supersededById: null }),
-    legacyRow({ id: 'rdec-l-odd', by: null, createdAt: 'x', reasonCodes: 'weird', supersededById: 'rdec-l1' }),
+    // An odd legacy row: no actor and no reason (a time and a reason list are typed columns now; a save refuses junk there).
+    legacyRow({ id: 'rdec-l-odd', by: null, reasonCodes: [], supersededById: 'rdec-l1' }),
   );
   openStore(DIR).save({ db });
+  const savedLegacy = openStore(DIR).load().db.roomDecisions;
   const s = await bootOn(DIR, PORT + 3);
   ok(s.up, 'the server boots on a legacy-only decision memory');
   const L = await lead(s);
   const sf = await s.j('GET', '/org/rooms/case-x/decision', undefined, L.token);
   ok(sf.status === 200 && sf.body.current === null && sf.body.advisory?.id === 'rdec-l2' && sf.body.advisory.kind === 'recommendation' && sf.body.advisory.recommendation === 'offer' && sf.body.omitted === 0, 'an M17 "offer" recommendation at the head is ADVISORY — not a formal decision, not current');
   neg(!db.roomDecisions.some(isFormal) && sf.body.requirements.hasFinal === false, 'no legacy row is read as formal, whatever it recommends');
-  ok(sf.body.history.length === 3 && sf.body.omitted === 0 && !s.log().includes('DECISION integrity'), 'an odd legacy row (no actor, no time) is served as M17 always served it — P5 does not judge it');
+  ok(sf.body.history.length === 3 && sf.body.omitted === 0 && !s.log().includes('DECISION integrity'), 'an odd legacy row (no actor, no reason) is served as M17 always served it — P5 does not judge it');
   const byHand = await s.j('POST', '/org/rooms/case-x/lifecycle', { action: 'considerOffer', expectedRev: 2 }, L.token);
   neg(byHand.status === 422 && byHand.body.error === 'LIFECYCLE_EVIDENCE_REQUIRED' && byHand.body.evidenceReason === 'no_finalized_progress_decision', 'and the advisory "offer" does not evidence offer_consideration');
   const after = await s.stop();
-  ok(stableJson(after.roomDecisions) === stableJson(db.roomDecisions), 'the legacy rows are identical in every key and value after the boot');
+  ok(stableJson(after.roomDecisions) === stableJson(savedLegacy), 'the legacy rows are identical in every key and value after the boot');
 }
 
 // ======================================================= 5 — clean boot, live flow, restart

@@ -188,7 +188,7 @@ section('3 — legacy and corrupt cases across five restarts: untouched, never r
   const plant = (id, chain, extraLast = {}) => {
     const k = db.recruitmentCases.find((x) => x.id === id);
     let prev = k.room.status; let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-    for (const to of chain) { tt += H; k.history.push({ id: `hist-p8p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', by: { kind: 'org', id: 'legacy', name: 'Legacy' }, detail: { from: prev, to, reasonCodes: [], ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
+    for (const to of chain) { tt += H; k.history.push({ id: `hist-p8p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: prev, to, reasonCodes: [], ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
     k.room.status = chain[chain.length - 1]; k.stage = chain[chain.length - 1] === 'signed' ? 'closed' : 'review'; k.room.rev = (k.room.rev ?? 1) + chain.length;
     return k;
   };
@@ -246,7 +246,7 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
   let db = await S.stop();
   {
     const k = db.recruitmentCases.find((x) => x.id === SP); let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-    for (const to of ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', by: { kind: 'org', id: 'legacy', name: 'Legacy' }, detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
+    for (const to of ['contacted', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
     k.room.rev = (k.room.rev ?? 1) + 6;
     // A REAL Offer (Kola's, cloned) re-homed on this case with its current-revision pointer stale: every field is sound,
     // only the pointer is behind — it names revision 1 while revision 2 is out. (S8c, typed since §4.3: a pointer naming
@@ -291,7 +291,7 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
   db = await S.stop();
   {
     const k = db.recruitmentCases.find((x) => x.id === MIX); let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-    for (const to of ['trial_requested', 'trial_scheduled', 'trial_completed']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', by: { kind: 'org', id: 'legacy', name: 'Legacy' }, detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
+    for (const to of ['trial_requested', 'trial_scheduled', 'trial_completed']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
     k.room.rev = (k.room.rev ?? 1) + 3;
     const st0 = openStore(DATA); const snap = st0.load(); snap.db = db; st0.save(snap);
   }
@@ -309,7 +309,7 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
   db = await S.stop();
   {
     const k = db.recruitmentCases.find((x) => x.id === SM); let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-    for (const to of ['offer_consideration', 'offer_made', 'signed']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', by: { kind: 'org', id: 'legacy', name: 'Legacy' }, detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
+    for (const to of ['offer_consideration', 'offer_made', 'signed']) { tt += H; k.history.push({ id: `hist-p81p-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: k.room.status, to, reasonCodes: [] } }); k.room.status = to; }
     k.room.rev = (k.room.rev ?? 1) + 3; k.stage = 'closed'; k.links ??= {}; k.links.signingId = 'sign-p81p-missing';
     const st0 = openStore(DATA); const snap = st0.load(); snap.db = db; st0.save(snap);
   }

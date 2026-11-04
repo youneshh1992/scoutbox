@@ -1,766 +1,1191 @@
 /**
- * Recruitment cases (the M12 case with its M17 Room facet, M23 decision draft, M27 transaction handoff and M13 budget),
- * room comments, room snapshots, room decisions and room evidence states — migration plan step S8b
- * (docs/architecture/s8b-readiness-review.md, the design independently accepted at 4d2c74b; plan §D.9; approved for
- * the player references by the Founder's explicit Q8a answer of 23 October 2026, "Approve tolerant (Recommended)").
+ * Recruitment cases (the M12 case with its M17 Room facet, M23 decision draft, M27 transaction handoff and F9 budget),
+ * room comments, room snapshots, room decisions and room evidence states as typed tables with EXPLICIT writes
+ * (migration `0016_recruitment_cases`, docs/architecture/migration.md §4.3; S8a, S8c and S8d are the template).
  *
- * Owns twenty-five tables (and, since migration 0016, the `case_id` REAL keys of `recruitment_requests` and `trials` —
- * Q7b's conversion — and the broadened owner CHECK of the ONE shared `idempotency_keys` table) and five read-only
- * collection views:
- *
- *   recruitment_cases, case_room_tags, case_assignments, case_tasks, case_approvals,
- *   case_history, case_request_links, case_trial_links, case_decision_drafts,
- *   case_decision_draft_reason_codes, case_decision_draft_evidence_refs,
- *   case_transaction_handoffs, case_budget_scenarios, case_budget_lines,
- *   case_budget_fx_assumptions, case_budget_actuals                                → db.recruitmentCases
- *   room_comments, room_comment_mentions                                           → db.roomComments
- *   room_snapshots, room_snapshot_source_refs                                      → db.roomSnapshots
+ * Tables (file 02):
+ *   recruitment_cases, case_room_tags, case_assignments, case_tasks, case_approvals, case_history,
+ *   case_request_links, case_trial_links, case_decision_drafts, case_decision_draft_reason_codes,
+ *   case_decision_draft_evidence_refs, case_transaction_handoffs, case_budget_scenarios, case_budget_lines,
+ *   case_budget_fx_assumptions, case_budget_actuals                                     → db.recruitmentCases
+ *   room_comments, room_comment_mentions                                                → db.roomComments
+ *   room_snapshots, room_snapshot_source_refs                                           → db.roomSnapshots
  *   room_decisions, room_decision_reason_codes, room_decision_evidence_refs,
- *   room_decision_assessment_ids                                                   → db.roomDecisions
- *   room_evidence_states                                                           → db.roomEvidenceState
- *   idempotency_keys (the `keys` of the drafts, the handoffs and the formal decisions, beside the S8a rows)
+ *   room_decision_assessment_ids                                                        → db.roomDecisions
+ *   room_evidence_states                                                                → db.roomEvidenceState
  *
- * WHAT THE ROWS ARE. The five collections were JSON blobs every build since M12/M17 wrote and mutated IN PLACE from
- * m12/scouting.mjs, m13/planning.mjs, m17/rooms.mjs, m23/decisionRoutes.mjs, m27/index.mjs and server.mjs (the
- * deletion unit's tombstone). This step keeps that contract exactly as S8a-core did for requests and trials: the five
- * views are read-only ARRAYS (push/splice/assignment refused) whose elements are the plain, mutable records the routes
- * hold; every in-place change — a status move, a pushed history entry, a task, a budget scenario, the draft set and
- * nulled, the handoff, a comment edit or tombstone, an evidence state overwrite, a decision superseded — is detected and
- * written by the next save's flush, so each row lands in the save that carried its blob before; new records enter
- * through `addCase` / `addComment` / `addSnapshot` / `addDecision` / `addEvidenceState` (the former `push` sites) and
- * the finalize route's transport-failure splice through `removeDecision`.
+ * EVERY FIELD IS A TYPED COLUMN with the vocabulary CHECKs of the domain rules (m17/shared.mjs, m23/decision.mjs,
+ * m13/shared.mjs, m27/integration.mjs). There is no `absent_keys_json`, `offtype_json`, `extra_json` or `raw_json`.
+ * A record the columns cannot hold — an unknown field at any level included — is REFUSED with its id, at a repository
+ * write (the unit rolls back) and at a snapshot write (the save rolls back). An `undefined` field is an absent one;
+ * an absent field reads back as null, an absent list as empty. Two model changes: a case's history has ONE entry
+ * shape (`{ id, at, byKind, byId, byName, action, detail }`), and a decision's `snapshot` is read from the
+ * room_snapshots row it names (it is that row, never a second copy). The idempotency keys are columns of their owner
+ * (a draft's create key, a decision's finalize and draft keys, a handoff's invite key).
  *
- * LOSSLESS, AT EVERY LEVEL — the lossless engine below (S8a's before it became typed, §4.3): the writers' literals key for
- * key; every scalar a column of the writer's nullability (no vocabulary or length CHECK — a storage step changes no
- * product rule; the NOT NULL columns are the identifiers the keys need); every known nested object columns of the same
- * row; every list a child table keyed (owner…, position) in list order — a list of strings in a `scalar` column, a
- * non-matching entry in `raw_json`, so a duplicate link entry or tag is kept in its position and never deduplicated;
- * absent keys in `absent_keys_json` (dotted), off-type values in `offtype_json`, unknown own fields (a prototype-named
- * one included) in `extra_json`. The two history literals (`{byKind, byId, byName}` and `{by: {kind, userId, name}}`)
- * are mapped side by side. The decision's full `snapshot` copy and the snapshot's `note` are stored as written. The
- * `keys` of a draft, a handoff or a formal decision follow the S8a rule: a value act carrying a string key is a row of
- * idempotency_keys (owner the child table, owner_id the child record's id), everything else is held on the row.
+ * EXPLICIT WRITES. The five `db.*` views are read-only arrays over the repository's mirrors; every record they hand
+ * out is a read-only proxy, so an in-place edit throws. A route changes a record by calling an operation:
+ * `cases.create(record)`, `cases.update(id, (draft) => { … })`, the same for comments, decisions and evidence states,
+ * `snapshots.create(record)`, and the deletion unit's `redactPlayer`. `update` hands the caller a plain copy, types
+ * the result whole, writes the record's rows at once and re-reads it from the tables into the mirror. An update of a
+ * record from inside its own update is refused (the outer write would overwrite the inner one). An operation joins
+ * the open unit of work (store.unit) or runs a transaction of its own; the mirrors are restored by the unit's rollback
+ * through `hook()`.
  *
- * REFERENCES — THE APPROVED SCOPE (§2, §3, §9 of the review; Q8a):
- *   player_id (recruitment_cases, room_snapshots, room_decisions, case_transaction_handoffs)
- *                             NO key, TOLERANT (Q8a, 23 October 2026): a live id resolves, a retained id resolves to the
- *                             retained record, a historically missing id is preserved and counted — never refused,
- *                             never given a fabricated account, never deleted.
- *   org_id                    REFERENCES orgs RESTRICT (every table that carries one).
- *   owner_user_id, room_lead_scout_user_id (nullable), decision_by_user_id, case_assignments.user_id,
- *   room_comments.author_user_id          REFERENCES org_users RESTRICT (staff are never deleted).
- *   recruitment_requests.case_id, trials.case_id    REFERENCES recruitment_cases RESTRICT (rebuilt by 0016).
- *   case_request_links.request_id → recruitment_requests RESTRICT; case_trial_links.trial_id → trials RESTRICT.
- *   room_*.room_id            REFERENCES recruitment_cases RESTRICT (independent collections: a retained row blocks a
- *                             case removal, named at the preflight with its table).
- *   case_history.case_id      RESTRICT (owned; removed explicitly before its owner, R1); every other child CASCADE.
- *   decision chain, client keys, vacancy/evidence/assessment/signing/transaction/agency ids: plain ids checked in code.
- *   recruitment_cases_one_open_room          WITHDRAWN (§3): the routes keep their one-open-room rule.
+ * References. org_id → orgs and the staff ids (owner, lead scout, M12 decision maker, assignee, comment author) →
+ * org_users, RESTRICT. Every room row's room_id → recruitment_cases RESTRICT; a decision's snapshot_id →
+ * room_snapshots RESTRICT. case_request_links → recruitment_requests and case_trial_links → trials RESTRICT. Player
+ * ids: no key, tolerant and counted (Q8a). The decision chain (supersedes / superseded by) and a decision's snapshot
+ * must stay inside the decision's room, checked at every write. The children cascade with their owner.
  *
- * THE WRITE (review §6, corrected after the reviews of 57076a2 and 86342b8), one algorithm for the import, a restore, a
- * flush and a snapshot, every step inside the one transaction:
- *   P  preflight against the FINAL combined graph (every supplied collection as supplied, every omitted one as the
- *      retained rows; in a flush the mirrors): every link of every final case names a final request/trial
- *      (CASE_LINK_DANGLING); a case the write removes is named by no RETAINED independent row (CASE_STILL_REFERENCED,
- *      naming the table — recruitment_requests, trials, room_comments, room_snapshots, room_decisions,
- *      room_evidence_states; the owned children never block); every room row's roomId names a final case
- *      (ROOM_CASE_MISSING); the decision chain (DECISION_CHAIN_BROKEN); the organisation and staff keys named with ids
- *      (RECRUITMENT_CASES_ORG_MISSING / RECRUITMENT_CASES_USER_MISSING); the player references counted.
- *   A  the supplied (or changed) cases upserted by id (seq kept), their owned children rewritten in list order — the
- *      link rows excepted — with the polymorphic key rows of the previous draft/handoff removed first;
- *   R  release: the link rows of the cases this write supplies or prunes are gone (rewritten at C); the link rows of
- *      RETAINED cases naming a trial of the S8a departure set (or a pruned request) are MEMORISED verbatim and deleted;
- *   B  the S8a rows (repositories/recruitment.mjs: explicit writes since §4.3, so a flush has no S8a departures;
- *      a snapshot writes them between this repository's two stages);
- *   C  the supplied cases' link rows in list order; the memorised rows back verbatim;
- *   D  the supplied room collections upserted, children in list order, the decision chain as plain ids;
- *   E  the channels (S7d, its own hook);
- *   F1 the rows a SUPPLIED room collection no longer lists (their key rows first) — before their case;
- *   F2 the S8a request prune (inside the recruitment hook's flush; in a snapshot its own call);
- *   F3 the cases no longer listed: for each departing owner, its case_history rows and the idempotency_keys rows of its
- *      owned draft/handoff explicitly, THEN the parent row (the CASCADE children follow);
- *   G  the final assertions, ids only: every link target present, the decision chain, foreign_key_check empty.
- * Nothing disables foreign keys, drops a constraint, depends on the input order or changes a product rule.
- *
- * TWO FAILURE CONTRACTS (the store's, unchanged): a failed ORDINARY save leaves the records as they are — memory is the
- * intended state — and the next save lands them once (change tracking reflects COMMITTED state only); an aborted UNIT
- * OF WORK rolls the tables back AND restores the five mirrors in place through the graph memento (every record, nested
- * object and array by identity: a held room facet, draft or history list reads the pre-unit value), the pending edits
- * made before the unit still pending.
- *
- * Whether the tables are authoritative is decided by the cutover record `0016_recruitment_cases` in `data_migrations`,
- * never by the tables existing. Refusals (RECRUITMENT_CASES_IMPORT_BLOCKED and the reference codes) name collections,
- * positions, tables and ids — never a name, a note, a body or a message.
+ * Refusals name tables, fields and ids — never a name, a note, a body or a message.
  */
-import { markView } from './readonly.mjs';
-import { captureGraph, restoreGraph } from './memento.mjs';
-import { migrationApplied } from './database.mjs';
-import { cloneJson } from './outboxPush.mjs';
-import { JSON_CHECK, describe, isPlainObject, nonEmpty, tableExists, ids } from './recruitment.mjs';
-
-// ------------------------------------------------------------------ the lossless engine (moved here from recruitment.mjs when S8a became typed and explicit, §4.3; it goes when S8b does)
-const EXTRA_CHECK = (col) => `CHECK (${col} IS NULL OR (json_valid(${col}) AND json_type(${col}) = 'object'))`;
-const ABSENT_CHECK = "CHECK (absent_keys_json IS NULL OR (json_valid(absent_keys_json) AND json_type(absent_keys_json) = 'array'))";
-const setOwn = (obj, k, v) => Object.defineProperty(obj, k, { value: v, enumerable: true, writable: true, configurable: true });
-/** The blob's JSON rules: a non-finite number is kept live (persisted as null), a nested undefined is stored as JSON.stringify stored it. */
-const JSON_RULES = Object.freeze({ nonFinite: 'keep', undefinedNested: 'json' });
-const clone = (v, at) => cloneJson(v, at, JSON_RULES);
-const parseJson = (text, at) => clone(JSON.parse(text), at).value;
-const childSpecs = (shape, out = []) => { for (const s of Object.values(shape.lists ?? {})) { out.push(s); childSpecs(s.shape, out); } for (const s of Object.values(shape.object ?? {})) { out.push(s); childSpecs(s.shape, out); } for (const s of Object.values(shape.objects ?? {})) childSpecs(s, out); return out; };
-const sqlType = (kind) => (kind === 'int' || kind === 'bool' ? 'INTEGER' : kind === 'num' ? 'REAL' : 'TEXT');
-const columnsOf = (shape, out = []) => { for (const k of shape.keys) { if (shape.cols?.[k]) out.push(shape.cols[k]); else if (shape.objects?.[k]) columnsOf(shape.objects[k], out); } return out; };
-const columnHolds = (kind, v) => (kind === 'text' ? typeof v === 'string' : kind === 'id' ? nonEmpty(v) : kind === 'int' ? Number.isSafeInteger(v) : kind === 'num' ? (typeof v === 'number' && Number.isFinite(v)) : kind === 'bool' ? typeof v === 'boolean' : true);
-const toCol = (kind, v) => (kind === 'bool' ? (v ? 1 : 0) : kind === 'json' ? JSON.stringify(clone(v, 'json').value) : v);
-const fromCol = (kind, v, col) => (v === null ? null : kind === 'bool' ? v === 1 : kind === 'json' ? parseJson(v, col) : v);
-/**
- * Encode one object against a shape level: columns, absent paths, off-type values, extras (nested extras under their
- * known key), and the children to write (`{ spec, path, items | map }`).
- */
-function encodeLevel(shape, obj, prefix, out, extraHolder) {
-  for (const k of Object.keys(obj)) { if (shape.keys.includes(k) || obj[k] === undefined) continue; const c = clone(obj[k], `${prefix}${k}`); if (c.reason) throw new TypeError(c.reason); setOwn(extraHolder, k, c.value); }
-  for (const k of shape.keys) {
-    const path = `${prefix}${k}`;
-    if (!Object.hasOwn(obj, k) || obj[k] === undefined) { out.absent.push(path); continue; }
-    const v = obj[k];
-    if (shape.objects?.[k]) {
-      if (!isPlainObject(v)) { out.offtype[path] = clone(v, path).value; continue; }
-      const sub = {}; encodeLevel(shape.objects[k], v, `${path}.`, out, sub); if (Object.keys(sub).length) setOwn(extraHolder, k, sub);
-    } else if (shape.lists?.[k]) { if (!Array.isArray(v)) out.offtype[path] = clone(v, path).value; else out.children.push({ spec: shape.lists[k], path, items: v }); }
-    else if (shape.object?.[k]) { if (!isPlainObject(v)) out.offtype[path] = clone(v, path).value; else out.children.push({ spec: shape.object[k], path, items: [v] }); }
-    else if (shape.maps?.[k]) {
-      if (!isPlainObject(v)) { out.offtype[path] = clone(v, path).value; continue; }
-      if (!shape.maps[k].ownerTable) { out.children.push({ spec: shape.maps[k], path, map: v }); continue; }
-      // the idempotency keys: a NON-EMPTY list act and a value act carrying a string key are rows; everything else an
-      // act holds — a value act WITHOUT a key (`trials.keys.accept {key: null, fp}`, plan §D.7.3), an EMPTY list (no row
-      // could carry its presence), an empty object, null, any other value — stays on the owner row under `keys` in
-      // extra_json exactly as it is, so every act comes back present and distinct (review of 6d77aa7, F1). Acts are set
-      // as OWN data properties: an act named `__proto__` (own in the writer's object, own again after JSON.parse)
-      // assigned with `rows[act] =` would set the prototype and vanish.
-      const rows = {}; const held = {};
-      for (const [act, entry] of Object.entries(v)) {
-        if (entry === undefined) continue;
-        if ((Array.isArray(entry) && entry.length > 0) || (isPlainObject(entry) && typeof entry.key === 'string')) setOwn(rows, act, entry);
-        else setOwn(held, act, clone(entry, `${path}.${act}`).value);
-      }
-      if (Object.keys(held).length) setOwn(extraHolder, k, held);
-      out.children.push({ spec: shape.maps[k], path, map: rows });
-    }
-    else { const [col, kind] = shape.cols[k]; if (v === null) out.cols[col] = null; else if (columnHolds(kind, v)) out.cols[col] = toCol(kind, v); else { out.cols[col] = null; out.offtype[path] = clone(v, path).value; } }
-  }
-}
-function encode(shape, obj) {
-  const out = { cols: {}, absent: [], offtype: {}, extra: {}, children: [] };
-  encodeLevel(shape, obj, '', out, out.extra);
-  return out;
-}
-/** Decode one shape level from a row (its columns, the parsed absent/offtype/extra of the record) and the children already decoded by path. */
-function decodeLevel(shape, row, prefix, extraHolder, absent, offtype, children) {
-  const obj = {};
-  for (const k of Object.keys(extraHolder)) if (!shape.keys.includes(k)) setOwn(obj, k, extraHolder[k]);
-  for (const k of shape.keys) {
-    const path = `${prefix}${k}`;
-    if (absent.has(path)) continue;
-    if (Object.hasOwn(offtype, path)) { setOwn(obj, k, offtype[path]); continue; }
-    if (shape.objects?.[k]) obj[k] = decodeLevel(shape.objects[k], row, `${path}.`, isPlainObject(extraHolder[k]) ? extraHolder[k] : {}, absent, offtype, children);
-    else if (shape.lists?.[k]) obj[k] = children.get(path) ?? [];
-    else if (shape.object?.[k]) obj[k] = (children.get(path) ?? [null])[0];
-    else if (shape.maps?.[k]) { const held = shape.maps[k].ownerTable && isPlainObject(extraHolder[k]) ? extraHolder[k] : {}; const o = {}; for (const a of Object.keys(held)) setOwn(o, a, held[a]); for (const [a, val] of Object.entries(children.get(path) ?? {})) setOwn(o, a, val); obj[k] = o; }
-    else { const [col, kind] = shape.cols[k]; obj[k] = fromCol(kind, row[col], col); }
-  }
-  return obj;
-}
-const rowMeta = (enc) => ({ absent_keys_json: enc.absent.length ? JSON.stringify(enc.absent) : null, offtype_json: jsonOrNull(enc.offtype), extra_json: jsonOrNull(enc.extra) });
-const metaOf = (r) => ({ absent: new Set(r.absent_keys_json ? JSON.parse(r.absent_keys_json) : []), offtype: r.offtype_json ? parseJson(r.offtype_json, 'offtype_json') : {}, extra: r.extra_json ? parseJson(r.extra_json, 'extra_json') : {} });
-/** Column admission and conversion, shared with the S8b engine (repositories/recruitmentCases.mjs). */
-const columnAdmits = (kind, v) => columnHolds(kind, v);
-const toColumn = (kind, v) => toCol(kind, v);
-const fromColumn = (kind, v, col) => fromCol(kind, v, col);
-const copyRecord = (r) => { const c = {}; for (const k of Object.keys(r)) setOwn(c, k, clone(r[k], k).value); return c; };
+import { readonlyView, markView } from './readonly.mjs';
+import { transaction, migrationApplied } from './database.mjs';
+import { describe, isPlainObject, nonEmpty, ids } from './recruitment.mjs';
+import {
+  ROOM_STATUSES, ROOM_PRIORITIES, SOURCE_CONTEXTS, TASK_STATES, LINKED_RESOURCE_TYPES, EVIDENCE_REVIEW_STATES,
+  RECOMMENDATIONS, LIMITS, CASE_STAGES, CASE_PRIORITIES, CASE_DECISION_OUTCOMES, CASE_APPROVAL_STATES,
+} from '../m17/shared.mjs';
+import { DECISION_OUTCOMES, DECISION_KINDS, DECISION_STATES, EVIDENCE_REF_KINDS, DECISION_LIMITS } from '../m23/decision.mjs';
+import { CURRENCIES, BUDGET_LINE_KINDS, BUDGET_SCHEDULES } from '../m13/shared.mjs';
+import { HANDOFF_STATUSES } from '../m27/integration.mjs';
 
 export const RECRUITMENT_CASES_MIGRATION = '0016_recruitment_cases';
 export const RECRUITMENT_CASES_COLLECTIONS = Object.freeze(['recruitmentCases', 'roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState']);
-/** The owner tables the shared idempotency_keys CHECK names once 0016 is recorded (the S8a two first). */
-export const S8B_KEY_OWNERS = Object.freeze(['recruitment_cases', 'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions']);
-
+export const CASE_TABLES = Object.freeze(['recruitment_cases', 'case_room_tags', 'case_assignments', 'case_tasks', 'case_approvals', 'case_history', 'case_request_links', 'case_trial_links', 'case_decision_drafts', 'case_decision_draft_reason_codes', 'case_decision_draft_evidence_refs', 'case_transaction_handoffs', 'case_budget_scenarios', 'case_budget_lines', 'case_budget_fx_assumptions', 'case_budget_actuals']);
+export const ROOM_TABLES = Object.freeze(['room_comments', 'room_comment_mentions', 'room_snapshots', 'room_snapshot_source_refs', 'room_decisions', 'room_decision_reason_codes', 'room_decision_evidence_refs', 'room_decision_assessment_ids', 'room_evidence_states']);
+export const RECRUITMENT_CASES_TABLES = Object.freeze([...CASE_TABLES, ...ROOM_TABLES]);
 export const recruitmentCasesLive = (sqlite) => migrationApplied(sqlite, RECRUITMENT_CASES_MIGRATION);
-const blocked = (detail, extra = {}) => Object.assign(new Error(`RECRUITMENT_CASES_IMPORT_BLOCKED: ${detail}; nothing was imported`), { code: 'RECRUITMENT_CASES_IMPORT_BLOCKED', ...extra });
 const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const jsonOrNull = (obj) => (Object.keys(obj).length ? JSON.stringify(obj) : null);
+const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
-// ------------------------------------------------------------------ the shapes (the writers' literals, key for key)
-// kinds: text | int | num | bool | json | id (as the S8a engine). A child spec: { table, ownerCols, shape, scalar?: [col, kind]
-// (a list of scalars: a matching entry in the column, any other entry in raw_json), constant?: { col: value } (several
-// lists sharing one table), single?: true (an object child: one row), restrict?: true (deleted explicitly before its owner),
-// indexes?: [...] }. A `maps` entry with `ownerTable` is the idempotency_keys rule: owner_id is the record's own id (a case, a
-// decision) or, with `ownerKey: 'case'`, the OWNING CASE id (the draft and the handoff — one per case, their primary key the
-// case id; their own ids are data the parent-scoped tables admit twice; the review of b7c0dd0, F2).
-const EMPTY = { keys: [], cols: {} };
-const BY2 = (p) => ({ keys: ['userId', 'name'], cols: { userId: [`${p}_user_id`, 'text'], name: [`${p}_name`, 'text'] } });
-const BY3 = (p) => ({ keys: ['kind', 'userId', 'name'], cols: { kind: [`${p}_kind`, 'text'], userId: [`${p}_user_id`, 'text'], name: [`${p}_name`, 'text'] } });
-const BY_ROLE = (p) => ({ keys: ['userId', 'name', 'role'], cols: { userId: [`${p}_user_id`, 'text'], name: [`${p}_name`, 'text'], role: [`${p}_role`, 'text'] } });
-const scalarList = (table, ownerCols, scalar, extra = {}) => ({ table, ownerCols, shape: EMPTY, scalar, ...extra });
+// ------------------------------------------------------------------ vocabulary
+/** Who a case history entry names: a club user (`org`, M13's `org_user`), a family member, the platform, an agent. */
+export const CASE_ACTOR_KINDS = Object.freeze(['org', 'org_user', 'player', 'guardian', 'system', 'admin', 'agent']);
+/** A handoff's stored status (`expired` is read from its age, never stored). */
+const HANDOFF_STORED = HANDOFF_STATUSES.filter((s) => s !== 'expired');
+const SOURCE_REF_KINDS = ['evidence', 'assessment', 'combine', 'trial'];
+const CODE_MAX = 64;
+const KEY_MAX = DECISION_LIMITS.clientKey;
+const TEXT = { reasons: 500, trigger: 120, action: 64, assumption: 200, source: 80, task: 200, title: 200, label: 80, fxRate: 32, evidenceNote: 1000 };
 
-const ROOM_TAGS = scalarList('case_room_tags', ['case_id'], ['tag', 'text']);
-const ASSIGNMENTS = { table: 'case_assignments', ownerCols: ['case_id'], shape: { keys: ['id', 'userId', 'name', 'task', 'dueAt', 'status', 'createdAt'], cols: { id: ['id', 'text'], userId: ['user_id', 'text'], name: ['user_name', 'text'], task: ['task', 'text'], dueAt: ['due_at_json', 'json'], status: ['status', 'text'], createdAt: ['created_at', 'int'] } }, indexes: ['CREATE INDEX case_assignments_user ON case_assignments (user_id)'] };
-const TASKS = { table: 'case_tasks', ownerCols: ['case_id'], shape: { keys: ['id', 'title', 'description', 'dueAt', 'assigneeUserId', 'assigneeName', 'status', 'linkedResourceType', 'linkedResourceId', 'createdBy', 'createdAt', 'completedAt', 'completedBy'], cols: { id: ['id', 'text'], title: ['title', 'text'], description: ['description', 'text'], dueAt: ['due_at_json', 'json'], assigneeUserId: ['assignee_user_id', 'text'], assigneeName: ['assignee_name', 'text'], status: ['status', 'text'], linkedResourceType: ['linked_resource_type', 'text'], linkedResourceId: ['linked_resource_id', 'text'], createdAt: ['created_at', 'int'], completedAt: ['completed_at', 'int'], completedBy: ['completed_by_name', 'text'] }, objects: { createdBy: BY2('created_by') } }, indexes: ['CREATE INDEX case_tasks_assignee_status ON case_tasks (assignee_user_id, status)'] };
-const APPROVALS = { table: 'case_approvals', ownerCols: ['case_id'], shape: { keys: ['id', 'decision', 'requestedBy', 'status', 'requestedAt', 'resolvedBy'], cols: { id: ['id', 'text'], status: ['status', 'text'], requestedAt: ['requested_at', 'int'] }, objects: { decision: { keys: ['outcome', 'reasons'], cols: { outcome: ['decision_outcome', 'text'], reasons: ['decision_reasons', 'text'] } }, requestedBy: BY2('requested_by'), resolvedBy: { keys: ['userId', 'name', 'at'], cols: { userId: ['resolved_by_user_id', 'text'], name: ['resolved_by_name', 'text'], at: ['resolved_at', 'int'] } } } } };
-const HISTORY = { table: 'case_history', ownerCols: ['case_id'], restrict: true, shape: { keys: ['id', 'at', 'byKind', 'byId', 'byName', 'action', 'by', 'detail'], cols: { id: ['id', 'text'], at: ['at', 'int'], byKind: ['by_kind', 'text'], byId: ['by_id', 'text'], byName: ['by_name', 'text'], action: ['action', 'text'], detail: ['detail_json', 'json'] }, objects: { by: BY3('actor') } }, indexes: ['CREATE INDEX case_history_case_at ON case_history (case_id, at)', 'CREATE INDEX case_history_id ON case_history (id)'] };
-const REQUEST_LINKS = scalarList('case_request_links', ['case_id'], ['request_id', 'text'], { indexes: ['CREATE INDEX case_request_links_request ON case_request_links (request_id)'] });
-const TRIAL_LINKS = scalarList('case_trial_links', ['case_id'], ['trial_id', 'text'], { indexes: ['CREATE INDEX case_trial_links_trial ON case_trial_links (trial_id)'] });
-const DRAFT_REASONS = scalarList('case_decision_draft_reason_codes', ['case_id', 'draft_position'], ['code', 'text']);
-const DRAFT_REFS = { table: 'case_decision_draft_evidence_refs', ownerCols: ['case_id', 'draft_position'], shape: { keys: ['kind', 'id', 'meta'], cols: { kind: ['kind', 'text'], id: ['ref_id', 'text'], meta: ['meta_json', 'json'] } } };
-const DRAFT = { table: 'case_decision_drafts', ownerCols: ['case_id'], single: true, shape: { keys: ['id', 'outcome', 'reasonCodes', 'note', 'evidenceRefs', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'rev', 'revAt', 'keys'], cols: { id: ['id', 'text'], outcome: ['outcome', 'text'], note: ['note', 'text'], createdAt: ['created_at', 'int'], updatedAt: ['updated_at', 'int'], rev: ['rev', 'int'], revAt: ['rev_at', 'int'] }, objects: { by: BY_ROLE('by'), updatedBy: BY_ROLE('updated_by') }, lists: { reasonCodes: DRAFT_REASONS, evidenceRefs: DRAFT_REFS }, maps: { keys: { table: 'idempotency_keys', ownerTable: 'case_decision_drafts', ownerKey: 'case' } } }, indexes: ['CREATE INDEX case_decision_drafts_id ON case_decision_drafts (id)'] };
-const HANDOFF = { table: 'case_transaction_handoffs', ownerCols: ['case_id'], single: true, shape: { keys: ['id', 'caseId', 'orgId', 'playerId', 'status', 'invitedAt', 'invitedBy', 'acceptedAt', 'withdrawnAt', 'transactionId', 'representedAtInvitation', 'invitedAgencyOrgId', 'invitedAgentUserId', 'keys', 'rev', 'revAt'], cols: { id: ['id', 'text'], caseId: ['handoff_case_id', 'text'], orgId: ['org_id', 'text'], playerId: ['player_id', 'text'], status: ['status', 'text'], invitedAt: ['invited_at', 'int'], acceptedAt: ['accepted_at', 'int'], withdrawnAt: ['withdrawn_at', 'int'], transactionId: ['transaction_id', 'text'], representedAtInvitation: ['represented_at_invitation', 'bool'], invitedAgencyOrgId: ['invited_agency_org_id', 'text'], invitedAgentUserId: ['invited_agent_user_id', 'text'], rev: ['rev', 'int'], revAt: ['rev_at', 'int'] }, objects: { invitedBy: BY3('invited_by') }, maps: { keys: { table: 'idempotency_keys', ownerTable: 'case_transaction_handoffs', ownerKey: 'case' } } }, indexes: ['CREATE INDEX case_transaction_handoffs_id ON case_transaction_handoffs (id)', 'CREATE INDEX case_transaction_handoffs_agency_status ON case_transaction_handoffs (invited_agency_org_id, status)', 'CREATE INDEX case_transaction_handoffs_player ON case_transaction_handoffs (player_id)'] };
-const BUDGET_LINES = { table: 'case_budget_lines', ownerCols: ['case_id', 'scenario_position'], shape: { keys: ['id', 'kind', 'label', 'amountMinor', 'currency', 'schedule', 'confirmed', 'conditional'], cols: { id: ['id', 'text'], kind: ['kind', 'text'], label: ['label', 'text'], amountMinor: ['amount_minor', 'int'], currency: ['currency', 'text'], schedule: ['schedule', 'text'], confirmed: ['confirmed', 'bool'] }, objects: { conditional: { keys: ['assumption'], cols: { assumption: ['conditional_assumption', 'text'] } } } } };
-const BUDGET_FX = { table: 'case_budget_fx_assumptions', ownerCols: ['case_id', 'scenario_position'], shape: { keys: ['from', 'to', 'rate', 'source', 'date', 'manual'], cols: { from: ['from_currency', 'text'], to: ['to_currency', 'text'], rate: ['rate', 'text'], source: ['source', 'text'], date: ['date', 'text'], manual: ['manual', 'bool'] } } };
-const BUDGET_ACTUALS = { table: 'case_budget_actuals', ownerCols: ['case_id', 'scenario_position'], shape: { keys: ['id', 'lineId', 'amountMinor', 'at', 'recordedBy'], cols: { id: ['id', 'text'], lineId: ['line_id', 'text'], amountMinor: ['amount_minor', 'int'], at: ['at', 'int'], recordedBy: ['recorded_by_name', 'text'] } } };
-const BUDGET_SCENARIOS = { table: 'case_budget_scenarios', ownerCols: ['case_id'], shape: { keys: ['id', 'version', 'label', 'currency', 'termMonths', 'lines', 'fxAssumptions', 'approval', 'actuals', 'createdBy', 'createdAt', 'updatedAt'], cols: { id: ['id', 'text'], version: ['version', 'int'], label: ['label', 'text'], currency: ['currency', 'text'], termMonths: ['term_months', 'int'], createdBy: ['created_by_name', 'text'], createdAt: ['created_at', 'int'], updatedAt: ['updated_at', 'int'] }, objects: { approval: { keys: ['by', 'byUserId', 'at', 'version', 'superseded'], cols: { by: ['approval_by_name', 'text'], byUserId: ['approval_by_user_id', 'text'], at: ['approval_at', 'int'], version: ['approval_version', 'int'], superseded: ['approval_superseded', 'bool'] } } }, lists: { lines: BUDGET_LINES, fxAssumptions: BUDGET_FX, actuals: BUDGET_ACTUALS } }, indexes: ['CREATE INDEX case_budget_scenarios_id ON case_budget_scenarios (id)'] };
-const CASE_SHAPE = {
-  keys: ['id', 'orgId', 'playerId', 'playerName', 'vacancyId', 'ownerUserId', 'ownerName', 'stage', 'priority', 'deadline', 'restricted', 'assignments', 'tasks', 'approvals', 'decision', 'links', 'createdAt', 'history', 'room', 'decisionDraft', 'transactionHandoff', 'budget', 'subjectRemovedAt'],
-  cols: { id: ['id', 'id'], orgId: ['org_id', 'text'], playerId: ['player_id', 'text'], playerName: ['player_name', 'text'], vacancyId: ['vacancy_id', 'text'], ownerUserId: ['owner_user_id', 'text'], ownerName: ['owner_name', 'text'], stage: ['stage', 'text'], priority: ['priority', 'text'], deadline: ['deadline_json', 'json'], restricted: ['restricted', 'bool'], createdAt: ['created_at', 'int'], subjectRemovedAt: ['subject_removed_at', 'int'] },
-  objects: {
-    decision: { keys: ['outcome', 'reasons', 'byUserId', 'byName', 'approvedBy', 'at'], cols: { outcome: ['decision_outcome', 'text'], reasons: ['decision_reasons', 'text'], byUserId: ['decision_by_user_id', 'text'], byName: ['decision_by_name', 'text'], approvedBy: ['decision_approved_by_name', 'text'], at: ['decision_at', 'int'] } },
-    links: { keys: ['requestIds', 'trialIds', 'signingId'], cols: { signingId: ['links_signing_id', 'text'] }, lists: { requestIds: REQUEST_LINKS, trialIds: TRIAL_LINKS } },
-    room: {
-      keys: ['status', 'priority', 'tags', 'leadScoutUserId', 'sourceContext', 'sourceRef', 'openedBy', 'updatedAt', 'archivedAt', 'closedAt', 'rev', 'revAt', 'revBy', 'reopened'],
-      cols: { status: ['room_status', 'text'], priority: ['room_priority', 'text'], leadScoutUserId: ['room_lead_scout_user_id', 'text'], sourceContext: ['room_source_context', 'text'], sourceRef: ['room_source_ref_json', 'json'], updatedAt: ['room_updated_at', 'int'], archivedAt: ['room_archived_at', 'int'], closedAt: ['room_closed_at', 'int'], rev: ['room_rev', 'int'], revAt: ['room_rev_at', 'int'] },
-      objects: { openedBy: BY2('room_opened_by'), revBy: BY2('room_rev_by'), reopened: { keys: ['by', 'at', 'from', 'reasonCodes', 'sourceContext', 'sourceRef'], cols: { at: ['room_reopened_at', 'int'], from: ['room_reopened_from', 'text'], reasonCodes: ['room_reopened_reason_codes_json', 'json'], sourceContext: ['room_reopened_source_context', 'text'], sourceRef: ['room_reopened_source_ref_json', 'json'] }, objects: { by: BY2('room_reopened_by') } } },
-      lists: { tags: ROOM_TAGS },
-    },
-    budget: { keys: ['scenarios'], cols: {}, lists: { scenarios: BUDGET_SCENARIOS } },
-  },
-  lists: { assignments: ASSIGNMENTS, tasks: TASKS, approvals: APPROVALS, history: HISTORY },
-  object: { decisionDraft: DRAFT, transactionHandoff: HANDOFF },
-};
-const MENTIONS = scalarList('room_comment_mentions', ['comment_id'], ['user_id', 'text']);
-const COMMENT_SHAPE = { keys: ['id', 'roomId', 'orgId', 'authorId', 'authorName', 'body', 'replyToId', 'mentions', 'createdAt', 'editedAt', 'editCount', 'deletedAt', 'deletedBy'], cols: { id: ['id', 'id'], roomId: ['room_id', 'text'], orgId: ['org_id', 'text'], authorId: ['author_user_id', 'text'], authorName: ['author_name', 'text'], body: ['body', 'text'], replyToId: ['reply_to_id', 'text'], createdAt: ['created_at', 'int'], editedAt: ['edited_at', 'int'], editCount: ['edit_count', 'int'], deletedAt: ['deleted_at', 'int'] }, objects: { deletedBy: BY2('deleted_by') }, lists: { mentions: MENTIONS } };
-const sourceRefList = (kind) => ({ table: 'room_snapshot_source_refs', ownerCols: ['snapshot_id'], shape: EMPTY, scalar: ['ref_id', 'text'], constant: { kind } });
-const SOURCE_REFS = { keys: ['passportVersion', 'passportRevision', 'evidenceIds', 'assessmentIds', 'combineResults', 'trialIds'], cols: { passportVersion: ['source_passport_version', 'int'], passportRevision: ['source_passport_revision', 'int'] }, lists: { evidenceIds: sourceRefList('evidence'), assessmentIds: sourceRefList('assessment'), combineResults: sourceRefList('combine'), trialIds: sourceRefList('trial') } };
-const TRUST = (p) => ({ keys: ['score', 'band', 'policyVersion', 'componentLevels', 'hash'], cols: { score: [`${p}_score`, 'num'], band: [`${p}_band`, 'text'], policyVersion: [`${p}_policy_version`, 'int'], componentLevels: [`${p}_component_levels_json`, 'json'], hash: [`${p}_hash`, 'text'] } });
-const SNAPSHOT_SHAPE = { keys: ['id', 'roomId', 'orgId', 'playerId', 'at', 'trigger', 'trust', 'sourceRefs', 'note'], cols: { id: ['id', 'id'], roomId: ['room_id', 'text'], orgId: ['org_id', 'text'], playerId: ['player_id', 'text'], at: ['at', 'int'], trigger: ['trigger', 'text'], note: ['note', 'text'] }, objects: { trust: TRUST('trust'), sourceRefs: SOURCE_REFS } };
-const DECISION_REASONS = scalarList('room_decision_reason_codes', ['decision_id'], ['code', 'text']);
-const DECISION_REFS = { table: 'room_decision_evidence_refs', ownerCols: ['decision_id'], shape: { keys: ['kind', 'id', 'meta'], cols: { kind: ['kind', 'text'], id: ['ref_id', 'text'], meta: ['meta_json', 'json'] } }, indexes: ['CREATE INDEX room_decision_evidence_refs_ref ON room_decision_evidence_refs (kind, ref_id)'] };
-const DECISION_ASSESSMENTS = scalarList('room_decision_assessment_ids', ['decision_id'], ['assessment_id', 'text']);
-const DECISION_SHAPE = {
-  keys: ['id', 'roomId', 'orgId', 'playerId', 'kind', 'state', 'outcome', 'recommendation', 'reasonCodes', 'note', 'by', 'createdAt', 'finalizedAt', 'trigger', 'clientKey', 'supersedes', 'supersededById', 'supersession', 'rev', 'revAt', 'evidenceRefs', 'assessmentSummary', 'snapshot', 'keys', 'draftId', 'lifecycle', 'policyVersion'],
-  cols: { id: ['id', 'id'], roomId: ['room_id', 'text'], orgId: ['org_id', 'text'], playerId: ['player_id', 'text'], kind: ['kind', 'text'], state: ['state', 'text'], outcome: ['outcome', 'text'], recommendation: ['recommendation', 'text'], note: ['note', 'text'], createdAt: ['created_at', 'int'], finalizedAt: ['finalized_at', 'int'], trigger: ['trigger', 'text'], clientKey: ['client_key', 'text'], supersedes: ['supersedes_id', 'text'], supersededById: ['superseded_by_id', 'text'], rev: ['rev', 'int'], revAt: ['rev_at', 'int'], draftId: ['draft_id', 'text'], policyVersion: ['policy_version', 'int'] },
-  objects: {
-    by: BY_ROLE('by'),
-    supersession: { keys: ['of', 'reason'], cols: { of: ['supersession_of_id', 'text'], reason: ['supersession_reason', 'text'] } },
-    assessmentSummary: { keys: ['submitted', 'withheld', 'verdicts', 'assessmentIds'], cols: { submitted: ['assessments_submitted', 'int'], withheld: ['assessments_withheld', 'int'], verdicts: ['assessment_verdicts_json', 'json'] }, lists: { assessmentIds: DECISION_ASSESSMENTS } },
-    snapshot: { keys: ['at', 'trust', 'sourceRefs', 'snapshotId'], cols: { at: ['snapshot_at', 'int'], sourceRefs: ['snapshot_source_refs_json', 'json'], snapshotId: ['snapshot_id', 'text'] }, objects: { trust: TRUST('snapshot_trust') } },
-    lifecycle: { keys: ['action', 'from', 'to', 'applied', 'reason', 'at'], cols: { action: ['lifecycle_action', 'text'], from: ['lifecycle_from', 'text'], to: ['lifecycle_to', 'text'], applied: ['lifecycle_applied', 'bool'], reason: ['lifecycle_reason', 'text'], at: ['lifecycle_at', 'int'] } },
-  },
-  lists: { reasonCodes: DECISION_REASONS, evidenceRefs: DECISION_REFS },
-  maps: { keys: { table: 'idempotency_keys', ownerTable: 'room_decisions' } },
-};
-const EVIDENCE_SHAPE = { keys: ['id', 'roomId', 'orgId', 'evidenceId', 'state', 'note', 'byId', 'byName', 'at'], cols: { id: ['id', 'id'], roomId: ['room_id', 'text'], orgId: ['org_id', 'text'], evidenceId: ['evidence_id', 'text'], state: ['state', 'text'], note: ['note', 'text'], byId: ['by_user_id', 'text'], byName: ['by_name', 'text'], at: ['at', 'int'] } };
+// ------------------------------------------------------------------ DDL
+const inList = (col, vocab) => `CHECK (${col} IS NULL OR ${col} IN (${vocab.map((v) => `'${v}'`).join(',')}))`;
+const maxLen = (col, n) => `CHECK (${col} IS NULL OR length(${col}) <= ${n})`;
+const bool = (col) => `CHECK (${col} IS NULL OR ${col} IN (0,1))`;
+const dayCheck = (col) => `CHECK (${col} IS NULL OR ${col} GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')`;
+const jsonObject = (col) => `CHECK (${col} IS NULL OR (json_valid(${col}) AND json_type(${col}) = 'object'))`;
+const jsonArray = (col) => `CHECK (${col} IS NULL OR (json_valid(${col}) AND json_type(${col}) = 'array'))`;
+const staffRef = (col) => `${col} TEXT REFERENCES org_users(id) ON DELETE RESTRICT`;
+/** A day (`YYYY-MM-DD`) or an instant (ms), never both: a due date or a deadline. */
+const dayOrInstantCols = (p) => `  ${p}_day TEXT ${dayCheck(`${p}_day`)},\n  ${p}_at INTEGER`;
+const oneOfDayOrInstant = (p) => `CHECK (${p}_day IS NULL OR ${p}_at IS NULL)`;
+const ownedByCase = '  case_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE CASCADE';
 
-/** One collection: its parent table, shape, children (write order: a sub-child after its owner), the key owners it carries, its indexes. */
-const COLL = (name, table, shape, indexes, { roomRef = null, keyOwners = [] } = {}) => ({ name, table, shape, children: Object.freeze(childSpecs(shape)), indexes, roomRef, keyOwners });
-export const CASES = COLL('recruitmentCases', 'recruitment_cases', CASE_SHAPE, ['CREATE INDEX recruitment_cases_org_created ON recruitment_cases (org_id, created_at)', 'CREATE INDEX recruitment_cases_org_player ON recruitment_cases (org_id, player_id)', 'CREATE INDEX recruitment_cases_org_room_status_updated ON recruitment_cases (org_id, room_status, room_updated_at)', 'CREATE INDEX recruitment_cases_org_stage ON recruitment_cases (org_id, stage)', 'CREATE INDEX recruitment_cases_player ON recruitment_cases (player_id)'], { keyOwners: [DRAFT, HANDOFF] });
-export const COMMENTS = COLL('roomComments', 'room_comments', COMMENT_SHAPE, ['CREATE INDEX room_comments_room_created ON room_comments (room_id, created_at)', 'CREATE INDEX room_comments_author ON room_comments (author_user_id)'], { roomRef: 'room_id' });
-export const SNAPSHOTS = COLL('roomSnapshots', 'room_snapshots', SNAPSHOT_SHAPE, ['CREATE INDEX room_snapshots_room_at ON room_snapshots (room_id, at)', 'CREATE INDEX room_snapshots_player ON room_snapshots (player_id)'], { roomRef: 'room_id' });
-export const DECISIONS = COLL('roomDecisions', 'room_decisions', DECISION_SHAPE, ['CREATE INDEX room_decisions_room_created ON room_decisions (room_id, created_at)', 'CREATE INDEX room_decisions_room_client_key ON room_decisions (room_id, client_key)', 'CREATE INDEX room_decisions_player ON room_decisions (player_id)', 'CREATE INDEX room_decisions_draft ON room_decisions (draft_id)'], { roomRef: 'room_id', keyOwners: [{ table: 'room_decisions', self: true }] });
-export const EVIDENCE_STATES = COLL('roomEvidenceState', 'room_evidence_states', EVIDENCE_SHAPE, ['CREATE INDEX room_evidence_states_room_evidence ON room_evidence_states (room_id, evidence_id)'], { roomRef: 'room_id' });
-const ROOM_COLLECTIONS = Object.freeze([COMMENTS, SNAPSHOTS, DECISIONS, EVIDENCE_STATES]);
-const ALL_COLLECTIONS = Object.freeze([CASES, ...ROOM_COLLECTIONS]);
-const byName = Object.fromEntries(ALL_COLLECTIONS.map((c) => [c.name, c]));
-const LINK_TABLES = new Set([REQUEST_LINKS.table, TRIAL_LINKS.table]);
-const dedupeTables = (list) => [...new Set(list)];
-export const RECRUITMENT_CASES_TABLES = Object.freeze(dedupeTables(ALL_COLLECTIONS.flatMap((c) => [c.table, ...c.children.map((ch) => ch.table)])));
+export const RECRUITMENT_CASES_DDL = `
+CREATE TABLE recruitment_cases (
+  id TEXT PRIMARY KEY,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id TEXT NOT NULL,
+  player_name TEXT,
+  vacancy_id TEXT,
+  ${staffRef('owner_user_id')} NOT NULL,
+  owner_name TEXT,
+  stage TEXT NOT NULL ${inList('stage', CASE_STAGES)},
+  priority TEXT NOT NULL ${inList('priority', CASE_PRIORITIES)},
+${dayOrInstantCols('deadline')},
+  restricted INTEGER NOT NULL ${bool('restricted')},
+  decision_outcome TEXT ${inList('decision_outcome', CASE_DECISION_OUTCOMES)},
+  decision_reasons TEXT ${maxLen('decision_reasons', TEXT.reasons)},
+  ${staffRef('decision_by_user_id')},
+  decision_by_name TEXT,
+  decision_approved_by_name TEXT,
+  decision_at INTEGER,
+  links_signing_id TEXT,
+  created_at INTEGER NOT NULL,
+  subject_removed_at INTEGER,
+  room_status TEXT ${inList('room_status', ROOM_STATUSES)},
+  room_priority TEXT ${inList('room_priority', ROOM_PRIORITIES)},
+  ${staffRef('room_lead_scout_user_id')},
+  room_source_context TEXT ${inList('room_source_context', SOURCE_CONTEXTS)},
+  room_source_ref_id TEXT,
+  room_source_ref_version INTEGER,
+  room_opened_by_user_id TEXT,
+  room_opened_by_name TEXT,
+  room_updated_at INTEGER,
+  room_archived_at INTEGER,
+  room_closed_at INTEGER,
+  room_rev INTEGER CHECK (room_rev IS NULL OR room_rev >= 0),
+  room_rev_at INTEGER,
+  room_rev_by_user_id TEXT,
+  room_rev_by_name TEXT,
+  room_reopened_at INTEGER,
+  room_reopened_by_user_id TEXT,
+  room_reopened_by_name TEXT,
+  room_reopened_from TEXT ${inList('room_reopened_from', ROOM_STATUSES)},
+  room_reopened_reason_codes_json TEXT ${jsonArray('room_reopened_reason_codes_json')},
+  room_reopened_source_context TEXT ${inList('room_reopened_source_context', SOURCE_CONTEXTS)},
+  room_reopened_source_ref_id TEXT,
+  room_reopened_source_ref_version INTEGER,
+  ${oneOfDayOrInstant('deadline')},
+  CHECK ((decision_outcome IS NULL) = (decision_at IS NULL)),
+  CHECK ((room_status IS NULL) = (room_rev IS NULL) AND (room_status IS NULL) = (room_updated_at IS NULL) AND (room_status IS NULL) = (room_priority IS NULL)),
+  CHECK ((room_reopened_at IS NULL) = (room_reopened_reason_codes_json IS NULL)),
+  CHECK (room_status IS NOT NULL OR room_reopened_at IS NULL)
+) STRICT;
+CREATE INDEX recruitment_cases_org_created ON recruitment_cases (org_id, created_at);
+CREATE INDEX recruitment_cases_org_player ON recruitment_cases (org_id, player_id);
+CREATE INDEX recruitment_cases_org_room_status_updated ON recruitment_cases (org_id, room_status, room_updated_at);
+CREATE INDEX recruitment_cases_org_stage ON recruitment_cases (org_id, stage);
+CREATE INDEX recruitment_cases_player ON recruitment_cases (player_id);
+CREATE TABLE case_room_tags (
+${ownedByCase},
+  position INTEGER NOT NULL,
+  tag TEXT NOT NULL CHECK (length(tag) BETWEEN 1 AND ${LIMITS.tagLength}),
+  PRIMARY KEY (case_id, position),
+  UNIQUE (case_id, tag)
+) STRICT;
+CREATE TABLE case_assignments (
+${ownedByCase},
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  ${staffRef('user_id')} NOT NULL,
+  user_name TEXT,
+  task TEXT NOT NULL ${maxLen('task', TEXT.task)},
+${dayOrInstantCols('due')},
+  status TEXT NOT NULL ${inList('status', TASK_STATES)},
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (case_id, position),
+  UNIQUE (case_id, id),
+  ${oneOfDayOrInstant('due')}
+) STRICT;
+CREATE INDEX case_assignments_user ON case_assignments (user_id);
+CREATE TABLE case_tasks (
+${ownedByCase},
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND ${TEXT.title}),
+  description TEXT ${maxLen('description', LIMITS.taskDescription)},
+${dayOrInstantCols('due')},
+  assignee_user_id TEXT,
+  assignee_name TEXT,
+  status TEXT NOT NULL ${inList('status', TASK_STATES)},
+  linked_resource_type TEXT ${inList('linked_resource_type', LINKED_RESOURCE_TYPES)},
+  linked_resource_id TEXT,
+  created_by_user_id TEXT,
+  created_by_name TEXT,
+  created_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  completed_by_name TEXT,
+  PRIMARY KEY (case_id, position),
+  UNIQUE (case_id, id),
+  ${oneOfDayOrInstant('due')}
+) STRICT;
+CREATE INDEX case_tasks_assignee_status ON case_tasks (assignee_user_id, status);
+CREATE TABLE case_approvals (
+${ownedByCase},
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  decision_outcome TEXT NOT NULL ${inList('decision_outcome', CASE_DECISION_OUTCOMES)},
+  decision_reasons TEXT ${maxLen('decision_reasons', TEXT.reasons)},
+  requested_by_user_id TEXT,
+  requested_by_name TEXT,
+  status TEXT NOT NULL ${inList('status', CASE_APPROVAL_STATES)},
+  requested_at INTEGER NOT NULL,
+  resolved_by_user_id TEXT,
+  resolved_by_name TEXT,
+  resolved_at INTEGER,
+  PRIMARY KEY (case_id, position),
+  UNIQUE (case_id, id),
+  CHECK ((status = 'pending') = (resolved_at IS NULL))
+) STRICT;
+CREATE TABLE case_history (
+${ownedByCase},
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  action TEXT NOT NULL CHECK (length(action) BETWEEN 1 AND ${TEXT.action}),
+  by_kind TEXT ${inList('by_kind', CASE_ACTOR_KINDS)},
+  by_id TEXT,
+  by_name TEXT,
+  detail_text TEXT,
+  detail_json TEXT ${jsonObject('detail_json')},
+  PRIMARY KEY (case_id, position),
+  UNIQUE (case_id, id),
+  CHECK (detail_text IS NULL OR detail_json IS NULL)
+) STRICT;
+CREATE INDEX case_history_case_at ON case_history (case_id, at);
+CREATE TABLE case_request_links (
+${ownedByCase},
+  position INTEGER NOT NULL,
+  request_id TEXT NOT NULL REFERENCES recruitment_requests(id) ON DELETE RESTRICT,
+  PRIMARY KEY (case_id, position),
+  UNIQUE (case_id, request_id)
+) STRICT;
+CREATE INDEX case_request_links_request ON case_request_links (request_id);
+CREATE TABLE case_trial_links (
+${ownedByCase},
+  position INTEGER NOT NULL,
+  trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE RESTRICT,
+  PRIMARY KEY (case_id, position),
+  UNIQUE (case_id, trial_id)
+) STRICT;
+CREATE INDEX case_trial_links_trial ON case_trial_links (trial_id);
+CREATE TABLE case_decision_drafts (
+  case_id TEXT PRIMARY KEY REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  id TEXT NOT NULL UNIQUE,
+  outcome TEXT ${inList('outcome', DECISION_OUTCOMES)},
+  note TEXT ${maxLen('note', DECISION_LIMITS.note)},
+  by_user_id TEXT,
+  by_name TEXT,
+  by_role TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by_user_id TEXT,
+  updated_by_name TEXT,
+  updated_by_role TEXT,
+  rev INTEGER NOT NULL CHECK (rev >= 1),
+  rev_at INTEGER,
+  create_key TEXT ${maxLen('create_key', KEY_MAX)},
+  create_fp TEXT,
+  CHECK ((create_key IS NULL) = (create_fp IS NULL))
+) STRICT;
+CREATE TABLE case_decision_draft_reason_codes (
+  case_id TEXT NOT NULL REFERENCES case_decision_drafts(case_id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  code TEXT NOT NULL CHECK (length(code) BETWEEN 1 AND ${CODE_MAX}),
+  PRIMARY KEY (case_id, position)
+) STRICT;
+CREATE TABLE case_decision_draft_evidence_refs (
+  case_id TEXT NOT NULL REFERENCES case_decision_drafts(case_id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  kind TEXT NOT NULL ${inList('kind', EVIDENCE_REF_KINDS)},
+  ref_id TEXT NOT NULL,
+  meta_json TEXT ${jsonObject('meta_json')},
+  PRIMARY KEY (case_id, position)
+) STRICT;
+CREATE TABLE case_transaction_handoffs (
+  case_id TEXT PRIMARY KEY REFERENCES recruitment_cases(id) ON DELETE CASCADE,
+  id TEXT NOT NULL UNIQUE,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id TEXT NOT NULL,
+  status TEXT NOT NULL ${inList('status', HANDOFF_STORED)},
+  invited_at INTEGER NOT NULL,
+  invited_by_user_id TEXT,
+  invited_by_name TEXT,
+  accepted_at INTEGER,
+  withdrawn_at INTEGER,
+  transaction_id TEXT,
+  represented_at_invitation INTEGER NOT NULL ${bool('represented_at_invitation')},
+  invited_agency_org_id TEXT,
+  invited_agent_user_id TEXT,
+  invite_key TEXT ${maxLen('invite_key', KEY_MAX)},
+  rev INTEGER NOT NULL CHECK (rev >= 1),
+  rev_at INTEGER,
+  CHECK ((status = 'accepted') = (accepted_at IS NOT NULL)),
+  CHECK ((status = 'withdrawn') = (withdrawn_at IS NOT NULL))
+) STRICT;
+CREATE INDEX case_transaction_handoffs_agent_status ON case_transaction_handoffs (invited_agent_user_id, status);
+CREATE INDEX case_transaction_handoffs_player ON case_transaction_handoffs (player_id);
+CREATE TABLE case_budget_scenarios (
+${ownedByCase},
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK (version >= 1),
+  label TEXT NOT NULL ${maxLen('label', TEXT.label)},
+  currency TEXT NOT NULL ${inList('currency', CURRENCIES)},
+  term_months INTEGER NOT NULL CHECK (term_months BETWEEN 1 AND 72),
+  created_by_name TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  approval_by_name TEXT,
+  approval_by_user_id TEXT,
+  approval_at INTEGER,
+  approval_version INTEGER,
+  approval_superseded INTEGER ${bool('approval_superseded')},
+  PRIMARY KEY (case_id, position),
+  UNIQUE (case_id, id),
+  CHECK ((approval_at IS NULL) = (approval_version IS NULL) AND (approval_at IS NULL) = (approval_superseded IS NULL))
+) STRICT;
+CREATE TABLE case_budget_lines (
+  case_id TEXT NOT NULL,
+  scenario_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  kind TEXT NOT NULL ${inList('kind', BUDGET_LINE_KINDS)},
+  label TEXT NOT NULL ${maxLen('label', TEXT.label)},
+  amount_minor INTEGER NOT NULL CHECK (amount_minor >= 0),
+  currency TEXT NOT NULL ${inList('currency', CURRENCIES)},
+  schedule TEXT NOT NULL ${inList('schedule', BUDGET_SCHEDULES)},
+  confirmed INTEGER NOT NULL ${bool('confirmed')},
+  conditional_assumption TEXT ${maxLen('conditional_assumption', TEXT.assumption)},
+  PRIMARY KEY (case_id, scenario_id, position),
+  UNIQUE (case_id, scenario_id, id),
+  FOREIGN KEY (case_id, scenario_id) REFERENCES case_budget_scenarios(case_id, id) ON DELETE CASCADE
+) STRICT;
+CREATE TABLE case_budget_fx_assumptions (
+  case_id TEXT NOT NULL,
+  scenario_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  from_currency TEXT NOT NULL ${inList('from_currency', CURRENCIES)},
+  to_currency TEXT NOT NULL ${inList('to_currency', CURRENCIES)},
+  rate TEXT NOT NULL CHECK (length(rate) BETWEEN 1 AND ${TEXT.fxRate}),
+  source TEXT ${maxLen('source', TEXT.source)},
+  date TEXT NOT NULL ${dayCheck('date')},
+  manual INTEGER NOT NULL ${bool('manual')},
+  PRIMARY KEY (case_id, scenario_id, position),
+  FOREIGN KEY (case_id, scenario_id) REFERENCES case_budget_scenarios(case_id, id) ON DELETE CASCADE
+) STRICT;
+CREATE TABLE case_budget_actuals (
+  case_id TEXT NOT NULL,
+  scenario_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  id TEXT NOT NULL,
+  line_id TEXT NOT NULL,
+  amount_minor INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  recorded_by_name TEXT,
+  PRIMARY KEY (case_id, scenario_id, position),
+  FOREIGN KEY (case_id, scenario_id) REFERENCES case_budget_scenarios(case_id, id) ON DELETE CASCADE
+) STRICT;
+CREATE TABLE room_comments (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  ${staffRef('author_user_id')} NOT NULL,
+  author_name TEXT,
+  body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND ${LIMITS.commentBody}),
+  reply_to_id TEXT,
+  created_at INTEGER NOT NULL,
+  edited_at INTEGER,
+  edit_count INTEGER NOT NULL CHECK (edit_count >= 0),
+  deleted_at INTEGER,
+  deleted_by_user_id TEXT,
+  deleted_by_name TEXT,
+  CHECK (deleted_at IS NOT NULL OR (deleted_by_user_id IS NULL AND deleted_by_name IS NULL))
+) STRICT;
+CREATE INDEX room_comments_room_created ON room_comments (room_id, created_at);
+CREATE INDEX room_comments_author ON room_comments (author_user_id);
+CREATE TABLE room_comment_mentions (
+  comment_id TEXT NOT NULL REFERENCES room_comments(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  PRIMARY KEY (comment_id, position),
+  UNIQUE (comment_id, user_id)
+) STRICT;
+CREATE TABLE room_snapshots (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  trigger TEXT NOT NULL CHECK (length(trigger) BETWEEN 1 AND ${TEXT.trigger}),
+  trust_score REAL,
+  trust_band TEXT,
+  trust_policy_version INTEGER,
+  trust_component_levels_json TEXT ${jsonObject('trust_component_levels_json')},
+  trust_hash TEXT,
+  source_passport_version INTEGER,
+  source_passport_revision TEXT,
+  note TEXT,
+  CHECK ((trust_hash IS NULL) = (trust_component_levels_json IS NULL))
+) STRICT;
+CREATE INDEX room_snapshots_room_at ON room_snapshots (room_id, at);
+CREATE INDEX room_snapshots_player ON room_snapshots (player_id);
+CREATE TABLE room_snapshot_source_refs (
+  snapshot_id TEXT NOT NULL REFERENCES room_snapshots(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL ${inList('kind', SOURCE_REF_KINDS)},
+  position INTEGER NOT NULL,
+  ref_id TEXT NOT NULL,
+  PRIMARY KEY (snapshot_id, kind, position)
+) STRICT;
+CREATE TABLE room_decisions (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id TEXT NOT NULL,
+  kind TEXT ${inList('kind', DECISION_KINDS)},
+  state TEXT ${inList('state', DECISION_STATES)},
+  outcome TEXT ${inList('outcome', DECISION_OUTCOMES)},
+  recommendation TEXT NOT NULL ${inList('recommendation', RECOMMENDATIONS)},
+  note TEXT ${maxLen('note', DECISION_LIMITS.note)},
+  by_user_id TEXT,
+  by_name TEXT,
+  by_role TEXT,
+  created_at INTEGER NOT NULL,
+  finalized_at INTEGER,
+  trigger TEXT ${maxLen('trigger', TEXT.trigger)},
+  client_key TEXT ${maxLen('client_key', KEY_MAX)},
+  supersedes_id TEXT,
+  superseded_by_id TEXT,
+  supersession_of_id TEXT,
+  supersession_reason TEXT ${maxLen('supersession_reason', DECISION_LIMITS.supersessionReason)},
+  rev INTEGER CHECK (rev IS NULL OR rev >= 1),
+  rev_at INTEGER,
+  assessments_submitted INTEGER,
+  assessments_withheld INTEGER,
+  assessment_verdicts_json TEXT ${jsonObject('assessment_verdicts_json')},
+  snapshot_id TEXT REFERENCES room_snapshots(id) ON DELETE RESTRICT,
+  finalize_key TEXT ${maxLen('finalize_key', KEY_MAX)},
+  finalize_fp TEXT,
+  draft_key TEXT ${maxLen('draft_key', KEY_MAX)},
+  draft_fp TEXT,
+  draft_id TEXT,
+  lifecycle_action TEXT,
+  lifecycle_from TEXT ${inList('lifecycle_from', ROOM_STATUSES)},
+  lifecycle_to TEXT ${inList('lifecycle_to', ROOM_STATUSES)},
+  lifecycle_applied INTEGER ${bool('lifecycle_applied')},
+  lifecycle_reason TEXT,
+  lifecycle_at INTEGER,
+  policy_version INTEGER,
+  CHECK ((finalize_key IS NULL) = (finalize_fp IS NULL)),
+  CHECK ((draft_key IS NULL) = (draft_fp IS NULL)),
+  CHECK ((assessments_submitted IS NULL) = (assessment_verdicts_json IS NULL)),
+  CHECK ((supersession_of_id IS NULL) = (supersession_reason IS NULL))
+) STRICT;
+CREATE INDEX room_decisions_room_created ON room_decisions (room_id, created_at);
+CREATE INDEX room_decisions_room_client_key ON room_decisions (room_id, client_key);
+CREATE INDEX room_decisions_player ON room_decisions (player_id);
+CREATE TABLE room_decision_reason_codes (
+  decision_id TEXT NOT NULL REFERENCES room_decisions(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  code TEXT NOT NULL CHECK (length(code) BETWEEN 1 AND ${CODE_MAX}),
+  PRIMARY KEY (decision_id, position)
+) STRICT;
+CREATE TABLE room_decision_evidence_refs (
+  decision_id TEXT NOT NULL REFERENCES room_decisions(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  kind TEXT NOT NULL ${inList('kind', EVIDENCE_REF_KINDS)},
+  ref_id TEXT NOT NULL,
+  meta_json TEXT ${jsonObject('meta_json')},
+  PRIMARY KEY (decision_id, position)
+) STRICT;
+CREATE INDEX room_decision_evidence_refs_ref ON room_decision_evidence_refs (kind, ref_id);
+CREATE TABLE room_decision_assessment_ids (
+  decision_id TEXT NOT NULL REFERENCES room_decisions(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  assessment_id TEXT NOT NULL,
+  PRIMARY KEY (decision_id, position)
+) STRICT;
+CREATE TABLE room_evidence_states (
+  id TEXT PRIMARY KEY,
+  room_id TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  evidence_id TEXT NOT NULL,
+  state TEXT NOT NULL ${inList('state', EVIDENCE_REVIEW_STATES)},
+  note TEXT ${maxLen('note', TEXT.evidenceNote)},
+  by_user_id TEXT,
+  by_name TEXT,
+  at INTEGER NOT NULL,
+  UNIQUE (room_id, evidence_id)
+) STRICT;
+`;
 
-// ------------------------------------------------------------------ the DDL (generated from the shapes; amended into docs/architecture/sql/02_recruitment.sql at this step)
-const CONSTRAINTS = {
-  recruitment_cases: { id: 'TEXT NOT NULL UNIQUE', org_id: 'TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT', player_id: 'TEXT NOT NULL', owner_user_id: 'TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT', room_lead_scout_user_id: 'TEXT REFERENCES org_users(id) ON DELETE RESTRICT', decision_by_user_id: 'TEXT REFERENCES org_users(id) ON DELETE RESTRICT' },
-  case_assignments: { user_id: 'TEXT REFERENCES org_users(id) ON DELETE RESTRICT' },
-  case_request_links: { request_id: 'TEXT REFERENCES recruitment_requests(id) ON DELETE RESTRICT' },
-  case_trial_links: { trial_id: 'TEXT REFERENCES trials(id) ON DELETE RESTRICT' },
-  case_transaction_handoffs: { org_id: 'TEXT REFERENCES orgs(id) ON DELETE RESTRICT' },
-  room_comments: { id: 'TEXT NOT NULL UNIQUE', room_id: 'TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT', org_id: 'TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT', author_user_id: 'TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT' },
-  room_snapshots: { id: 'TEXT NOT NULL UNIQUE', room_id: 'TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT', org_id: 'TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT' },
-  room_decisions: { id: 'TEXT NOT NULL UNIQUE', room_id: 'TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT', org_id: 'TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT' },
-  room_evidence_states: { id: 'TEXT NOT NULL UNIQUE', room_id: 'TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT', org_id: 'TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT' },
-};
-const colDdl = (table, [col, kind]) => `  ${col.padEnd(32)} ${CONSTRAINTS[table]?.[col] ?? sqlType(kind)}${kind === 'json' && !CONSTRAINTS[table]?.[col] ? ` ${JSON_CHECK(col)}` : ''}`;
-function parentDdl(coll) {
-  const cols = columnsOf(coll.shape).map((c) => colDdl(coll.table, c));
-  return `CREATE TABLE ${coll.table} (\n  seq                              INTEGER PRIMARY KEY,\n${cols.join(',\n')},\n  absent_keys_json                 TEXT ${ABSENT_CHECK},\n  offtype_json                     TEXT ${EXTRA_CHECK('offtype_json')},\n  extra_json                       TEXT ${EXTRA_CHECK('extra_json')}\n) STRICT;\n${coll.indexes.map((ix) => `${ix};`).join('\n')}`;
+// ------------------------------------------------------------------ typing (the one place a value is judged)
+const isInt = (v) => Number.isSafeInteger(v);
+const isStr = (v) => typeof v === 'string';
+const absent = (v) => v === undefined || v === null;
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+class Bad extends Error {}
+const fail = (label, field, what) => { throw new Bad(`${label}.${field} ${what}`); };
+function onlyKeys(v, keys, label, field) {
+  if (!isPlainObject(v)) fail(label, field, `must be an object (got ${describe(v)})`);
+  for (const k of Object.keys(v)) if (v[k] !== undefined && !keys.includes(k)) fail(label, `${field}.${k}`, 'is not a field this table stores');
+  return v;
 }
-function childDdl(spec, parentTable) {
-  const owner = spec.ownerCols.map((c, i) => `  ${c.padEnd(32)} ${i === 0 ? `TEXT NOT NULL REFERENCES ${parentTable}(id) ON DELETE ${spec.restrict ? 'RESTRICT' : 'CASCADE'}` : 'INTEGER NOT NULL'}`);
-  const constants = Object.keys(spec.constant ?? {}).map((c) => `  ${c.padEnd(32)} TEXT NOT NULL`);
-  const scalar = spec.scalar ? [colDdl(spec.table, spec.scalar)] : [];
-  const cols = columnsOf(spec.shape).map((c) => colDdl(spec.table, c));
-  // an object child (one row or none) is keyed by its owner alone: the drafted `case_id UNIQUE` is structural, its primary key
-  const pk = spec.single ? `PRIMARY KEY (${spec.ownerCols.join(', ')})` : `PRIMARY KEY (${[...spec.ownerCols, ...Object.keys(spec.constant ?? {}), 'position'].join(', ')})`;
-  return `CREATE TABLE ${spec.table} (\n${[...owner, ...constants].join(',\n')},\n  position                         INTEGER NOT NULL,\n${[...scalar, ...cols, `  raw_json                         TEXT ${JSON_CHECK('raw_json')}`, `  absent_keys_json                 TEXT ${ABSENT_CHECK}`, `  offtype_json                     TEXT ${EXTRA_CHECK('offtype_json')}`, `  extra_json                       TEXT ${EXTRA_CHECK('extra_json')}`].join(',\n')},\n  ${pk}\n) STRICT;\n${(spec.indexes ?? []).map((ix) => `${ix};`).join('\n')}`;
-}
-/** The twenty-five tables, parents before children, cases before the room collections (their room_id keys). Each child table once (the four source-reference lists share one). */
-export const RECRUITMENT_CASES_DDL = ALL_COLLECTIONS.flatMap((coll) => { const seen = new Set(); return [parentDdl(coll), ...coll.children.filter((ch) => (seen.has(ch.table) ? false : (seen.add(ch.table), true))).map((ch) => childDdl(ch, coll.table))]; }).join('\n');
+const str = (v, label, field, { max = null, required = false } = {}) => {
+  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
+  if (!isStr(v)) fail(label, field, `must be text or null (got ${describe(v)})`);
+  if (required && v.length === 0) fail(label, field, 'must not be empty');
+  if (max !== null && v.length > max) fail(label, field, `exceeds ${max} characters`);
+  return v;
+};
+const int = (v, label, field, { required = false, min = null } = {}) => {
+  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
+  if (!isInt(v)) fail(label, field, `must be an integer or null (got ${describe(v)})`);
+  if (min !== null && v < min) fail(label, field, `must be at least ${min}`);
+  return v;
+};
+const num = (v, label, field) => { if (absent(v)) return null; if (typeof v !== 'number' || !Number.isFinite(v)) fail(label, field, `must be a finite number (got ${describe(v)})`); return v; };
+const flag = (v, label, field, { required = false } = {}) => {
+  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
+  if (typeof v !== 'boolean') fail(label, field, `must be true or false (got ${describe(v)})`);
+  return v;
+};
+const oneOf = (v, allowed, label, field, { required = true } = {}) => {
+  if (absent(v) && !required) return null;
+  if (!allowed.includes(v)) fail(label, field, `must be one of ${allowed.join('|')} (got ${isStr(v) && v.length <= 40 ? JSON.stringify(v) : describe(v)})`);
+  return v;
+};
+const dayOf = (v, label, field, { required = false } = {}) => {
+  if (absent(v)) { if (required) fail(label, field, 'is required'); return null; }
+  if (!isStr(v) || !DAY_RE.test(v)) fail(label, field, 'must be a YYYY-MM-DD day or null');
+  return v;
+};
+/** A due date or a deadline: a `YYYY-MM-DD` day, an instant in ms, or nothing. */
+const dayOrInstant = (v, label, field) => {
+  if (absent(v)) return null;
+  if ((isStr(v) && DAY_RE.test(v)) || isInt(v)) return v;
+  return fail(label, field, 'must be a YYYY-MM-DD day, an instant in ms, or null');
+};
+const list = (v, label, field) => { if (absent(v)) return []; if (!Array.isArray(v)) fail(label, field, `must be a list (got ${describe(v)})`); return v; };
+const obj = (v, keys, label, field) => (absent(v) ? null : onlyKeys(v, keys, label, field));
+const unique = (items, keyOf, label, field) => { const seen = new Set(); for (const x of items) { const k = keyOf(x); if (seen.has(k)) fail(label, field, `repeats ${k}`); seen.add(k); } };
+const strList = (v, label, field, { max = null } = {}) => list(v, label, field).map((x, i) => str(x, label, `${field}[${i}]`, { required: true, max }));
+/** A plain JSON object (an evidence reference's metadata, a history entry's detail, a trust component map). */
+const jsonObj = (v, label, field, { values = null } = {}) => {
+  if (absent(v)) return null;
+  if (!isPlainObject(v)) fail(label, field, `must be an object or null (got ${describe(v)})`);
+  if (values) for (const [k, x] of Object.entries(v)) if (x !== undefined && !values(x)) fail(label, `${field}.${k}`, 'has a value of the wrong kind');
+  return clone(v);
+};
+const person = (v, label, field, extra = []) => { const x = obj(v, ['userId', 'name', ...extra], label, field); return x ? { userId: str(x.userId, label, `${field}.userId`), name: str(x.name, label, `${field}.name`), ...Object.fromEntries(extra.map((k) => [k, str(x[k], label, `${field}.${k}`)])) } : null; };
+/** A room's provenance reference: what it was opened or reopened from (a brief and its version, a Second Look item, a watchlist). */
+const sourceRef = (v, label, field) => { const x = obj(v, ['id', 'version'], label, field); return x ? { id: str(x.id, label, `${field}.id`, { required: true }), version: int(x.version, label, `${field}.version`) } : null; };
+const evidenceRefs = (v, label, field) => list(v, label, field).map((r, i) => { const L = `${label} ${field}[${i}]`; onlyKeys(r, ['kind', 'id', 'meta'], L, 'entry'); return { kind: oneOf(r.kind, EVIDENCE_REF_KINDS, L, 'kind'), id: str(r.id, L, 'id', { required: true }), meta: jsonObj(r.meta, L, 'meta') }; });
+const keyPair = (v, label, field) => { const x = obj(v, ['key', 'fp'], label, field); return x ? { key: str(x.key, label, `${field}.key`, { required: true, max: KEY_MAX }), fp: str(x.fp, label, `${field}.fp`, { required: true }) } : null; };
+const codes = (v, label, field) => strList(v, label, field, { max: CODE_MAX });
+const typed = (fn) => (raw, at) => {
+  try {
+    if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
+    if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
+    return { ok: true, record: fn(raw, `${at} ${raw.id}`) };
+  } catch (e) { if (e instanceof Bad) return { ok: false, reason: e.message }; throw e; }
+};
 
-// ------------------------------------------------------------------ statements (lazily prepared per connection; re-prepared when the connection's `prepare` is replaced — the suites' statement-failure seam)
+const CASE_KEYS = ['id', 'orgId', 'playerId', 'playerName', 'vacancyId', 'ownerUserId', 'ownerName', 'stage', 'priority', 'deadline', 'restricted', 'assignments', 'tasks', 'approvals', 'decision', 'links', 'createdAt', 'history', 'room', 'decisionDraft', 'transactionHandoff', 'budget', 'subjectRemovedAt'];
+const ROOM_KEYS = ['status', 'priority', 'tags', 'leadScoutUserId', 'sourceContext', 'sourceRef', 'openedBy', 'updatedAt', 'archivedAt', 'closedAt', 'rev', 'revAt', 'revBy', 'reopened'];
+
+function typeRoom(v, L) {
+  const r = obj(v, ROOM_KEYS, L, 'room');
+  if (!r) return null;
+  const tags = strList(r.tags, L, 'room.tags', { max: LIMITS.tagLength });
+  unique(tags, (t) => t, L, 'room.tags');
+  const ro = obj(r.reopened, ['by', 'at', 'from', 'reasonCodes', 'sourceContext', 'sourceRef'], L, 'room.reopened');
+  return {
+    status: oneOf(r.status, ROOM_STATUSES, L, 'room.status'), priority: oneOf(r.priority, ROOM_PRIORITIES, L, 'room.priority'), tags,
+    leadScoutUserId: str(r.leadScoutUserId, L, 'room.leadScoutUserId'), sourceContext: oneOf(r.sourceContext, SOURCE_CONTEXTS, L, 'room.sourceContext', { required: false }),
+    sourceRef: sourceRef(r.sourceRef, L, 'room.sourceRef'), openedBy: person(r.openedBy, L, 'room.openedBy'),
+    updatedAt: int(r.updatedAt, L, 'room.updatedAt', { required: true }), archivedAt: int(r.archivedAt, L, 'room.archivedAt'), closedAt: int(r.closedAt, L, 'room.closedAt'),
+    rev: int(r.rev, L, 'room.rev', { required: true, min: 0 }), revAt: int(r.revAt, L, 'room.revAt'), revBy: person(r.revBy, L, 'room.revBy'),
+    reopened: ro ? { by: person(ro.by, L, 'room.reopened.by'), at: int(ro.at, L, 'room.reopened.at', { required: true }), from: oneOf(ro.from, ROOM_STATUSES, L, 'room.reopened.from', { required: false }), reasonCodes: codes(ro.reasonCodes, L, 'room.reopened.reasonCodes'), sourceContext: oneOf(ro.sourceContext, SOURCE_CONTEXTS, L, 'room.reopened.sourceContext', { required: false }), sourceRef: sourceRef(ro.sourceRef, L, 'room.reopened.sourceRef') } : null,
+  };
+}
+function typeHistory(v, L) {
+  const history = list(v, L, 'history').map((h, i) => {
+    const HL = `${L} history[${i}]`;
+    onlyKeys(h, ['id', 'at', 'byKind', 'byId', 'byName', 'action', 'detail'], HL, 'entry');
+    if (!absent(h.detail) && !isStr(h.detail) && !isPlainObject(h.detail)) fail(HL, 'detail', 'must be text, an object or null');
+    return { id: str(h.id, HL, 'id', { required: true }), at: int(h.at, HL, 'at', { required: true }), byKind: oneOf(h.byKind, CASE_ACTOR_KINDS, HL, 'byKind', { required: false }), byId: str(h.byId, HL, 'byId'), byName: str(h.byName, HL, 'byName'), action: str(h.action, HL, 'action', { required: true, max: TEXT.action }), detail: absent(h.detail) ? null : clone(h.detail) };
+  });
+  unique(history, (h) => h.id, L, 'history');
+  return history;
+}
+function typeDraft(v, L) {
+  const d = obj(v, ['id', 'outcome', 'reasonCodes', 'note', 'evidenceRefs', 'by', 'createdAt', 'updatedAt', 'updatedBy', 'rev', 'revAt', 'keys'], L, 'decisionDraft');
+  if (!d) return null;
+  const k = obj(d.keys, ['create'], L, 'decisionDraft.keys');
+  return {
+    id: str(d.id, L, 'decisionDraft.id', { required: true }), outcome: oneOf(d.outcome, DECISION_OUTCOMES, L, 'decisionDraft.outcome', { required: false }),
+    reasonCodes: codes(d.reasonCodes, L, 'decisionDraft.reasonCodes'), note: str(d.note, L, 'decisionDraft.note', { max: DECISION_LIMITS.note }),
+    evidenceRefs: evidenceRefs(d.evidenceRefs, L, 'decisionDraft.evidenceRefs'), by: person(d.by, L, 'decisionDraft.by', ['role']),
+    createdAt: int(d.createdAt, L, 'decisionDraft.createdAt', { required: true }), updatedAt: int(d.updatedAt, L, 'decisionDraft.updatedAt', { required: true }), updatedBy: person(d.updatedBy, L, 'decisionDraft.updatedBy', ['role']),
+    rev: int(d.rev, L, 'decisionDraft.rev', { required: true, min: 1 }), revAt: int(d.revAt, L, 'decisionDraft.revAt'),
+    keys: { create: k ? keyPair(k.create, L, 'decisionDraft.keys.create') : null },
+  };
+}
+function typeHandoff(v, L, caseId) {
+  const h = obj(v, ['id', 'caseId', 'orgId', 'playerId', 'status', 'invitedAt', 'invitedBy', 'acceptedAt', 'withdrawnAt', 'transactionId', 'representedAtInvitation', 'invitedAgencyOrgId', 'invitedAgentUserId', 'keys', 'rev', 'revAt'], L, 'transactionHandoff');
+  if (!h) return null;
+  if (h.caseId !== caseId) fail(L, 'transactionHandoff.caseId', 'must name the case it is on');
+  const by = obj(h.invitedBy, ['kind', 'userId', 'name'], L, 'transactionHandoff.invitedBy');
+  if (by) oneOf(by.kind, ['org'], L, 'transactionHandoff.invitedBy.kind');
+  const k = obj(h.keys, ['invite'], L, 'transactionHandoff.keys');
+  const inv = k ? obj(k.invite, ['key'], L, 'transactionHandoff.keys.invite') : null;
+  return {
+    id: str(h.id, L, 'transactionHandoff.id', { required: true }), caseId, orgId: str(h.orgId, L, 'transactionHandoff.orgId', { required: true }), playerId: str(h.playerId, L, 'transactionHandoff.playerId', { required: true }),
+    status: oneOf(h.status, HANDOFF_STORED, L, 'transactionHandoff.status'), invitedAt: int(h.invitedAt, L, 'transactionHandoff.invitedAt', { required: true }),
+    invitedBy: by ? { kind: 'org', userId: str(by.userId, L, 'transactionHandoff.invitedBy.userId'), name: str(by.name, L, 'transactionHandoff.invitedBy.name') } : null,
+    acceptedAt: int(h.acceptedAt, L, 'transactionHandoff.acceptedAt'), withdrawnAt: int(h.withdrawnAt, L, 'transactionHandoff.withdrawnAt'), transactionId: str(h.transactionId, L, 'transactionHandoff.transactionId'),
+    representedAtInvitation: flag(h.representedAtInvitation, L, 'transactionHandoff.representedAtInvitation', { required: true }),
+    invitedAgencyOrgId: str(h.invitedAgencyOrgId, L, 'transactionHandoff.invitedAgencyOrgId'), invitedAgentUserId: str(h.invitedAgentUserId, L, 'transactionHandoff.invitedAgentUserId'),
+    keys: { invite: inv ? { key: str(inv.key, L, 'transactionHandoff.keys.invite.key', { required: true, max: KEY_MAX }) } : null },
+    rev: int(h.rev, L, 'transactionHandoff.rev', { required: true, min: 1 }), revAt: int(h.revAt, L, 'transactionHandoff.revAt'),
+  };
+}
+function typeBudget(v, L) {
+  const bud = obj(v, ['scenarios'], L, 'budget');
+  if (!bud) return null;
+  const scenarios = list(bud.scenarios, L, 'budget.scenarios').map((s, i) => {
+    const SL = `${L} budget.scenarios[${i}]`;
+    onlyKeys(s, ['id', 'version', 'label', 'currency', 'termMonths', 'lines', 'fxAssumptions', 'approval', 'actuals', 'createdBy', 'createdAt', 'updatedAt'], SL, 'scenario');
+    const lines = list(s.lines, SL, 'lines').map((l, j) => {
+      const LL = `${SL} lines[${j}]`; onlyKeys(l, ['id', 'kind', 'label', 'amountMinor', 'currency', 'schedule', 'confirmed', 'conditional'], LL, 'line');
+      const c = obj(l.conditional, ['assumption'], LL, 'conditional');
+      return { id: str(l.id, LL, 'id', { required: true }), kind: oneOf(l.kind, BUDGET_LINE_KINDS, LL, 'kind'), label: str(l.label, LL, 'label', { required: true, max: TEXT.label }), amountMinor: int(l.amountMinor, LL, 'amountMinor', { required: true, min: 0 }), currency: oneOf(l.currency, CURRENCIES, LL, 'currency'), schedule: oneOf(l.schedule, BUDGET_SCHEDULES, LL, 'schedule'), confirmed: flag(l.confirmed, LL, 'confirmed', { required: true }), conditional: c ? { assumption: str(c.assumption, LL, 'conditional.assumption', { required: true, max: TEXT.assumption }) } : null };
+    });
+    unique(lines, (l) => l.id, SL, 'lines');
+    const fxAssumptions = list(s.fxAssumptions, SL, 'fxAssumptions').map((a, j) => {
+      const AL = `${SL} fxAssumptions[${j}]`; onlyKeys(a, ['from', 'to', 'rate', 'source', 'date', 'manual'], AL, 'assumption');
+      return { from: oneOf(a.from, CURRENCIES, AL, 'from'), to: oneOf(a.to, CURRENCIES, AL, 'to'), rate: str(a.rate, AL, 'rate', { required: true, max: TEXT.fxRate }), source: str(a.source, AL, 'source', { max: TEXT.source }), date: dayOf(a.date, AL, 'date', { required: true }), manual: flag(a.manual, AL, 'manual', { required: true }) };
+    });
+    const ap = obj(s.approval, ['by', 'byUserId', 'at', 'version', 'superseded'], SL, 'approval');
+    const actuals = list(s.actuals, SL, 'actuals').map((a, j) => {
+      const AL = `${SL} actuals[${j}]`; onlyKeys(a, ['id', 'lineId', 'amountMinor', 'at', 'recordedBy'], AL, 'actual');
+      return { id: str(a.id, AL, 'id', { required: true }), lineId: str(a.lineId, AL, 'lineId', { required: true }), amountMinor: int(a.amountMinor, AL, 'amountMinor', { required: true }), at: int(a.at, AL, 'at', { required: true }), recordedBy: str(a.recordedBy, AL, 'recordedBy') };
+    });
+    return {
+      id: str(s.id, SL, 'id', { required: true }), version: int(s.version, SL, 'version', { required: true, min: 1 }), label: str(s.label, SL, 'label', { required: true, max: TEXT.label }),
+      currency: oneOf(s.currency, CURRENCIES, SL, 'currency'), termMonths: int(s.termMonths, SL, 'termMonths', { required: true, min: 1 }), lines, fxAssumptions,
+      approval: ap ? { by: str(ap.by, SL, 'approval.by'), byUserId: str(ap.byUserId, SL, 'approval.byUserId'), at: int(ap.at, SL, 'approval.at', { required: true }), version: int(ap.version, SL, 'approval.version', { required: true }), superseded: flag(ap.superseded, SL, 'approval.superseded', { required: true }) } : null,
+      actuals, createdBy: str(s.createdBy, SL, 'createdBy'), createdAt: int(s.createdAt, SL, 'createdAt', { required: true }), updatedAt: int(s.updatedAt, SL, 'updatedAt', { required: true }),
+    };
+  });
+  unique(scenarios, (s) => s.id, L, 'budget.scenarios');
+  // An empty budget is no budget: a case gains one with its first scenario and never loses a scenario.
+  return scenarios.length ? { scenarios } : null;
+}
+
+/** A case as M12, M13, M17, M23 and M27 write it, typed. */
+export const typeCase = typed((raw, L) => {
+  onlyKeys(raw, CASE_KEYS, L, 'record');
+  const assignments = list(raw.assignments, L, 'assignments').map((a, i) => {
+    const AL = `${L} assignments[${i}]`; onlyKeys(a, ['id', 'userId', 'name', 'task', 'dueAt', 'status', 'createdAt'], AL, 'entry');
+    return { id: str(a.id, AL, 'id', { required: true }), userId: str(a.userId, AL, 'userId', { required: true }), name: str(a.name, AL, 'name'), task: str(a.task, AL, 'task', { required: true, max: TEXT.task }), dueAt: dayOrInstant(a.dueAt, AL, 'dueAt'), status: oneOf(a.status, TASK_STATES, AL, 'status'), createdAt: int(a.createdAt, AL, 'createdAt', { required: true }) };
+  });
+  unique(assignments, (a) => a.id, L, 'assignments');
+  const tasks = list(raw.tasks, L, 'tasks').map((t, i) => {
+    const TL = `${L} tasks[${i}]`; onlyKeys(t, ['id', 'title', 'description', 'dueAt', 'assigneeUserId', 'assigneeName', 'status', 'linkedResourceType', 'linkedResourceId', 'createdBy', 'createdAt', 'completedAt', 'completedBy'], TL, 'entry');
+    return { id: str(t.id, TL, 'id', { required: true }), title: str(t.title, TL, 'title', { required: true, max: TEXT.title }), description: str(t.description, TL, 'description', { max: LIMITS.taskDescription }), dueAt: dayOrInstant(t.dueAt, TL, 'dueAt'), assigneeUserId: str(t.assigneeUserId, TL, 'assigneeUserId'), assigneeName: str(t.assigneeName, TL, 'assigneeName'), status: oneOf(t.status, TASK_STATES, TL, 'status'), linkedResourceType: oneOf(t.linkedResourceType, LINKED_RESOURCE_TYPES, TL, 'linkedResourceType', { required: false }), linkedResourceId: str(t.linkedResourceId, TL, 'linkedResourceId'), createdBy: person(t.createdBy, TL, 'createdBy'), createdAt: int(t.createdAt, TL, 'createdAt', { required: true }), completedAt: int(t.completedAt, TL, 'completedAt'), completedBy: str(t.completedBy, TL, 'completedBy') };
+  });
+  unique(tasks, (t) => t.id, L, 'tasks');
+  const approvals = list(raw.approvals, L, 'approvals').map((a, i) => {
+    const AL = `${L} approvals[${i}]`; onlyKeys(a, ['id', 'decision', 'requestedBy', 'status', 'requestedAt', 'resolvedBy'], AL, 'entry');
+    const d = obj(a.decision, ['outcome', 'reasons'], AL, 'decision'); if (!d) fail(AL, 'decision', 'is required');
+    const rb = obj(a.resolvedBy, ['userId', 'name', 'at'], AL, 'resolvedBy');
+    const status = oneOf(a.status, CASE_APPROVAL_STATES, AL, 'status');
+    if ((status === 'pending') !== !rb) fail(AL, 'resolvedBy', 'is set exactly when the approval is resolved');
+    return { id: str(a.id, AL, 'id', { required: true }), decision: { outcome: oneOf(d.outcome, CASE_DECISION_OUTCOMES, AL, 'decision.outcome'), reasons: str(d.reasons, AL, 'decision.reasons', { max: TEXT.reasons }) }, requestedBy: person(a.requestedBy, AL, 'requestedBy'), status, requestedAt: int(a.requestedAt, AL, 'requestedAt', { required: true }), resolvedBy: rb ? { userId: str(rb.userId, AL, 'resolvedBy.userId'), name: str(rb.name, AL, 'resolvedBy.name'), at: int(rb.at, AL, 'resolvedBy.at', { required: true }) } : null };
+  });
+  unique(approvals, (a) => a.id, L, 'approvals');
+  const dec = obj(raw.decision, ['outcome', 'reasons', 'byUserId', 'byName', 'approvedBy', 'at'], L, 'decision');
+  const lk = obj(raw.links, ['requestIds', 'trialIds', 'signingId'], L, 'links') ?? {};
+  const links = { requestIds: strList(lk.requestIds, L, 'links.requestIds'), trialIds: strList(lk.trialIds, L, 'links.trialIds'), signingId: str(lk.signingId, L, 'links.signingId') };
+  unique(links.requestIds, (x) => x, L, 'links.requestIds'); unique(links.trialIds, (x) => x, L, 'links.trialIds');
+  return {
+    id: raw.id, orgId: str(raw.orgId, L, 'orgId', { required: true }), playerId: str(raw.playerId, L, 'playerId', { required: true }), playerName: str(raw.playerName, L, 'playerName'),
+    vacancyId: str(raw.vacancyId, L, 'vacancyId'), ownerUserId: str(raw.ownerUserId, L, 'ownerUserId', { required: true }), ownerName: str(raw.ownerName, L, 'ownerName'),
+    stage: oneOf(raw.stage, CASE_STAGES, L, 'stage'), priority: oneOf(raw.priority, CASE_PRIORITIES, L, 'priority'), deadline: dayOrInstant(raw.deadline, L, 'deadline'),
+    restricted: flag(raw.restricted, L, 'restricted') ?? false, assignments, tasks, approvals,
+    decision: dec ? { outcome: oneOf(dec.outcome, CASE_DECISION_OUTCOMES, L, 'decision.outcome'), reasons: str(dec.reasons, L, 'decision.reasons', { max: TEXT.reasons }), byUserId: str(dec.byUserId, L, 'decision.byUserId'), byName: str(dec.byName, L, 'decision.byName'), approvedBy: str(dec.approvedBy, L, 'decision.approvedBy'), at: int(dec.at, L, 'decision.at', { required: true }) } : null,
+    links, createdAt: int(raw.createdAt, L, 'createdAt', { required: true }), history: typeHistory(raw.history, L), room: typeRoom(raw.room, L),
+    decisionDraft: typeDraft(raw.decisionDraft, L), transactionHandoff: typeHandoff(raw.transactionHandoff, L, raw.id), budget: typeBudget(raw.budget, L), subjectRemovedAt: int(raw.subjectRemovedAt, L, 'subjectRemovedAt'),
+  };
+});
+
+export const typeComment = typed((raw, L) => {
+  onlyKeys(raw, ['id', 'roomId', 'orgId', 'authorId', 'authorName', 'body', 'replyToId', 'mentions', 'createdAt', 'editedAt', 'editCount', 'deletedAt', 'deletedBy'], L, 'record');
+  const mentions = strList(raw.mentions, L, 'mentions'); unique(mentions, (m) => m, L, 'mentions');
+  const deletedAt = int(raw.deletedAt, L, 'deletedAt'); const deletedBy = person(raw.deletedBy, L, 'deletedBy');
+  if (deletedBy && deletedAt === null) fail(L, 'deletedBy', 'is only stored on a deleted comment');
+  return { id: raw.id, roomId: str(raw.roomId, L, 'roomId', { required: true }), orgId: str(raw.orgId, L, 'orgId', { required: true }), authorId: str(raw.authorId, L, 'authorId', { required: true }), authorName: str(raw.authorName, L, 'authorName'), body: str(raw.body, L, 'body', { required: true, max: LIMITS.commentBody }), replyToId: str(raw.replyToId, L, 'replyToId'), mentions, createdAt: int(raw.createdAt, L, 'createdAt', { required: true }), editedAt: int(raw.editedAt, L, 'editedAt'), editCount: int(raw.editCount, L, 'editCount', { min: 0 }) ?? 0, deletedAt, deletedBy };
+});
+
+function typeTrust(v, L, field) {
+  const t = obj(v, ['score', 'band', 'policyVersion', 'componentLevels', 'hash'], L, field);
+  return t ? { score: num(t.score, L, `${field}.score`), band: str(t.band, L, `${field}.band`), policyVersion: int(t.policyVersion, L, `${field}.policyVersion`), componentLevels: jsonObj(t.componentLevels, L, `${field}.componentLevels`, { values: isStr }) ?? {}, hash: str(t.hash, L, `${field}.hash`, { required: true }) } : null;
+}
+function typeSourceRefs(v, L, field) {
+  const s = obj(v, ['passportVersion', 'passportRevision', 'evidenceIds', 'assessmentIds', 'combineResults', 'trialIds'], L, field) ?? {};
+  return { passportVersion: int(s.passportVersion, L, `${field}.passportVersion`), passportRevision: str(s.passportRevision, L, `${field}.passportRevision`), evidenceIds: strList(s.evidenceIds, L, `${field}.evidenceIds`), assessmentIds: strList(s.assessmentIds, L, `${field}.assessmentIds`), combineResults: strList(s.combineResults, L, `${field}.combineResults`), trialIds: strList(s.trialIds, L, `${field}.trialIds`) };
+}
+export const typeSnapshot = typed((raw, L) => {
+  onlyKeys(raw, ['id', 'roomId', 'orgId', 'playerId', 'at', 'trigger', 'trust', 'sourceRefs', 'note'], L, 'record');
+  return { id: raw.id, roomId: str(raw.roomId, L, 'roomId', { required: true }), orgId: str(raw.orgId, L, 'orgId', { required: true }), playerId: str(raw.playerId, L, 'playerId', { required: true }), at: int(raw.at, L, 'at', { required: true }), trigger: str(raw.trigger, L, 'trigger', { required: true, max: TEXT.trigger }), trust: typeTrust(raw.trust, L, 'trust'), sourceRefs: typeSourceRefs(raw.sourceRefs, L, 'sourceRefs'), note: str(raw.note, L, 'note') };
+});
+
+const DECISION_KEYS = ['id', 'roomId', 'orgId', 'playerId', 'kind', 'state', 'outcome', 'recommendation', 'reasonCodes', 'note', 'by', 'createdAt', 'finalizedAt', 'trigger', 'clientKey', 'supersedes', 'supersededById', 'supersession', 'rev', 'revAt', 'evidenceRefs', 'assessmentSummary', 'snapshot', 'keys', 'draftId', 'lifecycle', 'policyVersion'];
+export const typeDecision = typed((raw, L) => {
+  onlyKeys(raw, DECISION_KEYS, L, 'record');
+  const sp = obj(raw.supersession, ['of', 'reason'], L, 'supersession');
+  const as = obj(raw.assessmentSummary, ['submitted', 'withheld', 'verdicts', 'assessmentIds'], L, 'assessmentSummary');
+  const sn = obj(raw.snapshot, ['at', 'trust', 'sourceRefs', 'snapshotId'], L, 'snapshot');
+  const k = obj(raw.keys, ['finalize', 'draft'], L, 'keys') ?? {};
+  const lc = obj(raw.lifecycle, ['action', 'from', 'to', 'applied', 'reason', 'at'], L, 'lifecycle');
+  return {
+    id: raw.id, roomId: str(raw.roomId, L, 'roomId', { required: true }), orgId: str(raw.orgId, L, 'orgId', { required: true }), playerId: str(raw.playerId, L, 'playerId', { required: true }),
+    kind: oneOf(raw.kind, DECISION_KINDS, L, 'kind', { required: false }), state: oneOf(raw.state, DECISION_STATES, L, 'state', { required: false }), outcome: oneOf(raw.outcome, DECISION_OUTCOMES, L, 'outcome', { required: false }),
+    recommendation: oneOf(raw.recommendation, RECOMMENDATIONS, L, 'recommendation'), reasonCodes: codes(raw.reasonCodes, L, 'reasonCodes'), note: str(raw.note, L, 'note', { max: DECISION_LIMITS.note }),
+    by: person(raw.by, L, 'by', ['role']), createdAt: int(raw.createdAt, L, 'createdAt', { required: true }), finalizedAt: int(raw.finalizedAt, L, 'finalizedAt'),
+    trigger: str(raw.trigger, L, 'trigger', { max: TEXT.trigger }), clientKey: str(raw.clientKey, L, 'clientKey', { max: KEY_MAX }),
+    supersedes: str(raw.supersedes, L, 'supersedes'), supersededById: str(raw.supersededById, L, 'supersededById'),
+    supersession: sp ? { of: str(sp.of, L, 'supersession.of', { required: true }), reason: str(sp.reason, L, 'supersession.reason', { required: true, max: DECISION_LIMITS.supersessionReason }) } : null,
+    rev: int(raw.rev, L, 'rev', { min: 1 }), revAt: int(raw.revAt, L, 'revAt'), evidenceRefs: evidenceRefs(raw.evidenceRefs, L, 'evidenceRefs'),
+    assessmentSummary: as ? { submitted: int(as.submitted, L, 'assessmentSummary.submitted', { required: true, min: 0 }), withheld: int(as.withheld, L, 'assessmentSummary.withheld', { min: 0 }) ?? 0, verdicts: jsonObj(as.verdicts, L, 'assessmentSummary.verdicts', { values: isInt }) ?? {}, assessmentIds: strList(as.assessmentIds, L, 'assessmentSummary.assessmentIds') } : null,
+    // The decision's snapshot IS the room_snapshots row it names: only the id is stored, and the row is read back with it.
+    snapshot: sn ? { snapshotId: str(sn.snapshotId, L, 'snapshot.snapshotId', { required: true }) } : null,
+    keys: { finalize: keyPair(k.finalize, L, 'keys.finalize'), draft: keyPair(k.draft, L, 'keys.draft') },
+    draftId: str(raw.draftId, L, 'draftId'),
+    lifecycle: lc ? { action: str(lc.action, L, 'lifecycle.action'), from: oneOf(lc.from, ROOM_STATUSES, L, 'lifecycle.from', { required: false }), to: oneOf(lc.to, ROOM_STATUSES, L, 'lifecycle.to', { required: false }), applied: flag(lc.applied, L, 'lifecycle.applied', { required: true }), reason: str(lc.reason, L, 'lifecycle.reason'), at: int(lc.at, L, 'lifecycle.at') } : null,
+    policyVersion: int(raw.policyVersion, L, 'policyVersion'),
+  };
+});
+
+export const typeEvidenceState = typed((raw, L) => {
+  onlyKeys(raw, ['id', 'roomId', 'orgId', 'evidenceId', 'state', 'note', 'byId', 'byName', 'at'], L, 'record');
+  return { id: raw.id, roomId: str(raw.roomId, L, 'roomId', { required: true }), orgId: str(raw.orgId, L, 'orgId', { required: true }), evidenceId: str(raw.evidenceId, L, 'evidenceId', { required: true }), state: oneOf(raw.state, EVIDENCE_REVIEW_STATES, L, 'state'), note: str(raw.note, L, 'note', { max: TEXT.evidenceNote }), byId: str(raw.byId, L, 'byId'), byName: str(raw.byName, L, 'byName'), at: int(raw.at, L, 'at', { required: true }) };
+});
+const TYPERS = { recruitmentCases: typeCase, roomComments: typeComment, roomSnapshots: typeSnapshot, roomDecisions: typeDecision, roomEvidenceState: typeEvidenceState };
+
+// ------------------------------------------------------------------ rows
+const b = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
+const dueRow = (p, v) => ({ [`${p}_day`]: isStr(v) ? v : null, [`${p}_at`]: isInt(v) ? v : null });
+const dueOut = (row, p) => row[`${p}_day`] ?? row[`${p}_at`];
+const personRow = (p, v, extra = []) => ({ [`${p}_user_id`]: v?.userId ?? null, [`${p}_name`]: v?.name ?? null, ...Object.fromEntries(extra.map((k) => [`${p}_${k}`, v?.[k] ?? null])) });
+const personOut = (row, p, extra = []) => (row[`${p}_user_id`] === null && row[`${p}_name`] === null && extra.every((k) => row[`${p}_${k}`] === null) ? null : { userId: row[`${p}_user_id`], name: row[`${p}_name`], ...Object.fromEntries(extra.map((k) => [k, row[`${p}_${k}`]])) });
+const jsonOut = (v) => (v === null ? null : JSON.parse(v));
+
+const caseRow = (c) => {
+  const r = c.room; const ro = r?.reopened ?? null;
+  return {
+    id: c.id, org_id: c.orgId, player_id: c.playerId, player_name: c.playerName, vacancy_id: c.vacancyId, owner_user_id: c.ownerUserId, owner_name: c.ownerName,
+    stage: c.stage, priority: c.priority, ...dueRow('deadline', c.deadline), restricted: b(c.restricted),
+    decision_outcome: c.decision?.outcome ?? null, decision_reasons: c.decision?.reasons ?? null, decision_by_user_id: c.decision?.byUserId ?? null, decision_by_name: c.decision?.byName ?? null, decision_approved_by_name: c.decision?.approvedBy ?? null, decision_at: c.decision?.at ?? null,
+    links_signing_id: c.links.signingId, created_at: c.createdAt, subject_removed_at: c.subjectRemovedAt,
+    room_status: r?.status ?? null, room_priority: r?.priority ?? null, room_lead_scout_user_id: r?.leadScoutUserId ?? null, room_source_context: r?.sourceContext ?? null,
+    room_source_ref_id: r?.sourceRef?.id ?? null, room_source_ref_version: r?.sourceRef?.version ?? null, ...personRow('room_opened_by', r?.openedBy),
+    room_updated_at: r?.updatedAt ?? null, room_archived_at: r?.archivedAt ?? null, room_closed_at: r?.closedAt ?? null,
+    room_rev: r?.rev ?? null, room_rev_at: r?.revAt ?? null, ...personRow('room_rev_by', r?.revBy),
+    room_reopened_at: ro?.at ?? null, ...personRow('room_reopened_by', ro?.by), room_reopened_from: ro?.from ?? null, room_reopened_reason_codes_json: ro ? JSON.stringify(ro.reasonCodes) : null,
+    room_reopened_source_context: ro?.sourceContext ?? null, room_reopened_source_ref_id: ro?.sourceRef?.id ?? null, room_reopened_source_ref_version: ro?.sourceRef?.version ?? null,
+  };
+};
+const draftRow = (caseId, d) => ({ case_id: caseId, id: d.id, outcome: d.outcome, note: d.note, ...personRow('by', d.by, ['role']), created_at: d.createdAt, updated_at: d.updatedAt, ...personRow('updated_by', d.updatedBy, ['role']), rev: d.rev, rev_at: d.revAt, create_key: d.keys.create?.key ?? null, create_fp: d.keys.create?.fp ?? null });
+const handoffRow = (caseId, h) => ({ case_id: caseId, id: h.id, org_id: h.orgId, player_id: h.playerId, status: h.status, invited_at: h.invitedAt, invited_by_user_id: h.invitedBy?.userId ?? null, invited_by_name: h.invitedBy?.name ?? null, accepted_at: h.acceptedAt, withdrawn_at: h.withdrawnAt, transaction_id: h.transactionId, represented_at_invitation: b(h.representedAtInvitation), invited_agency_org_id: h.invitedAgencyOrgId, invited_agent_user_id: h.invitedAgentUserId, invite_key: h.keys.invite?.key ?? null, rev: h.rev, rev_at: h.revAt });
+const commentRow = (c) => ({ id: c.id, room_id: c.roomId, org_id: c.orgId, author_user_id: c.authorId, author_name: c.authorName, body: c.body, reply_to_id: c.replyToId, created_at: c.createdAt, edited_at: c.editedAt, edit_count: c.editCount, deleted_at: c.deletedAt, ...personRow('deleted_by', c.deletedBy) });
+const snapshotRow = (s) => ({ id: s.id, room_id: s.roomId, org_id: s.orgId, player_id: s.playerId, at: s.at, trigger: s.trigger, trust_score: s.trust?.score ?? null, trust_band: s.trust?.band ?? null, trust_policy_version: s.trust?.policyVersion ?? null, trust_component_levels_json: s.trust ? JSON.stringify(s.trust.componentLevels) : null, trust_hash: s.trust?.hash ?? null, source_passport_version: s.sourceRefs.passportVersion ?? null, source_passport_revision: s.sourceRefs.passportRevision ?? null, note: s.note });
+const decisionRow = (d) => ({
+  id: d.id, room_id: d.roomId, org_id: d.orgId, player_id: d.playerId, kind: d.kind, state: d.state, outcome: d.outcome, recommendation: d.recommendation, note: d.note, ...personRow('by', d.by, ['role']),
+  created_at: d.createdAt, finalized_at: d.finalizedAt, trigger: d.trigger, client_key: d.clientKey, supersedes_id: d.supersedes, superseded_by_id: d.supersededById,
+  supersession_of_id: d.supersession?.of ?? null, supersession_reason: d.supersession?.reason ?? null, rev: d.rev, rev_at: d.revAt,
+  assessments_submitted: d.assessmentSummary?.submitted ?? null, assessments_withheld: d.assessmentSummary?.withheld ?? null, assessment_verdicts_json: d.assessmentSummary ? JSON.stringify(d.assessmentSummary.verdicts) : null,
+  snapshot_id: d.snapshot?.snapshotId ?? null, finalize_key: d.keys.finalize?.key ?? null, finalize_fp: d.keys.finalize?.fp ?? null, draft_key: d.keys.draft?.key ?? null, draft_fp: d.keys.draft?.fp ?? null, draft_id: d.draftId,
+  lifecycle_action: d.lifecycle?.action ?? null, lifecycle_from: d.lifecycle?.from ?? null, lifecycle_to: d.lifecycle?.to ?? null, lifecycle_applied: b(d.lifecycle?.applied), lifecycle_reason: d.lifecycle?.reason ?? null, lifecycle_at: d.lifecycle?.at ?? null, policy_version: d.policyVersion,
+});
+const evidenceRow = (e) => ({ id: e.id, room_id: e.roomId, org_id: e.orgId, evidence_id: e.evidenceId, state: e.state, note: e.note, by_user_id: e.byId, by_name: e.byName, at: e.at });
+
+const SAMPLE_CASE = { id: 'x', links: { signingId: null } };
+const SAMPLE_DECISION = { id: 'x', keys: { finalize: null, draft: null } };
+const COLS = {
+  recruitment_cases: Object.keys(caseRow(SAMPLE_CASE)),
+  case_room_tags: ['case_id', 'position', 'tag'],
+  case_assignments: ['case_id', 'position', 'id', 'user_id', 'user_name', 'task', 'due_day', 'due_at', 'status', 'created_at'],
+  case_tasks: ['case_id', 'position', 'id', 'title', 'description', 'due_day', 'due_at', 'assignee_user_id', 'assignee_name', 'status', 'linked_resource_type', 'linked_resource_id', 'created_by_user_id', 'created_by_name', 'created_at', 'completed_at', 'completed_by_name'],
+  case_approvals: ['case_id', 'position', 'id', 'decision_outcome', 'decision_reasons', 'requested_by_user_id', 'requested_by_name', 'status', 'requested_at', 'resolved_by_user_id', 'resolved_by_name', 'resolved_at'],
+  case_history: ['case_id', 'position', 'id', 'at', 'action', 'by_kind', 'by_id', 'by_name', 'detail_text', 'detail_json'],
+  case_request_links: ['case_id', 'position', 'request_id'],
+  case_trial_links: ['case_id', 'position', 'trial_id'],
+  case_decision_drafts: Object.keys(draftRow('x', { keys: { create: null } })),
+  case_decision_draft_reason_codes: ['case_id', 'position', 'code'],
+  case_decision_draft_evidence_refs: ['case_id', 'position', 'kind', 'ref_id', 'meta_json'],
+  case_transaction_handoffs: Object.keys(handoffRow('x', { keys: { invite: null } })),
+  case_budget_scenarios: ['case_id', 'position', 'id', 'version', 'label', 'currency', 'term_months', 'created_by_name', 'created_at', 'updated_at', 'approval_by_name', 'approval_by_user_id', 'approval_at', 'approval_version', 'approval_superseded'],
+  case_budget_lines: ['case_id', 'scenario_id', 'position', 'id', 'kind', 'label', 'amount_minor', 'currency', 'schedule', 'confirmed', 'conditional_assumption'],
+  case_budget_fx_assumptions: ['case_id', 'scenario_id', 'position', 'from_currency', 'to_currency', 'rate', 'source', 'date', 'manual'],
+  case_budget_actuals: ['case_id', 'scenario_id', 'position', 'id', 'line_id', 'amount_minor', 'at', 'recorded_by_name'],
+  room_comments: Object.keys(commentRow({})),
+  room_comment_mentions: ['comment_id', 'position', 'user_id'],
+  room_snapshots: Object.keys(snapshotRow({ sourceRefs: {} })),
+  room_snapshot_source_refs: ['snapshot_id', 'kind', 'position', 'ref_id'],
+  room_decisions: Object.keys(decisionRow(SAMPLE_DECISION)),
+  room_decision_reason_codes: ['decision_id', 'position', 'code'],
+  room_decision_evidence_refs: ['decision_id', 'position', 'kind', 'ref_id', 'meta_json'],
+  room_decision_assessment_ids: ['decision_id', 'position', 'assessment_id'],
+  room_evidence_states: Object.keys(evidenceRow({})),
+};
+/** The case's child tables, in delete order (a grandchild before its parent; the links included). */
+const CASE_CHILDREN = ['case_room_tags', 'case_assignments', 'case_tasks', 'case_approvals', 'case_history', 'case_request_links', 'case_trial_links', 'case_decision_draft_reason_codes', 'case_decision_draft_evidence_refs', 'case_decision_drafts', 'case_transaction_handoffs', 'case_budget_lines', 'case_budget_fx_assumptions', 'case_budget_actuals', 'case_budget_scenarios'];
+const LINK_TABLES = ['case_request_links', 'case_trial_links'];
+const PARENT = { recruitmentCases: 'recruitment_cases', roomComments: 'room_comments', roomSnapshots: 'room_snapshots', roomDecisions: 'room_decisions', roomEvidenceState: 'room_evidence_states' };
+const ROOM_CHILDREN = { room_comments: [['room_comment_mentions', 'comment_id']], room_snapshots: [['room_snapshot_source_refs', 'snapshot_id']], room_decisions: [['room_decision_reason_codes', 'decision_id'], ['room_decision_evidence_refs', 'decision_id'], ['room_decision_assessment_ids', 'decision_id']], room_evidence_states: [] };
+
+// ------------------------------------------------------------------ statements and the record readers
 const stmtCache = new WeakMap();
-function stmts(sqlite) {
+function statements(sqlite) {
   let s = stmtCache.get(sqlite); if (s && s.preparedBy === sqlite.prepare) return s;
-  const insertFor = (table, cols) => sqlite.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`);
-  const parentFor = (coll) => {
-    const cols = [...columnsOf(coll.shape).map((c) => c[0]), 'absent_keys_json', 'offtype_json', 'extra_json'];
-    const set = cols.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`);
-    return { upsert: sqlite.prepare(`INSERT INTO ${coll.table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')}) ON CONFLICT(id) DO UPDATE SET ${set.join(', ')}`), select: sqlite.prepare(`SELECT * FROM ${coll.table} ORDER BY seq`), ids: sqlite.prepare(`SELECT id FROM ${coll.table} ORDER BY seq`), del: sqlite.prepare(`DELETE FROM ${coll.table} WHERE id = ?`), cols };
+  const insert = (table, { upsert = false } = {}) => {
+    const cols = COLS[table];
+    const tail = upsert ? ` ON CONFLICT(id) DO UPDATE SET ${cols.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}` : '';
+    return sqlite.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})${tail}`);
   };
-  const childFor = (spec) => {
-    const cols = [...spec.ownerCols, ...Object.keys(spec.constant ?? {}), 'position', ...(spec.scalar ? [spec.scalar[0]] : []), ...columnsOf(spec.shape).map((c) => c[0]), 'raw_json', 'absent_keys_json', 'offtype_json', 'extra_json'];
-    return { insert: insertFor(spec.table, cols), deleteOwner: sqlite.prepare(`DELETE FROM ${spec.table} WHERE ${spec.ownerCols[0]} = ?`), select: sqlite.prepare(`SELECT * FROM ${spec.table} ORDER BY ${[...spec.ownerCols, ...Object.keys(spec.constant ?? {}), 'position'].join(', ')}`), cols };
-  };
-  const children = {}; for (const coll of ALL_COLLECTIONS) for (const ch of coll.children) if (!children[ch.table]) children[ch.table] = childFor(ch);
+  const byCase = (t, order = 'position') => sqlite.prepare(`SELECT * FROM ${t} WHERE case_id = ?${order ? ` ORDER BY ${order}` : ''}`);
   s = {
-    parents: Object.fromEntries(ALL_COLLECTIONS.map((c) => [c.name, parentFor(c)])),
-    children,
-    keys: { insert: insertFor('idempotency_keys', ['owner_table', 'owner_id', 'position', 'act', 'shape', 'key', 'fp', 'at', 'entry_json']), deleteOwner: sqlite.prepare('DELETE FROM idempotency_keys WHERE owner_table = ? AND owner_id = ?'), select: sqlite.prepare('SELECT * FROM idempotency_keys WHERE owner_table = ? ORDER BY owner_id, position') },
-    historyOf: sqlite.prepare('DELETE FROM case_history WHERE case_id = ?'),
-    deleteCase: sqlite.prepare('DELETE FROM recruitment_cases WHERE id = ?'),
-    linkRowsNaming: { requests: (n) => sqlite.prepare(`SELECT * FROM case_request_links WHERE request_id IN (${Array(n).fill('?').join(', ')})`), trials: (n) => sqlite.prepare(`SELECT * FROM case_trial_links WHERE trial_id IN (${Array(n).fill('?').join(', ')})`) },
-    deleteLinkRow: { case_request_links: sqlite.prepare('DELETE FROM case_request_links WHERE case_id = ? AND position = ?'), case_trial_links: sqlite.prepare('DELETE FROM case_trial_links WHERE case_id = ? AND position = ?') },
+    ins: Object.fromEntries(Object.keys(COLS).map((t) => [t, insert(t, { upsert: Object.values(PARENT).includes(t) })])),
+    caseChildDel: Object.fromEntries(CASE_CHILDREN.map((t) => [t, sqlite.prepare(`DELETE FROM ${t} WHERE case_id = ?`)])),
+    roomChildDel: Object.fromEntries(Object.values(ROOM_CHILDREN).flat().map(([t, col]) => [t, sqlite.prepare(`DELETE FROM ${t} WHERE ${col} = ?`)])),
+    del: Object.fromEntries(Object.values(PARENT).map((t) => [t, sqlite.prepare(`DELETE FROM ${t} WHERE id = ?`)])),
+    byId: Object.fromEntries(Object.values(PARENT).map((t) => [t, sqlite.prepare(`SELECT * FROM ${t} WHERE id = ?`)])),
+    all: Object.fromEntries(Object.values(PARENT).map((t) => [t, sqlite.prepare(`SELECT * FROM ${t} ORDER BY rowid`)])),
+    of: Object.fromEntries(['case_room_tags', 'case_assignments', 'case_tasks', 'case_approvals', 'case_history', 'case_request_links', 'case_trial_links', 'case_decision_draft_reason_codes', 'case_decision_draft_evidence_refs', 'case_budget_scenarios'].map((t) => [t, byCase(t)])),
+    draftOf: byCase('case_decision_drafts', null), handoffOf: byCase('case_transaction_handoffs', null),
+    scenarioChild: Object.fromEntries(['case_budget_lines', 'case_budget_fx_assumptions', 'case_budget_actuals'].map((t) => [t, sqlite.prepare(`SELECT * FROM ${t} WHERE case_id = ? AND scenario_id = ? ORDER BY position`)])),
+    mentionsOf: sqlite.prepare('SELECT user_id FROM room_comment_mentions WHERE comment_id = ? ORDER BY position'),
+    sourceRefsOf: sqlite.prepare('SELECT kind, ref_id FROM room_snapshot_source_refs WHERE snapshot_id = ? ORDER BY kind, position'),
+    decisionChild: Object.fromEntries(['room_decision_reason_codes', 'room_decision_evidence_refs', 'room_decision_assessment_ids'].map((t) => [t, sqlite.prepare(`SELECT * FROM ${t} WHERE decision_id = ? ORDER BY position`)])),
+    org: sqlite.prepare('SELECT 1 FROM orgs WHERE id = ?'), user: sqlite.prepare('SELECT 1 FROM org_users WHERE id = ?'),
+    request: sqlite.prepare('SELECT 1 FROM recruitment_requests WHERE id = ?'), trial: sqlite.prepare('SELECT 1 FROM trials WHERE id = ?'),
+    ids: (table) => sqlite.prepare(`SELECT id FROM ${table} ORDER BY rowid`).all().map((r) => r.id),
     preparedBy: sqlite.prepare,
   };
   stmtCache.set(sqlite, s); return s;
 }
 
-// ------------------------------------------------------------------ the mapping engine (record ↔ row + child rows), generic over the specs above
-/**
- * Idempotency rows need an owner id. A record whose key rows are owned by ITS OWN id (a decision, a case) and that has no
- * string id keeps its row-worthy acts on the row instead (held under `keys` in extra_json), so nothing is lost and no id is
- * minted. A child whose rows are owned by the CASE id (`ownerKey: 'case'` — the draft and the handoff, one per case, their
- * primary key the case id; the review of b7c0dd0, F2) always has an owner, whatever its own id: two cases may carry the
- * same child id and each keeps exactly its own rows.
- */
-function foldKeysWithoutOwner(enc, item) {
-  if (nonEmpty(item?.id)) return;
-  enc.children = enc.children.filter((ch) => {
-    if (!ch.spec.ownerTable || ch.spec.ownerKey === 'case') return true;
-    const held = isPlainObject(enc.extra.keys) ? enc.extra.keys : {}; for (const [act, v] of Object.entries(ch.map)) setOwn(held, act, clone(v, `keys.${act}`).value); setOwn(enc.extra, 'keys', held); return false;
+/** Write a typed case whole: the row upserted (its rowid, and so its place in the mirror, kept), every child replaced. `links: false` leaves the link rows to `writeCaseLinks` (the snapshot path writes them after the requests and trials). */
+function writeCase(st, c, { links = true } = {}) {
+  st.ins.recruitment_cases.run(caseRow(c));
+  for (const t of CASE_CHILDREN) if (links || !LINK_TABLES.includes(t)) st.caseChildDel[t].run(c.id);
+  const I = st.ins; const id = c.id;
+  (c.room?.tags ?? []).forEach((tag, i) => I.case_room_tags.run({ case_id: id, position: i, tag }));
+  c.assignments.forEach((a, i) => I.case_assignments.run({ case_id: id, position: i, id: a.id, user_id: a.userId, user_name: a.name, task: a.task, ...dueRow('due', a.dueAt), status: a.status, created_at: a.createdAt }));
+  c.tasks.forEach((t, i) => I.case_tasks.run({ case_id: id, position: i, id: t.id, title: t.title, description: t.description, ...dueRow('due', t.dueAt), assignee_user_id: t.assigneeUserId, assignee_name: t.assigneeName, status: t.status, linked_resource_type: t.linkedResourceType, linked_resource_id: t.linkedResourceId, ...personRow('created_by', t.createdBy), created_at: t.createdAt, completed_at: t.completedAt, completed_by_name: t.completedBy }));
+  c.approvals.forEach((a, i) => I.case_approvals.run({ case_id: id, position: i, id: a.id, decision_outcome: a.decision.outcome, decision_reasons: a.decision.reasons, ...personRow('requested_by', a.requestedBy), status: a.status, requested_at: a.requestedAt, resolved_by_user_id: a.resolvedBy?.userId ?? null, resolved_by_name: a.resolvedBy?.name ?? null, resolved_at: a.resolvedBy?.at ?? null }));
+  c.history.forEach((h, i) => I.case_history.run({ case_id: id, position: i, id: h.id, at: h.at, action: h.action, by_kind: h.byKind, by_id: h.byId, by_name: h.byName, detail_text: isStr(h.detail) ? h.detail : null, detail_json: isPlainObject(h.detail) ? JSON.stringify(h.detail) : null }));
+  if (links) writeCaseLinks(st, c);
+  if (c.decisionDraft) {
+    const d = c.decisionDraft; I.case_decision_drafts.run(draftRow(id, d));
+    d.reasonCodes.forEach((code, i) => I.case_decision_draft_reason_codes.run({ case_id: id, position: i, code }));
+    d.evidenceRefs.forEach((r, i) => I.case_decision_draft_evidence_refs.run({ case_id: id, position: i, kind: r.kind, ref_id: r.id, meta_json: r.meta === null ? null : JSON.stringify(r.meta) }));
+  }
+  if (c.transactionHandoff) I.case_transaction_handoffs.run(handoffRow(id, c.transactionHandoff));
+  (c.budget?.scenarios ?? []).forEach((s, i) => {
+    I.case_budget_scenarios.run({ case_id: id, position: i, id: s.id, version: s.version, label: s.label, currency: s.currency, term_months: s.termMonths, created_by_name: s.createdBy, created_at: s.createdAt, updated_at: s.updatedAt, approval_by_name: s.approval?.by ?? null, approval_by_user_id: s.approval?.byUserId ?? null, approval_at: s.approval?.at ?? null, approval_version: s.approval?.version ?? null, approval_superseded: b(s.approval?.superseded) });
+    s.lines.forEach((l, j) => I.case_budget_lines.run({ case_id: id, scenario_id: s.id, position: j, id: l.id, kind: l.kind, label: l.label, amount_minor: l.amountMinor, currency: l.currency, schedule: l.schedule, confirmed: b(l.confirmed), conditional_assumption: l.conditional?.assumption ?? null }));
+    s.fxAssumptions.forEach((a, j) => I.case_budget_fx_assumptions.run({ case_id: id, scenario_id: s.id, position: j, from_currency: a.from, to_currency: a.to, rate: a.rate, source: a.source, date: a.date, manual: b(a.manual) }));
+    s.actuals.forEach((a, j) => I.case_budget_actuals.run({ case_id: id, scenario_id: s.id, position: j, id: a.id, line_id: a.lineId, amount_minor: a.amountMinor, at: a.at, recorded_by_name: a.recordedBy }));
   });
 }
-function writeKeyRows(S, ownerTable, ownerId, map) {
-  let i = 0;
-  for (const [act, v] of Object.entries(map)) {
-    if (v === undefined) continue;
-    if (Array.isArray(v)) for (const e of v) { const c = clone(e, `keys.${act}`).value; S.keys.insert.run({ owner_table: ownerTable, owner_id: ownerId, position: i++, act, shape: 'list', key: isPlainObject(c) && typeof c.key === 'string' ? c.key : null, fp: isPlainObject(c) && typeof c.fp === 'string' ? c.fp : null, at: isPlainObject(c) && Number.isSafeInteger(c.at) ? c.at : null, entry_json: JSON.stringify(c === undefined ? null : c) }); }
-    else { const c = clone(v, `keys.${act}`).value; S.keys.insert.run({ owner_table: ownerTable, owner_id: ownerId, position: i++, act, shape: 'value', key: isPlainObject(c) && typeof c.key === 'string' ? c.key : null, fp: isPlainObject(c) && typeof c.fp === 'string' ? c.fp : null, at: null, entry_json: JSON.stringify(c === undefined ? null : c) }); }
+function writeCaseLinks(st, c) {
+  for (const t of LINK_TABLES) st.caseChildDel[t].run(c.id);
+  c.links.requestIds.forEach((r, i) => st.ins.case_request_links.run({ case_id: c.id, position: i, request_id: r }));
+  c.links.trialIds.forEach((t, i) => st.ins.case_trial_links.run({ case_id: c.id, position: i, trial_id: t }));
+}
+function writeRoomRow(st, name, r) {
+  const table = PARENT[name];
+  for (const [t] of ROOM_CHILDREN[table]) st.roomChildDel[t].run(r.id);
+  if (name === 'roomComments') { st.ins.room_comments.run(commentRow(r)); r.mentions.forEach((u, i) => st.ins.room_comment_mentions.run({ comment_id: r.id, position: i, user_id: u })); return; }
+  if (name === 'roomSnapshots') {
+    st.ins.room_snapshots.run(snapshotRow(r));
+    for (const [kind, key] of [['evidence', 'evidenceIds'], ['assessment', 'assessmentIds'], ['combine', 'combineResults'], ['trial', 'trialIds']]) r.sourceRefs[key].forEach((ref, i) => st.ins.room_snapshot_source_refs.run({ snapshot_id: r.id, kind, position: i, ref_id: ref }));
+    return;
   }
-}
-/** Write the children of one encoded level: `ownerValues` the owner key so far (the case id first), `owner` the record at this level (its id owns its key rows unless the spec says the CASE does), `include(spec)` the stage filter. */
-function writeChildren(sqlite, children, ownerValues, owner, include) {
-  const S = stmts(sqlite);
-  for (const ch of children) {
-    if (ch.spec.ownerTable) { if (include(ch.spec)) writeKeyRows(S, ch.spec.ownerTable, ch.spec.ownerKey === 'case' ? ownerValues[0] : owner.id, ch.map); continue; }
-    if (!include(ch.spec)) continue;
-    const st = S.children[ch.spec.table]; const constants = ch.spec.constant ?? {};
-    ch.items.forEach((item, position) => {
-      const base = { ...Object.fromEntries(ch.spec.ownerCols.map((c, i) => [c, ownerValues[i]])), ...constants, position };
-      const blank = Object.fromEntries(columnsOf(ch.spec.shape).map(([col]) => [col, null]));
-      if (ch.spec.scalar) { const [col, kind] = ch.spec.scalar; const fits = item !== null && item !== undefined && !isPlainObject(item) && columnAdmits(kind, item); st.insert.run({ ...base, [col]: fits ? toColumn(kind, item) : null, ...blank, raw_json: fits ? null : JSON.stringify(clone(item, ch.path).value), absent_keys_json: null, offtype_json: null, extra_json: null }); return; }
-      if (!isPlainObject(item)) { st.insert.run({ ...base, ...blank, raw_json: JSON.stringify(clone(item, ch.path).value), absent_keys_json: null, offtype_json: null, extra_json: null }); return; }
-      const enc = encode(ch.spec.shape, item); foldKeysWithoutOwner(enc, item);
-      st.insert.run({ ...base, ...Object.fromEntries(columnsOf(ch.spec.shape).map(([col]) => [col, enc.cols[col] ?? null])), raw_json: null, ...rowMeta(enc) });
-      if (enc.children.length) writeChildren(sqlite, enc.children, [...ownerValues, position], item, include);
-    });
+  if (name === 'roomDecisions') {
+    st.ins.room_decisions.run(decisionRow(r));
+    r.reasonCodes.forEach((code, i) => st.ins.room_decision_reason_codes.run({ decision_id: r.id, position: i, code }));
+    r.evidenceRefs.forEach((e, i) => st.ins.room_decision_evidence_refs.run({ decision_id: r.id, position: i, kind: e.kind, ref_id: e.id, meta_json: e.meta === null ? null : JSON.stringify(e.meta) }));
+    (r.assessmentSummary?.assessmentIds ?? []).forEach((a, i) => st.ins.room_decision_assessment_ids.run({ decision_id: r.id, position: i, assessment_id: a }));
+    return;
   }
+  st.ins.room_evidence_states.run(evidenceRow(r));
 }
-/** The idempotency rows a parent record owns (its own rows and its draft's / handoff's, all keyed by the record's id), deleted before the children are rewritten or the owner departs; another case's rows are never touched. */
-function deleteOwnedKeyRows(sqlite, coll, recordId) {
-  const S = stmts(sqlite);
-  for (const owner of coll.keyOwners) S.keys.deleteOwner.run(owner.table, recordId);
-}
-/**
- * Write one parent record: its row by upsert (seq kept), every child row of the included stage deleted and reinserted in
- * list order (`include`: the A stage excludes the link tables, the C stage writes nothing but them).
- */
-export function writeRecord(sqlite, coll, record, { include = () => true, upsertParent = true } = {}) {
-  const S = stmts(sqlite); const P = S.parents[coll.name];
-  const enc = encode(coll.shape, record); foldKeysWithoutOwner(enc, record);
-  if (upsertParent) {
-    deleteOwnedKeyRows(sqlite, coll, record.id);
-    P.upsert.run({ ...Object.fromEntries(columnsOf(coll.shape).map(([col]) => [col, enc.cols[col] ?? null])), ...rowMeta(enc) });
-  }
-  const seen = new Set(); for (const ch of coll.children) if (include(ch) && !seen.has(ch.table)) { seen.add(ch.table); S.children[ch.table].deleteOwner.run(record.id); }
-  writeChildren(sqlite, enc.children, [record.id], record, include);
-}
-const notLinks = (spec) => !LINK_TABLES.has(spec.table);
-const onlyLinks = (spec) => LINK_TABLES.has(spec.table);
-/** Read every parent record of a collection with its children, in `seq` order: fresh objects from the file. */
-export function readRecords(sqlite, coll) {
-  const S = stmts(sqlite);
-  const groups = new Map(); // `${table}|${constants}|${ownerKey}` → rows
-  const seen = new Set();
-  for (const c of coll.children) { if (seen.has(c.table)) continue; seen.add(c.table); for (const r of S.children[c.table].select.all()) { const key = `${c.table}|${Object.keys(c.constant ?? {}).map((k) => r[k]).join('|')}|${c.ownerCols.map((col) => r[col]).join('|')}`; if (!groups.has(key)) groups.set(key, []); groups.get(key).push({ ...r }); } }
-  const keys = new Map(); // `${ownerTable}|${ownerId}` → rows
-  const keyTables = new Set(); const collectKeyTables = (shape) => { for (const m of Object.values(shape.maps ?? {})) if (m.ownerTable) keyTables.add(m.ownerTable); for (const sub of Object.values(shape.objects ?? {})) collectKeyTables(sub); for (const sub of Object.values(shape.lists ?? {})) collectKeyTables(sub.shape); for (const sub of Object.values(shape.object ?? {})) collectKeyTables(sub.shape); }; collectKeyTables(coll.shape);
-  for (const t of keyTables) for (const r of S.keys.select.all(t)) { const k = `${t}|${r.owner_id}`; if (!keys.has(k)) keys.set(k, []); keys.get(k).push(r); }
-  const rowsOf = (sub, ownerValues) => groups.get(`${sub.table}|${Object.values(sub.constant ?? {}).join('|')}|${ownerValues.join('|')}`) ?? [];
-  const decodeChildren = (shape, ownerValues, ownerId, out = new Map(), prefix = '') => {
-    for (const [k, sub] of Object.entries(shape.lists ?? {})) out.set(`${prefix}${k}`, rowsOf(sub, ownerValues).map((r) => decodeChild(sub, r, ownerValues)));
-    for (const [k, sub] of Object.entries(shape.object ?? {})) out.set(`${prefix}${k}`, rowsOf(sub, ownerValues).map((r) => decodeChild(sub, r, ownerValues)));
-    for (const [k, sub] of Object.entries(shape.maps ?? {})) { const o = {}; for (const r of keys.get(`${sub.ownerTable}|${sub.ownerKey === 'case' ? ownerValues[0] : ownerId}`) ?? []) { const v = parseJson(r.entry_json, 'entry_json'); if (r.shape === 'list') { if (!Object.hasOwn(o, r.act) || !Array.isArray(o[r.act])) setOwn(o, r.act, []); o[r.act].push(v); } else setOwn(o, r.act, v); } out.set(`${prefix}${k}`, o); } // own properties only: an act named __proto__ is data
-    for (const [k, sub] of Object.entries(shape.objects ?? {})) decodeChildren(sub, ownerValues, ownerId, out, `${prefix}${k}.`);
-    return out;
-  };
-  const decodeChild = (sub, r, ownerValues) => {
-    if (r.raw_json !== null) return parseJson(r.raw_json, 'raw_json');
-    if (sub.scalar) return fromColumn(sub.scalar[1], r[sub.scalar[0]], sub.scalar[0]);
-    const m = metaOf(r); const kids = decodeChildren(sub.shape, [...ownerValues, r.position], typeof r.id === 'string' ? r.id : null);
-    return decodeLevel(sub.shape, r, '', m.extra, m.absent, m.offtype, kids);
-  };
-  return S.parents[coll.name].select.all().map((r) => { const m = metaOf(r); return decodeLevel(coll.shape, r, '', m.extra, m.absent, m.offtype, decodeChildren(coll.shape, [r.id], r.id)); });
-}
-export const readCases = (sqlite) => readRecords(sqlite, CASES);
-export const readRoomComments = (sqlite) => readRecords(sqlite, COMMENTS);
-export const readRoomSnapshots = (sqlite) => readRecords(sqlite, SNAPSHOTS);
-export const readRoomDecisions = (sqlite) => readRecords(sqlite, DECISIONS);
-export const readRoomEvidenceStates = (sqlite) => readRecords(sqlite, EVIDENCE_STATES);
-const READERS = { recruitmentCases: readCases, roomComments: readRoomComments, roomSnapshots: readRoomSnapshots, roomDecisions: readRoomDecisions, roomEvidenceState: readRoomEvidenceStates };
+function deleteRoomRow(st, name, id) { const table = PARENT[name]; for (const [t] of ROOM_CHILDREN[table]) st.roomChildDel[t].run(id); st.del[table].run(id); }
+function deleteCase(st, id) { for (const t of CASE_CHILDREN) st.caseChildDel[t].run(id); st.del.recruitment_cases.run(id); }
 
-// ------------------------------------------------------------------ validation (the literal's contract: never a value in a message)
-const presentKey = (raw, k) => Object.hasOwn(raw, k) && raw[k] !== undefined;
-/** Validate one entry of a collection: `{ ok: true }` or `{ ok: false, reason }`. The contract is the identifiers the keys need (and, for a case, the createdAt the ordering reads); everything else is lossless. */
-export function validateEntry(coll, raw, at = coll.name) {
-  if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-  if (!nonEmpty(raw.id)) return { ok: false, reason: `${at}.id must be a non-empty string` };
-  if (!nonEmpty(raw.orgId)) return { ok: false, reason: `${at}.orgId must be a non-empty string (${raw.id})` };
-  if (coll === CASES) {
-    if (!nonEmpty(raw.playerId)) return { ok: false, reason: `${at}.playerId must be a non-empty string (${raw.id})` };
-    if (!nonEmpty(raw.ownerUserId)) return { ok: false, reason: `${at}.ownerUserId must be a non-empty string (${raw.id})` };
-    if (!presentKey(raw, 'createdAt')) return { ok: false, reason: `${at}.createdAt must be present (${raw.id})` };
-  } else {
-    if (!nonEmpty(raw.roomId)) return { ok: false, reason: `${at}.roomId must be a non-empty string (${raw.id})` };
-    if (coll === COMMENTS && !nonEmpty(raw.authorId)) return { ok: false, reason: `${at}.authorId must be a non-empty string (${raw.id})` };
-  }
-  try { encode(coll.shape, raw); } catch (e) { return { ok: false, reason: `${at} (${raw.id}): ${e.message}` }; }
-  return { ok: true };
+function decodeCase(st, row) {
+  const id = row.id; const O = st.of;
+  const dr = st.draftOf.get(id); const ho = st.handoffOf.get(id);
+  const scenarios = O.case_budget_scenarios.all(id).map((s) => ({
+    id: s.id, version: s.version, label: s.label, currency: s.currency, termMonths: s.term_months,
+    lines: st.scenarioChild.case_budget_lines.all(id, s.id).map((l) => ({ id: l.id, kind: l.kind, label: l.label, amountMinor: l.amount_minor, currency: l.currency, schedule: l.schedule, confirmed: l.confirmed === 1, conditional: l.conditional_assumption === null ? null : { assumption: l.conditional_assumption } })),
+    fxAssumptions: st.scenarioChild.case_budget_fx_assumptions.all(id, s.id).map((a) => ({ from: a.from_currency, to: a.to_currency, rate: a.rate, source: a.source, date: a.date, manual: a.manual === 1 })),
+    approval: s.approval_at === null ? null : { by: s.approval_by_name, byUserId: s.approval_by_user_id, at: s.approval_at, version: s.approval_version, superseded: s.approval_superseded === 1 },
+    actuals: st.scenarioChild.case_budget_actuals.all(id, s.id).map((a) => ({ id: a.id, lineId: a.line_id, amountMinor: a.amount_minor, at: a.at, recordedBy: a.recorded_by_name })),
+    createdBy: s.created_by_name, createdAt: s.created_at, updatedAt: s.updated_at,
+  }));
+  const room = row.room_status === null ? null : {
+    status: row.room_status, priority: row.room_priority, tags: O.case_room_tags.all(id).map((t) => t.tag), leadScoutUserId: row.room_lead_scout_user_id, sourceContext: row.room_source_context,
+    sourceRef: row.room_source_ref_id === null ? null : { id: row.room_source_ref_id, version: row.room_source_ref_version }, openedBy: personOut(row, 'room_opened_by'),
+    updatedAt: row.room_updated_at, archivedAt: row.room_archived_at, closedAt: row.room_closed_at, rev: row.room_rev, revAt: row.room_rev_at, revBy: personOut(row, 'room_rev_by'),
+    reopened: row.room_reopened_at === null ? null : { by: personOut(row, 'room_reopened_by'), at: row.room_reopened_at, from: row.room_reopened_from, reasonCodes: JSON.parse(row.room_reopened_reason_codes_json), sourceContext: row.room_reopened_source_context, sourceRef: row.room_reopened_source_ref_id === null ? null : { id: row.room_reopened_source_ref_id, version: row.room_reopened_source_ref_version } },
+  };
+  return {
+    id, orgId: row.org_id, playerId: row.player_id, playerName: row.player_name, vacancyId: row.vacancy_id, ownerUserId: row.owner_user_id, ownerName: row.owner_name,
+    stage: row.stage, priority: row.priority, deadline: dueOut(row, 'deadline'), restricted: row.restricted === 1,
+    assignments: O.case_assignments.all(id).map((a) => ({ id: a.id, userId: a.user_id, name: a.user_name, task: a.task, dueAt: dueOut(a, 'due'), status: a.status, createdAt: a.created_at })),
+    tasks: O.case_tasks.all(id).map((t) => ({ id: t.id, title: t.title, description: t.description, dueAt: dueOut(t, 'due'), assigneeUserId: t.assignee_user_id, assigneeName: t.assignee_name, status: t.status, linkedResourceType: t.linked_resource_type, linkedResourceId: t.linked_resource_id, createdBy: personOut(t, 'created_by'), createdAt: t.created_at, completedAt: t.completed_at, completedBy: t.completed_by_name })),
+    approvals: O.case_approvals.all(id).map((a) => ({ id: a.id, decision: { outcome: a.decision_outcome, reasons: a.decision_reasons }, requestedBy: personOut(a, 'requested_by'), status: a.status, requestedAt: a.requested_at, resolvedBy: a.resolved_at === null ? null : { userId: a.resolved_by_user_id, name: a.resolved_by_name, at: a.resolved_at } })),
+    decision: row.decision_at === null ? null : { outcome: row.decision_outcome, reasons: row.decision_reasons, byUserId: row.decision_by_user_id, byName: row.decision_by_name, approvedBy: row.decision_approved_by_name, at: row.decision_at },
+    links: { requestIds: O.case_request_links.all(id).map((r) => r.request_id), trialIds: O.case_trial_links.all(id).map((r) => r.trial_id), signingId: row.links_signing_id },
+    createdAt: row.created_at,
+    history: O.case_history.all(id).map((h) => ({ id: h.id, at: h.at, byKind: h.by_kind, byId: h.by_id, byName: h.by_name, action: h.action, detail: h.detail_json !== null ? JSON.parse(h.detail_json) : h.detail_text })),
+    room,
+    decisionDraft: !dr ? null : { id: dr.id, outcome: dr.outcome, reasonCodes: O.case_decision_draft_reason_codes.all(id).map((r) => r.code), note: dr.note, evidenceRefs: O.case_decision_draft_evidence_refs.all(id).map((r) => ({ kind: r.kind, id: r.ref_id, meta: jsonOut(r.meta_json) })), by: personOut(dr, 'by', ['role']), createdAt: dr.created_at, updatedAt: dr.updated_at, updatedBy: personOut(dr, 'updated_by', ['role']), rev: dr.rev, revAt: dr.rev_at, keys: { create: dr.create_key === null ? null : { key: dr.create_key, fp: dr.create_fp } } },
+    transactionHandoff: !ho ? null : { id: ho.id, caseId: id, orgId: ho.org_id, playerId: ho.player_id, status: ho.status, invitedAt: ho.invited_at, invitedBy: ho.invited_by_user_id === null && ho.invited_by_name === null ? null : { kind: 'org', userId: ho.invited_by_user_id, name: ho.invited_by_name }, acceptedAt: ho.accepted_at, withdrawnAt: ho.withdrawn_at, transactionId: ho.transaction_id, representedAtInvitation: ho.represented_at_invitation === 1, invitedAgencyOrgId: ho.invited_agency_org_id, invitedAgentUserId: ho.invited_agent_user_id, keys: { invite: ho.invite_key === null ? null : { key: ho.invite_key } }, rev: ho.rev, revAt: ho.rev_at },
+    budget: scenarios.length ? { scenarios } : null,
+    subjectRemovedAt: row.subject_removed_at,
+  };
 }
-const unknownExtras = (enc) => Object.keys(enc.extra).some((k) => k !== 'keys');
-const strRefs = (list) => (Array.isArray(list) ? list.filter(nonEmpty) : []);
-const linkRefsOf = (c) => ({ requests: isPlainObject(c.links) ? strRefs(c.links.requestIds) : [], trials: isPlainObject(c.links) ? strRefs(c.links.trialIds) : [] });
-const idSet = (list) => new Set((Array.isArray(list) ? list : []).filter(isPlainObject).map((x) => x.id));
-const ROOM_TABLE_LABEL = Object.fromEntries(ROOM_COLLECTIONS.map((c) => [c.name, c.table]));
+const decodeComment = (st, r) => ({ id: r.id, roomId: r.room_id, orgId: r.org_id, authorId: r.author_user_id, authorName: r.author_name, body: r.body, replyToId: r.reply_to_id, mentions: st.mentionsOf.all(r.id).map((m) => m.user_id), createdAt: r.created_at, editedAt: r.edited_at, editCount: r.edit_count, deletedAt: r.deleted_at, deletedBy: personOut(r, 'deleted_by') });
+function decodeSnapshot(st, r) {
+  const refs = { evidence: [], assessment: [], combine: [], trial: [] };
+  for (const x of st.sourceRefsOf.all(r.id)) refs[x.kind].push(x.ref_id);
+  return { id: r.id, roomId: r.room_id, orgId: r.org_id, playerId: r.player_id, at: r.at, trigger: r.trigger, trust: r.trust_hash === null ? null : { score: r.trust_score, band: r.trust_band, policyVersion: r.trust_policy_version, componentLevels: JSON.parse(r.trust_component_levels_json), hash: r.trust_hash }, sourceRefs: { passportVersion: r.source_passport_version, passportRevision: r.source_passport_revision, evidenceIds: refs.evidence, assessmentIds: refs.assessment, combineResults: refs.combine, trialIds: refs.trial }, note: r.note };
+}
+function decodeDecision(st, r) {
+  const C = st.decisionChild;
+  const snapRow = r.snapshot_id === null ? null : st.byId.room_snapshots.get(r.snapshot_id);
+  const snap = snapRow ? decodeSnapshot(st, snapRow) : null;
+  return {
+    id: r.id, roomId: r.room_id, orgId: r.org_id, playerId: r.player_id, kind: r.kind, state: r.state, outcome: r.outcome, recommendation: r.recommendation,
+    reasonCodes: C.room_decision_reason_codes.all(r.id).map((x) => x.code), note: r.note, by: personOut(r, 'by', ['role']), createdAt: r.created_at, finalizedAt: r.finalized_at, trigger: r.trigger, clientKey: r.client_key,
+    supersedes: r.supersedes_id, supersededById: r.superseded_by_id, supersession: r.supersession_of_id === null ? null : { of: r.supersession_of_id, reason: r.supersession_reason },
+    rev: r.rev, revAt: r.rev_at, evidenceRefs: C.room_decision_evidence_refs.all(r.id).map((x) => ({ kind: x.kind, id: x.ref_id, meta: jsonOut(x.meta_json) })),
+    assessmentSummary: r.assessments_submitted === null ? null : { submitted: r.assessments_submitted, withheld: r.assessments_withheld, verdicts: JSON.parse(r.assessment_verdicts_json), assessmentIds: C.room_decision_assessment_ids.all(r.id).map((x) => x.assessment_id) },
+    snapshot: snap ? { at: snap.at, trust: snap.trust, sourceRefs: snap.sourceRefs, snapshotId: snap.id } : null,
+    keys: { finalize: r.finalize_key === null ? null : { key: r.finalize_key, fp: r.finalize_fp }, draft: r.draft_key === null ? null : { key: r.draft_key, fp: r.draft_fp } },
+    draftId: r.draft_id,
+    lifecycle: r.lifecycle_applied === null ? null : { action: r.lifecycle_action, from: r.lifecycle_from, to: r.lifecycle_to, applied: r.lifecycle_applied === 1, reason: r.lifecycle_reason, at: r.lifecycle_at },
+    policyVersion: r.policy_version,
+  };
+}
+const decodeEvidence = (_st, r) => ({ id: r.id, roomId: r.room_id, orgId: r.org_id, evidenceId: r.evidence_id, state: r.state, note: r.note, byId: r.by_user_id, byName: r.by_name, at: r.at });
+const DECODERS = { recruitmentCases: decodeCase, roomComments: decodeComment, roomSnapshots: decodeSnapshot, roomDecisions: decodeDecision, roomEvidenceState: decodeEvidence };
+const readAll = (sqlite, name) => { const st = statements(sqlite); return st.all[PARENT[name]].all().map((r) => DECODERS[name](st, r)); };
+export const readCases = (sqlite) => readAll(sqlite, 'recruitmentCases');
+export const readRoomComments = (sqlite) => readAll(sqlite, 'roomComments');
+export const readRoomSnapshots = (sqlite) => readAll(sqlite, 'roomSnapshots');
+export const readRoomDecisions = (sqlite) => readAll(sqlite, 'roomDecisions');
+export const readRoomEvidenceStates = (sqlite) => readAll(sqlite, 'roomEvidenceState');
 
-/**
- * The preflight P of the review's §6 against the FINAL combined graph, ids only, before any write. `supplied` holds the
- * five collections as supplied (`undefined` = omitted, retained); `stored` the retained side as records (ids suffice)
- * for every omitted collection; `s8a` the final requests and trials (`{ requests, trials }` as records: the supplied
- * snapshot collections, the recruitment mirror in a flush, the table rows otherwise) with `departures` (the trial ids
- * B deletes or reinserts, the request ids F2 prunes); `orgs`/`users` the final organisations and staff (records) or
- * undefined for the tables; `only` (a flush) restricts the entry validation to the changed ids — the mirrors' other
- * records were validated when they were committed. Returns `{ counts, departingCases }` or throws.
- */
-export function preflight(sqlite, supplied, { stored, s8a, orgs, users, only = null, label = 'the snapshot' }) {
-  const problems = [];
-  const counts = { players: { live: 0, retained: 0, missing: 0 } };
-  for (const coll of ALL_COLLECTIONS) {
-    const list = supplied[coll.name];
-    counts[coll.name] = { imported: 0, withExtraFields: 0, withAbsentKeys: 0, withOfftypeValues: 0, ...(coll === CASES ? { roomless: 0 } : {}) };
-    if (list === undefined) continue;
-    if (!Array.isArray(list)) throw blocked(`${label}: ${coll.name} must be an array of entries (got ${describe(list)})`);
-    const seen = new Set();
-    list.forEach((raw, i) => {
-      if (only && isPlainObject(raw) && !only[coll.name]?.has(raw.id)) { if (seen.has(raw.id)) problems.push(`${coll.name} entry #${i}: duplicates the id of an earlier entry (${raw.id})`); seen.add(raw.id); return; }
-      const v = validateEntry(coll, raw, `${coll.name} entry #${i}`); if (!v.ok) { problems.push(v.reason); return; }
-      if (seen.has(raw.id)) { problems.push(`${coll.name} entry #${i}: duplicates the id of an earlier entry (${raw.id})`); return; } seen.add(raw.id);
-      const e = encode(coll.shape, raw); const c = counts[coll.name]; c.imported += 1; if (unknownExtras(e)) c.withExtraFields += 1; if (e.absent.length) c.withAbsentKeys += 1; if (Object.keys(e.offtype).length) c.withOfftypeValues += 1;
-      if (coll === CASES && !isPlainObject(raw.room)) c.roomless += 1;
-    });
+// ------------------------------------------------------------------ references, judged in code so a refusal names ids
+/** The cross-record rules no key can state: a decision's snapshot and its chain stay inside its room. */
+function decisionRefsProblems(d, { decisionRoom, snapshotRoom }) {
+  const out = [];
+  if (d.snapshot && snapshotRoom(d.snapshot.snapshotId) !== d.roomId) out.push(`room_decisions ${d.id} names snapshot ${d.snapshot.snapshotId}, which is not a snapshot of room ${d.roomId}`);
+  for (const [k, v] of [['supersedes', d.supersedes], ['supersededById', d.supersededById]]) {
+    if (v === null) continue;
+    const room = decisionRoom(v);
+    if (room === undefined) out.push(`room_decisions ${d.id} (room ${d.roomId}) names ${v} (${k}): no such decision`);
+    else if (room !== d.roomId) out.push(`room_decisions ${d.id} (room ${d.roomId}) names ${v} (${k}) of room ${room}`);
   }
-  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  const final = (coll) => (supplied[coll.name] === undefined ? (stored[coll.name] ?? []) : supplied[coll.name]);
-  const finalCases = final(CASES).filter(isPlainObject); const finalCaseIds = idSet(finalCases);
-  const storedCaseIds = idSet(stored.recruitmentCases ?? []);
-  const departingCases = supplied.recruitmentCases === undefined ? [] : [...storedCaseIds].filter((id) => !finalCaseIds.has(id));
-  // (1) every link of every final case names a final request/trial
-  const reqIds = idSet(s8a.requests); const trialIds = idSet(s8a.trials);
-  const dangling = [];
-  for (const c of finalCases) { const l = linkRefsOf(c); for (const r of l.requests) if (!reqIds.has(r)) dangling.push(`case ${c.id} links request ${r}`); for (const t of l.trials) if (!trialIds.has(t)) dangling.push(`case ${c.id} links trial ${t}`); }
-  if (dangling.length) throw refusal('CASE_LINK_DANGLING', `${dangling.length} case link(s) in ${label} name a request or trial that is not in the final collections (${ids(dangling)}); the write was rolled back and nothing was changed — remove the link with its target, or keep the target`, { links: dangling });
-  // (2) a case the write removes is named by no RETAINED independent row (the owned children never block)
-  if (departingCases.length) {
-    const departing = new Set(departingCases); const blockers = [];
-    for (const r of (s8a.requests ?? []).filter(isPlainObject)) if (nonEmpty(r.caseId) && departing.has(r.caseId)) blockers.push(['recruitment_requests', r.id, r.caseId]);
-    for (const t of (s8a.trials ?? []).filter(isPlainObject)) if (nonEmpty(t.caseId) && departing.has(t.caseId)) blockers.push(['trials', t.id, t.caseId]);
-    for (const coll of ROOM_COLLECTIONS) if (supplied[coll.name] === undefined) for (const r of (stored[coll.name] ?? []).filter(isPlainObject)) if (nonEmpty(r.roomId) && departing.has(r.roomId)) blockers.push([coll.table, r.id, r.roomId]);
-    if (blockers.length) {
-      const byTable = new Map(); for (const [t, id] of blockers) { if (!byTable.has(t)) byTable.set(t, []); byTable.get(t).push(id); }
-      throw refusal('CASE_STILL_REFERENCED', `${blockers.length} retained row(s) in ${label} name a case this write removes (${[...byTable].map(([t, list]) => `${t} ${ids(list)}`).join('; ')} → cases ${ids([...new Set(blockers.map((b) => b[2]))])}); the write was rolled back and nothing was changed — remove the rows with their case in the same snapshot, or keep the case`, { rows: blockers.map((b) => `${b[0]} ${b[1]}`) });
-    }
+  return out;
+}
+/** The organisation, staff, request and trial each record names (RESTRICT keys), named with ids before the engine would refuse anonymously. */
+function referenceProblems(st, name, r) {
+  const out = [];
+  const table = PARENT[name];
+  if (!st.org.get(r.orgId)) out.push(`${table} ${r.id} → orgs ${r.orgId}`);
+  const users = name === 'recruitmentCases' ? [r.ownerUserId, r.room?.leadScoutUserId, r.decision?.byUserId, ...r.assignments.map((a) => a.userId)] : name === 'roomComments' ? [r.authorId] : [];
+  for (const u of users) if (u && !st.user.get(u)) out.push(`${table} ${r.id} → org_users ${u}`);
+  if (name === 'recruitmentCases') {
+    if (r.transactionHandoff && !st.org.get(r.transactionHandoff.orgId)) out.push(`case_transaction_handoffs ${r.id} → orgs ${r.transactionHandoff.orgId}`);
+    for (const q of r.links.requestIds) if (!st.request.get(q)) out.push(`case_request_links ${r.id} → recruitment_requests ${q}`);
+    for (const t of r.links.trialIds) if (!st.trial.get(t)) out.push(`case_trial_links ${r.id} → trials ${t}`);
   }
-  // (3) every supplied room row names a final case
-  const missingRoom = [];
-  for (const coll of ROOM_COLLECTIONS) if (supplied[coll.name] !== undefined) for (const r of supplied[coll.name]) if (!finalCaseIds.has(r.roomId)) missingRoom.push([coll.table, r.id, r.roomId]);
-  if (missingRoom.length) throw refusal('ROOM_CASE_MISSING', `${missingRoom.length} room row(s) in ${label} name a case that is not in the final recruitmentCases collection (${ids(missingRoom.map((m) => `${m[0]} ${m[1]} → ${m[2]}`))}); the write was rolled back and nothing was changed`, { rows: missingRoom.map((m) => `${m[0]} ${m[1]}`) });
-  // the decision chain over the final decisions, ids only: every supersedes / supersededById names a final decision OF THE
-  // SAME ROOM (readiness review §6 G; the review of b7c0dd0, F1 — existence alone let a chain cross rooms). The duplicate-head
-  // condition stays a matter judged on read, not a refusal.
-  const finalDecisions = final(DECISIONS).filter(isPlainObject); const roomOf = new Map(); for (const d of finalDecisions) if (nonEmpty(d.id) && !roomOf.has(d.id)) roomOf.set(d.id, d.roomId); const broken = [];
-  for (const d of finalDecisions) for (const k of ['supersedes', 'supersededById']) {
-    if (!nonEmpty(d[k])) continue;
-    if (!roomOf.has(d[k])) broken.push(`${d.id} (room ${d.roomId}) names ${d[k]} (${k}): no such decision`);
-    else if (roomOf.get(d[k]) !== d.roomId) broken.push(`${d.id} (room ${d.roomId}) names ${d[k]} (${k}) of room ${roomOf.get(d[k])}`);
+  return out;
+}
+/** Every table outside the case's own whose foreign key names recruitment_cases (requests, trials, contacts, offers, signings, the room rows). */
+function caseDependants(sqlite) {
+  const out = [];
+  for (const { name } of sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()) {
+    if (CASE_TABLES.includes(name)) continue;
+    for (const fk of sqlite.prepare(`PRAGMA foreign_key_list(${name})`).all()) if (fk.table === 'recruitment_cases') out.push([name, fk.from]);
   }
-  if (broken.length) throw refusal('DECISION_CHAIN_BROKEN', `${broken.length} decision chain reference(s) in ${label} do not name a decision of the same room in the final roomDecisions collection (${ids(broken)}); the write was rolled back and nothing was changed`, { links: broken });
-  // the organisation and staff keys (RESTRICT): named here with ids, against the FINAL collections when the snapshot supplies them, the tables otherwise
-  const orgIds = orgs !== undefined ? idSet(orgs) : tableExists(sqlite, 'orgs') ? new Set(sqlite.prepare('SELECT id FROM orgs').all().map((r) => r.id)) : null;
-  const userIds = users !== undefined ? idSet(users) : tableExists(sqlite, 'org_users') ? new Set(sqlite.prepare('SELECT id FROM org_users').all().map((r) => r.id)) : null;
-  const noOrg = []; const noUser = [];
-  for (const coll of ALL_COLLECTIONS) {
-    const list = supplied[coll.name]; if (list === undefined) continue;
-    for (const r of list) {
-      if (orgIds && !orgIds.has(r.orgId)) noOrg.push([coll.table, r.id, r.orgId]);
-      if (!userIds) continue;
-      if (coll === CASES) {
-        if (!userIds.has(r.ownerUserId)) noUser.push([coll.table, r.id, r.ownerUserId]);
-        if (isPlainObject(r.room) && nonEmpty(r.room.leadScoutUserId) && !userIds.has(r.room.leadScoutUserId)) noUser.push([coll.table, r.id, r.room.leadScoutUserId]);
-        if (isPlainObject(r.decision) && nonEmpty(r.decision.byUserId) && !userIds.has(r.decision.byUserId)) noUser.push([coll.table, r.id, r.decision.byUserId]);
-        for (const a of Array.isArray(r.assignments) ? r.assignments : []) if (isPlainObject(a) && nonEmpty(a.userId) && !userIds.has(a.userId)) noUser.push(['case_assignments', r.id, a.userId]);
-      } else if (coll === COMMENTS && !userIds.has(r.authorId)) noUser.push([coll.table, r.id, r.authorId]);
-    }
-  }
-  if (noOrg.length) throw refusal('RECRUITMENT_CASES_ORG_MISSING', `${noOrg.length} row(s) in ${label} name an organisation that does not exist in the final orgs table (${ids(noOrg.map((x) => `${x[0]} ${x[1]}`))}; organisations ${ids([...new Set(noOrg.map((x) => x[2]))])}); the write was rolled back and nothing was changed`, { rows: noOrg.map((x) => x[1]) });
-  if (noUser.length) throw refusal('RECRUITMENT_CASES_USER_MISSING', `${noUser.length} row(s) in ${label} name a staff member that does not exist in the final org_users table (${ids(noUser.map((x) => `${x[0]} ${x[1]}`))}; staff ${ids([...new Set(noUser.map((x) => x[2]))])}); the write was rolled back and nothing was changed`, { rows: noUser.map((x) => x[1]) });
-  // the tolerant player references (Q8a), counted: cases, snapshots, decisions and the handoffs of the supplied cases
-  if (tableExists(sqlite, 'players')) {
-    const live = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NULL').all().map((r) => r.id)); const retained = new Set(sqlite.prepare('SELECT id FROM players WHERE deleted_at IS NOT NULL').all().map((r) => r.id));
-    const count = (pid) => { if (live.has(pid)) counts.players.live += 1; else if (retained.has(pid)) counts.players.retained += 1; else counts.players.missing += 1; };
-    for (const c of supplied.recruitmentCases ?? []) { count(c.playerId); if (isPlainObject(c.transactionHandoff) && presentKey(c.transactionHandoff, 'playerId')) count(c.transactionHandoff.playerId); }
-    for (const coll of [SNAPSHOTS, DECISIONS]) for (const r of supplied[coll.name] ?? []) if (presentKey(r, 'playerId')) count(r.playerId);
-  }
-  return { counts, departingCases };
+  return out;
 }
 
-// ------------------------------------------------------------------ the stages against the tables (inside the caller's transaction)
-/** A: the supplied cases upserted with their owned children; their link rows are deleted here and rewritten at C (after the S8a phases); `only` restricts to the given ids. */
-export function stageCases(sqlite, cases, { only = null } = {}) { const S = stmts(sqlite); for (const c of cases) if (!only || only.has(c.id)) { writeRecord(sqlite, CASES, c, { include: notLinks }); S.children.case_request_links.deleteOwner.run(c.id); S.children.case_trial_links.deleteOwner.run(c.id); } }
-/**
- * R: release the link rows B or F2 would hit. The supplied cases' rows were deleted at A (rewritten at C). The rows of
- * RETAINED cases naming a trial of the departure set or a pruned request are memorised verbatim and deleted; the
- * supplied-or-pruned cases' remaining rows (a pruned case) are deleted. Returns the memo for C.
- */
-export function releaseLinks(sqlite, { departures, rewritten, pruned }) {
-  const S = stmts(sqlite); const memo = [];
-  const skip = new Set([...rewritten, ...pruned]);
-  const release = (table, targets, kind) => {
-    if (!targets.length) return;
-    for (const row of S.linkRowsNaming[kind](targets.length).all(...targets)) { if (!skip.has(row.case_id)) memo.push({ table, row: { ...row } }); S.deleteLinkRow[table].run(row.case_id, row.position); }
-  };
-  release('case_trial_links', departures.trials, 'trials'); release('case_request_links', departures.requests, 'requests');
-  for (const id of pruned) { S.children.case_request_links.deleteOwner.run(id); S.children.case_trial_links.deleteOwner.run(id); }
-  return memo;
-}
-/** C: the supplied cases' link rows in list order; the memorised rows of the retained cases back verbatim. */
-export function stageLinks(sqlite, cases, memo, { only = null } = {}) {
-  const S = stmts(sqlite);
-  for (const c of cases) if (!only || only.has(c.id)) writeRecord(sqlite, CASES, c, { include: onlyLinks, upsertParent: false });
-  for (const { table, row } of memo) S.children[table].insert.run(row);
-}
-/** D: the supplied room collections upserted (the formal decisions' key rows rewritten with them). */
-export function stageRooms(sqlite, supplied, { only = null } = {}) { for (const coll of ROOM_COLLECTIONS) for (const r of supplied[coll.name] ?? []) if (!only || only[coll.name].has(r.id)) writeRecord(sqlite, coll, r); }
-/** F1: the rows a SUPPLIED room collection no longer lists (their key rows first). `gone` maps a collection name to the ids to remove. */
-export function pruneRooms(sqlite, gone) { const S = stmts(sqlite); for (const coll of ROOM_COLLECTIONS) for (const id of gone[coll.name] ?? []) { deleteOwnedKeyRows(sqlite, coll, id); S.parents[coll.name].del.run(id); } }
-/** F3: the cases no longer listed — each departing owner's RESTRICT-owned history rows and the key rows of its owned draft/handoff explicitly, THEN the parent (the cascades follow). */
-export function pruneCases(sqlite, gone) { const S = stmts(sqlite); for (const id of gone) { S.historyOf.run(id); deleteOwnedKeyRows(sqlite, CASES, id); S.deleteCase.run(id); } }
-/** G: the final assertions, ids only — every link target present, the decision chain over the final table state, foreign_key_check empty on the tables this step owns and the two it keyed. */
-export function assertCasesConsistent(sqlite, { label = 'the snapshot' } = {}) {
-  if (!recruitmentCasesLive(sqlite)) return;
-  const danglingR = sqlite.prepare('SELECT l.case_id, l.request_id FROM case_request_links l LEFT JOIN recruitment_requests r ON r.id = l.request_id WHERE l.request_id IS NOT NULL AND r.id IS NULL').all();
-  const danglingT = sqlite.prepare('SELECT l.case_id, l.trial_id FROM case_trial_links l LEFT JOIN trials t ON t.id = l.trial_id WHERE l.trial_id IS NOT NULL AND t.id IS NULL').all();
-  if (danglingR.length || danglingT.length) throw refusal('CASE_LINK_DANGLING', `${danglingR.length + danglingT.length} case link(s) in ${label} name a request or trial that is not in the final tables (${ids([...danglingR.map((r) => `case ${r.case_id} links request ${r.request_id}`), ...danglingT.map((r) => `case ${r.case_id} links trial ${r.trial_id}`)])}); the write was rolled back and nothing was changed`);
-  // the chain over the FINAL table state: each pointer names a decision of the SAME room (review of b7c0dd0, F1), checked here independently of the preflight
-  const chain = sqlite.prepare("SELECT d.id, d.room_id, d.supersedes_id, d.superseded_by_id, (SELECT x.room_id FROM room_decisions x WHERE x.id = d.supersedes_id) AS s_room, (SELECT x.room_id FROM room_decisions x WHERE x.id = d.superseded_by_id) AS b_room FROM room_decisions d WHERE (d.supersedes_id IS NOT NULL AND (SELECT x.room_id FROM room_decisions x WHERE x.id = d.supersedes_id) IS NOT d.room_id) OR (d.superseded_by_id IS NOT NULL AND (SELECT x.room_id FROM room_decisions x WHERE x.id = d.superseded_by_id) IS NOT d.room_id)").all();
-  if (chain.length) throw refusal('DECISION_CHAIN_BROKEN', `${chain.length} decision chain reference(s) in ${label} do not name a decision of the same room in the final room_decisions table (${ids(chain.flatMap((d) => [d.supersedes_id !== null && d.s_room !== d.room_id ? `${d.id} (room ${d.room_id}) names ${d.supersedes_id} (supersedes)${d.s_room === null ? ': no such decision' : ` of room ${d.s_room}`}` : null, d.superseded_by_id !== null && d.b_room !== d.room_id ? `${d.id} (room ${d.room_id}) names ${d.superseded_by_id} (supersededById)${d.b_room === null ? ': no such decision' : ` of room ${d.b_room}`}` : null].filter(Boolean)))}); the write was rolled back and nothing was changed`);
-  // the owned key rows (review of b7c0dd0, F2): every draft / handoff key row is owned by a case that has that child; a row owned by nothing (a file written by the superseded b7c0dd0 build keyed them by the child id) is refused, never guessed at
-  const orphanKeys = sqlite.prepare("SELECT k.owner_table, k.owner_id FROM idempotency_keys k WHERE (k.owner_table = 'case_decision_drafts' AND NOT EXISTS (SELECT 1 FROM case_decision_drafts c WHERE c.case_id = k.owner_id)) OR (k.owner_table = 'case_transaction_handoffs' AND NOT EXISTS (SELECT 1 FROM case_transaction_handoffs c WHERE c.case_id = k.owner_id)) GROUP BY k.owner_table, k.owner_id").all();
-  if (orphanKeys.length) throw refusal('RECRUITMENT_CASES_KEY_OWNER_UNKNOWN', `${orphanKeys.length} idempotency_keys owner(s) in ${label} name no case child (${ids(orphanKeys.map((k) => `${k.owner_table} ${k.owner_id}`))}); since the correction of b7c0dd0 the draft's and the handoff's rows are owned by the CASE id — a file cut over by the b7c0dd0 build is not read: roll it back with that build's tool on a copy and cut the copy over again`, { rows: orphanKeys.map((k) => `${k.owner_table} ${k.owner_id}`) });
-  const broken = [...RECRUITMENT_CASES_TABLES, 'recruitment_requests', 'trials'].flatMap((t) => sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all());
-  if (broken.length) throw refusal('RECRUITMENT_CASES_KEY_VIOLATION', `foreign_key_check found ${broken.length} broken reference(s) in ${label} (first: ${broken[0].table} rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back and nothing was changed`);
-}
 /** The counts of the admin report: rows naming a player that is not in the players table, and rows naming a retained record (Q8a: counted, never refused). */
 const PLAYER_COUNT_TABLES = { recruitmentCases: 'recruitment_cases', roomSnapshots: 'room_snapshots', roomDecisions: 'room_decisions', caseTransactionHandoffs: 'case_transaction_handoffs' };
 export function unresolvedPlayerReferences(sqlite) {
   if (!recruitmentCasesLive(sqlite)) return null;
-  return Object.fromEntries(Object.entries(PLAYER_COUNT_TABLES).map(([k, t]) => [k, sqlite.prepare(`SELECT count(*) AS n FROM ${t} x WHERE x.player_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.player_id)`).get().n]));
+  return Object.fromEntries(Object.entries(PLAYER_COUNT_TABLES).map(([k, t]) => [k, sqlite.prepare(`SELECT count(*) AS n FROM ${t} x WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.player_id)`).get().n]));
 }
 export function retainedPlayerReferences(sqlite) {
   if (!recruitmentCasesLive(sqlite)) return null;
   return Object.fromEntries(Object.entries(PLAYER_COUNT_TABLES).map(([k, t]) => [k, sqlite.prepare(`SELECT count(*) AS n FROM ${t} x WHERE EXISTS (SELECT 1 FROM players p WHERE p.id = x.player_id AND p.deleted_at IS NOT NULL)`).get().n]));
 }
 
-// ------------------------------------------------------------------ whole-snapshot access (writeTableBacked / readTableBacked)
-/** The ids-only stored side for an omitted collection (the preflight needs ids and references, never a decoded record). */
-function storedRefs(sqlite) {
-  return {
-    recruitmentCases: sqlite.prepare('SELECT id FROM recruitment_cases ORDER BY seq').all().map((r) => ({ id: r.id })),
-    roomComments: sqlite.prepare('SELECT id, room_id AS roomId FROM room_comments ORDER BY seq').all().map((r) => ({ ...r })),
-    roomSnapshots: sqlite.prepare('SELECT id, room_id AS roomId FROM room_snapshots ORDER BY seq').all().map((r) => ({ ...r })),
-    roomDecisions: sqlite.prepare('SELECT id, room_id AS roomId, supersedes_id AS supersedes, superseded_by_id AS supersededById FROM room_decisions ORDER BY seq').all().map((r) => ({ ...r })),
-    roomEvidenceState: sqlite.prepare('SELECT id, room_id AS roomId FROM room_evidence_states ORDER BY seq').all().map((r) => ({ ...r })),
-  };
+/** The final state of the case graph, ids only: the decision chain and snapshots inside their room, every key. */
+export function assertCasesConsistent(sqlite, { label = 'the snapshot' } = {}) {
+  if (!recruitmentCasesLive(sqlite)) return;
+  const rooms = new Map(sqlite.prepare('SELECT id, room_id FROM room_decisions').all().map((r) => [r.id, r.room_id]));
+  const snaps = new Map(sqlite.prepare('SELECT id, room_id FROM room_snapshots').all().map((r) => [r.id, r.room_id]));
+  const problems = [];
+  for (const r of sqlite.prepare('SELECT id, room_id, supersedes_id, superseded_by_id, snapshot_id FROM room_decisions').all()) {
+    problems.push(...decisionRefsProblems({ id: r.id, roomId: r.room_id, supersedes: r.supersedes_id, supersededById: r.superseded_by_id, snapshot: r.snapshot_id === null ? null : { snapshotId: r.snapshot_id } }, { decisionRoom: (x) => rooms.get(x), snapshotRoom: (x) => snaps.get(x) }));
+  }
+  if (problems.length) throw refusal('DECISION_CHAIN_BROKEN', `${label}: ${problems.length} decision reference(s) leave their room (${ids(problems)}); the write was rolled back`);
+  const broken = RECRUITMENT_CASES_TABLES.flatMap((t) => sqlite.prepare(`PRAGMA foreign_key_check(${t})`).all());
+  if (broken.length) throw refusal('RECRUITMENT_CASES_KEY_VIOLATION', `${label}: foreign_key_check found ${broken.length} broken reference(s) (first: ${broken[0].table} rowid ${broken[0].rowid} → ${broken[0].parent}); the write was rolled back`);
 }
-/** The retained cases' link references (ids only) for the preflight when the cases are omitted. */
-function storedCaseLinks(sqlite) {
-  const cases = new Map(sqlite.prepare('SELECT id FROM recruitment_cases ORDER BY seq').all().map((r) => [r.id, { id: r.id, links: { requestIds: [], trialIds: [] } }]));
-  for (const r of sqlite.prepare('SELECT case_id, request_id FROM case_request_links WHERE request_id IS NOT NULL').all()) cases.get(r.case_id)?.links.requestIds.push(r.request_id);
-  for (const r of sqlite.prepare('SELECT case_id, trial_id FROM case_trial_links WHERE trial_id IS NOT NULL').all()) cases.get(r.case_id)?.links.trialIds.push(r.trial_id);
-  return [...cases.values()];
-}
-const s8aRows = (sqlite) => ({ requests: sqlite.prepare('SELECT id, case_id AS caseId FROM recruitment_requests').all().map((r) => ({ ...r })), trials: sqlite.prepare('SELECT id, request_id AS requestId, case_id AS caseId FROM trials').all().map((r) => ({ ...r })) });
-/** What the S8a phases will delete or reinsert for the supplied requests/trials against the tables (recruitment.mjs phase 2a and 5), ids only. */
-function s8aDepartures(sqlite, { requests, trials }) {
-  const out = { trials: [], requests: [] };
-  if (trials !== undefined) { const byId = new Map(trials.filter(isPlainObject).map((t) => [t.id, t])); out.trials = sqlite.prepare('SELECT id, request_id FROM trials').all().filter((st) => { const t = byId.get(st.id); return !t || t.requestId !== st.request_id; }).map((st) => st.id); }
-  if (requests !== undefined) { const keep = idSet(requests); out.requests = sqlite.prepare('SELECT id FROM recruitment_requests').all().map((r) => r.id).filter((id) => !keep.has(id)); }
-  return out;
-}
-const suppliedOf = (db) => Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, Object.hasOwn(db, n) && db[n] !== undefined ? db[n] : undefined]));
+
+// ------------------------------------------------------------------ the snapshot path (tools, fixtures, the persistence suites)
+/**
+ * `begin` types the supplied collections (an omitted one is retained whole; an array is the whole final collection),
+ * names every reference it can with ids against the FINAL state, and writes the cases (without their link rows) and
+ * the room rows; `links` writes the supplied cases' link rows after the requests and trials; `pruneRooms` and
+ * `pruneCases` remove what a supplied collection no longer lists, room rows before their case and a case only when
+ * nothing retained names it; `assert` checks the final state.
+ */
 export const RECRUITMENT_CASES_SNAPSHOT = {
   names: RECRUITMENT_CASES_COLLECTIONS,
-  read(sqlite) { if (!recruitmentCasesLive(sqlite)) return null; return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, READERS[n](sqlite)])); },
-  /**
-   * P, A and R for the supplied collections (any subset of the five) against the tables; returns the plan C, D, F1 and
-   * F3 need (`null` before the cutover record: the caller writes the blobs). `requests`/`trials` are the snapshot's
-   * supplied S8a collections (undefined when omitted). Runs inside the caller's transaction.
-   */
-  begin(sqlite, db, { requests, trials, orgs, users, label = 'the snapshot' } = {}) {
+  read(sqlite) { if (!recruitmentCasesLive(sqlite)) return null; return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, readAll(sqlite, n)])); },
+  begin(sqlite, db, { requests, trials, label = 'the snapshot' } = {}) {
     if (!recruitmentCasesLive(sqlite)) return null;
-    if (!sqlite.isTransaction) throw new Error('recruitmentCases: begin() runs inside the caller\'s transaction');
-    const supplied = suppliedOf(db);
-    const anyCases = RECRUITMENT_CASES_COLLECTIONS.some((n) => supplied[n] !== undefined);
+    const supplied = {};
+    for (const name of RECRUITMENT_CASES_COLLECTIONS) {
+      const value = Object.hasOwn(db, name) ? db[name] : undefined;
+      if (value === undefined) continue;
+      if (!Array.isArray(value)) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', `the ${name} collection of ${label} must be an array of records (got ${describe(value)}); nothing was written`);
+      const seen = new Set(); const problems = [];
+      supplied[name] = value.map((raw, i) => {
+        const t = TYPERS[name](raw, `${name} entry #${i}`);
+        if (!t.ok) { problems.push(t.reason); return null; }
+        if (seen.has(t.record.id)) problems.push(`${name} entry #${i} duplicates the id of an earlier entry (${t.record.id})`);
+        seen.add(t.record.id); return t.record;
+      });
+      // Every entry the typed tables cannot hold is named, not just the first.
+      if (problems.length) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', `${label}: ${problems.length} ${name} entr${problems.length === 1 ? 'y' : 'ies'} refused (${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}); nothing was written`);
+    }
     const anyS8a = requests !== undefined || trials !== undefined;
-    if (!anyCases && !anyS8a) return null;
-    const stored = storedRefs(sqlite); if (supplied.recruitmentCases === undefined) stored.recruitmentCases = storedCaseLinks(sqlite);
-    const table = s8aRows(sqlite);
-    const s8a = { requests: requests !== undefined ? requests : table.requests, trials: trials !== undefined ? trials : table.trials };
-    const { counts, departingCases } = preflight(sqlite, supplied, { stored, s8a, orgs, users, label });
-    const departures = s8aDepartures(sqlite, { requests, trials });
-    if (supplied.recruitmentCases !== undefined) stageCases(sqlite, supplied.recruitmentCases);
-    const rewritten = supplied.recruitmentCases === undefined ? [] : supplied.recruitmentCases.map((c) => c.id);
-    const memo = releaseLinks(sqlite, { departures, rewritten, pruned: departingCases });
-    const gone = {}; for (const coll of ROOM_COLLECTIONS) if (supplied[coll.name] !== undefined) { const keep = idSet(supplied[coll.name]); gone[coll.name] = stored[coll.name].map((r) => r.id).filter((id) => !keep.has(id)); }
-    return { supplied, memo, departingCases, gone, counts, written: RECRUITMENT_CASES_COLLECTIONS.filter((n) => supplied[n] !== undefined) };
+    if (!Object.keys(supplied).length && !anyS8a) return null;
+    const st = statements(sqlite);
+    const finalOf = (name) => supplied[name] ?? readAll(sqlite, name);
+    const caseIds = new Set(finalOf('recruitmentCases').map((c) => c.id));
+    const problems = [];
+    for (const name of ['roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState']) for (const r of supplied[name] ?? []) if (!caseIds.has(r.roomId)) problems.push(`${PARENT[name]} ${r.id} → case ${r.roomId}`);
+    if (problems.length) throw refusal('ROOM_CASE_MISSING', `${label}: ${problems.length} room row(s) name a case that is not in the final recruitmentCases collection (${ids(problems)}); the write was rolled back and nothing was changed`);
+    // A case link names a final request or trial (the supplied S8a collections, the rows otherwise).
+    const reqIds = new Set(requests !== undefined ? requests.filter(isPlainObject).map((r) => r.id) : st.ids('recruitment_requests'));
+    const trialIds = new Set(trials !== undefined ? trials.filter(isPlainObject).map((t) => t.id) : st.ids('trials'));
+    for (const c of finalOf('recruitmentCases')) { for (const r of c.links.requestIds) if (!reqIds.has(r)) problems.push(`case ${c.id} links request ${r}`); for (const t of c.links.trialIds) if (!trialIds.has(t)) problems.push(`case ${c.id} links trial ${t}`); }
+    if (problems.length) throw refusal('CASE_LINK_DANGLING', `${label}: ${problems.length} case link(s) name a request or trial that is not in the final collections (${ids(problems)}); the write was rolled back and nothing was changed`);
+    // The decision chain and snapshots against the FINAL room rows.
+    const finalDecisions = finalOf('roomDecisions');
+    const snapshotRoom = new Map(finalOf('roomSnapshots').map((s) => [s.id, s.roomId]));
+    const decisionRoom = new Map(finalDecisions.map((d) => [d.id, d.roomId]));
+    for (const d of finalDecisions) problems.push(...decisionRefsProblems(d, { decisionRoom: (x) => decisionRoom.get(x), snapshotRoom: (x) => snapshotRoom.get(x) }));
+    if (problems.length) throw refusal('DECISION_CHAIN_BROKEN', `${label}: ${problems.length} decision reference(s) leave their room (${ids(problems)}); the write was rolled back and nothing was changed`);
+    for (const c of supplied.recruitmentCases ?? []) writeCase(st, c, { links: false });
+    for (const name of ['roomSnapshots', 'roomComments', 'roomDecisions', 'roomEvidenceState']) for (const r of supplied[name] ?? []) writeRoomRow(st, name, r);
+    const gone = Object.fromEntries(Object.keys(supplied).map((name) => { const keep = new Set(supplied[name].map((r) => r.id)); return [name, st.ids(PARENT[name]).filter((id) => !keep.has(id))]; }));
+    return { supplied, gone, written: Object.keys(supplied) };
   },
-  /** C and D after the S8a phases. */
-  links(sqlite, plan) { if (plan) stageLinks(sqlite, plan.supplied.recruitmentCases ?? [], plan.memo); },
-  rooms(sqlite, plan) { if (plan) stageRooms(sqlite, plan.supplied); },
-  /** F1: the supplied room collections' prunes (before the S8a request prune and the cases). */
-  pruneRooms(sqlite, plan) { if (plan) pruneRooms(sqlite, plan.gone); },
-  /** F3: the cases no longer listed (after the S8a request prune, before the staff and organisations). */
-  pruneCases(sqlite, plan) { if (plan) pruneCases(sqlite, plan.departingCases); },
-  /** G. */
+  links(sqlite, plan) { if (!plan) return; const st = statements(sqlite); for (const c of plan.supplied.recruitmentCases ?? []) writeCaseLinks(st, c); },
+  pruneRooms(sqlite, plan) {
+    if (!plan) return;
+    const st = statements(sqlite);
+    for (const name of ['roomEvidenceState', 'roomComments', 'roomDecisions', 'roomSnapshots']) for (const id of plan.gone[name] ?? []) {
+      try { deleteRoomRow(st, name, id); } catch (e) { throw refusal('ROOM_ROW_STILL_REFERENCED', `${PARENT[name]} ${id} is no longer listed but a retained row still names it (${e.message}); the write was rolled back`); }
+    }
+  },
+  pruneCases(sqlite, plan, { label = 'the snapshot' } = {}) {
+    if (!plan || !plan.gone.recruitmentCases?.length) return;
+    const st = statements(sqlite);
+    const departing = plan.gone.recruitmentCases;
+    const held = [];
+    for (const [table, col] of caseDependants(sqlite)) {
+      for (const r of sqlite.prepare(`SELECT ${col} AS c FROM ${table} WHERE ${col} IN (${departing.map(() => '?').join(', ')})`).all(...departing)) held.push(`${table} → case ${r.c}`);
+    }
+    if (held.length) throw refusal('CASE_STILL_REFERENCED', `${label}: ${held.length} retained row(s) name a case this write removes (${ids(held)}); the write was rolled back and nothing was changed — remove the rows with their case in the same snapshot, or keep the case`);
+    for (const id of departing) deleteCase(st, id);
+  },
   assert(sqlite, { label } = {}) { assertCasesConsistent(sqlite, { label }); },
 };
 
-// ------------------------------------------------------------------ the repository
+// ------------------------------------------------------------------ the repository (explicit writes; the mirrors; the participant)
 /**
- * `unit` is the store's participant API ({ active(), join(work) }) or null; `staged` selects the server's write mode
- * (the four hooks must be registered in the order attachDataLayer registers them); `recruitment` is an accessor for the
- * S8a repository (its mirrors are the final requests/trials of a flush; its departures() the release set).
+ * `createRecruitmentCasesRepository({ sqlite, unit, now, log })`. Every operation joins the open unit of work (a
+ * failure poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and
+ * re-reads the record into the mirror.
  */
-export function createRecruitmentCasesRepository({ sqlite, now = Date.now, log = () => {}, unit = null, staged = false, recruitment = null } = {}) {
-  if (!sqlite) throw new TypeError('the recruitment-cases repository needs a SQLite connection (node:sqlite); the five collections have no in-memory or JSON fallback');
-  if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the recruitment-cases repository needs the store\'s participant API `unit` ({ active(), join(work) }) or null');
-  if (staged && !unit) throw new TypeError('the recruitment-cases repository in staged mode needs the store\'s participant API `unit` and the store must register its hooks');
-  if (recruitment !== null && typeof recruitment !== 'function') throw new TypeError('the recruitment-cases repository takes `recruitment` as an accessor function returning the recruitment repository');
-  void now;
-  const cutover = sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?');
-  const refuse = (what) => { throw new TypeError(`${what} is written through the recruitment-cases repository (addCase / addComment / addSnapshot / addDecision / addEvidenceState / removeDecision), never directly on the in-memory collection; a record's own fields are edited in place and land in the next save`); };
-  // The mirrors: plain, mutable records in insertion order; the views are read-only ARRAYS over them.
+export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
+  if (!sqlite) throw new TypeError('the recruitment-cases repository needs a SQLite connection (node:sqlite)');
+  const st = statements(sqlite);
+  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
   const mirrors = Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, []]));
-  const arrayView = (target, label) => markView(new Proxy(target, { set() { return refuse(`the ${label} collection`); }, deleteProperty() { return refuse(`the ${label} collection`); }, defineProperty() { return refuse(`the ${label} collection`); } }));
-  const views = Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, arrayView(mirrors[n], n)]));
-  // Change tracking reflects COMMITTED state only: id → the fingerprint of the record as last committed.
-  const committed = Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, new Map()]));
-  let inFlight = null; // the plan of the open save transaction: applied by commit(), discarded by rollback()
-  const fp = (r) => JSON.stringify(r);
-  const load = () => {
-    for (const n of RECRUITMENT_CASES_COLLECTIONS) { mirrors[n].length = 0; committed[n].clear(); }
-    if (!recruitmentCasesLive(sqlite)) return;
-    for (const n of RECRUITMENT_CASES_COLLECTIONS) for (const r of READERS[n](sqlite)) { mirrors[n].push(r); committed[n].set(r.id, fp(r)); }
+  const LABEL = { recruitmentCases: 'a recruitment case', roomComments: 'a room comment', roomSnapshots: 'a room snapshot', roomDecisions: 'a room decision', roomEvidenceState: 'a room evidence state' };
+  const views = Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, markView(readonlyView(mirrors[n], LABEL[n]))]));
+  const reload = () => { for (const n of RECRUITMENT_CASES_COLLECTIONS) { mirrors[n].length = 0; for (const r of readAll(sqlite, n)) mirrors[n].push(r); } };
+  const find = (name, id) => mirrors[name].find((x) => x.id === id) ?? null;
+  const replaceIn = (name, id, record) => { const i = mirrors[name].findIndex((r) => r.id === id); if (i >= 0) mirrors[name][i] = record; else mirrors[name].push(record); return readonlyView(record, LABEL[name]); };
+  const refresh = (name, id) => replaceIn(name, id, DECODERS[name](st, st.byId[PARENT[name]].get(id)));
+  const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', t.reason); return t.record; };
+  const IMMUTABLE = { recruitmentCases: ['id', 'orgId', 'playerId', 'createdAt'], roomComments: ['id', 'roomId', 'orgId', 'authorId', 'createdAt'], roomSnapshots: ['id', 'roomId'], roomDecisions: ['id', 'roomId', 'orgId', 'playerId', 'createdAt'], roomEvidenceState: ['id', 'roomId', 'orgId', 'evidenceId'] };
+  const check = (name, r) => {
+    const problems = referenceProblems(st, name, r);
+    let code = 'RECRUITMENT_CASES_REFERENCE_MISSING';
+    if (name !== 'recruitmentCases' && !find('recruitmentCases', r.roomId)) { problems.push(`${PARENT[name]} ${r.id} → case ${r.roomId}`); code = 'ROOM_CASE_MISSING'; }
+    if (name === 'roomDecisions') {
+      const chain = decisionRefsProblems(r, { decisionRoom: (x) => (x === r.id ? r.roomId : find('roomDecisions', x)?.roomId), snapshotRoom: (x) => find('roomSnapshots', x)?.roomId });
+      if (chain.length) { problems.push(...chain); code = 'DECISION_CHAIN_BROKEN'; }
+    }
+    if (name === 'roomEvidenceState' && mirrors.roomEvidenceState.some((e) => e.id !== r.id && e.roomId === r.roomId && e.evidenceId === r.evidenceId)) problems.push(`room_evidence_states ${r.id}: room ${r.roomId} already reviews evidence ${r.evidenceId}`);
+    if (problems.length) throw refusal(code, `${PARENT[name]} ${r.id}: ${ids(problems)}`);
   };
-  load();
-  const inUnit = () => !!unit?.active?.();
-  let hooksTaken = 0;
-  const hookRefusal = (what) => new Error(`recruitmentCases: ${what} needs the repository's four save hooks registered with the store first (coreHook, linksHook, roomsHook, pruneHook around the recruitment and channels hooks): the hooks are how a save writes the changed records and how a unit of work's rollback restores this repository's memory`);
-  const mutate = (fn) => { if (inUnit()) return unit.join(() => { if (hooksTaken < 4) throw hookRefusal('a write inside a unit of work'); return fn(); }); if (staged && hooksTaken < 4) throw hookRefusal('a write'); return fn(); };
-  const casesHave = (id) => mirrors.recruitmentCases.some((c) => c.id === id);
-  const add = (coll, record) => mutate(() => {
-    const v = validateEntry(coll, record); if (!v.ok) throw new TypeError(`a ${coll.name} record needs the writer's literal: ${v.reason}`);
-    if (mirrors[coll.name].some((r) => r.id === record.id)) throw new Error(`recruitmentCases: a ${coll.name} record with id ${record.id} already exists`);
-    if (coll !== CASES && !casesHave(record.roomId)) throw refusal('ROOM_CASE_MISSING', `recruitmentCases: ${coll.table} ${record.id} names case ${record.roomId}, which is not in the recruitmentCases collection`);
-    mirrors[coll.name].push(record); return record;
+  const write = (name, r) => { check(name, r); if (name === 'recruitmentCases') writeCase(st, r); else writeRoomRow(st, name, r); };
+  const editing = new Set();
+
+  /** `create(record)`: a new record, typed whole; an existing id is refused. */
+  const create = (name) => (raw) => operation(() => {
+    const r = typedOr(name, raw);
+    if (find(name, r.id)) throw refusal('RECRUITMENT_CASES_DUPLICATE', `${PARENT[name]} ${r.id} already exists`);
+    write(name, r); return refresh(name, r.id);
   });
+  /**
+   * `update(id, change)`: `change` receives a plain copy of the stored record and edits it (or returns a replacement);
+   * the result is typed whole and written at once. The identifiers and the creation instant cannot change.
+   */
+  const update = (name) => (id, change) => operation(() => {
+    if (typeof change !== 'function') throw new TypeError(`${name}.update(id, change) needs a function that edits the copy it is given`);
+    const key = `${name}:${id}`;
+    if (editing.has(key)) throw new Error(`${PARENT[name]} ${id} is already being updated: an update inside its own update would be overwritten by the outer one; make the second change after the first returns`);
+    const before = find(name, id);
+    if (!before) throw refusal('RECRUITMENT_CASES_NOT_FOUND', `${PARENT[name]} ${id} is not a record of the repository`);
+    editing.add(key);
+    let returned; const draft = clone(before);
+    try { returned = change(draft); } finally { editing.delete(key); }
+    const next = typedOr(name, returned === undefined ? draft : returned);
+    for (const k of IMMUTABLE[name]) if (next[k] !== before[k]) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', `${PARENT[name]} ${id}: ${k} cannot change`);
+    write(name, next); return refresh(name, id);
+  });
+  const byId = (name) => (id) => { const r = find(name, id); return r ? readonlyView(r, LABEL[name]) : null; };
+  const ops = (name, { updatable = true } = {}) => ({ create: create(name), ...(updatable ? { update: update(name) } : {}), byId: byId(name) });
 
-  const repo = {
-    attach() {
-      if (!cutover.get(RECRUITMENT_CASES_MIGRATION)) throw new Error(`recruitmentCases: the cutover record ${RECRUITMENT_CASES_MIGRATION} is missing from data_migrations; the tables cannot be trusted as the source of truth`);
-      load();
-      log(`recruitment cases: ${RECRUITMENT_CASES_COLLECTIONS.map((n) => `${mirrors[n].length} ${n}`).join(', ')} loaded from the tables`);
-      return { engine: 'sqlite', ...Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, mirrors[n].length])) };
-    },
-    reload() { load(); return RECRUITMENT_CASES_COLLECTIONS.reduce((a, n) => a + mirrors[n].length, 0); },
-    casesView: views.recruitmentCases, commentsView: views.roomComments, snapshotsView: views.roomSnapshots, decisionsView: views.roomDecisions, evidenceView: views.roomEvidenceState,
+  return {
     views,
-    counts: () => Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, mirrors[n].length])),
-    /** Changed or new records not yet in a committed save, plus removed ones. */
-    pending: () => Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, mirrors[n].filter((r) => committed[n].get(r.id) !== fp(r)).length + [...committed[n].keys()].filter((id) => !mirrors[n].some((r) => r.id === id)).length])),
-    /** A new record at the end (the former `db.<collection>.push`): the record itself is kept, validated like an import; a room row's case must exist (ids only). */
-    addCase: (record) => add(CASES, record),
-    addComment: (record) => add(COMMENTS, record),
-    addSnapshot: (record) => add(SNAPSHOTS, record),
-    addDecision: (record) => add(DECISIONS, record),
-    addEvidenceState: (record) => add(EVIDENCE_STATES, record),
-    /** The finalize route's transport-failure splice (decisionRoutes.mjs:392): the record leaves the mirror; a committed row is pruned by the next save, an uncommitted one lands nowhere. */
-    removeDecision(record) { return mutate(() => { const i = mirrors.roomDecisions.indexOf(record); if (i < 0) return false; mirrors.roomDecisions.splice(i, 1); return true; }); },
-    /** Every record in its legacy shape, detached (the admin backup). */
-    exportCases: () => mirrors.recruitmentCases.map(copyRecord),
-    exportRoomComments: () => mirrors.roomComments.map(copyRecord),
-    exportRoomSnapshots: () => mirrors.roomSnapshots.map(copyRecord),
-    exportRoomDecisions: () => mirrors.roomDecisions.map(copyRecord),
-    exportRoomEvidenceState: () => mirrors.roomEvidenceState.map(copyRecord),
-    exportAll: () => Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, mirrors[n].map(copyRecord)])),
-
-    // ---------------------------------------------------------- the four save hooks (P A R | B | C | D F1 | E | F2 inside B's hook | F3 G)
-    /** Hook 1 (before the recruitment hook): the preflight against the mirrors, A for the changed cases, R. */
-    flushCore() {
-      if (!sqlite.isTransaction) throw new Error('recruitmentCases.flushCore runs inside a save transaction; the store reports its commit or rollback afterwards');
-      const changed = {}; const removed = {}; let touched = false;
-      for (const n of RECRUITMENT_CASES_COLLECTIONS) { changed[n] = new Set(mirrors[n].filter((r) => committed[n].get(r.id) !== fp(r)).map((r) => r.id)); removed[n] = [...committed[n].keys()].filter((id) => !mirrors[n].some((r) => r.id === id)); if (changed[n].size || removed[n].length) touched = true; }
-      const rec = recruitment ? recruitment() : null;
-      const s8a = rec ? { requests: rec.requestsView, trials: rec.trialsView } : s8aRows(sqlite);
-      const departures = rec ? rec.departures() : { trials: [], requests: [] };
-      const s8aMoves = departures.trials.length + departures.requests.length > 0;
-      if (!touched && !s8aMoves) { inFlight = { changed, removed, memo: [], plan: null }; return 0; }
-      // the FINAL graph of a flush is the mirrors: every collection "supplied" (its changed records are what A, D write; its removed ids what F1, F3 prune)
-      const supplied = Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, mirrors[n]]));
-      for (const n of RECRUITMENT_CASES_COLLECTIONS) for (const id of changed[n]) { const r = mirrors[n].find((x) => x.id === id); const v = validateEntry(byName[n], r); if (!v.ok) throw new TypeError(`recruitmentCases: a ${n} record cannot be saved: ${v.reason}`); }
-      const stored = storedRefs(sqlite);
-      preflight(sqlite, supplied, { stored, s8a, only: changed, label: 'the save' });
-      stageCases(sqlite, mirrors.recruitmentCases, { only: changed.recruitmentCases }); // A
-      const memo = releaseLinks(sqlite, { departures, rewritten: [...changed.recruitmentCases], pruned: removed.recruitmentCases }); // R
-      inFlight = { changed, removed, memo, plan: true };
-      return RECRUITMENT_CASES_COLLECTIONS.reduce((a, n) => a + changed[n].size + removed[n].length, 0);
+    cases: ops('recruitmentCases'),
+    comments: ops('roomComments'),
+    snapshots: ops('roomSnapshots', { updatable: false }),
+    decisions: ops('roomDecisions'),
+    evidenceStates: ops('roomEvidenceState'),
+    /** The deletion unit (M23 P4A-D14): a deleted player's cases keep their ids, states and history and lose the name. */
+    redactPlayer(playerId, at) {
+      return operation(() => {
+        let n = 0;
+        for (const c of mirrors.recruitmentCases.filter((x) => x.playerId === playerId)) { update('recruitmentCases')(c.id, (d) => { d.playerName = null; d.subjectRemovedAt = at; }); n += 1; }
+        return n;
+      });
     },
-    /** Hook 2 (after the recruitment hook): C. */
-    flushLinks() { if (!inFlight?.plan) return; stageLinks(sqlite, mirrors.recruitmentCases, inFlight.memo, { only: inFlight.changed.recruitmentCases }); },
-    /** Hook 3 (before the channels hook): D, F1. */
-    flushRooms() { if (!inFlight?.plan) return; stageRooms(sqlite, Object.fromEntries(ROOM_COLLECTIONS.map((c) => [c.name, mirrors[c.name]])), { only: inFlight.changed }); pruneRooms(sqlite, inFlight.removed); },
-    /** Hook 4 (after the channels hook; the S8a request prune ran inside the recruitment hook): F3, G. */
-    flushPrune() { if (!inFlight?.plan) return; pruneCases(sqlite, inFlight.removed.recruitmentCases); assertCasesConsistent(sqlite, { label: 'the save (cases, rooms, requests and trials together)' }); },
-    commit() { if (!inFlight) return; for (const n of RECRUITMENT_CASES_COLLECTIONS) { for (const id of inFlight.changed[n]) committed[n].set(id, fp(mirrors[n].find((x) => x.id === id))); for (const id of inFlight.removed[n]) committed[n].delete(id); } inFlight = null; },
-    rollback() { inFlight = null; },
-    /** Unit-of-work participation: the graph memento of the five mirrors, restored IN PLACE. The committed fingerprints are not part of it: they reflect committed state, which a rollback does not change. */
-    snapshotState: () => ({ graph: captureGraph(RECRUITMENT_CASES_COLLECTIONS.map((n) => mirrors[n])) }),
-    restoreState(state) { if (!state) return; inFlight = null; restoreGraph(state.graph); },
-    coreHook: () => { hooksTaken += 1; return { flush: () => repo.flushCore(), commit: () => repo.commit(), rollback: () => repo.rollback(), snapshotState: () => repo.snapshotState(), restoreState: (s) => repo.restoreState(s) }; },
-    linksHook: () => { hooksTaken += 1; return { flush: () => repo.flushLinks() }; },
-    roomsHook: () => { hooksTaken += 1; return { flush: () => repo.flushRooms() }; },
-    pruneHook: () => { hooksTaken += 1; return { flush: () => repo.flushPrune() }; },
+    /** Load the mirrors (the tables are authoritative once 0016 is recorded; nothing is imported from memory). */
+    attach() {
+      if (!recruitmentCasesLive(sqlite)) throw new Error(`the recruitment-cases repository needs ${RECRUITMENT_CASES_MIGRATION} recorded; it never imports an in-memory array`);
+      reload();
+      log(`recruitment cases: ${RECRUITMENT_CASES_COLLECTIONS.map((n) => `${mirrors[n].length} ${n}`).join(', ')} loaded from the tables`);
+      return { counts: this.counts() };
+    },
+    /** The store participant: no flush (every write is already in the tables); the mirrors restored by a unit's rollback. */
+    hook() {
+      return {
+        flush() {},
+        snapshotState() { return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, mirrors[n].slice()])); },
+        restoreState(s) { if (!s) return; for (const n of RECRUITMENT_CASES_COLLECTIONS) { mirrors[n].length = 0; for (const r of s[n]) mirrors[n].push(r); } },
+      };
+    },
+    counts() { return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, mirrors[n].length])); },
+    pending: () => 0,
+    exportAll() { return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, clone(mirrors[n])])); },
+    log,
+    now,
   };
-  return repo;
 }

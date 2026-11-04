@@ -558,14 +558,17 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   const kase = snap.db.recruitmentCases.find((c) => c.id === MID);
   kase.room.status = 'signed'; // TEST FIXTURE ONLY: a legacy `signed` case with its signing record
   // the D14 matrix: one legacy case per lifecycle position, all for the same player (fixture rows; no route can reach these today)
+  const mariaId = snap.db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id;
   const MATRIX = ['trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made', 'offer_accepted', 'archived', 'withdrawn', 'closed'];
   for (const st of MATRIX) {
     const clone = JSON.parse(JSON.stringify(kase));
-    clone.id = `case-matrix-${st}`; clone.room.status = st; clone.room.rev = 3;
-    clone.history = [{ action: 'room_created', at: Date.now() - 20 * DAY, detail: { status: 'watching' } }, { action: 'room_status_changed', at: Date.now() - 10 * DAY, detail: { from: 'watching', to: st } }];
+    // S8b: each clone is a whole case of its own — its own history entries (the one entry shape, with ids), and no
+    // copy of the original's draft or handoff (those belong to the original case).
+    clone.id = `case-matrix-${st}`; clone.room.status = st; clone.room.rev = 3; clone.decisionDraft = null; clone.transactionHandoff = null;
+    clone.history = [{ id: `aud-matrix-${st}-1`, at: Date.now() - 20 * DAY, byKind: 'org', byId: mariaId, byName: 'Maria Keane', action: 'room_created', detail: { status: 'watching' } }, { id: `aud-matrix-${st}-2`, at: Date.now() - 10 * DAY, byKind: 'org', byId: mariaId, byName: 'Maria Keane', action: 'room_status_changed', detail: { from: 'watching', to: st } }];
     snap.db.recruitmentCases.push(clone);
   }
-  snap.db.signings.push({ id: 'sign-legacy-1', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', userId: 'u-maria', scoutName: 'Maria Keane', ts: Date.now() - 5 * DAY });
+  snap.db.signings.push({ id: 'sign-legacy-1', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', userId: mariaId /* the real staff id: a signing names its staff member by a key */, scoutName: 'Maria Keane', ts: Date.now() - 5 * DAY });
   // legacy trial rows written before the validator existed. S8a (§4.3): a typed row holds a day-shaped value only, so
   // the bad dates planted here are the ones a row can still carry — an impossible month, an impossible day, a day
   // outside the accepted range, no date — and the read side must still defend against each. The shapes a row cannot
@@ -586,7 +589,6 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   // trials get the accepted invitation each of them came from, in the legacy direct-request literal; a trial naming an
   // absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The garbage this section
   // proves tolerated lives in the trial rows above, which are unchanged.
-  const mariaId = snap.db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id;
   for (const n of [1, 2, 3, 4]) snap.db.requests.push({ id: `req-legacy-${n}`, playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy accepted invitation', trialDetails: { proposedDate: '1999-01-01', altSlots: [], venue: null, notes: '' }, status: 'accepted', createdAt: Date.now() - 41 * DAY, respondedAt: Date.now() - 40 * DAY, respondedBy: 'player', routedTo: 'player', guardianId: null, contactChannel: null });
   snap.db.requests.push({ id: 'req-legacy-5', playerId: 'pl-carvalho', playerName: 'Mateus Carvalho', orgId: 'org-eastport', orgName: 'Eastport FC', orgType: 'club', orgVerified: true, orgSafeguardingCertified: true, userId: mariaId /* S8a-core: the real staff id (a request names its staff member by a key) */, scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', type: 'trial', message: 'legacy pending invitation', trialDetails: { proposedDate: '2026-13-01', altSlots: ['2026-02-30'], venue: null, notes: '' }, status: 'pending', createdAt: Date.now() - 3 * DAY, routedTo: 'player', guardianId: null, contactChannel: null });
   for (const junk of unstorable) {

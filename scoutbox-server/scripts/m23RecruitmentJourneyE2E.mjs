@@ -449,7 +449,7 @@ const L = {};
   const plant = (db, id, chain, extraLast = {}) => {
     const k = db.recruitmentCases.find((c) => c.id === id);
     let prev = k.room.status; let t = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-    for (const to of chain) { t += H; k.history.push({ id: `hist-p8-${Math.random().toString(36).slice(2, 8)}`, at: t, action: 'room_status_changed', by: { kind: 'org', id: 'legacy', name: 'Legacy Scout' }, detail: { from: prev, to, reasonCodes: [] , ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
+    for (const to of chain) { t += H; k.history.push({ id: `hist-p8-${Math.random().toString(36).slice(2, 8)}`, at: t, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy Scout', detail: { from: prev, to, reasonCodes: [] , ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
     k.room.status = chain[chain.length - 1];
     k.stage = chain[chain.length - 1] === 'signed' ? 'closed' : 'review';
     k.room.rev = (k.room.rev ?? 1) + chain.length;
@@ -665,7 +665,7 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   // S4a: the completion is one unit of work (store.unitOfWork) — the case lifecycle, the signings row, the player's
   // columns and the blobs roll back together through the store's memento and participants, never by a hand-written
   // restore in the signing module; the lifecycle writer keeps its own snapshot for its own failures (M17).
-  neg(/lifecycleSnapshot|restoreLifecycle/.test(src('m17/rooms.mjs')) && /unit\(\(\) => \{[\s\S]{0,400}recordCompletedSigning\(/.test(src('m29/index.mjs')) && !/kase\.room\.status = snapshot/.test(src('m29/index.mjs')) && !/restoreLifecycle/.test(src('m29/index.mjs')), 'Z11 the signing completion rolls back as one unit of work (S4a), not through a hand-written restore');
+  neg(!/lifecycleSnapshot|restoreLifecycle/.test(src('m17/rooms.mjs')) && /unit\(\(\) => \{[\s\S]{0,400}recordCompletedSigning\(/.test(src('m29/index.mjs')) && !/kase\.room\.status = snapshot/.test(src('m29/index.mjs')) && !/restoreLifecycle/.test(src('m29/index.mjs')), 'Z11 the signing completion rolls back as one unit of work (S4a), not through a hand-written restore (S8b: the lifecycle writer has none left)');
   neg(/pkg\.caseId !== kase\.id/.test(src('m23/evidence.mjs')) && /ts < opened/.test(src('m23/evidence.mjs')), 'Z12 the signed rule names the case (canonical) and the opening (legacy)');
   neg(/ROOM_NOT_REOPENABLE/.test(src('m17/rooms.mjs')) && /namingActions/.test(src('m17/rooms.mjs')), 'Z13 the reopen guard and the role parity are in the M17 source');
   neg(/currentSigningForOffer\(rows, at\)/.test(src('m29/index.mjs')), '#53 Z14 the Offer\'s signing summary uses the ONE current-package rule');

@@ -589,7 +589,7 @@ export function registerMatching(ctx) {
     if (!player) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, player)) return res.status(403).json({ error: 'NOT_VISIBLE', message: 'This player is not visible to your organisation under the standing rules.' });
 
-    const created = ctx.createRoomForPlayer?.({ req, player, sourceContext: 'dynamic_watchlist', sourceRef: w.id });
+    const created = ctx.createRoomForPlayer?.({ req, player, sourceContext: 'dynamic_watchlist', sourceRef: { id: w.id } });
     if (!created) return res.status(500).json({ error: 'ROOM_BRIDGE_UNAVAILABLE' });
     if (!created.ok) return res.status(created.status ?? 409).json({ error: created.error });
     vmetric?.('watchlist_player_to_room');

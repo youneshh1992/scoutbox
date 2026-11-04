@@ -54,7 +54,12 @@ export function registerIntegration(ctx) {
     db, orgRouter, playerRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isAdult, isBlocked, orgCanSee, checkEligibility, distanceBand,
     agent, compliance, rateLimit,
+    recruitmentCases, // S8b: the handoff is part of its case, written by cases.update
   } = ctx;
+  if (!recruitmentCases?.cases) throw new TypeError('registerIntegration needs the recruitment-cases repository from the data layer');
+  const { cases } = recruitmentCases;
+  /** A case history entry in the one shape every case writer uses. */
+  const handoffHistory = (d, at, action, by, detail) => d.history.push({ id: nextId('aud'), at, byKind: 'org', byId: by.userId ?? null, byName: by.name ?? null, action, detail });
 
   const now = () => Date.now();
 
@@ -689,12 +694,13 @@ export function registerIntegration(ctx) {
       // the transaction that answers it must come from this agency and no other.
       invitedAgencyOrgId: agreement?.agencyOrgId ?? null,
       invitedAgentUserId: agreement?.agentUserId ?? null,
-      keys: key ? { invite: { key } } : {},
+      keys: { invite: key ? { key } : null },
       rev: 1, revAt: at,
     };
-    kase.transactionHandoff = h;
-    kase.history ??= [];
-    kase.history.push({ id: nextId('aud'), at, action: 'transaction_handoff_invited', by: h.invitedBy, detail: { handoffId: h.id, represented: h.representedAtInvitation } });
+    cases.update(kase.id, (d) => {
+      d.transactionHandoff = h;
+      handoffHistory(d, at, 'transaction_handoff_invited', h.invitedBy, { handoffId: h.id, represented: h.representedAtInvitation });
+    });
     persistNow();
     broadcast('transaction_handoff_invited', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
     // The agent hears, because they are the one who can open the workspace. The
@@ -726,19 +732,21 @@ export function registerIntegration(ctx) {
     // The other half of the invite/withdraw loop, on the same club budget.
     if (limitedOr429(res, 'transaction_handoff', kase.orgId)) return;
     const at = now();
-    h.status = 'withdrawn';
-    h.withdrawnAt = at;
-    h.rev = (h.rev ?? 1) + 1;
-    h.revAt = at;
-    kase.history ??= [];
-    kase.history.push({ id: nextId('aud'), at, action: 'transaction_handoff_withdrawn', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { handoffId: h.id } });
+    const fresh = cases.update(kase.id, (d) => {
+      const x = d.transactionHandoff;
+      x.status = 'withdrawn';
+      x.withdrawnAt = at;
+      x.rev = (x.rev ?? 1) + 1;
+      x.revAt = at;
+      handoffHistory(d, at, 'transaction_handoff_withdrawn', { userId: req.orgUser.id, name: req.orgUser.name }, { handoffId: h.id });
+    });
     persistNow();
     broadcast('transaction_handoff_withdrawn', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
     if (h.invitedAgentUserId) {
       notify({ kind: 'org_user', id: h.invitedAgentUserId }, 'representation_transaction',
         'A club has withdrawn its invitation to open a transaction workspace. Nothing was opened and nothing was agreed.', h.id);
     }
-    res.json({ handoff: handoffView(h, kase) });
+    res.json({ handoff: handoffView(fresh.transactionHandoff, fresh) });
   });
 
   /**
@@ -796,13 +804,15 @@ export function registerIntegration(ctx) {
     // a general licence to open a workspace citing this club.
     if (h.invitedAgencyOrgId && h.invitedAgencyOrgId !== agencyOrgId) return 'HANDOFF_NOT_ADDRESSED';
     if (h.invitedAgentUserId && h.invitedAgentUserId !== agentUserId) return 'HANDOFF_NOT_ADDRESSED';
-    h.status = 'accepted';
-    h.acceptedAt = at;
-    h.transactionId = transactionId;
-    h.rev = (h.rev ?? 1) + 1;
-    h.revAt = at;
-    kase.history ??= [];
-    kase.history.push({ id: nextId('aud'), at, action: 'transaction_handoff_accepted', by: { kind: 'org', userId: agentUserId, name: null }, detail: { handoffId: h.id } });
+    cases.update(kase.id, (d) => {
+      const x = d.transactionHandoff;
+      x.status = 'accepted';
+      x.acceptedAt = at;
+      x.transactionId = transactionId;
+      x.rev = (x.rev ?? 1) + 1;
+      x.revAt = at;
+      handoffHistory(d, at, 'transaction_handoff_accepted', { userId: agentUserId, name: null }, { handoffId: h.id });
+    });
     return null;
   }
 

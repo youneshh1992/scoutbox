@@ -58,6 +58,8 @@ export function registerOffers(rawCtx) {
     // S8c: every Offer write is an explicit repository operation (offers.create / update) inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
   } = ctx;
+  /** S8b: a case history entry is an explicit write of its case (never an in-place push on the read-only view). */
+  const caseAudit = (kase, ...args) => ctx.recruitmentCases.cases.update(kase.id, (d) => audit(d, ...args));
   if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.offers) throw new TypeError('registerOffers needs the contacts/offers repository, unit and afterCommit from the data layer');
   const offers = recruitmentContactsOffers.offers;
 
@@ -244,11 +246,9 @@ export function registerOffers(rawCtx) {
     if (verdict.ok) {
       const org = orgOf(room.orgId);
       let effect;
-      try { effect = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger, actor: actor ? { ...actor, org } : null }); }
+      try { effect = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger, actor: actor ? { ...actor, org } : null, statusDetail: { lifecycleAction: action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, ...keyDetail } }); }
       catch (e) { console.error(`OFFER lifecycle_writer_threw ${action}: ${e?.message ?? e}`); return { applied: false, action, reason: 'writer_failed', message: null, allowed: [], from: room.room.status, to: null, at }; }
       const { from, to } = effect;
-      const last = room.history[room.history.length - 1];
-      if (last?.action === 'room_status_changed') last.detail = { ...last.detail, lifecycleAction: action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, ...keyDetail };
       return { applied: true, action, from, to, at };
     }
     if (verdict.error === 'LIFECYCLE_NO_CHANGE') return { applied: false, action, reason: 'already_there', from: room.room.status, to: room.room.status, at };
@@ -365,7 +365,7 @@ export function registerOffers(rawCtx) {
     hist(offer, 'offer_draft_created', by, { revisionId: rev.id, revisionNumber: 1 }, at);
     const stored = unit(() => {
       const fresh = offers.create(offer);
-      audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id });
+      caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id });
       return fresh;
     });
     safe('offer_draft_created', () => broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
@@ -511,7 +511,7 @@ export function registerOffers(rawCtx) {
         hist(d, prevIssued ? 'offer_superseded' : 'offer_issued', by, { revisionId: r.id, revisionNumber: r.revisionNumber, supersedes: prevIssued?.id ?? null, expiresAt: r.expiresAt }, at);
         if (prevIssued) hist(d, 'offer_issued', by, { revisionId: r.id, revisionNumber: r.revisionNumber, expiresAt: r.expiresAt }, at);
       });
-      audit(kase, 'org', req.orgUser.id, req.orgUser.name, prevIssued ? 'offer_superseded' : 'offer_issued', { offerId: offer.id, revisionId: rev.id, supersedes: prevIssued?.id ?? null, to: moved.applied ? moved.to : undefined });
+      caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, prevIssued ? 'offer_superseded' : 'offer_issued', { offerId: offer.id, revisionId: rev.id, supersedes: prevIssued?.id ?? null, to: moved.applied ? moved.to : undefined });
       return fresh;
     });
     if (!done) return;
@@ -570,7 +570,7 @@ export function registerOffers(rawCtx) {
         bumpRev(d, { by: req.orgUser, at });
         hist(d, 'offer_withdrawn', by, { revisionId: r.id, wasIssued, hadReason: !!reason }, at);
       });
-      audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_withdrawn', { offerId: offer.id, revisionId: rev.id, wasIssued, to: moved.applied ? moved.to : undefined });
+      caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_withdrawn', { offerId: offer.id, revisionId: rev.id, wasIssued, to: moved.applied ? moved.to : undefined });
       return fresh;
     });
     safe('offer_withdrawn', () => broadcast?.('offer_withdrawn', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
@@ -630,7 +630,7 @@ export function registerOffers(rawCtx) {
         bumpRev(d, { by: req.orgUser, at });
         hist(d, 'offer_draft_created', by, { revisionId: rev.id, revisionNumber: rev.revisionNumber, supersedes: rev.supersedesRevisionId }, at);
       });
-      audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id, revises: prev.id });
+      caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'offer_draft_created', { offerId: offer.id, revisionId: rev.id, revises: prev.id });
       return fresh;
     });
     safe('offer_draft_created', () => broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
@@ -821,7 +821,7 @@ export function registerOffers(rawCtx) {
           if (discard) hist(d, 'offer_draft_discarded', who, { revisionId: discard.id, byResponseId: response.id }, at);
           hist(d, responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', who, { revisionId: rev.id, responseId: response.id, hadReason: !!reason }, at);
         });
-        if (room) audit(room, by, actorId, actorName, responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', { offerId: o.id, revisionId: rev.id, to: moved.applied ? moved.to : undefined });
+        if (room) caseAudit(room, by, actorId, actorName, responseType === 'accepted' ? 'offer_accepted' : 'offer_declined', { offerId: o.id, revisionId: rev.id, to: moved.applied ? moved.to : undefined });
         return fresh;
       });
       if (!done) return;

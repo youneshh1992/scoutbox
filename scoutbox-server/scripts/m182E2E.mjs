@@ -761,7 +761,8 @@ section('§42 — a snapshot written before M18.2 upgrades in place');
   // collection is expressed as its pre-M18.2 value.
   snap.db.schema = { version: 0, migrations: [] };
   snap.db.notificationPrefs = [];
-  for (const c of snap.db.recruitmentCases ?? []) if (c.room) delete c.room.rev;
+  // (A Room's rev is a typed NOT NULL column since S8b: a case cannot be regressed to a rev-less Room any more; the pure
+  // backfill of an in-memory pre-M18.2 snapshot is proved above.)
   for (const b of snap.db.recruitmentBriefs ?? []) delete b.rev;
   for (const n of snap.db.notifications ?? []) delete n.repeatCount;
   store.save(snap);

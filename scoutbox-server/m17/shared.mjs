@@ -104,6 +104,12 @@ export const OPEN_ROOM_STATUSES = ROOM_STATUSES.filter((s) => !TERMINAL_ROOM_STA
 // assertion in m17/index.mjs fails loudly if they ever drift apart.
 export const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 export const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
+/** Every stage a case can hold, at either level (the case table's vocabulary). */
+export const CASE_STAGES = [...new Set([...PRO_STAGES, ...GRASSROOTS_STAGES])];
+/** The M12 case's own priority (the Room keeps ROOM_PRIORITIES), its sign-off outcomes and its approval states. */
+export const CASE_PRIORITIES = ['high', 'medium', 'low'];
+export const CASE_DECISION_OUTCOMES = ['sign', 'pass', 'monitor'];
+export const CASE_APPROVAL_STATES = ['pending', 'approved', 'rejected'];
 
 const STAGE_MAP = table({
   pro: table({

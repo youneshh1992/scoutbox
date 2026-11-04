@@ -28,7 +28,6 @@ import {
 } from './shared.mjs';
 import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
 import { rateLimitedBody } from '../m181/rateLimit.mjs';
-import { parseDateOrInstant, isAbsent } from '../temporal.mjs';
 // M23 P8 — the lifecycle's own role table, so the legacy status route and the
 // semantic-action route agree on WHO may reach a state (a room lead could reach
 // `signed` here while `confirmSignedOutcome` needs a recruitment lead).
@@ -39,8 +38,10 @@ export function registerRooms(ctx) {
     db, orgRouter, adminRouter, nextId, persistNow, notify, ledgerAppend, broadcast,
     findPlayer, moderateOrRefuse, playerViewForOrg, orgCanSee, isLead, audit, vmetric,
     faults = null,
-    recruitmentCases, // S8b: the cases and the four room collections live in their tables; a new record enters through the repository, every other change is in place
+    recruitmentCases, unit, dueAtOrRefuse, // S8b: every case and room write is an explicit repository operation, inside `unit` when it touches more than one row
   } = ctx;
+  if (typeof unit !== 'function' || !recruitmentCases?.cases) throw new TypeError('registerRooms needs the recruitment-cases repository and unit from the data layer');
+  const { cases, comments, snapshots, decisions, evidenceStates } = recruitmentCases;
 
   // ------------------------------------------------------------- utilities
 
@@ -57,18 +58,6 @@ export function registerRooms(ctx) {
   // Comment bodies are stored inert: markup is removed on write, so no renderer
   // anywhere — ours or a future one — can be talked into executing it.
   const plainText = (s, max) => String(s ?? '').replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, max);
-  /**
-   * M23 P5.7: a due date is a calendar day or an instant that EXISTS, or it is
-   * absent. Returns the canonical stored value (a `YYYY-MM-DD` string or
-   * integer ms), null for absent, or undefined after sending a 400.
-   */
-  const dueAtOrRefuse = (res, raw) => {
-    if (isAbsent(raw)) return null;
-    const p = parseDateOrInstant(raw, { dayEdge: 'end' });
-    if (!p.ok) { res.status(400).json({ error: 'DATE_INVALID', field: 'dueAt', message: `A due date is a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset (${p.why}).`, expected: p.expected }); return undefined; }
-    return p.precision === 'day' ? p.value : p.ms;
-  };
-
   const isRoom = (c) => !!c?.room;
 
   /**
@@ -98,7 +87,7 @@ export function registerRooms(ctx) {
     return ctx.trialId ? 'trial' : null;
   }
 
-  /** The single writer of room status. `case.stage` is derived here and only here. */
+  /** The single writer of room status, on a case draft inside `cases.update`. `case.stage` is derived here and only here. */
   function applyStatus(room, status, org, by = null) {
     room.room.status = status;
     room.stage = stageForRoomStatus(status, org.level);
@@ -139,9 +128,12 @@ export function registerRooms(ctx) {
     return true;
   }
 
+  /** Append a history entry to a case draft (inside `cases.update`). */
   function activity(room, req, type, detail = null) {
     audit(room, 'org', req.orgUser.id, req.orgUser.name, type, detail);
   }
+  /** One explicit write of a case: `change` edits the draft; the fresh record is returned. */
+  const touch = (room, change) => cases.update(room.id, change);
 
   // ------------------------------------------------------ source gathering
 
@@ -546,6 +538,44 @@ export function registerRooms(ctx) {
 
   // ----------------------------------------------------------- create room
 
+  /**
+   * Open a Room for a player (inside the caller's unit): adopt this org's open case for the player if one exists — a
+   * Room is a facet of the case, so a club never ends up with a case and a room that disagree about where the player
+   * is in the pipeline — or create the case with the facet in one write. Returns the fresh case.
+   */
+  function openRoom({ req, player, sourceContext, sourceRef, priority = 'normal', restricted = false, vacancyId = null, withSourceRef = true }) {
+    const existingCase = db.recruitmentCases.find((c) => c.orgId === req.org.id && c.playerId === player.id && c.stage !== 'closed' && !isRoom(c));
+    const adopted = !!existingCase;
+    const at = now();
+    const facet = (d) => {
+      d.room = {
+        status: INITIAL_ROOM_STATUS, priority, tags: [], leadScoutUserId: req.orgUser.id,
+        sourceContext, sourceRef: withSourceRef ? sourceRef : null,
+        openedBy: { userId: req.orgUser.id, name: req.orgUser.name },
+        updatedAt: at, archivedAt: null, closedAt: null,
+        rev: 0, // applyStatus below records the creation as revision 1
+        revAt: at, revBy: { userId: req.orgUser.id, name: req.orgUser.name },
+      };
+      // The case already had a stage — keep its meaning rather than resetting the club's pipeline position to the
+      // start, without asserting a fact the records cannot prove (see `adoptionStatus`).
+      const inheritedStage = adopted ? (d.stage ?? null) : null;
+      if (inheritedStage) d.room.status = adoptionStatusForStage(inheritedStage, req.org.level);
+      applyStatus(d, d.room.status, req.org, req.orgUser);
+      activity(d, req, 'room_created', { status: d.room.status, sourceContext: d.room.sourceContext, ...(withSourceRef ? { sourceRef } : {}), adoptedExistingCase: adopted, inheritedStage });
+    };
+    if (adopted) return { room: touch(existingCase, facet), adopted };
+    const draft = {
+      id: nextId('case'), orgId: req.org.id, playerId: player.id, playerName: player.name,
+      vacancyId, ownerUserId: req.orgUser.id, ownerName: req.orgUser.name,
+      stage: null, priority: 'medium', deadline: null, restricted,
+      assignments: [], tasks: [], approvals: [], decision: null,
+      links: { requestIds: [], trialIds: [], signingId: null },
+      createdAt: at, history: [],
+    };
+    facet(draft);
+    return { room: cases.create(draft), adopted };
+  }
+
   orgRouter.post('/rooms', (req, res) => {
     if (limited('room_create', req.org.id)) return res.status(429).json(rateLimitedBody('room_create'));
     const { playerId, sourceContext, priority, restricted, vacancyId } = req.body ?? {};
@@ -563,42 +593,7 @@ export function registerRooms(ctx) {
       });
     }
 
-    // Adopt this org's open case for the player if one exists — a Room is a
-    // facet of the case, so a club never ends up with a case and a room that
-    // disagree about where the player is in the pipeline.
-    let room = db.recruitmentCases.find((c) => c.orgId === req.org.id && c.playerId === p.id && c.stage !== 'closed' && !isRoom(c));
-    const adopted = !!room;
-    if (!room) {
-      room = {
-        id: nextId('case'), orgId: req.org.id, playerId: p.id, playerName: p.name,
-        vacancyId: vacancyId ?? null, ownerUserId: req.orgUser.id, ownerName: req.orgUser.name,
-        stage: null, priority: 'medium', deadline: null, restricted: !!restricted,
-        assignments: [], tasks: [], approvals: [], decision: null,
-        links: { requestIds: [], trialIds: [], signingId: null },
-        createdAt: now(), history: [],
-      };
-      recruitmentCases.addCase(room); // S8b: the former `db.recruitmentCases.push(room)`; the row lands in the persistNow() below
-    }
-    room.room = {
-      status: INITIAL_ROOM_STATUS,
-      priority: ROOM_PRIORITIES.includes(priority) ? priority : 'normal',
-      tags: [],
-      leadScoutUserId: req.orgUser.id,
-      sourceContext: normaliseSourceContext(sourceContext),
-      openedBy: { userId: req.orgUser.id, name: req.orgUser.name },
-      updatedAt: now(), archivedAt: null, closedAt: null,
-      rev: 0, // applyStatus below records the creation as revision 1
-      revAt: now(), revBy: { userId: req.orgUser.id, name: req.orgUser.name },
-    };
-    const inheritedStage = adopted ? (room.stage ?? null) : null;
-    if (inheritedStage) {
-      // The case already had a stage — keep its meaning rather than resetting
-      // the club's pipeline position to the start, without asserting a fact
-      // the records cannot prove (see `adoptionStatus`).
-      room.room.status = adoptionStatusForStage(inheritedStage, req.org.level);
-    }
-    applyStatus(room, room.room.status, req.org, req.orgUser);
-    activity(room, req, 'room_created', { status: room.room.status, sourceContext: room.room.sourceContext, adoptedExistingCase: adopted, inheritedStage });
+    const { room, adopted } = unit(() => openRoom({ req, player: p, sourceContext: normaliseSourceContext(sourceContext), sourceRef: null, priority: ROOM_PRIORITIES.includes(priority) ? priority : 'normal', restricted: !!restricted, vacancyId: vacancyId ?? null, withSourceRef: false }));
     vmetric('recruitment_room_created');
     ledgerAppend?.({ type: 'recruitment_room_created', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
     persistNow();
@@ -629,12 +624,12 @@ export function registerRooms(ctx) {
       current: { status: room.room.status, priority: room.room.priority, updatedAt: room.room.updatedAt },
     })) return;
 
+    // Every field is judged before anything is written: a refusal leaves the room exactly as it was.
     if (priority !== undefined) {
       if (!ROOM_PRIORITIES.includes(priority)) return res.status(400).json({ error: 'ROOM_PRIORITY_UNKNOWN' });
       if (!requireCan(req, res, room, 'set_status')) return;
-      room.room.priority = priority;
-      activity(room, req, 'room_priority_changed', { priority });
     }
+    let cleanTags;
     if (tags !== undefined) {
       if (!Array.isArray(tags)) return res.status(400).json({ error: 'ROOM_TAGS_INVALID' });
       if (tags.length > LIMITS.tagsPerRoom) return res.status(400).json({ error: 'ROOM_TAGS_TOO_MANY' });
@@ -644,35 +639,36 @@ export function registerRooms(ctx) {
         if (!v.ok) return res.status(400).json(v);
         out.push(v.tag);
       }
-      room.room.tags = [...new Set(out)];
-      activity(room, req, 'room_tag_changed', { count: room.room.tags.length });
+      cleanTags = [...new Set(out)];
     }
     if (leadScoutUserId !== undefined) {
       if (!requireCan(req, res, room, 'assign')) return;
       if (leadScoutUserId !== null && !orgUser(req.org.id, leadScoutUserId)) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
-      room.room.leadScoutUserId = leadScoutUserId;
-      activity(room, req, 'room_member_assigned', { leadScoutUserId });
     }
+    let owner = null;
     if (ownerUserId !== undefined) {
       // A departed owner must never leave a room unusable: any recruitment
       // lead can reassign it, not only the owner.
       if (!requireCan(req, res, room, 'reassign_owner')) return;
-      const u = orgUser(req.org.id, ownerUserId);
-      if (!u) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
-      room.ownerUserId = u.id;
-      room.ownerName = u.name;
-      activity(room, req, 'room_owner_changed', { ownerUserId: u.id });
+      owner = orgUser(req.org.id, ownerUserId);
+      if (!owner) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
     }
-    if (restricted !== undefined) {
-      if (!requireCan(req, res, room, 'set_status')) return;
-      room.restricted = !!restricted;
-    }
-    if (deadline !== undefined) room.deadline = deadline ?? null;
+    if (restricted !== undefined && !requireCan(req, res, room, 'set_status')) return;
+    const due = deadline === undefined ? undefined : dueAtOrRefuse(res, deadline, 'deadline');
+    if (due === undefined && deadline !== undefined) return;
 
-    room.room.updatedAt = now();
-    if (workflowFields) bumpRev(room.room, { by: req.orgUser, at: room.room.updatedAt });
+    const fresh = touch(room, (d) => {
+      if (priority !== undefined) { d.room.priority = priority; activity(d, req, 'room_priority_changed', { priority }); }
+      if (cleanTags !== undefined) { d.room.tags = cleanTags; activity(d, req, 'room_tag_changed', { count: cleanTags.length }); }
+      if (leadScoutUserId !== undefined) { d.room.leadScoutUserId = leadScoutUserId; activity(d, req, 'room_member_assigned', { leadScoutUserId }); }
+      if (owner) { d.ownerUserId = owner.id; d.ownerName = owner.name; activity(d, req, 'room_owner_changed', { ownerUserId: owner.id }); }
+      if (restricted !== undefined) d.restricted = !!restricted;
+      if (deadline !== undefined) d.deadline = due;
+      d.room.updatedAt = now();
+      if (workflowFields) bumpRev(d.room, { by: req.orgUser, at: d.room.updatedAt });
+    });
     persistNow();
-    res.json({ room: buildRecruitmentRoom(room, req) });
+    res.json({ room: buildRecruitmentRoom(fresh, req) });
   });
 
   // ----------------------------------------------------------- status move
@@ -733,49 +729,42 @@ export function registerRooms(ctx) {
     }
 
     const from = room.room.status;
-    applyStatus(room, to, req.org, req.orgUser);
-
-    // Snapshot the evidence confidence the club could see AT this moment.
+    const ends = ['archived', 'closed', 'withdrawn'].includes(to);
     let snapshot = null;
-    if (check.snapshot) snapshot = captureSnapshot(room, req, `status:${to}`);
-
-    if (check.reopen) {
-      room.room.reopened = { by: { userId: req.orgUser.id, name: req.orgUser.name }, at: now(), from, reasonCodes: reasons.codes };
-      activity(room, req, 'room_reopened', { from, to, reasonCodes: reasons.codes });
-      vmetric('recruitment_room_reopened');
-    }
-    activity(room, req, 'room_status_changed', { from, to, reasonCodes: reasons.codes, note: note ? true : false });
+    const fresh = unit(() => {
+      // Snapshot the evidence confidence the club could see AT this moment.
+      if (check.snapshot) snapshot = captureSnapshot(room, req, `status:${to}`);
+      touch(room, (d) => {
+        applyStatus(d, to, req.org, req.orgUser);
+        if (check.reopen) {
+          d.room.reopened = { by: { userId: req.orgUser.id, name: req.orgUser.name }, at: now(), from, reasonCodes: reasons.codes };
+          activity(d, req, 'room_reopened', { from, to, reasonCodes: reasons.codes });
+        }
+        activity(d, req, 'room_status_changed', { from, to, reasonCodes: reasons.codes, note: note ? true : false });
+        // Keep M12's sign-off artefact consistent so "closing needs a decision"
+        // stays true without a second decision store fighting this one.
+        if (ends) d.decision = { outcome: 'pass', reasons: reasons.codes.join(', '), byUserId: req.orgUser.id, byName: req.orgUser.name, at: now() };
+        if (to === 'signed') d.decision = { outcome: 'sign', reasons: reasons.codes.join(', ') || 'signed', byUserId: req.orgUser.id, byName: req.orgUser.name, at: now() };
+      });
+      // A status that ends pursuit records a decision so the reason survives as
+      // machine-readable decision memory, not as a status flag alone.
+      if (ends) recordDecision(room, req, { recommendation: 'archive', reasonCodes: reasons.codes, note, snapshot, trigger: `status:${to}` });
+      return cases.byId(room.id);
+    });
+    if (check.reopen) vmetric('recruitment_room_reopened');
     vmetric('recruitment_room_status_changed');
     broadcast?.('recruitment_case_moved', { orgId: room.orgId, roomId: room.id, from, to });
-    if (to === 'archived' || to === 'closed' || to === 'withdrawn') vmetric('recruitment_room_archived');
+    if (ends) vmetric('recruitment_room_archived');
     if (to === 'signed') vmetric('recruitment_room_signed');
-
-    // A status that ends pursuit records a decision so the reason survives as
-    // machine-readable decision memory, not as a status flag alone.
-    if (['archived', 'closed', 'withdrawn'].includes(to)) {
-      recordDecision(room, req, {
-        recommendation: to === 'signed' ? 'offer' : 'archive',
-        reasonCodes: reasons.codes,
-        note,
-        snapshot,
-        trigger: `status:${to}`,
-      });
-      // Keep M12's sign-off artefact consistent so "closing needs a decision"
-      // stays true without a second decision store fighting this one.
-      room.decision = { outcome: 'pass', reasons: reasons.codes.join(', '), byUserId: req.orgUser.id, byName: req.orgUser.name, at: now() };
-    }
-    if (to === 'signed') {
-      room.decision = { outcome: 'sign', reasons: reasons.codes.join(', ') || 'signed', byUserId: req.orgUser.id, byName: req.orgUser.name, at: now() };
-    }
 
     for (const u of orgUsers(req.org.id)) {
       if (u.id === req.orgUser.id) continue;
-      if (u.id === room.ownerUserId || u.id === room.room.leadScoutUserId) {
-        notify({ kind: 'org_user', id: u.id }, 'recruitment_room', `Recruitment Room — ${room.playerName ?? 'a removed player'}: ${ROOM_STATUS_LABELS[to]}.`, room.id);
+      if (u.id === fresh.ownerUserId || u.id === fresh.room.leadScoutUserId) {
+        notify({ kind: 'org_user', id: u.id }, 'recruitment_room', `Recruitment Room — ${fresh.playerName ?? 'a removed player'}: ${ROOM_STATUS_LABELS[to]}.`, fresh.id);
       }
     }
     persistNow();
-    res.json({ room: buildRecruitmentRoom(room, req), snapshot });
+    res.json({ room: buildRecruitmentRoom(fresh, req), snapshot });
   });
 
   /**
@@ -814,18 +803,22 @@ export function registerRooms(ctx) {
     }
 
     const from = room.room.status;
-    applyStatus(room, to, req.org, req.orgUser);
-    if (check.snapshot) captureSnapshot(room, req, `status:${to}`);
-    room.room.reopened = {
-      by: { userId: req.orgUser.id, name: req.orgUser.name }, at: now(), from,
-      reasonCodes: reasons.codes, sourceContext, sourceRef,
-    };
-    if (sourceContext) room.room.sourceContext = sourceContext;
-    activity(room, req, 'room_reopened', { from, to, reasonCodes: reasons.codes, sourceContext, sourceRef });
+    const fresh = unit(() => {
+      if (check.snapshot) captureSnapshot(room, req, `status:${to}`);
+      return touch(room, (d) => {
+        applyStatus(d, to, req.org, req.orgUser);
+        d.room.reopened = {
+          by: { userId: req.orgUser.id, name: req.orgUser.name }, at: now(), from,
+          reasonCodes: reasons.codes, sourceContext, sourceRef,
+        };
+        if (sourceContext) d.room.sourceContext = sourceContext;
+        activity(d, req, 'room_reopened', { from, to, reasonCodes: reasons.codes, sourceContext, sourceRef });
+      });
+    });
     vmetric('recruitment_room_reopened');
     broadcast?.('recruitment_case_moved', { orgId: room.orgId, roomId: room.id, from, to });
     persistNow();
-    return { ok: true, room: buildRecruitmentRoom(room, req), from, to };
+    return { ok: true, room: buildRecruitmentRoom(fresh, req), from, to };
   };
   ctx.findRoomForRequest = findRoom;
   ctx.roomIsRoom = isRoom;
@@ -845,40 +838,7 @@ export function registerRooms(ctx) {
    * appends the history entry M20's funnel reads, in that order, so a status
    * that moved is always a status with a recorded reason for moving.
    */
-  /**
-   * M23 P8 — the lifecycle's unit of work. `applyStatus` changes five things
-   * on the case (status, stage, updatedAt, archived/closed instants, rev) and
-   * writes history; a caller that restores only `room.status` after a
-   * failure leaves the stage and the rev out of step. These two helpers are
-   * the ONE way to snapshot and restore what the writer touches, used by the
-   * writer itself and by the domains whose own unit of work spans it.
-   */
-  ctx.lifecycleSnapshot = (room) => ({
-    stage: room.stage ?? null,
-    room: { ...room.room },
-    historyLen: Array.isArray(room.history) ? room.history.length : null,
-    links: room.links ? { ...room.links } : null,
-  });
-  ctx.restoreLifecycle = (room, snap) => {
-    if (!snap) return;
-    room.stage = snap.stage;
-    for (const k of Object.keys(room.room)) if (!(k in snap.room)) delete room.room[k];
-    Object.assign(room.room, snap.room);
-    if (snap.historyLen !== null && Array.isArray(room.history)) room.history.length = snap.historyLen;
-    if (snap.links) room.links = { ...snap.links };
-  };
-
-  ctx.applyLifecycleTransition = ({ req, room, to, reasonCodes = [], trigger = 'lifecycle', actor = null }) => {
-    const snap = ctx.lifecycleSnapshot(room);
-    try {
-      return applyLifecycleTransitionInner({ req, room, to, reasonCodes, trigger, actor });
-    } catch (e) {
-      // A throw after `applyStatus` must not leave the case half-moved.
-      ctx.restoreLifecycle(room, snap);
-      throw e;
-    }
-  };
-  function applyLifecycleTransitionInner({ req, room, to, reasonCodes = [], trigger = 'lifecycle', actor = null }) {
+  ctx.applyLifecycleTransition = ({ req, room, to, reasonCodes = [], trigger = 'lifecycle', actor = null, statusDetail = null }) => {
     const from = room.room.status;
     // M23 P4B: a case may move BECAUSE a recipient acted (a guardian accepted
     // a concrete trial slot), through this same writer. The recipient never
@@ -887,27 +847,34 @@ export function registerRooms(ctx) {
     // actor, the club user on the request is the actor, exactly as before.
     const org = actor?.org ?? req.org;
     const by = actor ? { id: actor.id ?? null, name: actor.name ?? null } : req.orgUser;
-    const write = (type, detail) => (actor
-      ? audit(room, actor.kind ?? 'system', actor.id ?? null, actor.name ?? null, type, detail)
-      : activity(room, req, type, detail));
-    applyStatus(room, to, org, by);
-    // M23 P8.1 (§15) — a development-only fault seam between the status write
-    // and the history entry: the outer writer's snapshot/restore must leave
-    // status, stage, rev, instants and history exactly as they were.
-    if (faults?.shouldFail?.('lifecycle.after_status')) throw new Error('simulated failure after the status write (development fault layer)');
-    if (REOPENED_FROM.includes(from) && OPEN_ROOM_STATUSES.includes(to)) {
-      room.room.reopened = { by: { userId: by.id ?? null, name: by.name ?? null }, at: now(), from, reasonCodes };
-      write('room_reopened', { from, to, reasonCodes });
-      vmetric('recruitment_room_reopened');
-    }
-    // The same action name M20's funnel already reads. A second name would
-    // mean a second funnel, silently disagreeing with the first.
-    write('room_status_changed', { from, to, reasonCodes, trigger });
+    const reopens = REOPENED_FROM.includes(from) && OPEN_ROOM_STATUSES.includes(to);
+    // One write of the case (joining the caller's unit of work): the status, the stage, the rev and the history
+    // entries together, or nothing.
+    const fresh = touch(room, (d) => {
+      const write = (type, detail) => (actor
+        ? audit(d, actor.kind ?? 'system', actor.id ?? null, actor.name ?? null, type, detail)
+        : activity(d, req, type, detail));
+      applyStatus(d, to, org, by);
+      // M23 P8.1 (§15) — a development-only fault seam between the status write
+      // and the history entry: the write is refused whole, so status, stage,
+      // rev, instants and history stay exactly as they were.
+      if (faults?.shouldFail?.('lifecycle.after_status')) throw new Error('simulated failure after the status write (development fault layer)');
+      if (reopens) {
+        d.room.reopened = { by: { userId: by.id ?? null, name: by.name ?? null }, at: now(), from, reasonCodes };
+        write('room_reopened', { from, to, reasonCodes });
+      }
+      // The same action name M20's funnel already reads. A second name would
+      // mean a second funnel, silently disagreeing with the first. The caller's
+      // `statusDetail` (the semantic action, the policy version, the record that
+      // moved the case) is part of the same entry.
+      write('room_status_changed', { from, to, reasonCodes, trigger, ...(statusDetail ?? {}) });
+    });
+    if (reopens) vmetric('recruitment_room_reopened');
     vmetric('recruitment_room_status_changed');
     // M23 P8 — open Rooms re-read the journey on this event (ids and words only).
     broadcast?.('recruitment_case_moved', { orgId: room.orgId, roomId: room.id, from, to });
-    return { from, to };
-  }
+    return { from, to, room: fresh };
+  };
 
   /**
    * The ONE room creator reachable from another milestone, shared with M18
@@ -923,31 +890,7 @@ export function registerRooms(ctx) {
       && isRoom(c) && OPEN_ROOM_STATUSES.includes(c.room.status));
     if (existing) return { ok: true, roomId: existing.id, existed: true, room: buildRecruitmentRoom(existing, req) };
 
-    let room = db.recruitmentCases.find((c) => c.orgId === req.org.id && c.playerId === player.id && c.stage !== 'closed' && !isRoom(c));
-    const adopted = !!room;
-    if (!room) {
-      room = {
-        id: nextId('case'), orgId: req.org.id, playerId: player.id, playerName: player.name,
-        vacancyId: null, ownerUserId: req.orgUser.id, ownerName: req.orgUser.name,
-        stage: null, priority: 'medium', deadline: null, restricted: false,
-        assignments: [], tasks: [], approvals: [], decision: null,
-        links: { requestIds: [], trialIds: [], signingId: null },
-        createdAt: now(), history: [],
-      };
-      recruitmentCases.addCase(room); // S8b: the former `db.recruitmentCases.push(room)`
-    }
-    room.room = {
-      status: INITIAL_ROOM_STATUS, priority: 'normal', tags: [], leadScoutUserId: req.orgUser.id,
-      sourceContext: normaliseSourceContext(sourceContext), sourceRef,
-      openedBy: { userId: req.orgUser.id, name: req.orgUser.name },
-      updatedAt: now(), archivedAt: null, closedAt: null,
-      rev: 0, // applyStatus below records the creation as revision 1
-      revAt: now(), revBy: { userId: req.orgUser.id, name: req.orgUser.name },
-    };
-    const inheritedStage = adopted ? (room.stage ?? null) : null;
-    if (inheritedStage) room.room.status = adoptionStatusForStage(inheritedStage, req.org.level);
-    applyStatus(room, room.room.status, req.org, req.orgUser);
-    activity(room, req, 'room_created', { status: room.room.status, sourceContext: room.room.sourceContext, sourceRef, adoptedExistingCase: adopted, inheritedStage });
+    const { room } = unit(() => openRoom({ req, player, sourceContext: normaliseSourceContext(sourceContext), sourceRef }));
     vmetric('recruitment_room_created');
     ledgerAppend?.({ type: 'recruitment_room_created', playerId: player.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
     persistNow();
@@ -983,8 +926,7 @@ export function registerRooms(ctx) {
         },
       }),
     };
-    recruitmentCases.addSnapshot(snap); // S8b: the former `db.roomSnapshots.push(snap)`
-    return snap;
+    return snapshots.create(snap);
   }
 
   orgRouter.get('/rooms/:id/snapshots', (req, res) => {
@@ -1045,9 +987,11 @@ export function registerRooms(ctx) {
       body, replyToId, mentions,
       createdAt: now(), editedAt: null, editCount: 0, deletedAt: null,
     };
-    recruitmentCases.addComment(c); // S8b: the former `db.roomComments.push(c)`
-    activity(room, req, 'room_comment_added', { commentId: c.id, replyToId });
-    room.room.updatedAt = now();
+    const saved = unit(() => {
+      const row = comments.create(c);
+      touch(room, (d) => { activity(d, req, 'room_comment_added', { commentId: c.id, replyToId }); d.room.updatedAt = now(); });
+      return row;
+    });
     vmetric('room_comment_added');
     // Internal only: a mention notifies a colleague in this organisation and
     // nobody else. No player, guardian, coach, other club or email.
@@ -1056,7 +1000,7 @@ export function registerRooms(ctx) {
       notify({ kind: 'org_user', id: uid }, 'recruitment_room', `${req.orgUser.name} mentioned you in the Recruitment Room for ${room.playerName ?? 'a removed player'}.`, room.id);
     }
     persistNow();
-    res.status(201).json({ comment: commentView(c, { orgId: req.org.id }) });
+    res.status(201).json({ comment: commentView(saved, { orgId: req.org.id }) });
   });
 
   orgRouter.patch('/rooms/:id/comments/:cid', (req, res) => {
@@ -1069,12 +1013,13 @@ export function registerRooms(ctx) {
     const body = plainText(req.body?.body, LIMITS.commentBody);
     if (!body) return res.status(400).json({ error: 'ROOM_COMMENT_EMPTY' });
     if (!moderateOrRefuse(res, body, { kind: 'recruitment_room_comment', orgId: req.org.id })) return;
-    c.body = body;
-    c.editedAt = now();
-    c.editCount = (c.editCount ?? 0) + 1;
-    activity(room, req, 'room_comment_edited', { commentId: c.id });
+    const saved = unit(() => {
+      const row = comments.update(c.id, (d) => { d.body = body; d.editedAt = now(); d.editCount = (d.editCount ?? 0) + 1; });
+      touch(room, (d) => activity(d, req, 'room_comment_edited', { commentId: c.id }));
+      return row;
+    });
     persistNow();
-    res.json({ comment: commentView(c, { orgId: req.org.id }) });
+    res.json({ comment: commentView(saved, { orgId: req.org.id }) });
   });
 
   orgRouter.delete('/rooms/:id/comments/:cid', (req, res) => {
@@ -1086,11 +1031,13 @@ export function registerRooms(ctx) {
     if (c.authorId !== req.orgUser.id && !lead) return res.status(403).json({ error: 'ROOM_COMMENT_NOT_AUTHOR' });
     // Tombstone, never erase: the thread keeps its shape and the audit trail
     // keeps its attribution.
-    c.deletedAt = now();
-    c.deletedBy = { userId: req.orgUser.id, name: req.orgUser.name };
-    activity(room, req, 'room_comment_deleted', { commentId: c.id });
+    const saved = unit(() => {
+      const row = comments.update(c.id, (d) => { d.deletedAt = now(); d.deletedBy = { userId: req.orgUser.id, name: req.orgUser.name }; });
+      touch(room, (d) => activity(d, req, 'room_comment_deleted', { commentId: c.id }));
+      return row;
+    });
     persistNow();
-    res.json({ comment: commentView(c, { orgId: req.org.id }) });
+    res.json({ comment: commentView(saved, { orgId: req.org.id }) });
   });
 
   // ----------------------------------------------------------------- tasks
@@ -1123,10 +1070,11 @@ export function registerRooms(ctx) {
       createdBy: { userId: req.orgUser.id, name: req.orgUser.name },
       createdAt: now(), completedAt: null,
     };
-    room.tasks ??= [];
-    room.tasks.push(t);
-    room.room.updatedAt = now();
-    activity(room, req, 'room_task_created', { taskId: t.id, assigneeUserId: t.assigneeUserId });
+    touch(room, (d) => {
+      d.tasks.push(t);
+      d.room.updatedAt = now();
+      activity(d, req, 'room_task_created', { taskId: t.id, assigneeUserId: t.assigneeUserId });
+    });
     vmetric('room_task_created');
     // A room task is STAFF work. It is never sent to the player: a player-facing
     // ask must go through the evidence-request or Combine-request workflow.
@@ -1146,27 +1094,32 @@ export function registerRooms(ctx) {
     const mine = t.assigneeUserId === req.orgUser.id || t.createdBy?.userId === req.orgUser.id;
     if (!mine && !roomCan(role, 'assign')) return res.status(403).json({ error: 'ROOM_PERMISSION_REQUIRED', message: 'Only the assignee, the creator or a room lead can change this task.' });
 
+    // Both fields are judged before anything is written.
+    let status;
     if (req.body?.status !== undefined) {
-      const to = String(req.body.status);
-      if (!TASK_STATES.includes(to)) return res.status(400).json({ error: 'ROOM_TASK_STATE_UNKNOWN' });
+      status = String(req.body.status);
+      if (!TASK_STATES.includes(status)) return res.status(400).json({ error: 'ROOM_TASK_STATE_UNKNOWN' });
       const from = t.status ?? 'open';
-      if (from !== to && !canTaskTransition(from, to)) return res.status(409).json({ error: 'ROOM_TASK_TRANSITION_INVALID', from, to });
-      t.status = to;
-      t.completedAt = to === 'done' ? now() : null;
+      if (from !== status && !canTaskTransition(from, status)) return res.status(409).json({ error: 'ROOM_TASK_TRANSITION_INVALID', from, to: status });
     }
+    let assignee;
     if (req.body?.assigneeUserId !== undefined) {
       if (!roomCan(role, 'assign')) return res.status(403).json({ error: 'ROOM_PERMISSION_REQUIRED' });
-      if (req.body.assigneeUserId === null) { t.assigneeUserId = null; t.assigneeName = null; }
+      if (req.body.assigneeUserId === null) assignee = null;
       else {
-        const u = orgUser(req.org.id, String(req.body.assigneeUserId));
-        if (!u) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
-        t.assigneeUserId = u.id; t.assigneeName = u.name;
+        assignee = orgUser(req.org.id, String(req.body.assigneeUserId));
+        if (!assignee) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
       }
     }
-    room.room.updatedAt = now();
-    activity(room, req, 'room_task_updated', { taskId: t.id, status: t.status });
+    const fresh = touch(room, (d) => {
+      const task = d.tasks.find((x) => x.id === t.id);
+      if (status !== undefined) { task.status = status; task.completedAt = status === 'done' ? now() : null; }
+      if (assignee !== undefined) { task.assigneeUserId = assignee?.id ?? null; task.assigneeName = assignee?.name ?? null; }
+      d.room.updatedAt = now();
+      activity(d, req, 'room_task_updated', { taskId: t.id, status: task.status });
+    });
     persistNow();
-    res.json({ task: taskView(t) });
+    res.json({ task: taskView(fresh.tasks.find((x) => x.id === t.id)) });
   });
 
   // ------------------------------------------------------------- decisions
@@ -1182,11 +1135,11 @@ export function registerRooms(ctx) {
       snapshot: snapshot ? { at: snapshot.at, trust: snapshot.trust, sourceRefs: snapshot.sourceRefs, snapshotId: snapshot.id } : null,
     };
     // Append-only: a revision SUPERSEDES its predecessor, it never rewrites it.
-    if (prev) prev.supersededById = d.id;
-    recruitmentCases.addDecision(d); // S8b: the former `db.roomDecisions.push(d)`
-    activity(room, req, 'room_decision_recorded', { decisionId: d.id, recommendation, reasonCodes });
+    const saved = decisions.create(d);
+    if (prev) decisions.update(prev.id, (p) => { p.supersededById = d.id; });
+    const fresh = touch(room, (c) => activity(c, req, 'room_decision_recorded', { decisionId: d.id, recommendation, reasonCodes }));
     vmetric('room_decision_recorded');
-    if (['archived', 'closed', 'withdrawn'].includes(room.room.status)) {
+    if (['archived', 'closed', 'withdrawn'].includes(fresh.room.status)) {
       // The Second Look contract: a typed, machine-readable domain event with
       // reason CODES and no private free text.
       // M18.2: the STREAM carries ids only. secondLookEvent() remains the
@@ -1195,7 +1148,7 @@ export function registerRooms(ctx) {
       // channel whose only consumer refetches through an authorised read.
       broadcast?.('recruitment_room_archived', { orgId: room.orgId, roomId: room.id });
     }
-    return d;
+    return saved;
   }
 
   orgRouter.post('/rooms/:id/decisions', (req, res) => {
@@ -1236,12 +1189,14 @@ export function registerRooms(ctx) {
     const note = check.note == null ? null : plainText(check.note, 2000);
     if (note && !moderateOrRefuse(res, note, { kind: 'recruitment_room_decision', orgId: req.org.id })) return;
 
-    const snapshot = captureSnapshot(room, req, 'decision');
-    const d = recordDecision(room, req, { recommendation: check.recommendation, reasonCodes: check.codes, note, snapshot, trigger: 'decision', clientKey });
-    room.room.updatedAt = now();
-    bumpRev(room.room, { by: req.orgUser, at: room.room.updatedAt });
+    const { snapshot, d, fresh } = unit(() => {
+      const snap = captureSnapshot(room, req, 'decision');
+      const row = recordDecision(room, req, { recommendation: check.recommendation, reasonCodes: check.codes, note, snapshot: snap, trigger: 'decision', clientKey });
+      const after = touch(room, (c) => { c.room.updatedAt = now(); bumpRev(c.room, { by: req.orgUser, at: c.room.updatedAt }); });
+      return { snapshot: snap, d: row, fresh: after };
+    });
     persistNow();
-    res.status(201).json({ decision: decisionView(d), snapshot, rev: room.room.rev });
+    res.status(201).json({ decision: decisionView(d), snapshot, rev: fresh.room.rev });
   });
 
   orgRouter.get('/rooms/:id/decisions', (req, res) => {
@@ -1269,17 +1224,16 @@ export function registerRooms(ctx) {
     const note = req.body?.note ? plainText(req.body.note, 1000) : null;
     if (note && !moderateOrRefuse(res, note, { kind: 'recruitment_room_evidence_note', orgId: req.org.id })) return;
 
-    let row = db.roomEvidenceState.find((x) => x.roomId === room.id && x.evidenceId === evidence.id);
-    if (!row) {
-      row = { id: nextId('rev'), roomId: room.id, orgId: req.org.id, evidenceId: evidence.id, state, note, byId: req.orgUser.id, byName: req.orgUser.name, at: now() };
-      recruitmentCases.addEvidenceState(row); // S8b: the former `db.roomEvidenceState.push(row)`
-    } else {
-      Object.assign(row, { state, note: note ?? row.note, byId: req.orgUser.id, byName: req.orgUser.name, at: now() });
-    }
+    const existing = db.roomEvidenceState.find((x) => x.roomId === room.id && x.evidenceId === evidence.id);
     // The review state and the note belong to the ROOM. The evidence record
     // itself is the player's and is not touched.
-    activity(room, req, 'room_evidence_reviewed', { evidenceId: evidence.id, state });
-    room.room.updatedAt = now();
+    const row = unit(() => {
+      const saved = existing
+        ? evidenceStates.update(existing.id, (d) => Object.assign(d, { state, note: note ?? d.note, byId: req.orgUser.id, byName: req.orgUser.name, at: now() }))
+        : evidenceStates.create({ id: nextId('rev'), roomId: room.id, orgId: req.org.id, evidenceId: evidence.id, state, note, byId: req.orgUser.id, byName: req.orgUser.name, at: now() });
+      touch(room, (d) => { activity(d, req, 'room_evidence_reviewed', { evidenceId: evidence.id, state }); d.room.updatedAt = now(); });
+      return saved;
+    });
     persistNow();
     res.json({ review: { evidenceId: evidence.id, state: row.state, note: row.note, by: row.byName, at: row.at }, note: 'Internal review state only — the evidence record itself is unchanged.' });
   });
@@ -1297,11 +1251,12 @@ export function registerRooms(ctx) {
     const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
     if (dueAt === undefined) return;
     const a = { id: nextId('asg'), userId: u.id, name: u.name, task: `${kind} assessment`, dueAt, status: 'open', createdAt: now() };
-    room.assignments ??= [];
-    room.assignments.push(a);
-    activity(room, req, 'room_assessment_assigned', { assignmentId: a.id, userId: u.id, kind });
+    touch(room, (d) => {
+      d.assignments.push(a);
+      activity(d, req, 'room_assessment_assigned', { assignmentId: a.id, userId: u.id, kind });
+      d.room.updatedAt = now();
+    });
     vmetric('room_assessment_assigned');
-    room.room.updatedAt = now();
     if (u.id !== req.orgUser.id) notify({ kind: 'org_user', id: u.id }, 'recruitment_room', `${req.orgUser.name} assigned you a ${kind.toLowerCase()} assessment for ${room.playerName ?? 'a removed player'}.`, room.id);
     persistNow();
     res.status(201).json({ assignment: a });
@@ -1322,9 +1277,8 @@ export function registerRooms(ctx) {
     // even one this org may otherwise see — so the id is scoped to the room.
     const out = ctx.requestEvidenceGap({ org: req.org, suggestionId, playerId: room.playerId });
     if (!out.ok) return res.status(out.status).json({ error: out.error, ...(out.message ? { message: out.message } : {}), ...(out.detail ?? {}) });
-    activity(room, req, 'room_evidence_requested', { suggestionId, ruleId: out.suggestion.ruleId, routedTo: out.routedTo });
+    touch(room, (d) => { activity(d, req, 'room_evidence_requested', { suggestionId, ruleId: out.suggestion.ruleId, routedTo: out.routedTo }); d.room.updatedAt = now(); });
     vmetric('room_evidence_requested');
-    room.room.updatedAt = now();
     persistNow();
     res.status(201).json({ suggestion: out.suggestion, routedTo: out.routedTo, note: 'Routed through the standing evidence-request rules, including guardian routing for under-18s.' });
   });
@@ -1352,9 +1306,8 @@ export function registerRooms(ctx) {
       protocolIds: ids, title: req.body?.title ?? null, deadline: req.body?.deadline ?? null, instructions,
     });
     if (!out.created.length) return res.status(409).json({ error: 'NOT_VISIBLE', skipped: out.skipped });
-    activity(room, req, 'room_combine_requested', { requestId: out.created[0].id, protocols: ids });
+    touch(room, (d) => { activity(d, req, 'room_combine_requested', { requestId: out.created[0].id, protocols: ids }); d.room.updatedAt = now(); });
     vmetric('room_combine_requested');
-    room.room.updatedAt = now();
     persistNow();
     res.status(201).json({ request: ctx.combineRequestView?.(out.created[0]) ?? out.created[0] });
   });
@@ -1369,29 +1322,25 @@ export function registerRooms(ctx) {
     if (!room) return;
     if (!requireCan(req, res, room, 'assign')) return;
     const { trialId, signingId, requestId } = req.body ?? {};
-    room.links ??= { requestIds: [], trialIds: [], signingId: null };
-
-    if (trialId) {
-      const t = db.trials.find((x) => x.id === trialId && x.orgId === req.org.id && x.playerId === room.playerId);
-      if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
-      if (!room.links.trialIds.includes(t.id)) room.links.trialIds.push(t.id);
-      activity(room, req, 'room_trial_linked', { trialId: t.id, status: t.status });
-      vmetric('room_trial_requested');
-    }
-    if (requestId) {
-      const r = db.requests.find((x) => x.id === requestId && x.orgId === req.org.id && x.playerId === room.playerId);
-      if (!r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
-      if (!room.links.requestIds.includes(r.id)) room.links.requestIds.push(r.id);
-    }
-    if (signingId) {
-      const s = db.signings.find((x) => x.id === signingId && x.orgId === req.org.id && x.playerId === room.playerId);
-      if (!s) return res.status(404).json({ error: 'SIGNING_NOT_FOUND' });
-      room.links.signingId = s.id;
-      activity(room, req, 'room_signing_linked', { signingId: s.id });
-    }
-    room.room.updatedAt = now();
+    // Every reference is checked before anything is written.
+    const t = trialId ? db.trials.find((x) => x.id === trialId && x.orgId === req.org.id && x.playerId === room.playerId) : null;
+    if (trialId && !t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
+    const r = requestId ? db.requests.find((x) => x.id === requestId && x.orgId === req.org.id && x.playerId === room.playerId) : null;
+    if (requestId && !r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
+    const sg = signingId ? db.signings.find((x) => x.id === signingId && x.orgId === req.org.id && x.playerId === room.playerId) : null;
+    if (signingId && !sg) return res.status(404).json({ error: 'SIGNING_NOT_FOUND' });
+    const fresh = touch(room, (d) => {
+      if (t) {
+        if (!d.links.trialIds.includes(t.id)) d.links.trialIds.push(t.id);
+        activity(d, req, 'room_trial_linked', { trialId: t.id, status: t.status });
+      }
+      if (r && !d.links.requestIds.includes(r.id)) d.links.requestIds.push(r.id);
+      if (sg) { d.links.signingId = sg.id; activity(d, req, 'room_signing_linked', { signingId: sg.id }); }
+      d.room.updatedAt = now();
+    });
+    if (t) vmetric('room_trial_requested');
     persistNow();
-    res.json({ links: room.links });
+    res.json({ links: fresh.links });
   });
 
   /** Organisation-private recruitment funnel. No cross-club comparison exists. */

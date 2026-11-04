@@ -57,8 +57,8 @@ The migration is finished when:
 - a synthetic load of 100k players (`scripts/dataLayerPerf.mjs`) gives p50 under 5 ms on hot paths, with
   no request writing the whole database.
 
-Moving storage alone isn't the goal. A domain that is in tables but still loaded whole into memory and
-diffed on save (S8a–S8c today) is only part-way there.
+Moving storage alone isn't the goal. A domain that is in tables but still loaded whole into memory (S8a–S8c today:
+explicit writes, but every read still scans a whole-collection mirror) is only part-way there.
 
 ## 3. Status
 
@@ -77,14 +77,14 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S7a–d | notifications, dispatches, outbox/push, message threads | `0009`–`0012` | `notifications.mjs`, `dispatches.mjs`, `outboxPush.mjs`, `channels.mjs` | staged, written at save | done |
 | S6b | safeguarding and audit (8 tables) | `0013_safety_audit` | `safetyAudit.mjs` | staged | done |
 | S4b-R | retained record on player deletion | `0014_player_erasure` | `identity.mjs` | direct | done |
-| S8a | recruitment requests, trials | `0015_recruitment` | `recruitment.mjs` | **explicit, typed** (§4.3, 3 Nov) | implemented; accept on green tests |
-| S8b | cases, rooms, decisions | `0016_recruitment_cases` | `recruitmentCases.mjs` | **fingerprint** | done |
-| S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **explicit, typed** (§4.3, 3 Nov) | implemented; accept on green tests |
+| S8a | recruitment requests, trials | `0015_recruitment` | `recruitment.mjs` | **explicit, typed** (§4.3, 3 Nov) | done |
+| S8b | cases, rooms, decisions | `0016_recruitment_cases` | `recruitmentCases.mjs` | **explicit, typed** (§4.3, 4 Nov) | done |
+| S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **explicit, typed** (§4.3, 3 Nov) | done |
 | S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed** | implemented; accept on green tests |
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3: S8c and S8a done (3 Nov); S8b next |
+| — | recruitment end-state proof | — | — | — | §4.3 step 1 and 3 done (S8a–S8c explicit and typed, 4 Nov); steps 2 and 4 next |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -94,8 +94,8 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S14 | retire the blob | | | | not started |
 
 The lossless side columns (`extra_json`, `absent_keys_json`, `offtype_json`) of the old fidelity rule were dropped
-from S0–S7 and S6b on 3 November, and from S8c and S8a when they moved to explicit writes (§4.3). S8b still carries
-them; they go in §4.3.
+from S0–S7 and S6b on 3 November, and from S8c, S8a and S8b when they moved to explicit writes (§4.3, 3–4 November).
+No table carries them now.
 
 ## 4. The order of work
 
@@ -211,6 +211,37 @@ S8b:
   writers' whole literals. `m23TrialPersistence` §3 plants only the corruption a typed row can carry (a state that
   disagrees with its facts, a timezone that is not a zone, rev 0); the unstorable cases moved to a new §3c that
   asserts the save refuses each one with its id.
+
+**S8b done 4 November** (on `feat/sqlite-schema`). Cases and the four room collections are twenty-five typed tables
+with the vocabulary CHECKs of `m17/shared.mjs`, `m23/decision.mjs`, `m13/shared.mjs` and `m27/integration.mjs`, and no
+side columns. Migration `0016` was amended in place (re-seed a development database). It no longer creates
+`idempotency_keys`: the draft's, the formal decision's and the handoff's keys are columns, and `0018` creates the table
+for the signing packages, its only owner. The repository offers `cases.create` / `update`, `comments`, `decisions` and
+`evidenceStates` `create` / `update`, `snapshots.create` and `redactPlayer`, the S8a pattern; an update of a record
+from inside its own update is refused. Every writer uses them: M12 cases, M13 budgets, every Room route, the lifecycle
+writer, the decision draft and finalize, the M27 handoff, the trial, contact, offer and signing couplings, and the
+deletion unit. Three model changes:
+
+- One case history shape, `{ id, at, byKind, byId, byName, action, detail }`. M27 wrote a second one that the activity
+  feed could not read, so handoff entries now show their actor there.
+- A decision's `snapshot` is the `room_snapshots` row it names (`snapshot_id`), read back with the decision, never a copy.
+- A Room's `sourceRef` is `{ id, version }` from every caller (M18 Nobody Missed and Second Look, M19 watchlists).
+
+Junk the routes now refuse instead of storing: a case `deadline` or an M12 assignment or task `dueAt` that is not a day
+or an instant (400 `DATE_INVALID`), and an FX assumption whose date is not a day (dropped, like a bad rate). The Room
+PATCH, task PATCH and link routes check every field before writing, so a refusal part-way no longer leaves the earlier
+fields changed in memory. The finalize route is one unit of work: a lifecycle refusal rolls back the formal row, its
+snapshot and the supersession instead of the hand-written undo. The `case_id` keys of requests, trials, contacts and
+offers are immediate `RESTRICT`, and the writers name a missing case with its ids. What we learned, for S9–S13:
+
+- The probe listed every in-place write, but grouping writes by their innermost frame hid the callers of shared helpers
+  (`audit` from M28 and M29, `histAppend`). The read-only views caught those on the first battery run. Group by the
+  first frame outside the shared helpers.
+- Shared mutators (`applyStatus`, `audit`, `bumpRev`) keep working unchanged on the draft `update` hands out. A seam
+  other modules call (the lifecycle writer) does its own `update` and takes the extra detail its callers used to patch
+  onto the last history entry (`statusDetail`).
+- Test fixtures had drifted from the writers (a `proceed` outcome, budget kinds the route never accepted, a string
+  passport revision stored as a number). Typing the fixtures found them before the batteries did.
 
 ### 4.4 The end-to-end test estate
 

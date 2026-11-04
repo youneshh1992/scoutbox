@@ -779,12 +779,13 @@ section('W — legacy: the direct route defers to the canonical workflow; a sign
   neg(expect(await j('POST', '/org/players/pl-adeyemi/signing', { note: 'legacy' }, maria.token), 409, 'SIGNING_CANONICAL_REQUIRED'), 'W1 the legacy route refuses a player with a canonical signing');
   neg(expect(await j('POST', '/org/players/pl-alvarez/signing', { note: 'legacy' }, maria.token), 409, 'SIGNING_CANONICAL_REQUIRED'), 'W2 and one with a live package');
   const F = globalThis.__F;
-  await offline((db) => { const k = db.recruitmentCases.find((c) => c.id === F.RID); k.__status = k.room.status; k.room.status = 'signed'; });
+  let heldStatus = null; // the status to put back (a case row has no field for it)
+  await offline((db) => { const k = db.recruitmentCases.find((c) => c.id === F.RID); heldStatus = k.room.status; k.room.status = 'signed'; });
   await relogin();
   const room = await sRoom(F.RID, maria.token);
   neg(room.status === 200 && room.body.packages.find((p) => p.id === F.SID)?.integrity.includes('LIVE_SIGNING_CASE_NOT_AT_OFFER_ACCEPTED') && room.body.legacySigning === null && (await signings(maria.token)).every((s) => s.signingPackageId !== F.SID), 'W3 a case edited to signed with a live package and no row: the surface names the contradiction, reports no legacy signing, writes nothing');
   neg(expect(await pSign(F.SID, { revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-alvarez'].token), 409, 'SIGNING_LIFECYCLE_CONFLICT') || expect(await pSign(F.SID, { revisionId: F.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-alvarez'].token), 409, 'SIGNING_PARTY_ALREADY_COMPLETED'), 'W4 nobody can sign into a case that claims to be signed');
-  await offline((db) => { const k = db.recruitmentCases.find((c) => c.id === F.RID); k.room.status = k.__status; delete k.__status; });
+  await offline((db) => { const k = db.recruitmentCases.find((c) => c.id === F.RID); k.room.status = heldStatus; });
   await relogin();
   ok((await sRoom(F.RID, maria.token)).body.packages.find((p) => p.id === F.SID)?.integrity.length === 0, 'W5 restored: consistent');
 }

@@ -3,7 +3,8 @@
 // Money is integer minor units end to end; travel times and market values are
 // never invented; candidate suggestions only ever contain players the org can
 // see under the standing rules.
-import { convertMinor } from './shared.mjs';
+import { convertMinor, BUDGET_LINE_KINDS as LINE_KINDS, BUDGET_SCHEDULES as SCHEDULES } from './shared.mjs';
+import { readDateOnly } from '../temporal.mjs';
 
 // Exported for direct fixture testing — ALL integer arithmetic.
 export function computeScenarioTotals(scenario) {
@@ -56,7 +57,9 @@ export function registerPlanning(ctx) {
     db, orgRouter, nextId, persistNow, notify, findPlayer, orgCanSee,
     paginate, histAppend, isLead, requireLead, canViewFinance, haversineKm,
     validAmountMinor, convertMinor, CURRENCIES,
+    recruitmentCases, // S8b: a budget change is one explicit write of its case (cases.update)
   } = ctx;
+  const { cases } = recruitmentCases;
 
   // ============================================================ F7 coverage
   orgRouter.post('/coverage/fixtures', (req, res) => {
@@ -208,8 +211,6 @@ export function registerPlanning(ctx) {
   });
 
   // ============================================================ F9 budgets
-  const LINE_KINDS = ['wage', 'fee', 'bonus', 'expense'];
-  const SCHEDULES = ['one_off', 'weekly', 'monthly', 'annual'];
 
   function caseFor(req, res) {
     const c = db.recruitmentCases.find((x) => x.id === req.params.id && x.orgId === req.org.id);
@@ -229,7 +230,7 @@ export function registerPlanning(ctx) {
       if (!LINE_KINDS.includes(l.kind) || !SCHEDULES.includes(l.schedule)) continue;
       if (!validAmountMinor(l.amountMinor) || l.amountMinor < 0) continue;
       out.push({
-        id: l.id ?? null, kind: l.kind, label: String(l.label ?? l.kind).slice(0, 80),
+        id: typeof l.id === 'string' && l.id ? l.id : null, kind: l.kind, label: String(l.label || l.kind).slice(0, 80),
         amountMinor: l.amountMinor, currency: CURRENCIES.includes(l.currency) ? l.currency : 'GBP',
         schedule: l.schedule, confirmed: l.confirmed === true,
         conditional: l.conditional?.assumption ? { assumption: String(l.conditional.assumption).slice(0, 200) } : null,
@@ -238,26 +239,35 @@ export function registerPlanning(ctx) {
     return out;
   }
 
+  /** Up to six stated FX rates: known currencies, a decimal rate, a real calendar day (today when none is given). */
+  function cleanFx(raw) {
+    return (Array.isArray(raw) ? raw : []).slice(0, 6)
+      .filter((a) => CURRENCIES.includes(a?.from) && CURRENCIES.includes(a?.to) && /^\d+(\.\d{1,6})?$/.test(String(a.rate)))
+      .map((a) => ({ from: a.from, to: a.to, rate: String(a.rate), source: String(a.source ?? 'manual entry').slice(0, 80), date: a.date === undefined || a.date === null ? new Date().toISOString().slice(0, 10) : readDateOnly(String(a.date).slice(0, 10)), manual: true }))
+      .filter((a) => a.date !== null);
+  }
+
   ctx.computeScenarioTotals = computeScenarioTotals;
 
   orgRouter.post('/cases/:id/budget/scenarios', (req, res) => {
     const c = caseFor(req, res); if (!c) return;
     const b = req.body ?? {};
-    c.budget ??= { scenarios: [] };
-    if (c.budget.scenarios.length >= 8) return res.status(409).json({ error: 'TOO_MANY_SCENARIOS' });
+    const existing = c.budget?.scenarios ?? [];
+    if (existing.length >= 8) return res.status(409).json({ error: 'TOO_MANY_SCENARIOS' });
     const s = {
-      id: nextId('scn'), version: 1, label: String(b.label ?? `Scenario ${c.budget.scenarios.length + 1}`).slice(0, 80),
+      id: nextId('scn'), version: 1, label: String(b.label ?? `Scenario ${existing.length + 1}`).slice(0, 80),
       currency: CURRENCIES.includes(b.currency) ? b.currency : 'GBP',
       termMonths: Math.min(Math.max(Number(b.termMonths) || 12, 1), 72),
       lines: cleanLines(b.lines).map((l, i) => ({ ...l, id: `ln-${i + 1}` })),
-      fxAssumptions: (Array.isArray(b.fxAssumptions) ? b.fxAssumptions : []).slice(0, 6)
-        .filter((a) => CURRENCIES.includes(a.from) && CURRENCIES.includes(a.to) && /^\d+(\.\d{1,6})?$/.test(String(a.rate)))
-        .map((a) => ({ from: a.from, to: a.to, rate: String(a.rate), source: String(a.source ?? 'manual entry').slice(0, 80), date: String(a.date ?? new Date().toISOString().slice(0, 10)).slice(0, 10), manual: true })),
+      fxAssumptions: cleanFx(b.fxAssumptions),
       approval: null, actuals: [],
       createdBy: req.orgUser.name, createdAt: Date.now(), updatedAt: Date.now(),
     };
-    c.budget.scenarios.push(s);
-    histAppend(c, 'org_user', req.orgUser.id, req.orgUser.name, 'budget_scenario_created', { scenarioId: s.id });
+    cases.update(c.id, (d) => {
+      d.budget ??= { scenarios: [] };
+      d.budget.scenarios.push(s);
+      histAppend(d, 'org_user', req.orgUser.id, req.orgUser.name, 'budget_scenario_created', { scenarioId: s.id });
+    });
     persistNow();
     res.status(201).json({ scenario: s, totals: computeScenarioTotals(s), honest: 'All figures are user-entered. ScoutBox never invents market values, resale projections or “expected returns”, and a scenario is planning support — not legal or financial approval.' });
   });
@@ -272,23 +282,24 @@ export function registerPlanning(ctx) {
 
   orgRouter.put('/cases/:id/budget/scenarios/:sid', (req, res) => {
     const c = caseFor(req, res); if (!c) return;
-    const s = c.budget?.scenarios.find((x) => x.id === req.params.sid);
-    if (!s) return res.status(404).json({ error: 'SCENARIO_NOT_FOUND' });
+    if (!c.budget?.scenarios.some((x) => x.id === req.params.sid)) return res.status(404).json({ error: 'SCENARIO_NOT_FOUND' });
     const b = req.body ?? {};
-    if (b.label) s.label = String(b.label).slice(0, 80);
-    if (b.termMonths) s.termMonths = Math.min(Math.max(Number(b.termMonths) || s.termMonths, 1), 72);
-    if (b.lines) s.lines = cleanLines(b.lines).map((l, i) => ({ ...l, id: l.id ?? `ln-${i + 1}` }));
-    if (b.fxAssumptions) {
-      s.fxAssumptions = b.fxAssumptions.slice(0, 6)
-        .filter((a) => CURRENCIES.includes(a.from) && CURRENCIES.includes(a.to) && /^\d+(\.\d{1,6})?$/.test(String(a.rate)))
-        .map((a) => ({ from: a.from, to: a.to, rate: String(a.rate), source: String(a.source ?? 'manual entry').slice(0, 80), date: String(a.date ?? new Date().toISOString().slice(0, 10)).slice(0, 10), manual: true }));
-    }
-    s.version += 1;
-    s.updatedAt = Date.now();
-    // Approval is version-specific: an edit after approval leaves the record
-    // but marks it superseded.
-    if (s.approval && s.approval.version !== s.version) s.approval = { ...s.approval, superseded: true };
-    histAppend(c, 'org_user', req.orgUser.id, req.orgUser.name, 'budget_scenario_edited', { scenarioId: s.id, version: s.version });
+    const lines = b.lines ? cleanLines(b.lines).map((l, i) => ({ ...l, id: l.id ?? `ln-${i + 1}` })) : null;
+    if (lines && new Set(lines.map((l) => l.id)).size !== lines.length) return res.status(400).json({ error: 'LINES_INVALID', message: 'Each budget line needs its own id.' });
+    const fresh = cases.update(c.id, (d) => {
+      const s = d.budget.scenarios.find((x) => x.id === req.params.sid);
+      if (b.label) s.label = String(b.label).slice(0, 80);
+      if (b.termMonths) s.termMonths = Math.min(Math.max(Number(b.termMonths) || s.termMonths, 1), 72);
+      if (lines) s.lines = lines;
+      if (b.fxAssumptions) s.fxAssumptions = cleanFx(b.fxAssumptions);
+      s.version += 1;
+      s.updatedAt = Date.now();
+      // Approval is version-specific: an edit after approval leaves the record
+      // but marks it superseded.
+      if (s.approval && s.approval.version !== s.version) s.approval = { ...s.approval, superseded: true };
+      histAppend(d, 'org_user', req.orgUser.id, req.orgUser.name, 'budget_scenario_edited', { scenarioId: s.id, version: s.version });
+    });
+    const s = fresh.budget.scenarios.find((x) => x.id === req.params.sid);
     persistNow();
     res.json({ scenario: s, totals: computeScenarioTotals(s) });
   });
@@ -296,10 +307,13 @@ export function registerPlanning(ctx) {
   orgRouter.post('/cases/:id/budget/scenarios/:sid/approve', (req, res) => {
     const c = caseFor(req, res); if (!c) return;
     if (!requireLead(req, res)) return;
-    const s = c.budget?.scenarios.find((x) => x.id === req.params.sid);
-    if (!s) return res.status(404).json({ error: 'SCENARIO_NOT_FOUND' });
-    s.approval = { by: req.orgUser.name, byUserId: req.orgUser.id, at: Date.now(), version: s.version, superseded: false };
-    histAppend(c, 'org_user', req.orgUser.id, req.orgUser.name, 'budget_scenario_approved', { scenarioId: s.id, version: s.version });
+    if (!c.budget?.scenarios.some((x) => x.id === req.params.sid)) return res.status(404).json({ error: 'SCENARIO_NOT_FOUND' });
+    const fresh = cases.update(c.id, (d) => {
+      const sc = d.budget.scenarios.find((x) => x.id === req.params.sid);
+      sc.approval = { by: req.orgUser.name, byUserId: req.orgUser.id, at: Date.now(), version: sc.version, superseded: false };
+      histAppend(d, 'org_user', req.orgUser.id, req.orgUser.name, 'budget_scenario_approved', { scenarioId: sc.id, version: sc.version });
+    });
+    const s = fresh.budget.scenarios.find((x) => x.id === req.params.sid);
     persistNow();
     res.json({ scenario: s, note: 'Internal planning approval by a named lead for THIS version. It is not legal, regulatory or financial-services approval.' });
   });
@@ -311,8 +325,10 @@ export function registerPlanning(ctx) {
     const { lineId, amountMinor } = req.body ?? {};
     if (!s.lines.some((l) => l.id === lineId)) return res.status(404).json({ error: 'LINE_NOT_FOUND' });
     if (!validAmountMinor(amountMinor)) return res.status(400).json({ error: 'AMOUNT_INVALID', message: 'amountMinor must be an integer in minor units.' });
-    s.actuals.push({ id: nextId('act'), lineId, amountMinor, at: Date.now(), recordedBy: req.orgUser.name });
+    const fresh = cases.update(c.id, (d) => {
+      d.budget.scenarios.find((x) => x.id === s.id).actuals.push({ id: nextId('act'), lineId, amountMinor, at: Date.now(), recordedBy: req.orgUser.name });
+    });
     persistNow();
-    res.json({ actuals: s.actuals });
+    res.json({ actuals: fresh.budget.scenarios.find((x) => x.id === s.id).actuals });
   });
 }

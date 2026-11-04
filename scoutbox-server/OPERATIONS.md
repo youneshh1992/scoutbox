@@ -107,15 +107,14 @@ module registration → integrity report → listen.
   a migrated domain is a read-only view (`repositories/readonly.mjs`). Reads work as
   before (find, filter, spread, stringify). A direct push, splice or assignment throws and
   tells you which repository to use. Add records with the repository's `add*` / `insert`
-  methods and change rows with `update` / `setItems` / `patchItem` etc. The S8b
-  recruitment domain (cases, rooms) still exposes arrays of plain mutable records that
-  routes edit in place (those edits land in the next save's flush). That model is being
-  replaced by explicit writes; don't copy it. New domains follow S8d
-  (`repositories/signingsFollowUps.mjs`), S8c (`repositories/recruitmentContactsOffers.mjs`)
-  or S8a (`repositories/recruitment.mjs`, requests and trials): `create(record)` and
-  `update(id, (draft) => …)`, which types the whole record and writes it at once. A route
-  that edits a record and then reads it must use the record `update` returns; the one it
-  held before is the old version.
+  methods and change rows with `update` / `setItems` / `patchItem` etc. New domains follow
+  S8b (`repositories/recruitmentCases.mjs`, cases and rooms), S8a
+  (`repositories/recruitment.mjs`, requests and trials), S8c
+  (`repositories/recruitmentContactsOffers.mjs`) or S8d (`repositories/signingsFollowUps.mjs`):
+  `create(record)` and `update(id, (draft) => …)`, which types the whole record and writes it
+  at once. A route that edits a record and then reads it must use the record `update`
+  returns; the one it held before is the old version. Don't call `update` for a record from
+  inside its own `update` (it is refused): make the second change after the first returns.
 - **Units of work.** If one operation touches more than one table, or a table plus a
   blob, wrap it in `unit(() => { ... })` (`store.unitOfWork`). Inside the unit:
   - The callback must be **synchronous**. An `async` function is refused before it runs.
@@ -144,9 +143,7 @@ module registration → integrity report → listen.
   record.
 - **Typed columns, valid input only**. Each field is a typed column. Routes
   reject junk input; there are no `absent_keys_json` / `offtype_json` / `extra_json` side
-  columns. The S8b recruitment tables still carry them from the old lossless rule until they are
-  rewritten (migration plan §4.3).
-  List order is kept with `seq` / `position`.
+  columns. List order is kept with `seq` / `position`.
 - **Refusals name ids, not content.** Validation errors from repositories and migrations
   carry codes, ids and reasons. They never include a name, e-mail, message body, token or
   code.

@@ -39,7 +39,10 @@ export function registerDecision(ctx) {
   const {
     db, orgRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, audit, testProviderEnabled = false,
+    recruitmentCases, unit, // S8b: drafts, formal rows and the case move are explicit repository writes, one unit per act
   } = ctx;
+  if (typeof unit !== 'function' || !recruitmentCases?.cases) throw new TypeError('registerDecision needs the recruitment-cases repository and unit from the data layer');
+  const { cases, decisions } = recruitmentCases;
 
   const err = (res, error, message, extra = {}) => sendDomainError(res, { error, message, ...extra }, 'decision');
   const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
@@ -229,14 +232,17 @@ export function registerDecision(ctx) {
     if (content.note && !moderateOrRefuse(res, content.note, { kind: 'recruitment_decision', orgId: req.org.id, userId: req.orgUser.id })) return;
     const at = now();
     const by = actor(req);
-    kase.decisionDraft = {
+    const draft = {
       id: nextId('rdraft'), outcome: content.outcome, reasonCodes: content.reasonCodes, note: content.note, evidenceRefs: refs.refs,
       by, createdAt: at, updatedAt: at, updatedBy: by, rev: 1, revAt: at,
       keys: { create: key.key ? { key: key.key, fp } : null },
     };
-    audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'room_decision_drafted', { draftId: kase.decisionDraft.id, outcome: content.outcome, note: !!content.note });
+    const fresh = cases.update(kase.id, (d) => {
+      d.decisionDraft = draft;
+      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'room_decision_drafted', { draftId: draft.id, outcome: content.outcome, note: !!content.note });
+    });
     persistNow();
-    res.status(201).json({ draft: draftView(kase.decisionDraft) });
+    res.status(201).json({ draft: draftView(fresh.decisionDraft) });
   });
 
   orgRouter.patch('/rooms/:id/decision/draft', (req, res) => {
@@ -258,16 +264,19 @@ export function registerDecision(ctx) {
     }
     if (content.provided.note && content.note && !moderateOrRefuse(res, content.note, { kind: 'recruitment_decision', orgId: req.org.id, userId: req.orgUser.id })) return;
     const at = now();
-    if (content.provided.outcome) dr.outcome = content.outcome;
-    if (content.provided.reasonCodes) dr.reasonCodes = content.reasonCodes;
-    if (content.provided.note) dr.note = content.note;
-    if (refs) dr.evidenceRefs = refs.refs;
-    dr.updatedAt = at;
-    dr.updatedBy = actor(req);
-    dr.rev = (Number.isInteger(dr.rev) ? dr.rev : 1) + 1;
-    dr.revAt = at;
+    const fresh = cases.update(kase.id, (d) => {
+      const x = d.decisionDraft;
+      if (content.provided.outcome) x.outcome = content.outcome;
+      if (content.provided.reasonCodes) x.reasonCodes = content.reasonCodes;
+      if (content.provided.note) x.note = content.note;
+      if (refs) x.evidenceRefs = refs.refs;
+      x.updatedAt = at;
+      x.updatedBy = actor(req);
+      x.rev = (Number.isInteger(x.rev) ? x.rev : 1) + 1;
+      x.revAt = at;
+    });
     persistNow();
-    res.json({ draft: draftView(dr) });
+    res.json({ draft: draftView(fresh.decisionDraft) });
   });
 
   orgRouter.delete('/rooms/:id/decision/draft', (req, res) => {
@@ -277,8 +286,10 @@ export function registerDecision(ctx) {
     const dr = kase.decisionDraft;
     if (!dr) return err(res, 'DECISION_NOT_FOUND', 'This case has no draft decision.');
     if (!revGate(req, res, dr)) return;
-    kase.decisionDraft = null;
-    audit(kase, 'org', req.orgUser.id, req.orgUser.name, 'room_decision_draft_discarded', { draftId: dr.id, outcome: dr.outcome ?? null });
+    cases.update(kase.id, (d) => {
+      d.decisionDraft = null;
+      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'room_decision_draft_discarded', { draftId: dr.id, outcome: dr.outcome ?? null });
+    });
     persistNow();
     res.json({ draft: null, discarded: { id: dr.id } });
   });
@@ -363,55 +374,57 @@ export function registerDecision(ctx) {
         return err(res, 'DECISION_TRANSPORT_REFUSED', 'The decision could not be recorded. Nothing was changed; try again.');
       }
 
-      // ---- The formal row. Built in memory; persisted once, with the case move, or not at all.
+      // ---- The formal row, the case move and the draft's removal: ONE unit of work, or nothing.
       const { visible, withheld } = assessmentsVisible(req, kase);
       const summary = summariseAssessments(visible, { withheld });
-      const snapshot = ctx.captureRoomSnapshot?.(kase, req, 'decision:finalize') ?? null;
       const by = actor(req);
-      const row = {
-        id: nextId('rdec'), roomId: kase.id, orgId: kase.orgId, playerId: kase.playerId,
-        kind: 'formal', state: 'final', outcome, recommendation: map.recommendation,
-        reasonCodes: content.reasonCodes, note: content.note,
-        by, createdAt: at, finalizedAt: at, trigger: 'decision:finalize', clientKey: key.key,
-        supersedes: head?.id ?? null, supersededById: null, supersession,
-        rev: 1, revAt: at,
-        evidenceRefs: refs.refs,
-        assessmentSummary: assessmentSnapshot(summary),
-        snapshot: snapshot ? { at: snapshot.at, trust: snapshot.trust, sourceRefs: snapshot.sourceRefs, snapshotId: snapshot.id } : null,
-        keys: { finalize: key.key ? { key: key.key, fp } : null, draft: dr.keys?.create ?? null },
-        draftId: dr.id,
-        lifecycle: null,
-        policyVersion: DECISION_POLICY_VERSION,
-      };
-
-      // ---- The case, through the ONE validator, which now sees this row as the evidence a progress needs.
       const from = kase.room.status;
-      const prevSupersededById = head ? head.supersededById : null;
-      ctx.recruitmentCases.addDecision(row); // S8b: the former `db.roomDecisions.push(row)`; the row lands in the persistNow() below
-      if (head) head.supersededById = row.id;
-      const rollback = () => { ctx.recruitmentCases.removeDecision(row); if (head) head.supersededById = prevSupersededById; }; // S8b: the former splice — the uncommitted record leaves the mirror and lands nowhere
-      let lifecycle;
-      if (from === LIFECYCLE_ACTIONS[map.action].to) {
-        lifecycle = { action: map.action, from, to: from, applied: false, reason: 'already_there', at };
-      } else {
-        const verdict = canTransitionRecruitmentCase(kase, map.action, { role, evidence: evidenceProvider(), reasonCodes: map.lifecycleReasons, now: at });
-        if (!verdict.ok) {
-          rollback();
-          return err(res, 'DECISION_LIFECYCLE_CONFLICT', `The case at "${ROOM_STATUS_LABELS[from] ?? from}" cannot take the step this decision asks for (${map.action}). ${verdict.message ?? ''}`.trim(), { lifecycle: verdict.error, allowed: verdict.allowed ?? [], current: { status: from } });
-        }
-        const moved = ctx.applyLifecycleTransition({ req, room: kase, to: verdict.to, reasonCodes: map.lifecycleReasons, trigger: `decision:finalize:${row.id}` });
-        const last = kase.history[kase.history.length - 1];
-        if (last?.action === 'room_status_changed') {
-          last.detail = { ...last.detail, lifecycleAction: map.action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, decisionId: row.id };
-        }
-        lifecycle = { action: map.action, from: moved.from, to: moved.to, applied: true, at };
-      }
-      row.lifecycle = lifecycle;
-      if (headFormal) { headFormal.rev = (Number.isInteger(headFormal.rev) ? headFormal.rev : 1) + 1; headFormal.revAt = at; }
-      kase.decisionDraft = null;
-
       const action = headFormal ? 'room_decision_superseded' : 'room_decision_finalized';
-      audit(kase, 'org', req.orgUser.id, req.orgUser.name, action, { decisionId: row.id, outcome, supersedes: headFormal?.id ?? null, reasonCodes: content.reasonCodes, note: !!content.note, to: lifecycle.applied ? lifecycle.to : undefined });
+      class LifecycleRefused extends Error {}
+      let refused = null;
+      let row; let lifecycle; let fresh;
+      try {
+        ({ row, lifecycle, fresh } = unit(() => {
+          const snapshot = ctx.captureRoomSnapshot?.(kase, req, 'decision:finalize') ?? null;
+          const formal = decisions.create({
+            id: nextId('rdec'), roomId: kase.id, orgId: kase.orgId, playerId: kase.playerId,
+            kind: 'formal', state: 'final', outcome, recommendation: map.recommendation,
+            reasonCodes: content.reasonCodes, note: content.note,
+            by, createdAt: at, finalizedAt: at, trigger: 'decision:finalize', clientKey: key.key,
+            supersedes: head?.id ?? null, supersededById: null, supersession,
+            rev: 1, revAt: at,
+            evidenceRefs: refs.refs,
+            assessmentSummary: assessmentSnapshot(summary),
+            snapshot: snapshot ? { at: snapshot.at, trust: snapshot.trust, sourceRefs: snapshot.sourceRefs, snapshotId: snapshot.id } : null,
+            keys: { finalize: key.key ? { key: key.key, fp } : null, draft: dr.keys?.create ?? null },
+            draftId: dr.id,
+            lifecycle: null,
+            policyVersion: DECISION_POLICY_VERSION,
+          });
+          if (head) decisions.update(head.id, (h) => { h.supersededById = formal.id; });
+          // The case, through the ONE validator, which now sees this row as the evidence a progress needs.
+          let lc;
+          if (from === LIFECYCLE_ACTIONS[map.action].to) {
+            lc = { action: map.action, from, to: from, applied: false, reason: 'already_there', at };
+          } else {
+            const verdict = canTransitionRecruitmentCase(kase, map.action, { role, evidence: evidenceProvider(), reasonCodes: map.lifecycleReasons, now: at });
+            // A refusal rolls the whole unit back: no row, no snapshot, no supersession.
+            if (!verdict.ok) { refused = verdict; throw new LifecycleRefused(); }
+            const moved = ctx.applyLifecycleTransition({ req, room: kase, to: verdict.to, reasonCodes: map.lifecycleReasons, trigger: `decision:finalize:${formal.id}`, statusDetail: { lifecycleAction: map.action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, decisionId: formal.id } });
+            lc = { action: map.action, from: moved.from, to: moved.to, applied: true, at };
+          }
+          const saved = decisions.update(formal.id, (d) => { d.lifecycle = lc; });
+          if (headFormal) decisions.update(headFormal.id, (h) => { h.rev = (Number.isInteger(h.rev) ? h.rev : 1) + 1; h.revAt = at; });
+          const after = cases.update(kase.id, (c) => {
+            c.decisionDraft = null;
+            audit(c, 'org', req.orgUser.id, req.orgUser.name, action, { decisionId: formal.id, outcome, supersedes: headFormal?.id ?? null, reasonCodes: content.reasonCodes, note: !!content.note, to: lc.applied ? lc.to : undefined });
+          });
+          return { row: saved, lifecycle: lc, fresh: after };
+        }));
+      } catch (e) {
+        if (!(e instanceof LifecycleRefused)) throw e;
+      }
+      if (refused) return err(res, 'DECISION_LIFECYCLE_CONFLICT', `The case at "${ROOM_STATUS_LABELS[from] ?? from}" cannot take the step this decision asks for (${map.action}). ${refused.message ?? ''}`.trim(), { lifecycle: refused.error, allowed: refused.allowed ?? [], current: { status: from } });
       persistNow();
 
       // Literal names (PRE-M24 PM-15): the M18.2 source scan only sees call
@@ -421,15 +434,15 @@ export function registerDecision(ctx) {
       const decisionEvent = { orgId: kase.orgId, roomId: kase.id, decisionId: row.id };
       if (headFormal) broadcast?.('room_decision_superseded', decisionEvent);
       else broadcast?.('room_decision_finalized', decisionEvent);
-      if (TERMINAL_ROOM_STATUSES.includes(kase.room.status)) {
+      if (TERMINAL_ROOM_STATUSES.includes(fresh.room.status)) {
         // The Second Look contract: the same ids-only event M17 broadcasts when a room is archived.
         broadcast?.('recruitment_room_archived', { orgId: kase.orgId, roomId: kase.id });
       }
-      for (const uid of new Set([kase.ownerUserId, kase.room?.leadScoutUserId])) {
+      for (const uid of new Set([fresh.ownerUserId, fresh.room?.leadScoutUserId])) {
         if (!uid || uid === req.orgUser.id) continue;
         notify({ kind: 'org_user', id: uid }, 'recruitment_room', `Recruitment Room — ${kase.playerName ?? 'a removed player'}: formal decision recorded (${map.label}).`, kase.id);
       }
-      res.status(201).json({ decision: decisionView(row), lifecycle, case: lifecycle.applied ? { from: lifecycle.from, to: lifecycle.to } : { unchanged: true, status: kase.room.status }, rev: kase.room.rev });
+      res.status(201).json({ decision: decisionView(row), lifecycle, case: lifecycle.applied ? { from: lifecycle.from, to: lifecycle.to } : { unchanged: true, status: fresh.room.status }, rev: fresh.room.rev });
     };
   }
   orgRouter.post('/rooms/:id/decision/finalize', finalizeHandler('finalize'));

@@ -39,7 +39,7 @@ export function migrateM13(db, players) {
   // depends on a sweep having been scheduled is a store that moves if the
   // sweep is ever made lazy.
   db.reviewLater ??= [];
-  for (const c of db.recruitmentCases ?? []) c.budget ??= null; // F9 — deal scenarios live on the case
+  // F9 — deal scenarios live on the case (typed rows since S8b: a case without one reads back `budget: null`).
   // Staff records (`db.users`) are owned by the users repository
   // (repositories/users.mjs) and are read-only here: an unset `mfa` or
   // `deliveryPrefs` is simply absent, and every reader already treats
@@ -103,6 +103,9 @@ export function totpValid(secretB32, code, nowMs = Date.now()) {
 // ever touches an amount; conversion uses a scaled-integer rate.
 export const validAmountMinor = (v) => Number.isInteger(v) && Math.abs(v) <= Number.MAX_SAFE_INTEGER;
 export const CURRENCIES = ['GBP', 'EUR', 'USD', 'CHF', 'SEK', 'NOK', 'DKK', 'PLN', 'BRL'];
+/** F9 budget lines: what a line is and how often it is paid. */
+export const BUDGET_LINE_KINDS = ['wage', 'fee', 'bonus', 'expense'];
+export const BUDGET_SCHEDULES = ['one_off', 'weekly', 'monthly', 'annual'];
 /** Convert via an explicit assumption. rate is a decimal STRING (e.g. "1.1732").
  *  Scaled to 1e6 integer math via BigInt; result rounded half-up to minor units. */
 export function convertMinor(amountMinor, rateStr) {

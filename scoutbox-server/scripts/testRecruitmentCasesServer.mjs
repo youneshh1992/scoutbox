@@ -2,7 +2,7 @@
 // only): recruitment cases, room comments, room snapshots, room decisions and room evidence states as tables. A room
 // created and one adopting an M12 case, a comment edited and tombstoned, a task, a status move with its snapshot, an
 // archive and a reopen, an evidence review overwritten in place, a decision draft replayed and conflicted, finalized
-// with its key rows moved to the formal row, an M12 case with its budget scenario (lines, fx assumption, approval,
+// with its keys carried to the formal row, an M12 case with its budget scenario (lines, fx assumption, approval,
 // actual), the handoff readiness route, the listing and reading routes answering as before, a SIGKILL right after a
 // comment, /capabilities counting the rows; the player's and the guardian's surfaces acquiring no internal note, no
 // decision and no mention of a room; another club's 404; the deletion unit tombstoning the cases in place with a REAL
@@ -35,7 +35,7 @@ const COLLECTIONS = ['recruitmentCases', 'roomComments', 'roomSnapshots', 'roomD
 const CASE_TABLES = ['recruitment_cases', 'case_room_tags', 'case_assignments', 'case_tasks', 'case_approvals', 'case_history', 'case_request_links', 'case_trial_links', 'case_decision_drafts', 'case_decision_draft_reason_codes', 'case_decision_draft_evidence_refs', 'case_transaction_handoffs', 'case_budget_scenarios', 'case_budget_lines', 'case_budget_fx_assumptions', 'case_budget_actuals'];
 const ROOM_TABLES = ['room_comments', 'room_comment_mentions', 'room_snapshots', 'room_snapshot_source_refs', 'room_decisions', 'room_decision_reason_codes', 'room_decision_evidence_refs', 'room_decision_assessment_ids', 'room_evidence_states'];
 const TABLES = [...CASE_TABLES, ...ROOM_TABLES];
-const S8A_TABLES = ['recruitment_requests', 'request_trial_slots', 'trials', 'trial_schedule_sessions', 'trial_session_evidence', 'trial_schedule_revisions', 'trial_attendance', 'trial_reminders', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events', 'trial_reports', 'trial_history', 'idempotency_keys'];
+const S8A_TABLES = ['recruitment_requests', 'request_trial_slots', 'trials', 'trial_schedule_sessions', 'trial_session_evidence', 'trial_schedule_revisions', 'trial_attendance', 'trial_reminders', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events', 'trial_reports', 'trial_history'];
 const INTERNAL_COMMENT = 'Internal: prefers the left channel, watch 42:10.';
 const INTERNAL_NOTE = 'Internal: hold until the winter window.';
 
@@ -87,11 +87,11 @@ async function roomFor(S, token, playerId, extra = {}) { const r = await S.j('PO
 const roomRev = async (S, token, id) => (await S.j('GET', `/org/rooms/${id}`, undefined, token)).body.room.rev;
 const moveStatus = async (S, token, id, status, extra = {}) => S.j('POST', `/org/rooms/${id}/status`, { status, expectedRev: await roomRev(S, token, id), ...extra }, token);
 
-await test('[routes] a fresh boot records 0016_recruitment_cases last; the twenty-five tables exist, recruitment_requests and trials carry the REAL case key, idempotency_keys the broadened CHECK, no blob behind any of the five; a room created, a comment (edited, tombstoned), a task, a status move with its snapshot, an archive and a reopen, an evidence review overwritten in place, a draft replayed/conflicted/patched/finalized with its key rows, an M12 case with its budget and a room adopting it land as rows the moment the route answers; the handoff readiness route, the listing and reading routes answer as before; a SIGKILL right after a comment loses nothing; /capabilities counts the rows; [compat] another club gets 404, the player\'s and the guardian\'s surfaces carry no internal note, no decision and no room', async () => {
+await test('[routes] a fresh boot records 0016_recruitment_cases last; the twenty-five tables exist, recruitment_requests and trials carry the REAL, immediate case key, the case graph keeps its keys as columns, no blob behind any of the five; a room created, a comment (edited, tombstoned), a task, a status move with its snapshot, an archive and a reopen, an evidence review overwritten in place, a draft replayed/conflicted/patched/finalized with its keys, an M12 case with its budget and a room adopting it land as rows the moment the route answers; the handoff readiness route, the listing and reading routes answer as before; a SIGKILL right after a comment loses nothing; /capabilities counts the rows; [compat] another club gets 404, the player\'s and the guardian\'s surfaces carry no internal note, no decision and no room', async () => {
   const dir = tempDir('s8b-boot'); let S = await boot(dir);
   assert.equal(applied(dir).at(-3), MIGRATION, 'the recorded migration (0017_recruitment_contacts_offers, S8c, and 0018_signings_follow_ups, S8d, follow it on the same boot)'); assert.equal(applied(dir).at(-2), '0017_recruitment_contacts_offers'); assert.equal(applied(dir).at(-1), '0018_signings_follow_ups'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
-  for (const t of ['recruitment_requests', 'trials']) assert.ok(fkOf(dir, t).includes('case_id->recruitment_cases(id) NO ACTION'), `${t}.case_id is a real key, deferred to COMMIT since S8a became explicit (§4.3): ${fkOf(dir, t)}`);
-  assert.match(ddlOf(dir, 'idempotency_keys') ?? '', /'case_decision_drafts', 'case_transaction_handoffs', 'room_decisions'/, 'the broadened owner CHECK');
+  for (const t of ['recruitment_requests', 'trials']) assert.ok(fkOf(dir, t).includes('case_id->recruitment_cases(id) RESTRICT'), `${t}.case_id is a real, immediate key (§4.3): ${fkOf(dir, t)}`);
+  assert.match(ddlOf(dir, 'idempotency_keys') ?? '', /owner_table IN \('signing_packages'\)/, 'the case graph keeps its keys as columns');
   for (const n of COLLECTIONS) assert.equal(blobOf(dir, n), undefined, `${n}: no blob`);
   const maria = await orgLogin(S); const a = await signupAdult(S, 'Room Adult'); const b = await signupAdult(S, 'Case Adult'); const c = await signupAdult(S, 'Adopted Adult');
   // the room
@@ -125,15 +125,15 @@ await test('[routes] a fresh boot records 0016_recruitment_cases last; the twent
   // the decision: draft, replay, conflict, patch, finalize, replay
   const DRAFT = { outcome: 'hold', reasonCodes: ['technical_fit'], note: INTERNAL_NOTE, clientKey: 'draft-key-a' };
   const dr = await S.j('POST', `/org/rooms/${RID}/decision/draft`, DRAFT, maria); assert.equal(dr.status, 201, dr.text); const DID = dr.body.draft.id;
-  assert.equal(q1(dir, 'SELECT id, outcome, note FROM case_decision_drafts WHERE case_id = ?', RID).id, DID); assert.equal(q1(dir, "SELECT key FROM idempotency_keys WHERE owner_table = 'case_decision_drafts' AND owner_id = ? AND act = 'create'", RID).key, 'draft-key-a', 'keys.create as a row owned by the CASE id (review of b7c0dd0, F2)'); assert.equal(q1(dir, 'SELECT count(*) AS n FROM idempotency_keys WHERE owner_id = ?', DID).n, 0, 'never under the draft id');
+  assert.equal(q1(dir, 'SELECT id, outcome, note FROM case_decision_drafts WHERE case_id = ?', RID).id, DID); assert.equal(q1(dir, 'SELECT create_key FROM case_decision_drafts WHERE case_id = ?', RID).create_key, 'draft-key-a', 'keys.create is a column of the draft row');
   assert.deepEqual(qAll(dir, 'SELECT code FROM case_decision_draft_reason_codes WHERE case_id = ? ORDER BY position', RID).map((r) => r.code), ['technical_fit']);
   const replay = await S.j('POST', `/org/rooms/${RID}/decision/draft`, DRAFT, maria); assert.equal(replay.status, 200, replay.text); assert.equal(replay.body.idempotent, true, '[compat] the same clientKey replays');
   const conflict = await S.j('POST', `/org/rooms/${RID}/decision/draft`, { ...DRAFT, note: 'Different.' }, maria); assert.equal(conflict.body.error, 'DECISION_IDEMPOTENCY_CONFLICT', conflict.text);
   const pt = await S.j('PATCH', `/org/rooms/${RID}/decision/draft`, { note: `${INTERNAL_NOTE} Patched.`, expectedRev: dr.body.draft.rev }, maria); assert.equal(pt.status, 200, pt.text); assert.equal(q1(dir, 'SELECT rev FROM case_decision_drafts WHERE id = ?', DID).rev, 2);
   const fin = await S.j('POST', `/org/rooms/${RID}/decision/finalize`, { expectedRev: pt.body.draft.rev, clientKey: 'fin-key-a' }, maria); assert.equal(fin.status, 201, fin.text); const FID = fin.body.decision.id;
   const frow = q1(dir, 'SELECT * FROM room_decisions WHERE id = ?', FID); assert.equal(frow.kind, 'formal'); assert.equal(frow.outcome, 'hold'); assert.equal(frow.draft_id, DID); assert.equal(frow.room_id, RID);
-  assert.deepEqual(qAll(dir, "SELECT act, key FROM idempotency_keys WHERE owner_table = 'room_decisions' AND owner_id = ? ORDER BY position", FID).map((r) => [r.act, r.key]), [['finalize', 'fin-key-a'], ['draft', 'draft-key-a']], 'the formal row\'s keys as rows');
-  assert.equal(q1(dir, 'SELECT count(*) AS n FROM case_decision_drafts WHERE case_id = ?', RID).n, 0, 'the draft row gone'); assert.equal(q1(dir, "SELECT count(*) AS n FROM idempotency_keys WHERE owner_table = 'case_decision_drafts'").n, 0, 'the draft\'s key row cleaned');
+  assert.deepEqual(Object.values({ ...q1(dir, 'SELECT finalize_key, draft_key FROM room_decisions WHERE id = ?', FID) }), ['fin-key-a', 'draft-key-a'], 'the formal row\'s keys are its columns');
+  assert.equal(q1(dir, 'SELECT count(*) AS n FROM case_decision_drafts WHERE case_id = ?', RID).n, 0, 'the draft row gone');
   assert.equal(caseRow(dir, RID).room_status, fin.body.lifecycle.to, 'the case moved with the decision');
   if (fin.body.decision.snapshot?.snapshotId ?? frow.snapshot_id) assert.ok(q1(dir, 'SELECT 1 AS one FROM room_snapshots WHERE id = ?', frow.snapshot_id), 'the decision\'s snapshot copy names a stored snapshot');
   const finReplay = await S.j('POST', `/org/rooms/${RID}/decision/finalize`, { expectedRev: 0, clientKey: 'fin-key-a' }, maria); assert.equal(finReplay.status, 200, finReplay.text); assert.equal(finReplay.body.idempotent, true, '[compat] the finalize replays');

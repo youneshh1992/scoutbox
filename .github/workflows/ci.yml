@@ -28,7 +28,7 @@ jobs:
         run: node scripts/connectedE2E.mjs
       - name: Migrated-domain end-to-end batteries (each spawns its own server)
         run: |
-          for s in m13E2E m23Persistence m23BootContract m23AgentTransactionPersistence m23ContactPersistence m23OfferPersistence m23DecisionPersistence m23TrialPersistence m23RecruitmentJourneyPersistence m23SigningPersistence; do
+          for s in m13E2E m23Persistence m23BootContract m23AgentTransactionPersistence m23ContactPersistence m23OfferPersistence m23DecisionPersistence m23TrialPersistence m23RecruitmentJourneyPersistence m23SigningPersistence m12E2E m17E2E m23DecisionE2E; do
             echo "== $s"; node "scripts/$s.mjs" || exit 1
           done
 

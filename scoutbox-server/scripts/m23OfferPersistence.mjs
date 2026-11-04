@@ -291,7 +291,7 @@ section('5 — P6.1: lazy expiry, temporal corruption, unknown statuses, legacy 
   // d) a legacy row: a case at offer_made with no Offer row at all (a pre-P6 lifecycle written by the legacy status writer)
   const legacyCase = db.recruitmentCases.find((c) => c.id === R.kim.RID);
   void legacyCase;
-  const martinCase = { ...structuredClone(svenCase), id: 'case-legacy-made', playerId: 'pl-martin', room: { ...structuredClone(svenCase.room), status: 'offer_made', id: 'case-legacy-made' }, history: [] };
+  const martinCase = { ...structuredClone(svenCase), id: 'case-legacy-made', playerId: 'pl-martin', room: { ...structuredClone(svenCase.room), status: 'offer_made' }, history: [], decisionDraft: null, transactionHandoff: null };
   db.recruitmentCases.push(martinCase);
   // S8c (typed since §4.3): an unknown Offer status, an unknown revision status and a revision number below 1 are
   // values the columns cannot hold — each save is REFUSED, naming the row, and the directory is unchanged. The other

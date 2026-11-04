@@ -532,7 +532,7 @@ export function registerSecondLook(ctx) {
     const out = ctx.reopenRoom({
       req, room, to: 'under_review',
       reasonCodes: req.body?.reasonCodes ?? ['continue_monitoring'],
-      sourceContext: 'second_look', sourceRef: item.id,
+      sourceContext: 'second_look', sourceRef: { id: item.id },
     });
     if (!out.ok) return res.status(out.status).json(out);
 

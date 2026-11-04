@@ -938,8 +938,10 @@ section('R — corrupt current pointers and unknown states fail closed (§35, §
   // S8c (typed since §4.3): a current-revision pointer naming a revision the Offer does not hold is refused at the
   // save, naming the Offer (planted in its own save, like R2); the Offer reads as before.
   let gone = null; const goneRefused = await offline((db) => { const o = db.recruitmentOffers.find((x) => x.id === K.OID); gone = o ?? null; db.recruitmentOffers = db.recruitmentOffers.map((x) => (x.id === K.OID ? { ...x, currentRevisionId: 'rofr-gone' } : x)); });
-  await offline((db) => {
-    const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); if (k) k.room.status = 'SIGNEDX';
+  // S8b (typed since §4.3): the room status is a CHECKed column — an unknown word is refused at the save, naming the
+  // case (planted in its own save, like R1 and R2); the case reads as before.
+  let r4Status = null; const unknownRefused = await offline((db) => {
+    const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); r4Status = k?.room?.status ?? null; if (k) k.room.status = 'SIGNEDX';
   });
   const jK = await jb(K.RID);
   neg(gone && goneRefused && goneRefused.message.includes(`${K.OID}.currentRevisionId names rofr-gone, not a revision of this offer`) && jK.resources.offerId === K.OID && jK.classification !== 'integrity_error', `R1 an Offer whose current-revision pointer names a missing revision cannot be stored: the save refuses it, naming the Offer; the case reads as before (${String(goneRefused?.message ?? 'no refusal').slice(0, 100)}…)`);
@@ -948,13 +950,10 @@ section('R — corrupt current pointers and unknown states fail closed (§35, §
   const jN = await jb(Hh.R5);
   neg(bogusPkg === null || (bogus && /SIGNINGS_IMPORT_BLOCKED/.test(bogus.message) && bogus.message.includes(bogusPkg) && bogus.message.includes('status must be one of') && jN.classification !== 'integrity_error'), `R2 (S8d) an unknown status word cannot be stored: the save refuses it, naming the package; the package reads as before (${bogusPkg ?? 'no package'}: ${String(bogus?.message ?? 'no refusal').slice(0, 80)}…)`);
   const j4 = await jb(globalThis.__B.R4);
-  neg(j4.nextAction.code === 'STATE_UNKNOWN' && j4.classification === 'integrity_error' && j4.integrity.includes('LIFECYCLE_STATE_UNKNOWN'), 'R3 an unknown lifecycle word: STATE_UNKNOWN, integrity_error');
-  const mv = await lifecycle(globalThis.__B.R4, 'startReview');
-  neg(mv.status >= 400 && /LIFECYCLE_STATE_UNKNOWN|ROOM|LIFECYCLE/.test(mv.body?.error ?? ''), `R3b the lifecycle refuses to move an unknown state (${mv.status} ${mv.body?.error})`);
-  await offline((db) => {
-    const k = db.recruitmentCases.find((x) => x.id === globalThis.__B.R4); if (k) k.room.status = 'archived';
-  });
-  ok((await jb(K.RID)).classification !== 'integrity_error', 'R4 restored, the case reads sound again (nothing was repaired on read: the store was put right)');
+  neg(unknownRefused && /RECRUITMENT_CASES_INPUT_INVALID/.test(unknownRefused.message) && unknownRefused.message.includes(`${globalThis.__B.R4}.room.status must be one of`) && j4.classification !== 'integrity_error', `R3 an unknown lifecycle word cannot be stored: the save refuses it, naming the case; the case reads as before (${String(unknownRefused?.message ?? 'no refusal').slice(0, 80)}…)`);
+  const verdict = canTransitionRecruitmentCase({ id: globalThis.__B.R4, room: { status: 'SIGNEDX' }, history: [] }, 'startReview', { role: 'recruitment_admin' });
+  neg(!verdict.ok && verdict.error === 'LIFECYCLE_STATE_UNKNOWN', `R3b the lifecycle refuses to move an unknown state (${verdict.error})`);
+  ok(r4Status === 'archived' && (await jb(globalThis.__B.R4)).classification !== 'integrity_error', 'R4 the store was never put wrong: the case still reads sound at its own status');
 }
 
 // ================================================================ S — legacy / canonical mix
@@ -969,7 +968,7 @@ section('S — partial legacy / canonical mixes: nothing invented (§37)');
     const plant = (id, chain, extraLast = {}) => {
       const k = db.recruitmentCases.find((x) => x.id === id);
       let prev = k.room.status; let tt = Math.max(Date.now(), ...(k.history ?? []).map((h) => Number(h.at) || 0));
-      for (const to of chain) { tt += H; k.history.push({ id: `hist-p81-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', by: { kind: 'org', id: 'legacy', name: 'Legacy' }, detail: { from: prev, to, ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
+      for (const to of chain) { tt += H; k.history.push({ id: `hist-p81-${Math.random().toString(36).slice(2, 8)}`, at: tt, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName: 'Legacy', detail: { from: prev, to, ...(to === chain[chain.length - 1] ? extraLast : {}) } }); prev = to; }
       k.room.status = chain[chain.length - 1]; k.room.rev = (k.room.rev ?? 1) + chain.length;
       return k;
     };

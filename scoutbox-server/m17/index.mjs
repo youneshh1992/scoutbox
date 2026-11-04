@@ -23,7 +23,7 @@ export function migrateM17(db) {
   db.roomDecisions ??= [];       // append-only decision memory with reason codes
   db.roomSnapshots ??= [];       // decision-time evidence-confidence provenance
   db.roomEvidenceState ??= [];   // the Room's private review state over evidence
-  for (const c of db.recruitmentCases ?? []) c.room ??= null;
+  // (A case's Room facet is a typed column group since S8b: a case without one reads back `room: null`.)
 }
 
 export function registerM17(ctx) {

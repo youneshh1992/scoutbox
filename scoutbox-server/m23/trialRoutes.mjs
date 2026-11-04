@@ -60,6 +60,8 @@ export function registerTrial(ctx) {
   // S8a: every trial and request write is an explicit repository operation (trials.update / requests.update) inside `unit`.
   if (typeof unit !== 'function' || !recruitment?.trials) throw new TypeError('registerTrial needs the recruitment repository and unit from the data layer');
   const { trials } = recruitment;
+  const { cases } = ctx.recruitmentCases; // S8b: the case's links and history are explicit writes in the same unit
+  const caseAudit = (kase, ...args) => cases.update(kase.id, (d) => audit(d, ...args));
 
   /**
    * ONE clock per request. In a test deployment (SCOUTBOX_TEST_CLOCK=1) a
@@ -229,11 +231,7 @@ export function registerTrial(ctx) {
     const verdict = canTransitionRecruitmentCase(room, action, { role, evidence: ctx.recruitmentEvidenceProvider, now: at });
     if (verdict.ok) {
       const org = orgOf(room.orgId);
-      const { from, to } = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger, actor: actor ? { ...actor, org } : null });
-      const last = room.history[room.history.length - 1];
-      if (last?.action === 'room_status_changed') {
-        last.detail = { ...last.detail, lifecycleAction: action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, ...keyDetail };
-      }
+      const { from, to } = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger, actor: actor ? { ...actor, org } : null, statusDetail: { lifecycleAction: action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, ...keyDetail } });
       return { applied: true, from, to, at };
     }
     if (verdict.error !== 'LIFECYCLE_NO_CHANGE') console.error(`TRIAL lifecycle_not_applied ${room.id} ${action} ${verdict.error} ${verdict.evidenceReason ?? ''}`);
@@ -413,9 +411,10 @@ export function registerTrial(ctx) {
       // S8a: the case link, the recipient snapshot and the client key are part of the one create.
       workflow: { caseId: room.id, recipient, keys: { invite: key.key ? { key: key.key, fp } : null } },
     }, { persist: false });
-    room.links ??= { requestIds: [], trialIds: [], signingId: null };
-    if (!room.links.requestIds.includes(request.id)) room.links.requestIds.push(request.id);
-    audit(room, 'org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', { requestId: request.id, recipientType: recipient.type, slotCount: inv.slots.length });
+    cases.update(room.id, (d) => {
+      if (!d.links.requestIds.includes(request.id)) d.links.requestIds.push(request.id);
+      audit(d, 'org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', { requestId: request.id, recipientType: recipient.type, slotCount: inv.slots.length });
+    });
 
     moved = advanceCase({ req, room, action: 'planTrial', at, trigger: `trial:invite:${request.id}`, keyDetail: { requestId: request.id } });
     return request;
@@ -848,9 +847,10 @@ export function registerTrial(ctx) {
     recruitment.requests.update(request.id, (d) => { d.trialId = trial.id; }); // S8a: in the respond route's unit
     const room = (db.recruitmentCases ?? []).find((k) => k?.id === request.caseId) ?? null;
     if (!room) return null;
-    room.links ??= { requestIds: [], trialIds: [], signingId: null };
-    if (!room.links.trialIds.includes(trial.id)) room.links.trialIds.push(trial.id);
-    audit(room, actor.kind, actor.id, actor.name, 'room_trial_accepted', { trialId: trial.id, requestId: request.id, recipientType: actor.kind, scheduled: trial.workflowState === 'scheduled' });
+    cases.update(room.id, (d) => {
+      if (!d.links.trialIds.includes(trial.id)) d.links.trialIds.push(trial.id);
+      audit(d, actor.kind, actor.id, actor.name, 'room_trial_accepted', { trialId: trial.id, requestId: request.id, recipientType: actor.kind, scheduled: trial.workflowState === 'scheduled' });
+    });
     let moved = { applied: false, reason: 'not_scheduled', at };
     if (trial.workflowState === 'scheduled') {
       moved = advanceCase({ room, action: 'confirmTrial', at, trigger: `trial:accept:${trial.id}`, actor, keyDetail: { trialId: trial.id } });
@@ -867,7 +867,7 @@ export function registerTrial(ctx) {
   ctx.onTrialDeclined = ({ request, at, actor }) => {
     const room = (db.recruitmentCases ?? []).find((k) => k?.id === request.caseId) ?? null;
     if (!room) return null;
-    audit(room, actor.kind, actor.id, actor.name, 'room_trial_declined', { requestId: request.id, recipientType: actor.kind });
+    caseAudit(room, actor.kind, actor.id, actor.name, 'room_trial_declined', { requestId: request.id, recipientType: actor.kind });
     for (const uid of new Set([room.ownerUserId, room.room?.leadScoutUserId])) {
       if (!uid || uid === request.userId) continue;
       notify({ kind: 'org_user', id: uid }, 'trial_day', `Recruitment Room — ${room.playerName ?? 'a removed player'}: the ${actor.kind} declined the trial invitation.`, request.id);

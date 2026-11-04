@@ -20,7 +20,7 @@
  * Tables (file 02): signing_packages, signing_revisions, signing_documents, signing_revision_parties, signing_history;
  * signings, signing_parties; follow_ups, outcome_reports, outcome_report_confirmations — ten definitions; the design
  * note counted nine before `signing_parties` was separated from `signings`. The package `keys` are rows of the ONE
- * shared `idempotency_keys` table, owner `signing_packages` (the CHECK broadened by 0018). `completion_signing_id`
+ * shared `idempotency_keys` table, owner `signing_packages` (created by 0018). `completion_signing_id`
  * (package → signing) and `signing_package_id` (signing → package) form a cycle, so the package side is DEFERRABLE
  * INITIALLY DEFERRED with NO ACTION (a RESTRICT would fire at once even on a deferred key): checked at COMMIT, which
  * lets the completion unit write the signing row and then the package, and a snapshot remove the pair in one save.
@@ -30,7 +30,6 @@
  * became the primary key when S8c moved to typed tables, migration.md §4.3; turning this into a real key is a later change). Player ids: NO key, tolerant and counted —
  * Q7a/Q8a/Q8c-a applied a fourth time, not re-asked. Guardian and party ids: polymorphic, no key.
  */
-import { S8C_KEY_OWNERS } from './recruitmentContactsOffers.mjs';
 import { idempotencyKeysDdl, isPlainObject, ids, tableExists } from './recruitment.mjs';
 import { readonlyView, markView } from './readonly.mjs';
 import { transaction, migrationApplied } from './database.mjs';
@@ -38,8 +37,8 @@ import { transaction, migrationApplied } from './database.mjs';
 export const SIGNINGS_FOLLOWUPS_MIGRATION = '0018_signings_follow_ups';
 export const SIGNINGS_FOLLOWUPS_COLLECTIONS = Object.freeze(['signingPackages', 'signings', 'followUps', 'outcomeReports']);
 export const SIGNINGS_FOLLOWUPS_TABLES = Object.freeze(['signing_packages', 'signing_revisions', 'signing_documents', 'signing_revision_parties', 'signing_history', 'signings', 'signing_parties', 'follow_ups', 'outcome_reports', 'outcome_report_confirmations']);
-/** The owner tables the shared idempotency_keys CHECK names once 0018 is recorded. */
-export const S8D_KEY_OWNERS = Object.freeze([...S8C_KEY_OWNERS, 'signing_packages']);
+/** The owner tables of the shared idempotency_keys table (created by 0018; the earlier steps keep their keys as columns). */
+export const S8D_KEY_OWNERS = Object.freeze(['signing_packages']);
 
 export const SIGNING_STORED_STATUSES = Object.freeze(['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED']);
 export const SIGNING_REVISION_STATUSES = Object.freeze([...SIGNING_STORED_STATUSES, 'SUPERSEDED']);
