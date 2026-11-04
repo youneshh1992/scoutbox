@@ -34,17 +34,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ObservationRun } from '../m22/engine.mjs';
-import { decodeFrame } from '../m22/frames.mjs';
+import { ObservationRun } from '../../m22/engine.mjs';
+import { decodeFrame } from '../../m22/frames.mjs';
 import {
   holdoutFamilies, holdoutFalseTouchStress, holdoutSeeds, DEV_SEEDS,
   GENERATION_PARAMETERS, HOLDOUT_GENERATIONS, ACTIVE_GENERATION,
-} from '../m22/holdout.mjs';
-import { freezeStatus, geometryMirrorCheck, FREEZE } from '../m22/freeze.mjs';
-import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../m22/policy.mjs';
+} from '../../m22/holdout.mjs';
+import { freezeStatus, geometryMirrorCheck, FREEZE } from '../../m22/freeze.mjs';
+import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../../m22/policy.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const M22 = path.join(HERE, '..', 'm22');
+const M22 = path.join(HERE, '..', '..', 'm22');
 const OUT = path.join(M22, 'holdout.json');
 const DEV_EVAL = path.join(M22, 'evaluation.json');
 

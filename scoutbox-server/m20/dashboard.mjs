@@ -8,8 +8,7 @@
  * metrics computed independently would be twenty linear scans of every
  * recruitment collection. So each collection is filtered to this organisation
  * exactly once, projected to the few fields the metrics declared, indexed, and
- * then every family reads from that. `m20Perf.mjs` measures the result at
- * 100/500/1000 rooms and the figure is published whatever it is.
+ * then every family reads from that.
  *
  * **Each family fails alone.** A dashboard that drops a panel when one
  * projection throws is lying about coverage — the director reads five panels

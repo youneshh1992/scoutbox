@@ -179,7 +179,7 @@ export class ProductionCvProvider {
     ttlMs = 5 * 60_000,
     maxConcurrent = MAX_CONCURRENT_SESSIONS,
     // §24/§95: an injection point for a worker boundary. It is NOT used by
-    // default, because m22Perf measured one frame at 0.31-0.92 ms and a
+    // default, because a measurement (M22) found one frame at 0.31-0.92 ms and a
     // batch capped at 12 — moving that to a worker would add more
     // serialisation cost than it removes blocking. Measure first, as §24
     // says; the seam exists so a future measurement can change the answer

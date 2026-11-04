@@ -71,7 +71,7 @@ export const TIMELINE_ACTION_NAMES = Object.freeze(Object.keys(TIMELINE_ACTIONS)
 /**
  * Gather every record belonging to one plan, in one pass per collection. The
  * snapshot store has no indexes — a scan IS the access path — so the shape of
- * this function is the performance story, and `scripts/m21Perf.mjs` measures it.
+ * this function is the performance story.
  */
 export function collectPlan(db, planId) {
   const plan = (db.developmentPlans ?? []).find((p) => p.id === planId) ?? null;

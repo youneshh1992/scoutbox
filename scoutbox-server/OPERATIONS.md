@@ -37,10 +37,9 @@ is archived in git under the tag `docs-archive-2026-11`. The migration's status 
 |---|---|
 | `npm test` | Runtime contract, data-layer, repository, migration and per-domain batteries, plus their real-server variants (`scripts/runTests.mjs`, the list is `SUITES`). Each suite runs on its own temporary directories and free ports, up to 4 at a time (`TEST_JOBS`); a failing suite prints its whole log (`TEST_VERBOSE=1` prints every log). `npm test -- testOrgs testSessions` runs only those. |
 | `npm run e2e` | `scripts/apiE2E.mjs`. Starts its own freshly seeded server on a free port and a temporary `DATA_DIR`, and removes both. To test a server you started yourself, pass both `API_URL` and that server's `DATA_DIR`; `API_URL` alone is refused, because the persistence checks read the data directory. |
-| `npm run perf:data-layer` | Data-layer micro-benchmark. |
 | `npm run perf:recruitment -- [players] [clones] [busy]` | Recruitment at scale through the real server: synthetic players and cloned recruitment graphs, hot-route timings, one write's log volume, the sweep queries (migration.md §4.3 step 4). |
+| `node scripts/tools/boxCamCvEvaluation.mjs` | Re-measures the Box Cam engine against its golden fixtures and rewrites `m22/evaluation.json`, which the Combine production gate reads. Run it when the engine changes and commit the result. `scripts/tools/boxCamCvHoldout.mjs` is the matching holdout run (`m22/holdout.json`). |
 | `node scripts/m13E2E.mjs` | Delivery, webhook, backup and restore end to end (sets `M13_FAST_RETRY`, `ALLOW_LOCAL_WEBHOOKS`). |
-| `node scripts/m13Load.mjs` | Small local load probe. Not a capacity claim. |
 
 Test-only knobs: `TEST_ONLY=<name>` filters cases inside some batteries (for example,
 `testUnitOfWork`, `testRecruitmentServer`). `SCOUTBOX_TEST_NODE_BINS=/a/node:/b/node`

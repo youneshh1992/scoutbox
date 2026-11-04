@@ -21,9 +21,6 @@ fixed on 3 November; these were found while fixing it.
 - **`scripts/m182E2E.mjs` fails one check**: `orgPanels.tsx` is no longer byte-identical in `scoutbox-club` and
   `scoutbox-grassroots` (which must share business logic). Grassroots shows audit entries as structured facts since
   `7f93a14` (1 Nov); Club still shows one sentence. Deciding which one both apps use is a design question. Not in CI.
-- **`scripts/m182Perf.mjs` stops at start-up**: it registers the notification preferences without the notifications
-  repository (`registerNotificationPrefs needs the notifications repository`). Not in CI; removed with the other
-  performance scripts in §4.4.
 - **`scripts/m23AgentPersistence.mjs` fails one check** ("the migrated staff member is an assistant"). It boots over a
   schema-2304 blob snapshot, but `server.mjs` runs the `m182` steps before `attachDataLayer`, and staff accounts are
   table-backed since S0, so `m240_001_agent_core_stores` sees no `db.users` and gives the staff member no

@@ -13,7 +13,7 @@
 //      one wrong is an unauthenticated pixel endpoint. §8 says not to build
 //      transport for novelty; this is the version of that advice with teeth.
 //
-//   2. The workload does not need a socket. m22Perf measured ingest at about
+//   2. The workload does not need a socket. M22 measured ingest at about
 //      0.57 ms per frame and a whole attempt at 0.01-0.02x of realtime. A
 //      batch of up to 12 frames every few hundred milliseconds is comfortably
 //      within request/response, and backpressure is expressed as an HTTP

@@ -705,7 +705,7 @@ of its table. The ones that change behaviour at scale:
 
 | Index | Replaces |
 |---|---|
-| `sessions (token_hash)` primary key | linear scan of every session on every authenticated request (`sessionFor`, `server.mjs:661`); measured 115 µs → 3.4 µs at 20k sessions (`scripts/dataLayerPerf.mjs`) |
+| `sessions (token_hash)` primary key | linear scan of every session on every authenticated request (`sessionFor`, `server.mjs:661`); measured 115 µs → 3.4 µs at 20k sessions (S2, with a benchmark since removed) |
 | `sessions (kind, ref_id)`, `(org_user_id)`, `(expires_at)` | full scans on logout-all, staff revocation and prune |
 | `guardians (lower(email))` unique | `find` by lower-cased e-mail at login and signup, and the uniqueness the code enforces by hand |
 | `players (guardian_id)` | `filter` per guardian child list |

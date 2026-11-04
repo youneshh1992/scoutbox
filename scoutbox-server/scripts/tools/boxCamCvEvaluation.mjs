@@ -15,15 +15,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ObservationRun } from '../m22/engine.mjs';
-import { decodeFrame } from '../m22/frames.mjs';
-import { goldenFixtures } from '../m22/fixtures.mjs';
-import { variationFamilies, falseTouchStress } from '../m22/families.mjs';
-import { consumedHoldoutCases, HOLDOUT_GENERATIONS } from '../m22/holdout.mjs';
-import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../m22/policy.mjs';
+import { ObservationRun } from '../../m22/engine.mjs';
+import { decodeFrame } from '../../m22/frames.mjs';
+import { goldenFixtures } from '../../m22/fixtures.mjs';
+import { variationFamilies, falseTouchStress } from '../../m22/families.mjs';
+import { consumedHoldoutCases, HOLDOUT_GENERATIONS } from '../../m22/holdout.mjs';
+import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../../m22/policy.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.join(HERE, '..', 'm22', 'evaluation.json');
+const OUT = path.join(HERE, '..', '..', 'm22', 'evaluation.json');
 
 /** Run one fixture through the engine exactly as the provider would. */
 function evaluate(fx) {

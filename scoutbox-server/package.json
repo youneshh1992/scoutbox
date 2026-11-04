@@ -10,7 +10,6 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node scripts/runTests.mjs",
-    "perf:data-layer": "node scripts/dataLayerPerf.mjs",
     "perf:recruitment": "node scripts/recruitmentPerf.mjs",
     "e2e": "node scripts/apiE2E.mjs"
   },
