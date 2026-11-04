@@ -28,6 +28,7 @@
  * token's subject and ref, an invitation's inviter of record 'trust_safety') carry none.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { text, int, bool, oneOf, group, flat, quote, tableDdl, bad, typeSpec, encode, decode, upsertSql } from './fieldSpecs.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 
@@ -70,13 +71,7 @@ export const VERIFICATION_LIMITS = Object.freeze({
 const L = VERIFICATION_LIMITS;
 
 // ------------------------------------------------------------------ field specs (one description drives typing, rows and decoding)
-const text = (k, c, max, o = {}) => ({ k, c, t: 'text', max, ...o });
-const int = (k, c, o = {}) => ({ k, c, t: 'int', ...o });
-const bool = (k, c, o = {}) => ({ k, c, t: 'bool', ...o });
-const oneOf = (k, c, vals, o = {}) => ({ k, c, t: 'enum', vals, ...o });
 const idf = (k, c, o = {}) => text(k, c, L.id, o);
-/** A nested object stored as columns: `nullable` groups are null when their first column is; `sparse` objects keep only non-null keys. */
-const group = (k, fields, o = {}) => ({ k, group: fields, ...o });
 
 const CLAIM_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }), oneOf('subjectType', 'subject_kind', ['user', 'org'], { req: true }), idf('subjectId', 'subject_id', { req: true, nonEmpty: true }),
@@ -204,23 +199,6 @@ const DOMAIN_SPEC = [
 ];
 
 // ------------------------------------------------------------------ DDL (generated from the specs, so the columns cannot drift from the typing)
-const flat = (spec) => spec.flatMap((f) => (f.group ? flat(f.group) : [f]));
-const quote = (v) => `'${String(v).replace(/'/g, "''")}'`;
-function columnDdl(f, { nullable = false } = {}) {
-  const notNull = f.req && !nullable;
-  const nn = notNull ? ' NOT NULL' : '';
-  const guard = (cond) => (notNull ? `CHECK (${cond})` : `CHECK (${f.c} IS NULL OR ${cond})`);
-  if (f.t === 'text') return `TEXT${nn} ${guard(`length(${f.c}) <= ${f.max}${f.nonEmpty ? ` AND length(${f.c}) > 0` : ''}`)}`;
-  if (f.t === 'int') return `INTEGER${nn}${f.def !== undefined ? ` DEFAULT ${f.def}` : ''}`;
-  if (f.t === 'bool') return `INTEGER${nn} ${guard(`${f.c} IN (0,1)`)}`;
-  return `TEXT${nn} ${guard(`${f.c} IN (${f.vals.map(quote).join(',')})`)}`;
-}
-const columnsOf = (spec, inNullableGroup = false) => spec.flatMap((f) => (f.group ? columnsOf(f.group, inNullableGroup || !!f.nullable) : [{ f, nullable: inNullableGroup }]));
-/** `CREATE TABLE` for a spec: its columns, then the given keys and table constraints. */
-function tableDdl(name, spec, extra = []) {
-  const cols = columnsOf(spec).map(({ f, nullable }) => `  ${f.c.padEnd(40)} ${f.c === 'id' ? 'TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80)' : columnDdl(f, { nullable })}`);
-  return `CREATE TABLE ${name} (\n${[...cols, ...extra.map((e) => `  ${e}`)].join(',\n')}\n) STRICT;`;
-}
 const codeTableDdl = (name, owner, ownerTable, lists) => `CREATE TABLE ${name} (
   ${owner}  TEXT NOT NULL REFERENCES ${ownerTable}(id) ON DELETE CASCADE,
   list      TEXT NOT NULL CHECK (list IN (${Object.keys(lists).map(quote).join(',')})),
@@ -302,45 +280,6 @@ export const VERIFICATION_TABLES = Object.freeze(['ver_root_requests', 'ver_root
 
 // ------------------------------------------------------------------ typing (the one place a value is judged)
 export const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const bad = (at, field, what) => ({ ok: false, reason: `${at}.${field} ${what}` });
-function typeScalar(f, v, at) {
-  if (v === undefined && f.def !== undefined) v = f.def;
-  if (v === undefined || v === null) return f.req ? bad(at, f.k, `is required (got ${describe(v)})`) : { ok: true, value: null };
-  if (f.t === 'text') {
-    if (typeof v !== 'string') return bad(at, f.k, `must be text (got ${describe(v)})`);
-    if (v.length > f.max) return bad(at, f.k, `exceeds ${f.max} characters`);
-    if (f.nonEmpty && !v.length) return bad(at, f.k, 'must not be empty');
-  } else if (f.t === 'int') {
-    if (!Number.isSafeInteger(v)) return bad(at, f.k, `must be an integer (got ${describe(v)})`);
-  } else if (f.t === 'bool') {
-    if (typeof v !== 'boolean') return bad(at, f.k, `must be true or false (got ${describe(v)})`);
-  } else if (!f.vals.includes(v)) return bad(at, f.k, `must be one of ${f.vals.join('|')} (got ${describe(v)})`);
-  return { ok: true, value: v };
-}
-/** Type `raw` against `spec`; `extra` lists keys the caller types itself. `{ ok, record }` or `{ ok: false, reason }` naming the field, never its content. */
-function typeSpec(spec, raw, at, extra = []) {
-  if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-  const known = new Set([...spec.map((f) => f.k), ...extra]);
-  const unknown = Object.keys(raw).filter((k) => !known.has(k));
-  if (unknown.length) return { ok: false, reason: `${at} carries field(s) this build does not store: ${unknown.join(', ')}` };
-  const out = {};
-  for (const f of spec) {
-    const v = raw[f.k];
-    if (f.group) {
-      if (v === undefined || v === null) {
-        if (f.nullable) { if (!f.sparse || v === null) out[f.k] = null; continue; }
-        if (f.sparse) { const t = typeSpec(f.group, {}, `${at}.${f.k}`); if (!t.ok) return t; out[f.k] = t.record; continue; }
-        return bad(at, f.k, `is required (got ${describe(v)})`);
-      }
-      const t = typeSpec(f.group, v, `${at}.${f.k}`); if (!t.ok) return t;
-      out[f.k] = f.sparse ? Object.fromEntries(Object.entries(t.record).filter(([, x]) => x !== null)) : t.record;
-      continue;
-    }
-    const t = typeScalar(f, v, at); if (!t.ok) return t;
-    out[f.k] = t.value;
-  }
-  return { ok: true, record: out };
-}
 function typeCodes(list, at, field, vocab) {
   if (list === undefined || list === null) return { ok: true, list: [] };
   if (!Array.isArray(list)) return bad(at, field, `must be a list of codes (got ${describe(list)})`);
@@ -398,31 +337,6 @@ export function typeOrgDomain(raw, at = 'orgVerifiedDomains') {
 }
 
 // ------------------------------------------------------------------ rows
-const encode = (spec, rec, row = {}) => {
-  for (const f of spec) {
-    if (f.group) { encode(f.group, rec[f.k] ?? {}, row); continue; }
-    const v = rec[f.k];
-    row[f.c] = v === undefined || v === null ? null : f.t === 'bool' ? (v ? 1 : 0) : v;
-  }
-  return row;
-};
-const decode = (spec, row) => {
-  const out = {};
-  for (const f of spec) {
-    if (f.group) {
-      const inner = decode(f.group, row);
-      if (f.nullable && row[f.group[0].c] === null) { if (!f.sparse) out[f.k] = null; continue; }
-      out[f.k] = f.sparse ? Object.fromEntries(Object.entries(inner).filter(([, x]) => x !== null)) : inner;
-      continue;
-    }
-    const v = row[f.c];
-    out[f.k] = v === null || v === undefined ? null : f.t === 'bool' ? v === 1 : v;
-  }
-  return out;
-};
-const insertSql = (table, spec) => { const cols = flat(spec).map((f) => f.c); return `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`; };
-const upsertSql = (table, spec, key = ['id']) => { const cols = flat(spec).map((f) => f.c); return `${insertSql(table, spec)} ON CONFLICT(${key.join(', ')}) DO UPDATE SET ${cols.filter((c) => !key.includes(c)).map((c) => `${c} = excluded.${c}`).join(', ')}`; };
-
 /** One entity: table, spec, typer, the record's child lists, and the queries over it. */
 const ENTITIES = {
   verClaims: { table: 'ver_claims', spec: CLAIM_SPEC, type: typeClaim, codes: { table: 'ver_claim_codes', owner: 'claim_id', lists: { reviewReasons: 'review_reason', riskFlags: 'risk_flag' } }, evidenceLinks: true },

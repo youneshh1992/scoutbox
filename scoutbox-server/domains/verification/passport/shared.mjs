@@ -573,7 +573,7 @@ export function completeness(facts) {
 // -------------------------------------------------------- share tokens
 export const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 export const mintShareSecret = () => crypto.randomBytes(24).toString('base64url');
-export const SHARE_MODES = ['public', 'recruitment'];
+export { SHARE_MODES } from '../../../repositories/passport.mjs';
 
 /** Pure share validation (no consumption — shares are multi-use until
  *  revoked/expired). Exact failure codes; unknown & revoked & expired all

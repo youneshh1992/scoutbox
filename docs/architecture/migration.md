@@ -64,7 +64,7 @@ routes still miss the bar: they are listed, and deferred, at the end of §4.3 st
 
 ## 3. Status
 
-23 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0024`. Each
+24 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0025`. Each
 step takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Write model | Status |
@@ -95,7 +95,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S9c | tactical setup, squad, shadow list, looking-for, federation check, vacancies | `0021_club_setup` | `clubSetup.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S9d | opportunities, applications, campaigns, player preferences | `0022_opportunities_campaigns` | `opportunitiesCampaigns.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S10a | verification claims, evidence, tokens, administrators, root applications, disputes, references, squad invitations by code, conflicts, domain requests, verified domains | `0023_verification` | `verification.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
-| S10b | passport preferences, career entries, achievements, shares, corrections | | | | not started |
+| S10b | passport preferences, career entries, achievements, shares, corrections | `0024_passport` | `passport.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S10c | transition cases, representations, vouches | | | | not started |
 | S11 | agents, compliance, transactions | | | | not started |
 | S12 | development, Box Cam, discovery | | | | not started |
@@ -383,6 +383,10 @@ retired (`org_verified_domains` rows, column `verification_revoked_at`). Signing
 evidence records, read with `evidence.byId` (S11). Staff writes cannot join a unit of work yet (`users.mjs`), so root
 approval creates the organisation and account before its unit. **Left for S10:** `orgs.verified` is synced by code,
 not derived from claims.
+
+**S10b as built (4 November).** `repositories/passport.mjs`, migration `0024`, read through `verificationReads`. The
+field-spec helpers now live in `repositories/fieldSpecs.mjs`, shared with S10a: use them for later domains. They add a
+`date` type, a football date stored in the precision given (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`).
 
 ### 4.6 S14: retire the blob
 

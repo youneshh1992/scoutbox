@@ -144,11 +144,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // pairingCodes: no longer a production db.* read since S6a — the rows live in pairing_codes (migration 0008,
   // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free
   // read-only view at db.pairingCodes, like the other table-backed collections. (mediaDeletions is the precedent.)
-  passportAchievements: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
-  passportCareerEntries: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
-  passportCorrections: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
-  passportPrefs: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
-  passportShares: { guarantee: 'module', owner: 'm15', reason: 'M15 Passport collection, created at registration' },
   plans: { guarantee: 'migration', owner: 'core', reason: 'product configuration, restored from catalogue.mjs; empty would silently move a Grassroots attribution window from 12 to 18 months (D2)' },
   // playerPrefs: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
   // (scoutingReads). db.playerPrefs throws.
@@ -204,6 +199,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // S10a — typed tables (migration 0023), read through repositories/verification.mjs (verificationReads). db.<name>
   // throws. The organisation facet `verification` moved to the same repository (verified domains) and to the orgs column
   // verification_revoked_at (verificationRevokedAt).
+  // passportPrefs, passportCareerEntries, passportAchievements, passportShares, passportCorrections: never a db.* read since
+  // S10b — typed tables (migration 0024), read through repositories/passport.mjs (verificationReads). db.<name> throws.
   vouches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   watchlistHistory: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   webhookDeliveries: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },

@@ -7,6 +7,7 @@
 // blocks, guardian ownership, adult checks. Passport adds no new access.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { ageOrNull } from '../../../temporal.mjs';
+import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';
 import {
   buildTimeline, clubHistory, currentStatus, temporalConflicts, completeness,
   projectPassport, passportRevision, normWhen, whenDisplay, evId, PROVENANCE_COPY,
@@ -19,6 +20,8 @@ import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../../../m1
 // of module registration order.
 import { combineProtocol as combineProtocolDef, personalBest as combinePersonalBest, formatCombineValue } from '../../../m16/combineShared.mjs';
 import { applicationView } from '../../scouting/journeys.mjs';
+import { blankPrefs, PASSPORT_LIMITS as L, AVAILABILITY, CORRECTION_TARGETS, CORRECTION_OUTCOMES } from '../../../repositories/passport.mjs';
+import { PLAYER_POSITIONS } from '../../../repositories/identityMapping.mjs';
 
 const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
 
@@ -26,8 +29,9 @@ export function registerPassportCore(ctx) {
   const {
     db, byId, playerRouter, guardianRouter, orgRouter, adminRouter,
     nextId, persist, persistNow, notify, ledgerAppend, findPlayer, isBlocked,
-    moderateOrRefuse, vmetric,
+    moderateOrRefuse, vmetric, passport, unit,
   } = ctx;
+  const vreads = ctx.verificationReads;
   // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerPassportCore needs recruitmentReads (signings) from the data layer');
@@ -35,15 +39,8 @@ export function registerPassportCore(ctx) {
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
   const orgOf = (id) => byId.org(id) ?? null;
-  const prefsFor = (playerId) => {
-    let p = db.passportPrefs.find((x) => x.playerId === playerId);
-    if (!p) {
-      p = { playerId, bio: null, positions: null, positionHistory: [], availability: null, availableFrom: null, publicSelections: [], updatedAt: null };
-      db.passportPrefs.push(p);
-    }
-    return p;
-  };
-  ctx.passportPrefsFor = prefsFor;
+  // S10b: reading preferences never creates a row; a player who never saved has the blank ones.
+  const prefsFor = (playerId) => vreads.passportPrefs.forPlayer(playerId) ?? blankPrefs(playerId);
   ctx.orgCanSee = orgCanSee;
 
   // Verified At-Home Combine results projected for the Passport: best
@@ -102,7 +99,7 @@ export function registerPassportCore(ctx) {
       // policy as M14 badges); the historical signing fact is untouched.
       return { id: s.id, orgId: s.orgId, orgName: s.orgName, ts: s.ts, endedAt: ended?.at ?? null, orgSuspended: !!orgOf(s.orgId)?.suspended };
     });
-    const careerEntries = db.passportCareerEntries.filter((c) => c.playerId === pid);
+    const careerEntries = vreads.careerEntries.forPlayer(pid);
 
     const trials = reads.trials.forPlayer(pid);
     const assessments = ctx.scoutingReads.assessments.forPlayer(pid)
@@ -150,7 +147,7 @@ export function registerPassportCore(ctx) {
           ?? byId.user(a.agentUserId)?.name ?? null,
         agencyName: orgOf(a.agencyOrgId)?.name ?? null,
       }));
-    const achievements = db.passportAchievements.filter((a) => a.playerId === pid);
+    const achievements = vreads.achievements.forPlayer(pid);
     const vouches = (db.vouches ?? []).filter((v) => v.playerId === pid && v.status === 'published' && !v.withdrawn);
 
     // M16 Box Cam — displayable (verified/partially verified, never
@@ -238,7 +235,7 @@ export function registerPassportCore(ctx) {
       combine: combineProjectionFor(pid),
       boxShareRecruitment: boxPrefs?.shareDevelopmentActivity === 'recruitment',
       sharingSummary: {
-        active: db.passportShares.filter((s) => s.playerId === pid && !s.revokedAt && (!s.expiresAt || s.expiresAt > now)).length,
+        active: vreads.shares.activeCount(pid, now),
       },
       assessments, trials, objectives, // raw-ish, filtered again at projection
       // Canonical inputs the M18.1 passport revision hashes. Kept separate from
@@ -307,26 +304,96 @@ export function registerPassportCore(ctx) {
     res.json(buildFor(child, 'guardian'));
   });
 
+  // ------------------------------------------------------- input and views
+  // S10b: every field is checked before anything is written; junk is refused naming the field. Free text is still
+  // shortened to its limit, as it always was.
+  const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return null; };
+  const dateInvalid = (res, field) => { res.status(400).json({ error: 'DATE_INVALID', field, message: 'Use a year (YYYY), a month (YYYY-MM) or a day (YYYY-MM-DD).' }); return null; };
+  const NOT_TEXT = Symbol('not text');
+  /** Optional free text: null when absent or empty, shortened to `max`; NOT_TEXT when it is not text. */
+  const optText = (v, max) => (v === undefined || v === null || v === '' ? null : typeof v === 'string' ? v.slice(0, max) : NOT_TEXT);
+  /** A football date as stored — the precision the player gave, never an invented day — or null when it is not one. */
+  const footballDate = (input) => { const w = normWhen(input); return w ? whenDisplay(w) : null; };
+  const POSITION_HELP = `Use position codes: ${PLAYER_POSITIONS.join(', ')}.`;
+  /** `{ primary, secondary }` from a body, or a refusal (already sent) as null; `primaryRequired` for a history row. */
+  function readPositions(res, input, field, { primaryRequired = false } = {}) {
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) return fieldInvalid(res, field, 'Send an object with primary and secondary.');
+    const primary = input.primary === '' || input.primary === undefined ? null : input.primary;
+    if (primary === null ? primaryRequired : !PLAYER_POSITIONS.includes(primary)) return fieldInvalid(res, `${field}.primary`, POSITION_HELP);
+    const secondary = input.secondary ?? [];
+    if (!Array.isArray(secondary) || secondary.length > L.secondary) return fieldInvalid(res, `${field}.secondary`, `Up to ${L.secondary} position codes.`);
+    const wrong = secondary.findIndex((x) => !PLAYER_POSITIONS.includes(x));
+    if (wrong >= 0) return fieldInvalid(res, `${field}.secondary[${wrong}]`, POSITION_HELP);
+    return { primary, secondary: [...new Set(secondary)] };
+  }
+  const prefsView = (p) => ({
+    playerId: p.playerId, bio: p.bio, positions: p.positions ? { primary: p.positions.primary, secondary: [...p.positions.secondary] } : null,
+    positionHistory: p.positionHistory.map((h) => ({ id: h.id, from: h.from, primary: h.primary, secondary: [...h.secondary], submittedBy: h.submittedBy, recordedAt: h.recordedAt })),
+    availability: p.availability, availableFrom: p.availableFrom, publicSelections: [...p.publicSelections], updatedAt: p.updatedAt,
+  });
+  const entryView = (e) => ({ id: e.id, playerId: e.playerId, orgName: e.orgName, role: e.role, from: e.from, to: e.to, note: e.note, submittedBy: e.submittedBy, createdAt: e.createdAt, withdrawnAt: e.withdrawnAt });
+  const achievementRecordView = (a) => ({
+    id: a.id, playerId: a.playerId, title: a.title, orgName: a.orgName, when: a.when, submittedBy: a.submittedBy,
+    confirmation: a.confirmation ? { provenance: a.confirmation.provenance, orgId: a.confirmation.orgId, orgName: a.confirmation.orgName, byName: a.confirmation.byName, at: a.confirmation.at } : null,
+    createdAt: a.createdAt, withdrawnAt: a.withdrawnAt,
+  });
+  const correctionView = (c) => ({
+    id: c.id, playerId: c.playerId, targetType: c.targetType, targetId: c.targetId, reason: c.reason,
+    by: { kind: c.by.kind, id: c.by.id, name: c.by.name }, status: c.status,
+    resolution: c.resolution ? { outcome: c.resolution.outcome, reason: c.resolution.reason, at: c.resolution.at } : null,
+    createdAt: c.createdAt, resolvedAt: c.resolvedAt,
+  });
+
   // ----------------------------------------------------------- preferences
   function applyPrefs(res, player, body, submittedBy) {
-    const p = prefsFor(player.id);
+    const set = {};
     if (body.bio !== undefined) {
-      const bio = body.bio === null ? null : String(body.bio).slice(0, 400);
+      const bio = optText(body.bio, L.bio);
+      if (bio === NOT_TEXT) return fieldInvalid(res, 'bio', 'The bio is text.');
       if (bio && !moderateOrRefuse(res, bio, { kind: 'passport_bio', playerId: player.id })) return null;
-      p.bio = bio;
+      set.bio = bio;
     }
     if (body.positions !== undefined) {
-      const wasPrimary = p.positions?.primary ?? null;
-      p.positions = body.positions ? {
-        primary: String(body.positions.primary ?? '').slice(0, 8) || null,
-        secondary: Array.isArray(body.positions.secondary) ? body.positions.secondary.slice(0, 3).map((x) => String(x).slice(0, 8)) : [],
-      } : null;
-      // M18.1 — a canonical source-change event with its OWN clock. Before this
-      // there was no honest timestamp for "the player's position changed":
-      // positionHistory.from is the football date the player STARTED playing
-      // the position, and prefs.updatedAt is bumped by any preference edit at
-      // all. Only a genuine change of the primary position is recorded, so
-      // re-saving the same preferences emits nothing.
+      if (body.positions === null) set.positions = null;
+      else { const p = readPositions(res, body.positions, 'positions'); if (!p) return null; set.positions = p.primary || p.secondary.length ? p : null; }
+    }
+    let historyRow = null;
+    if (body.positionHistoryAdd) {
+      const h = body.positionHistoryAdd;
+      // `from` is the FOOTBALL date the player started playing this position; `recordedAt` (M18.1) is when the row was
+      // written. They are different events and are never used for each other.
+      const from = footballDate(h?.from);
+      if (!from) { res.status(400).json({ error: 'DATE_REQUIRED', message: 'Position history needs at least a year.' }); return null; }
+      const p = readPositions(res, h, 'positionHistoryAdd', { primaryRequired: true }); if (!p) return null;
+      historyRow = { id: nextId('ppos'), from, primary: p.primary, secondary: p.secondary, submittedBy, recordedAt: Date.now() };
+    }
+    if (body.availability !== undefined) {
+      if (body.availability !== null && !AVAILABILITY.includes(body.availability)) { res.status(400).json({ error: 'AVAILABILITY_INVALID', allowed: [...AVAILABILITY, null] }); return null; }
+      set.availability = body.availability;
+    }
+    if (body.availableFrom !== undefined) {
+      if (body.availableFrom === null || body.availableFrom === '') set.availableFrom = null;
+      else { set.availableFrom = footballDate(body.availableFrom); if (!set.availableFrom) return dateInvalid(res, 'availableFrom'); }
+    }
+    if (body.publicSelections !== undefined) {
+      // Selection is NARROWING-ONLY input: unknown ids are stored harmlessly but can never surface anything the source
+      // policy keeps non-public (enforced at projection time, tested in the abuse suite). Repeats mean nothing.
+      const list = body.publicSelections ?? [];
+      if (!Array.isArray(list) || list.length > L.selections) return fieldInvalid(res, 'publicSelections', `A list of up to ${L.selections} ids.`);
+      const wrong = list.findIndex((x) => typeof x !== 'string' || !x || x.length > L.selection);
+      if (wrong >= 0) return fieldInvalid(res, `publicSelections[${wrong}]`, `Each selection is an id of at most ${L.selection} characters.`);
+      set.publicSelections = [...new Set(list)];
+    }
+    const wasPrimary = prefsFor(player.id).positions?.primary ?? null;
+    const saved = unit(() => {
+      const p = passport.passportPrefs.save(player.id, (d) => {
+        Object.assign(d, set);
+        if (historyRow) d.positionHistory.push(historyRow);
+        d.updatedAt = Date.now();
+      });
+      // M18.1 — a canonical source-change event with its OWN clock: positionHistory.from is the football date the player
+      // STARTED playing the position, and prefs.updatedAt is bumped by any preference edit at all. Only a genuine change
+      // of the primary position is recorded, so re-saving the same preferences emits nothing.
       const nowPrimary = p.positions?.primary ?? null;
       if (nowPrimary !== wasPrimary) {
         ctx.recordSourceChange?.({
@@ -335,86 +402,67 @@ export function registerPassportCore(ctx) {
           detail: { from: wasPrimary, to: nowPrimary, submittedBy },
         });
       }
-    }
-    if (body.positionHistoryAdd) {
-      const h = body.positionHistoryAdd;
-      const from = normWhen(h.from);
-      if (!from) { res.status(400).json({ error: 'DATE_REQUIRED', message: 'Position history needs at least a year.' }); return null; }
-      // `from` is the FOOTBALL date the player started playing this position;
-      // `recordedAt` (M18.1) is when the row was written. They are different
-      // events and are never used for each other.
-      const row = { id: nextId('ppos'), from: h.from, primary: String(h.primary ?? '').slice(0, 8), secondary: Array.isArray(h.secondary) ? h.secondary.slice(0, 3).map((x) => String(x).slice(0, 8)) : [], submittedBy, recordedAt: Date.now() };
-      p.positionHistory.push(row);
-      ctx.recordSourceChange?.({
-        playerId: player.id, type: 'position_changed',
-        sourceSystem: 'position_history', sourceId: row.id,
-        occurredAt: row.recordedAt, detail: { to: row.primary, submittedBy },
-      });
-    }
-    if (body.availability !== undefined) {
-      const ALLOWED = ['open_to_trials', 'open_to_contact', 'not_looking', null];
-      if (!ALLOWED.includes(body.availability)) { res.status(400).json({ error: 'AVAILABILITY_INVALID', allowed: ALLOWED }); return null; }
-      p.availability = body.availability;
-    }
-    if (body.availableFrom !== undefined) p.availableFrom = body.availableFrom ? String(body.availableFrom).slice(0, 10) : null;
-    if (body.publicSelections !== undefined) {
-      // Selection is NARROWING-ONLY input: unknown ids are stored harmlessly
-      // but can never surface anything the source policy keeps non-public
-      // (enforced at projection time, tested in the abuse suite).
-      p.publicSelections = Array.isArray(body.publicSelections) ? body.publicSelections.slice(0, 100).map((x) => String(x).slice(0, 120)) : [];
-    }
-    p.updatedAt = Date.now();
+      if (historyRow) {
+        ctx.recordSourceChange?.({
+          playerId: player.id, type: 'position_changed',
+          sourceSystem: 'position_history', sourceId: historyRow.id,
+          occurredAt: historyRow.recordedAt, detail: { to: historyRow.primary, submittedBy },
+        });
+      }
+      return p;
+    });
     persistNow();
-    return p;
+    return saved;
   }
 
   playerRouter.patch('/football-passport/prefs', (req, res) => {
     const p = applyPrefs(res, req.player, req.body ?? {}, 'player');
-    if (p) res.json({ prefs: p });
+    if (p) res.json({ prefs: prefsView(p) });
   });
   guardianRouter.patch('/children/:id/football-passport/prefs', (req, res) => {
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
     const child = findPlayer(req.params.id);
     if (!child) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     const p = applyPrefs(res, child, req.body ?? {}, 'guardian');
-    if (p) res.json({ prefs: p });
+    if (p) res.json({ prefs: prefsView(p) });
   });
 
   // --------------------------------------------------- self career entries
   function addCareerEntry(res, player, body, submittedBy) {
-    const orgName = String(body.orgName ?? '').trim().slice(0, 100);
+    if (body.orgName !== undefined && body.orgName !== null && typeof body.orgName !== 'string') return fieldInvalid(res, 'orgName', 'The club name is text.');
+    const orgName = String(body.orgName ?? '').trim().slice(0, L.orgName);
     if (!orgName) { res.status(400).json({ error: 'ORG_NAME_REQUIRED' }); return null; }
-    if (!moderateOrRefuse(res, orgName + ' ' + String(body.role ?? '') + ' ' + String(body.note ?? ''), { kind: 'passport_career', playerId: player.id })) return null;
-    const from = normWhen(body.from);
+    const role = optText(body.role, L.role); if (role === NOT_TEXT) return fieldInvalid(res, 'role', 'The role is text.');
+    const note = optText(body.note, L.note); if (note === NOT_TEXT) return fieldInvalid(res, 'note', 'The note is text.');
+    if (!moderateOrRefuse(res, orgName + ' ' + (role ?? '') + ' ' + (note ?? ''), { kind: 'passport_career', playerId: player.id })) return null;
+    const from = footballDate(body.from);
     if (!from) { res.status(400).json({ error: 'DATE_REQUIRED', message: 'A year is enough — exact dates are never invented.' }); return null; }
-    const to = body.to != null ? normWhen(body.to) : null;
-    if (body.to != null && !to) { res.status(400).json({ error: 'DATE_INVALID' }); return null; }
-    const e = {
-      id: nextId('pcar'), playerId: player.id, orgName, role: body.role ? String(body.role).slice(0, 60) : null,
-      from: body.from, to: body.to ?? null, note: body.note ? String(body.note).slice(0, 200) : null,
+    const to = body.to != null ? footballDate(body.to) : null;
+    if (body.to != null && !to) return dateInvalid(res, 'to');
+    const e = passport.careerEntries.create({
+      id: nextId('pcar'), playerId: player.id, orgName, role, from, to, note,
       submittedBy, createdAt: Date.now(), withdrawnAt: null,
-    };
-    db.passportCareerEntries.push(e);
+    });
     persistNow();
     return e;
   }
   playerRouter.post('/football-passport/career', (req, res) => {
     const e = addCareerEntry(res, req.player, req.body ?? {}, 'player');
-    if (e) res.status(201).json({ entry: e, provenance: 'player_submitted', note: PROVENANCE_COPY.player_submitted });
+    if (e) res.status(201).json({ entry: entryView(e), provenance: 'player_submitted', note: PROVENANCE_COPY.player_submitted });
   });
   guardianRouter.post('/children/:id/football-passport/career', (req, res) => {
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
     const child = findPlayer(req.params.id);
     if (!child) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     const e = addCareerEntry(res, child, req.body ?? {}, 'guardian');
-    if (e) res.status(201).json({ entry: e, provenance: 'guardian_submitted' });
+    if (e) res.status(201).json({ entry: entryView(e), provenance: 'guardian_submitted' });
   });
   playerRouter.post('/football-passport/career/:id/withdraw', (req, res) => {
-    const e = db.passportCareerEntries.find((x) => x.id === req.params.id && x.playerId === req.player.id);
-    if (!e) return res.status(404).json({ error: 'ENTRY_NOT_FOUND' });
-    e.withdrawnAt = Date.now();
+    const found = vreads.careerEntries.byId(req.params.id);
+    if (!found || found.playerId !== req.player.id) return res.status(404).json({ error: 'ENTRY_NOT_FOUND' });
+    const e = passport.careerEntries.update(found.id, (d) => { d.withdrawnAt = Date.now(); });
     persistNow();
-    res.json({ entry: e, note: 'Self-submitted entries can be withdrawn; confirmed records cannot (request a correction instead).' });
+    res.json({ entry: entryView(e), note: 'Self-submitted entries can be withdrawn; confirmed records cannot (request a correction instead).' });
   });
 
   // ------------------------------------------------------------ achievements
@@ -426,59 +474,68 @@ export function registerPassportCore(ctx) {
     addAchievement(res, child, req.body ?? {}, 'guardian');
   });
   function addAchievement(res, player, body, submittedBy) {
-    const title = String(body.title ?? '').trim().slice(0, 120);
+    if (body.title !== undefined && body.title !== null && typeof body.title !== 'string') return fieldInvalid(res, 'title', 'The title is text.');
+    const title = String(body.title ?? '').trim().slice(0, L.title);
     if (!title) return res.status(400).json({ error: 'TITLE_REQUIRED' });
+    const orgName = optText(body.orgName, L.orgName); if (orgName === NOT_TEXT) return fieldInvalid(res, 'orgName', 'The organisation name is text.');
+    const when = body.when == null || body.when === '' ? null : footballDate(body.when);
+    if (body.when != null && body.when !== '' && !when) return dateInvalid(res, 'when');
     if (!moderateOrRefuse(res, title, { kind: 'passport_achievement', playerId: player.id })) return;
-    // A client can NEVER assert authoritative provenance for itself (§79#16):
-    // whatever the body claims, a new achievement is player/guardian-submitted.
-    const a = {
-      id: nextId('pach'), playerId: player.id, title, orgName: body.orgName ? String(body.orgName).slice(0, 100) : null,
-      when: body.when ?? null, submittedBy, confirmation: null, createdAt: Date.now(), withdrawnAt: null,
-    };
-    db.passportAchievements.push(a);
+    // A client can NEVER assert authoritative provenance for itself (§79#16): whatever the body claims, a new
+    // achievement is player/guardian-submitted (the fields it names are not read).
+    const a = passport.achievements.create({
+      id: nextId('pach'), playerId: player.id, title, orgName, when, submittedBy, confirmation: null, createdAt: Date.now(), withdrawnAt: null,
+    });
     persistNow();
-    res.status(201).json({ achievement: a, provenance: submittedBy === 'guardian' ? 'guardian_submitted' : 'player_submitted' });
+    res.status(201).json({ achievement: achievementRecordView(a), provenance: submittedBy === 'guardian' ? 'guardian_submitted' : 'player_submitted' });
   }
   playerRouter.post('/football-passport/achievements/:id/withdraw', (req, res) => {
-    const a = db.passportAchievements.find((x) => x.id === req.params.id && x.playerId === req.player.id);
-    if (!a) return res.status(404).json({ error: 'ACHIEVEMENT_NOT_FOUND' });
+    const a = vreads.achievements.byId(req.params.id);
+    if (!a || a.playerId !== req.player.id) return res.status(404).json({ error: 'ACHIEVEMENT_NOT_FOUND' });
     if (a.confirmation) return res.status(403).json({ error: 'CONFIRMED_RECORD', message: 'A confirmed achievement is part of the record — request a correction instead of deleting it.' });
-    a.withdrawnAt = Date.now();
+    const done = passport.achievements.update(a.id, (d) => { d.withdrawnAt = Date.now(); });
     persistNow();
-    res.json({ achievement: a });
+    res.json({ achievement: achievementRecordView(done) });
   });
   // Club confirmation upgrades provenance WITHOUT rewriting the original.
   orgRouter.post('/players/:pid/football-passport/achievements/:id/confirm', (req, res) => {
     const p = findPlayer(req.params.pid);
     if (!p || !orgCanSee(req.org, p)) return res.status(p ? 403 : 404).json({ error: p ? (req.org.type === 'agency' && !isAdult(p) ? 'UNDER_18_WALL' : 'NOT_VISIBLE') : 'PLAYER_NOT_FOUND' });
     if (!req.org.verified) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can confirm an achievement.' });
-    const a = db.passportAchievements.find((x) => x.id === req.params.id && x.playerId === p.id && !x.withdrawnAt);
-    if (!a) return res.status(404).json({ error: 'ACHIEVEMENT_NOT_FOUND' });
+    const a = vreads.achievements.byId(req.params.id);
+    if (!a || a.playerId !== p.id || a.withdrawnAt) return res.status(404).json({ error: 'ACHIEVEMENT_NOT_FOUND' });
     if (a.confirmation) return res.status(409).json({ error: 'ALREADY_CONFIRMED' });
-    a.confirmation = { provenance: 'verified_club_confirmed', orgId: req.org.id, orgName: req.org.name, byName: req.orgUser.name, at: Date.now() };
-    notify({ kind: 'player', id: p.id }, 'passport', `🏅 ${req.org.name} confirmed your achievement “${a.title}”.`, a.id);
-    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'passport', `${req.org.name} confirmed ${p.name}'s achievement “${a.title}”.`, a.id);
+    // One unit: the confirmation with its notifications.
+    const done = unit(() => {
+      const c = passport.achievements.update(a.id, (d) => {
+        d.confirmation = { provenance: 'verified_club_confirmed', orgId: req.org.id, orgName: String(req.org.name).slice(0, L.name), byName: String(req.orgUser.name ?? '').slice(0, L.name) || null, at: Date.now() };
+      });
+      notify({ kind: 'player', id: p.id }, 'passport', `🏅 ${req.org.name} confirmed your achievement “${a.title}”.`, a.id);
+      if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'passport', `${req.org.name} confirmed ${p.name}'s achievement “${a.title}”.`, a.id);
+      return c;
+    });
     vmetric('achievement_confirmed');
     persistNow();
-    res.json({ achievement: a });
+    res.json({ achievement: achievementRecordView(done) });
   });
 
   // ------------------------------------------------------------ corrections
   function fileCorrection(res, player, body, by) {
-    const TARGETS = ['timeline_event', 'career_entry', 'club_history', 'reference', 'trial', 'assessment', 'achievement', 'signing'];
     const targetType = String(body.targetType ?? '');
-    if (!TARGETS.includes(targetType)) return res.status(400).json({ error: 'TARGET_INVALID', allowed: TARGETS });
+    if (!CORRECTION_TARGETS.includes(targetType)) return res.status(400).json({ error: 'TARGET_INVALID', allowed: CORRECTION_TARGETS });
+    const targetId = body.targetId === undefined || body.targetId === null || body.targetId === '' ? null : body.targetId;
+    if (targetId !== null && (typeof targetId !== 'string' || targetId.length > L.targetId)) return fieldInvalid(res, 'targetId', `An id of at most ${L.targetId} characters.`);
+    if (body.reason !== undefined && body.reason !== null && typeof body.reason !== 'string') return fieldInvalid(res, 'reason', 'The reason is text.');
     const reason = String(body.reason ?? '').trim();
     if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED' });
     if (!moderateOrRefuse(res, reason, { kind: 'passport_correction', playerId: player.id })) return;
-    const c = {
-      id: nextId('pcor'), playerId: player.id, targetType, targetId: String(body.targetId ?? '').slice(0, 80) || null,
-      reason: reason.slice(0, 500), by, status: 'open', resolution: null, createdAt: Date.now(), resolvedAt: null,
-    };
-    db.passportCorrections.push(c);
+    const c = passport.corrections.create({
+      id: nextId('pcor'), playerId: player.id, targetType, targetId, reason: reason.slice(0, L.reason),
+      by: { ...by, name: by.name ? String(by.name).slice(0, L.name) : null }, status: 'open', resolution: null, createdAt: Date.now(),
+    });
     vmetric('correction_filed');
     persistNow();
-    res.status(201).json({ correction: c, note: 'Authoritative records are never silently edited — Trust & Safety reviews correction requests, and verification claims can additionally be disputed through the existing verification flow.' });
+    res.status(201).json({ correction: correctionView(c), note: 'Authoritative records are never silently edited — Trust & Safety reviews correction requests, and verification claims can additionally be disputed through the existing verification flow.' });
   }
   playerRouter.post('/football-passport/corrections', (req, res) => fileCorrection(res, req.player, req.body ?? {}, { kind: 'player', id: req.player.id, name: req.player.name }));
   guardianRouter.post('/children/:id/football-passport/corrections', (req, res) => {
@@ -488,24 +545,33 @@ export function registerPassportCore(ctx) {
     fileCorrection(res, child, req.body ?? {}, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name });
   });
 
+  // The T&S queue, oldest first, by cursor (`?limit=&cursor=`; `?all=1` lists resolved ones too).
   adminRouter.get('/passport/corrections', (req, res) => {
-    const open = db.passportCorrections.filter((c) => req.query.all === '1' || c.status === 'open').sort((a, b) => a.createdAt - b.createdAt);
-    res.json({ items: open });
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    const { items, nextCursor } = pageOf(vreads.corrections.page({ all: req.query.all === '1', ...page }).rows, page.limit, (r) => r.key);
+    res.json({ items: items.map((r) => correctionView(r.record)), nextCursor });
   });
   adminRouter.post('/passport/corrections/:id/resolve', (req, res) => {
-    const c = db.passportCorrections.find((x) => x.id === req.params.id);
+    const c = vreads.corrections.byId(req.params.id);
     if (!c) return res.status(404).json({ error: 'CORRECTION_NOT_FOUND' });
     if (c.status !== 'open') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
     const { resolution, reason } = req.body ?? {};
-    if (!['corrected', 'rejected', 'referred'].includes(resolution)) return res.status(400).json({ error: 'RESOLUTION_REQUIRED', allowed: ['corrected', 'rejected', 'referred'] });
-    if (!String(reason ?? '').trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
-    c.status = 'resolved';
-    c.resolution = { outcome: resolution, reason: String(reason).slice(0, 400), at: Date.now() };
-    c.resolvedAt = Date.now();
-    const target = c.by.kind === 'guardian' ? { kind: 'guardian', id: c.by.id } : { kind: 'player', id: c.playerId };
-    notify(target, 'passport', `Trust & Safety resolved your Passport correction request: ${resolution}.`, c.id);
+    if (!CORRECTION_OUTCOMES.includes(resolution)) return res.status(400).json({ error: 'RESOLUTION_REQUIRED', allowed: CORRECTION_OUTCOMES });
+    if (typeof reason !== 'string' || !reason.trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
+    // One unit: the resolution with the requester's notification.
+    const done = unit(() => {
+      const r = passport.corrections.update(c.id, (d) => {
+        d.status = 'resolved';
+        d.resolution = { outcome: resolution, reason: reason.slice(0, L.resolutionReason), at: Date.now() };
+        d.resolvedAt = d.resolution.at;
+      });
+      const target = c.by.kind === 'guardian' ? { kind: 'guardian', id: c.by.id } : { kind: 'player', id: c.playerId };
+      notify(target, 'passport', `Trust & Safety resolved your Passport correction request: ${resolution}.`, c.id);
+      return r;
+    });
     persistNow();
-    res.json({ correction: c });
+    res.json({ correction: correctionView(done) });
   });
 
   // ------------------------------------------------------------- club view

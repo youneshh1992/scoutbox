@@ -167,7 +167,7 @@ export function registerIntegration(ctx) {
    * An explicit, separate player share for a surface that needs one (§11, §74).
    *
    * There is NO writer for an agent-directed Passport or evidence share in this
-   * build: `db.passportShares` holds link tokens a person opens, not a standing
+   * build: the Passport's share links (`passport_shares`) are link tokens a person opens, not a standing
    * grant to a named agent, and a link a player sent their agent is the player
    * handing over a URL, not ScoutBox granting the agent a projection. So this
    * answers false, `passport_shared` and `evidence_shared` refuse with

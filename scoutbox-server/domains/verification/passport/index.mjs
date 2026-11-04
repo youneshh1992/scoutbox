@@ -8,19 +8,14 @@
 // The Passport is a projection over existing records. The only new
 // persistence is what Passport genuinely introduces: preferences,
 // self-submitted career entries, achievements (+confirmations), shares
-// (hashed tokens) and correction requests.
+// (hashed tokens) and correction requests — since S10b typed tables owned by
+// repositories/passport.mjs (ctx.passport writes; ctx.verificationReads reads).
 import { metrics } from '../../../m13/enterprise.mjs';
 import { registerPassportCore } from './passport.mjs';
 import { registerPassportSharing } from './sharing.mjs';
 
 export function registerM15(ctx) {
-  const { db } = ctx;
-  db.passportPrefs ??= [];
-  db.passportCareerEntries ??= [];
-  db.passportAchievements ??= [];
-  db.passportShares ??= [];      // token hashes only — the secret is never stored
-  db.passportCorrections ??= [];
-
+  if (typeof ctx.passport?.passportPrefs?.save !== 'function') throw new TypeError('registerM15 needs the passport repository from the data layer');
   // Privacy-safe product metrics — counters only, no PII, no recruiter
   // identity exposure to players (§51/§52).
   metrics.passport = {

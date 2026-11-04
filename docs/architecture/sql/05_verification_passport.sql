@@ -11,8 +11,8 @@
 --             02_recruitment.sql (evidence, assessments).
 -- Conventions: docs/architecture/sql conventions (STRICT tables, snake_case,
 --   epoch-ms INTEGER *_at, hashed secrets, *_json only with a stated reason).
--- S10a: the verification tables are implemented and carry NO JSON column (see their section); the JSON
--- policy below now applies only to the passport, transition and representation tables (S10b, S10c).
+-- S10a and S10b: the verification and passport tables are implemented and carry NO JSON column (see their sections);
+-- the JSON policy below now applies only to the transition and representation tables (S10c).
 -- JSON policy for this file:
 --   * review_reasons_json / risk_flags_json — bounded arrays of reason/flag
 --     CODES (REVIEW_REASONS + 'REGISTRY_RECORD_UNREADABLE'; riskFlags()
@@ -28,12 +28,6 @@
 --     link...) and echoed back verbatim.
 --   * before_json / after_json / detail_json — audit payloads, free-form by
 --     design (every event type carries a different shape).
---   * *_raw_json (passport dates) — the client's raw value: an epoch number,
---     'YYYY' / 'YYYY-MM' / 'YYYY-MM-DD' string or {year,month} object.
---     Precision belongs to the source (normWhen() at read); normalising would
---     invent days the player never gave.
---   * position_secondary_json — ≤3 position codes; NULL means "positions not
---     set" (the whole positions object was null), '[]' means set with none.
 -- =============================================================================
 
 
@@ -447,240 +441,128 @@ CREATE TABLE ver_migrations (
 -- M15 — Football Passport
 -- =============================================================================
 
--- -----------------------------------------------------------------------------
--- source: db.passportPrefs  created at domains/verification/passport/passport.mjs:37 (prefsFor — LAZY
---         INSERT ON READ: the first passport read for a player writes a row)
--- owner/writer: m15 (player or guardian PATCH)
--- lifecycle: one row per player, never deleted; updated_at NULL until the
---   first PATCH
--- mapping:
---   playerId -> player_id (natural PK)
---   bio -> bio (≤400, moderated)
---   positions -> position_primary (≤8) + position_secondary_json; positions
---     === null  ⇔  position_secondary_json IS NULL (and position_primary NULL)
---   positions.primary -> position_primary   positions.secondary[] -> position_secondary_json
---   positionHistory[] -> passport_position_history
---   availability -> availability
---   availableFrom -> available_from_raw (String(x).slice(0,10); not validated
---     as a date, hence no _date suffix)
---   publicSelections[] -> passport_public_selections
---   updatedAt -> updated_at
--- notes:
---   * Privacy: player-owned; a minor's row is edited by the guardian.
---   * Read pattern: by player_id (every passport assembly; m18 nobodyMissed).
--- -----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
+-- S10b: IMPLEMENTED, migration 0024_passport REGISTERED (repositories/passport.mjs, 4 Nov 2026).
+-- The definitions below are the migration's DDL (generated from the repository's field specs, like S10a);
+-- scripts/testSchemaDdl.mjs compares them column by column.
+-- Sources: domains/verification/passport/ (passport.mjs, sharing.mjs).
+-- How the model differs from the first draft of this file:
+--   * No JSON columns. Football dates (career from/to, achievement when, position history from, available from) are
+--     TEXT 'YYYY', 'YYYY-MM' or 'YYYY-MM-DD': the precision the player gave, never an invented day. The routes write
+--     any accepted input (an epoch, {year, month}) in that shape.
+--   * Positions are PLAYER_POSITIONS codes. Secondary positions (≤3) are ordered rows: passport_pref_positions and
+--     passport_position_history_positions. Public selections are ordered rows without repeats.
+--   * A preferences row exists only once a player or guardian saved (no insert on read).
+--   * Player and guardian ids carry no key (tolerant, as S9 and S10a); a confirmation's organisation is RESTRICT.
+--   * A correction's resolution instant is one column (resolved_at), read back as both resolution.at and resolvedAt.
+-- ----------------------------------------------------------------------------
 CREATE TABLE passport_prefs (
-  player_id               TEXT PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
-  bio                     TEXT CHECK (bio IS NULL OR length(bio) <= 400),
-  position_primary        TEXT CHECK (position_primary IS NULL OR length(position_primary) <= 8),
-  position_secondary_json TEXT CHECK (position_secondary_json IS NULL OR (json_valid(position_secondary_json) AND json_type(position_secondary_json) = 'array')),
-  availability            TEXT CHECK (availability IS NULL OR availability IN ('open_to_trials','open_to_contact','not_looking')),
-  available_from_raw      TEXT CHECK (available_from_raw IS NULL OR length(available_from_raw) <= 10),
-  updated_at              INTEGER
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  bio                                      TEXT CHECK (bio IS NULL OR length(bio) <= 400),
+  position_primary                         TEXT CHECK (position_primary IS NULL OR position_primary IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
+  availability                             TEXT CHECK (availability IS NULL OR availability IN ('open_to_trials','open_to_contact','not_looking')),
+  available_from                           TEXT CHECK (available_from IS NULL OR (available_from GLOB '[0-9][0-9][0-9][0-9]' OR available_from GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' OR available_from GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')),
+  updated_at                               INTEGER NOT NULL,
+  PRIMARY KEY (player_id)
 ) STRICT;
-
-
--- -----------------------------------------------------------------------------
--- source: db.passportPrefs[].positionHistory[]  pushed at domains/verification/passport/passport.mjs:341
--- owner/writer: m15 (positionHistoryAdd in PATCH prefs)
--- lifecycle: append-only; no withdraw/delete path exists
--- mapping:
---   id -> id (ppos-N)   (parent) -> player_id
---   from -> from_raw_json (the FOOTBALL date the position started; raw client
---     value, see file header; validated only as normWhen()-parseable)
---   primary -> position_primary (≤8)   secondary[] -> position_secondary_json (≤3)
---   submittedBy -> submitted_by
---   recordedAt -> recorded_at (M18.1; NULL on rows written before it)
--- notes: read pattern: by player_id (timeline position_change events).
--- -----------------------------------------------------------------------------
+CREATE TABLE passport_pref_positions (
+  player_id  TEXT NOT NULL REFERENCES passport_prefs(player_id) ON DELETE CASCADE,
+  ord       INTEGER NOT NULL CHECK (ord >= 0),
+  code    TEXT NOT NULL CHECK (code IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF') AND ord < 3),
+  PRIMARY KEY (player_id, ord),
+  UNIQUE (player_id, code)
+) STRICT;
 CREATE TABLE passport_position_history (
-  id                      TEXT PRIMARY KEY,
-  player_id               TEXT NOT NULL REFERENCES passport_prefs(player_id) ON DELETE CASCADE,
-  from_raw_json           TEXT NOT NULL CHECK (json_valid(from_raw_json)),
-  position_primary        TEXT NOT NULL CHECK (length(position_primary) <= 8),
-  position_secondary_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(position_secondary_json) AND json_type(position_secondary_json) = 'array'),
-  submitted_by            TEXT NOT NULL CHECK (submitted_by IN ('player','guardian')),
-  recorded_at             INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  from_date                                TEXT NOT NULL CHECK ((from_date GLOB '[0-9][0-9][0-9][0-9]' OR from_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' OR from_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')),
+  position_primary                         TEXT NOT NULL CHECK (position_primary IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
+  submitted_by                             TEXT NOT NULL CHECK (submitted_by IN ('player','guardian')),
+  recorded_at                              INTEGER NOT NULL,
+  FOREIGN KEY (player_id) REFERENCES passport_prefs(player_id) ON DELETE CASCADE
 ) STRICT;
-
-CREATE INDEX passport_position_history_player ON passport_position_history(player_id);
-
-
--- -----------------------------------------------------------------------------
--- source: db.passportPrefs[].publicSelections[]  replaced wholesale at
---         domains/verification/passport/passport.mjs:359 (≤100 strings ≤120 chars)
--- owner/writer: m15 (PATCH prefs)
--- lifecycle: full replace on each PATCH (delete + insert)
--- mapping: publicSelections[i] -> selection; the array is consumed as a Set
---   (projection) so duplicates carry no meaning — composite PK dedupes them.
--- notes: values are timeline event ids ('pev:...'), 'hist:<orgName>' keys or
---   anything the client sends (unknown ids are stored harmlessly and can never
---   widen visibility — enforced at projection).
--- -----------------------------------------------------------------------------
+CREATE INDEX passport_position_history_player ON passport_position_history (player_id);
+CREATE TABLE passport_position_history_positions (
+  history_id  TEXT NOT NULL REFERENCES passport_position_history(id) ON DELETE CASCADE,
+  ord       INTEGER NOT NULL CHECK (ord >= 0),
+  code    TEXT NOT NULL CHECK (code IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF') AND ord < 3),
+  PRIMARY KEY (history_id, ord),
+  UNIQUE (history_id, code)
+) STRICT;
 CREATE TABLE passport_public_selections (
-  player_id TEXT NOT NULL REFERENCES passport_prefs(player_id) ON DELETE CASCADE,
-  selection TEXT NOT NULL CHECK (length(selection) <= 120),
-  PRIMARY KEY (player_id, selection)
+  player_id  TEXT NOT NULL REFERENCES passport_prefs(player_id) ON DELETE CASCADE,
+  ord       INTEGER NOT NULL CHECK (ord >= 0),
+  selection    TEXT NOT NULL CHECK (length(selection) > 0 AND length(selection) <= 120 AND ord < 100),
+  PRIMARY KEY (player_id, ord),
+  UNIQUE (player_id, selection)
 ) STRICT;
-
-
--- -----------------------------------------------------------------------------
--- source: db.passportCareerEntries  created at domains/verification/passport/passport.mjs:387
--- owner/writer: m15 (player or guardian; player-only withdraw at :407)
--- lifecycle: withdrawn_at soft delete; never hard-deleted
--- mapping:
---   id -> id (pcar-N)   playerId -> player_id
---   orgName -> org_name (free text ≤100 — NOT an orgs FK; matched to
---     authoritative rows by lower-cased name at read)
---   role -> role (≤60)
---   from -> from_raw_json   to -> to_raw_json (raw client values, see header)
---   note -> note (≤200)   submittedBy -> submitted_by
---   createdAt -> created_at   withdrawnAt -> withdrawn_at
--- notes:
---   * Provenance is derived at read from submitted_by (player_submitted /
---     guardian_submitted); never stored.
---   * Known defect: the guardian lane has no withdraw route — only the
---     player route exists, and a minor cannot call it.
---   * Read pattern: by player_id.
--- -----------------------------------------------------------------------------
 CREATE TABLE passport_career_entries (
-  id            TEXT PRIMARY KEY,
-  player_id     TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  org_name      TEXT NOT NULL CHECK (length(org_name) <= 100),
-  role          TEXT CHECK (role IS NULL OR length(role) <= 60),
-  from_raw_json TEXT NOT NULL CHECK (json_valid(from_raw_json)),
-  to_raw_json   TEXT CHECK (to_raw_json IS NULL OR json_valid(to_raw_json)),
-  note          TEXT CHECK (note IS NULL OR length(note) <= 200),
-  submitted_by  TEXT NOT NULL CHECK (submitted_by IN ('player','guardian')),
-  created_at    INTEGER NOT NULL,
-  withdrawn_at  INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  org_name                                 TEXT NOT NULL CHECK (length(org_name) <= 100 AND length(org_name) > 0),
+  role                                     TEXT CHECK (role IS NULL OR length(role) <= 60),
+  from_date                                TEXT NOT NULL CHECK ((from_date GLOB '[0-9][0-9][0-9][0-9]' OR from_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' OR from_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')),
+  to_date                                  TEXT CHECK (to_date IS NULL OR (to_date GLOB '[0-9][0-9][0-9][0-9]' OR to_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' OR to_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')),
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 200),
+  submitted_by                             TEXT NOT NULL CHECK (submitted_by IN ('player','guardian')),
+  created_at                               INTEGER NOT NULL,
+  withdrawn_at                             INTEGER
 ) STRICT;
-
-CREATE INDEX passport_career_entries_player ON passport_career_entries(player_id);
-
-
--- -----------------------------------------------------------------------------
--- source: db.passportAchievements  created at domains/verification/passport/passport.mjs:429; confirmed
---         by a verified org at :453
--- owner/writer: m15
--- lifecycle: withdrawn_at soft delete (refused once confirmed); confirmation
---   is write-once (ALREADY_CONFIRMED 409)
--- mapping:
---   id -> id (pach-N)   playerId -> player_id   title -> title (≤120)
---   orgName -> org_name (free text ≤100)
---   when -> when_raw_json (raw client value; NULL allowed)
---   submittedBy -> submitted_by
---   confirmation -> NULL ⇔ confirmation_at IS NULL
---   confirmation.provenance -> confirmation_provenance ('verified_club_confirmed')
---   confirmation.orgId -> confirmation_org_id
---   confirmation.orgName -> confirmation_org_name
---   confirmation.byName -> confirmation_by_name (staff name; never shown to
---     the player — the org stands behind the confirmation)
---   confirmation.at -> confirmation_at
---   createdAt -> created_at   withdrawnAt -> withdrawn_at
--- notes:
---   * Only a verified org that can see the player may confirm — code rule.
---   * Read pattern: by player_id.
--- -----------------------------------------------------------------------------
+CREATE INDEX passport_career_entries_player ON passport_career_entries (player_id);
 CREATE TABLE passport_achievements (
-  id                      TEXT PRIMARY KEY,
-  player_id               TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  title                   TEXT NOT NULL CHECK (length(title) <= 120),
-  org_name                TEXT CHECK (org_name IS NULL OR length(org_name) <= 100),
-  when_raw_json           TEXT CHECK (when_raw_json IS NULL OR json_valid(when_raw_json)),
-  submitted_by            TEXT NOT NULL CHECK (submitted_by IN ('player','guardian')),
-  confirmation_provenance TEXT CHECK (confirmation_provenance IS NULL OR confirmation_provenance IN ('verified_club_confirmed')),
-  confirmation_org_id     TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  confirmation_org_name   TEXT,                             -- snapshot
-  confirmation_by_name    TEXT,                             -- snapshot (staff name, org-internal)
-  confirmation_at         INTEGER,
-  created_at              INTEGER NOT NULL,
-  withdrawn_at            INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  title                                    TEXT NOT NULL CHECK (length(title) <= 120 AND length(title) > 0),
+  org_name                                 TEXT CHECK (org_name IS NULL OR length(org_name) <= 100),
+  when_date                                TEXT CHECK (when_date IS NULL OR (when_date GLOB '[0-9][0-9][0-9][0-9]' OR when_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' OR when_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')),
+  submitted_by                             TEXT NOT NULL CHECK (submitted_by IN ('player','guardian')),
+  confirmation_provenance                  TEXT CHECK (confirmation_provenance IS NULL OR confirmation_provenance IN ('verified_club_confirmed')),
+  confirmation_org_id                      TEXT CHECK (confirmation_org_id IS NULL OR length(confirmation_org_id) <= 80 AND length(confirmation_org_id) > 0),
+  confirmation_org_name                    TEXT CHECK (confirmation_org_name IS NULL OR length(confirmation_org_name) <= 200),
+  confirmation_by_name                     TEXT CHECK (confirmation_by_name IS NULL OR length(confirmation_by_name) <= 200),
+  confirmation_at                          INTEGER,
+  created_at                               INTEGER NOT NULL,
+  withdrawn_at                             INTEGER,
+  FOREIGN KEY (confirmation_org_id) REFERENCES orgs(id) ON DELETE RESTRICT
 ) STRICT;
-
-CREATE INDEX passport_achievements_player ON passport_achievements(player_id);
-
-
--- -----------------------------------------------------------------------------
--- source: db.passportShares  created at domains/verification/passport/sharing.mjs:31
--- owner/writer: m15 (adult player or guardian creates/revokes; T&S revokes)
--- lifecycle: revoked_at soft revoke; expires_at 1–90 days; multi-use until
---   revoked/expired; never deleted
--- mapping:
---   id -> id (pshr-N)   playerId -> player_id   mode -> mode
---   tokenHash -> token_hash (sha256 hex of a 24-byte base64url secret; the
---     secret exists only in the create response / QR URL)
---   createdBy{kind,id} -> created_by_kind, created_by_id
---   createdAt -> created_at   expiresAt -> expires_at
---   revokedAt -> revoked_at   revokedBy{kind,id} -> revoked_by_kind, revoked_by_id
---   views -> views (incremented on every successful resolve)
--- notes:
---   * token_hash unique (resolver lookup). Public shares resolve to the SAFE
---     PUBLIC projection; recruitment shares still re-run orgCanSee.
---   * Minors: guardian-managed only — code rule.
---   * Read patterns: by token_hash; by player_id (lists, active count).
--- -----------------------------------------------------------------------------
+CREATE INDEX passport_achievements_player ON passport_achievements (player_id);
 CREATE TABLE passport_shares (
-  id              TEXT PRIMARY KEY,
-  player_id       TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  mode            TEXT NOT NULL CHECK (mode IN ('public','recruitment')),
-  token_hash      TEXT NOT NULL CHECK (length(token_hash) = 64),
-  created_by_kind TEXT NOT NULL CHECK (created_by_kind IN ('player','guardian')),
-  created_by_id   TEXT NOT NULL,                            -- players.id | guardians.id (polymorphic, no FK)
-  created_at      INTEGER NOT NULL,
-  expires_at      INTEGER NOT NULL,
-  revoked_at      INTEGER,
-  revoked_by_kind TEXT CHECK (revoked_by_kind IS NULL OR revoked_by_kind IN ('player','guardian','trust_safety')),
-  revoked_by_id   TEXT,                                     -- players.id | guardians.id | 'admin'
-  views           INTEGER NOT NULL DEFAULT 0
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  mode                                     TEXT NOT NULL CHECK (mode IN ('public','recruitment')),
+  token_hash                               TEXT NOT NULL CHECK (length(token_hash) <= 64 AND length(token_hash) > 0),
+  created_by_kind                          TEXT NOT NULL CHECK (created_by_kind IN ('player','guardian')),
+  created_by_id                            TEXT NOT NULL CHECK (length(created_by_id) <= 80 AND length(created_by_id) > 0),
+  created_at                               INTEGER NOT NULL,
+  expires_at                               INTEGER NOT NULL,
+  revoked_at                               INTEGER,
+  revoked_by_kind                          TEXT CHECK (revoked_by_kind IS NULL OR revoked_by_kind IN ('player','guardian','trust_safety')),
+  revoked_by_id                            TEXT CHECK (revoked_by_id IS NULL OR length(revoked_by_id) <= 80 AND length(revoked_by_id) > 0),
+  views                                    INTEGER NOT NULL DEFAULT 0,
+  CHECK (length(token_hash) = 64),
+  CHECK (views >= 0),
+  CHECK ((revoked_at IS NULL) = (revoked_by_kind IS NULL))
 ) STRICT;
-
-CREATE UNIQUE INDEX passport_shares_token_hash ON passport_shares(token_hash);
-CREATE INDEX passport_shares_player ON passport_shares(player_id);
-
-
--- -----------------------------------------------------------------------------
--- source: db.passportCorrections  created at domains/verification/passport/passport.mjs:469; resolved by
---         T&S at :490
--- owner/writer: m15
--- lifecycle: status open → resolved; never deleted
--- mapping:
---   id -> id (pcor-N)   playerId -> player_id
---   targetType -> target_kind   targetId -> target_id (≤80; polymorphic by
---     target_kind: timeline event id 'pev:...', passport_career_entries.id,
---     'hist:<org>' key, ver_references.id, trials.id, assessments.id,
---     passport_achievements.id, signings.id; no FK)
---   reason -> reason (≤500, moderated)
---   by{kind,id,name} -> by_kind, by_id, by_name
---   status -> status
---   resolution.outcome -> resolution_outcome
---   resolution.reason -> resolution_reason (≤400)
---   resolution.at -> resolved_at (same instant as resolvedAt; the two
---     Date.now() calls at :498-:499 are collapsed into one column)
---   resolvedAt -> resolved_at
---   createdAt -> created_at
--- notes:
---   * Known defect: the RESOLVER identity is not stored (admin shared key).
---   * Read patterns: by status + created_at asc (T&S queue; ?all=1 lists all).
--- -----------------------------------------------------------------------------
+CREATE UNIQUE INDEX passport_shares_token_hash ON passport_shares (token_hash);
+CREATE INDEX passport_shares_player ON passport_shares (player_id);
 CREATE TABLE passport_corrections (
-  id                 TEXT PRIMARY KEY,
-  player_id          TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
-  target_kind        TEXT NOT NULL CHECK (target_kind IN ('timeline_event','career_entry','club_history','reference','trial','assessment','achievement','signing')),
-  target_id          TEXT CHECK (target_id IS NULL OR length(target_id) <= 80),
-  reason             TEXT NOT NULL CHECK (length(reason) <= 500),
-  by_kind            TEXT NOT NULL CHECK (by_kind IN ('player','guardian')),
-  by_id              TEXT NOT NULL,                         -- players.id | guardians.id (polymorphic, no FK)
-  by_name            TEXT,                                  -- snapshot
-  status             TEXT NOT NULL CHECK (status IN ('open','resolved')),
-  resolution_outcome TEXT CHECK (resolution_outcome IS NULL OR resolution_outcome IN ('corrected','rejected','referred')),
-  resolution_reason  TEXT CHECK (resolution_reason IS NULL OR length(resolution_reason) <= 400),
-  created_at         INTEGER NOT NULL,
-  resolved_at        INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  target_kind                              TEXT NOT NULL CHECK (target_kind IN ('timeline_event','career_entry','club_history','reference','trial','assessment','achievement','signing')),
+  target_id                                TEXT CHECK (target_id IS NULL OR length(target_id) <= 80),
+  reason                                   TEXT NOT NULL CHECK (length(reason) <= 500 AND length(reason) > 0),
+  by_kind                                  TEXT NOT NULL CHECK (by_kind IN ('player','guardian')),
+  by_id                                    TEXT NOT NULL CHECK (length(by_id) <= 80 AND length(by_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  status                                   TEXT NOT NULL CHECK (status IN ('open','resolved')),
+  resolution_outcome                       TEXT CHECK (resolution_outcome IS NULL OR resolution_outcome IN ('corrected','rejected','referred')),
+  resolution_reason                        TEXT CHECK (resolution_reason IS NULL OR length(resolution_reason) <= 400 AND length(resolution_reason) > 0),
+  resolved_at                              INTEGER,
+  created_at                               INTEGER NOT NULL,
+  CHECK ((status = 'resolved') = (resolution_outcome IS NOT NULL))
 ) STRICT;
-
-CREATE INDEX passport_corrections_status_created ON passport_corrections(status, created_at);
-CREATE INDEX passport_corrections_player ON passport_corrections(player_id);
+CREATE INDEX passport_corrections_status ON passport_corrections (status);
+CREATE INDEX passport_corrections_player ON passport_corrections (player_id);
 
 
 -- =============================================================================

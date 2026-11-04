@@ -11,13 +11,18 @@
 // (404 concealment), and the public resolver is rate-limited.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { mintShareSecret, sha256, shareProblem, SHARE_MODES } from './shared.mjs';
+import { PASSPORT_LIMITS } from '../../../repositories/passport.mjs';
+import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';
+
+const DAYS = PASSPORT_LIMITS.shareDays;
 
 export function registerPassportSharing(ctx) {
   const {
-    db, app, playerRouter, guardianRouter, orgRouter, adminRouter,
+    app, playerRouter, guardianRouter, orgRouter, adminRouter,
     nextId, persistNow, notify, ledgerAppend, findPlayer, isBlocked, vmetric,
-    buildFootballPassport,
+    buildFootballPassport, passport, unit,
   } = ctx;
+  const shares = ctx.verificationReads.shares; // S10b: the share links are read through SQL
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
@@ -26,17 +31,23 @@ export function registerPassportSharing(ctx) {
   function createShare(res, player, body, createdBy) {
     const mode = String(body.mode ?? 'public');
     if (!SHARE_MODES.includes(mode)) return res.status(400).json({ error: 'MODE_INVALID', allowed: SHARE_MODES });
-    const days = Math.min(Math.max(Number(body.expiresDays) || 30, 1), 90);
+    // S10b: a lifetime that is not a whole number of days from 1 to 90 is refused (it used to be clamped).
+    const days = body.expiresDays === undefined || body.expiresDays === null ? DAYS.default : body.expiresDays;
+    if (!Number.isInteger(days) || days < DAYS.min || days > DAYS.max) return res.status(400).json({ error: 'FIELD_INVALID', field: 'expiresDays', message: `A whole number of days from ${DAYS.min} to ${DAYS.max}.` });
     const secret = mintShareSecret();
-    const share = {
-      id: nextId('pshr'), playerId: player.id, mode, tokenHash: sha256(secret),
-      createdBy, createdAt: Date.now(), expiresAt: Date.now() + days * 86_400_000,
-      revokedAt: null, revokedBy: null, views: 0,
-    };
-    db.passportShares.push(share);
-    ledgerAppend({ type: 'passport_share_created', playerId: player.id, orgId: null, detail: { mode, shareId: share.id } });
+    const now = Date.now();
+    // One unit: the share with its ledger row and notification.
+    const share = unit(() => {
+      const created = passport.shares.create({
+        id: nextId('pshr'), playerId: player.id, mode, tokenHash: sha256(secret),
+        createdBy, createdAt: now, expiresAt: now + days * 86_400_000,
+        revokedAt: null, revokedBy: null, views: 0,
+      });
+      ledgerAppend({ type: 'passport_share_created', playerId: player.id, orgId: null, detail: { mode, shareId: created.id } });
+      notify({ kind: 'player', id: player.id }, 'passport', `A ${mode} Football Passport share link was created${createdBy.kind === 'guardian' ? ' by your guardian' : ''}. It expires in ${days} days and can be revoked any time.`, created.id);
+      return created;
+    });
     vmetric('share_created');
-    notify({ kind: 'player', id: player.id }, 'passport', `A ${mode} Football Passport share link was created${createdBy.kind === 'guardian' ? ' by your guardian' : ''}. It expires in ${days} days and can be revoked any time.`, share.id);
     persistNow();
     // The secret exists ONLY in this response — QR codes should encode
     // exactly this URL and nothing else.
@@ -63,36 +74,45 @@ export function registerPassportSharing(ctx) {
   });
 
   playerRouter.get('/football-passport/shares', (req, res) => {
-    res.json({ items: db.passportShares.filter((s) => s.playerId === req.player.id).map(shareView) });
+    res.json({ items: shares.forPlayer(req.player.id).map(shareView) });
   });
   guardianRouter.get('/children/:id/football-passport/shares', (req, res) => {
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-    res.json({ items: db.passportShares.filter((s) => s.playerId === req.params.id).map(shareView) });
+    res.json({ items: shares.forPlayer(req.params.id).map(shareView) });
   });
 
   function revoke(res, share, by) {
     if (!share) return res.status(404).json({ error: 'SHARE_NOT_FOUND' });
     if (share.revokedAt) return res.status(409).json({ error: 'ALREADY_REVOKED' });
-    share.revokedAt = Date.now();
-    share.revokedBy = by;
-    ledgerAppend({ type: 'passport_share_revoked', playerId: share.playerId, orgId: null, detail: { shareId: share.id, by: by.kind } });
+    // One unit: the revocation with its ledger row.
+    const revoked = unit(() => {
+      const r = passport.shares.update(share.id, (d) => { d.revokedAt = Date.now(); d.revokedBy = by; });
+      ledgerAppend({ type: 'passport_share_revoked', playerId: share.playerId, orgId: null, detail: { shareId: share.id, by: by.kind } });
+      return r;
+    });
     vmetric('share_revoked');
     persistNow();
-    res.json({ share: shareView(share), note: 'Revocation is immediate — the next request with this link fails.' });
+    res.json({ share: shareView(revoked), note: 'Revocation is immediate — the next request with this link fails.' });
   }
   playerRouter.post('/football-passport/shares/:id/revoke', (req, res) => {
     if (!isAdult(req.player)) return res.status(403).json({ error: 'GUARDIAN_MANAGED' });
-    revoke(res, db.passportShares.find((s) => s.id === req.params.id && s.playerId === req.player.id), { kind: 'player', id: req.player.id });
+    const s = shares.byId(req.params.id);
+    revoke(res, s?.playerId === req.player.id ? s : null, { kind: 'player', id: req.player.id });
   });
   guardianRouter.post('/children/:id/football-passport/shares/:sid/revoke', (req, res) => {
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-    revoke(res, db.passportShares.find((s) => s.id === req.params.sid && s.playerId === req.params.id), { kind: 'guardian', id: req.guardian.id });
+    const s = shares.byId(req.params.sid);
+    revoke(res, s?.playerId === req.params.id ? s : null, { kind: 'guardian', id: req.guardian.id });
   });
   adminRouter.post('/passport/shares/:id/revoke', (req, res) => {
-    revoke(res, db.passportShares.find((s) => s.id === req.params.id), { kind: 'trust_safety', id: 'admin' });
+    revoke(res, shares.byId(req.params.id), { kind: 'trust_safety', id: 'admin' });
   });
+  // Every share, newest first, by cursor (`?limit=&cursor=`).
   adminRouter.get('/passport/shares', (req, res) => {
-    res.json({ items: db.passportShares.map((s) => ({ ...shareView(s), playerId: s.playerId })) });
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    const { items, nextCursor } = pageOf(shares.page(page).rows, page.limit, (r) => r.key);
+    res.json({ items: items.map(({ record: s }) => ({ ...shareView(s), playerId: s.playerId })), nextCursor });
   });
 
   // --------------------------------------------------- public resolution
@@ -109,7 +129,7 @@ export function registerPassportSharing(ctx) {
   }
 
   function resolveShare(secret) {
-    const share = db.passportShares.find((s) => s.tokenHash === sha256(String(secret ?? '')));
+    const share = shares.byHash(sha256(String(secret ?? '')));
     const player = share ? findPlayer(share.playerId) : null;
     const problem = shareProblem(share, { playerRemoved: !player });
     return { share, player, problem };
@@ -122,7 +142,7 @@ export function registerPassportSharing(ctx) {
     // Concealment: unknown, revoked, expired, removed-subject and
     // wrong-mode all look identical from outside.
     if (problem || share.mode !== 'public') return res.status(404).json({ error: 'PASSPORT_NOT_FOUND' });
-    share.views += 1;
+    passport.shares.recordView(share.id);
     vmetric('share_opened_public');
     res.json(buildFootballPassport(player, 'public', { shareMode: 'public' }));
   });
@@ -137,7 +157,7 @@ export function registerPassportSharing(ctx) {
       // grassroots radius still applies, blocks still apply.
       return res.status(403).json({ error: req.org.type === 'agency' && !isAdult(player) ? 'UNDER_18_WALL' : 'NOT_VISIBLE' });
     }
-    share.views += 1;
+    passport.shares.recordView(share.id);
     vmetric('share_opened_recruitment');
     ledgerAppend({ type: 'passport_recruitment_view', playerId: player.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name, detail: { via: 'share' } });
     const viewer = req.org.type === 'agency' ? 'agency' : req.org.level === 'grassroots' ? 'grassroots_club' : 'pro_club';

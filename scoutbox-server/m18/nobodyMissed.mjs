@@ -49,7 +49,7 @@ export function registerNobodyMissed(ctx) {
   function matchFacts(player, org) {
     const view = playerViewForOrg(player, org);
     if (!view) return null;
-    const prefs = (db.passportPrefs ?? []).find((p) => p.playerId === player.id) ?? null;
+    const prefs = ctx.verificationReads.passportPrefs.forPlayer(player.id); // S10b: null until the player saves preferences
     const evidence = ctx.scoutingReads.evidence.currentForPlayer(player.id);
     const recentFullMatch = evidence.some((e) => e.claimType === 'footage' && e.recordedAt > now() - 180 * 86_400_000);
     // M19 needs the DATE, not only the 180-day boolean, so a club can write

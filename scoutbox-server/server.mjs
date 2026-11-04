@@ -200,7 +200,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -212,8 +212,9 @@ const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...
 // vacancies; since S9d opportunities, applications, campaigns, campaignSubmissions, playerPrefs).
 const scoutingReads = Object.freeze({ ...scoutingEvidence.reads, ...scoutingAssessments.reads, ...clubSetup.reads, ...opportunitiesCampaigns.reads });
 // The verification domain reads through SQL too (S10a): `verificationReads` (claims, events, evidence, tokens, admins,
-// rootTransfers, rootRequests, disputes, references, playerInvites, conflicts, domainRequests, domains).
-const verificationReads = verification.reads;
+// rootTransfers, rootRequests, disputes, references, playerInvites, conflicts, domainRequests, domains; since S10b the
+// Passport's passportPrefs, careerEntries, achievements, shares, corrections).
+const verificationReads = Object.freeze({ ...verification.reads, ...passport.reads });
 // Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
 // every module context as `byId` (`byId.player(id)`, `byId.org(id)`, …; null when there is none).
 const byId = createLookups({ players, guardians, users, orgs });
@@ -4739,6 +4740,7 @@ const m15Ctx = registerM15({
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
   recordSourceChange: srcCtx.recordSourceChange,
+  passport, unit, // S10b: every Passport record is an explicit repository write
 });
 const m16Ctx = registerM16({
   rateLimit,

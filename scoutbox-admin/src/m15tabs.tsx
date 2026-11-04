@@ -80,6 +80,8 @@ export function M15Panel({ adminKey, say }: { tab: M15Tab; adminKey: string; say
   const load = useCallback(async () => {
     if (DEMO) { setCorrections(cannedCorrections); setShares(cannedShares); return; }
     try {
+      // Both lists are paged by the server ({ items, nextCursor }): this reads the first 50 (the oldest open corrections,
+      // the newest shares). "Load more" is needed.
       setCorrections((await call<{ items: CorrectionRow[] }>(adminKey, `/admin/passport/corrections${showResolved ? '?all=1' : ''}`)).items);
       setShares((await call<{ items: ShareRow[] }>(adminKey, '/admin/passport/shares')).items);
     } catch (e) { say(e instanceof Error ? e.message : 'load failed'); }
