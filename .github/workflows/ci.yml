@@ -28,7 +28,7 @@ jobs:
         run: node e2e/platform/connectedMode.mjs
       - name: Migrated-domain end-to-end batteries (each spawns its own server)
         run: |
-          for s in operations/clubOperations platform/storeGuarantees agents/transactionsPersistence recruitment/contactsPersistence recruitment/offersPersistence recruitment/decisionsPersistence recruitment/trialsPersistence recruitment/journeyPersistence recruitment/signingsPersistence scouting/clubWorkflows recruitment/rooms recruitment/decisions; do
+          for s in operations/clubOperations discovery/exposureCalibrationAndCoverage platform/storeGuarantees agents/transactionsPersistence recruitment/contactsPersistence recruitment/offersPersistence recruitment/decisionsPersistence recruitment/trialsPersistence recruitment/journeyPersistence recruitment/signingsPersistence scouting/clubWorkflows recruitment/rooms recruitment/decisions; do
             echo "== $s"; node "e2e/$s.mjs" || exit 1
           done
 
