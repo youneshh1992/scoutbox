@@ -589,7 +589,7 @@ export function registerRooms(ctx) {
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     // A room cannot be used to bookmark a player the club may not see.
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE', message: 'This player is not visible to your organisation under the standing rules.' });
-    if (vacancyId && !db.vacancies.some((v) => v.id === vacancyId && v.orgId === req.org.id)) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' });
+    if (vacancyId && !ctx.scoutingReads.vacancies.ofOrg(vacancyId, req.org.id)) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' }); // S9c: read through SQL
 
     const existing = reads.cases.forOrgPlayer(req.org.id, p.id).find((c) => isRoom(c) && OPEN_ROOM_STATUSES.includes(c.room.status));
     if (existing) {

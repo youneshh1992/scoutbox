@@ -15,7 +15,7 @@ The player's evidence layer (Passport, verification, provenance, Trust) and the 
 - Root org bootstrap always needs T&S human review. Root approval never links an applicant to an account by name, only by a verified work-email match or an explicit T&S choice. Org-admin confirmation is authoritative for staff claims; root grants need dual control and MFA. (M14_VERIFICATION)
 - Revoking an admin stops new approvals; claims they already approved keep their provenance until acted on individually. (M14_VERIFICATION)
 - Only `authoritative` licences render "Licence verified"; a T&S document review renders "Credential reviewed". (M14_VERIFICATION)
-- References need a current verified role and snapshot the coach's verification at submission. They are corrected only by versioned supersession, never edited. Squad invites are recipient-bound and guardian-accepted for minors. (M14_VERIFICATION)
+- References need a current verified role and snapshot the coach's verification at submission. They are corrected only by versioned supersession, never edited. Squad invites are recipient-bound and guardian-accepted for minors. (M14_VERIFICATION) A club relationship comes from a squad row only: a club's shadow list (players it is considering) never counts as a relationship on the passport or the Trust score. (S9c)
 
 **Football Passport (M15)**
 - The Passport is a server-side projection over existing records. It is not a store, rating, badge or endorsement, and it never contains a numeric score. (M15_FOOTBALL_PASSPORT, M16_2_TRUST_SCORE)

@@ -382,7 +382,7 @@ ok(r.status === 403, 'tactical setup is lead-only');
 r = await post('/org/tactical', { formation: '4-3-3', planningHorizon: '2 windows', roles: [
   { name: 'Pressing 9', positionGroup: 'ATT', description: 'Leads the press, attacks depth',
     required: [{ key: 'positionGroup', value: 'ATT' }, { key: 'maxAge', value: 23 }],
-    preferred: [{ key: 'foot', value: 'L' }, { key: 'minAppearances', value: 10 }] },
+    preferred: [{ key: 'foot', value: 'left' }, { key: 'minAppearances', value: 10 }] }, // S9c: the player vocabulary ('L' never matched a player)
 ] }, bearer(MARIA));
 ok(r.status === 200, 'lead defines formation + role');
 const roleId = r.body.tactical.roles[0].id;
@@ -399,6 +399,46 @@ r = await post('/org/squad/shadow', { playerId: cand.playerId, roleId }, bearer(
 ok(r.status === 201, 'candidate added to the shadow squad');
 r = await j('/org/squad-planner', {}, bearer(MARIA));
 ok(r.body.shadow.length === 1 && r.body.vacancies.length === 1, 'squad planner shows shadow squad + vacancies');
+// S9c: the club setup is typed tables. Junk is refused naming the field; a re-save keeps role ids (and the vacancy its
+// role); a role from another club is refused; the shadow list is not the squad.
+{
+  const role0 = (await j('/org/tactical', {}, bearer(MARIA))).body.tactical.roles[0];
+  ok(role0.id === roleId && role0.preferred.some((c) => c.key === 'foot' && c.value === 'left'), 'S9c the setup reads back from the tables, role id and criteria intact');
+  const base = { formation: '4-3-3', roles: [{ id: roleId, name: 'Pressing 9', positionGroup: 'ATT', required: [{ key: 'maxAge', value: 23 }] }] };
+  const refused = async (body, field, error = 'FIELD_INVALID') => { const x = await post('/org/tactical', body, bearer(MARIA)); return x.status === 400 && x.body.error === error && x.body.field === field; };
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], positionGroup: 'STRIKER' }] }, 'roles[0].positionGroup'), 'S9c an unknown position group is refused, not turned into MID');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], category: 'veterans' }] }, 'roles[0].category'), 'S9c an unknown category is refused, not turned into mixed');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], required: [{ key: 'height', value: 180 }] }] }, 'roles[0].required[0].key'), 'S9c an unknown criterion key is refused, not dropped');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], preferred: [{ key: 'foot', value: 'L' }] }] }, 'roles[0].preferred[0].value'), 'S9c a foot outside the player vocabulary (left / right) is refused');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], required: [{ key: 'maxAge', value: '23' }] }] }, 'roles[0].required[0].value'), 'S9c an age that is not a whole number is refused');
+  ok(await refused({ ...base, roles: [{ ...base.roles[0], id: 'role-of-someone-else' }] }, 'roles[0].id'), "S9c a role id that is not one of this club's roles is refused");
+  ok(await refused({ ...base, windows: [{ name: 'Summer', opens: 'next June' }] }, 'windows[0].opens', 'DATE_INVALID'), 'S9c a window date that is not a day is refused');
+  ok(await refused({ ...base, roles: Array.from({ length: 16 }, (_, i) => ({ name: `R${i}`, positionGroup: 'MID' })) }, 'roles'), 'S9c more than fifteen roles are refused, not cut off');
+  const kept = await post('/org/tactical', { ...base, roles: [...base.roles, { name: 'Ball-winning 6', positionGroup: 'MID', category: 'mixed' }] }, bearer(MARIA));
+  ok(kept.status === 200 && kept.body.tactical.roles[0].id === roleId && kept.body.tactical.roles.length === 2, 'S9c re-saving the setup keeps the role id and adds the new role');
+  ok((await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).status === 200, 'S9c the vacancy keeps its role across the re-save');
+  const marked = (await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).body.candidates.find((c) => c.playerId === cand.playerId);
+  ok(!marked || (marked.shadowed === true && marked.onSquad === false), 'S9c a shadowed candidate is marked shadowed, not on the squad');
+  const list = await j('/org/vacancies', {}, bearer(MARIA));
+  ok(list.status === 200 && Array.isArray(list.body.items) && list.body.items[0].id === vacId && 'nextCursor' in list.body, 'S9c the vacancy list pages ({ items, nextCursor })');
+  ok((await j('/org/vacancies?limit=0', {}, bearer(MARIA))).status === 400, 'S9c a junk page limit is refused');
+  ok((await post('/org/vacancies', { roleId, notes: { x: 1 } }, bearer(MARIA))).status === 400, 'S9c vacancy notes that are not text are refused');
+  ok((await post('/org/squad/shadow', { playerId: 'pl-svensson', roleId: 'role-of-someone-else' }, bearer(MARIA))).status === 404, "S9c a shadow entry naming a role that is not the club's is refused");
+  const dropped = await post('/org/tactical', { formation: '4-4-2', roles: [{ name: 'Target man', positionGroup: 'ATT', category: 'mens' }] }, bearer(MARIA));
+  ok(dropped.status === 200 && !dropped.body.tactical.roles.some((x) => x.id === roleId), 'S9c a role left out of the save is dropped');
+  ok((await j(`/org/vacancies/${vacId}/candidates`, {}, bearer(MARIA))).status === 409, 'S9c a vacancy whose role was dropped answers ROLE_DELETED');
+  const closed = await post(`/org/vacancies/${vacId}/close`, {}, bearer(MARIA));
+  ok(closed.status === 200 && closed.body.vacancy.status === 'closed' && Number.isInteger(closed.body.vacancy.closedAt), 'S9c a vacancy closes');
+  // The defect S9c fixes: shadowing a player made them a member of the club's squad everywhere.
+  const sh = await post('/org/squad/shadow', { playerId: 'pl-osei' }, bearer(HACK));
+  ok(sh.status === 201 && sh.body.entry.source === 'shadow', 'S9c a grassroots club can shadow a player');
+  const sq = await j('/org/squad', {}, bearer(HACK));
+  ok(sq.status === 200 && !sq.body.entries.some((e) => e.playerId === 'pl-osei'), 'S9c a shadowed player is not on the grassroots squad');
+  const md = await post('/org/matchday', { fixture: 'S9c friendly', date: '2026-10-03', playerIds: ['pl-osei'] }, bearer(HACK));
+  ok(md.status === 201 && md.body.credited === 0, 'S9c a shadowed player gets no match-day attendance from that club');
+  const plan = (await j('/org/squad-planner', {}, bearer(HACK))).body;
+  ok(plan.shadow.some((s) => s.playerId === 'pl-osei') && !plan.current.some((s) => s.playerId === 'pl-osei'), 'S9c the planner shows the player on the shadow list only');
+}
 r = await post(`/org/cases/${caseId}/link`, {}, bearer(MARIA));
 ok(r.status === 200, 'case link endpoint tolerates empty link (no-op)');
 

@@ -386,7 +386,7 @@ export function registerVerificationReview(ctx) {
         level: r.orgType === 'grassroots club' ? 'grassroots' : null,
         plan: r.orgType === 'grassroots club' ? 'Grassroots' : 'Pro', trustedPartner: false,
         country: r.country, verified: false, verifiedDomain: null, safeguardingContractSigned: false,
-        ...(r.orgType === 'grassroots club' ? { location: { lat: 51.5, lng: -0.1, city: '' }, federationRef: r.federation ? { federation: r.federation, registrationId: 'pending' } : null, squad: [] } : {}),
+        ...(r.orgType === 'grassroots club' ? { location: { lat: 51.5, lng: -0.1, city: '' }, federationRef: r.federation ? { federation: r.federation, registrationId: 'pending' } : null } : {}),
         verification: { domains: [], revokedAt: null, orgType: r.orgType },
       });
     }

@@ -46,9 +46,9 @@ const fileDigest = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbo
 /** Organisation records in every shape the application writes. */
 const ORGS = () => [
   // The seed's shape: a pro club with location, explicit nulls and a verified domain.
-  { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true, password: 'scrypt$00$11', tactical: null, squad: [] },
+  { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true, password: 'scrypt$00$11', agencySettings: null, memos: [] },
   // Registration's shape (server.mjs): a grassroots club with a federation reference and a key order of its own.
-  { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, federationRef: { federation: 'London FA', registrationId: 'LFA-1' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, verifiedDomain: null, safeguardingContractSigned: false, squad: [{ id: 'sq-1', name: 'Kid', position: 'ST', playerId: null, source: 'manual', addedAt: 5 }], lookingFor: ['ST', 'CB'] },
+  { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, federationRef: { federation: 'London FA', registrationId: 'LFA-1' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, verifiedDomain: null, safeguardingContractSigned: false, memos: [{ id: 'sq-1', name: 'Kid', position: 'ST', playerId: null, source: 'manual', addedAt: 5 }], tags: ['ST', 'CB'] },
   // The verification review's shape (m14): level null, location null, a verification facet, unknown fields.
   { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, verifiedDomain: null, safeguardingContractSigned: false, location: null, federationRef: null, verification: { domains: [{ domain: 'northstar.example', status: 'verified', method: 'scoutbox_manual_review', verifiedAt: 7, addedBy: 'trust_safety' }], revokedAt: null, orgType: 'agency' }, agencySettings: { licence: 'FIFA-1' }, somethingNewer: { kept: true }, mfaRequiredForLeads: true, emailDomain: 'northstar.example', emailDomainVerified: true, createdAt: 1700000000000 },
 ];
@@ -86,7 +86,7 @@ test('mapping: every record shape the application writes round-trips byte for by
   assert.equal(row.verification_org_type, 'agency'); assert.equal(row.verification_revoked_at, null);
   const facets = JSON.parse(row.facets_json);
   assert.deepEqual(Object.keys(facets).filter((k) => !k.startsWith('__')).sort(), ['agencySettings', 'somethingNewer', 'verification']);
-  assert.ok(!('tactical' in facets) || true);
+  assert.ok(!('tactical' in facets), 'the retired S9c facets are never stored on an organisation');
   for (const key of MIGRATED_KEYS) assert.ok(!(key in facets), `${key} is a column, never a facet`);
 });
 test('validation: unsupported records are refused with a reason and nothing is coerced', () => {
@@ -172,23 +172,23 @@ test('repository: insert and update write migrated fields immediately; a migrate
   assert.equal(pro.suspended, true, 'the same record object the route holds is current'); assert.equal(pro.verifiedDomain, null); assert.equal(pro.password, 'scrypt$new');
   assert.equal(store.sqlite.prepare("SELECT suspended, verified_domain, password_hash FROM orgs WHERE id = 'org-pro'").get().suspended, 1, 'written immediately');
   assert.throws(() => layer.orgs.update('org-pro', { level: 'agent' }), /refused: level/);
-  assert.throws(() => layer.orgs.update('org-pro', { squad: [] }), /not a migrated organisation field/);
+  assert.throws(() => layer.orgs.update('org-pro', { memos: [] }), /not a migrated organisation field/);
   assert.throws(() => layer.orgs.update('org-none', { suspended: true }), /does not exist/);
   // insert/update commit on their own: inside someone else's transaction their bookkeeping could not follow a rollback.
   assert.throws(() => transaction(store.sqlite, () => layer.orgs.update('org-pro', { suspended: false })), /cannot run inside an open transaction/);
   assert.throws(() => transaction(store.sqlite, () => layer.orgs.insert({ id: 'org-tx', name: 'T', type: 'club', plan: 'Pro' })), /cannot run inside an open transaction/);
   assert.equal(pro.suspended, true, 'the refused update changed nothing');
   // Facets: mutated in place (as the modules do), persisted by the next save.
-  pro.squad.push({ id: 'sq-9', name: 'New', position: 'GK', playerId: null, source: 'manual', addedAt: 9 });
-  pro.tactical = { formation: '4-3-3' };
+  pro.memos.push({ id: 'sq-9', name: 'New', position: 'GK', playerId: null, source: 'manual', addedAt: 9 });
+  pro.agencySettings = { formation: '4-3-3' };
   pro.verification = { domains: [], revokedAt: 123, orgType: 'professional club' };
   const grass = db.orgs.find((o) => o.id === 'org-grass');
-  grass.lookingFor = ['GK'];
-  delete grass.squad;
-  assert.equal(JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-pro'").get().facets_json).squad.length, 0, 'not yet persisted');
+  grass.tags = ['GK'];
+  delete grass.memos;
+  assert.equal(JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-pro'").get().facets_json).memos.length, 0, 'not yet persisted');
   store.save({ savedAt: 2, idCounter: 1000, db });
   const facets = JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-pro'").get().facets_json);
-  assert.equal(facets.squad.length, 1); assert.deepEqual(facets.tactical, { formation: '4-3-3' });
+  assert.equal(facets.memos.length, 1); assert.deepEqual(facets.agencySettings, { formation: '4-3-3' });
   assert.equal(store.sqlite.prepare("SELECT verification_revoked_at, verification_org_type FROM orgs WHERE id = 'org-pro'").get().verification_org_type, 'professional club', 'the mirror columns follow the facet');
   assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'no blob');
   // Insert: a new organisation is a row from the first byte.
@@ -204,9 +204,9 @@ test('repository: insert and update write migrated fields immediately; a migrate
   layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 4, imported: 0 });
   const pro2 = db2.orgs.find((o) => o.id === 'org-pro');
-  assert.equal(pro2.suspended, true); assert.equal(pro2.password, 'scrypt$new'); assert.equal(pro2.squad.length, 1); assert.deepEqual(pro2.tactical, { formation: '4-3-3' }); assert.equal(pro2.verification.revokedAt, 123);
+  assert.equal(pro2.suspended, true); assert.equal(pro2.password, 'scrypt$new'); assert.equal(pro2.memos.length, 1); assert.deepEqual(pro2.agencySettings, { formation: '4-3-3' }); assert.equal(pro2.verification.revokedAt, 123);
   const grass2 = db2.orgs.find((o) => o.id === 'org-grass');
-  assert.deepEqual(grass2.lookingFor, ['GK']); assert.ok(!('squad' in grass2), 'a deleted facet stays deleted');
+  assert.deepEqual(grass2.tags, ['GK']); assert.ok(!('memos' in grass2), 'a deleted facet stays deleted');
   assert.equal(JSON.stringify(db2.orgs.find((o) => o.id === 'org-agency')), JSON.stringify(ORGS()[2]), 'an untouched record is byte-identical after the restart');
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -240,37 +240,37 @@ test('facet change tracking reflects committed state only — a save that fails 
   const facetsOf = (id) => JSON.parse(store.sqlite.prepare('SELECT facets_json FROM orgs WHERE id = ?').get(id).facets_json);
   const pro = db.orgs.find((o) => o.id === 'org-pro');
   const grass = db.orgs.find((o) => o.id === 'org-grass');
-  assert.deepEqual(facetsOf('org-pro').squad, []); assert.deepEqual(facetsOf('org-grass').lookingFor, ['ST', 'CB']);
+  assert.deepEqual(facetsOf('org-pro').memos, []); assert.deepEqual(facetsOf('org-grass').tags, ['ST', 'CB']);
   // (a) The failure is in a LATER write of the same save: an unrelated collection that cannot be serialised.
-  pro.squad.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
-  grass.lookingFor = ['GK'];
+  pro.memos.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
+  grass.tags = ['GK'];
   db.unrelated = [1n]; // a blob collection JSON cannot serialise
   assert.throws(() => store.save({ savedAt: 2, idCounter: 1000, db }), /BigInt/);
   assert.equal(store.sqlite.isTransaction, false, 'the transaction was rolled back');
-  assert.deepEqual(facetsOf('org-pro').squad, [], 'the flushed squad change was rolled back with the rest of the save');
-  assert.deepEqual(facetsOf('org-grass').lookingFor, ['ST', 'CB'], 'so was the second organisation');
+  assert.deepEqual(facetsOf('org-pro').memos, [], 'the flushed memos change was rolled back with the rest of the save');
+  assert.deepEqual(facetsOf('org-grass').tags, ['ST', 'CB'], 'so was the second organisation');
   db.unrelated = [];
   store.save({ savedAt: 3, idCounter: 1000, db });
-  assert.equal(facetsOf('org-pro').squad.length, 1, 'the retry persists the change the failed save had already flushed');
-  assert.deepEqual(facetsOf('org-grass').lookingFor, ['GK'], 'for every organisation that had a pending change');
+  assert.equal(facetsOf('org-pro').memos.length, 1, 'the retry persists the change the failed save had already flushed');
+  assert.deepEqual(facetsOf('org-grass').tags, ['GK'], 'for every organisation that had a pending change');
   // (b) The failure is at COMMIT.
-  pro.tactical = { formation: '4-4-2' };
+  pro.agencySettings = { formation: '4-4-2' };
   const exec = store.sqlite.exec.bind(store.sqlite);
   let explodeAtCommit = true;
   store.sqlite.exec = (sql) => { if (explodeAtCommit && sql === 'COMMIT') { explodeAtCommit = false; throw new Error('disk full at commit'); } return exec(sql); };
   assert.throws(() => store.save({ savedAt: 4, idCounter: 1000, db }), /disk full at commit/);
   assert.equal(store.sqlite.isTransaction, false);
-  assert.equal(facetsOf('org-pro').tactical, null, 'nothing committed');
+  assert.equal(facetsOf('org-pro').agencySettings, null, 'nothing committed');
   store.save({ savedAt: 5, idCounter: 1000, db });
-  assert.deepEqual(facetsOf('org-pro').tactical, { formation: '4-4-2' }, 'the retry persists the change');
+  assert.deepEqual(facetsOf('org-pro').agencySettings, { formation: '4-4-2' }, 'the retry persists the change');
   // (c) The failure is INSIDE the flush, after the first organisation's row was already written in the transaction.
-  pro.squad.push({ id: 'sq-2', name: 'B', position: 'GK', playerId: null, source: 'manual', addedAt: 2 });
+  pro.memos.push({ id: 'sq-2', name: 'B', position: 'GK', playerId: null, source: 'manual', addedAt: 2 });
   grass.agencySettings = { n: 1n };
   assert.throws(() => store.save({ savedAt: 6, idCounter: 1000, db }), /BigInt/);
-  assert.equal(facetsOf('org-pro').squad.length, 1, 'the first organisation\'s UPDATE was rolled back');
+  assert.equal(facetsOf('org-pro').memos.length, 1, 'the first organisation\'s UPDATE was rolled back');
   grass.agencySettings = { n: 1 };
   store.save({ savedAt: 7, idCounter: 1000, db });
-  assert.equal(facetsOf('org-pro').squad.length, 2); assert.deepEqual(facetsOf('org-grass').agencySettings, { n: 1 });
+  assert.equal(facetsOf('org-pro').memos.length, 2); assert.deepEqual(facetsOf('org-grass').agencySettings, { n: 1 });
   // A save with nothing pending writes no organisation row; a successful save is not re-flushed.
   store.sqlite.exec = exec;
   const seq = store.revision();
@@ -282,8 +282,8 @@ test('facet change tracking reflects committed state only — a save that fails 
   const db2 = { orgs: [], guardians: [], players: [], sessions: [], users: [] };
   attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   const pro2 = db2.orgs.find((o) => o.id === 'org-pro'); const grass2 = db2.orgs.find((o) => o.id === 'org-grass');
-  assert.deepEqual(pro2.squad.map((m) => m.id), ['sq-1', 'sq-2']); assert.deepEqual(pro2.tactical, { formation: '4-4-2' });
-  assert.deepEqual(grass2.lookingFor, ['GK']); assert.deepEqual(grass2.agencySettings, { n: 1 });
+  assert.deepEqual(pro2.memos.map((m) => m.id), ['sq-1', 'sq-2']); assert.deepEqual(pro2.agencySettings, { formation: '4-4-2' });
+  assert.deepEqual(grass2.tags, ['GK']); assert.deepEqual(grass2.agencySettings, { n: 1 });
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 test('nested migrated fields are protected — assigning, deleting or defining a property inside location or federationRef throws, the view never diverges from the table, and a repository update of a composite persists across a restart', () => {
@@ -453,14 +453,14 @@ test('snapshot mode: a fixture saved into a new directory goes into the tables a
   attempt((x) => { x.db.users.push({ id: 'usr-x', orgId: 'org-none', name: 'X', role: 'Scout', createdAt: 1 }); }, /FOREIGN KEY/);
   // A valid write: scalar and facet changes together, a new organisation, an organisation removed together with its staff and their sessions.
   const ok = tool.load();
-  ok.db.orgs[0].suspended = true; ok.db.orgs[0].squad.push({ id: 'sq-t', name: 'T' }); ok.db.orgs[0].brandNew = { from: 'tool' };
+  ok.db.orgs[0].suspended = true; ok.db.orgs[0].memos.push({ id: 'sq-t', name: 'T' }); ok.db.orgs[0].brandNew = { from: 'tool' };
   ok.db.orgs.push({ id: 'org-tool', name: 'Tool FC', type: 'club', level: 'academy', plan: 'Academy' });
   ok.db.orgs = ok.db.orgs.filter((o) => o.id !== 'org-agency'); ok.db.users = ok.db.users.filter((u) => u.orgId !== 'org-agency');
   ok.db.players[0].name = 'Renamed';
   tool.save(ok);
   const after = tool.load();
   assert.deepEqual(after.db.orgs.map((o) => o.id), ['org-pro', 'org-grass', 'org-tool']);
-  assert.equal(after.db.orgs[0].suspended, true); assert.equal(after.db.orgs[0].squad.length, 1); assert.deepEqual(after.db.orgs[0].brandNew, { from: 'tool' });
+  assert.equal(after.db.orgs[0].suspended, true); assert.equal(after.db.orgs[0].memos.length, 1); assert.deepEqual(after.db.orgs[0].brandNew, { from: 'tool' });
   assert.equal(after.db.players[0].name, 'Renamed');
   assert.ok(!after.db.users.some((u) => u.orgId === 'org-agency'));
   // An omitted orgs collection is a partial snapshot.
@@ -482,7 +482,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
   const seed = buildSeed();
   seed.users = [{ id: 'usr-legacy', orgId: 'org-eastport', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1 }];
   seed.sessions = [{ token: 'legacy-maria-token-00000000000000000000000000', sid: 'sid-maria', kind: 'org', refId: 'org-eastport', userId: 'usr-legacy', createdAt: Date.now() - DAY }];
-  seed.orgs.find((o) => o.id === 'org-eastport').squad = [{ id: 'sq-seed', name: 'Seeded', position: 'ST', playerId: null, source: 'manual', addedAt: 1 }];
+  seed.orgs.find((o) => o.id === 'org-eastport').memos = [{ id: 'sq-seed', name: 'Seeded', position: 'ST', playerId: null, source: 'manual', addedAt: 1 }];
   // A Room owned by a live organisation: the boot integrity report must still
   // see the organisation on every boot (regression: it ran
   // before the data layer attached and called every Room an orphan).
@@ -511,7 +511,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     const maria = seed.sessions[0].token;
     assert.equal((await j('GET', '/org/notifications', undefined, maria)).status, 200, 'the fixture staff session works');
     const cap = await j('GET', '/capabilities');
-    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups', '0019_scouting_evidence', '0020_scouting_assessments']);
+    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups', '0019_scouting_evidence', '0020_scouting_assessments', '0021_club_setup']);
     assert.equal(cap.body.dataLayer.domains.orgs.mode, 'live'); assert.equal(cap.body.dataLayer.domains.orgs.rows, 5);
     assert.equal(cap.body.integrity.ok, true, `the boot integrity report sees the live organisations: ${JSON.stringify(cap.body.integrity.byCode)}`);
     assert.ok(cap.body.integrity.checked >= 6, 'the report counted the organisations and the Room');
@@ -519,7 +519,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     const dirListing = await j('GET', '/orgs/directory');
     assert.equal(dirListing.status, 200); assert.ok(!JSON.stringify(dirListing.body).includes('scrypt'));
     const clubs = await j('GET', '/admin/clubs', undefined, null, A);
-    assert.equal(clubs.status, 200); assert.ok(clubs.body.find((o) => o.id === 'org-eastport').squad.length === 1, 'the facet is served'); assert.ok(!JSON.stringify(clubs.body).includes('password'));
+    assert.equal(clubs.status, 200); assert.ok(clubs.body.find((o) => o.id === 'org-eastport').memos.length === 1, 'the facet is served'); assert.ok(!JSON.stringify(clubs.body).includes('password'));
     // Registration: a new grassroots organisation is a table row at once.
     const reg = await j('POST', '/auth/org/register-grassroots', { name: 'Test Rovers', scoutName: 'Pat', role: 'Manager', country: 'GB', city: 'Leeds', lat: 53.8, lng: -1.5, federation: 'West Riding FA', registrationId: 'WR-9', password: 'rovers-pass-123' });
     assert.equal(reg.status, 201, JSON.stringify(reg.body)); newOrgId = reg.body.org.id;
@@ -555,7 +555,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     const rovers = clubs.body.find((o) => o.id === newOrgId);
     assert.equal(rovers.verified, true); assert.equal(rovers.verifiedDomain, 'rovers.example'); assert.equal(rovers.suspended, false);
     if (Array.isArray(rovers.lookingFor)) assert.deepEqual(rovers.lookingFor, ['ST', 'GK']);
-    assert.equal(clubs.body.find((o) => o.id === 'org-eastport').squad[0].name, 'Seeded', 'the seeded facet survived a restart');
+    assert.equal(clubs.body.find((o) => o.id === 'org-eastport').memos[0].name, 'Seeded', 'the seeded facet survived a restart');
     assert.equal((await j('GET', '/org/notifications', undefined, regToken)).status, 200, 'the session minted before the restart is still valid');
     const cap2 = await j('GET', '/capabilities');
     assert.equal(cap2.body.integrity.ok, true, `integrity after a restart: ${JSON.stringify(cap2.body.integrity.byCode)}`);
@@ -575,7 +575,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     await new Promise((resolve, reject) => { restored.stdout.on('data', () => { if (/listening on/.test(log2)) resolve(); }); restored.on('exit', (c) => reject(new Error(`restored server exited ${c}: ${log2}`))); setTimeout(() => reject(new Error(`restore timeout: ${log2}`)), 20_000).unref(); });
     const r = await fetch(`http://127.0.0.1:${port2}/admin/clubs`, { headers: A });
     const clubs = await r.json();
-    assert.equal(clubs.length, 6); assert.equal(clubs.find((o) => o.id === newOrgId).verifiedDomain, 'rovers.example'); assert.equal(clubs.find((o) => o.id === 'org-eastport').squad[0].name, 'Seeded');
+    assert.equal(clubs.length, 6); assert.equal(clubs.find((o) => o.id === newOrgId).verifiedDomain, 'rovers.example'); assert.equal(clubs.find((o) => o.id === 'org-eastport').memos[0].name, 'Seeded');
     assert.equal((await fetch(`http://127.0.0.1:${port2}/org/notifications`, { headers: { authorization: `Bearer ${regToken}` } })).status, 200, 'the session survives backup and restore');
     const raw = openRaw(restoreDir); assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0); assert.deepEqual(raw.prepare('PRAGMA foreign_key_check').all(), []); raw.close();
   } finally {

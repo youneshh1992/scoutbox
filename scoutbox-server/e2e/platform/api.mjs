@@ -309,7 +309,10 @@ r = await j('/player/benchmarks', {}, bearer(KOLA));
 ok(r.status === 200 && /not competition/.test(r.body.note) && Array.isArray(r.body.stats), 'benchmarks return cohort percentiles, framed as context');
 
 // Opportunity radar: Moss Side (Manchester) is in Kola's radius.
-await j('/org/looking-for', { method: 'POST', body: JSON.stringify({ positions: ['ST', 'CDM'] }) }, bearer(MOSS));
+r = await j('/org/looking-for', { method: 'POST', body: JSON.stringify({ positions: ['striker'] }) }, bearer(MOSS));
+ok(r.status === 400 && r.body.field === 'positions[0]', 'S9c looking-for takes position codes only (the radar could never match "striker")');
+r = await j('/org/looking-for', { method: 'POST', body: JSON.stringify({ positions: ['ST', 'CDM'] }) }, bearer(MOSS));
+ok(r.status === 200 && r.body.lookingFor.join() === 'ST,CDM', 'the club says what it is looking for');
 r = await j('/org/open-trials', {
   method: 'POST',
   body: JSON.stringify({ title: 'Open training session', date: '2099-05-01', venue: 'Moss Side Rec', ageGroup: 'open', positions: ['ST'] }),
@@ -455,6 +458,8 @@ ok(r.body.find((o) => o.id === 'org-mossside')?.pathwayClub === true, 'the Pathw
 // they verify through their federation registration instead.
 r = await j('/org/verification/federation', { method: 'POST', body: JSON.stringify({ federation: 'Manchester FA', registrationId: 'MFA-2210', contactEmail: 'mosssideathletic@gmail.com' }) }, bearer(MOSS));
 ok(r.status === 201 && r.body.submitted, 'grassroots club files federation verification (free-mail contact allowed)');
+r = await j('/org/verification/federation', { method: 'POST', body: JSON.stringify({ federation: 'Manchester FA', registrationId: 'MFA-2210', contactEmail: 'not an address' }) }, bearer(MOSS));
+ok(r.status === 400 && r.body.field === 'contactEmail', 'S9c a federation contact that is not an e-mail address is refused');
 r = await j('/admin/clubs', {}, admin);
 ok(r.body.find((o) => o.id === 'org-mossside')?.federationCheck?.status === 'pending', 'the federation check lands in the Trust & Safety queue');
 

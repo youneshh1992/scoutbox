@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
+import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
 import { registerM12 } from './m12/index.mjs';
 import { registerM13 } from './m13/index.mjs';
 import { registerM14 } from './m14/index.mjs';
@@ -199,7 +200,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -207,8 +208,9 @@ const { users, sessions, orgs, players, guardians, identity, mediaDeletions, cod
 const onlyIf = (record, ok) => (record && ok(record) ? record : null);
 const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads, ...recruitment.reads, ...recruitmentCases.reads });
 // The scouting domain reads through SQL too (S9): `scoutingReads` (evidence, coachAffiliations, squadInvites; since S9b
-// templates, assessments, segments, playlists).
-const scoutingReads = Object.freeze({ ...scoutingEvidence.reads, ...scoutingAssessments.reads });
+// templates, assessments, segments, playlists; since S9c tacticalSetups, squad, shadow, lookingFor, federationChecks,
+// vacancies).
+const scoutingReads = Object.freeze({ ...scoutingEvidence.reads, ...scoutingAssessments.reads, ...clubSetup.reads });
 // Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
 // every module context as `byId` (`byId.player(id)`, `byId.org(id)`, …; null when there is none).
 const byId = createLookups({ players, guardians, users, orgs });
@@ -291,9 +293,7 @@ db.vouches ??= [];         // coach references (email-code verified)
 db.matchdays ??= [];       // grassroots match-day logs (squad-wide attendance)
 db.friendlies ??= [];      // club-to-club friendly-match board (local)
 db.mediaBlobs ??= {};
-for (const o of db.orgs) {
-  if (o.level === 'grassroots') o.squad ??= [];
-}
+// S9c: a club's squad is rows of org_squad_members (repositories/clubSetup.mjs), not an organisation facet.
 
 // ---------------------------------------------------- production adapters
 // S7c: the records go through the repositories (staged into the next save, as
@@ -681,7 +681,14 @@ function currentIdCounter() { return idCounter; }
 
 function orgSafe(o) {
   const { password: _pw, ...safe } = o;
-  return safe;
+  // S9c: what the club is looking for and its federation-route request are club setup tables, not facets of the
+  // record; the apps read both from the session's organisation, so they are added here explicitly.
+  const fed = clubSetup.federation.forOrg(o.id);
+  return {
+    ...safe,
+    lookingFor: [...clubSetup.lookingFor.forOrg(o.id)],
+    federationCheck: fed ? { federation: fed.federation, registrationId: fed.registrationId, contactEmail: fed.contactEmail, status: fed.status, submittedAt: fed.submittedAt } : null,
+  };
 }
 
 function findPlayer(id) {
@@ -2879,13 +2886,16 @@ orgRouter.delete('/open-trials/:id', (req, res) => {
 });
 
 // What the club is looking for — powers the players' opportunity radar.
+// S9c: position codes only (the radar matches them against the player's position), at most five; an explicit write.
 orgRouter.post('/looking-for', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
-  const positions = Array.isArray(req.body?.positions) ? req.body.positions.slice(0, 5) : [];
-  req.org.lookingFor = positions;
-  persist();
+  const positions = req.body?.positions;
+  if (!Array.isArray(positions) || positions.length > CLUB_SETUP_LIMITS.lookingFor) return res.status(400).json({ error: 'FIELD_INVALID', field: 'positions', message: `positions is a list of at most ${CLUB_SETUP_LIMITS.lookingFor} position codes.` });
+  const wrong = positions.findIndex((p) => !LOOKING_FOR_POSITIONS.includes(p));
+  if (wrong >= 0) return res.status(400).json({ error: 'FIELD_INVALID', field: `positions[${wrong}]`, message: `Use position codes: ${LOOKING_FOR_POSITIONS.join(', ')}.` });
+  const lookingFor = clubSetup.lookingFor.set(req.org.id, [...new Set(positions)]);
   broadcast('orgs');
-  res.json({ lookingFor: req.org.lookingFor });
+  res.json({ lookingFor });
 });
 
 // Every open-day registrant gets an answer: an invitation (which creates a
@@ -2939,10 +2949,11 @@ orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
 // the whole squad verified, coach-signed attendance.
 const POSITION_GROUPS = { GK: ['GK'], DEF: ['CB', 'RB', 'LB', 'RWB', 'LWB'], MID: ['CDM', 'CM', 'CAM'], ATT: ['ST', 'CF', 'RW', 'LW'] };
 
+// S9c: the squad is rows of org_squad_members; a club's shadow list (the Pro squad planner) is never part of it.
 function squadView(org) {
-  const entries = (org.squad ?? []).map((e) => {
+  const entries = clubSetup.squad.forOrg(org.id).map((e) => {
     const p = e.playerId ? findPlayer(e.playerId) : null;
-    return { ...e, onPlatform: !!p, trustScore: p ? computeTrustScore(p) : null };
+    return { id: e.id, name: e.name, position: e.position, playerId: e.playerId, source: e.source, ...(e.approvedBy ? { approvedBy: e.approvedBy } : {}), addedAt: e.addedAt, onPlatform: !!p, trustScore: p ? computeTrustScore(p) : null };
   });
   const coverage = Object.fromEntries(Object.entries(POSITION_GROUPS).map(([group, positions]) => [
     group, entries.filter((e) => positions.includes(e.position)).length,
@@ -2962,14 +2973,13 @@ orgRouter.post('/squad', (req, res) => {
   const { name, position, playerId } = req.body || {};
   if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
   if (!optText(position, 40)) return badField(res, 'position');
+  if (!optText(playerId, 80)) return badField(res, 'playerId');
   if (playerId) {
     const p = findPlayer(playerId);
     if (!p || !visibleToOrg(p, req.org)) return res.status(403).json({ error: 'PLAYER_NOT_VISIBLE' });
-    if ((req.org.squad ?? []).some((e) => e.playerId === playerId)) return res.status(409).json({ error: 'ALREADY_ON_SQUAD' });
+    if (clubSetup.squad.has(req.org.id, playerId)) return res.status(409).json({ error: 'ALREADY_ON_SQUAD' });
   }
-  req.org.squad ??= [];
-  req.org.squad.push({ id: nextId('sq'), name: String(name).trim(), position: position || null, playerId: playerId || null, source: 'manual', addedAt: Date.now() });
-  persist();
+  clubSetup.squad.create({ id: nextId('sq'), orgId: req.org.id, name: String(name).trim(), position: position || null, playerId: playerId || null, source: 'manual', addedAt: Date.now() });
   res.status(201).json(squadView(req.org));
 });
 
@@ -2978,16 +2988,16 @@ orgRouter.post('/squad', (req, res) => {
 // published on the way out (club identity is already authenticated).
 orgRouter.post('/squad/:entryId/release', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
-  const entry = (req.org.squad ?? []).find((e) => e.id === req.params.entryId);
-  if (!entry) return res.status(404).json({ error: 'SQUAD_ENTRY_NOT_FOUND' });
+  const entry = clubSetup.squad.byId(req.params.entryId);
+  if (!entry || entry.orgId !== req.org.id) return res.status(404).json({ error: 'SQUAD_ENTRY_NOT_FOUND' });
   const { referenceText } = req.body || {};
   if (referenceText && !moderateOrRefuse(res, referenceText, { kind: 'release_reference', orgId: req.org.id })) return;
-  // ONE unit of work (review of 9656a4b): the organisation's squad (a facet),
+  // ONE unit of work (review of 9656a4b): the squad row (S9c: a row of org_squad_members),
   // the player's availability and contract columns, the published reference,
   // the ledger row and the notifications commit together; the pushes and the
   // broadcast go out after COMMIT.
   unit(() => {
-    req.org.squad = req.org.squad.filter((e) => e !== entry);
+    clubSetup.squad.remove(entry.id);
     const p = entry.playerId ? findPlayer(entry.playerId) : null;
     if (p) {
       // M23 P8 (§27): releasing a player from THIS club's squad does not speak
@@ -3020,7 +3030,7 @@ orgRouter.post('/matchday', (req, res) => {
   if (!fixture || !date) return res.status(400).json({ error: 'FIXTURE_AND_DATE_REQUIRED' });
   if (!dateOnlyOrRefuse(res, date, 'date')) return; // M23 P5.7: a match day is a day that exists
   const ids = Array.isArray(playerIds) ? playerIds : [];
-  const onSquad = new Set((req.org.squad ?? []).map((e) => e.playerId).filter(Boolean));
+  const onSquad = new Set(clubSetup.squad.playerIds(req.org.id)); // S9c: the squad only, never the shadow list
   const credited = [];
   // ONE unit of work (S5): every credited player's attendance row and activity,
   // the match-day record (a blob) and the ledger row commit together.
@@ -3061,7 +3071,7 @@ function pathwayRecord(org) {
   const orgSignings = signingsFollowUps.signings.forOrg(org.id);
   const involvedIds = new Set([
     ...orgSignings.map((sg) => sg.playerId),
-    ...(org.squad ?? []).map((e) => e.playerId).filter(Boolean),
+    ...clubSetup.squad.playerIds(org.id),
     ...db.openTrials.filter((t) => t.orgId === org.id).flatMap((t) => (t.registrations ?? []).map((r) => r.playerId)),
   ]);
   const firstInvolvement = (pid) => Math.min(
@@ -3092,12 +3102,12 @@ orgRouter.post('/verification/federation', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const { federation, registrationId, contactEmail } = req.body || {};
   if (!federation || !registrationId) return res.status(400).json({ error: 'FEDERATION_REQUIRED' });
-  req.org.federationCheck = {
-    federation: String(federation).trim(), registrationId: String(registrationId).trim(),
-    contactEmail: contactEmail ? String(contactEmail).trim() : null,
-    status: 'pending', ts: Date.now(),
-  };
-  persist();
+  // S9c: typed and refused at the route (FIELD_INVALID naming the field); one row per club, replaced on resubmission.
+  if (!reqText(federation, CLUB_SETUP_LIMITS.federation)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'federation', message: `federation is text of at most ${CLUB_SETUP_LIMITS.federation} characters.` });
+  if (!reqText(registrationId, CLUB_SETUP_LIMITS.registrationId)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'registrationId', message: `registrationId is text of at most ${CLUB_SETUP_LIMITS.registrationId} characters.` });
+  const email = typeof contactEmail === 'string' ? contactEmail.trim() : contactEmail;
+  if (!(email === undefined || email === null || email === '' || (typeof email === 'string' && email.length <= CLUB_SETUP_LIMITS.contactEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'contactEmail', message: 'contactEmail is an e-mail address.' });
+  clubSetup.federation.submit({ orgId: req.org.id, federation: federation.trim(), registrationId: registrationId.trim(), contactEmail: email || null, status: 'pending', submittedAt: Date.now() });
   broadcast('orgs');
   res.status(201).json({
     submitted: true,
@@ -3918,7 +3928,7 @@ playerRouter.get('/opportunities', (req, res) => {
       id: org.id, name: org.name, city: org.location.city ?? '', distanceKm,
       verified: org.verified, safeguardingCertified: safeguardingCertified(org),
       ...pathwayRecord(org),
-      lookingFor: org.lookingFor ?? [],
+      lookingFor: [...clubSetup.lookingFor.forOrg(org.id)],
       openTrials: db.openTrials.filter((t) => t.orgId === org.id && t.date >= new Date().toISOString().slice(0, 10))
         .map(({ registrations, ...t }) => ({ ...t, registered: (registrations ?? []).some((r) => r.playerId === req.player.id) })),
     }));
@@ -4650,6 +4660,7 @@ registerM12({
   signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   scoutingEvidence, // S9a: evidence, coach affiliations and squad invitations are explicit repository writes
   scoutingAssessments, // S9b: templates, assessments, video segments and playlists are explicit repository writes
+  clubSetup, // S9c: tactical setups, squads, shadow lists and vacancies are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -5013,6 +5024,7 @@ m29Ctx = registerSigning({
   // S4a: the player's level, contract status and availability are columns written through the identity repository; a completion is one unit of work.
   players, unit, afterCommit: (fn) => store.afterCommit(fn),
   signingsFollowUps, // S8d: packages and signings are explicit repository writes
+  clubSetup, // S9c: a grassroots signing adds the squad row through the club setup repository
   billing,
   refreshJourneyBadges,
   findRoomForRequest: m17Ctx.findRoomForRequest,

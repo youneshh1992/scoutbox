@@ -14,7 +14,8 @@ export function migrateM12(db, players) {
   // F2 templates and assessments, F7 video segments and playlists: tables of the scouting assessments repository (S9b),
   // read through SQL (scoutingReads); no db.* here.
   // F3 recruitment cases: tables of the recruitment-cases repository, read through SQL (§4.3 step 2); no db.* here.
-  db.vacancies ??= [];           // F4 — role vacancies / briefs
+  // F4 the tactical setup, squad, shadow list and vacancies: tables of the club setup repository (S9c), read through
+  // SQL (scoutingReads); no db.* and no organisation facet here.
   db.opportunities ??= [];       // F5 — structured opportunity board
   db.applications ??= [];        // F5 — opportunity applications
   db.campaigns ??= [];           // F6 — club-run assessment campaigns
@@ -22,10 +23,6 @@ export function migrateM12(db, players) {
   db.devObjectives ??= [];       // F8 — development objectives
   // F11 follow-ups and outcome reports: tables of the signings repository, read through SQL (§4.3 step 2); no db.* here.
   db.uploadSessions ??= [];      // F12 — resumable upload sessions
-  for (const o of db.orgs) {
-    o.tactical ??= null;         // F4 — formation + role definitions
-    o.squad ??= [];              // F4 — shadow/current squad exists for every org now
-  }
   // F12E — caption track (vtt text) or null. Since S5 a media item is a row of
   // player_media: the default is written through the repository only where the
   // stored item lacks the field (an existing null stays as it is).

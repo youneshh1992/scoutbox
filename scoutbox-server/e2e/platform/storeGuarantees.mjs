@@ -85,7 +85,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function priorSnapshot({ withExistingRows = false } = {}) {
   const db = {
     players: [{ id: 'pl-legacy', name: 'Legacy Player', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [] }],
-    orgs: [{ id: 'org-legacy', name: 'Legacy FC', type: 'club', level: 'academy', plan: 'Grassroots', verified: true, squad: [] }],
+    orgs: [{ id: 'org-legacy', name: 'Legacy FC', type: 'club', level: 'academy', plan: 'Grassroots', verified: true }],
     guardians: [],
     users: [],
     sessions: [],
@@ -137,7 +137,7 @@ console.log('\n— §4/§5 — the inventory is derived, not hand-kept —');
     `all ${PRODUCTION_REQUIRED_STORES.length} required stores exist after migrations alone (no seed)`);
   if (missing.length) console.error(`   missing: ${missing.join(', ')}`);
   neg(PRODUCTION_REQUIRED_STORES.includes('squads') === false,
-    'db.squads is NOT in the list — it never existed; squad membership is org.squad');
+    'db.squads is NOT in the list — it never existed; squad membership is org_squad_members (S9c)');
 
   // THE DRIFT GUARD. Two lists declared the same thing in two files and
   // disagreed: `db.assessments` was REQUIRED by the journey projection and
@@ -627,7 +627,7 @@ const bareMigrated = () => {
 /** A pre-M18.2 database: no schema record at all, several collections absent. */
 const oldSnapshot = () => ({
   players: [{ id: 'pl-legacy', name: 'Legacy Player', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [] }],
-  orgs: [{ id: 'org-legacy', name: 'Legacy FC', type: 'club', level: 'academy', plan: 'Grassroots', verified: true, squad: [] }],
+  orgs: [{ id: 'org-legacy', name: 'Legacy FC', type: 'club', level: 'academy', plan: 'Grassroots', verified: true }],
   guardians: [], users: [], sessions: [], ledger: [], notifications: [],
 });
 

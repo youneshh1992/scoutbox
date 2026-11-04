@@ -68,10 +68,13 @@ export function registerTrust(ctx) {
    *  verified and distinct. */
   function relationshipSource(player) {
     const out = [];
-    for (const o of db.orgs) {
-      if (o.suspended) continue;
-      const inSquad = (o.squad ?? []).some((row) => row.playerId === player.id);
-      if (inSquad) out.push({ key: `rel:club:${o.id}`, kind: 'club', verified: !!o.verified });
+    // S9c: the player's squad rows in one indexed query (a club's shadow list is not a relationship).
+    const clubs = new Set();
+    for (const row of ctx.scoutingReads.squad.forPlayer(player.id)) {
+      const o = ctx.byId.org(row.orgId);
+      if (!o || o.suspended || clubs.has(o.id)) continue;
+      clubs.add(o.id);
+      out.push({ key: `rel:club:${o.id}`, kind: 'club', verified: !!o.verified });
     }
     for (const r of (db.verReferences ?? [])) {
       if (r.playerId !== player.id || r.status !== 'active') continue;

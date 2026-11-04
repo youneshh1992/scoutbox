@@ -13,12 +13,17 @@
  *   registrationId}.
  *
  *   FACETS (`facets_json`, the transitional storage for everything else:
- *   tactical, squad, lookingFor, federationCheck, agencySettings, the whole
- *   `verification` object, and any field this step does not know): mutated in
- *   place by the modules that own them, exactly as the blob record was, and
- *   persisted by `flush()` inside every snapshot save transaction. They have
- *   their own cutover steps (S9 tactical/squad, S10 verification, S11 agency
- *   settings). The two columns `verification_revoked_at` /
+ *   agencySettings, the whole `verification` object, and any field this step
+ *   does not know): mutated in place by the modules that own them, exactly as
+ *   the blob record was, and persisted by `flush()` inside every snapshot save
+ *   transaction. They have their own cutover steps (S10 verification, S11
+ *   agency settings).
+ *
+ *   RETIRED (S9c): tactical, squad, lookingFor and federationCheck are tables of
+ *   the club setup repository (repositories/clubSetup.mjs). Reading, writing or
+ *   deleting one on an organisation throws, naming that repository, and a
+ *   record that carries one is refused, so a reader that was missed fails
+ *   loudly instead of seeing (or `??=`-creating) an empty list. The two columns `verification_revoked_at` /
  *   `verification_org_type` are a derived MIRROR of the verification facet,
  *   rewritten by `flush()` and read by nothing; the facet is authoritative
  *   until S10.
@@ -74,6 +79,9 @@ const COMPOSITES = Object.freeze({
   location: { city: 'city', lat: 'lat', lng: 'lng' },
   federationRef: { federation: 'federation', registrationId: 'federation_registration_id' },
 });
+/** Organisation facets that moved to the club setup repository's tables (S9c). */
+export const RETIRED_FACETS = Object.freeze(new Set(['tactical', 'squad', 'lookingFor', 'federationCheck']));
+const retiredFacet = (key) => new TypeError(`org.${String(key)} is gone: read and write it through the clubSetup repository (repositories/clubSetup.mjs)`);
 /** Every record key the columns own; anything else is a facet. */
 export const MIGRATED_KEYS = Object.freeze(new Set(['id', ...Object.keys(SCALARS), ...Object.keys(COMPOSITES)]));
 
@@ -127,6 +135,8 @@ export function validateOrgRecord(rec) {
   }
   if (rec.verification !== undefined && rec.verification !== null && !isPlainObject(rec.verification)) return { ok: false, reason: `verification is ${describe(rec.verification)}, not an object` };
   if ('__meta' in rec) return { ok: false, reason: 'the reserved field "__meta" is not allowed on a record' };
+  const retired = Object.keys(rec).filter((k) => RETIRED_FACETS.has(k));
+  if (retired.length) return { ok: false, reason: `${retired.join(', ')} ${retired.length > 1 ? 'are' : 'is'} no longer an organisation field (club setup tables since S9c: write it through the clubSetup repository or its snapshot collections)` };
   return { ok: true };
 }
 
@@ -333,19 +343,23 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
    */
   const recordView = (target) => markView(new Proxy(target, {
     get(t, key, receiver) {
+      if (RETIRED_FACETS.has(key)) throw retiredFacet(key);
       const value = Reflect.get(t, key, receiver);
       return key in COMPOSITES ? guard(value, key) : value;
     },
     set(t, key, value) {
+      if (RETIRED_FACETS.has(key)) throw retiredFacet(key);
       if (MIGRATED_KEYS.has(key)) return refuse(`an organisation (field "${String(key)}")`);
       if (key === '__meta' || key === '__rest') return refuse(`an organisation (reserved field "${String(key)}")`);
       t[key] = value; return true;
     },
     deleteProperty(t, key) {
+      if (RETIRED_FACETS.has(key)) throw retiredFacet(key);
       if (MIGRATED_KEYS.has(key)) return refuse(`an organisation (field "${String(key)}")`);
       delete t[key]; return true;
     },
     defineProperty(t, key, desc) {
+      if (RETIRED_FACETS.has(key)) throw retiredFacet(key);
       if (MIGRATED_KEYS.has(key)) return refuse(`an organisation (field "${String(key)}")`);
       return Reflect.defineProperty(t, key, desc);
     },

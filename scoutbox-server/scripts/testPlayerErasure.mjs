@@ -44,7 +44,7 @@ const RECORD = (id, deletedAt, birthDate, country) => ({ id, deletedAt, birthDat
 
 // ------------------------------------------------------------------ harness (the identity suite's, with the whole data layer attached)
 const FIXTURE = () => ({ players: [adult(), child('pl-child1', 'gd-primary', '2014-03-03'), seeded(), child('pl-child2', 'gd-primary', '2016-08-08')], guardians: [gPrimary(), gCo(), gSignup()] });
-const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB', squad: [] }];
+const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' }];
 const baseDb = (players, guardians) => ({ orgs: ORGS(), users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], sessions: [], players, guardians, requests: [], ledger: [], trials: [], channels: [], notifications: [], dispatches: [] });
 function boot(dir, { players = [], guardians = [], warnings = [] } = {}) {
   const db = baseDb(clone(players), clone(guardians));

@@ -12,7 +12,8 @@ const CONFIDENCE = ['low', 'medium', 'high'];
 const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
 
-import { readPage, sendPageError } from '../platform/paging.mjs';
+import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';
+import { CRITERIA_KEYS, CLUB_SETUP_LIMITS, typeTacticalSetup } from '../../repositories/clubSetup.mjs';
 import { parseStrictDateOnly } from '../../temporal.mjs';
 import { POSITION_GROUPS, ANCHOR_LEVELS, VERDICTS, VIEWINGS, ASSESSMENT_LIMITS as A_LIMITS } from '../../repositories/scoutingAssessments.mjs';
 import { textOrRefuse, storedName } from './passport.mjs';
@@ -28,7 +29,9 @@ export function registerScouting(ctx) {
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
     recruitmentCases, dueAtOrRefuse, // S8b: every case change is an explicit repository operation (cases.create / update)
     scoutingAssessments, unit, // S9b: templates, assessments, segments and playlists are explicit repository writes
+    clubSetup, // S9c: tactical setups, vacancies and shadow lists are explicit repository writes
   } = ctx;
+  if (typeof clubSetup?.tactical?.save !== 'function') throw new TypeError('registerScouting needs the club setup repository from the data layer');
   if (typeof scoutingAssessments?.assessments?.create !== 'function' || typeof unit !== 'function') throw new TypeError('registerScouting needs the scouting assessments repository and unit from the data layer');
   const { templates, assessments, segments, playlists } = scoutingAssessments;
   // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
@@ -533,7 +536,7 @@ export function registerScouting(ctx) {
     const p = findPlayer(playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
-    if (vacancyId && !db.vacancies.some((v) => v.id === vacancyId && v.orgId === req.org.id)) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' });
+    if (vacancyId && !scoutingReads.vacancies.ofOrg(vacancyId, req.org.id)) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' }); // S9c: read through SQL
     const due = dueAtOrRefuse(res, deadline, 'deadline');
     if (due === undefined) return;
     const draft = {
@@ -740,66 +743,91 @@ export function registerScouting(ctx) {
   // Tactical fit: transparent, rule-based matching. Criteria met / not met /
   // unknown, each with its data source — never a fabricated percentage,
   // potential rating, salary estimate or transfer value.
+  //
+  // S9c: the tactical setup, vacancies, the squad and the shadow list are tables of the club setup repository
+  // (repositories/clubSetup.mjs), written by explicit operations and read through SQL. Junk is refused with the field
+  // named (400 FIELD_INVALID / DATE_INVALID); over-long text is still shortened, as it always was.
 
-  const CRITERIA_KEYS = ['positionGroup', 'minAge', 'maxAge', 'foot', 'availability', 'maxLevel', 'minAppearances', 'category'];
   const groups = { GK: ['GK'], DEF: ['CB', 'RB', 'LB', 'RWB', 'LWB'], MID: ['CDM', 'CM', 'CAM'], ATT: ['ST', 'CF', 'RW', 'LW'] };
   function groupFor(position) {
     return Object.keys(groups).find((g) => groups[g].includes(position)) ?? 'MID';
   }
+  const SL = CLUB_SETUP_LIMITS;
+  const isText = (v) => typeof v === 'string';
+  const optionalText = (v) => v === undefined || v === null || isText(v);
+  const tacticalView = (t) => (t ? { formation: t.formation, planningHorizon: t.planningHorizon, windows: t.windows, roles: t.roles, updatedAt: t.updatedAt, updatedBy: t.updatedBy } : null);
+  const vacancyView = (v) => ({ id: v.id, orgId: v.orgId, roleId: v.roleId, roleName: v.roleName, window: v.window, notes: v.notes, status: v.status, createdBy: v.createdBy, createdAt: v.createdAt, closedAt: v.closedAt });
+  const shadowView = (s) => ({ id: s.id, playerId: s.playerId, name: s.name, source: 'shadow', roleId: s.roleId, addedBy: s.addedBy, addedAt: s.addedAt });
+  const squadRowView = (s) => ({ id: s.id, playerId: s.playerId, name: s.name, source: s.source, ...(s.approvedBy ? { approvedBy: s.approvedBy } : {}), addedAt: s.addedAt });
+  /** The field a typing reason names (`<label>.<field> …`), for the 400 answer. */
+  const fieldOf = (reason, label) => (reason.startsWith(`${label}.`) ? reason.slice(label.length + 1).split(' ')[0].replace(/\.$/, '') : 'body');
 
   orgRouter.get('/tactical', (req, res) => {
-    res.json({ tactical: req.org.tactical, criteriaKeys: CRITERIA_KEYS });
+    res.json({ tactical: tacticalView(scoutingReads.tacticalSetups.forOrg(req.org.id)), criteriaKeys: CRITERIA_KEYS });
   });
 
   orgRouter.post('/tactical', (req, res) => {
     if (!requireLead(req, res)) return;
     const { formation, roles, windows, planningHorizon } = req.body ?? {};
     if (!formation || !Array.isArray(roles)) return res.status(400).json({ error: 'FORMATION_AND_ROLES_REQUIRED' });
-    req.org.tactical = {
-      formation: String(formation).slice(0, 20),
-      planningHorizon: planningHorizon ? String(planningHorizon).slice(0, 40) : null,
-      windows: Array.isArray(windows) ? windows.slice(0, 4).map((w) => ({ name: String(w.name ?? '').slice(0, 40), opens: w.opens ?? null, closes: w.closes ?? null })) : [],
-      roles: roles.slice(0, 15).map((r) => ({
-        id: r.id ?? nextId('role'),
-        name: String(r.name ?? '').slice(0, 60),
-        positionGroup: ['GK', 'DEF', 'MID', 'ATT'].includes(r.positionGroup) ? r.positionGroup : 'MID',
-        description: String(r.description ?? '').slice(0, 300),
-        category: ['mens', 'womens', 'boys', 'girls', 'mixed'].includes(r.category) ? r.category : 'mixed',
-        required: sanitiseCriteria(r.required),
-        preferred: sanitiseCriteria(r.preferred),
-      })),
-      updatedAt: Date.now(), updatedBy: req.orgUser.name,
-    };
-    persistNow();
-    res.json({ tactical: req.org.tactical });
+    if (!isText(formation) || !formation.trim()) return fieldInvalid(res, 'formation', 'formation is text.');
+    if (!optionalText(planningHorizon)) return fieldInvalid(res, 'planningHorizon', 'planningHorizon is text.');
+    if (roles.length > SL.roles) return fieldInvalid(res, 'roles', `At most ${SL.roles} roles.`);
+    if (!(windows === undefined || windows === null || Array.isArray(windows))) return fieldInvalid(res, 'windows', 'windows is a list.');
+    if ((windows ?? []).length > SL.windows) return fieldInvalid(res, 'windows', `At most ${SL.windows} windows.`);
+    // A role keeps its id across saves (so its vacancies and shadow entries keep their role); a client-supplied id must
+    // be one of THIS club's current roles, and a role without one is new.
+    const current = new Set(clubSetup.tactical.roleIds(req.org.id));
+    const shaped = [];
+    for (const [i, r] of roles.entries()) {
+      const at = `roles[${i}]`;
+      if (!r || typeof r !== 'object' || Array.isArray(r)) return fieldInvalid(res, at, 'Each role is an object.');
+      if (r.id !== undefined && r.id !== null && !current.has(r.id)) return fieldInvalid(res, `${at}.id`, "A role id must be one of this club's current roles; leave it out for a new role.");
+      if (!isText(r.name) || !r.name.trim()) return fieldInvalid(res, `${at}.name`, 'Each role has a name.');
+      if (!optionalText(r.description)) return fieldInvalid(res, `${at}.description`, 'description is text.');
+      shaped.push({
+        ...r, id: r.id ?? nextId('role'), name: r.name.trim().slice(0, SL.roleName), description: (r.description ?? '').slice(0, SL.description),
+        positionGroup: r.positionGroup ?? 'MID', category: r.category ?? 'mixed', required: r.required ?? [], preferred: r.preferred ?? [],
+      });
+    }
+    const shapedWindows = (windows ?? []).map((w) => (w && typeof w === 'object' && !Array.isArray(w) ? { ...w, name: isText(w.name) ? w.name.slice(0, SL.windowName) : (w.name ?? ''), opens: w.opens ?? null, closes: w.closes ?? null } : w));
+    const label = 'tactical';
+    const typed = typeTacticalSetup({
+      orgId: req.org.id, formation: formation.trim().slice(0, SL.formation), planningHorizon: planningHorizon ? planningHorizon.slice(0, SL.planningHorizon) : null,
+      windows: shapedWindows, roles: shaped, updatedAt: Date.now(), updatedBy: storedName(req.orgUser.name),
+    }, label);
+    if (!typed.ok) {
+      const field = fieldOf(typed.reason.replace(`${label} ${req.org.id}`, label), label);
+      return res.status(400).json({ error: /\.(opens|closes)$/.test(field) ? 'DATE_INVALID' : 'FIELD_INVALID', field, message: typed.reason.replace(`${label} ${req.org.id}.`, '') });
+    }
+    const tactical = clubSetup.tactical.save(typed.record);
+    res.json({ tactical: tacticalView(tactical) });
   });
-
-  function sanitiseCriteria(list) {
-    if (!Array.isArray(list)) return [];
-    return list.filter((c) => CRITERIA_KEYS.includes(c.key)).map((c) => ({ key: c.key, value: c.value }));
-  }
 
   orgRouter.post('/vacancies', (req, res) => {
     const { roleId, notes, window } = req.body ?? {};
-    const role = req.org.tactical?.roles.find((r) => r.id === roleId);
+    const role = isText(roleId) ? scoutingReads.tacticalSetups.roleOf(req.org.id, roleId) : null;
     if (!role) return res.status(404).json({ error: 'ROLE_NOT_FOUND', message: 'Define the tactical role first.' });
-    const v = { id: nextId('vac'), orgId: req.org.id, roleId, roleName: role.name, window: window ?? null, notes: notes ? String(notes).slice(0, 300) : null, status: 'open', createdBy: req.orgUser.name, createdAt: Date.now() };
-    db.vacancies.push(v);
-    persistNow();
-    res.status(201).json({ vacancy: v });
+    if (!optionalText(notes)) return fieldInvalid(res, 'notes', 'notes is text.');
+    if (!optionalText(window)) return fieldInvalid(res, 'window', 'window is text (the name of a transfer window).');
+    const v = clubSetup.vacancies.create({ id: nextId('vac'), orgId: req.org.id, roleId, roleName: role.name, window: window ? window.slice(0, SL.windowName) : null, notes: notes ? notes.slice(0, SL.notes) : null, status: 'open', createdBy: storedName(req.orgUser.name), createdAt: Date.now(), closedAt: null });
+    res.status(201).json({ vacancy: vacancyView(v) });
   });
 
+  // §4.3: the club's vacancies grow without limit (they are closed, never deleted), so the list pages, newest first.
   orgRouter.get('/vacancies', (req, res) => {
-    res.json(db.vacancies.filter((v) => v.orgId === req.org.id));
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    const { items, nextCursor } = pageOf(scoutingReads.vacancies.page(req.org.id, page).rows, page.limit, (r) => r.key);
+    res.json({ items: items.map((r) => vacancyView(r.vacancy)), nextCursor });
   });
 
   orgRouter.post('/vacancies/:id/close', (req, res) => {
-    const v = db.vacancies.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const v = scoutingReads.vacancies.ofOrg(req.params.id, req.org.id);
     if (!v) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' });
-    v.status = 'closed';
-    v.closedAt = Date.now();
-    persistNow();
-    res.json({ vacancy: v });
+    if (v.status === 'closed') return res.json({ vacancy: vacancyView(v) }); // closing twice keeps the first close
+    const closed = clubSetup.vacancies.update(v.id, (d) => { d.status = 'closed'; d.closedAt = Date.now(); });
+    res.json({ vacancy: vacancyView(closed) });
   });
 
   function evaluateCriterion(c, p, view) {
@@ -814,8 +842,9 @@ export function registerScouting(ctx) {
         return { verdict: ok ? 'met' : 'not_met', source: src('age') };
       }
       case 'foot':
+        // S9c: a criterion's foot is the player vocabulary (left / right).
         if (!p.foot) return { verdict: 'unknown', source: 'foot not recorded' };
-        return { verdict: p.foot === c.value || p.foot === 'Both' ? 'met' : 'not_met', source: src('foot') };
+        return { verdict: p.foot === c.value ? 'met' : 'not_met', source: src('foot') };
       case 'availability':
         if (!p.availability) return { verdict: 'unknown', source: 'availability not set' };
         return { verdict: p.availability === c.value ? 'met' : 'not_met', source: src('availability') };
@@ -836,10 +865,13 @@ export function registerScouting(ctx) {
   }
 
   orgRouter.get('/vacancies/:id/candidates', (req, res) => {
-    const v = db.vacancies.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const v = scoutingReads.vacancies.ofOrg(req.params.id, req.org.id);
     if (!v) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' });
-    const role = req.org.tactical?.roles.find((r) => r.id === v.roleId);
+    const role = v.roleId ? scoutingReads.tacticalSetups.roleOf(req.org.id, v.roleId) : null;
     if (!role) return res.status(409).json({ error: 'ROLE_DELETED' });
+    // S9c: `onSquad` is the squad only; a player the club already shadows is `shadowed`.
+    const onSquad = new Set(scoutingReads.squad.playerIds(req.org.id));
+    const shadowed = new Set(scoutingReads.shadow.forOrg(req.org.id).map((s) => s.playerId));
     const candidates = db.players
       .map((p) => ({ p, view: playerViewForOrg(p, req.org) }))
       .filter((x) => x.view) // the wall, the radius, the blocks — same as search
@@ -853,14 +885,15 @@ export function registerScouting(ctx) {
           requiredMet: required.filter((c) => c.verdict === 'met').length,
           requiredTotal: required.length,
           unknowns: [...required, ...preferred].filter((c) => c.verdict === 'unknown').length,
-          onSquad: req.org.squad.some((s) => s.playerId === p.id),
+          onSquad: onSquad.has(p.id),
+          shadowed: shadowed.has(p.id),
           caseId: reads.cases.forOrgPlayer(req.org.id, p.id).find((c) => c.stage !== 'closed')?.id ?? null,
         };
       })
       .filter((c) => !c.required.some((r) => r.verdict === 'not_met'))
       .sort((a, b) => (b.requiredMet - a.requiredMet) || (a.unknowns - b.unknowns));
     res.json({
-      vacancy: v, role,
+      vacancy: vacancyView(v), role,
       candidates,
       note: 'Rule-based comparison: criteria met / not met / unknown with the data source for each. Unknown stays unknown — no invented suitability scores, potential ratings or market values.',
     });
@@ -868,29 +901,32 @@ export function registerScouting(ctx) {
 
   // Squad planner: current squad + shadow candidates + contract ends +
   // vacancies in one view. Grassroots keeps its existing gap analysis.
+  // S9c: the shadow list is its own table: a club considering a player is not that player's club, so nothing that
+  // reads the squad (match days, release, the passport, the Trust score) sees a shadow entry.
   orgRouter.post('/squad/shadow', (req, res) => {
-    const p = findPlayer(req.body?.playerId);
+    const { playerId, roleId } = req.body ?? {};
+    const p = findPlayer(playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
-    if (req.org.squad.some((s) => s.playerId === p.id && s.source === 'shadow')) return res.status(409).json({ error: 'ALREADY_SHADOWED' });
-    const entry = { id: nextId('sq'), playerId: p.id, name: p.name, source: 'shadow', roleId: req.body?.roleId ?? null, addedBy: req.orgUser.name, addedAt: Date.now() };
-    req.org.squad.push(entry);
-    persistNow();
-    res.status(201).json({ entry });
+    if (!(roleId === undefined || roleId === null) && !(isText(roleId) && scoutingReads.tacticalSetups.roleOf(req.org.id, roleId))) return res.status(404).json({ error: 'ROLE_NOT_FOUND', message: "roleId must be one of the club's tactical roles." });
+    if (scoutingReads.shadow.has(req.org.id, p.id)) return res.status(409).json({ error: 'ALREADY_SHADOWED' });
+    const entry = clubSetup.shadow.create({ id: nextId('shd'), orgId: req.org.id, playerId: p.id, name: storedName(p.name), roleId: roleId ?? null, addedBy: storedName(req.orgUser.name), addedAt: Date.now() });
+    res.status(201).json({ entry: shadowView(entry) });
   });
 
   orgRouter.get('/squad-planner', (req, res) => {
-    const enrich = (s) => {
+    const enrich = (s, base) => {
       const p = findPlayer(s.playerId);
-      return { ...s, position: p?.position ?? null, contractUntil: p?.contractUntil ?? null, level: p?.level ?? null, visible: p ? orgCanSee(req.org, p) : false };
+      return { ...base, position: p?.position ?? s.position ?? null, contractUntil: p?.contractUntil ?? null, level: p?.level ?? null, visible: p ? orgCanSee(req.org, p) : false };
     };
+    const tactical = scoutingReads.tacticalSetups.forOrg(req.org.id);
     res.json({
-      formation: req.org.tactical?.formation ?? null,
-      roles: req.org.tactical?.roles ?? [],
-      windows: req.org.tactical?.windows ?? [],
-      current: req.org.squad.filter((s) => s.source !== 'shadow').map(enrich),
-      shadow: req.org.squad.filter((s) => s.source === 'shadow').map(enrich),
-      vacancies: db.vacancies.filter((v) => v.orgId === req.org.id && v.status === 'open'),
+      formation: tactical?.formation ?? null,
+      roles: tactical?.roles ?? [],
+      windows: tactical?.windows ?? [],
+      current: scoutingReads.squad.forOrg(req.org.id).map((s) => enrich(s, squadRowView(s))),
+      shadow: scoutingReads.shadow.forOrg(req.org.id).map((s) => enrich(s, shadowView(s))),
+      vacancies: scoutingReads.vacancies.openForOrg(req.org.id).map(vacancyView),
     });
   });
 }

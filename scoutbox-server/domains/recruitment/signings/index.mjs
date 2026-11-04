@@ -37,6 +37,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { CLUB_SETUP_LIMITS } from '../../../repositories/clubSetup.mjs';
 import { buildShared } from '../../../m12/shared.mjs';
 import { roomRole, roomCan } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
@@ -72,6 +73,8 @@ export function registerSigning(rawCtx) {
     signingsFollowUps,
     // §4.3 step 2: the offers are read through SQL (the contacts/offers repository's queries).
     recruitmentReads,
+    // S9c: a grassroots signing's squad row is a row of org_squad_members.
+    clubSetup,
   } = ctx;
   if (typeof recruitmentReads?.offers?.byId !== 'function') throw new TypeError('registerSigning needs recruitmentReads (offers) from the data layer');
   const offerReads = recruitmentReads.offers;
@@ -332,8 +335,8 @@ export function registerSigning(rawCtx) {
       levelLines.push([`⬆️ Academy/pro level reached with ${org.name}. Your grassroots journey got you here.`, `${player.name} reached academy/pro level with ${org.name}.`]);
     }
     if (org.level === 'grassroots') {
-      org.squad ??= [];
-      if (!org.squad.some((e) => e.playerId === player.id)) org.squad.push({ id: nextId('sq'), playerId: player.id, name: player.name, position: player.position ?? '', source: 'signing', addedAt: ts });
+      // S9c: a row of org_squad_members, in this unit; a player the club shadowed joins the squad all the same.
+      if (!clubSetup.squad.has(org.id, player.id)) clubSetup.squad.create({ id: nextId('sq'), orgId: org.id, playerId: player.id, name: String(player.name ?? 'Player').slice(0, CLUB_SETUP_LIMITS.name), position: player.position ?? null, source: 'signing', addedAt: ts });
     }
     // `under_contract` means a real contract was executed (M23_P7_CONTRACT_STATUS_SEMANTICS.md): written here and nowhere else for a recruitment signing.
     players.update(player.id, { contractStatus: 'under_contract', availability: 'not_seeking' });

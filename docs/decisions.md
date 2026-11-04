@@ -15,6 +15,7 @@ November 2026 cleanup. One line each, newest first within each section. Details 
 
 | Date | Decision | Who |
 |---|---|---|
+| 4 Nov | **A club's shadow list is not its squad.** Shadowing a player (the Pro squad planner) puts them on the club's watch list for a role and nowhere else: not in the grassroots squad, not in match-day attendance or release, and not as a club relationship on the passport or the Trust score. Fixed in S9c (`product/recruitment.md`). | Tom |
 | 4 Nov | **Assessment templates stay shared by every club until the migration is finished.** One club's new template version changing it for all clubs is a known defect (`known-issues.md`); per-club templates come after S14. | Tom |
 | 3 Nov | The repo was cleaned up. Milestone documents were removed from the root and distilled into `docs/`. The rule is now: **no new Markdown at the root; design notes and test evidence go in PR descriptions; `docs/` is updated in place.** This replaces the "milestone gates" documentation-housekeeping policy of 14 Oct. | Tom (cleanup), for the Founder to review |
 | 3 Nov | **No passwordless logins in production.** Dev logins are on only in development; a production boot with `ALLOW_DEV_LOGINS` set is refused. A hosted demo gives its accounts real passwords. (The demos inside Claude are the self-contained builds and need no server.) | Tom |

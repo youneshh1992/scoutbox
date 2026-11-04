@@ -79,7 +79,7 @@ const PORT = 5600 + Math.floor(Math.random() * 200);
 function baseDb() {
   const db = {
     players: [{ id: 'pl-x', name: 'Xavier Adult', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } }],
-    orgs: [{ id: 'org-x', name: 'X FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, squad: [], location: { lat: 51.5, lng: -0.1 } }],
+    orgs: [{ id: 'org-x', name: 'X FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, location: { lat: 51.5, lng: -0.1 } }],
     guardians: [],
     // S8a-core: a request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
     // fixture carries the staff row the case and the request name (the dev login below finds it by org and name).
@@ -239,7 +239,7 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   ok(unstorable.every((c) => contactIntegrity(c, { orgId: 'org-x', caseId: 'case-x' }).length > 0), 'the integrity check still names a problem on each of the four unstorable rows');
 
   const db = baseDb();
-  db.orgs.push({ id: 'org-other', name: 'Other FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, squad: [], location: { lat: 51.5, lng: -0.1 } }); // the foreign row's organisation exists (org_id is a real key); the tenant filter below is unchanged
+  db.orgs.push({ id: 'org-other', name: 'Other FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, location: { lat: 51.5, lng: -0.1 } }); // the foreign row's organisation exists (org_id is a real key); the tenant filter below is unchanged
   db.recruitmentContacts = [
     soundContact(),                                                                  // sound
     soundContact({ id: 'rct-norecip', recipient: null }),                             // delivered with no recipient

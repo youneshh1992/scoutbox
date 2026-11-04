@@ -191,7 +191,9 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   transitionCases: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   uploadSessions: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   users: { guarantee: 'migration', owner: 'core', reason: 'staff accounts. Guaranteed by the migration registry in memory; since the data layer the rows live in the org_users table (repositories/users.mjs) and db.users is the repository\'s read-only view after attachDataLayer' },
-  vacancies: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
+  // vacancies: never a db.* read since S9c — a typed table (migration 0021), read through repositories/clubSetup.mjs
+  // (scoutingReads). db.vacancies throws. The organisation facets tactical, squad, lookingFor and federationCheck moved
+  // to the same repository's tables.
   verAdmins: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
   verClaims: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
   verConflicts: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },

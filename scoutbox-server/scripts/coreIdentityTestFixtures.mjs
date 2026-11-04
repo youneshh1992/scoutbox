@@ -65,7 +65,7 @@ export const FIXTURE = () => ({
   players: [adult(), child('pl-child1', 'gd-primary', '2014-03-03'), seeded(), child('pl-child2', 'gd-primary', '2016-08-08'), linkedAdult()],
   guardians: [{ ...gPrimary(), childIds: ['pl-child1', 'pl-child2', 'pl-grown'] }, gCo(), gSignup()],
 });
-export const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB', squad: [{ id: 'sq-1', name: 'Kid', position: 'ST', playerId: null, source: 'manual', addedAt: 5 }] }];
+export const ORGS = () => [{ id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB', memos: [{ id: 'sq-1', name: 'Kid', position: 'ST', playerId: null, source: 'manual', addedAt: 5 }] }];
 export const USERS = () => [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }];
 /** Legacy (plain-token) sessions the way a pre-S2 blob held them; migration 0003 hashes them. One per kind. */
 export const SESSIONS = (now = NOW) => [

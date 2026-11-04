@@ -26,7 +26,7 @@ export interface Org {
   /** Positions this club is recruiting — powers players' opportunity radar. */
   lookingFor?: string[];
   /** Federation-route verification filed with Trust & Safety. */
-  federationCheck?: { federation: string; registrationId: string; contactEmail: string | null; status: string; ts: number } | null;
+  federationCheck?: { federation: string; registrationId: string; contactEmail: string | null; status: string; submittedAt: number } | null;
 }
 
 // ---- M10: the grassroots club toolkit

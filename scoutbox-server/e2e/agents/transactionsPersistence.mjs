@@ -116,7 +116,7 @@ section('2 — upgrade from 2306: three containers appear and nothing else moves
   const db = {};
   runMigrations(db);
   db.recruitmentCases = []; // the snapshot's cases: the migrations no longer create the collection (§4.3 step 2)
-  db.orgs.push({ id: 'org-a', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: false, squad: [], location: null });
+  db.orgs.push({ id: 'org-a', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: false, location: null });
   db.players.push({ id: 'pl-1', name: 'Adult Player', dob: '1998-04-02', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } });
   db.users.push({ id: 'usr-1', orgId: 'org-a', name: 'Agency Agent', role: 'Agent', createdAt: 1 }); // the agent the context and the agreement name, and the case's owner
   db.recruitmentCases.push({ id: 'case-1', orgId: 'org-a', playerId: 'pl-1', playerName: 'Adult Player', vacancyId: null, ownerUserId: 'usr-1', ownerName: 'Agency Agent', stage: 'identified', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: null, decisionDraft: null, transactionHandoff: null, budget: null, subjectRemovedAt: null }); // the M12 case literal (the typed table refuses a partial one)

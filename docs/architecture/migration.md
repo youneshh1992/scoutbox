@@ -64,7 +64,7 @@ routes still miss the bar: they are listed, and deferred, at the end of §4.3 st
 
 ## 3. Status
 
-20 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0021`. Each
+21 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0022`. Each
 step takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Write model | Status |
@@ -92,7 +92,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | server code by domain | — | — | — | recruitment, platform and scouting done (§4.4.1, 4 Nov); the rest per step |
 | S9a | evidence passport, coach affiliations, squad invitations | `0019_scouting_evidence` | `scoutingEvidence.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S9b | assessment templates, assessments, video segments, playlists | `0020_scouting_assessments` | `scoutingAssessments.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
-| S9c | tactical setup, squad, looking-for, federation check, vacancies | | | | not started |
+| S9c | tactical setup, squad, shadow list, looking-for, federation check, vacancies | `0021_club_setup` | `clubSetup.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S9d | opportunities, applications, campaigns, player preferences | | | | not started |
 | S10 | verification and passport | | | | not started |
 | S11 | agents, compliance, transactions | | | | not started |
@@ -321,7 +321,7 @@ S12 is large; consider splitting Box Cam/Combine from discovery and watchlists.
 `scoutingReads` (projectors that take `reads` get `reads.evidence`). Player and media ids carry no key (tolerant, as
 recruitment: evidence and invitations stay after an account deletion, as before); `org_id` and staff ids are RESTRICT; the
 evidence value is a number or a short text (two columns). A correction, a corroboration, a dispute resolution and an
-approved invitation each commit as one unit (until S9c the invitation's squad row is still the org facet). The admin
+approved invitation each commit as one unit (since S9c the invitation's squad row is a row of org_squad_members). The admin
 dispute and coach lists keep their offset paging (the admin app's shape), now in SQL. Routes refuse junk with
 `400 FIELD_INVALID` / `DATE_INVALID` naming the field; over-long text is still shortened. **Open for the Founder:** a coach
 affiliation is still matched to a staff member by display name. Keying it by staff account means only people with a
@@ -341,6 +341,14 @@ reference fields, non-object references and drawings, non-numeric segment times)
 The calibration and group-template routes now pin a template's current version rather than v1. The club assessment
 and segment lists keep their offset paging (`paginate`), over SQL-narrowed rows. **Decided (4 November):** templates
 stay shared by every club until the migration is finished (a known defect, `known-issues.md`).
+
+**S9c as built (4 November).** `repositories/clubSetup.mjs`, migration `0021`, read through `scoutingReads`. **Decided with
+the Founder: the shadow list is not the squad** (its own table, `org_shadow_players`); a shadowed player counts nowhere a
+squad member does, except as "considered" in Nobody Missed. For S10/S11, which retire the remaining org facets
+(`verification`, `agencySettings`): the migration drops the facet from `orgs.facets_json` with `json_remove`, `orgs.mjs`
+`RETIRED_FACETS` makes reading or writing it on an org record throw, and `orgSafe` (login, admin clubs) must then add
+what the apps read from `session.org` explicitly. A whole-replace save of a list with dependants (tactical roles) diffs
+by id, so kept rows keep their dependants and dropped ones leave them `SET NULL`.
 
 ### 4.6 S14: retire the blob
 

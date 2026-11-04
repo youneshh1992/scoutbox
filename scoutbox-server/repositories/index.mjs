@@ -51,6 +51,7 @@ import * as m0017 from './migrations/0017_recruitment_contacts_offers.mjs';
 import * as m0018 from './migrations/0018_signings_follow_ups.mjs';
 import * as m0019 from './migrations/0019_scouting_evidence.mjs';
 import * as m0020 from './migrations/0020_scouting_assessments.mjs';
+import * as m0021 from './migrations/0021_club_setup.mjs';
 import { trialReportsFor } from './playerSubrecords.mjs';
 import { createRecruitmentRepository, RECRUITMENT_SNAPSHOT, RECRUITMENT_COLLECTIONS, RECRUITMENT_MIGRATION, assertRecruitmentConsistent, unresolvedPlayerReferences as unresolvedRecruitmentPlayers, retainedPlayerReferences as retainedRecruitmentPlayers } from './recruitment.mjs';
 import { createRecruitmentCasesRepository, RECRUITMENT_CASES_SNAPSHOT, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_MIGRATION, unresolvedPlayerReferences as unresolvedCasePlayers, retainedPlayerReferences as retainedCasePlayers } from './recruitmentCases.mjs';
@@ -58,6 +59,7 @@ import { createRecruitmentContactsOffersRepository, CONTACTS_OFFERS_SNAPSHOT, RE
 import { createSigningsFollowUpsRepository, SIGNINGS_FOLLOWUPS_SNAPSHOT, SIGNINGS_FOLLOWUPS_COLLECTIONS, SIGNINGS_FOLLOWUPS_MIGRATION, unresolvedPlayerReferences as unresolvedSigningPlayers, retainedPlayerReferences as retainedSigningPlayers } from './signingsFollowUps.mjs';
 import { createScoutingEvidenceRepository, SCOUTING_EVIDENCE_SNAPSHOT, SCOUTING_EVIDENCE_COLLECTIONS, unresolvedPlayerReferences as unresolvedEvidencePlayers, retainedPlayerReferences as retainedEvidencePlayers } from './scoutingEvidence.mjs';
 import { createScoutingAssessmentsRepository, SCOUTING_ASSESSMENTS_SNAPSHOT, SCOUTING_ASSESSMENTS_COLLECTIONS, unresolvedPlayerReferences as unresolvedAssessmentPlayers, retainedPlayerReferences as retainedAssessmentPlayers } from './scoutingAssessments.mjs';
+import { createClubSetupRepository, CLUB_SETUP_SNAPSHOT, CLUB_SETUP_COLLECTIONS, unresolvedPlayerReferences as unresolvedClubSetupPlayers, retainedPlayerReferences as retainedClubSetupPlayers } from './clubSetup.mjs';
 import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, NOTIFICATIONS_MIGRATION } from './notifications.mjs';
 import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCHES_MIGRATION } from './dispatches.mjs';
@@ -65,7 +67,7 @@ import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MI
 import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, assertChannelReferencesConsistent } from './channels.mjs';
 import { createSafetyAuditRepository, AUDIT_COLLECTIONS, AUDIT_SNAPSHOT_TABLES, SAFETY_AUDIT_MIGRATION, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020, m0021]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -116,7 +118,7 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
  * operations; a record the columns cannot hold is refused
  * (repositories/recruitmentContactsOffers.mjs).
  */
-export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS, ...RECRUITMENT_CASES_COLLECTIONS, ...RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, ...SIGNINGS_FOLLOWUPS_COLLECTIONS, ...SCOUTING_EVIDENCE_COLLECTIONS, ...SCOUTING_ASSESSMENTS_COLLECTIONS]);
+export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS, ...RECRUITMENT_CASES_COLLECTIONS, ...RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, ...SIGNINGS_FOLLOWUPS_COLLECTIONS, ...SCOUTING_EVIDENCE_COLLECTIONS, ...SCOUTING_ASSESSMENTS_COLLECTIONS, ...CLUB_SETUP_COLLECTIONS]);
 /** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
 /** The notification, dispatch, outbox and push tables: no reference to any other table (polymorphic audiences; the dispatch's notification reference is indexed, not a foreign key; the outbox and push rows reference nothing), dispatched last. */
@@ -158,6 +160,8 @@ export function readTableBacked(sqlite) {
   if (evidence) Object.assign(out, evidence);
   const assessments = SCOUTING_ASSESSMENTS_SNAPSHOT.read(sqlite); // S9b: assessment templates, assessments, video segments and playlists (null before the 0020 record)
   if (assessments) Object.assign(out, assessments);
+  const clubSetup = CLUB_SETUP_SNAPSHOT.read(sqlite); // S9c: tactical setups, squads, shadow lists, looking-for, federation checks, vacancies (null before the 0021 record)
+  if (clubSetup) Object.assign(out, clubSetup);
   return out;
 }
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
@@ -263,6 +267,8 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   written.push(...SCOUTING_EVIDENCE_SNAPSHOT.replace(sqlite, snapshot));
   // S9b: assessment templates, assessments, video segments and playlists, the same way (their org and staff keys are RESTRICT).
   written.push(...SCOUTING_ASSESSMENTS_SNAPSHOT.replace(sqlite, snapshot));
+  // S9c: a club's setup, the same way (its org keys are RESTRICT).
+  written.push(...CLUB_SETUP_SNAPSHOT.replace(sqlite, snapshot));
   if (present.includes(CHANNELS_TABLE.name) && CHANNELS_TABLE.replace(sqlite, snapshot[CHANNELS_TABLE.name], { requests: requestsSupplied ? snapshot.requests : undefined })) written.push(CHANNELS_TABLE.name);
   // Rows the snapshot no longer lists go last, children before parents, so a
   // parent that is still referenced makes the foreign key refuse the save
@@ -350,6 +356,7 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   if (signingsPlan?.typed) SIGNINGS_FOLLOWUPS_SNAPSHOT.assert(sqlite, { label: 'the snapshot (signings, follow-ups and outcomes)' });
   if (written.some((n) => SCOUTING_EVIDENCE_COLLECTIONS.includes(n))) SCOUTING_EVIDENCE_SNAPSHOT.assert(sqlite);
   if (written.some((n) => SCOUTING_ASSESSMENTS_COLLECTIONS.includes(n))) SCOUTING_ASSESSMENTS_SNAPSHOT.assert(sqlite);
+  if (written.some((n) => CLUB_SETUP_COLLECTIONS.includes(n))) CLUB_SETUP_SNAPSHOT.assert(sqlite);
   // A saved snapshot is never a first installation: the server attaches to the
   // tables it wrote and never initialises them from its seed.
   const settle = sqlite.prepare("UPDATE meta SET value = 'done' WHERE key = ? AND value = 'pending'");
@@ -638,6 +645,17 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     }
     retireCollection(db, name, 'scoutingAssessments');
   }
+  // S9c (migration 0021): a club's setup (repositories/clubSetup.mjs). The organisation facets tactical, squad,
+  // lookingFor and federationCheck are retired on the records (repositories/orgs.mjs); db.vacancies throws.
+  const clubSetup = createClubSetupRepository({ sqlite, log, now, unit: store.unit });
+  const clubSetupBoot = clubSetup.attach();
+  for (const name of CLUB_SETUP_COLLECTIONS) {
+    if (Object.hasOwn(db, name)) {
+      delete db[name];
+      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
+    }
+    retireCollection(db, name, 'clubSetup');
+  }
   for (const name of ['requests', 'trials']) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
@@ -708,13 +726,14 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     signingsFollowUps,
     scoutingEvidence,
     scoutingAssessments,
+    clubSetup,
     migrations,
-    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot, safetyAudit: safetyAuditBoot, recruitment: recruitmentBoot, recruitmentCases: recruitmentCasesBoot, recruitmentContactsOffers: recruitmentContactsOffersBoot, signingsFollowUps: signingsFollowUpsBoot, scoutingEvidence: scoutingEvidenceBoot, scoutingAssessments: scoutingAssessmentsBoot },
+    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot, safetyAudit: safetyAuditBoot, recruitment: recruitmentBoot, recruitmentCases: recruitmentCasesBoot, recruitmentContactsOffers: recruitmentContactsOffersBoot, signingsFollowUps: signingsFollowUpsBoot, scoutingEvidence: scoutingEvidenceBoot, scoutingAssessments: scoutingAssessmentsBoot, clubSetup: clubSetupBoot },
     /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
     report: () => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
       domains: {
-        orgs: { rows: orgs.count(), mode: 'live', transitional: 'facets_json (tactical, squad, lookingFor, federationCheck, agencySettings, verification, unknown fields)' },
+        orgs: { rows: orgs.count(), mode: 'live', transitional: 'facets_json (agencySettings, verification, unknown fields; tactical, squad, lookingFor and federationCheck are clubSetup tables since S9c)' },
         players: { rows: identity.players.count(), retained: identity.players.retainedCount(), mode: 'live', transitional: 'facets_json (unknown fields and shape metadata)', subrecords: { mode: 'live', tables: identity.players.subrecordRows(), trialReports: 'derived from trials' }, deletion: 'S4b-R (migration 0014): an account deletion keeps the row as a retained record — id, deleted_at, birth_date, country; placeholders and NULL elsewhere; owned rows and links removed — served by no account reader; retained records travel in backups as playersRetained' },
         guardians: { rows: identity.guardians.count(), mode: 'live', links: identity.report().links, transitional: 'facets_json (coGuardians)' },
         users: { rows: users.count(), mode: 'live' },
@@ -730,6 +749,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         signingsFollowUps: { mode: 'live', rows: signingsFollowUps.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedSigningPlayers(sqlite), retainedPlayerReferences: retainedSigningPlayers(sqlite), writeMode: 'explicit: every change is a repository operation (signingPackages.insert / patch / patchRevision / addRevision / setDocument / setParty / addKey / addHistory / redactPlayer; signings.record; followUps.schedule / patch; outcomeReports.file / addConfirmation) that writes its rows at once — inside the route\'s unit of work when one is open, in a transaction of its own otherwise — and returns the record read back from the tables; no flush, no fingerprint', readMode: 'SQL: every read is a repository query (byId, forCase / forOffer / forOrg / forPlayer / forOrgPlayer, forPackage, forSigning, forFollowUp, the sweep\'s due queries, the admin totals) decoding deep-frozen records; the club follow-up and signing lists page by cursor; no in-memory mirror and no db.* view', typing: 'typed columns only (file 02): the vocabulary and length CHECKs; no absent_keys_json, offtype_json or extra_json; a record the columns cannot hold is refused with its id at the route, the cutover and a snapshot write; the cutover normalised exactly what the design note lists and reported each with the row id (meta.signingsFollowUpsCutover.notes)', references: 'player ids no foreign key, TOLERANT and counted (Q7a/Q8a/Q8c-a applied, not re-asked); guardian and party ids polymorphic, no key; org_id → orgs, case_id → recruitment_cases, offer_id → recruitment_offers, the staff ids → org_users (RESTRICT); signing_package_id and signing_revision_id → their tables (RESTRICT); completion_signing_id → signings (RESTRICT, DEFERRABLE INITIALLY DEFERRED: the completion unit writes the signing row and then the package); follow_ups.signing_id, outcome_reports.follow_up_id / signing_id (RESTRICT); offer_revision_id a plain indexed column checked in code (offer_revisions.id is the primary key since §4.3; a real key is a later change). The three uniqueness rules of file 02 are partial unique indexes and are named with ids before the engine would (one live and one completed package per offer; one signing per package, per offer, one standing legacy row per organisation and player; one follow-up per signing and milestone; one report per follow-up)' },
         scoutingEvidence: { mode: 'live', rows: scoutingEvidence.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedEvidencePlayers(sqlite), retainedPlayerReferences: retainedEvidencePlayers(sqlite), writeMode: 'explicit: evidence, coachAffiliations and squadInvites create / update write a record\'s rows at once (inside the route\'s unit of work when one is open)', readMode: 'SQL: byId, forPlayer / currentForPlayer, byDispute, forOrg, activeFor, pendingFor, forPlayers; the admin dispute and affiliation lists page by offset in SQL; no mirror and no db.* view', references: 'player ids no foreign key, tolerant and counted (as recruitment); media ids no key; org_id → orgs and the staff ids → org_users (RESTRICT); correction_of_id / superseded_by_id → evidence (RESTRICT); one pending invitation per organisation and player (partial unique index)' },
         scoutingAssessments: { mode: 'live', rows: scoutingAssessments.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedAssessmentPlayers(sqlite), retainedPlayerReferences: retainedAssessmentPlayers(sqlite), writeMode: 'explicit: templates.create (append-only versions), assessments create / update / redactPlayer, segments.create, playlists create / update write a record\'s rows at once (inside the route\'s unit of work when one is open)', readMode: 'SQL: templates all / currentFor / currentById / byIdVersion; assessments byId, forOrg, forOrgPlayer, forOrgScout, forPlayer, withFeedbackForPlayer, anyForTrial; segments byId, forOrg; playlists byId, forOrg; no mirror and no db.* view', references: 'player, media, trial and trial-session ids no foreign key, tolerant and counted (as recruitment); org_id → orgs and the staff ids → org_users (RESTRICT); an assessment\'s template (id, version), first opinion and cited segments, and a playlist\'s segments, are RESTRICT keys inside the domain; the attributes snapshot is the template version\'s attributes, joined on read' },
+        clubSetup: { mode: 'live', rows: clubSetup.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedClubSetupPlayers(sqlite), retainedPlayerReferences: retainedClubSetupPlayers(sqlite), writeMode: 'explicit: tactical.save (roles diffed by id), squad create / remove, shadow.create, lookingFor.set, federation.submit, vacancies create / update write their rows at once (inside the route\'s unit of work when one is open)', readMode: 'SQL: tactical forOrg / roleOf; squad byId, forOrg, forPlayer, has, playerIds; shadow forOrg, has; lookingFor forOrg; federation forOrg; vacancies byId, ofOrg, openForOrg, the club list by cursor; no mirror, no db.* view and no organisation facet', references: 'player ids no foreign key, tolerant and counted (as recruitment); org_id → orgs (RESTRICT); roles, criteria and windows cascade with their setup; vacancies.role_id and org_shadow_players.role_id → org_tactical_roles ON DELETE SET NULL (a dropped role), the role checked to be the same organisation\'s; one squad row and one shadow entry per organisation and player' },
         safetyAudit: { mode: 'live', rows: safetyAudit.counts(), pendingWrites: safetyAudit.pending(), unresolvedPlayerReferences: unresolvedPlayerReferences(sqlite), retainedPlayerReferences: retainedPlayerReferences(sqlite), writeMode: 'staged: a block with its ledger row, a report with its suspension blocks, a note and a moderation hit land in the next save; a source change in its writer\'s save; an ops event in its caller\'s save; the IDV entry and the admin toggle land in their units\' commits', references: 'no foreign key on any of the eight tables. The five player references (blocks, reports, org_notes, ledger, source_changes) are tolerant historical references (Q4): an id that resolves to no player is counted here, never refused, never given a fabricated parent, never deleted; a count, not a claim about why it is absent. idv_queue.guardian_id is strict (Q4b): a write or import naming a missing guardian is refused and every snapshot that touches the queue or the identity pair is checked against the FINAL guardians table. A lifted block is deleted, as before (Q5). Organisation and staff references are historical pointers the routes never checked' },
       },
       identity: { initState: identity.initState() },

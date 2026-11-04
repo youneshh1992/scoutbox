@@ -54,7 +54,7 @@ export interface Criterion { key: string; value: unknown; verdict?: 'met' | 'not
 export interface TacticalRole { id: string; name: string; positionGroup: string; description: string; category?: string; required: Criterion[]; preferred: Criterion[] }
 export interface Tactical { formation: string; planningHorizon: string | null; windows: { name: string; opens: string | null; closes: string | null }[]; roles: TacticalRole[] }
 export interface Vacancy { id: string; roleId: string; roleName: string; status: string; notes: string | null; createdAt: number }
-export interface Candidate { playerId: string; name: string; position: string; age: number; required: Criterion[]; preferred: Criterion[]; requiredMet: number; requiredTotal: number; unknowns: number; onSquad: boolean; caseId: string | null }
+export interface Candidate { playerId: string; name: string; position: string; age: number; required: Criterion[]; preferred: Criterion[]; requiredMet: number; requiredTotal: number; unknowns: number; onSquad: boolean; shadowed?: boolean; caseId: string | null }
 export interface Opportunity {
   id: string; type: string; title: string; team: string | null; category: string; ageGroup: string | null; role: string | null;
   description: string | null; schedule: string | null; deadline: string; capacity: number | null;
@@ -113,7 +113,7 @@ export interface M12Api {
   removeStaff(s: Session, userId: string): Promise<void>;
 
   getTactical(s: Session): Promise<{ tactical: Tactical | null; criteriaKeys: string[] }>;
-  saveTactical(s: Session, tactical: { formation: string; planningHorizon?: string; roles: Omit<TacticalRole, 'id'>[] }): Promise<Tactical>;
+  saveTactical(s: Session, tactical: { formation: string; planningHorizon?: string; roles: (Omit<TacticalRole, 'id'> & { id?: string })[] }): Promise<Tactical>; // a kept role sends its id (its vacancies keep it)
   listVacancies(s: Session): Promise<Vacancy[]>;
   createVacancy(s: Session, roleId: string, notes?: string): Promise<Vacancy>;
   vacancyCandidates(s: Session, vacancyId: string): Promise<{ role: TacticalRole; candidates: Candidate[]; note: string }>;
@@ -199,7 +199,9 @@ export const httpM12: M12Api = {
 
   getTactical: (s) => G(s, '/org/tactical'),
   saveTactical: async (s, tactical) => (await P(s, '/org/tactical', tactical)).tactical,
-  listVacancies: (s) => G(s, '/org/vacancies'),
+  // The server pages the vacancy list ({ items, nextCursor }, newest first); this reads the first page. "Load more" is
+  // needed once a club has more than 50 vacancies.
+  listVacancies: async (s) => (await G(s, '/org/vacancies')).items,
   createVacancy: async (s, roleId, notes) => (await P(s, '/org/vacancies', { roleId, notes })).vacancy,
   vacancyCandidates: (s, id) => G(s, `/org/vacancies/${id}/candidates`),
   addShadow: (s, playerId, roleId) => P(s, '/org/squad/shadow', { playerId, roleId }),

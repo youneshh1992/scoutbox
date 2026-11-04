@@ -79,12 +79,12 @@ export function registerPassportCore(ctx) {
 
     // Club relationships: squad rows (invite-approved), accepted M14 squad
     // invitations, signings; plus self/guardian-submitted career entries.
+    // S9c: the player's squad rows in one indexed query; a club's shadow list is not a relationship.
     const squads = [];
-    for (const o of db.orgs) {
-      if (o.suspended) continue; // a suspended organisation lends no CURRENT relationship (§79#20)
-      for (const row of o.squad ?? []) {
-        if (row.playerId === pid) squads.push({ orgId: o.id, orgName: o.name, rowId: row.id, addedAt: row.addedAt, orgVerified: !!o.verified });
-      }
+    for (const row of ctx.scoutingReads.squad.forPlayer(pid)) {
+      const o = orgOf(row.orgId);
+      if (!o || o.suspended) continue; // a suspended organisation lends no CURRENT relationship (§79#20)
+      squads.push({ orgId: o.id, orgName: o.name, rowId: row.id, addedAt: row.addedAt, orgVerified: !!o.verified });
     }
     for (const inv of db.verPlayerInvites ?? []) {
       if (inv.playerId === pid && inv.status === 'accepted' && !squads.some((s) => s.orgId === inv.orgId)) {

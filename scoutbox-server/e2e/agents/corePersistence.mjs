@@ -88,9 +88,9 @@ function snapshot2304() {
       { id: 'pl-b', name: 'Adult B', dob: '1998-01-01', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } },
     ],
     orgs: [
-      { id: 'org-club', name: 'Club', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, squad: [], location: { lat: 51.5, lng: -0.1 } },
-      { id: 'org-ag', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: false, squad: [], location: null },
-      { id: 'org-ag2', name: 'Agency Two', type: 'agency', level: 'agency', plan: 'Agency', verified: false, squad: [], location: null },
+      { id: 'org-club', name: 'Club', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, location: { lat: 51.5, lng: -0.1 } },
+      { id: 'org-ag', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: false, location: null },
+      { id: 'org-ag2', name: 'Agency Two', type: 'agency', level: 'agency', plan: 'Agency', verified: false, location: null },
     ],
     guardians: [], sessions: [], ledger: [], notifications: [], blocks: [],
     users: [

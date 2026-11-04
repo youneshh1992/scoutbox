@@ -892,7 +892,7 @@ export const demoApi: ScoutboxApi = {
 
   submitFederationVerification: (s, input) => {
     if (!input.federation || !input.registrationId) throw new ApiError(400, 'FEDERATION_REQUIRED', 'Federation and registration id are required.');
-    s.org.federationCheck = { federation: input.federation, registrationId: input.registrationId, contactEmail: input.contactEmail ?? null, status: 'pending', ts: Date.now() };
+    s.org.federationCheck = { federation: input.federation, registrationId: input.registrationId, contactEmail: input.contactEmail ?? null, status: 'pending', submittedAt: Date.now() };
     pushNotification('Federation verification filed — Trust & Safety will cross-check the registration.', 'verification');
     return delay({ note: 'Trust & Safety cross-checks the registration with your federation. Verification (and with the safeguarding contract, U18 visibility) follows their approval.' });
   },

@@ -21,7 +21,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SUITES = [
   'testOutboxPushServer', 'testDispatchesServer', 'testSafetyAuditServer', 'testCoreIdentityServer',
   'testWriterAtomicity', 'testNotificationsServer', 'testOneTimeCodesServer', 'testRecruitmentServer',
-  'testScoutingEvidence', 'testScoutingAssessments', 'testRecruitmentContactsOffersServer', 'testChannelsServer', 'testRecruitmentCasesServer', 'testPlayerErasureServer',
+  'testScoutingEvidence', 'testScoutingAssessments', 'testClubSetup', 'testRecruitmentContactsOffersServer', 'testChannelsServer', 'testRecruitmentCasesServer', 'testPlayerErasureServer',
   'testBackup', 'testSessions', 'testOrgs', 'testIdentity',
   'testRuntime', 'testTrust', 'testDataLayer', 'testCoreSchema', 'testUnitOfWork', 'testCoreIdentityMapping',
   'testIdentityRepositories', 'testCoreIdentityMigration', 'testMediaDeletions', 'testPlayerSubrecords',

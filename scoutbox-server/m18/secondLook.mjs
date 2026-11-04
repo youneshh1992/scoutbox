@@ -158,12 +158,10 @@ export function registerSecondLook(ctx) {
     for (const sg of reads.signings.forPlayer(player.id)) {
       if (!sg.endedAt && sg.ts > since) add('current_club_confirmed', 'signing', sg.id, sg.ts);
     }
-    for (const o of db.orgs ?? []) {
-      for (const row of o.squad ?? []) {
-        if (row.playerId !== player.id) continue;
-        const addedAt = row.addedAt ?? 0;
-        if (o.verified && addedAt > since) add('current_club_confirmed', 'squad_row', `${o.id}:${row.playerId}`, addedAt);
-      }
+    // S9c: the player's squad rows in one indexed query (a club's shadow list confirms no club).
+    for (const row of ctx.scoutingReads.squad.forPlayer(player.id)) {
+      const o = ctx.byId.org(row.orgId);
+      if (o?.verified && row.addedAt > since) add('current_club_confirmed', 'squad_row', `${o.id}:${row.playerId}`, row.addedAt);
     }
     for (const claim of db.verClaims ?? []) {
       if (claim.subjectKind !== 'player' || claim.subjectId !== player.id) continue;

@@ -14,7 +14,7 @@ const layer = attachDataLayer({ db, store, nextId: (p) => `${p}-crash`, persist:
 const snapshot = () => ({ savedAt: Date.now(), idCounter: loaded.idCounter, db });
 store.unitOfWork(() => {
   layer.orgs.insert({ id: 'org-crash', name: 'Crash FC', type: 'club', plan: 'Pro' });
-  db.orgs.find((o) => o.id === 'org-pro').squad.push({ id: 'sq-crash', name: 'Crash', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
+  db.orgs.find((o) => o.id === 'org-pro').memos.push({ id: 'sq-crash', name: 'Crash', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
   db.vouches[0].status = 'accepted';
   db.vouches.push({ id: 'vch-crash', playerId: 'pl-1', status: 'pending', history: [] });
   // The row statements have run inside the open transaction; nothing is committed.

@@ -577,6 +577,17 @@ section('V17 — grassroots evidence path: prepared, never auto-approved');
   ok(r.body.status === 'requires_human_review', 'insufficient authoritative evidence → human review, NOT a lowered bar');
   r = await j('POST', `/admin/verification/root-requests/${id}/reject`, { reason: 'federation listing could not be corroborated — invited to reapply with the county FA affiliation number' }, null, A);
   ok(r.status === 200 && r.body.request.status === 'rejected', 'T&S can reject with a recorded reason');
+  // S9c: approving a grassroots application creates the club (its squad is rows of org_squad_members, not a field on the record).
+  r = await j('POST', '/auth/org/verification/apply', {
+    orgName: 'Brook Lane Colts', orgType: 'grassroots club', country: 'GB', website: 'https://brooklanecolts.example.org', federation: 'London FA',
+    applicantName: 'Sol Ade', applicantRole: 'Club Secretary', workEmail: 'sol.ade.blc@gmail.com',
+  });
+  const id2 = r.body.requestId, sec2 = r.body.applicantSecret;
+  await j('POST', `/auth/org/verification/apply/${id2}/confirm-email`, { applicantSecret: sec2, code: await outboxCode('sol.ade.blc@gmail.com') });
+  await j('POST', `/auth/org/verification/apply/${id2}/evidence`, { applicantSecret: sec2, dataUrl: PNG, filename: 'league-listing.png', note: 'London FA league handbook entry' });
+  await j('POST', `/auth/org/verification/apply/${id2}/submit`, { applicantSecret: sec2 });
+  r = await j('POST', `/admin/verification/root-requests/${id2}/approve`, { reason: 'county FA affiliation number confirmed by phone with the league secretary' }, null, A);
+  ok(r.status === 200 && r.body.request.status === 'approved', 'T&S can approve a grassroots application and the club is created');
 }
 
 // ==================================== V18 — takeover + dual control

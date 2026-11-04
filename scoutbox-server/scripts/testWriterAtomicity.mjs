@@ -188,25 +188,24 @@ await test('stats: the stat columns and the activity log (a facet) commit togeth
   await S.stop(); rm(dir);
 });
 
-// ------------------------------------------------------------- squad release (an organisation facet, player columns, a vouch, the ledger, notifications)
-await test('squad release: the organisation\'s squad (a facet), the player\'s availability and contract columns, the published reference (a blob) and the ledger row commit together before the 200 — second connection, SIGKILL, both failure seams, retry', async () => {
+// ------------------------------------------------------------- squad release (a squad row, player columns, a vouch, the ledger, notifications)
+await test('squad release: the squad row (org_squad_members since S9c), the player\'s availability and contract columns, the published reference (a blob) and the ledger row commit together before the 200 — second connection, SIGKILL, both failure seams, retry', async () => {
   const dir = tempDir('s4wa-release'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Near Hackney', { lat: 51.55, lng: -0.02 });
   assert.equal((await S.j('POST', '/player/availability', { availability: 'not_seeking' }, token)).status, 200);
   const grass = await orgLogin(S, 'org-hackneymarsh', 'Pat', 'Manager', 'grassroots');
   const added = await S.j('POST', '/org/squad', { name: 'Near Hackney', position: 'ST', playerId: pid }, grass); assert.equal(added.status, 201, JSON.stringify(added.body));
   const entryId = added.body.entries.find((e) => e.playerId === pid).id;
-  // Adding a squad entry is a facet-only write on the organisation (no column): the ordinary, debounced save persists it, so the pre-state is awaited in the database first.
-  const onSquadInDb = () => (facets(dir, 'orgs', 'org-hackneymarsh').squad ?? []).some((e) => e.id === entryId);
-  for (let i = 0; i < 200 && !onSquadInDb(); i++) await new Promise((r) => setTimeout(r, 50));
-  assert.equal(onSquadInDb(), true, 'the squad entry reached the database through the ordinary save');
+  // S9c: adding a squad entry is an explicit row write, committed before the 201.
+  const onSquadInDb = () => !!q1(dir, 'SELECT 1 AS x FROM org_squad_members WHERE id = ?', entryId);
+  assert.equal(onSquadInDb(), true, 'the squad entry is in the database when the route answers');
   const grassLogin = (X) => orgLogin(X, 'org-hackneymarsh', 'Pat', 'Manager', 'grassroots');
   S = await coupled(S, dir, {
     seam: 'squad.release.after_row',
     act: () => S.j('POST', `/org/squad/${entryId}/release`, { referenceText: 'A reliable, committed player all season.' }, grass),
     dbState: () => {
       const p = q1(dir, 'SELECT availability AS a, contract_status AS c FROM players WHERE id = ?', pid);
-      return { availability: p.a, contract: p.c, onSquad: (facets(dir, 'orgs', 'org-hackneymarsh').squad ?? []).some((e) => e.id === entryId), vouches: blob(dir, 'vouches').filter((v) => v.playerId === pid).length, ledger: blob(dir, 'ledger').filter((l) => l.playerId === pid && l.type === 'released_by_club').length };
+      return { availability: p.a, contract: p.c, onSquad: onSquadInDb(), vouches: blob(dir, 'vouches').filter((v) => v.playerId === pid).length, ledger: blob(dir, 'ledger').filter((l) => l.playerId === pid && l.type === 'released_by_club').length };
     },
     before: { availability: 'not_seeking', contract: 'unknown', onSquad: true, vouches: 0, ledger: 0 },
     after: { availability: 'available_now', contract: 'free_agent', onSquad: false, vouches: 1, ledger: 1 },

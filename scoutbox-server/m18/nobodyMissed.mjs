@@ -79,7 +79,7 @@ export function registerNobodyMissed(ctx) {
     }
     const trust = ctx.trustSummaryFor?.(player) ?? null;
     // M23-D2: this read `(db.squads ?? []).length >= 0 && …`. There is no
-    // `db.squads` anywhere in the product — squad membership is `org.squad`,
+    // `db.squads` anywhere in the product — squad membership is org_squad_members (S9c),
     // per organisation — and `[].length >= 0` is true for every possible
     // value, so the conjunct could never change the result. Removing it is
     // behaviour-preserving and removes a production read of a store that does
@@ -131,7 +131,8 @@ export function registerNobodyMissed(ctx) {
       signing: reads.signings.forOrgPlayer(org.id, playerId).length > 0,
       shortlisted: (db.ledger ?? []).some((l) => l.type === 'shortlist' && l.orgId === org.id && l.playerId === playerId),
       review_deferred: (db.reviewLater ?? []).some((r) => r.orgId === org.id && r.playerId === playerId && r.dueAt > now()),
-      squad: (org.squad ?? []).some((s) => s.playerId === playerId),
+      // S9c: on the squad, or on the shadow list — either way the club has already considered the player.
+      squad: ctx.scoutingReads.squad.has(org.id, playerId) || ctx.scoutingReads.shadow.has(org.id, playerId),
       lastDecisionAt,
       openRoomId: openRoom?.id ?? null,
     };

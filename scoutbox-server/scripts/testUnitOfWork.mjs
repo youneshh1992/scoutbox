@@ -28,8 +28,8 @@ let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 const ORGS = () => [
-  { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true, tactical: null, squad: [] },
-  { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, safeguardingContractSigned: false, squad: [], lookingFor: ['ST'] },
+  { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true, agencySettings: null, memos: [] },
+  { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, safeguardingContractSigned: false, memos: [], tags: ['ST'] },
   { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, agencySettings: { licence: 'FIFA-1' } },
 ];
 // Since S4a the players and guardians are table-backed too: the fixture player is a valid record (the identity repositories validate it at the first boot's import).
@@ -53,7 +53,7 @@ function operation(t, { failBlob = false, afterCommit = null } = {}) {
   const result = t.unit(() => {
     t.layer.orgs.insert({ id: 'org-new', name: 'New FC', type: 'club', plan: 'Pro' });
     t.layer.orgs.update('org-pro', { suspended: true });
-    pro.squad.push({ id: 'sq-op', name: 'Op', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
+    pro.memos.push({ id: 'sq-op', name: 'Op', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
     req1.status = 'accepted'; req1.history.push('accepted');
     t.db.vouches.push({ id: 'vch-2', playerId: 'pl-1', status: 'pending', history: [] });
     t.db.syntheticNotes = [{ id: 'syn-1', playerId: 'pl-1' }]; // a NEW blob collection (S7d: `channels` is the data layer's read-only view, so another name stands in)
@@ -68,13 +68,13 @@ function operation(t, { failBlob = false, afterCommit = null } = {}) {
 function assertDatabaseUntouched(t, { unrelatedSaved }) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-new'").n, 0, 'no inserted row');
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0, 'no updated column');
-  assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0, 'no flushed facet');
+  assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 0, 'no flushed facet');
   const vouches = t.blob('vouches');
   assert.equal(vouches.length, 1); assert.equal(vouches[0].status, 'pending'); assert.deepEqual(vouches[0].history, []);
   assert.equal(t.blob('syntheticNotes'), undefined, 'no new blob');
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player'").n, 0, 'no session row');
   const grass = JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-grass'").facets_json);
-  assert.deepEqual(grass.lookingFor, unrelatedSaved ? ['GK'] : ['ST']);
+  assert.deepEqual(grass.tags, unrelatedSaved ? ['GK'] : ['ST']);
   assert.equal(t.blob('players'), undefined, 'players are table-backed since S4a: never a blob');
   assert.equal(t.blob('vouches')[0].note, unrelatedSaved ? 'pending-before' : undefined);
 }
@@ -82,29 +82,29 @@ function assertMemoryRestored(t, refs) {
   const { pro, req1, hist, grass } = refs;
   assert.equal(t.db.orgs.find((o) => o.id === 'org-pro'), pro, 'the same record object');
   assert.equal(pro.suspended, undefined, 'the column write is undone on the held record');
-  assert.equal(pro.squad.length, 0, 'the facet push is undone in place');
+  assert.equal(pro.memos.length, 0, 'the facet push is undone in place');
   assert.equal(t.layer.orgs.byId('org-new'), null); assert.equal(t.db.orgs.length, 3); assert.equal(t.layer.orgs.count(), 3);
   assert.equal(t.db.vouches[0], req1, 'the same blob record object'); assert.equal(req1.status, 'pending');
   assert.equal(req1.history, hist, 'the same nested array object'); assert.equal(hist.length, 0);
   assert.equal(t.db.vouches.length, 1); assert.equal('syntheticNotes' in t.db, false, 'a key added by the operation is gone');
   // Unrelated edits made BEFORE the operation are still in memory and still pending.
-  assert.deepEqual(grass.lookingFor, ['GK']); assert.equal(t.db.vouches[0].note, 'pending-before');
+  assert.deepEqual(grass.tags, ['GK']); assert.equal(t.db.vouches[0].note, 'pending-before');
   assert.equal(t.layer.orgs.uncommitted(), 1, 'the pre-operation facet change is still eligible for the next save');
 }
 function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-new'").n, 1);
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
-  assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 1);
+  assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 1);
   const vouches = t.blob('vouches');
   assert.equal(vouches.length, 2); assert.equal(vouches[0].status, 'accepted'); assert.deepEqual(vouches[0].history, ['accepted']);
   assert.deepEqual(t.blob('syntheticNotes'), [{ id: 'syn-1', playerId: 'pl-1' }]);
   assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
-  assert.deepEqual(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-grass'").facets_json).lookingFor, ['GK']);
+  assert.deepEqual(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-grass'").facets_json).tags, ['GK']);
   assert.equal(t.layer.orgs.uncommitted(), 0);
 }
 const prepare = (t) => {
   const pro = t.db.orgs.find((o) => o.id === 'org-pro'); const grass = t.db.orgs.find((o) => o.id === 'org-grass');
-  grass.lookingFor = ['GK']; t.db.vouches[0].note = 'pending-before'; // unrelated edits, pending before the operation (players are a repository view since S4a)
+  grass.tags = ['GK']; t.db.vouches[0].note = 'pending-before'; // unrelated edits, pending before the operation (players are a repository view since S4a)
   return { pro, grass, req1: t.db.vouches[0], hist: t.db.vouches[0].history };
 };
 
@@ -187,7 +187,7 @@ await test('unit of work: a process killed before COMMIT leaves the pre-operatio
   const db2 = { ...again.load().db };
   const layer2 = attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.equal(layer2.orgs.byId('org-crash'), null); assert.equal(db2.orgs.length, 3);
-  assert.equal(db2.orgs.find((o) => o.id === 'org-pro').squad.length, 0);
+  assert.equal(db2.orgs.find((o) => o.id === 'org-pro').memos.length, 0);
   assert.equal(db2.vouches.length, 1); assert.equal(db2.vouches[0].status, 'pending');
   assert.equal(again.sqlite.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
@@ -197,15 +197,15 @@ await test('unit of work: a process killed before COMMIT leaves the pre-operatio
 await test('ordinary saves keep the S3 contract: a facet change in a FAILED ordinary save stays pending and the next ordinary save persists it (no explicit retry needed)', () => {
   const dir = tempDir('uow-s3'); const t = boot(dir);
   const pro = t.db.orgs.find((o) => o.id === 'org-pro');
-  pro.squad.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
+  pro.memos.push({ id: 'sq-1', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
   t.db.vouches[0].big = 1n; // a blob record (players are a repository view since S4a)
   assert.throws(() => t.store.save(t.snapshot()), /BigInt/);
-  assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0);
-  assert.equal(pro.squad.length, 1, 'an ordinary save failure does NOT undo memory: memory is the intended state, retried by the next save');
+  assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 0);
+  assert.equal(pro.memos.length, 1, 'an ordinary save failure does NOT undo memory: memory is the intended state, retried by the next save');
   assert.equal(t.layer.orgs.uncommitted(), 1);
   delete t.db.vouches[0].big;
   t.store.save(t.snapshot());
-  assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 1);
+  assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 1);
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -218,11 +218,11 @@ await test('unit of work: a nested unit joins the enclosing one (an inner failur
   try {
     t.unit(() => {
       t.layer.orgs.insert({ id: 'org-outer', name: 'Outer', type: 'club', plan: 'Pro' });
-      t.unit(() => { pro.squad.push({ id: 'sq-inner', name: 'I', position: 'ST', playerId: null, source: 'manual', addedAt: 1 }); throw new Error('inner failed'); });
+      t.unit(() => { pro.memos.push({ id: 'sq-inner', name: 'I', position: 'ST', playerId: null, source: 'manual', addedAt: 1 }); throw new Error('inner failed'); });
     });
   } catch (e) { err = e; }
   assert.match(err.message, /inner failed/); assert.equal(err.unitOfWork, 'rolled_back');
-  assert.equal(t.layer.orgs.byId('org-outer'), null); assert.equal(pro.squad.length, 0);
+  assert.equal(t.layer.orgs.byId('org-outer'), null); assert.equal(pro.memos.length, 0);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-outer'").n, 0);
   // save() inside a unit does not open a second transaction; its blobs land with the unit.
   const rev = t.store.revision();
@@ -363,32 +363,32 @@ await test('a nested (joined) unit that fails poisons the whole unit even when i
 await test('a facet value written by a row update inside a unit and then changed back before COMMIT is overwritten in the database — view and table agree after commit, after rollback, after an ordinary save and after a restart', () => {
   const dir = tempDir('uow-revert'); const t = boot(dir);
   const pro = t.db.orgs.find((o) => o.id === 'org-pro');
-  const squad = (id = 'org-pro') => JSON.parse(t.raw('SELECT facets_json FROM orgs WHERE id = ?', id).facets_json).squad.length;
+  const memos = (id = 'org-pro') => JSON.parse(t.raw('SELECT facets_json FROM orgs WHERE id = ?', id).facets_json).memos.length;
   // Commit: the intermediate value (one member) is written by the row update; the final value (none) must win.
   t.unit(() => {
-    pro.squad.push({ id: 'sq-temp', name: 'T', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
+    pro.memos.push({ id: 'sq-temp', name: 'T', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
     t.layer.orgs.update('org-pro', { name: 'Eastport FC (renamed)' });
-    pro.squad = [];
+    pro.memos = [];
   });
-  assert.equal(pro.squad.length, 0); assert.equal(squad(), 0, 'the table holds the final value, not the intermediate one');
+  assert.equal(pro.memos.length, 0); assert.equal(memos(), 0, 'the table holds the final value, not the intermediate one');
   assert.equal(t.raw("SELECT name FROM orgs WHERE id = 'org-pro'").name, 'Eastport FC (renamed)'); assert.equal(t.layer.orgs.uncommitted(), 0);
   // The mirror image: a third value after the update is written too.
-  t.unit(() => { pro.squad.push({ id: 'sq-a', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 }); t.layer.orgs.update('org-pro', { suspended: true }); pro.squad.push({ id: 'sq-b', name: 'B', position: 'GK', playerId: null, source: 'manual', addedAt: 2 }); });
-  assert.equal(squad(), 2); assert.equal(pro.squad.length, 2);
+  t.unit(() => { pro.memos.push({ id: 'sq-a', name: 'A', position: 'ST', playerId: null, source: 'manual', addedAt: 1 }); t.layer.orgs.update('org-pro', { suspended: true }); pro.memos.push({ id: 'sq-b', name: 'B', position: 'GK', playerId: null, source: 'manual', addedAt: 2 }); });
+  assert.equal(memos(), 2); assert.equal(pro.memos.length, 2);
   // Rollback: the same shape, then a failure — the database keeps the committed value and memory is restored.
-  assert.throws(() => t.unit(() => { pro.squad.push({ id: 'sq-x', name: 'X', position: 'ST', playerId: null, source: 'manual', addedAt: 3 }); t.layer.orgs.update('org-pro', { suspended: false }); pro.squad = []; throw new Error('late failure'); }), /late failure/);
-  assert.equal(squad(), 2); assert.equal(pro.squad.length, 2); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1); assert.equal(t.layer.orgs.uncommitted(), 0);
+  assert.throws(() => t.unit(() => { pro.memos.push({ id: 'sq-x', name: 'X', position: 'ST', playerId: null, source: 'manual', addedAt: 3 }); t.layer.orgs.update('org-pro', { suspended: false }); pro.memos = []; throw new Error('late failure'); }), /late failure/);
+  assert.equal(memos(), 2); assert.equal(pro.memos.length, 2); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1); assert.equal(t.layer.orgs.uncommitted(), 0);
   // Ordinary save: a facet changed back to its committed value after an uncommitted change is simply not written; one changed away from it is.
-  pro.squad.push({ id: 'sq-c', name: 'C', position: 'ST', playerId: null, source: 'manual', addedAt: 4 }); pro.squad.pop();
-  assert.equal(t.layer.orgs.uncommitted(), 0); t.store.save(t.snapshot()); assert.equal(squad(), 2);
-  pro.squad = []; t.store.save(t.snapshot()); assert.equal(squad(), 0);
+  pro.memos.push({ id: 'sq-c', name: 'C', position: 'ST', playerId: null, source: 'manual', addedAt: 4 }); pro.memos.pop();
+  assert.equal(t.layer.orgs.uncommitted(), 0); t.store.save(t.snapshot()); assert.equal(memos(), 2);
+  pro.memos = []; t.store.save(t.snapshot()); assert.equal(memos(), 0);
   // Restart: the table is what the next boot sees.
   t.store.sqlite.close();
   const again = openStore(dir, { tableBacked: TABLE_BACKED });
   const db2 = { ...again.load().db };
   attachDataLayer({ db: db2, store: again, nextId, persist: () => {}, sessionTtlMs: TTL });
   const pro2 = db2.orgs.find((o) => o.id === 'org-pro');
-  assert.equal(pro2.name, 'Eastport FC (renamed)'); assert.equal(pro2.squad.length, 0); assert.equal(pro2.suspended, true);
+  assert.equal(pro2.name, 'Eastport FC (renamed)'); assert.equal(pro2.memos.length, 0); assert.equal(pro2.suspended, true);
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -418,13 +418,13 @@ await test('an async function is refused BEFORE it is invoked (top-level and nes
     err = null;
     try {
       t.unit(() => {
-        pro.squad.push({ id: 'sq-sync', name: 'S', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
+        pro.memos.push({ id: 'sq-sync', name: 'S', position: 'ST', playerId: null, source: 'manual', addedAt: 1 });
         return (async () => { await tick(); continuation += 1; throw new Error('continuation rejected'); })();
       });
     } catch (e) { err = e; }
     assert.match(err.message, /synchronous|thenable|promise/); assert.equal(err.unitOfWork, 'rolled_back');
-    assert.equal(pro.squad.length, 0, 'the synchronous part of the work is rolled back');
-    assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).squad.length, 0);
+    assert.equal(pro.memos.length, 0, 'the synchronous part of the work is rolled back');
+    assert.equal(JSON.parse(t.raw("SELECT facets_json FROM orgs WHERE id = 'org-pro'").facets_json).memos.length, 0);
     await tick(); await tick();
     assert.equal(continuation, 1, 'the continuation still ran: refusing the promise does not cancel the work (documented limitation)');
     const stray = t.store.unitOfWorkState().strayAsyncWork;

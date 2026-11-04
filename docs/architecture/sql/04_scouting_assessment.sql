@@ -2,7 +2,7 @@
 -- 04_scouting_assessment.sql — ScoutBox target relational schema (SQLite, STRICT)
 --
 -- Scope: M12 F1/F2/F4/F5/F6/F7/F10 collections + M13 F3 playerPrefs + the
--- org-level fields `tactical`, `squad[]`, `lookingFor[]`, `federationCheck`.
+-- org-level fields `tactical`, `squad[]`, `lookingFor[]`, `federationCheck` (club setup tables since S9c).
 -- Sources: scoutbox-server/domains/scouting/passport.mjs, domains/scouting/scouting.mjs, domains/scouting/journeys.mjs,
 -- m12/shared.mjs (migrateM12), domains/scouting/suitability.mjs, m13/shared.mjs (migrateM13),
 -- server.mjs (looking-for, squad, verification/federation), domains/recruitment/signings/index.mjs (squad
@@ -165,152 +165,135 @@ CREATE INDEX squad_invites_player_status ON squad_invites (player_id, status);
 
 
 -- ----------------------------------------------------------------------------
--- source: db.orgs[].tactical  created at domains/scouting/scouting.mjs:661-675 (POST /org/tactical)
--- owner/writer: domains/scouting/scouting.mjs (lead only); replaced wholesale on every POST
--- lifecycle: one row per org, null until first POST (migrateM12 sets o.tactical ??= null)
--- mapping:
---   formation -> formation (<=20)          planningHorizon -> planning_horizon (<=40)
---   windows[] -> org_tactical_windows      roles[] -> org_tactical_roles (+ criteria)
---   updatedAt -> updated_at                updatedBy -> updated_by_name (a name, not an id)
--- notes: the source replaces the whole object; the migration/ORM must diff
---        roles by id (not delete+insert) or vacancies.role_id would be nulled
---        every time a lead re-saves the formation with the same role ids.
+-- S9c: IMPLEMENTED, migration 0021_club_setup REGISTERED (repositories/clubSetup.mjs, 4 Nov 2026).
+-- The definitions below are the migration's DDL; scripts/testSchemaDdl.mjs compares them column by column.
+-- A club's own setup: the tactical setup (roles, criteria, windows), the squad, the shadow list, what a grassroots club
+-- is looking for, the federation-route verification request, and role vacancies. The first four were facets of the
+-- organisation record (orgs.facets_json: tactical, squad, lookingFor, federationCheck); the migration removes them from
+-- the facets (their contents are not carried over) and repositories/orgs.mjs refuses them on a record. Vacancies were
+-- the blob collection db.vacancies.
+-- Sources: domains/scouting/scouting.mjs (tactical, vacancies, candidates, shadow list, planner), server.mjs (the
+-- grassroots squad and release, match days, looking-for, the radar, the federation request), domains/scouting/passport.mjs
+-- (an approved squad invitation), domains/recruitment/signings/index.mjs (a grassroots signing); readers in m15, m162, m18.
+-- How the model differs from the first draft of this file:
+--   * The shadow list is its own table (org_shadow_players), not a squad row with source 'shadow' (decided with the
+--     Founder, 4 Nov): a club considering a player is not that player's club. The grassroots squad, match-day
+--     attendance, release, the passport's club relationships, the Trust score and Second Look read org_squad_members
+--     only; Nobody Missed still counts either as "considered". A shadowed player can then sign or be invited onto the
+--     squad (the old code skipped the squad row when a shadow row existed).
+--   * org_id is ON DELETE RESTRICT, not CASCADE (organisations are never deleted, O2). player_id has NO foreign key:
+--     tolerant, like recruitment and S9a (a squad row outlives the account, as before).
+--   * Role criteria: value_number / value_text, not value_json; each key has its vocabulary (positionGroup GK|DEF|MID|ATT,
+--     foot left|right as players store it, availability and maxLevel the player vocabularies, category the role
+--     categories) or whole-number range (ages 5-60, appearances 0-1000); one criterion per key and kind.
+--   * Roles keep their order (ordinal) and are diffed BY ID on a re-save (kept rows updated in place); a client role id
+--     must be one of the club's current roles (the old route accepted any id, another club's included). Roles,
+--     criteria and windows cascade with their setup; vacancies.role_id and org_shadow_players.role_id are SET NULL (a
+--     dropped role: the candidates route answers 409 ROLE_DELETED, as before), the role checked to be the club's own.
+--   * Windows: opens / closes are YYYY-MM-DD days or null, opens <= closes. More than 15 roles or 4 windows is refused,
+--     not cut off; an unknown position group or category is refused, not turned into MID / mixed.
+--   * Squad rows: source manual | invite_approved | signing; approved_by_label exactly on an approved invitation; a
+--     player id on every row but a manual one (off-platform people); one row per club and on-platform player.
+--   * Looking-for: position codes only (the radar matches them against the player's position), at most five, unique.
+--   * Federation check: one per club, replaced on resubmission; contact_email an e-mail address or null; the source
+--     field `ts` is submitted_at.
+--   * Vacancies: window_name (`window` is an SQL keyword), the closed state CHECK; the club list pages by cursor.
 -- ----------------------------------------------------------------------------
 CREATE TABLE org_tactical_setups (
-  org_id           TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE CASCADE,
-  formation        TEXT NOT NULL,
-  planning_horizon TEXT,
+  org_id           TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE RESTRICT,
+  formation        TEXT NOT NULL CHECK (length(formation) BETWEEN 1 AND 20),
+  planning_horizon TEXT CHECK (planning_horizon IS NULL OR length(planning_horizon) <= 40),
   updated_at       INTEGER NOT NULL,
-  updated_by_name  TEXT NOT NULL                           -- snapshot
+  updated_by_name  TEXT NOT NULL CHECK (length(updated_by_name) <= 200)
 ) STRICT;
-
--- ----------------------------------------------------------------------------
--- source: db.orgs[].tactical.roles[]  created at domains/scouting/scouting.mjs:665-673
--- owner/writer: domains/scouting/scouting.mjs
--- mapping:
---   id -> id (role-N minted, OR a client-supplied id: `r.id ?? nextId('role')`)
---   (array position) -> ordinal (new; keeps the ≤15 ordering)
---   name -> name (<=60)   positionGroup -> position_group   description -> description (<=300)
---   category -> category  required[] / preferred[] -> org_tactical_role_criteria
--- notes: ids are globally unique here (id TEXT PRIMARY KEY, as every other
---        preserved id). In practice they are server-minted `role-N`; the `r.id ??`
---        branch exists so a re-POST keeps earlier ids. KNOWN DEFECT: the route
---        never checks that a client-supplied id belongs to this org — the
---        migration re-mints any id that collides with another org's row, and the
---        UNIQUE (org_id, id) index documents the per-org lookup the code performs.
--- ----------------------------------------------------------------------------
 CREATE TABLE org_tactical_roles (
   id             TEXT PRIMARY KEY,
   org_id         TEXT NOT NULL REFERENCES org_tactical_setups(org_id) ON DELETE CASCADE,
-  ordinal        INTEGER NOT NULL,
-  name           TEXT NOT NULL,
-  position_group TEXT NOT NULL CHECK (position_group IN ('GK','DEF','MID','ATT')) DEFAULT 'MID',
-  description    TEXT NOT NULL DEFAULT '',
-  category       TEXT NOT NULL CHECK (category IN ('mens','womens','boys','girls','mixed')) DEFAULT 'mixed'
+  ordinal        INTEGER NOT NULL CHECK (ordinal >= 0),
+  name           TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 60),
+  position_group TEXT NOT NULL CHECK (position_group IN ('GK','DEF','MID','ATT')),
+  description    TEXT NOT NULL CHECK (length(description) <= 300),
+  category       TEXT NOT NULL CHECK (category IN ('mens','womens','boys','girls','mixed')),
+  UNIQUE (org_id, id)
 ) STRICT;
-CREATE UNIQUE INDEX org_tactical_roles_org_id_id ON org_tactical_roles (org_id, id);  -- new; roles.find(r.id === roleId) within an org
-
--- ----------------------------------------------------------------------------
--- source: db.orgs[].tactical.roles[].required[] and .preferred[]  (sanitiseCriteria, domains/scouting/scouting.mjs:680)
--- owner/writer: domains/scouting/scouting.mjs
--- mapping: (list name) -> kind ('required' | 'preferred'), (array position) -> ordinal,
---          key -> key (CRITERIA_KEYS only), value -> value_json (number for
---          minAge/maxAge/minAppearances, string otherwise — heterogeneous, kept as JSON)
--- ----------------------------------------------------------------------------
 CREATE TABLE org_tactical_role_criteria (
-  role_id    TEXT NOT NULL REFERENCES org_tactical_roles(id) ON DELETE CASCADE,
-  kind       TEXT NOT NULL CHECK (kind IN ('required','preferred')),
-  ordinal    INTEGER NOT NULL,
-  key        TEXT NOT NULL CHECK (key IN ('positionGroup','minAge','maxAge','foot','availability','maxLevel','minAppearances','category')),
-  value_json TEXT NOT NULL CHECK (json_valid(value_json)),
-  PRIMARY KEY (role_id, kind, ordinal)
+  role_id      TEXT NOT NULL REFERENCES org_tactical_roles(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL CHECK (kind IN ('required','preferred')),
+  ordinal      INTEGER NOT NULL CHECK (ordinal >= 0),
+  key          TEXT NOT NULL CHECK (key IN ('positionGroup','minAge','maxAge','foot','availability','maxLevel','minAppearances','category')),
+  value_number INTEGER,
+  value_text   TEXT CHECK (value_text IS NULL OR length(value_text) <= 40),
+  PRIMARY KEY (role_id, kind, ordinal),
+  UNIQUE (role_id, kind, key),
+  CHECK ((value_number IS NULL) <> (value_text IS NULL)),
+  CHECK ((key IN ('minAge','maxAge','minAppearances')) = (value_number IS NOT NULL))
 ) STRICT;
-
--- ----------------------------------------------------------------------------
--- source: db.orgs[].tactical.windows[]  created at domains/scouting/scouting.mjs:664 (≤4)
--- owner/writer: domains/scouting/scouting.mjs
--- mapping: (array position) -> ordinal, name -> name (<=40), opens -> opens, closes -> closes
--- notes: opens/closes are stored exactly as sent (`w.opens ?? null`) — never
---        validated, usually a date string; TEXT without a format check (defect).
--- ----------------------------------------------------------------------------
 CREATE TABLE org_tactical_windows (
   org_id  TEXT NOT NULL REFERENCES org_tactical_setups(org_id) ON DELETE CASCADE,
-  ordinal INTEGER NOT NULL,
-  name    TEXT NOT NULL DEFAULT '',
-  opens   TEXT,
-  closes  TEXT,
-  PRIMARY KEY (org_id, ordinal)
+  ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+  name    TEXT NOT NULL CHECK (length(name) <= 40),
+  opens   TEXT CHECK (opens IS NULL OR length(opens) = 10),
+  closes  TEXT CHECK (closes IS NULL OR length(closes) = 10),
+  PRIMARY KEY (org_id, ordinal),
+  CHECK (opens IS NULL OR closes IS NULL OR opens <= closes)
 ) STRICT;
-
--- ----------------------------------------------------------------------------
--- source: db.orgs[].squad[]  created at server.mjs:2797 (manual), domains/scouting/passport.mjs:409
---         (invite_approved), domains/scouting/scouting.mjs:779 (shadow), domains/recruitment/signings/index.mjs:291 (signing)
--- owner/writer: server.mjs (grassroots squad + release), domains/scouting/passport.mjs,
---               domains/scouting/scouting.mjs, domains/recruitment/signings/index.mjs (and m29 snapshot/rollback restores the whole array)
--- lifecycle: hard-deleted on release (server.mjs:2811 filters the array) — no soft-delete field exists
--- mapping (union of the four row shapes):
---   id -> id (sq-N)                        playerId -> player_id (null for off-platform manual entries)
---   name -> name                           position -> position (manual/signing only; '' on signing)
---   source -> source                       roleId -> role_id (shadow only)
---   approvedBy -> approved_by_label (invite_approved only: 'the player' | 'guardian <name>')
---   addedBy -> added_by_name (shadow only) addedAt -> added_at
--- notes:
---   * name is a snapshot of player.name, or personal data about an off-platform
---     person when player_id is null.
---   * Uniqueness as the code enforces it: one non-shadow row per (org, player)
---     and one shadow row per (org, player) — a player can be both current and
---     shadowed. Both partial unique indexes mirror that.
---   * Player deletion today leaves player_id dangling; target SET NULL keeps the
---     row (the club's roster history) without the reference.
--- ----------------------------------------------------------------------------
 CREATE TABLE org_squad_members (
   id                TEXT PRIMARY KEY,
-  org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  player_id         TEXT REFERENCES players(id) ON DELETE SET NULL,
-  name              TEXT NOT NULL,                         -- snapshot / personal data
-  position          TEXT,
-  source            TEXT NOT NULL CHECK (source IN ('manual','invite_approved','shadow','signing')),
-  role_id           TEXT REFERENCES org_tactical_roles(id) ON DELETE SET NULL,  -- shadow only; `req.body?.roleId ?? null` is never validated against the org's roles (defect: migration nulls unknown ids)
-  approved_by_label TEXT,
-  added_by_name     TEXT,                                  -- snapshot
-  added_at          INTEGER NOT NULL
+  org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id         TEXT,
+  name              TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
+  position          TEXT CHECK (position IS NULL OR length(position) <= 40),
+  source            TEXT NOT NULL CHECK (source IN ('manual','invite_approved','signing')),
+  approved_by_label TEXT CHECK (approved_by_label IS NULL OR length(approved_by_label) <= 200),
+  added_at          INTEGER NOT NULL,
+  CHECK ((source = 'invite_approved') = (approved_by_label IS NOT NULL)),
+  CHECK (source = 'manual' OR player_id IS NOT NULL)
 ) STRICT;
-CREATE UNIQUE INDEX org_squad_members_current_org_player ON org_squad_members (org_id, player_id) WHERE player_id IS NOT NULL AND source <> 'shadow';  -- enforced by code today
-CREATE UNIQUE INDEX org_squad_members_shadow_org_player ON org_squad_members (org_id, player_id) WHERE player_id IS NOT NULL AND source = 'shadow';    -- enforced by code today
-CREATE INDEX org_squad_members_player_id ON org_squad_members (player_id);  -- "on squad anywhere" checks (m15, m18, m162)
-
--- ----------------------------------------------------------------------------
--- source: db.orgs[].lookingFor[]  created at server.mjs:2705 (POST /org/looking-for, grassroots only)
--- owner/writer: server.mjs; replaced wholesale (≤5 entries)
--- mapping: (array position) -> ordinal (new), positions[i] -> position
--- notes: values are unvalidated strings (expected position codes such as 'ST');
---        read by the players' opportunity radar (server.mjs:3644-3648).
--- ----------------------------------------------------------------------------
+CREATE UNIQUE INDEX org_squad_members_org_player ON org_squad_members (org_id, player_id) WHERE player_id IS NOT NULL;
+CREATE INDEX org_squad_members_org ON org_squad_members (org_id);
+CREATE INDEX org_squad_members_player ON org_squad_members (player_id);
+CREATE TABLE org_shadow_players (
+  id            TEXT PRIMARY KEY,
+  org_id        TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  player_id     TEXT NOT NULL,
+  name          TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
+  role_id       TEXT REFERENCES org_tactical_roles(id) ON DELETE SET NULL,
+  added_by_name TEXT NOT NULL CHECK (length(added_by_name) <= 200),
+  added_at      INTEGER NOT NULL,
+  UNIQUE (org_id, player_id)
+) STRICT;
+CREATE INDEX org_shadow_players_player ON org_shadow_players (player_id);
 CREATE TABLE org_looking_for (
-  org_id   TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  ordinal  INTEGER NOT NULL,
-  position TEXT NOT NULL,
-  PRIMARY KEY (org_id, ordinal)
+  org_id   TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  ordinal  INTEGER NOT NULL CHECK (ordinal BETWEEN 0 AND 4),
+  position TEXT NOT NULL CHECK (position IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
+  PRIMARY KEY (org_id, ordinal),
+  UNIQUE (org_id, position)
 ) STRICT;
-
--- ----------------------------------------------------------------------------
--- source: db.orgs[].federationCheck  created at server.mjs:2913 (POST /org/verification/federation)
--- owner/writer: server.mjs (grassroots only); replaced wholesale on resubmission
--- lifecycle: status is only ever written as 'pending' — no route in the code base
---            moves it on (Trust & Safety verification lands on the org's M14 claims instead).
--- mapping: federation -> federation, registrationId -> registration_id,
---          contactEmail -> contact_email, status -> status, ts -> submitted_at
---          (source field is literally `ts`)
--- notes: contact_email is personal data. One row per org (natural key org_id).
--- ----------------------------------------------------------------------------
 CREATE TABLE org_federation_checks (
-  org_id          TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE CASCADE,
-  federation      TEXT NOT NULL,
-  registration_id TEXT NOT NULL,
-  contact_email   TEXT,                                    -- personal data
-  status          TEXT NOT NULL CHECK (status IN ('pending')) DEFAULT 'pending',
+  org_id          TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE RESTRICT,
+  federation      TEXT NOT NULL CHECK (length(federation) BETWEEN 1 AND 120),
+  registration_id TEXT NOT NULL CHECK (length(registration_id) BETWEEN 1 AND 60),
+  contact_email   TEXT CHECK (contact_email IS NULL OR length(contact_email) <= 120),
+  status          TEXT NOT NULL CHECK (status IN ('pending')),
   submitted_at    INTEGER NOT NULL
 ) STRICT;
+CREATE TABLE vacancies (
+  id              TEXT PRIMARY KEY,
+  org_id          TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  role_id         TEXT REFERENCES org_tactical_roles(id) ON DELETE SET NULL,
+  role_name       TEXT NOT NULL CHECK (length(role_name) BETWEEN 1 AND 60),
+  window_name     TEXT CHECK (window_name IS NULL OR length(window_name) <= 40),
+  notes           TEXT CHECK (notes IS NULL OR length(notes) <= 300),
+  status          TEXT NOT NULL CHECK (status IN ('open','closed')),
+  created_by_name TEXT NOT NULL CHECK (length(created_by_name) <= 200),
+  created_at      INTEGER NOT NULL,
+  closed_at       INTEGER,
+  CHECK ((status = 'closed') = (closed_at IS NOT NULL))
+) STRICT;
+CREATE INDEX vacancies_org_status ON vacancies (org_id, status);
+CREATE INDEX vacancies_role ON vacancies (role_id);
+CREATE INDEX org_shadow_players_role ON org_shadow_players (role_id);
 
 
 -- ----------------------------------------------------------------------------
@@ -482,33 +465,6 @@ CREATE TABLE assessment_history (
   detail      TEXT CHECK (detail IS NULL OR length(detail) <= 500),
   UNIQUE (assessment_id, position)
 ) STRICT;
-
-
--- ----------------------------------------------------------------------------
--- source: db.vacancies  created at domains/scouting/scouting.mjs:689
--- owner/writer: domains/scouting/scouting.mjs (also read by domains/recruitment/rooms/rooms.mjs:555 and recruitment_cases.vacancy_id in 02)
--- lifecycle: status open -> closed (closed_at); never deleted
--- mapping: id -> id (vac-N), orgId -> org_id, roleId -> role_id, roleName -> role_name,
---          window -> window (unvalidated, stored as sent), notes -> notes (<=300),
---          status -> status, createdBy -> created_by_name (a name, not an id),
---          createdAt -> created_at, closedAt -> closed_at
--- notes: the source tolerates a vanished role (409 ROLE_DELETED on candidates)
---        → ON DELETE SET NULL; role_name keeps the label. "role belongs to the
---        same org" is checked by the route (scouting.mjs:687), not by the schema.
--- ----------------------------------------------------------------------------
-CREATE TABLE vacancies (
-  id              TEXT PRIMARY KEY,
-  org_id          TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  role_id         TEXT REFERENCES org_tactical_roles(id) ON DELETE SET NULL,
-  role_name       TEXT NOT NULL,                           -- snapshot
-  window          TEXT,
-  notes           TEXT,
-  status          TEXT NOT NULL CHECK (status IN ('open','closed')) DEFAULT 'open',
-  created_by_name TEXT NOT NULL,                           -- snapshot
-  created_at      INTEGER NOT NULL,
-  closed_at       INTEGER
-) STRICT;
-CREATE INDEX vacancies_org_id_status ON vacancies (org_id, status);  -- org list; squad planner (open only)
 
 
 -- ----------------------------------------------------------------------------

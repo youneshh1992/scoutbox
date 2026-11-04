@@ -83,7 +83,7 @@ const T0 = 1_800_000_000_000; // 2027-01-15T08:00:00Z — inside the 2000–2100
 function baseDb() {
   const db = {
     players: [{ id: 'pl-x', name: 'Xavier Adult', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } }],
-    orgs: [{ id: 'org-x', name: 'X FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, squad: [], location: { lat: 51.5, lng: -0.1 } }],
+    orgs: [{ id: 'org-x', name: 'X FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, location: { lat: 51.5, lng: -0.1 } }],
     guardians: [],
     // S8a-core: a request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
     // fixture carries the staff row the case and the request name (the dev login below finds it by org and name).

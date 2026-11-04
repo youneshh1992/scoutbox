@@ -38,6 +38,7 @@ export function registerPassport(ctx) {
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, guardianOwnsChild, freshness, activeAffiliation,
     moderateOrRefuse, isAdult, scoutingReads, scoutingEvidence, unit,
+    clubSetup, // S9c: an approved invitation adds the squad row through the club setup repository
   } = ctx;
   if (typeof scoutingEvidence?.evidence?.create !== 'function' || typeof unit !== 'function') throw new TypeError('registerPassport needs the scouting evidence repository and unit from the data layer');
   /** The player's own record, or null. */
@@ -457,17 +458,17 @@ export function registerPassport(ctx) {
     persistNow();
     res.status(201).json({ invite });
   });
-  // The answer, the squad row (the org's squad facet until S9c) and the notification commit together.
+  // The answer, the squad row (S9c: a row of org_squad_members) and the notification commit together.
   function respondSquadInvite(req, res, invite, approverLabel) {
     const { accept } = req.body ?? {};
     const at = Date.now();
     const fresh = unit(() => {
       const next = scoutingEvidence.squadInvites.update(invite.id, (i) => { i.status = accept ? 'approved' : 'declined'; i.respondedAt = at; });
       if (accept) {
-        const org = byId.org(invite.orgId);
-        org.squad ??= [];
-        if (!org.squad.some((s) => s.playerId === invite.playerId)) {
-          org.squad.push({ id: nextId('sq'), playerId: invite.playerId, name: invite.playerName, source: 'invite_approved', approvedBy: approverLabel, addedAt: at });
+        // A player the club shadowed joins the squad all the same: the shadow list is not the squad (S9c).
+        if (!clubSetup.squad.has(invite.orgId, invite.playerId)) {
+          const name = invite.playerName ?? findPlayer(invite.playerId)?.name ?? 'Player';
+          clubSetup.squad.create({ id: nextId('sq'), orgId: invite.orgId, playerId: invite.playerId, name: storedName(name), position: null, source: 'invite_approved', approvedBy: storedName(approverLabel), addedAt: at });
         }
         notify({ kind: 'org_user', id: invite.byUserId }, 'squad_invite', `✅ ${invite.playerName} joined your squad list (approved by ${approverLabel}).`, invite.id);
       }
