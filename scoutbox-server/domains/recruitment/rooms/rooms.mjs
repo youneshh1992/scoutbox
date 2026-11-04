@@ -270,14 +270,13 @@ export function registerRooms(ctx) {
    *
    * The Passport's club projection deliberately returns `evidence` as a SUMMARY
    * object (`{fullMatches, clips, references, lastEvidenceDays, …}`), not a row
-   * list — so the Room reads the canonical `db.evidence` rows itself and keeps
+   * list — so the Room reads the canonical evidence rows itself (scoutingReads, S9a) and keeps
    * the summary for the header. Access is already settled: `sources()` returned
    * `visible: true`, which means `orgCanSee` passed on this read.
    */
   function evidenceFor(req, room, srcs) {
     const state = reads.evidenceStates.forRoom(room.id);
-    const list = db.evidence
-      .filter((e) => e.playerId === room.playerId && !e.supersededBy)
+    const list = [...ctx.scoutingReads.evidence.currentForPlayer(room.playerId)]
       .sort((a, b) => (b.recordedAt ?? 0) - (a.recordedAt ?? 0))
       .map((e) => ({
         id: e.id,
@@ -922,7 +921,7 @@ export function registerRooms(ctx) {
           // Second Look can say whether the Passport truth itself moved.
           passportVersion: full?.passportVersion ?? null,
           passportRevision: ctx.passportRevisionOf?.(room.playerId) ?? null,
-          evidenceIds: (db.evidence.filter((e) => e.playerId === room.playerId && !e.supersededBy).map((e) => e.id)),
+          evidenceIds: ctx.scoutingReads.evidence.currentForPlayer(room.playerId).map((e) => e.id),
           assessmentIds: db.assessments.filter((a) => a.orgId === room.orgId && a.playerId === room.playerId && a.state !== 'draft').map((a) => a.id),
           // Protocol coverage at decision time — which standardized tests had a
           // verified result, never the measured values themselves.
@@ -1225,7 +1224,8 @@ export function registerRooms(ctx) {
     if (!requireCan(req, res, room, 'comment')) return;
     const state = String(req.body?.state ?? '');
     if (!EVIDENCE_REVIEW_STATES.includes(state)) return res.status(400).json({ error: 'ROOM_EVIDENCE_STATE_UNKNOWN' });
-    const evidence = db.evidence.find((e) => e.id === req.params.eid && e.playerId === room.playerId);
+    const found = ctx.scoutingReads.evidence.byId(req.params.eid);
+    const evidence = found && found.playerId === room.playerId ? found : null;
     if (!evidence) return res.status(404).json({ error: 'EVIDENCE_NOT_FOUND' });
     const note = req.body?.note ? plainText(req.body.note, 1000) : null;
     if (note && !moderateOrRefuse(res, note, { kind: 'recruitment_room_evidence_note', orgId: req.org.id })) return;

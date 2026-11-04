@@ -125,6 +125,29 @@ const disp = r.body.items[0];
 ok(r.body.items.length === 1 && disp.evidenceId === ev2, 'T&S sees the dispute queue');
 r = await post(`/admin/evidence/disputes/${disp.id}/resolve`, { resolution: 'upheld', note: 'club evidence stronger', downgrade: true }, admin);
 ok(r.status === 200 && r.body.evidence.verification.method === 'downgraded after dispute', 'T&S resolves; downgrade recorded with method');
+// S9a: valid input only — junk is refused with the field named, and nothing is written
+{
+  const before = (await j('/player/passport', {}, bearer(KOLA))).body.records.length;
+  for (const [body, field] of [
+    [{ claimType: 'statistic', label: 'Goals', value: { goals: 3 } }, 'value'],
+    [{ claimType: 'statistic', label: 'Goals', value: true }, 'value'],
+    [{ claimType: 'statistic', label: 42 }, 'label'],
+    [{ claimType: 'statistic', label: 'Goals', units: ['goals'] }, 'units'],
+    [{ claimType: 'statistic', label: 'Goals', mediaIds: 'clip-1' }, 'mediaIds'],
+  ]) {
+    const bad = await post('/player/evidence', body, bearer(KOLA));
+    ok(bad.status === 400 && bad.body.error === 'FIELD_INVALID' && bad.body.field === field, `S9a evidence with a junk ${field} is refused (400 FIELD_INVALID, field named)`);
+  }
+  ok((await j('/player/passport', {}, bearer(KOLA))).body.records.length === before, 'S9a and no refused claim was recorded');
+  const longLabel = await post('/player/evidence', { claimType: 'statistic', label: 'x'.repeat(500), value: '12 goals' }, bearer(KOLA));
+  ok(longLabel.status === 201 && longLabel.body.evidence.label.length === 120 && longLabel.body.evidence.value === '12 goals', 'S9a over-long text is still shortened, and a text value is kept as text');
+  const badReason = await post(`/player/evidence/${longLabel.body.evidence.id}/correct`, { reason: { why: 'x' } }, bearer(KOLA));
+  ok(badReason.status === 400 && badReason.body.field === 'reason', 'S9a a correction reason that is not text is refused');
+  const badFrom = await post('/org/coaches', { coachName: 'Pat Doe', role: 'Coach', from: 'last spring' }, bearer(HACK));
+  ok(badFrom.status === 400 && badFrom.body.error === 'DATE_INVALID' && badFrom.body.field === 'from', 'S9a a coach affiliation start that is not a day is refused');
+  const badNote = await post('/org/squad/invite', { playerId: 'pl-adeyemi', note: 7 }, bearer(MARIA));
+  ok(badNote.status === 400 && badNote.body.field === 'note', 'S9a a squad invitation note that is not text is refused');
+}
 // legacy relabelling
 r = await j('/player/passport', {}, bearer(KOLA));
 ok(r.body.legacy.every((l) => l.tier !== 'independent'), 'no legacy surface claims independent measurement');

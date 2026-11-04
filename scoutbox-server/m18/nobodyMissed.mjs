@@ -50,7 +50,7 @@ export function registerNobodyMissed(ctx) {
     const view = playerViewForOrg(player, org);
     if (!view) return null;
     const prefs = (db.passportPrefs ?? []).find((p) => p.playerId === player.id) ?? null;
-    const evidence = db.evidence.filter((e) => e.playerId === player.id && !e.supersededBy);
+    const evidence = ctx.scoutingReads.evidence.currentForPlayer(player.id);
     const recentFullMatch = evidence.some((e) => e.claimType === 'footage' && e.recordedAt > now() - 180 * 86_400_000);
     // M19 needs the DATE, not only the 180-day boolean, so a club can write
     // its own recency criterion ("within 90 days") instead of inheriting ours.

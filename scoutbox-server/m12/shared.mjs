@@ -9,9 +9,8 @@ import { isLeadUser } from '../roles.mjs';
 // Versioned by the commit that introduces each line.
 /** `players` (S5): the identity repository, for the media caption default (a row write). */
 export function migrateM12(db, players) {
-  db.evidence ??= [];            // F1 — evidence passport records
-  db.coachAffiliations ??= [];   // F10 — club-confirmed coach affiliations
-  db.squadInvites ??= [];        // F10 — restricted squad invitations (approval-gated)
+  // F1 evidence, F10 coach affiliations and squad invitations: tables of the scouting evidence repository (S9a), read
+  // through SQL (scoutingReads); no db.* here.
   db.assessmentTemplates ??= []; // F2 — versioned, position-specific templates
   db.assessments ??= [];         // F2 — scouting assessments
   db.videoSegments ??= [];       // F7 — timestamped annotations against source media
@@ -90,9 +89,8 @@ export function buildShared(ctx) {
     return { ageDays: days, fresh: days <= 180 };
   };
 
-  const activeAffiliation = (orgId, userName) =>
-    db.coachAffiliations.find((a) => a.orgId === orgId && a.status === 'confirmed'
-      && a.coachName.toLowerCase() === String(userName ?? '').toLowerCase());
+  // KNOWN DEFECT, kept until the Founder decides: matched by the coach's NAME, not by a staff account (migration.md §4.5 S9).
+  const activeAffiliation = (orgId, userName) => ctx.scoutingReads.coachAffiliations.activeFor(orgId, userName);
 
   // Eligibility engine shared by opportunities + campaigns (F5/F6). Explicit
   // criteria in, explicit verdict out; missing required data fails CLOSED.

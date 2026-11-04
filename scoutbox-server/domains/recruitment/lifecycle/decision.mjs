@@ -183,7 +183,7 @@ export function resolveEvidenceRefs(refs, { db, reads = {}, kase, testProviderEn
       continue;
     }
     if (ref.kind === 'passport_evidence') {
-      const ev = (db.evidence ?? []).find((x) => x && x.id === ref.id);
+      const ev = reads.evidence?.byId(ref.id) ?? null;
       if (!ev || ev.playerId !== kase.playerId || ev.supersededBy) return mismatch('That evidence record is not one of this player\'s current records.');
       out.push({ kind: 'passport_evidence', id: ev.id, meta: { claimType: ev.claimType ?? null, provenance: ev.verification?.status ?? 'self_reported' } });
       continue;
@@ -322,8 +322,7 @@ export function evidenceCandidates({ db, reads = {}, kase, assessmentsVisible, t
       boxCam.push({ id: sid, trialId: t.id, trialSessionId: v.trialSessionId, verificationState: v.session?.verificationState ?? null, observation: v.observation?.state ?? 'unavailable', observationCopy: v.observation?.copy ?? null, simulated: !!v.session?.simulated, provenance: v.provenance });
     }
   }
-  const passport = (db.evidence ?? [])
-    .filter((e) => e && e.playerId === kase.playerId && !e.supersededBy)
+  const passport = [...(reads.evidence?.currentForPlayer(kase.playerId) ?? [])]
     .sort((a, b) => ((b.recordedAt ?? 0) - (a.recordedAt ?? 0)) || String(a.id).localeCompare(String(b.id)))
     .slice(0, 40)
     .map((e) => ({ id: e.id, claimType: e.claimType ?? null, label: e.label ?? null, provenance: e.verification?.status ?? 'self_reported', recordedAt: e.recordedAt ?? null }));

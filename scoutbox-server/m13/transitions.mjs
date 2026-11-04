@@ -19,7 +19,7 @@ export function registerTransitions(ctx) {
   function buildPack(player, sel) {
     const mediaIds = (sel?.mediaIds ?? []).filter((id) => player.media.some((m) => m.id === id));
     const evidenceIds = (sel?.evidenceIds ?? []).filter((id) =>
-      db.evidence.some((e) => e.id === id && e.playerId === player.id && !e.supersededBy));
+      { const e = ctx.scoutingReads.evidence.byId(id); return !!e && e.playerId === player.id && !e.supersededBy; });
     const feedbackIds = (sel?.feedbackIds ?? []).filter((id) =>
       db.assessments.some((a) => a.id === id && a.playerId === player.id && a.publishedFeedback));
     return { mediaIds, evidenceIds, feedbackIds };
@@ -28,7 +28,7 @@ export function registerTransitions(ctx) {
   function packView(player, pack) {
     return {
       media: player.media.filter((m) => pack.mediaIds.includes(m.id)).map((m) => ({ id: m.id, title: m.title, url: m.url })),
-      evidence: db.evidence.filter((e) => pack.evidenceIds.includes(e.id)).map((e) => ({ id: e.id, kind: e.kind, tier: e.tier, summary: e.summary, recordedAt: e.recordedAt })),
+      evidence: ctx.scoutingReads.evidence.forPlayer(player.id).filter((e) => pack.evidenceIds.includes(e.id)).map((e) => ({ id: e.id, kind: e.kind, tier: e.tier, summary: e.summary, recordedAt: e.recordedAt })),
       publishedFeedback: db.assessments.filter((a) => pack.feedbackIds.includes(a.id)).map((a) => ({ id: a.id, orgName: byId.org(a.orgId)?.name ?? 'club', text: a.publishedFeedback.text, at: a.publishedFeedback.at })),
     };
   }

@@ -50,7 +50,7 @@ export function registerSecondLook(ctx) {
       out.push(normalizeMaterialChange({ type, subjectId: player.id, sourceSystem, sourceId, occurredAt, detail }));
 
     // --- M12 evidence ------------------------------------------------------
-    for (const e of db.evidence.filter((x) => x.playerId === player.id)) {
+    for (const e of ctx.scoutingReads.evidence.forPlayer(player.id)) {
       if (e.recordedAt > since && !e.correctionOf) {
         add(e.claimType === 'footage' ? 'full_match_added' : 'evidence_added', 'evidence', e.id, e.recordedAt);
       }
@@ -64,7 +64,7 @@ export function registerSecondLook(ctx) {
       }
       // Superseded: the correcting row carries the clock, the original does not.
       if (e.supersededBy) {
-        const next = db.evidence.find((x) => x.id === e.supersededBy);
+        const next = ctx.scoutingReads.evidence.byId(e.supersededBy);
         if (next && next.recordedAt > since) add('evidence_removed', 'evidence', e.id, next.recordedAt);
       }
       for (const d of e.disputes ?? []) {
@@ -189,7 +189,7 @@ export function registerSecondLook(ctx) {
 
   /** Current canonical facts, for the snapshot comparison. */
   function currentFacts(player, org) {
-    const evidenceIds = db.evidence.filter((e) => e.playerId === player.id && !e.supersededBy).map((e) => e.id);
+    const evidenceIds = ctx.scoutingReads.evidence.currentForPlayer(player.id).map((e) => e.id);
     const assessmentIds = db.assessments.filter((a) => a.orgId === org.id && a.playerId === player.id && a.state !== 'draft').map((a) => a.id);
     const combineResults = (ctx.combineProjection?.(player.id)?.results ?? []).map((r) => `${r.protocolId}@${r.protocolVersion}`);
     const trialIds = reads.trials.forOrgPlayer(org.id, player.id).map((t) => t.id);

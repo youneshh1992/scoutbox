@@ -136,6 +136,16 @@ function roomRowQueries(rows, { orgPlayer = false } = {}) {
 }
 
 /** The `recruitmentReads` shape over a plain database's arrays (an absent or non-array collection gives no queries). */
+/** The S9a evidence queries (scoutingReads.evidence) over a plain array, in array order. */
+function evidenceQueries(rows) {
+  const list = () => rows.filter(sound);
+  return {
+    byId: (id) => list().find((e) => e.id === id) ?? null,
+    forPlayer: (playerId) => list().filter((e) => e.playerId === playerId),
+    currentForPlayer: (playerId) => list().filter((e) => e.playerId === playerId && !e.supersededBy),
+  };
+}
+
 export function arrayReads(db) {
   const out = {};
   if (Array.isArray(db?.recruitmentContacts)) out.contacts = contactQueries(db.recruitmentContacts);
@@ -151,6 +161,7 @@ export function arrayReads(db) {
   if (Array.isArray(db?.roomSnapshots)) out.snapshots = roomRowQueries(db.roomSnapshots);
   if (Array.isArray(db?.roomDecisions)) out.decisions = roomRowQueries(db.roomDecisions, { orgPlayer: true });
   if (Array.isArray(db?.roomEvidenceState)) out.evidenceStates = roomRowQueries(db.roomEvidenceState);
+  if (Array.isArray(db?.evidence)) out.evidence = evidenceQueries(db.evidence);
   return out;
 }
 

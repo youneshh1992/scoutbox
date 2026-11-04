@@ -103,7 +103,7 @@ const naming = (dir, pid) => snap(dir, (c) => Object.fromEntries(AUDIT_TABLES.ma
 await test('[cutover] a fresh boot records 0014_player_erasure last; DELETE /player/account and DELETE /guardian/children/:id keep EXACTLY the agreed row (id, the deletion instant, the full birth date, the country; fixed placeholders; NULL elsewhere), remove the child rows, links, session, pairing code and queue the media file as today; afterwards the account is served by no reader — /player/me 401, login PLAYER_NOT_FOUND, the club\'s view and list 404/absent, the guardian\'s children list without the child, the pairing code refused, a second deletion refused — the audit rows naming the person are byte-identical and the Q4 count unchanged while the new retained-reference count names them; /capabilities counts the retained records; a SIGKILL and a restart serve the same', async () => {
   const dir = tempDir('s4br-routes'); let S = await boot(dir);
   let cap = (await S.j('GET', '/capabilities')).body;
-  assert.equal(cap.dataLayer.migrations.at(-5), MIGRATION, `0014 recorded after 0013 (S8a's 0015, S8b's 0016, S8c's 0017 and S8d's 0018 follow it: ${cap.dataLayer.migrations.slice(-5).join(', ')})`);
+  assert.equal(cap.dataLayer.migrations.filter((id) => id < '0019').at(-5), MIGRATION, `0014 recorded after 0013 (S8a's 0015, S8b's 0016, S8c's 0017 and S8d's 0018 follow it: ${cap.dataLayer.migrations.slice(-5).join(', ')})`);
   assert.equal(cap.dataLayer.domains.players.retained, 0, 'the report counts retained records');
   const maria = await orgLogin(S);
   const { pid, token, file } = await signupAdult(S, 'Erased Adult');

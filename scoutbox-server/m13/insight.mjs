@@ -419,7 +419,7 @@ export function registerInsight(ctx) {
       id: 'uncorroborated_claims', version: RULES_VERSION,
       action: 'Ask a coach or run a club assessment to corroborate the claim.',
       evaluate(player) {
-        const claims = db.evidence.filter((e) => e.playerId === player.id && !e.supersededBy);
+        const claims = ctx.scoutingReads.evidence.currentForPlayer(player.id);
         const selfOnly = claims.filter((e) => e.tier === 'self_reported');
         if (!claims.length || selfOnly.length < claims.length || !selfOnly.length) return null;
         return { records: selfOnly.map((e) => e.id), explanation: `All ${selfOnly.length} evidence-passport records are self-reported — nothing is coach-confirmed or club-assessed yet.` };

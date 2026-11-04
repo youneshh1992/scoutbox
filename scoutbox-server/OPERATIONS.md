@@ -126,9 +126,10 @@ module registration → integrity report → listen.
 - **Read SQL where the domain has no view.** Since §4.3 step 2 a domain whose reads moved
   to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
   repository). The whole recruitment domain (cases and Room records, requests, trials,
-  contacts, offers, signing packages, signings, follow-ups, outcome reports) has moved: ask the repository (`recruitmentContactsOffers.contacts.forCase`,
-  `signingsFollowUps.signings.forOrgPlayer`, …, or the read-only `recruitmentReads` every
-  module context carries). A list that grows without limit pages by cursor through
+  contacts, offers, signing packages, signings, follow-ups, outcome reports) has moved, and so
+  have the scouting evidence passport, coach affiliations and squad invitations (S9a): ask the repository (`recruitmentContactsOffers.contacts.forCase`,
+  `signingsFollowUps.signings.forOrgPlayer`, `scoutingEvidence.evidence.currentForPlayer`, …, or the read-only `recruitmentReads`
+  and `scoutingReads` every module context carries). A list that grows without limit pages by cursor through
   `domains/platform/paging.mjs` (`readPage` at the route, a `pageFor…` query in the
   repository that asks for one row more than the page). Each record is a fresh,
   deep-frozen decode; a query inside a unit of work sees the unit's own writes. Pure
@@ -189,7 +190,7 @@ When you move a blob domain to tables:
 - After attach, an in-memory array (seed, `??= []` default, stale copy) is never imported
   into a live table.
 
-The latest table migration is `0018_signings_follow_ups`.
+The latest table migration is `0019_scouting_evidence`.
 
 **Snapshot mode.** `openStore(dir)` without options is for tools and fixtures. It runs the
 table migrations when it opens the file, then reads and writes the whole database in the

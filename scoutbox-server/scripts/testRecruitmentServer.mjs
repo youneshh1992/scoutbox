@@ -72,7 +72,7 @@ async function inviteAndAccept(S, maria, pid, token, { proposedDate = '2026-11-0
 
 await test('[routes] a fresh boot records 0015_recruitment (followed by S8b\'s 0016 since that step) and the fifteen tables exist with channels carrying the real request key; the direct invitation and the adult\'s acceptance land as rows (the request answered, the trial with its history and keys.accept, the thread naming the request through the key) with no blob behind them; /org/requests, /org/trials, /player/inbox and /player/trials answer as before; the report lands in trial_reports and the day staff in trial_day_staff; the direct route still answers REQUEST_PENDING; a SIGKILL right after the acceptance loses nothing; /capabilities counts the rows', async () => {
   const dir = tempDir('s8a-boot'); const S = await boot(dir);
-  assert.equal(applied(dir).at(-4), MIGRATION, 'the S8a migration, recorded before S8b\'s 0016, S8c\'s 0017 and S8d\'s 0018'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
+  assert.equal(applied(dir).filter((id) => id < '0019').at(-4), MIGRATION, 'the S8a migration, recorded before S8b\'s 0016, S8c\'s 0017 and S8d\'s 0018'); for (const t of TABLES) assert.ok(tableExists(dir, t), `${t} exists`);
   assert.ok(qAll(dir, 'PRAGMA foreign_key_list(channels)').some((r) => r.table === 'recruitment_requests'), 'channels.request_id is a real key');
   const maria = await orgLogin(S); const { pid, token } = await signupAdult(S, 'Invited Adult');
   const dup = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'First.', proposedDate: '2026-11-01', venue: 'G', notes: '' }, maria); assert.equal(dup.status, 201);

@@ -76,8 +76,9 @@ export function registerDevelopment(ctx) {
   const {
     db, byId, nextId, persistNow, notify, broadcast, findPlayer, orgCanSee, isLead,
     orgRouter, playerRouter, guardianRouter, audit, isAdult,
-    recruitmentReads: reads, // §4.3 step 2: the trials are read through SQL
+    recruitmentReads, scoutingReads, // §4.3 step 2: the trials (and, since S9a, the evidence) are read through SQL
   } = ctx;
+  const reads = { ...recruitmentReads, ...scoutingReads };
   if (typeof reads?.trials?.byId !== 'function') throw new TypeError('registerDevelopment needs recruitmentReads (trials) from the data layer');
   migrateM21(db);
 
@@ -401,7 +402,7 @@ export function registerDevelopment(ctx) {
       if (!canSee) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
 
       const candidates = [
-        ...(db.evidence ?? []).filter((e) => e.playerId === player.id).map((e) => ({ sourceType: 'passport_evidence', sourceId: e.id })),
+        ...(reads.evidence?.forPlayer(player.id) ?? []).map((e) => ({ sourceType: 'passport_evidence', sourceId: e.id })),
         ...(db.assessments ?? []).filter((a) => a.playerId === player.id).map((a) => ({ sourceType: 'assessment', sourceId: a.id })),
         ...(db.boxSessions ?? []).filter((s) => s.playerId === player.id).map((s) => ({ sourceType: 'box_cam_session', sourceId: s.id })),
         ...(db.combineAttempts ?? []).filter((a) => a.playerId === player.id).map((a) => ({ sourceType: 'combine_attempt', sourceId: a.id })),

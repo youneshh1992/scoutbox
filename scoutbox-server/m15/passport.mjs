@@ -114,7 +114,7 @@ export function registerPassportCore(ctx) {
         return !!claim && claim.status === 'verified' && claim.current !== false;
       })(),
     }));
-    const evidence = db.evidence.filter((e) => e.playerId === pid).map((e) => ({
+    const evidence = ctx.scoutingReads.evidence.forPlayer(pid).map((e) => ({
       id: e.id, claimType: e.claimType, label: e.label, recordedAt: e.recordedAt,
       tier: e.verification?.status ?? 'self_reported', sourceKind: e.source?.kind ?? 'player',
       superseded: !!e.supersededBy, expired: e.expiresAt ? e.expiresAt < now : false,

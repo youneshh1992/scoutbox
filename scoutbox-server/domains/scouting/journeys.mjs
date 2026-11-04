@@ -11,7 +11,7 @@ import { readPage, sendPageError } from '../platform/paging.mjs';
 
 export function registerJourneys(ctx) {
   const {
-    db, byId, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    db, byId, scoutingReads, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, requireLead, isLead, moderateOrRefuse, isAdult,
     checkEligibility, distanceBand, guardianOwnsChild, recordActivity, DRILLS,
@@ -413,7 +413,7 @@ export function registerJourneys(ctx) {
       objectives: objectives.map((o) => ({
         id: nextId('objx'), text: String(o.text ?? '').slice(0, 200),
         exerciseRefs: Array.isArray(o.exerciseRefs) ? o.exerciseRefs.slice(0, 4) : [],
-        baselineEvidenceIds: (Array.isArray(o.baselineEvidenceIds) ? o.baselineEvidenceIds : []).filter((id) => db.evidence.some((e) => e.id === id && e.playerId === player.id)),
+        baselineEvidenceIds: (Array.isArray(o.baselineEvidenceIds) ? o.baselineEvidenceIds : []).filter((id) => scoutingReads.evidence.byId(id)?.playerId === player.id),
       })),
       progress: [], sharing: { orgIds: [] },
       reassessments: [], reviewAt: req.body?.reviewAt ?? null,
@@ -446,7 +446,7 @@ export function registerJourneys(ctx) {
     const o = db.devObjectives.find((x) => x.id === req.params.id && x.playerId === req.player.id);
     if (!o) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });
     const { note, evidenceId, objectiveId } = req.body ?? {};
-    if (evidenceId && !db.evidence.some((e) => e.id === evidenceId && e.playerId === req.player.id)) return res.status(400).json({ error: 'EVIDENCE_INVALID' });
+    if (evidenceId && scoutingReads.evidence.byId(evidenceId)?.playerId !== req.player.id) return res.status(400).json({ error: 'EVIDENCE_INVALID' });
     o.progress.push({ id: nextId('prg'), at: Date.now(), objectiveId: objectiveId ?? null, note: note ? String(note).slice(0, 300) : null, evidenceId: evidenceId ?? null });
     recordActivity(req.player);
     persistNow();
@@ -507,7 +507,7 @@ export function registerJourneys(ctx) {
     r.status = 'completed';
     r.outcome = {
       note: String(note).slice(0, 500),
-      evidenceIds: (Array.isArray(evidenceIds) ? evidenceIds : []).filter((id) => db.evidence.some((e) => e.id === id && e.playerId === o.playerId)),
+      evidenceIds: (Array.isArray(evidenceIds) ? evidenceIds : []).filter((id) => scoutingReads.evidence.byId(id)?.playerId === o.playerId),
       byUserId: req.orgUser.id, byName: req.orgUser.name, at: Date.now(),
     };
     const p = findPlayer(o.playerId);

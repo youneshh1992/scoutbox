@@ -30,224 +30,138 @@
 
 
 -- ----------------------------------------------------------------------------
--- source: db.evidence  created at domains/scouting/passport.mjs:43-74 (newEvidence)
--- owner/writer: domains/scouting/passport.mjs (player, guardian, org, admin routes)
--- lifecycle: no status field; `superseded_by_id` set on correction (row kept),
---            `expires_at` only for claimType 'availability' (recorded_at + 90d).
--- mapping:
---   id -> id (evd-N)                      playerId -> player_id
---   claimType -> claim_type               label -> label (<=120)
---   value -> value_json (untyped scalar/object from the request body; kept as JSON
---            because the source never types it — free-form by design)
---   units -> units (<=20)                 season -> season (<=20)
---   source.kind/id/name -> source_kind / source_id / source_name
---   observedAt -> observed_at             recordedAt -> recorded_at
---   mediaIds[] -> evidence_media          verification.status -> verification_status
---   verification.method -> verification_method (<=80 free text)
---   verification.reviewerId -> reviewer_id   verification.reviewerName -> reviewer_name
---   verification.reviewedAt -> reviewed_at   expiresAt -> expires_at
---   correctionOf -> correction_of_id      supersededBy -> superseded_by_id
---   disputes[] -> evidence_disputes       note -> note (<=300)
---   history[] -> evidence_history
---   derived, not stored: freshness (from recorded_at), expired (expires_at < now),
---     openDisputes (count), superseded (superseded_by_id IS NOT NULL)
--- notes:
---   * source_kind: the code writes 'player' | 'guardian' | 'org'. The comment at
---     passport.mjs:51 lists 'coach' but no route can produce it — unreachable,
---     excluded from the CHECK. source_id is polymorphic: players.id, guardians.id
---     or orgs.id depending on source_kind (no FK).
---   * verification_status: the code writes self_reported | coach_confirmed |
---     club_assessed. 'independent' exists in EVIDENCE_TIERS (m12/shared.mjs:83)
---     and is read by m18/secondLook.mjs:59 but no route sets it — excluded.
---   * reviewer_id is org_users.id, or the literal 'admin' after a dispute
---     downgrade (passport.mjs:300) — no FK.
---   * Minor data: evidence is written by or about under-18s; org reads are gated
---     by orgCanSee at read time (tenant wall is evaluated live, not stored).
---   * Today evidence survives account deletion (defect: deletePlayerData does not
---     touch db.evidence). Target: player-owned → ON DELETE CASCADE.
+-- S9a: IMPLEMENTED, migration 0019_scouting_evidence REGISTERED (repositories/scoutingEvidence.mjs, 4 Nov 2026).
+-- The definitions below are the migration's DDL; scripts/testSchemaDdl.mjs compares them column by column.
+-- Sources: domains/scouting/passport.mjs (evidence, disputes, corrections, coach affiliations, squad invitations).
+-- How the model differs from the first draft of this file:
+--   * player_id (evidence, squad_invites) has NO foreign key: tolerant and counted, like recruitment. Evidence and
+--     invitations stay after an account deletion, as before (retention is an open question, decisions.md §5).
+--   * org_id is ON DELETE RESTRICT, not CASCADE (organisations are never deleted, O2).
+--   * evidence.value is typed: value_number REAL or value_text TEXT (at most one), not value_json.
+--   * evidence_media keeps the order (position) and has no key to player_media: a removed clip stays named.
+--   * superseded_by_id is RESTRICT (evidence is never deleted); both self keys are immediate: a correction is
+--     inserted first, then the original is pointed at it, in one unit of work.
+--   * history uses the one entry shape {id, at, byKind, byId, byName, action, detail}; detail is plain text.
+--     coach_affiliations_history is named coach_affiliation_history.
+--   * disputes keep their order (position); a resolved dispute carries its outcome and instant (CHECK).
+--   * coach_affiliations: to_date is set exactly when the affiliation is no longer confirmed (CHECK). The coach is
+--     still identified by name (KNOWN DEFECT: activeAffiliation matches the staff member's display name; a
+--     product decision for the Founder, migration.md §4.5).
+--   * squad_invites: responded_at is set exactly when the invitation is answered (CHECK); one pending
+--     invitation per organisation and player (partial unique index).
+--   * Text columns carry the routes' length limits as CHECKs.
 -- ----------------------------------------------------------------------------
 CREATE TABLE evidence (
   id                  TEXT PRIMARY KEY,
-  player_id           TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  player_id           TEXT NOT NULL,
   claim_type          TEXT NOT NULL CHECK (claim_type IN ('statistic','attendance','assessment_result','reference','footage','availability')),
-  label               TEXT NOT NULL,
-  value_json          TEXT CHECK (json_valid(value_json) OR value_json IS NULL),
-  units               TEXT,
-  season              TEXT,
+  label               TEXT NOT NULL CHECK (length(label) <= 120),
+  value_number        REAL,
+  value_text          TEXT CHECK (value_text IS NULL OR length(value_text) <= 120),
+  units               TEXT CHECK (units IS NULL OR length(units) <= 20),
+  season              TEXT CHECK (season IS NULL OR length(season) <= 20),
   source_kind         TEXT NOT NULL CHECK (source_kind IN ('player','guardian','org')),
-  source_id           TEXT NOT NULL,                       -- players.id | guardians.id | orgs.id (by source_kind)
-  source_name         TEXT NOT NULL,                       -- snapshot
+  source_id           TEXT NOT NULL,
+  source_name         TEXT NOT NULL CHECK (length(source_name) <= 200),
   observed_at         INTEGER,
   recorded_at         INTEGER NOT NULL,
   verification_status TEXT NOT NULL CHECK (verification_status IN ('self_reported','coach_confirmed','club_assessed')),
-  verification_method TEXT,
-  reviewer_id         TEXT,                                -- org_users.id or 'admin'; no FK
-  reviewer_name       TEXT,                                -- snapshot
+  verification_method TEXT CHECK (verification_method IS NULL OR length(verification_method) <= 80),
+  reviewer_id         TEXT,
+  reviewer_name       TEXT CHECK (reviewer_name IS NULL OR length(reviewer_name) <= 200),
   reviewed_at         INTEGER,
   expires_at          INTEGER,
   correction_of_id    TEXT REFERENCES evidence(id) ON DELETE RESTRICT,
-  superseded_by_id    TEXT REFERENCES evidence(id) ON DELETE SET NULL,
-  note                TEXT
+  superseded_by_id    TEXT REFERENCES evidence(id) ON DELETE RESTRICT,
+  note                TEXT CHECK (note IS NULL OR length(note) <= 300),
+  CHECK (value_number IS NULL OR value_text IS NULL)
 ) STRICT;
-CREATE INDEX evidence_player_id_claim_type ON evidence (player_id, claim_type);  -- passport by player; minAppearances by player+claim_type (scouting.mjs:730)
-CREATE INDEX evidence_superseded_by_id ON evidence (superseded_by_id);           -- m18/secondLook.mjs:64 follows the chain
-
--- ----------------------------------------------------------------------------
--- source: db.evidence[].mediaIds[]  created at domains/scouting/passport.mjs:56
--- owner/writer: domains/scouting/passport.mjs (set at creation; copied on correction; never edited)
--- lifecycle: none (rows live with the evidence row)
--- mapping: mediaIds[i] -> (evidence_id, media_id); natural composite PRIMARY KEY
--- notes: the code only keeps ids present in player.media at creation time.
---        Media deletion today leaves the id dangling; target cascades.
--- ----------------------------------------------------------------------------
+CREATE INDEX evidence_player ON evidence (player_id, claim_type);
+CREATE INDEX evidence_superseded_by ON evidence (superseded_by_id);
 CREATE TABLE evidence_media (
   evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
-  media_id    TEXT NOT NULL REFERENCES player_media(id) ON DELETE CASCADE,
-  PRIMARY KEY (evidence_id, media_id)
+  position    INTEGER NOT NULL,
+  media_id    TEXT NOT NULL,
+  PRIMARY KEY (evidence_id, position),
+  UNIQUE (evidence_id, media_id)
 ) STRICT;
-
--- ----------------------------------------------------------------------------
--- source: db.evidence[].disputes[]  created at domains/scouting/passport.mjs:207 (fileDispute)
--- owner/writer: domains/scouting/passport.mjs (player/org file; admin resolves)
--- lifecycle: status open -> resolved (never deleted)
--- mapping:
---   id -> id (dsp-N; prefix shared with m13 dispatches — ids are still globally unique)
---   at -> filed_at                        by.kind/id/name -> by_kind / by_id / by_name
---   reason -> reason (<=300)              status -> status
---   resolution.outcome -> resolution_outcome   resolution.note -> resolution_note (<=300)
---   resolution.at -> resolved_at
---   (evidenceId, playerId, label, tier on the admin list are joined, not stored)
--- notes: by_id is players.id or orgs.id (polymorphic, no FK); by_name for org
---        disputes is "<user name> · <org name>" (passport.mjs:278).
--- ----------------------------------------------------------------------------
 CREATE TABLE evidence_disputes (
   id                 TEXT PRIMARY KEY,
   evidence_id        TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+  position           INTEGER NOT NULL,
   filed_at           INTEGER NOT NULL,
   by_kind            TEXT NOT NULL CHECK (by_kind IN ('player','org')),
-  by_id              TEXT NOT NULL,                       -- players.id | orgs.id
-  by_name            TEXT NOT NULL,                       -- snapshot
-  reason             TEXT NOT NULL,
-  status             TEXT NOT NULL CHECK (status IN ('open','resolved')) DEFAULT 'open',
-  resolution_outcome TEXT CHECK (resolution_outcome IN ('upheld','rejected') OR resolution_outcome IS NULL),
-  resolution_note    TEXT,
-  resolved_at        INTEGER
+  by_id              TEXT NOT NULL,
+  by_name            TEXT NOT NULL CHECK (length(by_name) <= 200),
+  reason             TEXT NOT NULL CHECK (length(reason) <= 300),
+  status             TEXT NOT NULL CHECK (status IN ('open','resolved')),
+  resolution_outcome TEXT CHECK (resolution_outcome IS NULL OR resolution_outcome IN ('upheld','rejected')),
+  resolution_note    TEXT CHECK (resolution_note IS NULL OR length(resolution_note) <= 300),
+  resolved_at        INTEGER,
+  UNIQUE (evidence_id, position),
+  CHECK ((status = 'resolved') = (resolution_outcome IS NOT NULL AND resolved_at IS NOT NULL))
 ) STRICT;
-CREATE INDEX evidence_disputes_evidence_id ON evidence_disputes (evidence_id);
-CREATE INDEX evidence_disputes_status_filed_at ON evidence_disputes (status, filed_at);  -- admin queue (passport.mjs:282)
+CREATE INDEX evidence_disputes_status_filed ON evidence_disputes (status, filed_at);
 
--- ----------------------------------------------------------------------------
--- source: db.evidence[].history[]  created at m12/shared.mjs:72 (audit)
--- owner/writer: domains/scouting/passport.mjs via audit(); append-only
--- mapping: id -> id (aud-N), at -> at, byKind -> by_kind, byId -> by_id,
---          byName -> by_name, action -> action, detail -> detail_json (JSON-encoded string)
--- notes: by_id is inconsistent in the source (player id, guardian id, org id or
---        the literal 'admin'); actions written: created, superseded,
---        created_as_correction, disputed, corroborated, dispute_resolved.
---        Audit rows: ON DELETE RESTRICT so they outlive nothing silently.
--- ----------------------------------------------------------------------------
 CREATE TABLE evidence_history (
   id          TEXT PRIMARY KEY,
-  evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE RESTRICT,
+  evidence_id    TEXT NOT NULL REFERENCES evidence(id) ON DELETE RESTRICT,
+  position    INTEGER NOT NULL,
   at          INTEGER NOT NULL,
-  by_kind     TEXT CHECK (by_kind IN ('player','guardian','org','admin') OR by_kind IS NULL),
+  by_kind     TEXT CHECK (by_kind IS NULL OR by_kind IN ('player','guardian','org','admin')),
   by_id       TEXT,
-  by_name     TEXT,
+  by_name     TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
   action      TEXT NOT NULL,
-  detail_json TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  detail      TEXT CHECK (detail IS NULL OR length(detail) <= 500),
+  UNIQUE (evidence_id, position)
 ) STRICT;
-CREATE INDEX evidence_history_evidence_id ON evidence_history (evidence_id);
-
-
--- ----------------------------------------------------------------------------
--- source: db.coachAffiliations  created at domains/scouting/passport.mjs:328-340
--- owner/writer: domains/scouting/passport.mjs (org creates/ends/revokes; admin lists)
--- lifecycle: status confirmed -> ended | revoked (to_date set); never deleted
--- mapping:
---   id -> id (aff-N)                      orgId -> org_id        orgName -> org_name
---   coachName -> coach_name (<=80)        coachEmail -> coach_email (<=120)
---   role -> role (<=60)                   from -> from_date      to -> to_date
---   status -> status
---   confirmedBy.userId -> confirmed_by_user_id   confirmedBy.name -> confirmed_by_name
---   conflictOfInterest -> conflict_of_interest (<=200)
---   createdAt -> created_at               history[] -> coach_affiliations_history
---   derived, not stored: current (status = 'confirmed')
--- notes:
---   * Known defect: identity is name-matched — activeAffiliation() (m12/shared.mjs:90)
---     compares lower(coach_name) to the org user's display name. There is no
---     org_users FK for the coach because the source has none.
---   * coach_name / coach_email are personal data about a possibly off-platform person.
---   * from_date is whatever the client sent sliced to 10 chars (unvalidated); the
---     length check documents the intended format.
--- ----------------------------------------------------------------------------
 CREATE TABLE coach_affiliations (
-  id                    TEXT PRIMARY KEY,
-  org_id                TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  org_name              TEXT NOT NULL,                     -- snapshot
-  coach_name            TEXT NOT NULL,                     -- personal data
-  coach_email           TEXT,                              -- personal data
-  role                  TEXT NOT NULL,
-  from_date             TEXT NOT NULL CHECK (length(from_date) = 10),
-  to_date               TEXT CHECK (length(to_date) = 10 OR to_date IS NULL),
-  status                TEXT NOT NULL CHECK (status IN ('confirmed','ended','revoked')) DEFAULT 'confirmed',
-  confirmed_by_user_id  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  confirmed_by_name     TEXT NOT NULL,                     -- snapshot
-  conflict_of_interest  TEXT,
-  created_at            INTEGER NOT NULL
-) STRICT;
-CREATE INDEX coach_affiliations_org_id_status_coach_name ON coach_affiliations (org_id, status, coach_name);  -- org list; activeAffiliation lookup
-CREATE INDEX coach_affiliations_created_at ON coach_affiliations (created_at);  -- admin list sorted newest first
-
--- ----------------------------------------------------------------------------
--- source: db.coachAffiliations[].history[]  created via audit() (m12/shared.mjs:72)
--- owner/writer: domains/scouting/passport.mjs; append-only
--- mapping: id -> id (aud-N), at -> at, byKind -> by_kind ('org'), byId -> by_id (orgs.id),
---          byName -> by_name (the acting user's name), action -> action
---          (confirmed | ended | revoked), detail -> detail_json (role or reason)
--- ----------------------------------------------------------------------------
-CREATE TABLE coach_affiliations_history (
   id                   TEXT PRIMARY KEY,
-  coach_affiliation_id TEXT NOT NULL REFERENCES coach_affiliations(id) ON DELETE RESTRICT,
-  at                   INTEGER NOT NULL,
-  by_kind              TEXT CHECK (by_kind IN ('org') OR by_kind IS NULL),
-  by_id                TEXT,
-  by_name              TEXT,
-  action               TEXT NOT NULL,
-  detail_json          TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  org_id               TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name             TEXT NOT NULL CHECK (length(org_name) <= 200),
+  coach_name           TEXT NOT NULL CHECK (length(coach_name) <= 80),
+  coach_email          TEXT CHECK (coach_email IS NULL OR length(coach_email) <= 120),
+  role                 TEXT NOT NULL CHECK (length(role) <= 60),
+  from_date            TEXT NOT NULL CHECK (length(from_date) = 10),
+  to_date              TEXT CHECK (to_date IS NULL OR length(to_date) = 10),
+  status               TEXT NOT NULL CHECK (status IN ('confirmed','ended','revoked')),
+  confirmed_by_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  confirmed_by_name    TEXT NOT NULL CHECK (length(confirmed_by_name) <= 200),
+  conflict_of_interest TEXT CHECK (conflict_of_interest IS NULL OR length(conflict_of_interest) <= 200),
+  created_at           INTEGER NOT NULL,
+  CHECK ((status = 'confirmed') = (to_date IS NULL))
 ) STRICT;
-CREATE INDEX coach_affiliations_history_coach_affiliation_id ON coach_affiliations_history (coach_affiliation_id);
+CREATE INDEX coach_affiliations_org_status ON coach_affiliations (org_id, status);
+CREATE INDEX coach_affiliations_created ON coach_affiliations (created_at);
 
-
--- ----------------------------------------------------------------------------
--- source: db.squadInvites  created at domains/scouting/passport.mjs:388-394
--- owner/writer: domains/scouting/passport.mjs (org invites; player or guardian responds)
--- lifecycle: pending_guardian | pending_player -> approved | declined; never deleted
--- mapping:
---   id -> id (sqi-N)        orgId -> org_id         orgName -> org_name
---   playerId -> player_id   playerName -> player_name
---   byUserId -> by_user_id  byName -> by_name       note -> note (<=200)
---   status -> status        createdAt -> created_at   respondedAt -> responded_at
--- notes:
---   * Uniqueness: at most one pending invite per (org, player) — enforced by code
---     today (passport.mjs:384); the partial unique index makes it structural.
---   * Minor routing: a minor's invite goes to the guardian (pending_guardian).
---   * Player-owned (consent record addressed to the player/guardian): cascades.
--- ----------------------------------------------------------------------------
+CREATE TABLE coach_affiliation_history (
+  id          TEXT PRIMARY KEY,
+  affiliation_id    TEXT NOT NULL REFERENCES coach_affiliations(id) ON DELETE RESTRICT,
+  position    INTEGER NOT NULL,
+  at          INTEGER NOT NULL,
+  by_kind     TEXT CHECK (by_kind IS NULL OR by_kind IN ('player','guardian','org','admin')),
+  by_id       TEXT,
+  by_name     TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  action      TEXT NOT NULL,
+  detail      TEXT CHECK (detail IS NULL OR length(detail) <= 500),
+  UNIQUE (affiliation_id, position)
+) STRICT;
 CREATE TABLE squad_invites (
   id           TEXT PRIMARY KEY,
-  org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  org_name     TEXT NOT NULL,                              -- snapshot
-  player_id    TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  player_name  TEXT NOT NULL,                              -- snapshot
+  org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  org_name     TEXT NOT NULL CHECK (length(org_name) <= 200),
+  player_id    TEXT NOT NULL,
+  player_name  TEXT CHECK (player_name IS NULL OR length(player_name) <= 200),
   by_user_id   TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  by_name      TEXT NOT NULL,                              -- snapshot
-  note         TEXT,
+  by_name      TEXT NOT NULL CHECK (length(by_name) <= 200),
+  note         TEXT CHECK (note IS NULL OR length(note) <= 200),
   status       TEXT NOT NULL CHECK (status IN ('pending_guardian','pending_player','approved','declined')),
   created_at   INTEGER NOT NULL,
-  responded_at INTEGER
+  responded_at INTEGER,
+  CHECK ((status IN ('approved','declined')) = (responded_at IS NOT NULL))
 ) STRICT;
-CREATE UNIQUE INDEX squad_invites_pending_org_player ON squad_invites (org_id, player_id) WHERE status IN ('pending_guardian','pending_player');  -- enforced by code today
-CREATE INDEX squad_invites_player_id_status ON squad_invites (player_id, status);  -- player/guardian pending lists
+CREATE UNIQUE INDEX squad_invites_one_pending ON squad_invites (org_id, player_id) WHERE status IN ('pending_guardian','pending_player');
+CREATE INDEX squad_invites_player_status ON squad_invites (player_id, status);
 
 
 -- ----------------------------------------------------------------------------

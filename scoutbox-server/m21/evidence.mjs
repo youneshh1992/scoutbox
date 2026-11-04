@@ -100,7 +100,7 @@ export function resolveEvidenceLink(link, { db, reads = {}, player, viewer, orgC
   if (!viewerMaySeePlayer(viewer, player, { orgCanSee })) return unavailable(link, 'evidence_not_visible');
 
   switch (link.sourceType) {
-    case 'passport_evidence': return resolvePassportEvidence(link, { db, player, now });
+    case 'passport_evidence': return resolvePassportEvidence(link, { reads, player, now });
     case 'assessment': return resolveAssessment(link, { db, player, viewer });
     case 'box_cam_session': return resolveBoxSession(link, { db, player });
     case 'combine_attempt': return resolveCombineAttempt(link, { db, player });
@@ -109,8 +109,8 @@ export function resolveEvidenceLink(link, { db, reads = {}, player, viewer, orgC
   }
 }
 
-function resolvePassportEvidence(link, { db, player, now }) {
-  const e = (db.evidence ?? []).find((x) => x.id === link.sourceId);
+function resolvePassportEvidence(link, { reads, player, now }) {
+  const e = reads.evidence?.byId(link.sourceId) ?? null;
   if (!e || e.playerId !== player.id) return unavailable(link, 'evidence_not_found');
   if (e.supersededBy) return unavailable(link, 'evidence_superseded');
   if (e.expiresAt && e.expiresAt < now) return unavailable(link, 'evidence_expired');
@@ -266,7 +266,7 @@ export function validateEvidenceLink({ sourceType, sourceId, db, reads = {}, pla
 export function recordBelongsToPlayer({ db, reads = {}, sourceType, sourceId, playerId }) {
   const find = (list) => (list ?? []).find((x) => x.id === sourceId && x.playerId === playerId) ?? null;
   switch (sourceType) {
-    case 'passport_evidence': return find(db.evidence);
+    case 'passport_evidence': { const e = reads.evidence?.byId(sourceId) ?? null; return e && e.playerId === playerId ? e : null; }
     case 'assessment': return find(db.assessments);
     case 'box_cam_session': return find(db.boxSessions);
     case 'combine_attempt': return find(db.combineAttempts);

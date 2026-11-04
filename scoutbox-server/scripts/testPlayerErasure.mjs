@@ -268,7 +268,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
 
 // ------------------------------------------------------------------ migration 0014
 test('migration 0014_player_erasure: registered after 0013; on a database at 0013 it records the step and changes no row and no table; it refuses to run outside the runner or before 0013; a second run is a no-op; retained records a snapshot save wrote read back by deletion instant, then id', () => {
-  assert.equal(DATA_MIGRATIONS.map((m) => m.id).at(-5), MIGRATION, 'registered after 0013 (S8a\'s 0015, S8b\'s 0016, S8c\'s 0017 and S8d\'s 0018 follow it)');
+  assert.equal(DATA_MIGRATIONS.map((m) => m.id).filter((id) => id < '0019').at(-5), MIGRATION, 'registered after 0013 (S8a\'s 0015, S8b\'s 0016, S8c\'s 0017 and S8d\'s 0018 follow it)');
   const step = DATA_MIGRATIONS.find((m) => m.id === MIGRATION);
   const tables = (s) => s.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => r.name);
   const a = tempDir('m14-plain'); freshFile(a);
@@ -279,7 +279,7 @@ test('migration 0014_player_erasure: registered after 0013; on a database at 001
   assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id <= MIGRATION), { now: NOW }).ran, [MIGRATION]);
   assert.ok(applied(s).includes(MIGRATION));
   assert.deepEqual(tables(s), tablesBefore, 'no table created'); assert.equal(dump(s, { except: ['data_migrations'] }), before, 'no row changed');
-  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW + 1 }).ran, ['0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], 'never twice');
+  assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW + 1 }).ran.filter((id) => id < '0019'), ['0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups'], 'never twice');
   s.close();
   // Before 0013: refused.
   const b = tempDir('m14-early'); freshFile(b);

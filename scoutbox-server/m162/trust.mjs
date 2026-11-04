@@ -113,8 +113,8 @@ export function registerTrust(ctx) {
 
   /** M12 evidence records mapped to their canonical provenance. */
   function evidenceSource(player) {
-    return (db.evidence ?? [])
-      .filter((e) => e.playerId === player.id && !e.supersededBy && !(e.expiresAt && e.expiresAt < Date.now()))
+    return ctx.scoutingReads.evidence.currentForPlayer(player.id)
+      .filter((e) => !(e.expiresAt && e.expiresAt < Date.now()))
       .map((e) => ({
         key: `ev:${e.id}`,
         provenance: e.verification?.status === 'club_assessed' ? 'verified_club_confirmed'

@@ -84,10 +84,10 @@ const typed = (name, raw) => { const t = mod[{ signingPackages: 'typeSigningPack
 
 test('[schema] migration 0018 is registered last and creates the ten typed STRICT tables (no lossless side column), the deferred completion key and the signing method CHECK, and broadens idempotency_keys to signing_packages; a fresh database holds no row; the step never runs twice; the fixtures written by a snapshot save read back as the typed expectation (the legacy signing\'s method and the copied ledger row normalised), with their key rows; the live player counters', () => {
   need();
-  assert.equal(DATA_MIGRATIONS.at(-1)?.id, MIGRATION, 'the last registered migration'); for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
+  assert.equal(DATA_MIGRATIONS.filter((m) => m.id < '0019').at(-1)?.id, MIGRATION, 'the last registered migration of the recruitment steps (S9 onwards follow)'); for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
   // a fresh database: the tables exist and are empty
   const empty = tempDir('s8d-empty'); const e = openStore(empty).sqlite;
-  assert.equal(e.prepare('SELECT id FROM data_migrations ORDER BY id').all().at(-1).id, MIGRATION);
+  assert.equal(e.prepare("SELECT id FROM data_migrations WHERE id < '0019' ORDER BY id").all().at(-1).id, MIGRATION);
   for (const t of TABLES) { assert.ok(tableExistsIn(e, t), `${t} exists`); assert.equal(e.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0); }
   for (const t of TABLES) { assert.doesNotMatch(ddlOf(e, t), /absent_keys_json|offtype_json|extra_json/, `${t} has no lossless side column`); assert.match(ddlOf(e, t), /STRICT/); }
   assert.match(ddlOf(e, 'signing_packages'), /completion_signing_id\s+TEXT REFERENCES signings\(id\) DEFERRABLE INITIALLY DEFERRED/);

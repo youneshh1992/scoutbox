@@ -15,7 +15,7 @@ const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision',
 import { readPage, sendPageError } from '../platform/paging.mjs';
 export function registerScouting(ctx) {
   const {
-    db, byId, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
+    db, byId, scoutingReads, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter,
     orgCanSee, paginate, audit, isLead, requireLead, moderateOrRefuse, isAdult,
     playerViewForOrg, revokeOrgUserAccess, guardianOwnsChild,
@@ -752,7 +752,7 @@ export function registerScouting(ctx) {
       case 'minAppearances': {
         const apps = p.stats?.appearances;
         if (typeof apps !== 'number') return { verdict: 'unknown', source: 'no appearances statistic recorded' };
-        const corroborated = db.evidence.some((e) => e.playerId === p.id && e.claimType === 'statistic' && !e.supersededBy && e.verification.status !== 'self_reported');
+        const corroborated = scoutingReads.evidence.currentForPlayer(p.id).some((e) => e.claimType === 'statistic' && e.verification.status !== 'self_reported');
         return { verdict: apps >= c.value ? 'met' : 'not_met', source: corroborated ? 'statistic (has corroborated evidence records)' : 'self-reported statistic' };
       }
       case 'category':

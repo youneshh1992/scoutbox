@@ -64,7 +64,7 @@ routes still miss the bar: they are listed, and deferred, at the end of §4.3 st
 
 ## 3. Status
 
-18 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0019`. Each
+19 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0020`. Each
 step takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Write model | Status |
@@ -89,8 +89,11 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 items 1–5 done (4 Nov); what still misses §2 is deferred (§4.3) |
 | — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left |
 | — | end-to-end test estate | — | — | — | done (§4.4, 4 Nov) |
-| — | server code by domain | — | — | — | recruitment and platform done (§4.4.1, 4 Nov); the rest per step |
-| S9 | scouting and assessment | | | | not started |
+| — | server code by domain | — | — | — | recruitment, platform and scouting done (§4.4.1, 4 Nov); the rest per step |
+| S9a | evidence passport, coach affiliations, squad invitations | `0019_scouting_evidence` | `scoutingEvidence.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
+| S9b | assessment templates, assessments, video segments, playlists | | | | not started |
+| S9c | tactical setup, squad, looking-for, federation check, vacancies | | | | not started |
+| S9d | opportunities, applications, campaigns, player preferences | | | | not started |
 | S10 | verification and passport | | | | not started |
 | S11 | agents, compliance, transactions | | | | not started |
 | S12 | development, Box Cam, discovery | | | | not started |
@@ -291,7 +294,7 @@ into `domains/<domain>/` alongside the migration, not as a separate rewrite:
   its own `index.mjs` and `errors.mjs`); `m181` and `m182` share `domains/platform/`. File names are unchanged. The
   batteries that scan source by folder name the new folders, and `platform/storeGuarantees` names a file's module by
   its folder under `domains/`.
-- **Each of S9–S13** first moves its domain's files, in a commit with no other change, then edits them. The mixed
+- **Each of S9–S13** first moves its domain's files, in a commit with no other change, then edits them. **S9: done (4 November):** `m12/passport.mjs`, `m12/scouting.mjs`, `m12/journeys.mjs` and `m13/suitability.mjs` are in `domains/scouting/` (`scouting.mjs` still holds the M12 recruitment-case routes, F3, which move with the final pass). The mixed
   folders (`m12`, `m13`, `m14`) are split file by file as each domain's step comes round; `m20` and `m27` read across
   domains and are placed when their readers are. A step may move its domain's routes out of `server.mjs` while it
   rewrites them.
@@ -299,7 +302,9 @@ into `domains/<domain>/` alongside the migration, not as a separate rewrite:
 
 ### 4.5 S9–S13: the remaining domains
 
-One step per `sql/*.sql` file, split only if a step gets too big to review. Each is a short branch and a PR into `main`.
+One step per `sql/*.sql` file, split only if a step gets too big to review. S9 is split in four (S9a–S9d, the §3 table),
+each with its own migration: evidence first (most readers, self-contained), then assessments, then the org facets and
+vacancies (roles before the vacancies and squad rows that name them), then opportunities and campaigns. Each is a short branch and a PR into `main`.
 Each step starts by moving its domain's code into `domains/<domain>/` (§4.4.1).
 
 | Step | Schema file | Tables | Collections | Depends on | Watch out for |
@@ -311,6 +316,16 @@ Each step starts by moving its domain's code into `domains/<domain>/` (§4.4.1).
 | S13 Operations and integrations | `08_operations_integrations.sql` | 45 | `apiKeys`, `webhook*`, `orgInvites`, `sso*`, `support*`, `importBatches`, `prospects`, `identityReviews`, `groups`, `groupGrants`, `uploadSessions`, `savedSearches`, `openTrials`, `matchdays`, `friendlies`, `invoices`, `plans`, `archetypes`, `reputationSeed`, the `delivery*` singletons | S3, S8 | Invites and SSO states are hashed. Invoices are stored exactly, in minor units. Backup becomes `VACUUM INTO`. Production's empty first boot (catalogues only, demo opt-in with `SCOUTBOX_SEED_DEMO=1`) exists since 3 Nov; keep it when the catalogues become rows. |
 
 S12 is large; consider splitting Box Cam/Combine from discovery and watchlists.
+
+**S9a as built (4 November).** `repositories/scoutingEvidence.mjs`, migration `0019`; modules read through
+`scoutingReads` (projectors that take `reads` get `reads.evidence`). Player and media ids carry no key (tolerant, as
+recruitment: evidence and invitations stay after an account deletion, as before); `org_id` and staff ids are RESTRICT; the
+evidence value is a number or a short text (two columns). A correction, a corroboration, a dispute resolution and an
+approved invitation each commit as one unit (until S9c the invitation's squad row is still the org facet). The admin
+dispute and coach lists keep their offset paging (the admin app's shape), now in SQL. Routes refuse junk with
+`400 FIELD_INVALID` / `DATE_INVALID` naming the field; over-long text is still shortened. **Open for the Founder:** a coach
+affiliation is still matched to a staff member by display name. Keying it by staff account means only people with a
+ScoutBox login can be affiliated coaches, and the Grassroots "Coach name" box becomes a pick-list.
 
 ### 4.6 S14: retire the blob
 

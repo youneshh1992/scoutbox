@@ -5,19 +5,41 @@
 // the verifying actor's authority, corrections supersede without erasing,
 // and "insufficient evidence" is a first-class display state.
 
-import { parseDateOrInstant, isAbsent, readInstant } from '../../temporal.mjs';
+import { parseDateOrInstant, parseStrictDateOnly, isAbsent, readInstant } from '../../temporal.mjs';
+import { CLAIM_TYPES, EVIDENCE_LIMITS as LIMITS } from '../../repositories/scoutingEvidence.mjs';
 
-const CLAIM_TYPES = ['statistic', 'attendance', 'assessment_result', 'reference', 'footage', 'availability'];
+// S9a (migration 0019): the evidence, coach affiliations and squad invitations are typed tables of the scouting evidence
+// repository. Every change is an explicit operation (create / update) — a correction, a corroboration with its
+// notification, a resolution and an approved invitation with its squad row each commit as one unit of work — and every
+// read is a query (scoutingReads). Junk a client sends (a value that is neither a number nor text, a label or reason
+// that is not text, a start date that is not a day) is refused with the field named; over-long text is shortened, as
+// it always was.
+
+/** A text field from a request: undefined/null → null; text → shortened to `max`; anything else → a 400 sent, returns undefined. */
+function textOrRefuse(res, raw, field, max, { required = false } = {}) {
+  if (raw === undefined || raw === null || (typeof raw === 'string' && !raw.trim())) {
+    if (required) { res.status(400).json({ error: `${field.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}_REQUIRED`, field }); return undefined; }
+    return null;
+  }
+  if (typeof raw !== 'string') { res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be text.` }); return undefined; }
+  return raw.slice(0, max);
+}
 
 export function registerPassport(ctx) {
   const {
     db, byId, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, guardianOwnsChild, freshness, activeAffiliation,
-    moderateOrRefuse, isAdult,
+    moderateOrRefuse, isAdult, scoutingReads, scoutingEvidence, unit,
   } = ctx;
+  if (typeof scoutingEvidence?.evidence?.create !== 'function' || typeof unit !== 'function') throw new TypeError('registerPassport needs the scouting evidence repository and unit from the data layer');
+  /** The player's own record, or null. */
+  const ownEvidence = (id, playerId) => { const e = scoutingReads.evidence.byId(id); return e && e.playerId === playerId ? e : null; };
+  /** The admin lists' offset paging (the `{ total, limit, offset, items }` shape the admin app reads). */
+  const offsetPage = (req) => ({ limit: Math.min(Math.max(Math.floor(Number(req.query.limit)) || 50, 1), 200), offset: Math.max(Math.floor(Number(req.query.offset)) || 0, 0) });
 
   // ------------------------------------------------------------ evidence core
+  /** The evidence record a route creates (not yet written): one event, one clock read. */
   function newEvidence({ player, claimType, label, value, units, season, source, mediaIds, observedAt, note, tier, method, reviewer, correctionOf }) {
     // ONE EVENT, ONE CLOCK READ.
     //
@@ -44,11 +66,11 @@ export function registerPassport(ctx) {
       id: nextId('evd'),
       playerId: player.id,
       claimType,
-      label: String(label).slice(0, 120),
-      value: value ?? null,
-      units: units ? String(units).slice(0, 20) : null,
-      season: season ? String(season).slice(0, 20) : null,
-      source, // { kind: 'player'|'guardian'|'org'|'coach', id, name }
+      label: String(label).slice(0, LIMITS.label),
+      value: typeof value === 'string' ? value.slice(0, LIMITS.valueText) : (value ?? null),
+      units: units ? String(units).slice(0, LIMITS.units) : null,
+      season: season ? String(season).slice(0, LIMITS.season) : null,
+      source, // { kind: 'player'|'guardian'|'org', id, name }
       // M23 P5.7: an evidence date the route has already validated (readInstant
       // keeps a legacy row's finite number and drops anything else to null).
       observedAt: readInstant(observedAt),
@@ -68,12 +90,13 @@ export function registerPassport(ctx) {
       correctionOf: correctionOf ?? null,
       supersededBy: null,
       disputes: [],
-      note: note ? String(note).slice(0, 300) : null,
+      note: note ? String(note).slice(0, LIMITS.note) : null,
       history: [],
     };
-    db.evidence.push(rec);
     return rec;
   }
+  /** Append an audit entry to a record draft (the shared history shape). */
+  const auditDraft = (rec, byKind, byId, byName, action, detail = null) => audit(rec, byKind, byId, byName, action, detail === null ? null : String(detail).slice(0, LIMITS.detail));
 
   function evidenceView(rec) {
     const { disputes, history, ...rest } = rec;
@@ -90,7 +113,7 @@ export function registerPassport(ctx) {
   // of every pre-M12 "verified" surface. Reliability ≠ ability: nothing here
   // scores the player, it only describes how each claim was checked.
   function composePassport(player) {
-    const records = db.evidence.filter((e) => e.playerId === player.id).map(evidenceView);
+    const records = scoutingReads.evidence.forPlayer(player.id).map(evidenceView);
     const legacy = [];
     for (const a of player.attendance ?? []) {
       if (a.corroboratedBy) {
@@ -130,9 +153,14 @@ export function registerPassport(ctx) {
   }
 
   function submitClaim(req, res, player, sourceKind, sourceId, sourceName, tier, method, reviewer) {
-    const { claimType, label, value, units, season, mediaIds, observedAt, note } = req.body ?? {};
+    const { claimType, value, mediaIds, observedAt } = req.body ?? {};
     if (!CLAIM_TYPES.includes(claimType)) return res.status(400).json({ error: 'CLAIM_TYPE_INVALID', allowed: CLAIM_TYPES });
-    if (!label || !String(label).trim()) return res.status(400).json({ error: 'LABEL_REQUIRED' });
+    const label = textOrRefuse(res, req.body?.label, 'label', LIMITS.label, { required: true }); if (label === undefined) return;
+    const units = textOrRefuse(res, req.body?.units, 'units', LIMITS.units); if (units === undefined) return;
+    const season = textOrRefuse(res, req.body?.season, 'season', LIMITS.season); if (season === undefined) return;
+    const note = textOrRefuse(res, req.body?.note, 'note', LIMITS.note); if (note === undefined) return;
+    if (!(value === undefined || value === null || Number.isFinite(value) || typeof value === 'string')) return res.status(400).json({ error: 'FIELD_INVALID', field: 'value', message: 'value is a number or text.' });
+    if (!(mediaIds === undefined || mediaIds === null || (Array.isArray(mediaIds) && mediaIds.every((m) => typeof m === 'string')))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'mediaIds', message: 'mediaIds is a list of media ids.' });
     if (note && !moderateOrRefuse(res, note, { kind: 'evidence_note', playerId: player.id })) return;
     if (!moderateOrRefuse(res, label, { kind: 'evidence_label', playerId: player.id })) return;
     // M23 P5.7 (§16): an observation date is a calendar day or an instant that
@@ -144,12 +172,13 @@ export function registerPassport(ctx) {
       if (p.ms > Date.now() + 5 * 60_000) return res.status(400).json({ error: 'DATE_INVALID', field: 'observedAt', message: 'An observation cannot be dated in the future.' });
       observed = p.ms;
     }
-    const rec = newEvidence({
-      player, claimType, label, value, units, season, mediaIds, observedAt: observed, note,
+    const draft = newEvidence({
+      player, claimType, label, value, units, season, mediaIds: Array.isArray(mediaIds) ? [...new Set(mediaIds)] : [], observedAt: observed, note,
       source: { kind: sourceKind, id: sourceId, name: sourceName },
       tier, method, reviewer,
     });
-    audit(rec, sourceKind, sourceId, sourceName, 'created', tier);
+    auditDraft(draft, sourceKind, sourceId, sourceName, 'created', tier);
+    const rec = scoutingEvidence.evidence.create(draft);
     persistNow();
     broadcast('evidence', { playerId: player.id });
     res.status(201).json({ evidence: evidenceView(rec) });
@@ -168,45 +197,50 @@ export function registerPassport(ctx) {
   });
 
   playerRouter.post('/evidence/:id/correct', (req, res) => {
-    const orig = db.evidence.find((e) => e.id === req.params.id && e.playerId === req.player.id);
+    const orig = ownEvidence(req.params.id, req.player.id);
     if (!orig) return res.status(404).json({ error: 'EVIDENCE_NOT_FOUND' });
     if (orig.source.kind === 'org') return res.status(403).json({ error: 'NOT_YOUR_RECORD', message: 'Club-submitted records are corrected by the club, or disputed.' });
     correctEvidence(req, res, orig, { kind: 'player', id: req.player.id, name: req.player.name });
   });
 
   playerRouter.post('/evidence/:id/dispute', (req, res) => {
-    const rec = db.evidence.find((e) => e.id === req.params.id && e.playerId === req.player.id);
+    const rec = ownEvidence(req.params.id, req.player.id);
     if (!rec) return res.status(404).json({ error: 'EVIDENCE_NOT_FOUND' });
     fileDispute(req, res, rec, { kind: 'player', id: req.player.id, name: req.player.name });
   });
 
   function correctEvidence(req, res, orig, actor) {
-    const { value, note, reason } = req.body ?? {};
-    if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'REASON_REQUIRED', message: 'Corrections carry a reason — the history stays traceable.' });
-    if (!moderateOrRefuse(res, String(reason), { kind: 'evidence_correction', playerId: orig.playerId })) return;
+    const { value } = req.body ?? {};
+    if (req.body?.reason === undefined || req.body?.reason === null || (typeof req.body.reason === 'string' && !req.body.reason.trim())) return res.status(400).json({ error: 'REASON_REQUIRED', message: 'Corrections carry a reason — the history stays traceable.' });
+    const reason = textOrRefuse(res, req.body.reason, 'reason', LIMITS.reason); if (reason === undefined) return;
+    const note = textOrRefuse(res, req.body?.note, 'note', LIMITS.note); if (note === undefined) return;
+    if (!(value === undefined || value === null || Number.isFinite(value) || typeof value === 'string')) return res.status(400).json({ error: 'FIELD_INVALID', field: 'value', message: 'value is a number or text.' });
+    if (!moderateOrRefuse(res, reason, { kind: 'evidence_correction', playerId: orig.playerId })) return;
     const player = findPlayer(orig.playerId);
-    const rec = newEvidence({
+    const draft = newEvidence({
       player, claimType: orig.claimType, label: orig.label,
       value: value ?? orig.value, units: orig.units, season: orig.season,
       mediaIds: orig.mediaIds, observedAt: orig.observedAt, note: note ?? orig.note,
       source: actor, tier: actor.kind === 'org' ? orig.verification.status : 'self_reported',
       method: 'correction', correctionOf: orig.id,
     });
-    orig.supersededBy = rec.id;
-    audit(orig, actor.kind, actor.id, actor.name, 'superseded', reason);
-    audit(rec, actor.kind, actor.id, actor.name, 'created_as_correction', reason);
+    auditDraft(draft, actor.kind, actor.id, actor.name, 'created_as_correction', reason);
+    // The correction and the superseded original commit together.
+    const rec = unit(() => {
+      const created = scoutingEvidence.evidence.create(draft);
+      scoutingEvidence.evidence.update(orig.id, (o) => { o.supersededBy = created.id; auditDraft(o, actor.kind, actor.id, actor.name, 'superseded', reason); });
+      return created;
+    });
     persistNow();
     broadcast('evidence', { playerId: orig.playerId });
     res.status(201).json({ evidence: evidenceView(rec), superseded: orig.id });
   }
 
   function fileDispute(req, res, rec, actor) {
-    const { reason } = req.body ?? {};
-    if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
-    if (!moderateOrRefuse(res, String(reason), { kind: 'evidence_dispute', playerId: rec.playerId })) return;
-    const d = { id: nextId('dsp'), at: Date.now(), by: actor, reason: String(reason).slice(0, 300), status: 'open', resolution: null };
-    rec.disputes.push(d);
-    audit(rec, actor.kind, actor.id, actor.name, 'disputed', d.reason);
+    const reason = textOrRefuse(res, req.body?.reason, 'reason', LIMITS.reason, { required: true }); if (reason === undefined) return;
+    if (!moderateOrRefuse(res, reason, { kind: 'evidence_dispute', playerId: rec.playerId })) return;
+    const d = { id: nextId('dsp'), at: Date.now(), by: { kind: actor.kind, id: actor.id, name: String(actor.name).slice(0, LIMITS.name) }, reason, status: 'open', resolution: null };
+    scoutingEvidence.evidence.update(rec.id, (e) => { e.disputes.push(d); auditDraft(e, actor.kind, actor.id, actor.name, 'disputed', d.reason); });
     persistNow();
     res.status(201).json({ dispute: d });
   }
@@ -248,30 +282,34 @@ export function registerPassport(ctx) {
   // club) upgrades a self-reported claim. The original stays; a verification
   // event lands on its history.
   orgRouter.post('/evidence/:id/corroborate', (req, res) => {
-    const rec = db.evidence.find((e) => e.id === req.params.id);
+    const rec = scoutingReads.evidence.byId(req.params.id);
     if (!rec) return res.status(404).json({ error: 'EVIDENCE_NOT_FOUND' });
     const p = findPlayer(rec.playerId);
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE', message: 'You can only corroborate claims for players visible to your organisation.' });
     if (rec.verification.status !== 'self_reported') return res.status(409).json({ error: 'ALREADY_VERIFIED', status: rec.verification.status });
     if (rec.supersededBy) return res.status(409).json({ error: 'SUPERSEDED', by: rec.supersededBy });
     const affiliation = activeAffiliation(req.org.id, req.orgUser.name);
-    rec.verification = {
+    const verification = {
       status: affiliation ? 'coach_confirmed' : 'club_assessed',
-      method: affiliation ? `confirmed by club-affiliated coach (${affiliation.role})` : `corroborated by ${req.org.name}`,
+      method: (affiliation ? `confirmed by club-affiliated coach (${affiliation.role})` : `corroborated by ${req.org.name}`).slice(0, LIMITS.method),
       reviewerId: req.orgUser.id,
       reviewerName: req.orgUser.name,
       reviewedAt: Date.now(),
     };
-    audit(rec, 'org', req.org.id, req.org.name, 'corroborated', rec.verification.status);
-    notify({ kind: 'player', id: p.id }, 'evidence', `✅ ${req.org.name} corroborated "${rec.label}" on your evidence passport.`, rec.id);
-    if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'evidence', `${req.org.name} corroborated "${rec.label}" on ${p.name}'s evidence passport.`, rec.id);
+    // The upgrade and its notifications commit together.
+    const fresh = unit(() => {
+      const next = scoutingEvidence.evidence.update(rec.id, (e) => { e.verification = verification; auditDraft(e, 'org', req.org.id, req.org.name, 'corroborated', verification.status); });
+      notify({ kind: 'player', id: p.id }, 'evidence', `✅ ${req.org.name} corroborated "${rec.label}" on your evidence passport.`, rec.id);
+      if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'evidence', `${req.org.name} corroborated "${rec.label}" on ${p.name}'s evidence passport.`, rec.id);
+      return next;
+    });
     persistNow();
     broadcast('evidence', { playerId: p.id });
-    res.json({ evidence: evidenceView(rec) });
+    res.json({ evidence: evidenceView(fresh) });
   });
 
   orgRouter.post('/evidence/:id/dispute', (req, res) => {
-    const rec = db.evidence.find((e) => e.id === req.params.id);
+    const rec = scoutingReads.evidence.byId(req.params.id);
     if (!rec) return res.status(404).json({ error: 'EVIDENCE_NOT_FOUND' });
     const p = findPlayer(rec.playerId);
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
@@ -280,29 +318,32 @@ export function registerPassport(ctx) {
 
   // ------------------------------------------------------------ admin routes
   adminRouter.get('/evidence/disputes', (req, res) => {
-    const open = db.evidence
-      .flatMap((e) => e.disputes.map((d) => ({ ...d, evidenceId: e.id, playerId: e.playerId, label: e.label, tier: e.verification.status })))
-      .filter((d) => req.query.all === '1' || d.status === 'open')
-      .sort((a, b) => a.at - b.at);
-    res.json(paginate(req, open));
+    res.json(scoutingReads.evidence.disputePage({ all: req.query.all === '1', ...offsetPage(req) }));
   });
 
   adminRouter.post('/evidence/disputes/:id/resolve', (req, res) => {
-    const rec = db.evidence.find((e) => e.disputes.some((d) => d.id === req.params.id));
+    const rec = scoutingReads.evidence.byDispute(req.params.id);
     const d = rec?.disputes.find((x) => x.id === req.params.id);
     if (!d) return res.status(404).json({ error: 'DISPUTE_NOT_FOUND' });
     if (d.status !== 'open') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-    const { resolution, note, downgrade } = req.body ?? {};
+    const { resolution, downgrade } = req.body ?? {};
     if (!['upheld', 'rejected'].includes(resolution)) return res.status(400).json({ error: 'RESOLUTION_REQUIRED', allowed: ['upheld', 'rejected'] });
-    d.status = 'resolved';
-    d.resolution = { outcome: resolution, note: note ? String(note).slice(0, 300) : null, at: Date.now() };
-    if (resolution === 'upheld' && downgrade) {
-      rec.verification = { status: 'self_reported', method: 'downgraded after dispute', reviewerId: 'admin', reviewerName: 'Trust & Safety', reviewedAt: Date.now() };
-    }
-    audit(rec, 'admin', 'admin', 'Trust & Safety', 'dispute_resolved', resolution);
-    notify({ kind: 'player', id: rec.playerId }, 'evidence', `Trust & Safety resolved a dispute on "${rec.label}": ${resolution}.`, rec.id);
+    const note = textOrRefuse(res, req.body?.note, 'note', LIMITS.resolutionNote); if (note === undefined) return;
+    const at = Date.now();
+    // The resolution, any downgrade and the player's notification commit together.
+    const fresh = unit(() => {
+      const next = scoutingEvidence.evidence.update(rec.id, (e) => {
+        const target = e.disputes.find((x) => x.id === d.id);
+        target.status = 'resolved';
+        target.resolution = { outcome: resolution, note, at };
+        if (resolution === 'upheld' && downgrade) e.verification = { status: 'self_reported', method: 'downgraded after dispute', reviewerId: 'admin', reviewerName: 'Trust & Safety', reviewedAt: at };
+        auditDraft(e, 'admin', 'admin', 'Trust & Safety', 'dispute_resolved', resolution);
+      });
+      notify({ kind: 'player', id: rec.playerId }, 'evidence', `Trust & Safety resolved a dispute on "${rec.label}": ${resolution}.`, rec.id);
+      return next;
+    });
     persistNow();
-    res.json({ dispute: d, evidence: evidenceView(rec) });
+    res.json({ dispute: fresh.disputes.find((x) => x.id === d.id), evidence: evidenceView(fresh) });
   });
 
   // ================================================================== F10
@@ -318,48 +359,57 @@ export function registerPassport(ctx) {
   }
 
   orgRouter.get('/coaches', (req, res) => {
-    res.json(db.coachAffiliations.filter((a) => a.orgId === req.org.id).map(affiliationView));
+    res.json(scoutingReads.coachAffiliations.forOrg(req.org.id).map(affiliationView));
   });
 
   orgRouter.post('/coaches', (req, res) => {
-    const { coachName, coachEmail, role, from, conflictOfInterest } = req.body ?? {};
-    if (!coachName || !String(coachName).trim()) return res.status(400).json({ error: 'COACH_NAME_REQUIRED' });
-    if (!role || !String(role).trim()) return res.status(400).json({ error: 'ROLE_REQUIRED' });
-    const a = {
+    const coachName = textOrRefuse(res, typeof req.body?.coachName === 'string' ? req.body.coachName.trim() : req.body?.coachName, 'coachName', LIMITS.coachName, { required: true }); if (coachName === undefined) return;
+    const role = textOrRefuse(res, typeof req.body?.role === 'string' ? req.body.role.trim() : req.body?.role, 'role', LIMITS.role, { required: true }); if (role === undefined) return;
+    const coachEmail = textOrRefuse(res, typeof req.body?.coachEmail === 'string' ? req.body.coachEmail.trim() : req.body?.coachEmail, 'coachEmail', LIMITS.coachEmail); if (coachEmail === undefined) return;
+    const conflictOfInterest = textOrRefuse(res, req.body?.conflictOfInterest, 'conflictOfInterest', LIMITS.conflict); if (conflictOfInterest === undefined) return;
+    let from = new Date().toISOString().slice(0, 10);
+    if (!isAbsent(req.body?.from)) {
+      const d = parseStrictDateOnly(req.body.from);
+      if (!d.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'from', message: `from is a calendar day (YYYY-MM-DD) (${d.why}).`, expected: d.expected });
+      from = req.body.from;
+    }
+    const draft = {
       id: nextId('aff'), orgId: req.org.id, orgName: req.org.name,
-      coachName: String(coachName).trim().slice(0, 80),
-      coachEmail: coachEmail ? String(coachEmail).trim().slice(0, 120) : null,
-      role: String(role).trim().slice(0, 60),
-      from: from ? String(from).slice(0, 10) : new Date().toISOString().slice(0, 10),
+      coachName, coachEmail, role, from,
       to: null,
       status: 'confirmed', // the CLUB is the confirmer — this endpoint runs under org auth
       confirmedBy: { userId: req.orgUser.id, name: req.orgUser.name },
-      conflictOfInterest: conflictOfInterest ? String(conflictOfInterest).slice(0, 200) : null,
+      conflictOfInterest,
       createdAt: Date.now(),
       history: [],
     };
-    audit(a, 'org', req.org.id, req.orgUser.name, 'confirmed', a.role);
-    db.coachAffiliations.push(a);
+    auditDraft(draft, 'org', req.org.id, req.orgUser.name, 'confirmed', draft.role);
+    const a = scoutingEvidence.coachAffiliations.create(draft);
     ledgerAppend({ type: 'coach_affiliation_confirmed', orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
     persistNow();
     res.status(201).json({ affiliation: affiliationView(a) });
   });
 
   function closeAffiliation(req, res, status) {
-    const a = db.coachAffiliations.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const found = scoutingReads.coachAffiliations.byId(req.params.id);
+    const a = found && found.orgId === req.org.id ? found : null;
     if (!a) return res.status(404).json({ error: 'AFFILIATION_NOT_FOUND' });
     if (a.status !== 'confirmed') return res.status(409).json({ error: 'NOT_CURRENT', status: a.status });
-    a.status = status; // 'ended' keeps a clean history; 'revoked' flags cause
-    a.to = new Date().toISOString().slice(0, 10);
-    audit(a, 'org', req.org.id, req.orgUser.name, status, req.body?.reason ?? null);
+    const reason = textOrRefuse(res, req.body?.reason, 'reason', LIMITS.closeReason); if (reason === undefined) return;
+    const fresh = scoutingEvidence.coachAffiliations.update(a.id, (x) => {
+      x.status = status; // 'ended' keeps a clean history; 'revoked' flags cause
+      x.to = new Date().toISOString().slice(0, 10);
+      auditDraft(x, 'org', req.org.id, req.orgUser.name, status, reason);
+    });
     persistNow();
-    res.json({ affiliation: affiliationView(a), note: 'Historical references stay attributed; current coach privileges are removed immediately.' });
+    res.json({ affiliation: affiliationView(fresh), note: 'Historical references stay attributed; current coach privileges are removed immediately.' });
   }
   orgRouter.post('/coaches/:id/end', (req, res) => closeAffiliation(req, res, 'ended'));
   orgRouter.post('/coaches/:id/revoke', (req, res) => closeAffiliation(req, res, 'revoked'));
 
   adminRouter.get('/coaches', (req, res) => {
-    res.json(paginate(req, db.coachAffiliations.map(affiliationView).sort((a, b) => b.createdAt - a.createdAt)));
+    const page = scoutingReads.coachAffiliations.page(offsetPage(req));
+    res.json({ ...page, items: page.items.map(affiliationView) });
   });
 
   adminRouter.post('/vouches/:id/withdraw', (req, res) => {
@@ -379,46 +429,53 @@ export function registerPassport(ctx) {
     const p = findPlayer(req.body?.playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
-    const note = req.body?.note ? String(req.body.note).slice(0, 200) : null;
+    const note = textOrRefuse(res, req.body?.note, 'note', LIMITS.inviteNote); if (note === undefined) return;
     if (note && !moderateOrRefuse(res, note, { kind: 'squad_invite', playerId: p.id, orgId: req.org.id })) return;
-    if (db.squadInvites.some((i) => i.orgId === req.org.id && i.playerId === p.id && i.status.startsWith('pending'))) {
+    if (scoutingReads.squadInvites.pendingFor(req.org.id, p.id)) {
       return res.status(409).json({ error: 'INVITE_PENDING' });
     }
     const minor = !isAdult(p);
-    const invite = {
+    const draft = {
       id: nextId('sqi'), orgId: req.org.id, orgName: req.org.name, playerId: p.id, playerName: p.name,
       byUserId: req.orgUser.id, byName: req.orgUser.name, note,
       status: minor ? 'pending_guardian' : 'pending_player',
       createdAt: Date.now(), respondedAt: null,
     };
-    db.squadInvites.push(invite);
-    if (minor) notify({ kind: 'guardian', id: p.guardianId }, 'squad_invite', `${req.org.name} invites ${p.name} to join their squad list — your approval is required.`, invite.id);
-    else notify({ kind: 'player', id: p.id }, 'squad_invite', `${req.org.name} invites you to join their squad list.`, invite.id);
+    const invite = unit(() => {
+      const created = scoutingEvidence.squadInvites.create(draft);
+      if (minor) notify({ kind: 'guardian', id: p.guardianId }, 'squad_invite', `${req.org.name} invites ${p.name} to join their squad list — your approval is required.`, created.id);
+      else notify({ kind: 'player', id: p.id }, 'squad_invite', `${req.org.name} invites you to join their squad list.`, created.id);
+      return created;
+    });
     persistNow();
     res.status(201).json({ invite });
   });
-
+  // The answer, the squad row (the org's squad facet until S9c) and the notification commit together.
   function respondSquadInvite(req, res, invite, approverLabel) {
     const { accept } = req.body ?? {};
-    invite.status = accept ? 'approved' : 'declined';
-    invite.respondedAt = Date.now();
-    if (accept) {
-      const org = byId.org(invite.orgId);
-      org.squad ??= [];
-      if (!org.squad.some((s) => s.playerId === invite.playerId)) {
-        org.squad.push({ id: nextId('sq'), playerId: invite.playerId, name: invite.playerName, source: 'invite_approved', approvedBy: approverLabel, addedAt: Date.now() });
+    const at = Date.now();
+    const fresh = unit(() => {
+      const next = scoutingEvidence.squadInvites.update(invite.id, (i) => { i.status = accept ? 'approved' : 'declined'; i.respondedAt = at; });
+      if (accept) {
+        const org = byId.org(invite.orgId);
+        org.squad ??= [];
+        if (!org.squad.some((s) => s.playerId === invite.playerId)) {
+          org.squad.push({ id: nextId('sq'), playerId: invite.playerId, name: invite.playerName, source: 'invite_approved', approvedBy: approverLabel, addedAt: at });
+        }
+        notify({ kind: 'org_user', id: invite.byUserId }, 'squad_invite', `✅ ${invite.playerName} joined your squad list (approved by ${approverLabel}).`, invite.id);
       }
-      notify({ kind: 'org_user', id: invite.byUserId }, 'squad_invite', `✅ ${invite.playerName} joined your squad list (approved by ${approverLabel}).`, invite.id);
-    }
+      return next;
+    });
     persistNow();
-    res.json({ invite });
+    res.json({ invite: fresh });
   }
 
   playerRouter.get('/squad-invites', (req, res) => {
-    res.json(db.squadInvites.filter((i) => i.playerId === req.player.id && i.status === 'pending_player'));
+    res.json(scoutingReads.squadInvites.forPlayers([req.player.id], 'pending_player'));
   });
   playerRouter.post('/squad-invites/:id/respond', (req, res) => {
-    const invite = db.squadInvites.find((i) => i.id === req.params.id && i.playerId === req.player.id);
+    const found = scoutingReads.squadInvites.byId(req.params.id);
+    const invite = found && found.playerId === req.player.id ? found : null;
     if (!invite) return res.status(404).json({ error: 'INVITE_NOT_FOUND' });
     if (invite.status === 'pending_guardian') return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Your parent or guardian responds to squad invitations.' });
     if (invite.status !== 'pending_player') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
@@ -426,10 +483,11 @@ export function registerPassport(ctx) {
   });
 
   guardianRouter.get('/squad-invites', (req, res) => {
-    res.json(db.squadInvites.filter((i) => req.guardian.childIds.includes(i.playerId) && i.status === 'pending_guardian'));
+    res.json(scoutingReads.squadInvites.forPlayers(req.guardian.childIds, 'pending_guardian'));
   });
   guardianRouter.post('/squad-invites/:id/respond', (req, res) => {
-    const invite = db.squadInvites.find((i) => i.id === req.params.id && req.guardian.childIds.includes(i.playerId));
+    const found = scoutingReads.squadInvites.byId(req.params.id);
+    const invite = found && req.guardian.childIds.includes(found.playerId) ? found : null;
     if (!invite) return res.status(404).json({ error: 'INVITE_NOT_FOUND' });
     if (invite.status !== 'pending_guardian') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
     respondSquadInvite(req, res, invite, `guardian ${req.guardian.name}`);
