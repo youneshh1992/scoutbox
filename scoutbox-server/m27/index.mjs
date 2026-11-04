@@ -55,8 +55,10 @@ export function registerIntegration(ctx) {
     findPlayer, isAdult, isBlocked, orgCanSee, checkEligibility, distanceBand,
     agent, compliance, rateLimit,
     recruitmentCases, // S8b: the handoff is part of its case, written by cases.update
+    recruitmentReads, // §4.3 step 2: contacts are read through SQL
   } = ctx;
   if (!recruitmentCases?.cases) throw new TypeError('registerIntegration needs the recruitment-cases repository from the data layer');
+  if (typeof recruitmentReads?.contacts?.forAgent !== 'function') throw new TypeError('registerIntegration needs recruitmentReads (contacts) from the data layer');
   const { cases } = recruitmentCases;
   /** A case history entry in the one shape every case writer uses. */
   const handoffHistory = (d, at, action, by, detail) => d.history.push({ id: nextId('aud'), at, byKind: 'org', byId: by.userId ?? null, byName: by.name ?? null, action, detail });
@@ -296,8 +298,8 @@ export function registerIntegration(ctx) {
       return res.status(403).json({ error: decision.code, rule: decision.rule, message: 'This client\'s record is not open to you right now.' });
     }
     const items = [];
-    for (const c of db.recruitmentContacts ?? []) {
-      if (!c || c.playerId !== a.clientId) continue;
+    for (const c of recruitmentReads.contacts.forAgent(req.orgUser.id)) {
+      if (c.playerId !== a.clientId) continue;
       const snap = c.routingSnapshot ?? null;
       if (snap?.agent?.agentUserId !== req.orgUser.id) continue;
       const org = (db.orgs ?? []).find((o) => o && o.id === c.orgId) ?? null;

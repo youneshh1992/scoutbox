@@ -88,7 +88,8 @@ function safeDetail(action, detail) {
 }
 
 export function registerAudit(ctx) {
-  const { db, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
+  const { db, recruitmentReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
+  if (typeof recruitmentReads?.contacts?.forOrg !== 'function') throw new TypeError('registerAudit needs recruitmentReads (contacts) from the data layer');
 
   function entriesFor(org) {
     const rows = [];
@@ -167,8 +168,7 @@ export function registerAudit(ctx) {
     // M23 P3: Contact lifecycle. The subject is named only if the organisation
     // may currently see the player; the body, the summary and the reply never
     // reach this feed.
-    for (const c of db.recruitmentContacts ?? []) {
-      if (!c || c.orgId !== org.id) continue;
+    for (const c of recruitmentReads.contacts.forOrg(org.id)) {
       const p = findPlayer(c.playerId);
       const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };
       for (const h of c.history ?? []) {

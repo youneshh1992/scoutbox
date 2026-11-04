@@ -23,16 +23,16 @@ import {
   derivedConditions, availableActions, toAnalyticsRecruitmentStage,
   NULL_EVIDENCE_PROVIDER,
 } from '../m23/lifecycle.mjs';
-import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../m23/journey.mjs';
+import { JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../m23/journey.mjs';
 import {
   ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, roomStatusForStage,
   STATUS_EVIDENCE_REQUIRED, adoptionStatusForStage, PRO_STAGES, GRASSROOTS_STAGES,
   ALL_REASON_CODES,
 } from '../m17/shared.mjs';
-import { createEvidenceProvider } from '../m23/evidence.mjs';
 import { M23_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../m23/errors.mjs';
 import { guaranteeFor, MIGRATION_GUARANTEED, MODULE_GUARANTEED } from '../storeContract.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../m20/funnels.mjs';
+import { buildRecruitmentJourney, createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const PORT = 5700 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -1568,14 +1568,17 @@ section('Z — what P2 deliberately does NOT ship, asserted rather than assumed'
   // ('optional': "we cannot answer that yet") is now 'module', owned by m28
   // and created at registration — NOT by a migration, so the schema stays at
   // 2307 and no lifecycle state is reinterpreted as an Offer (P6 §4, §60).
-  ok(guaranteeFor('recruitmentOffers') === 'module',
-    'Z2 the store contract classifies it MODULE-guaranteed (P6) — not migration, not optional, not absent from the contract');
+  // §4.3 step 2 (rewritten: Z2–Z4 described the old storage). The offers are rows of their tables, read through SQL;
+  // there is no db.recruitmentOffers to classify, and the journey's offers stay optional through its `reads`.
+  ok(guaranteeFor('recruitmentOffers') === null,
+    'Z2 the store contract has no db collection for the offers (a table since 0017, read through SQL)');
   neg(MIGRATION_GUARANTEED.includes('recruitmentOffers') === false
-    && MODULE_GUARANTEED.includes('recruitmentOffers') === true,
-  'Z3 and the module boot path guarantees it while no migration claims it, so the schema did not move for it');
+    && MODULE_GUARANTEED.includes('recruitmentOffers') === false,
+  'Z3 and neither the migration registry nor a module creates one, so the schema did not move for it');
+  const noOffers = buildRecruitmentJourney({ recruitmentCases: [{ id: 'z-case', orgId: 'o1', playerId: 'p1', room: { status: 'shortlisted' }, history: [] }], roomDecisions: [], requests: [], trials: [], assessments: [], signings: [], recruitmentContacts: [] }, 'z-case', { kind: 'org_staff', orgId: 'o1', role: 'room_lead' });
   neg(JOURNEY_REQUIRED_STORES.includes('recruitmentOffers') === false
-    && JOURNEY_OPTIONAL_STORES.includes('recruitmentOffers'),
-  'Z4 the journey treats it as optional, so its absence is not a JOURNEY_STORE_MISSING');
+    && noOffers.ok === true && noOffers.offer?.available === false,
+  'Z4 the journey treats the offers as optional, so their absence is not a JOURNEY_STORE_MISSING');
 
   // The distinction the optional classification exists to protect.
   ok(jz.body.offer?.available === true,

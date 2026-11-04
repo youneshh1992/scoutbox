@@ -49,10 +49,11 @@ import { M23_ERROR_HTTP } from '../m23/errors.mjs';
 import { EVENT_REGISTRY } from '../m182/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
 import { STATUS_EVIDENCE_REQUIRED, ROOM_TRANSITIONS, ROOM_STATUSES, roomCan, PROHIBITED_REASON_CODES, REVISITABLE_REASON_CODES } from '../m17/shared.mjs';
-import { createEvidenceProvider, EVIDENCE_KINDS } from '../m23/evidence.mjs';
+import { EVIDENCE_KINDS } from '../m23/evidence.mjs';
 import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS } from '../m23/lifecycle.mjs';
 import { readFileSync } from 'node:fs';
 import { pickPort } from './testPort.mjs';
+import { createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const PORT = pickPort(6400, 200, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;

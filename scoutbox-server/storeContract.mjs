@@ -159,13 +159,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   pushTokens: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_tokens table (defined by attachDataLayer), written only through the push tokens repository' },
   recruitmentBriefs: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
   recruitmentCases: { guarantee: 'migration', owner: 'm12', reason: 'the canonical recruitment object (M12); the lifecycle lives on it' },
-  recruitmentContacts: { guarantee: 'migration', owner: 'm23', reason: 'M23 P3 Contact workflow: the club-internal record of a communication process. A draft must live where no recipient route reads, and delivery truth must not become a case state' },
-  // M23 P6 — the canonical Offer store. Created at registration by
-  // `registerOffers` (the M12–M16 module guarantee), NOT by a migration: the
-  // schema stays at 2307, nothing is backfilled and no lifecycle state is ever
-  // reinterpreted as an Offer (P6 §4, §60–§62). ONE writer in the repository:
-  // scoutbox-server/m28. The evidence provider and the journey read it.
-  recruitmentOffers: { guarantee: 'module', owner: 'm28', reason: 'M23 P6 canonical Offer workflow: drafts, immutable issued revisions, recipient responses. Created by registerOffers at registration; written only by m28' },
+  // recruitmentContacts, recruitmentOffers: never a db.* read since §4.3 step 2 — the contacts and offers live in their
+  // typed tables (migration 0017) and are read through repositories/recruitmentContactsOffers.mjs. db.<name> throws.
   reports: { guarantee: 'migration', owner: 'core', reason: 'report-user/scout/club submissions (D2); since S6b a read-only view over the reports table, written only through handleReport / moderateOrRefuse and the resolve route → the safetyAudit repository (a report naming an unknown player is accepted, Q4)' },
   representations: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   // M23 P5.6B — ScoutBox Agent core. Guaranteed by migration 2305 so a

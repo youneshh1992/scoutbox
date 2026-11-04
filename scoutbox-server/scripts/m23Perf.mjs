@@ -10,8 +10,7 @@
 // projection that walks every case in the organisation to render one of them
 // is the defect this file exists to detect.
 
-import { buildRecruitmentJourney } from '../m23/journey.mjs';
-import { createEvidenceProvider } from '../m23/evidence.mjs';
+import { buildRecruitmentJourney, createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const say = (m) => console.log(m);
 

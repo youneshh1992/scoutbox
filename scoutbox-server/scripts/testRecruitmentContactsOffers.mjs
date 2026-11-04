@@ -3,9 +3,10 @@
 // tables (no lossless side column, the deferred case and request keys); a snapshot save (fixtures, tools) types every
 // field into its column and reads back the typed record, stops on a record it cannot type and names every missing
 // reference with ids; the player references are counted, never refused (Q8c-a), and a missing guardian is refused
-// (Q8c-b); the repository's operations write rows at once and return fresh read-only records, the views refuse an
-// in-place edit, a unit of work rolls rows AND mirrors back, and a contact may name a request the staged S8a repository
-// writes at the same unit's COMMIT; the deletion unit's redactions; a partial, an empty and a departing snapshot write.
+// (Q8c-b); the repository's operations write rows at once and return fresh read-only records; there is no db.* view
+// (§4.3 step 2: a reader naming one throws) and every query matches a scan of the tables; a unit of work rolls the rows
+// back and a read inside it sees its own writes; a contact may name a request the staged S8a repository writes at the
+// same unit's COMMIT; the deletion unit's redactions; a partial, an empty and a departing snapshot write.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -139,38 +140,80 @@ test('[snapshot] the collection rule: an omitted collection is retained whole; a
 
 // ------------------------------------------------------------- the repository
 
-test('[repository] explicit writes: the views and every returned record are read-only (a push, a field assignment and a nested push throw, naming the repository); create and update write their rows at once — a second connection sees them with no save — and return the fresh record; update hands out a plain copy, types the result whole and refuses junk, a changed identifier and an unknown id; nothing is written by a save; a reopen serves the same records', () => {
+test('[repository] explicit writes: there is no db.* view (reading or assigning db.recruitmentContacts / db.recruitmentOffers throws, naming the repository); every returned record is read-only (a field assignment and a nested push throw); create and update write their rows at once — a second connection sees them with no save — and return the fresh record; update hands out a plain copy, types the result whole and refuses junk, a changed identifier and an unknown id; nothing is written by a save; a reopen serves the same records', () => {
   const d = file('repo'); const L = serverOpen(d); const { contacts, offers } = L.repo;
-  assert.throws(() => L.db.recruitmentContacts.push(draftContact({ id: 'rct-x' })), /written through its domain repository/);
-  assert.throws(() => { L.db.recruitmentContacts[0].status = 'cancelled'; }, /written through its domain repository/);
-  assert.throws(() => { L.db.recruitmentOffers[1].revisions[0].documents.push({}); }, /written through its domain repository/);
+  for (const name of COLLECTIONS) {
+    assert.throws(() => L.db[name], new RegExp(`db\\.${name} is gone: read it through the recruitmentContactsOffers repository`));
+    assert.throws(() => { L.db[name] = []; }, new RegExp(`db\\.${name} is gone`));
+    assert.equal(Object.keys(L.db).includes(name), false, `${name} is not enumerable on db`);
+  }
+  assert.throws(() => { contacts.byId('rct-1').status = 'cancelled'; }, TypeError);
+  assert.throws(() => { offers.byId('rof-2').revisions[0].documents.push({}); }, TypeError);
   const created = contacts.create(draftContact({ id: 'rct-new', keys: { create: null, send: null, record: null }, history: [] }));
-  assert.equal(created.id, 'rct-new'); assert.throws(() => { created.subject = 'x'; }, /written through its domain repository/);
+  assert.equal(created.id, 'rct-new'); assert.throws(() => { created.subject = 'x'; }, TypeError);
   withRo(d, (s) => assert.equal(col(s, "SELECT status FROM recruitment_contacts WHERE id = 'rct-new'"), 'draft', 'written at once'));
   refused(() => contacts.create(draftContact({ id: 'rct-new' })), /CONTACTS_OFFERS_DUPLICATE: recruitment_contacts rct-new already exists/);
   const edited = contacts.update('rct-new', (draft) => { draft.subject = 'Edited'; draft.history.push({ id: 'aud-e1', at: NOW, action: 'contact_edited', by: { kind: 'org', userId: 'usr-1', name: 'Maria' }, detail: { fields: ['subject'] } }); draft.rev = 2; });
-  assert.equal(edited.subject, 'Edited'); assert.equal(L.db.recruitmentContacts.find((c) => c.id === 'rct-new').history.length, 1);
+  assert.equal(edited.subject, 'Edited'); assert.equal(contacts.byId('rct-new').history.length, 1);
   withRo(d, (s) => { assert.equal(col(s, "SELECT subject FROM recruitment_contacts WHERE id = 'rct-new'"), 'Edited'); assert.equal(col(s, "SELECT action FROM contact_history WHERE contact_id = 'rct-new'"), 'contact_edited'); });
   refused(() => contacts.update('rct-new', (draft) => { draft.subject = 42; }), /CONTACTS_OFFERS_INPUT_INVALID: recruitmentContacts rct-new\.subject must be text or null/);
   refused(() => contacts.update('rct-new', (draft) => { draft.caseId = 'case-2'; }), /rct-new: caseId cannot change/);
   refused(() => contacts.update('rct-nowhere', () => {}), /CONTACTS_OFFERS_NOT_FOUND/);
-  assert.equal(L.db.recruitmentContacts.find((c) => c.id === 'rct-new').subject, 'Edited', 'a refused update changed nothing');
+  assert.equal(contacts.byId('rct-new').subject, 'Edited', 'a refused update changed nothing');
   const o = offers.update('rof-1', (draft) => { draft.revisions.push(revision({ id: 'rofr-n', revisionNumber: 2 })); draft.currentRevisionId = 'rofr-n'; draft.keys.revise.push({ key: 'k-n', revisionId: 'rofr-n' }); draft.rev = 2; });
   assert.equal(o.revisions.length, 2); withRo(d, (s) => { assert.equal(col(s, "SELECT count(*) FROM offer_revisions WHERE offer_id = 'rof-1'"), 2); assert.equal(col(s, "SELECT key FROM offer_keys WHERE offer_id = 'rof-1'"), 'k-n'); });
   refused(() => offers.update('rof-1', (draft) => { draft.currentRevisionId = 'rofr-2'; }), /rof-1\.currentRevisionId names rofr-2, not a revision of this offer/);
   const dump = withRo(d, s8cDump); L.save(); assert.equal(withRo(d, s8cDump), dump, 'a save writes no S8c row');
-  const served = plain(L.db.recruitmentContacts); L.close();
-  const R = serverOpen(d); assert.deepEqual(plain(R.db.recruitmentContacts), served); R.close(); rm(d);
+  const served = plain(L.repo.exportAll()); L.close();
+  const R = serverOpen(d); assert.deepEqual(plain(R.repo.exportAll()), served); R.close(); rm(d);
 });
 
-test('[repository] a unit of work: a contact written in a unit together with the request it names — a NEW request the staged S8a repository writes at the same COMMIT (the deferred key) — commits; a unit that throws after its writes rolls the rows AND the mirrors back (the records held before read the pre-unit values); a contact naming a request that never arrives fails at COMMIT, nothing lands and the mirror is restored', () => {
+test('[repository] SQL reads (§4.3 step 2): byId and every list query return exactly the records a scan of the tables would, in insertion order; an unknown or non-text id reads null; forPlayers takes several players and ignores junk; the read-only `reads` object carries the queries and no write', () => {
+  const d = file('reads'); const L = serverOpen(d); const { contacts, offers, reads } = L.repo;
+  const all = { contacts: mod.readContacts(L.store.sqlite), offers: mod.readOffers(L.store.sqlite) };
+  assert.ok(all.contacts.length >= 5 && all.offers.length >= 4, 'the fixture has records to query');
+  const ids = (rows) => rows.map((r) => r.id);
+  const values = (list, key) => [...new Set(list.map((r) => key(r)).filter((v) => v !== null && v !== undefined)), 'nobody'];
+  for (const c of all.contacts) assert.deepEqual(plain(contacts.byId(c.id)), plain(c));
+  for (const o of all.offers) assert.deepEqual(plain(offers.byId(o.id)), plain(o));
+  for (const bad of ['rct-nowhere', undefined, null, 42]) { assert.equal(contacts.byId(bad), null); assert.equal(offers.byId(bad), null); }
+  const check = (label, got, want) => assert.deepEqual(ids(got), ids(want), label);
+  for (const v of values(all.contacts, (c) => c.caseId)) check(`contacts.forCase ${v}`, contacts.forCase(v), all.contacts.filter((c) => c.caseId === v));
+  for (const v of values(all.contacts, (c) => c.playerId)) check(`contacts.forPlayer ${v}`, contacts.forPlayer(v), all.contacts.filter((c) => c.playerId === v));
+  for (const v of values(all.contacts, (c) => c.orgId)) check(`contacts.forOrg ${v}`, contacts.forOrg(v), all.contacts.filter((c) => c.orgId === v));
+  for (const v of values(all.contacts, (c) => c.requestId)) check(`contacts.forRequest ${v}`, contacts.forRequest(v), all.contacts.filter((c) => c.requestId === v));
+  for (const v of values(all.contacts, (c) => c.routingSnapshot?.agent?.agentUserId)) check(`contacts.forAgent ${v}`, contacts.forAgent(v), all.contacts.filter((c) => c.routingSnapshot?.agent?.agentUserId === v));
+  for (const c of all.contacts) check(`contacts.forOrgPlayer ${c.orgId}/${c.playerId}`, contacts.forOrgPlayer(c.orgId, c.playerId), all.contacts.filter((x) => x.orgId === c.orgId && x.playerId === c.playerId));
+  for (const v of values(all.offers, (o) => o.caseId)) check(`offers.forCase ${v}`, offers.forCase(v), all.offers.filter((o) => o.caseId === v));
+  for (const v of values(all.offers, (o) => o.playerId)) check(`offers.forPlayer ${v}`, offers.forPlayer(v), all.offers.filter((o) => o.playerId === v));
+  for (const v of values(all.offers, (o) => o.orgId)) check(`offers.forOrg ${v}`, offers.forOrg(v), all.offers.filter((o) => o.orgId === v));
+  for (const v of values(all.offers, (o) => o.agentShare?.agentUserId)) check(`offers.forAgentShare ${v}`, offers.forAgentShare(v), all.offers.filter((o) => o.agentShare?.agentUserId === v));
+  for (const o of all.offers) check(`offers.forOrgPlayer ${o.orgId}/${o.playerId}`, offers.forOrgPlayer(o.orgId, o.playerId), all.offers.filter((x) => x.orgId === o.orgId && x.playerId === o.playerId));
+  const players = values(all.offers, (o) => o.playerId);
+  check('offers.forPlayers (all, with junk and a repeat)', offers.forPlayers([...players, players[0], 42, null]), all.offers.filter((o) => players.includes(o.playerId)));
+  assert.deepEqual(offers.forPlayers([]), []); assert.deepEqual(offers.forPlayers(undefined), []);
+  for (const r of [...contacts.forOrg(all.contacts[0].orgId), ...offers.forOrg(all.offers[0].orgId)]) assert.ok(Object.isFrozen(r), 'a listed record is read-only');
+  for (const name of ['contacts', 'offers']) {
+    assert.ok(Object.isFrozen(reads[name]));
+    for (const w of ['create', 'update', 'redactPlayer']) assert.equal(reads[name][w], undefined, `reads.${name} has no ${w}`);
+    assert.equal(reads[name].byId, L.repo[name].byId);
+  }
+  assert.deepEqual(L.repo.counts(), { recruitmentContacts: all.contacts.length, recruitmentOffers: all.offers.length });
+  L.close(); rm(d);
+});
+
+test('[repository] a unit of work: a contact written in a unit together with the request it names — a NEW request the staged S8a repository writes at the same COMMIT (the deferred key) — commits; a read inside the unit sees the unit\'s own writes; a unit that throws after its writes rolls the rows back (the records held before read the pre-unit values, and a fresh read the stored ones); a contact naming a request that never arrives fails at COMMIT and nothing lands', () => {
   const d = file('unit'); const L = serverOpen(d); const { contacts } = L.repo;
   const sent = (id, requestId) => draftContact({ id, status: 'delivered', recipient: { type: 'player', playerId: 'pl-adult', guardianId: null, minor: false }, requestId, sentAt: NOW, deliveredAt: NOW, attempts: [{ at: NOW, ok: true, code: null }], keys: { create: null, send: { key: null, fp: `{"contactId":"${id}"}` }, record: null }, history: [] });
   L.unit(() => { L.recruitment.requests.create(contactRequest('req-new', 'rct-new')); contacts.create(sent('rct-new', 'req-new')); });
   withRo(d, (s) => { assert.equal(col(s, "SELECT request_id FROM recruitment_contacts WHERE id = 'rct-new'"), 'req-new'); assert.equal(col(s, "SELECT contact_id FROM recruitment_requests WHERE id = 'req-new'"), 'rct-new'); });
   const held = L.repo.contacts.byId('rct-1'); const before = withRo(d, fullDump);
-  assert.throws(() => L.unit(() => { contacts.update('rct-1', (x) => { x.subject = 'In the unit'; }); contacts.create(draftContact({ id: 'rct-gone', history: [] })); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
-  assert.equal(withRo(d, fullDump), before, 'the rows rolled back'); assert.equal(held.subject, 'Next season'); assert.equal(L.repo.contacts.byId('rct-1').subject, 'Next season'); assert.equal(L.repo.contacts.byId('rct-gone'), null, 'the mirror rolled back');
+  assert.throws(() => L.unit(() => {
+    contacts.update('rct-1', (x) => { x.subject = 'In the unit'; }); contacts.create(draftContact({ id: 'rct-gone', history: [] }));
+    assert.equal(contacts.byId('rct-1').subject, 'In the unit', 'a read inside the unit sees its update'); assert.ok(contacts.forCase(contacts.byId('rct-gone').caseId).some((c) => c.id === 'rct-gone'), 'and its create');
+    throw new Error('synthetic unit failure');
+  }), /synthetic unit failure/);
+  assert.equal(withRo(d, fullDump), before, 'the rows rolled back'); assert.equal(held.subject, 'Next season'); assert.equal(L.repo.contacts.byId('rct-1').subject, 'Next season'); assert.equal(L.repo.contacts.byId('rct-gone'), null, 'a fresh read sees the rollback');
   assert.throws(() => L.unit(() => { contacts.create(sent('rct-dangling', 'req-never')); }), /FOREIGN KEY constraint failed/);
   assert.equal(withRo(d, fullDump), before); assert.equal(L.repo.contacts.byId('rct-dangling'), null); assert.equal(L.store.sqlite.isTransaction, false);
   L.close(); rm(d);
@@ -189,7 +232,7 @@ test('[repository] the deletion unit\'s redactions: the contacts about the playe
     assert.equal(col(s, "SELECT by_name FROM offer_history WHERE id = 'aud-p'"), null); assert.equal(col(s, "SELECT subject_removed_at FROM recruitment_offers WHERE id = 'rof-1'"), NOW);
     assert.equal(col(s, "SELECT subject_removed_at FROM recruitment_offers WHERE id = 'rof-2'"), TX.removed, 'another player\'s offer is untouched');
   });
-  assert.equal(L.repo.offers.byId('rof-1').responses[0].actorName, null, 'the mirror follows');
+  assert.equal(L.repo.offers.byId('rof-1').responses[0].actorName, null, 'a read follows the redaction');
   L.close(); rm(d);
 });
 

@@ -63,14 +63,8 @@ export function registerOffers(rawCtx) {
   if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.offers) throw new TypeError('registerOffers needs the contacts/offers repository, unit and afterCommit from the data layer');
   const offers = recruitmentContactsOffers.offers;
 
-  // The store is created HERE, at registration, on every boot (the M12–M16
-  // "module" guarantee in storeContract.mjs). No migration: nothing is
-  // backfilled and no lifecycle state is reinterpreted as an Offer (§60–§62).
-  // Since migration 0017 (S8c) the data layer publishes `db.recruitmentOffers`
-  // as a read-only view over the offer tables before this module registers, so
-  // the `??=` below is a no-op there; it still creates the container on a file
-  // that has not cut over.
-  db.recruitmentOffers ??= [];
+  // The offers live in their typed tables (migration 0017) and every read is a
+  // query of the repository (§4.3 step 2): there is no db.recruitmentOffers.
 
   const err = (res, error, message, extra = {}) => sendOfferError(res, { error, message, ...extra }, 'offer');
   const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
@@ -125,15 +119,6 @@ export function registerOffers(rawCtx) {
   const withSigning = (o, at, view) => ({ ...view, signing: signingSummary ? signingSummary(o.id, o.orgId, at) : null });
   const clubView = (o, at) => withSigning(o, at, offerClubView(o, at));
 
-  function storeOr500(res) {
-    if (!Array.isArray(db.recruitmentOffers)) {
-      console.error('OFFER store_missing db.recruitmentOffers is absent or not a list');
-      err(res, 'OFFER_STORE_MISSING', 'Offers cannot be served right now.');
-      return null;
-    }
-    return db.recruitmentOffers;
-  }
-
   // ------------------------------------------------------------- lookups
 
   /** Room + role + capability, through M17's concealing lookup. */
@@ -150,8 +135,8 @@ export function registerOffers(rawCtx) {
 
   /** An Offer of THIS organisation, or concealed. Then the room, through the same lookup. */
   function offerFor(req, res, need) {
-    if (!storeOr500(res)) return null;
-    const o = db.recruitmentOffers.find((x) => x && x.id === req.params.id && x.orgId === req.org.id) ?? null;
+    const found = offers.byId(req.params.id);
+    const o = found && found.orgId === req.org.id ? found : null;
     if (!o) { notFound(res, 'club'); return null; }
     const problems = offerIntegrity(o, { orgId: req.org.id });
     if (problems.length) { console.error(`OFFER integrity ${o.id}: ${problems.join(',')}`); err(res, 'OFFER_STATE_UNKNOWN', 'This Offer cannot be read.'); return null; }
@@ -170,7 +155,7 @@ export function registerOffers(rawCtx) {
     return { offer: o, room, role };
   }
 
-  const offersOfCase = (kase) => (db.recruitmentOffers ?? []).filter((o) => o && o.caseId === kase.id && o.orgId === kase.orgId);
+  const offersOfCase = (kase) => offers.forCase(kase.id).filter((o) => o.orgId === kase.orgId);
   const liveOfferOf = (kase, at) => offersOfCase(kase).find((o) => ['DRAFT', 'ISSUED'].includes(offerStatus(o, at))) ?? null;
   const subjectRemoved = (kase) => !!kase.subjectRemovedAt || !findPlayer(kase.playerId);
 
@@ -281,7 +266,6 @@ export function registerOffers(rawCtx) {
   orgRouter.get('/rooms/:id/offers', (req, res) => {
     const got = roomFor(req, res, 'offer_view');
     if (!got) return;
-    if (!storeOr500(res)) return;
     const { room: kase, role } = got;
     const at = now(req);
     const offers = offersOfCase(kase).map((o) => ({ ...clubView(o, at), integrity: [...offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }), ...offerCaseConsistency(o, kase, at)] })).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
@@ -306,7 +290,6 @@ export function registerOffers(rawCtx) {
   orgRouter.post('/rooms/:id/offers', (req, res) => {
     const got = roomFor(req, res, 'offer_draft');
     if (!got) return;
-    if (!storeOr500(res)) return;
     const { room: kase, role } = got;
     const at = now(req);
     const key = normaliseOfferClientKey(req.body?.clientKey);
@@ -671,8 +654,7 @@ export function registerOffers(rawCtx) {
 
   function recipientOffers({ by, actorId, playerIds, at }) {
     const out = [];
-    for (const o of db.recruitmentOffers ?? []) {
-      if (!o || !playerIds.includes(o.playerId)) continue;
+    for (const o of offers.forPlayers(playerIds)) {
       if (!soundOffer(o, at)) continue;
       const live = liveRevision(o);
       if (!live) continue; // a draft — or a draft withdrawn before issue — is invisible, not redacted
@@ -685,7 +667,6 @@ export function registerOffers(rawCtx) {
   }
 
   function recipientOffer(req, res, { by, actorId, playerIds }) {
-    if (!storeOr500(res)) return null;
     const at = now(req);
     const o = recipientOffers({ by, actorId, playerIds, at }).find((x) => x.id === req.params.id) ?? null;
     if (!o) { notFound(res, by); return null; }
@@ -708,7 +689,6 @@ export function registerOffers(rawCtx) {
 
   function listHandler(by) {
     return (req, res) => {
-      if (!storeOr500(res)) return;
       const at = now(req);
       const actorId = by === 'guardian' ? req.guardian.id : req.player.id;
       const playerIds = by === 'guardian' ? req.guardian.childIds : [req.player.id];
@@ -930,8 +910,8 @@ export function registerOffers(rawCtx) {
     if (licenceCurrent !== true) return res.status(403).json({ error: 'LICENCE_NOT_CURRENT', rule: 'LICENCE', message: 'This client\'s Offers are not open to you right now.' });
     const player = findPlayer(a.clientId);
     const items = [];
-    for (const o of db.recruitmentOffers ?? []) {
-      if (!o || o.playerId !== a.clientId || !soundOffer(o, at)) continue;
+    for (const o of offers.forPlayer(a.clientId)) {
+      if (!soundOffer(o, at)) continue;
       if (!o.agentShare || o.agentShare.agentUserId !== req.orgUser.id) continue; // not shared with THIS agent: invisible
       if (!liveRevision(o)) continue;
       items.push(withSigning(o, at, offerAgentView(o, at, { orgName: orgOf(o.orgId)?.name ?? null })));

@@ -23,10 +23,11 @@
 // Measured at 100 / 500 / 1000 rooms, in memory, against synthetic snapshots
 // of the exact shapes the server stores. Measurements only: one machine, warm
 // process, no SLA is claimed and none of these figures should be quoted as one.
-import { buildReportingContext, buildDashboard } from '../m20/dashboard.mjs';
+import { buildDashboard } from '../m20/dashboard.mjs';
 import { resolveWindow, METRIC_IDS } from '../m20/metrics.mjs';
 import { transitions, firstReachedAt, firstTerminalAt } from '../m20/funnels.mjs';
 import { stageVisits } from '../m20/timeSeries.mjs';
+import { buildReportingContext } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 5, 15, 12);

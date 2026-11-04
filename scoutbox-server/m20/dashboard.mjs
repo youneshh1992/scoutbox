@@ -89,7 +89,7 @@ const projectDecision = (d) => ({
 });
 
 export function buildReportingContext({
-  db, org, window: w, now = Date.now(), orgCanSee, findPlayer, filters = {},
+  db, reads = {}, org, window: w, now = Date.now(), orgCanSee, findPlayer, filters = {},
 }) {
   const orgId = org.id;
 
@@ -179,9 +179,11 @@ export function buildReportingContext({
     // M23 P8 — the canonical records the journey funnel counts. Org-scoped and
     // room-filtered like decisions; ids, states and instants only reach the
     // projection (the metric's `reads` declaration is asserted at boot).
-    contacts: (db.recruitmentContacts ?? []).filter((c) => c && c.orgId === orgId && keptRoomIds.has(c.caseId)),
+    // The contacts and offers come from SQL (§4.3 step 2): `reads` is the data layer's recruitmentReads; a context built
+    // without it (a unit fixture over plain collections) has none, as it had none without the collections.
+    contacts: (reads.contacts?.forOrg(orgId) ?? []).filter((c) => keptRoomIds.has(c.caseId)),
     assessments: (db.assessments ?? []).filter((a) => a && a.orgId === orgId),
-    offers: (db.recruitmentOffers ?? []).filter((o) => o && o.orgId === orgId && keptRoomIds.has(o.caseId)),
+    offers: (reads.offers?.forOrg(orgId) ?? []).filter((o) => keptRoomIds.has(o.caseId)),
     packages: (db.signingPackages ?? []).filter((p) => p && p.orgId === orgId && keptRoomIds.has(p.caseId)),
     signings: (db.signings ?? []).filter((s) => s && s.orgId === orgId),
     // M23 P4B: trial invitations (requests of type trial tied to a case) for

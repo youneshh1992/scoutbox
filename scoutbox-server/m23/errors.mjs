@@ -134,7 +134,6 @@ export const M23_ERROR_HTTP = table({
 
   // ---- 500: ours.
   CONTACT_STATE_UNKNOWN: 500,
-  CONTACT_STORE_MISSING: 500,
 
   // ======================================================== M23 P4B Trial
   // Same bands, same rule: no default. Every code below is produced by

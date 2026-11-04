@@ -59,7 +59,6 @@ export function registerContact(ctx) {
   if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.contacts) throw new TypeError('registerContact needs the contacts/offers repository, unit and afterCommit from the data layer');
   const contacts = recruitmentContactsOffers.contacts;
   const now = () => Date.now();
-  const store = () => (Array.isArray(db.recruitmentContacts) ? db.recruitmentContacts : null);
   const actorOf = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const limited = (action, keyPart) => !!rateLimit?.limited(action, keyPart);
@@ -87,22 +86,12 @@ export function registerContact(ctx) {
     return { room, role };
   }
 
-  function storeOr500(res) {
-    const s = store();
-    if (!s) {
-      console.error('CONTACT store_missing db.recruitmentContacts is absent or not a list');
-      err(res, 'CONTACT_STORE_MISSING', 'Contacts cannot be served right now.');
-    }
-    return s;
-  }
-
   /** This case's contacts, corrupt records excluded and named in the log. */
   function contactsOf(room) {
-    const s = store() ?? [];
     const good = [];
     let omitted = 0;
-    for (const c of s) {
-      if (!c || c.caseId !== room.id || c.orgId !== room.orgId) continue;
+    for (const c of contacts.forCase(room.id)) {
+      if (c.orgId !== room.orgId) continue;
       const problems = contactIntegrity(c, { orgId: room.orgId, caseId: room.id });
       if (problems.length) { omitted += 1; console.error(`CONTACT integrity ${c.id ?? '?'}: ${problems.join(',')}`); continue; }
       good.push(c);
@@ -112,9 +101,8 @@ export function registerContact(ctx) {
   }
 
   function findContact(req, res, room) {
-    const s = storeOr500(res);
-    if (!s) return null;
-    const c = s.find((x) => x && x.id === req.params.cid && x.caseId === room.id && x.orgId === room.orgId);
+    const found = contacts.byId(req.params.cid);
+    const c = found && found.caseId === room.id && found.orgId === room.orgId ? found : null;
     if (!c) { err(res, 'CONTACT_NOT_FOUND', 'No such contact.'); return null; }
     const problems = contactIntegrity(c, { orgId: room.orgId, caseId: room.id });
     if (problems.length) {
@@ -245,14 +233,13 @@ export function registerContact(ctx) {
   orgRouter.get('/rooms/:id/contacts', (req, res) => {
     const got = roomFor(req, res, 'contact_view');
     if (!got) return;
-    if (!storeOr500(res)) return;
     const { room, role } = got;
     const { list, omitted } = contactsOf(room);
     // The preview asks for the widest mode the club could choose, so the club can
     // see whether an agent WOULD be a party before it drafts anything. Asking is
     // not routing: nothing is sent and nobody is told.
     const { recipient: routing, routing: route } = routeFor(req, room, 'both');
-    const cooldown = cooldownFor(store(), { orgId: room.orgId, playerId: room.playerId, now: now() });
+    const cooldown = cooldownFor(contacts.forOrgPlayer(room.orgId, room.playerId), { orgId: room.orgId, playerId: room.playerId, now: now() });
     res.json({
       items: list.map(contactView),
       omitted,
@@ -281,8 +268,6 @@ export function registerContact(ctx) {
     const got = roomFor(req, res, 'contact_write');
     if (!got) return;
     const { room } = got;
-    const s = storeOr500(res);
-    if (!s) return;
 
     const key = normaliseClientKey(req.body?.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
@@ -452,7 +437,7 @@ export function registerContact(ctx) {
     const recipient = routing.recipient;
     const player = findPlayer(room.playerId);
 
-    const cooldown = cooldownFor(store(), { orgId: room.orgId, playerId: room.playerId, now: now(), exceptId: c.id });
+    const cooldown = cooldownFor(contacts.forOrgPlayer(room.orgId, room.playerId), { orgId: room.orgId, playerId: room.playerId, now: now(), exceptId: c.id });
     if (cooldown) return err(res, 'CONTACT_COOLDOWN', 'A contact was delivered to this player recently and has not been answered yet. Wait before sending another.', { retryAt: cooldown.retryAt });
 
     const content = validateContactContent({ subject: c.subject, body: c.body });
@@ -581,8 +566,6 @@ export function registerContact(ctx) {
     const got = roomFor(req, res, 'contact_write');
     if (!got) return;
     const { room } = got;
-    const s = storeOr500(res);
-    if (!s) return;
 
     const key = normaliseClientKey(req.body?.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
@@ -649,10 +632,9 @@ export function registerContact(ctx) {
    * route's unit of work, so the answer and the Contact commit together.
    */
   ctx.onRequestResponded = ({ request, accept, message = null, by, at = Date.now() }) => {
-    const s = store();
-    if (!s || !request?.contactId) return null;
-    const found = s.find((x) => x && x.id === request.contactId && x.requestId === request.id);
-    if (!found || found.status !== 'delivered') return null;
+    if (!request?.contactId) return null;
+    const found = contacts.byId(request.contactId);
+    if (!found || found.requestId !== request.id || found.status !== 'delivered') return null;
     const kind = accept ? 'accepted' : 'declined';
     const c = contacts.update(found.id, (d) => {
       d.status = 'responded';

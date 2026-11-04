@@ -38,8 +38,7 @@ import {
   validateContactContent, validateContactReply, normaliseClientKey, resolveContactRecipient,
   validateExternalRecord, cooldownFor, contactIntegrity, contactView, contactMilestone, plainShared,
 } from '../m23/contact.mjs';
-import { createEvidenceProvider } from '../m23/evidence.mjs';
-import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES } from '../m23/journey.mjs';
+import { JOURNEY_REQUIRED_STORES } from '../m23/journey.mjs';
 import { canTransitionRecruitmentCase } from '../m23/lifecycle.mjs';
 import { M23_ERROR_HTTP, httpStatusFor } from '../m23/errors.mjs';
 import { EVENT_REGISTRY } from '../m182/eventRegistry.mjs';
@@ -48,6 +47,7 @@ import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES }
 import { guaranteeFor } from '../storeContract.mjs';
 import { roomCan } from '../m17/shared.mjs';
 import { pickPort } from './testPort.mjs';
+import { buildRecruitmentJourney, createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const PORT = pickPort(5900, 200, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
@@ -277,8 +277,10 @@ section('V — a draft is not evidence; the journey carries milestones, never wo
   ok(v2.ok === true && v2.to === 'contacted', 'and permits it once a contact was delivered');
 
   // Journey.
-  ok(JOURNEY_REQUIRED_STORES.includes('recruitmentContacts'), 'the journey declares the contacts store required');
-  ok(PRODUCTION_REQUIRED_STORES.includes('recruitmentContacts') && guaranteeFor('recruitmentContacts') === 'migration', 'and the migration registry guarantees it');
+  // §4.3 step 2 (rewritten: these described the old storage): the contacts are read through SQL, not a db collection.
+  const noContacts = buildRecruitmentJourney({ recruitmentCases: [], roomDecisions: [], requests: [], trials: [], assessments: [], signings: [] }, 'k', { kind: 'org_staff', orgId: 'o1' });
+  ok(noContacts.ok === false && noContacts.error === 'JOURNEY_STORE_MISSING' && noContacts.missing.includes('recruitmentContacts'), 'the journey requires the contacts: without their queries it reports the store missing');
+  ok(!PRODUCTION_REQUIRED_STORES.includes('recruitmentContacts') && guaranteeFor('recruitmentContacts') === null, 'and they are no db collection (a table since 0017, read through SQL)');
   const db = {
     recruitmentCases: [{ ...kase, room: { status: 'contacted', rev: 2 }, history: [{ action: 'room_status_changed', at: 10, by: { name: 'A' }, detail: { from: 'contact_planned', to: 'contacted' } }] }],
     roomDecisions: [], requests: [{ id: 'r1', orgId: 'o1', playerId: 'p1', type: 'contact', status: 'accepted', routedTo: 'player', createdAt: 10, contactId: 'cA', message: `${SENTINEL} shared body` }],
@@ -331,7 +333,7 @@ section('V — registry, limits and schema');
   ok(RATE_LIMIT_POLICY.contact_response.scope === 'actor', 'the response limit is per actor, so a club cannot exhaust a recipient\'s quota');
   ok(SCHEMA_VERSION >= 2303 && MIGRATIONS.some((m) => m.id === 'm230_004_recruitment_contacts'), `schema ${SCHEMA_VERSION} (2303 introduced the Contact step; later phases may add steps, never remove this one)`);
   const fresh = {}; runMigrations(fresh);
-  ok(Array.isArray(fresh.recruitmentContacts), 'a fresh database has the store after migrations alone');
+  ok(!Object.hasOwn(fresh, 'recruitmentContacts'), 'a fresh database has no contacts collection after migrations: the contacts are a table, read through SQL (§4.3 step 2; rewritten, it described the old storage)');
   const old = { recruitmentContacts: [{ id: 'keep' }] }; runMigrations(old);
   ok(old.recruitmentContacts.length === 1 && old.recruitmentContacts[0].id === 'keep', 'an existing store is never overwritten');
   for (const code of Object.keys(M23_ERROR_HTTP).filter((c) => c.startsWith('CONTACT_'))) {

@@ -25,10 +25,10 @@ import { fileURLToPath } from 'node:url';
 import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../m182/migrations.mjs';
 import { integrityReport } from '../m182/integrity.mjs';
 import { openStore } from '../store.mjs';
-import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES } from '../m23/journey.mjs';
-import { createEvidenceProvider } from '../m23/evidence.mjs';
+import { JOURNEY_REQUIRED_STORES } from '../m23/journey.mjs';
 import { contactIntegrity, CONTACT_STATUSES } from '../m23/contact.mjs';
 import { guaranteeFor } from '../storeContract.mjs';
+import { buildRecruitmentJourney, createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
@@ -114,12 +114,15 @@ const stableJson = (db) => { const { schema, ...rest } = db; const { updatedAt, 
 // ======================================================= §100 — the guarantee
 section('§100/§101 — the store is guaranteed by the registry, on every path');
 {
-  ok(guaranteeFor('recruitmentContacts') === 'migration', 'recruitmentContacts is classified migration-guaranteed in the store contract');
-  ok(PRODUCTION_REQUIRED_STORES.includes('recruitmentContacts'), 'and is in the derived required list');
-  ok(JOURNEY_REQUIRED_STORES.includes('recruitmentContacts'), 'and the journey declares it required');
+  // §4.3 step 2 (rewritten: these described the old storage). The contacts are rows of recruitment_contacts, read
+  // through SQL; there is no db collection to guarantee, and the registry step that created one is a recorded no-op.
+  ok(guaranteeFor('recruitmentContacts') === null, 'recruitmentContacts is not a db collection in the store contract (a table since 0017, read through SQL)');
+  ok(!PRODUCTION_REQUIRED_STORES.includes('recruitmentContacts'), 'and is not in the derived required list');
+  const noContacts = buildRecruitmentJourney({ recruitmentCases: [], roomDecisions: [], requests: [], trials: [], assessments: [], signings: [] }, 'k', { kind: 'org_staff', orgId: 'o1' });
+  ok(noContacts.ok === false && noContacts.error === 'JOURNEY_STORE_MISSING' && noContacts.missing.includes('recruitmentContacts'), 'the journey still requires the contacts: without their queries it reports the store missing');
   const fresh = {};
   const r = runMigrations(fresh);
-  ok(r.to === SCHEMA_VERSION && Array.isArray(fresh.recruitmentContacts), `a clean database migrates to ${SCHEMA_VERSION} with an empty contacts store`);
+  ok(r.to === SCHEMA_VERSION && !Object.hasOwn(fresh, 'recruitmentContacts'), `a clean database migrates to ${SCHEMA_VERSION} and creates no db.recruitmentContacts`);
   ok(MIGRATIONS.find((m) => m.id === 'm230_004_recruitment_contacts')?.version === 2303, 'the step is numbered 2303');
 
   // A pre-P3 snapshot (schema 2302) gains the store and nothing else moves.
@@ -129,7 +132,7 @@ section('§100/§101 — the store is guaranteed by the registry, on every path'
   const beforeOthers = stableJson({ ...old, schema: undefined });
   const up = runMigrations(old);
   ok(up.ran[0] === 'm230_004_recruitment_contacts' && up.ran.every((id) => /^m230_00[4-9]/.test(id)) && up.to === SCHEMA_VERSION, `a P2.5-era snapshot (2302) runs the Contact step first, then only later M23 steps (${up.ran.join(', ')})`);
-  ok(Array.isArray(old.recruitmentContacts) && old.recruitmentContacts.length === 0, 'and gains an empty store');
+  ok(!Object.hasOwn(old, 'recruitmentContacts'), 'and creates no db collection (the step is a recorded no-op since §4.3 step 2)');
   const afterOthers = stableJson({ ...old, recruitmentContacts: undefined, schema: undefined });
   neg(beforeOthers === afterOthers, 'and no other collection changed');
   const again = runMigrations(old);

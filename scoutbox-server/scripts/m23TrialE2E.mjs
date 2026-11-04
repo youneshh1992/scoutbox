@@ -48,7 +48,8 @@ import { EVENT_REGISTRY } from '../m182/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
 import { MIGRATIONS, SCHEMA_VERSION, runMigrations } from '../m182/migrations.mjs';
 import { STATUS_EVIDENCE_REQUIRED, roomCan } from '../m17/shared.mjs';
-import { createEvidenceProvider, EVIDENCE_KINDS } from '../m23/evidence.mjs';
+import { EVIDENCE_KINDS } from '../m23/evidence.mjs';
+import { createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const PORT = 6100 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;

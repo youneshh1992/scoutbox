@@ -39,12 +39,13 @@ import { EVENT_REGISTRY } from '../m182/eventRegistry.mjs';
 import { CATEGORIES, TYPE_CATEGORY } from '../m182/notificationPrefs.mjs';
 import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
 import { STATUS_EVIDENCE_REQUIRED, ROOM_TRANSITIONS, ROOM_STATUSES, roomCan } from '../m17/shared.mjs';
-import { createEvidenceProvider, EVIDENCE_KINDS } from '../m23/evidence.mjs';
+import { EVIDENCE_KINDS } from '../m23/evidence.mjs';
 import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS, NULL_EVIDENCE_PROVIDER } from '../m23/lifecycle.mjs';
 import { PRODUCTION_STORE_CONTRACT as STORE_CONTRACT } from '../storeContract.mjs';
 import { SCHEMA_VERSION, MIGRATIONS } from '../m182/migrations.mjs';
 import { isAdult } from '../domain.mjs';
 import { isExpiredAt, parseInstant } from '../temporal.mjs';
+import { createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const PORT = 6700 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -90,8 +91,9 @@ section('A — model and store: seven statuses, terminal at revision level, one 
   ok(OFFER_LIMITS.revisions === 20 && OFFER_LIMITS.documents === 10 && OFFER_LIMITS.internalNote === 2000 && OFFER_LIMITS.minExpiryMs === H && OFFER_LIMITS.maxExpiryMs === 180 * DAY, 'A7 explicit bounds: 20 revisions, 10 documents, notes of 2000, expiry within 1 h … 180 d');
   neg(Object.values(MINOR_OFFER_PATHWAY_ENABLED).every((v) => v === false) && minorOfferPathwayOpen('GB') === false && minorOfferPathwayOpen('XX') === false && minorOfferPathwayOpen(undefined) === false && minorOfferPathwayOpen('__proto__') === false, 'A8 the minor pathway is CLOSED in every jurisdiction, including unknown ones and prototype names (§13 fail-closed)');
   ok(minorOfferPathwayOpen('GB', { GB: true, DEFAULT: false }) === true && minorOfferPathwayOpen('FR', { GB: true, DEFAULT: false }) === false, 'A8b opening it is a policy-table change, per jurisdiction');
-  // The store: module-guaranteed, owned by m28, created without a migration.
-  ok(STORE_CONTRACT.recruitmentOffers?.guarantee === 'module' && STORE_CONTRACT.recruitmentOffers.owner === 'm28', 'A9 recruitmentOffers is a MODULE-guaranteed store owned by m28 (§4)');
+  // The store: no db collection since §4.3 step 2 (rewritten, it described the old storage) — the offers are their
+  // tables, read through SQL; still created without a P6 migration.
+  ok(STORE_CONTRACT.recruitmentOffers === undefined, 'A9 recruitmentOffers is not a db collection: the offers are their tables, read through SQL (§4.3 step 2)');
   ok(SCHEMA_VERSION === 2308 && !MIGRATIONS.some((m) => /offer/i.test(m.id ?? '')), `A10 schema is ${SCHEMA_VERSION} (P7's signing store is the one step past 2307) and still no migration names an Offer (§60: reuse the reserved store, no unnecessary migration)`);
   ok(STORE_CONTRACT.signings?.guarantee !== undefined, 'A11 the signings store contract is untouched');
   // Capabilities.
@@ -106,10 +108,10 @@ section('A — model and store: seven statuses, terminal at revision level, one 
   ok(CATEGORIES.offer_updates?.mandatory === false && CATEGORIES.offer_updates.default === true && TYPE_CATEGORY.recruitment_offer === 'offer_updates', 'A16 one notification category, on by default, not mandatory: a recipient may choose not to hear about Offers (§37)');
   // Errors.
   const codes = Object.keys(M28_ERROR_HTTP);
-  ok(codes.length === 24 && codes.every((c) => /^OFFER_/.test(c)) && [400, 403, 404, 409, 422, 500].every((s) => Object.values(M28_ERROR_HTTP).includes(s)), 'A17 24 OFFER_* codes across six status bands, in one table');
+  ok(codes.length === 23 && codes.every((c) => /^OFFER_/.test(c)) && [400, 403, 404, 409, 422, 500].every((s) => Object.values(M28_ERROR_HTTP).includes(s)), 'A17 23 OFFER_* codes across six status bands, in one table (OFFER_STORE_MISSING left with the db collection, §4.3 step 2)');
   neg(M28_ERROR_HTTP.__proto__ === undefined && M28_ERROR_HTTP.constructor === undefined && M28_ERROR_HTTP.toString === undefined, 'A18 the error table has no prototype: an unknown code cannot inherit a status');
   ok(M28_ERROR_HTTP.OFFER_NOT_FOUND === 404 && M28_ERROR_HTTP.OFFER_DOCUMENT_NOT_FOUND === 404 && M28_ERROR_HTTP.OFFER_BLOCKED === 403 && M28_ERROR_HTTP.OFFER_EXPIRED === 409 && M28_ERROR_HTTP.OFFER_RECIPIENT_INVALID === 422 && M28_ERROR_HTTP.OFFER_COMPLIANCE_BLOCKED === 422, 'A19 the bands: concealment 404, own standing 403, state 409, world 422');
-  neg(publicErrorBody({ error: 'OFFER_STORE_MISSING', message: 'x', stack: 's', detail: 'd' }).message !== 'x' && !has(publicErrorBody({ error: 'OFFER_STATE_INVALID', message: 'm', stack: 's', internal: 'i' }), 'stack'), 'A20 a 500 body is generic and no body carries a field outside the allowlist');
+  neg(publicErrorBody({ error: 'OFFER_STATE_UNKNOWN', message: 'x', stack: 's', detail: 'd' }).message !== 'x' && !has(publicErrorBody({ error: 'OFFER_STATE_INVALID', message: 'm', stack: 's', internal: 'i' }), 'stack'), 'A20 a 500 body is generic and no body carries a field outside the allowlist');
   ok(PUBLIC_ERROR_FIELDS.includes('reasons') && PUBLIC_ERROR_FIELDS.includes('blockers') && !PUBLIC_ERROR_FIELDS.includes('note') && !PUBLIC_ERROR_FIELDS.includes('rationale'), 'A21 the allowlist carries reasons and blockers as codes, never a note or rationale');
   // The drift guard: every code the m28 source can produce is in the table.
   const rawSrc = readdirSync(path.join(HERE, '..', 'm28')).filter((f) => f.endsWith('.mjs')).map((f) => readFileSync(path.join(HERE, '..', 'm28', f), 'utf8')).join('\n');

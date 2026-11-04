@@ -51,7 +51,8 @@ export function migrateM20(db) {
 }
 
 export function registerAnalytics(ctx) {
-  const { db, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
+  const { db, recruitmentReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
+  if (typeof recruitmentReads?.contacts?.forOrg !== 'function' || typeof recruitmentReads?.offers?.forOrg !== 'function') throw new TypeError('registerAnalytics needs recruitmentReads (contacts, offers) from the data layer');
   migrateM20(db);
 
   // Counters only, and deliberately only two: how often the page was read and
@@ -138,7 +139,7 @@ export function registerAnalytics(ctx) {
   }
 
   const contextFor = (req, parsed) => buildReportingContext({
-    db, org: req.org, window: parsed.window, now: now(), orgCanSee, findPlayer, filters: parsed.filters,
+    db, reads: recruitmentReads, org: req.org, window: parsed.window, now: now(), orgCanSee, findPlayer, filters: parsed.filters,
   });
 
   // ------------------------------------------------------------- the catalogue
@@ -248,6 +249,6 @@ export function registerAnalytics(ctx) {
 
   return {
     analyticsCatalogue: () => ({ policyVersion: RECRUITMENT_ANALYTICS_POLICY_VERSION, metrics: METRIC_IDS.length }),
-    buildReportingContext: (org, opts) => buildReportingContext({ db, org, orgCanSee, findPlayer, ...opts }),
+    buildReportingContext: (org, opts) => buildReportingContext({ db, reads: recruitmentReads, org, orgCanSee, findPlayer, ...opts }),
   };
 }

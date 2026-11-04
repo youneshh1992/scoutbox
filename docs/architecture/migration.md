@@ -79,12 +79,12 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S4b-R | retained record on player deletion | `0014_player_erasure` | `identity.mjs` | direct | done |
 | S8a | recruitment requests, trials | `0015_recruitment` | `recruitment.mjs` | **explicit, typed** (§4.3, 3 Nov) | done |
 | S8b | cases, rooms, decisions | `0016_recruitment_cases` | `recruitmentCases.mjs` | **explicit, typed** (§4.3, 4 Nov) | done |
-| S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **explicit, typed** (§4.3, 3 Nov) | done |
+| S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **explicit, typed, SQL reads** (§4.3, 3–4 Nov) | done |
 | S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed** | implemented; accept on green tests |
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3 step 1 and 3 done (S8a–S8c explicit and typed, 4 Nov); steps 2 and 4 next |
+| — | recruitment end-state proof | — | — | — | §4.3 steps 1 and 3 done (4 Nov); step 2: S8c done (4 Nov), then S8d, S8a, S8b; step 4 after |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -242,6 +242,26 @@ offers are immediate `RESTRICT`, and the writers name a missing case with its id
   onto the last history entry (`statusDetail`).
 - Test fixtures had drifted from the writers (a `proceed` outcome, budget kinds the route never accepted, a string
   passport revision stored as a number). Typing the fixtures found them before the batteries did.
+
+**Step 2: S8c reads through SQL, done 4 November** (on `feat/sqlite-schema`). The contacts and offers have no mirror and
+no `db.*` view: `db.recruitmentContacts` and `db.recruitmentOffers` throw when read or assigned, naming the repository,
+so a missed reader fails loudly instead of seeing an empty list. The repository answers `byId`, `forCase`,
+`forOrgPlayer`, `forPlayer`, `forRequest` / `forAgent` (contacts), `forPlayers` / `forAgentShare` (offers) and `forOrg`
+from the existing indexes, in insertion order, as fresh deep-frozen records. A read inside a unit of work sees the
+unit's own writes, so the participant hook that restored the mirrors is gone. Modules get the queries as
+`recruitmentReads` in their context; the pure projectors (the journey, the evidence provider, the dashboard context)
+take them as `reads` instead of reading `db`, and the journey reads a case's contacts and offers once instead of
+scanning both collections about a dozen times. The redactions are `UPDATE … WHERE player_id = ?`. The contacts and
+offers left the store contract, the `m230_004` snapshot step is a recorded no-op, and `CONTACT_STORE_MISSING` and
+`OFFER_STORE_MISSING` went with the collections. No list here grows without limit (each is per case, per player or per
+agent client), so nothing pages; the club audit feed, which merges every domain, pages when S8b moves. The batteries
+that call the projectors directly get the same queries over their plain arrays from `scripts/recruitmentReadsFixture.mjs`.
+What we learned, for the next repositories:
+
+- Make the old name throw rather than delete it. The `??= []` lines and `Array.isArray(db.x)` guards would otherwise
+  quietly create or report an empty collection; the throwing getter found every remaining reader on the first run.
+- The "store missing" branches (`storeOr500`, `JOURNEY_REQUIRED_STORES`) were about the blob; their tests now check
+  the same behaviour through the queries (a projector given no contact queries still reports the store missing).
 
 ### 4.4 The end-to-end test estate
 

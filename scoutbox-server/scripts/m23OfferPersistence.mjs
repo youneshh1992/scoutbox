@@ -77,7 +77,7 @@ const S_NOTE = 'PRIVATE_NOTE_PERSISTS_9911';
 section('1 — no P6 migration: schema 2307, a module-guaranteed store, an absent store boots empty');
 {
   ok(SCHEMA_VERSION === 2308 && MIGRATIONS.length === 18 && !MIGRATIONS.some((m) => /offer/i.test(m.id)), `1.1 schema ${SCHEMA_VERSION}, ${MIGRATIONS.length} migrations, none named for an Offer`);
-  ok(guaranteeFor('recruitmentOffers') === 'module', '1.2 recruitmentOffers is module-guaranteed (created at registration, every boot)');
+  ok(guaranteeFor('recruitmentOffers') === null, '1.2 recruitmentOffers is no db collection: the offers are their tables, read through SQL (§4.3 step 2; rewritten, it described the old storage)');
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23op-1-'));
   const s1 = await bootOn(DIR, PORT);
   ok(s1.up, '1.3 a fresh store boots');

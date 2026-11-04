@@ -31,7 +31,8 @@ export function registerM23(rawCtx) {
   // The established seam: isLead, orgCanSee, audit and paginate come from one
   // place rather than being re-derived per milestone.
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
-  const { db, orgRouter, persistNow, isLead } = ctx;
+  const { db, recruitmentReads, orgRouter, persistNow, isLead } = ctx;
+  if (!recruitmentReads?.contacts || !recruitmentReads?.offers) throw new TypeError('registerM23 needs recruitmentReads (contacts, offers) from the data layer');
 
   /**
    * Idempotency for lifecycle actions.
@@ -69,7 +70,7 @@ export function registerM23(rawCtx) {
       orgId: req.org.id,
       userId: req.orgUser.id,
       role: roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) }),
-    }, { now: nowOf(req), evidence: evidenceProvider(), historyLimit: req.query.limit, historyCursor: req.query.cursor });
+    }, { now: nowOf(req), evidence: evidenceProvider(), historyLimit: req.query.limit, historyCursor: req.query.cursor, reads: recruitmentReads });
 
     if (!out.ok) return sendDomainError(res, out, 'journey');
     return res.json(out);
@@ -197,12 +198,7 @@ export function registerM23(rawCtx) {
 }
 
 export function migrateM23() {
-  // P2 introduced no store. P3's `db.recruitmentContacts` is created by the
-  // migration registry (m182/migrations.mjs, `m230_004_recruitment_contacts`)
-  // so it survives an arbitrary restore — not here, where it would exist only
-  // after this module registered. `db.recruitmentOffers` still arrives with
-  // the phase that actually writes offers. Since migration 0017 (S8c) the data
-  // layer publishes both names as read-only views over the contact and offer
-  // tables (repositories/recruitmentContactsOffers.mjs) before any module
-  // registers; the registry's `??= []` is a no-op on a cut-over file.
+  // P2 introduced no store. The contacts (P3) and offers (P6) live in their
+  // typed tables (migration 0017) and are read through SQL, the contacts/offers
+  // repository's queries (§4.3 step 2): there is no db.* collection for them.
 }

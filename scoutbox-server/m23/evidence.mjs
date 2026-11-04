@@ -83,11 +83,16 @@ function signingSupports(signing, kase, packages = null) {
 /**
  * Build the provider over a live database.
  *
+ * `reads` carries the recruitment domains that are read through SQL rather than
+ * `db` (§4.3 step 2): `contacts` and `offers` are the query objects of the
+ * contacts/offers repository (`forOrgPlayer`, `forCase`). A missing one is a
+ * broken composition, answered as an unavailable store, never as "no record".
+ *
  * Pure with respect to the database: it reads and returns a verdict. It never
  * creates, mutates or caches, so asking the same question twice cannot change
  * the answer.
  */
-export function createEvidenceProvider(db) {
+export function createEvidenceProvider(db, reads = {}) {
   return {
     /**
      * @returns {{satisfied: boolean, reason?: string, sourceType?: string, sourceId?: string}}
@@ -122,9 +127,8 @@ export function createEvidenceProvider(db) {
         // recorded as having happened outside ScoutBox. A draft is not
         // evidence; a failed attempt is not evidence; a corrupt record is not
         // evidence. A missing store is a broken database, not "no contact".
-        const contacts = db?.recruitmentContacts;
-        if (!Array.isArray(contacts)) return { satisfied: false, reason: 'contacts_store_unavailable' };
-        const hit = contacts.find((c) => c && c.orgId === kase.orgId && c.playerId === kase.playerId
+        if (typeof reads.contacts?.forOrgPlayer !== 'function') return { satisfied: false, reason: 'contacts_store_unavailable' };
+        const hit = reads.contacts.forOrgPlayer(kase.orgId, kase.playerId).find((c) => c && c.orgId === kase.orgId && c.playerId === kase.playerId
           && CONTACT_EVIDENCE_STATUSES.includes(c.status) && !c.cancelledAt && contactIntegrity(c).length === 0);
         return hit
           ? { satisfied: true, sourceType: 'recruitment_contact', sourceId: hit.id }
@@ -197,8 +201,8 @@ export function createEvidenceProvider(db) {
       // `recordOfferAccepted` with no recipient response is refused here.
       // Reads; never writes.
       if (OFFER_EVIDENCE_KINDS.includes(kind)) {
-        if (!Array.isArray(db?.recruitmentOffers)) return { satisfied: false, reason: 'offers_store_unavailable' };
-        return offerEvidence(db.recruitmentOffers, kase, kind, now);
+        if (typeof reads.offers?.forCase !== 'function') return { satisfied: false, reason: 'offers_store_unavailable' };
+        return offerEvidence(reads.offers.forCase(kase.id), kase, kind, now);
       }
 
       return { satisfied: false, reason: 'not_implemented' };

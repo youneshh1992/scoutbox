@@ -26,8 +26,8 @@ import {
   currentContactForCase, currentTrialForCase, currentOfferForCase, currentSigningForOffer, currentDecisionForCase, currentAssessmentForCase,
   playerNextActionFor, playerStageFor, validateRecruitmentJourney, JOURNEY_CLASSIFICATIONS, TIMELINE_VISIBILITY, timelineVisibleTo,
 } from '../m23/journeyModel.mjs';
-import { buildRecruitmentJourney, JOURNEY_VIEWERS } from '../m23/journey.mjs';
-import { createEvidenceProvider } from '../m23/evidence.mjs';
+import { JOURNEY_VIEWERS } from '../m23/journey.mjs';
+import { buildRecruitmentJourney, createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');

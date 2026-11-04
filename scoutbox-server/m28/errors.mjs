@@ -53,7 +53,6 @@ export const M28_ERROR_HTTP = table({
 
   // ---- 500: ours.
   OFFER_STATE_UNKNOWN: 500,
-  OFFER_STORE_MISSING: 500,
 });
 
 export const httpStatusFor = (code) => M28_ERROR_HTTP[code] ?? null;

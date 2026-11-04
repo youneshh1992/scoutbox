@@ -13,13 +13,13 @@
  * rolls back) and at a snapshot write (the save rolls back). The idempotency keys are columns of their owner
  * (`create_key`, `send_key`, …) and the offer's per-act key lists the rows of `offer_keys`.
  *
- * EXPLICIT WRITES. The two `db.<collection>` arrays are read-only views over the repository's mirrors; every record
- * a view or an operation hands out is a read-only proxy, so an in-place edit throws. A route changes a record by
- * calling an operation: `contacts.create(record)`, `contacts.update(id, (draft) => { … })`, `offers.create`,
- * `offers.update`, and the deletion unit's `redactPlayer`. `update` hands the caller a plain copy to change, types
- * the result whole, writes the record's rows at once and re-reads it from the tables into the mirror. An operation
- * joins the open unit of work (store.unit) or runs a transaction of its own; the mirrors are restored by the unit's
- * rollback through `hook()`.
+ * EXPLICIT WRITES, SQL READS. There is no in-memory mirror and no `db.<collection>` view (§4.3 step 2): readers
+ * call the repository's queries (`contacts.byId`, `contacts.forCase`, `offers.forPlayers`, …), and every record they
+ * get is a fresh, deep-frozen decode, so an in-place edit throws. A route changes a record by calling an operation:
+ * `contacts.create(record)`, `contacts.update(id, (draft) => { … })`, `offers.create`, `offers.update`, and the
+ * deletion unit's `redactPlayer`. `update` hands the caller a plain copy to change, types the result whole, writes
+ * the record's rows at once and returns it read back from the tables. An operation joins the open unit of work
+ * (store.unit) or runs a transaction of its own.
  *
  * References. `org_id` → orgs and `case_id` → recruitment_cases (RESTRICT). A contact's `request_id` →
  * recruitment_requests is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a send writes its contact before the
@@ -31,7 +31,6 @@
  *
  * Refusals name tables, fields and ids — never a subject, a body, a note, a message or a name.
  */
-import { readonlyView, markView } from './readonly.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 import { isPlainObject, ids, tableExists } from './recruitment.mjs';
 import { CONTACT_STATUSES, CONTACT_CHANNELS, CONTACT_MODES, CONTACT_LIMITS, RESPONSE_KINDS } from '../m23/contact.mjs';
@@ -820,32 +819,57 @@ export const CONTACTS_OFFERS_SNAPSHOT = {
   assert(sqlite, { label = 'the snapshot' } = {}) { if (!recruitmentContactsOffersLive(sqlite)) return; assertKeys(sqlite, label); assertPairs(sqlite, label); },
 };
 
-// ------------------------------------------------------------------ the repository (explicit writes; the mirrors; the participant)
+// ------------------------------------------------------------------ the repository (explicit writes; SQL reads; the participant)
+const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
+const CONTACT_READS = {
+  forCase: 'SELECT * FROM recruitment_contacts WHERE case_id = ? ORDER BY rowid',
+  forOrgPlayer: 'SELECT * FROM recruitment_contacts WHERE org_id = ? AND player_id = ? ORDER BY rowid',
+  forPlayer: 'SELECT * FROM recruitment_contacts WHERE player_id = ? ORDER BY rowid',
+  forRequest: 'SELECT * FROM recruitment_contacts WHERE request_id = ? ORDER BY rowid',
+  forAgent: 'SELECT * FROM recruitment_contacts WHERE routing_agent_user_id = ? ORDER BY rowid',
+  forOrg: 'SELECT * FROM recruitment_contacts WHERE org_id = ? ORDER BY rowid',
+};
+const OFFER_READS = {
+  forCase: 'SELECT * FROM recruitment_offers WHERE case_id = ? ORDER BY rowid',
+  forOrgPlayer: 'SELECT * FROM recruitment_offers WHERE org_id = ? AND player_id = ? ORDER BY rowid',
+  forPlayer: 'SELECT * FROM recruitment_offers WHERE player_id = ? ORDER BY rowid',
+  forAgentShare: 'SELECT * FROM recruitment_offers WHERE agent_share_user_id = ? ORDER BY rowid',
+  forOrg: 'SELECT * FROM recruitment_offers WHERE org_id = ? ORDER BY rowid',
+};
+
 /**
  * `createRecruitmentContactsOffersRepository({ sqlite, unit, now, log })`. Every operation joins the open unit of work
  * (a failure poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and
- * re-reads the record into the mirror. A route that writes a contact naming a request created in the same act runs
- * inside a unit, whose COMMIT checks the deferred request key.
+ * returns the record read back from the tables. A route that writes a contact naming a request created in the same act
+ * runs inside a unit, whose COMMIT checks the deferred request key.
+ *
+ * READS ARE SQL (§4.3 step 2). There is no in-memory mirror and no `db.recruitmentContacts` / `db.recruitmentOffers`:
+ * callers ask the repository (`contacts.byId`, `contacts.forCase`, `offers.forPlayer`, …). Every query runs on the
+ * one connection, so a read inside a unit of work sees the unit's own uncommitted writes, and a rolled-back unit
+ * leaves nothing to restore. Each record handed out is a fresh, deep-frozen decode of its rows: an in-place edit
+ * throws, and a change is `update(id, (draft) => …)`. Lists come back in insertion (rowid) order, the order the
+ * mirrors had.
  */
 export function createRecruitmentContactsOffersRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the recruitment contacts/offers repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
   const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
-  const mirrors = { recruitmentContacts: [], recruitmentOffers: [] };
-  const views = Object.fromEntries(RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((n) => [n, markView(readonlyView(mirrors[n], `a ${n} record`))]));
-  const reload = () => { const all = CONTACTS_OFFERS_SNAPSHOT.read(sqlite); for (const n of RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS) { mirrors[n].length = 0; for (const r of all[n]) mirrors[n].push(r); } };
-  const replaceIn = (name, id, record) => { const i = mirrors[name].findIndex((r) => r.id === id); if (i >= 0) mirrors[name][i] = record; else mirrors[name].push(record); return readonlyView(record, `a ${name} record`); };
-  const refresh = (name, id) => (name === 'recruitmentContacts' ? replaceIn(name, id, decodeContact(st, st.contactById.get(id))) : replaceIn(name, id, decodeOffer(st, st.offerById.get(id))));
-  const must = (name, id) => { const r = mirrors[name].find((x) => x.id === id); if (!r) throw refusal('CONTACTS_OFFERS_NOT_FOUND', `${name} ${id} is not a record of the repository`); return r; };
+  const decode = { recruitmentContacts: (row) => deepFreeze(decodeContact(st, row)), recruitmentOffers: (row) => deepFreeze(decodeOffer(st, row)) };
+  const rowById = { recruitmentContacts: st.contactById, recruitmentOffers: st.offerById };
+  const read = (name, id) => { if (typeof id !== 'string') return null; const row = rowById[name].get(id); return row ? decode[name](row) : null; };
+  const must = (name, id) => { const r = read(name, id); if (!r) throw refusal('CONTACTS_OFFERS_NOT_FOUND', `${name} ${id} is not a record of the repository`); return r; };
   const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', t.reason); return t.record; };
   const IMMUTABLE = ['id', 'orgId', 'caseId', 'playerId', 'createdAt'];
   const write = (name, record) => (name === 'recruitmentContacts' ? writeContact(st, record) : writeOffer(st, record));
+  const queries = (name, sql) => Object.fromEntries(Object.entries(sql).map(([k, q]) => { const stmt = sqlite.prepare(q); return [k, (...args) => stmt.all(...args).map(decode[name])]; }));
+  const countOf = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`);
+  const counters = { recruitmentContacts: countOf('recruitment_contacts'), recruitmentOffers: countOf('recruitment_offers') };
 
   /** `create(record)`: a new record, typed whole; an existing id is refused. */
   const create = (name) => (raw) => operation(() => {
     const r = typedOr(name, raw);
-    if (mirrors[name].some((x) => x.id === r.id)) throw refusal('CONTACTS_OFFERS_DUPLICATE', `${TABLE_OF[name]} ${r.id} already exists`);
-    write(name, r); return refresh(name, r.id);
+    if (rowById[name].get(r.id)) throw refusal('CONTACTS_OFFERS_DUPLICATE', `${TABLE_OF[name]} ${r.id} already exists`);
+    write(name, r); return must(name, r.id);
   });
   /**
    * `update(id, change)`: `change` receives a plain copy of the stored record and edits it (or returns a replacement);
@@ -853,63 +877,64 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
    */
   const update = (name) => (id, change) => operation(() => {
     if (typeof change !== 'function') throw new TypeError(`${name}.update(id, change) needs a function that edits the copy it is given`);
-    const draft = clone(must(name, id));
+    const stored = must(name, id);
+    const draft = clone(stored);
     const returned = change(draft);
     const next = typedOr(name, returned === undefined ? draft : returned);
-    for (const k of IMMUTABLE) if (next[k] !== must(name, id)[k]) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `${TABLE_OF[name]} ${id}: ${k} cannot change`);
-    write(name, next); return refresh(name, id);
+    for (const k of IMMUTABLE) if (next[k] !== stored[k]) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', `${TABLE_OF[name]} ${id}: ${k} cannot change`);
+    write(name, next); return must(name, id);
   });
-  const byId = (name) => (id) => { const r = mirrors[name].find((x) => x.id === id); return r ? readonlyView(r, `a ${name} record`) : null; };
 
   const contacts = {
-    create: create('recruitmentContacts'), update: update('recruitmentContacts'), byId: byId('recruitmentContacts'),
+    create: create('recruitmentContacts'), update: update('recruitmentContacts'),
+    /** One contact by id, or null. Callers check the organisation and case they expect. */
+    byId: (id) => read('recruitmentContacts', id),
+    /** forCase(caseId), forOrgPlayer(orgId, playerId), forPlayer(playerId), forRequest(requestId), forAgent(agentUserId), forOrg(orgId). */
+    ...queries('recruitmentContacts', CONTACT_READS),
     /** The deletion unit: the player's own words leave the contacts about them (the reply message); the records stay. */
     redactPlayer(playerId) {
       return operation(() => {
-        const touched = [];
-        for (const c of mirrors.recruitmentContacts.filter((x) => x.playerId === playerId && x.response && x.response.message !== null)) {
-          sqlite.prepare('UPDATE recruitment_contacts SET response_message = NULL WHERE id = ?').run(c.id);
-          touched.push(refresh('recruitmentContacts', c.id));
-        }
-        return touched;
+        const ids = sqlite.prepare('SELECT id FROM recruitment_contacts WHERE player_id = ? AND response_message IS NOT NULL ORDER BY rowid').all(playerId).map((r) => r.id);
+        sqlite.prepare('UPDATE recruitment_contacts SET response_message = NULL WHERE player_id = ? AND response_message IS NOT NULL').run(playerId);
+        return ids.map((id) => must('recruitmentContacts', id));
       });
     },
   };
   const offers = {
-    create: create('recruitmentOffers'), update: update('recruitmentOffers'), byId: byId('recruitmentOffers'),
+    create: create('recruitmentOffers'), update: update('recruitmentOffers'),
+    /** One offer by id, or null. Callers check the organisation they expect. */
+    byId: (id) => read('recruitmentOffers', id),
+    /** forCase(caseId), forOrgPlayer(orgId, playerId), forPlayer(playerId), forAgentShare(agentUserId), forOrg(orgId). */
+    ...queries('recruitmentOffers', OFFER_READS),
+    /** The offers of several players (a guardian's children), in insertion order. */
+    forPlayers(playerIds) { const want = [...new Set((playerIds ?? []).filter((p) => typeof p === 'string'))]; if (!want.length) return []; return sqlite.prepare(`SELECT * FROM recruitment_offers WHERE player_id IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want).map(decode.recruitmentOffers); },
     /** The deletion unit (P6.1 §66): ids, states and times stay; the player's name and words go; subject_removed_at set. */
     redactPlayer(playerId, at) {
       return operation(() => {
-        const touched = [];
-        for (const o of mirrors.recruitmentOffers.filter((x) => x.playerId === playerId)) {
-          sqlite.prepare("UPDATE offer_responses SET actor_name = NULL, reason = NULL WHERE offer_id = ? AND actor_type = 'player'").run(o.id);
-          sqlite.prepare("UPDATE offer_history SET by_name = NULL WHERE offer_id = ? AND by_kind = 'player'").run(o.id);
-          sqlite.prepare('UPDATE recruitment_offers SET subject_removed_at = ? WHERE id = ?').run(at, o.id);
-          touched.push(refresh('recruitmentOffers', o.id));
+        const ids = sqlite.prepare('SELECT id FROM recruitment_offers WHERE player_id = ? ORDER BY rowid').all(playerId).map((r) => r.id);
+        for (const id of ids) {
+          sqlite.prepare("UPDATE offer_responses SET actor_name = NULL, reason = NULL WHERE offer_id = ? AND actor_type = 'player'").run(id);
+          sqlite.prepare("UPDATE offer_history SET by_name = NULL WHERE offer_id = ? AND by_kind = 'player'").run(id);
+          sqlite.prepare('UPDATE recruitment_offers SET subject_removed_at = ? WHERE id = ?').run(at, id);
         }
-        return touched;
+        return ids.map((id) => must('recruitmentOffers', id));
       });
     },
   };
 
+  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !['create', 'update', 'redactPlayer'].includes(k))));
   return {
-    views, contacts, offers,
-    /** Load the mirrors (the tables are authoritative once 0017 is recorded; nothing is imported from memory). */
+    contacts, offers,
+    /** The queries alone, for the pure projectors and providers that must not write (the evidence provider, the journey). */
+    reads: Object.freeze({ contacts: readOnly(contacts), offers: readOnly(offers) }),
+    /** Check the tables are authoritative (0017 recorded); there is nothing to load. */
     attach() {
       if (!recruitmentContactsOffersLive(sqlite)) throw new Error(`the recruitment contacts/offers repository needs ${RECRUITMENT_CONTACTS_OFFERS_MIGRATION} recorded; it never imports an in-memory array`);
-      reload(); return { counts: this.counts() };
+      return { counts: this.counts() };
     },
-    /** The store participant: no flush (every write is already in the tables); the mirrors restored by a unit's rollback. */
-    hook() {
-      return {
-        flush() {},
-        snapshotState() { return Object.fromEntries(RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((n) => [n, mirrors[n].slice()])); },
-        restoreState(s) { if (!s) return; for (const n of RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS) { mirrors[n].length = 0; for (const r of s[n]) mirrors[n].push(r); } },
-      };
-    },
-    counts() { return Object.fromEntries(RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((n) => [n, mirrors[n].length])); },
+    counts() { return Object.fromEntries(RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return Object.fromEntries(RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((n) => [n, clone(mirrors[n])])); },
+    exportAll() { return CONTACTS_OFFERS_SNAPSHOT.read(sqlite); },
     log,
     now,
   };

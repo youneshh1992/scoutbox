@@ -115,6 +115,13 @@ module registration → integrity report → listen.
   at once. A route that edits a record and then reads it must use the record `update`
   returns; the one it held before is the old version. Don't call `update` for a record from
   inside its own `update` (it is refused): make the second change after the first returns.
+- **Read SQL where the domain has no view.** Since §4.3 step 2 a domain whose reads moved
+  to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
+  repository). Contacts and offers are the first: ask the repository
+  (`recruitmentContactsOffers.contacts.byId` / `forCase` / `forOrgPlayer` / …, or the
+  read-only `recruitmentReads` every module context carries). Each record is a fresh,
+  deep-frozen decode; a query inside a unit of work sees the unit's own writes. Pure
+  projectors take the queries as an argument (`reads`) rather than reading `db`.
 - **Units of work.** If one operation touches more than one table, or a table plus a
   blob, wrap it in `unit(() => { ... })` (`store.unitOfWork`). Inside the unit:
   - The callback must be **synchronous**. An `async` function is refused before it runs.

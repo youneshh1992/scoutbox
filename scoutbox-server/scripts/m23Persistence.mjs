@@ -40,9 +40,10 @@ import { integrityReport } from '../m182/integrity.mjs';
 import { PLANS } from '../catalogue.mjs';
 import { openStore } from '../store.mjs';
 import { ROOM_STATUSES, ROOM_STATUS_LABELS, TERMINAL_ROOM_STATUSES, stageForRoomStatus } from '../m17/shared.mjs';
-import { buildRecruitmentJourney, JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../m23/journey.mjs';
+import { JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../m23/journey.mjs';
 import { NULL_EVIDENCE_PROVIDER } from '../m23/lifecycle.mjs';
 import { pickPort } from './testPort.mjs';
+import { buildRecruitmentJourney } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', 'server.mjs');
@@ -479,7 +480,9 @@ console.log('\n— §47 — a PRE-M23 snapshot keeps all thirteen original statu
     '§50 while the D2 stores it never had are now present');
 
   // And it reads. A migrated-but-unreadable database is not migrated.
-  const out = buildRecruitmentJourney(db, 'old-signed', { kind: 'org_staff', orgId: 'org-legacy', role: 'room_lead' },
+  // §4.3 step 2: the contacts are a table now, not a collection the migrations create; a pre-M23 database has none,
+  // so the projection is given the empty contacts table it would read (rewritten: it described the old storage).
+  const out = buildRecruitmentJourney({ ...db, recruitmentContacts: [] }, 'old-signed', { kind: 'org_staff', orgId: 'org-legacy', role: 'room_lead' },
     { now: 3000, evidence: NULL_EVIDENCE_PROVIDER });
   if (!out.ok) console.error(`   journey refused: ${JSON.stringify(out)}`);
   ok(out.ok === true && out.lifecycle?.currentStage === 'signed',

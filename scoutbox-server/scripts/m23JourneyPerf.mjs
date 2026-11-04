@@ -7,8 +7,7 @@
 // of filters, not N × M scans, and a store ten times larger makes a read at
 // most a few times slower (the filters are linear in the store, by design —
 // there is no index and none was added).
-import { buildRecruitmentJourney } from '../m23/journey.mjs';
-import { createEvidenceProvider } from '../m23/evidence.mjs';
+import { buildRecruitmentJourney, createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const T0 = Date.now(); const DAY = 86_400_000;
 function build(N) {

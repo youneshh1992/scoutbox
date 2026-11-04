@@ -35,13 +35,14 @@ import {
 } from '../m20/funnels.mjs';
 import { stageVisits, lastActivityAt, STALL_THRESHOLDS, DECISION_OWED_STATUSES, AGE_BUCKETS } from '../m20/timeSeries.mjs';
 import { EVIDENCE_REASON_CODES } from '../m20/cohorts.mjs';
-import { buildReportingContext, buildDashboard } from '../m20/dashboard.mjs';
+import { buildDashboard } from '../m20/dashboard.mjs';
 import { migrateM20, DRILLDOWN_METRICS } from '../m20/index.mjs';
 import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES, OPEN_ROOM_STATUSES, SOURCE_CONTEXTS, ROOM_PRIORITIES, REASON_CODES } from '../m17/shared.mjs';
 import { EVENT_NAMES } from '../m182/eventRegistry.mjs';
 import { CATEGORIES } from '../m182/notificationPrefs.mjs';
 import { MIGRATIONS, SCHEMA_VERSION, runMigrations } from '../m182/migrations.mjs';
 import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
+import { buildReportingContext } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..');

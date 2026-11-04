@@ -6,9 +6,8 @@
 // more than once per surface? No index, no cache, no precomputation is added;
 // the numbers say whether one would be justified.
 
-import { createEvidenceProvider } from '../m23/evidence.mjs';
-import { buildRecruitmentJourney } from '../m23/journey.mjs';
 import { offerClubView, offerRecipientView, offerAgentView, offerHistoryView, offerEvidence, offerIntegrity, offerStatus, liveRevision, canRespondToRevision } from '../m28/offer.mjs';
+import { buildRecruitmentJourney, createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const say = (m) => console.log(m);
 const ms = (n) => `${n.toFixed(3)}ms`;

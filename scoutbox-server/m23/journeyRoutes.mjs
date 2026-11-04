@@ -22,7 +22,8 @@ import { buildRecruitmentJourney } from './journey.mjs';
 import { currentSigningForOffer } from './journeyModel.mjs';
 
 export function registerJourneyRoutes(ctx) {
-  const { db, playerRouter, guardianRouter, orgRouter, agent = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
+  const { db, recruitmentReads, playerRouter, guardianRouter, orgRouter, agent = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
+  if (!recruitmentReads?.contacts || !recruitmentReads?.offers) throw new TypeError('registerJourneyRoutes needs recruitmentReads (contacts, offers) from the data layer');
   const evidence = () => ctx.recruitmentEvidenceProvider ?? undefined;
   const orgOf = (orgId) => (db.orgs ?? []).find((o) => o && o.id === orgId) ?? null;
   // The same per-request test clock the Offer and signing routes honour (development only).
@@ -34,7 +35,7 @@ export function registerJourneyRoutes(ctx) {
     const items = [];
     for (const k of db.recruitmentCases ?? []) {
       if (!k || k.playerId !== playerId || !k.room) continue;
-      const out = buildRecruitmentJourney(db, k.id, viewer, { now: at, evidence: evidence() });
+      const out = buildRecruitmentJourney(db, k.id, viewer, { now: at, evidence: evidence(), reads: recruitmentReads });
       if (!out.ok) continue; // nothing crossed the share boundary: the case does not exist for them
       items.push({ club: clubOf(k.orgId), shared: out.shared, journey: out.journey });
     }
@@ -85,7 +86,7 @@ export function registerJourneyRoutes(ctx) {
     const items = [];
     for (const k of db.recruitmentCases ?? []) {
       if (!k || k.playerId !== a.clientId || !k.room) continue;
-      const out = buildRecruitmentJourney(db, k.id, { kind: 'agent', authorized: true, playerId: a.clientId, userId: req.orgUser.id, grants: g.grants }, { now: at, evidence: evidence() });
+      const out = buildRecruitmentJourney(db, k.id, { kind: 'agent', authorized: true, playerId: a.clientId, userId: req.orgUser.id, grants: g.grants }, { now: at, evidence: evidence(), reads: recruitmentReads });
       if (!out.ok) continue;
       // A club that shared nothing with this agent is not a club the agent learns about.
       if (out.journey.stage === 'none' && out.journey.timeline.length === 0) continue;
@@ -158,7 +159,7 @@ export function registerJourneyRoutes(ctx) {
         return null;
       }
       if (ref.startsWith('rct-')) {
-        const c = (db.recruitmentContacts ?? []).find((x) => x && x.id === ref);
+        const c = recruitmentReads.contacts.byId(ref);
         if (!c) return null;
         if (kind === 'org_user') {
           if (c.orgId === orgId) return room(caseFor(c.caseId, orgId), 'contact');
@@ -168,7 +169,7 @@ export function registerJourneyRoutes(ctx) {
         return null;
       }
       if (ref.startsWith('rof-')) {
-        const o = (db.recruitmentOffers ?? []).find((x) => x && x.id === ref);
+        const o = recruitmentReads.offers.byId(ref);
         if (!o) return null;
         if (kind === 'org_user') {
           if (o.orgId === orgId) return room(caseFor(o.caseId, orgId), 'offer');
@@ -190,7 +191,7 @@ export function registerJourneyRoutes(ctx) {
         const current = currentSigningForOffer((db.signingPackages ?? []).filter((x) => x && x.offerId === p.offerId && x.orgId === p.orgId), at) ?? p;
         if (kind === 'org_user') {
           if (p.orgId === orgId) return room(caseFor(p.caseId, orgId), 'signing');
-          const o = (db.recruitmentOffers ?? []).find((x) => x && x.id === p.offerId);
+          const o = recruitmentReads.offers.byId(p.offerId);
           return o?.agentShare?.agentUserId === audience.id ? agentTarget(audience.id, p.playerId, 'offers', at) : null;
         }
         const rev = (current.revisions ?? []).find((r) => r && r.id === current.currentRevisionId) ?? null;

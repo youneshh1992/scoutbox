@@ -32,9 +32,9 @@ import { EVENT_REGISTRY } from '../m182/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
 import { isAdult, adultAgeFor } from '../domain.mjs';
 import { isExpiredAt } from '../temporal.mjs';
-import { createEvidenceProvider } from '../m23/evidence.mjs';
 import { canTransitionRecruitmentCase } from '../m23/lifecycle.mjs';
 import { openStore } from '../store.mjs';
+import { createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const PORT = 6900 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -116,7 +116,7 @@ section('L/M — pure: notification category, event registry audiences and paylo
   const src = readdirSync(path.join(HERE, '..', 'm28')).filter((f) => f.endsWith('.mjs')).map((f) => readFileSync(path.join(HERE, '..', 'm28', f), 'utf8')).join('\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   neg(!/req\.body\??\.(status|role|verified|licensed|isAdult|canAccept|isGuardian|isAgent|complianceClear|currentRevision|playerId|orgId|caseId|occurredAt|issuedAt|revisionNumber|actorId)\b/.test(src), 'T-p1 client trust audit: m28 never reads status/role/verified/licensed/isAdult/canAccept/isGuardian/isAgent/complianceClear/currentRevision/playerId/orgId/caseId/occurredAt/revisionNumber/actorId from a request body');
   neg(!/dangerouslySetInnerHTML/.test(readFileSync(path.join(HERE, '..', '..', 'scoutbox-club', 'src', 'offerPanel.tsx'), 'utf8')) && !/dangerouslySetInnerHTML/.test(readFileSync(path.join(HERE, '..', '..', 'scoutbox-agent', 'src', 'screens.tsx'), 'utf8')), 'T-p2 no Offer field is rendered as HTML in the club or agent app');
-  ok(Object.keys(M28_ERROR_HTTP).length === 24, 'T-p3 the 24-code error table is unchanged by hardening');
+  ok(Object.keys(M28_ERROR_HTTP).length === 23, 'T-p3 the 23-code error table is unchanged by hardening (OFFER_STORE_MISSING left with the db collection, §4.3 step 2)');
   const bidi = validateMessages({ recipientMessage: 'Join‮evil‬ us​ now', internalNote: 'a⁦b⁩c' });
   neg(bidi.recipientMessage === 'Joinevil us now' && bidi.internalNote === 'abc', 'T-p4 bidi and zero-width format controls are stripped from messages (spoof-proof), ordinary text kept');
   ok(validateTerms({ role: 'Ailier — «gauche» / 左ウイング' }).terms.role === 'Ailier — «gauche» / 左ウイング', 'T-p5 legitimate Unicode is kept as typed');

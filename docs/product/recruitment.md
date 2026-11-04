@@ -27,7 +27,7 @@ How a club takes a player from "watching" to a decision. The case lifecycle, the
 - Decision notes are never projected (only `hasNote`). Room tasks and mentions stay in the org. Room activity never goes to the global ledger with a playerId (the guardian log would expose it). (M17, M23_RECRUITMENT_WORKFLOW)
 - Decision-time snapshots hold Trust levels and references, never player data. Blind-until-submit: withheld peer assessments are counted, not shown. No AI recruiter or player score. (M17)
 
-**Contact** (store `recruitmentContacts`)
+**Contact** (table `recruitment_contacts`, read through SQL)
 - `contacted` means a communication was **delivered** in-app or a legitimate external contact was **recorded** by a named person. A draft, a plan, a queue or a failure is not contact. (M23_P3_CONTACT_CONTRACT)
 - Contact states: draft → delivered | failed | cancelled; failed → delivered | failed | cancelled; delivered → responded; responded, recorded and cancelled are final. These are never case statuses. Evidence comes only from delivered, responded or recorded. Case moves contact_planned → contacted once; later contacts record `LIFECYCLE_NO_CHANGE`. A failure, response or block never moves the case back. (M23_P3_CONTACT_CONTRACT)
 - The server derives the recipient on every create, send and record: adult (GB 18, KR 19) → player; minor → exactly one verified, non-removed guardian (the designated one if several); otherwise refuse (`CONTACT_GUARDIAN_REQUIRED`), never fall back to the child. A draft for someone the club cannot contact is refused at compose time. A block refuses compose, send and accept (decline still works). (M23_P3_CONTACT_CONTRACT)

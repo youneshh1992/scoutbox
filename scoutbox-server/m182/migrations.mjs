@@ -329,13 +329,10 @@ export const MIGRATIONS = [
     // request can reach the projector that declares it required.
     // A container of user data: empty is the truthful default.
     note: 'M23 P3: the Contact workflow store (recruitmentContacts).',
-    // Since migration 0017 (S8c) the data layer replaces this array with a
-    // read-only view over the recruitment_contacts tables right after the
-    // snapshot migrations ran (repositories/index.mjs); on a cut-over file the
-    // container created here is dropped there and never saved as a blob.
-    up(db) {
-      db.recruitmentContacts ??= [];
-    },
+    // Since migration 0017 (S8c) the contacts live in the recruitment_contacts
+    // tables, and since §4.3 step 2 they are read through SQL only: there is no
+    // db.recruitmentContacts to create. Kept as a recorded no-op (its id stays).
+    up() {},
   },
   {
     id: 'm230_005_trial_workflow',

@@ -198,6 +198,9 @@ const dataLayer = attachDataLayer({
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
 const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps } = dataLayer;
+// The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
+// module context as `recruitmentReads` (contacts, offers).
+const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads });
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -4647,7 +4650,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4680,7 +4683,7 @@ registerSourceChanges(srcCtx);
 // routers exist and before the milestone modules that emit notifications, so
 // the preference gate is in place for every notify() call that follows.
 m182Ctx = {
-  db, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
+  db, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
   // The same standing-gate composition M12's shared helpers use.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
@@ -4795,6 +4798,7 @@ const m18Ctx = registerM18({
 // deliberately no second matching engine and no second Room-creation path.
 const m19Ctx = {
   ...m18Ctx,
+  recruitmentReads, // §4.3 step 2: contacts and offers are read through SQL
   users,
   notifications, // S7a: the Agent module's inbox and unread count read the repository
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),
@@ -4837,7 +4841,7 @@ migrateM23(db);
 // M23, because M17's own status route can name an evidence-bearing status. One
 // provider, reachable from every status path; a path with no provider fails
 // closed rather than assuming the requirement is met.
-const recruitmentEvidence = createEvidenceProvider(db);
+const recruitmentEvidence = createEvidenceProvider(db, recruitmentReads);
 m17Ctx.recruitmentEvidence = recruitmentEvidence;
 
 // ------------------------------------------ M23 P5.6E the integration seam holder

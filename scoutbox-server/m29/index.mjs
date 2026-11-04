@@ -69,7 +69,11 @@ export function registerSigning(rawCtx) {
     players, unit, afterCommit,
     // S8d: the explicit-write repository of the four signing/follow-up collections.
     signingsFollowUps,
+    // §4.3 step 2: the offers are read through SQL (the contacts/offers repository's queries).
+    recruitmentReads,
   } = ctx;
+  if (typeof recruitmentReads?.offers?.byId !== 'function') throw new TypeError('registerSigning needs recruitmentReads (offers) from the data layer');
+  const offerReads = recruitmentReads.offers;
   /** S8b: a case history entry is an explicit write of its case (never an in-place push on the read-only view). */
   const caseAudit = (kase, ...args) => ctx.recruitmentCases.cases.update(kase.id, (d) => audit(d, ...args));
   if (typeof players?.update !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
@@ -115,7 +119,7 @@ export function registerSigning(rawCtx) {
   // ------------------------------------------------------------- lookups
 
   const caseOf = (pkg) => (db.recruitmentCases ?? []).find((k) => k && k.id === pkg.caseId && k.orgId === pkg.orgId) ?? null;
-  const offerOf = (pkg) => (db.recruitmentOffers ?? []).find((o) => o && o.id === pkg.offerId && o.orgId === pkg.orgId) ?? null;
+  const offerOf = (pkg) => { const o = offerReads.byId(pkg.offerId); return o && o.orgId === pkg.orgId ? o : null; };
   const offerRevisionOf = (offer, id) => (offer?.revisions ?? []).find((r) => r && r.id === id) ?? null;
   const packagesOf = (offerId, orgId) => (db.signingPackages ?? []).filter((p) => p && p.offerId === offerId && p.orgId === orgId);
   const packagesOfCase = (kase) => (db.signingPackages ?? []).filter((p) => p && p.caseId === kase.id && p.orgId === kase.orgId);
@@ -342,7 +346,7 @@ export function registerSigning(rawCtx) {
    * this club and player means the canonical workflow owns the signing (§88).
    */
   function legacyRecordingBlocker(playerId, orgId, at = Date.now()) {
-    const offers = (db.recruitmentOffers ?? []).filter((o) => o && o.orgId === orgId && o.playerId === playerId);
+    const offers = offerReads.forOrgPlayer(orgId, playerId);
     if (offers.some((o) => canonicalOfferStatus(o, at) === 'ACCEPTED')) return { error: 'SIGNING_CANONICAL_REQUIRED', message: 'This player accepted a canonical Offer from your club: complete the signing through the signing workflow on the case.' };
     if ((db.signingPackages ?? []).some((p) => p && p.orgId === orgId && p.playerId === playerId && (isLive(p, at) || effectiveStatus(p, at) === 'COMPLETED'))) return { error: 'SIGNING_CANONICAL_REQUIRED', message: 'A signing workflow exists for this player on your case: complete it there.' };
     return null;
@@ -359,7 +363,7 @@ export function registerSigning(rawCtx) {
     // §14: for a player under the age of majority the readiness names the closed pathway before anyone tries, whatever the Offer's state.
     const subject = findPlayer(kase.playerId);
     if (subject && typeof isAdult === 'function' && !isAdult(subject) && !minorSigningPathwayOpen(orgOf(kase.orgId)?.country ?? 'GB')) blockers.push('MINOR_PATHWAY_CLOSED');
-    const accepted = (db.recruitmentOffers ?? []).find((o) => o && o.caseId === kase.id && o.orgId === kase.orgId && canonicalOfferStatus(o, at) === 'ACCEPTED') ?? null;
+    const accepted = offerReads.forCase(kase.id).find((o) => o.orgId === kase.orgId && canonicalOfferStatus(o, at) === 'ACCEPTED') ?? null;
     if (!accepted) blockers.push('OFFER_NOT_ACCEPTED');
     else {
       const rev = (accepted.revisions ?? []).find((r) => r && effectiveRevisionStatus(r, at) === 'ACCEPTED') ?? null;
@@ -393,7 +397,8 @@ export function registerSigning(rawCtx) {
 
   orgRouter.post('/offers/:id/signing', (req, res) => {
     if (!storeOr500(res)) return;
-    const offer = (db.recruitmentOffers ?? []).find((o) => o && o.id === req.params.id && o.orgId === req.org.id) ?? null;
+    const found = offerReads.byId(req.params.id);
+    const offer = found && found.orgId === req.org.id ? found : null;
     if (!offer) return notFound(res, 'club');
     const kase = (db.recruitmentCases ?? []).find((k) => k && k.id === offer.caseId && k.orgId === req.org.id) ?? null;
     if (!kase || !kase.room) return notFound(res, 'club');
