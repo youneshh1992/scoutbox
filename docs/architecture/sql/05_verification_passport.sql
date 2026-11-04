@@ -1309,7 +1309,7 @@ CREATE INDEX representation_history_rep ON representation_history(representation
 --         or guardian request) and server.mjs:2823 (club release reference —
 --         published immediately, no email, no code)
 -- owner/writer: server.mjs (request, /vouch/submit publish, admin revoke) and
---   m12/passport.mjs:369 (admin withdraw)
+--   domains/scouting/passport.mjs:369 (admin withdraw)
 -- lifecycle: status pending → published → revoked; withdrawn_at is a separate
 --   T&S soft-withdraw on a published row; never deleted — survives player
 --   deletion WITH names (known retention defect)
@@ -1329,7 +1329,7 @@ CREATE INDEX representation_history_rep ON representation_history(representation
 --   withdrawn{at,by,reason} -> withdrawn_at, withdrawn_by ('admin'),
 --     withdrawn_reason (≤200)
 --   verificationMethod -> derived, not stored: never written; every reader
---     defaults it to 'email_code' (server.mjs:969, m12/passport.mjs:103)
+--     defaults it to 'email_code' (server.mjs:969, domains/scouting/passport.mjs:103)
 --   identityVerified -> derived, not stored: never written; readers default
 --     it to false (an email code proves mailbox control, not identity)
 -- notes:

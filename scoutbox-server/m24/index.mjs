@@ -20,7 +20,7 @@
 
 import { visibleToOrg } from '../domain.mjs';
 import { buildShared } from '../m12/shared.mjs';
-import { opportunityBoardFor } from '../m12/journeys.mjs';
+import { opportunityBoardFor } from '../domains/scouting/journeys.mjs';
 import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
 import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';

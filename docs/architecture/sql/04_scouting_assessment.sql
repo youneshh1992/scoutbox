@@ -3,8 +3,8 @@
 --
 -- Scope: M12 F1/F2/F4/F5/F6/F7/F10 collections + M13 F3 playerPrefs + the
 -- org-level fields `tactical`, `squad[]`, `lookingFor[]`, `federationCheck`.
--- Sources: scoutbox-server/m12/passport.mjs, m12/scouting.mjs, m12/journeys.mjs,
--- m12/shared.mjs (migrateM12), m13/suitability.mjs, m13/shared.mjs (migrateM13),
+-- Sources: scoutbox-server/domains/scouting/passport.mjs, domains/scouting/scouting.mjs, domains/scouting/journeys.mjs,
+-- m12/shared.mjs (migrateM12), domains/scouting/suitability.mjs, m13/shared.mjs (migrateM13),
 -- server.mjs (looking-for, squad, verification/federation), domains/recruitment/signings/index.mjs (squad
 -- on signing), m12/operations.mjs (application reminder sweep).
 --
@@ -30,8 +30,8 @@
 
 
 -- ----------------------------------------------------------------------------
--- source: db.evidence  created at m12/passport.mjs:43-74 (newEvidence)
--- owner/writer: m12/passport.mjs (player, guardian, org, admin routes)
+-- source: db.evidence  created at domains/scouting/passport.mjs:43-74 (newEvidence)
+-- owner/writer: domains/scouting/passport.mjs (player, guardian, org, admin routes)
 -- lifecycle: no status field; `superseded_by_id` set on correction (row kept),
 --            `expires_at` only for claimType 'availability' (recorded_at + 90d).
 -- mapping:
@@ -93,8 +93,8 @@ CREATE INDEX evidence_player_id_claim_type ON evidence (player_id, claim_type); 
 CREATE INDEX evidence_superseded_by_id ON evidence (superseded_by_id);           -- m18/secondLook.mjs:64 follows the chain
 
 -- ----------------------------------------------------------------------------
--- source: db.evidence[].mediaIds[]  created at m12/passport.mjs:56
--- owner/writer: m12/passport.mjs (set at creation; copied on correction; never edited)
+-- source: db.evidence[].mediaIds[]  created at domains/scouting/passport.mjs:56
+-- owner/writer: domains/scouting/passport.mjs (set at creation; copied on correction; never edited)
 -- lifecycle: none (rows live with the evidence row)
 -- mapping: mediaIds[i] -> (evidence_id, media_id); natural composite PRIMARY KEY
 -- notes: the code only keeps ids present in player.media at creation time.
@@ -107,8 +107,8 @@ CREATE TABLE evidence_media (
 ) STRICT;
 
 -- ----------------------------------------------------------------------------
--- source: db.evidence[].disputes[]  created at m12/passport.mjs:207 (fileDispute)
--- owner/writer: m12/passport.mjs (player/org file; admin resolves)
+-- source: db.evidence[].disputes[]  created at domains/scouting/passport.mjs:207 (fileDispute)
+-- owner/writer: domains/scouting/passport.mjs (player/org file; admin resolves)
 -- lifecycle: status open -> resolved (never deleted)
 -- mapping:
 --   id -> id (dsp-N; prefix shared with m13 dispatches — ids are still globally unique)
@@ -138,7 +138,7 @@ CREATE INDEX evidence_disputes_status_filed_at ON evidence_disputes (status, fil
 
 -- ----------------------------------------------------------------------------
 -- source: db.evidence[].history[]  created at m12/shared.mjs:72 (audit)
--- owner/writer: m12/passport.mjs via audit(); append-only
+-- owner/writer: domains/scouting/passport.mjs via audit(); append-only
 -- mapping: id -> id (aud-N), at -> at, byKind -> by_kind, byId -> by_id,
 --          byName -> by_name, action -> action, detail -> detail_json (JSON-encoded string)
 -- notes: by_id is inconsistent in the source (player id, guardian id, org id or
@@ -160,8 +160,8 @@ CREATE INDEX evidence_history_evidence_id ON evidence_history (evidence_id);
 
 
 -- ----------------------------------------------------------------------------
--- source: db.coachAffiliations  created at m12/passport.mjs:328-340
--- owner/writer: m12/passport.mjs (org creates/ends/revokes; admin lists)
+-- source: db.coachAffiliations  created at domains/scouting/passport.mjs:328-340
+-- owner/writer: domains/scouting/passport.mjs (org creates/ends/revokes; admin lists)
 -- lifecycle: status confirmed -> ended | revoked (to_date set); never deleted
 -- mapping:
 --   id -> id (aff-N)                      orgId -> org_id        orgName -> org_name
@@ -200,7 +200,7 @@ CREATE INDEX coach_affiliations_created_at ON coach_affiliations (created_at);  
 
 -- ----------------------------------------------------------------------------
 -- source: db.coachAffiliations[].history[]  created via audit() (m12/shared.mjs:72)
--- owner/writer: m12/passport.mjs; append-only
+-- owner/writer: domains/scouting/passport.mjs; append-only
 -- mapping: id -> id (aud-N), at -> at, byKind -> by_kind ('org'), byId -> by_id (orgs.id),
 --          byName -> by_name (the acting user's name), action -> action
 --          (confirmed | ended | revoked), detail -> detail_json (role or reason)
@@ -219,8 +219,8 @@ CREATE INDEX coach_affiliations_history_coach_affiliation_id ON coach_affiliatio
 
 
 -- ----------------------------------------------------------------------------
--- source: db.squadInvites  created at m12/passport.mjs:388-394
--- owner/writer: m12/passport.mjs (org invites; player or guardian responds)
+-- source: db.squadInvites  created at domains/scouting/passport.mjs:388-394
+-- owner/writer: domains/scouting/passport.mjs (org invites; player or guardian responds)
 -- lifecycle: pending_guardian | pending_player -> approved | declined; never deleted
 -- mapping:
 --   id -> id (sqi-N)        orgId -> org_id         orgName -> org_name
@@ -251,8 +251,8 @@ CREATE INDEX squad_invites_player_id_status ON squad_invites (player_id, status)
 
 
 -- ----------------------------------------------------------------------------
--- source: db.orgs[].tactical  created at m12/scouting.mjs:661-675 (POST /org/tactical)
--- owner/writer: m12/scouting.mjs (lead only); replaced wholesale on every POST
+-- source: db.orgs[].tactical  created at domains/scouting/scouting.mjs:661-675 (POST /org/tactical)
+-- owner/writer: domains/scouting/scouting.mjs (lead only); replaced wholesale on every POST
 -- lifecycle: one row per org, null until first POST (migrateM12 sets o.tactical ??= null)
 -- mapping:
 --   formation -> formation (<=20)          planningHorizon -> planning_horizon (<=40)
@@ -271,8 +271,8 @@ CREATE TABLE org_tactical_setups (
 ) STRICT;
 
 -- ----------------------------------------------------------------------------
--- source: db.orgs[].tactical.roles[]  created at m12/scouting.mjs:665-673
--- owner/writer: m12/scouting.mjs
+-- source: db.orgs[].tactical.roles[]  created at domains/scouting/scouting.mjs:665-673
+-- owner/writer: domains/scouting/scouting.mjs
 -- mapping:
 --   id -> id (role-N minted, OR a client-supplied id: `r.id ?? nextId('role')`)
 --   (array position) -> ordinal (new; keeps the ≤15 ordering)
@@ -297,8 +297,8 @@ CREATE TABLE org_tactical_roles (
 CREATE UNIQUE INDEX org_tactical_roles_org_id_id ON org_tactical_roles (org_id, id);  -- new; roles.find(r.id === roleId) within an org
 
 -- ----------------------------------------------------------------------------
--- source: db.orgs[].tactical.roles[].required[] and .preferred[]  (sanitiseCriteria, m12/scouting.mjs:680)
--- owner/writer: m12/scouting.mjs
+-- source: db.orgs[].tactical.roles[].required[] and .preferred[]  (sanitiseCriteria, domains/scouting/scouting.mjs:680)
+-- owner/writer: domains/scouting/scouting.mjs
 -- mapping: (list name) -> kind ('required' | 'preferred'), (array position) -> ordinal,
 --          key -> key (CRITERIA_KEYS only), value -> value_json (number for
 --          minAge/maxAge/minAppearances, string otherwise — heterogeneous, kept as JSON)
@@ -313,8 +313,8 @@ CREATE TABLE org_tactical_role_criteria (
 ) STRICT;
 
 -- ----------------------------------------------------------------------------
--- source: db.orgs[].tactical.windows[]  created at m12/scouting.mjs:664 (≤4)
--- owner/writer: m12/scouting.mjs
+-- source: db.orgs[].tactical.windows[]  created at domains/scouting/scouting.mjs:664 (≤4)
+-- owner/writer: domains/scouting/scouting.mjs
 -- mapping: (array position) -> ordinal, name -> name (<=40), opens -> opens, closes -> closes
 -- notes: opens/closes are stored exactly as sent (`w.opens ?? null`) — never
 --        validated, usually a date string; TEXT without a format check (defect).
@@ -329,10 +329,10 @@ CREATE TABLE org_tactical_windows (
 ) STRICT;
 
 -- ----------------------------------------------------------------------------
--- source: db.orgs[].squad[]  created at server.mjs:2797 (manual), m12/passport.mjs:409
---         (invite_approved), m12/scouting.mjs:779 (shadow), domains/recruitment/signings/index.mjs:291 (signing)
--- owner/writer: server.mjs (grassroots squad + release), m12/passport.mjs,
---               m12/scouting.mjs, domains/recruitment/signings/index.mjs (and m29 snapshot/rollback restores the whole array)
+-- source: db.orgs[].squad[]  created at server.mjs:2797 (manual), domains/scouting/passport.mjs:409
+--         (invite_approved), domains/scouting/scouting.mjs:779 (shadow), domains/recruitment/signings/index.mjs:291 (signing)
+-- owner/writer: server.mjs (grassroots squad + release), domains/scouting/passport.mjs,
+--               domains/scouting/scouting.mjs, domains/recruitment/signings/index.mjs (and m29 snapshot/rollback restores the whole array)
 -- lifecycle: hard-deleted on release (server.mjs:2811 filters the array) — no soft-delete field exists
 -- mapping (union of the four row shapes):
 --   id -> id (sq-N)                        playerId -> player_id (null for off-platform manual entries)
@@ -400,8 +400,8 @@ CREATE TABLE org_federation_checks (
 
 
 -- ----------------------------------------------------------------------------
--- source: db.assessmentTemplates  created at m12/scouting.mjs:28-58 (seed v1) and :76-81 (new version)
--- owner/writer: m12/scouting.mjs (any org lead publishes a new version)
+-- source: db.assessmentTemplates  created at domains/scouting/scouting.mjs:28-58 (seed v1) and :76-81 (new version)
+-- owner/writer: domains/scouting/scouting.mjs (any org lead publishes a new version)
 -- lifecycle: append-only; versions are immutable (nothing mutates a pushed template)
 -- mapping:
 --   id -> id ('tpl-gk' | 'tpl-def' | 'tpl-mid' | 'tpl-att' — reused across versions)
@@ -425,8 +425,8 @@ CREATE TABLE assessment_templates (
 CREATE UNIQUE INDEX assessment_templates_position_group_version ON assessment_templates (position_group, version);  -- new; currentTemplateFor() = max(version) per group
 
 -- ----------------------------------------------------------------------------
--- source: db.assessmentTemplates[].attributes[]  (m12/scouting.mjs:31 seed, :79 posted)
--- owner/writer: m12/scouting.mjs; immutable with the version
+-- source: db.assessmentTemplates[].attributes[]  (domains/scouting/scouting.mjs:31 seed, :79 posted)
+-- owner/writer: domains/scouting/scouting.mjs; immutable with the version
 -- mapping: id -> attr_id (<=40), (array position) -> ordinal (new), label -> label (<=80),
 --          anchors -> anchors_json (seed: {"1":..,"3":..,"5":..}; posted: `a.anchors ?? {}`,
 --          an arbitrary object — free-form by design, kept as JSON)
@@ -444,8 +444,8 @@ CREATE TABLE assessment_template_attributes (
 
 
 -- ----------------------------------------------------------------------------
--- source: db.videoSegments  created at m12/scouting.mjs:370-380
--- owner/writer: m12/scouting.mjs (org-private workflow records; never edited or deleted)
+-- source: db.videoSegments  created at domains/scouting/scouting.mjs:370-380
+-- owner/writer: domains/scouting/scouting.mjs (org-private workflow records; never edited or deleted)
 -- lifecycle: none
 -- mapping:
 --   id -> id (seg-N)          mediaId -> media_id         playerId -> player_id   orgId -> org_id
@@ -478,8 +478,8 @@ CREATE INDEX video_segments_org_id_player_id ON video_segments (org_id, player_i
 CREATE INDEX video_segments_org_id_media_id ON video_segments (org_id, media_id);    -- GET /org/segments?mediaId=
 
 -- ----------------------------------------------------------------------------
--- source: db.playlists  created at m12/scouting.mjs:406
--- owner/writer: m12/scouting.mjs
+-- source: db.playlists  created at domains/scouting/scouting.mjs:406
+-- owner/writer: domains/scouting/scouting.mjs
 -- lifecycle: none (never closed or deleted)
 -- mapping: id -> id (pls-N), orgId -> org_id, name -> name (<=80),
 --          createdBy.userId -> created_by_user_id, createdBy.name -> created_by_name,
@@ -496,8 +496,8 @@ CREATE TABLE playlists (
 CREATE INDEX playlists_org_id ON playlists (org_id);
 
 -- ----------------------------------------------------------------------------
--- source: db.playlists[].segmentIds[]  appended at m12/scouting.mjs:417 (deduplicated by the code)
--- owner/writer: m12/scouting.mjs
+-- source: db.playlists[].segmentIds[]  appended at domains/scouting/scouting.mjs:417 (deduplicated by the code)
+-- owner/writer: domains/scouting/scouting.mjs
 -- mapping: segmentIds[i] -> (playlist_id, segment_id); (array position) -> ordinal (new, keeps order)
 -- ----------------------------------------------------------------------------
 CREATE TABLE playlist_segments (
@@ -509,8 +509,8 @@ CREATE TABLE playlist_segments (
 
 
 -- ----------------------------------------------------------------------------
--- source: db.assessments  created at m12/scouting.mjs:170-187
--- owner/writer: m12/scouting.mjs (scout drafts/submits; lead reviews; publish-feedback);
+-- source: db.assessments  created at domains/scouting/scouting.mjs:170-187
+-- owner/writer: domains/scouting/scouting.mjs (scout drafts/submits; lead reviews; publish-feedback);
 --               server.mjs:3996 nulls playerName on account deletion
 -- lifecycle: state draft -> submitted -> reviewed; never deleted; published_feedback is a
 --            one-shot side door (ALREADY_PUBLISHED on a second attempt)
@@ -588,8 +588,8 @@ CREATE INDEX assessments_player_id_published_feedback_at ON assessments (player_
 CREATE INDEX assessments_context_trial_id ON assessments (context_trial_id);            -- ?trialId= filter; m23 trial routes/journey
 
 -- ----------------------------------------------------------------------------
--- source: db.assessments[].ratings[]  replaced wholesale at m12/scouting.mjs:224-230 (PUT while draft)
--- owner/writer: m12/scouting.mjs
+-- source: db.assessments[].ratings[]  replaced wholesale at domains/scouting/scouting.mjs:224-230 (PUT while draft)
+-- owner/writer: domains/scouting/scouting.mjs
 -- mapping:
 --   attrId -> attr_id        rating -> rating (NULL when notObserved)   notObserved -> not_observed
 --   confidence -> confidence (default 'medium')   note -> note (<=300)
@@ -611,8 +611,8 @@ CREATE TABLE assessment_ratings (
 ) STRICT;
 
 -- ----------------------------------------------------------------------------
--- source: db.assessments[].ratings[].evidenceRefs[]  (≤6 per rating; m12/scouting.mjs:227-229)
--- owner/writer: m12/scouting.mjs
+-- source: db.assessments[].ratings[].evidenceRefs[]  (≤6 per rating; domains/scouting/scouting.mjs:227-229)
+-- owner/writer: domains/scouting/scouting.mjs
 -- mapping:
 --   (array position) -> ordinal (new)      segmentId -> segment_id
 --   trialSessionId -> trial_session_id     boxSessionId -> box_session_id
@@ -639,7 +639,7 @@ CREATE TABLE assessment_rating_evidence_refs (
 
 -- ----------------------------------------------------------------------------
 -- source: db.assessments[].history[]  via audit() (m12/shared.mjs:72); append-only
--- owner/writer: m12/scouting.mjs
+-- owner/writer: domains/scouting/scouting.mjs
 -- mapping: id -> id (aud-N), at -> at, byKind -> by_kind ('org'), byId -> by_id (org_users.id here),
 --          byName -> by_name, action -> action (created | submitted | reviewed | published_feedback),
 --          detail -> detail_json (always null today)
@@ -658,8 +658,8 @@ CREATE INDEX assessment_history_assessment_id ON assessment_history (assessment_
 
 
 -- ----------------------------------------------------------------------------
--- source: db.vacancies  created at m12/scouting.mjs:689
--- owner/writer: m12/scouting.mjs (also read by domains/recruitment/rooms/rooms.mjs:555 and recruitment_cases.vacancy_id in 02)
+-- source: db.vacancies  created at domains/scouting/scouting.mjs:689
+-- owner/writer: domains/scouting/scouting.mjs (also read by domains/recruitment/rooms/rooms.mjs:555 and recruitment_cases.vacancy_id in 02)
 -- lifecycle: status open -> closed (closed_at); never deleted
 -- mapping: id -> id (vac-N), orgId -> org_id, roleId -> role_id, roleName -> role_name,
 --          window -> window (unvalidated, stored as sent), notes -> notes (<=300),
@@ -685,9 +685,9 @@ CREATE INDEX vacancies_org_id_status ON vacancies (org_id, status);  -- org list
 
 
 -- ----------------------------------------------------------------------------
--- source: db.opportunities  created at m12/journeys.mjs:30-51; `structured` added by
---         m13/suitability.mjs:92-103 (PUT /org/opportunities/:id/structured-requirements)
--- owner/writer: m12/journeys.mjs (create/close), m13/suitability.mjs (structured block, replaced wholesale)
+-- source: db.opportunities  created at domains/scouting/journeys.mjs:30-51; `structured` added by
+--         domains/scouting/suitability.mjs:92-103 (PUT /org/opportunities/:id/structured-requirements)
+-- owner/writer: domains/scouting/journeys.mjs (create/close), domains/scouting/suitability.mjs (structured block, replaced wholesale)
 -- lifecycle: status published -> closed (closed_at); "open" is derived (published AND deadline >= today)
 -- mapping:
 --   id -> id (opp-N)          orgId -> org_id         orgName -> org_name
@@ -752,8 +752,8 @@ CREATE INDEX opportunities_org_id ON opportunities (org_id);                    
 CREATE INDEX opportunities_status_deadline_date ON opportunities (status, deadline_date);  -- board: published AND deadline >= today
 
 -- ----------------------------------------------------------------------------
--- source: db.opportunities[].structured.trainingSlots[]  (≤10; m13/suitability.mjs:93-96)
--- owner/writer: m13/suitability.mjs; replaced wholesale with the structured block
+-- source: db.opportunities[].structured.trainingSlots[]  (≤10; domains/scouting/suitability.mjs:93-96)
+-- owner/writer: domains/scouting/suitability.mjs; replaced wholesale with the structured block
 -- mapping: (array position) -> ordinal (new), day -> day (3-letter lowercase),
 --          start -> start_time ('HH:MM'), end -> end_time ('HH:MM'), tz -> tz (<=40)
 -- notes: values are sliced, not validated (day may be '' or junk) — no CHECK beyond length.
@@ -770,9 +770,9 @@ CREATE TABLE opportunity_training_slots (
 
 
 -- ----------------------------------------------------------------------------
--- source: db.applications  created at m12/journeys.mjs:103-107 (applyTo)
--- owner/writer: m12/journeys.mjs (apply / withdraw / outcome), m12/operations.mjs:315
---               (remindedAt sweep), m13/suitability.mjs:213-221 (suitabilitySummary)
+-- source: db.applications  created at domains/scouting/journeys.mjs:103-107 (applyTo)
+-- owner/writer: domains/scouting/journeys.mjs (apply / withdraw / outcome), m12/operations.mjs:315
+--               (remindedAt sweep), domains/scouting/suitability.mjs:213-221 (suitabilitySummary)
 -- lifecycle: status submitted -> withdrawn | accepted | declined; never deleted
 -- mapping:
 --   id -> id (apl-N)              opportunityId -> opportunity_id   orgId -> org_id
@@ -825,7 +825,7 @@ CREATE INDEX applications_status_created_at ON applications (status, created_at)
 
 -- ----------------------------------------------------------------------------
 -- source: db.applications[].history[]  via audit() (m12/shared.mjs:72); append-only
--- owner/writer: m12/journeys.mjs
+-- owner/writer: domains/scouting/journeys.mjs
 -- mapping: id -> id (aud-N), at -> at, byKind -> by_kind, byId -> by_id, byName -> by_name,
 --          action -> action (submitted | withdrawn | accepted | declined), detail -> detail_json
 -- notes: known defect — a guardian withdrawal is audited with byKind 'player'
@@ -845,8 +845,8 @@ CREATE INDEX applications_history_application_id ON applications_history (applic
 
 
 -- ----------------------------------------------------------------------------
--- source: db.campaigns  created at m12/journeys.mjs:230-254
--- owner/writer: m12/journeys.mjs
+-- source: db.campaigns  created at domains/scouting/journeys.mjs:230-254
+-- owner/writer: domains/scouting/journeys.mjs
 -- lifecycle: status is only ever 'published' — there is no close route; "open" is
 --            derived (published AND deadline >= today). Never deleted.
 -- mapping:
@@ -886,8 +886,8 @@ CREATE INDEX campaigns_org_id ON campaigns (org_id);                            
 CREATE INDEX campaigns_status_deadline_date ON campaigns (status, deadline_date);  -- player/guardian open campaigns
 
 -- ----------------------------------------------------------------------------
--- source: db.campaignSubmissions  created at m12/journeys.mjs:314
--- owner/writer: m12/journeys.mjs (one row per campaign+player, created on first attempt)
+-- source: db.campaignSubmissions  created at domains/scouting/journeys.mjs:314
+-- owner/writer: domains/scouting/journeys.mjs (one row per campaign+player, created on first attempt)
 -- lifecycle: none on the row; attempts carry the states
 -- mapping: id -> id (csb-N), campaignId -> campaign_id, orgId -> org_id, playerId -> player_id,
 --          playerName -> player_name, submittedBy.kind/id/name -> submitted_by_kind /
@@ -912,8 +912,8 @@ CREATE UNIQUE INDEX campaign_submissions_campaign_id_player_id ON campaign_submi
 CREATE INDEX campaign_submissions_player_id ON campaign_submissions (player_id);
 
 -- ----------------------------------------------------------------------------
--- source: db.campaignSubmissions[].attempts[]  created at m12/journeys.mjs:324-332
--- owner/writer: m12/journeys.mjs (submit; org review)
+-- source: db.campaignSubmissions[].attempts[]  created at domains/scouting/journeys.mjs:324-332
+-- owner/writer: domains/scouting/journeys.mjs (submit; org review)
 -- lifecycle: status failed_checks (terminal) | submitted -> accepted | returned
 -- mapping:
 --   id -> id (att-N; prefix shared with players[].attendance[] — still globally unique)
@@ -955,8 +955,8 @@ CREATE INDEX campaign_submission_attempts_submission_id_status ON campaign_submi
 
 
 -- ----------------------------------------------------------------------------
--- source: db.playerPrefs  created at m13/suitability.mjs:15-25 (blankPrefs) — created on GET (prefsFor)
--- owner/writer: m13/suitability.mjs (adult player, or guardian for a minor)
+-- source: db.playerPrefs  created at domains/scouting/suitability.mjs:15-25 (blankPrefs) — created on GET (prefsFor)
+-- owner/writer: domains/scouting/suitability.mjs (adult player, or guardian for a minor)
 -- lifecycle: one row per player; updated in place; never deleted
 -- mapping:
 --   id -> id (prf-N)                 playerId -> player_id (UNIQUE)
@@ -993,8 +993,8 @@ CREATE TABLE player_prefs (
 ) STRICT;
 
 -- ----------------------------------------------------------------------------
--- source: db.playerPrefs[].commitments[] and .availableSlots[]  (≤20 each; m13/suitability.mjs:34-40)
--- owner/writer: m13/suitability.mjs; each list replaced wholesale
+-- source: db.playerPrefs[].commitments[] and .availableSlots[]  (≤20 each; domains/scouting/suitability.mjs:34-40)
+-- owner/writer: domains/scouting/suitability.mjs; each list replaced wholesale
 -- mapping: (list name) -> kind, (array position) -> ordinal (new), day -> day (3-letter lowercase),
 --          start -> start_time ('HH:MM'), end -> end_time ('HH:MM'), tz -> tz (<=40),
 --          label -> label (<=60; e.g. "school", "work" — personal data)

@@ -939,7 +939,7 @@ the route and response half is named with its plan step.
    (`server.mjs:4219`). S4 replaces it with a repository view.
 5. **Guardian e-mail uniqueness bypass on the co-guardian path** (`server.mjs:1576-1590`).
    The unique index makes it impossible; the shadow report shows existing duplicates first.
-6. **Coach affiliation matched by display name** (`m12/passport.mjs:328`): `coach_affiliations`
+6. **Coach affiliation matched by display name** (`domains/scouting/passport.mjs:328`): `coach_affiliations`
    keeps `coach_user_id` and the name as a snapshot; S9 makes the id the key.
 7. **Backups include secrets despite the manifest** (`m13/enterprise.mjs:454`). Fixed by 1
    and S13.

@@ -25,8 +25,8 @@
 -- M12 F8 — development objectives (the pre-M21 objective record)
 -- =============================================================================
 
--- source: db.devObjectives  created at m12/journeys.mjs:405
--- owner/writer: m12/journeys.mjs (createObjective, progress, share, reassessment);
+-- source: db.devObjectives  created at domains/scouting/journeys.mjs:405
+-- owner/writer: domains/scouting/journeys.mjs (createObjective, progress, share, reassessment);
 --   read by m16/training.mjs (developmentPlan, assignment objectiveId check),
 --   m21/index.mjs (originObjectiveFor)
 -- lifecycle: status is only ever written as 'active' (no close/archive route);
@@ -66,8 +66,8 @@ CREATE TABLE dev_objectives (
 CREATE INDEX dev_objectives_player ON dev_objectives (player_id);
 CREATE INDEX dev_objectives_org_player ON dev_objectives (org_id, player_id);
 
--- source: db.devObjectives[].objectives[]  created at m12/journeys.mjs:408
--- owner/writer: m12/journeys.mjs (write-once at objective creation)
+-- source: db.devObjectives[].objectives[]  created at domains/scouting/journeys.mjs:408
+-- owner/writer: domains/scouting/journeys.mjs (write-once at objective creation)
 -- lifecycle: immutable; 1–2 per objective
 -- mapping:
 --   id -> id (objx-*)
@@ -86,8 +86,8 @@ CREATE TABLE dev_objective_items (
 ) STRICT;
 CREATE INDEX dev_objective_items_objective ON dev_objective_items (objective_id, position);
 
--- source: db.devObjectives[].objectives[].baselineEvidenceIds[]  m12/journeys.mjs:411
--- owner/writer: m12/journeys.mjs (validated against db.evidence for the same player)
+-- source: db.devObjectives[].objectives[].baselineEvidenceIds[]  domains/scouting/journeys.mjs:411
+-- owner/writer: domains/scouting/journeys.mjs (validated against db.evidence for the same player)
 -- mapping: each id -> (item_id, evidence_id)
 CREATE TABLE dev_objective_item_evidence (
   item_id      TEXT NOT NULL REFERENCES dev_objective_items(id) ON DELETE CASCADE,
@@ -95,8 +95,8 @@ CREATE TABLE dev_objective_item_evidence (
   PRIMARY KEY (item_id, evidence_id)
 ) STRICT;
 
--- source: db.devObjectives[].progress[]  created at m12/journeys.mjs:445
--- owner/writer: m12/journeys.mjs (player only, minors included)
+-- source: db.devObjectives[].progress[]  created at domains/scouting/journeys.mjs:445
+-- owner/writer: domains/scouting/journeys.mjs (player only, minors included)
 -- lifecycle: append-only
 -- mapping:
 --   id -> id (prg-*)
@@ -116,8 +116,8 @@ CREATE TABLE dev_objective_progress (
 ) STRICT;
 CREATE INDEX dev_objective_progress_objective ON dev_objective_progress (objective_id, created_at);
 
--- source: db.devObjectives[].sharing.orgIds[]  m12/journeys.mjs:456
--- owner/writer: m12/journeys.mjs setSharing (add/remove = hard delete of the row)
+-- source: db.devObjectives[].sharing.orgIds[]  domains/scouting/journeys.mjs:456
+-- owner/writer: domains/scouting/journeys.mjs setSharing (add/remove = hard delete of the row)
 -- mapping: each org id -> (objective_id, org_id)
 -- notes: the org must exist (checked); no "shared at" is recorded today.
 CREATE TABLE dev_objective_shares (
@@ -126,8 +126,8 @@ CREATE TABLE dev_objective_shares (
   PRIMARY KEY (objective_id, org_id)
 ) STRICT;
 
--- source: db.devObjectives[].reassessments[]  created at m12/journeys.mjs:472
--- owner/writer: m12/journeys.mjs (requestReassessment; outcome by the owning org)
+-- source: db.devObjectives[].reassessments[]  created at domains/scouting/journeys.mjs:472
+-- owner/writer: domains/scouting/journeys.mjs (requestReassessment; outcome by the owning org)
 -- lifecycle: status requested -> completed; one open ('requested') per objective
 -- mapping:
 --   id -> id (ras-*)
@@ -153,7 +153,7 @@ CREATE TABLE dev_objective_reassessments (
 ) STRICT;
 CREATE INDEX dev_objective_reassessments_objective ON dev_objective_reassessments (objective_id, status);
 
--- source: db.devObjectives[].reassessments[].outcome.evidenceIds[]  m12/journeys.mjs:505
+-- source: db.devObjectives[].reassessments[].outcome.evidenceIds[]  domains/scouting/journeys.mjs:505
 -- mapping: each id -> (reassessment_id, evidence_id)
 CREATE TABLE dev_objective_reassessment_evidence (
   reassessment_id  TEXT NOT NULL REFERENCES dev_objective_reassessments(id) ON DELETE CASCADE,
@@ -166,9 +166,9 @@ CREATE TABLE dev_objective_reassessment_evidence (
 -- M12 F6 — drill guidance (recording instructions + coach review status)
 -- =============================================================================
 
--- source: db.drillGuidance  created at m12/journeys.mjs:205 (seeded from the
+-- source: db.drillGuidance  created at domains/scouting/journeys.mjs:205 (seeded from the
 --   server.mjs DRILLS registry — the legacy combine drills, NOT m16/drills.mjs)
--- owner/writer: m12/journeys.mjs (seed on boot; adminRouter review sets coachReview)
+-- owner/writer: domains/scouting/journeys.mjs (seed on boot; adminRouter review sets coachReview)
 -- lifecycle: one row per legacy drill id; never deleted
 -- mapping:
 --   drillId -> drill_id (natural PK; key into the code registry server.mjs DRILLS)

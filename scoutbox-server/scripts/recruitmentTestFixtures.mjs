@@ -2,7 +2,7 @@
 // (server.mjs issueRecruitmentRequest / the open-day outcome route / issueAcceptedTrial /
 // the report route / tombstoneRequest / tombstoneTrial; domains/recruitment/lifecycle/trialRoutes.mjs the P4B
 // invitation, schedule, cancel, attendance, complete, evidence links, the recipient's
-// confirm/decline/cancel; m12/journeys.mjs the day containers; m12/operations.mjs the
+// confirm/decline/cancel; domains/scouting/journeys.mjs the day containers; m12/operations.mjs the
 // reminder markers). Synthetic ids and names only. Shared by testRecruitment.mjs,
 // testRecruitmentServer.mjs and the handoff bench.
 import { NOW, FIXTURE, USERS, SESSIONS, ORGS } from './coreIdentityTestFixtures.mjs';
@@ -90,7 +90,7 @@ export const acceptedTrial = (over = {}) => scheduledTrial({ id: 'trial-legacy',
 export const preP4bTrial = (over = {}) => ({ id: 'trial-old', requestId: 'req-old', caseId: null, playerId: 'pl-adult', playerName: 'Adult Signup', orgId: ORG.id, orgName: ORG.name, scoutName: SCOUT.name, acceptedAt: T.accepted - 30 * DAY, acceptedBy: 'player', guardianApproved: false, proposedDate: '2026-09-01', venue: 'Old ground', notes: '', reportDueAt: T.accepted - 20 * DAY, status: 'reported', workflowState: 'legacy_accepted', rev: 1, report: report({ id: 'rep-old', trialId: 'trial-old', filedAt: T.accepted - 25 * DAY }), ...over });
 /** The report route's literal (TRIAL_REPORT_FIELDS in order, notes '' default, the two feedback notes). */
 export const report = (over = {}) => ({ id: 'rep-1', trialId: 'trial-1', playerId: 'pl-adult', orgId: ORG.id, orgName: ORG.name, userId: SCOUT.userId, scoutName: SCOUT.name, filedAt: T.filed, acceleration: 7, sprintSpeedKmh: 31, distanceKm: 6.2, passCompletionPct: 78, duelSuccessPct: 55, coachRating: 8, notes: 'Quick feet.', strengthNote: 'Pace', focusNote: 'Left foot', ...over });
-/** The day container (m12/journeys.mjs:534) once the club worked on the trial day: staff with a filed check, a consent, a check-in, a status event, arrival/emergency/collection. */
+/** The day container (domains/scouting/journeys.mjs:534) once the club worked on the trial day: staff with a filed check, a consent, a check-in, a status event, arrival/emergency/collection. */
 export const dayContainer = (over = {}) => ({
   staff: [{ id: 'stf-1', name: 'Coach Dan', role: 'Lead coach', check: { kind: 'DBS (England & Wales)', ref: 'DBS-001', status: 'pending', expiresAt: '2027-01-01', reviewedBy: null }, addedBy: SCOUT.name, addedAt: T.accepted + HOUR }, { id: 'stf-2', name: 'Physio Pat', role: 'Physio', check: null, addedBy: SCOUT.name, addedAt: T.accepted + 2 * HOUR }],
   consents: [{ id: 'cns-1', by: { kind: 'player', id: 'pl-adult', name: 'Adult Signup' }, scope: 'player_event_consent', at: T.accepted + 3 * HOUR }],
@@ -118,7 +118,7 @@ export const workedTrial = (over = {}) => {
 export const cancelledTrial = (over = {}) => scheduledTrial({ id: 'trial-cancelled', requestId: 'req-cancelled', workflowState: 'cancelled', completion: { state: 'cancelled', at: T.accepted + DAY, by: who('player', 'pl-adult', 'Adult Signup'), reason: 'Injured', phase: 'scheduled', cancelledBy: 'player' }, keys: { cancel: [{ key: 'k-cancel-1', fp: 'fp-cx', at: T.accepted + DAY }] }, rev: 2, revAt: T.accepted + DAY, revBy: null, ...over });
 
 /** The recruitmentCases blob entries the strict case references (Q7b) resolve against: ids only matter here. */
-/** The cases the strict case references (Q7b) resolve against: since S8b (migration 0016) a table-backed collection imported on the same run, so each is a full case literal (m12/scouting.mjs:450) with EMPTY links — these fixtures vary the requests and trials freely and a case link would have to name one of them. */
+/** The cases the strict case references (Q7b) resolve against: since S8b (migration 0016) a table-backed collection imported on the same run, so each is a full case literal (domains/scouting/scouting.mjs:450) with EMPTY links — these fixtures vary the requests and trials freely and a case link would have to name one of them. */
 const caseLiteral = (over) => ({ id: 'case-1', orgId: ORG.id, playerId: 'pl-adult', playerName: 'Adult Signup', vacancyId: null, ownerUserId: SCOUT.userId, ownerName: SCOUT.name, stage: 'trial', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: T.invited - DAY, history: [], room: null, budget: null, ...over });
 export const CASES = () => [caseLiteral({ id: 'case-1' }), caseLiteral({ id: 'case-2', playerId: 'pl-child1', playerName: 'Child pl-child1' })];
 

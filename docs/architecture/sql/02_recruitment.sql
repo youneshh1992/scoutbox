@@ -71,7 +71,7 @@ CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, ow
 -- recruitment_cases and its fifteen owned child tables — LIVE since migration 0016_recruitment_cases (amended in
 --   place at §4.3: typed and explicit; repositories/recruitmentCases.mjs, which generates this DDL)
 -- =============================================================================
--- writers: m12/scouting.mjs (the M12 case, assignments, tasks, approvals, the sign-off decision, links),
+-- writers: domains/scouting/scouting.mjs (the M12 case, assignments, tasks, approvals, the sign-off decision, links),
 --   domains/recruitment/rooms/rooms.mjs (the Room facet, its status through applyStatus, tasks, assignments, links, reopen),
 --   domains/recruitment/lifecycle/decisionRoutes.mjs (the decision draft), m27/index.mjs (the transaction handoff), m13/planning.mjs (the
 --   budget), the lifecycle writer's callers (m23, m28, m29) and the deletion unit (redactPlayer) — every one an
@@ -364,7 +364,7 @@ CREATE TABLE case_budget_actuals (
 -- writers: server.mjs issueRecruitmentRequest (requests.create; the Trial invitation's case link, recipient
 --   and client key in the same create), the respond routes, the report route, the urgent-report freeze and
 --   the deletion unit's tombstones (requests/trials.update), issueAcceptedTrial (trials.create),
---   domains/recruitment/lifecycle/trialRoutes.mjs, m12/journeys.mjs (the trial day) and m12/operations.mjs (reminder markers) — every
+--   domains/recruitment/lifecycle/trialRoutes.mjs, domains/scouting/journeys.mjs (the trial day) and m12/operations.mjs (reminder markers) — every
 --   one an explicit repository operation inside the route's unit of work. db.requests and db.trials are
 --   read-only views.
 -- columns: every field is a typed column with its vocabulary CHECK (request type and status, the parties,

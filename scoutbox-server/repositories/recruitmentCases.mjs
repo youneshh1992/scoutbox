@@ -1256,7 +1256,7 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
     },
   };
   /**
-   * Who may open a case or a Room, as SQL over `recruitment_cases c`: the rule of `caseAccess` (m12/scouting.mjs) and,
+   * Who may open a case or a Room, as SQL over `recruitment_cases c`: the rule of `caseAccess` (domains/scouting/scouting.mjs) and,
    * for a Room, of `roomRole` (domains/recruitment/rooms/shared.mjs) being non-null. A recruitment lead opens everything.
    */
   function access({ userId, isLead }, { room }) {

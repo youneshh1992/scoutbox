@@ -33,7 +33,7 @@ import {
   shareView, MAX_OPPORTUNITY_SHARES,
 } from '../m24/shared.mjs';
 import { MINOR_PATHWAY_PRODUCTION_ENABLED } from '../m25/policy.mjs';
-import { opportunityBoardFor } from '../m12/journeys.mjs';
+import { opportunityBoardFor } from '../domains/scouting/journeys.mjs';
 import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
 import { plainShared, normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
 import { chainHead, isFormal } from '../domains/recruitment/lifecycle/decision.mjs';

@@ -3,9 +3,9 @@
 // existing gates (bearer sessions, org suspension, guardian ownership,
 // visibleToOrg, blocks, moderation) apply before any M12 handler runs.
 import { migrateM12, buildShared } from './shared.mjs';
-import { registerPassport } from './passport.mjs';
-import { registerScouting } from './scouting.mjs';
-import { registerJourneys } from './journeys.mjs';
+import { registerPassport } from '../domains/scouting/passport.mjs';
+import { registerScouting } from '../domains/scouting/scouting.mjs';
+import { registerJourneys } from '../domains/scouting/journeys.mjs';
 import { registerOperations } from './operations.mjs';
 
 export function registerM12(ctx) {

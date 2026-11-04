@@ -4,10 +4,10 @@
 // Everything guardian-routed for minors, everything eligibility-checked
 // server-side (fail-closed on missing location), grassroots 50 km preserved.
 
-import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../domain.mjs';
-import { parseStrictDateOnly, parseDateOrInstant, isExpiredAt, isAbsent } from '../temporal.mjs';
-import { trialFamilyView, trialOutcomeLine } from '../domains/recruitment/lifecycle/trial.mjs';
-import { readPage, sendPageError } from '../domains/platform/paging.mjs';
+import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../../domain.mjs';
+import { parseStrictDateOnly, parseDateOrInstant, isExpiredAt, isAbsent } from '../../temporal.mjs';
+import { trialFamilyView, trialOutcomeLine } from '../recruitment/lifecycle/trial.mjs';
+import { readPage, sendPageError } from '../platform/paging.mjs';
 
 export function registerJourneys(ctx) {
   const {

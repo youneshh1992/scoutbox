@@ -5,7 +5,7 @@
 // the verifying actor's authority, corrections supersede without erasing,
 // and "insufficient evidence" is a first-class display state.
 
-import { parseDateOrInstant, isAbsent, readInstant } from '../temporal.mjs';
+import { parseDateOrInstant, isAbsent, readInstant } from '../../temporal.mjs';
 
 const CLAIM_TYPES = ['statistic', 'attendance', 'assessment_result', 'reference', 'footage', 'availability'];
 

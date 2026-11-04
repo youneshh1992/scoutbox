@@ -114,7 +114,7 @@ How a club takes a player from "watching" to a decision. The case lifecycle, the
 *Spot-checked against the code on 3 November 2026. ✓ enforced, ✗ not found, ≠ differs from the old docs.*
 
 - ✓ Target-keyed evidence gates incl. trial, decision and signed: `scoutbox-server/domains/recruitment/rooms/shared.mjs:273-290`.
-- ✓ Stage route refused on Room cases: `m12/scouting.mjs:535-537`. ✓ `stage`/`status` key refused: `domains/recruitment/lifecycle/index.mjs:89`.
+- ✓ Stage route refused on Room cases: `domains/scouting/scouting.mjs:535-537`. ✓ `stage`/`status` key refused: `domains/recruitment/lifecycle/index.mjs:89`.
 - ✓ Minor without guardian route fails closed: `domains/recruitment/lifecycle/contact.mjs:278`. ✓ 180-day / 72 h constants: `domains/recruitment/lifecycle/contact.mjs:109,111`.
 - ✓ Recipient view strips caseId, orgId, keys and private trial address/instructions: `server.mjs:2355-2366`.
 - ✓ Minor wall and grassroots radius: `domain.mjs:110-120`. ✓ Completion gate: `domains/recruitment/lifecycle/trial.mjs:323-338`. ✓ Child device cannot act: `domains/recruitment/lifecycle/trialRoutes.mjs:892`.

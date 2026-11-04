@@ -6,13 +6,13 @@
 // blind SERVER-SIDE: another scout's report is not delivered to you until
 // your own is submitted. "Not observed" is never averaged as zero.
 
-import { roomRole, roomCan, CASE_PRIORITIES, CASE_DECISION_OUTCOMES } from '../domains/recruitment/rooms/shared.mjs';
+import { roomRole, roomCan, CASE_PRIORITIES, CASE_DECISION_OUTCOMES } from '../recruitment/rooms/shared.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
 const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
 
-import { readPage, sendPageError } from '../domains/platform/paging.mjs';
+import { readPage, sendPageError } from '../platform/paging.mjs';
 export function registerScouting(ctx) {
   const {
     db, byId, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,

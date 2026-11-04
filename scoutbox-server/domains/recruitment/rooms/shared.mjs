@@ -100,7 +100,7 @@ export const INITIAL_ROOM_STATUS = 'watching';
 export const OPEN_ROOM_STATUSES = ROOM_STATUSES.filter((s) => !TERMINAL_ROOM_STATUSES.includes(s));
 
 // M12 stage vocabularies, mirrored here so the mapping is declarative. These
-// MUST stay equal to m12/scouting.mjs PRO_STAGES / GRASSROOTS_STAGES; a boot
+// MUST stay equal to domains/scouting/scouting.mjs PRO_STAGES / GRASSROOTS_STAGES; a boot
 // assertion in domains/recruitment/rooms/index.mjs fails loudly if they ever drift apart.
 export const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 export const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];

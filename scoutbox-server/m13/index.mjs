@@ -9,7 +9,7 @@ import { migrateM13, buildSharedM13 } from './shared.mjs';
 import { registerImports } from './imports.mjs';
 import { registerDelivery } from './delivery.mjs';
 import { registerEnterprise } from './enterprise.mjs';
-import { registerSuitability } from './suitability.mjs';
+import { registerSuitability } from '../domains/scouting/suitability.mjs';
 import { registerTransitions } from './transitions.mjs';
 import { registerInsight } from './insight.mjs';
 import { registerPlanning } from './planning.mjs';

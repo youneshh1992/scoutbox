@@ -103,6 +103,6 @@ There are no health categories: `availability/rehabilitation` and `injury_or_una
 - ✓ Lead pattern: `scoutbox-server/roles.mjs:16`.
 - ✓ Five-cap constants and validators: `scoutbox-club/src/nav.ts:55,280`, `scoutbox-admin/src/navGroups.ts:10`, `design-system/caseNav.ts:46`. Pro groups and T&S groups match M24D.
 - ✓ Player tabs and the "Updates" label: `scoutbox-player/src/app/(tabs)/_layout.tsx:19-25,73`; categories `scoutbox-player/src/caseNav.ts:27-70`; You sections `you.tsx:57-73`.
-- ✓ Stage not writable on a Room: `scoutbox-server/m12/scouting.mjs:538`. ✓ Contacted needs `contact_delivered`: `domains/recruitment/rooms/shared.mjs:274`.
+- ✓ Stage not writable on a Room: `scoutbox-server/domains/scouting/scouting.mjs:538`. ✓ Contacted needs `contact_delivered`: `domains/recruitment/rooms/shared.mjs:274`.
 - ✓ 16 lifecycle reason codes: `domains/recruitment/lifecycle/lifecycle.mjs:67`. ✓ Development vocabulary checked at boot: `m21/shared.mjs:448`.
 - ✓ Finance: the sidebar (`scoutbox-club/src/nav.ts`) and the server (`m13/shared.mjs` `canViewFinance`) both use `isFinanceRole` from `scoutbox-server/roles.mjs`. Others get `403 FINANCE_ROLE_REQUIRED` (`m13/planning.mjs`).

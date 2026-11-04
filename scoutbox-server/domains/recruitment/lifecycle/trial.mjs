@@ -69,7 +69,7 @@ export const TRIAL_COMPLETION_STATES = Object.freeze(['completed', 'cancelled'])
 export const TRIAL_CANCEL_ACTORS = Object.freeze(['club', 'player', 'guardian', 'system']);
 /** The record's own status: a mandatory report is owed until it is filed. */
 export const TRIAL_STATUSES = Object.freeze(['awaiting_report', 'reported']);
-/** Trial-day vocabulary (m12/journeys.mjs): a named staff member's background-check states, the day's status events, the event-consent scopes. */
+/** Trial-day vocabulary (domains/scouting/journeys.mjs): a named staff member's background-check states, the day's status events, the event-consent scopes. */
 export const TRIAL_STAFF_CHECK_STATES = Object.freeze(['pending', 'reviewed', 'expired', 'rejected']);
 export const TRIAL_DAY_EVENT_KINDS = Object.freeze(['cancelled', 'postponed']);
 export const TRIAL_CONSENT_SCOPES = Object.freeze(['player_event_consent', 'guardian_event_consent']);

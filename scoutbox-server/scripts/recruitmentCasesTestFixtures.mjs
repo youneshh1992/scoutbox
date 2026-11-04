@@ -1,6 +1,6 @@
 // S8b test fixtures: recruitment cases (the M12 case with the M17 room facet, its owned lists and objects), room
 // comments, room snapshots, room decisions and room evidence states in the EXACT shapes the writers produce
-// (m12/scouting.mjs the case, assignments, M12 tasks, approvals, the decision; domains/recruitment/rooms/rooms.mjs the room facet, M17 tasks,
+// (domains/scouting/scouting.mjs the case, assignments, M12 tasks, approvals, the decision; domains/recruitment/rooms/rooms.mjs the room facet, M17 tasks,
 // assignments, links, reopen, comments, snapshots, recommendations, evidence states; domains/recruitment/lifecycle/decisionRoutes.mjs the draft
 // and the formal decision; m27/index.mjs the transaction handoff; m13/planning.mjs the budget; m12/shared.mjs /
 // m13/shared.mjs the one history literal every case writer appends). Every record is one the typed tables hold.
@@ -17,7 +17,7 @@ const by = () => ({ userId: SCOUT.userId, name: SCOUT.name });
 /** m12/shared.mjs `audit()` / m13/shared.mjs `histAppend()`: the history literal every M12/M17/M23 writer appends. */
 export const hist = (id, at, action, detail = null, over = {}) => ({ id, at, byKind: 'org', byId: SCOUT.userId, byName: SCOUT.name, action, detail, ...over });
 
-/** m12/scouting.mjs — the M12 case literal (no room, no budget). */
+/** domains/scouting/scouting.mjs — the M12 case literal (no room, no budget). */
 export const m12Case = (over = {}) => ({
   id: 'case-2', orgId: ORG.id, playerId: 'pl-child1', playerName: 'Child pl-child1',
   vacancyId: null, ownerUserId: SCOUT.userId, ownerName: SCOUT.name,
@@ -67,7 +67,7 @@ export const roomCase = (over = {}) => ({
   ...over,
 });
 
-/** m12/scouting.mjs — a bare M12 case: a vacancy, a deadline day, nothing assigned yet. */
+/** domains/scouting/scouting.mjs — a bare M12 case: a vacancy, a deadline day, nothing assigned yet. */
 export const legacyCase = (over = {}) => m12Case({
   id: 'case-legacy', playerId: 'pl-child2', playerName: 'Child pl-child2', vacancyId: 'vac-9', priority: 'low', deadline: '2026-12-01',
   assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null },

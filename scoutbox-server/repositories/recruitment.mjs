@@ -11,7 +11,7 @@
  * and `channels`, rebuilt by 0015 so its `request_id` is a real key.
  *
  * EVERY FIELD IS A TYPED COLUMN with the vocabulary CHECKs of the domain rules (server.mjs issueRecruitmentRequest and
- * issueAcceptedTrial, domains/recruitment/lifecycle/trial.mjs, domains/recruitment/lifecycle/trialRoutes.mjs, m12/journeys.mjs). There is no `absent_keys_json`,
+ * issueAcceptedTrial, domains/recruitment/lifecycle/trial.mjs, domains/recruitment/lifecycle/trialRoutes.mjs, domains/scouting/journeys.mjs). There is no `absent_keys_json`,
  * `offtype_json`, `extra_json` or `raw_json`. A record the columns cannot hold — an unknown field at any level
  * included — is REFUSED with its id, at a repository write (the unit rolls back) and at a snapshot write (the save
  * rolls back). An `undefined` field is an absent one (the JSON rule); an absent field reads back as null, an absent
@@ -535,7 +535,7 @@ export function typeRequest(raw, at = 'requests') {
 }
 
 const TRIAL_KEYS = ['id', 'requestId', 'caseId', 'playerId', 'playerName', 'orgId', 'orgName', 'scoutName', 'acceptedAt', 'acceptedBy', 'guardianApproved', 'proposedDate', 'venue', 'notes', 'reportDueAt', 'status', 'reminderSent', 'feedbackEscalatedAt', 'report', 'day', 'workflowState', 'schedule', 'attendance', 'completion', 'recipient', 'keys', 'history', 'reminders', 'lifecycle', 'rev', 'revAt', 'revBy', 'subjectRemovedAt'];
-/** The trial-day container every trial reads back with (m12/journeys.mjs). */
+/** The trial-day container every trial reads back with (domains/scouting/journeys.mjs). */
 export const emptyTrialDay = () => ({ staff: [], consents: [], arrival: null, emergency: null, checkins: [], collection: null, statusEvents: [] });
 
 function typeDay(d, L) {

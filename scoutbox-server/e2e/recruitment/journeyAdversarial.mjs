@@ -1214,7 +1214,7 @@ section('Z — boundary invariants, read from the source');
   neg(/\['delivered', 'responded'\]\.includes\(c\.status\)/.test(src('domains/recruitment/lifecycle/contactRoutes.mjs')), 'Z11 the send replay reports current truth (D-P81-10)');
   neg(/DECISION_IDEMPOTENCY_CONFLICT/.test(src('domains/recruitment/rooms/rooms.mjs')), 'Z12 the M17 decision replay fingerprints content (D-P81-11)');
   neg(/pkg\.currentRevisionId \?\? null\)\) return res\.json\(\{ \.\.\.view\(\), idempotent: true/.test(src('domains/recruitment/signings/index.mjs')), 'Z13 a party signature key replays only for the current revision (D-P81-12)');
-  neg(/USER_NOT_IN_ORG/.test(src('m12/scouting.mjs')), 'Z14 an M12 case task requires an org member (D-P81-13)');
+  neg(/USER_NOT_IN_ORG/.test(src('domains/scouting/scouting.mjs')), 'Z14 an M12 case task requires an org member (D-P81-13)');
   neg(/lifecycle\.after_status/.test(src('domains/recruitment/rooms/rooms.mjs')) && /offer\.respond\.after_persist/.test(src('domains/recruitment/offers/index.mjs')), 'Z15 the two P8.1 fault seams sit inside the writers they prove');
   neg(['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every((f) => /visibilitychange/.test(src(f)) && /'pageshow'/.test(src(f))), 'Z16 the three web apps re-read on focus, pageshow and visibility');
   neg(['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every((f) => { const s = strip(src(f)); const i = s.indexOf('api.onChange(session'); const block = s.slice(i, i + 400); return !/payload\.(status|to|from|stage)/.test(block); }), 'Z17 no app reads a status, a stage or a target state off an event payload');

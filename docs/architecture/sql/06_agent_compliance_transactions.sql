@@ -540,7 +540,7 @@ CREATE TABLE agreement_documents (
 -- owner/writer: m27 (share, withdraw)   lifecycle: withdrawn_at soft marker;
 --         never deleted; cap 200 per agreement (MAX_OPPORTUNITY_SHARES).
 -- mapping: id -> id (aos-*); opportunityId -> opportunity_id + via ->
---   via: a POLYMORPHIC pair — the board (m12/journeys.mjs:837/848) yields
+--   via: a POLYMORPHIC pair — the board (domains/scouting/journeys.mjs:837/848) yields
 --   via 'opportunity' (-> opportunities(id), 04) or 'open_trial' (an open
 --   trial day row, 04), so no FK; title/orgName/deadline -> title / org_name /
 --   deadline_date (snapshots of the board row at share time); note -> note

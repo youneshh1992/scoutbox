@@ -646,11 +646,11 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   const src = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
   const files = (dir) => readdirSync(path.join(ROOT, dir)).filter((f) => f.endsWith('.mjs')).map((f) => `${dir}/${f}`);
-  const serverFiles = ['server.mjs', 'seed.mjs', 'domain.mjs', ...['m12', 'm13', 'm14', 'm15', 'm16', 'm162', 'm18', 'm19', 'm20', 'm21', 'm22', 'm24', 'm25', 'm26', 'm27', 'domains/platform', 'domains/recruitment/rooms', 'domains/recruitment/lifecycle', 'domains/recruitment/offers', 'domains/recruitment/signings'].flatMap(files)];
+  const serverFiles = ['server.mjs', 'seed.mjs', 'domain.mjs', ...['m12', 'm13', 'm14', 'm15', 'm16', 'm162', 'm18', 'm19', 'm20', 'm21', 'm22', 'm24', 'm25', 'm26', 'm27', 'domains/platform', 'domains/recruitment/rooms', 'domains/recruitment/lifecycle', 'domains/recruitment/offers', 'domains/recruitment/signings', 'domains/scouting'].flatMap(files)];
   const statusWriters = serverFiles.filter((f) => /\.room\.status\s*=[^=]/.test(strip(src(f))));
   neg(statusWriters.length === 1 && statusWriters[0] === 'domains/recruitment/rooms/rooms.mjs', `Z1 exactly one file assigns room.status on a live case: ${statusWriters.join(', ')}`);
   const stageWriters = serverFiles.filter((f) => /(?:kase|room|c|k)\.stage\s*=[^=]/.test(strip(src(f))));
-  neg(stageWriters.every((f) => ['domains/recruitment/rooms/rooms.mjs', 'm12/scouting.mjs'].includes(f)), `Z2 case.stage is written only by the ONE writer and the room-guarded M12 routes: ${stageWriters.join(', ')}`);
+  neg(stageWriters.every((f) => ['domains/recruitment/rooms/rooms.mjs', 'domains/scouting/scouting.mjs'].includes(f)), `Z2 case.stage is written only by the ONE writer and the room-guarded M12 routes: ${stageWriters.join(', ')}`);
   // S4a: the column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record; the one writer is still m29.
   const ucWriters = serverFiles.filter((f) => /contractStatus\s*=\s*'under_contract'|players\.update\([^\n]*contractStatus: 'under_contract'/.test(strip(src(f))));
   neg(ucWriters.length === 1 && ucWriters[0] === 'domains/recruitment/signings/index.mjs', `#26 Z3 'under_contract' is written in exactly one file: ${ucWriters.join(', ')}`);
