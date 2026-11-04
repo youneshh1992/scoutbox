@@ -87,6 +87,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
 | — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 measured (4 Nov): fails §2, fixes listed in §4.3 |
+| — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | §4.3.1, next; before S9 |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -177,7 +178,7 @@ commit: add a counts response the two home dashboards read instead; page the fou
 each app where only the first page is read, as `m12api.ts` and the admin `m12tabs.tsx` do.
 
 Doing the same for players and guardians (S4a's whole-snapshot identity replace) would also settle the A0–A3
-foreign-key questions. That's a candidate for later.
+foreign-key questions. It is now §4.3.1.
 
 **S8c done 3 November** (branch `migrate/s8c-explicit-writes`). Contacts and offers are ten typed tables with the
 vocabulary and length CHECKs, no side columns, and their idempotency keys as columns plus `offer_keys` rows (no longer
@@ -353,14 +354,14 @@ A typical club is at or near 5 ms everywhere (its audit about 20 ms at 30k). Boo
 comment adds about 320 kB to the write-ahead log at any size, so no request rewrites the database file, but every write
 costs CPU in proportion to the whole player base. The causes, from CPU profiles, in the order to fix them:
 
+Items 1 and 2 are not recruitment's and every later domain would inherit them, so they are a step of their own
+(§4.3.1). Items 3–6 are recruitment's: fix them after §4.3.1 and re-measure.
+
 1. **Every write walks every player.** At each unit-of-work commit and save, `identity.flushDomain` rebuilds every
    player's row to compare its facets (`repositories/identity.mjs:1026`), and building a row reads the player's derived
-   trial reports (one query per player). This is S4a's whole-snapshot write model; making the identity writes explicit,
-   as recruitment's are, removes it (and settles A0–A3, see above). After that, check what the unit of work's
-   `captureGraph` of the in-memory database (`store.mjs:294`) still costs.
+   trial reports (one query per player). Fixed by §4.3.1.
 2. **`findPlayer` is a linear scan** of the identity view (`server.mjs:702`, 184 callers), as are `usersOf` and
-   `db.orgs.find`. The audit feed calls it once per case, contact and trial; the sweeps once per item. The identity
-   repository already has `players.byId`.
+   `db.orgs.find`. The audit feed calls it once per case, contact and trial; the sweeps once per item. Fixed by §4.3.1.
 3. **The trial-reminder sweep visits every confirmed, open trial every minute** and calls `findPlayer` for each before
    checking whether a reminder is due (`m12/operations.mjs:362`); reading those trials alone takes 0.2 s per 1,000.
    With 10,000 open trials and 100k players this blocked the boot for over 18 minutes. Select only the sessions starting
@@ -376,6 +377,32 @@ A backlog is a separate risk: the boot runs the sweeps before it listens, and th
 and one notification at a time (a stale copy of the fixtures, 3,000 graphs at 10k players, booted in 68 s instead of
 23 s). The script moves the fixtures' instants to today and leaves out their 200-day-old legacy signing so it measures
 the steady state.
+
+### 4.3.1 Remove the costs that grow with the whole player base (before S9)
+
+Found by §4.3 step 4. Two foundations make every request slower as the platform grows, whatever the domain: a write
+costs CPU in proportion to every player (2.4 s per Room comment at 10k players, 6.4 s at 30k), and a lookup by id scans
+a whole collection. Each domain migrated on top of them inherits both, so this comes before S9.
+
+1. **Lookups by id use the index.** `findPlayer` (`server.mjs:702`, 184 callers), `usersOf` and the `db.orgs.find`
+   / `db.users` scans (about 120 more) go through the repositories' maps: `players.byId` and `users.byId` exist;
+   `orgs.byId` exists but searches with `records.indexOf` (`repositories/orgs.mjs:401`) and needs the map to hold the
+   view. One small change, no behaviour change. It removes most of the audit feed's time and the sweeps' per-item scan.
+2. **Explicit identity writes (S4a-E).** Players and guardians move to the S8 pattern: routes call repository
+   operations (most already do: `players.update`, `patchItem`, `setItems`), each write types and writes its rows, and
+   the save no longer rebuilds and compares every player's row (`identity.flushDomain`, `repositories/identity.mjs:1026`,
+   with one trial-report query per player). The read-only view stays for readers until they move to queries. This
+   settles A0–A3 (§6).
+3. **Then re-measure the unit of work itself.** `store.unitOfWork` copies the whole in-memory database at the start
+   (`captureGraph`, `store.mjs:294`) and every repository with a mirror captures its own state (`snapshotState`; the
+   organisations capture every record). Measure what is left after 1 and 2; remove what no longer has an in-memory
+   state to restore.
+4. **The boot's default backfill** (`server.mjs:271`) writes one transaction per player that lacks a default; it is
+   cheap on a seeded database but becomes one statement once the identity writes are explicit.
+
+Done when: `npm run perf:recruitment -- 30000 1000 500` shows a Room comment and the offers lists under 50 ms and the
+audit feed's time no longer growing between 10k and 30k players, and a unit test asserts that a write's cost does
+not grow with the player count (for example, the number of statements a save runs).
 
 ### 4.4 The end-to-end test estate
 
@@ -400,7 +427,7 @@ One step per `sql/*.sql` file, split only if a step gets too big to review. Each
 
 | Step | Schema file | Tables | Collections | Depends on | Watch out for |
 |---|---|---|---|---|---|
-| S9 Scouting and assessment | `04_scouting_assessment.sql` | 33 | `evidence`, `coachAffiliations`, `squadInvites`, `assessmentTemplates`, `assessments`, `videoSegments`, `playlists`, `vacancies`, `opportunities`, `applications`, `campaigns`, `campaignSubmissions`, `playerPrefs`; the org facets `tactical`, `squad`, `lookingFor`, `federationCheck` move out of `orgs.facets_json` | S5, S8 | Template ids repeat across versions, so the key is `(id, version)`. A tactical re-save must diff roles by id so vacancies keep `role_id`. Coach affiliations are keyed by user id. `playerPrefs` is inserted on read, so it needs an upsert. Squads come in four shapes. Player foreign keys: tolerant, like recruitment, unless there's a reason not to. |
+| S9 Scouting and assessment | `04_scouting_assessment.sql` | 33 | `evidence`, `coachAffiliations`, `squadInvites`, `assessmentTemplates`, `assessments`, `videoSegments`, `playlists`, `vacancies`, `opportunities`, `applications`, `campaigns`, `campaignSubmissions`, `playerPrefs`; the org facets `tactical`, `squad`, `lookingFor`, `federationCheck` move out of `orgs.facets_json` | S5, S8, §4.3.1 | Template ids repeat across versions, so the key is `(id, version)`. A tactical re-save must diff roles by id so vacancies keep `role_id`. Coach affiliations are keyed by user id. `playerPrefs` is inserted on read, so it needs an upsert. Squads come in four shapes. Player foreign keys: tolerant, like recruitment, unless there's a reason not to. |
 | S10 Verification and passport | `05_verification_passport.sql` | 31 | the `ver*` collections (including `verMigrated`), `passportPrefs`, `passportCareerEntries`, `passportAchievements`, `passportShares`, `passportCorrections`, `transitionCases`, `representations`, `vouches`; the `orgs.verification` facet | S4, S9 | `orgs.verified` becomes derived from claims. Raw passport dates stay raw. Tokens and vouch codes are hashed. One identity claim per user; self-verification is refused. |
 | S11 Agents, compliance, transactions | `06_agent_compliance_transactions.sql` | 61 | `agentProfiles`, `agencyAffiliations`, `representationAgreements`, `tsReviewers`, `jurisdictionPolicies`, `regulatoryReviews`, `regulatoryConsents`, `complianceContexts`, `agentTransactions`, `transactionRepresentations`, `transactionDocuments`; `orgs.agencySettings` | S8, S10 | Uniqueness on an *effective* status stays in code. Policies are published under dual control. Each consent can be revoked once. Minors are refused on agreements. Reviewer secrets are hashed. |
 | S12 Development, Box Cam, discovery | `07_development_boxcam_discovery.sql` | 57 | about 30: `devObjectives`, `drillGuidance`, `boxCam*`/`box*`, `combine*`, `recruitmentBriefs`, `nobodyMissedReviews`, `secondLookItems`, `dynamicWatchlists`, `watchlistHistory`, `development*`, `exposureEvents`, `reviewLater`, `evidenceSuggestions`, `calibrationSessions`, `fixtures`, `coverage*` | S5, S8, S9 | Reads that write (Second Look and watchlist reconciliation, evidence suggestions) become explicit upserts. Hash the nonce. Split `fixture_id` into kind and id. Consent gate; one entry per challenge and player. |
