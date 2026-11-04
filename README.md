@@ -41,7 +41,7 @@ Running the server, its environment variables and the data-layer rules: [`scoutb
 cd scoutbox-server && npm test                   # server unit suites
 cd scoutbox-player && npm test                   # Player (Jest, jest-expo)
 npm run test:server                              # server unit suites + connected end-to-end
-cd scoutbox-server && npm run e2e                # API end-to-end (starts its own server on a temporary data dir)
+cd scoutbox-server && npm run e2e                # end-to-end batteries (each starts its own servers on temporary data dirs)
 ```
 
 CI (`.github/workflows/ci.yml`) runs the server suites and end-to-end batteries, and type-checks and builds every app.

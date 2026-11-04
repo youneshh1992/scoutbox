@@ -22,12 +22,13 @@ fixed on 3 November; these were found while fixing it.
   alone three times and in the next two full runs. If it fails again, keep the runner's log.
 - **`e2e/platform/contracts.mjs` fails one check**: `orgPanels.tsx` is no longer byte-identical in `scoutbox-club` and
   `scoutbox-grassroots` (which must share business logic). Grassroots shows audit entries as structured facts since
-  `7f93a14` (1 Nov); Club still shows one sentence. Deciding which one both apps use is a design question. Not in CI.
+  `7f93a14` (1 Nov); Club still shows one sentence. Deciding which one both apps use is a design question. A `knownFailure` check ("orgPanels.tsx drift"), so the
+  battery runs in CI.
 - **`e2e/agents/corePersistence.mjs` fails one check** ("the migrated staff member is an assistant"). It boots over a
   schema-2304 blob snapshot, but `server.mjs` runs the `m182` steps before `attachDataLayer`, and staff accounts are
   table-backed since S0, so `m240_001_agent_core_stores` sees no `db.users` and gives the staff member no
   affiliation. Only an old development-build file reaches this. It goes when S11 moves the affiliations into tables
-  and the step becomes a no-op. Not in CI.
+  and the step becomes a no-op. A `knownFailure` check ("agents/corePersistence staff upgrade").
 - **`e2e/m24f2DensityAudit` (3 checks) and `e2e/m24fVisualAudit` (2 checks) fail**, like the M24F audits fixed on
   3 Nov: Player Account categories, the portal ™ label, the Grassroots and Player Home single primary action, and
   the Player Card/ListRow check. Triage them against [`design.md`](design.md).

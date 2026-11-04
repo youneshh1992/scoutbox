@@ -7,6 +7,6 @@
     "dev": "node scripts/dev-all.mjs",
     "dev:all": "node scripts/dev-all.mjs --with-admin",
     "reseed": "node scripts/reseed.mjs",
-    "test:server": "cd scoutbox-server && npm test && node e2e/platform/connectedMode.mjs"
+    "test:server": "cd scoutbox-server && npm test && npm run e2e"
   }
 }
