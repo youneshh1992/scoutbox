@@ -95,12 +95,14 @@ export interface RoomFunnel {
 
 export interface RoomListParams {
   view?: string; status?: string; tag?: string; assignee?: string;
-  q?: string; limit?: number; offset?: number;
+  q?: string; limit?: number; cursor?: string;
 }
 
+// The server pages this list by cursor ("continue from here"): `nextCursor` is passed back as `cursor` for the next page,
+// null on the last. The Rooms screen reads the first page only; it will need a "load more" (not built yet, by decision).
 export interface RoomListResult {
   items: RoomListItem[];
-  total: number; limit: number; offset: number;
+  nextCursor: string | null;
   funnel: RoomFunnel;
   statuses: { id: string; label: string }[];
   note: string;

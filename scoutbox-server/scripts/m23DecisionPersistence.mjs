@@ -87,6 +87,7 @@ function baseDb() {
     }],
   };
   runMigrations(db);
+  db.roomDecisions ??= []; db.recruitmentCases ??= []; // the snapshot's collections: the migrations no longer create them (§4.3 step 2)
   return db;
 }
 
@@ -135,13 +136,13 @@ section('1 — no P5 migration: one decision store, the draft on the case, nothi
   // schema has since reached. The literal 2306 turned every later milestone's step
   // into a Decision failure, which is the opposite of what this asserts.
   ok(SCHEMA_VERSION >= 2306 && !MIGRATIONS.some((m) => /decision/i.test(m.id) && m.version > 2304), `the schema is ${SCHEMA_VERSION} and P5 Decision still adds no migration step of its own`);
-  ok(guaranteeFor('roomDecisions') === 'migration' && PRODUCTION_REQUIRED_STORES.includes('roomDecisions') && JOURNEY_REQUIRED_STORES.includes('roomDecisions'), 'roomDecisions is migration-guaranteed, production-required and journey-required (M17, unchanged)');
+  ok(guaranteeFor('roomDecisions') === null && !PRODUCTION_REQUIRED_STORES.includes('roomDecisions') && !JOURNEY_REQUIRED_STORES.includes('roomDecisions'), 'roomDecisions is a typed table read through SQL, no db collection (§4.3 step 2; rewritten, it described the old storage)');
   neg(guaranteeFor('recruitmentDecisions') !== 'migration' && guaranteeFor('decisionDrafts') !== 'migration' && guaranteeFor('recruitmentOffers') !== 'migration', 'no second decision store, no draft store, no offer store is guaranteed by the registry');
   const fresh = {};
   runMigrations(fresh);
   // Migrations ALONE: P5 invented no store, and the P6 Offer store is created by
   // its module at registration (guarantee 'module'), so it is absent here too.
-  ok(Array.isArray(fresh.roomDecisions) && fresh.roomDecisions.length === 0 && fresh.recruitmentDecisions === undefined && fresh.decisionDrafts === undefined && fresh.recruitmentOffers === undefined, 'a clean database gets an empty roomDecisions and no P5-invented store (the P6 Offer store arrives with its module, not a migration)');
+  ok(fresh.roomDecisions === undefined && fresh.recruitmentDecisions === undefined && fresh.decisionDrafts === undefined && fresh.recruitmentOffers === undefined, 'a clean database gets no roomDecisions collection (a table since §4.3 step 2) and no P5-invented store (the P6 Offer store arrives with its module, not a migration)');
   const db = baseDb();
   db.roomDecisions.push(legacyRow(), formalRow(), headRow());
   db.recruitmentCases[0].decisionDraft = draftRow();

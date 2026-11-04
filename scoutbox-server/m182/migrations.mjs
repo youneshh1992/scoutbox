@@ -99,7 +99,7 @@ export const MIGRATIONS = [
     up(db) {
       for (const k of [
         'notifications', 'ledger', 'sessions', 'users', 'orgs', 'players', 'guardians',
-        'recruitmentCases', 'roomComments', 'roomDecisions', 'roomSnapshots', 'roomEvidenceState',
+        // the recruitment cases and the four Room collections are tables read through SQL since §4.3 step 2
         'recruitmentBriefs', 'nobodyMissedReviews', 'secondLookItems', 'sourceChanges',
         'boxSessions', 'boxSessionEvents', 'combineAttempts', 'combineRequests',
       ]) db[k] ??= [];
@@ -109,7 +109,7 @@ export const MIGRATIONS = [
     id: 'm182_003_rev_backfill',
     note: 'Rooms and Briefs written before M18.1 carry rev 1 explicitly rather than implicitly.',
     up(db) {
-      for (const c of db.recruitmentCases ?? []) if (c.room && c.room.rev == null) c.room.rev = 1;
+      // The Rooms are typed rows since S8b, where rev is required; nothing to backfill on them (§4.3 step 2).
       for (const b of db.recruitmentBriefs ?? []) if (b.rev == null) b.rev = 1;
     },
   },

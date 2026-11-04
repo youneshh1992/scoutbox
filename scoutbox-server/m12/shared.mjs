@@ -16,7 +16,7 @@ export function migrateM12(db, players) {
   db.assessments ??= [];         // F2 — scouting assessments
   db.videoSegments ??= [];       // F7 — timestamped annotations against source media
   db.playlists ??= [];           // F7 — role-scoped segment playlists
-  db.recruitmentCases ??= [];    // F3 — recruitment cases
+  // F3 recruitment cases: tables of the recruitment-cases repository, read through SQL (§4.3 step 2); no db.* here.
   db.vacancies ??= [];           // F4 — role vacancies / briefs
   db.opportunities ??= [];       // F5 — structured opportunity board
   db.applications ??= [];        // F5 — opportunity applications

@@ -12,6 +12,7 @@ const CONFIDENCE = ['low', 'medium', 'high'];
 const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
 
+import { readPage, sendPageError, pageSorted } from '../domains/platform/paging.mjs';
 export function registerScouting(ctx) {
   const {
     db, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
@@ -24,6 +25,7 @@ export function registerScouting(ctx) {
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function' || typeof reads?.trials?.byId !== 'function') throw new TypeError('registerScouting needs recruitmentReads (signings, requests, trials) from the data layer');
   /** A trial of this organisation, or null. */
+  const caseOfOrg = (id, orgId) => { const k = reads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
   const orgTrial = (id, orgId) => { const t = reads.trials.byId(id); return t && t.orgId === orgId ? t : null; };
   const { cases } = recruitmentCases;
 
@@ -121,7 +123,7 @@ export function registerScouting(ctx) {
     const t = orgTrial(rawTrial, req.org.id);
     if (!t || t.playerId !== p.id) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
     if (t.subjectRemovedAt) { res.status(409).json({ error: 'TRIAL_SUBJECT_REMOVED', message: 'This player removed their ScoutBox account; nothing new is written about a person who left.' }); return null; }
-    const room = t.caseId ? (db.recruitmentCases ?? []).find((k) => k?.id === t.caseId && k.orgId === req.org.id) ?? null : null;
+    const room = t.caseId ? caseOfOrg(t.caseId, req.org.id) : null;
     if (room) {
       const role = roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
       if (!roomCan(role, 'trial_assess')) { res.status(403).json({ error: 'TRIAL_NOT_PERMITTED', message: 'Assessing this trial needs a role in its Recruitment Room.' }); return null; }
@@ -443,9 +445,17 @@ export function registerScouting(ctx) {
   function caseView(c) { return c; } // history is intentionally included: it is append-only
 
   orgRouter.get('/cases', (req, res) => {
-    let list = db.recruitmentCases.filter((c) => c.orgId === req.org.id && caseAccess(req, c));
+    // Newest first, paged by cursor ({ items, nextCursor }; domains/platform/paging.mjs). The access rule is per viewer,
+    // so the organisation's cases are read by index and filtered here. The apps read the first page only; a "load more"
+    // is not built yet (the decision of 4 November 2026).
+    let page;
+    try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
+    let list = reads.cases.forOrg(req.org.id).filter((c) => caseAccess(req, c));
     if (req.query.stage) list = list.filter((c) => c.stage === req.query.stage);
-    res.json({ ...paginate(req, list.slice().sort((a, b) => b.createdAt - a.createdAt).map(caseView)), stages: stagesFor(req.org) });
+    const newestFirst = (a, b) => (b[0] - a[0]) || (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0);
+    list.sort((a, b) => newestFirst([a.createdAt, a.id], [b.createdAt, b.id]));
+    const { items, nextCursor } = pageSorted(list, page, (c) => [c.createdAt, c.id], newestFirst);
+    res.json({ items: items.map(caseView), nextCursor, stages: stagesFor(req.org) });
   });
 
   orgRouter.post('/cases', (req, res) => {
@@ -472,7 +482,7 @@ export function registerScouting(ctx) {
   });
 
   function findCase(req, res) {
-    const c = db.recruitmentCases.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const c = caseOfOrg(req.params.id, req.org.id);
     if (!c) { res.status(404).json({ error: 'CASE_NOT_FOUND' }); return null; }
     if (!caseAccess(req, c)) { res.status(403).json({ error: 'CASE_RESTRICTED', message: 'This case is restricted to its owner, assignees and recruitment leads.' }); return null; }
     return c;
@@ -774,7 +784,7 @@ export function registerScouting(ctx) {
           requiredTotal: required.length,
           unknowns: [...required, ...preferred].filter((c) => c.verdict === 'unknown').length,
           onSquad: req.org.squad.some((s) => s.playerId === p.id),
-          caseId: db.recruitmentCases.find((c) => c.orgId === req.org.id && c.playerId === p.id && c.stage !== 'closed')?.id ?? null,
+          caseId: reads.cases.forOrgPlayer(req.org.id, p.id).find((c) => c.stage !== 'closed')?.id ?? null,
         };
       })
       .filter((c) => !c.required.some((r) => r.verdict === 'not_met'))

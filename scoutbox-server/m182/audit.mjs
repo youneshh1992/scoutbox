@@ -93,8 +93,8 @@ export function registerAudit(ctx) {
 
   function entriesFor(org) {
     const rows = [];
-    for (const c of db.recruitmentCases ?? []) {
-      if (c.orgId !== org.id || !c.room) continue;
+    for (const c of recruitmentReads.cases.forOrg(org.id)) {
+      if (!c.room) continue;
       // The player is named only if the organisation may currently see them.
       const p = findPlayer(c.playerId);
       const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };

@@ -86,7 +86,7 @@ function signingSupports(signing, kase, packages = null) {
  * `reads` carries the recruitment domains that are read through SQL rather than
  * `db` (§4.3 step 2): `contacts` and `offers` (the contacts/offers repository),
  * `signings` and `signingPackages` (the signings repository), `requests` and `trials`
- * (the recruitment repository). A missing one is a
+ * (the recruitment repository), `decisions` (the recruitment-cases repository). A missing one is a
  * broken composition, answered as an unavailable store, never as "no record".
  *
  * Pure with respect to the database: it reads and returns a verdict. It never
@@ -184,9 +184,8 @@ export function createEvidenceProvider(db, reads = {}) {
       // M17 recommendation is not a formal decision. Same direction as every
       // other kind: decision truth -> lifecycle; nothing written.
       if (kind === 'decision_progress') {
-        const decisions = db?.roomDecisions;
-        if (!Array.isArray(decisions)) return { satisfied: false, reason: 'decisions_store_unavailable' };
-        const hit = decisions.find((d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && d.outcome === 'progress'
+        if (typeof reads.decisions?.forRoom !== 'function') return { satisfied: false, reason: 'decisions_store_unavailable' };
+        const hit = reads.decisions.forRoom(kase.id).find((d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && d.outcome === 'progress'
           && d.roomId === kase.id && d.orgId === kase.orgId && d.playerId === kase.playerId && !d.supersededById);
         return hit
           ? { satisfied: true, sourceType: 'decision', sourceId: hit.id }

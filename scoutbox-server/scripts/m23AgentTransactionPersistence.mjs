@@ -115,6 +115,7 @@ section('2 — upgrade from 2306: three containers appear and nothing else moves
   // agreements, compliance contexts, seeded policies — is genuine.
   const db = {};
   runMigrations(db);
+  db.recruitmentCases = []; // the snapshot's cases: the migrations no longer create the collection (§4.3 step 2)
   db.orgs.push({ id: 'org-a', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: false, squad: [], location: null });
   db.players.push({ id: 'pl-1', name: 'Adult Player', dob: '1998-04-02', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } });
   db.users.push({ id: 'usr-1', orgId: 'org-a', name: 'Agency Agent', role: 'Agent', createdAt: 1 }); // the agent the context and the agreement name, and the case's owner

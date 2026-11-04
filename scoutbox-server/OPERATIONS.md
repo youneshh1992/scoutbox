@@ -117,8 +117,8 @@ module registration → integrity report → listen.
   inside its own `update` (it is refused): make the second change after the first returns.
 - **Read SQL where the domain has no view.** Since §4.3 step 2 a domain whose reads moved
   to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
-  repository). Requests, trials, contacts, offers, signing packages, signings, follow-ups and
-  outcome reports have moved: ask the repository (`recruitmentContactsOffers.contacts.forCase`,
+  repository). The whole recruitment domain (cases and Room records, requests, trials,
+  contacts, offers, signing packages, signings, follow-ups, outcome reports) has moved: ask the repository (`recruitmentContactsOffers.contacts.forCase`,
   `signingsFollowUps.signings.forOrgPlayer`, …, or the read-only `recruitmentReads` every
   module context carries). A list that grows without limit pages by cursor through
   `domains/platform/paging.mjs` (`readPage` at the route, a `pageFor…` query in the

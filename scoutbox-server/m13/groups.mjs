@@ -118,7 +118,7 @@ export function registerGroups(ctx) {
 
   function resourceOwnerOk(kind, id, orgId) {
     if (kind === 'shortlist') return id === '*'; // "my shortlist" as a whole
-    if (kind === 'case') return db.recruitmentCases.some((c) => c.id === id && c.orgId === orgId);
+    if (kind === 'case') return ctx.recruitmentReads.cases.byId(id)?.orgId === orgId;
     if (kind === 'assessment') return db.assessments.some((a) => a.id === id && a.orgId === orgId && a.state !== 'draft');
     return false;
   }
@@ -138,7 +138,8 @@ export function registerGroups(ctx) {
       };
     }
     if (grant.resourceKind === 'case') {
-      const c = db.recruitmentCases.find((x) => x.id === grant.resourceId && x.orgId === grant.fromOrgId);
+      const found = ctx.recruitmentReads.cases.byId(grant.resourceId);
+      const c = found && found.orgId === grant.fromOrgId ? found : null;
       if (!c) return { kind: 'case', gone: true };
       if (!eligible(c.playerId)) return { kind: 'case', withheldNote: 'The player in this case is not visible to your organisation under the standing rules.' };
       return { kind: 'case', case: { id: c.id, playerName: c.playerName, stage: c.stage, priority: c.priority, decision: c.decision } };

@@ -200,10 +200,11 @@ const dataLayer = attachDataLayer({
 });
 const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
-// module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials).
+// module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
+// cases, comments, snapshots, decisions, evidenceStates).
 // A record the caller may use, or null: `onlyIf(repo.byId(id), (r) => r.orgId === orgId)`.
 const onlyIf = (record, ok) => (record && ok(record) ? record : null);
-const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads, ...recruitment.reads });
+const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads, ...recruitment.reads, ...recruitmentCases.reads });
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -240,7 +241,7 @@ function seam(step) {
 // Runs AFTER the data layer attached (S3): `db.orgs` is a table-backed view
 // from here on, so a report taken earlier would see no organisations on any
 // boot after the cutover and call every Room an orphan.
-const integrity = integrityReport(db);
+const integrity = integrityReport(db, { cases: recruitmentCases.cases.withRoom() });
 for (const v of integrity.violations) console.error(`INTEGRITY ${v.code} key=${v.key} ids=${v.ids.join(',')}`);
 if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations.length} violation(s) in the loaded snapshot — nothing was repaired.`);
 // M23-D2 — a required collection absent AFTER migrations means the registry

@@ -835,6 +835,7 @@ CREATE TABLE room_decisions (
 CREATE INDEX room_decisions_room_created ON room_decisions (room_id, created_at);
 CREATE INDEX room_decisions_room_client_key ON room_decisions (room_id, client_key);
 CREATE INDEX room_decisions_player ON room_decisions (player_id);
+CREATE INDEX room_decisions_org_player ON room_decisions (org_id, player_id);
 CREATE TABLE room_decision_reason_codes (
   decision_id TEXT NOT NULL REFERENCES room_decisions(id) ON DELETE CASCADE,
   position INTEGER NOT NULL,

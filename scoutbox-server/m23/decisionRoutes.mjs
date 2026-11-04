@@ -68,21 +68,12 @@ export function registerDecision(ctx) {
     return { room, role };
   }
 
-  function storeOr500(res) {
-    if (!Array.isArray(db.roomDecisions)) {
-      console.error('DECISION store_missing db.roomDecisions is absent or not a list');
-      err(res, 'DECISION_STORE_MISSING', 'Decisions cannot be served right now.');
-      return null;
-    }
-    return db.roomDecisions;
-  }
-
   /** This case's rows in chain order; corrupt FORMAL rows omitted and counted, legacy rows left to M17's reading. */
   function rowsOf(kase) {
     const good = [];
     let omitted = 0;
-    for (const d of db.roomDecisions ?? []) {
-      if (!d || typeof d !== 'object' || d.roomId !== kase.id || d.orgId !== kase.orgId) continue;
+    for (const d of reads.decisions.forRoom(kase.id)) {
+      if (d.orgId !== kase.orgId) continue;
       if (isFormal(d)) {
         const problems = decisionIntegrity(d, { orgId: kase.orgId, caseId: kase.id });
         if (problems.length) { omitted += 1; console.error(`DECISION integrity ${d.id ?? '?'}: ${problems.join(',')}`); continue; }
@@ -162,7 +153,6 @@ export function registerDecision(ctx) {
   orgRouter.get('/rooms/:id/decision', (req, res) => {
     const got = roomFor(req, res, 'decision_view');
     if (!got) return;
-    if (!storeOr500(res)) return;
     const { room: kase, role } = got;
     const { rows, omitted, duplicateHeads } = rowsOf(kase);
     // Two formal rows both claiming to be current is corruption, not a tie —
@@ -206,7 +196,6 @@ export function registerDecision(ctx) {
   orgRouter.post('/rooms/:id/decision/draft', (req, res) => {
     const got = roomFor(req, res, 'decision_draft');
     if (!got) return;
-    if (!storeOr500(res)) return;
     const { room: kase } = got;
     const key = normaliseDecisionClientKey(req.body?.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
@@ -220,7 +209,7 @@ export function registerDecision(ctx) {
         if (dr.keys.create.fp === fp) return res.json({ draft: draftView(dr), idempotent: true });
         return err(res, 'DECISION_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different draft.');
       }
-      const became = (db.roomDecisions ?? []).find((d) => d && d.roomId === kase.id && d.orgId === kase.orgId && d.keys?.draft?.key === key.key);
+      const became = reads.decisions.forRoom(kase.id).find((d) => d.orgId === kase.orgId && d.keys?.draft?.key === key.key);
       if (became) {
         if (became.keys.draft.fp === fp) return res.json({ draft: null, decision: decisionView(became), idempotent: true });
         return err(res, 'DECISION_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different draft.');
@@ -250,7 +239,6 @@ export function registerDecision(ctx) {
   orgRouter.patch('/rooms/:id/decision/draft', (req, res) => {
     const got = roomFor(req, res, 'decision_draft');
     if (!got) return;
-    if (!storeOr500(res)) return;
     const { room: kase } = got;
     const dr = kase.decisionDraft;
     if (!dr) return err(res, 'DECISION_NOT_FOUND', 'This case has no draft decision.');
@@ -302,7 +290,6 @@ export function registerDecision(ctx) {
     return (req, res) => {
       const got = roomFor(req, res, 'decision_finalize');
       if (!got) return;
-      if (!storeOr500(res)) return;
       const { room: kase, role } = got;
       const at = now();
       const key = normaliseDecisionClientKey(req.body?.clientKey);

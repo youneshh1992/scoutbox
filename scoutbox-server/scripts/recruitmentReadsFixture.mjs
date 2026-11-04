@@ -1,5 +1,5 @@
-// Test helper (§4.3 step 2). The server reads the requests, trials, contacts, offers, signing packages, signings,
-// follow-ups and outcome reports through SQL (the repositories' queries, `recruitmentReads`); the pure projectors and
+// Test helper (§4.3 step 2). The server reads the cases and Room records, requests, trials, contacts, offers, signing
+// packages, signings, follow-ups and outcome reports through SQL (the repositories' queries, `recruitmentReads`); the pure projectors and
 // providers take those queries as `reads`. The batteries that exercise the projectors directly build plain in-memory databases, so this
 // helper answers the same queries over the plain arrays of such a database, in array order (the tables' rowid order).
 //
@@ -112,6 +112,29 @@ function trialQueries(rows) {
   };
 }
 
+function caseQueries(rows, handoffAgent = (c) => c.transactionHandoff?.invitedAgentUserId) {
+  const list = () => rows.filter(sound);
+  return {
+    byId: (id) => list().find((c) => c.id === id) ?? null,
+    forOrg: (orgId) => list().filter((c) => c.orgId === orgId),
+    forPlayer: (playerId) => list().filter((c) => c.playerId === playerId),
+    forOrgPlayer: (orgId, playerId) => list().filter((c) => c.orgId === orgId && c.playerId === playerId),
+    forHandoffAgent: (agentUserId) => list().filter((c) => handoffAgent(c) === agentUserId),
+    withRoom: () => list().filter((c) => c.room),
+    roomCount: () => list().filter((c) => c.room).length,
+    countForOrg: (orgId) => list().filter((c) => c.orgId === orgId).length,
+  };
+}
+
+function roomRowQueries(rows, { orgPlayer = false } = {}) {
+  const list = () => rows.filter(sound);
+  return {
+    byId: (id) => list().find((r) => r.id === id) ?? null,
+    forRoom: (roomId) => list().filter((r) => r.roomId === roomId),
+    ...(orgPlayer ? { forOrgPlayer: (orgId, playerId) => list().filter((r) => r.orgId === orgId && r.playerId === playerId), forOrg: (orgId) => list().filter((r) => r.orgId === orgId) } : {}),
+  };
+}
+
 /** The `recruitmentReads` shape over a plain database's arrays (an absent or non-array collection gives no queries). */
 export function arrayReads(db) {
   const out = {};
@@ -123,6 +146,11 @@ export function arrayReads(db) {
   if (Array.isArray(db?.outcomeReports)) out.outcomeReports = outcomeQueries(db.outcomeReports);
   if (Array.isArray(db?.requests)) out.requests = requestQueries(db.requests);
   if (Array.isArray(db?.trials)) out.trials = trialQueries(db.trials);
+  if (Array.isArray(db?.recruitmentCases)) out.cases = caseQueries(db.recruitmentCases);
+  if (Array.isArray(db?.roomComments)) out.comments = roomRowQueries(db.roomComments);
+  if (Array.isArray(db?.roomSnapshots)) out.snapshots = roomRowQueries(db.roomSnapshots);
+  if (Array.isArray(db?.roomDecisions)) out.decisions = roomRowQueries(db.roomDecisions, { orgPlayer: true });
+  if (Array.isArray(db?.roomEvidenceState)) out.evidenceStates = roomRowQueries(db.roomEvidenceState);
   return out;
 }
 

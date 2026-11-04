@@ -24,6 +24,9 @@ fixed on 3 November; these were found while fixing it.
 - **`scripts/m182E2E.mjs` fails two checks** (also before 3 Nov): Grassroots screens ask for `desk.*` translation
   keys that don't exist; and `orgPanels.tsx` is no longer byte-identical in `scoutbox-club` and `scoutbox-grassroots`
   (which must share business logic). Not in CI.
+- **`scripts/m182Perf.mjs` stops at start-up**: it registers the notification preferences without the notifications
+  repository (`registerNotificationPrefs needs the notifications repository`), so it fails the same way on the code
+  before §4.3 step 2. Not in CI.
 - **`scripts/m23AgentPersistence.mjs` fails one check** ("the migrated staff member is an assistant"), also before
   the S8a change of 3 Nov. Not related to recruitment storage. Not in CI.
 - **`e2e/m24f2DensityAudit` (3 checks) and `e2e/m24fVisualAudit` (2 checks) fail**, like the M24F audits fixed on

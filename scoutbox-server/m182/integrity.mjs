@@ -33,17 +33,18 @@ const dupes = (items, keyOf) => {
  * @returns {{ ok: boolean, checked: number, violations: Array<{code:string, key:string, ids:string[]}> }}
  * Keys and ids only — never a name, a note or a date of birth.
  */
-export function integrityReport(db) {
+export function integrityReport(db, { cases: allCases = [] } = {}) {
   const violations = [];
   const push = (code, list) => { for (const d of list) violations.push({ code, key: String(d.key), ids: d.ids.map(String) }); };
 
-  const cases = (db.recruitmentCases ?? []).filter((c) => c && c.room);
+  // §4.3 step 2: the cases come from SQL (the caller passes the recruitment-cases repository's Rooms), not from db.
+  const cases = allCases.filter((c) => c && c.room);
   // One OPEN Room per organisation and player (a closed history may repeat).
   push('ROOM_OPEN_DUPLICATE', dupes(
     cases.filter((c) => OPEN_ROOM_STATUSES.includes(c.room.status)),
     (c) => `${c.orgId}:${c.playerId}`,
   ));
-  push('CASE_ID_DUPLICATE', dupes(db.recruitmentCases ?? [], (c) => c?.id));
+  push('CASE_ID_DUPLICATE', dupes(allCases, (c) => c?.id));
   push('BRIEF_ID_DUPLICATE', dupes(db.recruitmentBriefs ?? [], (b) => b?.id));
   push('PLAYER_ID_DUPLICATE', dupes(db.players ?? [], (p) => p?.id));
   push('ORG_ID_DUPLICATE', dupes(db.orgs ?? [], (o) => o?.id));

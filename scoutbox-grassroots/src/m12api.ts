@@ -183,6 +183,8 @@ export const httpM12: M12Api = {
   createPlaylist: async (s, name) => (await P(s, '/org/playlists', { name })).playlist,
   addToPlaylist: (s, playlistId, segmentId) => P(s, `/org/playlists/${playlistId}/segments`, { segmentId }),
 
+  // The server pages this list by cursor ({ items, nextCursor, stages }, newest 50 first). Only the first page is read
+  // here: the cases screen will need a "load more" that passes `?cursor=<nextCursor>` (not built yet, by decision).
   listCases: (s) => G(s, '/org/cases'),
   createCase: async (s, playerId, opts) => (await P(s, '/org/cases', { playerId, ...opts })).case,
   setStage: async (s, caseId, stage, reason) => (await P(s, `/org/cases/${caseId}/stage`, { stage, reason })).case,

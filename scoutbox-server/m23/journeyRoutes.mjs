@@ -33,8 +33,8 @@ export function registerJourneyRoutes(ctx) {
 
   function playerJourneys(viewer, playerId, at) {
     const items = [];
-    for (const k of db.recruitmentCases ?? []) {
-      if (!k || k.playerId !== playerId || !k.room) continue;
+    for (const k of recruitmentReads.cases.forPlayer(playerId)) {
+      if (!k.room) continue;
       const out = buildRecruitmentJourney(db, k.id, viewer, { now: at, evidence: evidence(), reads: recruitmentReads });
       if (!out.ok) continue; // nothing crossed the share boundary: the case does not exist for them
       items.push({ club: clubOf(k.orgId), shared: out.shared, journey: out.journey });
@@ -84,8 +84,8 @@ export function registerJourneyRoutes(ctx) {
     const g = agentGrants(req, a, at);
     if (!g.ok) return res.status(403).json({ error: g.decision.code, rule: g.decision.rule ?? null, message: 'This client\'s record is not open to you right now.' });
     const items = [];
-    for (const k of db.recruitmentCases ?? []) {
-      if (!k || k.playerId !== a.clientId || !k.room) continue;
+    for (const k of recruitmentReads.cases.forPlayer(a.clientId)) {
+      if (!k.room) continue;
       const out = buildRecruitmentJourney(db, k.id, { kind: 'agent', authorized: true, playerId: a.clientId, userId: req.orgUser.id, grants: g.grants }, { now: at, evidence: evidence(), reads: recruitmentReads });
       if (!out.ok) continue;
       // A club that shared nothing with this agent is not a club the agent learns about.
@@ -100,7 +100,7 @@ export function registerJourneyRoutes(ctx) {
 
   /** The org a notification's staff audience belongs to, so a target never crosses a tenant. */
   const orgUserOrg = (userId) => { const u = (db.users ?? []).find((x) => x && x.id === userId); return u ? u.orgId : null; };
-  const caseFor = (caseId, orgId) => (db.recruitmentCases ?? []).find((k) => k && k.id === caseId && k.room && (orgId === null || k.orgId === orgId)) ?? null;
+  const caseFor = (caseId, orgId) => { const k = recruitmentReads.cases.byId(caseId); return k && k.room && (orgId === null || k.orgId === orgId) ? k : null; };
   const room = (k, tab) => (k ? { kind: 'room', roomId: k.id, tab } : null);
   const blocked = (playerId, orgId) => (db.blocks ?? []).some((b) => b && b.playerId === playerId && b.orgId === orgId);
   /**

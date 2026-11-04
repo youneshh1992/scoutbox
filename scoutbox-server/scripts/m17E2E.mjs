@@ -912,7 +912,8 @@ section('Pagination and bounded payloads');
     ok(next.body.items.every((c) => !page.body.items.some((p) => p.id === c.id)), 'the next comment page does not repeat the first');
   } else ok(true, 'the comment thread fits one page in this fixture');
   const huge = await j('GET', '/org/rooms?limit=100000', undefined, maria.token);
-  neg(huge.body.limit <= LIMITS.maxPageSize, 'an absurd page size is clamped rather than honoured');
+  // §4.3 step 2: the one paging convention refuses junk instead of clamping it (domains/platform/paging.mjs).
+  neg(huge.status === 400 && huge.body.error === 'PAGE_LIMIT_INVALID' && !Array.isArray(huge.body.items), 'an absurd page size is refused rather than honoured');
   const act = await j('GET', `/org/rooms/${ROOM}/activity?limit=3`, undefined, maria.token);
   ok(act.body.items.length <= 3, 'activity pages are bounded');
 }

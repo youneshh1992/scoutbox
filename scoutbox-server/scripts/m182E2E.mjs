@@ -250,10 +250,11 @@ section('§10 — migrations: ordered, idempotent, recorded, and a failure abort
   // Prior-schema fixture: rooms and briefs without rev, notifications without repeatCount, no schema record.
   const old = { recruitmentCases: [{ id: 'c1', room: { status: 'watching' } }], recruitmentBriefs: [{ id: 'b1' }], notifications: [{ id: 'n1' }], players: [] };
   const up = runMigrations(old, { now: 3000 });
-  ok(up.from === 0 && old.recruitmentCases[0].room.rev === 1 && old.recruitmentBriefs[0].rev === 1 && old.notifications[0].repeatCount === 1,
-    'a pre-M18.1 snapshot is upgraded: rev 1, repeatCount 1, prefs collection present');
+  // §4.3 step 2 (rewritten: the Rooms are typed rows where rev is required, so the step no longer touches cases).
+  ok(up.from === 0 && old.recruitmentCases[0].room.rev === undefined && old.recruitmentBriefs[0].rev === 1 && old.notifications[0].repeatCount === 1,
+    'a pre-M18.1 snapshot is upgraded: briefs rev 1, repeatCount 1, prefs collection present (a Room is not a blob row to backfill)');
   ok(Array.isArray(old.notificationPrefs) && old.players.length === 0, 'no step invents data');
-  const broken = { recruitmentCases: 5 };
+  const broken = { recruitmentBriefs: 5 }; // §4.3 step 2: the briefs are what m182_003 still walks
   let threw = null;
   try { runMigrations(broken); } catch (e) { threw = e; }
   neg(!!threw && /m182_003_rev_backfill failed/.test(threw.message) && /not modified/.test(threw.message), 'a failing step names itself and promises the disk was untouched');
@@ -272,22 +273,22 @@ section('§11 — boot-time integrity reports and never repairs');
     ],
     recruitmentBriefs: [{ id: 'b1', rev: 1 }], secondLookItems: [{ id: 's1', orgId: 'o1', roomId: 'c1', changes: [{ fingerprint: 'f1' }, { fingerprint: 'f2' }] }],
   };
-  const r = integrityReport(sane);
+  const r = integrityReport(sane, { cases: sane.recruitmentCases ?? [] });
   ok(r.ok && r.violations.length === 0, 'an archived Room plus an open one for the same player is fine — history repeats, activity does not');
   const dup = JSON.parse(JSON.stringify(sane));
   dup.recruitmentCases.push({ id: 'c3', orgId: 'o1', playerId: 'p1', room: { status: 'shortlisted', rev: 1 } });
-  const r2 = integrityReport(dup);
+  const r2 = integrityReport(dup, { cases: dup.recruitmentCases ?? [] });
   neg(r2.violations.some((v) => v.code === 'ROOM_OPEN_DUPLICATE' && v.ids.includes('c2') && v.ids.includes('c3')), 'two open Rooms for one organisation and player is reported with both ids');
   ok(dup.recruitmentCases.length === 3, 'and nothing was deleted or repaired');
   const orphan = { ...sane, recruitmentCases: [{ id: 'c9', orgId: 'nope', playerId: 'p1', room: { status: 'watching', rev: 1 } }] };
-  neg(integrityReport(orphan).violations.some((v) => v.code === 'ROOM_ORPHAN_ORG'), 'a Room whose organisation does not exist is reported');
-  neg(integrityReport({ ...sane, recruitmentBriefs: [{ id: 'b1', rev: 1 }, { id: 'b1', rev: 1 }] }).violations.some((v) => v.code === 'BRIEF_ID_DUPLICATE'), 'a duplicated brief id is reported');
-  neg(integrityReport({ ...sane, secondLookItems: [{ id: 's1', orgId: 'o1', roomId: 'c1', changes: [{ fingerprint: 'f1' }, { fingerprint: 'f1' }] }] }).violations.some((v) => v.code === 'SECOND_LOOK_FINGERPRINT_DUPLICATE'),
+  neg(integrityReport(orphan, { cases: orphan.recruitmentCases ?? [] }).violations.some((v) => v.code === 'ROOM_ORPHAN_ORG'), 'a Room whose organisation does not exist is reported');
+  neg(integrityReport({ ...sane, recruitmentBriefs: [{ id: 'b1', rev: 1 }, { id: 'b1', rev: 1 }] }, { cases: sane.recruitmentCases }).violations.some((v) => v.code === 'BRIEF_ID_DUPLICATE'), 'a duplicated brief id is reported');
+  neg(integrityReport({ ...sane, secondLookItems: [{ id: 's1', orgId: 'o1', roomId: 'c1', changes: [{ fingerprint: 'f1' }, { fingerprint: 'f1' }] }] }, { cases: sane.recruitmentCases }).violations.some((v) => v.code === 'SECOND_LOOK_FINGERPRINT_DUPLICATE'),
     'the same evidence counted twice inside one Second Look item is reported');
-  neg(integrityReport({ ...sane, recruitmentBriefs: [{ id: 'b1' }] }).violations.some((v) => v.code === 'BRIEF_REV_INVALID'), 'a rev-guarded record with no rev is reported (the migration should have set it)');
+  neg(integrityReport({ ...sane, recruitmentBriefs: [{ id: 'b1' }] }, { cases: sane.recruitmentCases }).violations.some((v) => v.code === 'BRIEF_REV_INVALID'), 'a rev-guarded record with no rev is reported (the migration should have set it)');
   const summary = integritySummary(r2);
   neg(!JSON.stringify(summary).includes('c2'), 'the operator summary carries counts by code, never ids');
-  ok(integrityReport({}).ok, 'an empty database is not a violation');
+  ok(integrityReport({}, { cases: [] }).ok, 'an empty database is not a violation');
 }
 
 // ================================================== §12 faults (unit)

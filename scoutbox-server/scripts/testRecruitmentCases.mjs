@@ -4,7 +4,8 @@
 // CHECKs, the children cascading, the room rows RESTRICT) and the case keys of requests, trials, contacts and offers are
 // immediate; a snapshot save (fixtures, tools) types every writer shape into its columns and reads back the typed record,
 // refuses a record it cannot type and names every missing reference with ids; the player references are counted, never
-// refused (Q8a); the repository's operations write rows at once and return fresh read-only records, the views refuse an
+// refused (Q8a); the repository's operations write rows at once and return fresh read-only records (§4.3 step 2: no
+// db.* view, every query matches a table scan), the records refuse an
 // in-place edit, an update inside its own update is refused, a unit of work rolls rows AND mirrors back; a decision's
 // snapshot is the snapshot row it names; the deletion unit's redaction.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
@@ -133,12 +134,12 @@ test('[snapshot] removals: a supplied collection is the whole final collection �
   s.sqlite.close(); rm(d);
 });
 
-test('[repository] explicit writes: the five views are read-only (an in-place edit throws, a push throws); create and update write rows at once and return fresh read-only records; update hands a plain copy, refuses an identifier change and an update inside its own update; a refused write changes nothing', () => {
+test('[repository] explicit writes: there is no db.* view (reading or assigning one of the five throws, naming the repository) and every record a query returns is read-only (an in-place edit throws); create and update write rows at once and return fresh read-only records; update hands a plain copy, refuses an identifier change and an update inside its own update; a refused write changes nothing', () => {
   const d = file('repo'); const L = serverOpen(d); const R = L.repo;
-  const held = L.db.recruitmentCases.find((c) => c.id === 'case-1');
-  refused(() => { held.stage = 'closed'; }, /written through its domain repository/, 'a field');
-  refused(() => { held.history.push(hist('aud-x', NOW, 'x')); }, /written through its domain repository/, 'a nested push');
-  refused(() => { L.db.roomComments.push(comment({ id: 'rcmt-9' })); }, /written through its domain repository/, 'a collection push');
+  for (const n of ['recruitmentCases', 'roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState']) { assert.throws(() => L.db[n], new RegExp(`db\\.${n} is gone: read it through the recruitmentCases repository`)); assert.throws(() => { L.db[n] = []; }, /is gone/); assert.equal(Object.keys(L.db).includes(n), false); }
+  const held = R.cases.byId('case-1');
+  assert.throws(() => { held.stage = 'closed'; }, /read only|Cannot assign/, 'a field');
+  assert.throws(() => { held.history.push(hist('aud-x', NOW, 'x')); }, /not extensible|read only|Cannot add/, 'a nested push');
   const fresh = R.cases.update('case-1', (c) => { c.room.tags.push('fast'); c.history.push(hist('aud-c1-9', NOW, 'room_tag_changed', { count: 3 })); });
   assert.deepEqual(plain(fresh.room.tags), ['watch', 'u18', 'fast']); assert.equal(held.room.tags.length, 2, 'the held record is the old version');
   withRo(d, (r) => { assert.equal(col(r, "SELECT count(*) FROM case_room_tags WHERE case_id = 'case-1'"), 3, 'the row is written at once'); assert.equal(col(r, "SELECT action FROM case_history WHERE id = 'aud-c1-9'"), 'room_tag_changed'); });
@@ -152,8 +153,37 @@ test('[repository] explicit writes: the five views are read-only (an in-place ed
   refused(() => R.cases.create(m12Case({ id: 'case-9', ownerUserId: 'usr-nobody' })), /RECRUITMENT_CASES_REFERENCE_MISSING[\s\S]*org_users usr-nobody/);
   assert.equal(withRo(d, caseDump), before, 'nothing was written by a refused operation');
   const c9 = R.cases.create(m12Case({ id: 'case-9', links: { requestIds: [], trialIds: [], signingId: null }, history: [] }));
-  assert.equal(c9.id, 'case-9'); assert.ok(L.db.recruitmentCases.some((c) => c.id === 'case-9'));
-  refused(() => { c9.priority = 'high'; }, /written through its domain repository/, 'a returned record is read-only');
+  assert.equal(c9.id, 'case-9'); assert.ok(R.cases.byId('case-9'));
+  assert.throws(() => { c9.priority = 'high'; }, /read only|Cannot assign/, 'a returned record is read-only');
+  L.close(); rm(d);
+});
+
+test('[repository] SQL reads (§4.3 step 2): byId and every list query of the five collections return exactly what a scan of the tables would, in insertion order; the handoff-agent query, the Room counts and the per-status counts agree; `reads` carries no write', () => {
+  const d = file('reads'); const L = serverOpen(d); const R = L.repo;
+  const all = R.exportAll();
+  const ids = (rows) => rows.map((r) => r.id);
+  const values = (list, key) => [...new Set(list.map(key).filter((v) => v !== null && v !== undefined)), 'nobody'];
+  const check = (label, got, want) => assert.deepEqual(ids(got), ids(want), label);
+  const repoOf = { recruitmentCases: R.cases, roomComments: R.comments, roomSnapshots: R.snapshots, roomDecisions: R.decisions, roomEvidenceState: R.evidenceStates };
+  for (const [n, repo] of Object.entries(repoOf)) {
+    for (const r of all[n]) assert.deepEqual(plain(repo.byId(r.id)), plain(r), `${n}.byId ${r.id}`);
+    for (const bad of ['nope', undefined, null, 42]) assert.equal(repo.byId(bad), null);
+    if (n !== 'recruitmentCases') for (const v of values(all[n], (r) => r.roomId)) check(`${n}.forRoom ${v}`, repo.forRoom(v), all[n].filter((r) => r.roomId === v));
+  }
+  const cases = all.recruitmentCases;
+  for (const [key, q] of [['orgId', 'forOrg'], ['playerId', 'forPlayer']]) for (const v of values(cases, (c) => c[key])) check(`cases.${q} ${v}`, R.cases[q](v), cases.filter((c) => c[key] === v));
+  for (const c of cases) check('cases.forOrgPlayer', R.cases.forOrgPlayer(c.orgId, c.playerId), cases.filter((x) => x.orgId === c.orgId && x.playerId === c.playerId));
+  for (const v of values(cases, (c) => c.transactionHandoff?.invitedAgentUserId)) check(`cases.forHandoffAgent ${v}`, R.cases.forHandoffAgent(v), cases.filter((c) => c.transactionHandoff?.invitedAgentUserId === v));
+  check('cases.withRoom', R.cases.withRoom(), cases.filter((c) => c.room)); assert.equal(R.cases.roomCount(), cases.filter((c) => c.room).length);
+  for (const v of values(cases, (c) => c.orgId)) {
+    assert.equal(R.cases.countForOrg(v), cases.filter((c) => c.orgId === v).length);
+    const want = {}; for (const c of cases.filter((x) => x.orgId === v && x.room)) want[c.room.status] = (want[c.room.status] ?? 0) + 1;
+    assert.deepEqual(R.cases.roomStatusCounts(v), want, `roomStatusCounts ${v}`);
+  }
+  const decs = all.roomDecisions;
+  for (const v of values(decs, (r) => r.orgId)) check(`decisions.forOrg ${v}`, R.decisions.forOrg(v), decs.filter((r) => r.orgId === v));
+  for (const r of decs) check('decisions.forOrgPlayer', R.decisions.forOrgPlayer(r.orgId, r.playerId), decs.filter((x) => x.orgId === r.orgId && x.playerId === r.playerId));
+  for (const n of ['cases', 'comments', 'snapshots', 'decisions', 'evidenceStates']) { assert.ok(Object.isFrozen(R.reads[n])); assert.equal(R.reads[n].byId, R[n].byId); assert.equal(R.reads[n].create, undefined); assert.equal(R.reads[n].update, undefined); }
   L.close(); rm(d);
 });
 
@@ -170,15 +200,15 @@ test('[repository] decisions: an advisory recommendation and its supersession, a
   L.close(); rm(d);
 });
 
-test('[repository] a unit of work: case, comment and decision writes commit together; a unit that fails rolls the rows AND the mirrors back; the deletion unit\'s redaction keeps ids, states and history and loses the name', () => {
+test('[repository] a unit of work: case, comment and decision writes commit together; a unit that fails rolls the rows back while a read inside it sees its writes; the deletion unit\'s redaction keeps ids, states and history and loses the name', () => {
   const d = file('unit'); const L = serverOpen(d); const R = L.repo;
-  const rows = withRo(d, caseDump); const mirror = JSON.stringify(L.db.recruitmentCases);
-  refused(() => L.unit(() => { R.comments.create(comment({ id: 'rcmt-u' })); R.cases.update('case-1', (c) => { c.room.updatedAt = NOW; }); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
-  assert.equal(withRo(d, caseDump), rows, 'no row changed'); assert.equal(JSON.stringify(L.db.recruitmentCases), mirror, 'the mirror is back'); assert.equal(L.db.roomComments.some((c) => c.id === 'rcmt-u'), false);
+  const rows = withRo(d, caseDump); const before = JSON.stringify(R.exportAll());
+  refused(() => L.unit(() => { R.comments.create(comment({ id: 'rcmt-u' })); R.cases.update('case-1', (c) => { c.room.updatedAt = NOW; }); assert.ok(R.comments.byId('rcmt-u'), 'a read inside the unit sees its create'); assert.equal(R.cases.byId('case-1').room.updatedAt, NOW); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
+  assert.equal(withRo(d, caseDump), rows, 'no row changed'); assert.equal(JSON.stringify(R.exportAll()), before, 'a fresh read sees the rollback'); assert.equal(R.comments.byId('rcmt-u'), null);
   L.unit(() => { R.comments.create(comment({ id: 'rcmt-u' })); R.cases.update('case-1', (c) => { c.history.push(hist('aud-u', NOW, 'room_comment_added', { commentId: 'rcmt-u', replyToId: null })); }); });
   withRo(d, (r) => { assert.equal(col(r, "SELECT count(*) FROM room_comments WHERE id = 'rcmt-u'"), 1); assert.equal(col(r, "SELECT count(*) FROM case_history WHERE id = 'aud-u'"), 1); });
   assert.equal(R.redactPlayer('pl-adult', NOW + 5), 1);
-  const red = L.db.recruitmentCases.find((c) => c.id === 'case-1');
+  const red = R.cases.byId('case-1');
   assert.equal(red.playerName, null); assert.equal(red.subjectRemovedAt, NOW + 5); assert.equal(red.playerId, 'pl-adult'); assert.equal(red.room.status, 'trial_requested'); assert.ok(red.history.length >= 6);
   assert.equal(R.counts().recruitmentCases, 4); assert.equal(R.pending(), 0);
   L.close(); rm(d);

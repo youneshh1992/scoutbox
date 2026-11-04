@@ -57,8 +57,9 @@ The migration is finished when:
 - a synthetic load of 100k players (`scripts/dataLayerPerf.mjs`) gives p50 under 5 ms on hot paths, with
   no request writing the whole database.
 
-Moving storage alone isn't the goal. A domain that is in tables but still loaded whole into memory (S8a–S8c today:
-explicit writes, but every read still scans a whole-collection mirror) is only part-way there.
+Moving storage alone isn't the goal. A domain that is in tables but still loaded whole into memory (explicit writes,
+but every read scanning a whole-collection mirror, as S8a–S8d were until 4 November) is only part-way there. The
+recruitment domain now reads through SQL (§4.3 step 2); what is left of §4.3 is the paging decided below and step 4.
 
 ## 3. Status
 
@@ -78,13 +79,13 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S6b | safeguarding and audit (8 tables) | `0013_safety_audit` | `safetyAudit.mjs` | staged | done |
 | S4b-R | retained record on player deletion | `0014_player_erasure` | `identity.mjs` | direct | done |
 | S8a | recruitment requests, trials | `0015_recruitment` | `recruitment.mjs` | **explicit, typed, SQL reads** (§4.3, 3–4 Nov) | done |
-| S8b | cases, rooms, decisions | `0016_recruitment_cases` | `recruitmentCases.mjs` | **explicit, typed** (§4.3, 4 Nov) | done |
+| S8b | cases, rooms, decisions | `0016_recruitment_cases` | `recruitmentCases.mjs` | **explicit, typed, SQL reads** (§4.3, 4 Nov) | done |
 | S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **explicit, typed, SQL reads** (§4.3, 3–4 Nov) | done |
 | S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed, SQL reads** (§4.3, 4 Nov) | done |
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3 steps 1 and 3 done (4 Nov); step 2: S8c, S8d and S8a done (4 Nov), then S8b and the requests/trials/inbox paging; step 4 after |
+| — | recruitment end-state proof | — | — | — | §4.3 steps 1 and 3 done (4 Nov); step 2: S8a–S8d done (4 Nov); the requests/trials/inbox paging next, then step 4 |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -296,6 +297,19 @@ links and plan) take `reads`; the batteries that call them get the queries over 
 `scripts/recruitmentReadsFixture.mjs`. The m182 steps that created or shaped `db.requests` / `db.trials` are no-ops, and
 `TRIAL_STORE_MISSING` went with the collection. The club Requests and Trials lists and the inboxes still return whole
 lists (from SQL): their paging waits on the home dashboards' counts (decided above).
+
+**Step 2: S8b reads through SQL, done 4 November** (on `feat/sqlite-schema`). The last recruitment mirror is gone:
+`db.recruitmentCases` and the four Room collections throw, and the recruitment domain has no `db.*` collection left.
+The repository adds `forOrg`, `forPlayer`, `forOrgPlayer`, `forHandoffAgent`, `withRoom`, counts and per-status Room
+counts for cases, `forRoom` for the Room records and `forOrg` / `forOrgPlayer` for decisions (one index added to `0016`
+in place: `room_decisions (org_id, player_id)`). The club Rooms list and the M12 cases list page by cursor
+(`{ items, nextCursor }`, the Rooms list keeping its funnel and statuses); the Pro and Grassroots apps read the first page
+and say a "load more" will be needed. Their filters are per viewer (restricted Rooms, views, the name search), so both
+read the organisation's cases by index and filter and page in code (`pageSorted`): the response is bounded, the read is
+one club's. A bad `limit` is now refused (400) where the Rooms list clamped it. The boot integrity report takes the
+Rooms from `cases.withRoom()`. The m182 steps that created or backfilled the case collections are no-ops, and
+`DECISION_STORE_MISSING` went with the collection. Still in memory, for step 4 to judge: the per-org filtering of those
+two lists, the audit feed's merge, the dashboard's per-org reads and the integrity report's boot read.
 
 ### 4.4 The end-to-end test estate
 

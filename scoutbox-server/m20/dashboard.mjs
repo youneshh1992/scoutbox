@@ -95,14 +95,14 @@ export function buildReportingContext({
 
   // ---- one pass per collection --------------------------------------------
   let rooms = [];
-  for (const c of db.recruitmentCases ?? []) {
+  for (const c of reads.cases?.forOrg(orgId) ?? []) {
     if (c.orgId !== orgId || !c.room) continue;
     rooms.push(projectRoom(c));
   }
   const roomIds = new Set(rooms.map((r) => r.id));
 
   const decisions = [];
-  for (const d of db.roomDecisions ?? []) {
+  for (const d of reads.decisions?.forOrg(orgId) ?? []) {
     if (d.orgId !== orgId) continue;
     decisions.push(projectDecision(d));
   }

@@ -116,11 +116,11 @@ export function registerNobodyMissed(ctx) {
    * are deliberately absent — looking at somebody is not evaluating them.
    */
   function evaluationSignals(playerId, org) {
-    const cases = db.recruitmentCases.filter((c) => c.orgId === org.id && c.playerId === playerId);
+    const cases = reads.cases.forOrgPlayer(org.id, playerId);
     const rooms = cases.filter((c) => c.room);
     const openRoom = rooms.find((c) => !['signed', 'withdrawn', 'archived', 'closed'].includes(c.room.status));
     const endedRooms = rooms.filter((c) => ['signed', 'withdrawn', 'archived', 'closed'].includes(c.room.status));
-    const decisions = (db.roomDecisions ?? []).filter((d) => d.orgId === org.id && d.playerId === playerId);
+    const decisions = reads.decisions.forOrgPlayer(org.id, playerId);
     const lastDecisionAt = decisions.reduce((m, d) => Math.max(m, d.createdAt ?? 0), 0) || null;
     return {
       room_open: !!openRoom,

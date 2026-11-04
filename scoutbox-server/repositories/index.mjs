@@ -567,7 +567,6 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   const recruitmentContactsOffersBoot = recruitmentContactsOffers.attach();
   const recruitmentCases = createRecruitmentCasesRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentCasesBoot = recruitmentCases.attach();
-  store.setSaveHook?.(recruitmentCases.hook());
   recruitment = createRecruitmentRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentBoot = recruitment.attach();
   for (const name of RECRUITMENT_CASES_COLLECTIONS) {
@@ -575,7 +574,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
       delete db[name];
       sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
     }
-    Object.defineProperty(db, name, { value: recruitmentCases.views[name], writable: false, configurable: false, enumerable: true });
+    retireCollection(db, name, 'recruitmentCases');
   }
   for (const name of RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS) {
     if (Object.hasOwn(db, name)) {

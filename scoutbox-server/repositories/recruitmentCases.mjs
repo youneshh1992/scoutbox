@@ -23,14 +23,14 @@
  * room_snapshots row it names (it is that row, never a second copy). The idempotency keys are columns of their owner
  * (a draft's create key, a decision's finalize and draft keys, a handoff's invite key).
  *
- * EXPLICIT WRITES. The five `db.*` views are read-only arrays over the repository's mirrors; every record they hand
- * out is a read-only proxy, so an in-place edit throws. A route changes a record by calling an operation:
+ * EXPLICIT WRITES, SQL READS (§4.3 step 2). There are no mirrors and no `db.*` views (each of the five names throws);
+ * readers call the repository's queries, and every record they get is a fresh, deep-frozen decode, so an in-place edit
+ * throws. A route changes a record by calling an operation:
  * `cases.create(record)`, `cases.update(id, (draft) => { … })`, the same for comments, decisions and evidence states,
  * `snapshots.create(record)`, and the deletion unit's `redactPlayer`. `update` hands the caller a plain copy, types
- * the result whole, writes the record's rows at once and re-reads it from the tables into the mirror. An update of a
- * record from inside its own update is refused (the outer write would overwrite the inner one). An operation joins
- * the open unit of work (store.unit) or runs a transaction of its own; the mirrors are restored by the unit's rollback
- * through `hook()`.
+ * the result whole, writes the record's rows at once and returns it read back from the tables. An update of a record
+ * from inside its own update is refused (the outer write would overwrite the inner one). An operation joins the open
+ * unit of work (store.unit) or runs a transaction of its own.
  *
  * References. org_id → orgs and the staff ids (owner, lead scout, M12 decision maker, assignee, comment author) →
  * org_users, RESTRICT. Every room row's room_id → recruitment_cases RESTRICT; a decision's snapshot_id →
@@ -40,7 +40,6 @@
  *
  * Refusals name tables, fields and ids — never a name, a note, a body or a message.
  */
-import { readonlyView, markView } from './readonly.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 import { describe, isPlainObject, nonEmpty, ids } from './recruitment.mjs';
 import {
@@ -447,6 +446,7 @@ CREATE TABLE room_decisions (
 CREATE INDEX room_decisions_room_created ON room_decisions (room_id, created_at);
 CREATE INDEX room_decisions_room_client_key ON room_decisions (room_id, client_key);
 CREATE INDEX room_decisions_player ON room_decisions (player_id);
+CREATE INDEX room_decisions_org_player ON room_decisions (org_id, player_id);
 CREATE TABLE room_decision_reason_codes (
   decision_id TEXT NOT NULL REFERENCES room_decisions(id) ON DELETE CASCADE,
   position INTEGER NOT NULL,
@@ -1093,34 +1093,37 @@ export const RECRUITMENT_CASES_SNAPSHOT = {
   assert(sqlite, { label } = {}) { assertCasesConsistent(sqlite, { label }); },
 };
 
-// ------------------------------------------------------------------ the repository (explicit writes; the mirrors; the participant)
+// ------------------------------------------------------------------ the repository (explicit writes; SQL reads)
+const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 /**
  * `createRecruitmentCasesRepository({ sqlite, unit, now, log })`. Every operation joins the open unit of work (a
  * failure poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and
- * re-reads the record into the mirror.
+ * returns the record read back from the tables.
+ *
+ * READS ARE SQL (§4.3 step 2): no mirror and no db.recruitmentCases / db.roomComments / db.roomSnapshots /
+ * db.roomDecisions / db.roomEvidenceState (each throws). Every query decodes fresh, deep-frozen records in insertion
+ * (rowid) order and runs on the one connection, so a read inside a unit of work sees the unit's own writes.
  */
 export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the recruitment-cases repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
   const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
-  const mirrors = Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, []]));
-  const LABEL = { recruitmentCases: 'a recruitment case', roomComments: 'a room comment', roomSnapshots: 'a room snapshot', roomDecisions: 'a room decision', roomEvidenceState: 'a room evidence state' };
-  const views = Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, markView(readonlyView(mirrors[n], LABEL[n]))]));
-  const reload = () => { for (const n of RECRUITMENT_CASES_COLLECTIONS) { mirrors[n].length = 0; for (const r of readAll(sqlite, n)) mirrors[n].push(r); } };
-  const find = (name, id) => mirrors[name].find((x) => x.id === id) ?? null;
-  const replaceIn = (name, id, record) => { const i = mirrors[name].findIndex((r) => r.id === id); if (i >= 0) mirrors[name][i] = record; else mirrors[name].push(record); return readonlyView(record, LABEL[name]); };
-  const refresh = (name, id) => replaceIn(name, id, DECODERS[name](st, st.byId[PARENT[name]].get(id)));
+  const decode = (name, row) => deepFreeze(DECODERS[name](st, row));
+  const find = (name, id) => { if (typeof id !== 'string') return null; const row = st.byId[PARENT[name]].get(id); return row ? decode(name, row) : null; };
+  const exists = (name, id) => typeof id === 'string' && !!st.byId[PARENT[name]].get(id);
+  const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.all(...args).map((r) => decode(name, r)); };
+  const count = (sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.get(...args).n; };
   const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', t.reason); return t.record; };
   const IMMUTABLE = { recruitmentCases: ['id', 'orgId', 'playerId', 'createdAt'], roomComments: ['id', 'roomId', 'orgId', 'authorId', 'createdAt'], roomSnapshots: ['id', 'roomId'], roomDecisions: ['id', 'roomId', 'orgId', 'playerId', 'createdAt'], roomEvidenceState: ['id', 'roomId', 'orgId', 'evidenceId'] };
   const check = (name, r) => {
     const problems = referenceProblems(st, name, r);
     let code = 'RECRUITMENT_CASES_REFERENCE_MISSING';
-    if (name !== 'recruitmentCases' && !find('recruitmentCases', r.roomId)) { problems.push(`${PARENT[name]} ${r.id} → case ${r.roomId}`); code = 'ROOM_CASE_MISSING'; }
+    if (name !== 'recruitmentCases' && !exists('recruitmentCases', r.roomId)) { problems.push(`${PARENT[name]} ${r.id} → case ${r.roomId}`); code = 'ROOM_CASE_MISSING'; }
     if (name === 'roomDecisions') {
       const chain = decisionRefsProblems(r, { decisionRoom: (x) => (x === r.id ? r.roomId : find('roomDecisions', x)?.roomId), snapshotRoom: (x) => find('roomSnapshots', x)?.roomId });
       if (chain.length) { problems.push(...chain); code = 'DECISION_CHAIN_BROKEN'; }
     }
-    if (name === 'roomEvidenceState' && mirrors.roomEvidenceState.some((e) => e.id !== r.id && e.roomId === r.roomId && e.evidenceId === r.evidenceId)) problems.push(`room_evidence_states ${r.id}: room ${r.roomId} already reviews evidence ${r.evidenceId}`);
+    if (name === 'roomEvidenceState' && sqlite.prepare('SELECT 1 FROM room_evidence_states WHERE room_id = ? AND evidence_id = ? AND id <> ?').get(r.roomId, r.evidenceId, r.id)) problems.push(`room_evidence_states ${r.id}: room ${r.roomId} already reviews evidence ${r.evidenceId}`);
     if (problems.length) throw refusal(code, `${PARENT[name]} ${r.id}: ${ids(problems)}`);
   };
   const write = (name, r) => { check(name, r); if (name === 'recruitmentCases') writeCase(st, r); else writeRoomRow(st, name, r); };
@@ -1129,8 +1132,8 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
   /** `create(record)`: a new record, typed whole; an existing id is refused. */
   const create = (name) => (raw) => operation(() => {
     const r = typedOr(name, raw);
-    if (find(name, r.id)) throw refusal('RECRUITMENT_CASES_DUPLICATE', `${PARENT[name]} ${r.id} already exists`);
-    write(name, r); return refresh(name, r.id);
+    if (exists(name, r.id)) throw refusal('RECRUITMENT_CASES_DUPLICATE', `${PARENT[name]} ${r.id} already exists`);
+    write(name, r); return find(name, r.id);
   });
   /**
    * `update(id, change)`: `change` receives a plain copy of the stored record and edits it (or returns a replacement);
@@ -1147,44 +1150,57 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
     try { returned = change(draft); } finally { editing.delete(key); }
     const next = typedOr(name, returned === undefined ? draft : returned);
     for (const k of IMMUTABLE[name]) if (next[k] !== before[k]) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', `${PARENT[name]} ${id}: ${k} cannot change`);
-    write(name, next); return refresh(name, id);
+    write(name, next); return find(name, id);
   });
-  const byId = (name) => (id) => { const r = find(name, id); return r ? readonlyView(r, LABEL[name]) : null; };
-  const ops = (name, { updatable = true } = {}) => ({ create: create(name), ...(updatable ? { update: update(name) } : {}), byId: byId(name) });
+  const ops = (name, { updatable = true } = {}) => ({ create: create(name), ...(updatable ? { update: update(name) } : {}), byId: (id) => find(name, id) });
+  const forRoom = (name) => list(name, `SELECT * FROM ${PARENT[name]} WHERE room_id = ? ORDER BY rowid`);
+
+  const cases = {
+    ...ops('recruitmentCases'),
+    forOrg: list('recruitmentCases', 'SELECT * FROM recruitment_cases WHERE org_id = ? ORDER BY rowid'),
+    forPlayer: list('recruitmentCases', 'SELECT * FROM recruitment_cases WHERE player_id = ? ORDER BY rowid'),
+    forOrgPlayer: list('recruitmentCases', 'SELECT * FROM recruitment_cases WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
+    /** The cases whose transaction handoff invites this agent (any organisation). */
+    forHandoffAgent: list('recruitmentCases', 'SELECT c.* FROM recruitment_cases c JOIN case_transaction_handoffs h ON h.case_id = c.id WHERE h.invited_agent_user_id = ? ORDER BY c.rowid'),
+    countForOrg: count('SELECT COUNT(*) AS n FROM recruitment_cases WHERE org_id = ?'),
+    /** Every case that has a Room (the boot integrity report reads them once). */
+    withRoom: list('recruitmentCases', 'SELECT * FROM recruitment_cases WHERE room_status IS NOT NULL ORDER BY rowid'),
+    roomCount: count('SELECT COUNT(*) AS n FROM recruitment_cases WHERE room_status IS NOT NULL'),
+    /** Room statuses of the organisation's Rooms, counted: `{ status: n }`. */
+    roomStatusCounts(orgId) { return Object.fromEntries(sqlite.prepare('SELECT room_status AS status, COUNT(*) AS n FROM recruitment_cases WHERE org_id = ? AND room_status IS NOT NULL GROUP BY room_status').all(orgId).map((r) => [r.status, r.n])); },
+  };
+  const comments = { ...ops('roomComments'), forRoom: forRoom('roomComments') };
+  const snapshots = { ...ops('roomSnapshots', { updatable: false }), forRoom: forRoom('roomSnapshots') };
+  const decisions = {
+    ...ops('roomDecisions'), forRoom: forRoom('roomDecisions'),
+    forOrgPlayer: list('roomDecisions', 'SELECT * FROM room_decisions WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
+    forOrg: list('roomDecisions', 'SELECT * FROM room_decisions WHERE org_id = ? ORDER BY rowid'),
+  };
+  const evidenceStates = { ...ops('roomEvidenceState'), forRoom: forRoom('roomEvidenceState') };
+  const WRITES = new Set(['create', 'update']);
+  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.has(k))));
+  const counters = Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, sqlite.prepare(`SELECT COUNT(*) AS n FROM ${PARENT[n]}`)]));
 
   return {
-    views,
-    cases: ops('recruitmentCases'),
-    comments: ops('roomComments'),
-    snapshots: ops('roomSnapshots', { updatable: false }),
-    decisions: ops('roomDecisions'),
-    evidenceStates: ops('roomEvidenceState'),
+    cases, comments, snapshots, decisions, evidenceStates,
+    /** The queries alone, for the pure projectors and providers that must not write. */
+    reads: Object.freeze({ cases: readOnly(cases), comments: readOnly(comments), snapshots: readOnly(snapshots), decisions: readOnly(decisions), evidenceStates: readOnly(evidenceStates) }),
     /** The deletion unit (M23 P4A-D14): a deleted player's cases keep their ids, states and history and lose the name. */
     redactPlayer(playerId, at) {
       return operation(() => {
         let n = 0;
-        for (const c of mirrors.recruitmentCases.filter((x) => x.playerId === playerId)) { update('recruitmentCases')(c.id, (d) => { d.playerName = null; d.subjectRemovedAt = at; }); n += 1; }
+        for (const c of sqlite.prepare('SELECT id FROM recruitment_cases WHERE player_id = ? ORDER BY rowid').all(playerId)) { update('recruitmentCases')(c.id, (d) => { d.playerName = null; d.subjectRemovedAt = at; }); n += 1; }
         return n;
       });
     },
-    /** Load the mirrors (the tables are authoritative once 0016 is recorded; nothing is imported from memory). */
+    /** Check the tables are authoritative (0016 recorded); there is nothing to load. */
     attach() {
       if (!recruitmentCasesLive(sqlite)) throw new Error(`the recruitment-cases repository needs ${RECRUITMENT_CASES_MIGRATION} recorded; it never imports an in-memory array`);
-      reload();
-      log(`recruitment cases: ${RECRUITMENT_CASES_COLLECTIONS.map((n) => `${mirrors[n].length} ${n}`).join(', ')} loaded from the tables`);
       return { counts: this.counts() };
     },
-    /** The store participant: no flush (every write is already in the tables); the mirrors restored by a unit's rollback. */
-    hook() {
-      return {
-        flush() {},
-        snapshotState() { return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, mirrors[n].slice()])); },
-        restoreState(s) { if (!s) return; for (const n of RECRUITMENT_CASES_COLLECTIONS) { mirrors[n].length = 0; for (const r of s[n]) mirrors[n].push(r); } },
-      };
-    },
-    counts() { return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, mirrors[n].length])); },
+    counts() { return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
     pending: () => 0,
-    exportAll() { return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, clone(mirrors[n])])); },
+    exportAll() { return Object.fromEntries(RECRUITMENT_CASES_COLLECTIONS.map((n) => [n, readAll(sqlite, n)])); },
     log,
     now,
   };

@@ -177,12 +177,12 @@ export function registerSecondLook(ctx) {
   }
 
   /** The head of the decision chain — exact, unlike last-by-timestamp. */
-  const latestDecision = (roomId) => (db.roomDecisions ?? [])
-    .find((d) => d.roomId === roomId && d.supersededById == null) ?? null;
+  const latestDecision = (roomId) => reads.decisions.forRoom(roomId)
+    .find((d) => d.supersededById == null) ?? null;
 
   const latestSnapshot = (roomId, decision) => {
     if (decision?.snapshot?.snapshotId) {
-      return (db.roomSnapshots ?? []).find((s) => s.id === decision.snapshot.snapshotId) ?? decision.snapshot;
+      return reads.snapshots.byId(decision.snapshot.snapshotId) ?? decision.snapshot;
     }
     return decision?.snapshot ?? null;
   };
@@ -212,7 +212,7 @@ export function registerSecondLook(ctx) {
    */
   function projectCandidates(req, { playerId = null } = {}) {
     const org = req.org;
-    const rooms = db.recruitmentCases.filter((c) => c.orgId === org.id && c.room
+    const rooms = reads.cases.forOrg(org.id).filter((c) => c.room
       && ['archived', 'closed', 'withdrawn'].includes(c.room.status)
       && (!playerId || c.playerId === playerId));
     // A club may have opened, archived and later opened a SECOND room for the
@@ -381,7 +381,7 @@ export function registerSecondLook(ctx) {
     if (status !== 'all') items = items.filter((l) => l.item.status === status);
 
     const named = items.map(({ item, candidate }) => {
-      const room = db.recruitmentCases.find((c) => c.id === item.roomId);
+      const room = reads.cases.byId(item.roomId);
       return { item, candidate: { ...candidate, playerName: room?.playerName ?? null } };
     });
     const ordered = orderSecondLook(named.map((n) => ({ ...n.candidate, id: n.item.id, status: n.item.status })))
@@ -417,7 +417,7 @@ export function registerSecondLook(ctx) {
     const item = findItem(req, res);
     if (!item) return;
     const live = reconcile(req, { playerId: item.playerId }).find((l) => l.item.id === item.id);
-    const room = db.recruitmentCases.find((c) => c.id === item.roomId);
+    const room = reads.cases.byId(item.roomId);
     const player = findPlayer(item.playerId);
     // The player may have become invisible since the item was created. The
     // internal workflow record survives; the player projection does not.
@@ -444,7 +444,7 @@ export function registerSecondLook(ctx) {
     if (!player || !orgCanSee(req.org, player)) {
       return res.status(200).json({ available: false, unavailableNote: 'Player data is currently unavailable to your organisation under the standing rules.' });
     }
-    const room = db.recruitmentCases.find((c) => c.id === item.roomId);
+    const room = reads.cases.byId(item.roomId);
     const decision = latestDecision(item.roomId);
     const snapshot = latestSnapshot(item.roomId, decision);
     const { profile, safe } = trustFor(player);
@@ -524,7 +524,8 @@ export function registerSecondLook(ctx) {
     const item = findItem(req, res);
     if (!item) return;
     if (limited('second_look_action', req.org.id)) return res.status(429).json(rateLimitedBody('second_look_action'));
-    const room = db.recruitmentCases.find((c) => c.id === item.roomId && c.orgId === req.org.id && c.room);
+    const found = reads.cases.byId(item.roomId);
+    const room = found && found.orgId === req.org.id && found.room ? found : null;
     if (!room) return res.status(404).json({ error: 'ROOM_NOT_FOUND' });
     const player = findPlayer(item.playerId);
     if (!player || !orgCanSee(req.org, player)) return res.status(403).json({ error: 'NOT_VISIBLE' });

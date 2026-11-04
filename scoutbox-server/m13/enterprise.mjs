@@ -335,7 +335,7 @@ export function registerEnterprise(ctx) {
     const scoped = {
       contract: 'audit-export.2026-09.v1', orgId, exportedAt: Date.now(), exportedBy: req.orgUser.name,
       ledger: db.ledger.filter((l) => l.orgId === orgId),
-      caseHistories: db.recruitmentCases.filter((c) => c.orgId === orgId).map((c) => ({ id: c.id, playerId: c.playerId, history: c.history })),
+      caseHistories: ctx.recruitmentReads.cases.forOrg(orgId).map((c) => ({ id: c.id, playerId: c.playerId, history: c.history })),
       importHistories: db.importBatches.filter((b) => b.orgId === orgId).map((b) => ({ id: b.id, history: b.history })),
       grantsGiven: db.groupGrants.filter((g) => g.fromOrgId === orgId),
       grantsReceived: db.groupGrants.filter((g) => g.toOrgIds?.includes(orgId)),
@@ -419,7 +419,7 @@ export function registerEnterprise(ctx) {
       grant: { id: g.id, expiresAt: g.expiresAt },
       records: {
         refs: t.refs,
-        cases: db.recruitmentCases.filter((c) => c.orgId === orgId && t.refs.some((r) => r.kind === 'case' && r.id === c.id)),
+        cases: t.refs.filter((r) => r.kind === 'case').map((r) => ctx.recruitmentReads.cases.byId(r.id)).filter((c) => c && c.orgId === orgId),
         imports: db.importBatches.filter((b) => b.orgId === orgId && t.refs.some((r) => r.kind === 'import' && r.id === b.id)).map(({ rows, ...b }) => b),
       },
       note: 'Only records the ticket references, only while the grant lives, only logged.',

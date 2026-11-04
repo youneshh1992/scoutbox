@@ -297,7 +297,7 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
   const after = await s.stop();
   neg(JSON.stringify(canon(after.recruitmentContacts)) === before, 'shutdown wrote the corrupt rows back UNCHANGED in every key and value — reported, never repaired (the missing recipient and the impossible state carried as written)');
   // Boot-time integrity: contacts are not part of the M18.2 report's subject, and must not make it lie.
-  const rep = integrityReport(after);
+  const rep = integrityReport(after, { cases: after.recruitmentCases ?? [] });
   ok(rep.stores.ok === true, 'the boot integrity report still finds every required store present');
 }
 

@@ -242,7 +242,7 @@ console.log('\n— §10/§48 — idempotency and restart —');
 console.log('\n— §45 — boot integrity reports a missing store, and never repairs it —');
 {
   const db = priorSnapshot();
-  const before = integrityReport(db);
+  const before = integrityReport(db, { cases: db.recruitmentCases ?? [] });
   ok(before.stores.ok === false, 'an un-migrated snapshot reports missing stores');
   ok(before.stores.missing.includes('blocks'), 'db.blocks is named among them');
   neg(db.blocks === undefined, 'and integrityReport did NOT create the collection — it reports, it does not repair');
@@ -250,7 +250,7 @@ console.log('\n— §45 — boot integrity reports a missing store, and never re
     'a missing store is NOT counted as a data violation — two records disagreeing and a database never built need different answers');
 
   runMigrations(db);
-  const after = integrityReport(db);
+  const after = integrityReport(db, { cases: db.recruitmentCases ?? [] });
   ok(after.stores.ok === true, 'after migration no store is missing');
   ok(after.stores.missing.length === 0, 'and the missing list is empty');
 }
@@ -264,7 +264,7 @@ console.log('\n— §44 — a snapshot that CLAIMS a step it does not reflect is
   const db = inconsistentSnapshot();
   const r = runMigrations(db);
   ok(r.ran.length === 0, 'the runner applies nothing: every step is already claimed');
-  const report = integrityReport(db);
+  const report = integrityReport(db, { cases: db.recruitmentCases ?? [] });
   ok(report.stores.ok === false, 'and boot integrity reports the collections that are nonetheless absent');
   neg(db.blocks === undefined,
     'the damaged snapshot is NOT silently repaired — a person is told, which is §44');
@@ -280,8 +280,8 @@ console.log('\n— §46/§47 — startup order: stores exist before any module r
   runMigrations(db);
   ok(missingRequiredStores(db).length === 0,
     'every required store exists from migrations alone — no feature module participated');
-  neg(db.recruitmentCases !== undefined && db.blocks !== undefined,
-    'registration order cannot decide whether core collections exist');
+  neg(!Object.hasOwn(db, 'recruitmentCases') && db.blocks !== undefined,
+    'registration order cannot decide whether core collections exist (the cases are a table read through SQL since §4.3 step 2; rewritten)');
 }
 
 // ---------------------------------------------------------------- live boot
@@ -482,7 +482,7 @@ console.log('\n— §47 — a PRE-M23 snapshot keeps all thirteen original statu
   // And it reads. A migrated-but-unreadable database is not migrated.
   // §4.3 step 2: the contacts, signings, requests and trials are tables now, not collections the migrations create; a pre-M23 database has none,
   // so the projection is given the empty contacts table it would read (rewritten: it described the old storage).
-  const out = buildRecruitmentJourney({ ...db, recruitmentContacts: [], signings: db.signings ?? [], requests: db.requests ?? [], trials: db.trials ?? [] }, 'old-signed', { kind: 'org_staff', orgId: 'org-legacy', role: 'room_lead' },
+  const out = buildRecruitmentJourney({ ...db, recruitmentContacts: [], signings: db.signings ?? [], requests: db.requests ?? [], trials: db.trials ?? [], roomDecisions: db.roomDecisions ?? [] }, 'old-signed', { kind: 'org_staff', orgId: 'org-legacy', role: 'room_lead' },
     { now: 3000, evidence: NULL_EVIDENCE_PROVIDER });
   if (!out.ok) console.error(`   journey refused: ${JSON.stringify(out)}`);
   ok(out.ok === true && out.lifecycle?.currentStage === 'signed',

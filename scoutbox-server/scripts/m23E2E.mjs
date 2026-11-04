@@ -1045,10 +1045,10 @@ section('X — stored corruption: a broken record is reported, never rendered as
   // list" are different operational problems and a log that conflates them
   // sends someone looking in the wrong place.
   {
-    // §4.3 step 2 (rewritten: trials is no db store now): roomDecisions is the wrong-type one.
-    const db = base(); db.roomDecisions = null; delete db.assessments;
+    // §4.3 step 2 (rewritten: assessments is the one db store left; the contacts are read through SQL queries).
+    const db = base(); db.assessments = null; delete db.recruitmentContacts;
     const out = build(db);
-    neg(out.malformed?.includes('roomDecisions') && out.missing?.includes('assessments'),
+    neg(out.malformed?.includes('assessments') && out.missing?.includes('recruitmentContacts'),
       'X2b and names which store was absent and which was the wrong type');
   }
 

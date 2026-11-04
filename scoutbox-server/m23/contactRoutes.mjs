@@ -48,6 +48,7 @@ export function registerContact(ctx) {
     rateLimit, mailer, isLead, moderateOrRefuse, issueRecruitmentRequest,
     // S8c: the recruitment contacts/offers repository. Every write is an explicit operation inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
+    recruitmentReads, // §4.3 step 2: the cases are read through SQL
     // M23 P5.6E — the ONE cross-app integration seam. It is a HOLDER: M23 is
     // registered before the Agent, Compliance and Integration layers, so the
     // methods arrive later. Until they do, `agentRoute` is absent and every
@@ -648,7 +649,7 @@ export function registerContact(ctx) {
     // The sender already hears through the respond route's own notification.
     // The room's owner and lead scout hear too, if they are different people;
     // nobody else in the organisation does (§62).
-    const room = (db.recruitmentCases ?? []).find((k) => k?.id === c.caseId);
+    const room = recruitmentReads.cases.byId(c.caseId);
     if (room) {
       for (const uid of new Set([room.ownerUserId, room.room?.leadScoutUserId])) {
         if (!uid || uid === request.userId) continue;

@@ -84,7 +84,7 @@ console.log('\n— boot-time work, by snapshot size —\n');
     runMigrations(snap);
     const mig = performance.now() - t0;
     t0 = performance.now();
-    const r = integrityReport(snap);
+    const r = integrityReport(snap, { cases: snap.recruitmentCases ?? [] });
     const integ = performance.now() - t0;
     console.log(`${`${n} players / ${n} rooms / ${n * 4} notifications`.padEnd(56)} migrations ${mig.toFixed(2)} ms   integrity ${integ.toFixed(2)} ms (${r.checked} records)`);
   }

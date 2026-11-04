@@ -57,11 +57,14 @@ export function registerOffers(rawCtx) {
     agent = null, integration = null, transactions = null, faults = null,
     // S8c: every Offer write is an explicit repository operation (offers.create / update) inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
+    recruitmentReads, // §4.3 step 2: the cases are read through SQL
   } = ctx;
   /** S8b: a case history entry is an explicit write of its case (never an in-place push on the read-only view). */
   const caseAudit = (kase, ...args) => ctx.recruitmentCases.cases.update(kase.id, (d) => audit(d, ...args));
   if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.offers) throw new TypeError('registerOffers needs the contacts/offers repository, unit and afterCommit from the data layer');
   const offers = recruitmentContactsOffers.offers;
+  /** A case of this organisation, or null (§4.3 step 2: read through SQL). */
+  const caseOfOrg = (id, orgId) => { const k = recruitmentReads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
 
   // The offers live in their typed tables (migration 0017) and every read is a
   // query of the repository (§4.3 step 2): there is no db.recruitmentOffers.
@@ -140,7 +143,7 @@ export function registerOffers(rawCtx) {
     if (!o) { notFound(res, 'club'); return null; }
     const problems = offerIntegrity(o, { orgId: req.org.id });
     if (problems.length) { console.error(`OFFER integrity ${o.id}: ${problems.join(',')}`); err(res, 'OFFER_STATE_UNKNOWN', 'This Offer cannot be read.'); return null; }
-    const room = (db.recruitmentCases ?? []).find((k) => k && k.id === o.caseId && k.orgId === req.org.id) ?? null;
+    const room = caseOfOrg(o.caseId, req.org.id);
     if (!room || !room.room) { notFound(res, 'club'); return null; }
     // P6.1 (§27, §28, §38): the Offer's player is the case's player, and the
     // Offer and the case cannot say two things that are both false.
@@ -243,7 +246,7 @@ export function registerOffers(rawCtx) {
   // ------------------------------------------------------------ notifications
 
   function notifyClub(offer, text) {
-    const room = (db.recruitmentCases ?? []).find((k) => k?.id === offer.caseId);
+    const room = recruitmentReads.cases.byId(offer.caseId);
     const ids = new Set([room?.ownerUserId, room?.room?.leadScoutUserId, currentRevision(offer)?.issuedBy?.id].filter(Boolean));
     for (const uid of ids) notify({ kind: 'org_user', id: uid }, 'recruitment_offer', text, offer.id);
   }
@@ -644,7 +647,7 @@ export function registerOffers(rawCtx) {
    */
   function soundOffer(o, at) {
     if (!o || offerIntegrity(o).length) return false;
-    const k = (db.recruitmentCases ?? []).find((x) => x?.id === o.caseId && x.orgId === o.orgId) ?? null;
+    const k = caseOfOrg(o.caseId, o.orgId);
     if (!k) return true; // no case to disagree with (a legacy row); the row's own integrity carried it
     if (k.playerId !== o.playerId) { console.error(`OFFER integrity ${o.id}: player_mismatch`); return false; }
     const c = offerCaseConsistency(o, k, at);
@@ -673,7 +676,7 @@ export function registerOffers(rawCtx) {
     return o;
   }
 
-  const caseOpenFor = (o) => { const k = (db.recruitmentCases ?? []).find((x) => x?.id === o.caseId && x.orgId === o.orgId); return !k || k.room?.status === 'offer_made'; };
+  const caseOpenFor = (o) => { const k = caseOfOrg(o.caseId, o.orgId); return !k || k.room?.status === 'offer_made'; };
   const recipientView = (o, at) => withSigning(o, at, offerRecipientView(o, at, { orgName: orgOf(o.orgId)?.name ?? null, caseOpen: caseOpenFor(o) }));
 
   /** A read receipt for the live revision (§40): a fact about delivery, never a status. Returns the stored Offer (unchanged when it was already recorded). */
@@ -775,7 +778,7 @@ export function registerOffers(rawCtx) {
       // The case moves BECAUSE the recipient acted — through the ONE validator, which sees this response as its
       // evidence: the answer is written first, then the case asked, in one unit. A case that cannot record the
       // answer rolls the answer back with it.
-      const room = (db.recruitmentCases ?? []).find((k) => k?.id === o.caseId && k.orgId === o.orgId) ?? null;
+      const room = caseOfOrg(o.caseId, o.orgId);
       let moved = { applied: false, action: null, reason: 'no_case', at };
       const done = inUnit(res, () => {
         offers.update(o.id, (d) => {

@@ -181,12 +181,12 @@ section('U — chain, integrity, summaries, views');
 section('P — policy: error bands, rate policies, events, permissions, the ONE widening, no new states');
 {
   const codes = Object.keys(M23_ERROR_HTTP).filter((c) => c.startsWith('DECISION_'));
-  ok(codes.length >= 19, `P1 ${codes.length} DECISION_* codes are in the M23 error table`);
+  ok(codes.length >= 18, `P1 ${codes.length} DECISION_* codes are in the M23 error table (DECISION_STORE_MISSING left with the db collection, §4.3 step 2)`);
   const band = (c) => M23_ERROR_HTTP[c];
   ok(['DECISION_OUTCOME_INVALID', 'DECISION_REASON_INVALID', 'DECISION_CONTENT_INVALID', 'DECISION_EVIDENCE_INVALID', 'DECISION_CASE_MISMATCH', 'DECISION_CLIENT_KEY_INVALID', 'DECISION_REV_REQUIRED'].every((c) => band(c) === 400), 'P2 validation codes are 400');
   ok(band('DECISION_NOT_PERMITTED') === 403 && band('DECISION_BLOCKED') === 403 && band('DECISION_NOT_FOUND') === 404, 'P3 permission 403, not-found 404');
   ok(['DECISION_INVALID_STATE', 'DECISION_ALREADY_FINAL', 'DECISION_VERSION_CONFLICT', 'DECISION_IDEMPOTENCY_CONFLICT', 'DECISION_LIFECYCLE_CONFLICT', 'DECISION_SUBJECT_REMOVED'].every((c) => band(c) === 409), 'P4 state codes are 409');
-  ok(['DECISION_STATE_UNKNOWN', 'DECISION_STORE_MISSING', 'DECISION_TRANSPORT_REFUSED'].every((c) => band(c) === 500), 'P5 integrity and transport codes are 500 — the server\'s fault, said so');
+  ok(['DECISION_STATE_UNKNOWN', 'DECISION_TRANSPORT_REFUSED'].every((c) => band(c) === 500), 'P5 integrity and transport codes are 500 — the server\'s fault, said so');
   ok(RATE_LIMIT_POLICY.decision_draft?.max === 60 && RATE_LIMIT_POLICY.decision_finalize?.max === 30 && RATE_LIMIT_POLICY.decision_finalize.scope === 'org', 'P6 rate policies: 60 drafts and 30 finalizations per hour per organisation');
   const ev = (n) => EVENT_REGISTRY[n] ?? EVENT_REGISTRY.find?.((e) => e.name === n);
   ok(ev('room_decision_finalized') && ev('room_decision_superseded'), 'P7 the two decision events are registered');

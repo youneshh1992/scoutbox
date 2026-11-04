@@ -50,3 +50,13 @@ export function sendPageError(res, e) {
   res.status(400).json({ error: e.code, message: e.message.slice(e.code.length + 2) });
   return true;
 }
+
+/**
+ * Page a list that is already filtered and sorted in code (a filter SQL cannot express, e.g. a per-viewer access rule).
+ * `cmpKey(a, b)` orders two keys exactly as the list is sorted; the page starts after `after`. The rows still come from
+ * an indexed query (one organisation's), so this pages the response, not the read.
+ */
+export function pageSorted(rows, { limit, after = null }, keyOf, cmpKey) {
+  const rest = after ? rows.filter((r) => cmpKey(keyOf(r), after) > 0) : rows;
+  return pageOf(rest.slice(0, limit + 1), limit, keyOf);
+}

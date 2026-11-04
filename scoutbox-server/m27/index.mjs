@@ -563,7 +563,7 @@ export function registerIntegration(ctx) {
    * (§32 "Do not expose the internal decision itself").
    */
   function hasFinalProgressDecision(kase) {
-    const rows = (db.roomDecisions ?? []).filter((d) => d && d.roomId === kase.id && d.orgId === kase.orgId);
+    const rows = recruitmentReads.decisions.forRoom(kase.id).filter((d) => d.orgId === kase.orgId);
     // `chainHead` and `isFormal` are P5's own — an advisory recommendation is not
     // a formal decision, and a superseded row is not the head.
     const head = chainHead(rows);
@@ -760,7 +760,7 @@ export function registerIntegration(ctx) {
     if (!agent.resolveMembership(req, res)) return;
     if (!agent.requireCap(req, res, 'transactions.read')) return;
     const items = [];
-    for (const kase of db.recruitmentCases ?? []) {
+    for (const kase of recruitmentReads.cases.forHandoffAgent(req.orgUser.id)) {
       const h = kase?.transactionHandoff;
       if (!h || h.invitedAgentUserId !== req.orgUser.id) continue;
       if (effectiveHandoffStatus(h) !== 'invited') continue;
@@ -795,7 +795,7 @@ export function registerIntegration(ctx) {
    * Returns a refusal code or null. The transaction route obeys it.
    */
   function bindHandoff({ recruitmentCaseId, transactionId, agencyOrgId, agentUserId, clientId, at = now() }) {
-    const kase = (db.recruitmentCases ?? []).find((k) => k && k.id === recruitmentCaseId) ?? null;
+    const kase = recruitmentReads.cases.byId(recruitmentCaseId);
     if (!kase) return 'HANDOFF_NOT_FOUND';
     const h = kase.transactionHandoff;
     if (!h) return 'HANDOFF_NOT_FOUND';
@@ -826,9 +826,9 @@ export function registerIntegration(ctx) {
     /**
      * Does this recruitment case belong to this organisation? P5.6D asks this
      * before it shows a club a case reference, so that the transaction module
-     * never has to read `db.recruitmentCases` itself.
+     * never has to read the cases itself.
      */
-    caseBelongsTo: (caseId, orgId) => (db.recruitmentCases ?? []).some((k) => k && k.id === caseId && k.orgId === orgId),
+    caseBelongsTo: (caseId, orgId) => recruitmentReads.cases.byId(caseId)?.orgId === orgId,
     basisFor,
     // P6.1: the licence fact for a read that is not a regulated ACTION but is
     // agent work all the same (the Offer projection, m28). One predicate, here.

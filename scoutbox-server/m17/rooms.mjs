@@ -33,6 +33,7 @@ import { rateLimitedBody } from '../m181/rateLimit.mjs';
 // `signed` here while `confirmSignedOutcome` needs a recruitment lead).
 import { LIFECYCLE_ACTIONS } from '../m23/lifecycle.mjs';
 
+import { readPage, sendPageError, pageSorted } from '../domains/platform/paging.mjs';
 export function registerRooms(ctx) {
   const {
     db, orgRouter, adminRouter, nextId, persistNow, notify, ledgerAppend, broadcast,
@@ -111,7 +112,8 @@ export function registerRooms(ctx) {
    * status code and the body are identical.
    */
   function findRoom(req, res) {
-    const c = db.recruitmentCases.find((x) => x.id === req.params.id && x.orgId === req.org.id && isRoom(x));
+    const found = reads.cases.byId(req.params.id);
+    const c = found && found.orgId === req.org.id && isRoom(found) ? found : null;
     if (!c) { res.status(404).json({ error: 'ROOM_NOT_FOUND' }); return null; }
     if (c.restricted && !roomRole({ room: c, user: req.orgUser, isLead: isLead(req.orgUser) })) {
       res.status(403).json({ error: 'ROOM_RESTRICTED', message: 'This room is restricted to its lead, its assignees and recruitment leads.' });
@@ -182,8 +184,10 @@ export function registerRooms(ctx) {
 
   // ------------------------------------------------------- room components
 
-  const roomComments = (roomId) => db.roomComments.filter((c) => c.roomId === roomId);
-  const roomDecisions = (roomId) => db.roomDecisions.filter((d) => d.roomId === roomId).sort((a, b) => a.createdAt - b.createdAt);
+  const roomComments = (roomId) => reads.comments.forRoom(roomId);
+  /** A comment of this Room, or null. */
+  const commentOf = (id, roomId) => { const c = reads.comments.byId(id); return c && c.roomId === roomId ? c : null; };
+  const roomDecisions = (roomId) => reads.decisions.forRoom(roomId).slice().sort((a, b) => a.createdAt - b.createdAt);
   const currentDecision = (roomId) => { const all = roomDecisions(roomId); return all.length ? all[all.length - 1] : null; };
 
   function commentView(c, { orgId }) {
@@ -271,7 +275,7 @@ export function registerRooms(ctx) {
    * `visible: true`, which means `orgCanSee` passed on this read.
    */
   function evidenceFor(req, room, srcs) {
-    const state = db.roomEvidenceState.filter((e) => e.roomId === room.id);
+    const state = reads.evidenceStates.forRoom(room.id);
     const list = db.evidence
       .filter((e) => e.playerId === room.playerId && !e.supersededBy)
       .sort((a, b) => (b.recordedAt ?? 0) - (a.recordedAt ?? 0))
@@ -450,7 +454,9 @@ export function registerRooms(ctx) {
   // ------------------------------------------------------------- room list
 
   orgRouter.get('/rooms', (req, res) => {
-    const all = db.recruitmentCases.filter((c) => c.orgId === req.org.id && isRoom(c));
+    let page;
+    try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
+    const all = reads.cases.forOrg(req.org.id).filter((c) => isRoom(c));
     const mine = all.filter((c) => !c.restricted || roomRole({ room: c, user: req.orgUser, isLead: isLead(req.orgUser) }));
 
     let list = mine;
@@ -477,14 +483,15 @@ export function registerRooms(ctx) {
       });
     }
 
-    const limit = clampPage(req.query.limit);
-    const offset = Math.max(0, Number(req.query.offset) || 0);
-    const sorted = list.slice().sort((a, b) => (b.room.updatedAt - a.room.updatedAt) || String(a.id).localeCompare(String(b.id)));
-    const page = sorted.slice(offset, offset + limit);
+    // Most recent activity first, paged by cursor ({ items, nextCursor }; domains/platform/paging.mjs). The view, the
+    // access rule and the search are per viewer, so the organisation's Rooms are read by index and filtered here.
+    const recentFirst = (a, b) => (b[0] - a[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+    const sorted = list.slice().sort((a, b) => recentFirst([a.room.updatedAt, a.id], [b.room.updatedAt, b.id]));
+    const { items: pageRows, nextCursor } = pageSorted(sorted, page, (c) => [c.room.updatedAt, c.id], recentFirst);
 
     // One light assembly per player on the page, shared between the Passport
     // and Trust engines — no per-row source round trip.
-    const items = page.map((c) => {
+    const items = pageRows.map((c) => {
       const srcs = sources(c, req.org, { light: true });
       const readiness = null;
       return roomSummary(c, {
@@ -498,7 +505,7 @@ export function registerRooms(ctx) {
     });
 
     res.json({
-      items, total: sorted.length, limit, offset,
+      items, nextCursor,
       funnel: roomFunnel(mine),
       statuses: ROOM_STATUSES.map((s) => ({ id: s, label: ROOM_STATUS_LABELS[s] })),
       note: 'Rooms are listed by most recent activity. ScoutBox never orders players by Trust Score.',
@@ -507,7 +514,7 @@ export function registerRooms(ctx) {
 
   /** Needs-attention: deterministic, no priority scoring of any kind. */
   orgRouter.get('/rooms/needs-attention', (req, res) => {
-    const mine = db.recruitmentCases.filter((c) => c.orgId === req.org.id && isRoom(c)
+    const mine = reads.cases.forOrg(req.org.id).filter((c) => isRoom(c)
       && (!c.restricted || roomRole({ room: c, user: req.orgUser, isLead: isLead(req.orgUser) }))
       && OPEN_ROOM_STATUSES.includes(c.room.status));
     const items = [];
@@ -531,7 +538,7 @@ export function registerRooms(ctx) {
   orgRouter.get('/rooms/summaries', (req, res) => {
     const ids = String(req.query.playerIds ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 100);
     const items = ids.map((pid) => {
-      const c = db.recruitmentCases.find((x) => x.orgId === req.org.id && x.playerId === pid && isRoom(x) && OPEN_ROOM_STATUSES.includes(x.room.status));
+      const c = reads.cases.forOrgPlayer(req.org.id, pid).find((x) => isRoom(x) && OPEN_ROOM_STATUSES.includes(x.room.status));
       if (!c || (c.restricted && !roomRole({ room: c, user: req.orgUser, isLead: isLead(req.orgUser) }))) return { playerId: pid, roomId: null, status: null };
       return { playerId: pid, roomId: c.id, status: c.room.status, statusLabel: ROOM_STATUS_LABELS[c.room.status] };
     });
@@ -546,7 +553,7 @@ export function registerRooms(ctx) {
    * is in the pipeline — or create the case with the facet in one write. Returns the fresh case.
    */
   function openRoom({ req, player, sourceContext, sourceRef, priority = 'normal', restricted = false, vacancyId = null, withSourceRef = true }) {
-    const existingCase = db.recruitmentCases.find((c) => c.orgId === req.org.id && c.playerId === player.id && c.stage !== 'closed' && !isRoom(c));
+    const existingCase = reads.cases.forOrgPlayer(req.org.id, player.id).find((c) => c.stage !== 'closed' && !isRoom(c));
     const adopted = !!existingCase;
     const at = now();
     const facet = (d) => {
@@ -587,7 +594,7 @@ export function registerRooms(ctx) {
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE', message: 'This player is not visible to your organisation under the standing rules.' });
     if (vacancyId && !db.vacancies.some((v) => v.id === vacancyId && v.orgId === req.org.id)) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' });
 
-    const existing = db.recruitmentCases.find((c) => c.orgId === req.org.id && c.playerId === p.id && isRoom(c) && OPEN_ROOM_STATUSES.includes(c.room.status));
+    const existing = reads.cases.forOrgPlayer(req.org.id, p.id).find((c) => isRoom(c) && OPEN_ROOM_STATUSES.includes(c.room.status));
     if (existing) {
       return res.status(409).json({
         error: 'ROOM_EXISTS', existingRoomId: existing.id, status: existing.room.status,
@@ -888,8 +895,7 @@ export function registerRooms(ctx) {
    */
   ctx.createRoomForPlayer = ({ req, player, sourceContext = 'direct', sourceRef = null }) => {
     if (!orgCanSee(req.org, player)) return { ok: false, status: 403, error: 'NOT_VISIBLE' };
-    const existing = db.recruitmentCases.find((c) => c.orgId === req.org.id && c.playerId === player.id
-      && isRoom(c) && OPEN_ROOM_STATUSES.includes(c.room.status));
+    const existing = reads.cases.forOrgPlayer(req.org.id, player.id).find((c) => isRoom(c) && OPEN_ROOM_STATUSES.includes(c.room.status));
     if (existing) return { ok: true, roomId: existing.id, existed: true, room: buildRecruitmentRoom(existing, req) };
 
     const { room } = unit(() => openRoom({ req, player, sourceContext: normaliseSourceContext(sourceContext), sourceRef }));
@@ -934,7 +940,7 @@ export function registerRooms(ctx) {
   orgRouter.get('/rooms/:id/snapshots', (req, res) => {
     const room = findRoom(req, res);
     if (!room) return;
-    res.json({ items: db.roomSnapshots.filter((s) => s.roomId === room.id).sort((a, b) => b.at - a.at) });
+    res.json({ items: reads.snapshots.forRoom(room.id).slice().sort((a, b) => b.at - a.at) });
   });
 
   // -------------------------------------------------------------- activity
@@ -976,7 +982,7 @@ export function registerRooms(ctx) {
     const replyToId = req.body?.replyToId ? String(req.body.replyToId) : null;
     if (replyToId) {
       // A comment id from another room is a 404 here, not a cross-room reply.
-      const parent = db.roomComments.find((c) => c.id === replyToId && c.roomId === room.id);
+      const parent = commentOf(replyToId, room.id);
       if (!parent) return res.status(404).json({ error: 'ROOM_COMMENT_NOT_FOUND' });
     }
     const mentions = [...new Set((Array.isArray(req.body?.mentions) ? req.body.mentions : []).map(String))]
@@ -1008,7 +1014,7 @@ export function registerRooms(ctx) {
   orgRouter.patch('/rooms/:id/comments/:cid', (req, res) => {
     const room = findRoom(req, res);
     if (!room) return;
-    const c = db.roomComments.find((x) => x.id === req.params.cid && x.roomId === room.id);
+    const c = commentOf(req.params.cid, room.id);
     if (!c) return res.status(404).json({ error: 'ROOM_COMMENT_NOT_FOUND' });
     if (c.authorId !== req.orgUser.id) return res.status(403).json({ error: 'ROOM_COMMENT_NOT_AUTHOR', message: 'Only the author can edit a comment.' });
     if (c.deletedAt) return res.status(409).json({ error: 'ROOM_COMMENT_DELETED' });
@@ -1027,7 +1033,7 @@ export function registerRooms(ctx) {
   orgRouter.delete('/rooms/:id/comments/:cid', (req, res) => {
     const room = findRoom(req, res);
     if (!room) return;
-    const c = db.roomComments.find((x) => x.id === req.params.cid && x.roomId === room.id);
+    const c = commentOf(req.params.cid, room.id);
     if (!c) return res.status(404).json({ error: 'ROOM_COMMENT_NOT_FOUND' });
     const lead = isLead(req.orgUser);
     if (c.authorId !== req.orgUser.id && !lead) return res.status(403).json({ error: 'ROOM_COMMENT_NOT_AUTHOR' });
@@ -1160,7 +1166,7 @@ export function registerRooms(ctx) {
 
     const clientKey = req.body?.clientKey ? String(req.body.clientKey).slice(0, 64) : null;
     if (clientKey) {
-      const dup = db.roomDecisions.find((d) => d.roomId === room.id && d.clientKey === clientKey);
+      const dup = reads.decisions.forRoom(room.id).find((d) => d.clientKey === clientKey);
       // Idempotent submit: the same key returns the same decision instead of
       // stacking a duplicate onto the decision memory. M23 P8.1 (D-P81-11): the
       // same key with DIFFERENT content is a different request wearing the
@@ -1226,7 +1232,7 @@ export function registerRooms(ctx) {
     const note = req.body?.note ? plainText(req.body.note, 1000) : null;
     if (note && !moderateOrRefuse(res, note, { kind: 'recruitment_room_evidence_note', orgId: req.org.id })) return;
 
-    const existing = db.roomEvidenceState.find((x) => x.roomId === room.id && x.evidenceId === evidence.id);
+    const existing = reads.evidenceStates.forRoom(room.id).find((x) => x.evidenceId === evidence.id);
     // The review state and the note belong to the ROOM. The evidence record
     // itself is the player's and is not touched.
     const row = unit(() => {
@@ -1350,7 +1356,7 @@ export function registerRooms(ctx) {
 
   /** Organisation-private recruitment funnel. No cross-club comparison exists. */
   orgRouter.get('/rooms-funnel', (req, res) => {
-    const mine = db.recruitmentCases.filter((c) => c.orgId === req.org.id && isRoom(c));
+    const mine = reads.cases.forOrg(req.org.id).filter((c) => isRoom(c));
     res.json(roomFunnel(mine));
   });
 
@@ -1362,11 +1368,9 @@ export function registerRooms(ctx) {
    * comment, no decision, no reason, no player and no organisation.
    */
   adminRouter.get('/rooms/overview', (req, res) => {
+    const counts = ctx.recruitmentCases.counts();
     res.json({
-      rooms: db.recruitmentCases.filter(isRoom).length,
-      comments: db.roomComments.length,
-      decisions: db.roomDecisions.length,
-      snapshots: db.roomSnapshots.length,
+      rooms: reads.cases.roomCount(), comments: counts.roomComments, decisions: counts.roomDecisions, snapshots: counts.roomSnapshots,
       note: 'Recruitment Rooms are private to the organisation that owns them. Trust & Safety has no routine read access to their contents — an investigation needs an explicit, audited, reasoned support grant.',
     });
   });

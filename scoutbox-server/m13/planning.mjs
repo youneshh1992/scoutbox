@@ -192,7 +192,7 @@ export function registerPlanning(ctx) {
   // 30 km. A heuristic, labelled as one — no schedules are scraped.
   orgRouter.get('/coverage/suggestions', (req, res) => {
     const interest = new Set([
-      ...db.recruitmentCases.filter((c) => c.orgId === req.org.id && !['closed'].includes(c.stage)).map((c) => c.playerId),
+      ...ctx.recruitmentReads.cases.forOrg(req.org.id).filter((c) => !['closed'].includes(c.stage)).map((c) => c.playerId),
       ...db.ledger.filter((l) => l.type === 'shortlist' && l.orgId === req.org.id).map((l) => l.playerId),
     ]);
     const candidates = [...interest].map(findPlayer).filter((p) => p && orgCanSee(req.org, p) && p.location);
@@ -213,7 +213,8 @@ export function registerPlanning(ctx) {
   // ============================================================ F9 budgets
 
   function caseFor(req, res) {
-    const c = db.recruitmentCases.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const found = ctx.recruitmentReads.cases.byId(req.params.id);
+    const c = found && found.orgId === req.org.id ? found : null;
     if (!c) { res.status(404).json({ error: 'CASE_NOT_FOUND' }); return null; }
     const access = !c.restricted || c.ownerUserId === req.orgUser.id || (c.assignments ?? []).some((a) => a.userId === req.orgUser.id) || isLead(req.orgUser);
     if (!access) { res.status(403).json({ error: 'CASE_RESTRICTED' }); return null; }

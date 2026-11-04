@@ -56,6 +56,7 @@ export function registerTrial(ctx) {
     db, orgRouter, playerRouter, guardianRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked, isAdult,
     rateLimit, isLead, moderateOrRefuse, issueRecruitmentRequest, audit, orgCanSee, guardianManagedOnly,
     combineOrgMaySeeResults, testProviderEnabled = false, recruitment, unit,
+    recruitmentReads, // §4.3 step 2: the cases are read through SQL
   } = ctx;
   // S8a: every trial and request write is an explicit repository operation (trials.update / requests.update) inside `unit`.
   if (typeof unit !== 'function' || !recruitment?.trials) throw new TypeError('registerTrial needs the recruitment repository and unit from the data layer');
@@ -243,7 +244,7 @@ export function registerTrial(ctx) {
     if (a) notify(a, 'trial_day', text, t.id);
   }
   function notifyClub(t, text) {
-    const room = (db.recruitmentCases ?? []).find((k) => k?.id === t.caseId);
+    const room = recruitmentReads.cases.byId(t.caseId);
     const request = recruitment.requests.byId(t.requestId);
     const ids = new Set([request?.userId, room?.ownerUserId, room?.room?.leadScoutUserId].filter(Boolean));
     for (const uid of ids) notify({ kind: 'org_user', id: uid }, 'trial_day', text, t.id);
@@ -812,7 +813,7 @@ export function registerTrial(ctx) {
    * injection point for acceptance — refused here, nothing is written.
    */
   ctx.trialAcceptGate = ({ request, by, actorId }) => {
-    const room = (db.recruitmentCases ?? []).find((k) => k?.id === request.caseId) ?? null;
+    const room = recruitmentReads.cases.byId(request.caseId);
     const org = orgOf(request.orgId);
     const fail = (error, message) => ({ ok: false, status: httpStatusFor(error) ?? 422, error, message });
     if (!room || !org) return fail('TRIAL_RECIPIENT_UNAVAILABLE', 'This invitation can no longer be accepted.');
@@ -833,7 +834,7 @@ export function registerTrial(ctx) {
   /** After the single writer created the trial row: link it to the case and, if the slot was concrete, confirm the case's trial_scheduled. Same save as the answer. */
   ctx.onTrialAccepted = ({ request, trial, at, actor }) => {
     recruitment.requests.update(request.id, (d) => { d.trialId = trial.id; }); // S8a: in the respond route's unit
-    const room = (db.recruitmentCases ?? []).find((k) => k?.id === request.caseId) ?? null;
+    const room = recruitmentReads.cases.byId(request.caseId);
     if (!room) return null;
     cases.update(room.id, (d) => {
       if (!d.links.trialIds.includes(trial.id)) d.links.trialIds.push(trial.id);
@@ -853,7 +854,7 @@ export function registerTrial(ctx) {
   };
 
   ctx.onTrialDeclined = ({ request, at, actor }) => {
-    const room = (db.recruitmentCases ?? []).find((k) => k?.id === request.caseId) ?? null;
+    const room = recruitmentReads.cases.byId(request.caseId);
     if (!room) return null;
     caseAudit(room, actor.kind, actor.id, actor.name, 'room_trial_declined', { requestId: request.id, recipientType: actor.kind });
     for (const uid of new Set([room.ownerUserId, room.room?.leadScoutUserId])) {
@@ -905,7 +906,7 @@ export function registerTrial(ctx) {
         if (!guardRev(req, res, t, { errorCode: 'TRIAL_VERSION_CONFLICT', current: { workflowState: deriveWorkflowState(t) } })) return;
       }
       const who = { kind: by, id: actorId, name: actorName };
-      const room = t.caseId ? (db.recruitmentCases ?? []).find((k) => k?.id === t.caseId) ?? null : null;
+      const room = t.caseId ? recruitmentReads.cases.byId(t.caseId) : null;
       const fresh = unit(() => {
         trials.update(t.id, (d) => {
           d.schedule.confirmedAt = at;
@@ -982,7 +983,7 @@ export function registerTrial(ctx) {
         record(d, 'trial_cancelled', who, { phase: state, cancelledBy: by, attendedSessions: [...currentAttendance(d).values()].filter((a) => ['attended', 'partial'].includes(a.state)).length }, at);
         bumpRev(d, { by: null, at });
       }));
-      const room = fresh.caseId ? (db.recruitmentCases ?? []).find((k) => k?.id === fresh.caseId) ?? null : null;
+      const room = fresh.caseId ? recruitmentReads.cases.byId(fresh.caseId) : null;
       if (room) broadcast('trial_cancelled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
       notifyClub(fresh, `${actorName} cancelled the trial for ${fresh.playerName ?? 'the player'}${reason ? `: ${reason}` : '.'}`);
       res.json({ trial: trialFamilyView(fresh) });

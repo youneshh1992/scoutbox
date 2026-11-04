@@ -156,12 +156,12 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   pushLog: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_log table (defined by attachDataLayer), written only through the push log repository' },
   pushTokens: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_tokens table (defined by attachDataLayer), written only through the push tokens repository' },
   recruitmentBriefs: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
-  recruitmentCases: { guarantee: 'migration', owner: 'm12', reason: 'the canonical recruitment object (M12); the lifecycle lives on it' },
   // recruitmentContacts, recruitmentOffers: never a db.* read since §4.3 step 2 — the contacts and offers live in their
   // typed tables (migration 0017) and are read through repositories/recruitmentContactsOffers.mjs. db.<name> throws.
   // signingPackages, signings, followUps, outcomeReports: the same since §4.3 step 2 — typed tables (migration 0018),
   // read through repositories/signingsFollowUps.mjs. requests, trials: the same — typed tables (migration 0015), read
-  // through repositories/recruitment.mjs.
+  // through repositories/recruitment.mjs. recruitmentCases, roomComments, roomSnapshots, roomDecisions,
+  // roomEvidenceState: the same — typed tables (migration 0016), read through repositories/recruitmentCases.mjs.
   reports: { guarantee: 'migration', owner: 'core', reason: 'report-user/scout/club submissions (D2); since S6b a read-only view over the reports table, written only through handleReport / moderateOrRefuse and the resolve route → the safetyAudit repository (a report naming an unknown player is accepted, Q4)' },
   representations: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   // M23 P5.6B — ScoutBox Agent core. Guaranteed by migration 2305 so a
@@ -181,10 +181,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   transactionDocuments: { guarantee: 'migration', owner: 'm26', reason: 'P5.6D: document classification and visibility — type, owner, visibility class, version chain, expiry and a reference into the canonical evidence vault; stores no bytes, so it is not a second upload path' },
   reputationSeed: { guarantee: 'migration', owner: 'core', reason: 'demo track records; EMPTY is the correct production value — fabricating them would be worse than the bug (D2)' },
   reviewLater: { guarantee: 'module', owner: 'm13', reason: 'existed only because insightSweep() happens to run once synchronously at registration; a store whose existence depends on a sweep moves the day the sweep is made lazy' },
-  roomComments: { guarantee: 'migration', owner: 'm17', reason: 'Recruitment Room collection, guaranteed by the migration registry' },
-  roomDecisions: { guarantee: 'migration', owner: 'm17', reason: 'Recruitment Room collection, guaranteed by the migration registry' },
-  roomEvidenceState: { guarantee: 'migration', owner: 'm17', reason: 'Recruitment Room collection, guaranteed by the migration registry' },
-  roomSnapshots: { guarantee: 'migration', owner: 'm17', reason: 'Recruitment Room collection, guaranteed by the migration registry' },
   savedSearches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   secondLookItems: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
   sessions: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },

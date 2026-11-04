@@ -75,6 +75,8 @@ export function registerSigning(rawCtx) {
   } = ctx;
   if (typeof recruitmentReads?.offers?.byId !== 'function') throw new TypeError('registerSigning needs recruitmentReads (offers) from the data layer');
   const offerReads = recruitmentReads.offers;
+  /** A case of this organisation, or null (§4.3 step 2: read through SQL). */
+  const caseOfOrg = (id, orgId) => { const k = recruitmentReads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
   /** S8b: a case history entry is an explicit write of its case (never an in-place push on the read-only view). */
   const caseAudit = (kase, ...args) => ctx.recruitmentCases.cases.update(kase.id, (d) => audit(d, ...args));
   if (typeof players?.update !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
@@ -110,7 +112,7 @@ export function registerSigning(rawCtx) {
 
   // ------------------------------------------------------------- lookups
 
-  const caseOf = (pkg) => (db.recruitmentCases ?? []).find((k) => k && k.id === pkg.caseId && k.orgId === pkg.orgId) ?? null;
+  const caseOf = (pkg) => caseOfOrg(pkg.caseId, pkg.orgId);
   const offerOf = (pkg) => { const o = offerReads.byId(pkg.offerId); return o && o.orgId === pkg.orgId ? o : null; };
   const offerRevisionOf = (offer, id) => (offer?.revisions ?? []).find((r) => r && r.id === id) ?? null;
   const packagesOf = (offerId, orgId) => sp.forOffer(offerId).filter((p) => p.orgId === orgId);
@@ -390,7 +392,7 @@ export function registerSigning(rawCtx) {
     const found = offerReads.byId(req.params.id);
     const offer = found && found.orgId === req.org.id ? found : null;
     if (!offer) return notFound(res, 'club');
-    const kase = (db.recruitmentCases ?? []).find((k) => k && k.id === offer.caseId && k.orgId === req.org.id) ?? null;
+    const kase = caseOfOrg(offer.caseId, req.org.id);
     if (!kase || !kase.room) return notFound(res, 'club');
     const role = roleFor(req, kase);
     if (!roomCan(role, 'offer_view')) return err(res, 'SIGNING_NOT_PERMITTED', 'Your role cannot read signings on this case.');

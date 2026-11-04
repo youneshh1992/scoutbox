@@ -8,8 +8,8 @@
  *
  * Inputs, all canonical and all owned by someone else:
  *
- *   db.recruitmentCases    the case, its room facet, and case.history
- *   db.roomDecisions       append-only decisions (M17)
+ *   opts.reads.cases       the case, its room facet, and case.history (SQL since §4.3 step 2)
+ *   opts.reads.decisions   append-only decisions (M17; SQL since §4.3 step 2)
  *   opts.reads.requests    contact/trial requests (core; SQL since §4.3 step 2)
  *   opts.reads.trials      accepted trials (core; SQL since §4.3 step 2)
  *   db.assessments         assessments (M12)
@@ -55,7 +55,7 @@ import {
  * `recruitmentContacts` for the contacts); `opts.reads.offers`, `.signingPackages` and `.outcomeReports` are optional like their phases always were.
  */
 export const JOURNEY_REQUIRED_STORES = Object.freeze([
-  'recruitmentCases', 'roomDecisions', 'assessments',
+  'assessments',
 ]);
 
 /** Stores that are genuinely optional right now, because their phase has not shipped (none since §4.3 step 2: the outcome reports are an optional `reads` entry). */
@@ -127,11 +127,11 @@ function caseEndedAt(k) {
   const ends = (k.history ?? []).filter((e) => e?.action === 'room_status_changed' && LIFECYCLE_TERMINAL.includes(e.detail?.to)).map((e) => Number(e.at) || 0);
   return ends.length ? Math.max(...ends) : (Number(k.room?.updatedAt) || 0);
 }
-function ownedByAnotherCase(db, kase, { caseId = null, at = null }) {
+function ownedByAnotherCase(rec, kase, { caseId = null, at = null }) {
   if (typeof caseId === 'string' && caseId) return caseId !== kase.id;
   const ts = Number(at);
   if (!Number.isFinite(ts)) return false;
-  return (db.recruitmentCases ?? []).some((k) => k && k.id !== kase.id && k.orgId === kase.orgId && k.playerId === kase.playerId && k.room && Number(k.room.createdAt) <= ts && ts <= caseEndedAt(k));
+  return rec.siblingCases.some((k) => k && k.id !== kase.id && k.orgId === kase.orgId && k.playerId === kase.playerId && k.room && Number(k.room.createdAt) <= ts && ts <= caseEndedAt(k));
 }
 const trialCaseOf = (rec, trialId) => (typeof trialId === 'string' ? rec.trialById(trialId)?.caseId ?? null : null);
 const contactCaseOf = (rec, contactId) => (typeof contactId === 'string' ? rec.contactById(contactId)?.caseId ?? null : null);
@@ -155,6 +155,8 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // as the broken infrastructure it is. Both are reported, named separately so
   // the log says which happened.
   const missing = JOURNEY_REQUIRED_STORES.filter((k) => db?.[k] === undefined);
+  if (typeof reads.cases?.byId !== 'function' || typeof reads.cases?.forOrgPlayer !== 'function') missing.push('recruitmentCases');
+  if (typeof reads.decisions?.forRoom !== 'function') missing.push('roomDecisions');
   if (typeof reads.contacts?.forCase !== 'function' || typeof reads.contacts?.byId !== 'function') missing.push('recruitmentContacts');
   if (typeof reads.signings?.forOrgPlayer !== 'function' || typeof reads.signings?.byId !== 'function') missing.push('signings');
   if (typeof reads.requests?.forOrgPlayer !== 'function' || typeof reads.requests?.forCase !== 'function') missing.push('requests');
@@ -174,7 +176,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
     return { ok: false, error: 'JOURNEY_VIEWER_UNKNOWN', message: 'Unknown viewer context.' };
   }
 
-  const kase = db.recruitmentCases.find((c) => c?.id === caseId);
+  const kase = reads.cases.byId(caseId);
 
   // ---- §39 — tenant isolation with 404 concealment.
   //
@@ -193,6 +195,9 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   // `packages` are null when their store is not composed (the optional phases).
   const rec = {
     contacts: reads.contacts.forCase(kase.id),
+    // The club's other cases of this player (an earlier, ended case owns its own records) and this case's decisions.
+    siblingCases: reads.cases.forOrgPlayer(kase.orgId, kase.playerId),
+    decisions: reads.decisions.forRoom(kase.id),
     offers: typeof reads.offers?.forCase === 'function' ? reads.offers.forCase(kase.id) : null,
     packages: typeof reads.signingPackages?.forCase === 'function' ? reads.signingPackages.forCase(kase.id) : null,
     signings: reads.signings.forOrgPlayer(kase.orgId, kase.playerId),
@@ -275,7 +280,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const status = kase.room.status;
   const role = viewer.role ?? null;
 
-  const decisions = db.roomDecisions
+  const decisions = rec.decisions
     .filter((d) => d?.roomId === kase.id && d.orgId === kase.orgId)
     .map((d) => ({
       id: d.id,
@@ -373,12 +378,12 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
   const trialsCorrupt = rec.caseTrials.filter((t) => t?.caseId === kase.id && t.orgId === kase.orgId && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length > 0).length;
   const corruptRecords = offersCorrupt + packagesCorrupt + trialsCorrupt + contactsOmitted;
   // P8.1 (D-P81-15): this case's assessments — never the ended case's (a Trial of another case, or written while another case was open).
-  const allAssessments = db.assessments.filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId && !ownedByAnotherCase(db, kase, { caseId: trialCaseOf(rec, a.context?.trialId), at: a.createdAt }));
+  const allAssessments = db.assessments.filter((a) => a?.orgId === kase.orgId && a.playerId === kase.playerId && !ownedByAnotherCase(rec, kase, { caseId: trialCaseOf(rec, a.context?.trialId), at: a.createdAt }));
   const journeyBlock = journeyFor(db, rec, kase, {
     status, role, now,
     contacts: rec.contacts.filter((c) => c && c.caseId === kase.id && c.orgId === kase.orgId && contactIntegrity(c, { orgId: kase.orgId, caseId: kase.id }).length === 0),
     trials: trialRows, trialRequests: trialInvitations, assessments: allAssessments,
-    decisions: db.roomDecisions.filter((d) => d?.roomId === kase.id && d.orgId === kase.orgId),
+    decisions: rec.decisions.filter((d) => d?.roomId === kase.id && d.orgId === kase.orgId),
     offers: offerRows, packages: soundPackages, signingRow: signing,
     corruptRecords,
     foreign: foreignReferences(db, rec, kase),
@@ -474,7 +479,7 @@ export function buildRecruitmentJourney(db, caseId, viewer, opts = {}) {
 function sharedRecordsFor(db, rec, kase, viewer, now = Date.now()) {
   const mine = (r) => {
     if (r?.orgId !== kase.orgId || r.playerId !== kase.playerId) return false;
-    if (ownedByAnotherCase(db, kase, { caseId: r.caseId ?? contactCaseOf(rec, r.contactId), at: r.createdAt })) return false; // P8.1 (D-P81-15): the ended case's request is its own line
+    if (ownedByAnotherCase(rec, kase, { caseId: r.caseId ?? contactCaseOf(rec, r.contactId), at: r.createdAt })) return false; // P8.1 (D-P81-15): the ended case's request is its own line
     if (viewer.kind === 'player_self') return r.routedTo !== 'guardian' && viewer.playerId === kase.playerId;
     return r.routedTo === 'guardian' && r.guardianId === viewer.guardianId;
   };
@@ -491,7 +496,7 @@ function sharedRecordsFor(db, rec, kase, viewer, now = Date.now()) {
   // the outcome line, never the guardian's record. No case id, no history.
   const mineTrial = (t) => {
     if (t?.orgId !== kase.orgId || t.playerId !== kase.playerId || t.subjectRemovedAt) return false;
-    if (ownedByAnotherCase(db, kase, { caseId: t.caseId ?? null, at: t.acceptedAt ?? t.createdAt })) return false; // P8.1 (D-P81-15)
+    if (ownedByAnotherCase(rec, kase, { caseId: t.caseId ?? null, at: t.acceptedAt ?? t.createdAt })) return false; // P8.1 (D-P81-15)
     if (viewer.kind === 'player_self') return viewer.playerId === kase.playerId && (t.recipient ? t.recipient.type === 'player' : t.acceptedBy === 'player');
     return t.recipient ? t.recipient.type === 'guardian' && t.recipient.guardianId === viewer.guardianId : t.acceptedBy === 'guardian';
   };
@@ -564,7 +569,7 @@ function foreignReferences(db, rec, kase) {
     }
   };
   check(rec.contacts); check(rec.caseTrials); check(rec.caseRequests); check(rec.offers); check(rec.packages);
-  for (const d of db.roomDecisions ?? []) { if (d?.roomId === kase.id && (d.orgId !== kase.orgId || (d.playerId !== undefined && d.playerId !== kase.playerId))) out.add(d.orgId !== kase.orgId ? 'CLUB_MISMATCH' : 'PLAYER_MISMATCH'); }
+  for (const d of rec.decisions) { if (d?.roomId === kase.id && (d.orgId !== kase.orgId || (d.playerId !== undefined && d.playerId !== kase.playerId))) out.add(d.orgId !== kase.orgId ? 'CLUB_MISMATCH' : 'PLAYER_MISMATCH'); }
   return [...out];
 }
 

@@ -925,10 +925,9 @@ export const demoRooms: RoomsApi = {
     // Most recent activity first — never ordered or ranked by Trust Score.
     const sorted = list.sort((a, b) => (b.updatedAt - a.updatedAt) || a.roomId.localeCompare(b.roomId));
     const limit = params.limit ?? 50;
-    const offset = params.offset ?? 0;
     const result: RoomListResult = {
-      items: sorted.slice(offset, offset + limit).map(summarise),
-      total: sorted.length, limit, offset,
+      items: sorted.slice(0, limit).map(summarise),
+      nextCursor: null, // the demo serves one page
       funnel: funnelOf(roomStore),
       statuses: ALL_STATUSES.map((s) => ({ id: s, label: STATUS_LABELS[s] })),
       note: LIST_NOTE,
