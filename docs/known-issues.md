@@ -14,6 +14,11 @@ fixed on 3 November; these were found while fixing it.
 
 ## Data model
 
+- **Assessment templates are shared by every club.** When one club's lead publishes a new version of a position
+  template (`POST /org/assessment-templates`), it becomes the current template for every club: other clubs' new
+  assessments use it, though reports already written keep their version. Deferred until the migration is finished
+  (decisions.md, 4 Nov). The fix: each club gets its own templates (an `org_id` on `assessment_templates`), starting
+  from the four standard v1 templates.
 - **Evidence records copy people's names as text and cut them at 200 characters.** The evidence passport, disputes,
   evidence history, coach affiliations and squad invitations store a copy of the player's, scout's or club's name
   (an org dispute stores "scout · club"). Player signup has no name length limit, and a scout name plus a club

@@ -340,7 +340,7 @@ CREATE TABLE org_federation_checks (
 --     overlay object the client draws and the server never reads (at most 4000 characters; no app sends one).
 --   * Playlist segments keep their order (position) and are unique per playlist; a segment is RESTRICT there.
 --   * Templates remain GLOBAL (KNOWN DEFECT, carried as-is): a lead of any club publishes a version for every club.
---     A product decision for the Founder (migration.md §4.5).
+--     Deferred until the migration is finished (decisions.md, 4 Nov; known-issues.md).
 -- ----------------------------------------------------------------------------
 CREATE TABLE assessment_templates (
   id              TEXT NOT NULL,

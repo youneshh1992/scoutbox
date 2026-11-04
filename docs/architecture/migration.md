@@ -339,8 +339,8 @@ domain. A submission with its ledger entry, and a publication with its notificat
 refuse junk (`400 FIELD_INVALID` / `DATE_INVALID`, field named; half ratings, duplicate attributes, unknown context or
 reference fields, non-object references and drawings, non-numeric segment times); over-long text is still shortened.
 The calibration and group-template routes now pin a template's current version rather than v1. The club assessment
-and segment lists keep their offset paging (`paginate`), over SQL-narrowed rows. **Open for the Founder:** templates
-are still shared by every club, so one club's lead publishing a new version changes it for all.
+and segment lists keep their offset paging (`paginate`), over SQL-narrowed rows. **Decided (4 November):** templates
+stay shared by every club until the migration is finished (a known defect, `known-issues.md`).
 
 ### 4.6 S14: retire the blob
 
