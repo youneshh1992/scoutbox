@@ -210,7 +210,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   verPlayerInvites: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
   verReferences: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
   verRootRequests: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verRootTransfers: { guarantee: 'module', owner: 'm14', reason: 'was created inside the transfer route; moved to m14/shared.mjs beside its twelve siblings' },
+  verRootTransfers: { guarantee: 'module', owner: 'm14', reason: 'was created inside the transfer route; moved to domains/verification/claims/shared.mjs beside its twelve siblings' },
   verTokens: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
   vouches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   watchlistHistory: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },

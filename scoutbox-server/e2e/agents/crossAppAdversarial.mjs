@@ -158,7 +158,7 @@ section('RA/§20 — no non-active relationship is active Trust evidence, in eit
   }
 
   // The legacy lane, directly: a mirror row that names nobody.
-  const trustSrc = readFileSync(path.join(ROOT, 'scoutbox-server', 'm162', 'trust.mjs'), 'utf8');
+  const trustSrc = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'trust', 'trust.mjs'), 'utf8');
   ok(/status !== 'active'/.test(trustSrc) && /!rep\.confirmedAt/.test(trustSrc), 'RA7 the legacy lane\'s Trust input requires confirmedAt AND an active status');
   ok(/endAt && rep\.endAt < now/.test(trustSrc), 'RA8 and rejects one past its end date, because confirmedAt survives an ending');
   ok(/typeof a\.agentUserId !== 'string'/.test(trustSrc), 'RA9 the canonical lane additionally requires a NAMED individual, so a legacy mirror counts through neither lane');
@@ -174,7 +174,7 @@ section('RB/§21 — the Passport: the agent reads, and writes nothing');
   neg(expect(collect('RB provenance', await j('PATCH', '/org/players/pl-adeyemi/football-passport/provenance', { verified: true }, ana.token)), 404, null), 'RB4 nor its provenance');
   neg(expect(collect('RB trust write', await j('POST', '/org/players/pl-adeyemi/trust-profile', { score: 99 }, ana.token)), 404, null), 'RB5 nor the Trust Score');
   // The legacy row is HISTORY in the Passport, never the headline (P5.6E E-2).
-  const src = readFileSync(path.join(ROOT, 'scoutbox-server', 'm15', 'passport.mjs'), 'utf8');
+  const src = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'passport', 'passport.mjs'), 'utf8');
   ok(/HEADLINE is not built from them/.test(src), 'RB6 the Passport says in its own source that the headline is not built from legacy rows');
   ok(/typeof a\.agentUserId === 'string'/.test(src), 'RB7 and the canonical projection it does use requires a named individual');
   // A player revoking a share closes the agent's shared-evidence surface.

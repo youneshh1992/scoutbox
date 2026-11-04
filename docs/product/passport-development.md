@@ -120,8 +120,8 @@ The player's evidence layer (Passport, verification, provenance, Trust) and the 
 - ≠ `production_cv` status is `configured`, with `combineVerifiedProtocols: []`: `m16/drills.mjs:119-126` (the M16 docs say not_configured).
 - ✓ Test provider hidden unless enabled: `m16/drills.mjs:146`. `isProductionValidCombine` excludes testOnly: `m16/combineShared.mjs:231-235`.
 - ✓ The validation gate denies unless `verdict?.pass !== true` is false: `m22/eligibility.mjs:111`. All three protocols `not_completed`: `m22/validation.mjs:54-56`.
-- ✓ Share tokens stored as sha256: `m15/sharing.mjs:32,112`. Minor share gets `GUARDIAN_MANAGED`: `m15/sharing.mjs:55`.
-- ✓ Trust weights must total 100 at boot: `m162/index.mjs:15`.
+- ✓ Share tokens stored as sha256: `domains/verification/passport/sharing.mjs:32,112`. Minor share gets `GUARDIAN_MANAGED`: `domains/verification/passport/sharing.mjs:55`.
+- ✓ Trust weights must total 100 at boot: `domains/verification/trust/index.mjs:15`.
 - ✓ The development vocabulary is asserted at boot: `m21/index.mjs:84`.
 - ✓ The M21 transition tables match the docs: `m21/shared.mjs:127-211`.
-- ✓ A trial never creates history: `m15/shared.mjs:196,406` (comments plus logic).
+- ✓ A trial never creates history: `domains/verification/passport/shared.mjs:196,406` (comments plus logic).

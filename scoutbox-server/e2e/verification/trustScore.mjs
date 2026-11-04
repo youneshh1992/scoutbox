@@ -20,7 +20,7 @@ import {
   eligibleTrustComponents, scoreCombineConfidence, scoreEvidenceConfidence,
   scoreFootballHistoryConfidence, scoreIdentityConfidence,
   scoreRelationshipConfidence, scoreReferencesConfidence, TRUST_DISCLAIMER,
-} from '../../m162/shared.mjs';
+} from '../../domains/verification/trust/shared.mjs';
 
 const PORT = 5100 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -530,7 +530,7 @@ section('D-P56A-1 — an agency relationship counts only while it is active');
   // carries, and the canonical source must apply the same state filter rather
   // than counting any agreement it finds.
   const { readFileSync } = await import('node:fs');
-  const trustSrc = readFileSync(new URL('../../m162/trust.mjs', import.meta.url), 'utf8');
+  const trustSrc = readFileSync(new URL('../../domains/verification/trust/trust.mjs', import.meta.url), 'utf8');
   neg(!/rel:agency:\$\{rep\.orgId\}/.test(trustSrc) && /rel:agency:\$\{rep\.agencyOrgId\}/.test(trustSrc), 'the legacy relationship key reads `agencyOrgId`, the field the representation record actually carries');
   neg(/db\.representationAgreements/.test(trustSrc) && /a\.confirmedAt \&\& a\.status !== 'active'|!a\.confirmedAt \|\| a\.status !== 'active'/.test(trustSrc), 'the canonical source requires confirmedAt AND an active status');
   neg(/typeof a\.agentUserId !== 'string'/.test(trustSrc), 'and it refuses a legacy mirror row, which names no licensed individual');

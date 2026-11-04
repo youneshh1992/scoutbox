@@ -866,7 +866,7 @@ section('#37 — a revoked relationship never contributes as an active Trust rel
   const mateus = await playerLogin('pl-carvalho');
   const t2 = await j('GET', '/player/trust-profile', undefined, mateus.token);
   ok(t2.status === 200, '#37b and so does the client whose relationship was terminated above');
-  const src = readFileSync(path.join(HERE, '..', '..', 'm162', 'trust.mjs'), 'utf8');
+  const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'verification', 'trust', 'trust.mjs'), 'utf8');
   ok(/representationAgreements/.test(src), '#37c the Trust relationship input reads the canonical lane');
   ok(/a\.confirmedAt \|\| a\.status !== 'active'/.test(src) || /!a\.confirmedAt \|\| a\.status !== 'active'/.test(src), '#37d and filters on confirmedAt AND an active status');
   ok(/a\.endAt === 'number' && a\.endAt <= now/.test(src), '#37e and on expiry, so a lapsed agreement contributes nothing');

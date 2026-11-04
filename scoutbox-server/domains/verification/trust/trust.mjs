@@ -12,9 +12,9 @@
 //
 // The Trust Score grants no permission whatsoever: every route below runs the
 // standing authorization gates FIRST and the score is only ever a payload.
-import { isAdult, visibleToOrg } from '../domain.mjs';
-import { effectiveStatus, assuranceForClaim } from '../m14/shared.mjs';
-import { PROVIDERS } from '../m16/drills.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.mjs';
+import { effectiveStatus, assuranceForClaim } from '../claims/shared.mjs';
+import { PROVIDERS } from '../../../m16/drills.mjs';
 import {
   POLICY, TRUST_SCORE_POLICY_VERSION, calculateTrustScore, safeTrustProjection,
   trustSummary, trustSnapshot, TRUST_DISCLAIMER,

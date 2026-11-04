@@ -317,7 +317,7 @@ CREATE INDEX org_shadow_players_role ON org_shadow_players (role_id);
 --     an unknown field, is refused). A cited segment is a RESTRICT key, checked to be the club's and the player's.
 --   * The state CHECKs: submitted_at exactly when not a draft, reviewed_at exactly when reviewed, the review note
 --     only after review, a recommendation's verdict and reasons together, published feedback whole and never on a
---     draft. 'published' is not a state (m15/m162 used to filter on it; it was never written).
+--     draft. 'published' is not a state (domains/verification/passport/m162 used to filter on it; it was never written).
 --   * history uses the one entry shape {id, at, byKind, byId, byName, action, detail}, with its position.
 --   * video segment labels are a child table (video_segment_labels), not labels_json. drawing_json stays JSON: an
 --     overlay object the client draws and the server never reads (at most 4000 characters; no app sends one).

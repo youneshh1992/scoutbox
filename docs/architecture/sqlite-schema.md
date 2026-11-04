@@ -486,7 +486,7 @@ guardians ──< guardian_children >── players ──< player_* (12 sub-rec
 ```
 
 - **`orgs`** — one row per club or agency (live since S3, `repositories/orgs.mjs`). Owner:
-  registration (`server.mjs`, `orgs.insert`), T&S org creation (`m14/review.mjs`,
+  registration (`server.mjs`, `orgs.insert`), T&S org creation (`domains/verification/claims/review.mjs`,
   `orgs.insert`), org settings routes, admin verification / credentials / suspension and
   the `m13` security route (`orgs.update`). Lifecycle: `suspended` flag; no deletion route
   exists today and S3 adds none (O2, below). CHECKs: `type IN (club, agency)`, `level IS
@@ -929,7 +929,7 @@ the route and response half is named with its plan step.
    `*_hash` columns everywhere except push tokens and webhook secrets (OPEN: encrypt at rest
    with a key from env); `mediaSign` leaves the database; `outbox.text` retention OPEN.
 2. **Unsalted sha256 for API keys, verification tokens and share tokens** (`m13/imports.mjs`,
-   `m14/shared.mjs:299`, `m15/sharing.mjs:31`). Acceptable for 32-byte random tokens; not for
+   `domains/verification/claims/shared.mjs:299`, `domains/verification/passport/sharing.mjs:31`). Acceptable for 32-byte random tokens; not for
    6-character codes (`email_challenges`, `pairing_codes`, ~30 bits): the header notes it and
    S6 adds attempt limits per code.
 3. **Blocklist response filtering** (`playerViewForOrg`, `server.mjs:1052`): attendance GPS,
@@ -1047,7 +1047,7 @@ Code read for this design (line numbers refer to this branch): `scoutbox-server/
 1890, deletion 3978–4023, admin 4219–4294), `store.mjs`, `seed.mjs`, `domain.mjs`,
 `adapters.mjs`, `storeContract.mjs`, `domains/platform/migrations.mjs`, `m12/*` (passport, scouting,
 journeys, operations, shared), `m13/*` (shared, imports, enterprise, delivery, suitability,
-insight, planning, groups, transitions, mfa), `m14/*`, `m15/*`, `m16/*`, `m17/*`, `m18/*`,
+insight, planning, groups, transitions, mfa), `domains/verification/claims/*`, `domains/verification/passport/*`, `m16/*`, `m17/*`, `m18/*`,
 `m19/*`, `m21/*`, `m22/*`, `m23/*`, `m24/*`–`m29/*`, `repositories/*`, the frontend type
 files (`scoutbox-club/src/api.ts`, `scoutbox-grassroots/src/api.ts`, `roomsApi.ts`,
 `scoutbox-agent/src/api.ts`, `scoutbox-player/src/domain/types.ts`,

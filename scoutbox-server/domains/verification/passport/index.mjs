@@ -9,7 +9,7 @@
 // persistence is what Passport genuinely introduces: preferences,
 // self-submitted career entries, achievements (+confirmations), shares
 // (hashed tokens) and correction requests.
-import { metrics } from '../m13/enterprise.mjs';
+import { metrics } from '../../../m13/enterprise.mjs';
 import { registerPassportCore } from './passport.mjs';
 import { registerPassportSharing } from './sharing.mjs';
 

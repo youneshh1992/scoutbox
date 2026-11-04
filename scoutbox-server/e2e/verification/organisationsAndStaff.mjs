@@ -14,7 +14,7 @@ import {
   emailProblem, domainOfEmail, isFreeMail, isDisposable, domainCovered,
   normalizeDomain, evidenceFileProblem, evidenceCompleteness, mintToken,
   consumeToken, toPublicVerificationProfile, verLevelFor, orgVerificationStatus,
-} from '../../m14/shared.mjs';
+} from '../../domains/verification/claims/shared.mjs';
 import { totp } from '../../m13/shared.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 

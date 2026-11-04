@@ -10,7 +10,7 @@ import { registerImports } from './imports.mjs';
 import { registerDelivery } from './delivery.mjs';
 import { registerEnterprise } from './enterprise.mjs';
 import { registerSuitability } from '../domains/scouting/suitability.mjs';
-import { registerTransitions } from './transitions.mjs';
+import { registerTransitions } from '../domains/verification/transitions.mjs';
 import { registerInsight } from './insight.mjs';
 import { registerPlanning } from './planning.mjs';
 import { registerGroups } from './groups.mjs';

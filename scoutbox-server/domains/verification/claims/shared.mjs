@@ -14,7 +14,7 @@
 //  * M14 does NOT introduce a new age system: all age gates continue to use
 //    the existing DOB/country isAdult() from domain.mjs.
 import crypto from 'node:crypto';
-import { isExpiredAt, readInstant } from '../temporal.mjs';
+import { isExpiredAt, readInstant } from '../../../temporal.mjs';
 
 // ------------------------------------------------------------- claim types
 export const CLAIM_TYPES = [

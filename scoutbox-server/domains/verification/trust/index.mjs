@@ -5,7 +5,7 @@
 // sources), no new authentication and, critically, no new authorization:
 // every route registers on the EXISTING authenticated routers so the
 // standing gates run before any handler here.
-import { metrics } from '../m13/enterprise.mjs';
+import { metrics } from '../../../m13/enterprise.mjs';
 import { POLICY, TRUST_SCORE_POLICY_VERSION, policyWeightsTotal } from './shared.mjs';
 import { registerTrust } from './trust.mjs';
 

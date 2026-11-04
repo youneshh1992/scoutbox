@@ -8,8 +8,8 @@
 // VERIFIED organisation; domain control is evidence of mailbox control, never
 // of employment. Where no authority exists, the case routes to Trust & Safety
 // as a prepared human-review case — humans are the LAST step, not the first.
-import { isAdult, visibleToOrg } from '../domain.mjs';
-import { parseDateOrInstant, isAbsent } from '../temporal.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.mjs';
+import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
 import {
   emailProblem, domainOfEmail, isFreeMail, isDisposable, normalizeDomain,
   domainCovered, riskFlags, decideReview, evidenceCompleteness, verLevelRank,

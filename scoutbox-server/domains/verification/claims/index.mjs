@@ -14,7 +14,7 @@ import {
   orgVerificationStatus, mintToken, consumeToken, peekToken, sha256,
   evidenceFileProblem, claimProvenanceLabel,
 } from './shared.mjs';
-import { metrics } from '../m13/enterprise.mjs';
+import { metrics } from '../../../m13/enterprise.mjs';
 import { registerOrganisationVerification } from './organisations.mjs';
 import { registerVerificationReview } from './review.mjs';
 

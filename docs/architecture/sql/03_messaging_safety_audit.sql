@@ -456,7 +456,7 @@ CREATE TABLE dispatch_attempts (
 --   or neither is refused by position. `source` records which literal a row is.
 -- owner/writer: the outbox repository, called by adapters.mjs createMailer.send (nine route
 --         sites: server.mjs guardian sign-up, club e-mail challenge (the one `secrets` site),
---         reference request; m14/organisations.mjs 236/533/717/918; domains/recruitment/lifecycle/contactRoutes.mjs:521;
+--         reference request; domains/verification/claims/organisations.mjs 236/533/717/918; domains/recruitment/lifecycle/contactRoutes.mjs:521;
 --         m13/enterprise.mjs:88) and by m13/delivery.mjs fakeSend; the mailer's `markDelivered`
 --         after the live provider call settles.
 -- lifecycle: append-only; never pruned; never deleted on player deletion; `seq` is the
@@ -900,7 +900,7 @@ CREATE INDEX ops_events_occurred_at ON ops_events (occurred_at);
 -- owner/writer: domains/platform/sourceChanges.mjs recordSourceChange — safetyAudit.sourceChanges.append
 --         then safetyAudit.sourceChanges.trimTo(20000) (the cap deletes the OLDEST rows beyond
 --         20 000 in insertion order, the same splice the array had), both staged into the
---         persistNow() that follows. Called from m15/passport.mjs only.
+--         persistNow() that follows. Called from domains/verification/passport/passport.mjs only.
 -- lifecycle: append-only, capped; no deletion hook on player deletion (Q4: the row stays with
 --         its now-unresolved player_id, counted).
 -- mapping (the recordSourceChange literal, key for key):

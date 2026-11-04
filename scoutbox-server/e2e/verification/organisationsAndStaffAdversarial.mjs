@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import {
   evidenceFileProblem, sniffFileSignature, toPublicVerificationProfile,
   assuranceForClaim, claimProvenanceLabel, mintToken, consumeToken, peekToken,
-} from '../../m14/shared.mjs';
+} from '../../domains/verification/claims/shared.mjs';
 
 const PORT = 4600 + Math.floor(Math.random() * 300);
 const BASE = `http://localhost:${PORT}`;

@@ -9,7 +9,7 @@
 //     session and re-run the standing orgCanSee gates.
 // Unknown, revoked, expired and removed-subject tokens are indistinguishable
 // (404 concealment), and the public resolver is rate-limited.
-import { isAdult, visibleToOrg } from '../domain.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { mintShareSecret, sha256, shareProblem, SHARE_MODES } from './shared.mjs';
 
 export function registerPassportSharing(ctx) {

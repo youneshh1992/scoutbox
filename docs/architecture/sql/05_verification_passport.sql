@@ -36,13 +36,13 @@
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verClaims  created at m14/index.mjs:56 (createClaim) and
---         m14/shared.mjs:507 (mkClaim, migrated rows vclm-m-N)
+-- source: db.verClaims  created at domains/verification/claims/index.mjs:56 (createClaim) and
+--         domains/verification/claims/shared.mjs:507 (mkClaim, migrated rows vclm-m-N)
 -- owner/writer: m14 (organisations.mjs, review.mjs, shared.mjs applyTransition)
 -- lifecycle: status unverified → collecting_evidence → pending →
 --   automated_checks_passed | requires_human_review → verified | rejected;
 --   verified → expired | suspended | revoked | disputed | superseded;
---   VALID_TRANSITIONS in m14/shared.mjs:61. No deletes. `current=0` closes a
+--   VALID_TRANSITIONS in domains/verification/claims/shared.mjs:61. No deletes. `current=0` closes a
 --   verified period (departed / mark_former) without erasing it.
 -- mapping:
 --   id -> id (vclm-N; vclm-m-N for M14 migration rows)
@@ -54,7 +54,7 @@
 --   role -> role (≤60)
 --   status -> status
 --   validFrom -> valid_from   validUntil -> valid_until (EXCLUSIVE expiry ms;
---     NULL = no expiry; m14/shared.mjs:124)
+--     NULL = no expiry; domains/verification/claims/shared.mjs:124)
 --   current -> current
 --   verificationMethod -> verification_method
 --   authorityType -> authority_kind   authorityId -> authority_id (org_users.id
@@ -165,7 +165,7 @@ CREATE UNIQUE INDEX ver_claims_one_current_affiliation ON ver_claims(subject_id,
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verClaims[].history[]  created at m14/shared.mjs:509 (mkClaim)
+-- source: db.verClaims[].history[]  created at domains/verification/claims/shared.mjs:509 (mkClaim)
 -- owner/writer: m14 migration only
 -- lifecycle: append-only
 -- mapping: history[] entries would be {id,at,byKind,byId,byName,action,detail}
@@ -190,8 +190,8 @@ CREATE INDEX ver_claim_history_claim ON ver_claim_history(ver_claim_id, at);
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verEvents  created at m14/index.mjs:35 (verEvent) and
---         m14/shared.mjs:516 (migration rows vevt-m-N)
+-- source: db.verEvents  created at domains/verification/claims/index.mjs:35 (verEvent) and
+--         domains/verification/claims/shared.mjs:516 (migration rows vevt-m-N)
 -- owner/writer: m14; append-only — nothing mutates or deletes a row
 -- lifecycle: none (immutable)
 -- mapping:
@@ -210,7 +210,7 @@ CREATE INDEX ver_claim_history_claim ON ver_claim_history(ver_claim_id, at);
 -- notes:
 --   * Read pattern: by ver_claim_id (admin case view, chronological).
 --   * type values are the closed set below; `claim.<status>` is generated
---     from CLAIM_STATES, the rest are literals in m14/*.mjs.
+--     from CLAIM_STATES, the rest are literals in domains/verification/claims/*.mjs.
 --   * subject_id/org_id FKs: org_id RESTRICT (audit must outlive org);
 --     ver_claim_id RESTRICT.
 -- -----------------------------------------------------------------------------
@@ -248,8 +248,8 @@ CREATE INDEX ver_events_org ON ver_events(org_id, occurred_at);
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verEvidence  created at m14/index.mjs:99 (addEvidence); callers in
---         m14/organisations.mjs:137,262,961, m14/review.mjs:118,173 and
+-- source: db.verEvidence  created at domains/verification/claims/index.mjs:99 (addEvidence); callers in
+--         domains/verification/claims/organisations.mjs:137,262,961, domains/verification/claims/review.mjs:118,173 and
 --         domains/recruitment/signings/index.mjs:176 (signing documents, via ctx.evidence.add)
 -- owner/writer: m14 (+ m29 signing vault rows); never deleted
 -- lifecycle: no status; retention policy string is declared but UNENFORCED
@@ -338,7 +338,7 @@ CREATE INDEX ver_claim_evidence_evidence ON ver_claim_evidence(ver_evidence_id);
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verTokens  created at m14/shared.mjs:299 (mintToken)
+-- source: db.verTokens  created at domains/verification/claims/shared.mjs:299 (mintToken)
 -- owner/writer: m14; never purged (expired/used rows stay)
 -- lifecycle: single-use: used_at set on successful consume; expires_at checked
 --   at peek; attempts_failed incremented on wrong-code attempts for the user's
@@ -383,8 +383,8 @@ CREATE INDEX ver_tokens_ref ON ver_tokens(ref_id);
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verAdmins  created at m14/organisations.mjs:616,636 and
---         m14/review.mjs:459,495
+-- source: db.verAdmins  created at domains/verification/claims/organisations.mjs:616,636 and
+--         domains/verification/claims/review.mjs:459,495
 -- owner/writer: m14
 -- lifecycle: status active → revoked (revoke route, departed route); rows
 --   never deleted
@@ -425,7 +425,7 @@ CREATE UNIQUE INDEX ver_admins_one_active_grant ON ver_admins(org_id, user_id, l
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verRootTransfers  created at m14/organisations.mjs:607
+-- source: db.verRootTransfers  created at domains/verification/claims/organisations.mjs:607
 -- owner/writer: m14 (dual-control root-admin grants)
 -- lifecycle: status pending → approved; no reject/expiry path exists
 -- mapping:
@@ -456,7 +456,7 @@ CREATE UNIQUE INDEX ver_root_transfers_one_pending ON ver_root_transfers(org_id)
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verRootRequests  created at m14/organisations.mjs:904
+-- source: db.verRootRequests  created at domains/verification/claims/organisations.mjs:904
 --         (public POST /auth/org/verification/apply)
 -- owner/writer: m14 (applicant lane with applicant secret; T&S decision in
 --   review.mjs:373/471)
@@ -549,7 +549,7 @@ CREATE INDEX ver_root_requests_domain ON ver_root_requests(domain, status);
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verRootRequests[].evidenceIds[]  pushed at m14/organisations.mjs:966
+-- source: db.verRootRequests[].evidenceIds[]  pushed at domains/verification/claims/organisations.mjs:966
 -- owner/writer: m14 applicant evidence route
 -- lifecycle: append-only; copied onto the ORGANISATION_IDENTITY claim at approval
 -- mapping: evidenceIds[i] -> (ver_root_request_id, ver_evidence_id, position)
@@ -565,7 +565,7 @@ CREATE TABLE ver_root_request_evidence (
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verDisputes  created at m14/organisations.mjs:299 (openDispute)
+-- source: db.verDisputes  created at domains/verification/claims/organisations.mjs:299 (openDispute)
 -- owner/writer: m14 (subject opens; T&S resolves at review.mjs:540)
 -- lifecycle: status open → resolved; never deleted
 -- mapping:
@@ -606,7 +606,7 @@ CREATE UNIQUE INDEX ver_disputes_one_open_per_claim ON ver_disputes(ver_claim_id
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verReferences  created at m14/organisations.mjs:791 (new) and
+-- source: db.verReferences  created at domains/verification/claims/organisations.mjs:791 (new) and
 --         :832 (correction = new version row)
 -- owner/writer: m14; versioned — a correction inserts version+1 and marks the
 --   old row superseded; withdrawal is a status change, text is kept
@@ -633,7 +633,7 @@ CREATE UNIQUE INDEX ver_disputes_one_open_per_claim ON ver_disputes(ver_claim_id
 --   * Minor-safe: creation requires visibleToOrg + !isBlocked; a minor's
 --     notification routes to the guardian.
 --   * The provenance snapshot is never rewritten; "still current" is derived
---     at read (m15/passport.mjs:109, m162/trust.mjs:78).
+--     at read (domains/verification/passport/passport.mjs:109, domains/verification/trust/trust.mjs:78).
 --   * Read patterns: (player_id, status) [passport, player view, trust];
 --     org_id [org list]; coach_user_id [withdraw/correct ownership].
 -- -----------------------------------------------------------------------------
@@ -673,7 +673,7 @@ CREATE INDEX ver_references_coach ON ver_references(coach_user_id);
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verPlayerInvites  created at m14/organisations.mjs:705
+-- source: db.verPlayerInvites  created at domains/verification/claims/organisations.mjs:705
 -- owner/writer: m14 (org sends; adult player or guardian accepts :739)
 -- lifecycle: status pending → accepted; expiry (14d) lives on the token and on
 --   expires_at (not swept — an expired pending row stays pending)
@@ -716,7 +716,7 @@ CREATE INDEX ver_player_invites_player_status ON ver_player_invites(player_id, s
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verConflicts  created at m14/organisations.mjs:667
+-- source: db.verConflicts  created at domains/verification/claims/organisations.mjs:667
 -- owner/writer: m14 (self-declared conflicts of interest)
 -- lifecycle: withdrawn_at soft-withdraw; never deleted
 -- mapping:
@@ -745,7 +745,7 @@ CREATE INDEX ver_conflicts_user ON ver_conflicts(user_id, withdrawn_at);
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verDomainRequests  created at m14/organisations.mjs:518
+-- source: db.verDomainRequests  created at domains/verification/claims/organisations.mjs:518
 -- owner/writer: m14 (org admin requests; email challenge confirm :545; T&S
 --   decide at review.mjs:510)
 -- lifecycle: status email_challenge | requires_human_review → verified |
@@ -784,7 +784,7 @@ CREATE INDEX ver_domain_requests_status ON ver_domain_requests(status);
 
 
 -- -----------------------------------------------------------------------------
--- source: db.verMigrated  (object, not an array) written at m14/shared.mjs:560
+-- source: db.verMigrated  (object, not an array) written at domains/verification/claims/shared.mjs:560
 --         as { m14: { at, claims } }
 -- owner/writer: m14 migrateM14 (one-time guard)
 -- lifecycle: write-once per key
@@ -801,7 +801,7 @@ CREATE TABLE ver_migrations (
 
 
 -- -----------------------------------------------------------------------------
--- source: db.orgs[].verification.domains[]  pushed at m14/shared.mjs:534
+-- source: db.orgs[].verification.domains[]  pushed at domains/verification/claims/shared.mjs:534
 --         (migration), organisations.mjs:556 (email challenge), review.mjs:446
 --         (root approval), review.mjs:518 (T&S decide); removed (hard splice)
 --         at organisations.mjs:573
@@ -849,7 +849,7 @@ CREATE INDEX org_verified_domains_domain ON org_verified_domains(domain);
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
--- source: db.passportPrefs  created at m15/passport.mjs:37 (prefsFor — LAZY
+-- source: db.passportPrefs  created at domains/verification/passport/passport.mjs:37 (prefsFor — LAZY
 --         INSERT ON READ: the first passport read for a player writes a row)
 -- owner/writer: m15 (player or guardian PATCH)
 -- lifecycle: one row per player, never deleted; updated_at NULL until the
@@ -882,7 +882,7 @@ CREATE TABLE passport_prefs (
 
 
 -- -----------------------------------------------------------------------------
--- source: db.passportPrefs[].positionHistory[]  pushed at m15/passport.mjs:341
+-- source: db.passportPrefs[].positionHistory[]  pushed at domains/verification/passport/passport.mjs:341
 -- owner/writer: m15 (positionHistoryAdd in PATCH prefs)
 -- lifecycle: append-only; no withdraw/delete path exists
 -- mapping:
@@ -909,7 +909,7 @@ CREATE INDEX passport_position_history_player ON passport_position_history(playe
 
 -- -----------------------------------------------------------------------------
 -- source: db.passportPrefs[].publicSelections[]  replaced wholesale at
---         m15/passport.mjs:359 (≤100 strings ≤120 chars)
+--         domains/verification/passport/passport.mjs:359 (≤100 strings ≤120 chars)
 -- owner/writer: m15 (PATCH prefs)
 -- lifecycle: full replace on each PATCH (delete + insert)
 -- mapping: publicSelections[i] -> selection; the array is consumed as a Set
@@ -926,7 +926,7 @@ CREATE TABLE passport_public_selections (
 
 
 -- -----------------------------------------------------------------------------
--- source: db.passportCareerEntries  created at m15/passport.mjs:387
+-- source: db.passportCareerEntries  created at domains/verification/passport/passport.mjs:387
 -- owner/writer: m15 (player or guardian; player-only withdraw at :407)
 -- lifecycle: withdrawn_at soft delete; never hard-deleted
 -- mapping:
@@ -961,7 +961,7 @@ CREATE INDEX passport_career_entries_player ON passport_career_entries(player_id
 
 
 -- -----------------------------------------------------------------------------
--- source: db.passportAchievements  created at m15/passport.mjs:429; confirmed
+-- source: db.passportAchievements  created at domains/verification/passport/passport.mjs:429; confirmed
 --         by a verified org at :453
 -- owner/writer: m15
 -- lifecycle: withdrawn_at soft delete (refused once confirmed); confirmation
@@ -1003,7 +1003,7 @@ CREATE INDEX passport_achievements_player ON passport_achievements(player_id);
 
 
 -- -----------------------------------------------------------------------------
--- source: db.passportShares  created at m15/sharing.mjs:31
+-- source: db.passportShares  created at domains/verification/passport/sharing.mjs:31
 -- owner/writer: m15 (adult player or guardian creates/revokes; T&S revokes)
 -- lifecycle: revoked_at soft revoke; expires_at 1–90 days; multi-use until
 --   revoked/expired; never deleted
@@ -1041,7 +1041,7 @@ CREATE INDEX passport_shares_player ON passport_shares(player_id);
 
 
 -- -----------------------------------------------------------------------------
--- source: db.passportCorrections  created at m15/passport.mjs:469; resolved by
+-- source: db.passportCorrections  created at domains/verification/passport/passport.mjs:469; resolved by
 --         T&S at :490
 -- owner/writer: m15
 -- lifecycle: status open → resolved; never deleted
@@ -1089,7 +1089,7 @@ CREATE INDEX passport_corrections_player ON passport_corrections(player_id);
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
--- source: db.transitionCases  created at m13/transitions.mjs:42
+-- source: db.transitionCases  created at domains/verification/transitions.mjs:42
 -- owner/writer: m13 transitions (adult player or guardian own the case; clubs
 --   only read through a live grant)
 -- lifecycle: status open → withdrawn | placed | expired (sweep at
@@ -1143,7 +1143,7 @@ CREATE INDEX transition_cases_status_period ON transition_cases(status, period_e
 
 -- -----------------------------------------------------------------------------
 -- source: db.transitionCases[].pack.{mediaIds,evidenceIds,feedbackIds}[]
---         built at m13/transitions.mjs:19 (buildPack whitelist)
+--         built at domains/verification/transitions.mjs:19 (buildPack whitelist)
 -- owner/writer: m13 transitions; written once at case creation
 -- lifecycle: immutable after creation
 -- mapping: pack.mediaIds[i] -> (case_id, 'media', item_id) — players.media[].id
@@ -1162,7 +1162,7 @@ CREATE TABLE transition_case_pack_items (
 
 
 -- -----------------------------------------------------------------------------
--- source: db.transitionCases[].recipients[]  pushed at m13/transitions.mjs:93
+-- source: db.transitionCases[].recipients[]  pushed at domains/verification/transitions.mjs:93
 -- owner/writer: m13 transitions (grant / revoke / withdraw / place / club view)
 -- lifecycle: revoked_at soft revoke (also set for every other recipient on
 --   placement and for all on withdraw); expiry by expires_at (≤ case period)
@@ -1221,7 +1221,7 @@ CREATE INDEX transition_case_history_case ON transition_case_history(transition_
 
 -- -----------------------------------------------------------------------------
 -- source: db.representations  originally created by POST /org/representation/
---         propose (commit e865531, m13/transitions.mjs:247 at the time); that
+--         propose (commit e865531, domains/verification/transitions.mjs:247 at the time); that
 --         route now returns 410 REPRESENTATION_LANE_CLOSED (transitions.mjs:256)
 --         — NO new rows can be created. Existing rows are read as history and
 --         were mirrored into representationAgreements by m182 migration 2305.
@@ -1367,9 +1367,9 @@ CREATE INDEX vouches_code_hash ON vouches(code_hash) WHERE code_hash IS NOT NULL
 --   * CLAIM_TYPES, CLAIM_STATES, METHODS, AUTHORITATIVE_METHODS,
 --     VALID_TRANSITIONS, REVIEW_REASONS, EVIDENCE_TYPES, EVIDENCE_VISIBILITY,
 --     EVIDENCE_MIME_ALLOW, VER_LEVELS, FREE_MAIL_DOMAINS, DISPOSABLE_DOMAINS
---     — code registries in m14/shared.mjs (CHECK constraints above mirror the
+--     — code registries in domains/verification/claims/shared.mjs (CHECK constraints above mirror the
 --     written subset).
---   * licenceProviders() / TEST_REGISTRY_ROWS (m14/review.mjs) — provider
+--   * licenceProviders() / TEST_REGISTRY_ROWS (domains/verification/claims/review.mjs) — provider
 --     registry and env-gated test fixture; the lookup RESULT is stored on the
 --     claim (metadata.registry) and as a registry_result evidence row.
 --   * buildClaimIndex (bySubject / byAuthority) — in-memory index rebuilt on
@@ -1381,7 +1381,7 @@ CREATE INDEX vouches_code_hash ON vouches(code_hash) WHERE code_hash IS NOT NULL
 --     boot.
 --   * verificationSweep / transitionSweep timers — schedulers, not state.
 --   * PROVENANCE, PROVENANCE_COPY, VISIBILITY, VIEWERS, GAP_RULES,
---     GAP_RULES_VERSION (m15/shared.mjs) — code registries.
+--     GAP_RULES_VERSION (domains/verification/passport/shared.mjs) — code registries.
 --   * Passport timeline, clubHistory, currentStatus, temporalConflicts,
 --     completeness, evidenceSummary, developmentActivity, combine projection,
 --     passportRevision (pr_<sha1>) — all derived per read from the tables in

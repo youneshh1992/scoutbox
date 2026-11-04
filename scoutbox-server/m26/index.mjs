@@ -38,7 +38,7 @@ import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs'
 import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
 import { isExpiredAt, isAbsent, parseDateOrInstant } from '../temporal.mjs';
-import { hasVerLevel } from '../m14/shared.mjs';
+import { hasVerLevel } from '../domains/verification/claims/shared.mjs';
 import { effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can } from '../m24/shared.mjs';
 import { sendTransactionError, notFound } from './errors.mjs';
 import { transactionAuditRows } from './audit.mjs';

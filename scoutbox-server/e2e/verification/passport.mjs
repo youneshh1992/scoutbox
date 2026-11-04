@@ -16,7 +16,7 @@ import {
   PROVENANCE, provRank, provenanceFromMethod, PROVENANCE_COPY,
   viewerSees, normWhen, whenDisplay, evId, projectPassport,
   sha256, mintShareSecret, shareProblem, SHARE_MODES,
-} from '../../m15/shared.mjs';
+} from '../../domains/verification/passport/shared.mjs';
 
 const PORT = pickPort(4900, 300, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;

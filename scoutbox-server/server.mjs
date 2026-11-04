@@ -29,10 +29,10 @@ import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
 import { registerM12 } from './m12/index.mjs';
 import { registerM13 } from './m13/index.mjs';
-import { registerM14 } from './m14/index.mjs';
-import { registerM15 } from './m15/index.mjs';
+import { registerM14 } from './domains/verification/claims/index.mjs';
+import { registerM15 } from './domains/verification/passport/index.mjs';
 import { registerM16 } from './m16/index.mjs';
-import { registerM162 } from './m162/index.mjs';
+import { registerM162 } from './domains/verification/trust/index.mjs';
 import { registerM17 } from './domains/recruitment/rooms/index.mjs';
 import { registerM18 } from './m18/index.mjs';
 import { registerMatching } from './m19/index.mjs';
@@ -4684,7 +4684,7 @@ const m13Ctx = registerM13({
 // ------------------------------------------------------------ Milestone 14
 // Verification & Trust: independent claims, org-administered attestation,
 // Trust & Safety review, licences, disputes, references. Same module pattern
-// under m14/. Returns its context so the legacy admin verification route can
+// under domains/verification/claims/. Returns its context so the legacy admin verification route can
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
   db, byId, scoutingReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,

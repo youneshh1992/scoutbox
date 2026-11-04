@@ -28,7 +28,7 @@ import { parseStrictDateOnly } from '../temporal.mjs';
 import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
 import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
-import { hasVerLevel } from '../m14/shared.mjs';
+import { hasVerLevel } from '../domains/verification/claims/shared.mjs';
 import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt, agencyJurisdictions } from '../m24/shared.mjs';
 import { sendComplianceError } from './errors.mjs';
 import { RULE_STATUSES, SEEDED_POLICY_VERSIONS } from './policyVersions.mjs';

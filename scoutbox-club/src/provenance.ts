@@ -13,7 +13,7 @@
 // nobody is being credited with confirming it. It is never guessed.
 import { t } from './i18n';
 
-/** The server's PROVENANCE vocabulary (m15/shared.mjs), in rank order. */
+/** The server's PROVENANCE vocabulary (domains/verification/passport/shared.mjs), in rank order. */
 export const PROVENANCE_TYPES = [
   'player_submitted', 'guardian_submitted', 'system_recorded', 'historical_migration',
   'box_cam_observed', 'scoutbox_reviewed', 'verified_coach_confirmed',

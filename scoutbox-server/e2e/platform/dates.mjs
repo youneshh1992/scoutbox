@@ -33,12 +33,12 @@ import { effectiveFacetState, affiliationActive, agreementGrantsAccess, effectiv
 import { selectPolicyVersion, ruleStatusAt, isRegulatoryMinor, evaluateMinorGate, earliestPermittedApproachAt } from '../../m25/policy.mjs';
 import { consentSufficiency } from '../../m25/conflict.mjs';
 import { effectiveHandoffStatus, HANDOFF_TTL_MS } from '../../m27/integration.mjs';
-import { effectiveStatus as licenceEffectiveStatus } from '../../m14/shared.mjs';
+import { effectiveStatus as licenceEffectiveStatus } from '../../domains/verification/claims/shared.mjs';
 import { validateExternalRecord, cooldownFor, CONTACT_LIMITS } from '../../domains/recruitment/lifecycle/contact.mjs';
 import { parseInstant as trialParseInstant, validateTimezone, validateSessionInput, validateScheduleInput, localDay, icsLocal, TRIAL_LIMITS } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { resolveWindow, previousWindow } from '../../m20/metrics.mjs';
 import { briefIsLiveOn, validateRecruitmentBrief } from '../../m18/shared.mjs';
-import { normWhen } from '../../m15/shared.mjs';
+import { normWhen } from '../../domains/verification/passport/shared.mjs';
 import { parseDate as devParseDate } from '../../m21/shared.mjs';
 import { SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';

@@ -13,7 +13,7 @@
 //  * Revocation/suspension propagates to effective badges immediately via the
 //    read-time engine; history is never deleted.
 import { decideReview, normalizeDomain, domainOfEmail, domainCovered, sha256 } from './shared.mjs';
-import { parseDateOrInstant, isAbsent } from '../temporal.mjs';
+import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
 
 // ---------------------------------------------------------------- registry
 // Licence-registry adapter (§13/§63). Interface every future FA/UEFA/

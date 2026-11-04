@@ -5,20 +5,20 @@
 // endpoints. Authorization reuses the standing gates verbatim:
 // visibleToOrg (incl. the agency/minor wall and the grassroots 50 km rule),
 // blocks, guardian ownership, adult checks. Passport adds no new access.
-import { isAdult, visibleToOrg } from '../domain.mjs';
-import { ageOrNull } from '../temporal.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.mjs';
+import { ageOrNull } from '../../../temporal.mjs';
 import {
   buildTimeline, clubHistory, currentStatus, temporalConflicts, completeness,
   projectPassport, passportRevision, normWhen, whenDisplay, evId, PROVENANCE_COPY,
 } from './shared.mjs';
 // M16: the Passport PROJECTS Box Cam data — it never copies it.
-import { developmentActivity as boxDevelopmentActivity, fmtMs as boxFmtMs } from '../m16/shared.mjs';
-import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../m16/drills.mjs';
+import { developmentActivity as boxDevelopmentActivity, fmtMs as boxFmtMs } from '../../../m16/shared.mjs';
+import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../../../m16/drills.mjs';
 // M16.1 At-Home Combine — the Passport PROJECTS verified Combine results, it
 // never copies them. Computed with the pure engine so this stays independent
 // of module registration order.
-import { combineProtocol as combineProtocolDef, personalBest as combinePersonalBest, formatCombineValue } from '../m16/combineShared.mjs';
-import { applicationView } from '../domains/scouting/journeys.mjs';
+import { combineProtocol as combineProtocolDef, personalBest as combinePersonalBest, formatCombineValue } from '../../../m16/combineShared.mjs';
+import { applicationView } from '../../scouting/journeys.mjs';
 
 const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
 

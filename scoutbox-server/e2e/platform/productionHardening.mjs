@@ -26,7 +26,7 @@ import {
 } from '../../domains/platform/rateLimit.mjs';
 import { AUDIENCES, EVENT_AUDIENCE, audienceFor, unclassifiedEvents } from '../../domains/platform/eventAudience.mjs';
 import { buildCapabilityReport, productionConfigProblems } from '../../domains/platform/capabilities.mjs';
-import { passportRevision, PROVENANCE, PROVENANCE_COPY } from '../../m15/shared.mjs';
+import { passportRevision, PROVENANCE, PROVENANCE_COPY } from '../../domains/verification/passport/shared.mjs';
 import { CHANGE_TYPES, CHANGE_COPY, changeFingerprint, normalizeMaterialChange } from '../../m18/shared.mjs';
 
 const PORT = 5960 + Math.floor(Math.random() * 30);

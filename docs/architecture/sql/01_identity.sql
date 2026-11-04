@@ -17,7 +17,7 @@
 -- save rewrites facets_json; guardians.update writes the coGuardians list, and players.update refuses an unknown field.
 -- The media-deletion queue (migration 0006) is in 08_operations_integrations.sql.
 
--- source: db.orgs  (seed.mjs:15-88; registration server.mjs:1734; T&S org creation m14/review.mjs:382)
+-- source: db.orgs  (seed.mjs:15-88; registration server.mjs:1734; T&S org creation domains/verification/claims/review.mjs:382)
 -- owner/writer: server.mjs (core), m14 (verification fields), m13 (mfaRequiredForLeads), m24 (agencySettings → 06)
 -- lifecycle: no deletion route; suspended flag; verification.revokedAt (m14)
 -- mapping: id→id, name→name, type→type, level→level, plan→plan, country→country,
@@ -32,7 +32,7 @@
 -- notes: orgs have no createdAt today (created_at nullable, recorded going forward). `level` also compares against
 --   'agent' at server.mjs:2598 but no row carries it; CHECK lists the written values. safeguardingCertified is derived.
 --   LIVE since migration 0004 (S3, repositories/orgs.mjs). `level` is nullable: the verification review creates
---   non-grassroots organisations with level null (m14/review.mjs). `facets_json` is the S3 TRANSITIONAL storage for every
+--   non-grassroots organisations with level null (domains/verification/claims/review.mjs). `facets_json` is the S3 TRANSITIONAL storage for every
 --   record field that has not cut over yet (squad, tactical, lookingFor, federationCheck, verification, agencySettings,
 --   unknown fields) plus the record's shape metadata (`__meta`: key order, explicit nulls, present composites); it is
 --   owned by the repository, mutated in place by the owning modules and flushed inside every save, and shrinks as

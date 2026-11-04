@@ -10,8 +10,8 @@
 // Everything in this file is a pure function over plain data so the engine
 // is unit-testable without a server.
 import crypto from 'node:crypto';
-import { isLegacyTrial, currentAttendance, TRIAL_ATTENDED_STATES } from '../domains/recruitment/lifecycle/trial.mjs';
-import { parseStrictDateOnly } from '../temporal.mjs';
+import { isLegacyTrial, currentAttendance, TRIAL_ATTENDED_STATES } from '../../recruitment/lifecycle/trial.mjs';
+import { parseStrictDateOnly } from '../../../temporal.mjs';
 
 // ------------------------------------------------------------- provenance
 // One vocabulary for "where did this come from". Ordered least→most
