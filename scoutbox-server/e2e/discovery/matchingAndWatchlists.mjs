@@ -35,12 +35,12 @@ import {
 } from '../../m19/watchlists.mjs';
 import { MATCH_SORTS, DEFAULT_MATCH_SORT } from '../../m19/index.mjs';
 import { playerMatchesBrief, POSITIONS, TRUST_BANDS, EVIDENCE_REQUIREMENTS, PROHIBITED_BRIEF_FIELDS } from '../../m18/shared.mjs';
-import { EVENT_REGISTRY, isRegistered, minimizePayload } from '../../m182/eventRegistry.mjs';
-import { audienceFor } from '../../m181/eventAudience.mjs';
-import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../m182/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION } from '../../m182/migrations.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
-import { SOURCE_CONTEXTS } from '../../m17/shared.mjs';
+import { EVENT_REGISTRY, isRegistered, minimizePayload } from '../../domains/platform/eventRegistry.mjs';
+import { audienceFor } from '../../domains/platform/eventAudience.mjs';
+import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';
+import { MIGRATIONS, SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
+import { SOURCE_CONTEXTS } from '../../domains/recruitment/rooms/shared.mjs';
 import { ageOn } from '../../domain.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -471,7 +471,7 @@ section('§9b — age boundaries, time-driven change, and the things M19 must NO
 
   // The org audit log carries watchlist LIFECYCLE only. Membership churn
   // belongs in the watchlist history, or the audit log becomes unreadable.
-  const auditSrc = read('scoutbox-server/m182/audit.mjs');
+  const auditSrc = read('scoutbox-server/domains/platform/audit.mjs');
   abuse(45, /WATCHLIST_ACTIONS = new Set\(\['watchlist_created', 'watchlist_updated', 'watchlist_archived'\]\)/.test(auditSrc),
     'the audit log projects watchlist lifecycle only — membership changes never flood it');
   abuse(45, !/watchlist_membership_changed/.test(auditSrc),

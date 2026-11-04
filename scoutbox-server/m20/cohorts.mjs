@@ -13,7 +13,7 @@
  * being worked?*
  */
 import { METRICS, wire, ratio, count, distribution, days, inWindow } from './metrics.mjs';
-import { REASON_CODES } from '../m17/shared.mjs';
+import { REASON_CODES } from '../domains/recruitment/rooms/shared.mjs';
 import { briefIsLiveOn } from '../m18/shared.mjs';
 import { firstTerminalAt } from './funnels.mjs';
 

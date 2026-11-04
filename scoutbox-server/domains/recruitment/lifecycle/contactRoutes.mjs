@@ -29,10 +29,10 @@
  * are read-only.
  */
 
-import { visibleToOrg } from '../domain.mjs';
-import { roomRole, ROOM_STATUS_LABELS } from '../m17/shared.mjs';
-import { guardRev, bumpRev, expectedRevOf } from '../m181/concurrency.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
+import { visibleToOrg } from '../../../domain.mjs';
+import { roomRole, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
+import { guardRev, bumpRev, expectedRevOf } from '../../platform/concurrency.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import { canTransitionRecruitmentCase, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from './lifecycle.mjs';
 import { sendDomainError } from './errors.mjs';
 import {

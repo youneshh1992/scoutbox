@@ -23,7 +23,7 @@ is archived in git under the tag `docs-archive-2026-11`. The migration's status 
   initialises it. In development that is the demo world (people, clubs, track records);
   in production it is the product catalogues only (plans, archetypes) and no people or
   clubs. `SCOUTBOX_SEED_DEMO=1` or `=0` overrides either way (`demoSeedEnabled` in
-  `m181/capabilities.mjs`). On later boots the saved database is authoritative, even when a
+  `domains/platform/capabilities.mjs`). On later boots the saved database is authoritative, even when a
   table is empty, and the seed is never imported over it. `NODE_ENV=production` also:
   - passwordless seeded demo logins are refused (`DEV_LOGIN_DISABLED`);
   - the fault-injection layer and the test identity provider are disabled;
@@ -48,7 +48,7 @@ makes the runtime test also probe real Node binaries.
 
 ## Environment variables
 
-`m181/capabilities.mjs` is the registry. `GET /capabilities` reports what is configured
+`domains/platform/capabilities.mjs` is the registry. `GET /capabilities` reports what is configured
 without revealing any values. `productionConfigProblems()` refuses to boot in production
 on the fatal cases listed below. Names in **bold** are the ones the code reads; the others
 are refused in production.
@@ -99,7 +99,7 @@ A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 domain's counts.
 
 **Boot order** (`server.mjs`): `buildSeed` → `loadSnapshot` → snapshot migrations
-(`m182/migrations.mjs`) → `attachDataLayer` (table migrations, then repositories) →
+(`domains/platform/migrations.mjs`) → `attachDataLayer` (table migrations, then repositories) →
 module registration → integrity report → listen.
 
 ### Rules when writing server code
@@ -170,7 +170,7 @@ module registration → integrity report → listen.
 
 There are two registries:
 
-- **Snapshot migrations** (`m182/migrations.mjs`) shape the in-memory blob collections.
+- **Snapshot migrations** (`domains/platform/migrations.mjs`) shape the in-memory blob collections.
   They are idempotent, versioned in `db.schema` and exposed as `X-ScoutBox-Schema`. A
   failing step aborts the boot before anything is saved.
 - **Table migrations** (`repositories/migrations/NNNN_name.mjs`, registered in
@@ -256,7 +256,7 @@ used to relabel stubs as live providers; production now refuses them (`PROVIDER_
   Interval timers (about 60 s, faster with `M13_FAST_RETRY`) sweep them with bounded
   retries. Media files queued for removal are removed after commit, again at boot, and
   every minute until the removal is confirmed.
-- **Rate limits** are per process (`m181/rateLimit.mjs`, `RATE_LIMIT_POLICY` is the
+- **Rate limits** are per process (`domains/platform/rateLimit.mjs`, `RATE_LIMIT_POLICY` is the
   single table). Behind a proxy, set `SCOUTBOX_TRUST_PROXY`. Otherwise every client
   shares one address and the `/auth` limit becomes global.
 - **Shutdown.** `SIGINT` / `SIGTERM` flush the pending debounced save (`persistNow()`).

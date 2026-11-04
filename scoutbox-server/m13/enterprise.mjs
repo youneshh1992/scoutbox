@@ -13,7 +13,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { totpValid, b32encode, timingSafeEqStr } from './shared.mjs';
-import { devLoginsEnabled } from '../m181/capabilities.mjs';
+import { devLoginsEnabled } from '../domains/platform/capabilities.mjs';
 
 // ---------------------------------------------------- request instrumentation
 // Exported separately so server.mjs can install it BEFORE all routes.

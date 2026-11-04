@@ -157,7 +157,7 @@ await stop(S);
 // ================================================================ A — async handler errors (PM-9)
 section('A — a rejected async handler answers 500 and the process keeps serving (PM-9)');
 {
-  const { installAsyncErrorForwarding } = await import('../../m181/asyncErrors.mjs');
+  const { installAsyncErrorForwarding } = await import('../../domains/platform/asyncErrors.mjs');
   const { createRequire } = await import('node:module');
   const express = createRequire(import.meta.url)('express');
   installAsyncErrorForwarding();

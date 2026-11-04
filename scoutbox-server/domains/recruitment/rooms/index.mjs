@@ -8,8 +8,8 @@
 // Every route registers on the EXISTING authenticated `orgRouter`, so bearer
 // sessions, removed users, org suspension, `visibleToOrg`, blocks and
 // moderation all run before any M17 handler — a Room grants no access.
-import { buildShared } from '../m12/shared.mjs';
-import { metrics } from '../m13/enterprise.mjs';
+import { buildShared } from '../../../m12/shared.mjs';
+import { metrics } from '../../../m13/enterprise.mjs';
 import { registerRooms } from './rooms.mjs';
 import {
   ROOM_STATUSES, ROOM_TRANSITIONS, PRO_STAGES, GRASSROOTS_STAGES,

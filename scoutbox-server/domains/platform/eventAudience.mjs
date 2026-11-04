@@ -2,7 +2,7 @@
  * M18.1 — explicit event audiences.
  *
  * Since M18.2 the audience table is a VIEW over the canonical event registry
- * (`m182/eventRegistry.mjs`), which also carries payload allowlists, dedupe
+ * (`domains/platform/eventRegistry.mjs`), which also carries payload allowlists, dedupe
  * and replay semantics. This module keeps the M18.1 names so nothing that
  * imported them changes, and so the M18.1 suite keeps asserting the rule it
  * was written for: every event name is classified, and anything unknown
@@ -15,7 +15,7 @@
  *   public_safe         any authenticated identity; carries no personal data
  *   trust_safety_only   Trust & Safety only
  */
-import { EVENT_REGISTRY, AUDIENCES as REGISTRY_AUDIENCES, audienceFor as registryAudienceFor } from '../m182/eventRegistry.mjs';
+import { EVENT_REGISTRY, AUDIENCES as REGISTRY_AUDIENCES, audienceFor as registryAudienceFor } from './eventRegistry.mjs';
 
 export const AUDIENCES = REGISTRY_AUDIENCES;
 

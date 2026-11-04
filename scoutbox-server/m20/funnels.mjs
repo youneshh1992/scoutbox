@@ -17,7 +17,7 @@ import {
 } from './metrics.mjs';
 import {
   ROOM_STATUSES, TERMINAL_ROOM_STATUSES, SOURCE_CONTEXTS, reasonCategory, REASON_CODES,
-} from '../m17/shared.mjs';
+} from '../domains/recruitment/rooms/shared.mjs';
 
 /**
  * The ladder the funnel panel renders, in order. It is ROOM_STATUSES minus the
@@ -362,7 +362,7 @@ function caseEndedAt(k) {
   const ends = transitions(k).filter((t) => TERMINAL_ROOM_STATUSES.includes(t.to)).map((t) => Number(t.at) || 0);
   return ends.length ? Math.max(...ends) : 0;
 }
-/** M23 P8.1 (D-P81-18): does this assessment belong to this case? (mirrors m23/journey.mjs ownedByAnotherCase) */
+/** M23 P8.1 (D-P81-18): does this assessment belong to this case? (mirrors domains/recruitment/lifecycle/journey.mjs ownedByAnotherCase) */
 function assessmentOfCase(a, k, x) {
   const tid = a?.context?.trialId;
   if (typeof tid === 'string' && tid) { const t = x.trialsById.get(tid); return !!t && t.caseId === k.id; }

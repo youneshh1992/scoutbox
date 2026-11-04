@@ -22,10 +22,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { MIGRATIONS, SCHEMA_VERSION } from '../../m182/migrations.mjs';
+import { MIGRATIONS, SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
-import { signingIntegrity } from '../../m29/signing.mjs';
+import { signingIntegrity } from '../../domains/recruitment/signings/signing.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');

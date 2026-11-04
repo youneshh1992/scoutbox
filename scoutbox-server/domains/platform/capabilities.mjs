@@ -12,8 +12,8 @@
  * and one sentence on what its absence means.
  */
 
-import { combineVerifiedProtocols } from '../m22/eligibility.mjs';
-import { parseTrustProxy } from '../httpTrust.mjs';
+import { combineVerifiedProtocols } from '../../m22/eligibility.mjs';
+import { parseTrustProxy } from '../../httpTrust.mjs';
 export const CAPABILITY_STATES = ['configured', 'not_configured', 'test_only'];
 
 /**

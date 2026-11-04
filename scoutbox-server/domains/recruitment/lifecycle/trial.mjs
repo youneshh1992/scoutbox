@@ -32,8 +32,8 @@
  * without Express or a database.
  */
 
-import { parseTrialDate, isTrialDate } from '../domain.mjs';
-import { validateIanaZone, parseInstant as parseCanonicalInstant, localParts as canonicalLocalParts } from '../temporal.mjs';
+import { parseTrialDate, isTrialDate } from '../../../domain.mjs';
+import { validateIanaZone, parseInstant as parseCanonicalInstant, localParts as canonicalLocalParts } from '../../../temporal.mjs';
 import { normaliseClientKey, payloadFingerprint } from './contact.mjs';
 
 export const TRIAL_POLICY_VERSION = 1;
@@ -104,7 +104,7 @@ export const TRIAL_INSTANT_YEAR_MAX = 2100;
 
 /**
  * Who may do what (architecture §11). The same three levels are mirrored in
- * `roomCan` (m17/shared.mjs) so the Room keeps one permission surface.
+ * `roomCan` (domains/recruitment/rooms/shared.mjs) so the Room keeps one permission surface.
  *
  *   trial_view    viewer and above — shared Trial information is club memory
  *   trial_assess  contributor and above — a scout may assess in Trial context

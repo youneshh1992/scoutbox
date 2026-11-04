@@ -33,16 +33,16 @@ import {
   normaliseOfferClientKey, validateTerms, validateMessages, validateExpiry, validateDocumentRefs,
   effectiveRevisionStatus, offerStatus, canRevise, canRespondToRevision, canWithdrawRevision, responderMatches,
   offerIntegrity, offerEvidence, offerClubView, offerRecipientView, offerAgentView,
-} from '../../m28/offer.mjs';
-import { M28_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../m28/errors.mjs';
-import { EVENT_REGISTRY } from '../../m182/eventRegistry.mjs';
-import { CATEGORIES, TYPE_CATEGORY } from '../../m182/notificationPrefs.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
-import { STATUS_EVIDENCE_REQUIRED, ROOM_TRANSITIONS, ROOM_STATUSES, roomCan } from '../../m17/shared.mjs';
-import { EVIDENCE_KINDS } from '../../m23/evidence.mjs';
-import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS, NULL_EVIDENCE_PROVIDER } from '../../m23/lifecycle.mjs';
+} from '../../domains/recruitment/offers/offer.mjs';
+import { M28_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/recruitment/offers/errors.mjs';
+import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { CATEGORIES, TYPE_CATEGORY } from '../../domains/platform/notificationPrefs.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
+import { STATUS_EVIDENCE_REQUIRED, ROOM_TRANSITIONS, ROOM_STATUSES, roomCan } from '../../domains/recruitment/rooms/shared.mjs';
+import { EVIDENCE_KINDS } from '../../domains/recruitment/lifecycle/evidence.mjs';
+import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS, NULL_EVIDENCE_PROVIDER } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { PRODUCTION_STORE_CONTRACT as STORE_CONTRACT } from '../../storeContract.mjs';
-import { SCHEMA_VERSION, MIGRATIONS } from '../../m182/migrations.mjs';
+import { SCHEMA_VERSION, MIGRATIONS } from '../../domains/platform/migrations.mjs';
 import { isAdult } from '../../domain.mjs';
 import { isExpiredAt, parseInstant } from '../../temporal.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
@@ -114,7 +114,7 @@ section('A — model and store: seven statuses, terminal at revision level, one 
   neg(publicErrorBody({ error: 'OFFER_STATE_UNKNOWN', message: 'x', stack: 's', detail: 'd' }).message !== 'x' && !has(publicErrorBody({ error: 'OFFER_STATE_INVALID', message: 'm', stack: 's', internal: 'i' }), 'stack'), 'A20 a 500 body is generic and no body carries a field outside the allowlist');
   ok(PUBLIC_ERROR_FIELDS.includes('reasons') && PUBLIC_ERROR_FIELDS.includes('blockers') && !PUBLIC_ERROR_FIELDS.includes('note') && !PUBLIC_ERROR_FIELDS.includes('rationale'), 'A21 the allowlist carries reasons and blockers as codes, never a note or rationale');
   // The drift guard: every code the m28 source can produce is in the table.
-  const rawSrc = readdirSync(path.join(HERE, '..', '..', 'm28')).filter((f) => f.endsWith('.mjs')).map((f) => readFileSync(path.join(HERE, '..', '..', 'm28', f), 'utf8')).join('\n');
+  const rawSrc = readdirSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers')).filter((f) => f.endsWith('.mjs')).map((f) => readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', f), 'utf8')).join('\n');
   const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/[^'"\n]\/\/ .*$/gm, ''); // code only: comments explain what is NOT done
   const produced = new Set([...src.matchAll(/(?:error: |err\(res, )'(OFFER_[A-Z_]+)'/g)].map((m) => m[1]));
   const unmapped = [...produced].filter((c) => M28_ERROR_HTTP[c] === undefined);

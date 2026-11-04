@@ -651,12 +651,12 @@ CREATE INDEX combine_attempts_request ON combine_attempts (request_id);
 -- =============================================================================
 
 -- source: db.boxCamCvResults  created at m22/routes.mjs:257 (provider.finalize -> #buildResult, m22/provider.mjs:510)
--- owner/writer: m22/routes.mjs (single-shot finalize); read by m22 T&S diagnostics and m23/trialRoutes.mjs
+-- owner/writer: m22/routes.mjs (single-shot finalize); read by m22 T&S diagnostics and domains/recruitment/lifecycle/trialRoutes.mjs
 -- lifecycle: immutable once written (Object.freeze); a cancelled/expired/failed
 --   provider session mints NO row; never deleted
 -- mapping:
 --   (no id field) -> provider_session_id is the effective PK ('pcv_<base64url 12>'), looked up by it everywhere
---   sessionId -> session_id (the bound Box Cam session; NB m23/trialRoutes.mjs:796 reads
+--   sessionId -> session_id (the bound Box Cam session; NB domains/recruitment/lifecycle/trialRoutes.mjs:796 reads
 --     `boxCamSessionId` which does not exist — known defect)
 --   providerSessionId -> provider_session_id
 --   protocolId -> protocol_id (CANDIDATE_PROTOCOLS: combine-box-touch-60 | combine-box-juggle | combine-box-control-60)
@@ -1823,7 +1823,7 @@ CREATE TABLE coverage_assignment_assessments (
 --   m13/insight.mjs RULES (evidence-gap rule engine); server.mjs DRILLS (legacy
 --   drill registry seeding drill_guidance).
 -- In-memory state (lost on restart by design, never persisted):
---   rate-limit buckets (m181/rateLimit.mjs), box dispute windows (m16/training.mjs
+--   rate-limit buckets (domains/platform/rateLimit.mjs), box dispute windows (m16/training.mjs
 --   disputeWindows), SSE buffers, M22 ProductionCvProvider sessions / byBoxCamSession
 --   maps / FrameQueue / ObservationRun / ObservationSessions runtime, metrics counters
 --   (metrics.boxCam, metrics.development), criteriaVersion VERSION_MEMO (WeakMap),

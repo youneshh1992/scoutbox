@@ -1,6 +1,6 @@
 /**
  * M23 P5.6B — the Agent domain error contract. Same discipline as
- * m23/errors.mjs: ONE table, no default branch, a public-field allowlist.
+ * domains/recruitment/lifecycle/errors.mjs: ONE table, no default branch, a public-field allowlist.
  */
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));

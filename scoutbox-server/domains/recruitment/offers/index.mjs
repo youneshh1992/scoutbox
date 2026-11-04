@@ -28,13 +28,13 @@
  * body claim about who the caller is; no client clock.
  */
 
-import { buildShared } from '../m12/shared.mjs';
-import { roomRole, roomCan, ROOM_STATUS_LABELS } from '../m17/shared.mjs';
-import { guardRev, bumpRev, expectedRevOf } from '../m181/concurrency.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
-import { canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../m23/lifecycle.mjs';
-import { resolveContactRecipient } from '../m23/contact.mjs';
-import { visibleToOrg } from '../domain.mjs';
+import { buildShared } from '../../../m12/shared.mjs';
+import { roomRole, roomCan, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
+import { guardRev, bumpRev, expectedRevOf } from '../../platform/concurrency.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../lifecycle/lifecycle.mjs';
+import { resolveContactRecipient } from '../lifecycle/contact.mjs';
+import { visibleToOrg } from '../../../domain.mjs';
 import { sendOfferError, notFound, documentNotFound } from './errors.mjs';
 import {
   OFFER_POLICY_VERSION, OFFER_STATUSES, OFFER_STATUS_LABELS, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES,

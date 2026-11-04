@@ -14,7 +14,7 @@
  * The report is logged, surfaced on /capabilities as counts, and the pure
  * function is exported so a suite can hand it a broken snapshot directly.
  */
-import { OPEN_ROOM_STATUSES } from '../m17/shared.mjs';
+import { OPEN_ROOM_STATUSES } from '../recruitment/rooms/shared.mjs';
 import { missingRequiredStores, PRODUCTION_REQUIRED_STORES } from './migrations.mjs';
 
 const dupes = (items, keyOf) => {

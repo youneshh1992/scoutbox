@@ -42,8 +42,8 @@ import { validateEvidenceLink, resolveEvidenceLink, EVIDENCE_LINK_FIELDS } from 
 import { viewerFor, planAccess, canAssign, VIEWER_KINDS, CAPABILITIES } from './permissions.mjs';
 import { collectPlan, buildDevelopmentPlan, planListItem, buildTimeline, TIMELINE_ACTIONS, PLAN_LIMITATION } from './plan.mjs';
 import { buildGoalSnapshots, validateReview, validateSupersession, pageReviews } from './reviews.mjs';
-import { guardRev, bumpRev } from '../m181/concurrency.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
+import { guardRev, bumpRev } from '../domains/platform/concurrency.mjs';
+import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
 import { metrics } from '../m13/enterprise.mjs';
 
 /** How close together two identical creates must be to count as one retry. */

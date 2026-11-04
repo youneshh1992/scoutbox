@@ -120,7 +120,7 @@
  * path writes a `system` audience today and must keep importing). A stored
  * mandatory category `false` is accepted at storage (the route accepts numeric
  * zero and stores it; a legacy row may hold it) and forced ON by the effective
- * view and the gate in m182/notificationPrefs.mjs — nothing is rewritten.
+ * view and the gate in domains/platform/notificationPrefs.mjs — nothing is rewritten.
  *
  * Snapshot format (backups, restores, the persistence suites): the legacy
  * shapes exactly, one entry per row / per person, in insertion order. An entry
@@ -135,7 +135,7 @@
 import crypto from 'node:crypto';
 import { readonlyView } from './readonly.mjs';
 import { migrationApplied, transaction } from './database.mjs';
-import { CATEGORY_NAMES } from '../m182/notificationPrefs.mjs';
+import { CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
 
 export const NOTIFICATIONS_MIGRATION = '0009_notifications';
 export const NOTIFICATION_TABLES = Object.freeze(['notifications', 'notification_prefs', 'notification_pref_categories']);

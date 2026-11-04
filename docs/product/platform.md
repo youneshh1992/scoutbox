@@ -7,13 +7,13 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 ## How it works
 
 ### Error contract
-- Domain error codes map to HTTP status through one null-prototype table in `scoutbox-server/m23/errors.mjs` (`httpStatusFor`, `sendDomainError`, `publicErrorBody`). There is **no default branch**: an unmapped code returns `null`, the route answers 500 `LIFECYCLE_INTERNAL` and logs the code by name. New domain codes must be added to the table. (M23_ERROR_CONTRACT)
+- Domain error codes map to HTTP status through one null-prototype table in `scoutbox-server/domains/recruitment/lifecycle/errors.mjs` (`httpStatusFor`, `sendDomainError`, `publicErrorBody`). There is **no default branch**: an unmapped code returns `null`, the route answers 500 `LIFECYCLE_INTERNAL` and logs the code by name. New domain codes must be added to the table. (M23_ERROR_CONTRACT)
 - Bands: 400 bad request; 403 role may never do this; 404 concealment; 409 case moved (reload); 422 evidence record absent; 429 contact cooldown (`retryAt`); 500 our build or data. (M23_ERROR_CONTRACT)
 - Hidden, foreign and non-existent cases return **byte-identical** 404 bodies. Existence checks come before role checks, so a 403 only reaches someone who can already see the room. (M23_ERROR_CONTRACT)
 - Every 500 returns a fixed body with only the code; internal detail goes to the log only. A corruption error such as `CASE_HISTORY_CORRUPT` is checked *after* concealment, so it never confirms that a case exists. (M23_ERROR_CONTRACT, M23_P2_SWEEP_REPORT)
 - `ROOM_VERSION_CONFLICT` (409) body is exactly `expectedRev, currentRev, updatedBy` (a display name, never a user id), `updatedAt`. (M23_ERROR_CONTRACT)
 - A protected characteristic can never be a reason (`ROOM_REASON_PROHIBITED`, shared with M17). (M23_ERROR_CONTRACT)
-- Malformed body types (an object or number where text is expected) get 400 `FIELD_INVALID` naming the field, and nothing is stored. A rejection from an async handler goes to the error middleware (`m181/asyncErrors.mjs`) and must never crash the process. (PRE_M24_DEFECT_REGISTER)
+- Malformed body types (an object or number where text is expected) get 400 `FIELD_INVALID` naming the field, and nothing is stored. A rejection from an async handler goes to the error middleware (`domains/platform/asyncErrors.mjs`) and must never crash the process. (PRE_M24_DEFECT_REGISTER)
 
 ### Production boot contract
 - Boot order in `server.mjs`: seed builder, `loadSnapshot`, `runMigrations`, then `integrityReport` (reports `STORE_MISSING`, **never repairs**), then every module `register*()`, then `app.listen` as the last statement. There is no top-level await in between, so no request reaches a module before all modules have registered. (M23_PRODUCTION_BOOT_CONTRACT)
@@ -23,9 +23,9 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 - Restarting must not mutate any collection, and missing rows are never inferred. (M23_PRODUCTION_BOOT_CONTRACT, M23_STORE_INITIALIZATION_AUDIT)
 
 ### Production configuration
-- `NODE_ENV=production` refuses to boot (fatal) on any of: `MEDIA_SECRET_MISSING`, `ADMIN_KEY_UNSAFE` (unset, `scoutbox-admin`, or <16 characters), `TEST_PROVIDER_IN_PRODUCTION` (`BOX_CAM_TEST_PROVIDER=1`), `AGENT_TEST_PROVIDER_IN_PRODUCTION`, `FAULTS_IN_PRODUCTION` (`SCOUTBOX_FAULTS`), `TEST_IDP_IN_PRODUCTION`, `DEV_LOGIN_IN_PRODUCTION` (`ALLOW_DEV_LOGINS` set), `TRUST_WEIGHTS_INVALID`. (README, PRE_M24_DEFECT_REGISTER; code `m181/capabilities.mjs`)
+- `NODE_ENV=production` refuses to boot (fatal) on any of: `MEDIA_SECRET_MISSING`, `ADMIN_KEY_UNSAFE` (unset, `scoutbox-admin`, or <16 characters), `TEST_PROVIDER_IN_PRODUCTION` (`BOX_CAM_TEST_PROVIDER=1`), `AGENT_TEST_PROVIDER_IN_PRODUCTION`, `FAULTS_IN_PRODUCTION` (`SCOUTBOX_FAULTS`), `TEST_IDP_IN_PRODUCTION`, `DEV_LOGIN_IN_PRODUCTION` (`ALLOW_DEV_LOGINS` set), `TRUST_WEIGHTS_INVALID`. (README, PRE_M24_DEFECT_REGISTER; code `domains/platform/capabilities.mjs`)
 - A production first boot has no people or clubs, only the product catalogues; `SCOUTBOX_SEED_DEMO=1` opts into the demo world (decided 3 Nov).
-- Seeded passwordless dev logins, credential-less org logins and the test identity provider exist in development only, with no production override (`devLoginsEnabled` in `m181/capabilities.mjs`). Pro and Grassroots club credentials come from T&S (`POST /admin/clubs/:id/credentials`). (README, PRE_M24_DEFECT_REGISTER; decided 3 Nov)
+- Seeded passwordless dev logins, credential-less org logins and the test identity provider exist in development only, with no production override (`devLoginsEnabled` in `domains/platform/capabilities.mjs`). Pro and Grassroots club credentials come from T&S (`POST /admin/clubs/:id/credentials`). (README, PRE_M24_DEFECT_REGISTER; decided 3 Nov)
 - Sessions expire after `SESSION_TTL_DAYS` (default 30), checked on requests, stream connect and signed media. Sign-out revokes the token (`POST /auth/logout`); any 401 or `session_expired` returns the app to login, across tabs. (PRE_M24_DEFECT_REGISTER)
 - Connected mode is the default. Demo mode only with `VITE_DEMO=1` / `EXPO_PUBLIC_DEMO=1`; a missing variable never selects mock data, and an outage shows a connection error. (README)
 - Mail and push switch to real providers by environment variable: `SENDGRID_API_KEY` (+`MAIL_FROM`) and `EXPO_ACCESS_TOKEN`. Unset, they fall back to dev transports visible in the admin console. ID verification (instant dev attestation), billing (local ledger) and media storage (local disk) have no real provider yet; production refuses `ONFIDO_API_TOKEN`, `STRIPE_SECRET_KEY` and `S3_BUCKET` (`PROVIDER_NOT_IMPLEMENTED`) rather than pretend. (DEPLOY; decided 3 Nov)
@@ -69,7 +69,7 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 - Quiet hours (`HH:MM`) and the minors' school-hours mute are evaluated in `notificationPrefs.timezone`, else Europe/London. (M23_P57_TRIAL_TIMEZONE_DST_AUDIT)
 
 ### Write sites
-- `room.status` has one writer, `applyStatus()` in `m17/rooms.mjs`; `case.stage` is derived from it and never written directly on a Room (`STAGE_NOT_SETTABLE_ON_ROOM`). (M23_WRITE_SITE_AUDIT, M23_P2_SWEEP_REPORT)
+- `room.status` has one writer, `applyStatus()` in `domains/recruitment/rooms/rooms.mjs`; `case.stage` is derived from it and never written directly on a Room (`STAGE_NOT_SETTABLE_ON_ROOM`). (M23_WRITE_SITE_AUDIT, M23_P2_SWEEP_REPORT)
 - Signings have one writer, `POST /org/players/:id/signing`. No lifecycle transition may create a signing, because a signing bills the club. (M23_WRITE_SITE_AUDIT)
 - An idempotent replay still checks permission first. Tables keyed by external data are null-prototype. (M23_P2_SWEEP_REPORT)
 
@@ -129,7 +129,7 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 
 ## Rate limits and test-only providers
 
-- The old runbook has almost nothing for these docs. Their rate limits live in `RATE_LIMIT_POLICY` (`m181/rateLimit.mjs`).
+- The old runbook has almost nothing for these docs. Their rate limits live in `RATE_LIMIT_POLICY` (`domains/platform/rateLimit.mjs`).
 - Agents: the synthetic licence register (`AGENT_VERIFICATION_TEST_PROVIDER`, which verifies any `TEST-VERIFIED-*` reference) is test-only, so an agent cannot self-verify in production.
 - Matching-analytics: Combine CV verification stays disabled until real-world validation. Metrics that need a real detector are reported as unsupported, never estimated.
 
@@ -148,8 +148,8 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 
 *Spot-checked against the code on 3 November 2026. ✓ enforced, ✗ not found, ≠ differs from the old docs.*
 
-- ✓ The error table has no default: `httpStatusFor = code => M23_ERROR_HTTP[code] ?? null`, null-prototype table (`m23/errors.mjs:26,234`); `sendDomainError`/`publicErrorBody` at `:284,311`.
-- ✓ Fatal production gates `ADMIN_KEY_UNSAFE`, `AGENT_TEST_PROVIDER_IN_PRODUCTION` and `TEST_PROVIDER_IN_PRODUCTION` exist (`m181/capabilities.mjs:137-187`), and boot throws on them (`server.mjs:5058-5066`).
+- ✓ The error table has no default: `httpStatusFor = code => M23_ERROR_HTTP[code] ?? null`, null-prototype table (`domains/recruitment/lifecycle/errors.mjs:26,234`); `sendDomainError`/`publicErrorBody` at `:284,311`.
+- ✓ Fatal production gates `ADMIN_KEY_UNSAFE`, `AGENT_TEST_PROVIDER_IN_PRODUCTION` and `TEST_PROVIDER_IN_PRODUCTION` exist (`domains/platform/capabilities.mjs:137-187`), and boot throws on them (`server.mjs:5058-5066`).
 - ✓ Media URLs are signed with `MEDIA_SECRET` only, which production requires (32+ characters). Development uses a per-process key; nothing is stored in the database.
 - ✓ The temporal parsers exist (`temporal.mjs:91-311`). Quiet hours default to `PLATFORM_HOME_ZONE='Europe/London'` (`server.mjs:830`) and the zone is validated (`:4140`).
 - ✓ Boot order loadSnapshot → runMigrations → … → `app.listen` (`server.mjs:184,190,5184`).

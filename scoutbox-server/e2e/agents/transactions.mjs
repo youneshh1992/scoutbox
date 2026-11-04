@@ -43,10 +43,10 @@ import { M26_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../m26/
 import { TRANSACTION_AUDIT_ACTIONS, transactionAuditRows } from '../../m26/audit.mjs';
 import { PERMISSIONS, can } from '../../m24/shared.mjs';
 import { CONTEXT_TYPES, PARTY_ROLES as ENGINE_PARTY_ROLES, PERMITTED_WITH_CONSENT } from '../../m25/conflict.mjs';
-import { EVENT_REGISTRY } from '../../m182/eventRegistry.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
-import { TYPE_CATEGORY, CATEGORIES } from '../../m182/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../m182/migrations.mjs';
+import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
+import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
+import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
 import { openStore } from '../../store.mjs';
 

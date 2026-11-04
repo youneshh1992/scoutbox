@@ -101,7 +101,7 @@ export const OPEN_ROOM_STATUSES = ROOM_STATUSES.filter((s) => !TERMINAL_ROOM_STA
 
 // M12 stage vocabularies, mirrored here so the mapping is declarative. These
 // MUST stay equal to m12/scouting.mjs PRO_STAGES / GRASSROOTS_STAGES; a boot
-// assertion in m17/index.mjs fails loudly if they ever drift apart.
+// assertion in domains/recruitment/rooms/index.mjs fails loudly if they ever drift apart.
 export const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 export const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
 /** Every stage a case can hold, at either level (the case table's vocabulary). */
@@ -219,7 +219,7 @@ export const ROOM_TRANSITIONS = table({
   // `offer_made → offer_accepted` is the player saying yes in ScoutBox.
   // `offer_accepted → signed` is a separate, separately-authorised act that
   // requires confirmed joining evidence. Nothing derives the second from the
-  // first: see m23/lifecycle.mjs, where `signed` carries a precondition that
+  // first: see domains/recruitment/lifecycle/lifecycle.mjs, where `signed` carries a precondition that
   // an acceptance can never satisfy.
   //
   // `offer_made → signed` is KEPT. Removing it would not add safety — the
@@ -240,7 +240,7 @@ export const ROOM_TRANSITIONS = table({
   // (optionally) a date to look again, and every ordinary route out of it
   // stays open.
   // M23 P8.1 (D-P81-1): `resumeCase` returns the case to the state it was held
-  // FROM (m23/lifecycle.mjs resolves the target and is the ONE edge out of a
+  // FROM (domains/recruitment/lifecycle/lifecycle.mjs resolves the target and is the ONE edge out of a
   // hold into a held-from state). This row deliberately names NONE of the
   // states a recipient's answer reaches (contacted, trial_scheduled,
   // trial_completed, offer_made, offer_accepted, signed): while a case is

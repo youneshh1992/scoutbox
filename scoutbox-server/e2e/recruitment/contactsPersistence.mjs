@@ -22,11 +22,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../m182/migrations.mjs';
-import { integrityReport } from '../../m182/integrity.mjs';
+import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
+import { integrityReport } from '../../domains/platform/integrity.mjs';
 import { openStore } from '../../store.mjs';
-import { JOURNEY_REQUIRED_STORES } from '../../m23/journey.mjs';
-import { contactIntegrity, CONTACT_STATUSES } from '../../m23/contact.mjs';
+import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
+import { contactIntegrity, CONTACT_STATUSES } from '../../domains/recruitment/lifecycle/contact.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 

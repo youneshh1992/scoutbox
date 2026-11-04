@@ -91,7 +91,7 @@ export const M23_ERROR_HTTP = table({
 
   // ======================================================== M23 P3 Contact
   // Same bands, same rule: no default. Every code below is produced by
-  // m23/contact.mjs or m23/contactRoutes.mjs and swept by the drift guard.
+  // domains/recruitment/lifecycle/contact.mjs or domains/recruitment/lifecycle/contactRoutes.mjs and swept by the drift guard.
 
   // ---- 400: fix the request.
   CONTACT_CONTENT_INVALID: 400,
@@ -137,7 +137,7 @@ export const M23_ERROR_HTTP = table({
 
   // ======================================================== M23 P4B Trial
   // Same bands, same rule: no default. Every code below is produced by
-  // m23/trial.mjs or m23/trialRoutes.mjs and swept by the drift guard.
+  // domains/recruitment/lifecycle/trial.mjs or domains/recruitment/lifecycle/trialRoutes.mjs and swept by the drift guard.
 
   // ---- 400: fix the request.
   // (`TRIAL_DATE_INVALID`, `TRIAL_SLOT_INVALID` and `TRIAL_NOTES_INVALID` are
@@ -190,7 +190,7 @@ export const M23_ERROR_HTTP = table({
 
   // ======================================================== M23 P5 Decision
   // Same bands, same rule: no default. Every code below is produced by
-  // m23/decision.mjs or m23/decisionRoutes.mjs and swept by the drift guard.
+  // domains/recruitment/lifecycle/decision.mjs or domains/recruitment/lifecycle/decisionRoutes.mjs and swept by the drift guard.
 
   // ---- 400: fix the request.
   DECISION_OUTCOME_INVALID: 400,

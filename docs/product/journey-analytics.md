@@ -7,7 +7,7 @@ What each party sees of a recruitment as it progresses, how the next action is c
 ## How it works
 
 ### Lifecycle and stages
-- The lifecycle has exactly 18 states (`ROOM_STATUSES`, `m17/shared.mjs`): watching, under_review, contact_planned, contacted, shortlisted, priority, trial_requested, trial_scheduled, trial_completed, offer_consideration, offer_made, offer_accepted, offer_declined, signed, on_hold, withdrawn, archived, closed. There is no 19th state, no `awaiting_*` state and no journey store. `applyStatus` is the one status writer. (M23_P8_RECRUITMENT_JOURNEY_SOURCE_OF_TRUTH)
+- The lifecycle has exactly 18 states (`ROOM_STATUSES`, `domains/recruitment/rooms/shared.mjs`): watching, under_review, contact_planned, contacted, shortlisted, priority, trial_requested, trial_scheduled, trial_completed, offer_consideration, offer_made, offer_accepted, offer_declined, signed, on_hold, withdrawn, archived, closed. There is no 19th state, no `awaiting_*` state and no journey store. `applyStatus` is the one status writer. (M23_P8_RECRUITMENT_JOURNEY_SOURCE_OF_TRUTH)
 - Journey stages are derived on every read and never stored:
   - review = under_review / shortlisted / priority
   - contact = contact_planned / contacted
@@ -45,7 +45,7 @@ What each party sees of a recruitment as it progresses, how the next action is c
   (M23_P81_CURRENT_RESOURCE_INTEGRITY)
 
 ### Current-resource selection
-One copy of each rule, in `m23/journeyModel.mjs`, used by every projection, the Offer summary and the notification targets. Within a tier, the newest record wins (by the tier's instant), ties broken by id descending. (M23_P8_CURRENT_RESOURCE_SELECTION)
+One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used by every projection, the Offer summary and the notification targets. Within a tier, the newest record wins (by the tier's instant), ties broken by id descending. (M23_P8_CURRENT_RESOURCE_SELECTION)
 - Contact: delivered, then responded/recorded, then draft, then failed. Cancelled is never current.
 - Trial: live, then completed, then cancelled, then legacy_accepted.
 - Assessment: submitted, then draft.
@@ -142,10 +142,10 @@ One copy of each rule, in `m23/journeyModel.mjs`, used by every projection, the 
 
 *Spot-checked against the code on 3 November 2026. ✓ enforced, ✗ not found, ≠ differs from the old docs.*
 
-- 18 states: ✓ `scoutbox-server/m17/shared.mjs:39`
-- Body may not set stage or status: ✓ `m23/index.mjs:89`
-- Resume to the held-from state: ✓ `m23/lifecycle.mjs:154`
-- Player next-action priority, drift detection, single selectors: ✓ `m23/journeyModel.mjs:381,535,150,167`
+- 18 states: ✓ `scoutbox-server/domains/recruitment/rooms/shared.mjs:39`
+- Body may not set stage or status: ✓ `domains/recruitment/lifecycle/index.mjs:89`
+- Resume to the held-from state: ✓ `domains/recruitment/lifecycle/lifecycle.mjs:154`
+- Player next-action priority, drift detection, single selectors: ✓ `domains/recruitment/lifecycle/journeyModel.mjs:381,535,150,167`
 - Events only trigger a refetch: ✓ `scoutbox-club/src/App.tsx:434-450` (same in grassroots and agent)
 - Analytics guards: ✓ `m20/index.mjs:91` (person grouping), `m20/metrics.mjs:46` (small-n), `m20/index.mjs:73` (registry at boot)
 - M19 guards (prohibited traits, distance sort, mode required): ✓ `m19/criteria.mjs:212`, `m19/index.mjs:170,261`

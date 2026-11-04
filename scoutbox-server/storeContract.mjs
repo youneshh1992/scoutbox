@@ -15,11 +15,11 @@
 // against reality rather than trusts.
 //
 // It replaces three lists that could disagree. `PRODUCTION_REQUIRED_STORES` in
-// m182/migrations.mjs is now DERIVED from this file, not hand-kept beside it.
+// domains/platform/migrations.mjs is now DERIVED from this file, not hand-kept beside it.
 //
 // THE FIELDS
 //
-//   guarantee  'migration' — created by a numbered step in m182/migrations.mjs.
+//   guarantee  'migration' — created by a numbered step in domains/platform/migrations.mjs.
 //                            Survives loadSnapshot() replacing the db object
 //                            wholesale, so it is the only class that survives
 //                            an arbitrary restore.
@@ -219,7 +219,7 @@ export const CONTRACT_STORES = Object.freeze(Object.keys(PRODUCTION_STORE_CONTRA
 /**
  * Stores guaranteed by the migration registry.
  *
- * DERIVED, not hand-kept. `m182/migrations.mjs` re-exports this as
+ * DERIVED, not hand-kept. `domains/platform/migrations.mjs` re-exports this as
  * `PRODUCTION_REQUIRED_STORES` so there is one list, not two that can drift.
  */
 export const MIGRATION_GUARANTEED = Object.freeze(

@@ -1,7 +1,7 @@
 // S8b test fixtures: recruitment cases (the M12 case with the M17 room facet, its owned lists and objects), room
 // comments, room snapshots, room decisions and room evidence states in the EXACT shapes the writers produce
-// (m12/scouting.mjs the case, assignments, M12 tasks, approvals, the decision; m17/rooms.mjs the room facet, M17 tasks,
-// assignments, links, reopen, comments, snapshots, recommendations, evidence states; m23/decisionRoutes.mjs the draft
+// (m12/scouting.mjs the case, assignments, M12 tasks, approvals, the decision; domains/recruitment/rooms/rooms.mjs the room facet, M17 tasks,
+// assignments, links, reopen, comments, snapshots, recommendations, evidence states; domains/recruitment/lifecycle/decisionRoutes.mjs the draft
 // and the formal decision; m27/index.mjs the transaction handoff; m13/planning.mjs the budget; m12/shared.mjs /
 // m13/shared.mjs the one history literal every case writer appends). Every record is one the typed tables hold.
 // Synthetic ids and names only. Shared by testRecruitmentCases.mjs and
@@ -31,7 +31,7 @@ export const m12Case = (over = {}) => ({
   room: null, budget: null, ...over,
 });
 
-/** m17/rooms.mjs:568–:599 — the room literal (the case created by the room route, the facet, `applyStatus` to under_review, rev 1) with every owned list and object a later route may add. */
+/** domains/recruitment/rooms/rooms.mjs:568–:599 — the room literal (the case created by the room route, the facet, `applyStatus` to under_review, rev 1) with every owned list and object a later route may add. */
 export const roomCase = (over = {}) => ({
   id: 'case-1', orgId: ORG.id, playerId: 'pl-adult', playerName: 'Adult Signup',
   vacancyId: null, ownerUserId: SCOUT.userId, ownerName: SCOUT.name,
@@ -76,18 +76,18 @@ export const legacyCase = (over = {}) => m12Case({
 /** server.mjs:4290 — the case after its player's account deletion: `playerName` null, `subjectRemovedAt` set (nothing else changes). */
 export const tombstonedCase = (over = {}) => m12Case({ id: 'case-gone', playerId: 'pl-gone-long-ago', playerName: null, subjectRemovedAt: T.removed, links: { requestIds: [], trialIds: [], signingId: null }, history: [hist('aud-g-1', TC.created, 'created', 'identified')], assignments: [], tasks: [], approvals: [], decision: null, ...over });
 
-/** m17/rooms.mjs:1041–:1046 — a comment; `:1073`–`:1075` the edit; `:1088`–`:1089` the tombstone. */
+/** domains/recruitment/rooms/rooms.mjs:1041–:1046 — a comment; `:1073`–`:1075` the edit; `:1088`–`:1089` the tombstone. */
 export const comment = (over = {}) => ({ id: 'rcmt-1', roomId: 'case-1', orgId: ORG.id, authorId: SCOUT.userId, authorName: SCOUT.name, body: 'Quick on the turn.', replyToId: null, mentions: [SCOUT.userId], createdAt: TC.moved, editedAt: null, editCount: 0, deletedAt: null, ...over });
 export const editedComment = (over = {}) => comment({ id: 'rcmt-2', body: 'Quick on the turn (edited).', replyToId: 'rcmt-1', mentions: [], createdAt: TC.moved + MIN, editedAt: TC.moved + 2 * MIN, editCount: 1, ...over });
 export const tombstonedComment = (over = {}) => comment({ id: 'rcmt-3', body: 'Removed by the author.', mentions: [], createdAt: TC.moved + 3 * MIN, deletedAt: TC.moved + 4 * MIN, deletedBy: by(), ...over });
 
-/** m17/rooms.mjs:962–:983 with m17/shared.mjs `buildRoomSnapshot` — the snapshot literal, trust absent (null) and present. */
+/** domains/recruitment/rooms/rooms.mjs:962–:983 with domains/recruitment/rooms/shared.mjs `buildRoomSnapshot` — the snapshot literal, trust absent (null) and present. */
 export const snapshot = (over = {}) => ({ id: 'rsnap-1', roomId: 'case-1', orgId: ORG.id, playerId: 'pl-adult', at: TC.moved, trigger: 'status:trial_requested', trust: null, sourceRefs: { passportVersion: 1, passportRevision: 'pr_4', evidenceIds: ['ev-1', 'ev-2'], assessmentIds: [], combineResults: ['sprint-30m@2'], trialIds: ['trial-1'] }, note: 'Evidence confidence at decision time; not a judgement of the player.', ...over });
 export const trustedSnapshot = (over = {}) => snapshot({ id: 'rsnap-2', at: TC.decided, trigger: 'decision:finalize', trust: { score: 72, band: 'good', policyVersion: 3, componentLevels: { evidence: 'high', identity: 'verified', consistency: 'medium' }, hash: 'sha256:abc' }, sourceRefs: { passportVersion: 1, passportRevision: 'pr_5', evidenceIds: ['ev-1', 'ev-2', 'ev-3'], assessmentIds: ['as-1'], combineResults: ['sprint-30m@2', 'agility@1'], trialIds: ['trial-1'] }, ...over });
 
-/** m17/rooms.mjs:1175–:1183 — an M17 recommendation (superseded by the formal decision below). */
+/** domains/recruitment/rooms/rooms.mjs:1175–:1183 — an M17 recommendation (superseded by the formal decision below). */
 export const recommendation = (over = {}) => ({ id: 'rdec-1', roomId: 'case-1', orgId: ORG.id, playerId: 'pl-adult', recommendation: 'continue_watching', reasonCodes: ['needs_more_evidence'], note: null, by: { ...by(), role: SCOUT.role }, createdAt: TC.moved, trigger: 'decision', clientKey: 'rec-key-1', supersedes: null, supersededById: 'rdec-2', snapshot: { at: TC.moved, trust: null, sourceRefs: snapshot().sourceRefs, snapshotId: 'rsnap-1' }, ...over });
-/** m23/decisionRoutes.mjs:371–:385 — the formal decision (kind formal, state final, the keys, the assessment summary, the snapshot copy, the lifecycle). */
+/** domains/recruitment/lifecycle/decisionRoutes.mjs:371–:385 — the formal decision (kind formal, state final, the keys, the assessment summary, the snapshot copy, the lifecycle). */
 export const formalDecision = (over = {}) => ({
   id: 'rdec-2', roomId: 'case-1', orgId: ORG.id, playerId: 'pl-adult', kind: 'formal', state: 'final', outcome: 'progress', recommendation: 'offer',
   reasonCodes: ['strong_evidence'], note: 'Strong on the left.', by: { ...by(), role: SCOUT.role }, createdAt: TC.decided + HOUR, finalizedAt: TC.decided + HOUR, trigger: 'decision:finalize', clientKey: 'fin-key-1',
@@ -98,7 +98,7 @@ export const formalDecision = (over = {}) => ({
   keys: { finalize: { key: 'fin-key-1', fp: 'fp-fin-1' }, draft: { key: 'draft-key-1', fp: 'fp-draft-1' } },
   draftId: 'rdraft-0', lifecycle: { action: 'shortlist', from: 'trial_requested', to: 'shortlisted', applied: true, at: TC.decided + HOUR }, policyVersion: 2, ...over,
 });
-/** m17/rooms.mjs:1273 — an evidence review state, overwritten in place. */
+/** domains/recruitment/rooms/rooms.mjs:1273 — an evidence review state, overwritten in place. */
 export const evidenceState = (over = {}) => ({ id: 'rev-1', roomId: 'case-1', orgId: ORG.id, evidenceId: 'ev-1', state: 'reviewed', note: 'Good angle.', byId: SCOUT.userId, byName: SCOUT.name, at: TC.moved + 5 * MIN, ...over });
 
 /** The standard S8b graph: the room case, the M12 case, the legacy case, the tombstoned case; their room rows. */

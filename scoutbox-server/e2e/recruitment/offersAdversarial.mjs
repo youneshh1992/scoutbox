@@ -26,13 +26,13 @@ import {
   OFFER_LIMITS, validateTerms, validateMessages, validateExpiry, effectiveRevisionStatus, offerStatus, liveStatus, liveRevision,
   canRespondToRevision, offerIntegrity, offerCaseConsistency, offerCaseCorrupt, offerEvidence, offerRecipientView, offerAgentView, offerClubView,
   minorOfferPathwayOpen, MINOR_OFFER_PATHWAY_ENABLED, responderMatches,
-} from '../../m28/offer.mjs';
-import { M28_ERROR_HTTP } from '../../m28/errors.mjs';
-import { EVENT_REGISTRY } from '../../m182/eventRegistry.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
+} from '../../domains/recruitment/offers/offer.mjs';
+import { M28_ERROR_HTTP } from '../../domains/recruitment/offers/errors.mjs';
+import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { isAdult, adultAgeFor } from '../../domain.mjs';
 import { isExpiredAt } from '../../temporal.mjs';
-import { canTransitionRecruitmentCase } from '../../m23/lifecycle.mjs';
+import { canTransitionRecruitmentCase } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { openStore } from '../../store.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
@@ -113,7 +113,7 @@ section('L/M — pure: notification category, event registry audiences and paylo
   neg(EVENT_REGISTRY.offer_draft_created.notificationEligible === false && EVENT_REGISTRY.offer_draft_updated.notificationEligible === false, 'M-p3 draft events are not notification-eligible');
   ok(RATE_LIMIT_POLICY.offer_response.scope === 'actor' && ['offer_draft_write', 'offer_issue', 'offer_withdraw'].every((k) => RATE_LIMIT_POLICY[k].scope === 'org'), 'H-p1 budgets: per person for answers, per organisation for club acts');
   // The m28 source never reads a client-supplied authority fact.
-  const src = readdirSync(path.join(HERE, '..', '..', 'm28')).filter((f) => f.endsWith('.mjs')).map((f) => readFileSync(path.join(HERE, '..', '..', 'm28', f), 'utf8')).join('\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const src = readdirSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers')).filter((f) => f.endsWith('.mjs')).map((f) => readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', f), 'utf8')).join('\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   neg(!/req\.body\??\.(status|role|verified|licensed|isAdult|canAccept|isGuardian|isAgent|complianceClear|currentRevision|playerId|orgId|caseId|occurredAt|issuedAt|revisionNumber|actorId)\b/.test(src), 'T-p1 client trust audit: m28 never reads status/role/verified/licensed/isAdult/canAccept/isGuardian/isAgent/complianceClear/currentRevision/playerId/orgId/caseId/occurredAt/revisionNumber/actorId from a request body');
   neg(!/dangerouslySetInnerHTML/.test(readFileSync(path.join(HERE, '..', '..', '..', 'scoutbox-club', 'src', 'offerPanel.tsx'), 'utf8')) && !/dangerouslySetInnerHTML/.test(readFileSync(path.join(HERE, '..', '..', '..', 'scoutbox-agent', 'src', 'screens.tsx'), 'utf8')), 'T-p2 no Offer field is rendered as HTML in the club or agent app');
   ok(Object.keys(M28_ERROR_HTTP).length === 23, 'T-p3 the 23-code error table is unchanged by hardening (OFFER_STORE_MISSING left with the db collection, §4.3 step 2)');
@@ -659,7 +659,7 @@ section('O — partial failure: authoritative state first, side effects never tu
   // Every post-persist side effect is wrapped: the m28 source proves it, and the route order is persist → effects.
   // S8c (§4.3): an Offer write is a repository operation inside a unit of work (`unit(…)`, or `inUnit(res, …)` where
   // the case may refuse the move); the side effects follow the unit's COMMIT.
-  const src = readFileSync(path.join(HERE, '..', '..', 'm28', 'index.mjs'), 'utf8');
+  const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', 'index.mjs'), 'utf8');
   const unitIdx = [...src.matchAll(/\b(unit|inUnit)\((res, )?\(\) =>/g)].map((m) => m.index);
   const bareBroadcast = [...src.matchAll(/^\s*broadcast\?\.\(/gm)].length;
   neg(bareBroadcast === 0 && /const safe = \(label, fn\)/.test(src) && unitIdx.length >= 6, 'O2 every broadcast/notification after a persisted write is wrapped in safe() — a throwing side effect is logged, not surfaced as a 500');
@@ -697,7 +697,7 @@ section('H — rate limits: one budget per person/organisation, closure actions 
 {
   ok(RATE_LIMIT_POLICY.offer_response.max >= 30 && RATE_LIMIT_POLICY.offer_withdraw.max >= 30, 'H1 closure budgets (answer, withdraw) are generous enough for any honest use');
   // The player and guardian routes are distinct persons: a guardian answering for two children is one budget; the player route cannot draw on the guardian's.
-  const src = readFileSync(path.join(HERE, '..', '..', 'm28', 'index.mjs'), 'utf8');
+  const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', 'index.mjs'), 'utf8');
   neg(/limited\('offer_response', `\$\{by\}:\$\{actorId\}`\)/.test(src) && /limited\('offer_draft_write', req\.org\.id\)/.test(src) && /limited\('offer_issue', req\.org\.id\)/.test(src) && /limited\('offer_withdraw', req\.org\.id\)/.test(src), 'H2 keys: answers by (kind, person); club acts by organisation — no route, id or alias yields a second budget');
   neg((src.match(/limited\('offer_draft_write'/g) ?? []).length === 3, 'H3 create, edit and revise share ONE draft budget (three call sites, one action name)');
   const far = T0 + 5000 * H;

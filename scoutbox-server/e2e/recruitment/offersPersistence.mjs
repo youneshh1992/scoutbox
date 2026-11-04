@@ -19,10 +19,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION } from '../../m182/migrations.mjs';
+import { MIGRATIONS, SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
-import { offerIntegrity } from '../../m28/offer.mjs';
+import { offerIntegrity } from '../../domains/recruitment/offers/offer.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));

@@ -30,7 +30,7 @@ import { CONTACT_EVIDENCE_STATUSES, contactIntegrity } from './contact.mjs';
 import { trialIntegrity, deriveWorkflowState } from './trial.mjs';
 // M23 P6 — the Offer domain's pure evidence predicate. The lifecycle asks; the
 // Offer store answers; nothing here writes an Offer or a status.
-import { offerEvidence } from '../m28/offer.mjs';
+import { offerEvidence } from '../offers/offer.mjs';
 
 const OFFER_EVIDENCE_KINDS = Object.freeze(['offer_sent', 'offer_accepted_by_recipient', 'offer_declined_by_recipient']);
 
@@ -193,7 +193,7 @@ export function createEvidenceProvider(db, reads = {}) {
       }
 
       // ---- P6 Offer evidence. Answered from the canonical Offer store through
-      // a pure predicate owned by the Offer domain (m28/offer.mjs): an ISSUED
+      // a pure predicate owned by the Offer domain (domains/recruitment/offers/offer.mjs): an ISSUED
       // revision satisfies `offer_sent`; a response row on that revision, by
       // the recipient the revision was addressed to, satisfies the accepted
       // or declined kind. A draft is not an Offer sent; a club user naming

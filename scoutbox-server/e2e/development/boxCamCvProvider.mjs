@@ -549,7 +549,7 @@ section('§2 — the release state, restated at the end');
 section('§116–§122 — migration, clean boot, upgrade and restart');
 // =====================================================================
 {
-  const { MIGRATIONS, SCHEMA_VERSION, runMigrations: migrate, schemaReport } = await import('../../m182/migrations.mjs');
+  const { MIGRATIONS, SCHEMA_VERSION, runMigrations: migrate, schemaReport } = await import('../../domains/platform/migrations.mjs');
 
   const step = MIGRATIONS.find((m) => m.id === 'm220_001_box_cam_cv_results');
   ok(!!step, '§116. an M22 migration step exists');

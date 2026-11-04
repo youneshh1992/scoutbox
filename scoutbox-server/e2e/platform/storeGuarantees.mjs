@@ -43,13 +43,13 @@ import { fileURLToPath } from 'node:url';
 import {
   MIGRATIONS, SCHEMA_VERSION, runMigrations,
   PRODUCTION_REQUIRED_STORES, missingRequiredStores,
-} from '../../m182/migrations.mjs';
-import { integrityReport } from '../../m182/integrity.mjs';
+} from '../../domains/platform/migrations.mjs';
+import { integrityReport } from '../../domains/platform/integrity.mjs';
 import { PLANS } from '../../catalogue.mjs';
 import { openStore } from '../../store.mjs';
-import { ROOM_STATUSES, ROOM_STATUS_LABELS, TERMINAL_ROOM_STATUSES, stageForRoomStatus } from '../../m17/shared.mjs';
-import { JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../../m23/journey.mjs';
-import { NULL_EVIDENCE_PROVIDER } from '../../m23/lifecycle.mjs';
+import { ROOM_STATUSES, ROOM_STATUS_LABELS, TERMINAL_ROOM_STATUSES, stageForRoomStatus } from '../../domains/recruitment/rooms/shared.mjs';
+import { JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
+import { NULL_EVIDENCE_PROVIDER } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import {
   PRODUCTION_STORE_CONTRACT, CONTRACT_STORES, MIGRATION_GUARANTEED,
   MODULE_GUARANTEED, OPTIONAL_STORES, NOT_A_STORE, guaranteeFor,
@@ -556,6 +556,9 @@ const OPTIONAL_BY_DESIGN = Object.fromEntries(
 
 const SKIP_DIRS = new Set(['node_modules', 'scripts', 'e2e', 'data', 'public', 'assets', 'dist']);
 
+/** A file under domains/ belongs to its folder (domains/platform, domains/recruitment/rooms…), a milestone file to its milestone. */
+const moduleOf = (file) => (file.startsWith('domains/') ? path.posix.dirname(file) : file.split('/')[0].replace('.mjs', ''));
+
 function productionFiles() {
   const out = [];
   (function walk(d) {
@@ -907,8 +910,8 @@ section('§10 — cross-module reads: initialised by one module, read by another
     if (r.classification !== 'MODULE_BOOT') continue;
     const owner = r.owners[0];
     if (!owner) continue;
-    const ownerDir = owner.split('/')[0];
-    const foreign = [...new Set(r.reads.map((x) => x.file))].filter((f) => f.split('/')[0] !== ownerDir);
+    const ownerDir = moduleOf(owner);
+    const foreign = [...new Set(r.reads.map((x) => x.file))].filter((f) => moduleOf(f) !== ownerDir);
     if (foreign.length) cross.push({ name: r.name, owner, readers: foreign });
   }
   ok(cross.length >= 0, `§10 ${cross.length} module-owned stores are read from outside the owning module`);
@@ -1032,7 +1035,7 @@ section('§9/§12 — the contract is checked against the running server, not tr
   // §12 OWNER VALIDATION. `owner: 'm14'` must mean M14 actually initialises it.
   // Proven by source: the init site the scan found must live under the owner's
   // directory (or be the core composition root).
-  const OWNER_DIR = { core: ['server.mjs', 'm182/'], m12: ['m12/'], m13: ['m13/'], m14: ['m14/'], m15: ['m15/'], m16: ['m16/'], m17: ['m17/'], m18: ['m18/'], 'm18.1': ['m181/'], m21: ['m21/'], m28: ['m28/'] };
+  const OWNER_DIR = { core: ['server.mjs', 'domains/platform/'], m12: ['m12/'], m13: ['m13/'], m14: ['m14/'], m15: ['m15/'], m16: ['m16/'], m17: ['domains/recruitment/rooms/'], m18: ['m18/'], 'm18.1': ['domains/platform/'], m21: ['m21/'], m28: ['domains/recruitment/offers/'] };
   const wrongOwner = [];
   for (const r of rows) {
     if (r.classification !== 'MODULE_BOOT') continue;
@@ -1068,9 +1071,9 @@ section('§15 — cross-module ownership, frozen');
   for (const r of rows) {
     const owner = PRODUCTION_STORE_CONTRACT[r.name]?.owner;
     if (!owner) continue;
-    const consumers = [...new Set(r.reads.map((x) => x.file.split('/')[0].replace('.mjs', '')))]
+    const consumers = [...new Set(r.reads.map((x) => moduleOf(x.file)))]
       .filter((mod) => {
-        const m = { core: ['server', 'm182', 'adapters', 'domain', 'store', 'catalogue', 'seed', 'grassrootsJourney', 'storeContract'] }[owner] ?? [owner.replace('.', '')];
+        const m = { core: ['server', 'domains/platform', 'adapters', 'domain', 'store', 'catalogue', 'seed', 'grassrootsJourney', 'storeContract'], 'm18.1': ['domains/platform'] }[owner] ?? [owner.replace('.', '')];
         return !m.includes(mod) && mod !== owner.replace('.', '');
       });
     if (consumers.length) cross.push({ store: r.name, owner, guarantee: r.classification, consumers });
@@ -1109,7 +1112,7 @@ section('§11 — the drift guard: a new store cannot be added unexplained');
   // An unguarded read of an optional store is a contradiction: the reader
   // claims absence is supported and then assumes presence.
   const contradictions = rows.filter((r) => r.optional && r.reads.some((x) => !x.guarded
-    && !/^\s*\*/.test('') && x.file !== 'm23/index.mjs'));
+    && !/^\s*\*/.test('') && x.file !== 'domains/recruitment/lifecycle/index.mjs'));
   const realContradictions = contradictions.filter((r) => {
     // Only count reads that are not immediately preceded by an Array.isArray gate
     // in the same file — journey.mjs gates once and then uses the value.
@@ -1143,7 +1146,7 @@ missing after production boot: ${counts.missing}
 const table = rows.map((r) => ({
   store: r.name,
   classification: r.classification,
-  owner: r.owners[0] ?? (r.migration ? 'm182/migrations.mjs' : ''),
+  owner: r.owners[0] ?? (r.migration ? 'domains/platform/migrations.mjs' : ''),
   readers: [...new Set(r.reads.map((x) => x.file))].length,
   unguardedReads: r.rawReads,
 }));

@@ -250,7 +250,7 @@ CREATE INDEX ver_events_org ON ver_events(org_id, occurred_at);
 -- -----------------------------------------------------------------------------
 -- source: db.verEvidence  created at m14/index.mjs:99 (addEvidence); callers in
 --         m14/organisations.mjs:137,262,961, m14/review.mjs:118,173 and
---         m29/index.mjs:176 (signing documents, via ctx.evidence.add)
+--         domains/recruitment/signings/index.mjs:176 (signing documents, via ctx.evidence.add)
 -- owner/writer: m14 (+ m29 signing vault rows); never deleted
 -- lifecycle: no status; retention policy string is declared but UNENFORCED
 --   (no purge job exists); expires_at is always null today.

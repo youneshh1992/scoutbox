@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { isAdult, visibleToOrg } from '../domain.mjs';
-import { deriveWorkflowState } from '../m23/trial.mjs';
+import { deriveWorkflowState } from '../domains/recruitment/lifecycle/trial.mjs';
 import { readPage, sendPageError } from '../domains/platform/paging.mjs';
 
 const MILESTONES = { '3m': 91, '6m': 182, '12m': 365 };

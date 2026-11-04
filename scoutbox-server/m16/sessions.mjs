@@ -18,7 +18,7 @@ import {
   mergeIntervals, normIntervals, sumIntervals, fmtMs, STATE_COPY, TERMINAL_STATES,
 } from './shared.mjs';
 import { drillByIdVersion, latestDrill, providerFor, LIVENESS_CHALLENGES, PROVIDERS } from './drills.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
+import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
 
 const DRIFT_MS = 7_000;            // allowed client/server clock drift
 const SESSION_TTL_MS = 2 * 3_600_000;
@@ -40,7 +40,7 @@ export function registerBoxCamSessions(ctx) {
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
 
   // ----------------------------------------------------------- rate limits
-  // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
+  // M18.1: the shared limiter and its named policy (see domains/platform/rateLimit.mjs).
   const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
   const caps = (session) => {

@@ -21,9 +21,9 @@
 import { visibleToOrg } from '../domain.mjs';
 import { buildShared } from '../m12/shared.mjs';
 import { opportunityBoardFor } from '../m12/journeys.mjs';
-import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
-import { normaliseClientKey, payloadFingerprint } from '../m23/contact.mjs';
+import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
+import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
+import { normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
 import { sendAgentError } from './errors.mjs';
 import { agentAuditRows } from './audit.mjs';
 import { facetFromProviderAnswer, FACET_METHOD } from '../m25/provider.mjs';

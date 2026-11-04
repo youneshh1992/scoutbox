@@ -18,10 +18,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../m182/migrations.mjs';
+import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
-import { JOURNEY_REQUIRED_STORES } from '../../m23/journey.mjs';
-import { decisionIntegrity, duplicateFinalHeads, chainHead, isFormal } from '../../m23/decision.mjs';
+import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
+import { decisionIntegrity, duplicateFinalHeads, chainHead, isFormal } from '../../domains/recruitment/lifecycle/decision.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 

@@ -25,9 +25,9 @@
 
 import { visibleToOrg } from '../domain.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
-import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
-import { normaliseClientKey, payloadFingerprint } from '../m23/contact.mjs';
+import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
+import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
+import { normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
 import { hasVerLevel } from '../m14/shared.mjs';
 import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt, agencyJurisdictions } from '../m24/shared.mjs';
 import { sendComplianceError } from './errors.mjs';

@@ -17,7 +17,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, USERS } from './coreIdentityTestFixtures.mjs';
-import { ROOM_STATUSES, OPEN_ROOM_STATUSES, CASE_STAGES, TASK_STATES, roomRole } from '../m17/shared.mjs';
+import { ROOM_STATUSES, OPEN_ROOM_STATUSES, CASE_STAGES, TASK_STATES, roomRole } from '../domains/recruitment/rooms/shared.mjs';
 import { pageSorted } from '../domains/platform/paging.mjs';
 import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture, fixtureDb, SCOUT } from './recruitmentTestFixtures.mjs';
 import { roomCase, m12Case, comment, snapshot, trustedSnapshot, recommendation, formalDecision, evidenceState, hist, S8B_FIX, persisted, TC } from './recruitmentCasesTestFixtures.mjs';

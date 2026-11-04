@@ -806,13 +806,13 @@ CREATE TABLE friendly_responses (
 -- ---------------------------------------------------------------------
 -- invoices
 -- source: db.invoices  created at server.mjs:222 (and seed.mjs:488); rows minted at adapters.mjs:164-176 (createBilling.invoiceForSigning)
--- owner/writer: adapters.mjs billing seam, called from m29/index.mjs:275   lifecycle: status only ever 'issued'; never
---               deleted except the in-request rollback at m29/index.mjs:619 (array truncated to its pre-request length)
+-- owner/writer: adapters.mjs billing seam, called from domains/recruitment/signings/index.mjs:275   lifecycle: status only ever 'issued'; never
+--               deleted except the in-request rollback at domains/recruitment/signings/index.mjs:619 (array truncated to its pre-request length)
 -- mapping: id -> id (inv-N — prefix shared with org_invites); ts -> created_at (source field is literally `ts`);
 --          orgId -> org_id; orgName -> org_name; signingId -> signing_id; playerName -> player_name; description -> description;
 --          amount (MAJOR units, e.g. 1500) -> amount_minor (= amount * 100); currency -> currency (always 'EUR' today);
 --          status -> status; provider -> provider
--- notes: one invoice per signing enforced by code before issuing (m29/index.mjs:275 `.some(i.signingId === signing.id)`)
+-- notes: one invoice per signing enforced by code before issuing (domains/recruitment/signings/index.mjs:275 `.some(i.signingId === signing.id)`)
 --        -> unique index. player_name is retained after player deletion (deletePlayerData leaves invoices alone) —
 --        billing record; retention justified but flagged. Read patterns: by org newest first (server.mjs:2627);
 --        admin all (4153); existence by signing_id.
@@ -837,12 +837,12 @@ CREATE INDEX invoices_org_id_created_at ON invoices(org_id, created_at);
 -- ---------------------------------------------------------------------
 -- plans  (catalogue, keyed by name)
 -- source: db.plans  object keyed by plan name; seeded from catalogue.mjs PLANS (seed.mjs:444) and restored by
---         m182/migrations.mjs:257 (`db.plans ??= planCatalogue()`); never written by a route
+--         domains/platform/migrations.mjs:257 (`db.plans ??= planCatalogue()`); never written by a route
 -- owner/writer: catalogue.mjs (constants) via seed/migration   lifecycle: static product configuration
 -- mapping: object key -> name (PRIMARY KEY); name -> name (identical to the key); pricePerMonthGBP (major GBP) ->
 --          price_per_month_minor (= value * 100) + currency 'GBP'; seats -> seats; attributionWindowMonths -> attribution_window_months;
 --          antiCircumvention -> anti_circumvention
--- notes: read by name = orgs.plan (server.mjs:1112 /meta full dump; 3064, 3078 and m29/index.mjs:260 by key with
+-- notes: read by name = orgs.plan (server.mjs:1112 /meta full dump; 3064, 3078 and domains/recruitment/signings/index.mjs:260 by key with
 --        `?? 18` fallback). orgs.plan (01_identity) should REFERENCE plans(name) — declared there, not here.
 --        An EMPTY table reproduces the M23-D2 billing bug (catalogue.mjs:24-29): the migration must insert the
 --        four rows. `customised` seen in e2e/platform/storeGuarantees.mjs:84 is a test fixture, not a product field.
@@ -859,7 +859,7 @@ CREATE TABLE plans (
 
 -- ---------------------------------------------------------------------
 -- archetypes  (catalogue)
--- source: db.archetypes  seeded from catalogue.mjs ARCHETYPES (seed.mjs:435) and restored by m182/migrations.mjs:258; never written by a route
+-- source: db.archetypes  seeded from catalogue.mjs ARCHETYPES (seed.mjs:435) and restored by domains/platform/migrations.mjs:258; never written by a route
 -- owner/writer: catalogue.mjs via seed/migration   lifecycle: static; exactly 5 rows
 -- mapping: id -> id (arch-*); label -> label; position -> position; foot -> foot; dob -> dob (synthetic yardstick date);
 --          heightCm -> height_cm; weightKg -> weight_kg; stats.appearances -> stat_appearances; stats.goals -> stat_goals;
@@ -883,7 +883,7 @@ CREATE TABLE archetypes (
 
 -- ---------------------------------------------------------------------
 -- reputation_seed  -- DEMO ONLY
--- source: db.reputationSeed  seeded at seed.mjs:438-442; m182/migrations.mjs:254 restores it as [] (empty is the
+-- source: db.reputationSeed  seeded at seed.mjs:438-442; domains/platform/migrations.mjs:254 restores it as [] (empty is the
 --         correct production value, storeContract.mjs:155); never written by a route
 -- owner/writer: seed.mjs   lifecycle: static demo rows; EMPTY in production
 -- mapping: scoutName -> scout_name; orgName -> org_name; discoveries -> discoveries; successRatePct -> success_rate_pct;
@@ -922,7 +922,7 @@ CREATE INDEX delivery_callbacks_seen_seen_at ON delivery_callbacks_seen(seen_at)
 -- ---------------------------------------------------------------------
 -- ops_settings  (key/value singletons)
 -- source: db.deliveryFailInject (object {email, push, contact?, trial?, decision?} of pending injected failures,
---         m13/delivery.mjs:20, incremented at 250, decremented at 29 and m23/{trialRoutes:391,628,830;
+--         m13/delivery.mjs:20, incremented at 250, decremented at 29 and domains/recruitment/lifecycle/{trialRoutes:391,628,830;
 --         contactRoutes:461; decisionRoutes:360}) and db.deliveryCentreSince (number, m13/delivery.mjs:21, read at 82)
 -- owner/writer: m13/delivery.mjs (+ m23 route files decrement)   lifecycle: persistent singletons; never deleted
 -- mapping: deliveryCentreSince -> row key 'delivery_centre_since', value_json = epoch-ms integer;

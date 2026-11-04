@@ -199,12 +199,12 @@ All ✓ unless noted (paths under `scoutbox-server/`):
 - ≠ `FIFA-RSTP-2027` is a rule, not a version (§3).
 
 - ✓ Actor transition map as documented: `scoutbox-server/m26/transaction.mjs:122`.
-- ✓ Contact modes `player_only`/`both` only: `m23/contact.mjs:96`; unknown mode flagged at `:447`.
+- ✓ Contact modes `player_only`/`both` only: `domains/recruitment/lifecycle/contact.mjs:96`; unknown mode flagged at `:447`.
 - ✓ Disclosures default off: `m24/shared.mjs:361`.
 - ✓ Start-date check in the access predicate: `m24/shared.mjs:291,311`.
-- ✓ Handoff TTL 30 days: `m27/integration.mjs:366`; agent trial viewer `m23/trial.mjs:476`.
+- ✓ Handoff TTL 30 days: `m27/integration.mjs:366`; agent trial viewer `domains/recruitment/lifecycle/trial.mjs:476`.
 - ✓ Minor pathway disabled (ENG, INT, USA): `m25/policy.mjs:322`.
 - ✓ `sharedFor` always false: `m27/index.mjs:170`.
 - ✓ Duplicate rule: `m26/index.mjs:592`; handoff binding before create: `m26/index.mjs:610`.
-- ✓ Offer readiness seam used by Offers: `m26/index.mjs:1416`, `m28/index.mjs:323`; adult-only share-agent route `m28/index.mjs:793`.
+- ✓ Offer readiness seam used by Offers: `m26/index.mjs:1416`, `domains/recruitment/offers/index.mjs:323`; adult-only share-agent route `domains/recruitment/offers/index.mjs:793`.
 - ✓ Missing dob fails closed: `domain.mjs:35`.

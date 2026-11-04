@@ -25,13 +25,13 @@ consequences in plain terms, and don't ask him storage questions.
 - New persistent state goes in tables owned by a domain repository under `scoutbox-server/repositories/`, created
   by a numbered migration and matched in `docs/architecture/sql/*.sql`. No new `db.<collection>` arrays, no new
   `migrateMxx` lines, no new milestone-named modules (`m30/…`). New server code goes in
-  `scoutbox-server/domains/<domain>/` (not created yet; start it with the first new module).
+  `scoutbox-server/domains/<domain>/` (`platform` and `recruitment` exist; start a new one with its first module).
 - Writes are explicit repository operations, inside `store.unitOfWork(() => …)` when they touch more than one row
   or domain. Side effects go through `store.afterCommit`. Provider calls happen before the unit. Don't edit
   in-memory records and rely on the save to find the change.
 - Store typed columns, and validate and reject junk input at the route. Don't preserve malformed data.
 - Responses are built from explicit allowlists, never by spreading a stored record. Never log or return a plain
-  token. Secrets have no defaults. Every environment setting is registered in `m181/capabilities.mjs`.
+  token. Secrets have no defaults. Every environment setting is registered in `domains/platform/capabilities.mjs`.
 - One definition per rule: import shared rules (`roles.mjs`, `domain.mjs`, `temporal.mjs`), don't copy them.
 - Don't add another copy of an API type or client to an app; write client code so it can move to a shared package.
   `scoutbox-club` and `scoutbox-grassroots` share business logic: a fix in one is a fix in both.

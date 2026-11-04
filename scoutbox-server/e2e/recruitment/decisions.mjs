@@ -39,13 +39,13 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DECISION_OUTCOMES, OUTCOME_MAP, EVIDENCE_REF_KINDS, DECISION_LIMITS, DECISION_POLICY_VERSION, validateOutcome, validateDecisionReasons, validateNote, validateEvidenceRefShapes, decisionIntegrity, duplicateFinalHeads, chainHead, summariseAssessments, assessmentSnapshot, decisionView, draftView, decisionMilestone, decisionRequirements, normaliseDecisionClientKey } from '../../m23/decision.mjs';
-import { M23_ERROR_HTTP } from '../../m23/errors.mjs';
-import { EVENT_REGISTRY } from '../../m182/eventRegistry.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
-import { STATUS_EVIDENCE_REQUIRED, ROOM_TRANSITIONS, ROOM_STATUSES, roomCan, PROHIBITED_REASON_CODES, REVISITABLE_REASON_CODES } from '../../m17/shared.mjs';
-import { EVIDENCE_KINDS } from '../../m23/evidence.mjs';
-import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS } from '../../m23/lifecycle.mjs';
+import { DECISION_OUTCOMES, OUTCOME_MAP, EVIDENCE_REF_KINDS, DECISION_LIMITS, DECISION_POLICY_VERSION, validateOutcome, validateDecisionReasons, validateNote, validateEvidenceRefShapes, decisionIntegrity, duplicateFinalHeads, chainHead, summariseAssessments, assessmentSnapshot, decisionView, draftView, decisionMilestone, decisionRequirements, normaliseDecisionClientKey } from '../../domains/recruitment/lifecycle/decision.mjs';
+import { M23_ERROR_HTTP } from '../../domains/recruitment/lifecycle/errors.mjs';
+import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
+import { STATUS_EVIDENCE_REQUIRED, ROOM_TRANSITIONS, ROOM_STATUSES, roomCan, PROHIBITED_REASON_CODES, REVISITABLE_REASON_CODES } from '../../domains/recruitment/rooms/shared.mjs';
+import { EVIDENCE_KINDS } from '../../domains/recruitment/lifecycle/evidence.mjs';
+import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { readFileSync } from 'node:fs';
 import { pickPort } from '../../scripts/testPort.mjs';
 import { createEvidenceProvider, resolveEvidenceRefs } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the recruitment queries over the plain arrays
@@ -197,7 +197,7 @@ section('P — policy: error bands, rate policies, events, permissions, the ONE 
   neg(!('on_hold' in STATUS_EVIDENCE_REQUIRED) && !('archived' in STATUS_EVIDENCE_REQUIRED), 'P12 on_hold and archived need no decision row — a hold or an archive by hand remains possible (documented choice)');
   for (const s of ['decision_pending', 'decision_complete', 'recommended', 'committee_review', 'greenlight', 'decided', 'offer_recommended']) neg(!ROOM_STATUSES.includes(s) && !(s in ROOM_TRANSITIONS), `P13 no lifecycle state "${s}" was invented`);
   ok(Object.keys(ROOM_TRANSITIONS).length === ROOM_STATUSES.length, 'P13b the transition table covers exactly the existing statuses');
-  const auditSrc = readFileSync(path.join(path.dirname(SERVER), 'm182', 'audit.mjs'), 'utf8');
+  const auditSrc = readFileSync(path.join(path.dirname(SERVER), 'domains', 'platform', 'audit.mjs'), 'utf8');
   ok(['room_decision_finalized', 'room_decision_superseded', 'room_decision_drafted', 'room_decision_draft_discarded'].every((a) => auditSrc.includes(`'${a}'`)), 'P14 the four audit actions are registered in the audit log\'s room-action set');
   // The provider, against a fake database: a draft, an advisory row, a superseded formal row and a hold prove nothing for offer_consideration.
   const kase = { id: 'c', orgId: 'o', playerId: 'p', room: { status: 'shortlisted', leadScoutUserId: 'u' }, ownerUserId: 'u' };

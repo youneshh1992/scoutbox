@@ -11,7 +11,7 @@ import { planCatalogue, archetypeCatalogue } from './catalogue.mjs';
 /**
  * The world a first boot starts from. `demo: false` keeps only the product
  * catalogues (plans, archetypes) and every container empty: no people, clubs
- * or track records. The server picks with demoSeedEnabled() (m181/capabilities.mjs).
+ * or track records. The server picks with demoSeedEnabled() (domains/platform/capabilities.mjs).
  */
 export function buildSeed({ demo = true } = {}) {
   const now = Date.now();

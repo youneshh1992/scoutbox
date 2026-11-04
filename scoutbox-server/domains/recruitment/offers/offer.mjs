@@ -37,7 +37,7 @@
  * run: the security decision never depends on a materialised status.
  */
 
-import { parseInstant, parseStrictDateOnly, isExpiredAt, readInstant, isAbsent, DAY_MS } from '../temporal.mjs';
+import { parseInstant, parseStrictDateOnly, isExpiredAt, readInstant, isAbsent, DAY_MS } from '../../../temporal.mjs';
 
 export const OFFER_POLICY_VERSION = 1;
 

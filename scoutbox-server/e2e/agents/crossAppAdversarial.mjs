@@ -33,7 +33,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EVENT_REGISTRY, isRegistered } from '../../m182/eventRegistry.mjs';
+import { EVENT_REGISTRY, isRegistered } from '../../domains/platform/eventRegistry.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..', '..', '..');
@@ -497,7 +497,7 @@ section('RM/§19 — the event registry against what the server actually emits')
     ok(typeof def.audience === 'string' && def.audience.length > 0, `RM9 ${n}: it declares an audience (${def.audience})`);
   }
   // And the contract itself still holds, run exactly as boot runs it.
-  const { assertEventRegistry } = await import('../../m182/eventRegistry.mjs');
+  const { assertEventRegistry } = await import('../../domains/platform/eventRegistry.mjs');
   const problems = assertEventRegistry({ emitted, mode: 'production' });
   neg(problems.length === 0, `RM10 and the production registry contract reports no problems at all (${problems.join(' | ') || 'none'})`);
 }

@@ -5,7 +5,7 @@
 -- org-level fields `tactical`, `squad[]`, `lookingFor[]`, `federationCheck`.
 -- Sources: scoutbox-server/m12/passport.mjs, m12/scouting.mjs, m12/journeys.mjs,
 -- m12/shared.mjs (migrateM12), m13/suitability.mjs, m13/shared.mjs (migrateM13),
--- server.mjs (looking-for, squad, verification/federation), m29/index.mjs (squad
+-- server.mjs (looking-for, squad, verification/federation), domains/recruitment/signings/index.mjs (squad
 -- on signing), m12/operations.mjs (application reminder sweep).
 --
 -- Depends on (created earlier in lexical order):
@@ -330,9 +330,9 @@ CREATE TABLE org_tactical_windows (
 
 -- ----------------------------------------------------------------------------
 -- source: db.orgs[].squad[]  created at server.mjs:2797 (manual), m12/passport.mjs:409
---         (invite_approved), m12/scouting.mjs:779 (shadow), m29/index.mjs:291 (signing)
+--         (invite_approved), m12/scouting.mjs:779 (shadow), domains/recruitment/signings/index.mjs:291 (signing)
 -- owner/writer: server.mjs (grassroots squad + release), m12/passport.mjs,
---               m12/scouting.mjs, m29/index.mjs (and m29 snapshot/rollback restores the whole array)
+--               m12/scouting.mjs, domains/recruitment/signings/index.mjs (and m29 snapshot/rollback restores the whole array)
 -- lifecycle: hard-deleted on release (server.mjs:2811 filters the array) — no soft-delete field exists
 -- mapping (union of the four row shapes):
 --   id -> id (sq-N)                        playerId -> player_id (null for off-platform manual entries)
@@ -659,7 +659,7 @@ CREATE INDEX assessment_history_assessment_id ON assessment_history (assessment_
 
 -- ----------------------------------------------------------------------------
 -- source: db.vacancies  created at m12/scouting.mjs:689
--- owner/writer: m12/scouting.mjs (also read by m17/rooms.mjs:555 and recruitment_cases.vacancy_id in 02)
+-- owner/writer: m12/scouting.mjs (also read by domains/recruitment/rooms/rooms.mjs:555 and recruitment_cases.vacancy_id in 02)
 -- lifecycle: status open -> closed (closed_at); never deleted
 -- mapping: id -> id (vac-N), orgId -> org_id, roleId -> role_id, roleName -> role_name,
 --          window -> window (unvalidated, stored as sent), notes -> notes (<=300),

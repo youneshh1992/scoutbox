@@ -120,12 +120,12 @@ All others terminal. No SIGNED state.
 
 *Spot-checked against the code on 3 November 2026. ✓ enforced, ✗ not found, ≠ differs from the old docs.*
 
-- ✓ **Minor pathway closed:** m28/offer.mjs:116; signing equivalent m29/signing.mjs:51.
-- ✓ **Offer transitions and limits:** m28/offer.mjs:68-76, 100-104.
-- ✓ **Recipient view** carries no internalNote, decisionId, transactionId or withdrawReason (m28/offer.mjs `offerRecipientView`; club view at :500 does).
-- ✓ **Single `under_contract` writer** outside the seed: m29/index.mjs:324.
-- ✓ **Single signings writer:** m29/index.mjs:299.
-- ✓ **Party kinds and lead requirement:** m29/signing.mjs:48, m29/index.mjs:156. Signing expiry: m29/signing.mjs:58.
-- ✓ **Legacy blocker:** m29/index.mjs:344-347 (called at server.mjs:2753).
-- ✓ **`signingSupports`:** m23/evidence.mjs:60. Agent licence check: m28/index.mjs:877, m29/index.mjs:835.
-- ≠ **Invoice after commit**, not rolled back in the unit (m29/index.mjs:300-304).
+- ✓ **Minor pathway closed:** domains/recruitment/offers/offer.mjs:116; signing equivalent domains/recruitment/signings/signing.mjs:51.
+- ✓ **Offer transitions and limits:** domains/recruitment/offers/offer.mjs:68-76, 100-104.
+- ✓ **Recipient view** carries no internalNote, decisionId, transactionId or withdrawReason (domains/recruitment/offers/offer.mjs `offerRecipientView`; club view at :500 does).
+- ✓ **Single `under_contract` writer** outside the seed: domains/recruitment/signings/index.mjs:324.
+- ✓ **Single signings writer:** domains/recruitment/signings/index.mjs:299.
+- ✓ **Party kinds and lead requirement:** domains/recruitment/signings/signing.mjs:48, domains/recruitment/signings/index.mjs:156. Signing expiry: domains/recruitment/signings/signing.mjs:58.
+- ✓ **Legacy blocker:** domains/recruitment/signings/index.mjs:344-347 (called at server.mjs:2753).
+- ✓ **`signingSupports`:** domains/recruitment/lifecycle/evidence.mjs:60. Agent licence check: domains/recruitment/offers/index.mjs:877, domains/recruitment/signings/index.mjs:835.
+- ≠ **Invoice after commit**, not rolled back in the unit (domains/recruitment/signings/index.mjs:300-304).

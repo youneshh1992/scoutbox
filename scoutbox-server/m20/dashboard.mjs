@@ -36,7 +36,7 @@ import {
   terminalWithRecordedDecision, supersededDecisionRate, evidenceLimitedExits, reopenRate,
   briefsLive, nobodyMissedCoverage, secondLookCoverage, watchlistActivity,
 } from './cohorts.mjs';
-import { SOURCE_CONTEXTS, ROOM_PRIORITIES } from '../m17/shared.mjs';
+import { SOURCE_CONTEXTS, ROOM_PRIORITIES } from '../domains/recruitment/rooms/shared.mjs';
 
 export { ROOM_PRIORITIES };
 

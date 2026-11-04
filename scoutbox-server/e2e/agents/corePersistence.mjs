@@ -25,7 +25,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../m182/migrations.mjs';
+import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 
 /** Every step above the frozen 2304 baseline, in declared order. */
 const ABOVE_2304 = MIGRATIONS.filter((m) => m.version > 2304).map((m) => m.id);

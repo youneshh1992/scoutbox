@@ -26,14 +26,14 @@ import {
   ROOM_UNAVAILABLE_NOTE, LIMITS, clampPage, validateTag, SNAPSHOT_STATUSES,
   adoptionStatusForStage, INITIAL_ROOM_STATUS,
 } from './shared.mjs';
-import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
+import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 // M23 P8 — the lifecycle's own role table, so the legacy status route and the
 // semantic-action route agree on WHO may reach a state (a room lead could reach
 // `signed` here while `confirmSignedOutcome` needs a recruitment lead).
-import { LIFECYCLE_ACTIONS } from '../m23/lifecycle.mjs';
+import { LIFECYCLE_ACTIONS } from '../lifecycle/lifecycle.mjs';
 
-import { readPage, sendPageError } from '../domains/platform/paging.mjs';
+import { readPage, sendPageError } from '../../platform/paging.mjs';
 export function registerRooms(ctx) {
   const {
     db, orgRouter, adminRouter, nextId, persistNow, notify, ledgerAppend, broadcast,
@@ -717,7 +717,7 @@ export function registerRooms(ctx) {
     // This route takes a status string from the client, so without this gate it
     // is a side door around the M23 lifecycle: `offer_made` + `{status:'signed'}`
     // would have landed on `signed` with no signing in the database. The
-    // requirement is keyed by TARGET status in m17/shared.mjs, so every path to
+    // requirement is keyed by TARGET status in domains/recruitment/rooms/shared.mjs, so every path to
     // `signed` carries the identical burden and no future edge can skip it.
     //
     // FAILS CLOSED. No provider attached means the requirement cannot be

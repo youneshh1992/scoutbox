@@ -46,10 +46,10 @@ import { buildGoalSnapshots, pageReviews } from '../../m21/reviews.mjs';
 import { migrateM21, M21_STORES } from '../../m21/index.mjs';
 import { liveCombineState, isProductionValidCombine } from '../../m16/combineShared.mjs';
 import { PROVIDERS } from '../../m16/drills.mjs';
-import { EVENT_NAMES, EVENT_REGISTRY, assertEventRegistry } from '../../m182/eventRegistry.mjs';
-import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../m182/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations } from '../../m182/migrations.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
+import { EVENT_NAMES, EVENT_REGISTRY, assertEventRegistry } from '../../domains/platform/eventRegistry.mjs';
+import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';
+import { MIGRATIONS, SCHEMA_VERSION, runMigrations } from '../../domains/platform/migrations.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { resolveEvidenceLink, recordBelongsToPlayer } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the recruitment queries over the plain arrays
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));

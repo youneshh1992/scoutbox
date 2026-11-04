@@ -6,7 +6,7 @@
 
 import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../domain.mjs';
 import { parseStrictDateOnly, parseDateOrInstant, isExpiredAt, isAbsent } from '../temporal.mjs';
-import { trialFamilyView, trialOutcomeLine } from '../m23/trial.mjs';
+import { trialFamilyView, trialOutcomeLine } from '../domains/recruitment/lifecycle/trial.mjs';
 import { readPage, sendPageError } from '../domains/platform/paging.mjs';
 
 export function registerJourneys(ctx) {

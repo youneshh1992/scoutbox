@@ -23,9 +23,9 @@ import { sendDomainError } from './errors.mjs';
 import { registerContact } from './contactRoutes.mjs';
 import { registerTrial } from './trialRoutes.mjs';
 import { registerDecision } from './decisionRoutes.mjs';
-import { roomRole } from '../m17/shared.mjs';
-import { guardRev, revMeta } from '../m181/concurrency.mjs';
-import { buildShared } from '../m12/shared.mjs';
+import { roomRole } from '../rooms/shared.mjs';
+import { guardRev, revMeta } from '../../platform/concurrency.mjs';
+import { buildShared } from '../../../m12/shared.mjs';
 
 export function registerM23(rawCtx) {
   // The established seam: isLead, orgCanSee, audit and paginate come from one

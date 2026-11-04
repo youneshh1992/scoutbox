@@ -25,7 +25,7 @@ import {
   combineResultHash, comparisonMatrix, COMBINE_TERMINAL, COMBINE_STATE_COPY,
   liveCombineState,
 } from './combineShared.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
+import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
 import { combineCapabilities } from '../m22/eligibility.mjs';
 import { CV_PROVIDER_ID } from '../m22/policy.mjs';
 
@@ -78,7 +78,7 @@ export function registerCombine(ctx) {
   };
 
   // Rate limits (per §109 / §76): attempt creation and request creation.
-  // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
+  // M18.1: the shared limiter and its named policy (see domains/platform/rateLimit.mjs).
   const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
   // ------------------------------------------------------------- views

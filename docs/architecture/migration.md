@@ -89,7 +89,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 items 1–4 done (4 Nov); what still misses §2 is listed in §4.3 |
 | — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left |
 | — | end-to-end test estate | — | — | — | done (§4.4, 4 Nov) |
-| — | server code by domain | — | — | — | §4.4.1: recruitment and platform before S9, then per step |
+| — | server code by domain | — | — | — | recruitment and platform done (§4.4.1, 4 Nov); the rest per step |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
 | S11 | agents, compliance, transactions | | | | not started |
@@ -267,7 +267,11 @@ into `domains/<domain>/` alongside the migration, not as a separate rewrite:
 
 - **Before S9**, after §4.4: move recruitment (`m17`, `m23`, `m28`, `m29`) and platform (`m181`, `m182`) into
   `domains/recruitment/` and `domains/platform/`. File moves and import paths only, in one commit, so S9 copies a
-  finished layout. Most cross-milestone imports point at these two.
+  finished layout. Most cross-milestone imports point at these two. **Done (4 November).** `m17` is
+  `domains/recruitment/rooms/`, `m23` `lifecycle/`, `m28` `offers/`, `m29` `signings/` (subfolders, because each had
+  its own `index.mjs` and `errors.mjs`); `m181` and `m182` share `domains/platform/`. File names are unchanged. The
+  batteries that scan source by folder name the new folders, and `platform/storeGuarantees` names a file's module by
+  its folder under `domains/`.
 - **Each of S9–S13** first moves its domain's files, in a commit with no other change, then edits them. The mixed
   folders (`m12`, `m13`, `m14`) are split file by file as each domain's step comes round; `m20` and `m27` read across
   domains and are placed when their readers are. A step may move its domain's routes out of `server.mjs` while it

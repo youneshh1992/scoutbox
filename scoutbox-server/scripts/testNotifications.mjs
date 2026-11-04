@@ -23,7 +23,7 @@ import {
 } from '../repositories/notifications.mjs';
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
-import { registerNotificationPrefs, CATEGORY_NAMES } from '../m182/notificationPrefs.mjs';
+import { registerNotificationPrefs, CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
 import { registerDelivery } from '../m13/delivery.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, freshFile, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump } from './coreIdentityTestFixtures.mjs';

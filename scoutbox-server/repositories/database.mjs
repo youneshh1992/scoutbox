@@ -2,7 +2,7 @@
  * The relational data layer's foundation: versioned table migrations and a
  * transaction helper over the node:sqlite handle that store.mjs opens.
  *
- * Why a second migration registry next to m182/migrations.mjs: that one
+ * Why a second migration registry next to domains/platform/migrations.mjs: that one
  * shapes the in-memory snapshot (collections present, fields backfilled) and
  * runs against the loaded object. This one shapes TABLES, runs SQL, and is
  * recorded in the database itself, so a restored file carries its own schema

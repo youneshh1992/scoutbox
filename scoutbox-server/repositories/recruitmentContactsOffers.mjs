@@ -7,8 +7,8 @@
  *   recruitment_offers, offer_revisions, offer_revision_documents, offer_responses,
  *   offer_read_receipts, offer_history, offer_keys                               → db.recruitmentOffers
  *
- * EVERY FIELD IS A TYPED COLUMN with the vocabulary and length CHECKs of the domain rules (m23/contact.mjs,
- * m28/offer.mjs). There is no `absent_keys_json`, `offtype_json`, `extra_json` or `raw_json`. A record the columns
+ * EVERY FIELD IS A TYPED COLUMN with the vocabulary and length CHECKs of the domain rules (domains/recruitment/lifecycle/contact.mjs,
+ * domains/recruitment/offers/offer.mjs). There is no `absent_keys_json`, `offtype_json`, `extra_json` or `raw_json`. A record the columns
  * cannot hold — an unknown field at any level included — is REFUSED with its id, at a repository write (the unit
  * rolls back) and at a snapshot write (the save rolls back). The idempotency keys are columns of their owner
  * (`create_key`, `send_key`, …) and the offer's per-act key lists the rows of `offer_keys`.
@@ -33,8 +33,8 @@
  */
 import { transaction, migrationApplied, newestHistory } from './database.mjs';
 import { isPlainObject, ids, tableExists } from './recruitment.mjs';
-import { CONTACT_STATUSES, CONTACT_CHANNELS, CONTACT_MODES, CONTACT_LIMITS, RESPONSE_KINDS } from '../m23/contact.mjs';
-import { OFFER_STATUSES, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES, OFFER_RESPONSE_ACTORS } from '../m28/offer.mjs';
+import { CONTACT_STATUSES, CONTACT_CHANNELS, CONTACT_MODES, CONTACT_LIMITS, RESPONSE_KINDS } from '../domains/recruitment/lifecycle/contact.mjs';
+import { OFFER_STATUSES, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES, OFFER_RESPONSE_ACTORS } from '../domains/recruitment/offers/offer.mjs';
 
 export const RECRUITMENT_CONTACTS_OFFERS_MIGRATION = '0017_recruitment_contacts_offers';
 export const RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS = Object.freeze(['recruitmentContacts', 'recruitmentOffers']);

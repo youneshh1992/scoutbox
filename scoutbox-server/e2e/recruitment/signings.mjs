@@ -19,16 +19,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { SCHEMA_VERSION, MIGRATIONS } from '../../m182/migrations.mjs';
+import { SCHEMA_VERSION, MIGRATIONS } from '../../domains/platform/migrations.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
-import { EVENT_REGISTRY } from '../../m182/eventRegistry.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
-import { M29_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../m29/errors.mjs';
+import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
+import { M29_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/recruitment/signings/errors.mjs';
 import {
   SIGNING_STATUSES, SIGNING_STORED_STATUSES, SIGNING_METHODS, PARTY_TYPES, MINOR_SIGNING_PATHWAY_ENABLED, minorSigningPathwayOpen,
   payloadFingerprint, validateContractDates, validateExpiry, requiredPartiesFor, effectiveStatus, canStart, canCompleteParty, completionGate,
   signingIntegrity, signingConsistency, signingCorrupt, SIGNING_CORRUPTION, signingRecipientView, signingAgentView, signingClubView, cleanText,
-} from '../../m29/signing.mjs';
+} from '../../domains/recruitment/signings/signing.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -740,16 +740,16 @@ section('Z — the boundary: ONE writer of db.signings, signed and under_contrac
   const walk = (d) => { for (const f of readdirSync(d)) { const p = path.join(d, f); if (f === 'node_modules' || f === 'scripts' || f === 'e2e' || f.startsWith('.')) continue; if (statSync(p).isDirectory()) walk(p); else if (f.endsWith('.mjs')) files.push(p); } };
   walk(root);
   const src = Object.fromEntries(files.map((f) => [path.relative(root, f), readFileSync(f, 'utf8')]));
-  // S8d: the signing row is written through the domain repository (`signings.record(...)`), never pushed on the view; the ONE writer is still m29/index.mjs.
+  // S8d: the signing row is written through the domain repository (`signings.record(...)`), never pushed on the view; the ONE writer is still domains/recruitment/signings/index.mjs.
   const pushes = Object.entries(src).filter(([, s]) => /db\.signings\.push\(|signings\.record\(/.test(s)).map(([f]) => f).filter((f) => !f.startsWith('repositories/'));
-  neg(pushes.length === 1 && pushes[0] === 'm29/index.mjs', `#23 Z1 the signing row is written (signings.record / db.signings.push) in exactly one file outside the repositories: ${pushes.join(', ')}`);
+  neg(pushes.length === 1 && pushes[0] === 'domains/recruitment/signings/index.mjs', `#23 Z1 the signing row is written (signings.record / db.signings.push) in exactly one file outside the repositories: ${pushes.join(', ')}`);
   // S4a: the column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record.
   const uc = Object.entries(src).filter(([, s]) => /contractStatus\s*=\s*'under_contract'|players\.update\([^\n]*contractStatus: 'under_contract'/.test(s)).map(([f]) => f);
-  neg(uc.length === 1 && uc[0] === 'm29/index.mjs', `#25 Z2 contractStatus 'under_contract' is written in exactly one file: ${uc.join(', ')}`);
+  neg(uc.length === 1 && uc[0] === 'domains/recruitment/signings/index.mjs', `#25 Z2 contractStatus 'under_contract' is written in exactly one file: ${uc.join(', ')}`);
   neg(!/db\.signings\.push|contractStatus = 'under_contract'|playerLevelAfterSigning\(/.test(src['server.mjs'].slice(src['server.mjs'].indexOf("orgRouter.post('/players/:id/signing'"), src['server.mjs'].indexOf("orgRouter.get('/signings'"))), 'Z3 the legacy route itself writes nothing: it delegates to the ONE writer');
-  neg(!/status\s*=\s*'signed'|room\.status\s*=\s*['"]signed/.test(src['m29/index.mjs']) && /confirmSignedOutcome/.test(src['m29/index.mjs']) && /applyLifecycleTransition/.test(src['m29/index.mjs']), '#24 Z4 m29 never assigns the status word: signed is reached through the ONE validator and the ONE lifecycle writer');
-  neg(!/docusign|adobe\s*sign|hellosign|pandadoc|qualified electronic signature/i.test(src['m29/index.mjs'] + src['m29/signing.mjs']), 'Z5 no external provider is named or faked');
-  neg(!/trustScore|computeTrustScore|trustProfile/.test(src['m29/index.mjs'] + src['m29/signing.mjs']), '#50 Z6 the signing module never touches the Trust Score');
+  neg(!/status\s*=\s*'signed'|room\.status\s*=\s*['"]signed/.test(src['domains/recruitment/signings/index.mjs']) && /confirmSignedOutcome/.test(src['domains/recruitment/signings/index.mjs']) && /applyLifecycleTransition/.test(src['domains/recruitment/signings/index.mjs']), '#24 Z4 m29 never assigns the status word: signed is reached through the ONE validator and the ONE lifecycle writer');
+  neg(!/docusign|adobe\s*sign|hellosign|pandadoc|qualified electronic signature/i.test(src['domains/recruitment/signings/index.mjs'] + src['domains/recruitment/signings/signing.mjs']), 'Z5 no external provider is named or faked');
+  neg(!/trustScore|computeTrustScore|trustProfile/.test(src['domains/recruitment/signings/index.mjs'] + src['domains/recruitment/signings/signing.mjs']), '#50 Z6 the signing module never touches the Trust Score');
   // restart
   const D = globalThis.__DONE; const KI = globalThis.__KI;
   const before = { d: (await sGet(D.SID)).body.signing, k: (await sGet(KI.SID)).body.signing, rows: await signings() };

@@ -25,10 +25,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../m182/migrations.mjs';
+import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
-import { JOURNEY_REQUIRED_STORES } from '../../m23/journey.mjs';
-import { trialIntegrity, deriveWorkflowState, TRIAL_WORKFLOW_STATES } from '../../m23/trial.mjs';
+import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
+import { trialIntegrity, deriveWorkflowState, TRIAL_WORKFLOW_STATES } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { typeTrial } from '../../repositories/recruitment.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays

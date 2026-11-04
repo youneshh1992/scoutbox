@@ -1,5 +1,5 @@
-// S8c test fixtures: recruitment contacts and offers in the EXACT shapes the writers produce (m23/contactRoutes.mjs the
-// draft, the external record, the send, the response hook, the edit; m28/index.mjs the offer, the edit, the issue, the
+// S8c test fixtures: recruitment contacts and offers in the EXACT shapes the writers produce (domains/recruitment/lifecycle/contactRoutes.mjs the
+// draft, the external record, the send, the response hook, the edit; domains/recruitment/offers/index.mjs the offer, the edit, the issue, the
 // withdraw, the revise, the response, the share, the receipt, the deletion unit). Every record is valid: the typed
 // tables refuse junk, and the suites build junk from these with an override. Synthetic ids and names only.
 // Shared by testRecruitmentContactsOffers.mjs and testRecruitmentContactsOffersServer.mjs. The ids agree with the S8a
@@ -11,8 +11,8 @@ import { ORG, SCOUT, p4bInvitation } from './recruitmentTestFixtures.mjs';
 const MIN = 60_000; const HOUR = 60 * MIN; const DAY = 24 * HOUR;
 export const TX = Object.freeze({ drafted: NOW - 6 * DAY, sent: NOW - 5 * DAY, answered: NOW - 4 * DAY, issued: NOW - 3 * DAY, revised: NOW - 2 * DAY, accepted: NOW - DAY, removed: NOW });
 const ACTOR = Object.freeze({ kind: 'org', userId: SCOUT.userId, name: SCOUT.name }); // contactRoutes.mjs:55 actorOf(req)
-const REVBY = Object.freeze({ userId: SCOUT.userId, name: SCOUT.name }); // m181/concurrency.mjs:84 bumpRev
-const BY = Object.freeze({ kind: 'org', id: SCOUT.userId, name: SCOUT.name, role: SCOUT.role }); // m28/index.mjs:77 byOrg(req)
+const REVBY = Object.freeze({ userId: SCOUT.userId, name: SCOUT.name }); // domains/platform/concurrency.mjs:84 bumpRev
+const BY = Object.freeze({ kind: 'org', id: SCOUT.userId, name: SCOUT.name, role: SCOUT.role }); // domains/recruitment/offers/index.mjs:77 byOrg(req)
 export const HONEST_AGENT = 'Who was validly routed when this contact was recorded. A later change to the relationship does not rewrite it, and the next contact is routed from the authority in force then.';
 export const HONEST_NONE = 'Routed to the recipient only: no agent authority could be resolved when this was sent.';
 export const PRIVATE_BODY = 'Internal: we would like to talk about next season.';
@@ -61,11 +61,11 @@ export const externalContact = (over = {}) => draftContact({
 export const cancelledContact = (over = {}) => draftContact({ id: 'rct-5', caseId: 'case-gone', playerId: 'pl-gone-long-ago', status: 'cancelled', subject: 'Old', body: 'Old body', updatedAt: TX.drafted + MIN, cancelledAt: TX.drafted + MIN, cancelledBy: ACTOR, keys: { create: null, send: null, record: null }, history: [chist('aud-rc9', TX.drafted + MIN, 'contact_cancelled')], ...over });
 
 export const TERMS = Object.freeze({ offerType: 'direct_recruitment', role: 'CM', squad: 'U21', startDate: '2027-07-01', endDate: null, conditions: null });
-/** m28/index.mjs:78-81 `hist()` — an offer history entry. */
+/** domains/recruitment/offers/index.mjs:78-81 `hist()` — an offer history entry. */
 export const ohist = (id, at, action, detail = null, by = { kind: 'org', id: SCOUT.userId, name: SCOUT.name }) => ({ id, at, action, by, detail });
-/** m28/index.mjs:326-333 — a revision literal (every key present; `discardedByResponseId` absent unless discarded). */
+/** domains/recruitment/offers/index.mjs:326-333 — a revision literal (every key present; `discardedByResponseId` absent unless discarded). */
 export const revision = (over = {}) => ({ id: 'rofr-1', revisionNumber: 1, status: 'DRAFT', terms: TERMS, recipientMessage: null, internalNote: PRIVATE_NOTE, documents: [], expiresAt: null, createdAt: TX.drafted, createdBy: BY, updatedAt: TX.drafted, updatedBy: BY, issuedAt: null, issuedBy: null, withdrawnAt: null, withdrawnBy: null, withdrawReason: null, respondedAt: null, response: null, supersedesRevisionId: null, supersededByRevisionId: null, supersededAt: null, recipientSnapshot: null, readinessSnapshot: null, rev: 1, revAt: TX.drafted, revBy: null, ...over });
-/** m28/index.mjs:334-340 — the draft offer literal. */
+/** domains/recruitment/offers/index.mjs:334-340 — the draft offer literal. */
 export const draftOffer = (over = {}) => ({
   id: 'rof-1', orgId: ORG.id, caseId: 'case-1', playerId: 'pl-adult', type: 'direct_recruitment', decisionId: 'rdec-2', transactionId: null, status: 'DRAFT', currentRevisionId: 'rofr-1',
   revisions: [revision()], responses: [], readReceipts: [], agentShare: null,

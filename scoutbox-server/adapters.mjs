@@ -10,12 +10,12 @@
 //
 // No real IDV, billing or object-storage provider is integrated yet. Each seam
 // names what it is; none claims a provider it doesn't call
-// (UNIMPLEMENTED_PROVIDER_VARIABLES in m181/capabilities.mjs).
+// (UNIMPLEMENTED_PROVIDER_VARIABLES in domains/platform/capabilities.mjs).
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { liveMailConfigured, livePushConfigured } from './m181/capabilities.mjs';
+import { liveMailConfigured, livePushConfigured } from './domains/platform/capabilities.mjs';
 
 // ------------------------------------------------------------------ passwords
 // scrypt with a per-password salt. Stored as `scrypt$<salt>$<hash>` so the

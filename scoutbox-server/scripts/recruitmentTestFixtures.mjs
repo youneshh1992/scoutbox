@@ -1,6 +1,6 @@
 // S8a-core test fixtures: requests and trials in the EXACT shapes the writers produce
 // (server.mjs issueRecruitmentRequest / the open-day outcome route / issueAcceptedTrial /
-// the report route / tombstoneRequest / tombstoneTrial; m23/trialRoutes.mjs the P4B
+// the report route / tombstoneRequest / tombstoneTrial; domains/recruitment/lifecycle/trialRoutes.mjs the P4B
 // invitation, schedule, cancel, attendance, complete, evidence links, the recipient's
 // confirm/decline/cancel; m12/journeys.mjs the day containers; m12/operations.mjs the
 // reminder markers). Synthetic ids and names only. Shared by testRecruitment.mjs,
@@ -53,7 +53,7 @@ export const openDayRequest = (over = {}) => ({
   status: 'pending', createdAt: T.invited, routedTo: 'player', guardianId: null, contactChannel: null, ...over,
 });
 export const slot = (id, day, startsAt, over = {}) => ({ id, day, kind: 'training', startsAt, endsAt: startsAt + 90 * MIN, timezone: 'Europe/London', venue: { name: 'Eastport Ground', town: 'Eastport' }, ...over });
-/** The P4B invitation (m23/trialRoutes.mjs:395–412): slots, the private details held back until acceptance, caseId, trialId null, recipient, keys.invite. */
+/** The P4B invitation (domains/recruitment/lifecycle/trialRoutes.mjs:395–412): slots, the private details held back until acceptance, caseId, trialId null, recipient, keys.invite. */
 export const p4bInvitation = (over = {}) => ({
   ...legacyTrialRequest({ id: 'req-p4b', message: 'Trial invitation.' }),
   trialDetails: { proposedDate: '2026-11-03', altSlots: ['2026-11-04'], venue: 'Eastport Ground, Eastport', notes: '', slots: [slot('tslot-1', '2026-11-03', T.session), slot('tslot-2', '2026-11-04', T.session + DAY)], private: { venueAddress: '1 Harbour Road', instructions: 'Gate B, ask for Maria' } },

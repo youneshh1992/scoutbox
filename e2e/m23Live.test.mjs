@@ -34,7 +34,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 // The server's own status set, so the label check below cannot drift from it.
-import { ROOM_STATUSES } from '../scoutbox-server/m17/shared.mjs';
+import { ROOM_STATUSES } from '../scoutbox-server/domains/recruitment/rooms/shared.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';

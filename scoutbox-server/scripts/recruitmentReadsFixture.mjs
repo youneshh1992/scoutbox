@@ -6,11 +6,11 @@
 // A database WITHOUT one of the arrays gets no query object for it, exactly as the old code saw no collection: the
 // journey reports the missing contacts store, the evidence provider answers "store unavailable", and the offers stay
 // the optional phase they always were.
-import { buildRecruitmentJourney as journey } from '../m23/journey.mjs';
-import { createEvidenceProvider as provider } from '../m23/evidence.mjs';
+import { buildRecruitmentJourney as journey } from '../domains/recruitment/lifecycle/journey.mjs';
+import { createEvidenceProvider as provider } from '../domains/recruitment/lifecycle/evidence.mjs';
 import { buildReportingContext as reportingContext } from '../m20/dashboard.mjs';
 import { resolveEvidenceLink as resolveLink, recordBelongsToPlayer as belongs, validateEvidenceLink as validateLink } from '../m21/evidence.mjs';
-import { resolveEvidenceRefs as resolveRefs, evidenceCandidates as candidates } from '../m23/decision.mjs';
+import { resolveEvidenceRefs as resolveRefs, evidenceCandidates as candidates } from '../domains/recruitment/lifecycle/decision.mjs';
 import { buildDevelopmentPlan as buildPlan } from '../m21/plan.mjs';
 
 const sound = (r) => r !== null && typeof r === 'object';

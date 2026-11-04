@@ -28,7 +28,7 @@
  * human on the request. Nothing here writes a case status.
  */
 
-import { validateReasonCodes, REASON_CODES } from '../m17/shared.mjs';
+import { validateReasonCodes, REASON_CODES } from '../rooms/shared.mjs';
 import { normaliseClientKey as contactKey, payloadFingerprint } from './contact.mjs';
 import { deriveWorkflowState } from './trial.mjs';
 

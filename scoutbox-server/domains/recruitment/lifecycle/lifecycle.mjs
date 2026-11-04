@@ -33,7 +33,7 @@
 import {
   ROOM_TRANSITIONS, ROOM_STATUSES, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED,
   PROHIBITED_REASON_CODES, INITIAL_ROOM_STATUS,
-} from '../m17/shared.mjs';
+} from '../rooms/shared.mjs';
 
 export const RECRUITMENT_LIFECYCLE_POLICY_VERSION = 1;
 
@@ -204,7 +204,7 @@ export function lifecycleTargetFor(kase, action, context = {}) {
   return def.resolveTo ? def.resolveTo(kase, context) : def.to;
 }
 
-/** Role ranking, mirroring m17/shared.mjs roomCan. */
+/** Role ranking, mirroring domains/recruitment/rooms/shared.mjs roomCan. */
 const ROLE_RANK = { viewer: 0, contributor: 1, room_lead: 2, recruitment_admin: 3 };
 const roleAllows = (role, allowed) => {
   const have = ROLE_RANK[role];
@@ -365,7 +365,7 @@ const MAX_LIFECYCLE_REASONS = 6;
  * `LIFECYCLE_REASON_CODES` say why a case MOVED — an event in a process. The
  * two sets do not overlap by a single code.
  *
- * The M23 route used to call `validateReasonCodes` from m17/shared.mjs, so it
+ * The M23 route used to call `validateReasonCodes` from domains/recruitment/rooms/shared.mjs, so it
  * accepted decision reasons on a transition and refused every one of the
  * sixteen lifecycle reasons it publishes. `closeCase` requires a reason, and
  * the only reasons it would take described a judgement about the player rather

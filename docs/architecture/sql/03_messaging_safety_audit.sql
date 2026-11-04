@@ -42,7 +42,7 @@
 --   Founder's decisions D-A and D-B recorded in §11.9).
 -- source: db.channels (the blob every build since M9 wrote; imported and retired by 0012, array
 --         position → seq). The container is still created by seed.mjs and the snapshot migration
---         m230_001 (m182/migrations.mjs) before the data layer attaches; attachDataLayer drops that
+--         m230_001 (domains/platform/migrations.mjs) before the data layer attaches; attachDataLayer drops that
 --         array and defines db.channels as a read-only view over the mirror.
 -- owner/writer: repositories/channels.mjs through server.mjs openChannel (the acceptance routes,
 --         player and guardian), postMessage (appendMessage), the three /channels/:id/read routes
@@ -218,7 +218,7 @@ CREATE TABLE message_attachments (
 --   audience.id   -> audience_id (polymorphic: players.id / guardians.id / org_users.id; no FK)
 --                    An audience is these two fields only: an entry whose audience carries any
 --                    other field refuses the whole import or snapshot write (nothing is dropped).
---   type          -> type (open set registered in m182/notificationPrefs.mjs TYPE_CATEGORY;
+--   type          -> type (open set registered in domains/platform/notificationPrefs.mjs TYPE_CATEGORY;
 --                    unknown types are delivered by design → no CHECK)
 --   text          -> text
 --   refId         -> ref_id (polymorphic, kind implied by type; no FK)
@@ -226,7 +226,7 @@ CREATE TABLE message_attachments (
 --   repeatCount   -> repeat_count (absent on a pre-M18.2 row → 1, as m182_005 did)
 --   groupKey      -> group_key (= "type:refId" or NULL; absent → NULL)
 --   category      -> category (validated in code against CATEGORY_NAMES — the vocabulary lives in
---                    m182/notificationPrefs.mjs and must not need a schema change to grow; NULL when
+--                    domains/platform/notificationPrefs.mjs and must not need a schema change to grow; NULL when
 --                    the type is unclassified; absent → NULL)
 --   deferredPush  -> deferred_push (absent → 0)
 --   actionRequired          -> action_required (1 when the object exists)
@@ -271,7 +271,7 @@ CREATE INDEX notifications_audience_seq ON notifications (audience_kind, audienc
 -- -----------------------------------------------------------------------------
 -- notification_prefs — LIVE since migration 0009_notifications (S7a, REGISTERED; repositories/notifications.mjs).
 -- source: db.notificationPrefs (M18.2; the blob every build before S7a wrote; imported and retired by 0009).
--- owner/writer: repositories/notifications.mjs updatePrefs, called by m182/notificationPrefs.mjs
+-- owner/writer: repositories/notifications.mjs updatePrefs, called by domains/platform/notificationPrefs.mjs
 --         (PUT /notification-preferences per router), which keeps the vocabulary, the validation,
 --         the effective view and the gate.
 -- lifecycle: upsert on write; never deleted (retained after a person's notifications are deleted —
@@ -284,7 +284,7 @@ CREATE INDEX notifications_audience_seq ON notifications (audience_kind, audienc
 --   updatedAt    -> updated_at (NULL until the first write; absent → NULL)
 -- notes: natural key (audienceKind, audienceId) is the PRIMARY KEY (one record per person; a
 --   duplicate in a backup refuses the import). Effective prefs are DERIVED (stored over defaults,
---   mandatory always on; effective() in m182/notificationPrefs.mjs).
+--   mandatory always on; effective() in domains/platform/notificationPrefs.mjs).
 -- -----------------------------------------------------------------------------
 CREATE TABLE notification_prefs (
   audience_kind TEXT NOT NULL,
@@ -456,7 +456,7 @@ CREATE TABLE dispatch_attempts (
 --   or neither is refused by position. `source` records which literal a row is.
 -- owner/writer: the outbox repository, called by adapters.mjs createMailer.send (nine route
 --         sites: server.mjs guardian sign-up, club e-mail challenge (the one `secrets` site),
---         reference request; m14/organisations.mjs 236/533/717/918; m23/contactRoutes.mjs:521;
+--         reference request; m14/organisations.mjs 236/533/717/918; domains/recruitment/lifecycle/contactRoutes.mjs:521;
 --         m13/enterprise.mjs:88) and by m13/delivery.mjs fakeSend; the mailer's `markDelivered`
 --         after the live provider call settles.
 -- lifecycle: append-only; never pruned; never deleted on player deletion; `seq` is the
@@ -897,7 +897,7 @@ CREATE INDEX ops_events_occurred_at ON ops_events (occurred_at);
 --   pending independent acceptance). Repository: repositories/safetyAudit.mjs (sourceChanges).
 -- source: db.sourceChanges (M18.1; imported and retired by 0013, array position → seq;
 --         db.sourceChanges is the read-only view).
--- owner/writer: m181/sourceChanges.mjs recordSourceChange — safetyAudit.sourceChanges.append
+-- owner/writer: domains/platform/sourceChanges.mjs recordSourceChange — safetyAudit.sourceChanges.append
 --         then safetyAudit.sourceChanges.trimTo(20000) (the cap deletes the OLDEST rows beyond
 --         20 000 in insertion order, the same splice the array had), both staged into the
 --         persistNow() that follows. Called from m15/passport.mjs only.

@@ -33,10 +33,10 @@ import { createVerificationProvider, facetFromProviderAnswer, PROVIDER_STATES } 
 import { M25_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../m25/errors.mjs';
 import { COMPLIANCE_AUDIT_ACTIONS } from '../../m25/audit.mjs';
 import { PERMISSIONS, can, FACETS } from '../../m24/shared.mjs';
-import { EVENT_REGISTRY } from '../../m182/eventRegistry.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
-import { TYPE_CATEGORY, CATEGORIES } from '../../m182/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../m182/migrations.mjs';
+import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
+import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
+import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
 import { openStore } from '../../store.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';

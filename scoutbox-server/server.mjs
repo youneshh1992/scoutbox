@@ -6,7 +6,7 @@
 // surface is designed so storage can swap to Postgres without changes.
 
 import express from 'express';
-import { installAsyncErrorForwarding } from './m181/asyncErrors.mjs';
+import { installAsyncErrorForwarding } from './domains/platform/asyncErrors.mjs';
 // PRE-M24 (PM-9): a rejected async handler answers 500 instead of ending the process.
 installAsyncErrorForwarding();
 
@@ -32,38 +32,38 @@ import { registerM14 } from './m14/index.mjs';
 import { registerM15 } from './m15/index.mjs';
 import { registerM16 } from './m16/index.mjs';
 import { registerM162 } from './m162/index.mjs';
-import { registerM17 } from './m17/index.mjs';
+import { registerM17 } from './domains/recruitment/rooms/index.mjs';
 import { registerM18 } from './m18/index.mjs';
 import { registerMatching } from './m19/index.mjs';
 import { registerAnalytics } from './m20/index.mjs';
 import { registerDevelopment } from './m21/index.mjs';
-import { registerM23, migrateM23 } from './m23/index.mjs';
+import { registerM23, migrateM23 } from './domains/recruitment/lifecycle/index.mjs';
 import { registerAgent } from './m24/index.mjs';
 import { registerCompliance } from './m25/index.mjs';
 import { registerTransactions } from './m26/index.mjs';
 import { registerIntegration } from './m27/index.mjs';
-import { registerOffers } from './m28/index.mjs';
-import { registerSigning } from './m29/index.mjs';
-import { registerJourneyRoutes } from './m23/journeyRoutes.mjs';
+import { registerOffers } from './domains/recruitment/offers/index.mjs';
+import { registerSigning } from './domains/recruitment/signings/index.mjs';
+import { registerJourneyRoutes } from './domains/recruitment/lifecycle/journeyRoutes.mjs';
 import { createVerificationProvider } from './m25/provider.mjs';
-import { createEvidenceProvider } from './m23/evidence.mjs';
+import { createEvidenceProvider } from './domains/recruitment/lifecycle/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './m16/combineShared.mjs';
-import { registerSourceChanges } from './m181/sourceChanges.mjs';
-import { audienceFor, EVENT_AUDIENCE } from './m181/eventAudience.mjs';
-import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './m181/rateLimit.mjs';
-import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, productionConfigProblems, saveDebounceMs } from './m181/capabilities.mjs';
+import { registerSourceChanges } from './domains/platform/sourceChanges.mjs';
+import { audienceFor, EVENT_AUDIENCE } from './domains/platform/eventAudience.mjs';
+import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './domains/platform/rateLimit.mjs';
+import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, productionConfigProblems, saveDebounceMs } from './domains/platform/capabilities.mjs';
 import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
-import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './m182/eventRegistry.mjs';
-import { runMigrations, schemaReport, SCHEMA_VERSION } from './m182/migrations.mjs';
-import { registerNotificationPrefs } from './m182/notificationPrefs.mjs';
-import { registerAudit } from './m182/audit.mjs';
-import { createFaultLayer } from './m182/faults.mjs';
-import { httpContractMiddleware } from './m182/httpContract.mjs';
-import { integrityReport, integritySummary } from './m182/integrity.mjs';
+import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './domains/platform/eventRegistry.mjs';
+import { runMigrations, schemaReport, SCHEMA_VERSION } from './domains/platform/migrations.mjs';
+import { registerNotificationPrefs } from './domains/platform/notificationPrefs.mjs';
+import { registerAudit } from './domains/platform/audit.mjs';
+import { createFaultLayer } from './domains/platform/faults.mjs';
+import { httpContractMiddleware } from './domains/platform/httpContract.mjs';
+import { integrityReport, integritySummary } from './domains/platform/integrity.mjs';
 import { orgPlayerView, guardianChildView, guardianSelfView, adminGuardianView } from './views/playerViews.mjs';
-import { validateContactReply } from './m23/contact.mjs';
-import { icsLocal as trialIcsLocal, icsText as trialIcsText } from './m23/trial.mjs';
+import { validateContactReply } from './domains/recruitment/lifecycle/contact.mjs';
+import { icsLocal as trialIcsLocal, icsText as trialIcsText } from './domains/recruitment/lifecycle/trial.mjs';
 import { requestInstrumentation } from './m13/enterprise.mjs';
 import { totpValid, timingSafeEqStr } from './m13/shared.mjs';
 import { hashCode } from './repositories/oneTimeCodes.mjs';
@@ -155,7 +155,7 @@ function loadSnapshot() {
 }
 
 let saveTimer = null;
-const SAVE_DEBOUNCE_MS = saveDebounceMs(); // 2000 ms; shorter only in a test environment (m181/capabilities.mjs)
+const SAVE_DEBOUNCE_MS = saveDebounceMs(); // 2000 ms; shorter only in a test environment (domains/platform/capabilities.mjs)
 function persist() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {

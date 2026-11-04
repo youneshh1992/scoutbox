@@ -12,8 +12,8 @@ The last four recruitment blobs, written by two modules, become the nine tables 
 
 | Blob | Writer | Tables | Rows today |
 |---|---|---|---|
-| `signingPackages` (the M23 P7 signing workflow over an accepted offer revision) | `m29/index.mjs` — start, draft edits, document, ready, party completion, executed document, complete, cancel, void, supersede, T&S void, player deletion | `signing_packages`, `signing_revisions`, `signing_documents`, `signing_revision_parties`, `signing_history` | seed only |
-| `signings` (completed signings; legacy standing rows from before P7) | `m29/index.mjs` `recordCompletedSigning` (`:285`); the legacy route in `server.mjs` only reads today | `signings`, `signing_parties` | seed only |
+| `signingPackages` (the M23 P7 signing workflow over an accepted offer revision) | `domains/recruitment/signings/index.mjs` — start, draft edits, document, ready, party completion, executed document, complete, cancel, void, supersede, T&S void, player deletion | `signing_packages`, `signing_revisions`, `signing_documents`, `signing_revision_parties`, `signing_history` | seed only |
+| `signings` (completed signings; legacy standing rows from before P7) | `domains/recruitment/signings/index.mjs` `recordCompletedSigning` (`:285`); the legacy route in `server.mjs` only reads today | `signings`, `signing_parties` | seed only |
 | `followUps` (91/182/365-day milestones after a signing) | `m12/operations.mjs` — the sweep schedules and marks due, the report route completes, admin moves a due date | `follow_ups` | seed only |
 | `outcomeReports` (the club's report at a milestone; player/guardian confirm or dispute) | `m12/operations.mjs` `:69`, `:97` | `outcome_reports`, `outcome_report_confirmations` | seed only |
 
@@ -73,7 +73,7 @@ S8a–S8c.
 - *Explicit writes* (recommended): `signingPackages.start / revise / markReady / completeParty / complete / cancel /
   void / supersede`, `signings.record`, `followUps.schedule / markDue / complete / moveDueDate`,
   `outcomeReports.file / respond` — each a repository function that writes its rows inside the route's unit of work,
-  and the in-memory records become true read-only views. The 43 mutation sites in `m29/index.mjs` and the 8 in
+  and the in-memory records become true read-only views. The 43 mutation sites in `domains/recruitment/signings/index.mjs` and the 8 in
   `m12/operations.mjs` are converted to those calls. About two to three days. S8d then becomes the first domain
   built the way the end-state proof will rebuild the others, and is not migrated twice. Reads stay in memory for
   now; moving them to SQL is the end-state proof's job on recruitment as a whole.
@@ -107,7 +107,7 @@ Decision taken: **explicit writes** (the recommended model). `repositories/signi
 redactPlayer`, `signings.record`, `followUps.schedule / patch`, `outcomeReports.file / addConfirmation`); each call
 writes its rows inside the route's unit of work (or its own transaction outside one) and refreshes the record it
 returns; the four collections on `db` are read-only views, and every record a view or a call hands out is a read-only
-proxy (`written through its domain repository`). `m29/index.mjs` and `m12/operations.mjs` call the repository; no
+proxy (`written through its domain repository`). `domains/recruitment/signings/index.mjs` and `m12/operations.mjs` call the repository; no
 route edits a record in place. Migration `0018_signings_follow_ups` creates the ten tables (`signing_parties` is
 separate from `signings`, so ten, not nine) and broadens `idempotency_keys` to `signing_packages`.
 

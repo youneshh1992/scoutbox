@@ -34,12 +34,12 @@ import {
 } from '../m24/shared.mjs';
 import { MINOR_PATHWAY_PRODUCTION_ENABLED } from '../m25/policy.mjs';
 import { opportunityBoardFor } from '../m12/journeys.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
-import { plainShared, normaliseClientKey, payloadFingerprint } from '../m23/contact.mjs';
-import { chainHead, isFormal } from '../m23/decision.mjs';
-import { roomRole, roomCan } from '../m17/shared.mjs';
+import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
+import { plainShared, normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
+import { chainHead, isFormal } from '../domains/recruitment/lifecycle/decision.mjs';
+import { roomRole, roomCan } from '../domains/recruitment/rooms/shared.mjs';
 import { TERMINAL_STATUSES } from '../m26/transaction.mjs';
-import { scheduleView as trialScheduleView, deriveWorkflowState, TRIAL_WORKFLOW_LABELS, isLegacyTrial } from '../m23/trial.mjs';
+import { scheduleView as trialScheduleView, deriveWorkflowState, TRIAL_WORKFLOW_LABELS, isLegacyTrial } from '../domains/recruitment/lifecycle/trial.mjs';
 import {
   SURFACES, SURFACE_NAMES, SURFACE_DISCLOSURE, POLICY_ACTION_FOR_SURFACE,
   DISCLOSURE_KEYS, DISCLOSURE_DEFAULT, CONTACT_ROUTING_MODES, RULE_ORDER, DENY_CODES,

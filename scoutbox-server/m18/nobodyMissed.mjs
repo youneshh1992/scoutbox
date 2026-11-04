@@ -22,8 +22,8 @@ import {
   NOBODY_MISSED_STATES, NM_DISMISSAL_REASONS, NM_SORTS, orderNobodyMissed,
   EVIDENCE_REQUIREMENTS, POSITIONS, TRUST_BANDS, LIMITS, clampPage, briefIsLiveOn,
 } from './shared.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
-import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
+import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
+import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
 
 export function registerNobodyMissed(ctx) {
   const {
@@ -35,7 +35,7 @@ export function registerNobodyMissed(ctx) {
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerNobodyMissed needs recruitmentReads (signings) from the data layer');
 
   const now = () => Date.now();
-  // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
+  // M18.1: the shared limiter and its named policy (see domains/platform/rateLimit.mjs).
   const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
   const SUPPRESS_MIN = 3;
 

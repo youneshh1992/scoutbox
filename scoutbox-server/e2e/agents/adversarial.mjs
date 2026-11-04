@@ -56,9 +56,9 @@ import {
 import { TRANSACTION_STATUSES, DOCUMENT_TYPES, DOCUMENT_VISIBILITY, TIMELINE_AUDIENCES } from '../../m26/transaction.mjs';
 import { isAdult, ageOn, parseDob } from '../../domain.mjs';
 import { agentClientBasis } from '../../m27/integration.mjs';
-import { EVENT_REGISTRY } from '../../m182/eventRegistry.mjs';
-import { SCHEMA_VERSION, MIGRATIONS } from '../../m182/migrations.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
+import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { SCHEMA_VERSION, MIGRATIONS } from '../../domains/platform/migrations.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { openStore } from '../../store.mjs';
 import { hashPassword } from '../../adapters.mjs';
 
@@ -489,7 +489,7 @@ section('AC/live — rev conflicts: two answers to one question cannot both land
 
 section('AB/live — idempotency: a replay is an answer, not a second act');
 {
-  // The key travels in the BODY as `clientKey` (m23/contact.mjs normaliseClientKey,
+  // The key travels in the BODY as `clientKey` (domains/recruitment/lifecycle/contact.mjs normaliseClientKey,
   // used by m24/m25/m26 alike), not in an Idempotency-Key header.
   const k = key();
   const body = { playerId: 'pl-martin', scope: ['employment'], jurisdiction: 'ENG', clientKey: k };

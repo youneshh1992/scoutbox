@@ -35,9 +35,9 @@ import {
   parseTrialDate, isTrialDate, trialReportDueAt, validateTrialDetails, chooseTrialSlot,
   TRIAL_REPORT_WINDOW_MS, TRIAL_DATE_SYNTAX, TRIAL_DETAIL_LIMITS, TRIAL_REPORT_FIELDS,
 } from '../../domain.mjs';
-import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../m182/notificationPrefs.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
-import { SCHEMA_VERSION } from '../../m182/migrations.mjs';
+import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
+import { SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 
 const PORT = 6200 + Math.floor(Math.random() * 200);

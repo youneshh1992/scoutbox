@@ -34,9 +34,9 @@
  *                                   no rule, no policy and no consent row.
  */
 
-import { guardRev, bumpRev, revMeta } from '../m181/concurrency.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
-import { normaliseClientKey, payloadFingerprint } from '../m23/contact.mjs';
+import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
+import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
+import { normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
 import { isExpiredAt, isAbsent, parseDateOrInstant } from '../temporal.mjs';
 import { hasVerLevel } from '../m14/shared.mjs';
 import { effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can } from '../m24/shared.mjs';

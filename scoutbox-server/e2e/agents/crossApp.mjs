@@ -47,16 +47,16 @@ import {
   agreementGrantsAccess, effectiveAgreementStatus, PERMISSIONS, can,
   MAX_OPPORTUNITY_SHARES, SCOPES,
 } from '../../m24/shared.mjs';
-import { CONTACT_MODES, CONTACT_STATUSES, contactIntegrity, contactView, contactMilestone } from '../../m23/contact.mjs';
-import { M23_ERROR_HTTP, httpStatusFor } from '../../m23/errors.mjs';
+import { CONTACT_MODES, CONTACT_STATUSES, contactIntegrity, contactView, contactMilestone } from '../../domains/recruitment/lifecycle/contact.mjs';
+import { M23_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
 import { M26_ERROR_HTTP } from '../../m26/errors.mjs';
 import { TERMINAL_STATUSES } from '../../m26/transaction.mjs';
-import { TRIAL_SCHEDULE_VIEWERS } from '../../m23/trial.mjs';
+import { TRIAL_SCHEDULE_VIEWERS } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { POLICY_ACTIONS, MINOR_PATHWAY_PRODUCTION_ENABLED } from '../../m25/policy.mjs';
-import { EVENT_REGISTRY, EVENT_NAMES } from '../../m182/eventRegistry.mjs';
-import { TYPE_CATEGORY, CATEGORIES } from '../../m182/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../m182/migrations.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
+import { EVENT_REGISTRY, EVENT_NAMES } from '../../domains/platform/eventRegistry.mjs';
+import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
+import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { openStore } from '../../store.mjs';
 
 const PORT = 7100 + Math.floor(Math.random() * 200);
@@ -1012,7 +1012,7 @@ section('AP — every route P5.6E added, swept by actor and by id');
 
 section('AQ — the five events P5.6E emits, checked against the registry');
 {
-  const registry = readFileSync(path.join(ROOT, 'scoutbox-server', 'm182', 'eventRegistry.mjs'), 'utf8');
+  const registry = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'platform', 'eventRegistry.mjs'), 'utf8');
   const serverSrc = readFileSync(path.join(ROOT, 'scoutbox-server', 'server.mjs'), 'utf8');
   const NEW_EVENTS = ['representation_disclosure_changed', 'contact_agent_routed', 'agent_opportunity_shared', 'transaction_handoff_invited', 'transaction_handoff_withdrawn'];
   for (const name of NEW_EVENTS) {
@@ -1069,7 +1069,7 @@ section('AR — authority is re-derived at READ time, not cached at grant time')
   // category. None of them is smuggled into `compliance`, which is mandatory and
   // cannot be turned off — a club's message and an agent's tip are not safety
   // notices, and dressing them as one would take a real choice away.
-  const prefs = readFileSync(path.join(ROOT, 'scoutbox-server', 'm182', 'notificationPrefs.mjs'), 'utf8');
+  const prefs = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'platform', 'notificationPrefs.mjs'), 'utf8');
   const catOf = (t) => (prefs.match(new RegExp(`\\b${t}:\\s*'([a-z_]+)'`)) ?? [])[1] ?? null;
   const mandatory = new Set([...prefs.matchAll(/(\w+):\s*\{[^}]*mandatory:\s*true/g)].map((m) => m[1]));
   for (const t of ['representation_disclosure', 'representation_contact', 'representation_opportunity', 'representation_transaction']) {

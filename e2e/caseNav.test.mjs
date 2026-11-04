@@ -34,7 +34,7 @@ const MAX = ds.CASE_NAV_MAX_SUBS;
 ok(MAX === 5, `the hard rule is five (${MAX})`);
 
 // The tabs the SERVER still emits (notification targets + journey next-action
-// tabs, m23/journeyRoutes.mjs + m23/journeyModel.mjs). Each must resolve.
+// tabs, domains/recruitment/lifecycle/journeyRoutes.mjs + domains/recruitment/lifecycle/journeyModel.mjs). Each must resolve.
 const SERVER_ROOM_TABS = ['overview', 'contact', 'trial', 'offer', 'signing', 'assessments', 'decision'];
 const SERVER_CLIENT_TABS = ['contacts', 'offers'];
 

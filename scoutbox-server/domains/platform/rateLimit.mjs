@@ -90,7 +90,7 @@ export const RATE_LIMIT_POLICY = {
   // runaway client. The response limit is per ACTOR (a player or guardian),
   // so a busy club cannot exhaust a recipient's quota. The per-recipient
   // cooldown (one delivered in-app contact per org+player per 72 h unless
-  // answered) is separate and deterministic — see m23/contact.mjs.
+  // answered) is separate and deterministic — see domains/recruitment/lifecycle/contact.mjs.
   contact_draft: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Contact drafts created or edited.' },
   contact_send: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Contacts sent to players and guardians.' },
   contact_external_record: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'External contacts recorded.' },
@@ -101,7 +101,7 @@ export const RATE_LIMIT_POLICY = {
   // and evidence links stay inside the organisation and are bounded only
   // against a runaway client. Responses are per ACTOR, so a busy club cannot
   // exhaust a family's quota. The per-player invitation cooldown is
-  // deterministic and separate — see m23/trialRoutes.mjs.
+  // deterministic and separate — see domains/recruitment/lifecycle/trialRoutes.mjs.
   trial_invite: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Trial invitations sent to players and guardians.' },
   trial_schedule: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Trial schedules proposed, revised or cancelled.' },
   trial_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Trial schedule confirmations, declines and cancellations by a player or guardian.' },

@@ -34,13 +34,13 @@ import { selectPolicyVersion, ruleStatusAt, isRegulatoryMinor, evaluateMinorGate
 import { consentSufficiency } from '../../m25/conflict.mjs';
 import { effectiveHandoffStatus, HANDOFF_TTL_MS } from '../../m27/integration.mjs';
 import { effectiveStatus as licenceEffectiveStatus } from '../../m14/shared.mjs';
-import { validateExternalRecord, cooldownFor, CONTACT_LIMITS } from '../../m23/contact.mjs';
-import { parseInstant as trialParseInstant, validateTimezone, validateSessionInput, validateScheduleInput, localDay, icsLocal, TRIAL_LIMITS } from '../../m23/trial.mjs';
+import { validateExternalRecord, cooldownFor, CONTACT_LIMITS } from '../../domains/recruitment/lifecycle/contact.mjs';
+import { parseInstant as trialParseInstant, validateTimezone, validateSessionInput, validateScheduleInput, localDay, icsLocal, TRIAL_LIMITS } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { resolveWindow, previousWindow } from '../../m20/metrics.mjs';
 import { briefIsLiveOn, validateRecruitmentBrief } from '../../m18/shared.mjs';
 import { normWhen } from '../../m15/shared.mjs';
 import { parseDate as devParseDate } from '../../m21/shared.mjs';
-import { SCHEMA_VERSION } from '../../m182/migrations.mjs';
+import { SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 
 const PORT = 7600 + Math.floor(Math.random() * 150);

@@ -33,7 +33,7 @@ These are the product's first principles for under-18s. Everything below refines
 
 **Who receives contact, trials and offers (the recipient rule)**
 - One function, `resolveContactRecipient`, serves Contact, Trial and Offer. It returns the adult player, or the verified guardian for a minor, or a refusal: `CONTACT_GUARDIAN_REQUIRED`, `CONTACT_RECIPIENT_UNAVAILABLE` or `CONTACT_BLOCKED`. Guardian routing and the trial and contact rules are reused, never duplicated. (M23_P6)
-- A valid guardian route is a guardian record that exists, lists the child, and has passed the identity and disclaimer checks. If more than one guardian qualifies, the child's primary `guardianId` is chosen. (code, m23/contact.mjs)
+- A valid guardian route is a guardian record that exists, lists the child, and has passed the identity and disclaimer checks. If more than one guardian qualifies, the child's primary `guardianId` is chosen. (code, domains/recruitment/lifecycle/contact.mjs)
 - An offer's recipient is worked out when the offer is issued, and again each time the recipient reads or answers it. (M23_P6)
 
 **Offers to minors: the pathway is closed (fail closed)**
@@ -107,11 +107,11 @@ These are the product's first principles for under-18s. Everything below refines
 
 *Spot-checked against the code on 3 November 2026. ✓ enforced, ✗ not found, ≠ differs from the old docs.*
 
-- ✓ The minor offer pathway is closed for every jurisdiction: `scoutbox-server/m28/offer.mjs:116`. Issue is refused at `m28/index.mjs:449`, and readiness shows the blocker at `m28/index.mjs:205`.
-- ✓ The recipient rule returns the guardian route or `CONTACT_GUARDIAN_REQUIRED`, and the block refusal is checked first: `m23/contact.mjs:250`.
+- ✓ The minor offer pathway is closed for every jurisdiction: `scoutbox-server/domains/recruitment/offers/offer.mjs:116`. Issue is refused at `domains/recruitment/offers/index.mjs:449`, and readiness shows the blocker at `domains/recruitment/offers/index.mjs:205`.
+- ✓ The recipient rule returns the guardian route or `CONTACT_GUARDIAN_REQUIRED`, and the block refusal is checked first: `domains/recruitment/lifecycle/contact.mjs:250`.
 - ✓ An unknown age is never adult (`domain.mjs:76`), and age uses UTC getters with `NaN` for a bad date (`temporal.mjs:339`).
-- ✓ Unregistered events default to `org_private`: `m182/eventRegistry.mjs:559`.
-- ✓ `security_account` is mandatory: `m182/notificationPrefs.mjs:78`.
+- ✓ Unregistered events default to `org_private`: `domains/platform/eventRegistry.mjs:559`.
+- ✓ `security_account` is mandatory: `domains/platform/notificationPrefs.mjs:78`.
 - ✓ `/auth/logout` revokes the session id on the server: `server.mjs:764`.
-- ✓ Production boot refuses the Box Cam test provider and a missing media secret: `m181/capabilities.mjs:137`, `:144`.
-- ✓ Development logins exist only outside production, by one rule (`devLoginsEnabled`, `m181/capabilities.mjs`). A production boot with `ALLOW_DEV_LOGINS` set is refused (`DEV_LOGIN_IN_PRODUCTION`).
+- ✓ Production boot refuses the Box Cam test provider and a missing media secret: `domains/platform/capabilities.mjs:137`, `:144`.
+- ✓ Development logins exist only outside production, by one rule (`devLoginsEnabled`, `domains/platform/capabilities.mjs`). A production boot with `ALLOW_DEV_LOGINS` set is refused (`DEV_LOGIN_IN_PRODUCTION`).

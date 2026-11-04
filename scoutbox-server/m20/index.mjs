@@ -30,8 +30,8 @@ import {
 } from './metrics.mjs';
 import { buildReportingContext, buildDashboard, ROOM_PRIORITIES } from './dashboard.mjs';
 import { STALL_THRESHOLDS, DEFAULT_STALL_DAYS } from './timeSeries.mjs';
-import { SOURCE_CONTEXTS } from '../m17/shared.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
+import { SOURCE_CONTEXTS } from '../domains/recruitment/rooms/shared.mjs';
+import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
 import { metrics } from '../m13/enterprise.mjs';
 
 /** The metrics whose rows a director can page through. */

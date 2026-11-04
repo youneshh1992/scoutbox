@@ -14,7 +14,7 @@
  *   room_decision_assessment_ids                                                        → db.roomDecisions
  *   room_evidence_states                                                                → db.roomEvidenceState
  *
- * EVERY FIELD IS A TYPED COLUMN with the vocabulary CHECKs of the domain rules (m17/shared.mjs, m23/decision.mjs,
+ * EVERY FIELD IS A TYPED COLUMN with the vocabulary CHECKs of the domain rules (domains/recruitment/rooms/shared.mjs, domains/recruitment/lifecycle/decision.mjs,
  * m13/shared.mjs, m27/integration.mjs). There is no `absent_keys_json`, `offtype_json`, `extra_json` or `raw_json`.
  * A record the columns cannot hold — an unknown field at any level included — is REFUSED with its id, at a repository
  * write (the unit rolls back) and at a snapshot write (the save rolls back). An `undefined` field is an absent one;
@@ -46,8 +46,8 @@ import { describe, isPlainObject, nonEmpty, ids } from './recruitment.mjs';
 import {
   ROOM_STATUSES, ROOM_PRIORITIES, SOURCE_CONTEXTS, TASK_STATES, LINKED_RESOURCE_TYPES, EVIDENCE_REVIEW_STATES,
   RECOMMENDATIONS, LIMITS, CASE_STAGES, CASE_PRIORITIES, CASE_DECISION_OUTCOMES, CASE_APPROVAL_STATES,
-} from '../m17/shared.mjs';
-import { DECISION_OUTCOMES, DECISION_KINDS, DECISION_STATES, EVIDENCE_REF_KINDS, DECISION_LIMITS } from '../m23/decision.mjs';
+} from '../domains/recruitment/rooms/shared.mjs';
+import { DECISION_OUTCOMES, DECISION_KINDS, DECISION_STATES, EVIDENCE_REF_KINDS, DECISION_LIMITS } from '../domains/recruitment/lifecycle/decision.mjs';
 import { CURRENCIES, BUDGET_LINE_KINDS, BUDGET_SCHEDULES } from '../m13/shared.mjs';
 import { HANDOFF_STATUSES } from '../m27/integration.mjs';
 
@@ -1253,7 +1253,7 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
   };
   /**
    * Who may open a case or a Room, as SQL over `recruitment_cases c`: the rule of `caseAccess` (m12/scouting.mjs) and,
-   * for a Room, of `roomRole` (m17/shared.mjs) being non-null. A recruitment lead opens everything.
+   * for a Room, of `roomRole` (domains/recruitment/rooms/shared.mjs) being non-null. A recruitment lead opens everything.
    */
   function access({ userId, isLead }, { room }) {
     if (isLead) return { sql: '1', params: [] };

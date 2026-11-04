@@ -74,7 +74,7 @@ other worktrees (`/home/user/scoutbox` on `claude/desktop-project-migration-wyk3
   `persistNow()` writes synchronously and is called from many paths, including minting an id
   (`server.mjs:581`) and broadcasting a chat message (`server.mjs:521` via `broadcast`).
 - Boot order (`server.mjs:115-235`): `buildSeed()` → `loadSnapshot()` replaces the seed when a
-  snapshot exists → `runMigrations()` (`m182/migrations.mjs`, `SCHEMA_VERSION 2308`) →
+  snapshot exists → `runMigrations()` (`domains/platform/migrations.mjs`, `SCHEMA_VERSION 2308`) →
   `attachDataLayer()` → `integrityReport()` → `db.x ??= []` normalisation → module
   registration → listen. The integrity report moved after the data layer at S3: it reads
   `db.orgs`, which is a table-backed view from the cutover on, so taken earlier it would
@@ -99,7 +99,7 @@ other worktrees (`/home/user/scoutbox` on `claude/desktop-project-migration-wyk3
 | Unbounded growth, e.g. profile views appended to the ledger (1)            | TRUE    | `ledgerAppend` `server.mjs:595-602`; ledger is never pruned; `exposureEvents` capped at 50k, `sourceChanges` at 20k, most audit arrays uncapped |
 | No indexes; session lookup scans the sessions array (1)                    | TRUE at review; FIXED by S2 | was `sessionFor` (`db.sessions.find`); now `sessions.byToken` → `WHERE token_hash = ?` on the primary key (`repositories/sessions.mjs`) |
 | ~130 collections created with `db.x ??= []`, untyped nested records (1)    | TRUE    | 136 in `storeContract.mjs`; `server.mjs:202-235` and each module's `migrateMxx` |
-| Migration registry migrates JSON shapes, not tables (1)                    | TRUE    | `m182/migrations.mjs:83-622`; now complemented by `repositories/database.mjs` which migrates tables |
+| Migration registry migrates JSON shapes, not tables (1)                    | TRUE    | `domains/platform/migrations.mjs:83-622`; now complemented by `repositories/database.mjs` which migrates tables |
 | Fresh install starts with seeded demo data (1)                             | TRUE    | `server.mjs:115` `buildSeed()`; plan step S13 separates production init from demo seeding |
 | `GET /org/players` builds a view of every player, no pagination (2)        | TRUE    | `server.mjs:1890` region (full `db.players` filter + sort) |
 | `scryptSync` on the main thread; 20 MB JSON bodies; CV module in JS (2)    | TRUE    | `adapters.mjs:19-23`; `server.mjs:305`; `m22/` |
@@ -772,7 +772,7 @@ DECISIONs, some already in force:
 
 ## 8. Schema versioning
 
-- **Two registries, one order.** `m182/migrations.mjs` (`SCHEMA_VERSION 2308`) migrates the
+- **Two registries, one order.** `domains/platform/migrations.mjs` (`SCHEMA_VERSION 2308`) migrates the
   JSON snapshot in memory and records itself in `db.schema`. `repositories/database.mjs`
   migrates tables with SQL and records each migration id in the `data_migrations (id TEXT
   PRIMARY KEY, applied_at INTEGER)` table in the database itself, so a restored file carries
@@ -953,7 +953,7 @@ the route and response half is named with its plan step.
     but the sender filters on `org_user`** (`adapters.mjs:111`): staff never receive pushes.
     Defect recorded in `push_tokens` header; S7 registers tokens by `(audience_kind,
     audience_id)`.
-11. **Ledger truncation on signing rollback** (`m29/index.mjs:618`) is the one violation of
+11. **Ledger truncation on signing rollback** (`domains/recruitment/signings/index.mjs:618`) is the one violation of
     append-only; S8's `signings` repository compensates with a reversal row instead.
 12. **Admin IDV toggle updates only the first `idvQueue` row per guardian**
     (`server.mjs:4226`); `idv_queue` keeps every row and S6 updates by id.
@@ -1045,7 +1045,7 @@ catalogue; shadow-then-cutover per domain; no integer keys; no triggers or views
 Code read for this design (line numbers refer to this branch): `scoutbox-server/server.mjs`
 (boot 115–235, ids 579–583, sessions 639–669, player view 1052, requests 2068, players list
 1890, deletion 3978–4023, admin 4219–4294), `store.mjs`, `seed.mjs`, `domain.mjs`,
-`adapters.mjs`, `storeContract.mjs`, `m182/migrations.mjs`, `m12/*` (passport, scouting,
+`adapters.mjs`, `storeContract.mjs`, `domains/platform/migrations.mjs`, `m12/*` (passport, scouting,
 journeys, operations, shared), `m13/*` (shared, imports, enterprise, delivery, suitability,
 insight, planning, groups, transitions, mfa), `m14/*`, `m15/*`, `m16/*`, `m17/*`, `m18/*`,
 `m19/*`, `m21/*`, `m22/*`, `m23/*`, `m24/*`–`m29/*`, `repositories/*`, the frontend type

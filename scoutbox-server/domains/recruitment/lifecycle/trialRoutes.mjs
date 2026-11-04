@@ -33,13 +33,13 @@
  * re-derived from the live player, organisation, guardian records and clock.
  */
 
-import { visibleToOrg, chooseTrialSlot } from '../domain.mjs';
-import { roomRole, ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../m17/shared.mjs';
-import { guardRev, bumpRev, expectedRevOf } from '../m181/concurrency.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
-import { PROVIDERS } from '../m16/drills.mjs';
-import { STATE_COPY as CV_STATE_COPY } from '../m22/policy.mjs';
-import { COMBINE_DISABLED_REASON } from '../m22/eligibility.mjs';
+import { visibleToOrg, chooseTrialSlot } from '../../../domain.mjs';
+import { roomRole, ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../rooms/shared.mjs';
+import { guardRev, bumpRev, expectedRevOf } from '../../platform/concurrency.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { PROVIDERS } from '../../../m16/drills.mjs';
+import { STATE_COPY as CV_STATE_COPY } from '../../../m22/policy.mjs';
+import { COMBINE_DISABLED_REASON } from '../../../m22/eligibility.mjs';
 import { canTransitionRecruitmentCase, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from './lifecycle.mjs';
 import { sendDomainError, httpStatusFor } from './errors.mjs';
 import { resolveContactRecipient, CONTACT_LIMITS } from './contact.mjs';

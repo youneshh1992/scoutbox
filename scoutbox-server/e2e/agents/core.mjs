@@ -52,10 +52,10 @@ import {
 } from '../../m24/shared.mjs';
 import { M24_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../m24/errors.mjs';
 import { AGENT_AUDIT_ACTIONS } from '../../m24/audit.mjs';
-import { EVENT_REGISTRY } from '../../m182/eventRegistry.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
-import { TYPE_CATEGORY, CATEGORIES } from '../../m182/notificationPrefs.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../m182/migrations.mjs';
+import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
+import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
+import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
 import { openStore } from '../../store.mjs';
 

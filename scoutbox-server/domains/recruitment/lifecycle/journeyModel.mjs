@@ -27,12 +27,12 @@
  * NO SCORE. There is no readiness number, probability or progress percentage.
  */
 
-import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES } from '../m17/shared.mjs';
+import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES } from '../rooms/shared.mjs';
 import { LIFECYCLE_ACTIONS, LIFECYCLE_REOPENABLE } from './lifecycle.mjs';
 import { CONTACT_EVIDENCE_STATUSES } from './contact.mjs';
 import { deriveWorkflowState } from './trial.mjs';
-import { liveRevision, effectiveRevisionStatus, currentRevision as offerCurrentRevision, offerStatus, liveStatus as offerLiveStatus } from '../m28/offer.mjs';
-import { effectiveStatus as signingEffectiveStatus, currentRevision as signingCurrentRevision, isLive as signingIsLive } from '../m29/signing.mjs';
+import { liveRevision, effectiveRevisionStatus, currentRevision as offerCurrentRevision, offerStatus, liveStatus as offerLiveStatus } from '../offers/offer.mjs';
+import { effectiveStatus as signingEffectiveStatus, currentRevision as signingCurrentRevision, isLive as signingIsLive } from '../signings/signing.mjs';
 
 export const JOURNEY_POLICY_VERSION = 1;
 
@@ -281,7 +281,7 @@ export const NEXT_ACTIONS = Object.freeze(Object.assign(Object.create(null), {
 }));
 export const NEXT_ACTION_CODES = Object.freeze(Object.keys(NEXT_ACTIONS));
 
-/** Room-role rank, the same ladder m17/shared.mjs and lifecycle.mjs use. */
+/** Room-role rank, the same ladder domains/recruitment/rooms/shared.mjs and lifecycle.mjs use. */
 const ROLE_RANK = { viewer: 0, contributor: 1, room_lead: 2, recruitment_admin: 3 };
 /** The role each non-lifecycle permission needs (the domain routes remain the authority; this only says whether to offer the act). */
 const PERMISSION_MIN_ROLE = Object.freeze({ contact_write: 'room_lead', trial_write: 'room_lead', assess: 'contributor', decide: 'room_lead', offer_write: 'room_lead', signing_manage: 'room_lead', signing_lead: 'recruitment_admin' });

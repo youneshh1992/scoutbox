@@ -26,9 +26,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openStore } from '../../store.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { isAdult } from '../../domain.mjs';
-import { signingIntegrity, signingConsistency, signingCorrupt, SIGNING_CORRUPTION, effectiveStatus, canCompleteParty, completionGate, requiredPartiesFor, canStart } from '../../m29/signing.mjs';
+import { signingIntegrity, signingConsistency, signingCorrupt, SIGNING_CORRUPTION, effectiveStatus, canCompleteParty, completionGate, requiredPartiesFor, canStart } from '../../domains/recruitment/signings/signing.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -796,7 +796,7 @@ section('X — rate limits: one budget per logical actor and action; safety clos
   const pol = RATE_LIMIT_POLICY;
   ok(pol.signing_start?.scope === 'org' && pol.signing_document_write?.scope === 'org' && pol.signing_closure?.scope === 'org' && pol.signing_party_completion?.scope === 'actor' && pol.signing_safety_closure?.scope === 'org', 'X1 five signing policies with the intended scopes');
   neg(pol.signing_safety_closure.max >= pol.signing_closure.max, 'X2 cancel/void (safety) have at least the completion budget, on their own key — completion traffic cannot exhaust a safety closure');
-  const src = readFileSync(path.join(HERE, '..', '..', 'm29', 'index.mjs'), 'utf8');
+  const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'signings', 'index.mjs'), 'utf8');
   neg(/limited\('signing_safety_closure'/.test(src.slice(src.indexOf('function closeRoute'), src.indexOf("orgRouter.post('/signings/:id/cancel'"))) && /limited\('signing_closure'/.test(src.slice(src.indexOf("orgRouter.post('/signings/:id/complete'"), src.indexOf('function closeRoute'))), 'X3 (source) cancel/void consume signing_safety_closure; complete consumes signing_closure');
   neg(/rateKey: `org:\$\{req\.orgUser\.id\}`/.test(src) && /rateKey: `player:\$\{req\.player\.id\}`/.test(src), 'X4 (source) party completion is keyed per user for the club and per player — no alias between the two kinds');
   ok(Object.values(pol).every((p) => Number.isFinite(p.max) && p.max > 0 && Number.isFinite(p.windowMs) && p.windowMs > 0 && typeof p.note === 'string'), 'X5 every policy has a finite budget, a window and a note');
@@ -826,11 +826,11 @@ section('Z — the P7 invariants, re-proven at this tip');
   const rp = requiredPartiesFor({ recipientType: 'player', playerId: 'p1', orgId: 'o1' });
   neg(rp.length === 2 && rp.map((p) => p.partyType).join() === 'PLAYER,CLUB_SIGNATORY', 'ZD/ZE the required parties are explicit; completion needs both (gate, above)');
   neg(canCompleteParty({ id: 'x', orgId: 'o1', playerId: 'p1', status: 'READY', currentRevisionId: 'r', createdAt: T0, revisions: [{ id: 'r', status: 'READY', readyAt: T0, document: { sha256: SHA_A }, requiredParties: rp }] }, { partyType: 'PLAYER', actorKind: 'org', actorId: 'agent', revisionId: 'r', documentSha256: SHA_A }, T0 + 1).error === 'SIGNING_NOT_PERMITTED', 'ZF an agent cannot sign as the player');
-  const src = readFileSync(path.join(HERE, '..', '..', 'server.mjs'), 'utf8') + readFileSync(path.join(HERE, '..', '..', 'm29', 'index.mjs'), 'utf8');
-  const files = ['m29/index.mjs', 'm29/signing.mjs', 'm28/index.mjs', 'm23/journey.mjs', 'm23/lifecycle.mjs', 'server.mjs', 'm14/index.mjs', 'm17/index.mjs', 'm12/index.mjs'].map((f) => [f, readFileSync(path.join(HERE, '..', '..', f), 'utf8')]);
-  neg(files.filter(([f, s]) => !f.startsWith('repositories/') && /db\.signings\.push\(|signings\.record\(/.test(s)).map(([f]) => f).join() === 'm29/index.mjs' && files.filter(([, s]) => /contractStatus\s*=\s*'under_contract'|players\.update\([^\n]*contractStatus: 'under_contract'/.test(s)).map(([f]) => f).join() === 'm29/index.mjs', 'ZK/ZM the ONE writer of db.signings (S8d: through signings.record) and of under_contract (drift guard; S4a: written through players.update)');
-  neg(!/status\s*=\s*'signed'/.test(files.find(([f]) => f === 'm29/index.mjs')[1]), 'ZL m29 never assigns signed');
-  neg(!/trustScore|computeTrustScore/.test(files.find(([f]) => f === 'm29/index.mjs')[1] + files.find(([f]) => f === 'm29/signing.mjs')[1]), 'ZP the signing module never touches the Trust Score');
+  const src = readFileSync(path.join(HERE, '..', '..', 'server.mjs'), 'utf8') + readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'signings', 'index.mjs'), 'utf8');
+  const files = ['domains/recruitment/signings/index.mjs', 'domains/recruitment/signings/signing.mjs', 'domains/recruitment/offers/index.mjs', 'domains/recruitment/lifecycle/journey.mjs', 'domains/recruitment/lifecycle/lifecycle.mjs', 'server.mjs', 'm14/index.mjs', 'domains/recruitment/rooms/index.mjs', 'm12/index.mjs'].map((f) => [f, readFileSync(path.join(HERE, '..', '..', f), 'utf8')]);
+  neg(files.filter(([f, s]) => !f.startsWith('repositories/') && /db\.signings\.push\(|signings\.record\(/.test(s)).map(([f]) => f).join() === 'domains/recruitment/signings/index.mjs' && files.filter(([, s]) => /contractStatus\s*=\s*'under_contract'|players\.update\([^\n]*contractStatus: 'under_contract'/.test(s)).map(([f]) => f).join() === 'domains/recruitment/signings/index.mjs', 'ZK/ZM the ONE writer of db.signings (S8d: through signings.record) and of under_contract (drift guard; S4a: written through players.update)');
+  neg(!/status\s*=\s*'signed'/.test(files.find(([f]) => f === 'domains/recruitment/signings/index.mjs')[1]), 'ZL m29 never assigns signed');
+  neg(!/trustScore|computeTrustScore/.test(files.find(([f]) => f === 'domains/recruitment/signings/index.mjs')[1] + files.find(([f]) => f === 'domains/recruitment/signings/signing.mjs')[1]), 'ZP the signing module never touches the Trust Score');
   void src;
 }
 

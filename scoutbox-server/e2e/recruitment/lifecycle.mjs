@@ -22,14 +22,14 @@ import {
   RECRUITMENT_LIFECYCLE_POLICY_VERSION, canTransitionRecruitmentCase,
   derivedConditions, availableActions, toAnalyticsRecruitmentStage,
   NULL_EVIDENCE_PROVIDER,
-} from '../../m23/lifecycle.mjs';
-import { JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../../m23/journey.mjs';
+} from '../../domains/recruitment/lifecycle/lifecycle.mjs';
+import { JOURNEY_REQUIRED_STORES, JOURNEY_OPTIONAL_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
 import {
   ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, roomStatusForStage,
   STATUS_EVIDENCE_REQUIRED, adoptionStatusForStage, PRO_STAGES, GRASSROOTS_STAGES,
   ALL_REASON_CODES,
-} from '../../m17/shared.mjs';
-import { M23_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../../m23/errors.mjs';
+} from '../../domains/recruitment/rooms/shared.mjs';
+import { M23_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../../domains/recruitment/lifecycle/errors.mjs';
 import { guaranteeFor, MIGRATION_GUARANTEED, MODULE_GUARANTEED } from '../../storeContract.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../../m20/funnels.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
@@ -1442,7 +1442,7 @@ section('Y — the error contract: one table, no default, nothing internal in th
   // here would pass forever while the module grew a code nobody mapped — which
   // is exactly what the ternary chain this replaced did, silently, by falling
   // through to 400.
-  const M23_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'm23');
+  const M23_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'domains', 'recruitment', 'lifecycle');
   // errors.mjs is swept too since P3 moved `sendDomainError` — the one place
   // that PRODUCES `LIFECYCLE_INTERNAL` — into it. Its table rows are
   // `CODE: status,` and do not match a producing shape, so the sweep still

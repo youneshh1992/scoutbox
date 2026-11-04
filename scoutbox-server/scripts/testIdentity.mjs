@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.mjs';
 import { parseTrustProxy } from '../httpTrust.mjs';
-import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, liveMailConfigured, livePushConfigured, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, SAVE_DEBOUNCE_DEFAULT_MS, saveDebounceMs, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../m181/capabilities.mjs';
+import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, liveMailConfigured, livePushConfigured, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, SAVE_DEBOUNCE_DEFAULT_MS, saveDebounceMs, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../domains/platform/capabilities.mjs';
 import { createBilling, createIdvProvider, createStorage } from '../adapters.mjs';
 import { buildSeed } from '../seed.mjs';
 import { freePort } from './testPort.mjs';
@@ -122,7 +122,7 @@ await test('req.ip: an invalid value behaves like nothing trusted', async () => 
   assert.ok(isLoopback(await ipSeenBy(parseTrustProxy('fly').setting, { 'x-forwarded-for': '203.0.113.9' })));
 });
 
-// ------------------------------------------------- m181/capabilities.mjs
+// ------------------------------------------------- domains/platform/capabilities.mjs
 const PROD = { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'a-long-production-admin-key-0123' };
 await test('boot: a test IdP secret on a production instance is fatal', () => {
   const problems = productionConfigProblems({ env: { ...PROD, TEST_IDP_SECRET: 'copied-from-dev' }, trustWeightsTotal: 100 });

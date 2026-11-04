@@ -1,7 +1,7 @@
 /**
  * M23 P5.6B — the Agent domain's contribution to the operational audit feed.
  *
- * Same row shape as m182/audit.mjs and the same rule: what happened and who
+ * Same row shape as domains/platform/audit.mjs and the same rule: what happened and who
  * did it, never what was said. Reason text, dispute text and licence
  * references never reach this projection; the subject is named only if the
  * organisation may currently see the player.

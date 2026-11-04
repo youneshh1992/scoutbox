@@ -20,7 +20,7 @@
  * claims no legal effect beyond the workflow and evidence it records (§103).
  */
 
-import { parseStrictDateOnly, parseInstant, readInstant, isExpiredAt, isOrderedInterval, DAY_MS } from '../temporal.mjs';
+import { parseStrictDateOnly, parseInstant, readInstant, isExpiredAt, isOrderedInterval, DAY_MS } from '../../../temporal.mjs';
 
 export const SIGNING_POLICY_VERSION = 1;
 

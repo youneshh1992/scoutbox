@@ -674,7 +674,7 @@ export interface SigningDocumentFile { document: SigningDocumentView; file: { mi
 export interface SigningActInput { expectedRev: number; clientKey?: string; reason?: string }
 
 // ---------------------------------------------------------------- M23 P8 journey
-// The server-derived journey block (m23/journeyModel.mjs). The client renders
+// The server-derived journey block (domains/recruitment/lifecycle/journeyModel.mjs). The client renders
 // it and never computes a stage or a next action.
 export type JourneyStage = 'watching' | 'review' | 'contact' | 'trial' | 'assessment' | 'decision' | 'offer' | 'acceptance' | 'signing' | 'signed' | 'paused' | 'ended';
 export type JourneyTab = 'overview' | 'contact' | 'trial' | 'assessments' | 'decision' | 'offer' | 'signing';

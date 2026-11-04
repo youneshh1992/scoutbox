@@ -33,13 +33,13 @@ import {
   LIFECYCLE_TERMINAL, LIFECYCLE_REOPENABLE, RECRUITMENT_LIFECYCLE_POLICY_VERSION,
   availableActions, derivedConditions, NULL_EVIDENCE_PROVIDER,
 } from './lifecycle.mjs';
-import { ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../m17/shared.mjs';
+import { ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../rooms/shared.mjs';
 import { contactMilestone, contactIntegrity } from './contact.mjs';
 import { trialMilestone, trialIntegrity } from './trial.mjs';
 // M23 P6 — the Offer domain's own status derivation (lazy expiry), so the
 // journey never reads a stored status an expired revision has outgrown.
-import { offerStatus as canonicalOfferStatus, liveStatus as canonicalLiveStatus, offerIntegrity, offerCaseConsistency, offerCaseCorrupt } from '../m28/offer.mjs';
-import { effectiveStatus as signingEffectiveStatus, currentRevision as signingCurrentRevision, signingIntegrity, signingConsistency, signingCorrupt, isLive as signingIsLive, findParty } from '../m29/signing.mjs';
+import { offerStatus as canonicalOfferStatus, liveStatus as canonicalLiveStatus, offerIntegrity, offerCaseConsistency, offerCaseCorrupt } from '../offers/offer.mjs';
+import { effectiveStatus as signingEffectiveStatus, currentRevision as signingCurrentRevision, signingIntegrity, signingConsistency, signingCorrupt, isLive as signingIsLive, findParty } from '../signings/signing.mjs';
 // M23 P8 — the journey MODEL: stage, completed stages, current resources, the
 // server-derived next action, the validator and the timeline visibility table.
 import {

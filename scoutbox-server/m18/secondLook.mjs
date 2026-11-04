@@ -21,7 +21,7 @@ import {
   trustLevelChanges, POLICY, LIMITS, clampPage, safeM18Projection,
   CLUB_SIDE_REASONS, REASON_CHANGE_MAP,
 } from './shared.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
+import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
 
 export function registerSecondLook(ctx) {
   const {
@@ -33,7 +33,7 @@ export function registerSecondLook(ctx) {
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerSecondLook needs recruitmentReads (signings) from the data layer');
 
   const now = () => Date.now();
-  // M18.1: the shared limiter and its named policy (see m181/rateLimit.mjs).
+  // M18.1: the shared limiter and its named policy (see domains/platform/rateLimit.mjs).
   const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
   // ------------------------------------------------------ change collection

@@ -6,7 +6,7 @@
 // blind SERVER-SIDE: another scout's report is not delivered to you until
 // your own is submitted. "Not observed" is never averaged as zero.
 
-import { roomRole, roomCan, CASE_PRIORITIES, CASE_DECISION_OUTCOMES } from '../m17/shared.mjs';
+import { roomRole, roomCan, CASE_PRIORITIES, CASE_DECISION_OUTCOMES } from '../domains/recruitment/rooms/shared.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
 const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];

@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { SCHEMA_VERSION } from '../../m182/migrations.mjs';
+import { SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));

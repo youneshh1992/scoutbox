@@ -37,15 +37,15 @@
  */
 
 import { createHash } from 'node:crypto';
-import { buildShared } from '../m12/shared.mjs';
-import { roomRole, roomCan } from '../m17/shared.mjs';
-import { guardRev, expectedRevOf } from '../m181/concurrency.mjs';
-import { rateLimitedBody } from '../m181/rateLimit.mjs';
-import { canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../m23/lifecycle.mjs';
-import { playerLevelAfterSigning } from '../domain.mjs';
-import { offerStatus as canonicalOfferStatus, effectiveRevisionStatus } from '../m28/offer.mjs';
+import { buildShared } from '../../../m12/shared.mjs';
+import { roomRole, roomCan } from '../rooms/shared.mjs';
+import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../lifecycle/lifecycle.mjs';
+import { playerLevelAfterSigning } from '../../../domain.mjs';
+import { offerStatus as canonicalOfferStatus, effectiveRevisionStatus } from '../offers/offer.mjs';
 // M23 P8 §54 — the ONE current-package rule (live → completed → newest terminal).
-import { currentSigningForOffer } from '../m23/journeyModel.mjs';
+import { currentSigningForOffer } from '../lifecycle/journeyModel.mjs';
 import { sendSigningError, notFound, documentNotFound } from './errors.mjs';
 import {
   SIGNING_POLICY_VERSION, SIGNING_STATUSES, SIGNING_STATUS_LABELS, SIGNING_METHODS, SIGNING_LIMITS, PARTY_TYPES,
@@ -107,7 +107,7 @@ export function registerSigning(rawCtx) {
   const keyRow = (pkg, act, k) => keyList(pkg, act).find((x) => x && x.key === k) ?? null;
   const addKey = (pkg, act, entry) => sp.addKey(pkg.id, act, entry);
   const safe = (label, fn) => { try { return fn(); } catch (e) { console.error(`SIGNING side_effect_failed ${label}: ${e?.message ?? e}`); return undefined; } };
-  /** bumpRev's rule (m181/concurrency.mjs) written through the repository: rev + 1, revAt, revBy, updatedAt. */
+  /** bumpRev's rule (domains/platform/concurrency.mjs) written through the repository: rev + 1, revAt, revBy, updatedAt. */
   const touch = (pkg, req, at, by = req?.orgUser ?? null) => sp.patch(pkg.id, { rev: (Number.isInteger(pkg.rev) ? pkg.rev : 1) + 1, revAt: at, revBy: by ? { userId: by.id ?? null, name: by.name ?? null } : null, updatedAt: at });
 
   // ------------------------------------------------------------- lookups

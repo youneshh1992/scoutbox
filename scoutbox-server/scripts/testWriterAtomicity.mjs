@@ -9,7 +9,7 @@
 // not a throw placed before the statement) — is answered as a failure, leaves
 // nothing of the operation in the database or in memory, and the retry lands
 // the whole operation. The seams are the development fault layer's
-// `internal:<step>` rules (m182/faults.mjs), which cannot exist in production.
+// `internal:<step>` rules (domains/platform/faults.mjs), which cannot exist in production.
 // Nothing here touches DATA_DIR or any real data. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';

@@ -5,7 +5,7 @@
 -- on m24 records (opportunity shares; the recruitment-case handoff is on
 -- recruitment_cases and belongs to 02_recruitment.sql).
 --
--- Source collections (created by m182/migrations.mjs): agentProfiles,
+-- Source collections (created by domains/platform/migrations.mjs): agentProfiles,
 -- agencyAffiliations, representationAgreements (step 2305, lines 391-393);
 -- tsReviewers, jurisdictionPolicies, regulatoryReviews, regulatoryConsents,
 -- complianceContexts (step 2306, lines 471-475); agentTransactions,
@@ -18,7 +18,7 @@
 -- the shared `idempotency_keys` table (02_recruitment.sql): one row per
 -- (owner table, owner record id, action, key, fp) — the mapping comment of each
 -- table names the action values it uses. `fp` is payloadFingerprint(): the
--- sorted-key JSON of the request parts (m23/contact.mjs:337), not a hash.
+-- sorted-key JSON of the request parts (domains/recruitment/lifecycle/contact.mjs:337), not a hash.
 --
 -- Actor objects `by {kind, userId, name, role?, orgId?}` become by_kind /
 -- by_id / by_name / by_role / by_org_id. Kinds written by these modules:
@@ -92,7 +92,7 @@ CREATE INDEX ts_reviewer_history_reviewer ON ts_reviewer_history(reviewer_id, at
 
 -- -----------------------------------------------------------------------------
 -- source: db.jurisdictionPolicies   created at m25/index.mjs:220 (proposed via
---         POST /ts/compliance/policies) and m182/migrations.mjs:482 (seeded
+--         POST /ts/compliance/policies) and domains/platform/migrations.mjs:482 (seeded
 --         from m25/policyVersions.mjs SEEDED_POLICY_VERSIONS)
 -- owner/writer: m25   lifecycle: status proposed -> published (dual control:
 --         approver must differ from proposer). Never deleted or edited after
@@ -340,7 +340,7 @@ CREATE INDEX agent_profile_history_profile ON agent_profile_history(profile_id, 
 -- -----------------------------------------------------------------------------
 -- source: db.agencyAffiliations   created at m24/index.mjs:81 (bootstrap first
 --         member as admin), :374 (POST /org/agent/agency/team) and
---         m182/migrations.mjs:405 (step 2305: every existing agency user)
+--         domains/platform/migrations.mjs:405 (step 2305: every existing agency user)
 -- owner/writer: m24   lifecycle: active while started_at <= now and ended_at is
 --         null/future (affiliationActive); ended via /team/:userId/end (sets
 --         ended_at + ended_reason, also soft-removes the org user). Never deleted.
@@ -401,7 +401,7 @@ CREATE INDEX agency_affiliation_history_affiliation ON agency_affiliation_histor
 
 -- -----------------------------------------------------------------------------
 -- source: db.representationAgreements   created at m24/index.mjs:598
---         (POST /org/agent/clients/request) and m182/migrations.mjs:432
+--         (POST /org/agent/clients/request) and domains/platform/migrations.mjs:432
 --         (step 2305: legacy mirror of every db.representations row)
 -- owner/writer: m24 (request / terminate / client confirm, decline, terminate,
 --         dispute / sharing+disclosure); m25 (dispute resolution by attributed
@@ -623,7 +623,7 @@ CREATE TABLE org_agency_jurisdictions (
 -- source: db.regulatoryReviews   created at m25/index.mjs:283 (createReview:
 --         facetNeedsReview, representationDisputed, declare/conflict routes,
 --         createApproachReview, supersede) ; m26/index.mjs:779/792 (via
---         compliance.createReview) ; m182/migrations.mjs:497/510 (step 2306)
+--         compliance.createReview) ; domains/platform/migrations.mjs:497/510 (step 2306)
 -- owner/writer: m25 (tsRouter start/resolve/cancel/supersede; context close
 --         cancels open items); m26 creates via the seam.
 -- lifecycle: PENDING -> IN_REVIEW -> APPROVED | REJECTED; PENDING/IN_REVIEW ->

@@ -37,15 +37,15 @@ import {
   EXTERNAL_CHANNELS, CONTACT_LIMITS, CONTACT_EVIDENCE_STATUSES, canContactAction, contactRoleAllows,
   validateContactContent, validateContactReply, normaliseClientKey, resolveContactRecipient,
   validateExternalRecord, cooldownFor, contactIntegrity, contactView, contactMilestone, plainShared,
-} from '../../m23/contact.mjs';
-import { JOURNEY_REQUIRED_STORES } from '../../m23/journey.mjs';
-import { canTransitionRecruitmentCase } from '../../m23/lifecycle.mjs';
-import { M23_ERROR_HTTP, httpStatusFor } from '../../m23/errors.mjs';
-import { EVENT_REGISTRY } from '../../m182/eventRegistry.mjs';
-import { RATE_LIMIT_POLICY } from '../../m181/rateLimit.mjs';
-import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../m182/migrations.mjs';
+} from '../../domains/recruitment/lifecycle/contact.mjs';
+import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
+import { canTransitionRecruitmentCase } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
+import { M23_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
+import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
+import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
-import { roomCan } from '../../m17/shared.mjs';
+import { roomCan } from '../../domains/recruitment/rooms/shared.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 

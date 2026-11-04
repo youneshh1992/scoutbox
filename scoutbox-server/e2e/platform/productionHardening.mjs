@@ -20,12 +20,12 @@ import { fileURLToPath } from 'node:url';
 
 import {
   expectedRevOf, revOf, bumpRev, revMeta,
-} from '../../m181/concurrency.mjs';
+} from '../../domains/platform/concurrency.mjs';
 import {
   RATE_LIMIT_POLICY, memoryRateLimitProvider, createRateLimiter, rateLimitedBody,
-} from '../../m181/rateLimit.mjs';
-import { AUDIENCES, EVENT_AUDIENCE, audienceFor, unclassifiedEvents } from '../../m181/eventAudience.mjs';
-import { buildCapabilityReport, productionConfigProblems } from '../../m181/capabilities.mjs';
+} from '../../domains/platform/rateLimit.mjs';
+import { AUDIENCES, EVENT_AUDIENCE, audienceFor, unclassifiedEvents } from '../../domains/platform/eventAudience.mjs';
+import { buildCapabilityReport, productionConfigProblems } from '../../domains/platform/capabilities.mjs';
 import { passportRevision, PROVENANCE, PROVENANCE_COPY } from '../../m15/shared.mjs';
 import { CHANGE_TYPES, CHANGE_COPY, changeFingerprint, normalizeMaterialChange } from '../../m18/shared.mjs';
 

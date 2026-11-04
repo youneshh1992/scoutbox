@@ -18,8 +18,8 @@
  * without Express, a database or a session.
  */
 
-import { ROOM_TRANSITIONS } from '../m17/shared.mjs';
-import { parseInstant, readInstant } from '../temporal.mjs';
+import { ROOM_TRANSITIONS } from '../rooms/shared.mjs';
+import { parseInstant, readInstant } from '../../../temporal.mjs';
 
 export const CONTACT_POLICY_VERSION = 1;
 
@@ -118,7 +118,7 @@ export const CONTACT_CASE_STATUSES = Object.freeze(['contact_planned', 'contacte
 // ------------------------------------------------------------ roles/actions
 
 /**
- * Who may do what. Mirrors M17's ranking; `roomCan` in m17/shared.mjs carries
+ * Who may do what. Mirrors M17's ranking; `roomCan` in domains/recruitment/rooms/shared.mjs carries
  * the same two actions so the Room's permission surface stays one table.
  *
  *   contact_view   viewer and above — Contact history is club memory

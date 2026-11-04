@@ -22,15 +22,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { SCHEMA_VERSION, MIGRATIONS } from '../../m182/migrations.mjs';
+import { SCHEMA_VERSION, MIGRATIONS } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
-import { ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED } from '../../m17/shared.mjs';
+import { ROOM_STATUSES, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED } from '../../domains/recruitment/rooms/shared.mjs';
 import {
   currentContactForCase, currentTrialForCase, currentOfferForCase, currentSigningForOffer, currentDecisionForCase, currentAssessmentForCase,
   validateRecruitmentJourney, JOURNEY_INTEGRITY_CODES, NEXT_ACTION_CODES,
-} from '../../m23/journeyModel.mjs';
-import { LIFECYCLE_ACTIONS, canTransitionRecruitmentCase, heldFromStatus, lifecycleTargetFor } from '../../m23/lifecycle.mjs';
-import { memoryRateLimitProvider } from '../../m181/rateLimit.mjs';
+} from '../../domains/recruitment/lifecycle/journeyModel.mjs';
+import { LIFECYCLE_ACTIONS, canTransitionRecruitmentCase, heldFromStatus, lifecycleTargetFor } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
+import { memoryRateLimitProvider } from '../../domains/platform/rateLimit.mjs';
 import { journeyEvidenceFunnel } from '../../m20/funnels.mjs';
 import { isAdult } from '../../domain.mjs';
 
@@ -1190,7 +1190,7 @@ section('Y — privacy sweep of every journey payload (§22, §62, §63)');
   neg(![S_ASSESS, S_OFFER_NOTE].some((w) => has(cn, w)), 'Y4 the club\'s own notifications carry no assessment or Offer note (they name acts, not content)');
   const tl = (await journey(K.RID)).history.entries;
   neg(tl.every((e) => !has(e, S_DEC) && !has(e, S_ASSESS)), 'Y5 the club timeline carries no rationale text');
-  const regs = readFileSync(path.join(ROOT, 'm182', 'eventRegistry.mjs'), 'utf8');
+  const regs = readFileSync(path.join(ROOT, 'domains', 'platform', 'eventRegistry.mjs'), 'utf8');
   const recruitmentEntries = regs.split(/\n  [a-z_]+: \{/).filter((e) => /domain: '(recruitment|room|contact|trial|offer|signing|decision|case|lifecycle)/.test(e));
   neg(recruitmentEntries.length > 10 && recruitmentEntries.every((e) => !/payload:\s*\[[^\]]*(note|reason|terms|sha256|rationale)[^\]]*\]/.test(e)), `Y6 no recruitment event payload names a note, a reason, terms or a digest (${recruitmentEntries.length} entries scanned)`);
 }
@@ -1200,30 +1200,30 @@ section('Z — boundary invariants, read from the source');
 {
   const src = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
-  neg(/resolveTo: resumeTargetFor/.test(src('m23/lifecycle.mjs')) && /ownEdge/.test(src('m23/lifecycle.mjs')), 'Z1 resumeCase resolves its target in the ONE validator (D-P81-1)');
-  neg(!/'offer_made'|'offer_accepted'|'contacted'|'trial_scheduled'/.test(strip(src('m17/shared.mjs')).match(/on_hold: \[[^\]]*\]/)?.[0] ?? ''), 'Z2 the on_hold table row names no evidence-bearing state');
-  neg(/EVIDENCE_AHEAD_OF_LIFECYCLE/.test(src('m23/journeyModel.mjs')) && /INTEGRITY_ERROR/.test(src('m23/journey.mjs')), 'Z3 drift detection and the blocked act are in the projector (D-P81-2)');
+  neg(/resolveTo: resumeTargetFor/.test(src('domains/recruitment/lifecycle/lifecycle.mjs')) && /ownEdge/.test(src('domains/recruitment/lifecycle/lifecycle.mjs')), 'Z1 resumeCase resolves its target in the ONE validator (D-P81-1)');
+  neg(!/'offer_made'|'offer_accepted'|'contacted'|'trial_scheduled'/.test(strip(src('domains/recruitment/rooms/shared.mjs')).match(/on_hold: \[[^\]]*\]/)?.[0] ?? ''), 'Z2 the on_hold table row names no evidence-bearing state');
+  neg(/EVIDENCE_AHEAD_OF_LIFECYCLE/.test(src('domains/recruitment/lifecycle/journeyModel.mjs')) && /INTEGRITY_ERROR/.test(src('domains/recruitment/lifecycle/journey.mjs')), 'Z3 drift detection and the blocked act are in the projector (D-P81-2)');
   neg(/SIGNING_ALREADY_RECORDED/.test(src('server.mjs')) && /rateLimit\.limited\('signing_closure', req\.org\.id\)/.test(src('server.mjs')), 'Z4 the legacy recording route dedupes and draws on the closure budget (D-P81-3)');
   neg(/REQUEST_PENDING/.test(src('server.mjs')) && /'trial_invite' : 'contact_send'/.test(src('server.mjs')), 'Z5 the legacy request route dedupes and draws on the canonical budgets (D-P81-4)');
-  neg(!/buckets\.clear\(\)/.test(src('m181/rateLimit.mjs')), 'Z6 the limiter never clears every bucket (D-P81-5)');
-  neg(/playerId: room\.playerId/.test(src('m17/rooms.mjs')) && /x\.playerId === playerId/.test(src('m13/insight.mjs')), 'Z7 a Room\'s evidence request is scoped to its player (D-P81-6)');
+  neg(!/buckets\.clear\(\)/.test(src('domains/platform/rateLimit.mjs')), 'Z6 the limiter never clears every bucket (D-P81-5)');
+  neg(/playerId: room\.playerId/.test(src('domains/recruitment/rooms/rooms.mjs')) && /x\.playerId === playerId/.test(src('m13/insight.mjs')), 'Z7 a Room\'s evidence request is scoped to its player (D-P81-6)');
   neg(/CHILD_NOT_FOUND/.test(src('server.mjs').slice(src('server.mjs').indexOf("guardianRouter.post('/block'"), src('server.mjs').indexOf("guardianRouter.post('/block'") + 900)), 'Z8 a guardian block names its child (D-P81-7)');
   neg(!/childIds\[0\]/.test(src('server.mjs').slice(src('server.mjs').indexOf("guardianRouter.post('/block'"), src('server.mjs').indexOf("guardianRouter.post('/block'") + 900)) || /childIds\.length === 1/.test(src('server.mjs')), 'Z8b never a silent first-child fallback');
   neg(['/players/:id/notes', '/players/:id/morelike', '/players/:id/proofpack'].every((r) => { const i = src('server.mjs').indexOf(`orgRouter.${r.includes('morelike') || r.includes('proofpack') ? 'get' : 'post'}('${r}'`); return i > 0 && /isBlocked\(p\.id, req\.org\.id\)/.test(src('server.mjs').slice(i, i + 700)); }), 'Z9 notes, morelike and proofpack check the block (D-P81-8)');
-  neg(/combineOrgMaySeeResults[\s\S]*db\.boxSessions/.test(src('m23/trialRoutes.mjs').slice(src('m23/trialRoutes.mjs').indexOf('function linkAuthorisation'))), 'Z10 consent is decided before the session lookup (D-P81-9)');
-  neg(/\['delivered', 'responded'\]\.includes\(c\.status\)/.test(src('m23/contactRoutes.mjs')), 'Z11 the send replay reports current truth (D-P81-10)');
-  neg(/DECISION_IDEMPOTENCY_CONFLICT/.test(src('m17/rooms.mjs')), 'Z12 the M17 decision replay fingerprints content (D-P81-11)');
-  neg(/pkg\.currentRevisionId \?\? null\)\) return res\.json\(\{ \.\.\.view\(\), idempotent: true/.test(src('m29/index.mjs')), 'Z13 a party signature key replays only for the current revision (D-P81-12)');
+  neg(/combineOrgMaySeeResults[\s\S]*db\.boxSessions/.test(src('domains/recruitment/lifecycle/trialRoutes.mjs').slice(src('domains/recruitment/lifecycle/trialRoutes.mjs').indexOf('function linkAuthorisation'))), 'Z10 consent is decided before the session lookup (D-P81-9)');
+  neg(/\['delivered', 'responded'\]\.includes\(c\.status\)/.test(src('domains/recruitment/lifecycle/contactRoutes.mjs')), 'Z11 the send replay reports current truth (D-P81-10)');
+  neg(/DECISION_IDEMPOTENCY_CONFLICT/.test(src('domains/recruitment/rooms/rooms.mjs')), 'Z12 the M17 decision replay fingerprints content (D-P81-11)');
+  neg(/pkg\.currentRevisionId \?\? null\)\) return res\.json\(\{ \.\.\.view\(\), idempotent: true/.test(src('domains/recruitment/signings/index.mjs')), 'Z13 a party signature key replays only for the current revision (D-P81-12)');
   neg(/USER_NOT_IN_ORG/.test(src('m12/scouting.mjs')), 'Z14 an M12 case task requires an org member (D-P81-13)');
-  neg(/lifecycle\.after_status/.test(src('m17/rooms.mjs')) && /offer\.respond\.after_persist/.test(src('m28/index.mjs')), 'Z15 the two P8.1 fault seams sit inside the writers they prove');
+  neg(/lifecycle\.after_status/.test(src('domains/recruitment/rooms/rooms.mjs')) && /offer\.respond\.after_persist/.test(src('domains/recruitment/offers/index.mjs')), 'Z15 the two P8.1 fault seams sit inside the writers they prove');
   neg(['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every((f) => /visibilitychange/.test(src(f)) && /'pageshow'/.test(src(f))), 'Z16 the three web apps re-read on focus, pageshow and visibility');
   neg(['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every((f) => { const s = strip(src(f)); const i = s.indexOf('api.onChange(session'); const block = s.slice(i, i + 400); return !/payload\.(status|to|from|stage)/.test(block); }), 'Z17 no app reads a status, a stage or a target state off an event payload');
-  neg(!/room\.status\s*=[^=]/.test(strip(src('m28/index.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('m29/index.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('m23/contactRoutes.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('m23/trialRoutes.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('m23/decisionRoutes.mjs'))), 'Z18 no domain assigns a lifecycle status');
+  neg(!/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/offers/index.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/signings/index.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/contactRoutes.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/trialRoutes.mjs'))) && !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/decisionRoutes.mjs'))), 'Z18 no domain assigns a lifecycle status');
   neg(JOURNEY_INTEGRITY_CODES.includes('EVIDENCE_AHEAD_OF_LIFECYCLE') && NEXT_ACTION_CODES.length === 24 && ROOM_STATUSES.length === 18 && SCHEMA_VERSION === 2308 && MIGRATIONS.length === 18, 'Z19 one new integrity code; still 24 next actions, 18 states, schema 2308, 18 migrations');
   neg(Object.keys(LIFECYCLE_ACTIONS).length === 19 && TERMINAL_ROOM_STATUSES.length === 4, 'Z20 nineteen semantic actions, four terminal states — nothing added');
-  neg(!/recruitmentJourneyStates|db\.recruitmentJourneys\b(?!`)/.test(strip(src('m23/journey.mjs')).replace(/there is no `db\.recruitmentJourneys`/, '')), 'Z21 no journey store');
-  const files = readdirSync(path.join(ROOT, 'm23')).filter((f) => f.endsWith('.mjs'));
-  neg(files.every((f) => !/contractStatus\s*=[^=]/.test(strip(src(`m23/${f}`)))), 'Z22 no m23 module writes a contract word');
+  neg(!/recruitmentJourneyStates|db\.recruitmentJourneys\b(?!`)/.test(strip(src('domains/recruitment/lifecycle/journey.mjs')).replace(/there is no `db\.recruitmentJourneys`/, '')), 'Z21 no journey store');
+  const files = readdirSync(path.join(ROOT, 'domains', 'recruitment', 'lifecycle')).filter((f) => f.endsWith('.mjs'));
+  neg(files.every((f) => !/contractStatus\s*=[^=]/.test(strip(src(`domains/recruitment/lifecycle/${f}`)))), 'Z22 no m23 module writes a contract word');
 }
 
 section('summary');

@@ -14,7 +14,7 @@
  *      duration family cannot see.
  */
 import { METRICS, wire, distribution, count, days, inWindow, DAY_MS } from './metrics.mjs';
-import { OPEN_ROOM_STATUSES, ROOM_STATUSES } from '../m17/shared.mjs';
+import { OPEN_ROOM_STATUSES, ROOM_STATUSES } from '../domains/recruitment/rooms/shared.mjs';
 import { transitions, openedStatus, firstReachedAt } from './funnels.mjs';
 
 /** The last moment anything at all was written to this room. */

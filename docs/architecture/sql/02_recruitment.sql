@@ -22,7 +22,7 @@
 --   row (removedAt) so attribution survives.
 -- * Actor tuples {kind, userId|id, name} become <x>_kind / <x>_id / <x>_name.
 -- * Optimistic-concurrency tuples rev / revAt / revBy{userId,name}|null
---   (m181/concurrency.mjs:84 bumpRev) become rev / rev_at / rev_by_user_id /
+--   (domains/platform/concurrency.mjs:84 bumpRev) become rev / rev_at / rev_by_user_id /
 --   rev_by_name. A missing rev reads as 1 today; the migration writes 1.
 -- * history[] arrays become <table>_history in the convention shape (by_kind /
 --   by_id / by_name). A case's history has one entry shape, m12/shared.mjs
@@ -72,8 +72,8 @@ CREATE INDEX idempotency_keys_owner_act_key ON idempotency_keys (owner_table, ow
 --   place at §4.3: typed and explicit; repositories/recruitmentCases.mjs, which generates this DDL)
 -- =============================================================================
 -- writers: m12/scouting.mjs (the M12 case, assignments, tasks, approvals, the sign-off decision, links),
---   m17/rooms.mjs (the Room facet, its status through applyStatus, tasks, assignments, links, reopen),
---   m23/decisionRoutes.mjs (the decision draft), m27/index.mjs (the transaction handoff), m13/planning.mjs (the
+--   domains/recruitment/rooms/rooms.mjs (the Room facet, its status through applyStatus, tasks, assignments, links, reopen),
+--   domains/recruitment/lifecycle/decisionRoutes.mjs (the decision draft), m27/index.mjs (the transaction handoff), m13/planning.mjs (the
 --   budget), the lifecycle writer's callers (m23, m28, m29) and the deletion unit (redactPlayer) — every one an
 --   explicit cases.create / cases.update. db.recruitmentCases is a read-only view.
 -- columns: every field is a typed column with its vocabulary CHECK (case stage, priority and decision outcome,
@@ -364,12 +364,12 @@ CREATE TABLE case_budget_actuals (
 -- writers: server.mjs issueRecruitmentRequest (requests.create; the Trial invitation's case link, recipient
 --   and client key in the same create), the respond routes, the report route, the urgent-report freeze and
 --   the deletion unit's tombstones (requests/trials.update), issueAcceptedTrial (trials.create),
---   m23/trialRoutes.mjs, m12/journeys.mjs (the trial day) and m12/operations.mjs (reminder markers) — every
+--   domains/recruitment/lifecycle/trialRoutes.mjs, m12/journeys.mjs (the trial day) and m12/operations.mjs (reminder markers) — every
 --   one an explicit repository operation inside the route's unit of work. db.requests and db.trials are
 --   read-only views.
 -- columns: every field is a typed column with its vocabulary CHECK (request type and status, the parties,
 --   the trial status, workflow, completion, attendance, session, consent, staff-check and day-event
---   vocabularies of m23/trial.mjs). No lossless side columns: a record the columns cannot hold is refused
+--   vocabularies of domains/recruitment/lifecycle/trial.mjs). No lossless side columns: a record the columns cannot hold is refused
 --   with its id. Actors {kind:'org', userId, name} | {kind, id, name} are <x>_kind / <x>_user_id /
 --   <x>_actor_id / <x>_name. A request's trialDetails is present exactly when its type is trial; its
 --   invitation key is invite_key / invite_fp. A trial's client keys are rows of trial_keys; its reminder
@@ -730,8 +730,8 @@ CREATE TABLE trial_day_status_events (
 -- room_comments, room_snapshots, room_decisions, room_evidence_states and their children — LIVE since migration
 --   0016_recruitment_cases (typed and explicit; repositories/recruitmentCases.mjs)
 -- =============================================================================
--- writers: m17/rooms.mjs (comments.create / update, snapshots.create, decisions.create / update for an advisory
---   recommendation and its supersession, evidenceStates.create / update) and m23/decisionRoutes.mjs (the formal
+-- writers: domains/recruitment/rooms/rooms.mjs (comments.create / update, snapshots.create, decisions.create / update for an advisory
+--   recommendation and its supersession, evidenceStates.create / update) and domains/recruitment/lifecycle/decisionRoutes.mjs (the formal
 --   decision, in one unit with the case move). db.roomComments, db.roomSnapshots, db.roomDecisions and
 --   db.roomEvidenceState are read-only views.
 -- columns: a decision's snapshot is the room_snapshots row it names (snapshot_id): only the id is stored and the
@@ -879,7 +879,7 @@ CREATE TABLE room_evidence_states (
 -- =============================================================================
 -- LIVE since migration 0017_recruitment_contacts_offers (amended in place on 3 November 2026, migration.md §4.3):
 -- repositories/recruitmentContactsOffers.mjs. Typed columns only, with the vocabulary and length CHECKs of
--- m23/contact.mjs and m28/offer.mjs; no absent_keys_json, offtype_json, extra_json or raw_json. Written by explicit
+-- domains/recruitment/lifecycle/contact.mjs and domains/recruitment/offers/offer.mjs; no absent_keys_json, offtype_json, extra_json or raw_json. Written by explicit
 -- repository operations (contacts.create / update / redactPlayer, offers.create / update / redactPlayer).
 -- The idempotency keys are columns of their owner (create/send/record on a contact, create on an offer) and the rows
 -- of offer_keys (an offer's issue, withdraw and revise lists); neither uses idempotency_keys.
@@ -889,7 +889,7 @@ CREATE TABLE room_evidence_states (
 -- pointer (current revision, response, supersedes, superseded by, discarded by; a response's, a receipt's and a key's
 -- revision) names a row of the same offer, checked by the repository's typer. contact_history and offer_history are
 -- RESTRICT (removed explicitly before their owner); the other children cascade.
--- source: db.recruitmentContacts (m23/contactRoutes.mjs), db.recruitmentOffers (m28/index.mjs).
+-- source: db.recruitmentContacts (domains/recruitment/lifecycle/contactRoutes.mjs), db.recruitmentOffers (domains/recruitment/offers/index.mjs).
 CREATE TABLE recruitment_contacts (
   id TEXT PRIMARY KEY,
   org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
@@ -1167,8 +1167,8 @@ CREATE INDEX offer_keys_key ON offer_keys (offer_id, act, key);
 -- revokedAt / voidedAt fields are dropped and reported by the migration. idempotency_keys' owner CHECK gains
 -- 'signing_packages'.
 -- =============================================================================
--- source: db.signingPackages  created at m29/index.mjs:404 (store guaranteed by migration m280_001, schema 2308)
--- owner/writer: m29/index.mjs (start, PATCH draft, document, ready, party completion, executed document, complete,
+-- source: db.signingPackages  created at domains/recruitment/signings/index.mjs:404 (store guaranteed by migration m280_001, schema 2308)
+-- owner/writer: domains/recruitment/signings/index.mjs (start, PATCH draft, document, ready, party completion, executed document, complete,
 --         cancel, void, supersede, T&S void, onPlayerDeleted)
 --         lifecycle: stored status DRAFT|READY|IN_PROGRESS|COMPLETED|CANCELLED|VOIDED; EXPIRED is derived from
 --         expires_at on live rows (never stored); SUPERSEDED is a REVISION status only; never deleted
@@ -1249,8 +1249,8 @@ CREATE INDEX signing_packages_offer_revision ON signing_packages (offer_revision
 CREATE INDEX signing_packages_org_player ON signing_packages (org_id, player_id);
 CREATE UNIQUE INDEX signing_packages_one_completed_per_offer ON signing_packages (offer_id) WHERE status = 'COMPLETED';
 
--- source: db.signingPackages[].revisions[]  created at m29/index.mjs:397 (revision 1) and :701 (supersede)
--- owner/writer: m29/index.mjs   lifecycle: DRAFT -> READY -> IN_PROGRESS -> COMPLETED | CANCELLED | VOIDED | SUPERSEDED; never deleted
+-- source: db.signingPackages[].revisions[]  created at domains/recruitment/signings/index.mjs:397 (revision 1) and :701 (supersede)
+-- owner/writer: domains/recruitment/signings/index.mjs   lifecycle: DRAFT -> READY -> IN_PROGRESS -> COMPLETED | CANCELLED | VOIDED | SUPERSEDED; never deleted
 -- mapping: id -> id (spr-<n>)   revisionNumber -> revision_number   status -> status
 --   createdAt -> created_at   createdBy -> created_by_user_id, created_by_name, created_by_role
 --   readyAt -> ready_at   readyBy -> ready_by_user_id, ready_by_name, ready_by_role
@@ -1294,8 +1294,8 @@ CREATE TABLE signing_revisions (
   UNIQUE (package_id, position)
 ) STRICT;
 
--- source: db.signingPackages[].revisions[].document and .executedDocument  created at m29/index.mjs:181 (storeDocument)
--- owner/writer: m29/index.mjs (attach on DRAFT — re-attaching REPLACES the object; executed document on READY/IN_PROGRESS)
+-- source: db.signingPackages[].revisions[].document and .executedDocument  created at domains/recruitment/signings/index.mjs:181 (storeDocument)
+-- owner/writer: domains/recruitment/signings/index.mjs (attach on DRAFT — re-attaching REPLACES the object; executed document on READY/IN_PROGRESS)
 --         lifecycle: one 'signing' and one 'executed' per revision; the vault row (ver_evidence) is never removed
 -- mapping: id -> id (sgd-<n> | sgx-<n>)   kind (which field) -> kind   evidenceId -> evidence_id (ver_evidence(id), file 05, no FK)
 --   sha256 -> sha256 (the digest every party confirms)   filename -> filename   mime -> mime   bytes -> bytes   label -> label (<= 120)
@@ -1319,8 +1319,8 @@ CREATE TABLE signing_documents (
   UNIQUE (revision_id, kind)
 ) STRICT;
 
--- source: db.signingPackages[].revisions[].requiredParties[]  created at m29/signing.mjs:113 (requiredPartiesFor), completed at m29/index.mjs:537
--- owner/writer: m29/index.mjs completeParty   lifecycle: PENDING -> COMPLETED; a superseded revision keeps its parties as evidence
+-- source: db.signingPackages[].revisions[].requiredParties[]  created at domains/recruitment/signings/signing.mjs:113 (requiredPartiesFor), completed at domains/recruitment/signings/index.mjs:537
+-- owner/writer: domains/recruitment/signings/index.mjs completeParty   lifecycle: PENDING -> COMPLETED; a superseded revision keeps its parties as evidence
 -- mapping: partyType -> party_type   forEntityId -> for_entity_id (players(id) | guardians(id) | orgs(id) by party_type; polymorphic, no FK)
 --   forPlayerId -> for_player_id   status -> status   completedAt -> completed_at
 --   completedBy {kind,id,name} -> completed_by_kind, completed_by_id, completed_by_name (name NULL after subject removal for player rows)
@@ -1355,8 +1355,8 @@ CREATE TABLE signing_revision_parties (
 ) STRICT;
 CREATE INDEX signing_revision_parties_entity ON signing_revision_parties (party_type, for_entity_id);
 
--- source: db.signingPackages[].history[]  created at m29/index.mjs:76 hist()
--- owner/writer: m29/index.mjs   lifecycle: append-only; recipient view filters /draft|note|internal/ and hides org names;
+-- source: db.signingPackages[].history[]  created at domains/recruitment/signings/index.mjs:76 hist()
+-- owner/writer: domains/recruitment/signings/index.mjs   lifecycle: append-only; recipient view filters /draft|note|internal/ and hides org names;
 --         subject removal nulls by.name on player entries
 -- mapping: id -> id (aud-<n>)   at -> at   by {kind,id,name} -> by_kind, by_id, by_name   action -> action   detail -> detail_json
 CREATE TABLE signing_history (
@@ -1376,10 +1376,10 @@ CREATE INDEX signing_history_package_at ON signing_history (package_id, at);
 -- =============================================================================
 -- signings  (the completed signing record: canonical completion or legacy recording)
 -- =============================================================================
--- source: db.signings  created ONLY at m29/index.mjs:273 (recordCompletedSigning; shapes from m29/signing.mjs:471
---         completedSigningRecord and the legacy literal at m29/index.mjs:268); rows older than M29 carry the legacy
+-- source: db.signings  created ONLY at domains/recruitment/signings/index.mjs:273 (recordCompletedSigning; shapes from domains/recruitment/signings/signing.mjs:471
+--         completedSigningRecord and the legacy literal at domains/recruitment/signings/index.mjs:268); rows older than M29 carry the legacy
 --         shape without method/contract/package fields
--- owner/writer: m29/index.mjs recordCompletedSigning (also appends the ledger row, issues the invoice through the
+-- owner/writer: domains/recruitment/signings/index.mjs recordCompletedSigning (also appends the ledger row, issues the invoice through the
 --         billing adapter, sets players.level/contractStatus/availability/timeline and orgs.squad)
 --         lifecycle: immutable; never deleted; kept whole on subject removal INCLUDING player_name (known gap)
 -- mapping: id -> id (sign-<n>)   playerId -> player_id   playerName -> player_name (snapshot, retained after deletion)
@@ -1437,8 +1437,8 @@ CREATE UNIQUE INDEX signings_one_per_package ON signings (signing_package_id) WH
 CREATE UNIQUE INDEX signings_one_per_offer ON signings (offer_id) WHERE offer_id IS NOT NULL;
 CREATE UNIQUE INDEX signings_one_legacy_per_org_player ON signings (org_id, player_id) WHERE signing_package_id IS NULL;
 
--- source: db.signings[].parties[]  created at m29/signing.mjs:482 (completedSigningRecord)
--- owner/writer: m29/index.mjs recordCompletedSigning   lifecycle: immutable; canonical rows only
+-- source: db.signings[].parties[]  created at domains/recruitment/signings/signing.mjs:482 (completedSigningRecord)
+-- owner/writer: domains/recruitment/signings/index.mjs recordCompletedSigning   lifecycle: immutable; canonical rows only
 -- mapping: partyType -> party_type   method -> method   completedAt -> completed_at   byKind -> by_kind
 -- notes: a provenance SUMMARY of signing_revision_parties at completion; never a name.
 CREATE TABLE signing_parties (
@@ -1528,18 +1528,18 @@ CREATE TABLE outcome_report_confirmations (
 -- not tables:
 --   * In-memory / test-only state read by these modules: db.deliveryFailInject (contact/trial/decision failure
 --     injection), the SCOUTBOX_TEST_CLOCK header clock, the development fault layer (faults.shouldFail),
---     rate-limit buckets (m181/rateLimit), SSE broadcasts and event registries, integrity logs.
+--     rate-limit buckets (domains/platform/rateLimit.mjs), SSE broadcasts and event registries, integrity logs.
 --   * Code registries referenced by id: PROVIDERS (m16/drills.mjs, Box Cam providers incl. testOnly), the M16.2
 --     trust-score component registry (room_snapshots.trust_component_levels_json keys), COMBINE_PROTOCOLS
 --     (room_snapshot_source_refs 'combine_result' strings), ROOM_STATUSES / ROOM_TRANSITIONS /
---     STATUS_EVIDENCE_REQUIRED / REASON_CODES / RECOMMENDATIONS / SOURCE_CONTEXTS / TASK_STATES (m17/shared.mjs),
---     LIFECYCLE_ACTIONS (m23/lifecycle.mjs), CONTACT_* / TRIAL_* / DECISION_* / OFFER_* / SIGNING_* vocabularies and
+--     STATUS_EVIDENCE_REQUIRED / REASON_CODES / RECOMMENDATIONS / SOURCE_CONTEXTS / TASK_STATES (domains/recruitment/rooms/shared.mjs),
+--     LIFECYCLE_ACTIONS (domains/recruitment/lifecycle/lifecycle.mjs), CONTACT_* / TRIAL_* / DECISION_* / OFFER_* / SIGNING_* vocabularies and
 --     limits, OUTCOME_MAP, MINOR_*_PATHWAY_ENABLED policy tables, HANDOFF_TTL_MS, MILESTONES (3m/6m/12m).
 --   * Derived values never stored: case.stage when a Room exists (stageForRoomStatus), room health / readiness /
 --     funnel / needs-attention, trial `not_recorded` attendance, deriveWorkflowState (stored copy is
 --     integrity-checked only), trial report deadline (trialReportDueAt), offer / signing EXPIRED, handoff
 --     'expired', contact cooldown, offer liveRevision / liveStatus, signing summaryForOffer, the recruitment
---     journey projection (m23/journey.mjs) and the evidence provider's answers (m23/evidence.mjs), follow-up
+--     journey projection (domains/recruitment/lifecycle/journey.mjs) and the evidence provider's answers (domains/recruitment/lifecycle/evidence.mjs), follow-up
 --     outcomeState, budget scenario totals (computeScenarioTotals), every `honest` / `note` disclaimer sentence.
 --   * Stores in OTHER files that these tables point at: channels, ledger, outbox (03); evidence, assessments,
 --     vacancies, combine_requests, evidence_suggestions (04); ver_evidence (05); agent_transactions,

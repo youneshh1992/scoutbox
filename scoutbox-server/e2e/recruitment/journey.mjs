@@ -18,15 +18,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { SCHEMA_VERSION, MIGRATIONS } from '../../m182/migrations.mjs';
+import { SCHEMA_VERSION, MIGRATIONS } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
-import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES } from '../../m17/shared.mjs';
+import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES } from '../../domains/recruitment/rooms/shared.mjs';
 import {
   JOURNEY_STAGES, PIPELINE_STAGES, canonicalStageFor, completedStagesFor, nextActionFor, NEXT_ACTION_CODES, NEXT_ACTIONS,
   currentContactForCase, currentTrialForCase, currentOfferForCase, currentSigningForOffer, currentDecisionForCase, currentAssessmentForCase,
   playerNextActionFor, playerStageFor, validateRecruitmentJourney, JOURNEY_CLASSIFICATIONS, TIMELINE_VISIBILITY, timelineVisibleTo,
-} from '../../m23/journeyModel.mjs';
-import { JOURNEY_VIEWERS } from '../../m23/journey.mjs';
+} from '../../domains/recruitment/lifecycle/journeyModel.mjs';
+import { JOURNEY_VIEWERS } from '../../domains/recruitment/lifecycle/journey.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -100,7 +100,7 @@ section('A — the model: stages, selectors, next actions, validator, visibility
   ok(N('signed').code === 'RECRUITMENT_COMPLETE' && N('on_hold').code === 'RESUME_CASE' && N('archived').code === 'CASE_ENDED' && N('withdrawn').code === 'CASE_ENDED' && N('closed').code === 'CASE_ENDED' && N('nonsense').code === 'STATE_UNKNOWN', 'A19 signed → complete; hold → resume; ended → ended; unknown → unknown');
   neg(N('watching', { role: 'viewer' }).permitted === false && N('offer_accepted', { role: 'room_lead', signing: pkgWith([{ partyType: 'CLUB_SIGNATORY', status: 'PENDING' }]) }).permitted === false && N('offer_accepted', { role: 'room_lead' }).permitted === true && N('trial_requested').permitted === null, 'A20 permission follows the role: a viewer cannot start the review, a room lead cannot sign for the club but may start the signing; an await has no permission');
   neg(N('contact_planned', { blocked: true }).blockedBy.includes('BLOCKED') && N('contact_planned', { subjectRemoved: true }).blockedBy.includes('SUBJECT_REMOVED') && N('trial_requested', { blocked: true }).blockedBy.length === 0, 'A21 a block or a removed subject is named on a club act, not invented on a wait');
-  neg(Object.values(NEXT_ACTIONS).every((d) => !/trust|match|boxcam|\bcv\b/i.test(JSON.stringify(d))) && !/trustScore|matchScore|watchlist|boxCam|\bcv\b/i.test(readFileSync(path.join(ROOT, 'm23', 'journeyModel.mjs'), 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), '#15 #16 #17 A22 no next action and no line of the model reads a Trust Score, a match or a Box Cam verdict');
+  neg(Object.values(NEXT_ACTIONS).every((d) => !/trust|match|boxcam|\bcv\b/i.test(JSON.stringify(d))) && !/trustScore|matchScore|watchlist|boxCam|\bcv\b/i.test(readFileSync(path.join(ROOT, 'domains', 'recruitment', 'lifecycle', 'journeyModel.mjs'), 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')), '#15 #16 #17 A22 no next action and no line of the model reads a Trust Score, a match or a Box Cam verdict');
   // Player next action and stage.
   ok(playerNextActionFor({ signingPending: { id: 's' }, issuedOffer: { offer: { id: 'o' }, revision: { id: 'r' } } }).code === 'SIGN' && playerNextActionFor({ issuedOffer: { offer: { id: 'o' }, revision: { id: 'r' } }, pendingContactRequest: { id: 'q' } }).code === 'RESPOND_TO_OFFER' && playerNextActionFor({ pendingTrialRequest: { id: 'q' }, pendingContactRequest: { id: 'q2' } }).code === 'RESPOND_TO_TRIAL_INVITATION' && playerNextActionFor({}).code === 'NONE', 'A23 the player\'s action is the most consequential pending act');
   ok(playerStageFor({ contacts: [{ id: 'q' }] }) === 'contacted' && playerStageFor({ contacts: [{ id: 'q' }], trialRequests: [{ status: 'pending' }] }) === 'trial_invited' && playerStageFor({ offer: { liveStatus: 'ISSUED' } }) === 'offer_received' && playerStageFor({ offer: { liveStatus: 'ACCEPTED' } }) === 'offer_accepted' && playerStageFor({ signingRow: { id: 's' } }) === 'signed' && playerStageFor({}) === 'none', 'A24 player stage words come only from records that reached the player');
@@ -646,30 +646,30 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   const src = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
   const files = (dir) => readdirSync(path.join(ROOT, dir)).filter((f) => f.endsWith('.mjs')).map((f) => `${dir}/${f}`);
-  const serverFiles = ['server.mjs', 'seed.mjs', 'domain.mjs', ...['m12', 'm13', 'm14', 'm15', 'm16', 'm162', 'm17', 'm18', 'm181', 'm182', 'm19', 'm20', 'm21', 'm22', 'm23', 'm24', 'm25', 'm26', 'm27', 'm28', 'm29'].flatMap(files)];
+  const serverFiles = ['server.mjs', 'seed.mjs', 'domain.mjs', ...['m12', 'm13', 'm14', 'm15', 'm16', 'm162', 'm18', 'm19', 'm20', 'm21', 'm22', 'm24', 'm25', 'm26', 'm27', 'domains/platform', 'domains/recruitment/rooms', 'domains/recruitment/lifecycle', 'domains/recruitment/offers', 'domains/recruitment/signings'].flatMap(files)];
   const statusWriters = serverFiles.filter((f) => /\.room\.status\s*=[^=]/.test(strip(src(f))));
-  neg(statusWriters.length === 1 && statusWriters[0] === 'm17/rooms.mjs', `Z1 exactly one file assigns room.status on a live case: ${statusWriters.join(', ')}`);
+  neg(statusWriters.length === 1 && statusWriters[0] === 'domains/recruitment/rooms/rooms.mjs', `Z1 exactly one file assigns room.status on a live case: ${statusWriters.join(', ')}`);
   const stageWriters = serverFiles.filter((f) => /(?:kase|room|c|k)\.stage\s*=[^=]/.test(strip(src(f))));
-  neg(stageWriters.every((f) => ['m17/rooms.mjs', 'm12/scouting.mjs'].includes(f)), `Z2 case.stage is written only by the ONE writer and the room-guarded M12 routes: ${stageWriters.join(', ')}`);
+  neg(stageWriters.every((f) => ['domains/recruitment/rooms/rooms.mjs', 'm12/scouting.mjs'].includes(f)), `Z2 case.stage is written only by the ONE writer and the room-guarded M12 routes: ${stageWriters.join(', ')}`);
   // S4a: the column is written through the identity repository (`players.update(id, { contractStatus: 'under_contract' })`), never assigned on the record; the one writer is still m29.
   const ucWriters = serverFiles.filter((f) => /contractStatus\s*=\s*'under_contract'|players\.update\([^\n]*contractStatus: 'under_contract'/.test(strip(src(f))));
-  neg(ucWriters.length === 1 && ucWriters[0] === 'm29/index.mjs', `#26 Z3 'under_contract' is written in exactly one file: ${ucWriters.join(', ')}`);
+  neg(ucWriters.length === 1 && ucWriters[0] === 'domains/recruitment/signings/index.mjs', `#26 Z3 'under_contract' is written in exactly one file: ${ucWriters.join(', ')}`);
   const csWriters = serverFiles.filter((f) => /\.contractStatus\s*=[^=]/.test(strip(src(f))));
-  neg(csWriters.every((f) => ['m29/index.mjs', 'server.mjs'].includes(f)) && /CONTRACT_STATUS_NOT_SELF_DECLARABLE/.test(src('server.mjs')) && /CONTRACT_STATUS_CANONICAL/.test(src('server.mjs')) && /canonicalContractFor\(p\.id, Date\.now\(\), \{ exceptOrgId: req\.org\.id \}\)/.test(src('server.mjs')), `#26 Z4 every other contractStatus assignment sits behind the two refusals or the release guard: ${csWriters.join(', ')}`);
+  neg(csWriters.every((f) => ['domains/recruitment/signings/index.mjs', 'server.mjs'].includes(f)) && /CONTRACT_STATUS_NOT_SELF_DECLARABLE/.test(src('server.mjs')) && /CONTRACT_STATUS_CANONICAL/.test(src('server.mjs')) && /canonicalContractFor\(p\.id, Date\.now\(\), \{ exceptOrgId: req\.org\.id \}\)/.test(src('server.mjs')), `#26 Z4 every other contractStatus assignment sits behind the two refusals or the release guard: ${csWriters.join(', ')}`);
   neg(!/applyLifecycleTransition|room\.status|recordCompletedSigning/.test(strip(src('m19/index.mjs'))) && files('m22').every((f) => !/applyLifecycleTransition|room\.status|rejectCase|archived/.test(strip(src(f)))) && !/applyLifecycleTransition|room\.status/.test(strip(src('m162/shared.mjs'))), '#15 #16 #17 Z5 matching (M19), Box Cam / CV (M22) and Trust (M16.2) never touch the lifecycle');
-  neg(!/db\.signings\.push/.test(strip(src('m28/index.mjs'))) && !/'signed'/.test(strip(src('m28/index.mjs')).replace(/ROOM_STATUS_LABELS/g, '')) && !/db\.signingPackages\.push/.test(strip(src('m28/index.mjs'))), '#11 Z6 the Offer domain writes no signing row, no package, no signed');
-  neg(!/db\.recruitmentOffers\.push/.test(strip(src('m23/decisionRoutes.mjs'))), '#9 Z7 the decision domain writes no Offer');
-  neg(!/db\.recruitmentJourneys|recruitmentJourneyStates/.test(serverFiles.map((f) => strip(src(f))).join('')) && !/recruitmentJourneys|recruitmentJourneyStates/.test(src('m182/migrations.mjs')), '#83 Z8 there is no journey store and no migration names one');
-  neg(!/\.push\(|\.splice\(|\s=\s(?!==)/.test(strip(src('m23/journeyModel.mjs')).replace(/const |let |\w+\s*=\s*\(|=>|===|!==|<=|>=|\?\?=/g, '')) || true, 'Z9 the model is read-only by construction (no store access)');
-  neg(!/\bdb\b/.test(strip(src('m23/journeyModel.mjs'))), 'Z9b the model never receives a database');
-  neg(/registerJourneyRoutes/.test(src('server.mjs')) && !/\.push\(|persist/.test(strip(src('m23/journeyRoutes.mjs')).replace(/items\.push|out\.push|grants\.push/g, '')), 'Z10 the journey routes write nothing');
+  neg(!/db\.signings\.push/.test(strip(src('domains/recruitment/offers/index.mjs'))) && !/'signed'/.test(strip(src('domains/recruitment/offers/index.mjs')).replace(/ROOM_STATUS_LABELS/g, '')) && !/db\.signingPackages\.push/.test(strip(src('domains/recruitment/offers/index.mjs'))), '#11 Z6 the Offer domain writes no signing row, no package, no signed');
+  neg(!/db\.recruitmentOffers\.push/.test(strip(src('domains/recruitment/lifecycle/decisionRoutes.mjs'))), '#9 Z7 the decision domain writes no Offer');
+  neg(!/db\.recruitmentJourneys|recruitmentJourneyStates/.test(serverFiles.map((f) => strip(src(f))).join('')) && !/recruitmentJourneys|recruitmentJourneyStates/.test(src('domains/platform/migrations.mjs')), '#83 Z8 there is no journey store and no migration names one');
+  neg(!/\.push\(|\.splice\(|\s=\s(?!==)/.test(strip(src('domains/recruitment/lifecycle/journeyModel.mjs')).replace(/const |let |\w+\s*=\s*\(|=>|===|!==|<=|>=|\?\?=/g, '')) || true, 'Z9 the model is read-only by construction (no store access)');
+  neg(!/\bdb\b/.test(strip(src('domains/recruitment/lifecycle/journeyModel.mjs'))), 'Z9b the model never receives a database');
+  neg(/registerJourneyRoutes/.test(src('server.mjs')) && !/\.push\(|persist/.test(strip(src('domains/recruitment/lifecycle/journeyRoutes.mjs')).replace(/items\.push|out\.push|grants\.push/g, '')), 'Z10 the journey routes write nothing');
   // S4a: the completion is one unit of work (store.unitOfWork) — the case lifecycle, the signings row, the player's
   // columns and the blobs roll back together through the store's memento and participants, never by a hand-written
   // restore in the signing module; the lifecycle writer keeps its own snapshot for its own failures (M17).
-  neg(!/lifecycleSnapshot|restoreLifecycle/.test(src('m17/rooms.mjs')) && /unit\(\(\) => \{[\s\S]{0,400}recordCompletedSigning\(/.test(src('m29/index.mjs')) && !/kase\.room\.status = snapshot/.test(src('m29/index.mjs')) && !/restoreLifecycle/.test(src('m29/index.mjs')), 'Z11 the signing completion rolls back as one unit of work (S4a), not through a hand-written restore (S8b: the lifecycle writer has none left)');
-  neg(/pkg\.caseId !== kase\.id/.test(src('m23/evidence.mjs')) && /ts < opened/.test(src('m23/evidence.mjs')), 'Z12 the signed rule names the case (canonical) and the opening (legacy)');
-  neg(/ROOM_NOT_REOPENABLE/.test(src('m17/rooms.mjs')) && /namingActions/.test(src('m17/rooms.mjs')), 'Z13 the reopen guard and the role parity are in the M17 source');
-  neg(/currentSigningForOffer\(rows, at\)/.test(src('m29/index.mjs')), '#53 Z14 the Offer\'s signing summary uses the ONE current-package rule');
+  neg(!/lifecycleSnapshot|restoreLifecycle/.test(src('domains/recruitment/rooms/rooms.mjs')) && /unit\(\(\) => \{[\s\S]{0,400}recordCompletedSigning\(/.test(src('domains/recruitment/signings/index.mjs')) && !/kase\.room\.status = snapshot/.test(src('domains/recruitment/signings/index.mjs')) && !/restoreLifecycle/.test(src('domains/recruitment/signings/index.mjs')), 'Z11 the signing completion rolls back as one unit of work (S4a), not through a hand-written restore (S8b: the lifecycle writer has none left)');
+  neg(/pkg\.caseId !== kase\.id/.test(src('domains/recruitment/lifecycle/evidence.mjs')) && /ts < opened/.test(src('domains/recruitment/lifecycle/evidence.mjs')), 'Z12 the signed rule names the case (canonical) and the opening (legacy)');
+  neg(/ROOM_NOT_REOPENABLE/.test(src('domains/recruitment/rooms/rooms.mjs')) && /namingActions/.test(src('domains/recruitment/rooms/rooms.mjs')), 'Z13 the reopen guard and the role parity are in the M17 source');
+  neg(/currentSigningForOffer\(rows, at\)/.test(src('domains/recruitment/signings/index.mjs')), '#53 Z14 the Offer\'s signing summary uses the ONE current-package rule');
   const agentSel = src('../scoutbox-agent/src/screens.tsx');
   // M24B moved the agent's signings off the Offer row: the Signings page lists
   // every package the server marks live or COMPLETED and History the terminal

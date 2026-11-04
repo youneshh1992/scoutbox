@@ -22,9 +22,9 @@
  *      stable across reads (time, then id).
  */
 
-import { agentAuditRows } from '../m24/audit.mjs';
-import { encodeCursor } from '../domains/platform/paging.mjs';
-import { complianceAuditRows } from '../m25/audit.mjs';
+import { agentAuditRows } from '../../m24/audit.mjs';
+import { encodeCursor } from './paging.mjs';
+import { complianceAuditRows } from '../../m25/audit.mjs';
 
 const PAGE_MAX = 50;
 const PAGE_DEFAULT = 25;
