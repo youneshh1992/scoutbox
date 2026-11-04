@@ -318,7 +318,7 @@ const T0 = Date.now();
 const SLOTS = (base = T0) => [{ startsAt: base + 2 * H, endsAt: base + 4 * H, kind: 'training' }, { startsAt: base + 26 * H, endsAt: base + 28 * H, kind: 'small_sided' }];
 const INVITE = (extra = {}) => ({ timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B, Dome Road' }, message: 'Come and train with the U23s.', instructions: 'Ask for Priya at reception.', slots: SLOTS(), ...extra });
 const invite = (RID, token = maria.token, extra = {}, headers = {}) => j('POST', `/org/rooms/${RID}/trials`, INVITE(extra), token, headers);
-const pendingTrial = async (token, path = '/player/inbox') => (await j('GET', path, undefined, token)).body.find((r) => r.type === 'trial' && r.status === 'pending') ?? null;
+const pendingTrial = async (token, path = '/player/inbox') => (await j('GET', path, undefined, token)).body.items.find((r) => r.type === 'trial' && r.status === 'pending') ?? null;
 const trialsOf = async (RID, token = maria.token) => (await j('GET', `/org/rooms/${RID}/trials`, undefined, token)).body;
 const trial = async (RID, tid, token = maria.token) => (await j('GET', `/org/rooms/${RID}/trials/${tid}`, undefined, token)).body;
 const notifs = async (path, token) => (await j('GET', path, undefined, token)).body;
@@ -563,7 +563,7 @@ const M = {};
   const inv = await invite(M.RID, maria.token, { clientKey: 'M-inv' });
   ok(inv.status === 201 && inv.body.routing.type === 'guardian' && inv.body.invitation.routedTo === 'guardian', 'M1 the invitation is routed to the guardian');
   M.REQ = inv.body.invitation.id;
-  const childInbox = (await j('GET', '/player/inbox', undefined, guni.token)).body.find((r) => r.id === M.REQ);
+  const childInbox = (await j('GET', '/player/inbox', undefined, guni.token)).body.items.find((r) => r.id === M.REQ);
   neg(!!childInbox && childInbox.guardianManaged === true && !has(childInbox, 'Come and train') && !has(childInbox, 'slots') && !has(childInbox, 'Gate B'), 'M2 the child\'s own Inbox shows a guardian-managed line — no message, no slots, no address');
   const childAccept = collect('child accept', await j('POST', `/player/requests/${M.REQ}/respond`, { accept: true, chosenSlot: localDay(T0 + 2 * H, 'Europe/London') }, guni.token));
   neg(childAccept.status === 403, 'M3 the child cannot accept (403 — guardian-managed)');
@@ -1025,7 +1025,7 @@ section('I — sentinels: club-private text never reaches the family, the events
   const surfaces = {
     'player trials': (await j('GET', '/player/trials', undefined, mateus.token)).body,
     'player notifications': await notifs('/player/notifications', mateus.token),
-    'player inbox': (await j('GET', '/player/inbox', undefined, mateus.token)).body,
+    'player inbox': (await j('GET', '/player/inbox', undefined, mateus.token)).body.items,
     'player passport': (await j('GET', '/player/football-passport', undefined, mateus.token)).body,
     'player safety pack': (await j('GET', `/player/trials/${S.TID}/safety-pack`, undefined, mateus.token)).body,
     'kola passport': (await j('GET', '/player/football-passport', undefined, kola.token)).body,

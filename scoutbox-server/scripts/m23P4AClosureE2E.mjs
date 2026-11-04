@@ -183,8 +183,8 @@ const login = async (orgId, scoutName, role) => (await j('POST', '/auth/org/logi
 const playerLogin = async (playerId) => (await j('POST', '/auth/player/login', { playerId })).body;
 const guardianLogin = async (guardianId) => (await j('POST', '/auth/guardian/login', { guardianId })).body;
 const REPORT = { acceleration: 7, sprintSpeedKmh: 31.2, distanceKm: 8.4, passCompletionPct: 82, duelSuccessPct: 55, coachRating: 7 };
-const orgTrials = async (token) => (await j('GET', '/org/trials', undefined, token)).body;
-const trialOf = async (token, playerId) => (await orgTrials(token)).filter((t) => t.playerId === playerId).slice(-1)[0] ?? null;
+const orgTrials = async (token) => (await j('GET', '/org/trials', undefined, token)).body.items;
+const trialOf = async (token, playerId) => (await orgTrials(token)).find((t) => t.playerId === playerId) ?? null; // newest first
 const pendingFor = (inbox, type = 'trial') => (inbox ?? []).find((r) => r.type === type && r.status === 'pending');
 const notifs = async (path, token) => (await j('GET', path, undefined, token)).body ?? [];
 const findMetric = (obj, id) => {
@@ -209,7 +209,7 @@ ok(!!maria.token && !!harbour.token && !!kola.token && !!elias.token && !!mateus
 section('B — D1: a malformed trial date never reaches the store');
 const B = {};
 {
-  const before = (await j('GET', '/player/inbox', undefined, kola.token)).body.length;
+  const before = (await j('GET', '/player/inbox', undefined, kola.token)).body.items.length;
   const malformedHttp = ['not-a-date', '2026-13-99', '2026-02-31', {}, [], 0, ' 2026-10-03', '2026-10-03T10:00', '1999-12-31', '2101-01-01', true, 'NaN'];
   for (const m of malformedHttp) {
     const r = await j('POST', '/org/players/pl-adeyemi/request', { type: 'trial', message: 'Trial?', proposedDate: m }, maria.token);
@@ -229,10 +229,10 @@ const B = {};
   neg(expect(await j('POST', '/org/players/pl-adeyemi/request', { type: 'trial', message: 'Trial?', venue: { $gt: '' } }, maria.token), 400, 'TRIAL_VENUE_INVALID'), 'B3c an object venue is refused');
   neg(expect(await j('POST', '/org/players/pl-adeyemi/request', { type: 'trial', message: 'Trial?', notes: 'x'.repeat(501) }, maria.token), 400, 'TRIAL_NOTES_INVALID'), 'B3d 501-character notes are refused');
   neg(expect(await j('POST', '/org/players/pl-adeyemi/request', { type: 'trial', message: 'Trial?', notes: ['a'] }, maria.token), 400, 'TRIAL_NOTES_INVALID'), 'B3e list notes are refused');
-  const after = (await j('GET', '/player/inbox', undefined, kola.token)).body.length;
+  const after = (await j('GET', '/player/inbox', undefined, kola.token)).body.items.length;
   neg(after === before + 1, 'B4 of all the requests above only the undated one reached the Inbox — nothing malformed was persisted');
   // the undated one: decline it so it does not confuse the rest of the group
-  const undated = pendingFor((await j('GET', '/player/inbox', undefined, kola.token)).body);
+  const undated = pendingFor((await j('GET', '/player/inbox', undefined, kola.token)).body.items);
   ok(undated?.trialDetails?.proposedDate === null && Array.isArray(undated.trialDetails.altSlots) && undated.trialDetails.altSlots.length === 0, 'B4b the undated invitation shows a null day and no slots to the recipient');
   neg(expect(await j('POST', `/player/requests/${undated.id}/respond`, { accept: true, chosenSlot: FUTURE }, kola.token), 400, 'TRIAL_SLOT_INVALID'), 'B4c a slot cannot be chosen on an undated invitation');
   ok((await j('POST', `/player/requests/${undated.id}/respond`, { accept: false }, kola.token)).status === 200, 'B4d it is declined');
@@ -240,7 +240,7 @@ const B = {};
   // prototype keys in the request body
   const proto = await j('POST', '/org/players/pl-adeyemi/request', `{"type":"trial","message":"Trial with the U23s","proposedDate":"${FUTURE}","altSlots":["${FUTURE2}","${FUTURE3}"],"venue":"Eastport Dome; Gate 2, North stand","notes":"Bring boots.\\nAsk for Priya.","__proto__":{"proposedDate":"bad"},"constructor":{"prototype":{"venue":"x"}},"toString":"bad"}`, maria.token);
   ok(proto.status === 201, 'B5 a valid request carrying prototype-named keys is accepted on its real fields');
-  const inbox = (await j('GET', '/player/inbox', undefined, kola.token)).body;
+  const inbox = (await j('GET', '/player/inbox', undefined, kola.token)).body.items;
   const p = pendingFor(inbox);
   B.reqId = p.id;
   ok(p.trialDetails.proposedDate === FUTURE && JSON.stringify(p.trialDetails.altSlots) === JSON.stringify([FUTURE2, FUTURE3]) && p.trialDetails.venue === 'Eastport Dome; Gate 2, North stand' && p.trialDetails.notes === 'Bring boots.\nAsk for Priya.', 'B5b the recipient sees exactly the canonical details');
@@ -253,7 +253,7 @@ const B = {};
   for (const v of [{}, [], 0, true, 'bad', '2026-02-31']) {
     neg(expect(await j('POST', `/player/requests/${B.reqId}/respond`, { accept: true, chosenSlot: v }, kola.token), 400, 'TRIAL_SLOT_INVALID'), `B6b chosenSlot ${JSON.stringify(v)} → 400 TRIAL_SLOT_INVALID`);
   }
-  const still = (await j('GET', '/player/inbox', undefined, kola.token)).body.find((r) => r.id === B.reqId);
+  const still = (await j('GET', '/player/inbox', undefined, kola.token)).body.items.find((r) => r.id === B.reqId);
   neg(still.status === 'pending' && (await orgTrials(maria.token)).length === trialsBefore, 'B6c after every refused slot the request is still pending and no trial row exists — validation precedes persistence');
   const accepted = await j('POST', `/player/requests/${B.reqId}/respond`, { accept: true, chosenSlot: FUTURE3 }, kola.token);
   ok(accepted.status === 200, 'B7 the second alternative is accepted');
@@ -262,7 +262,7 @@ const B = {};
   ok(t.proposedDate === FUTURE3, 'B7b the trial is dated on the chosen alternative');
   ok(t.reportDueAt === utcDay(FUTURE3) + 7 * DAY, 'B7c the report deadline is exactly the trial day + 7 days (UTC), from the one derivation');
   ok(Number.isFinite(t.acceptedAt) && t.acceptedBy === 'player' && t.guardianApproved === false, 'B7d acceptedAt is finite; the adult path stamps acceptedBy=player and guardianApproved=false (P4A-D4: one writer)');
-  const reqRow = (await j('GET', '/org/requests', undefined, maria.token)).body.find((r) => r.id === B.reqId);
+  const reqRow = (await j('GET', '/org/requests', undefined, maria.token)).body.items.find((r) => r.id === B.reqId);
   ok(reqRow.respondedBy === 'player' && reqRow.respondedAt === t.acceptedAt, 'B7e the request carries respondedBy=player (P4A-D13) and the same instant as the trial — one clock');
 
   // calendar export
@@ -294,15 +294,15 @@ const B = {};
   ok((await j('POST', `/org/trials/${B.trialId}/report`, { ...REPORT, strengthNote: 'Composed under pressure.', focusNote: 'Weak-foot passing.' }, maria.token)).status === 201, 'B12b the report is filed');
   const gReq2 = await j('POST', '/org/players/pl-guni/request', { type: 'trial', message: 'U15 assessment for Guni.', proposedDate: FUTURE, altSlots: [FUTURE2] }, maria.token);
   ok(gReq2.status === 201 && gReq2.body.routedTo === 'guardian', 'B12c the minor\'s invitation is routed to the guardian');
-  const gp = pendingFor((await j('GET', '/guardian/inbox', undefined, amara.token)).body);
+  const gp = pendingFor((await j('GET', '/guardian/inbox', undefined, amara.token)).body.items);
   B.guniReq = gp.id;
   neg(expect(await j('POST', `/guardian/requests/${gp.id}/respond`, { accept: true, chosenSlot: FUTURE3 }, amara.token), 400, 'TRIAL_SLOT_INVALID'), 'B13 the guardian route refuses an un-offered slot the same way');
-  neg(pendingFor((await j('GET', '/guardian/inbox', undefined, amara.token)).body)?.id === gp.id, 'B13b and the invitation is still pending');
+  neg(pendingFor((await j('GET', '/guardian/inbox', undefined, amara.token)).body.items)?.id === gp.id, 'B13b and the invitation is still pending');
   ok((await j('POST', `/guardian/requests/${gp.id}/respond`, { accept: true, chosenSlot: FUTURE2 }, amara.token)).status === 200, 'B13c the guardian accepts the alternative');
   const gt = await trialOf(maria.token, 'pl-guni');
   B.guniTrial = gt.id;
   ok(gt.proposedDate === FUTURE2 && gt.reportDueAt === utcDay(FUTURE2) + 7 * DAY && gt.acceptedBy === 'guardian' && gt.guardianApproved === true, 'B13d the guardian-accepted trial comes from the same writer: same fields, guardianApproved=true, same derivation');
-  const gReqRow = (await j('GET', '/org/requests', undefined, maria.token)).body.find((r) => r.id === gp.id);
+  const gReqRow = (await j('GET', '/org/requests', undefined, maria.token)).body.items.find((r) => r.id === gp.id);
   ok(gReqRow.respondedBy === 'guardian' && gReqRow.respondedAt === gt.acceptedAt, 'B13e respondedBy=guardian, same clock as the trial');
 }
 
@@ -325,13 +325,13 @@ section('C — D10: a minor hears their guardian\'s decision');
   ok(off.status === 200, 'C2 Tomasz mutes "Messages and requests"');
   const c1 = await j('POST', '/org/players/pl-tomasz/request', { type: 'contact', message: 'Could we talk about next season?' }, maria.token);
   ok(c1.status === 201 && c1.body.routedTo === 'guardian', 'C2b a contact for Tomasz is routed to Marek');
-  const tp1 = pendingFor((await j('GET', '/guardian/inbox', undefined, marek.token)).body, 'contact');
+  const tp1 = pendingFor((await j('GET', '/guardian/inbox', undefined, marek.token)).body.items, 'contact');
   ok((await j('POST', `/guardian/requests/${tp1.id}/respond`, { accept: false }, marek.token)).status === 200, 'C2c Marek declines');
   neg(!(await notifs('/player/notifications', tomasz.token)).some((n) => n.type === 'guardian_decision'), 'C2d with the category muted the row is NOT created (never created-and-hidden)');
   ok((await j('PUT', '/player/notification-preferences', { categories: { messages: true } }, tomasz.token)).status === 200, 'C2e Tomasz turns it back on');
   const c2 = await j('POST', '/org/players/pl-tomasz/request', { type: 'contact', message: 'One more try — a short call?' }, maria.token);
   ok(c2.status === 201, 'C2f a second contact is sent');
-  const tp2 = pendingFor((await j('GET', '/guardian/inbox', undefined, marek.token)).body, 'contact');
+  const tp2 = pendingFor((await j('GET', '/guardian/inbox', undefined, marek.token)).body.items, 'contact');
   ok((await j('POST', `/guardian/requests/${tp2.id}/respond`, { accept: true }, marek.token)).status === 200, 'C2g Marek accepts this one');
   const tn = (await notifs('/player/notifications', tomasz.token)).filter((n) => n.type === 'guardian_decision');
   ok(tn.length === 1 && tn[0].text === 'Your parent/guardian accepted the contact with Eastport FC.' && tn[0].refId === tp2.id, 'C2h now the row lands, worded for a contact');
@@ -391,7 +391,7 @@ const D = {};
   ok((await j('POST', `/org/trials/${B.guniTrial}/report`, { ...REPORT }, maria.token)).status === 201, 'D0a Guni\'s report is filed so the mandatory-report gate is clear');
   const eReq = await j('POST', '/org/players/pl-svensson/request', { type: 'trial', message: 'Trial with the U23s?', proposedDate: PAST, venue: 'Eastport Training Ground', notes: 'Ask for Priya.' }, maria.token);
   ok(eReq.status === 201, 'D0b Elias is invited (a past day, so the report is already overdue)');
-  const ep = pendingFor((await j('GET', '/player/inbox', undefined, elias.token)).body);
+  const ep = pendingFor((await j('GET', '/player/inbox', undefined, elias.token)).body.items);
   ok((await j('POST', `/player/requests/${ep.id}/respond`, { accept: true }, elias.token)).status === 200, 'D0c Elias accepts');
   const et = await trialOf(maria.token, 'pl-svensson');
   D.eTrial = et.id; D.eReq = ep.id;
@@ -427,7 +427,7 @@ const D = {};
   neg(et2.status === 'awaiting_report' && et2.playerName === null && et2.day && et2.day.emergency === null && et2.day.arrival === null && et2.day.collection === null, 'D2e the awaiting trial\'s day keeps no emergency contact, arrival or collection details');
   ok(et2.day.staff.length === 1 && et2.day.consents.length === 1 && et2.day.consents[0].by.kind === 'player' && !('id' in et2.day.consents[0].by) && !('name' in et2.day.consents[0].by), 'D2f the club\'s staff record and the fact of consent (kind only) remain');
   neg(!JSON.stringify(trials).includes('70 000 11 22') && !JSON.stringify(trials).includes('Lena') && !JSON.stringify(trials).includes('Kola Adeyemi') && !JSON.stringify(trials).includes('Elias Svensson'), 'D2g the phone number and the names appear nowhere in the club\'s trial list');
-  const reqs = (await j('GET', '/org/requests', undefined, maria.token)).body;
+  const reqs = (await j('GET', '/org/requests', undefined, maria.token)).body.items;
   const kr = reqs.find((r) => r.id === B.reqId); const er = reqs.find((r) => r.id === D.eReq);
   ok(kr && er && kr.status === 'accepted' && er.status === 'accepted' && Number.isFinite(kr.subjectRemovedAt), 'D3 the request rows survive with their ids and outcomes');
   neg(kr.message === null && kr.playerName === null && er.trialDetails.notes === '' && er.trialDetails.venue === 'Eastport Training Ground' && er.trialDetails.proposedDate === PAST, 'D3b the message and name are gone; the club\'s venue and the offered days stay');
@@ -476,7 +476,7 @@ const D = {};
   // guardian path: Marek removes Tomasz after an accepted trial
   const tReq = await j('POST', '/org/players/pl-tomasz/request', { type: 'trial', message: 'U16 trial for Tomasz.', proposedDate: FUTURE }, maria.token);
   ok(tReq.status === 201, 'D8 Tomasz is invited to a trial');
-  const tp = pendingFor((await j('GET', '/guardian/inbox', undefined, marek.token)).body);
+  const tp = pendingFor((await j('GET', '/guardian/inbox', undefined, marek.token)).body.items);
   ok((await j('POST', `/guardian/requests/${tp.id}/respond`, { accept: true }, marek.token)).status === 200, 'D8b Marek accepts');
   const tt = await trialOf(maria.token, 'pl-tomasz');
   neg(expect(await j('DELETE', '/guardian/children/pl-guni', undefined, marek.token), 404, 'CHILD_NOT_FOUND'), 'D8c a guardian cannot delete someone else\'s child');
@@ -484,7 +484,7 @@ const D = {};
   neg(expect(await j('DELETE', '/guardian/children/pl-tomasz', undefined, marek.token), 404, 'CHILD_NOT_FOUND'), 'D8e a second delete finds no child — idempotent by refusal, not by a second cascade');
   const ttAfter = (await orgTrials(maria.token)).find((t) => t.id === tt.id);
   ok(ttAfter && ttAfter.playerName === null && ttAfter.guardianApproved === true && ttAfter.acceptedBy === 'guardian' && Number.isFinite(ttAfter.subjectRemovedAt), 'D8f the minor\'s trial is tombstoned the same way, keeping who accepted');
-  neg(!(await j('GET', '/guardian/inbox', undefined, marek.token)).body.some((r) => r.playerId === 'pl-tomasz'), 'D8g the guardian\'s Inbox no longer lists the removed child\'s requests');
+  neg(!(await j('GET', '/guardian/inbox', undefined, marek.token)).body.items.some((r) => r.playerId === 'pl-tomasz'), 'D8g the guardian\'s Inbox no longer lists the removed child\'s requests');
   neg(expect(await j('GET', '/player/me', undefined, tomasz.token), 401, 'PLAYER_AUTH_REQUIRED'), 'D8h the child\'s session is gone');
   neg(!JSON.stringify((await j('GET', '/guardian/export', undefined, marek.token)).body).includes('Tomasz Kowalski'), 'D8i the guardian export no longer carries the child');
 }
@@ -496,7 +496,7 @@ section('F — calendar export fuzz and deletion races');
   const longNotes = 'Épreuve d’évaluation — apportez vos crampons. '.repeat(11).slice(0, TRIAL_DETAIL_LIMITS.notes);
   const rq = await j('POST', '/org/players/pl-martin/request', { type: 'trial', message: 'Trial for Théo', proposedDate: FUTURE, venue: 'Stade Émile-Zola, porte Ç; tribune Nord', notes: longNotes }, maria.token);
   ok(rq.status === 201, 'F0 a trial with non-ASCII venue, punctuation and notes at the length limit is accepted');
-  const tp = pendingFor((await j('GET', '/player/inbox', undefined, theo.token)).body);
+  const tp = pendingFor((await j('GET', '/player/inbox', undefined, theo.token)).body.items);
   ok((await j('POST', `/player/requests/${tp.id}/respond`, { accept: true }, theo.token)).status === 200, 'F0b Théo accepts');
   const tt = await trialOf(maria.token, 'pl-martin');
   const ics1 = await j('GET', `/org/trials/${tt.id}/ics`, undefined, maria.token);
@@ -517,7 +517,7 @@ section('F — calendar export fuzz and deletion races');
   ok(oRoom.status === 201, 'F5 a Room exists for Chinedu');
   const ORID = oRoom.body.room.roomId;
   ok((await j('POST', '/org/players/pl-okafor/request', { type: 'trial', message: 'Trial?', proposedDate: FUTURE2 }, maria.token)).status === 201, 'F5b Chinedu is invited');
-  const op = pendingFor((await j('GET', '/player/inbox', undefined, okafor.token)).body);
+  const op = pendingFor((await j('GET', '/player/inbox', undefined, okafor.token)).body.items);
   ok((await j('POST', `/player/requests/${op.id}/respond`, { accept: true }, okafor.token)).status === 200, 'F5c and accepts');
   const ot = await trialOf(maria.token, 'pl-okafor');
   const oBefore = (await j('GET', `/org/rooms/${ORID}`, undefined, maria.token)).body.room;
@@ -546,7 +546,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   const mRoom = await j('POST', '/org/rooms', { playerId: 'pl-carvalho' }, maria.token);
   ok(mRoom.status === 201, 'L0 a Room exists for Mateus');
   const MID = mRoom.body.room.roomId;
-  const mp = pendingFor((await j('GET', '/player/inbox', undefined, mateus.token)).body);
+  const mp = pendingFor((await j('GET', '/player/inbox', undefined, mateus.token)).body.items);
   ok((await j('POST', `/player/requests/${mp.id}/respond`, { accept: true }, mateus.token)).status === 200, 'L0b Mateus accepts his (valid) trial');
   const mt = await trialOf(maria.token, 'pl-carvalho');
 
@@ -605,7 +605,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   ok(!!maria.token && !!mateus.token, 'L2 the server boots on the edited snapshot');
   ok((await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION, `L2b schema ${SCHEMA_VERSION} — no migration was needed or added for the closure`);
   const survived = (await orgTrials(maria.token)).find((t) => t.id === mt.id);
-  const survivedReq = (await j('GET', '/org/requests', undefined, maria.token)).body.find((r) => r.id === D.mateusReq);
+  const survivedReq = (await j('GET', '/org/requests', undefined, maria.token)).body.items.find((r) => r.id === D.mateusReq);
   neg(!!survived && survivedReq?.status === 'accepted' && !!survivedReq.contactChannel,
     'L2c the trial accepted a moment before the SIGKILL survived with its request and channel — the acceptance is ONE save (P4A-D15: it used to be saved before the trial row existed)');
 
@@ -621,7 +621,7 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
   ok(feed.status === 200 && feed.body.filter((i) => i.type === 'report_due' && i.trialId.startsWith('trial-legacy')).every((i) => i.dueAt === null || Number.isFinite(i.dueAt)), 'L4b the feed lists them without a fabricated deadline');
   const overdue = findMetric((await j('GET', '/org/recruitment-analytics', undefined, maria.token)).body, 'overdue_trial_reports');
   neg(overdue && !overdue.rows.some((r) => r.trialId.startsWith('trial-legacy')), 'L4c a null deadline is "unknown", not "overdue since 1970" — none of the legacy rows is counted late');
-  const mpend = (await j('GET', '/player/inbox', undefined, mateus.token)).body.find((r) => r.id === 'req-legacy-5');
+  const mpend = (await j('GET', '/player/inbox', undefined, mateus.token)).body.items.find((r) => r.id === 'req-legacy-5');
   neg(expect(await j('POST', '/player/requests/req-legacy-5/respond', { accept: true, chosenSlot: '2026-02-30' }, mateus.token), 200, null), 'L5 a legacy invitation with garbage days can still be accepted (the family is not blocked by the club\'s old data)');
   const lt = (await orgTrials(maria.token)).find((t) => t.requestId === 'req-legacy-5');
   neg(lt.proposedDate === null && lt.reportDueAt === lt.acceptedAt + 7 * DAY, 'L5b the trial it creates has NO date (never the garbage, never an invented day) and a deadline from the acceptance clock');

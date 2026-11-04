@@ -373,7 +373,7 @@ console.log('\n— §33/§34 — a real server on a real restored snapshot —')
     const reqs = await fetch(`${BASE}/org/requests`, { headers: { Authorization: `Bearer ${login.token}` } });
     ok(reqs.status === 200, '§34 the recruitment request path returns 200 on a snapshot that had no requests store');
     const body = await reqs.json();
-    ok(Array.isArray(body) && body.some((r) => r.id === 'req-legacy'),
+    ok(Array.isArray(body.items) && body.items.some((r) => r.id === 'req-legacy'),
       'and the pre-existing request row is still there');
   } else {
     fail('could not authenticate against the restored snapshot');

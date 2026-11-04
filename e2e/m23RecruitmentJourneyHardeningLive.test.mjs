@@ -261,7 +261,7 @@ ok(composeEnabled, 'L2b: the compose control is enabled at contact_planned');
 const d = await j('POST', `/org/rooms/${RK}/contacts`, { subject: 'Interest from Eastport', body: 'We would like to talk about next season.', clientKey: key() }, lead.token);
 const sent = await j('POST', `/org/rooms/${RK}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: key() }, lead.token);
 ok(sent.status === 200 && await waitNext(lead.page, 'AWAIT_CONTACT_RESPONSE'), 'L2c: sent over HTTP: the open tab followed (waiting for the player)');
-const req = (await j('GET', '/player/inbox', undefined, KOLA)).body.find((r) => r.type === 'contact' && r.status === 'pending');
+const req = (await j('GET', '/player/inbox', undefined, KOLA)).body.items.find((r) => r.type === 'contact' && r.status === 'pending');
 await j('POST', `/player/requests/${req.id}/respond`, { accept: true, message: 'Happy to talk.' }, KOLA);
 const T1 = T0 + DAY;
 const inv = await j('POST', `/org/rooms/${RK}/trials`, { timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B' }, message: 'Come and train.', slots: [{ startsAt: T1 + 2 * H, endsAt: T1 + 4 * H, kind: 'training' }], clientKey: key() }, lead.token, at(T1));
@@ -353,7 +353,7 @@ const { OID: OK } = await toOfferMade(RK, lead.token, { role: 'Striker', startDa
 let OKid = OK;
 if (!OKid) {
   // Kola's case is at trial_requested: the decision route needs the evaluation first. Take the shorter path: a fresh Offer on a review-stage case is what L4/L6 did; here we accept the trial and go through.
-  const p = (await j('GET', '/player/inbox', undefined, KOLA)).body.find((r) => r.type === 'trial' && r.status === 'pending');
+  const p = (await j('GET', '/player/inbox', undefined, KOLA)).body.items.find((r) => r.type === 'trial' && r.status === 'pending');
   const acc = await j('POST', `/player/requests/${p.id}/respond`, { accept: true, chosenSlot: p.trialDetails.proposedDate }, KOLA, at(T1));
   const TID = acc.body.trialId;
   const t = (await j('GET', `/org/rooms/${RK}/trials/${TID}`, undefined, lead.token)).body.trial;

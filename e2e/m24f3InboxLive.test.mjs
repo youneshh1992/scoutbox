@@ -122,7 +122,7 @@ say(`Eastport room for Elias: ${RE?.id} → under_review ${await moveStatus(RE.i
 const ELIAS_REQ = await sendContact(RE.id, LEAD, 'Hello Elias — a conversation about next season?');
 const blocked = await j('POST', '/player/block', { orgId: 'org-eastport' }, ELIAS);
 ok(ELIAS_REQ && [200, 201].includes(blocked.status), `seed: Elias received a request, then blocked the organisation (${blocked.status})`);
-const eliasInbox = (await j('GET', '/player/inbox', undefined, ELIAS)).body;
+const eliasInbox = (await j('GET', '/player/inbox', undefined, ELIAS)).body.items;
 const ELIAS_REQ_ID = Array.isArray(eliasInbox) ? eliasInbox.find((r) => r.type === 'contact')?.id : null;
 
 // ------------------------------------------------------------ browser
@@ -217,7 +217,7 @@ for (const [w, h] of [[390, 844], [430, 932], [1024, 768]]) {
   await detail.getByRole('button', { name: 'Accept', exact: true }).click();
   await page.waitForSelector('[data-testid^="req-status-"]:has-text("Accepted")', { timeout: 15000 }).catch(() => {});
   ok(/Accepted/.test(await detail.innerText().catch(() => '')), `${tag}: Accept → the status word says Accepted`);
-  const inboxNow = (await j('GET', '/player/inbox', undefined, KOLA)).body;
+  const inboxNow = (await j('GET', '/player/inbox', undefined, KOLA)).body.items;
   ok(Array.isArray(inboxNow) && inboxNow.some((r) => r.type === 'contact' && r.status === 'accepted' && /eastport/i.test(r.orgId ?? r.orgName ?? r.org?.name ?? 'eastport')), `${tag}: the server holds the acceptance`);
   await leave(page);
   const threads = page.locator('[data-testid^="thread-"]');

@@ -201,6 +201,7 @@ const caseRev = async (RID, token = maria.token) => (await journey(RID, token)).
 const lifecycle = async (RID, action, extra = {}, token = maria.token) => j('POST', `/org/rooms/${RID}/lifecycle`, { action, expectedRev: await caseRev(RID, token), ...extra }, token);
 const legacyStatus = async (RID, status, token = maria.token) => j('POST', `/org/rooms/${RID}/status`, { status, expectedRev: await caseRev(RID, token) }, token);
 const notifs = async (p, token) => (await j('GET', p, undefined, token)).body;
+const inboxOf = async (token) => (await j('GET', '/player/inbox', undefined, token)).body.items;
 const roomView = async (RID, token = maria.token) => (await j('GET', `/org/rooms/${RID}`, undefined, token)).body.room;
 const signings = async (token = maria.token) => (await j('GET', '/org/signings', undefined, token)).body?.items ?? [];
 const orgPlayer = async (id, token = maria.token) => (await j('GET', `/org/players/${id}`, undefined, token)).body;
@@ -222,14 +223,14 @@ async function contacted(RID, playerId, token = maria.token) {
   const CID = d.body.contact.id;
   const s = await j('POST', `/org/rooms/${RID}/contacts/${CID}/send`, { expectedRev: d.body.contact.rev, clientKey: key() }, token);
   if (s.status !== 200) throw new Error(`send ${s.status} ${JSON.stringify(s.body)}`);
-  const req = (await j('GET', '/player/inbox', undefined, P[playerId].token)).body.find((r) => r.type === 'contact' && r.status === 'pending');
+  const req = (await j('GET', '/player/inbox', undefined, P[playerId].token)).body.items.find((r) => r.type === 'contact' && r.status === 'pending');
   return { CID, REQID: req?.id ?? null };
 }
 async function respondContact(REQID, playerId) { return j('POST', `/player/requests/${REQID}/respond`, { accept: true, message: 'Happy to talk.' }, P[playerId].token); }
 /** Trial: invite → accept → attend → complete, on the clock. */
 async function trialInvited(RID, base, token = maria.token) { const inv = await j('POST', `/org/rooms/${RID}/trials`, INVITE(base, { clientKey: key() }), token, at(base)); if (inv.status !== 201) throw new Error(`invite ${inv.status} ${JSON.stringify(inv.body)}`); return inv.body.invitation.id; }
 async function trialAccepted(RID, playerId, base, token = maria.token) {
-  const p = (await j('GET', '/player/inbox', undefined, P[playerId].token)).body.find((r) => r.type === 'trial' && r.status === 'pending');
+  const p = (await j('GET', '/player/inbox', undefined, P[playerId].token)).body.items.find((r) => r.type === 'trial' && r.status === 'pending');
   const acc = await j('POST', `/player/requests/${p.id}/respond`, { accept: true, chosenSlot: p.trialDetails.proposedDate }, P[playerId].token, at(base));
   if (acc.status !== 200) throw new Error(`accept ${acc.status} ${JSON.stringify(acc.body)}`);
   return acc.body.trialId;
@@ -290,7 +291,7 @@ const J = {};
   J.RID = await openRoom(maria.token, 'pl-adeyemi');
   let b = await jb(J.RID);
   ok(b.stage === 'watching' && b.nextAction.code === 'REVIEW_PLAYER' && b.nextAction.permitted === true && b.classification === 'canonical' && done(b).join() === 'watching:lifecycle' && Object.values(b.resources).every((v) => v === null), 'B3 the club watches Kola: stage watching, next REVIEW_PLAYER, no resource, canonical');
-  neg((await notifs('/player/inbox', P['pl-adeyemi'].token)).every((r) => r.orgId !== 'org-eastport' || r.type !== 'contact'), '#2 B4 watching sent Kola nothing');
+  neg((await inboxOf(P['pl-adeyemi'].token)).every((r) => r.orgId !== 'org-eastport' || r.type !== 'contact'), '#2 B4 watching sent Kola nothing');
   // 4–5. open the Room, move to review
   const mv = await lifecycle(J.RID, 'startReview');
   b = await jb(J.RID);
@@ -307,7 +308,7 @@ const J = {};
   b = await jb(J.RID);
   ok(s.status === 200 && (await stage(J.RID)) === 'contacted' && b.nextAction.code === 'AWAIT_CONTACT_RESPONSE' && b.nextAction.kind === 'await' && done(b).includes('contact:canonical'), 'B8 sent: the case is contacted THROUGH the Contact, stage contact, next AWAIT_CONTACT_RESPONSE, basis canonical');
   // 7. delivered → responded
-  J.REQID = (await notifs('/player/inbox', P['pl-adeyemi'].token)).find((r) => r.type === 'contact' && r.status === 'pending')?.id;
+  J.REQID = (await inboxOf(P['pl-adeyemi'].token)).find((r) => r.type === 'contact' && r.status === 'pending')?.id;
   const pj = await playerJourneys(P['pl-adeyemi'].token);
   const mine = pj.items.find((x) => x.club.id === 'org-eastport');
   ok(!!J.REQID && mine && mine.journey.stage === 'contacted' && mine.journey.nextAction.code === 'RESPOND_TO_CONTACT' && mine.journey.nextAction.resources.requestId === J.REQID, 'B9 Kola\'s journey: contacted, next RESPOND_TO_CONTACT naming his request');

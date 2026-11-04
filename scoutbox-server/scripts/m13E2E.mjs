@@ -676,7 +676,7 @@ section('F6 — missing-evidence engine');
   const kidGap = kidGaps.find((x) => x.status === 'suggested');
   r = await j('POST', `/org/evidence-gaps/${kidGap.id}/request`, {}, maria.token);
   ok(r.status === 200, 'evidence request on a minor goes out');
-  const gNotifs = (await j('GET', '/guardian/inbox', undefined, amara.token)).body;
+  const gNotifs = (await j('GET', '/guardian/inbox', undefined, amara.token)).body.items;
   const gNotifs2 = (await j('GET', '/guardian/notifications', undefined, amara.token)).body;
   const routed = JSON.stringify(gNotifs2 ?? gNotifs).includes('easier to assess');
   ok(routed, 'the request landed with the GUARDIAN, not the child');

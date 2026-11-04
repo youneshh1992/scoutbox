@@ -130,6 +130,7 @@ CREATE TABLE recruitment_requests (
   CHECK ((invite_key IS NULL) = (invite_fp IS NULL))
 ) STRICT;
 CREATE INDEX recruitment_requests_org_player_type_status ON recruitment_requests (org_id, player_id, type, status);
+CREATE INDEX recruitment_requests_org ON recruitment_requests (org_id);
 CREATE INDEX recruitment_requests_player ON recruitment_requests (player_id, created_at);
 CREATE INDEX recruitment_requests_routed_guardian ON recruitment_requests (routed_to, guardian_id);
 CREATE INDEX recruitment_requests_case_type_created ON recruitment_requests (case_id, type, created_at);
@@ -212,6 +213,7 @@ ${actor('completion_by')},
   CHECK (day_emergency_at IS NOT NULL OR (day_emergency_name IS NULL AND day_emergency_phone IS NULL))
 ) STRICT;
 CREATE INDEX trials_org_status ON trials (org_id, status);
+CREATE INDEX trials_org ON trials (org_id);
 CREATE INDEX trials_org_player_case ON trials (org_id, player_id, case_id);
 CREATE INDEX trials_player ON trials (player_id);
 CREATE INDEX trials_case ON trials (case_id);
@@ -936,6 +938,19 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
   const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.all(...args).map(decode[name]); };
   const inList = (name, table, col) => (values) => { const want = [...new Set((values ?? []).filter((v) => typeof v === 'string'))]; if (!want.length) return []; return sqlite.prepare(`SELECT * FROM ${table} WHERE ${col} IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want).map(decode[name]); };
   const count = (sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.get(...args).n; };
+  /**
+   * Newest first by cursor (domains/platform/paging.mjs): `where` takes `args`, the key is the rowid (insertion order;
+   * an update is an upsert, so it never moves a row). `after` comes from readPage(query, ['number']).
+   */
+  const pageStmts = new Map();
+  const newestFirst = (name, table, where) => (args, { limit, after = null }) => {
+    const sql = `SELECT rowid AS page_key, * FROM ${table} WHERE ${where(args)}${after ? ' AND rowid < ?' : ''} ORDER BY rowid DESC LIMIT ?`;
+    if (!pageStmts.has(sql)) pageStmts.set(sql, sqlite.prepare(sql));
+    const rows = pageStmts.get(sql).all(...args, ...(after ? [after[0]] : []), limit + 1);
+    const page = pageOf(rows, limit, (r) => [r.page_key]);
+    return { items: page.items.map(decode[name]), nextCursor: page.nextCursor };
+  };
+  const placeholders = (args) => args.map(() => '?').join(',');
   const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_INPUT_INVALID', t.reason); return t.record; };
   const IMMUTABLE = { requests: ['id', 'playerId', 'orgId', 'userId', 'type', 'createdAt'], trials: ['id', 'requestId', 'playerId', 'orgId', 'acceptedAt'] };
   const guardiansExist = (name, r) => { const missing = guardianIdsOf(name, r).filter((g) => !st.guardian.get(g)); if (missing.length) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `${TABLE_OF[name]} ${r.id} names a guardian that does not exist (${ids(missing)})`); };
@@ -961,6 +976,12 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     write(name, next); return must(name, id);
   });
 
+  const pageOfRequestsBy = new Map();
+  const pageOfRequests = (args, where, page) => {
+    if (!pageOfRequestsBy.has(where)) pageOfRequestsBy.set(where, newestFirst('requests', 'recruitment_requests', () => where));
+    return pageOfRequestsBy.get(where)(args, page);
+  };
+  const pageOfTrials = newestFirst('trials', 'trials', () => 'org_id = ?');
   const requests = {
     create: create('requests'), update: update('requests'),
     byId: (id) => read('requests', id),
@@ -970,6 +991,17 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     forOrgPlayer: list('requests', 'SELECT * FROM recruitment_requests WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
     forCase: list('requests', 'SELECT * FROM recruitment_requests WHERE case_id = ? ORDER BY rowid'),
     countForOrg: count('SELECT COUNT(*) AS n FROM recruitment_requests WHERE org_id = ?'),
+    countForOrgStatus: count('SELECT COUNT(*) AS n FROM recruitment_requests WHERE org_id = ? AND status = ?'),
+    /** The club's Requests list, newest first, by cursor: `{ items, nextCursor }`. */
+    pageForOrg: (orgId, page) => pageOfRequests([orgId], 'org_id = ?', page),
+    /** A player's Inbox, newest first, by cursor. */
+    pageForPlayer: (playerId, page) => pageOfRequests([playerId], 'player_id = ?', page),
+    /** A guardian's Inbox: the requests routed to the guardian about any of `playerIds`, newest first, by cursor. */
+    pageForGuardianOf(playerIds, page) {
+      const want = [...new Set((playerIds ?? []).filter((v) => typeof v === 'string'))];
+      if (!want.length) return { items: [], nextCursor: null };
+      return pageOfRequests(want, `player_id IN (${placeholders(want)}) AND routed_to = 'guardian'`, page);
+    },
   };
   const staffPage = {
     first: (pendingOnly) => sqlite.prepare(`SELECT t.rowid AS page_trial, s.position AS page_position, s.*, t.org_id, t.org_name FROM trial_day_staff s JOIN trials t ON t.id = s.trial_id WHERE s.check_status IS NOT NULL ${pendingOnly ? "AND s.check_status = 'pending'" : ''} ORDER BY t.rowid, s.position LIMIT ?`),
@@ -987,6 +1019,8 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     forCase: list('trials', 'SELECT * FROM trials WHERE case_id = ? ORDER BY rowid'),
     countForOrg: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ?'),
     countForOrgStatus: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ? AND status = ?'),
+    /** The club's Trials list, newest first, by cursor: `{ items, nextCursor }`. */
+    pageForOrg: (orgId, page) => pageOfTrials([orgId], page),
     /** The report sweep: a deadline passed, no report, never escalated, the subject not removed. */
     reportOverdue: list('trials', 'SELECT * FROM trials t WHERE t.report_due_at < ? AND t.feedback_escalated_at IS NULL AND t.subject_removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM trial_reports r WHERE r.trial_id = t.id) ORDER BY t.rowid'),
     /** The reminder sweep: a confirmed schedule, not completed or cancelled, the subject not removed (the sweep derives the rest). */

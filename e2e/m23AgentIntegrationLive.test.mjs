@@ -340,7 +340,7 @@ say('C1: Ana signs in to the real Agent client');
     slots: [{ startsAt: new Date(T).toISOString(), endsAt: new Date(T + 2 * H).toISOString() }],
   }, mariaApi.token);
   const inbox = await j('GET', '/player/inbox', undefined, kolaApi.token);
-  const treq = (Array.isArray(inbox.body) ? inbox.body : []).find((x) => x.type === 'trial' && x.status === 'pending');
+  const treq = inbox.body.items.find((x) => x.type === 'trial' && x.status === 'pending');
   const acc = await j('POST', `/player/requests/${treq?.id}/respond`, { accept: true, chosenSlot: treq?.trialDetails?.proposedDate }, kolaApi.token);
   if (inv.status >= 400 || acc.status !== 200) fail(`D setup: invite=${inv.status} accept=${acc.status}`);
 

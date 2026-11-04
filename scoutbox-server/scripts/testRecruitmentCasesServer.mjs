@@ -161,7 +161,7 @@ await test('[routes] a fresh boot records 0016_recruitment_cases last; the twent
     assert.equal((await S.j('POST', `/org/rooms/${kidRoom.body.room.roomId}/comments`, { body: 'Internal: the parent is keen, the coach is not.' }, maria)).status, 201);
     assert.equal((await S.j('POST', `/org/rooms/${kidRoom.body.room.roomId}/decision/draft`, { outcome: 'hold', note: 'Internal: revisit at 12.' }, maria)).status, 201);
   }
-  const gBlob = JSON.stringify([(await S.j('GET', '/guardian/children', undefined, g.token)).body, (await S.j('GET', `/guardian/children/${g.childId}/insights`, undefined, g.token)).body, (await S.j('GET', '/guardian/inbox', undefined, g.token)).body, (await S.j('GET', '/guardian/notifications', undefined, g.token)).body, (await S.j('GET', '/guardian/digest', undefined, g.token)).body]);
+  const gBlob = JSON.stringify([(await S.j('GET', '/guardian/children', undefined, g.token)).body, (await S.j('GET', `/guardian/children/${g.childId}/insights`, undefined, g.token)).body, (await S.j('GET', '/guardian/inbox', undefined, g.token)).body.items, (await S.j('GET', '/guardian/notifications', undefined, g.token)).body, (await S.j('GET', '/guardian/digest', undefined, g.token)).body]);
   assert.equal(gBlob.includes('the parent is keen'), false, '[compat] the guardian sees no room comment'); assert.equal(gBlob.includes('revisit at 12'), false, '[compat] the guardian sees no decision note'); assert.doesNotMatch(gBlob, /roomId|recruitmentRoom|room_comment/i, '[compat] the guardian\'s surfaces mention no room');
   // SIGKILL right after a comment
   const last = await S.j('POST', `/org/rooms/${RID}/comments`, { body: 'Right before the kill.' }, maria); assert.equal(last.status, 201);

@@ -117,13 +117,13 @@ const d = await S.j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Interest',
 const sent = await S.j('POST', `/org/rooms/${RID}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: key() }, maria.token);
 ok(sent.status === 200, 'contact sent');
 await restartAndCompare(RID, 'checkpoint contacted', 'contacted', 'AWAIT_CONTACT_RESPONSE');
-const req = (await S.j('GET', '/player/inbox', undefined, kola.token)).body.find((x) => x.type === 'contact' && x.status === 'pending');
+const req = (await S.j('GET', '/player/inbox', undefined, kola.token)).body.items.find((x) => x.type === 'contact' && x.status === 'pending');
 ok((await S.j('POST', `/player/requests/${req.id}/respond`, { accept: true, message: 'Yes.' }, kola.token)).status === 200, 'the player answered');
 const T1 = T0 + DAY;
 const inv = await S.j('POST', `/org/rooms/${RID}/trials`, { timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B' }, message: 'Come and train.', slots: [{ startsAt: T1 + 2 * H, endsAt: T1 + 4 * H, kind: 'training' }], clientKey: key() }, maria.token, at(T1));
 ok(inv.status === 201, 'trial invited');
 await restartAndCompare(RID, 'checkpoint trial_requested', 'trial_requested', 'AWAIT_TRIAL_RESPONSE');
-const p = (await S.j('GET', '/player/inbox', undefined, kola.token)).body.find((x) => x.type === 'trial' && x.status === 'pending');
+const p = (await S.j('GET', '/player/inbox', undefined, kola.token)).body.items.find((x) => x.type === 'trial' && x.status === 'pending');
 const acc = await S.j('POST', `/player/requests/${p.id}/respond`, { accept: true, chosenSlot: p.trialDetails.proposedDate }, kola.token, at(T1));
 ok(acc.status === 200, 'trial accepted');
 const TID = acc.body.trialId;

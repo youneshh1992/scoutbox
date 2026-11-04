@@ -291,7 +291,7 @@ async function assess(token, playerId, verdict, note = 'Solid.', context) {
 async function completedTrial(RID, playerToken, base) {
   const inv = await j('POST', `/org/rooms/${RID}/trials`, { timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B, Dome Road' }, message: 'Come and train with the U23s.', slots: [{ startsAt: base + 2 * H, endsAt: base + 4 * H, kind: 'training' }] }, maria.token, at(base));
   if (inv.status !== 201) throw new Error(`invite: ${inv.status} ${JSON.stringify(inv.body)}`);
-  const p = (await j('GET', '/player/inbox', undefined, playerToken)).body.find((r) => r.type === 'trial' && r.status === 'pending');
+  const p = (await j('GET', '/player/inbox', undefined, playerToken)).body.items.find((r) => r.type === 'trial' && r.status === 'pending');
   const acc = await j('POST', `/player/requests/${p.id}/respond`, { accept: true, chosenSlot: p.trialDetails.proposedDate }, playerToken, at(base));
   if (acc.status !== 200) throw new Error(`accept: ${acc.status} ${JSON.stringify(acc.body)}`);
   const TID = acc.body.trialId;
@@ -791,7 +791,7 @@ section('I — sentinels: club-private text never reaches the player, the guardi
   const playerFrames = await sse.stop(); const orgFrames = await sseOrg.stop();
   const surfaces = {
     'player notifications': await notifs('/player/notifications', kola.token),
-    'player inbox': (await j('GET', '/player/inbox', undefined, kola.token)).body,
+    'player inbox': (await j('GET', '/player/inbox', undefined, kola.token)).body.items,
     'player passport': (await j('GET', '/player/football-passport', undefined, kola.token)).body,
     'player opportunities': (await j('GET', '/player/opportunities', undefined, kola.token)).body,
     'player trials': (await j('GET', '/player/trials', undefined, kola.token)).body,
@@ -801,7 +801,7 @@ section('I — sentinels: club-private text never reaches the player, the guardi
     'mateus passport': (await j('GET', '/player/football-passport', undefined, mateus.token)).body,
     'mateus export': (await j('GET', '/player/export', undefined, mateus.token)).body,
     'guardian notifications': await notifs('/guardian/notifications', amara.token),
-    'guardian inbox': (await j('GET', '/guardian/inbox', undefined, amara.token)).body,
+    'guardian inbox': (await j('GET', '/guardian/inbox', undefined, amara.token)).body.items,
     'guardian export': (await j('GET', '/guardian/export', undefined, amara.token)).body,
     'org notifications': await notifs('/org/notifications', maria.token),
     'org notifications (tom)': await notifs('/org/notifications', tom.token),

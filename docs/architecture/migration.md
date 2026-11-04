@@ -59,7 +59,7 @@ The migration is finished when:
 
 Moving storage alone isn't the goal. A domain that is in tables but still loaded whole into memory (explicit writes,
 but every read scanning a whole-collection mirror, as S8a–S8d were until 4 November) is only part-way there. The
-recruitment domain now reads through SQL (§4.3 step 2); what is left of §4.3 is the paging decided below and step 4.
+recruitment domain now reads through SQL and its unbounded lists page (§4.3 step 2); what is left of §4.3 is step 4.
 
 ## 3. Status
 
@@ -85,7 +85,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3 steps 1 and 3 done (4 Nov); step 2: S8a–S8d done (4 Nov); the requests/trials/inbox paging next, then step 4 |
+| — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov), including the requests/trials/inbox paging; step 4 next |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -166,7 +166,7 @@ a second pass:
    other domains lost theirs then).
 4. Measure with `scripts/dataLayerPerf.mjs` at 100k synthetic players.
 
-**Decided 4 November, to do after S8b (before step 4): page the club Requests and Trials lists and the inboxes.**
+**Decided 4 November, done 4 November (see the end of this section): page the club Requests and Trials lists and the inboxes.**
 `GET /org/requests`, `GET /org/trials`, `GET /player/inbox` and `GET /guardian/inbox` still return whole lists (from
 SQL since S8a). The Pro and Grassroots home dashboards count pending requests, trials awaiting a report and all trials
 from the first two, so paging them alone would make those figures wrong for a club with more than 50. The change, as one
@@ -310,6 +310,21 @@ one club's. A bad `limit` is now refused (400) where the Rooms list clamped it. 
 Rooms from `cases.withRoom()`. The m182 steps that created or backfilled the case collections are no-ops, and
 `DECISION_STORE_MISSING` went with the collection. Still in memory, for step 4 to judge: the per-org filtering of those
 two lists, the audit feed's merge, the dashboard's per-org reads and the integrity report's boot read.
+
+**Step 2: the club Requests and Trials lists and the inboxes page, done 4 November** (on `feat/sqlite-schema`).
+`GET /org/requests`, `GET /org/trials`, `GET /player/inbox` and `GET /guardian/inbox` answer `{ items, nextCursor }`,
+newest first by rowid (an update is an upsert, so a row never moves), 50 by default, junk refused with 400. The club
+lists used to be oldest first; now all four read newest first, so a club sees its latest requests and trials on the
+first page. The guardian Inbox is one query over the children's requests routed to the guardian, and a child's Inbox
+pages the same rows as before, with the same guardian-managed wording. The home figures come from a new
+`GET /org/recruitment-counts` (`requestsPending`, `trialsAwaitingReport`, `trials`, three indexed `COUNT`s), which the
+Pro and Grassroots home dashboards read instead of counting the lists. The Pro, Grassroots and Player clients read the
+first page and say a "load more" will be needed. Until it exists, a club with more than 50 requests or trials sees only
+the newest 50 on the Requests, Trials and Trial days screens and in the Messages report picker, and an older trial awaiting
+a report drops off the Trials screen (the home figure still counts it). Two indexes were added to `0015` in place
+(`recruitment_requests (org_id)`, `trials (org_id)`, so the club lists read in rowid order without a sort; re-seed a
+development database). The batteries read `.items`; `m23P4AClosureE2E`'s "latest trial of a player" takes the first
+row instead of the last.
 
 ### 4.4 The end-to-end test estate
 

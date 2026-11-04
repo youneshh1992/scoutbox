@@ -85,8 +85,8 @@ await test('[routes] a fresh boot records 0015_recruitment (followed by S8b\'s 0
   const t = q1(dir, 'SELECT request_id, workflow_state, player_id FROM trials WHERE id = ?', trialId); assert.equal(t.request_id, requestId); assert.equal(t.workflow_state, 'accepted');
   assert.equal(qAll(dir, 'SELECT action FROM trial_history WHERE trial_id = ? ORDER BY position', trialId).map((r) => r.action).join(','), 'trial_accepted');
   assert.equal(q1(dir, "SELECT count(*) AS n FROM idempotency_keys WHERE owner_id = ? AND act = 'accept'", trialId).n, 0, 'keys.accept carries a null key: retained on the row, not an idempotency row');
-  const list = await S.j('GET', '/org/trials', undefined, maria); assert.equal(list.body.find((x) => x.id === trialId).requestId, requestId);
-  const inbox = await S.j('GET', '/player/inbox', undefined, token); assert.equal(inbox.body[0].id, requestId); assert.equal(inbox.body[0].status, 'accepted'); assert.equal(inbox.body[0].trialId, trialId);
+  const list = await S.j('GET', '/org/trials', undefined, maria); assert.equal(list.body.items.find((x) => x.id === trialId).requestId, requestId);
+  const inbox = await S.j('GET', '/player/inbox', undefined, token); assert.equal(inbox.body.items[0].id, requestId); assert.equal(inbox.body.items[0].status, 'accepted'); assert.equal(inbox.body.items[0].trialId, trialId);
   const mine = await S.j('GET', '/player/trials', undefined, token); assert.ok(mine.body.some((x) => x.id === trialId));
   const staff = await S.j('POST', `/org/trials/${trialId}/staff`, { name: 'Coach Dan', role: 'Lead coach' }, maria); assert.equal(staff.status, 201, staff.text);
   assert.equal(q1(dir, 'SELECT name FROM trial_day_staff WHERE trial_id = ?', trialId).name, 'Coach Dan');
@@ -99,7 +99,7 @@ await test('[routes] a fresh boot records 0015_recruitment (followed by S8b\'s 0
   const b = await signupAdult(S, 'Killed Adult'); const second = await inviteAndAccept(S, maria, b.pid, b.token, { proposedDate: '2026-11-05' });
   await S.kill();
   assert.equal(q1(dir, 'SELECT status FROM recruitment_requests WHERE id = ?', second.requestId).status, 'accepted'); assert.ok(q1(dir, 'SELECT 1 AS one FROM trials WHERE id = ?', second.trialId));
-  const S2 = await boot(dir); const mariaR = await orgLogin(S2); assert.equal((await S2.j('GET', '/org/trials', undefined, mariaR)).body.length, 2); await S2.stop(); rm(dir);
+  const S2 = await boot(dir); const mariaR = await orgLogin(S2); assert.equal((await S2.j('GET', '/org/trials', undefined, mariaR)).body.items.length, 2); await S2.stop(); rm(dir);
 });
 
 await test('[routes] two stored open-day invitations for one player (the shape the open-day outcome route writes, no one-pending guard) boot, are both served in the inbox and survive a save; a request naming a historically missing player is served and counted (Q7a), never refused; the deletion unit tombstones the requests and trials in place and deletes the thread — a failure of the REAL COMMIT leaves every row as it was; the retry lands once', async () => {
@@ -117,8 +117,8 @@ await test('[routes] two stored open-day invitations for one player (the shape t
   const restored = tempDir('s8a-restored'); fs.cpSync(bkp.body.dir, restored, { recursive: true });
   S = await boot(restored);
   assert.ok(live(restored));
-  const inbox = await S.j('GET', '/player/inbox', undefined, (await S.j('POST', '/auth/player/login', { playerId: pid, password: 'synthetic-pass-1' })).body.token); assert.equal(inbox.body.filter((r) => r.status === 'pending' && r.type === 'trial').length, 2, 'both open-day invitations served');
-  const mariaR = await orgLogin(S); assert.ok((await S.j('GET', '/org/requests', undefined, mariaR)).body.some((r) => r.id === 'req-gone'), 'the request of a missing player is served as today');
+  const inbox = await S.j('GET', '/player/inbox', undefined, (await S.j('POST', '/auth/player/login', { playerId: pid, password: 'synthetic-pass-1' })).body.token); assert.equal(inbox.body.items.filter((r) => r.status === 'pending' && r.type === 'trial').length, 2, 'both open-day invitations served');
+  const mariaR = await orgLogin(S); assert.ok((await S.j('GET', '/org/requests', undefined, mariaR)).body.items.some((r) => r.id === 'req-gone'), 'the request of a missing player is served as today');
   const cap = await S.j('GET', '/capabilities'); assert.equal(cap.body.dataLayer.domains.recruitment.unresolvedPlayerReferences.requests, 1);
   assert.equal(q1(restored, "SELECT count(*) AS n FROM recruitment_requests WHERE status = 'pending' AND player_id = ?", pid).n, 2, 'both rows stored: no universal duplicate rejection');
   // the deletion unit, failed at the REAL COMMIT, then retried
@@ -150,7 +150,7 @@ await test('[backup] the admin backup is a copy of the database: its requests an
   { const s = new DatabaseSync(path.join(bk.body.dir, 'scoutbox.db'), { readOnly: true }); const t = readTrials(s)[0]; assert.equal(t.requestId, flow.requestId); assert.deepEqual(t.history.map((h) => h.action).slice(0, 1), ['trial_accepted'], 'the acceptance is in the copy (S8a: recorded by the history entry; the write-only keys.accept fingerprint is gone)'); s.close(); }
   const restored = tempDir('s8a-restore'); fs.cpSync(bk.body.dir, restored, { recursive: true });
   S = await boot(restored); assert.ok(live(restored)); assert.equal(recDump(restored), liveDump, 'row for row');
-  const mariaR = await orgLogin(S); assert.ok((await S.j('GET', '/org/trials', undefined, mariaR)).body.some((x) => x.id === flow.trialId), 'the restored server serves the trial'); await S.stop();
+  const mariaR = await orgLogin(S); assert.ok((await S.j('GET', '/org/trials', undefined, mariaR)).body.items.some((x) => x.id === flow.trialId), 'the restored server serves the trial'); await S.stop();
   rm(dir, restored, bk.body.dir);
 });
 
@@ -165,7 +165,7 @@ await test('[routes] F1 (review of 6d77aa7) through the real routes: an invitati
   const replay = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE(), maria); assert.equal(replay.status, 200, replay.text); assert.equal(replay.body.idempotent, true, 'the same clientKey and payload: a replay');
   const conflict = await S.j('POST', `/org/rooms/${RID}/trials`, INVITE({ message: 'A different message.' }), maria); assert.equal(conflict.body.error, 'TRIAL_IDEMPOTENCY_CONFLICT', conflict.text);
   assert.equal(q1(dir, 'SELECT count(*) AS n FROM recruitment_requests WHERE case_id = ?', RID).n, 1, 'one request row'); assert.equal(q1(dir, 'SELECT invite_key FROM recruitment_requests WHERE case_id = ?', RID).invite_key, 'inv-key-1', 'keys.invite as the request\'s own column (§4.3)');
-  const pending = (await S.j('GET', '/player/inbox', undefined, a.token)).body.find((r) => r.type === 'trial' && r.status === 'pending'); assert.ok(pending, 'the invitation in the inbox');
+  const pending = (await S.j('GET', '/player/inbox', undefined, a.token)).body.items.find((r) => r.type === 'trial' && r.status === 'pending'); assert.ok(pending, 'the invitation in the inbox');
   const acc = await S.j('POST', `/player/requests/${pending.id}/respond`, { accept: true, chosenSlot: pending.trialDetails.proposedDate }, a.token); assert.equal(acc.status, 200, acc.text); const TID = acc.body.trialId;
   const current = async (srv, token) => (await srv.j('GET', `/org/rooms/${RID}/trials/${TID}`, undefined, token)).body;
   // the revision moves the accepted slot's session (its id is stable, so the payload fingerprint is stable and the clientKey can replay; a NEW session gets a minted id — a route rule outside this step)
@@ -193,6 +193,56 @@ await test('[routes] F1 (review of 6d77aa7) through the real routes: an invitati
   S = await boot(restored); maria = await orgLogin(S); await replayS(S, maria, 'the restore'); await S.stop();
   { const store = openStore(restored); expectKeys(store.load().db.trials.find((x) => x.id === TID).keys, 'read back from the restored tables'); store.sqlite.close(); }
   rm(dir, restored, bk.body.dir);
+});
+
+await test('[paging] the club Requests and Trials lists and both inboxes page newest first by cursor ({ items, nextCursor }): every row exactly once across the pages, junk limit and cursor refused with 400; /org/recruitment-counts gives the home figures from SQL, past the first page, and only for the asking club', async () => {
+  const dir = tempDir('s8a-paging'); let S = await boot(dir);
+  const maria = await orgLogin(S); const { pid, token } = await signupAdult(S, 'Paging Adult'); const flow = await inviteAndAccept(S, maria, pid, token);
+  await S.stop();
+  { const store = openStore(dir); const loaded = store.load(); const base = loaded.db.requests.find((r) => r.id === flow.requestId);
+    const pending = (id, i, over = {}) => ({ id, playerId: pid, playerName: 'Paging Adult', orgId: base.orgId, orgName: base.orgName, orgType: base.orgType, orgVerified: base.orgVerified, orgSafeguardingCertified: base.orgSafeguardingCertified, trustedPartner: base.trustedPartner, userId: base.userId, scoutName: base.scoutName, scoutRole: base.scoutRole, type: 'trial', message: 'Synthetic open-day follow-up.', trialDetails: { proposedDate: null, altSlots: [], venue: 'Eastport Ground', notes: 'Synthetic.' }, status: 'pending', createdAt: base.createdAt + 1 + i, routedTo: 'player', guardianId: null, contactChannel: null, ...over });
+    const toPlayer = Array.from({ length: 55 }, (_, i) => pending(`req-pg-${String(i).padStart(2, '0')}`, i));
+    const toGuardian = Array.from({ length: 3 }, (_, i) => pending(`req-pgg-${i}`, 100 + i, { playerId: 'pl-guni', playerName: 'Guni', routedTo: 'guardian', guardianId: 'gd-amara' }));
+    loaded.db.requests = [...loaded.db.requests, ...toPlayer, ...toGuardian];
+    store.save(loaded); store.sqlite.close(); }
+  S = await boot(dir);
+  const maria2 = await orgLogin(S); const adult = (await S.j('POST', '/auth/player/login', { playerId: pid, password: 'synthetic-pass-1' })).body.token;
+  const amara = (await S.j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' })).body.token; const harbour = await orgLogin(S, 'org-harbour', 'Synthetic Scout', 'Scout');
+  /** Every page of `route` (limit `n`): the ids in order, and the page sizes. */
+  const walk = async (route, who, n = 50) => { const ids = []; const sizes = []; let cursor = null;
+    for (let guard = 0; guard < 20; guard++) { const r = await S.j('GET', `${route}?limit=${n}${cursor ? `&cursor=${cursor}` : ''}`, undefined, who); assert.equal(r.status, 200, r.text);
+      assert.deepEqual(Object.keys(r.body).sort(), ['items', 'nextCursor']); ids.push(...r.body.items.map((x) => x.id)); sizes.push(r.body.items.length); cursor = r.body.nextCursor; if (!cursor) return { ids, sizes }; }
+    throw new Error(`${route} never ended`); };
+  const newestFirst = (table, where, ...p) => qAll(dir, `SELECT id FROM ${table} WHERE ${where} ORDER BY rowid DESC`, ...p).map((r) => r.id);
+
+  const orgReqs = await walk('/org/requests', maria2);
+  assert.deepEqual(orgReqs.ids, newestFirst('recruitment_requests', "org_id = 'org-eastport'"), 'the club list: every request once, newest first');
+  assert.equal(orgReqs.sizes[0], 50, 'the default page is 50'); assert.equal(orgReqs.ids[0], 'req-pgg-2');
+  const inbox = await walk('/player/inbox', adult, 20);
+  assert.deepEqual(inbox.ids, newestFirst('recruitment_requests', 'player_id = ?', pid), 'the player Inbox: every request once, newest first');
+  assert.deepEqual(inbox.sizes, [20, 20, 16]);
+  const gInbox = await walk('/guardian/inbox', amara, 2);
+  assert.deepEqual(gInbox.ids, ['req-pgg-2', 'req-pgg-1', 'req-pgg-0'], 'the guardian Inbox: only the requests routed to the guardian, newest first');
+  const trials = await walk('/org/trials', maria2);
+  assert.deepEqual(trials.ids, [flow.trialId]);
+  assert.deepEqual((await walk('/org/requests', harbour)).ids, [], 'another club sees none of them');
+
+  for (const [q, code] of [['limit=0', 'PAGE_LIMIT_INVALID'], ['limit=101', 'PAGE_LIMIT_INVALID'], ['limit=ten', 'PAGE_LIMIT_INVALID'], ['cursor=junk', 'PAGE_CURSOR_INVALID']]) {
+    for (const [route, who] of [['/org/requests', maria2], ['/org/trials', maria2], ['/player/inbox', adult], ['/guardian/inbox', amara]]) {
+      const r = await S.j('GET', `${route}?${q}`, undefined, who); assert.equal(r.status, 400, `${route}?${q}`); assert.equal(r.body.error, code);
+    }
+  }
+
+  const counts = await S.j('GET', '/org/recruitment-counts', undefined, maria2); assert.equal(counts.status, 200, counts.text);
+  assert.deepEqual(counts.body, {
+    requestsPending: q1(dir, "SELECT count(*) AS n FROM recruitment_requests WHERE org_id = 'org-eastport' AND status = 'pending'").n,
+    trialsAwaitingReport: q1(dir, "SELECT count(*) AS n FROM trials WHERE org_id = 'org-eastport' AND status = 'awaiting_report'").n,
+    trials: 1,
+  });
+  assert.equal(counts.body.requestsPending, 58, 'the figure counts past the first page');
+  assert.deepEqual((await S.j('GET', '/org/recruitment-counts', undefined, harbour)).body, { requestsPending: 0, trialsAwaitingReport: 0, trials: 0 }, 'another club counts only its own');
+  assert.equal((await S.j('GET', '/org/recruitment-counts')).status, 401, 'staff only');
+  await S.stop(); rm(dir);
 });
 
 console.log(`\n${passed} recruitment server checks passed`);

@@ -417,7 +417,7 @@ const J = {};
   const jr0 = (await j('GET', `/org/rooms/${J.RID}/journey`, undefined, maria.token)).body;
   await j('POST', `/org/rooms/${J.RID}/lifecycle`, { action: 'planContact', expectedRev: jr0.case.rev }, maria.token);
   ok(await stage(J.RID) === 'contact_planned', 'J1 the case is at contact_planned');
-  const inboxBefore = (await j('GET', '/player/inbox', undefined, kola.token)).body;
+  const inboxBefore = (await j('GET', '/player/inbox', undefined, kola.token)).body.items;
   const notifsBefore = (await j('GET', '/player/notifications', undefined, kola.token)).body;
   const outboxBefore = (await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body.length;
 
@@ -439,10 +439,10 @@ const J = {};
   ok(draft.body.contact.recipient === null, 'J2c and NO resolved recipient yet — that is decided at send');
   neg(await stage(J.RID) === 'contact_planned', 'J3 the case did NOT move — a draft is not contact');
   neg(await historyLen(J.RID) === J.histAtPlanned, 'J3b and no case history entry was written');
-  neg(JSON.stringify((await j('GET', '/player/inbox', undefined, kola.token)).body) === JSON.stringify(inboxBefore), 'J4 the player\'s Inbox is unchanged — the draft is invisible');
+  neg(JSON.stringify((await j('GET', '/player/inbox', undefined, kola.token)).body.items) === JSON.stringify(inboxBefore), 'J4 the player\'s Inbox is unchanged — the draft is invisible');
   neg((await j('GET', '/player/notifications', undefined, kola.token)).body.length === notifsBefore.length, 'J4b and the player was not notified');
   neg((await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body.length === outboxBefore, 'J4c and nothing was queued to the outbox');
-  neg((await j('GET', '/org/requests', undefined, maria.token)).body.every((r) => r.contactId !== J.CID), 'J4d and no request row exists for it');
+  neg((await j('GET', '/org/requests', undefined, maria.token)).body.items.every((r) => r.contactId !== J.CID), 'J4d and no request row exists for it');
   const sseFrames = await sseP.stop();
   neg(!sseFrames.includes(J.CID) && !/contact_created/.test(sseFrames), 'J4e the player\'s live stream carried no contact event and no contact id during the draft');
 
@@ -466,7 +466,7 @@ const J = {};
   const moved = jrS.history.entries.find((e) => e.to === 'contacted');
   ok(moved && moved.reasonCodes.length === 0 && moved.kind === 'room_status_changed', 'J7d it is the same room_status_changed entry M20\'s funnel reads');
   ok(jrS.contact.contacts.some((c) => c.id === J.CID && c.status === 'delivered'), 'J7e the journey lists the contact milestone');
-  const inboxAfter = (await j('GET', '/player/inbox', undefined, kola.token)).body;
+  const inboxAfter = (await j('GET', '/player/inbox', undefined, kola.token)).body.items;
   J.request = inboxAfter.find((r) => r.type === 'contact' && r.subject === 'Interest from Eastport');
   ok(!!J.request && J.request.status === 'pending', 'J8 the player\'s Inbox now holds the contact, pending');
   ok(J.request.message.endsWith('suit you?') && J.request.scoutName === 'Maria Keane' && J.request.orgName === 'Eastport FC', 'J8b with the shared message, the named sender and the club');
@@ -480,7 +480,7 @@ const J = {};
   // Resend of a delivered contact.
   const again = collect('send twice', await j('POST', `/org/rooms/${J.RID}/contacts/${J.CID}/send`, { expectedRev: sent.body.contact.rev, clientKey: 'J-send-2' }, maria.token));
   neg(expect(again, 409, 'CONTACT_ALREADY_SENT', ''), 'J9 sending a delivered contact again is refused 409 CONTACT_ALREADY_SENT');
-  neg((await j('GET', '/player/inbox', undefined, kola.token)).body.filter((r) => r.type === 'contact').length === 1, 'J9b and the player still has exactly one');
+  neg((await j('GET', '/player/inbox', undefined, kola.token)).body.items.filter((r) => r.type === 'contact').length === 1, 'J9b and the player still has exactly one');
 
   // The response.
   const tomNotifsBefore = (await j('GET', '/org/notifications', undefined, tom.token)).body.length;
@@ -511,7 +511,7 @@ const J = {};
   ok(ext.status === 201 && ext.body.contact.status === 'recorded' && ext.body.contact.channel === 'phone', 'J16 a phone call is recorded as an external contact (201, recorded)');
   ok(ext.body.case?.unchanged === true && await historyLen(J.RID) === histNow, 'J16b the case was already contacted: no second transition, no second history entry (contract §8)');
   ok(ext.body.contact.recordedBy?.name === 'Maria Keane' && typeof ext.body.contact.occurredAt === 'number', 'J16c attributed to the named person, with the time they say it happened');
-  neg((await j('GET', '/player/inbox', undefined, kola.token)).body.filter((r) => r.type === 'contact').length === 1, 'J16d it created nothing in the player\'s Inbox — a recorded contact has no recipient object');
+  neg((await j('GET', '/player/inbox', undefined, kola.token)).body.items.filter((r) => r.type === 'contact').length === 1, 'J16d it created nothing in the player\'s Inbox — a recorded contact has no recipient object');
   J.EXT = ext.body.contact.id;
 }
 
@@ -522,7 +522,7 @@ section('D — hidden-draft privacy and enumeration');
   const elias = await playerLogin('pl-svensson');
   const draft = await j('POST', `/org/rooms/${RID}/contacts`, { body: 'Draft only, never sent.', subject: 'Quiet' }, maria.token);
   const CID = draft.body.contact.id;
-  neg((await j('GET', '/player/inbox', undefined, elias.token)).body.length === 0, 'D1 a player with a draft against them has an empty Inbox');
+  neg((await j('GET', '/player/inbox', undefined, elias.token)).body.items.length === 0, 'D1 a player with a draft against them has an empty Inbox');
   neg((await j('GET', '/player/notifications', undefined, elias.token)).body.length === 0, 'D1b and no notification');
   neg((await j('GET', '/player/insights', undefined, elias.token)).body.recent.every((r) => !/contact/.test(r.type)), 'D1c and no insight row about a contact');
   const real = await j('GET', `/player/contacts/${CID}`, undefined, elias.token);
@@ -545,13 +545,13 @@ section('D — hidden-draft privacy and enumeration');
 section('I — internal-note isolation: the sentinel reaches no recipient surface');
 {
   const surfaces = {
-    'player inbox': (await j('GET', '/player/inbox', undefined, kola.token)).body,
+    'player inbox': (await j('GET', '/player/inbox', undefined, kola.token)).body.items,
     'player notifications': (await j('GET', '/player/notifications', undefined, kola.token)).body,
     'player channels': (await j('GET', '/player/channels', undefined, kola.token)).body,
     'player export': (await j('GET', '/player/export', undefined, kola.token)).body,
     'player insights': (await j('GET', '/player/insights', undefined, kola.token)).body,
     'player feed': (await j('GET', '/player/feed', undefined, kola.token)).body,
-    'guardian inbox': (await j('GET', '/guardian/inbox', undefined, amara.token)).body,
+    'guardian inbox': (await j('GET', '/guardian/inbox', undefined, amara.token)).body.items,
     'guardian notifications': (await j('GET', '/guardian/notifications', undefined, amara.token)).body,
     'guardian log': (await j('GET', '/guardian/log', undefined, amara.token)).body,
     'outbox': (await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body,
@@ -579,14 +579,14 @@ section('M — the minor journey: guardian route, no direct contact, missing gua
   ok(draft.status === 201 && draft.body.routing.type === 'guardian' && draft.body.routing.minor === true, 'M1 the routing preview says: this will reach the guardian');
   const direct = collect('external minor as player', await j('POST', `/org/rooms/${RID}/contacts/external`, { channel: 'phone', occurredAt: Date.now(), recipientType: 'player' }, maria.token));
   neg(expect(direct, 400, 'CONTACT_RECIPIENT_MISMATCH', ''), 'M2 recording direct contact WITH the child is refused 400 CONTACT_RECIPIENT_MISMATCH');
-  const guniInboxBefore = (await j('GET', '/player/inbox', undefined, guni.token)).body;
+  const guniInboxBefore = (await j('GET', '/player/inbox', undefined, guni.token)).body.items;
   const sent = await j('POST', `/org/rooms/${RID}/contacts/${draft.body.contact.id}/send`, { expectedRev: draft.body.contact.rev, clientKey: 'M-send' }, maria.token);
   ok(sent.status === 200 && sent.body.contact.recipient?.type === 'guardian' && sent.body.contact.recipient.minor === true, 'M3 send resolves the guardian as the recipient');
   ok(sent.body.case?.to === 'contacted', 'M3b a guardian-routed delivery satisfies contact_delivered (contract §5)');
-  const gInbox = (await j('GET', '/guardian/inbox', undefined, amara.token)).body;
+  const gInbox = (await j('GET', '/guardian/inbox', undefined, amara.token)).body.items;
   const gReq = gInbox.find((r) => r.type === 'contact' && r.subject === 'About Guni');
   ok(!!gReq && gReq.routedTo === 'guardian' && gReq.playerName === 'Guni Adebayo', 'M4 the guardian\'s Inbox holds it, naming the child and the club');
-  const childInbox = (await j('GET', '/player/inbox', undefined, guni.token)).body;
+  const childInbox = (await j('GET', '/player/inbox', undefined, guni.token)).body.items;
   const childItem = childInbox.find((r) => r.type === 'contact');
   ok(childItem && childItem.guardianManaged === true, 'M5 the child sees only a guardian-managed status note');
   neg(!('message' in childItem) && !('subject' in childItem) && !JSON.stringify(childItem).includes('U15 programme'), 'M5b the child never sees the club\'s message');
@@ -616,8 +616,8 @@ section('M — the minor journey: guardian route, no direct contact, missing gua
   const noRoute = collect('missing guardian', await j('POST', `/org/rooms/${RID2}/contacts/${d2.body.contact.id}/send`, { expectedRev: d2.body.contact.rev }, maria.token));
   neg(expect(noRoute, 422, 'CONTACT_GUARDIAN_REQUIRED', ''), 'M10 with no valid guardian route the send FAILS CLOSED — 422 CONTACT_GUARDIAN_REQUIRED, no direct fallback');
   neg(await stage(RID2) === 'contact_planned', 'M10b the case did not move');
-  neg((await j('GET', '/guardian/inbox', undefined, marek.token)).body.every((r) => r.playerId !== 'pl-tomasz' || r.type !== 'contact'), 'M10c and nothing reached the unverified guardian');
-  neg((await j('GET', '/player/inbox', undefined, (await playerLogin('pl-tomasz')).token)).body.length === 0, 'M10d nor the child');
+  neg((await j('GET', '/guardian/inbox', undefined, marek.token)).body.items.every((r) => r.playerId !== 'pl-tomasz' || r.type !== 'contact'), 'M10c and nothing reached the unverified guardian');
+  neg((await j('GET', '/player/inbox', undefined, (await playerLogin('pl-tomasz')).token)).body.items.length === 0, 'M10d nor the child');
   neg((await j('GET', `/org/rooms/${RID2}/contacts/${d2.body.contact.id}`, undefined, maria.token)).body.contact.status === 'draft', 'M10e the draft is still a draft — a refused send is not an attempt');
   neg(expect(collect('external missing guardian', await j('POST', `/org/rooms/${RID2}/contacts/external`, { channel: 'phone', occurredAt: Date.now(), recipientType: 'guardian' }, maria.token)), 422, 'CONTACT_GUARDIAN_REQUIRED', ''), 'M10f recording an external contact with a guardian who cannot be validated is refused too');
   await j('POST', '/admin/guardians/gd-marek/idv', { approved: true }, undefined, ADMIN);
@@ -648,7 +648,7 @@ section('B — blocks: before compose, after compose, after delivery');
   ok(d.status === 201, 'B2 a draft exists before the block');
   await j('POST', '/player/block', { orgId: 'org-eastport' }, kim.token);
   neg(expect(collect('send after block', await j('POST', `/org/rooms/${RID2}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev }, maria.token)), 403, 'CONTACT_BLOCKED', ''), 'B3 a block placed after compose refuses the send — the mutation re-checks');
-  neg(await stage(RID2) === 'contact_planned' && (await j('GET', '/player/inbox', undefined, kim.token)).body.length === 0, 'B3b the case did not move and the player received nothing');
+  neg(await stage(RID2) === 'contact_planned' && (await j('GET', '/player/inbox', undefined, kim.token)).body.items.length === 0, 'B3b the case did not move and the player received nothing');
   neg((await j('GET', `/org/rooms/${RID2}/contacts/${d.body.contact.id}`, undefined, maria.token)).body.contact.status === 'draft', 'B3c the draft remains a draft, historically');
 
   // Block after delivery: history stays; accept refused; decline allowed.
@@ -658,7 +658,7 @@ section('B — blocks: before compose, after compose, after delivery');
   await j('POST', '/player/block', { orgId: 'org-eastport' }, imani.token);
   const cView = await j('GET', `/org/rooms/${IMANI_ROOM}/contacts/${IMANI_DRAFT.id}`, undefined, maria.token);
   ok(cView.status === 200 && cView.body.contact.status === 'delivered', 'B5 after the block the club\'s historical record of the delivered contact remains');
-  const req = (await j('GET', '/player/inbox', undefined, imani.token)).body.find((r) => r.type === 'contact');
+  const req = (await j('GET', '/player/inbox', undefined, imani.token)).body.items.find((r) => r.type === 'contact');
   neg(expect(collect('accept after block', await j('POST', `/player/requests/${req.id}/respond`, { accept: true }, imani.token)), 403, 'BLOCKED', ''), 'B6 accepting a blocked organisation\'s contact is refused 403 BLOCKED — it would open a thread');
   const dec = await j('POST', `/player/requests/${req.id}/respond`, { accept: false }, imani.token);
   ok(dec.status === 200 && dec.body.status === 'declined', 'B6b declining it is allowed — the block is the player\'s own act');
@@ -750,7 +750,7 @@ section('K — idempotency, collision, stale and malformed revs, concurrency');
   const s2 = await j('POST', `/org/rooms/${RID}/contacts/${CID}/send`, { expectedRev: 999, clientKey: 'K-send' }, maria.token);
   ok(s1.status === 200 && s2.status === 200 && s2.body.idempotent === true, 'K4 the same send key replays without sending again, whatever rev the retry carries');
   const mateus = await playerLogin('pl-carvalho');
-  neg((await j('GET', '/player/inbox', undefined, mateus.token)).body.filter((r) => r.type === 'contact').length === 1, 'K4b the player received exactly one message');
+  neg((await j('GET', '/player/inbox', undefined, mateus.token)).body.items.filter((r) => r.type === 'contact').length === 1, 'K4b the player received exactly one message');
   neg((await j('GET', '/player/notifications', undefined, mateus.token)).body.filter((n) => n.type === 'request').length === 1, 'K4c and exactly one notification');
   neg((await j('GET', `/org/rooms/${RID}/journey`, undefined, maria.token)).body.history.entries.filter((e) => e.to === 'contacted').length === 1, 'K4d and the case moved exactly once');
   K_PROBE.room = RID; K_PROBE.contact = CID; K_PROBE.key = 'K-send';
@@ -796,7 +796,7 @@ section('K — idempotency, collision, stale and malformed revs, concurrency');
   const loser = [p, q].find((r) => r.status !== 200);
   neg(loser.status === 409 && ['CONTACT_ALREADY_SENT', 'CONTACT_VERSION_CONFLICT'].includes(loser.body?.error), `K9b the loser is told 409 ${loser.body?.error}`);
   const riku = await playerLogin('pl-tanaka');
-  neg((await j('GET', '/player/inbox', undefined, riku.token)).body.filter((r) => r.type === 'contact').length === 1, 'K9c the player got one message, not two');
+  neg((await j('GET', '/player/inbox', undefined, riku.token)).body.items.filter((r) => r.type === 'contact').length === 1, 'K9c the player got one message, not two');
   // Send vs cancel.
   const RID2 = await planned(maria.token, 'pl-alvarez');
   const d2 = await j('POST', `/org/rooms/${RID2}/contacts`, { body: 'Hi Santiago.' }, maria.token);
@@ -818,7 +818,7 @@ section('K — idempotency, collision, stale and malformed revs, concurrency');
   neg((await j('GET', `/org/rooms/${RID3}/journey`, undefined, maria.token)).body.history.entries.filter((e) => e.to === 'contacted').length === 1, 'K11b and the case moved exactly once');
   // Response vs block: the accept loses to a block placed at the same time.
   const filip = await playerLogin('pl-nowak');
-  const req = (await j('GET', '/player/inbox', undefined, filip.token)).body.find((r) => r.type === 'contact');
+  const req = (await j('GET', '/player/inbox', undefined, filip.token)).body.items.find((r) => r.type === 'contact');
   const [blk, acc] = await Promise.all([
     j('POST', '/player/block', { orgId: 'org-eastport' }, filip.token),
     j('POST', `/player/requests/${req.id}/respond`, { accept: true }, filip.token),
@@ -840,7 +840,7 @@ section('F — honest transport failure and resend');
   ok(s.status === 200 && s.body.delivered === false && s.body.contact.status === 'failed' && s.body.contact.failureCode === 'TRANSPORT_REFUSED', 'F2 the send reports delivered:false and the Contact is `failed` with a failure code — not delivered, not queued');
   neg(s.body.contact.deliveredAt === null && s.body.contact.sentAt === null, 'F2b no delivery time was invented');
   neg(await stage(RID) === 'contact_planned', 'F3 the case did NOT move — a failed attempt is not contact');
-  neg((await j('GET', '/player/inbox', undefined, theo.token)).body.length === 0, 'F3b the player received nothing');
+  neg((await j('GET', '/player/inbox', undefined, theo.token)).body.items.length === 0, 'F3b the player received nothing');
   neg((await j('GET', '/player/notifications', undefined, theo.token)).body.length === 0, 'F3c and was not notified');
   ok(s.body.contact.attempts === 1 && s.body.contact.history.some((h) => h.action === 'contact_send_failed'), 'F4 the attempt is on the record — a failure does not erase that the club tried');
   const replay = await j('POST', `/org/rooms/${RID}/contacts/${d.body.contact.id}/send`, { expectedRev: 999, clientKey: 'F-send' }, maria.token);
@@ -848,7 +848,7 @@ section('F — honest transport failure and resend');
   const again = await j('POST', `/org/rooms/${RID}/contacts/${d.body.contact.id}/send`, { expectedRev: s.body.contact.rev, clientKey: 'F-send-2' }, maria.token);
   ok(again.status === 200 && again.body.delivered === true && again.body.contact.status === 'delivered' && again.body.contact.attempts === 2, 'F5 an explicit resend is a new attempt on the SAME Contact: delivered, attempts 2');
   ok(again.body.contact.history.map((h) => h.action).join(',') === 'contact_created,contact_send_failed,contact_sent', 'F5b history keeps both attempts in order');
-  ok(await stage(RID) === 'contacted' && (await j('GET', '/player/inbox', undefined, theo.token)).body.length === 1, 'F5c now the case moves and the player has exactly one message');
+  ok(await stage(RID) === 'contacted' && (await j('GET', '/player/inbox', undefined, theo.token)).body.items.length === 1, 'F5c now the case moves and the player has exactly one message');
   neg((await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body.every((m) => !String(m.text ?? '').includes('Goalkeeping')), 'F6 no outbox record ever carries the message body');
 }
 
@@ -878,7 +878,7 @@ section('X — content at the HTTP boundary');
     const dE = await j('POST', `/org/rooms/${D_ROOM}/contacts`, { body: 'Hi Elias, a quick word about next season.' }, maria.token);
     const sE = await j('POST', `/org/rooms/${D_ROOM}/contacts/${dE.body.contact.id}/send`, { expectedRev: dE.body.contact.rev }, maria.token);
     ok(sE.status === 200 && sE.body.delivered, 'X6a a pending contact reaches Elias');
-    const reqE = (await j('GET', '/player/inbox', undefined, elias.token)).body.find((r) => r.type === 'contact' && r.status === 'pending');
+    const reqE = (await j('GET', '/player/inbox', undefined, elias.token)).body.items.find((r) => r.type === 'contact' && r.status === 'pending');
     neg(expect(collect('bad reply', await j('POST', `/player/requests/${reqE.id}/respond`, { accept: true, message: { x: 1 } }, elias.token)), 400, 'CONTACT_RESPONSE_INVALID', ''), 'X6 a non-text reply is refused before anything is touched');
     neg((await j('GET', `/org/rooms/${D_ROOM}/contacts/${dE.body.contact.id}`, undefined, maria.token)).body.contact.status === 'delivered', 'X6b and the contact is still awaiting a response');
     neg(expect(collect('reply with email', await j('POST', `/player/requests/${reqE.id}/respond`, { accept: true, message: 'call me on 07700 900123' }, elias.token)), 400, 'MODERATION_BLOCKED', ''), 'X6c a reply carrying a phone number is refused by moderation');
@@ -975,7 +975,7 @@ section('C — cooldown and rate limit are server-enforced and deterministic');
   const list = (await j('GET', `/org/rooms/${RID}/contacts`, undefined, maria.token)).body;
   ok(list.cooldown?.until === s2.body.retryAt, 'C2c and the list tells the club in advance');
   const chinedu = await playerLogin('pl-okafor');
-  const req = (await j('GET', '/player/inbox', undefined, chinedu.token)).body.find((r) => r.type === 'contact');
+  const req = (await j('GET', '/player/inbox', undefined, chinedu.token)).body.items.find((r) => r.type === 'contact');
   await j('POST', `/player/requests/${req.id}/respond`, { accept: true }, chinedu.token);
   const s3 = await j('POST', `/org/rooms/${RID}/contacts/${d2.body.contact.id}/send`, { expectedRev: d2.body.contact.rev }, maria.token);
   ok(s3.status === 200 && s3.body.delivered, 'C3 once the first is answered, the second sends — the cooldown is about unanswered messages, not about the player');
@@ -1045,7 +1045,7 @@ section('Z — restart: idempotency and truth survive the process dying');
   const replay = await j('POST', `/org/rooms/${K_PROBE.room}/contacts/${K_PROBE.contact}/send`, { expectedRev: 999, clientKey: K_PROBE.key }, re.token);
   neg(replay.status === 200 && replay.body.idempotent === true, 'Z2 a send replay after the process died is still a replay — the key lives on the record');
   const mateus = await playerLogin('pl-carvalho');
-  neg((await j('GET', '/player/inbox', undefined, mateus.token)).body.filter((r) => r.type === 'contact').length === 1, 'Z2b and the player still has exactly one message');
+  neg((await j('GET', '/player/inbox', undefined, mateus.token)).body.items.filter((r) => r.type === 'contact').length === 1, 'Z2b and the player still has exactly one message');
   const c = (await j('GET', `/org/rooms/${J.RID}/contacts/${J.CID}`, undefined, re.token)).body.contact;
   ok(c.status === 'responded' && c.response.kind === 'accepted' && c.response.message === 'Yes, happy to talk next week.', 'Z3 the responded contact, its reply and its history are exactly as before');
   ok(c.history.length === 4, 'Z3b four history entries, unchanged');

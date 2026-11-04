@@ -320,7 +320,7 @@ section('4 — clean boot: invitation, acceptance, restart — keys and stages s
   const NOW = Date.now();
   const inv = await s.j('POST', '/org/rooms/case-x/trials', { timezone: 'Europe/London', venue: { name: 'Dome', town: 'London', address: '1 Dome Road' }, message: 'Come and train.', instructions: 'Gate B', slots: [{ startsAt: NOW + 2 * H, endsAt: NOW + 4 * H }], clientKey: 'clean-inv' }, lead.token);
   ok(inv.status === 201 && inv.body.case.to === 'trial_requested', 'an invitation goes out from a clean database');
-  const inbox = (await s.j('GET', '/player/inbox', undefined, player.token)).body.find((r) => r.type === 'trial' && r.status === 'pending');
+  const inbox = (await s.j('GET', '/player/inbox', undefined, player.token)).body.items.find((r) => r.type === 'trial' && r.status === 'pending');
   const acc = await s.j('POST', `/player/requests/${inbox.id}/respond`, { accept: true, chosenSlot: inbox.trialDetails.proposedDate }, player.token);
   ok(acc.status === 200 && acc.body.trialId, 'the player accepts');
   const snap1 = await s.stop();

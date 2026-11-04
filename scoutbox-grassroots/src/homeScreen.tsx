@@ -3,12 +3,12 @@
 // Hierarchy: a welcome, one primary action, a row of
 // counts, Needs your attention, Club progress, Recent activity, Quick
 // actions. Every number is read from the workspace's own endpoints
-// (shortlist, requests, trials, squad, feed); nothing is estimated, no
+// (shortlist, recruitment counts, squad, feed); nothing is estimated, no
 // percentage is invented, and a count the server refuses is simply absent.
 import { useEffect, useState } from 'react';
 import { initials } from '../../design-system/text';
 import { Icon } from '../../design-system/icons';
-import { api, type FeedItem, type OrgRequest, type Player, type Session, type Squad, type Trial } from './api';
+import { api, type FeedItem, type Player, type RecruitmentCounts, type Session, type Squad } from './api';
 import { fmtDate, t } from './i18n';
 import { NeedsAttention } from './navui';
 import type { ScreenId } from './App';
@@ -22,8 +22,7 @@ const FEED_LABELS: Record<FeedItem['type'], string> = {
 
 interface Facts {
   shortlist: Player[] | null;
-  requests: OrgRequest[] | null;
-  trials: Trial[] | null;
+  counts: RecruitmentCounts | null;
   squad: Squad | null;
   feed: FeedItem[] | null;
   verRequests: number | null;
@@ -54,10 +53,10 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
     let gone = false;
     const settle = <T,>(p: Promise<T>) => p.then((v) => v as T | null).catch(() => null);
     Promise.all([
-      settle(api.getShortlist(session)), settle(api.getRequests(session)), settle(api.getTrials(session)),
+      settle(api.getShortlist(session)), settle(api.getRecruitmentCounts(session)),
       settle(api.getSquad(session)), settle(api.getFeed(session)),
-    ]).then(([shortlist, requests, trials, squad, feed]) => {
-      if (!gone) setFacts({ shortlist, requests, trials, squad, feed, verRequests: null });
+    ]).then(([shortlist, counts, squad, feed]) => {
+      if (!gone) setFacts({ shortlist, counts, squad, feed, verRequests: null });
     });
     return () => { gone = true; };
   }, [session, tick]);
@@ -66,8 +65,8 @@ export function HomeScreen({ session, tick, openPlayer, unreadMessages, verLevel
     return <div className="list-rows" aria-busy="true">{[1, 2, 3, 4].map((i) => <div key={i} className="list-row skeleton" style={{ height: 48 }} />)}</div>;
   }
 
-  const pendingRequests = facts.requests?.filter((r) => r.status === 'pending').length ?? null;
-  const awaitingReport = facts.trials?.filter((x) => x.status === 'awaiting_report').length ?? null;
+  const pendingRequests = facts.counts?.requestsPending ?? null;
+  const awaitingReport = facts.counts?.trialsAwaitingReport ?? null;
   const shortlisted = facts.shortlist?.length ?? null;
   const squadSize = facts.squad?.entries.length ?? null;
   const org = session.org;

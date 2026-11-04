@@ -992,6 +992,11 @@ export const demoApi: ScoutboxApi = {
 
   getRequests: (s) => delay(requests.slice()),
   getTrials: (s) => delay(trials.slice()),
+  getRecruitmentCounts: (s) => delay({
+    requestsPending: requests.filter((r) => r.status === 'pending').length,
+    trialsAwaitingReport: trials.filter((t) => t.status === 'awaiting_report').length,
+    trials: trials.length,
+  }),
 
   fileTrialReport: (s, trialId, report) => {
     const required = ['acceleration', 'sprintSpeedKmh', 'distanceKm', 'passCompletionPct', 'duelSuccessPct', 'coachRating'];

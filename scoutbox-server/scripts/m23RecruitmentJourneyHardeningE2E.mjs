@@ -176,13 +176,13 @@ async function contacted(RID, playerId, token = maria.token) {
   const CID = d.body.contact.id;
   const s = await j('POST', `/org/rooms/${RID}/contacts/${CID}/send`, { expectedRev: d.body.contact.rev, clientKey: key() }, token);
   if (s.status !== 200) throw new Error(`send ${s.status} ${JSON.stringify(s.body)}`);
-  const req = (await j('GET', '/player/inbox', undefined, P[playerId].token)).body.find((r) => r.type === 'contact' && r.status === 'pending');
+  const req = (await j('GET', '/player/inbox', undefined, P[playerId].token)).body.items.find((r) => r.type === 'contact' && r.status === 'pending');
   return { CID, REQID: req?.id ?? null, rev: s.body.contact.rev };
 }
 async function respondContact(REQID, playerId) { return j('POST', `/player/requests/${REQID}/respond`, { accept: true, message: 'Happy to talk.' }, P[playerId].token); }
 async function trialInvited(RID, base, token = maria.token) { const inv = await j('POST', `/org/rooms/${RID}/trials`, INVITE(base, { clientKey: key() }), token, at(base)); if (inv.status !== 201) throw new Error(`invite ${inv.status} ${JSON.stringify(inv.body)}`); return inv.body.invitation.id; }
 async function trialAccepted(RID, playerId, base, token = maria.token) {
-  const p = (await j('GET', '/player/inbox', undefined, P[playerId].token)).body.find((r) => r.type === 'trial' && r.status === 'pending');
+  const p = (await j('GET', '/player/inbox', undefined, P[playerId].token)).body.items.find((r) => r.type === 'trial' && r.status === 'pending');
   const acc = await j('POST', `/player/requests/${p.id}/respond`, { accept: true, chosenSlot: p.trialDetails.proposedDate }, P[playerId].token, at(base));
   if (acc.status !== 200) throw new Error(`accept ${acc.status} ${JSON.stringify(acc.body)}`);
   return acc.body.trialId;
@@ -314,7 +314,7 @@ section('B — adjacent-stage races: one authoritative result (§6)');
   ok(send2.status === 200 && (await stage(RID)) === 'contacted', 'B1b after the lift the same send delivers and the case moves once');
   // 2. contact response vs trial invitation: both records, one move each.
   const T1 = T0 + 2 * DAY;
-  const req = (await j('GET', '/player/inbox', undefined, P[pid].token)).body.find((r) => r.type === 'contact' && r.status === 'pending');
+  const req = (await j('GET', '/player/inbox', undefined, P[pid].token)).body.items.find((r) => r.type === 'contact' && r.status === 'pending');
   const [resp, inv] = await Promise.all([respondContact(req.id, pid), j('POST', `/org/rooms/${RID}/trials`, INVITE(T1, { clientKey: key() }), maria.token, at(T1))]);
   ok(resp.status === 200 && inv.status === 201 && (await stage(RID)) === 'trial_requested', 'B2 an answer and an invitation at once: both recorded, the case at trial_requested');
   const dup = await Promise.all([j('POST', `/org/rooms/${RID}/trials`, INVITE(T1, { clientKey: key() }), maria.token, at(T1)), j('POST', `/org/rooms/${RID}/trials`, INVITE(T1, { clientKey: key() }), maria.token, at(T1))]);
@@ -444,8 +444,8 @@ section('D — cross-player: no player A resource may advance player B\'s case (
 {
   const B = globalThis.__B;
   const pA = 'pl-carvalho'; const pB = 'pl-okafor';
-  const reqB = (await j('GET', '/player/inbox', undefined, P[pB].token)).body;
-  const reqA = (await j('GET', '/player/inbox', undefined, P[pA].token)).body;
+  const reqB = (await j('GET', '/player/inbox', undefined, P[pB].token)).body.items;
+  const reqA = (await j('GET', '/player/inbox', undefined, P[pA].token)).body.items;
   const someA = reqA.find((r) => r.type === 'contact') ?? reqA[0];
   const cross = someA ? await j('POST', `/player/requests/${someA.id}/respond`, { accept: true, message: 'mine?' }, P[pB].token) : { status: 404, body: { error: 'REQUEST_NOT_FOUND' } };
   neg(cross.status === 404 && cross.body?.error === 'REQUEST_NOT_FOUND', 'D1 player B answering player A\'s request: REQUEST_NOT_FOUND');
@@ -641,7 +641,7 @@ section('I — a block inserted mid-stage stops what comes next and erases nothi
   await lift();
   const sent = await j('POST', `/org/rooms/${RID}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: key() }, maria.token);
   ok(sent.status === 200, 'I1b lifted: the send delivers');
-  const req = (await j('GET', '/player/inbox', undefined, P[pid].token)).body.find((r) => r.type === 'contact' && r.status === 'pending');
+  const req = (await j('GET', '/player/inbox', undefined, P[pid].token)).body.items.find((r) => r.type === 'contact' && r.status === 'pending');
   await block();
   const ansYes = await respondContact(req.id, pid);
   const ansNo = await j('POST', `/player/requests/${req.id}/respond`, { accept: false, message: 'No thanks.' }, P[pid].token);
@@ -804,8 +804,8 @@ section('M — minors through the chain; malformed DOB fails closed (§23, §24)
   await lifecycle(RID, 'planContact');
   const d = await j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Interest', body: 'Talk?', clientKey: key() }, maria.token);
   const s = await j('POST', `/org/rooms/${RID}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: key() }, maria.token);
-  const gInbox = (await j('GET', '/guardian/inbox', undefined, amara.token)).body;
-  const kInbox = (await j('GET', '/player/inbox', undefined, P['pl-guni'].token)).body;
+  const gInbox = (await j('GET', '/guardian/inbox', undefined, amara.token)).body.items;
+  const kInbox = (await j('GET', '/player/inbox', undefined, P['pl-guni'].token)).body.items;
   neg(s.status === 200 && (gInbox ?? []).some((r) => r.type === 'contact') && !(kInbox ?? []).some((r) => r.orgId === 'org-eastport' && r.type === 'contact' && r.routedTo === 'player'), 'M2 a Contact to a minor routes to the guardian, never to the child');
   const gj = await j('GET', '/guardian/children/pl-guni/journeys', undefined, amara.token);
   neg(gj.status === 200 && !has(gj.body, 'offer') || gj.status === 200, 'M4 the guardian\'s view of the child carries no Offer (none may exist)');

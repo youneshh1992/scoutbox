@@ -517,7 +517,7 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
   const future = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10);
   const rq = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'Trial with the U23s?', proposedDate: future, venue: 'Eastport Training Ground' }, pro); assert.equal(rq.status, 201, JSON.stringify(rq.body));
   assert.equal((await S.j('POST', `/player/requests/${rq.body.requestId}/respond`, { accept: true }, token)).status, 200);
-  const trialsBody = (await S.j('GET', '/org/trials', undefined, pro)).body; const trial = (Array.isArray(trialsBody) ? trialsBody : trialsBody.items ?? []).find((t) => t.playerId === pid); assert.ok(trial, 'the trial exists');
+  const trialsBody = (await S.j('GET', '/org/trials', undefined, pro)).body.items; const trial = trialsBody.find((t) => t.playerId === pid); assert.ok(trial, 'the trial exists');
   assert.equal((await S.j('POST', `/org/trials/${trial.id}/staff`, { name: 'Priya Shah', role: 'Safeguarding Lead', check: { kind: 'DBS (England & Wales)', ref: 'DBS-4471', expiresAt: new Date(Date.now() + 300 * 86_400_000).toISOString() } }, pro)).status, 201);
   const chk = (await S.j('GET', '/admin/staff-checks', undefined, null, A)).body.items.find((c) => c.trialId === trial.id); assert.ok(chk);
   assert.equal((await S.j('POST', `/admin/staff-checks/${chk.trialId}/${chk.staffId}`, { status: 'reviewed' }, null, A)).status, 200);
@@ -586,7 +586,7 @@ await test('review of 132eda2 (finding 2): a trial report filed through the real
     const future = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10);
     const rq = await S.j('POST', `/org/players/${pid}/request`, { type: 'trial', message: 'Trial?', proposedDate: future, venue: 'Ground' }, pro); assert.equal(rq.status, 201, JSON.stringify(rq.body));
     assert.equal((await S.j('POST', `/player/requests/${rq.body.requestId}/respond`, { accept: true }, login.body.token)).status, 200);
-    const trialsBody = (await S.j('GET', '/org/trials', undefined, pro)).body; const trial = (Array.isArray(trialsBody) ? trialsBody : trialsBody.items ?? []).find((t) => t.playerId === pid); assert.ok(trial);
+    const trialsBody = (await S.j('GET', '/org/trials', undefined, pro)).body.items; const trial = trialsBody.find((t) => t.playerId === pid); assert.ok(trial);
     const rep = await S.j('POST', `/org/trials/${trial.id}/report`, { acceleration: 8, sprintSpeedKmh: 33.4, distanceKm: 9.1, passCompletionPct: 81, duelSuccessPct: 63, coachRating: 8 }, pro); assert.equal(rep.status, 201, JSON.stringify(rep.body));
     const me = (await S.j('GET', '/player/me', undefined, login.body.token)).body;
     const cv = (await S.j('GET', '/player/cv', undefined, login.body.token)).body;

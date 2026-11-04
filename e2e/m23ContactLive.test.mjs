@@ -278,7 +278,7 @@ ok(await waitLive(lead.page, /Draft saved\. Nothing has been sent\./), 'A5: the 
   ok(await waitPanel(lead.page, /Contact history \(1\)/i), 'A5b: the history lists one entry');
   ok(/\bDraft\b/.test(await contactPanel(lead.page).innerText()), 'A5b\': and it is a Draft');
   neg(/Contact planned/.test(await headerStatus(lead.page)), 'A5c: the case is STILL at Contact planned — a draft moved nothing');
-  const inbox = (await j('GET', '/player/inbox', undefined, KOLA)).body;
+  const inbox = (await j('GET', '/player/inbox', undefined, KOLA)).body.items;
   neg(!JSON.stringify(inbox).includes('U21s'), 'A5d: nothing reached the player\'s Inbox');
 }
 
@@ -417,7 +417,7 @@ const LEAD = lead.token;
   const jr = (await j('GET', `/org/rooms/${ROOM_T}/journey`, undefined, LEAD)).body;
   neg(jr.lifecycle.currentStage === 'contact_planned', 'N1g: the case did not move');
   const MAREK = (await j('POST', '/auth/guardian/login', { guardianId: 'gd-marek' })).body.token;
-  neg((await j('GET', '/guardian/inbox', undefined, MAREK)).body.every((r) => r.playerId !== 'pl-tomasz' || r.type !== 'contact'), 'N1h: nothing reached the unverified guardian');
+  neg((await j('GET', '/guardian/inbox', undefined, MAREK)).body.items.every((r) => r.playerId !== 'pl-tomasz' || r.type !== 'contact'), 'N1h: nothing reached the unverified guardian');
 }
 
 // N2 — a block placed AFTER delivery: accept is refused, decline is allowed.
@@ -431,7 +431,7 @@ const LEAD = lead.token;
   const d0 = await j('POST', `/org/rooms/${ROOM_E}/contacts`, { body: 'A follow-up, drafted before any block.' }, LEAD);
   ok(d0.status === 201, 'N2a: a second draft is written while the player is still reachable');
   const ELIAS = (await j('POST', '/auth/player/login', { playerId: 'pl-svensson' })).body.token;
-  const req = (await j('GET', '/player/inbox', undefined, ELIAS)).body.find((r) => r.status === 'pending' && r.type === 'contact');
+  const req = (await j('GET', '/player/inbox', undefined, ELIAS)).body.items.find((r) => r.status === 'pending' && r.type === 'contact');
   ok(req, 'N2b: it is in the player\'s Inbox');
   ok((await j('POST', '/player/block', { orgId: 'org-eastport' }, ELIAS)).status === 201, 'N2c: the player then blocks the organisation');
   expect(await j('POST', `/player/requests/${req.id}/respond`, { accept: true }, ELIAS), 403, 'BLOCKED', 'N2d: accepting a message from a blocked organisation is refused 403 BLOCKED');
@@ -486,10 +486,10 @@ const LEAD = lead.token;
   await openInbox(kola);
   neg(!(await bodyText(kola)).includes(SENTINEL), 'N5b: the player\'s Inbox does not carry it');
   const surfaces = {
-    'player inbox': (await j('GET', '/player/inbox', undefined, KOLA)).body,
+    'player inbox': (await j('GET', '/player/inbox', undefined, KOLA)).body.items,
     'player notifications': (await j('GET', '/player/notifications', undefined, KOLA)).body,
     'player export': (await j('GET', '/player/export', undefined, KOLA)).body,
-    'guardian inbox': (await j('GET', '/guardian/inbox', undefined, AMARA)).body,
+    'guardian inbox': (await j('GET', '/guardian/inbox', undefined, AMARA)).body.items,
     'outbox': (await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body,
   };
   for (const [name, body] of Object.entries(surfaces)) neg(!JSON.stringify(body ?? {}).includes(SENTINEL), `N5c: ${name} carries no internal draft`);

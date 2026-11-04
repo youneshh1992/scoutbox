@@ -745,13 +745,13 @@ section('Regressions — the evidence tab, and the archive event stays private')
 
 section('R6/R11 — trials and signings are linked, never duplicated');
 {
-  const trialsBefore = (await j('GET', '/org/trials', undefined, maria.token)).body;
+  const trialsBefore = (await j('GET', '/org/trials', undefined, maria.token)).body.items;
   const trialCount = (trialsBefore.items ?? trialsBefore).length ?? 0;
   const fake = await j('POST', `/org/rooms/${ROOM}/link`, { trialId: 'trial-does-not-exist' }, maria.token);
   neg(fake.status === 404, '[29] a room cannot link a trial that is not its own');
   const fakeSign = await j('POST', `/org/rooms/${ROOM}/link`, { signingId: 'sign-does-not-exist' }, maria.token);
   neg(fakeSign.status === 404, '[30] a room cannot link a signing that is not its own');
-  const trialsAfter = (await j('GET', '/org/trials', undefined, maria.token)).body;
+  const trialsAfter = (await j('GET', '/org/trials', undefined, maria.token)).body.items;
   neg(((trialsAfter.items ?? trialsAfter).length ?? 0) === trialCount, '[29] no trial row was created by the room');
   const signings = (await j('GET', '/org/signings', undefined, maria.token)).body.items;
   neg(!JSON.stringify(signings).includes(ROOM), '[30] the room created no signing record');

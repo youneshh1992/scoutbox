@@ -133,11 +133,11 @@ r = await j('/org/players/pl-adeyemi/request', {
 ok(r.status === 201, 'org sends trial request with alt slots');
 const reqId = r.body.requestId;
 let inbox = await j('/player/inbox', {}, bearer(KOLA));
-ok(inbox.body.find((x) => x.id === reqId)?.trialDetails?.altSlots?.length === 2, 'player sees proposed + alt slots');
+ok(inbox.body.items.find((x) => x.id === reqId)?.trialDetails?.altSlots?.length === 2, 'player sees proposed + alt slots');
 r = await j(`/player/requests/${reqId}/respond`, { method: 'POST', body: JSON.stringify({ accept: true, chosenSlot: '2026-09-12' }) }, bearer(KOLA));
 ok(r.status === 200, 'player accepts choosing an alt slot');
 let trials = await j('/org/trials', {}, bearer(EASTPORT));
-const trial = trials.body.find((t) => t.requestId === reqId);
+const trial = trials.body.items.find((t) => t.requestId === reqId);
 ok(trial?.proposedDate === '2026-09-12', 'trial is booked on the chosen alt slot');
 const ics = await fetch(`${API}/org/trials/${trial.id}/ics`, { headers: bearer(EASTPORT) });
 const icsText = await ics.text();
@@ -175,7 +175,7 @@ const gReqId = r.body.requestId;
 r = await j(`/guardian/requests/${gReqId}/respond`, { method: 'POST', body: JSON.stringify({ accept: true, chosenSlot: '2026-09-13' }) }, bearer(AMARA));
 ok(r.status === 200, 'guardian accepts choosing the alt slot');
 trials = await j('/org/trials', {}, bearer(EASTPORT));
-ok(trials.body.some((t) => t.requestId === gReqId && t.proposedDate === '2026-09-13'), 'guardian-chosen slot books the trial');
+ok(trials.body.items.some((t) => t.requestId === gReqId && t.proposedDate === '2026-09-13'), 'guardian-chosen slot books the trial');
 
 // ---- 7. moderation v2: grooming language blocks AND escalates
 const guniChannel = (await j('/guardian/channels', {}, bearer(AMARA))).body.find((c) => c.requestId === gReqId);
@@ -404,9 +404,9 @@ const pastReg = trials.body.find((t) => t.id === pastTrialId).registrations[0];
 r = await j(`/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'invite_trial', note: 'Great movement up front — come train with the first team.' }) }, bearer(MOSS));
 ok(r.status === 200 && r.body.registration.outcome === 'invite_trial', 'open-day outcome recorded: trial invitation');
 r = await j('/player/inbox', {}, bearer(KOLA));
-ok(r.body.some((x) => x.type === 'trial' && /open day/.test(x.trialDetails?.notes ?? '') && x.status === 'pending'), 'the invitation is a real, properly-routed trial request in the player inbox');
+ok(r.body.items.some((x) => x.type === 'trial' && /open day/.test(x.trialDetails?.notes ?? '') && x.status === 'pending'), 'the invitation is a real, properly-routed trial request in the player inbox');
 {
-  const invite = r.body.find((x) => x.type === 'trial' && /open day/.test(x.trialDetails?.notes ?? ''));
+  const invite = r.body.items.find((x) => x.type === 'trial' && /open day/.test(x.trialDetails?.notes ?? ''));
   ok(invite?.routedTo === 'player' && invite.orgName === 'Moss Side Athletic' && typeof invite.orgSafeguardingCertified === 'boolean' && invite.message.startsWith('Great movement'),
     'it is written by the one request writer: routing, club facts and the club\'s note, like any other trial invitation');
   const feed = await j('/player/notifications', {}, bearer(KOLA));

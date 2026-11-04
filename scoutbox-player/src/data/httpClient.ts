@@ -111,7 +111,9 @@ export const httpClient: PlayerClient = {
 
   getMe: (playerId) => request<Me>('/player/me', playerId),
 
-  getInbox: (playerId) => request<(InboxRequest | ChildInboxItem)[]>('/player/inbox', playerId),
+  // The server pages the Inbox by cursor ({ items, nextCursor }, newest 50 first). Only the first page is read here: the
+  // Inbox will need a "load more" that passes `?cursor=<nextCursor>` (not built yet, by decision).
+  getInbox: async (playerId) => (await request<{ items: (InboxRequest | ChildInboxItem)[]; nextCursor: string | null }>('/player/inbox', playerId)).items,
 
   pair: async (code) => {
     const r = await request<{ playerId: string; name: string; token?: string }>('/auth/player/pair', undefined, {
@@ -261,7 +263,8 @@ export const httpClient: PlayerClient = {
   guardianAddChild: (guardianId, input: ChildInput) =>
     guardianRequest<{ playerId: string }>('/guardian/children', guardianId, { method: 'POST', body: JSON.stringify(input) }),
 
-  guardianInbox: (guardianId) => guardianRequest<GuardianInboxRequest[]>('/guardian/inbox', guardianId),
+  // Paged like the player Inbox (newest 50 first); only the first page is read, a "load more" is not built yet (by decision).
+  guardianInbox: async (guardianId) => (await guardianRequest<{ items: GuardianInboxRequest[]; nextCursor: string | null }>('/guardian/inbox', guardianId)).items,
 
   guardianRespond: (guardianId, requestId, accept, chosenSlot, message) =>
     guardianRequest<void>(`/guardian/requests/${requestId}/respond`, guardianId, { method: 'POST', body: JSON.stringify({ accept, chosenSlot, ...(message ? { message } : {}) }) }),

@@ -194,6 +194,14 @@ export interface PlayerDetail extends Player {
   };
 }
 
+/** The home dashboard's recruitment figures (GET /org/recruitment-counts). */
+export interface RecruitmentCounts {
+  requestsPending: number;
+  trialsAwaitingReport: number;
+  /** Every trial on record for the club. */
+  trials: number;
+}
+
 export interface OrgRequest {
   id: string;
   playerId: string;
@@ -465,8 +473,12 @@ export interface ScoutboxApi {
   getMyReports(s: Session): Promise<FiledReport[]>;
   /** Absolute URL for an uploaded media file, or null when no file exists. */
   mediaUrl(path: string | null | undefined): string | null;
+  /** The newest 50 requests (the first page). */
   getRequests(s: Session): Promise<OrgRequest[]>;
+  /** The newest 50 trials (the first page). */
   getTrials(s: Session): Promise<Trial[]>;
+  /** The home figures, counted on the server over every row. */
+  getRecruitmentCounts(s: Session): Promise<RecruitmentCounts>;
   fileTrialReport(s: Session, trialId: string, report: Record<string, number | string>): Promise<void>;
   getLedger(s: Session): Promise<LedgerEntry[]>;
   getProofPack(s: Session, playerId: string): Promise<ProofPack>;
@@ -595,8 +607,13 @@ export const httpApi: ScoutboxApi = {
 
   mediaUrl: (path) => (path ? `${API_URL}${path}` : null),
 
-  getRequests: (s) => request<OrgRequest[]>('/org/requests', { headers: headers(s) }),
-  getTrials: (s) => request<Trial[]>('/org/trials', { headers: headers(s) }),
+  // The server pages these two lists by cursor ({ items, nextCursor }, newest 50 first). Only the first page is read
+  // here: the Requests, Trials and Trial days screens and the Messages report picker will need a "load more" that passes
+  // `?cursor=<nextCursor>` (not built yet, by decision). The home figures come from getRecruitmentCounts, never from
+  // counting a page.
+  getRequests: async (s) => (await request<{ items: OrgRequest[]; nextCursor: string | null }>('/org/requests', { headers: headers(s) })).items,
+  getTrials: async (s) => (await request<{ items: Trial[]; nextCursor: string | null }>('/org/trials', { headers: headers(s) })).items,
+  getRecruitmentCounts: (s) => request<RecruitmentCounts>('/org/recruitment-counts', { headers: headers(s) }),
 
   fileTrialReport: (s, trialId, report) =>
     request<void>(`/org/trials/${trialId}/report`, {

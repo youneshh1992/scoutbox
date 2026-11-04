@@ -518,7 +518,7 @@ section('H/I/J/§20–§24 — contact routing, its reauthorization, and Inbox i
   ok(preview.body.routing.agentParty === true && preview.body.routing.agentRefusal === null, 'H7 and the preview now offers the agent as a party');
   // Clear the cooldown by answering the first contact.
   const inbox = await j('GET', '/player/inbox', undefined, kola.token);
-  const req1 = (Array.isArray(inbox.body) ? inbox.body : []).find((x) => x.type === 'contact' && x.status === 'pending');
+  const req1 = inbox.body.items.find((x) => x.type === 'contact' && x.status === 'pending');
   ok((await j('POST', `/player/requests/${req1?.id}/respond`, { accept: false }, kola.token)).status === 200, 'J2 the client answers the first contact themselves');
   const d2 = await j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Next season', body: 'Following up with you and your representative.', contactMode: 'both' }, maria.token);
   const C2 = d2.body.contact.id;
@@ -536,7 +536,7 @@ section('H/I/J/§20–§24 — contact routing, its reauthorization, and Inbox i
 
   // #26: a block added between render and send.
   const inbox2 = await j('GET', '/player/inbox', undefined, kola.token);
-  const req2 = (Array.isArray(inbox2.body) ? inbox2.body : []).find((x) => x.type === 'contact' && x.status === 'pending');
+  const req2 = inbox2.body.items.find((x) => x.type === 'contact' && x.status === 'pending');
   await j('POST', `/player/requests/${req2?.id}/respond`, { accept: false }, kola.token);
   const d3 = await j('POST', `/org/rooms/${RID}/contacts`, { body: 'One more note.', contactMode: 'both' }, maria.token);
   const blocked = await j('POST', '/player/block', { orgId: 'org-eastport' }, kola.token);
@@ -573,7 +573,7 @@ section('K/L/M/§26–§29 — the trial projection is scheduling, and stops the
   }, maria.token);
   ok(inv.status === 200 || inv.status === 201, 'K3 the club invites the client to a trial');
   const inbox = await j('GET', '/player/inbox', undefined, kola.token);
-  const treq = (Array.isArray(inbox.body) ? inbox.body : []).find((x) => x.type === 'trial' && x.status === 'pending');
+  const treq = inbox.body.items.find((x) => x.type === 'trial' && x.status === 'pending');
   const acc = await j('POST', `/player/requests/${treq?.id}/respond`, { accept: true, chosenSlot: treq?.trialDetails?.proposedDate }, kola.token);
   ok(acc.status === 200, 'K4 the client accepts a slot, which confirms the schedule');
   const tv = await j('GET', `/org/agent/clients/${REP}/trials`, undefined, ana.token);

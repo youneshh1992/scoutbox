@@ -225,13 +225,13 @@ const d = await j('POST', `/org/rooms/${RID}/contacts`, { subject: 'Interest fro
 const sent = await j('POST', `/org/rooms/${RID}/contacts/${d.body.contact.id}/send`, { expectedRev: d.body.contact.rev, clientKey: key() }, lead.token);
 ok(sent.status === 200 && await waitNext(lead.page, 'AWAIT_CONTACT_RESPONSE'), 'A7: sent: the strip waits for the player (no button, an hourglass)');
 neg(await goBtn(lead.page).count() === 0, 'A8: a wait offers no primary act');
-const req = (await j('GET', '/player/inbox', undefined, KOLA)).body.find((r) => r.type === 'contact' && r.status === 'pending');
+const req = (await j('GET', '/player/inbox', undefined, KOLA)).body.items.find((r) => r.type === 'contact' && r.status === 'pending');
 await j('POST', `/player/requests/${req.id}/respond`, { accept: true, message: 'Happy to talk.' }, KOLA);
 ok(await waitNext(lead.page, 'CONTINUE_EVALUATION'), 'A9: the player answered: next "Continue the evaluation"');
 const T1 = T0 + DAY;
 const inv = await j('POST', `/org/rooms/${RID}/trials`, { timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport', address: 'Gate B' }, message: 'Come and train.', slots: [{ startsAt: T1 + 2 * H, endsAt: T1 + 4 * H, kind: 'training' }], clientKey: key() }, lead.token, at(T1));
 ok(inv.status === 201 && await waitNext(lead.page, 'AWAIT_TRIAL_RESPONSE') && await stageOf(lead.page) === 'trial', 'A10: trial invited: stage trial, waiting for the answer');
-const p = (await j('GET', '/player/inbox', undefined, KOLA)).body.find((r) => r.type === 'trial' && r.status === 'pending');
+const p = (await j('GET', '/player/inbox', undefined, KOLA)).body.items.find((r) => r.type === 'trial' && r.status === 'pending');
 const acc = await j('POST', `/player/requests/${p.id}/respond`, { accept: true, chosenSlot: p.trialDetails.proposedDate }, KOLA, at(T1));
 const TID = acc.body.trialId;
 ok(acc.status === 200 && await waitNext(lead.page, 'CONDUCT_TRIAL'), 'A11: accepted with a slot: next "Run the trial"');

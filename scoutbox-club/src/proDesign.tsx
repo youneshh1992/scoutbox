@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { ProGlyph as Icon } from './proExperience';
 import { exportCsv } from './proExport';
-import { api, type Session, type Funnel, type Player, type OrgRequest, type Trial } from './api';
+import { api, type Session, type Funnel, type Player, type RecruitmentCounts } from './api';
 import type { ScreenId } from './App';
 
 const pageNotes: Partial<Record<ScreenId, [string, string]>> = {
@@ -44,15 +44,15 @@ export function ProChart({ title, note, items, additive = true }: { title: strin
   </section>;
 }
 
-interface OverviewData { shortlist: Player[] | null; requests: OrgRequest[] | null; trials: Trial[] | null; funnel: Funnel | null }
+interface OverviewData { shortlist: Player[] | null; counts: RecruitmentCounts | null; funnel: Funnel | null }
 export function ProOverview({ session, tick, navigate }: { session: Session; tick: number; navigate: (id: ScreenId) => void }) {
   const [data, setData] = useState<OverviewData | null>(null);
-  useEffect(() => { let gone = false; const safe = <T,>(p: Promise<T>) => p.catch(() => null); Promise.all([safe(api.getShortlist(session)), safe(api.getRequests(session)), safe(api.getTrials(session)), safe(api.getFunnel(session))]).then(([shortlist, requests, trials, funnel]) => { if (!gone) setData({shortlist, requests, trials, funnel}); }); return () => { gone = true; }; }, [session, tick]);
+  useEffect(() => { let gone = false; const safe = <T,>(p: Promise<T>) => p.catch(() => null); Promise.all([safe(api.getShortlist(session)), safe(api.getRecruitmentCounts(session)), safe(api.getFunnel(session))]).then(([shortlist, counts, funnel]) => { if (!gone) setData({shortlist, counts, funnel}); }); return () => { gone = true; }; }, [session, tick]);
   const metrics: { label: string; value: number | null; icon: string; target: ScreenId; sub: string }[] = [
     {label:'Player portfolio',value:data?.shortlist?.length ?? null,icon:'users',target:'shortlist',sub:'Shortlisted players'},
-    {label:'Open conversations',value:data?.requests?.filter(x=>x.status==='pending').length ?? null,icon:'messages-square',target:'requests',sub:'Pending requests'},
-    {label:'Trial reports',value:data?.trials?.filter(x=>x.status==='awaiting_report').length ?? null,icon:'clipboard-list',target:'trials',sub:'Awaiting a report'},
-    {label:'Trial programme',value:data?.trials?.length ?? null,icon:'calendar-days',target:'trials',sub:'Recorded trials'},
+    {label:'Open conversations',value:data?.counts?.requestsPending ?? null,icon:'messages-square',target:'requests',sub:'Pending requests'},
+    {label:'Trial reports',value:data?.counts?.trialsAwaitingReport ?? null,icon:'clipboard-list',target:'trials',sub:'Awaiting a report'},
+    {label:'Trial programme',value:data?.counts?.trials ?? null,icon:'calendar-days',target:'trials',sub:'Recorded trials'},
   ];
   const positions = data?.shortlist?.reduce<Record<string, number>>((acc, p) => { acc[p.position] = (acc[p.position] ?? 0) + 1; return acc; }, {});
   return <>

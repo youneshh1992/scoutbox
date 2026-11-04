@@ -1559,14 +1559,12 @@ guardianRouter.post('/children', (req, res) => {
 
 // Scout Inbox for minors lives with the GUARDIAN. Club-first identity:
 // the parent sees the verified club and the sender's verified role.
+// Newest first, paged by cursor: { items, nextCursor }.
 guardianRouter.get('/inbox', (req, res) => {
-  res.json(
-    recruitment.requests.forPlayers(req.guardian.childIds)
-      .filter((r) => r.routedTo === 'guardian')
-      .map(requestForRecipient)
-      .slice()
-      .reverse()
-  );
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const { items, nextCursor } = recruitment.requests.pageForGuardianOf(req.guardian.childIds, page);
+  res.json({ items: items.map(requestForRecipient), nextCursor });
 });
 
 guardianRouter.post('/requests/:id/respond', (req, res) => {
@@ -2675,14 +2673,27 @@ orgRouter.get('/fixtures', (req, res) => {
   res.json(Object.values(groups).sort((a, b) => (a.date < b.date ? 1 : -1)));
 });
 
+// The club's Requests and Trials lists, newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
+// The home dashboards read their figures from /org/recruitment-counts, never by counting a page.
 orgRouter.get('/requests', (req, res) => {
-  // Whole list, from SQL. Paging it waits on the home dashboards' counts (they count this list): see migration.md §4.3.
-  res.json(recruitment.requests.forOrg(req.org.id));
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  res.json(recruitment.requests.pageForOrg(req.org.id, page));
 });
 
 orgRouter.get('/trials', (req, res) => {
-  // Whole list, from SQL. Paging it waits on the home dashboards' counts (they count this list): see migration.md §4.3.
-  res.json(recruitment.trials.forOrg(req.org.id));
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  res.json(recruitment.trials.pageForOrg(req.org.id, page));
+});
+
+// The Pro and Grassroots home figures: pending requests, trials awaiting a report, and every trial on record.
+orgRouter.get('/recruitment-counts', (req, res) => {
+  res.json({
+    requestsPending: recruitment.requests.countForOrgStatus(req.org.id, 'pending'),
+    trialsAwaitingReport: recruitment.trials.countForOrgStatus(req.org.id, 'awaiting_report'),
+    trials: recruitment.trials.countForOrg(req.org.id),
+  });
 });
 
 // Trial Performance Reports — mandatory, complete or rejected.
@@ -3418,11 +3429,14 @@ playerRouter.get('/cv', (req, res) => {
 // sees who wants them and decides. No message thread exists until acceptance.
 // A CHILD's inbox never carries a message or a contact channel: they see only
 // guardian-managed status updates. No direct messages to children. Ever.
+// Newest first, paged by cursor: { items, nextCursor }.
 playerRouter.get('/inbox', (req, res) => {
-  const rows = recruitment.requests.forPlayer(req.player.id);
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const { items: rows, nextCursor } = recruitment.requests.pageForPlayer(req.player.id, page);
   if (req.playerIsMinor) {
-    return res.json(
-      rows
+    return res.json({
+      items: rows
         .map((r) => ({
           id: r.id,
           type: r.type,
@@ -3436,12 +3450,11 @@ playerRouter.get('/inbox', (req, res) => {
               : r.status === 'accepted'
                 ? `Your parent/guardian accepted the ${r.type} with ${r.orgName}.`
                 : `Your parent/guardian declined the ${r.type} with ${r.orgName}.`,
-        }))
-        .slice()
-        .reverse()
-    );
+        })),
+      nextCursor,
+    });
   }
-  res.json(rows.map(requestForRecipient).slice().reverse());
+  res.json({ items: rows.map(requestForRecipient), nextCursor });
 });
 
 playerRouter.post('/requests/:id/respond', (req, res) => {

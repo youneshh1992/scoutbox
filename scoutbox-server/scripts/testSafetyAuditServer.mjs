@@ -112,7 +112,7 @@ await test('[compat] every writer through its route and every reader: a guardian
   const req = await S.j('POST', '/org/players/pl-guni/request', { type: 'contact', message: 'Synthetic contact request for the child.' }, maria); assert.equal(req.status, 201, req.text);
   assert.equal((await S.j('POST', '/guardian/block', { orgId: 'org-harbour', playerId: 'pl-guni', reason: 'synthetic guardian block' }, amara)).status, 201);
   const gRep = await S.j('POST', '/guardian/report', { targetKind: 'club', targetOrgId: 'org-eastport', reason: 'Synthetic urgent guardian report.', urgent: true }, amara); assert.equal(gRep.status, 201, gRep.text); assert.equal(gRep.body.suspended, true);
-  assert.equal((await S.j('GET', '/guardian/inbox', undefined, amara)).body.find((r) => r.id === req.body.requestId)?.status, 'suspended', 'the pending request froze with the suspension block');
+  assert.equal((await S.j('GET', '/guardian/inbox', undefined, amara)).body.items.find((r) => r.id === req.body.requestId)?.status, 'suspended', 'the pending request froze with the suspension block');
   // Adult: a block naming an organisation that does not exist (the route checks truthiness only), reports naming an unknown player and a numeric id (handleReport stores what it received).
   assert.equal((await S.j('POST', '/player/block', { orgId: 'org-does-not-exist', reason: 'synthetic' }, adult)).status, 201, 'a block naming an unknown organisation is accepted, as before');
   const pRep1 = await S.j('POST', '/player/report', { targetKind: 'player', targetPlayerId: 'pl-nobody', reason: 'Synthetic report naming an unknown player.' }, adult); assert.equal(pRep1.status, 201, pRep1.text);

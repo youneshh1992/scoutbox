@@ -163,7 +163,7 @@ await test('[compat] both acceptance paths, all three sender kinds, both attachm
   const trialReq = await S.j('POST', '/org/players/pl-adeyemi/request', { type: 'trial', message: 'Synthetic trial invitation.', proposedDate: '2026-12-05', altSlots: ['2026-12-12'], venue: 'Eastport Dome', notes: 'Synthetic.' }, maria); assert.equal(trialReq.status, 201, trialReq.text);
   assert.equal((await S.j('POST', `/player/requests/${trialReq.body.requestId}/respond`, { accept: true }, kola)).status, 200);
   const trialThread = (await S.j('GET', '/player/channels', undefined, kola)).body.find((c) => c.requestId === trialReq.body.requestId); assert.ok(trialThread?.id, 'a trial acceptance opens a thread of its own too (as before)'); assert.deepEqual(trialThread.messages, []);
-  const trial = (await S.j('GET', '/org/trials', undefined, maria)).body.find((t) => t.requestId === trialReq.body.requestId); assert.ok(trial?.id, 'the accepted trial');
+  const trial = (await S.j('GET', '/org/trials', undefined, maria)).body.items.find((t) => t.requestId === trialReq.body.requestId); assert.ok(trial?.id, 'the accepted trial');
   const filed = await S.j('POST', `/org/trials/${trial.id}/report`, REPORT, maria); assert.equal(filed.status, 201, filed.text);
   const m5 = await S.j('POST', `/org/channels/${adult.id}/messages`, { text: 'Synthetic message with the trial report.', attachTrialReportId: filed.body.report.id }, maria); assert.equal(m5.status, 201, m5.text);
   assert.deepEqual(m5.body.attachment, { kind: 'trial_report', reportId: filed.body.report.id, orgName: 'Eastport FC', summary: 'accel 7/10 · 31 km/h · 6.2 km · pass 78% · duels 55% · coach 8/10' });

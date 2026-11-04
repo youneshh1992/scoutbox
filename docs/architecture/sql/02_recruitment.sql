@@ -424,6 +424,7 @@ CREATE TABLE recruitment_requests (
   CHECK ((invite_key IS NULL) = (invite_fp IS NULL))
 ) STRICT;
 CREATE INDEX recruitment_requests_org_player_type_status ON recruitment_requests (org_id, player_id, type, status);
+CREATE INDEX recruitment_requests_org ON recruitment_requests (org_id);
 CREATE INDEX recruitment_requests_player ON recruitment_requests (player_id, created_at);
 CREATE INDEX recruitment_requests_routed_guardian ON recruitment_requests (routed_to, guardian_id);
 CREATE INDEX recruitment_requests_case_type_created ON recruitment_requests (case_id, type, created_at);
@@ -520,6 +521,7 @@ CREATE TABLE trials (
   CHECK (day_emergency_at IS NOT NULL OR (day_emergency_name IS NULL AND day_emergency_phone IS NULL))
 ) STRICT;
 CREATE INDEX trials_org_status ON trials (org_id, status);
+CREATE INDEX trials_org ON trials (org_id);
 CREATE INDEX trials_org_player_case ON trials (org_id, player_id, case_id);
 CREATE INDEX trials_player ON trials (player_id);
 CREATE INDEX trials_case ON trials (case_id);

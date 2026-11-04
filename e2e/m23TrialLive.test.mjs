@@ -283,7 +283,7 @@ ok(await waitLive(lead.page, /Invitation sent\. Case moved to Trial requested\./
   neg(!(await trialPanel(lead.page).locator('form[aria-label="Invite to a trial"]').count()), 'N15: the compose form is gone while an invitation is pending');
   expect(await j('POST', `/org/rooms/${ROOM_A}/trials`, { timezone: 'Europe/London', venue: { name: 'X', town: 'Y' }, message: 'Again?', slots: [{ startsAt: T0 + 48 * H, endsAt: T0 + 50 * H }] }, LEAD), 409, 'TRIAL_ALREADY_INVITED', 'N15b: the API refuses a second invitation while one is pending (409 TRIAL_ALREADY_INVITED)');
 }
-const INV = (await j('GET', '/player/inbox', undefined, KOLA)).body.find((r) => r.type === 'trial' && r.status === 'pending');
+const INV = (await j('GET', '/player/inbox', undefined, KOLA)).body.items.find((r) => r.type === 'trial' && r.status === 'pending');
 ok(INV && INV.trialDetails?.slots?.length === 1, 'A6: the invitation is in the player\'s Inbox with its concrete slot');
 neg(!JSON.stringify(INV).includes('Gate B') && !JSON.stringify(INV).includes('Ask for Priya'), 'A6b: the Inbox row carries neither the exact address nor the arrival instructions (shared after acceptance)');
 
@@ -546,7 +546,7 @@ await guni.waitForSelector('[data-testid="trial-workflow"]', { timeout: 20000 })
   const inv = await j('POST', `/org/rooms/${ROOM_E}/trials`, { timezone: 'Europe/London', venue: { name: 'Eastport Dome', town: 'Eastport' }, message: 'Elias — a session with the U21s?', slots: [{ startsAt: T0 + 96 * H, endsAt: T0 + 98 * H }] }, LEAD);
   ok(inv.status === 201, 'N5: an invitation goes to an adult');
   const ELIAS = (await j('POST', '/auth/player/login', { playerId: 'pl-svensson' })).body.token;
-  const req = (await j('GET', '/player/inbox', undefined, ELIAS)).body.find((r) => r.status === 'pending' && r.type === 'trial');
+  const req = (await j('GET', '/player/inbox', undefined, ELIAS)).body.items.find((r) => r.status === 'pending' && r.type === 'trial');
   ok((await j('POST', '/player/block', { orgId: 'org-eastport' }, ELIAS)).status === 201, 'N5b: the player then blocks the organisation');
   expect(await j('POST', `/player/requests/${req.id}/respond`, { accept: true, chosenSlot: req.trialDetails.proposedDate }, ELIAS), 403, 'BLOCKED', 'N5c: accepting an invitation from a blocked organisation is refused 403 BLOCKED');
   const dec = await j('POST', `/player/requests/${req.id}/respond`, { accept: false }, ELIAS);
