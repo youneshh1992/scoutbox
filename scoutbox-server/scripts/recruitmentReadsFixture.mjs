@@ -1,6 +1,6 @@
-// Test helper (§4.3 step 2). The server reads the contacts, offers, signing packages, signings, follow-ups and outcome
-// reports through SQL (the repositories' queries, `recruitmentReads`); the pure projectors and providers take those
-// queries as `reads`. The batteries that exercise the projectors directly build plain in-memory databases, so this
+// Test helper (§4.3 step 2). The server reads the requests, trials, contacts, offers, signing packages, signings,
+// follow-ups and outcome reports through SQL (the repositories' queries, `recruitmentReads`); the pure projectors and
+// providers take those queries as `reads`. The batteries that exercise the projectors directly build plain in-memory databases, so this
 // helper answers the same queries over the plain arrays of such a database, in array order (the tables' rowid order).
 //
 // A database WITHOUT one of the arrays gets no query object for it, exactly as the old code saw no collection: the
@@ -9,6 +9,9 @@
 import { buildRecruitmentJourney as journey } from '../m23/journey.mjs';
 import { createEvidenceProvider as provider } from '../m23/evidence.mjs';
 import { buildReportingContext as reportingContext } from '../m20/dashboard.mjs';
+import { resolveEvidenceLink as resolveLink, recordBelongsToPlayer as belongs, validateEvidenceLink as validateLink } from '../m21/evidence.mjs';
+import { resolveEvidenceRefs as resolveRefs, evidenceCandidates as candidates } from '../m23/decision.mjs';
+import { buildDevelopmentPlan as buildPlan } from '../m21/plan.mjs';
 
 const sound = (r) => r !== null && typeof r === 'object';
 
@@ -83,6 +86,32 @@ function outcomeQueries(rows) {
   };
 }
 
+function requestQueries(rows) {
+  const list = () => rows.filter(sound);
+  return {
+    byId: (id) => list().find((r) => r.id === id) ?? null,
+    forOrg: (orgId) => list().filter((r) => r.orgId === orgId),
+    forPlayer: (playerId) => list().filter((r) => r.playerId === playerId),
+    forPlayers: (playerIds) => list().filter((r) => (playerIds ?? []).includes(r.playerId)),
+    forOrgPlayer: (orgId, playerId) => list().filter((r) => r.orgId === orgId && r.playerId === playerId),
+    forCase: (caseId) => list().filter((r) => r.caseId === caseId),
+    countForOrg: (orgId) => list().filter((r) => r.orgId === orgId).length,
+  };
+}
+
+function trialQueries(rows) {
+  const list = () => rows.filter(sound);
+  return {
+    byId: (id) => list().find((t) => t.id === id) ?? null,
+    forOrg: (orgId) => list().filter((t) => t.orgId === orgId),
+    forOrgStatus: (orgId, status) => list().filter((t) => t.orgId === orgId && t.status === status),
+    forPlayer: (playerId) => list().filter((t) => t.playerId === playerId),
+    forPlayers: (playerIds) => list().filter((t) => (playerIds ?? []).includes(t.playerId)),
+    forOrgPlayer: (orgId, playerId) => list().filter((t) => t.orgId === orgId && t.playerId === playerId),
+    forCase: (caseId) => list().filter((t) => t.caseId === caseId),
+  };
+}
+
 /** The `recruitmentReads` shape over a plain database's arrays (an absent or non-array collection gives no queries). */
 export function arrayReads(db) {
   const out = {};
@@ -92,6 +121,8 @@ export function arrayReads(db) {
   if (Array.isArray(db?.signings)) out.signings = signingQueries(db.signings);
   if (Array.isArray(db?.followUps)) out.followUps = followUpQueries(db.followUps);
   if (Array.isArray(db?.outcomeReports)) out.outcomeReports = outcomeQueries(db.outcomeReports);
+  if (Array.isArray(db?.requests)) out.requests = requestQueries(db.requests);
+  if (Array.isArray(db?.trials)) out.trials = trialQueries(db.trials);
   return out;
 }
 
@@ -103,3 +134,11 @@ export const createEvidenceProvider = (db, reads = arrayReads(db)) => provider(d
 
 /** `buildReportingContext` over a plain database: `reads` defaults to the database's own arrays. */
 export const buildReportingContext = (args) => reportingContext({ reads: arrayReads(args?.db), ...args });
+
+// The M21 evidence links and the M23 decision evidence over a plain database: `reads` defaults to its own arrays.
+export const resolveEvidenceLink = (link, opts = {}) => resolveLink(link, { reads: arrayReads(opts.db), ...opts });
+export const recordBelongsToPlayer = (opts = {}) => belongs({ reads: arrayReads(opts.db), ...opts });
+export const validateEvidenceLink = (opts = {}) => validateLink({ reads: arrayReads(opts.db), ...opts });
+export const resolveEvidenceRefs = (refs, opts = {}) => resolveRefs(refs, { reads: arrayReads(opts.db), ...opts });
+export const evidenceCandidates = (opts = {}) => candidates({ reads: arrayReads(opts.db), ...opts });
+export const buildDevelopmentPlan = (opts = {}) => buildPlan({ reads: arrayReads(opts.db), ...opts });

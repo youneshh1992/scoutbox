@@ -526,6 +526,9 @@ CREATE INDEX trials_case ON trials (case_id);
 CREATE INDEX trials_status_report_due ON trials (status, report_due_at);
 CREATE INDEX trials_workflow_confirmed ON trials (workflow_state, schedule_confirmed_at);
 CREATE UNIQUE INDEX trials_one_open_per_case ON trials (case_id) WHERE case_id IS NOT NULL AND workflow_state NOT IN ('completed', 'cancelled');
+CREATE INDEX trials_report_overdue ON trials (report_due_at) WHERE feedback_escalated_at IS NULL AND subject_removed_at IS NULL;
+CREATE INDEX trials_confirmed_open ON trials (schedule_confirmed_at) WHERE completion_state IS NULL AND subject_removed_at IS NULL;
+CREATE INDEX trials_completion ON trials (completion_state, completion_at);
 CREATE TABLE trial_schedule_sessions (
   trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
   position INTEGER NOT NULL,
@@ -685,6 +688,7 @@ CREATE TABLE trial_day_staff (
   UNIQUE (trial_id, id),
   CHECK (check_status IS NOT NULL OR (check_kind IS NULL AND check_ref IS NULL AND check_expires_at IS NULL AND check_reviewed_by IS NULL AND check_reviewed_at IS NULL))
 ) STRICT;
+CREATE INDEX trial_day_staff_check ON trial_day_staff (check_status) WHERE check_status IS NOT NULL;
 CREATE TABLE trial_day_consents (
   trial_id TEXT NOT NULL REFERENCES trials(id) ON DELETE CASCADE,
   position INTEGER NOT NULL,

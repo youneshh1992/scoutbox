@@ -39,12 +39,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  DECISION_OUTCOMES, OUTCOME_MAP, EVIDENCE_REF_KINDS, DECISION_LIMITS, DECISION_POLICY_VERSION,
-  validateOutcome, validateDecisionReasons, validateNote, validateEvidenceRefShapes, resolveEvidenceRefs,
-  decisionIntegrity, duplicateFinalHeads, chainHead, summariseAssessments, assessmentSnapshot, decisionView, draftView,
-  decisionMilestone, decisionRequirements, normaliseDecisionClientKey,
-} from '../m23/decision.mjs';
+import { DECISION_OUTCOMES, OUTCOME_MAP, EVIDENCE_REF_KINDS, DECISION_LIMITS, DECISION_POLICY_VERSION, validateOutcome, validateDecisionReasons, validateNote, validateEvidenceRefShapes, decisionIntegrity, duplicateFinalHeads, chainHead, summariseAssessments, assessmentSnapshot, decisionView, draftView, decisionMilestone, decisionRequirements, normaliseDecisionClientKey } from '../m23/decision.mjs';
 import { M23_ERROR_HTTP } from '../m23/errors.mjs';
 import { EVENT_REGISTRY } from '../m182/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
@@ -53,7 +48,7 @@ import { EVIDENCE_KINDS } from '../m23/evidence.mjs';
 import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS } from '../m23/lifecycle.mjs';
 import { readFileSync } from 'node:fs';
 import { pickPort } from './testPort.mjs';
-import { createEvidenceProvider } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the contacts/offers queries over the plain arrays
+import { createEvidenceProvider, resolveEvidenceRefs } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the recruitment queries over the plain arrays
 
 const PORT = pickPort(6400, 200, [0]); // TH-6: never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;

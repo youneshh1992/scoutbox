@@ -450,11 +450,11 @@ const copyChannel = (row) => structuredClone(row);
  * the authoritative requests collection (the live blob: `() => db.requests`) that
  * `open` checks the transitional reference against; without it `open` refuses.
  */
-export function createChannelsRepository({ sqlite, now = Date.now, log = () => {}, unit = null, staged = false, requests = null } = {}) {
+export function createChannelsRepository({ sqlite, now = Date.now, log = () => {}, unit = null, staged = false, requestExists = null } = {}) {
   if (!sqlite) throw new TypeError('the channels repository needs a SQLite connection (node:sqlite); message threads have no in-memory or JSON fallback');
   if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the channels repository needs the store\'s participant API `unit` ({ active(), join(work) }) or null; a unit without join() could not report an operation\'s failure to the unit of work');
   if (staged && !unit) throw new TypeError('the channels repository in staged mode needs the store\'s participant API `unit` and the store must register its saveHook()');
-  if (requests !== null && typeof requests !== 'function') throw new TypeError('the channels repository takes `requests` as an accessor function returning the authoritative requests collection');
+  if (requestExists !== null && typeof requestExists !== 'function') throw new TypeError('the channels repository takes `requestExists(id)`, the requests repository\'s check that a request exists');
   const stmt = {
     cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
     channel: sqlite.prepare(CHANNEL_INSERT), message: sqlite.prepare(MESSAGE_INSERT), attachment: sqlite.prepare(ATTACHMENT_INSERT),
@@ -525,9 +525,8 @@ export function createChannelsRepository({ sqlite, now = Date.now, log = () => {
         const row = v.row;
         if (byId.has(row.id)) throw new Error(`channels: a thread with id ${row.id} already exists`);
         if (byRequest.has(row.requestId)) throw new Error(`channels: request ${row.requestId} already opened thread ${byRequest.get(row.requestId).id}; a request opens one thread`);
-        if (!requests) throw new Error('channels: open() needs the authoritative requests collection to check the request reference (the repository was created without `requests`)');
-        const list = requests(); if (!Array.isArray(list)) throw new Error(`channels: the authoritative requests collection is ${describe(list)}, not an array; the request reference cannot be checked`);
-        if (!list.some((r) => isPlainObject(r) && r.id === row.requestId)) throw refusal('CHANNEL_REQUEST_MISSING', `channels: request ${row.requestId} is not in the requests collection; a thread opens only for an existing request`);
+        if (typeof requestExists !== 'function') throw new Error('channels: open() needs the requests repository to check the request reference (the repository was created without `requestExists`)');
+        if (!requestExists(row.requestId)) throw refusal('CHANNEL_REQUEST_MISSING', `channels: request ${row.requestId} is not in the requests collection; a thread opens only for an existing request`);
         if (!stmt.org.get(row.orgId)) throw refusal('CHANNEL_ORG_MISSING', `channels: organisation ${row.orgId} does not exist`);
         if (row.guardianId !== null && !stmt.guardian.get(row.guardianId)) throw refusal('CHANNEL_GUARDIAN_MISSING', `channels: guardian ${row.guardianId} does not exist`);
         rows.push(row); byId.set(row.id, row); byRequest.set(row.requestId, row);

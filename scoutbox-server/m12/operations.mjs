@@ -339,10 +339,9 @@ export function registerOperations(ctx) {
 
     // F9: overdue trial feedback escalates once — to the club AND into the
     // existing no-ghosting culture (admin can see it in reports volume).
-    for (const t of db.trials) {
-      // P4B (D-P4B-3): an alien entry in the store is skipped, never fatal —
-      // the boot sweep must not take the server down over one bad row.
-      if (!t || typeof t !== 'object') continue;
+    // §4.3 step 2: the query is the old filter as an indexed predicate (a deadline passed, no report, never escalated,
+    // the subject not removed); the check below stays as written.
+    for (const t of trials.reportOverdue(now)) {
       // P4A-D1/D14: a null deadline is "unknown", not "now"; a tombstoned
       // trial has nobody to file for, so it never escalates.
       if (Number.isFinite(t.reportDueAt) && t.reportDueAt < now && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt) {
@@ -360,8 +359,8 @@ export function registerOperations(ctx) {
     // ago without completion, and a completed trial without an assessment
     // after a week, remind the club lead once each. A blocked club sends the
     // family nothing (D-16); a tombstoned trial has nobody to remind.
-    for (const t of db.trials) {
-      if (!t || typeof t !== 'object' || t.subjectRemovedAt || !t.schedule?.confirmedAt) continue;
+    for (const t of trials.confirmedOpen()) { // confirmed, not completed or cancelled, the subject not removed
+      if (t.subjectRemovedAt || !t.schedule?.confirmedAt) continue;
       if (deriveWorkflowState(t) !== 'scheduled') continue;
       const marks = {}; // the markers this sweep sets, written once below
       const p = findPlayer(t.playerId);
@@ -386,8 +385,8 @@ export function registerOperations(ctx) {
       }
       if (Object.keys(marks).length) trials.update(t.id, (d) => { Object.assign(d.reminders, marks); });
     }
-    for (const t of db.trials) {
-      if (!t || typeof t !== 'object' || t.subjectRemovedAt || t.completion?.state !== 'completed' || t.reminders?.assessmentPending) continue;
+    for (const t of trials.completedUnreminded(now - 7 * 86_400_000)) {
+      if (t.subjectRemovedAt || t.completion?.state !== 'completed' || t.reminders?.assessmentPending) continue;
       if (!Number.isFinite(t.completion.at) || now - t.completion.at < 7 * 86_400_000) continue;
       if ((db.assessments ?? []).some((a) => a?.context?.trialId === t.id)) continue;
       trials.update(t.id, (d) => { d.reminders.assessmentPending = now; });

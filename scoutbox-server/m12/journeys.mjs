@@ -7,6 +7,7 @@
 import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../domain.mjs';
 import { parseStrictDateOnly, parseDateOrInstant, isExpiredAt, isAbsent } from '../temporal.mjs';
 import { trialFamilyView, trialOutcomeLine } from '../m23/trial.mjs';
+import { readPage, sendPageError } from '../domains/platform/paging.mjs';
 
 export function registerJourneys(ctx) {
   const {
@@ -523,7 +524,8 @@ export function registerJourneys(ctx) {
   // feeding existing attendance without duplicates, honest cancellation.
 
   function trialFor(req, res) {
-    const t = db.trials.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const found = trials.byId(req.params.id);
+    const t = found && found.orgId === req.org.id ? found : null;
     if (!t) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
     // M23 P4A-D14: a tombstoned trial (its subject removed their account) can
     // still be READ — the record of what happened is the club's — but nothing
@@ -716,7 +718,8 @@ export function registerJourneys(ctx) {
 
   // Player/guardian side: consent, restricted emergency info, safety pack.
   function playerTrial(req, res, playerIds) {
-    const t = db.trials.find((x) => x.id === req.params.id && playerIds.includes(x.playerId));
+    const found = trials.byId(req.params.id);
+    const t = found && playerIds.includes(found.playerId) ? found : null;
     if (!t) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
     return t; // S8a: every trial reads back with its trial-day container
   }
@@ -773,8 +776,7 @@ export function registerJourneys(ctx) {
   }
 
   // The family's list of their own trials (safety pack entry point).
-  const familyTrials = (playerIds, { minorDevice = false } = {}) => db.trials
-    .filter((t) => t && typeof t === 'object' && playerIds.includes(t.playerId))
+  const familyTrials = (playerIds, { minorDevice = false } = {}) => trials.forPlayers(playerIds)
     .map((t) => {
       // P4B: the workflow edge (state, confirmed sessions, completion) rides
       // beside the P2 day view. Family view only — never the club's internals.
@@ -798,12 +800,16 @@ export function registerJourneys(ctx) {
   // Admin review queue for staff checks — jurisdiction-appropriate wording,
   // honest states, nothing auto-approved.
   adminRouter.get('/staff-checks', (req, res) => {
-    const rows = db.trials.flatMap((t) => (t.day?.staff ?? []).filter((s) => s.check).map((s) => ({ trialId: t.id, orgId: t.orgId, orgName: t.orgName, staffId: s.id, name: s.name, role: s.role, check: { ...s.check, state: checkState(s.check) } })));
-    res.json(paginate(req, rows.filter((r) => req.query.all === '1' || r.check.status === 'pending')));
+    // Paged by cursor (domains/platform/paging.mjs): { items, nextCursor }, oldest trial first. The admin app reads the
+    // first page only; a "load more" is not built yet (the decision of 4 November 2026).
+    let page;
+    try { page = readPage(req.query, ['number', 'number']); } catch (e) { return sendPageError(res, e); }
+    const { items, nextCursor } = trials.staffChecksPage({ pendingOnly: req.query.all !== '1', ...page });
+    res.json({ items: items.map((r) => ({ ...r, check: { ...r.check, state: checkState(r.check) } })), nextCursor });
   });
 
   adminRouter.post('/staff-checks/:trialId/:staffId', (req, res) => {
-    const t = db.trials.find((x) => x.id === req.params.trialId);
+    const t = trials.byId(req.params.trialId);
     const s = t?.day?.staff.find((x) => x.id === req.params.staffId);
     if (!s?.check) return res.status(404).json({ error: 'CHECK_NOT_FOUND' });
     const { status, expiresAt } = req.body ?? {};

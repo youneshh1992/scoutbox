@@ -151,7 +151,9 @@ export function validateEvidenceRefShapes(raw) {
  * (§51): who assessed and when, the trial's state, the session's verification
  * state, the claim type. Never a rating, a note, a trace or a value.
  */
-export function resolveEvidenceRefs(refs, { db, kase, testProviderEnabled = false, providers = {} }) {
+export function resolveEvidenceRefs(refs, { db, reads = {}, kase, testProviderEnabled = false, providers = {} }) {
+  // §4.3 step 2: the trials are read through SQL — this club's trials of this player, the only ones a ref may name.
+  const caseTrials = typeof reads.trials?.forOrgPlayer === 'function' ? reads.trials.forOrgPlayer(kase.orgId, kase.playerId) : [];
   const out = [];
   for (const ref of refs) {
     const mismatch = (message) => ({ ok: false, error: 'DECISION_CASE_MISMATCH', message, ref });
@@ -163,13 +165,13 @@ export function resolveEvidenceRefs(refs, { db, kase, testProviderEnabled = fals
       continue;
     }
     if (ref.kind === 'trial') {
-      const t = (db.trials ?? []).find((x) => x && x.id === ref.id);
+      const t = caseTrials.find((x) => x && x.id === ref.id);
       if (!t || t.orgId !== kase.orgId || t.playerId !== kase.playerId || (t.caseId && t.caseId !== kase.id)) return mismatch('That trial is not one of this case\'s.');
       out.push({ kind: 'trial', id: t.id, meta: { workflowState: deriveWorkflowState(t), completedAt: t.completion?.state === 'completed' ? t.completion.at : null } });
       continue;
     }
     if (ref.kind === 'box_cam_session') {
-      const link = (db.trials ?? [])
+      const link = caseTrials
         .filter((t) => t && t.orgId === kase.orgId && t.playerId === kase.playerId && (!t.caseId || t.caseId === kase.id))
         .flatMap((t) => (t.schedule?.sessions ?? []).flatMap((s) => (s?.evidence ?? []).map((e) => ({ trial: t, session: s, e }))))
         .find(({ e }) => e && e.kind === 'box_cam_session' && e.sessionId === ref.id && !e.removedAt);
@@ -301,13 +303,15 @@ export function assessmentSnapshot(summary) {
  * (§106). Box Cam observations appear as a STATE — observed, no reliable
  * observation, withdrawn — never as a recommendation (§26, §27).
  */
-export function evidenceCandidates({ db, kase, assessmentsVisible, trialEvidenceViews = null, providers = {}, testProviderEnabled = false }) {
-  const trials = (db.trials ?? [])
+export function evidenceCandidates({ db, reads = {}, kase, assessmentsVisible, trialEvidenceViews = null, providers = {}, testProviderEnabled = false }) {
+  // §4.3 step 2: this club's trials of this player, read through SQL.
+  const caseTrials = typeof reads.trials?.forOrgPlayer === 'function' ? reads.trials.forOrgPlayer(kase.orgId, kase.playerId) : [];
+  const trials = caseTrials
     .filter((t) => t && t.orgId === kase.orgId && t.playerId === kase.playerId && (!t.caseId || t.caseId === kase.id))
     .sort((a, b) => (a.acceptedAt - b.acceptedAt) || String(a.id).localeCompare(String(b.id)))
     .map((t) => ({ id: t.id, workflowState: deriveWorkflowState(t), completedAt: t.completion?.state === 'completed' ? t.completion.at : null, sessionCount: t.schedule?.sessions?.length ?? 0, legacy: !t.caseId }));
   const boxCam = [];
-  for (const t of (db.trials ?? [])) {
+  for (const t of caseTrials) {
     if (!t || t.orgId !== kase.orgId || t.playerId !== kase.playerId || (t.caseId && t.caseId !== kase.id)) continue;
     const views = trialEvidenceViews ? trialEvidenceViews(t) : [];
     for (const v of views) {

@@ -64,6 +64,7 @@ export function registerTransactions(rawCtx) {
     // duplicate rule. Absent (a suite booting P5.6D alone), a transaction may
     // not cite a recruitment case at all, which is the fail-closed answer.
     integration = null,
+    recruitmentReads, // §4.3 step 2: the trials are read through SQL
   } = rawCtx;
 
   // Registration-time presence (migration 2307 guarantees these; this is the
@@ -1231,7 +1232,8 @@ export function registerTransactions(rawCtx) {
     if (!writableOr(res, tx, 'links')) return;
     const trialId = str(req.body?.trialId, 60);
     const individual = partiesOf(tx).find((p) => !p.removed && p.partyRole === 'individual');
-    const trial = (db.trials ?? []).find((t) => t && t.id === trialId && t.orgId === req.org.id && individual && t.playerId === individual.subjectId);
+    const foundTrial = trialId ? recruitmentReads.trials.byId(trialId) : null;
+    const trial = foundTrial && foundTrial.orgId === req.org.id && individual && foundTrial.playerId === individual.subjectId ? foundTrial : null;
     if (!trial) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'trialId', message: 'No trial of yours with this transaction\'s individual matches that reference.' }, 'links');
     if (!guardRev(req, res, tx, { errorCode: 'TRANSACTION_VERSION_CONFLICT', current: { status: tx.status } })) return;
     tx.links ??= { trialId: null, opportunityId: null };

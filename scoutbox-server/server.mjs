@@ -200,8 +200,10 @@ const dataLayer = attachDataLayer({
 });
 const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
-// module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports).
-const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads });
+// module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials).
+// A record the caller may use, or null: `onlyIf(repo.byId(id), (r) => r.orgId === orgId)`.
+const onlyIf = (record, ok) => (record && ok(record) ? record : null);
+const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...signingsFollowUps.reads, ...recruitment.reads });
 if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
@@ -1031,7 +1033,7 @@ function postMessage(channel, sender, text, attachment = null, clientMsgId = nul
   if (sender.kind !== 'org_user') {
     // notify every org user who has messaged or created the request
     const userIds = new Set([...channel.messages.filter((m) => m.sender.kind === 'org_user').map((m) => m.sender.id)]);
-    const req = db.requests.find((r) => r.id === channel.requestId);
+    const req = recruitment.requests.byId(channel.requestId);
     if (req) userIds.add(req.userId);
     for (const uid of userIds) {
       if (uid) notify({ kind: 'org_user', id: uid }, 'message', `${sender.name} replied in the ${channel.playerName} thread.`, channel.id);
@@ -1558,8 +1560,8 @@ guardianRouter.post('/children', (req, res) => {
 // the parent sees the verified club and the sender's verified role.
 guardianRouter.get('/inbox', (req, res) => {
   res.json(
-    db.requests
-      .filter((r) => r.routedTo === 'guardian' && req.guardian.childIds.includes(r.playerId))
+    recruitment.requests.forPlayers(req.guardian.childIds)
+      .filter((r) => r.routedTo === 'guardian')
       .map(requestForRecipient)
       .slice()
       .reverse()
@@ -1567,9 +1569,8 @@ guardianRouter.get('/inbox', (req, res) => {
 });
 
 guardianRouter.post('/requests/:id/respond', (req, res) => {
-  const found = db.requests.find(
-    (r) => r.id === req.params.id && r.routedTo === 'guardian' && req.guardian.childIds.includes(r.playerId)
-  );
+  const candidate = recruitment.requests.byId(req.params.id);
+  const found = candidate && candidate.routedTo === 'guardian' && req.guardian.childIds.includes(candidate.playerId) ? candidate : null;
   if (!found) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
   if (found.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
   const child = findPlayer(found.playerId);
@@ -1685,7 +1686,7 @@ guardianRouter.get('/digest', (req, res) => {
         shortlists: ins.thisWeek.shortlists,
         streak: computeStreak(c.activityLog),
         weeklyGoal: weeklyGoal(c.activityLog),
-        newRequests: db.requests.filter((r) => r.playerId === c.id && r.createdAt >= week).length,
+        newRequests: recruitment.requests.forPlayer(c.id).filter((r) => r.createdAt >= week).length,
         activityThisWeek: (c.activityLog ?? []).filter((ts) => ts >= week).length,
       };
     }),
@@ -1819,7 +1820,7 @@ function handleReport(req, res, actor) {
     unit(() => {
       for (const pid of playerIds) {
         safetyAudit.blocks.append({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
-        for (const r of db.requests.filter((x) => x.playerId === pid && x.orgId === targetOrgId && x.status === 'pending')) {
+        for (const r of recruitment.requests.forOrgPlayer(targetOrgId, pid).filter((x) => x.status === 'pending')) {
           recruitment.requests.update(r.id, (d) => { d.status = 'suspended'; }); // S8a: the frozen request, with its block
         }
       }
@@ -2190,7 +2191,7 @@ orgRouter.post('/players/:id/request', (req, res) => {
     // trial cannot request new trials until it files.
     // A report can never be filed for a subject who removed their account
     // (P4A-D14), so a tombstoned trial does not hold the organisation hostage.
-    const overdue = db.trials.filter((t) => t.orgId === req.org.id && t.status === 'awaiting_report' && !t.subjectRemovedAt);
+    const overdue = recruitment.trials.forOrgStatus(req.org.id, 'awaiting_report').filter((t) => !t.subjectRemovedAt);
     if (overdue.length > 0) {
       return res.status(409).json({
         error: 'REPORTS_OUTSTANDING',
@@ -2217,7 +2218,7 @@ orgRouter.post('/players/:id/request', (req, res) => {
   // been validated exactly as before, it draws on the SAME budgets and keeps
   // the same one-pending rule, so it is not an unmetered alias: a club cannot
   // flood a player through the old door.
-  const pendingSame = db.requests.find((r) => r && r.orgId === req.org.id && r.playerId === p.id && r.type === type && r.status === 'pending' && !r.subjectRemovedAt);
+  const pendingSame = recruitment.requests.forOrgPlayer(req.org.id, p.id).find((r) => r.type === type && r.status === 'pending' && !r.subjectRemovedAt);
   if (pendingSame) return res.status(409).json({ error: 'REQUEST_PENDING', message: `A ${type} request to this player is already awaiting an answer.`, requestId: pendingSame.id });
   if (rateLimit.limited(type === 'trial' ? 'trial_invite' : 'contact_send', req.org.id)) return res.status(429).json(rateLimitedBody(type === 'trial' ? 'trial_invite' : 'contact_send'));
   const request = issueRecruitmentRequest({ org: req.org, orgUser: req.orgUser, player: p, type, message, trialDetails });
@@ -2532,13 +2533,13 @@ orgRouter.get('/feed', (req, res) => {
   }
   // A trial whose subject removed their account (P4A-D14 tombstone) has no
   // report to file, so it is neither listed as due nor reminded about.
-  for (const t of db.trials.filter((x) => x.orgId === req.org.id && x.status === 'awaiting_report' && !x.subjectRemovedAt)) {
+  for (const t of recruitment.trials.forOrgStatus(req.org.id, 'awaiting_report').filter((x) => !x.subjectRemovedAt)) {
     const dueAt = Number.isFinite(t.reportDueAt) ? t.reportDueAt : null;
     items.push({ type: 'report_due', ts: dueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt });
     // one-shot reminder when the mandatory report is due within 48h
     if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000) {
       recruitment.trials.update(t.id, (d) => { d.reminderSent = true; }); // S8a: the one-shot marker, written now
-      const request = db.requests.find((r) => r.id === t.requestId);
+      const request = recruitment.requests.byId(t.requestId);
       if (request?.userId) notify({ kind: 'org_user', id: request.userId }, 'report_due', `Mandatory trial report for ${t.playerName} is due ${utcDayOf(dueAt)}.`, t.id); // M23 P5.7: the UTC day, not the server locale
     }
   }
@@ -2600,7 +2601,7 @@ orgRouter.delete('/searches/:id', (req, res) => {
 
 // Calendar export for an accepted trial.
 orgRouter.get('/trials/:id/ics', (req, res) => {
-  const t = db.trials.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+  const t = onlyIf(recruitment.trials.byId(req.params.id), (x) => x.orgId === req.org.id);
   if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
   const deadline = Number.isFinite(t.reportDueAt) ? ` Mandatory performance report due ${new Date(t.reportDueAt).toISOString().slice(0, 10)}.` : '';
   // M23 P4B: a trial with a confirmed schedule exports every session as its
@@ -2674,16 +2675,18 @@ orgRouter.get('/fixtures', (req, res) => {
 });
 
 orgRouter.get('/requests', (req, res) => {
-  res.json(db.requests.filter((r) => r.orgId === req.org.id));
+  // Whole list, from SQL. Paging it waits on the home dashboards' counts (they count this list): see migration.md §4.3.
+  res.json(recruitment.requests.forOrg(req.org.id));
 });
 
 orgRouter.get('/trials', (req, res) => {
-  res.json(db.trials.filter((t) => t.orgId === req.org.id));
+  // Whole list, from SQL. Paging it waits on the home dashboards' counts (they count this list): see migration.md §4.3.
+  res.json(recruitment.trials.forOrg(req.org.id));
 });
 
 // Trial Performance Reports — mandatory, complete or rejected.
 orgRouter.post('/trials/:trialId/report', (req, res) => {
-  const trial = db.trials.find((t) => t.id === req.params.trialId && t.orgId === req.org.id);
+  const trial = onlyIf(recruitment.trials.byId(req.params.trialId), (x) => x.orgId === req.org.id);
   if (!trial) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
   if (trial.status === 'reported') return res.status(409).json({ error: 'ALREADY_REPORTED' });
   // P4A-D14: the subject removed their account. There is no profile for the
@@ -3167,7 +3170,7 @@ orgRouter.post('/friendlies/:id/respond', (req, res) => {
 orgRouter.get('/funnel', (req, res) => {
   const mine = db.ledger.filter((l) => l.orgId === req.org.id);
   const count = (type) => mine.filter((l) => l.type.startsWith(type)).length;
-  const requests = db.requests.filter((r) => r.orgId === req.org.id);
+  const requests = recruitment.requests.forOrg(req.org.id);
   res.json({
     stages: [
       { key: 'views', label: 'Profile views', count: count('view') },
@@ -3175,8 +3178,8 @@ orgRouter.get('/funnel', (req, res) => {
       { key: 'shortlists', label: 'Shortlists', count: count('shortlist') },
       { key: 'requests', label: 'Requests sent', count: requests.length },
       { key: 'accepted', label: 'Requests accepted', count: requests.filter((r) => r.status === 'accepted').length },
-      { key: 'trials', label: 'Trials booked', count: db.trials.filter((t) => t.orgId === req.org.id).length },
-      { key: 'reports', label: 'Reports filed', count: db.trials.filter((t) => t.orgId === req.org.id && t.status === 'reported').length },
+      { key: 'trials', label: 'Trials booked', count: recruitment.trials.countForOrg(req.org.id) },
+      { key: 'reports', label: 'Reports filed', count: recruitment.trials.countForOrgStatus(req.org.id, 'reported') },
       { key: 'signings', label: 'Signings', count: signingsFollowUps.signings.countForOrg(req.org.id) },
     ],
     byScout: Object.values(mine.reduce((acc, l) => {
@@ -3415,7 +3418,7 @@ playerRouter.get('/cv', (req, res) => {
 // A CHILD's inbox never carries a message or a contact channel: they see only
 // guardian-managed status updates. No direct messages to children. Ever.
 playerRouter.get('/inbox', (req, res) => {
-  const rows = db.requests.filter((r) => r.playerId === req.player.id);
+  const rows = recruitment.requests.forPlayer(req.player.id);
   if (req.playerIsMinor) {
     return res.json(
       rows
@@ -3442,7 +3445,7 @@ playerRouter.get('/inbox', (req, res) => {
 
 playerRouter.post('/requests/:id/respond', (req, res) => {
   if (guardianManagedOnly(req, res)) return; // minors never respond — guardians do
-  const found = db.requests.find((r) => r.id === req.params.id && r.playerId === req.player.id && r.routedTo === 'player');
+  const found = onlyIf(recruitment.requests.byId(req.params.id), (r) => r.playerId === req.player.id && r.routedTo === 'player');
   if (!found) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
   if (found.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
   const { accept, chosenSlot } = req.body || {};
@@ -4185,7 +4188,7 @@ function exportPlayer(p) {
   return {
     exportedAt: new Date().toISOString(),
     profile,
-    requests: db.requests.filter((r) => r.playerId === p.id).map(requestForRecipient),
+    requests: recruitment.requests.forPlayer(p.id).map(requestForRecipient),
     threads: db.channels.filter((c) => c.playerId === p.id).map((c) => channelViewFor(c, 'player')),
     notifications: notificationsFor('player', p.id),
     insights: insightsFor(p.id),
@@ -4370,7 +4373,7 @@ guardianRouter.delete('/children/:id', (req, res) => {
 app.get('/orgs/directory', (_req, res) => {
   res.json(
     db.orgs.filter((o) => o.type === 'club').map((o) => {
-      const trials = db.trials.filter((t) => t.orgId === o.id);
+      const trials = recruitment.trials.forOrg(o.id);
       const reported = trials.filter((t) => t.status === 'reported' && t.report);
       const avgReportDays = reported.length
         ? Math.round(reported.reduce((sum, t) => sum + (t.report.filedAt - t.acceptedAt), 0) / reported.length / (24 * 3600 * 1000) * 10) / 10

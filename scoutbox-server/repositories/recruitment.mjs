@@ -18,12 +18,11 @@
  * list as empty. A trial always reads back with its trial-day container, its five client-key lists and its reminder
  * map, so a reader never has to create them.
  *
- * EXPLICIT WRITES. `db.requests` and `db.trials` are read-only views over the repository's mirrors; every record they
- * hand out is a read-only proxy, so an in-place edit throws. A route changes a record by calling an operation:
- * `requests.create(record)`, `requests.update(id, (draft) => { … })`, the same for `trials`, and the deletion unit's
- * `tombstoneForPlayer`. `update` hands the caller a plain copy to change, types the result whole, writes the record's
- * rows at once and re-reads it from the tables into the mirror. An operation joins the open unit of work
- * (store.unit) or runs a transaction of its own; the mirrors are restored by the unit's rollback through `hook()`.
+ * EXPLICIT WRITES, SQL READS. There is no in-memory mirror and no `db.requests` / `db.trials` (§4.3 step 2: both
+ * throw): readers call the repository's queries (`requests.forPlayer`, `trials.forCase`, …), which hand out fresh,
+ * deep-frozen records. A route changes a record with `requests.create` / `update`, `trials.create` / `update` or the
+ * deletion unit's `tombstoneForPlayer`; `update` hands the caller a plain copy, types the result whole and writes it at
+ * once, joined into the open unit of work (store.unit) or in a transaction of its own.
  *
  * References. `org_id` → orgs, `user_id` → org_users and `case_id` (both tables) → recruitment_cases (RESTRICT).
  * `recruitment_requests.trial_id` → trials is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a snapshot writes a
@@ -32,7 +31,7 @@
  *
  * Refusals name tables, fields and ids — never a name, a message, a note, an address or a phone number.
  */
-import { readonlyView, markView } from './readonly.mjs';
+import { pageOf } from '../domains/platform/paging.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 import { ORG_TYPES } from './orgs.mjs';
 import {
@@ -219,6 +218,9 @@ CREATE INDEX trials_case ON trials (case_id);
 CREATE INDEX trials_status_report_due ON trials (status, report_due_at);
 CREATE INDEX trials_workflow_confirmed ON trials (workflow_state, schedule_confirmed_at);
 CREATE UNIQUE INDEX trials_one_open_per_case ON trials (case_id) WHERE case_id IS NOT NULL AND workflow_state NOT IN ('completed', 'cancelled');
+CREATE INDEX trials_report_overdue ON trials (report_due_at) WHERE feedback_escalated_at IS NULL AND subject_removed_at IS NULL;
+CREATE INDEX trials_confirmed_open ON trials (schedule_confirmed_at) WHERE completion_state IS NULL AND subject_removed_at IS NULL;
+CREATE INDEX trials_completion ON trials (completion_state, completion_at);
 CREATE TABLE trial_schedule_sessions (
 ${ownedBy('trials')},
   position INTEGER NOT NULL,
@@ -341,6 +343,7 @@ ${ownedBy('trials')},
   UNIQUE (trial_id, id),
   CHECK (check_status IS NOT NULL OR (check_kind IS NULL AND check_ref IS NULL AND check_expires_at IS NULL AND check_reviewed_by IS NULL AND check_reviewed_at IS NULL))
 ) STRICT;
+CREATE INDEX trial_day_staff_check ON trial_day_staff (check_status) WHERE check_status IS NOT NULL;
 CREATE TABLE trial_day_consents (
 ${ownedBy('trials')},
   position INTEGER NOT NULL,
@@ -911,24 +914,28 @@ export const RECRUITMENT_SNAPSHOT = {
   assert(sqlite, { label = 'the snapshot' } = {}) { assertRecruitmentConsistent(sqlite, { label }); },
 };
 
-// ------------------------------------------------------------------ the repository (explicit writes; the mirrors; the participant)
+// ------------------------------------------------------------------ the repository (explicit writes; SQL reads)
+const deepFreeze = (v) => { if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
 /**
  * `createRecruitmentRepository({ sqlite, unit, now, log })`. Every operation joins the open unit of work (a failure
- * poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and re-reads
- * the record into the mirror. A case a request or a trial names must already be written (its key is immediate).
+ * poisons it), the caller's open raw transaction, or runs a transaction of its own; it writes its rows and returns the
+ * record read back from the tables. A case a request or a trial names must already be written (its key is immediate).
+ *
+ * READS ARE SQL (§4.3 step 2): no mirror and no db.requests / db.trials (both throw). Every query decodes fresh,
+ * deep-frozen records in insertion (rowid) order and runs on the one connection, so a read inside a unit of work sees
+ * the unit's own writes. The sweeps' queries are indexed predicates; the admin staff-check queue pages by cursor.
  */
 export function createRecruitmentRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the recruitment repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
   const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
-  const mirrors = { requests: [], trials: [] };
-  const LABEL = { requests: 'a request record', trials: 'a trial record' };
-  const views = Object.fromEntries(RECRUITMENT_COLLECTIONS.map((n) => [n, markView(readonlyView(mirrors[n], LABEL[n]))]));
-  const reload = () => { const all = RECRUITMENT_SNAPSHOT.read(sqlite); for (const n of RECRUITMENT_COLLECTIONS) { mirrors[n].length = 0; for (const r of all[n]) mirrors[n].push(r); } };
-  const find = (name, id) => mirrors[name].find((x) => x.id === id) ?? null;
-  const replaceIn = (name, id, record) => { const i = mirrors[name].findIndex((r) => r.id === id); if (i >= 0) mirrors[name][i] = record; else mirrors[name].push(record); return readonlyView(record, LABEL[name]); };
-  const refresh = (name, id) => (name === 'requests' ? replaceIn(name, id, decodeRequest(st, st.requestById.get(id))) : replaceIn(name, id, decodeTrial(st, st.trialById.get(id))));
-  const must = (name, id) => { const r = find(name, id); if (!r) throw refusal('RECRUITMENT_NOT_FOUND', `${name} ${id} is not a record of the repository`); return r; };
+  const decode = { requests: (row) => deepFreeze(decodeRequest(st, row)), trials: (row) => deepFreeze(decodeTrial(st, row)) };
+  const rowById = { requests: st.requestById, trials: st.trialById };
+  const read = (name, id) => { if (typeof id !== 'string') return null; const row = rowById[name].get(id); return row ? decode[name](row) : null; };
+  const must = (name, id) => { const r = read(name, id); if (!r) throw refusal('RECRUITMENT_NOT_FOUND', `${name} ${id} is not a record of the repository`); return r; };
+  const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.all(...args).map(decode[name]); };
+  const inList = (name, table, col) => (values) => { const want = [...new Set((values ?? []).filter((v) => typeof v === 'string'))]; if (!want.length) return []; return sqlite.prepare(`SELECT * FROM ${table} WHERE ${col} IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want).map(decode[name]); };
+  const count = (sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.get(...args).n; };
   const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_INPUT_INVALID', t.reason); return t.record; };
   const IMMUTABLE = { requests: ['id', 'playerId', 'orgId', 'userId', 'type', 'createdAt'], trials: ['id', 'requestId', 'playerId', 'orgId', 'acceptedAt'] };
   const guardiansExist = (name, r) => { const missing = guardianIdsOf(name, r).filter((g) => !st.guardian.get(g)); if (missing.length) throw refusal('RECRUITMENT_GUARDIAN_MISSING', `${TABLE_OF[name]} ${r.id} names a guardian that does not exist (${ids(missing)})`); };
@@ -937,8 +944,8 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
   /** `create(record)`: a new record, typed whole; an existing id is refused. */
   const create = (name) => (raw) => operation(() => {
     const r = typedOr(name, raw);
-    if (find(name, r.id)) throw refusal('RECRUITMENT_DUPLICATE', `${TABLE_OF[name]} ${r.id} already exists`);
-    write(name, r); return refresh(name, r.id);
+    if (rowById[name].get(r.id)) throw refusal('RECRUITMENT_DUPLICATE', `${TABLE_OF[name]} ${r.id} already exists`);
+    write(name, r); return must(name, r.id);
   });
   /**
    * `update(id, change)`: `change` receives a plain copy of the stored record and edits it (or returns a replacement);
@@ -951,15 +958,57 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     const returned = change(draft);
     const next = typedOr(name, returned === undefined ? draft : returned);
     for (const k of IMMUTABLE[name]) if (next[k] !== before[k]) throw refusal('RECRUITMENT_INPUT_INVALID', `${TABLE_OF[name]} ${id}: ${k} cannot change`);
-    write(name, next); return refresh(name, id);
+    write(name, next); return must(name, id);
   });
-  const byId = (name) => (id) => { const r = find(name, id); return r ? readonlyView(r, LABEL[name]) : null; };
+
+  const requests = {
+    create: create('requests'), update: update('requests'),
+    byId: (id) => read('requests', id),
+    forOrg: list('requests', 'SELECT * FROM recruitment_requests WHERE org_id = ? ORDER BY rowid'),
+    forPlayer: list('requests', 'SELECT * FROM recruitment_requests WHERE player_id = ? ORDER BY rowid'),
+    forPlayers: inList('requests', 'recruitment_requests', 'player_id'),
+    forOrgPlayer: list('requests', 'SELECT * FROM recruitment_requests WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
+    forCase: list('requests', 'SELECT * FROM recruitment_requests WHERE case_id = ? ORDER BY rowid'),
+    countForOrg: count('SELECT COUNT(*) AS n FROM recruitment_requests WHERE org_id = ?'),
+  };
+  const staffPage = {
+    first: (pendingOnly) => sqlite.prepare(`SELECT t.rowid AS page_trial, s.position AS page_position, s.*, t.org_id, t.org_name FROM trial_day_staff s JOIN trials t ON t.id = s.trial_id WHERE s.check_status IS NOT NULL ${pendingOnly ? "AND s.check_status = 'pending'" : ''} ORDER BY t.rowid, s.position LIMIT ?`),
+    after: (pendingOnly) => sqlite.prepare(`SELECT t.rowid AS page_trial, s.position AS page_position, s.*, t.org_id, t.org_name FROM trial_day_staff s JOIN trials t ON t.id = s.trial_id WHERE s.check_status IS NOT NULL ${pendingOnly ? "AND s.check_status = 'pending'" : ''} AND (t.rowid > ? OR (t.rowid = ? AND s.position > ?)) ORDER BY t.rowid, s.position LIMIT ?`),
+  };
+  const staffStmts = { true: { first: staffPage.first(true), after: staffPage.after(true) }, false: { first: staffPage.first(false), after: staffPage.after(false) } };
+  const trials = {
+    create: create('trials'), update: update('trials'),
+    byId: (id) => read('trials', id),
+    forOrg: list('trials', 'SELECT * FROM trials WHERE org_id = ? ORDER BY rowid'),
+    forOrgStatus: list('trials', 'SELECT * FROM trials WHERE org_id = ? AND status = ? ORDER BY rowid'),
+    forPlayer: list('trials', 'SELECT * FROM trials WHERE player_id = ? ORDER BY rowid'),
+    forPlayers: inList('trials', 'trials', 'player_id'),
+    forOrgPlayer: list('trials', 'SELECT * FROM trials WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
+    forCase: list('trials', 'SELECT * FROM trials WHERE case_id = ? ORDER BY rowid'),
+    countForOrg: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ?'),
+    countForOrgStatus: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ? AND status = ?'),
+    /** The report sweep: a deadline passed, no report, never escalated, the subject not removed. */
+    reportOverdue: list('trials', 'SELECT * FROM trials t WHERE t.report_due_at < ? AND t.feedback_escalated_at IS NULL AND t.subject_removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM trial_reports r WHERE r.trial_id = t.id) ORDER BY t.rowid'),
+    /** The reminder sweep: a confirmed schedule, not completed or cancelled, the subject not removed (the sweep derives the rest). */
+    confirmedOpen: list('trials', 'SELECT * FROM trials WHERE schedule_confirmed_at IS NOT NULL AND completion_state IS NULL AND subject_removed_at IS NULL ORDER BY rowid'),
+    /** The assessment reminder: completed at or before `before`, the subject not removed, not yet reminded. */
+    completedUnreminded: list('trials', "SELECT * FROM trials t WHERE t.completion_state = 'completed' AND t.completion_at <= ? AND t.subject_removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM trial_reminders m WHERE m.trial_id = t.id AND m.marker = 'assessmentPending') ORDER BY t.rowid"),
+    /** The admin staff-check queue by cursor (trial, then staff position): `{ items, nextCursor }` rows, not trials. */
+    staffChecksPage({ pendingOnly, limit, after = null }) {
+      const s = staffStmts[pendingOnly ? 'true' : 'false'];
+      const rows = after ? s.after.all(after[0], after[0], after[1], limit + 1) : s.first.all(limit + 1);
+      const page = pageOf(rows, limit, (r) => [r.page_trial, r.page_position]);
+      return { items: page.items.map((r) => ({ trialId: r.trial_id, orgId: r.org_id, orgName: r.org_name, staffId: r.id, name: r.name, role: r.role, check: { kind: r.check_kind, ref: r.check_ref, status: r.check_status, expiresAt: r.check_expires_at, reviewedBy: r.check_reviewed_by, reviewedAt: r.check_reviewed_at } })), nextCursor: page.nextCursor };
+    },
+  };
+  const WRITES = new Set(['create', 'update']);
+  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.has(k))));
+  const counters = { requests: sqlite.prepare('SELECT COUNT(*) AS n FROM recruitment_requests'), trials: sqlite.prepare('SELECT COUNT(*) AS n FROM trials'), trialReports: sqlite.prepare('SELECT COUNT(*) AS n FROM trial_reports') };
 
   return {
-    views,
-    requestsView: views.requests, trialsView: views.trials,
-    requests: { create: create('requests'), update: update('requests'), byId: byId('requests') },
-    trials: { create: create('trials'), update: update('trials'), byId: byId('trials') },
+    requests, trials,
+    /** The queries alone, for the pure projectors and providers that must not write. */
+    reads: Object.freeze({ requests: readOnly(requests), trials: readOnly(trials) }),
     /**
      * The deletion unit (M23 P4A-D14): every request and trial of the player becomes the tombstone the callbacks build
      * from a plain copy (ids, states and times kept; the person-shaped fields gone), written at once.
@@ -967,31 +1016,23 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     tombstoneForPlayer(playerId, { request, trial }) {
       return operation(() => {
         let n = 0; let m = 0;
-        for (const r of mirrors.requests.filter((x) => x.playerId === playerId)) { update('requests')(r.id, (d) => request(d)); n += 1; }
-        for (const t of mirrors.trials.filter((x) => x.playerId === playerId)) { update('trials')(t.id, (d) => trial(d)); m += 1; }
+        for (const { id } of sqlite.prepare('SELECT id FROM recruitment_requests WHERE player_id = ? ORDER BY rowid').all(playerId)) { update('requests')(id, (d) => request(d)); n += 1; }
+        for (const { id } of sqlite.prepare('SELECT id FROM trials WHERE player_id = ? ORDER BY rowid').all(playerId)) { update('trials')(id, (d) => trial(d)); m += 1; }
         return { requests: n, trials: m };
       });
     },
     /** The derived `players[].trialReports`: the reports filed on the player's trials, in filing order (S5's rule). */
     trialReportsFor(playerId) {
-      return mirrors.trials.filter((t) => t.playerId === playerId && t.report).map((t) => t.report).sort((a, b) => a.filedAt - b.filedAt);
+      return trials.forPlayer(playerId).filter((t) => t.report).map((t) => t.report).sort((a, b) => a.filedAt - b.filedAt);
     },
-    /** Load the mirrors (the tables are authoritative once 0015 is recorded; nothing is imported from memory). */
+    /** Check the tables are authoritative (0015 recorded); there is nothing to load. */
     attach() {
       if (!recruitmentLive(sqlite)) throw new Error(`the recruitment repository needs ${RECRUITMENT_MIGRATION} recorded; it never imports an in-memory array`);
-      reload(); return { counts: this.counts() };
+      return { counts: this.counts() };
     },
-    /** The store participant: no flush (every write is already in the tables); the mirrors restored by a unit's rollback. */
-    hook() {
-      return {
-        flush() {},
-        snapshotState() { return Object.fromEntries(RECRUITMENT_COLLECTIONS.map((n) => [n, mirrors[n].slice()])); },
-        restoreState(s) { if (!s) return; for (const n of RECRUITMENT_COLLECTIONS) { mirrors[n].length = 0; for (const r of s[n]) mirrors[n].push(r); } },
-      };
-    },
-    counts() { return { requests: mirrors.requests.length, trials: mirrors.trials.length, trialReports: mirrors.trials.filter((t) => t.report).length }; },
+    counts() { return { requests: counters.requests.get().n, trials: counters.trials.get().n, trialReports: counters.trialReports.get().n }; },
     pending: () => 0,
-    exportAll() { return Object.fromEntries(RECRUITMENT_COLLECTIONS.map((n) => [n, clone(mirrors[n])])); },
+    exportAll() { return RECRUITMENT_SNAPSHOT.read(sqlite); },
     log,
     now,
   };

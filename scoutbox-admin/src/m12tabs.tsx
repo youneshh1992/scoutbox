@@ -68,6 +68,8 @@ export function M12Panel({ tab, adminKey, say }: { tab: M12Tab; adminKey: string
     try {
       setDisputes((await call<{ items: Dispute[] }>(adminKey, '/admin/evidence/disputes')).items);
       setCoaches((await call<{ items: Affiliation[] }>(adminKey, '/admin/coaches')).items);
+      // The server pages this queue by cursor ({ items, nextCursor }, the first 50). Only the first page is read here: the
+      // tab will need a "load more" that passes `?cursor=<nextCursor>` (not built yet, by decision).
       setChecks((await call<{ items: StaffCheck[] }>(adminKey, '/admin/staff-checks')).items);
       setOutcomes((await call<{ rows: OutcomeRow[] }>(adminKey, '/admin/outcomes')).rows);
       setGuide((await call<{ items: Guidance[] }>(adminKey, '/admin/drill-guidance')).items);

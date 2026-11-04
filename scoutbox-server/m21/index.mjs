@@ -76,7 +76,9 @@ export function registerDevelopment(ctx) {
   const {
     db, nextId, persistNow, notify, broadcast, findPlayer, orgCanSee, isLead,
     orgRouter, playerRouter, guardianRouter, audit, isAdult,
+    recruitmentReads: reads, // §4.3 step 2: the trials are read through SQL
   } = ctx;
+  if (typeof reads?.trials?.byId !== 'function') throw new TypeError('registerDevelopment needs recruitmentReads (trials) from the data layer');
   migrateM21(db);
 
   // Boot assertion. A development server whose own vocabulary has drifted
@@ -215,7 +217,7 @@ export function registerDevelopment(ctx) {
   };
 
   const project = (bundle, viewer) => buildDevelopmentPlan({
-    db, planId: bundle.plan.id, player: bundle.player, viewer, access: bundle.access,
+    db, reads, planId: bundle.plan.id, player: bundle.player, viewer, access: bundle.access,
     orgCanSee, now: now(), collected: bundle,
   });
 
@@ -403,13 +405,13 @@ export function registerDevelopment(ctx) {
         ...(db.assessments ?? []).filter((a) => a.playerId === player.id).map((a) => ({ sourceType: 'assessment', sourceId: a.id })),
         ...(db.boxSessions ?? []).filter((s) => s.playerId === player.id).map((s) => ({ sourceType: 'box_cam_session', sourceId: s.id })),
         ...(db.combineAttempts ?? []).filter((a) => a.playerId === player.id).map((a) => ({ sourceType: 'combine_attempt', sourceId: a.id })),
-        ...(db.trials ?? []).filter((t) => t.playerId === player.id).map((t) => ({ sourceType: 'trial_report', sourceId: t.id })),
+        ...reads.trials.forPlayer(player.id).map((t) => ({ sourceType: 'trial_report', sourceId: t.id })),
       ];
       const items = candidates
-        .map((c) => ({ ...c, ...validateEvidenceLink({ ...c, db, player: subject, viewer, orgCanSee, now: now() }) }))
+        .map((c) => ({ ...c, ...validateEvidenceLink({ ...c, db, reads, player: subject, viewer, orgCanSee, now: now() }) }))
         .filter((c) => !c.error)
         .map((c) => {
-          const r = resolveEvidenceLink(c, { db, player: subject, viewer, orgCanSee, now: now() });
+          const r = resolveEvidenceLink(c, { db, reads, player: subject, viewer, orgCanSee, now: now() });
           return {
             sourceType: c.sourceType, sourceId: c.sourceId,
             sourceLabel: r.sourceLabel, title: r.title ?? r.sourceLabel,
@@ -935,7 +937,7 @@ export function registerDevelopment(ctx) {
 
       const parsed = validateEvidenceLink({
         sourceType: req.body?.sourceType, sourceId: req.body?.sourceId,
-        db, player, viewer, orgCanSee, now: now(),
+        db, reads, player, viewer, orgCanSee, now: now(),
       });
       if (parsed.error) return res.status(parsed.error === 'EVIDENCE_NOT_FOUND' ? 404 : 400).json(parsed);
 

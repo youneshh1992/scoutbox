@@ -358,8 +358,8 @@ export function registerIntegration(ctx) {
     }
     const player = findPlayer(a.clientId);
     const items = [];
-    for (const t of db.trials ?? []) {
-      if (!t || t.playerId !== a.clientId || t.subjectRemovedAt) continue;
+    for (const t of recruitmentReads.trials.forPlayer(a.clientId)) {
+      if (t.subjectRemovedAt) continue;
       const org = (db.orgs ?? []).find((o) => o && o.id === t.orgId) ?? null;
       const state = deriveWorkflowState(t);
       items.push({

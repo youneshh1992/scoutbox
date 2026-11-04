@@ -85,7 +85,8 @@ function signingSupports(signing, kase, packages = null) {
  *
  * `reads` carries the recruitment domains that are read through SQL rather than
  * `db` (§4.3 step 2): `contacts` and `offers` (the contacts/offers repository),
- * `signings` and `signingPackages` (the signings repository). A missing one is a
+ * `signings` and `signingPackages` (the signings repository), `requests` and `trials`
+ * (the recruitment repository). A missing one is a
  * broken composition, answered as an unavailable store, never as "no record".
  *
  * Pure with respect to the database: it reads and returns a verdict. It never
@@ -137,8 +138,8 @@ export function createEvidenceProvider(db, reads = {}) {
       }
 
       // ---- P4B Trial evidence. Same direction as every other kind: trial
-      // truth -> lifecycle. The provider reads `db.requests` and `db.trials`
-      // and writes nothing.
+      // truth -> lifecycle. The provider reads the requests and trials of the
+      // case (`reads.requests`, `reads.trials`) and writes nothing.
       if (kind === 'trial_invited') {
         // D-3: an authorised invitation that was actually delivered — a
         // request row of type `trial` FOR THIS CASE (caseId on the request),
@@ -147,9 +148,8 @@ export function createEvidenceProvider(db, reads = {}) {
         // draft, a room task and the `planTrial` action alone prove nothing;
         // a legacy request with no caseId is not evidence for a case it was
         // never tied to.
-        const requests = db?.requests;
-        if (!Array.isArray(requests)) return { satisfied: false, reason: 'requests_store_unavailable' };
-        const hit = requests.find((r) => r && r.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId
+        if (typeof reads.requests?.forCase !== 'function') return { satisfied: false, reason: 'requests_store_unavailable' };
+        const hit = reads.requests.forCase(kase.id).find((r) => r && r.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId
           && r.playerId === kase.playerId && ['pending', 'accepted'].includes(r.status) && !r.subjectRemovedAt);
         return hit
           ? { satisfied: true, sourceType: 'trial_request', sourceId: hit.id }
@@ -163,9 +163,8 @@ export function createEvidenceProvider(db, reads = {}) {
         // schedule exists) and `reported` never satisfies `trial_completed`
         // (a report is not completion). A tombstoned trial still answers —
         // history stays honest after the person left (D-26).
-        const trials = db?.trials;
-        if (!Array.isArray(trials)) return { satisfied: false, reason: 'trials_store_unavailable' };
-        const own = trials.filter((t) => t && t.caseId === kase.id && t.orgId === kase.orgId && t.playerId === kase.playerId
+        if (typeof reads.trials?.forCase !== 'function') return { satisfied: false, reason: 'trials_store_unavailable' };
+        const own = reads.trials.forCase(kase.id).filter((t) => t && t.caseId === kase.id && t.orgId === kase.orgId && t.playerId === kase.playerId
           && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length === 0);
         if (kind === 'trial_confirmed') {
           const hit = own.find((t) => deriveWorkflowState(t) === 'scheduled' && Number.isFinite(t.schedule?.confirmedAt) && (t.schedule?.sessions?.length ?? 0) > 0);

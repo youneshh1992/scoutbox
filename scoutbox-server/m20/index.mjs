@@ -47,7 +47,7 @@ const PAGE_DEFAULT = 25;
  * without it would have thrown on the first trial read, M20 or not.
  */
 export function migrateM20(db) {
-  for (const k of ['trials', 'requests', 'dynamicWatchlists', 'watchlistHistory'] /* the signings are SQL (§4.3 step 2) */) db[k] ??= [];
+  for (const k of ['dynamicWatchlists', 'watchlistHistory'] /* the trials, requests and signings are SQL (§4.3 step 2) */) db[k] ??= [];
 }
 
 export function registerAnalytics(ctx) {

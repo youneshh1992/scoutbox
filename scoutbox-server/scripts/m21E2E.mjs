@@ -39,7 +39,7 @@ import {
   TARGET_SOURCES, TARGET_OPERATORS, TARGET_STATES, NO_MEASUREMENT_REASONS,
   validateTarget, evaluateTarget, compare, bestValidAttempt,
 } from '../m21/targets.mjs';
-import { EVIDENCE_LINK_FIELDS, resolveEvidenceLink, recordBelongsToPlayer, summariseEvidence } from '../m21/evidence.mjs';
+import { EVIDENCE_LINK_FIELDS, summariseEvidence } from '../m21/evidence.mjs';
 import { planAccess, canAssign, reviewView, VIEWER_KINDS, CAPABILITIES } from '../m21/permissions.mjs';
 import { buildTimeline, TIMELINE_ACTIONS, planSummary } from '../m21/plan.mjs';
 import { buildGoalSnapshots, pageReviews } from '../m21/reviews.mjs';
@@ -50,6 +50,7 @@ import { EVENT_NAMES, EVENT_REGISTRY, assertEventRegistry } from '../m182/eventR
 import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../m182/notificationPrefs.mjs';
 import { MIGRATIONS, SCHEMA_VERSION, runMigrations } from '../m182/migrations.mjs';
 import { RATE_LIMIT_POLICY } from '../m181/rateLimit.mjs';
+import { resolveEvidenceLink, recordBelongsToPlayer } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the recruitment queries over the plain arrays
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..');

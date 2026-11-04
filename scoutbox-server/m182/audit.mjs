@@ -183,8 +183,8 @@ export function registerAudit(ctx) {
     }
     // M23 P4B: Trial history — the operational record of what happened, for
     // the club that ran it. Subject named only where the org may see them.
-    for (const t of db.trials ?? []) {
-      if (!t || t.orgId !== org.id || !Array.isArray(t.history)) continue;
+    for (const t of recruitmentReads.trials.forOrg(org.id)) {
+      if (!Array.isArray(t.history)) continue;
       const p = findPlayer(t.playerId);
       const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };
       for (const h of t.history) {

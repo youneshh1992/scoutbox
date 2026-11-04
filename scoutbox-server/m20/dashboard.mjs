@@ -175,7 +175,7 @@ export function buildReportingContext({
       && (!roomFiltered || (i.roomId ? keptRoomIds.has(i.roomId) : false))),
     watchlists: (db.dynamicWatchlists ?? []).filter((w2) => w2.orgId === orgId),
     watchlistHistory: (db.watchlistHistory ?? []).filter((h) => h.orgId === orgId),
-    trials: (db.trials ?? []).filter((t) => t && t.orgId === orgId),
+    trials: reads.trials?.forOrg(orgId) ?? [],
     // M23 P8 — the canonical records the journey funnel counts. Org-scoped and
     // room-filtered like decisions; ids, states and instants only reach the
     // projection (the metric's `reads` declaration is asserted at boot).
@@ -188,7 +188,7 @@ export function buildReportingContext({
     signings: reads.signings?.forOrg(orgId) ?? [],
     // M23 P4B: trial invitations (requests of type trial tied to a case) for
     // the process counts. Ids, states and times only reach the projection.
-    requests: (db.requests ?? []).filter((r) => r && r.orgId === orgId && r.type === 'trial'),
+    requests: (reads.requests?.forOrg(orgId) ?? []).filter((r) => r.type === 'trial'),
     typicalDaysToTerminal,
     subjectOf,
   };

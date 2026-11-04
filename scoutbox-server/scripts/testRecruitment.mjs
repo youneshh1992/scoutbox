@@ -4,7 +4,8 @@
 // the real request key; a snapshot save (fixtures, tools) types every writer shape into its columns and reads back the
 // typed record, refuses a record it cannot type and names every missing reference with ids; the player references are
 // counted, never refused (Q7a), and a missing guardian is refused (Q7c); the repository's operations write rows at once
-// and return fresh read-only records, the views refuse an in-place edit, a unit of work rolls rows AND mirrors back,
+// and return fresh read-only records, there is no db.* view (§4.3 step 2) and every query matches a table scan, a unit
+// of work rolls the rows back and a read inside it sees its writes,
 // and a request or a trial may name a case the staged S8b repository writes at the same unit's COMMIT; the deletion
 // unit's tombstones; the derived trial reports; the live report.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
@@ -124,32 +125,62 @@ test('[snapshot] the collection rule: an omitted collection is retained whole; a
   const L = serverOpen(d); assert.equal(L.layer.report().domains.recruitment.unresolvedPlayerReferences.requests, 1, 'the missing player is counted'); L.close(); rm(d);
 });
 
-test('[repository] explicit writes: the views and every returned record are read-only (a push, a field assignment and a nested push throw, naming the repository); create and update write their rows at once and return the stored record; an update is typed whole (a refusal changes nothing), cannot change an identifier, and names no value; a duplicate create is refused; byId', () => {
+test('[repository] explicit writes: there is no db.requests or db.trials (reading or assigning throws, naming the repository) and every returned record is read-only (a field assignment and a nested push throw); create and update write their rows at once and return the stored record; an update is typed whole (a refusal changes nothing), cannot change an identifier, and names no value; a duplicate create is refused; byId', () => {
   const d = file('repo'); const L = serverOpen(d); const { requests, trials } = L.repo;
-  assert.throws(() => L.db.requests.push({}), /repositor/); assert.throws(() => { L.db.trials[0].status = 'reported'; }, /repositor/); assert.throws(() => L.db.trials[0].history.push({}), /repositor/);
-  const made = requests.create(contactRequest({ id: 'req-new' })); assert.equal(made.id, 'req-new'); assert.throws(() => { made.status = 'accepted'; }, /repositor/);
+  for (const n of ['requests', 'trials']) { assert.throws(() => L.db[n], new RegExp(`db\\.${n} is gone: read it through the recruitment repository`)); assert.throws(() => { L.db[n] = []; }, /is gone/); assert.equal(Object.keys(L.db).includes(n), false); }
+  assert.throws(() => { trials.byId('trial-1').status = 'reported'; }, /read only|Cannot assign/); assert.throws(() => trials.byId('trial-1').history.push({}), /not extensible|read only|Cannot add/);
+  const made = requests.create(contactRequest({ id: 'req-new' })); assert.equal(made.id, 'req-new'); assert.throws(() => { made.status = 'accepted'; }, /read only|Cannot assign/);
   assert.equal(withRo(d, (s) => col(s, "SELECT status FROM recruitment_requests WHERE id = 'req-new'")), 'pending', 'written at once, no save');
   refused(() => requests.create(contactRequest({ id: 'req-new' })), /RECRUITMENT_DUPLICATE[\s\S]*req-new/, 'duplicate');
-  const answered = requests.update('req-new', (x) => { x.status = 'accepted'; x.respondedAt = NOW; x.respondedBy = 'player'; }); assert.equal(answered.status, 'accepted'); assert.equal(L.db.requests.find((r) => r.id === 'req-new').status, 'accepted', 'the view serves the stored record');
+  const answered = requests.update('req-new', (x) => { x.status = 'accepted'; x.respondedAt = NOW; x.respondedBy = 'player'; }); assert.equal(answered.status, 'accepted'); assert.equal(requests.byId('req-new').status, 'accepted', 'a read serves the stored record');
   const rows = withRo(d, recDump);
   refused(() => requests.update('req-new', (x) => { x.status = 'maybe'; }), /req-new\.status must be one of/, 'vocabulary'); refused(() => requests.update('req-new', (x) => { x.playerId = 'pl-other'; }), /playerId cannot change/, 'identifier');
   refused(() => trials.update('trial-1', (x) => { x.attendance.push({ sessionId: 'tses-1', state: 'how it went', source: 'manual', recordedAt: NOW }); }), /attendance\[0\]\.state must be one of/, 'nested vocabulary');
-  assert.equal(withRo(d, recDump), rows, 'a refused update changed no row'); assert.equal(L.db.requests.find((r) => r.id === 'req-new').status, 'accepted', 'nor the mirror');
+  assert.equal(withRo(d, recDump), rows, 'a refused update changed no row'); assert.equal(requests.byId('req-new').status, 'accepted', 'nor a read');
   const t = trials.update('trial-1', (x) => { x.attendance.push({ sessionId: 'tses-1', state: 'attended', source: 'manual', recordedBy: { kind: 'org', userId: 'usr-1', name: 'Maria' }, recordedAt: NOW, note: null }); x.rev += 1; });
   assert.equal(t.attendance.length, 1); assert.equal(withRo(d, (s) => col(s, "SELECT count(*) FROM trial_attendance WHERE trial_id = 'trial-1'")), 1); assert.equal(trials.byId('trial-1').rev, 2); assert.equal(trials.byId('trial-ghost'), null);
   L.close(); rm(d);
 });
 
-test('[repository] a unit of work: a request and a trial written in a unit with the case created first in the same unit commit together; a unit that fails rolls the rows AND the mirrors back; a request naming a missing case refuses the whole unit with its ids', () => {
+test('[repository] a unit of work: a request and a trial written in a unit with the case created first in the same unit commit together; a unit that fails rolls the rows back while a read inside it sees its writes; a request naming a missing case refuses the whole unit with its ids', () => {
   const d = file('unit'); const L = serverOpen(d); const { requests, trials } = L.repo;
-  const rows = withRo(d, recDump); const mirror = JSON.stringify(L.db.requests);
-  assert.throws(() => L.unit(() => { requests.create(contactRequest({ id: 'req-u' })); trials.update('trial-1', (x) => { x.rev += 1; }); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
-  assert.equal(withRo(d, recDump), rows, 'no row changed'); assert.equal(JSON.stringify(L.db.requests), mirror, 'the mirror is back'); assert.equal(trials.byId('trial-1').rev, 1);
+  const rows = withRo(d, recDump); const before = JSON.stringify(L.repo.exportAll().requests);
+  assert.throws(() => L.unit(() => { requests.create(contactRequest({ id: 'req-u' })); trials.update('trial-1', (x) => { x.rev += 1; }); assert.ok(requests.byId('req-u'), 'a read inside the unit sees its create'); assert.equal(trials.byId('trial-1').rev, 2); throw new Error('synthetic unit failure'); }), /synthetic unit failure/);
+  assert.equal(withRo(d, recDump), rows, 'no row changed'); assert.equal(JSON.stringify(L.repo.exportAll().requests), before, 'a fresh read sees the rollback'); assert.equal(trials.byId('trial-1').rev, 1);
   assert.throws(() => L.unit(() => { requests.create(p4bInvitation({ id: 'req-ghost', caseId: 'case-ghost', trialId: null, keys: { invite: null } })); }), /RECRUITMENT_CASE_MISSING[\s\S]*req-ghost → recruitment_cases case-ghost/, 'a request naming no case is refused with its ids (the case key is immediate)');
-  assert.equal(L.db.requests.some((r) => r.id === 'req-ghost'), false); assert.equal(withRo(d, (s) => col(s, "SELECT count(*) FROM recruitment_requests WHERE id = 'req-ghost'")), 0);
+  assert.equal(requests.byId('req-ghost'), null); assert.equal(withRo(d, (s) => col(s, "SELECT count(*) FROM recruitment_requests WHERE id = 'req-ghost'")), 0);
   const kase = { ...CASES()[0], id: 'case-new' };
   L.unit(() => { L.layer.recruitmentCases.cases.create(kase); requests.create(p4bInvitation({ id: 'req-case-new', caseId: 'case-new', trialId: null, keys: { invite: null } })); });
   withRo(d, (s) => { assert.equal(col(s, "SELECT case_id FROM recruitment_requests WHERE id = 'req-case-new'"), 'case-new'); assert.equal(col(s, "SELECT count(*) FROM recruitment_cases WHERE id = 'case-new'"), 1); });
+  L.close(); rm(d);
+});
+
+test('[repository] SQL reads (§4.3 step 2): byId and every list query return exactly what a scan of the tables would, in insertion order; the counts agree; the sweep queries are the old filters (report overdue, confirmed and open, completed a week ago without the reminder); the staff-check pages walk every check, pending only or all, at every page size; `reads` carries no write', () => {
+  const d = file('reads'); const L = serverOpen(d); const { requests, trials } = L.repo;
+  const all = L.repo.exportAll();
+  assert.ok(all.requests.length >= 3 && all.trials.length >= 1, 'the fixture has records to query');
+  const ids = (rows) => rows.map((r) => r.id);
+  const values = (list, key) => [...new Set(list.map(key).filter((v) => v !== null && v !== undefined)), 'nobody'];
+  const check = (label, got, want) => assert.deepEqual(ids(got), ids(want), label);
+  for (const [name, repo] of [['requests', requests], ['trials', trials]]) {
+    for (const r of all[name]) assert.deepEqual(plain(repo.byId(r.id)), plain(r), `${name}.byId ${r.id}`);
+    for (const bad of ['nope', undefined, null, 42]) assert.equal(repo.byId(bad), null);
+    for (const [key, q] of [['orgId', 'forOrg'], ['playerId', 'forPlayer'], ['caseId', 'forCase']]) for (const v of values(all[name], (r) => r[key])) check(`${name}.${q} ${v}`, repo[q](v), all[name].filter((r) => r[key] === v));
+    for (const r of all[name]) check(`${name}.forOrgPlayer`, repo.forOrgPlayer(r.orgId, r.playerId), all[name].filter((x) => x.orgId === r.orgId && x.playerId === r.playerId));
+    const players = values(all[name], (r) => r.playerId); check(`${name}.forPlayers`, repo.forPlayers([...players, 42, null, players[0]]), all[name].filter((r) => players.includes(r.playerId))); assert.deepEqual(repo.forPlayers([]), []);
+    for (const v of values(all[name], (r) => r.orgId)) assert.equal(repo.countForOrg(v), all[name].filter((r) => r.orgId === v).length);
+  }
+  for (const t of all.trials) for (const st of [t.status, 'nothing']) { check(`trials.forOrgStatus ${st}`, trials.forOrgStatus(t.orgId, st), all.trials.filter((x) => x.orgId === t.orgId && x.status === st)); assert.equal(trials.countForOrgStatus(t.orgId, st), all.trials.filter((x) => x.orgId === t.orgId && x.status === st).length); }
+  for (const at of [0, NOW, NOW + 400 * 86_400_000]) {
+    check(`trials.reportOverdue ${at}`, trials.reportOverdue(at), all.trials.filter((t) => Number.isFinite(t.reportDueAt) && t.reportDueAt < at && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt));
+    check(`trials.completedUnreminded ${at}`, trials.completedUnreminded(at), all.trials.filter((t) => t.completion?.state === 'completed' && t.completion.at <= at && !t.subjectRemovedAt && !t.reminders?.assessmentPending));
+  }
+  check('trials.confirmedOpen', trials.confirmedOpen(), all.trials.filter((t) => t.schedule?.confirmedAt && !t.completion && !t.subjectRemovedAt));
+  const checks = (pendingOnly) => all.trials.flatMap((t) => (t.day?.staff ?? []).filter((x) => x.check && (!pendingOnly || x.check.status === 'pending')).map((x) => `${t.id}/${x.id}`));
+  const walk = (pendingOnly, limit) => { const seen = []; let after = null; for (let i = 0; i < 50; i += 1) { const page = trials.staffChecksPage({ pendingOnly, limit, after }); seen.push(...page.items.map((r) => `${r.trialId}/${r.staffId}`)); if (!page.nextCursor) return seen; after = JSON.parse(Buffer.from(page.nextCursor, 'base64url').toString('utf8')); } throw new Error('the pages never ended'); };
+  for (const pendingOnly of [true, false]) for (const limit of [1, 2, 100]) assert.deepEqual(walk(pendingOnly, limit), checks(pendingOnly), `staffChecksPage pendingOnly=${pendingOnly} by ${limit}`);
+  for (const n of ['requests', 'trials']) { assert.ok(Object.isFrozen(L.repo.reads[n])); assert.equal(L.repo.reads[n].byId, L.repo[n].byId); assert.equal(L.repo.reads[n].create, undefined); assert.equal(L.repo.reads[n].update, undefined); }
+  assert.deepEqual(L.repo.counts(), { requests: all.requests.length, trials: all.trials.length, trialReports: all.trials.filter((t) => t.report).length });
   L.close(); rm(d);
 });
 

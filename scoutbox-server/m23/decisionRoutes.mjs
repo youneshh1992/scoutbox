@@ -40,7 +40,9 @@ export function registerDecision(ctx) {
     db, orgRouter, nextId, persistNow, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, audit, testProviderEnabled = false,
     recruitmentCases, unit, // S8b: drafts, formal rows and the case move are explicit repository writes, one unit per act
+    recruitmentReads: reads, // §4.3 step 2: the trials are read through SQL
   } = ctx;
+  if (typeof reads?.trials?.forOrgPlayer !== 'function') throw new TypeError('registerDecision needs recruitmentReads (trials) from the data layer');
   if (typeof unit !== 'function' || !recruitmentCases?.cases) throw new TypeError('registerDecision needs the recruitment-cases repository and unit from the data layer');
   const { cases, decisions } = recruitmentCases;
 
@@ -153,7 +155,7 @@ export function registerDecision(ctx) {
     return { ok: true, outcome, reasonCodes: reasons.codes, note: note.text, refShapes: shapes.refs, provided: { outcome: b.outcome !== undefined, reasonCodes: b.reasonCodes !== undefined, note: b.note !== undefined, evidenceRefs: b.evidenceRefs !== undefined } };
   }
 
-  const resolveRefs = (refs, kase) => resolveEvidenceRefs(refs, { db, kase, testProviderEnabled, providers: PROVIDERS });
+  const resolveRefs = (refs, kase) => resolveEvidenceRefs(refs, { db, reads, kase, testProviderEnabled, providers: PROVIDERS });
 
   // ---------------------------------------------------------------- read
 
@@ -174,7 +176,7 @@ export function registerDecision(ctx) {
     const removed = subjectRemoved(kase);
     const blocked = isBlocked(kase.playerId, kase.orgId);
     const canFinalize = roomCan(role, 'decision_finalize');
-    const completedTrials = (db.trials ?? []).filter((t) => t && t.orgId === kase.orgId && t.playerId === kase.playerId && (!t.caseId || t.caseId === kase.id) && t.completion?.state === 'completed').length;
+    const completedTrials = reads.trials.forOrgPlayer(kase.orgId, kase.playerId).filter((t) => (!t.caseId || t.caseId === kase.id) && t.completion?.state === 'completed').length;
     res.json({
       current,
       advisory,
@@ -183,7 +185,7 @@ export function registerDecision(ctx) {
       omitted,
       duplicateHeads,
       assessments: summary,
-      evidence: evidenceCandidates({ db, kase, assessmentsVisible: visible, trialEvidenceViews: ctx.trialEvidenceViews ?? null, providers: PROVIDERS, testProviderEnabled }),
+      evidence: evidenceCandidates({ db, reads, kase, assessmentsVisible: visible, trialEvidenceViews: ctx.trialEvidenceViews ?? null, providers: PROVIDERS, testProviderEnabled }),
       requirements: decisionRequirements({
         role, canFinalize, status: kase.room?.status ?? null,
         submittedAssessments: summary.submitted, completedTrials,

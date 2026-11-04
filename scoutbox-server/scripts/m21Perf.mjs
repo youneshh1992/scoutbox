@@ -19,11 +19,11 @@
 // Measurements only: one machine, warm process, synthetic snapshots of the
 // exact shapes the server stores. No SLA is claimed and none of these numbers
 // should be quoted as one.
-import { collectPlan, buildDevelopmentPlan, buildTimeline, planListItem } from '../m21/plan.mjs';
+import { collectPlan, buildTimeline, planListItem } from '../m21/plan.mjs';
 import { planAccess } from '../m21/permissions.mjs';
 import { evaluateTarget, validateTarget } from '../m21/targets.mjs';
-import { resolveEvidenceLink } from '../m21/evidence.mjs';
 import { buildGoalSnapshots } from '../m21/reviews.mjs';
+import { resolveEvidenceLink, buildDevelopmentPlan } from './recruitmentReadsFixture.mjs'; // §4.3 step 2: the recruitment queries over the plain arrays
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 5, 15, 12);

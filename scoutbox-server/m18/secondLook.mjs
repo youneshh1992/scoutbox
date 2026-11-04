@@ -111,8 +111,7 @@ export function registerSecondLook(ctx) {
     }
 
     // --- trials, assessments, gap closure ----------------------------------
-    for (const t of db.trials ?? []) {
-      if (t.playerId !== player.id || t.orgId !== org.id) continue;
+    for (const t of reads.trials.forOrgPlayer(org.id, player.id)) {
       const filedAt = t.report?.filedAt ?? 0;
       if (t.status === 'reported' && filedAt > since) add('trial_completed', 'trial', t.id, filedAt);
     }
@@ -193,7 +192,7 @@ export function registerSecondLook(ctx) {
     const evidenceIds = db.evidence.filter((e) => e.playerId === player.id && !e.supersededBy).map((e) => e.id);
     const assessmentIds = db.assessments.filter((a) => a.orgId === org.id && a.playerId === player.id && a.state !== 'draft').map((a) => a.id);
     const combineResults = (ctx.combineProjection?.(player.id)?.results ?? []).map((r) => `${r.protocolId}@${r.protocolVersion}`);
-    const trialIds = db.trials.filter((t) => t.orgId === org.id && t.playerId === player.id).map((t) => t.id);
+    const trialIds = reads.trials.forOrgPlayer(org.id, player.id).map((t) => t.id);
     const references = (db.verReferences ?? []).filter((r) => r.playerId === player.id && r.status === 'active').length;
     return { evidenceIds, assessmentIds, combineResults, trialIds, references };
   }

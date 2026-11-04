@@ -143,7 +143,7 @@ export function registerJourneyRoutes(ctx) {
         return room(caseFor(ref, orgId), 'overview');
       }
       if (ref.startsWith('req-')) {
-        const r = (db.requests ?? []).find((x) => x && x.id === ref);
+        const r = recruitmentReads.requests.byId(ref);
         if (!r) return null;
         if (kind === 'org_user') return r.orgId === orgId ? room(caseFor(r.caseId, orgId), r.type === 'trial' ? 'trial' : 'contact') : null;
         if (kind === 'player') return r.playerId === audience.id && r.routedTo !== 'guardian' ? { kind: 'inbox', requestId: r.id } : null;
@@ -151,7 +151,7 @@ export function registerJourneyRoutes(ctx) {
         return null;
       }
       if (ref.startsWith('trial-')) {
-        const t = (db.trials ?? []).find((x) => x && x.id === ref);
+        const t = recruitmentReads.trials.byId(ref);
         if (!t) return null;
         if (kind === 'org_user') return t.orgId === orgId ? room(caseFor(t.caseId, orgId), 'trial') : null;
         if (kind === 'player') return t.playerId === audience.id && (t.recipient ? t.recipient.type === 'player' : t.acceptedBy === 'player') ? { kind: 'trial', trialId: t.id } : null;

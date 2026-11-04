@@ -77,14 +77,14 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S7a–d | notifications, dispatches, outbox/push, message threads | `0009`–`0012` | `notifications.mjs`, `dispatches.mjs`, `outboxPush.mjs`, `channels.mjs` | staged, written at save | done |
 | S6b | safeguarding and audit (8 tables) | `0013_safety_audit` | `safetyAudit.mjs` | staged | done |
 | S4b-R | retained record on player deletion | `0014_player_erasure` | `identity.mjs` | direct | done |
-| S8a | recruitment requests, trials | `0015_recruitment` | `recruitment.mjs` | **explicit, typed** (§4.3, 3 Nov) | done |
+| S8a | recruitment requests, trials | `0015_recruitment` | `recruitment.mjs` | **explicit, typed, SQL reads** (§4.3, 3–4 Nov) | done |
 | S8b | cases, rooms, decisions | `0016_recruitment_cases` | `recruitmentCases.mjs` | **explicit, typed** (§4.3, 4 Nov) | done |
 | S8c | contacts, offers | `0017_recruitment_contacts_offers` | `recruitmentContactsOffers.mjs` | **explicit, typed, SQL reads** (§4.3, 3–4 Nov) | done |
 | S8d | signing packages, signings, follow-ups, outcome reports | `0018_signings_follow_ups` | `signingsFollowUps.mjs` | **explicit, typed, SQL reads** (§4.3, 4 Nov) | done |
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3 steps 1 and 3 done (4 Nov); step 2: S8c and S8d done (4 Nov), then S8a, S8b; step 4 after |
+| — | recruitment end-state proof | — | — | — | §4.3 steps 1 and 3 done (4 Nov); step 2: S8c, S8d and S8a done (4 Nov), then S8b and the requests/trials/inbox paging; step 4 after |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -164,6 +164,15 @@ a second pass:
 3. Drop the lossless `*_json` side columns from the S8a–S8c tables as part of step 1 (decided 3 November; the
    other domains lost theirs then).
 4. Measure with `scripts/dataLayerPerf.mjs` at 100k synthetic players.
+
+**Decided 4 November, to do after S8b (before step 4): page the club Requests and Trials lists and the inboxes.**
+`GET /org/requests`, `GET /org/trials`, `GET /player/inbox` and `GET /guardian/inbox` still return whole lists (from
+SQL since S8a). The Pro and Grassroots home dashboards count pending requests, trials awaiting a report and all trials
+from the first two, so paging them alone would make those figures wrong for a club with more than 50. The change, as one
+commit: add a counts response the two home dashboards read instead; page the four routes with
+`domains/platform/paging.mjs` (`{ items, nextCursor }`); change the Pro, Grassroots and Player apps to read `.items`
+(Pro and Grassroots share business logic: change both). No "load more" UI yet (decided 4 November): leave a comment in
+each app where only the first page is read, as `m12api.ts` and the admin `m12tabs.tsx` do.
 
 Doing the same for players and guardians (S4a's whole-snapshot identity replace) would also settle the A0–A3
 foreign-key questions. That's a candidate for later.
@@ -276,6 +285,17 @@ three indexed queries (signings missing a milestone, scheduled-and-past, due-and
 signing and follow-up; the admin outcome figures are one `GROUP BY`; the club track record reads the club's signings once
 and each involved player's signings by index. The journey and the evidence provider read the case's packages and the
 club's signings of the player through `reads`.
+
+**Step 2: S8a reads through SQL, done 4 November** (on `feat/sqlite-schema`). Same pattern: `db.requests` and `db.trials`
+throw. The repository adds `forOrg`, `forPlayer(s)`, `forOrgPlayer`, `forCase`, `forOrgStatus` and counts; the three trial
+sweeps (report overdue, confirmed and open, completed without the assessment reminder) are indexed predicates, and the
+admin staff-check queue pages by cursor over `trial_day_staff`. Four indexes were added to `0015` in place (re-seed a
+development database). The channels repository checks a request through `requestExists(id)` instead of scanning the
+requests. The pure helpers that took `db` (the journey, the evidence provider, the decision evidence, the M21 evidence
+links and plan) take `reads`; the batteries that call them get the queries over their plain arrays from
+`scripts/recruitmentReadsFixture.mjs`. The m182 steps that created or shaped `db.requests` / `db.trials` are no-ops, and
+`TRIAL_STORE_MISSING` went with the collection. The club Requests and Trials lists and the inboxes still return whole
+lists (from SQL): their paging waits on the home dashboards' counts (decided above).
 
 ### 4.4 The end-to-end test estate
 

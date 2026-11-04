@@ -313,8 +313,7 @@ export function registerRooms(ctx) {
   }
 
   function trialsFor(req, room) {
-    return db.trials
-      .filter((t) => t.orgId === req.org.id && t.playerId === room.playerId)
+    return reads.trials.forOrgPlayer(req.org.id, room.playerId)
       .map((t) => ({
         id: t.id, status: t.status, proposedDate: t.proposedDate ?? null,
         venue: t.venue ?? null, reportDueAt: t.reportDueAt ?? null,
@@ -520,7 +519,7 @@ export function registerRooms(ctx) {
       if (supplied.length) reasons.push({ code: 'EVIDENCE_RETURNED', text: 'Requested evidence has arrived.' });
       const doneCombine = db.combineRequests.filter((r) => r.orgId === req.org.id && r.playerId === c.playerId && r.state === 'completed');
       if (doneCombine.length) reasons.push({ code: 'COMBINE_COMPLETED', text: 'A requested Combine has been completed.' });
-      const reported = db.trials.filter((t) => t.orgId === req.org.id && t.playerId === c.playerId && t.status === 'reported');
+      const reported = reads.trials.forOrgPlayer(req.org.id, c.playerId).filter((t) => t.status === 'reported');
       if (reported.length && c.room.status === 'trial_scheduled') reasons.push({ code: 'TRIAL_REPORTED', text: 'A trial report is in.' });
       if (['offer_consideration', 'offer_made'].includes(c.room.status) && !currentDecision(c.id)) reasons.push({ code: 'DECISION_OUTSTANDING', text: 'No decision has been recorded yet.' });
       if (reasons.length) items.push({ roomId: c.id, playerId: c.playerId, playerName: c.playerName, status: c.room.status, reasons });
@@ -1326,9 +1325,11 @@ export function registerRooms(ctx) {
     if (!requireCan(req, res, room, 'assign')) return;
     const { trialId, signingId, requestId } = req.body ?? {};
     // Every reference is checked before anything is written.
-    const t = trialId ? db.trials.find((x) => x.id === trialId && x.orgId === req.org.id && x.playerId === room.playerId) : null;
+    const foundTrial = trialId ? reads.trials.byId(trialId) : null;
+    const t = foundTrial && foundTrial.orgId === req.org.id && foundTrial.playerId === room.playerId ? foundTrial : null;
     if (trialId && !t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
-    const r = requestId ? db.requests.find((x) => x.id === requestId && x.orgId === req.org.id && x.playerId === room.playerId) : null;
+    const foundRequest = requestId ? reads.requests.byId(requestId) : null;
+    const r = foundRequest && foundRequest.orgId === req.org.id && foundRequest.playerId === room.playerId ? foundRequest : null;
     if (requestId && !r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
     const found = signingId ? reads.signings.byId(signingId) : null;
     const sg = found && found.orgId === req.org.id && found.playerId === room.playerId ? found : null;

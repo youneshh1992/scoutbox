@@ -139,7 +139,7 @@ export const MIGRATIONS = [
     note: 'Collections the recruitment analytics projection reads. No analytics store is created.',
     up(db) {
       // The signings are a table read through SQL since §4.3 step 2, so this step no longer creates them.
-      for (const k of ['trials', 'requests', 'dynamicWatchlists', 'watchlistHistory']) db[k] ??= [];
+      for (const k of ['dynamicWatchlists', 'watchlistHistory']) db[k] ??= []; // the trials and requests too are tables since §4.3 step 2
     },
   },
   {
@@ -349,22 +349,10 @@ export const MIGRATIONS = [
     // Idempotent (`??=`), never destructive, tolerant of a missing or
     // malformed `trials` collection (the boot-contract step already
     // guarantees the collection exists; this one only shapes its rows).
-    note: 'M23 P4B: additive Trial workflow containers on db.trials (workflowState, caseId, schedule, attendance, completion, keys, rev, history, reminders).',
-    up(db) {
-      db.trials ??= [];
-      if (!Array.isArray(db.trials)) return;
-      for (const t of db.trials) {
-        if (!t || typeof t !== 'object') continue;
-        t.workflowState ??= 'legacy_accepted';
-        t.caseId ??= null;
-        t.schedule ??= null;
-        t.attendance ??= [];
-        t.completion ??= null;
-        t.keys ??= {};
-        t.rev ??= 1;
-        t.history ??= [];
-        t.reminders ??= {};
-      }
+    note: 'M23 P4B: additive Trial workflow containers on the trials (workflowState, caseId, schedule, attendance, completion, keys, rev, history, reminders).',
+    // Since §4.3 step 2 the trials are typed rows read through SQL, and every trial reads back with these
+    // containers (repositories/recruitment.mjs): there is no db.trials to shape. A recorded no-op (its id stays).
+    up() {
     },
   },
   {

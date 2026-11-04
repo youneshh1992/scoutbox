@@ -67,7 +67,7 @@ export function registerInsight(ctx) {
     const profiles = byKind('profile_view');
     const evidence = byKind('evidence_view');
     const sinceTs = Date.now() - EXPOSURE_WINDOW_DAYS * 86_400_000;
-    const invited = new Set(db.requests.filter((r) => r.orgId === orgId && r.createdAt >= sinceTs).map((r) => r.playerId));
+    const invited = new Set(reads.requests.forOrg(orgId).filter((r) => r.createdAt >= sinceTs).map((r) => r.playerId));
     const outcomes = new Set(reads.signings.forOrg(orgId).filter((s) => (s.ts ?? 0) >= sinceTs).map((s) => s.playerId));
     return {
       windowDays: EXPOSURE_WINDOW_DAYS,

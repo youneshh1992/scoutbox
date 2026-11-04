@@ -77,7 +77,7 @@ function live(dir, { now = () => NOW } = {}) {
   return { store, db, layer, warnings, repo: layer.channels, snapshot, save: () => store.save(snapshot()), close: () => store.sqlite.close() };
 }
 /** An immediate-mode repository on a bare connection (a tool, a test): own transaction per mutation. */
-const bare = (s, requests = REQUESTS(), over = {}) => needModule().createChannelsRepository({ sqlite: s, now: () => NOW, requests: () => requests, ...over });
+const bare = (s, requests = REQUESTS(), over = {}) => needModule().createChannelsRepository({ sqlite: s, now: () => NOW, requestExists: (id) => requests.some((r) => r?.id === id), ...over });
 
 // ============================================================= [compat] what the accepted representation already does
 test('[compat] the message literal: a message without a clientMsgId has NO such key while one sent with a client id does, and the attachment key is always present (null without one)', () => {
@@ -177,7 +177,7 @@ test('[cutover] staged mode (the server): a thread, a message and a receipt are 
   L.save(); assert.equal(seqOf(dir), seq0 + 2); assert.equal(messageRows(dir).length, 2, 'a later save does not replay');
   // A unit of work: together or not at all.
   L.repo.appendMessage('chan-2', message({ id: 'm-pre' })); assert.equal(L.repo.pending(), 1);
-  const state = () => ({ export: plain(L.repo.exportRows()), heldMessages: held.messages.map((m) => m.id), heldRead: plain(held.readBy), requests: JSON.stringify(L.db.requests), durable: [channelIds(dir), messageRows(dir), seqOf(dir)] });
+  const state = () => ({ export: plain(L.repo.exportRows()), heldMessages: held.messages.map((m) => m.id), heldRead: plain(held.readBy), requests: JSON.stringify(L.layer.recruitment.exportAll().requests), durable: [channelIds(dir), messageRows(dir), seqOf(dir)] });
   const before = state();
   const unchanged = (label) => { assert.deepEqual(state(), before, label); assert.equal(L.repo.pending(), 1, `${label}: the pre-unit write is still pending`); assert.equal(L.store.sqlite.isTransaction, false); };
   const work = () => { L.layer.recruitment.requests.create(REQ('req-u', 'pl-adult', null)); /* S8a: an explicit create, joining the unit */ L.repo.appendMessage('chan-1', message({ id: 'm-u', attachment: clip() })); L.repo.markRead('chan-1', 'counterparty', NOW + 5); L.repo.open(channel({ id: 'chan-u', requestId: 'req-u' })); L.repo.deleteForPlayer('pl-adult'); };
@@ -196,12 +196,12 @@ test('[cutover] staged mode (the server): a thread, a message and a receipt are 
   assert.equal(seqOf(dir), before.durable[2] + 1); assert.deepEqual(channelIds(dir), [], 'every thread of pl-adult went (chan-1, chan-2 and the just-opened chan-u)'); assert.deepEqual(messageRows(dir), []); assert.ok(requestRow(dir, 'req-u'), 'the request added inside the unit landed with it'); assert.equal(L.repo.pending(), 0); assert.deepEqual(L.db.channels.map((c) => c.id), []);
   // Hook registration is a precondition inside the joined boundary.
   const { createChannelsRepository } = needModule();
-  const bareUnit = createChannelsRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, requests: () => L.db.requests });
-  const stagedUnit = createChannelsRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, staged: true, requests: () => L.db.requests });
+  const bareUnit = createChannelsRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, requestExists: (id) => !!L.layer.recruitment.requests.byId(id) });
+  const stagedUnit = createChannelsRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, staged: true, requestExists: (id) => !!L.layer.recruitment.requests.byId(id) });
   for (const [label, w] of [['immediate', () => bareUnit.open(channel({ id: 'chan-h', requestId: 'req-free' }))], ['staged', () => stagedUnit.open(channel({ id: 'chan-h', requestId: 'req-free' }))]]) {
     let c = null; let o = null;
     try { L.store.unitOfWork(() => { L.layer.recruitment.requests.create(REQ('req-h', 'pl-adult', null)); try { w(); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; }
-    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(requestRow(dir, 'req-h'), undefined); assert.equal(L.db.requests.some((r) => r.id === 'req-h'), false, 'the request added inside the refused unit is gone from memory too');
+    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(requestRow(dir, 'req-h'), undefined); assert.equal(L.layer.recruitment.requests.byId('req-h'), null, 'the request added inside the refused unit is gone from a read too');
   }
   assert.throws(() => stagedUnit.open(channel({ id: 'chan-h', requestId: 'req-free' })), /save hook/); assert.throws(() => createChannelsRepository({ sqlite: L.store.sqlite, staged: true }), /needs the store's participant API/);
   L.close(); rm(dir);

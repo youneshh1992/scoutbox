@@ -127,21 +127,11 @@ export function registerTrial(ctx) {
     return { room, role };
   }
 
-  function storeOr500(res) {
-    if (!Array.isArray(db.trials)) {
-      console.error('TRIAL store_missing db.trials is absent or not a list');
-      err(res, 'TRIAL_STORE_MISSING', 'Trials cannot be served right now.');
-      return null;
-    }
-    return db.trials;
-  }
-
   /** This case's trials (case-bound) plus this org's legacy trials for the same player (read-only interpretation), corrupt rows omitted and counted. */
   function trialsOf(room) {
     const good = [];
     let omitted = 0;
-    for (const t of db.trials ?? []) {
-      if (!t || t.orgId !== room.orgId || t.playerId !== room.playerId) continue;
+    for (const t of trials.forOrgPlayer(room.orgId, room.playerId)) {
       if (t.caseId && t.caseId !== room.id) continue;
       const problems = trialIntegrity(t, { orgId: room.orgId, caseId: t.caseId ? room.id : null });
       if (problems.length) { omitted += 1; console.error(`TRIAL integrity ${t.id ?? '?'}: ${problems.join(',')}`); continue; }
@@ -152,8 +142,8 @@ export function registerTrial(ctx) {
   }
 
   function findTrial(req, res, room) {
-    if (!storeOr500(res)) return null;
-    const t = db.trials.find((x) => x && x.id === req.params.tid && x.orgId === room.orgId && x.playerId === room.playerId && (!x.caseId || x.caseId === room.id));
+    const found = trials.byId(req.params.tid);
+    const t = found && found.orgId === room.orgId && found.playerId === room.playerId && (!found.caseId || found.caseId === room.id) ? found : null;
     if (!t) { err(res, 'TRIAL_NOT_FOUND', 'No such trial.'); return null; }
     const problems = trialIntegrity(t, { orgId: room.orgId, caseId: t.caseId ? room.id : null });
     if (problems.length) {
@@ -254,7 +244,7 @@ export function registerTrial(ctx) {
   }
   function notifyClub(t, text) {
     const room = (db.recruitmentCases ?? []).find((k) => k?.id === t.caseId);
-    const request = (db.requests ?? []).find((r) => r?.id === t.requestId);
+    const request = recruitment.requests.byId(t.requestId);
     const ids = new Set([request?.userId, room?.ownerUserId, room?.room?.leadScoutUserId].filter(Boolean));
     for (const uid of ids) notify({ kind: 'org_user', id: uid }, 'trial_day', text, t.id);
   }
@@ -264,11 +254,10 @@ export function registerTrial(ctx) {
   orgRouter.get('/rooms/:id/trials', (req, res) => {
     const got = roomFor(req, res, 'trial_view');
     if (!got) return;
-    if (!storeOr500(res)) return;
     const { room, role } = got;
     const { list, omitted } = trialsOf(room);
     const routing = recipientFor(req.org, room.playerId);
-    const invitation = (db.requests ?? []).filter((r) => r && r.type === 'trial' && r.caseId === room.id && r.orgId === room.orgId)
+    const invitation = recruitment.requests.forCase(room.id).filter((r) => r.type === 'trial' && r.orgId === room.orgId)
       .sort((a, b) => (b.createdAt - a.createdAt) || String(b.id).localeCompare(String(a.id)))[0] ?? null;
     res.json({
       items: list.map(trialClubView),
@@ -341,7 +330,6 @@ export function registerTrial(ctx) {
     const got = roomFor(req, res, 'trial_write');
     if (!got) return;
     const { room } = got;
-    if (!storeOr500(res)) return;
     const at = now(req);
 
     const key = normaliseTrialClientKey(req.body?.clientKey);
@@ -351,7 +339,7 @@ export function registerTrial(ctx) {
     const fp = payloadFingerprint({ slots: inv.slots.map((s) => [s.startsAt, s.endsAt]), venue: inv.venue.name, message: inv.message });
 
     // Replay of the same invitation: the same request row, not a second one.
-    const mine = (db.requests ?? []).filter((r) => r && r.type === 'trial' && r.caseId === room.id && r.orgId === room.orgId);
+    const mine = recruitment.requests.forCase(room.id).filter((r) => r.type === 'trial' && r.orgId === room.orgId);
     if (key.key) {
       const prior = mine.find((r) => r.keys?.invite?.key === key.key);
       if (prior && prior.keys.invite.fp === fp) return res.json({ invitation: invitationView(prior), idempotent: true, case: { unchanged: true, status: room.room.status } });
@@ -881,8 +869,8 @@ export function registerTrial(ctx) {
 
   /** The trial for this recipient, and the recipient re-derived now (D-7). */
   function recipientTrial(req, res, { by, actorId, playerIds }) {
-    if (!storeOr500(res)) return null;
-    const t = db.trials.find((x) => x && x.id === req.params.id && playerIds.includes(x.playerId)) ?? null;
+    const found = trials.byId(req.params.id);
+    const t = found && playerIds.includes(found.playerId) ? found : null;
     if (!t) { err(res, 'TRIAL_NOT_FOUND', 'No such trial.'); return null; }
     if (t.subjectRemovedAt) { err(res, 'TRIAL_SUBJECT_REMOVED', 'This trial can no longer be changed.'); return null; }
     const org = orgOf(t.orgId);

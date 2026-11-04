@@ -22,7 +22,9 @@ export function registerScouting(ctx) {
   } = ctx;
   // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
-  if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerScouting needs recruitmentReads (signings) from the data layer');
+  if (typeof reads?.signings?.forPlayer !== 'function' || typeof reads?.trials?.byId !== 'function') throw new TypeError('registerScouting needs recruitmentReads (signings, requests, trials) from the data layer');
+  /** A trial of this organisation, or null. */
+  const orgTrial = (id, orgId) => { const t = reads.trials.byId(id); return t && t.orgId === orgId ? t : null; };
   const { cases } = recruitmentCases;
 
   // ------------------------------------------------- template seeds (v1)
@@ -116,7 +118,7 @@ export function registerScouting(ctx) {
     if (rawTrial == null && rawSession == null) return { trialId: null, trialSessionId: null };
     if (rawTrial == null) { res.status(400).json({ error: 'TRIAL_CONTEXT_INVALID', message: 'A trial session belongs to a trial; give the trialId too.', field: 'trialId' }); return null; }
     if (typeof rawTrial !== 'string' || !rawTrial) { res.status(400).json({ error: 'TRIAL_CONTEXT_INVALID', field: 'trialId', expected: 'string' }); return null; }
-    const t = db.trials.find((x) => x?.id === rawTrial && x.orgId === req.org.id);
+    const t = orgTrial(rawTrial, req.org.id);
     if (!t || t.playerId !== p.id) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
     if (t.subjectRemovedAt) { res.status(409).json({ error: 'TRIAL_SUBJECT_REMOVED', message: 'This player removed their ScoutBox account; nothing new is written about a person who left.' }); return null; }
     const room = t.caseId ? (db.recruitmentCases ?? []).find((k) => k?.id === t.caseId && k.orgId === req.org.id) ?? null : null;
@@ -146,7 +148,7 @@ export function registerScouting(ctx) {
     // same access list (blind rule intact), never around it.
     if (req.query.trialId != null) {
       const tid = String(req.query.trialId);
-      const t = db.trials.find((x) => x?.id === tid && x.orgId === req.org.id);
+      const t = orgTrial(tid, req.org.id);
       if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
       list = (req.query.playerId ? list : assessmentAccessList(req, t.playerId)).filter((a) => a.context?.trialId === tid);
     }
@@ -217,7 +219,7 @@ export function registerScouting(ctx) {
             // that is LINKED (and not unlinked) to this assessment's trial —
             // by reference only. Nothing of the observation travels here.
             if (ref.trialSessionId !== undefined || ref.boxSessionId !== undefined) {
-              const t = a.context?.trialId ? db.trials.find((x) => x?.id === a.context.trialId && x.orgId === req.org.id) : null;
+              const t = a.context?.trialId ? orgTrial(a.context.trialId, req.org.id) : null;
               if (!t) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', message: 'Trial evidence references need an assessment written in the context of a trial.' });
               const sessions = t.schedule?.sessions ?? [];
               if (ref.trialSessionId !== undefined && !sessions.some((s) => s?.id === ref.trialSessionId)) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', field: 'trialSessionId' });
@@ -619,8 +621,10 @@ export function registerScouting(ctx) {
     if (!c) return;
     const { requestId, trialId, signingId } = req.body ?? {};
     // Every reference is checked before anything is written.
-    if (requestId && !db.requests.some((x) => x.id === requestId && x.orgId === req.org.id && x.playerId === c.playerId)) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
-    if (trialId && !db.trials.some((x) => x.id === trialId && x.orgId === req.org.id && x.playerId === c.playerId)) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
+    const request = requestId ? reads.requests.byId(requestId) : null;
+    if (requestId && !(request && request.orgId === req.org.id && request.playerId === c.playerId)) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
+    const trial = trialId ? orgTrial(trialId, req.org.id) : null;
+    if (trialId && !(trial && trial.playerId === c.playerId)) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
     const signing = signingId ? reads.signings.byId(signingId) : null;
     if (signingId && !(signing && signing.orgId === req.org.id && signing.playerId === c.playerId)) return res.status(404).json({ error: 'SIGNING_NOT_FOUND' });
     const fresh = cases.update(c.id, (d) => {

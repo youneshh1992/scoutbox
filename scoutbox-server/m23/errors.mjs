@@ -186,7 +186,6 @@ export const M23_ERROR_HTTP = table({
   // ---- 500: ours. A refused transport (injected for tests, or a real
   // persistence problem) writes nothing and says so.
   TRIAL_STATE_UNKNOWN: 500,
-  TRIAL_STORE_MISSING: 500,
   TRIAL_TRANSPORT_REFUSED: 500,
 
   // ======================================================== M23 P5 Decision

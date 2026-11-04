@@ -92,7 +92,7 @@ export function collectPlan(db, planId) {
  * than four consistent ones.
  */
 export function buildDevelopmentPlan({
-  db, planId, player, viewer, access, orgCanSee, now = Date.now(), collected = null,
+  db, reads = {}, planId, player, viewer, access, orgCanSee, now = Date.now(), collected = null,
 }) {
   const bundle = collected ?? collectPlan(db, planId);
   if (!bundle) return null;
@@ -115,7 +115,7 @@ export function buildDevelopmentPlan({
   }
 
   const resolveFor = (key) => (linksByTarget.get(key) ?? [])
-    .map((l) => ({ linkId: l.id, ...resolveEvidenceLink(l, { db, player, viewer, orgCanSee, now }) }))
+    .map((l) => ({ linkId: l.id, ...resolveEvidenceLink(l, { db, reads, player, viewer, orgCanSee, now }) }))
     .sort((a, b) => (b.occurredAt ?? 0) - (a.occurredAt ?? 0) || String(a.sourceId).localeCompare(String(b.sourceId)));
 
   const goalViews = goals

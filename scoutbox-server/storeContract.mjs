@@ -160,7 +160,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // recruitmentContacts, recruitmentOffers: never a db.* read since §4.3 step 2 — the contacts and offers live in their
   // typed tables (migration 0017) and are read through repositories/recruitmentContactsOffers.mjs. db.<name> throws.
   // signingPackages, signings, followUps, outcomeReports: the same since §4.3 step 2 — typed tables (migration 0018),
-  // read through repositories/signingsFollowUps.mjs.
+  // read through repositories/signingsFollowUps.mjs. requests, trials: the same — typed tables (migration 0015), read
+  // through repositories/recruitment.mjs.
   reports: { guarantee: 'migration', owner: 'core', reason: 'report-user/scout/club submissions (D2); since S6b a read-only view over the reports table, written only through handleReport / moderateOrRefuse and the resolve route → the safetyAudit repository (a report naming an unknown player is accepted, Q4)' },
   representations: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   // M23 P5.6B — ScoutBox Agent core. Guaranteed by migration 2305 so a
@@ -179,7 +180,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   transactionRepresentations: { guarantee: 'migration', owner: 'm26', reason: 'P5.6D: the frozen P5.6A §5 (agent, party role, transaction) binding with its own lifecycle, rev and review link — the conflict engine\'s unit of evaluation, kept out of the transaction row on purpose' },
   transactionDocuments: { guarantee: 'migration', owner: 'm26', reason: 'P5.6D: document classification and visibility — type, owner, visibility class, version chain, expiry and a reference into the canonical evidence vault; stores no bytes, so it is not a second upload path' },
   reputationSeed: { guarantee: 'migration', owner: 'core', reason: 'demo track records; EMPTY is the correct production value — fabricating them would be worse than the bug (D2)' },
-  requests: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   reviewLater: { guarantee: 'module', owner: 'm13', reason: 'existed only because insightSweep() happens to run once synchronously at registration; a store whose existence depends on a sweep moves the day the sweep is made lazy' },
   roomComments: { guarantee: 'migration', owner: 'm17', reason: 'Recruitment Room collection, guaranteed by the migration registry' },
   roomDecisions: { guarantee: 'migration', owner: 'm17', reason: 'Recruitment Room collection, guaranteed by the migration registry' },
@@ -195,7 +195,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   supportAccessGrants: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   supportTickets: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   transitionCases: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  trials: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   uploadSessions: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   users: { guarantee: 'migration', owner: 'core', reason: 'staff accounts. Guaranteed by the migration registry in memory; since the data layer the rows live in the org_users table (repositories/users.mjs) and db.users is the repository\'s read-only view after attachDataLayer' },
   vacancies: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },

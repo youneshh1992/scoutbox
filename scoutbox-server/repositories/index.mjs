@@ -180,29 +180,29 @@ export function checkTableBackedShapes(db) {
   return present;
 }
 
-export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
+export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   const written = [];
-  const present = checkTableBackedShapes(db);
+  const present = checkTableBackedShapes(snapshot);
   const single = (name) => TABLES.find((t) => t.name === name);
   // `replace` is false before the domain's cutover record exists (the blob
   // is still authoritative, so the caller writes it) and THROWS on a row the
   // table refuses, which rolls the caller's whole transaction back.
-  if (present.includes('orgs') && single('orgs').replace(sqlite, db.orgs)) written.push('orgs');
+  if (present.includes('orgs') && single('orgs').replace(sqlite, snapshot.orgs)) written.push('orgs');
   // S5: the `trials` the snapshot carries (written as a blob below, in the same transaction) judge every `trialReports` claim on its players; a snapshot without them is judged by the retained blob.
-  if (IDENTITY_COLLECTIONS.every((n) => present.includes(n)) && IDENTITY_SNAPSHOT.replace(sqlite, { players: db.players, guardians: db.guardians }, { now, trials: Object.hasOwn(db, 'trials') && db.trials !== undefined ? db.trials : undefined })) written.push(...IDENTITY_COLLECTIONS);
+  if (IDENTITY_COLLECTIONS.every((n) => present.includes(n)) && IDENTITY_SNAPSHOT.replace(sqlite, { players: snapshot.players, guardians: snapshot.guardians }, { now, trials: Object.hasOwn(snapshot, 'trials') && snapshot.trials !== undefined ? snapshot.trials : undefined })) written.push(...IDENTITY_COLLECTIONS);
   // S4b-R: the retained records go right after the identity pair (which carried the
   // existing ones through its rewrite). PROTECTED (review of 6d66655, F1): a supplied
   // collection may only ADD records — every stored record must be listed unchanged or
   // the whole save is refused (ids only); new records are checked against the live rows
   // as they now stand; an omitted collection keeps the rows.
-  if (present.includes(PLAYERS_RETAINED.name) && PLAYERS_RETAINED.replace(sqlite, db[PLAYERS_RETAINED.name])) written.push(PLAYERS_RETAINED.name);
+  if (present.includes(PLAYERS_RETAINED.name) && PLAYERS_RETAINED.replace(sqlite, snapshot[PLAYERS_RETAINED.name])) written.push(PLAYERS_RETAINED.name);
   // The staff rows are upserted here and pruned below, after the requests that name them
   // (S8a-core: recruitment_requests.user_id is a RESTRICT key); the sessions, which name
   // the staff, are written after that prune so a session of a staff member the snapshot
   // no longer lists is refused with its id, as before.
-  if (present.includes('users') && single('users').replace(sqlite, db.users, { prune: false })) written.push('users');
+  if (present.includes('users') && single('users').replace(sqlite, snapshot.users, { prune: false })) written.push('users');
   // The media-removal queue: validated entry by entry and rewritten (false before migration 0006, so the caller writes the blob the migration imports).
-  if (present.includes(MEDIA_DELETIONS_TABLE.name) && MEDIA_DELETIONS_TABLE.replace(sqlite, db[MEDIA_DELETIONS_TABLE.name])) written.push(MEDIA_DELETIONS_TABLE.name);
+  if (present.includes(MEDIA_DELETIONS_TABLE.name) && MEDIA_DELETIONS_TABLE.replace(sqlite, snapshot[MEDIA_DELETIONS_TABLE.name])) written.push(MEDIA_DELETIONS_TABLE.name);
   // S7d: the message threads are dispatched after the identity pair and the staff
   // (their guardians and organisations are then the snapshot's) and BEFORE the
   // organisation prune, so an organisation the snapshot removed while a thread
@@ -210,9 +210,9 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // than vanishing under its thread. The incoming rows' request references are
   // checked against the snapshot's `requests` when it carries them, the retained
   // blob otherwise (false before the 0012 record exists: the caller writes the blob).
-  const requestsSupplied = Object.hasOwn(db, 'requests') && db.requests !== undefined;
-  const trialsSupplied = Object.hasOwn(db, 'trials') && db.trials !== undefined;
-  const casesSupplied = Object.hasOwn(db, 'recruitmentCases') && db.recruitmentCases !== undefined;
+  const requestsSupplied = Object.hasOwn(snapshot, 'requests') && snapshot.requests !== undefined;
+  const trialsSupplied = Object.hasOwn(snapshot, 'trials') && snapshot.trials !== undefined;
+  const casesSupplied = Object.hasOwn(snapshot, 'recruitmentCases') && snapshot.recruitmentCases !== undefined;
   // S8b (typed, explicit): the five case collections typed (junk refused with
   // ids; a supplied array IS the whole final collection, an omitted one is
   // retained whole), their references named against the FINAL combined state
@@ -228,11 +228,11 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // rows normalised as the cutover normalises them — and their departures removed children first, BEFORE the S8c
   // departures so a package can leave with its offer; a retained dependant of a departing row refuses the save with
   // ids (SIGNINGS_STILL_REFERENCED). The rows are written after the offers (below). `null` before the 0018 record.
-  const signingsPlan = SIGNINGS_FOLLOWUPS_SNAPSHOT.begin(sqlite, db, { label: 'the snapshot (signings, follow-ups and outcomes)' });
+  const signingsPlan = SIGNINGS_FOLLOWUPS_SNAPSHOT.begin(sqlite, snapshot, { label: 'the snapshot (signings, follow-ups and outcomes)' });
   if (signingsPlan) written.push(...signingsPlan.written);
-  const contactsOffersPlan = CONTACTS_OFFERS_SNAPSHOT.begin(sqlite, db, { guardians: IDENTITY_COLLECTIONS.every((n) => present.includes(n)) ? db.guardians : undefined, label: 'the snapshot (contacts and offers)' });
+  const contactsOffersPlan = CONTACTS_OFFERS_SNAPSHOT.begin(sqlite, snapshot, { guardians: IDENTITY_COLLECTIONS.every((n) => present.includes(n)) ? snapshot.guardians : undefined, label: 'the snapshot (contacts and offers)' });
   if (contactsOffersPlan) written.push(...contactsOffersPlan.written);
-  const casesPlan = RECRUITMENT_CASES_SNAPSHOT.begin(sqlite, db, { requests: requestsSupplied ? db.requests : undefined, trials: trialsSupplied ? db.trials : undefined, label: 'the snapshot (cases, rooms, requests and trials)' });
+  const casesPlan = RECRUITMENT_CASES_SNAPSHOT.begin(sqlite, snapshot, { requests: requestsSupplied ? snapshot.requests : undefined, trials: trialsSupplied ? snapshot.trials : undefined, label: 'the snapshot (cases, rooms, requests and trials)' });
   if (casesPlan) written.push(...casesPlan.written);
   // S8a (typed, explicit): the supplied requests and trials typed (junk refused
   // with ids; a supplied array IS the whole final collection, an omitted one is
@@ -241,7 +241,7 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // and staff keys) and BEFORE the channels (a thread's request_id is a real
   // key). Their case keys and the request's trial key are deferred to COMMIT;
   // the assertion at the end names any miss.
-  if (requestsSupplied || trialsSupplied) written.push(...RECRUITMENT_SNAPSHOT.replace(sqlite, { requests: requestsSupplied ? db.requests : undefined, trials: trialsSupplied ? db.trials : undefined }, { label: 'the snapshot (requests and trials)' }));
+  if (requestsSupplied || trialsSupplied) written.push(...RECRUITMENT_SNAPSHOT.replace(sqlite, { requests: requestsSupplied ? snapshot.requests : undefined, trials: trialsSupplied ? snapshot.trials : undefined }, { label: 'the snapshot (requests and trials)' }));
   // S8c: the supplied contacts and offers written.
   CONTACTS_OFFERS_SNAPSHOT.write(sqlite, contactsOffersPlan);
   // S8d: the packages (their offers and cases are in place now), the signings, the follow-ups and the reports,
@@ -250,7 +250,7 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // S8b: the supplied cases' link rows (their request and trial keys are
   // satisfied now).
   RECRUITMENT_CASES_SNAPSHOT.links(sqlite, casesPlan);
-  if (present.includes(CHANNELS_TABLE.name) && CHANNELS_TABLE.replace(sqlite, db[CHANNELS_TABLE.name], { requests: requestsSupplied ? db.requests : undefined })) written.push(CHANNELS_TABLE.name);
+  if (present.includes(CHANNELS_TABLE.name) && CHANNELS_TABLE.replace(sqlite, snapshot[CHANNELS_TABLE.name], { requests: requestsSupplied ? snapshot.requests : undefined })) written.push(CHANNELS_TABLE.name);
   // Rows the snapshot no longer lists go last, children before parents, so a
   // parent that is still referenced makes the foreign key refuse the save
   // instead of the row disappearing under its dependants. (The identity pair
@@ -263,12 +263,12 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // contact, offer, signing and room row that named them (a retained one
   // refuses the save with ids), before the staff.
   RECRUITMENT_CASES_SNAPSHOT.pruneRooms(sqlite, casesPlan);
-  if (written.includes('requests')) RECRUITMENT_SNAPSHOT.prune(sqlite, { requests: db.requests, label: 'the snapshot (requests and channels together)' });
+  if (written.includes('requests')) RECRUITMENT_SNAPSHOT.prune(sqlite, { requests: snapshot.requests, label: 'the snapshot (requests and channels together)' });
   RECRUITMENT_CASES_SNAPSHOT.pruneCases(sqlite, casesPlan, { label: 'the snapshot (cases and everything that names them)' });
-  if (written.includes('users')) single('users').prune(sqlite, db.users); // the staff no longer listed (their sessions cascade), after the requests and cases that named them
-  if (present.includes('sessions') && single('sessions').replace(sqlite, db.sessions)) written.push('sessions'); // against the FINAL staff rows
+  if (written.includes('users')) single('users').prune(sqlite, snapshot.users); // the staff no longer listed (their sessions cascade), after the requests and cases that named them
+  if (present.includes('sessions') && single('sessions').replace(sqlite, snapshot.sessions)) written.push('sessions'); // against the FINAL staff rows
   for (const name of ['sessions', 'orgs']) {
-    if (written.includes(name)) single(name).prune?.(sqlite, db[name]);
+    if (written.includes(name)) single(name).prune?.(sqlite, snapshot[name]);
   }
   // The ownership invariant on the FINAL combined state (review of 4ef9345):
   // whichever side this snapshot wrote — the identity pair, the queue, or both —
@@ -282,7 +282,7 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // snapshot's). A snapshot that rewrote the players but omitted the pairing
   // codes keeps the retained codes, which must still name existing players —
   // the FINAL combined state is checked whichever side was written.
-  for (const table of CODE_TABLES) if (present.includes(table.name) && table.replace(sqlite, db[table.name])) written.push(table.name);
+  for (const table of CODE_TABLES) if (present.includes(table.name) && table.replace(sqlite, snapshot[table.name])) written.push(table.name);
   if (written.some((n) => IDENTITY_COLLECTIONS.includes(n))) assertPairingCodesConsistent(sqlite, { label: 'the snapshot (players and pairingCodes together)' });
   // S7a/S7b/S7c: the notification, dispatch, outbox and push tables reference
   // nothing (polymorphic audiences, no cascade with a person; a dispatch's
@@ -291,7 +291,7 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // that carries one collection and omits another leaves the omitted table
   // alone; each entry is validated (never coerced) and one refusal rolls the
   // whole save back.
-  for (const table of NOTIFICATION_TABLE_DISPATCH) if (present.includes(table.name) && table.replace(sqlite, db[table.name])) written.push(table.name);
+  for (const table of NOTIFICATION_TABLE_DISPATCH) if (present.includes(table.name) && table.replace(sqlite, snapshot[table.name])) written.push(table.name);
   // S7d: the FINAL combined state of the threads (review §11.5, corrected by the
   // review of 8330f08): whenever this snapshot wrote the channels, carries the
   // requests, or rewrote the identity pair, every thread row the file now holds
@@ -302,7 +302,7 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // organisation. A miss throws inside the caller's transaction: the whole save
   // rolls back, unrelated collections and the save revision included.
   if (written.includes(CHANNELS_TABLE.name) || requestsSupplied || written.some((n) => IDENTITY_COLLECTIONS.includes(n))) {
-    assertChannelReferencesConsistent(sqlite, { requests: requestsSupplied ? db.requests : undefined, label: 'the snapshot (channels, requests and guardians together)' });
+    assertChannelReferencesConsistent(sqlite, { requests: requestsSupplied ? snapshot.requests : undefined, label: 'the snapshot (channels, requests and guardians together)' });
   }
   // S6b: the eight audit tables go after the identity pair and the prunes. They carry
   // no foreign key. Domain P (the five player references): a snapshot that rewrites
@@ -313,7 +313,7 @@ export function writeTableBacked(sqlite, db, { now = Date.now() } = {}) {
   // pair was dispatched above), and the FINAL combined state is asserted whenever this
   // snapshot wrote the queue OR rewrote the identity pair — the queue omitted
   // included — so a guardian removed under a retained entry refuses the whole save.
-  for (const table of AUDIT_SNAPSHOT_TABLES) if (present.includes(table.name) && table.replace(sqlite, db[table.name])) written.push(table.name);
+  for (const table of AUDIT_SNAPSHOT_TABLES) if (present.includes(table.name) && table.replace(sqlite, snapshot[table.name])) written.push(table.name);
   if (written.includes('idvQueue') || written.some((n) => IDENTITY_COLLECTIONS.includes(n))) {
     assertIdvQueueGuardiansConsistent(sqlite, { label: 'the snapshot (idvQueue and guardians together)' });
   }
@@ -395,10 +395,14 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   // the repositories.
   // S5: the player arrays are rows of the `player_*` tables (migration 0007) and
   // `trialReports` is derived from the trials collection, read live: since
-  // S8a-core from the recruitment repository's mirror (attached below; the
-  // accessor is late-bound), before it from the `db.trials` array as it stands.
+  // S8a-core from the recruitment repository (attached below; the accessor is
+  // late-bound). Before it attaches, a first installation's initialisation
+  // checks the players' trialReports against the trials it was handed (the
+  // seed's or a fixture's plain array, not a mirror).
   let recruitment = null;
-  const identity = createIdentityRepositories({ sqlite, log, warn, unit: store.unit, now, trialReports: (playerId) => (recruitment ? recruitment.trialReportsFor(playerId) : trialReportsFor(db.trials, playerId)) });
+  /** A collection the caller handed in before its table took over (the seed's or a fixture's plain array), or []. */
+  const handedIn = (name) => (Object.hasOwn(db, name) && Array.isArray(db[name]) ? db[name] : []);
+  const identity = createIdentityRepositories({ sqlite, log, warn, unit: store.unit, now, trialReports: (playerId) => (recruitment ? recruitment.trialReportsFor(playerId) : trialReportsFor(handedIn('trials'), playerId)) });
   const identityBoot = identity.initState() === 'pending'
     ? identity.initialize({ players: db.players, guardians: db.guardians }, { now: now() })
     : identity.attach(db.players, db.guardians);
@@ -566,7 +570,6 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
   store.setSaveHook?.(recruitmentCases.hook());
   recruitment = createRecruitmentRepository({ sqlite, log, now, unit: store.unit });
   const recruitmentBoot = recruitment.attach();
-  store.setSaveHook?.(recruitment.hook());
   for (const name of RECRUITMENT_CASES_COLLECTIONS) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
@@ -599,15 +602,15 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     }
     retireCollection(db, name, 'signingsFollowUps');
   }
-  for (const [name, view] of [['requests', recruitment.requestsView], ['trials', recruitment.trialsView]]) {
+  for (const name of ['requests', 'trials']) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
       sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
     }
-    Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
+    retireCollection(db, name, 'recruitment');
   }
 
-  const channels = createChannelsRepository({ sqlite, log, now, unit: store.unit, staged: true, requests: () => db.requests });
+  const channels = createChannelsRepository({ sqlite, log, now, unit: store.unit, staged: true, requestExists: (id) => !!recruitment.requests.byId(id) });
   const channelsBoot = channels.attach();
   store.setSaveHook?.(channels.saveHook());
   if (Object.hasOwn(db, CHANNELS_TABLE.name)) {

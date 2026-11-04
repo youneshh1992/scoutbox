@@ -95,7 +95,7 @@ function viewerMaySeePlayer(viewer, player, { orgCanSee }) {
  * a caller distinguish "no such id" from "not yours", which is an enumeration
  * oracle over another club's evidence.
  */
-export function resolveEvidenceLink(link, { db, player, viewer, orgCanSee, now = Date.now() }) {
+export function resolveEvidenceLink(link, { db, reads = {}, player, viewer, orgCanSee, now = Date.now() }) {
   if (!EVIDENCE_SOURCES.includes(link.sourceType)) return unavailable(link, 'evidence_not_found');
   if (!viewerMaySeePlayer(viewer, player, { orgCanSee })) return unavailable(link, 'evidence_not_visible');
 
@@ -104,7 +104,7 @@ export function resolveEvidenceLink(link, { db, player, viewer, orgCanSee, now =
     case 'assessment': return resolveAssessment(link, { db, player, viewer });
     case 'box_cam_session': return resolveBoxSession(link, { db, player });
     case 'combine_attempt': return resolveCombineAttempt(link, { db, player });
-    case 'trial_report': return resolveTrialReport(link, { db, player, viewer });
+    case 'trial_report': return resolveTrialReport(link, { reads, player, viewer });
     default: return unavailable(link, 'evidence_not_found');
   }
 }
@@ -204,8 +204,9 @@ function resolveCombineAttempt(link, { db, player }) {
  * line of what it says. A trial report is a recruitment record; copying it into
  * a development plan the player can read is exactly the leak §56 forbids.
  */
-function resolveTrialReport(link, { db, player, viewer }) {
-  const t = (db.trials ?? []).find((x) => x.id === link.sourceId);
+function resolveTrialReport(link, { reads, player, viewer }) {
+  // §4.3 step 2: the trials are read through SQL (`reads.trials`, the recruitment repository's queries).
+  const t = reads.trials?.byId(link.sourceId) ?? null;
   if (!t || t.playerId !== player.id) return unavailable(link, 'evidence_not_found');
   const isOwningOrg = (viewer.kind === 'org_staff' || viewer.kind === 'grassroots_staff') && t.orgId === viewer.org?.id;
   if (!isOwningOrg) return unavailable(link, 'evidence_not_visible');
@@ -232,7 +233,7 @@ function resolveTrialReport(link, { db, player, viewer }) {
  * to unavailable at read time, because one guard is never enough for the rule
  * that keeps players' records apart.
  */
-export function validateEvidenceLink({ sourceType, sourceId, db, player, viewer, orgCanSee, now = Date.now() }) {
+export function validateEvidenceLink({ sourceType, sourceId, db, reads = {}, player, viewer, orgCanSee, now = Date.now() }) {
   if (!EVIDENCE_SOURCES.includes(String(sourceType))) {
     return { error: 'EVIDENCE_SOURCE_UNKNOWN', allowed: EVIDENCE_SOURCES, detail: `Unknown evidence source "${sourceType}".` };
   }
@@ -243,12 +244,12 @@ export function validateEvidenceLink({ sourceType, sourceId, db, player, viewer,
   // Does the record exist AND belong to this player? Both questions get the
   // same answer, so a caller cannot use the difference to discover that an id
   // exists on somebody else.
-  const owned = recordBelongsToPlayer({ db, sourceType, sourceId, playerId: player.id });
+  const owned = recordBelongsToPlayer({ db, reads, sourceType, sourceId, playerId: player.id });
   if (!owned) {
     return { error: 'EVIDENCE_NOT_FOUND', detail: 'That evidence does not exist for this player.' };
   }
 
-  const probe = resolveEvidenceLink({ sourceType, sourceId }, { db, player, viewer, orgCanSee, now });
+  const probe = resolveEvidenceLink({ sourceType, sourceId }, { db, reads, player, viewer, orgCanSee, now });
   if (!probe.available && probe.reason === 'evidence_not_visible') {
     return { error: 'EVIDENCE_NOT_FOUND', detail: 'That evidence does not exist for this player.' };
   }
@@ -262,14 +263,14 @@ export function validateEvidenceLink({ sourceType, sourceId, db, player, viewer,
 }
 
 /** Ownership, per store. One place, so no source can be added without answering it. */
-export function recordBelongsToPlayer({ db, sourceType, sourceId, playerId }) {
+export function recordBelongsToPlayer({ db, reads = {}, sourceType, sourceId, playerId }) {
   const find = (list) => (list ?? []).find((x) => x.id === sourceId && x.playerId === playerId) ?? null;
   switch (sourceType) {
     case 'passport_evidence': return find(db.evidence);
     case 'assessment': return find(db.assessments);
     case 'box_cam_session': return find(db.boxSessions);
     case 'combine_attempt': return find(db.combineAttempts);
-    case 'trial_report': return find(db.trials);
+    case 'trial_report': { const t = reads.trials?.byId(sourceId) ?? null; return t && t.playerId === playerId ? t : null; }
     default: return null;
   }
 }

@@ -308,8 +308,10 @@ section('§13/§14 — db.assessments and the D2 stores, checked by name');
   neg(JOURNEY_REQUIRED_STORES.every((k) => PRODUCTION_REQUIRED_STORES.includes(k)),
     'and every store the M23 journey DECLARES required is guaranteed by a migration step');
 
+  // §4.3 step 2 (rewritten: it described the old storage): the D2 `requests` and `trials` are typed tables read
+  // through SQL, no db collection a migration creates; the recruitment suites prove they are there on every boot.
   const D2 = ['blocks', 'reports', 'moderationLog', 'channels', 'reputationSeed', 'plans', 'archetypes',
-    'requests', 'trials', 'assessments'];
+    'assessments'];
   const absent = D2.filter((k) => !presentAfterBoot.has(k));
   for (const k of absent) console.error(`   D2 store absent after boot: db.${k}`);
   neg(absent.length === 0, `§14 all ${D2.length} D2 stores are present after a full production boot`);
