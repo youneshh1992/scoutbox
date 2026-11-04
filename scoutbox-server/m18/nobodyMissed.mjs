@@ -57,7 +57,7 @@ export function registerNobodyMissed(ctx) {
     const lastFootageAt = evidence
       .filter((e) => e.claimType === 'footage')
       .reduce((m, e) => Math.max(m, e.recordedAt ?? 0), 0) || null;
-    const coachReference = (db.verReferences ?? []).some((r) => r.playerId === player.id && r.status === 'active')
+    const coachReference = ctx.verificationReads.references.hasActive(player.id)
       || evidence.some((e) => e.verification?.status === 'coach_confirmed');
     // Production-valid Combine only: a simulated result never becomes
     // production recruitment eligibility.

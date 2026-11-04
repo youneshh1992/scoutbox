@@ -127,9 +127,9 @@ module registration → integrity report → listen.
   to SQL has no `db.<collection>` at all (reading or assigning it throws and names the
   repository). The whole recruitment domain (cases and Room records, requests, trials,
   contacts, offers, signing packages, signings, follow-ups, outcome reports) has moved, and so
-  have the scouting evidence passport, coach affiliations and squad invitations (S9a) the assessment templates, assessments, video segments and playlists (S9b), and a club's tactical setup, squad, shadow list, looking-for, federation request and vacancies (S9c, which also retired the organisation facets `tactical`, `squad`, `lookingFor` and `federationCheck`: reading one on an organisation throws), and the opportunity board, applications, assessment campaigns and players' private suitability preferences (S9d): ask the repository (`recruitmentContactsOffers.contacts.forCase`,
+  have the scouting evidence passport, coach affiliations and squad invitations (S9a) the assessment templates, assessments, video segments and playlists (S9b), and a club's tactical setup, squad, shadow list, looking-for, federation request and vacancies (S9c, which also retired the organisation facets `tactical`, `squad`, `lookingFor` and `federationCheck`: reading one on an organisation throws), the opportunity board, applications, assessment campaigns and players' private suitability preferences (S9d), and the verification claims, their evidence vault, tokens, administrators, root applications, disputes, references, squad invitations by code, conflicts, domain requests and verified domains (S10a, which also retired the organisation facet `verification`: its revocation is the organisation field `verificationRevokedAt`): ask the repository (`recruitmentContactsOffers.contacts.forCase`,
   `signingsFollowUps.signings.forOrgPlayer`, `scoutingEvidence.evidence.currentForPlayer`, …, or the read-only `recruitmentReads`
-  and `scoutingReads` every module context carries). A list that grows without limit pages by cursor through
+  `scoutingReads` and `verificationReads` every module context carries). A list that grows without limit pages by cursor through
   `domains/platform/paging.mjs` (`readPage` at the route, a `pageFor…` query in the
   repository that asks for one row more than the page). Each record is a fresh,
   deep-frozen decode; a query inside a unit of work sees the unit's own writes. Pure
@@ -190,7 +190,7 @@ When you move a blob domain to tables:
 - After attach, an in-memory array (seed, `??= []` default, stale copy) is never imported
   into a live table.
 
-The latest table migration is `0022_opportunities_campaigns`.
+The latest table migration is `0023_verification`.
 
 **Snapshot mode.** `openStore(dir)` without options is for tools and fixtures. It runs the
 table migrations when it opens the file, then reads and writes the whole database in the

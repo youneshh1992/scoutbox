@@ -7,21 +7,25 @@
 // Verification proves FACTS; authorization decides ACCESS. Nothing registered
 // here loosens visibleToOrg, guardian routing, adult-only representation, the
 // grassroots radius, or any other standing rule.
+//
+// S10a: every record is a row of the verification repository (repositories/verification.mjs), written by explicit
+// operations — inside a unit of work wherever a route writes more than one row — and read by SQL queries.
 import crypto from 'node:crypto';
 import {
-  migrateM14, buildClaimIndex, applyTransition, effectiveStatus,
+  bootstrapVerification, applyTransition, effectiveStatus,
   toPublicVerificationProfile, hasVerLevel, verLevelFor, orgCanAttest,
-  orgVerificationStatus, mintToken, consumeToken, peekToken, sha256,
+  orgVerificationStatus, mintToken, consumeToken, peekToken, useToken,
   evidenceFileProblem, claimProvenanceLabel,
 } from './shared.mjs';
+import { eventDetail, VERIFICATION_LIMITS } from '../../../repositories/verification.mjs';
 import { metrics } from '../../../m13/enterprise.mjs';
 import { registerOrganisationVerification } from './organisations.mjs';
 import { registerVerificationReview } from './review.mjs';
 
 export function registerM14(ctx) {
-  migrateM14(ctx.db);
-  const { db, byId, nextId, persist } = ctx;
-  const idx = buildClaimIndex(db);
+  const { db, byId, nextId, persist, verification, unit } = ctx;
+  const reads = verification.reads;
+  bootstrapVerification({ verification, orgs: [...db.orgs], representations: db.representations ?? [] });
 
   // -------- verification metrics (§61): counters only, never names/emails.
   metrics.verification = {
@@ -30,84 +34,105 @@ export function registerM14(ctx) {
     emailChallengeFailures: 0,
   };
   const vmetric = (k) => { metrics.verification[k] = (metrics.verification[k] ?? 0) + 1; };
+  const cut = (v, max) => (v === null || v === undefined ? null : String(v).slice(0, max));
 
-  // -------- append-only verification event log (§11).
+  // -------- append-only verification event log (§11). The before/after payloads become one detail line.
   function verEvent(type, fields = {}, req = null) {
-    const row = {
+    return verification.events.append({
       id: nextId('vevt'), ts: Date.now(), type,
       actorKind: fields.actorKind ?? (req?.orgUser ? 'org_user' : 'system'),
-      actorId: fields.actorId ?? req?.orgUser?.id ?? null,
-      actorName: fields.actorName ?? req?.orgUser?.name ?? null,
+      actorId: cut(fields.actorId ?? req?.orgUser?.id ?? null, VERIFICATION_LIMITS.id),
+      actorName: cut(fields.actorName ?? req?.orgUser?.name ?? null, VERIFICATION_LIMITS.name),
       actorOrgId: fields.actorOrgId ?? req?.org?.id ?? null,
-      requestId: req?.correlationId ?? req?.headers?.['x-request-id'] ?? null,
+      requestId: cut(req?.correlationId ?? req?.headers?.['x-request-id'] ?? null, VERIFICATION_LIMITS.requestId),
       // M14.1: how the actor identity was established — 'declared_reviewer'
       // (a named T&S reviewer declared on the request) vs 'shared_admin_key'
       // (the shared prototype admin credential; no individual identity).
       attribution: fields.attribution ?? null,
       claimId: fields.claimId ?? null, subjectId: fields.subjectId ?? null,
-      orgId: fields.orgId ?? null, before: fields.before ?? null,
-      after: fields.after ?? null, reason: fields.reason ?? null,
-    };
-    db.verEvents.push(row);
-    return row;
+      orgId: fields.orgId ?? null, detail: eventDetail(fields.before, fields.after),
+      reason: cut(fields.reason ?? null, VERIFICATION_LIMITS.reason),
+    });
   }
 
-  // -------- claim construction. THE only creator: guarantees index upkeep.
+  // -------- claim construction. THE only creator.
   function createClaim(fields, req = null) {
     const now = Date.now();
-    const claim = {
-      id: nextId('vclm'), subjectType: 'user', organisationId: null, role: null,
-      status: 'unverified', validFrom: null, validUntil: null, current: true,
-      verificationMethod: null, authorityType: null, authorityId: null,
-      evidenceIds: [], createdAt: now, updatedAt: now,
-      verifiedAt: null, verifiedBy: null, revokedAt: null, revokedBy: null,
-      revocationReason: null, suspendedAt: null, disputedAt: null,
-      supersedesClaimId: null, reviewReasons: [], riskFlags: [], metadata: {},
-      ...fields,
-    };
-    db.verClaims.push(claim);
-    idx.register(claim);
-    verEvent('claim.created', { claimId: claim.id, subjectId: claim.subjectId, orgId: claim.organisationId, after: { claimType: claim.claimType, status: claim.status } }, req);
-    vmetric('requestsCreated');
-    persist();
-    return claim;
+    return verification.atomically(() => {
+      const claim = verification.claims.create({
+        id: nextId('vclm'), subjectType: 'user', organisationId: null, role: null,
+        status: 'unverified', validFrom: null, validUntil: null, current: true,
+        verificationMethod: null, authorityType: null, authorityId: null,
+        evidenceIds: [], createdAt: now, updatedAt: now,
+        verifiedAt: null, verifiedBy: null, revokedAt: null, revokedBy: null,
+        revocationReason: null, suspendedAt: null, disputedAt: null,
+        reviewReasons: [], riskFlags: [], metadata: {},
+        ...fields,
+      });
+      verEvent('claim.created', { claimId: claim.id, subjectId: claim.subjectId, orgId: claim.organisationId, after: { claimType: claim.claimType, status: claim.status } }, req);
+      vmetric('requestsCreated');
+      return claim;
+    });
   }
 
-  // -------- guarded transition: one call site shape for every status change.
-  function transition(claim, to, opts, req = null) {
-    const before = claim.status;
-    const err = applyTransition(claim, to, opts);
+  const OPEN_OR_VERIFIED = ['unverified', 'collecting_evidence', 'pending', 'automated_checks_passed', 'requires_human_review', 'verified'];
+  const AFFILIATION_TYPES = ['CLUB_AFFILIATION', 'CLUB_ROLE', 'AGENCY_AFFILIATION', 'AGENCY_ROLE', 'GRASSROOTS_AFFILIATION'];
+  function openClash(id, to) {
+    const c = reads.claims.byId(id);
+    if (!c || c.subjectType !== 'user' || !OPEN_OR_VERIFIED.includes(to) || OPEN_OR_VERIFIED.includes(c.status)) return null;
+    const others = reads.claims.forSubject('user', c.subjectId).filter((x) => x.id !== c.id && x.claimType === c.claimType && OPEN_OR_VERIFIED.includes(x.status));
+    if (c.claimType === 'PERSON_IDENTITY' && others.length) return 'IDENTITY_CLAIM_EXISTS';
+    if (AFFILIATION_TYPES.includes(c.claimType) && c.current && others.some((x) => x.current && x.organisationId === c.organisationId)) return 'AFFILIATION_CLAIM_EXISTS';
+    return null;
+  }
+
+  // -------- guarded transition: one call site shape for every status change. `claim` is a claim or its id;
+  // `patch(draft)` applies further changes in the same write. Returns null on success or an error code.
+  function transition(claim, to, opts, req = null, patch = null) {
+    const id = typeof claim === 'string' ? claim : claim.id;
+    let err = null; let before = null; let after = null;
+    // The one-open-claim rules (one identity claim per user; one current affiliation per user, organisation and type):
+    // a claim may not return to an open or verified state while the person has opened another in the meantime.
+    const clash = openClash(id, to);
+    if (clash) return clash;
+    verification.atomically(() => {
+      after = verification.claims.update(id, (draft) => {
+        before = draft.status;
+        err = applyTransition(draft, to, opts);
+        if (!err && patch) patch(draft);
+      });
+      if (err) return;
+      verEvent(opts.eventType ?? `claim.${to}`, {
+        claimId: id, subjectId: after.subjectId, orgId: after.organisationId,
+        actorKind: opts.actorKind, actorId: opts.actorId, actorName: opts.actorName,
+        attribution: opts.attribution ?? null,
+        before: { status: before }, after: { status: to, method: after.verificationMethod }, reason: opts.reason ?? null,
+      }, req);
+    });
     if (err) return err;
-    verEvent(opts.eventType ?? `claim.${to}`, {
-      claimId: claim.id, subjectId: claim.subjectId, orgId: claim.organisationId,
-      actorKind: opts.actorKind, actorId: opts.actorId, actorName: opts.actorName,
-      attribution: opts.attribution ?? null,
-      before: { status: before }, after: { status: to, method: claim.verificationMethod }, reason: opts.reason ?? null,
-    }, req);
     if (to === 'verified') vmetric('approvals');
     if (to === 'rejected') vmetric('rejections');
     if (to === 'revoked') vmetric('revocations');
     if (to === 'expired') vmetric('expiries');
     if (to === 'disputed') vmetric('disputes');
-    persist();
     return null;
   }
 
   // -------- evidence records (§12, §40). Files go through the same storage
   // engine as media but are NEVER exposed on public/static paths — retrieval
-  // is a dedicated, authorised route in review.mjs.
+  // is a dedicated, authorised route in review.mjs. `claimIds` link the record to those claims at once.
   function addEvidence(fields, req = null) {
-    const ev = {
-      id: nextId('vevd'), receivedAt: Date.now(), claimIds: [], mediaId: null,
-      sha256: null, mime: null, bytes: null, filename: null, meta: {},
-      checks: { malwareScan: 'not_configured' }, // no scanner exists — never pretend one ran
-      retention: 'until_claim_resolution', visibility: 'trust_and_safety',
-      expiresAt: null, ...fields,
-    };
-    db.verEvidence.push(ev);
-    verEvent('evidence.added', { claimId: ev.claimIds[0] ?? null, subjectId: ev.suppliedById, orgId: ev.orgId, after: { type: ev.type, sha256: ev.sha256 } }, req);
-    persist();
-    return ev;
+    return verification.atomically(() => {
+      const ev = verification.evidence.create({
+        id: nextId('vevd'), receivedAt: Date.now(), claimIds: [], mediaId: null,
+        sha256: null, mime: null, bytes: null, filename: null, meta: {},
+        checks: { malwareScan: 'not_configured' }, // no scanner exists — never pretend one ran
+        retention: 'until_claim_resolution', visibility: 'trust_and_safety',
+        expiresAt: null, ...fields,
+      });
+      verEvent('evidence.added', { claimId: ev.claimIds[0] ?? null, subjectId: ev.suppliedById, orgId: ev.orgId, after: { type: ev.type, sha256: ev.sha256 } }, req);
+      return ev;
+    });
   }
   function storeEvidenceFile(dataUrl, filename, req) {
     const m = /^data:([\w/+.-]+);base64,(.+)$/.exec(String(dataUrl ?? ''));
@@ -123,7 +148,7 @@ export function registerM14(ctx) {
       // M23 P7 (D-P7-1): the digest is of the exact BYTES. `sha256(String(buf))`
       // hashed a UTF-8 decoding of the file, so two different binaries could
       // share a digest and a signing document's digest did not name its bytes.
-      mediaId: id, sha256: crypto.createHash('sha256').update(buf).digest('hex'), mime, bytes: buf.length, filename: String(filename ?? '').slice(0, 120),
+      mediaId: id, sha256: crypto.createHash('sha256').update(buf).digest('hex'), mime, bytes: buf.length, filename: String(filename ?? '').slice(0, VERIFICATION_LIMITS.filename),
       // contentSignature is format identification (magic bytes), NOT malware
       // scanning — malwareScan stays not_configured and is never conflated.
       checks: { malwareScan: 'not_configured', contentSignature: 'matched_claimed_type' },
@@ -134,7 +159,7 @@ export function registerM14(ctx) {
   // button is never the control. Root-level operations additionally require
   // an MFA-enabled account (existing F12 infrastructure).
   function requireVer(req, res, atLeast, { root = false } = {}) {
-    if (!hasVerLevel(db, req.org.id, req.orgUser.id, atLeast)) {
+    if (!hasVerLevel(reads, req.org.id, req.orgUser.id, atLeast)) {
       res.status(403).json({ error: 'VERIFICATION_PERMISSION_REQUIRED', message: `This needs ${atLeast.replace(/_/g, ' ')} authority for your organisation.` });
       return false;
     }
@@ -145,7 +170,8 @@ export function registerM14(ctx) {
     return true;
   }
 
-  const orgsById = () => new Map(db.orgs.map((o) => [o.id, o]));
+  /** The organisations a list of claims names, by id (one lookup each, through the index). */
+  const orgsFor = (claims) => new Map([...new Set(claims.map((c) => c.organisationId).filter(Boolean))].map((id) => [id, byId.org(id)]).filter(([, o]) => o));
 
   function publicProfileForUser(userId, now = Date.now()) {
     // Removed/deactivated accounts lose CURRENT public verification at once:
@@ -153,31 +179,30 @@ export function registerM14(ctx) {
     // cached boolean can bypass it. Closed historical periods stay visible
     // as history per §15 (truth is not erased).
     const user = byId.user(userId);
+    const claims = reads.claims.forSubject('user', userId);
     return toPublicVerificationProfile({
-      subjectType: 'user', subjectId: userId,
-      claims: idx.claimsFor('user', userId), orgsById: orgsById(),
+      subjectType: 'user', subjectId: userId, claims, orgsById: orgsFor(claims),
       subjectRemoved: !user || !!user.removedAt, now,
     });
   }
   function publicProfileForOrg(orgId, now = Date.now()) {
     const org = byId.org(orgId);
-    const profile = toPublicVerificationProfile({
-      subjectType: 'org', subjectId: orgId,
-      claims: idx.claimsFor('org', orgId), orgsById: orgsById(), now,
-    });
-    return { ...profile, organisationStatus: orgVerificationStatus(org, db) };
+    const claims = reads.claims.forSubject('org', orgId);
+    const profile = toPublicVerificationProfile({ subjectType: 'org', subjectId: orgId, claims, orgsById: orgsFor(claims), now });
+    return { ...profile, organisationStatus: orgVerificationStatus(org, reads) };
   }
 
   const shared = {
-    ...ctx, idx, verEvent, createClaim, transition, addEvidence, storeEvidenceFile,
-    requireVer, vmetric, publicProfileForUser, publicProfileForOrg,
-    mintToken: (o) => mintToken(db, nextId, o),
-    consumeToken: (o) => consumeToken(db, o),
-    peekToken: (o) => peekToken(db, o),
-    effectiveStatus, orgCanAttest: (org) => orgCanAttest(org, db),
-    orgVerificationStatus: (org) => orgVerificationStatus(org, db),
-    verLevelFor: (orgId, userId) => verLevelFor(db, orgId, userId),
-    hasVerLevel: (orgId, userId, lvl) => hasVerLevel(db, orgId, userId, lvl),
+    ...ctx, reads, verEvent, createClaim, transition, addEvidence, storeEvidenceFile,
+    requireVer, vmetric, publicProfileForUser, publicProfileForOrg, unit: unit ?? ((fn) => verification.atomically(fn)),
+    mintToken: (o) => mintToken(verification.tokens, nextId, o),
+    consumeToken: (o) => consumeToken(verification.tokens, o),
+    peekToken: (o) => peekToken(verification.tokens, o),
+    useToken: (t) => useToken(verification.tokens, t),
+    effectiveStatus, orgCanAttest: (org) => orgCanAttest(org, reads),
+    orgVerificationStatus: (org) => orgVerificationStatus(org, reads),
+    verLevelFor: (orgId, userId) => verLevelFor(reads, orgId, userId),
+    hasVerLevel: (orgId, userId, lvl) => hasVerLevel(reads, orgId, userId, lvl),
     claimProvenanceLabel,
     randomHex: (n = 16) => crypto.randomBytes(n).toString('hex'),
   };

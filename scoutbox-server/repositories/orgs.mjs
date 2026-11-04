@@ -13,20 +13,19 @@
  *   registrationId}.
  *
  *   FACETS (`facets_json`, the transitional storage for everything else:
- *   agencySettings, the whole `verification` object, and any field this step
+ *   agencySettings and any field this step
  *   does not know): mutated in place by the modules that own them, exactly as
  *   the blob record was, and persisted by `flush()` inside every snapshot save
- *   transaction. They have their own cutover steps (S10 verification, S11
+ *   transaction. They have their own cutover steps (S11
  *   agency settings).
  *
  *   RETIRED (S9c): tactical, squad, lookingFor and federationCheck are tables of
  *   the club setup repository (repositories/clubSetup.mjs). Reading, writing or
  *   deleting one on an organisation throws, naming that repository, and a
  *   record that carries one is refused, so a reader that was missed fails
- *   loudly instead of seeing (or `??=`-creating) an empty list. The two columns `verification_revoked_at` /
- *   `verification_org_type` are a derived MIRROR of the verification facet,
- *   rewritten by `flush()` and read by nothing; the facet is authoritative
- *   until S10.
+ *   loudly instead of seeing (or `??=`-creating) an empty list. RETIRED (S10a): `verification` likewise — its domains are
+ *   rows of the verification repository (repositories/verification.mjs) and its revokedAt is the scalar
+ *   `verificationRevokedAt` (column verification_revoked_at).
  *
  * Shape preservation. A record read back from a row has the same keys, in
  * the same order, with the same absent-versus-null distinction as the record
@@ -71,7 +70,7 @@ const SCALARS = Object.freeze({
   trustedPartner: 'trusted_partner', verified: 'verified', verifiedDomain: 'verified_domain',
   safeguardingContractSigned: 'safeguarding_contract_signed', suspended: 'suspended', password: 'password_hash',
   emailDomain: 'email_domain', emailDomainVerified: 'email_domain_verified', mfaRequiredForLeads: 'mfa_required_for_leads',
-  createdAt: 'created_at',
+  createdAt: 'created_at', verificationRevokedAt: 'verification_revoked_at',
 });
 const BOOLEANS = new Set(['trustedPartner', 'verified', 'safeguardingContractSigned', 'suspended', 'emailDomainVerified', 'mfaRequiredForLeads']);
 /** Composite record keys: an object whose listed sub-keys are columns; any other sub-key is a facet remainder. */
@@ -79,15 +78,16 @@ const COMPOSITES = Object.freeze({
   location: { city: 'city', lat: 'lat', lng: 'lng' },
   federationRef: { federation: 'federation', registrationId: 'federation_registration_id' },
 });
-/** Organisation facets that moved to the club setup repository's tables (S9c). */
-export const RETIRED_FACETS = Object.freeze(new Set(['tactical', 'squad', 'lookingFor', 'federationCheck']));
-const retiredFacet = (key) => new TypeError(`org.${String(key)} is gone: read and write it through the clubSetup repository (repositories/clubSetup.mjs)`);
+/** Organisation facets that moved to a domain repository's tables: the club setup (S9c) and verification (S10a). */
+const RETIRED_FACET_OWNER = Object.freeze({ tactical: 'clubSetup', squad: 'clubSetup', lookingFor: 'clubSetup', federationCheck: 'clubSetup', verification: 'verification' });
+export const RETIRED_FACETS = Object.freeze(new Set(Object.keys(RETIRED_FACET_OWNER)));
+const retiredFacet = (key) => new TypeError(`org.${String(key)} is gone: read and write it through the ${RETIRED_FACET_OWNER[key]} repository (repositories/${RETIRED_FACET_OWNER[key]}.mjs)${key === 'verification' ? '; its revokedAt is the organisation field verificationRevokedAt' : ''}`);
 /** Every record key the columns own; anything else is a facet. */
 export const MIGRATED_KEYS = Object.freeze(new Set(['id', ...Object.keys(SCALARS), ...Object.keys(COMPOSITES)]));
 
 const COLUMNS = ['id', 'name', 'type', 'level', 'plan', 'country', 'city', 'lat', 'lng', 'federation', 'federation_registration_id',
   'trusted_partner', 'verified', 'verified_domain', 'safeguarding_contract_signed', 'suspended', 'password_hash',
-  'email_domain', 'email_domain_verified', 'mfa_required_for_leads', 'verification_revoked_at', 'verification_org_type', 'created_at', 'facets_json'];
+  'email_domain', 'email_domain_verified', 'mfa_required_for_leads', 'verification_revoked_at', 'created_at', 'facets_json'];
 const INSERT_SQL = `INSERT INTO orgs (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map((c) => `@${c}`).join(', ')})`;
 const UPDATE_SQL = `UPDATE orgs SET ${COLUMNS.filter((c) => c !== 'id').map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`;
 const SELECT_SQL = `SELECT ${COLUMNS.join(', ')} FROM orgs`;
@@ -133,10 +133,10 @@ export function validateOrgRecord(rec) {
       if (v !== undefined && v !== null && typeof v !== 'string') return { ok: false, reason: `federationRef.${key} is ${describe(v)}, not a string` };
     }
   }
-  if (rec.verification !== undefined && rec.verification !== null && !isPlainObject(rec.verification)) return { ok: false, reason: `verification is ${describe(rec.verification)}, not an object` };
+  if (rec.verificationRevokedAt !== undefined && rec.verificationRevokedAt !== null && !Number.isSafeInteger(rec.verificationRevokedAt)) return { ok: false, reason: `verificationRevokedAt is ${describe(rec.verificationRevokedAt)}, not an integer timestamp` };
   if ('__meta' in rec) return { ok: false, reason: 'the reserved field "__meta" is not allowed on a record' };
   const retired = Object.keys(rec).filter((k) => RETIRED_FACETS.has(k));
-  if (retired.length) return { ok: false, reason: `${retired.join(', ')} ${retired.length > 1 ? 'are' : 'is'} no longer an organisation field (club setup tables since S9c: write it through the clubSetup repository or its snapshot collections)` };
+  if (retired.length) return { ok: false, reason: `${retired.join(', ')} ${retired.length > 1 ? 'are' : 'is'} no longer an organisation field (club setup tables since S9c, verification tables since S10a: write it through that repository or its snapshot collections)` };
   return { ok: true };
 }
 
@@ -179,10 +179,6 @@ export function toRow(rec) {
   }
   facets.__meta = meta;
   p.facets_json = JSON.stringify(facets);
-  // Derived mirror of the verification facet (read by nothing; authoritative in the facet until S10).
-  const ver = isPlainObject(rec.verification) ? rec.verification : null;
-  p.verification_revoked_at = ver && Number.isInteger(ver.revokedAt) ? ver.revokedAt : null;
-  p.verification_org_type = ver && typeof ver.orgType === 'string' ? ver.orgType : null;
   return p;
 }
 
@@ -294,7 +290,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
     all: sqlite.prepare(`${SELECT_SQL} ORDER BY rowid`),
     insert: sqlite.prepare(INSERT_SQL),
     update: sqlite.prepare(UPDATE_SQL),
-    facets: sqlite.prepare('UPDATE orgs SET facets_json = @facets_json, verification_revoked_at = @verification_revoked_at, verification_org_type = @verification_org_type WHERE id = @id'),
+    facets: sqlite.prepare('UPDATE orgs SET facets_json = @facets_json WHERE id = @id'),
     count: sqlite.prepare('SELECT COUNT(*) AS n FROM orgs'),
     cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
     meta: sqlite.prepare('SELECT value FROM meta WHERE key = ?'),
@@ -532,7 +528,7 @@ export function createOrgsRepository({ sqlite, log = () => {}, warn = () => {}, 
         // commit overwrites the intermediate row the update wrote.
         const stored = pendingFacets.has(rec.id) ? pendingFacets.get(rec.id) : committedFacets.get(rec.id);
         if (row.facets_json === stored) continue;
-        stmt.facets.run({ id: rec.id, facets_json: row.facets_json, verification_revoked_at: row.verification_revoked_at, verification_org_type: row.verification_org_type });
+        stmt.facets.run({ id: rec.id, facets_json: row.facets_json });
         pendingFacets.set(rec.id, row.facets_json);
         changed += 1;
       }

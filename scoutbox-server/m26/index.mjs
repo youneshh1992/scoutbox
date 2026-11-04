@@ -433,7 +433,7 @@ export function registerTransactions(rawCtx) {
     const tx = txById(id);
     const role = tx ? clubPartyRoleOf(tx, req.org.id) : null;
     if (!tx || !role) { notFound(res, 'transaction'); return null; }
-    if (signatory && !hasVerLevel(db, req.org.id, req.orgUser.id, 'verification_admin')) {
+    if (signatory && !hasVerLevel(rawCtx.verificationReads, req.org.id, req.orgUser.id, 'verification_admin')) {
       sendTransactionError(res, { error: 'SIGNATORY_REQUIRED', message: 'Only a recorded club signatory (a verification administrator) may act for the club here.' }, 'transaction');
       return null;
     }
@@ -449,7 +449,7 @@ export function registerTransactions(rawCtx) {
     return tx;
   }
 
-  const clubViewer = (req) => ({ kind: 'club', orgId: req.org.id, userId: req.orgUser.id, signatory: hasVerLevel(db, req.org.id, req.orgUser.id, 'verification_admin') });
+  const clubViewer = (req) => ({ kind: 'club', orgId: req.org.id, userId: req.orgUser.id, signatory: hasVerLevel(rawCtx.verificationReads, req.org.id, req.orgUser.id, 'verification_admin') });
   const agentViewer = (req) => ({ kind: 'agency', orgId: req.org.id, userId: req.orgUser.id, agencyAdmin: can(req.tiers, 'agency.compliance.read') });
   const playerViewer = (req) => ({ kind: 'player', playerId: req.player.id });
 
@@ -504,7 +504,7 @@ export function registerTransactions(rawCtx) {
   /** Notify a party that the workspace needs something from it. Ids and states only. */
   function notifyParty(tx, party, type, text) {
     if (party.subjectKind === 'player') notify({ kind: 'player', id: party.subjectId }, type, text, tx.id);
-    else for (const u of (db.verAdmins ?? []).filter((a) => a.orgId === party.subjectId && a.status === 'active')) notify({ kind: 'org_user', id: u.userId }, type, text, tx.id);
+    else for (const u of rawCtx.verificationReads.admins.activeForOrg(party.subjectId)) notify({ kind: 'org_user', id: u.userId }, type, text, tx.id);
   }
 
   // ============================================================ AGENT lane
@@ -1008,7 +1008,7 @@ export function registerTransactions(rawCtx) {
       const kind = String(b.evidenceRef?.kind ?? '');
       const id = str(b.evidenceRef?.id, 80);
       if (kind !== 'verification_evidence' || !id) return sendTransactionError(res, { error: 'DOCUMENT_INPUT_INVALID', field: 'evidenceRef', allowed: ['verification_evidence'], message: 'A document reference is { kind: "verification_evidence", id } naming a record in the canonical evidence vault.' }, 'documents');
-      const ev = (db.verEvidence ?? []).find((e) => e && e.id === id);
+      const ev = rawCtx.verificationReads.evidence.byId(id);
       // The uploader must own the evidence: a reference is not a way to reach
       // someone else's file, and an unknown id and a foreign id answer alike.
       const mine = ev && ((owner.kind === 'club' && ev.orgId === owner.id) || (owner.kind === 'player' && ev.playerId === owner.id) || (owner.kind === 'agent' && ev.orgId === tx.agencyOrgId));

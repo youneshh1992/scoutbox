@@ -49,8 +49,8 @@ const ORGS = () => [
   { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true, password: 'scrypt$00$11', agencySettings: null, memos: [] },
   // Registration's shape (server.mjs): a grassroots club with a federation reference and a key order of its own.
   { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, federationRef: { federation: 'London FA', registrationId: 'LFA-1' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, verifiedDomain: null, safeguardingContractSigned: false, memos: [{ id: 'sq-1', name: 'Kid', position: 'ST', playerId: null, source: 'manual', addedAt: 5 }], tags: ['ST', 'CB'] },
-  // The verification review's shape (m14): level null, location null, a verification facet, unknown fields.
-  { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, verifiedDomain: null, safeguardingContractSigned: false, location: null, federationRef: null, verification: { domains: [{ domain: 'northstar.example', status: 'verified', method: 'scoutbox_manual_review', verifiedAt: 7, addedBy: 'trust_safety' }], revokedAt: null, orgType: 'agency' }, agencySettings: { licence: 'FIFA-1' }, somethingNewer: { kept: true }, mfaRequiredForLeads: true, emailDomain: 'northstar.example', emailDomainVerified: true, createdAt: 1700000000000 },
+  // The verification review's shape (m14): level null, location null, the verification revocation column, unknown fields.
+  { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, verifiedDomain: null, safeguardingContractSigned: false, location: null, federationRef: null, verificationRevokedAt: null, agencySettings: { licence: 'FIFA-1' }, somethingNewer: { kept: true }, mfaRequiredForLeads: true, emailDomain: 'northstar.example', emailDomainVerified: true, createdAt: 1700000000000 },
 ];
 /** A minimal player record migration 0005 accepts (dob and country are required; everything else is optional). */
 const PLAYER_1 = (name = 'P') => ({ id: 'pl-1', name, dob: '2001-01-01', country: 'GB', media: [] });
@@ -83,9 +83,10 @@ test('mapping: every record shape the application writes round-trips byte for by
   // The row carries the scalars as columns and never the facets' keys as columns.
   const row = toRow(ORGS()[2]);
   assert.equal(row.level, null); assert.equal(row.mfa_required_for_leads, 1); assert.equal(row.email_domain, 'northstar.example'); assert.equal(row.created_at, 1700000000000);
-  assert.equal(row.verification_org_type, 'agency'); assert.equal(row.verification_revoked_at, null);
+  assert.equal(row.verification_revoked_at, null);
   const facets = JSON.parse(row.facets_json);
-  assert.deepEqual(Object.keys(facets).filter((k) => !k.startsWith('__')).sort(), ['agencySettings', 'somethingNewer', 'verification']);
+  assert.deepEqual(Object.keys(facets).filter((k) => !k.startsWith('__')).sort(), ['agencySettings', 'somethingNewer']);
+  assert.ok(!('verification' in facets), 'the retired S10a facet is never stored on an organisation');
   assert.ok(!('tactical' in facets), 'the retired S9c facets are never stored on an organisation');
   for (const key of MIGRATED_KEYS) assert.ok(!(key in facets), `${key} is a column, never a facet`);
 });
@@ -105,7 +106,8 @@ test('validation: unsupported records are refused with a reason and nothing is c
   refuse({ ...base, location: { lat: 'a', lng: 'b' } }, /not finite numbers/);
   refuse({ ...base, federationRef: 'FA' }, /federationRef is a string/);
   refuse({ ...base, federationRef: { federation: 1 } }, /federationRef.federation is a number/);
-  refuse({ ...base, verification: 'yes' }, /verification is a string/);
+  refuse({ ...base, verification: { domains: [] } }, /no longer an organisation field/);
+  refuse({ ...base, verificationRevokedAt: 'yes' }, /verificationRevokedAt is a string/);
   refuse({ ...base, __meta: {} }, /reserved field/);
   assert.equal(validateOrgRecord({ ...base, level: null }).ok, true, 'level null is a supported shape (the verification review writes it)');
   for (const rec of ORGS()) assert.equal(validateOrgRecord(rec).ok, true, rec.id);
@@ -181,15 +183,16 @@ test('repository: insert and update write migrated fields immediately; a migrate
   // Facets: mutated in place (as the modules do), persisted by the next save.
   pro.memos.push({ id: 'sq-9', name: 'New', position: 'GK', playerId: null, source: 'manual', addedAt: 9 });
   pro.agencySettings = { formation: '4-3-3' };
-  pro.verification = { domains: [], revokedAt: 123, orgType: 'professional club' };
+  assert.throws(() => { pro.verification = { domains: [] }; }, /verification repository/, 'the retired facet cannot be written on the record');
   const grass = db.orgs.find((o) => o.id === 'org-grass');
   grass.tags = ['GK'];
   delete grass.memos;
   assert.equal(JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-pro'").get().facets_json).memos.length, 0, 'not yet persisted');
   store.save({ savedAt: 2, idCounter: 1000, db });
+  layer.orgs.update('org-pro', { verificationRevokedAt: 123 }); // a scalar column since S10a
   const facets = JSON.parse(store.sqlite.prepare("SELECT facets_json FROM orgs WHERE id = 'org-pro'").get().facets_json);
   assert.equal(facets.memos.length, 1); assert.deepEqual(facets.agencySettings, { formation: '4-3-3' });
-  assert.equal(store.sqlite.prepare("SELECT verification_revoked_at, verification_org_type FROM orgs WHERE id = 'org-pro'").get().verification_org_type, 'professional club', 'the mirror columns follow the facet');
+  assert.equal(store.sqlite.prepare("SELECT verification_revoked_at FROM orgs WHERE id = 'org-pro'").get().verification_revoked_at, 123, 'the revocation is the column');
   assert.equal(store.sqlite.prepare("SELECT COUNT(*) AS n FROM collections WHERE name = 'orgs'").get().n, 0, 'no blob');
   // Insert: a new organisation is a row from the first byte.
   const created = layer.orgs.insert({ id: 'org-new', name: 'New FC', type: 'club', level: 'grassroots', location: { lat: 1, lng: 2, city: '' }, federationRef: { federation: 'FA', registrationId: 'R' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, verifiedDomain: null, safeguardingContractSigned: false });
@@ -204,7 +207,7 @@ test('repository: insert and update write migrated fields immediately; a migrate
   layer = attachDataLayer({ db: db2, store, nextId, persist: () => {}, sessionTtlMs: TTL });
   assert.deepEqual(layer.boot.orgs, { engine: 'sqlite', loaded: 4, imported: 0 });
   const pro2 = db2.orgs.find((o) => o.id === 'org-pro');
-  assert.equal(pro2.suspended, true); assert.equal(pro2.password, 'scrypt$new'); assert.equal(pro2.memos.length, 1); assert.deepEqual(pro2.agencySettings, { formation: '4-3-3' }); assert.equal(pro2.verification.revokedAt, 123);
+  assert.equal(pro2.suspended, true); assert.equal(pro2.password, 'scrypt$new'); assert.equal(pro2.memos.length, 1); assert.deepEqual(pro2.agencySettings, { formation: '4-3-3' }); assert.equal(pro2.verificationRevokedAt, 123);
   const grass2 = db2.orgs.find((o) => o.id === 'org-grass');
   assert.deepEqual(grass2.tags, ['GK']); assert.ok(!('memos' in grass2), 'a deleted facet stays deleted');
   assert.equal(JSON.stringify(db2.orgs.find((o) => o.id === 'org-agency')), JSON.stringify(ORGS()[2]), 'an untouched record is byte-identical after the restart');
@@ -511,7 +514,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
     const maria = seed.sessions[0].token;
     assert.equal((await j('GET', '/org/notifications', undefined, maria)).status, 200, 'the fixture staff session works');
     const cap = await j('GET', '/capabilities');
-    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups', '0019_scouting_evidence', '0020_scouting_assessments', '0021_club_setup', '0022_opportunities_campaigns']);
+    assert.deepEqual(cap.body.dataLayer.migrations, ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups', '0019_scouting_evidence', '0020_scouting_assessments', '0021_club_setup', '0022_opportunities_campaigns', '0023_verification']);
     assert.equal(cap.body.dataLayer.domains.orgs.mode, 'live'); assert.equal(cap.body.dataLayer.domains.orgs.rows, 5);
     assert.equal(cap.body.integrity.ok, true, `the boot integrity report sees the live organisations: ${JSON.stringify(cap.body.integrity.byCode)}`);
     assert.ok(cap.body.integrity.checked >= 6, 'the report counted the organisations and the Room');

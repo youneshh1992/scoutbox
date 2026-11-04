@@ -58,7 +58,10 @@ export function registerOffers(rawCtx) {
     // S8c: every Offer write is an explicit repository operation (offers.create / update) inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
     recruitmentReads, // §4.3 step 2: the cases are read through SQL
+    verificationReads, // S10a: the document vault is the verification repository's evidence
   } = ctx;
+  /** A vault record by id, or null. */
+  const vaultRecord = (id) => (typeof id === 'string' ? verificationReads?.evidence.byId(id) ?? null : null);
   /** S8b: a case history entry is an explicit write of its case (never an in-place push on the read-only view). */
   const caseAudit = (kase, ...args) => ctx.recruitmentCases.cases.update(kase.id, (d) => audit(d, ...args));
   if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.offers) throw new TypeError('registerOffers needs the contacts/offers repository, unit and afterCommit from the data layer');
@@ -188,7 +191,7 @@ export function registerOffers(rawCtx) {
   function resolveDocuments(refs, orgId) {
     const out = [];
     for (const d of refs) {
-      const ev = (db.verEvidence ?? []).find((e) => e && e.id === d.evidenceId);
+      const ev = vaultRecord(d.evidenceId);
       if (!ev || ev.orgId !== orgId) return { ok: false, error: 'OFFER_DOCUMENT_INVALID', field: 'documents', message: 'No evidence record of yours matches that reference.' };
       out.push({ id: nextId('rofd'), evidenceId: ev.id, label: d.label ?? ev.filename ?? null, mime: ev.mime ?? null, bytes: ev.bytes ?? null });
     }
@@ -447,7 +450,7 @@ export function registerOffers(rawCtx) {
     if (!expiry.ok) return err(res, expiry.error, expiry.message, { field: 'expiresAt' });
     // Documents named at draft time must still be this organisation's.
     for (const d of rev.documents ?? []) {
-      const ev = (db.verEvidence ?? []).find((e) => e && e.id === d.evidenceId);
+      const ev = vaultRecord(d.evidenceId);
       if (!ev || ev.orgId !== kase.orgId) return err(res, 'OFFER_DOCUMENT_INVALID', 'A document on this draft no longer belongs to your organisation.', { field: 'documents' });
     }
     // The recipient, resolved NOW (§13): an adult player, or a guardian route — and the minor pathway is closed in this build.
@@ -875,7 +878,7 @@ export function registerOffers(rawCtx) {
       const rev = (o.revisions ?? []).find((r) => wasIssued(r) && (r.documents ?? []).some((d) => d.id === req.params.docId));
       const doc = rev ? rev.documents.find((d) => d.id === req.params.docId) : null;
       if (!doc) return documentNotFound(res, by);
-      const ev = (db.verEvidence ?? []).find((e) => e && e.id === doc.evidenceId && e.orgId === o.orgId);
+      const ev = ((e) => (e && e.orgId === o.orgId ? e : null))(vaultRecord(doc.evidenceId));
       if (!ev) return documentNotFound(res, by);
       const blob = ev.mediaId && storage?.read ? storage.read(ev.mediaId) : null;
       res.json({ document: { id: doc.id, label: doc.label ?? null, mime: ev.mime ?? blob?.contentType ?? null, bytes: ev.bytes ?? blob?.buffer?.length ?? null, filename: ev.filename ?? null }, file: blob ? { mime: ev.mime ?? blob.contentType, base64: blob.buffer.toString('base64') } : null });

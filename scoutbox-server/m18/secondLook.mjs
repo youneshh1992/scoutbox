@@ -73,8 +73,7 @@ export function registerSecondLook(ctx) {
     }
 
     // --- M14 verified references ------------------------------------------
-    for (const r of db.verReferences ?? []) {
-      if (r.playerId !== player.id) continue;
+    for (const r of ctx.verificationReads.references.forPlayer(player.id)) {
       if (r.status === 'active' && r.createdAt > since) add('verified_reference_added', 'reference', r.id, r.createdAt);
       if (r.withdrawnAt && r.withdrawnAt > since) add('verified_reference_revoked', 'reference', r.id, r.withdrawnAt);
     }
@@ -163,12 +162,8 @@ export function registerSecondLook(ctx) {
       const o = ctx.byId.org(row.orgId);
       if (o?.verified && row.addedAt > since) add('current_club_confirmed', 'squad_row', `${o.id}:${row.playerId}`, row.addedAt);
     }
-    for (const claim of db.verClaims ?? []) {
-      if (claim.subjectKind !== 'player' || claim.subjectId !== player.id) continue;
-      if (claim.type !== 'organisation_affiliation' || claim.status !== 'verified') continue;
-      if (claim.current === false) continue;
-      if ((claim.verifiedAt ?? 0) > since) add('current_club_confirmed', 'verification_claim', claim.id, claim.verifiedAt);
-    }
+    // (A verification-claim branch here matched no claim the server can hold — claims are about staff and
+    // organisations, never players — and was removed with the move to tables, S10a.)
 
     return changesSinceDecision(out.filter(Boolean), since);
   }
@@ -190,7 +185,7 @@ export function registerSecondLook(ctx) {
     const assessmentIds = ctx.scoutingReads.assessments.forOrgPlayer(org.id, player.id).filter((a) => a.state !== 'draft').map((a) => a.id);
     const combineResults = (ctx.combineProjection?.(player.id)?.results ?? []).map((r) => `${r.protocolId}@${r.protocolVersion}`);
     const trialIds = reads.trials.forOrgPlayer(org.id, player.id).map((t) => t.id);
-    const references = (db.verReferences ?? []).filter((r) => r.playerId === player.id && r.status === 'active').length;
+    const references = ctx.verificationReads.references.activeForPlayer(player.id).length;
     return { evidenceIds, assessmentIds, combineResults, trialIds, references };
   }
 

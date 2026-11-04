@@ -882,7 +882,6 @@ section('§14 — route-before-store: a module initialises before it registers r
   const ENTRY = {
     m12: ['m12/index.mjs', 'migrateM12'],
     m13: ['m13/index.mjs', 'migrateM13'],
-    m14: ['domains/verification/claims/index.mjs', 'migrateM14'],
     m15: ['domains/verification/passport/index.mjs', null],
     m16: ['m16/index.mjs', null],
   };

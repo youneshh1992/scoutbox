@@ -15,6 +15,7 @@ import {
   domainCovered, riskFlags, decideReview, evidenceCompleteness, verLevelRank,
   VER_LEVELS, sha256,
 } from './shared.mjs';
+import { VERIFICATION_LIMITS as L, CONFLICT_KINDS } from '../../../repositories/verification.mjs';
 
 const AFFILIATION_TYPE = (org) =>
   org.type === 'agency' ? ['AGENCY_AFFILIATION', 'AGENCY_ROLE']
@@ -24,30 +25,25 @@ const AFFILIATION_TYPE = (org) =>
 export function registerOrganisationVerification(ctx) {
   const {
     db, byId, app, orgRouter, playerRouter, guardianRouter, nextId, persist, persistNow,
-    notify, mailer, idx, verEvent, createClaim, transition, addEvidence,
+    notify, mailer, verification, reads, unit, verEvent, createClaim, transition, addEvidence,
     storeEvidenceFile, requireVer, vmetric, publicProfileForUser, publicProfileForOrg,
-    mintToken, consumeToken, effectiveStatus, orgCanAttest, verLevelFor,
+    mintToken, effectiveStatus, orgCanAttest, verLevelFor,
     hasVerLevel, findPlayer, isBlocked, randomHex,
   } = ctx;
 
-  // Orgs created after the M14 migration (self-registration, root approval)
-  // may not carry the verification container yet — initialise it lazily for
-  // every /org/verification/* route before any handler touches it.
-  orgRouter.use('/verification', (req, _res, next) => {
-    req.org.verification ??= { domains: [], revokedAt: null, orgType: req.org.type === 'agency' ? 'agency' : (req.org.level === 'grassroots' ? 'grassroots club' : 'professional club') };
-    next();
-  });
-
   const openStates = ['unverified', 'collecting_evidence', 'pending', 'automated_checks_passed', 'requires_human_review'];
-  const userClaims = (userId) => idx.claimsFor('user', userId);
+  const userClaims = (userId) => reads.claims.forSubject('user', userId);
   const orgOf = (id) => byId.org(id) ?? null;
+  const verifiedDomainsOf = (orgId) => reads.domains.forOrg(orgId).filter((d) => d.status === 'verified').map((d) => d.domain);
   const reviewersOf = (orgId, atLeast = 'verification_reviewer') =>
-    db.verAdmins.filter((a) => a.orgId === orgId && a.status === 'active' && verLevelRank(a.level) >= verLevelRank(atLeast))
+    reads.admins.activeForOrg(orgId).filter((a) => verLevelRank(a.level) >= verLevelRank(atLeast))
       .map((a) => byId.user(a.userId, (u) => !u.removedAt)).filter(Boolean);
   const notifyReviewers = (orgId, text, refId) => {
     for (const u of reviewersOf(orgId)) notify({ kind: 'org_user', id: u.id }, 'verification', text, refId);
   };
-  const emailFailsFor = (userId) => db.verTokens.filter((t) => t.subjectId === userId && t.purpose === 'work_email' && (t.attemptsFailed ?? 0) > 0).reduce((n, t) => n + t.attemptsFailed, 0);
+  const emailFailsFor = (userId) => reads.tokens.failedAttempts(userId, 'work_email');
+  const onlyOrg = (req, r) => (r && r.orgId === req.org.id ? r : null);
+  const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
 
   // Subject's own view of a claim: status + reasons + own evidence summaries.
   // Never someone else's evidence, never reviewer notes.
@@ -63,7 +59,7 @@ export function registerOrganisationVerification(ctx) {
       verifiedAt: claim.verifiedAt, provenance: claim.status === 'verified' ? ctx.claimProvenanceLabel(claim, org?.name) : null,
       reviewReasons: claim.reviewReasons, createdAt: claim.createdAt, updatedAt: claim.updatedAt,
       revocationReason: claim.revocationReason, disputedAt: claim.disputedAt,
-      evidence: db.verEvidence.filter((e) => claim.evidenceIds.includes(e.id)).map((e) => ({
+      evidence: reads.evidence.byIds(claim.evidenceIds).map((e) => ({
         id: e.id, type: e.type, receivedAt: e.receivedAt, filename: e.filename,
         checks: e.checks, note: e.meta?.note ?? null,
       })),
@@ -105,18 +101,18 @@ export function registerOrganisationVerification(ctx) {
   });
 
   orgRouter.post('/verification/identity', (req, res) => {
-    if (userClaims(req.orgUser.id).some((c) => c.claimType === 'PERSON_IDENTITY' && [...openStates, 'verified'].includes(c.status))) {
+    if (reads.claims.hasOpenIdentity(req.orgUser.id)) {
       return res.status(409).json({ error: 'IDENTITY_CLAIM_EXISTS', message: 'An identity verification is already open or complete.' });
     }
     const claim = createClaim({
       subjectType: 'user', subjectId: req.orgUser.id, claimType: 'PERSON_IDENTITY',
-      status: 'collecting_evidence', metadata: { declaredName: req.orgUser.name },
+      status: 'collecting_evidence', metadata: { declaredName: (req.orgUser.name == null ? null : String(req.orgUser.name).slice(0, L.name)) },
     }, req);
     res.status(201).json({ claim: subjectClaimView(claim), note: 'Add an identity document as evidence, then submit. A document is evidence — verification happens in review, never on upload.' });
   });
 
   orgRouter.post('/verification/claims/:id/evidence', (req, res) => {
-    const claim = db.verClaims.find((c) => c.id === req.params.id);
+    const claim = reads.claims.byId(req.params.id);
     if (!claim || claim.subjectId !== req.orgUser.id || claim.subjectType !== 'user') {
       return res.status(404).json({ error: 'CLAIM_NOT_FOUND' }); // concealment: no cross-tenant existence leak
     }
@@ -124,6 +120,8 @@ export function registerOrganisationVerification(ctx) {
       return res.status(409).json({ error: 'CLAIM_NOT_EDITABLE', message: 'Evidence can only be added before review completes.' });
     }
     const { dataUrl, filename, note } = req.body ?? {};
+    if (!(note === undefined || note === null || typeof note === 'string')) return fieldInvalid(res, 'note', 'note is text.');
+    if (!(filename === undefined || filename === null || typeof filename === 'string')) return fieldInvalid(res, 'filename', 'filename is text.');
     let fileFields = {};
     if (dataUrl) {
       const stored = storeEvidenceFile(dataUrl, filename, req);
@@ -133,68 +131,75 @@ export function registerOrganisationVerification(ctx) {
       return res.status(400).json({ error: 'EVIDENCE_REQUIRED', message: 'Attach a document or a note.' });
     }
     // Duplicate-evidence hash detection (risk signal, not a verdict).
-    const dup = fileFields.sha256 && db.verEvidence.some((e) => e.sha256 === fileFields.sha256 && e.suppliedById !== req.orgUser.id);
-    const ev = addEvidence({
-      type: 'document', source: 'subject_upload', suppliedByKind: 'org_user', suppliedById: req.orgUser.id,
-      orgId: req.org.id, claimIds: [claim.id], ...fileFields, meta: { note: String(note ?? '').slice(0, 400) },
-      visibility: ['PERSON_IDENTITY', 'LICENCE'].includes(claim.claimType) ? 'trust_and_safety' : 'organisation_internal',
-    }, req);
-    claim.evidenceIds.push(ev.id);
-    if (dup && !claim.riskFlags.includes('DUPLICATE_EVIDENCE_HASH')) claim.riskFlags.push('DUPLICATE_EVIDENCE_HASH');
-    if (claim.status === 'unverified') applyStatus(claim, 'collecting_evidence', req);
+    const dup = fileFields.sha256 && reads.evidence.digestSeen(fileFields.sha256, req.orgUser.id);
+    const ev = unit(() => {
+      const added = addEvidence({
+        type: 'document', source: 'subject_upload', suppliedByKind: 'org_user', suppliedById: req.orgUser.id,
+        orgId: req.org.id, claimIds: [claim.id], ...fileFields, meta: { note: String(note ?? '').slice(0, L.note) },
+        visibility: ['PERSON_IDENTITY', 'LICENCE'].includes(claim.claimType) ? 'trust_and_safety' : 'organisation_internal',
+      }, req);
+      if (dup && !claim.riskFlags.includes('DUPLICATE_EVIDENCE_HASH')) verification.claims.update(claim.id, (c) => { c.riskFlags.push('DUPLICATE_EVIDENCE_HASH'); });
+      if (claim.status === 'unverified') applyStatus(claim, 'collecting_evidence', req);
+      return added;
+    });
     persist();
-    res.status(201).json({ claim: subjectClaimView(claim), evidenceChecks: ev.checks });
+    res.status(201).json({ claim: subjectClaimView(reads.claims.byId(claim.id)), evidenceChecks: ev.checks });
   });
-  function applyStatus(claim, to, req, opts = {}) {
-    return transition(claim, to, { actorKind: 'org_user', actorId: req.orgUser?.id, actorName: req.orgUser?.name, ...opts }, req);
+  function applyStatus(claim, to, req, opts = {}, patch = null) {
+    return transition(claim, to, { actorKind: req.orgUser ? 'org_user' : 'system', actorId: req.orgUser?.id, actorName: req.orgUser?.name, ...opts }, req, patch);
   }
+  /** The claim when it is the caller's own (a user subject), or null: concealment, no cross-tenant existence leak. */
+  const onlyMine = (req, c) => (c && c.subjectId === req.orgUser.id && c.subjectType === 'user' ? c : null);
 
   // Submit → deterministic pre-review pipeline (§25): completeness, dedupe,
   // conflicts, risk flags, decision, routing, packaged case. All automated —
   // the only humans afterwards are the AUTHORITATIVE ones.
   orgRouter.post('/verification/claims/:id/submit', (req, res) => {
-    const claim = db.verClaims.find((c) => c.id === req.params.id && c.subjectId === req.orgUser.id && c.subjectType === 'user');
+    const claim = onlyMine(req, reads.claims.byId(req.params.id));
     if (!claim) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
     if (!['collecting_evidence', 'unverified'].includes(claim.status)) {
       return res.status(409).json({ error: 'ALREADY_SUBMITTED' });
     }
-    const evTypes = db.verEvidence.filter((e) => claim.evidenceIds.includes(e.id)).map((e) => e.type);
+    const evTypes = reads.evidence.byIds(claim.evidenceIds).map((e) => e.type);
     const completeness = evidenceCompleteness(claim.claimType, evTypes);
     if (!completeness.complete) {
       return res.status(422).json({ error: 'EVIDENCE_INCOMPLETE', missing: completeness.missing });
     }
-    if (claim.status === 'unverified') applyStatus(claim, 'collecting_evidence', req);
-    applyStatus(claim, 'pending', req);
-    routeClaim(claim, req);
+    unit(() => {
+      if (claim.status === 'unverified') applyStatus(claim, 'collecting_evidence', req);
+      applyStatus(claim, 'pending', req);
+      routeClaim(claim.id, req);
+    });
     persist();
-    res.json({ claim: subjectClaimView(claim) });
+    res.json({ claim: subjectClaimView(reads.claims.byId(claim.id)) });
   });
 
-  function routeClaim(claim, req) {
+  /** Inside the caller's unit: the deterministic pre-review pipeline for claim `claimId` (just moved to pending). */
+  function routeClaim(claimId, req) {
+    const claim = reads.claims.byId(claimId);
     const org = claim.organisationId ? orgOf(claim.organisationId) : null;
     const flags = riskFlags({
       email: claim.metadata?.workEmail,
-      orgDomains: (org?.verification?.domains ?? []).filter((d) => d.status === 'verified').map((d) => d.domain),
+      orgDomains: org ? verifiedDomainsOf(org.id) : [],
       applicantHadRecentRevocation: userClaims(claim.subjectId).some((c) => c.status === 'revoked' && c.revokedAt > Date.now() - 30 * 86_400_000),
       competingOrgClaims: userClaims(claim.subjectId).filter((c) => c.id !== claim.id && c.claimType === claim.claimType && c.organisationId && c.organisationId !== claim.organisationId && openStates.includes(c.status)).length,
       orgSuspended: !!org?.suspended,
       emailChallengeFails: emailFailsFor(claim.subjectId),
       duplicateEvidenceHash: claim.riskFlags.includes('DUPLICATE_EVIDENCE_HASH'),
     });
-    claim.riskFlags = [...new Set([...claim.riskFlags, ...flags])];
-    const documentOnly = db.verEvidence.filter((e) => claim.evidenceIds.includes(e.id)).every((e) => e.type === 'document');
+    const documentOnly = reads.evidence.byIds(claim.evidenceIds).every((e) => e.type === 'document');
     const { decision, reasons } = decideReview({
       claimType: claim.claimType,
       orgHasActiveAuthority: !!org && orgCanAttest(org) && reviewersOf(org.id).length > 0,
       documentOnly, riskFlagCount: flags.length,
       disputed: !!claim.disputedAt,
     });
-    claim.reviewReasons = reasons;
+    const record = (c) => { c.riskFlags = [...new Set([...c.riskFlags, ...flags])]; c.reviewReasons = reasons; };
     if (decision === 'REQUIRES_HUMAN_REVIEW') {
-      applyStatus(claim, 'requires_human_review', req);
+      applyStatus(claim, 'requires_human_review', req, {}, record);
       vmetric('routedToHumanReview');
     } else {
-      applyStatus(claim, 'automated_checks_passed', req);
+      applyStatus(claim, 'automated_checks_passed', req, {}, record);
       vmetric('autoPrechecksPassed');
       verEvent('automated_check.passed', { claimId: claim.id, subjectId: claim.subjectId, orgId: claim.organisationId, after: { riskFlags: flags } }, req);
       if (claim.organisationId) {
@@ -205,18 +210,21 @@ export function registerOrganisationVerification(ctx) {
 
   // ----- professional affiliation request (creates the linked pair)
   orgRouter.post('/verification/affiliation', (req, res) => {
-    const role = String(req.body?.role ?? req.orgUser.role ?? '').trim().slice(0, 60);
+    if (!(req.body?.role === undefined || req.body?.role === null || typeof req.body.role === 'string')) return fieldInvalid(res, 'role', 'role is text.');
+    const role = String(req.body?.role ?? req.orgUser.role ?? '').trim().slice(0, L.role);
     if (!role) return res.status(400).json({ error: 'ROLE_REQUIRED' });
+    // The requested start is a calendar day or an instant, or nothing (it used to be stored as whatever was sent).
+    const startP = isAbsent(req.body?.validFrom) ? null : parseDateOrInstant(req.body.validFrom, { dayEdge: 'start' });
+    if (startP && !startP.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'validFrom', message: `validFrom is a calendar day (YYYY-MM-DD) or an instant (${startP.why}).`, expected: startP.expected });
     const [affType, roleType] = AFFILIATION_TYPE(req.org);
     const existing = userClaims(req.orgUser.id).filter((c) => c.organisationId === req.org.id && [affType, roleType].includes(c.claimType) && c.current !== false && [...openStates, 'verified'].includes(c.status));
     if (existing.length) return res.status(409).json({ error: 'AFFILIATION_CLAIM_EXISTS', message: 'A current affiliation request or verification already exists for this organisation.' });
     const pairId = nextId('vpair');
     const base = {
       subjectType: 'user', subjectId: req.orgUser.id, organisationId: req.org.id,
-      status: 'collecting_evidence', metadata: { pairId, declaredName: req.orgUser.name, requestedStart: req.body?.validFrom ?? null },
+      status: 'collecting_evidence', metadata: { pairId, declaredName: (req.orgUser.name == null ? null : String(req.orgUser.name).slice(0, L.name)), requestedStart: startP ? startP.ms : null },
     };
-    const aff = createClaim({ ...base, claimType: affType }, req);
-    const roleClaim = createClaim({ ...base, claimType: roleType, role }, req);
+    const [aff, roleClaim] = unit(() => [createClaim({ ...base, claimType: affType }, req), createClaim({ ...base, claimType: roleType, role }, req)]);
     res.status(201).json({
       affiliation: subjectClaimView(aff), role: subjectClaimView(roleClaim),
       next: 'Prove control of your work email (POST /org/verification/work-email), then the organisation confirms the relationship. Email control alone never equals verified employment.',
@@ -226,7 +234,8 @@ export function registerOrganisationVerification(ctx) {
   // ----- work-email proof (§7). One-time token; failure counting; the code
   // travels ONLY in the email (local fake transport in this environment).
   orgRouter.post('/verification/work-email', async (req, res) => {
-    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    if (typeof req.body?.email !== 'string') return res.status(400).json({ error: 'EMAIL_SYNTAX' });
+    const email = req.body.email.trim().toLowerCase();
     const problem = emailProblem(email);
     if (problem) return res.status(400).json({ error: problem });
     const dom = domainOfEmail(email);
@@ -245,65 +254,78 @@ export function registerOrganisationVerification(ctx) {
 
   orgRouter.post('/verification/work-email/confirm', (req, res) => {
     const { code, email } = req.body ?? {};
-    const out = consumeToken({ purpose: 'work_email', secret: code, email: email ?? null, subjectId: req.orgUser.id });
-    if (out.error) {
+    if (!(email === undefined || email === null || typeof email === 'string')) return res.status(400).json({ error: 'EMAIL_SYNTAX' });
+    if (!(code === undefined || code === null || typeof code === 'string')) return fieldInvalid(res, 'code', 'code is text.');
+    // Validate first: the token is consumed only together with the evidence and the claims it proves (one unit).
+    const peek = ctx.peekToken({ purpose: 'work_email', secret: code, email: email ?? null, subjectId: req.orgUser.id });
+    if (peek.error) {
       // count failures against open tokens for this user (risk signal)
-      for (const t of db.verTokens) if (t.subjectId === req.orgUser.id && t.purpose === 'work_email' && !t.usedAt) t.attemptsFailed = (t.attemptsFailed ?? 0) + 1;
+      unit(() => { for (const t of reads.tokens.openFor(req.orgUser.id, 'work_email')) verification.tokens.update(t.id, (d) => { d.attemptsFailed += 1; }); });
       vmetric('emailChallengeFailures');
       persist();
-      return res.status(out.error === 'TOKEN_EXPIRED' ? 410 : 401).json({ error: out.error });
+      return res.status(peek.error === 'TOKEN_EXPIRED' ? 410 : 401).json({ error: peek.error });
     }
-    if (out.token.subjectId !== req.orgUser.id) return res.status(403).json({ error: 'TOKEN_WRONG_ACCOUNT' });
-    const dom = domainOfEmail(out.token.email);
-    const covered = (req.org.verification?.domains ?? []).some((d) => d.status === 'verified' && domainCovered(dom, d.domain));
+    if (peek.token.subjectId !== req.orgUser.id) return res.status(403).json({ error: 'TOKEN_WRONG_ACCOUNT' });
+    const dom = domainOfEmail(peek.token.email);
+    const covered = verifiedDomainsOf(req.org.id).some((d) => domainCovered(dom, d));
     const [affType, roleType] = AFFILIATION_TYPE(req.org);
     const open = userClaims(req.orgUser.id).filter((c) => c.organisationId === req.org.id && [affType, roleType].includes(c.claimType) && openStates.includes(c.status));
-    if (!open.length) return res.status(409).json({ error: 'NO_OPEN_AFFILIATION', message: 'Request an affiliation first — the email proof attaches to it.' });
-    const ev = addEvidence({
-      type: 'official_email', source: 'email_challenge', suppliedByKind: 'org_user', suppliedById: req.orgUser.id,
-      orgId: req.org.id, claimIds: open.map((c) => c.id), visibility: 'organisation_internal',
-      meta: { domain: dom, domainCoveredByOrg: covered, addressHash: sha256(out.token.email) }, // the address itself is not stored on the evidence record
-    }, req);
-    for (const c of open) {
-      c.evidenceIds.push(ev.id);
-      c.metadata.workEmail = out.token.email; // subject+org internal, never public
-      c.metadata.domainControl = 'passed';
-      c.metadata.domainCoveredByOrg = covered;
-      verEvent('email.challenge_passed', { claimId: c.id, subjectId: req.orgUser.id, orgId: req.org.id, after: { domain: dom, covered } }, req);
-      if (['collecting_evidence', 'unverified'].includes(c.status)) {
-        if (c.status === 'unverified') applyStatus(c, 'collecting_evidence', req);
-        applyStatus(c, 'pending', req);
-        routeClaim(c, req);
-      }
+    if (!open.length) {
+      ctx.useToken(peek.token); // a correct code is spent even when there is nothing to attach it to, as before
+      return res.status(409).json({ error: 'NO_OPEN_AFFILIATION', message: 'Request an affiliation first — the email proof attaches to it.' });
     }
+    unit(() => {
+      ctx.useToken(peek.token);
+      addEvidence({
+        type: 'official_email', source: 'email_challenge', suppliedByKind: 'org_user', suppliedById: req.orgUser.id,
+        orgId: req.org.id, claimIds: open.map((c) => c.id), visibility: 'organisation_internal',
+        meta: { domain: dom, domainCoveredByOrg: covered, addressHash: sha256(peek.token.email) }, // the address itself is not stored on the evidence record
+      }, req);
+      for (const c of open) {
+        verification.claims.update(c.id, (d) => {
+          d.metadata.workEmail = peek.token.email; // subject+org internal, never public
+          d.metadata.domainControl = 'passed';
+          d.metadata.domainCoveredByOrg = covered;
+        });
+        verEvent('email.challenge_passed', { claimId: c.id, subjectId: req.orgUser.id, orgId: req.org.id, after: { domain: dom, covered } }, req);
+        if (['collecting_evidence', 'unverified'].includes(c.status)) {
+          if (c.status === 'unverified') applyStatus(c, 'collecting_evidence', req);
+          applyStatus(c, 'pending', req);
+          routeClaim(c.id, req);
+        }
+      }
+    });
     persist();
     res.json({
       domainControl: 'passed', domainCoveredByOrg: covered,
-      claims: open.map(subjectClaimView),
+      claims: open.map((c) => subjectClaimView(reads.claims.byId(c.id))),
       note: 'Email control recorded as evidence. It does NOT by itself verify employment — an authorised organisation administrator confirms the relationship next.',
     });
   });
 
   // ----- disputes from the subject (§16)
   orgRouter.post('/verification/claims/:id/dispute', (req, res) => {
-    const claim = db.verClaims.find((c) => c.id === req.params.id && c.subjectId === req.orgUser.id && c.subjectType === 'user');
+    const claim = onlyMine(req, reads.claims.byId(req.params.id));
     if (!claim) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
+    if (!(req.body?.reason === undefined || req.body?.reason === null || typeof req.body.reason === 'string')) return fieldInvalid(res, 'reason', 'reason is text.');
     const reason = String(req.body?.reason ?? '').trim();
     if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED' });
     return openDispute(res, claim, { byKind: 'org_user', byId: req.orgUser.id, byName: req.orgUser.name }, reason, req);
   });
   function openDispute(res, claim, by, reason, req) {
-    if (db.verDisputes.some((d) => d.claimId === claim.id && d.status === 'open')) {
+    if (reads.disputes.hasOpen(claim.id)) {
       return res.status(409).json({ error: 'DISPUTE_ALREADY_OPEN' });
     }
-    const d = {
-      id: nextId('vdsp'), claimId: claim.id, ...by, reason: reason.slice(0, 600),
-      status: 'open', resolution: null, createdAt: Date.now(), resolvedAt: null, resolvedBy: null,
-    };
-    db.verDisputes.push(d);
-    if (claim.status === 'verified') applyStatus(claim, 'disputed', req ?? { orgUser: null }, { reason });
-    else if (!claim.reviewReasons.includes('DISPUTED_CLAIM')) claim.reviewReasons.push('DISPUTED_CLAIM');
-    verEvent('claim.disputed', { claimId: claim.id, subjectId: claim.subjectId, orgId: claim.organisationId, reason, actorKind: by.byKind, actorId: by.byId, actorName: by.byName });
+    const d = unit(() => {
+      const created = verification.disputes.create({
+        id: nextId('vdsp'), claimId: claim.id, byKind: by.byKind, byId: by.byId, byName: by.byName == null ? null : String(by.byName).slice(0, L.name), reason: reason.slice(0, L.reason),
+        status: 'open', resolution: null, createdAt: Date.now(), resolvedAt: null, resolvedBy: null, resolvedById: null, resolutionAttribution: null,
+      });
+      if (claim.status === 'verified') applyStatus(claim, 'disputed', req ?? { orgUser: null }, { reason });
+      else if (!claim.reviewReasons.includes('DISPUTED_CLAIM')) verification.claims.update(claim.id, (c) => { c.reviewReasons.push('DISPUTED_CLAIM'); });
+      verEvent('claim.disputed', { claimId: claim.id, subjectId: claim.subjectId, orgId: claim.organisationId, reason, actorKind: by.byKind, actorId: by.byId, actorName: by.byName });
+      return created;
+    });
     vmetric('disputes');
     persistNow();
     res.status(201).json({ dispute: d, note: 'The claim is flagged, its history is preserved, and Trust & Safety reviews the dispute. Disputed claims never silently disappear.' });
@@ -325,7 +347,7 @@ export function registerOrganisationVerification(ctx) {
   // ================================================== console: dashboard
   orgRouter.get('/verification/dashboard', (req, res) => {
     if (!requireVer(req, res, 'verification_viewer')) return;
-    const mine = db.verClaims.filter((c) => c.organisationId === req.org.id && c.subjectType === 'user');
+    const mine = reads.claims.forOrgStaff(req.org.id);
     const now = Date.now();
     // "Currently verified" derives from the EFFECTIVE engine (M14.1): a raw
     // status of 'verified' does not count when org standing, account removal
@@ -341,10 +363,10 @@ export function registerOrganisationVerification(ctx) {
         pending: mine.filter((c) => ['pending', 'automated_checks_passed'].includes(c.status)).length,
         humanReview: mine.filter((c) => c.status === 'requires_human_review').length,
         expiringSoon: mine.filter((c) => c.status === 'verified' && c.validUntil && c.validUntil > now && c.validUntil < now + 30 * 86_400_000).length,
-        disputed: db.verDisputes.filter((d) => d.status === 'open' && mine.some((c) => c.id === d.claimId)).length,
+        disputed: reads.disputes.openCountForOrg(req.org.id),
         revoked: mine.filter((c) => c.status === 'revoked').length,
-        domains: (req.org.verification?.domains ?? []).length,
-        administrators: db.verAdmins.filter((a) => a.orgId === req.org.id && a.status === 'active').length,
+        domains: reads.domains.forOrg(req.org.id).length,
+        administrators: reads.admins.activeForOrg(req.org.id).length,
       },
     });
   });
@@ -369,8 +391,8 @@ export function registerOrganisationVerification(ctx) {
 
   orgRouter.get('/verification/requests', (req, res) => {
     if (!requireVer(req, res, 'verification_viewer')) return;
-    const rows = db.verClaims
-      .filter((c) => c.organisationId === req.org.id && c.subjectType === 'user' && ['pending', 'automated_checks_passed'].includes(c.status))
+    const rows = reads.claims.forOrgStaff(req.org.id)
+      .filter((c) => ['pending', 'automated_checks_passed'].includes(c.status))
       .map(requestRow);
     res.json({ items: rows, note: 'Decisions are audited. You cannot decide your own request.' });
   });
@@ -379,7 +401,8 @@ export function registerOrganisationVerification(ctx) {
   // mark former / reject / request more information.
   orgRouter.post('/verification/requests/:claimId/decide', (req, res) => {
     if (!requireVer(req, res, 'verification_reviewer')) return;
-    const claim = db.verClaims.find((c) => c.id === req.params.claimId && c.organisationId === req.org.id && c.subjectType === 'user');
+    const found = reads.claims.byId(req.params.claimId);
+    const claim = found && found.organisationId === req.org.id && found.subjectType === 'user' ? found : null;
     if (!claim) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
     // §27 self-verification prohibition — server-side, always, with an event.
     if (claim.subjectId === req.orgUser.id) {
@@ -395,28 +418,38 @@ export function registerOrganisationVerification(ctx) {
       return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: `This organisation is ${ctx.orgVerificationStatus(req.org)} and cannot confirm staff verification right now.` });
     }
     const { action, role, validFrom, validUntil, reason } = req.body ?? {};
-    const pair = db.verClaims.filter((c) => c.metadata?.pairId && c.metadata.pairId === claim.metadata?.pairId && ['pending', 'automated_checks_passed'].includes(c.status));
+    if (!(reason === undefined || reason === null || typeof reason === 'string')) return fieldInvalid(res, 'reason', 'reason is text.');
+    if (!(role === undefined || role === null || typeof role === 'string')) return fieldInvalid(res, 'role', 'role is text.');
+    const pair = claim.metadata?.pairId ? reads.claims.byPair(claim.metadata.pairId).filter((c) => ['pending', 'automated_checks_passed'].includes(c.status)) : [];
     const targets = pair.length ? pair : [claim];
-    const decide = (to, extra = {}) => {
-      for (const c of targets) {
-        const err = applyStatus(c, to, req, { method: 'organisation_admin_confirmation', reason, eventType: to === 'verified' ? 'review.approved' : 'review.rejected' });
-        if (err) return err;
-        Object.assign(c, extra);
-        if (to === 'verified') {
-          c.authorityType = 'org_admin';
-          c.authorityId = req.orgUser.id;
-          idx.registerAuthority(c);
-        }
-      }
+    /** One unit: every target moves (or none does). A refused transition throws inside the unit and is answered 409. */
+    const decide = (to, extra = {}, before = null) => {
+      try {
+        unit(() => {
+          before?.();
+          for (const c of targets) {
+            const err = applyStatus(c, to, req, { method: 'organisation_admin_confirmation', reason, eventType: to === 'verified' ? 'review.approved' : 'review.rejected' }, (d) => {
+              Object.assign(d, extra);
+              if (to === 'verified') { d.authorityType = 'org_admin'; d.authorityId = req.orgUser.id; }
+            });
+            if (err) throw Object.assign(new Error(err), { decideError: err });
+          }
+        });
+      } catch (e) { if (e.decideError) return e.decideError; throw e; }
       return null;
     };
     if (action === 'confirm' || action === 'correct_role' || action === 'mark_former') {
       const roleClaim = targets.find((c) => /ROLE/.test(c.claimType));
+      let correct = null;
+      let roleNow = roleClaim?.role ?? null;
       if (action === 'correct_role') {
         if (!role?.trim()) return res.status(400).json({ error: 'ROLE_REQUIRED' });
         if (roleClaim) {
-          verEvent('claim.corrected', { claimId: roleClaim.id, subjectId: claim.subjectId, orgId: req.org.id, before: { role: roleClaim.role }, after: { role: String(role).trim() } }, req);
-          roleClaim.role = String(role).trim().slice(0, 60);
+          roleNow = String(role).trim().slice(0, L.role);
+          correct = () => {
+            verEvent('claim.corrected', { claimId: roleClaim.id, subjectId: claim.subjectId, orgId: req.org.id, before: { role: roleClaim.role }, after: { role: String(role).trim() } }, req);
+            verification.claims.update(roleClaim.id, (d) => { d.role = roleNow; });
+          };
         }
       }
       // M23 P5.7 (T-3): the period bounds are instants or calendar days that
@@ -429,30 +462,30 @@ export function registerOrganisationVerification(ctx) {
       const until = untilP ? untilP.ms : (action === 'mark_former' ? Date.now() : null);
       // Ordering is checked only when the club STATED both ends; a defaulted start is "now" by convention, not a claim.
       if (fromP && untilP && !(from < until)) return res.status(400).json({ error: 'INTERVAL_INVALID', field: 'validUntil', message: 'The period must end after it starts.' });
-      const err = decide('verified', { validFrom: from, validUntil: until, current: action !== 'mark_former' });
+      const err = decide('verified', { validFrom: from, validUntil: until, current: action !== 'mark_former' }, correct);
       if (err) return res.status(409).json({ error: err });
-      notify({ kind: 'org_user', id: claim.subjectId }, 'verification', `${req.org.name} confirmed your ${action === 'mark_former' ? 'historical ' : ''}affiliation${roleClaim ? ` as ${roleClaim.role}` : ''}. ✓`, claim.id);
+      notify({ kind: 'org_user', id: claim.subjectId }, 'verification', `${req.org.name} confirmed your ${action === 'mark_former' ? 'historical ' : ''}affiliation${roleClaim ? ` as ${roleNow}` : ''}. ✓`, claim.id);
     } else if (action === 'reject') {
       if (!reason?.trim()) return res.status(400).json({ error: 'REASON_REQUIRED', message: 'A rejection needs a reason — it is shown to the person and audited.' });
       const err = decide('rejected');
       if (err) return res.status(409).json({ error: err });
       notify({ kind: 'org_user', id: claim.subjectId }, 'verification', `${req.org.name} declined the verification request: ${String(reason).slice(0, 140)}`, claim.id);
     } else if (action === 'request_info') {
-      for (const c of targets) applyStatus(c, 'collecting_evidence', req, { reason });
+      unit(() => { for (const c of targets) applyStatus(c, 'collecting_evidence', req, { reason }); });
       notify({ kind: 'org_user', id: claim.subjectId }, 'verification', `${req.org.name} asks for more information on your verification request${reason ? `: ${String(reason).slice(0, 140)}` : ''}.`, claim.id);
     } else {
       return res.status(400).json({ error: 'ACTION_UNKNOWN', message: 'Use confirm, correct_role, mark_former, reject or request_info.' });
     }
     ctx.ledgerAppend?.({ type: 'verification_decision', orgId: req.org.id, scoutName: req.orgUser.name, playerId: null, detail: { claimId: claim.id, action } });
     persistNow();
-    res.json({ decided: action, claims: targets.map(subjectClaimView) });
+    res.json({ decided: action, claims: targets.map((c) => subjectClaimView(reads.claims.byId(c.id))) });
   });
 
   // ----- staff registry with filters (§8)
   orgRouter.get('/verification/staff', (req, res) => {
     if (!requireVer(req, res, 'verification_viewer')) return;
     const { state, current, method, role } = req.query;
-    let rows = db.verClaims.filter((c) => c.organisationId === req.org.id && c.subjectType === 'user' && !['unverified'].includes(c.status));
+    let rows = reads.claims.forOrgStaff(req.org.id).filter((c) => !['unverified'].includes(c.status));
     if (state) rows = rows.filter((c) => c.status === state);
     if (current === 'true') rows = rows.filter((c) => c.current !== false);
     if (current === 'false') rows = rows.filter((c) => c.current === false);
@@ -475,22 +508,26 @@ export function registerOrganisationVerification(ctx) {
   orgRouter.post('/verification/staff/:userId/departed', (req, res) => {
     if (!requireVer(req, res, 'verification_reviewer')) return;
     if (req.params.userId === req.orgUser.id) return res.status(403).json({ error: 'SELF_VERIFICATION_FORBIDDEN', message: 'Ask another administrator to record your own departure.' });
-    const claims = db.verClaims.filter((c) => c.organisationId === req.org.id && c.subjectId === req.params.userId && c.subjectType === 'user' && c.status === 'verified' && c.current !== false);
+    const claims = reads.claims.forOrgSubject(req.org.id, req.params.userId).filter((c) => c.status === 'verified' && c.current !== false);
     if (!claims.length) return res.status(404).json({ error: 'NO_CURRENT_VERIFIED_CLAIMS' });
     const untilP = isAbsent(req.body?.validUntil) ? null : parseDateOrInstant(req.body.validUntil, { dayEdge: 'end' });
     if (untilP && !untilP.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'validUntil', message: `validUntil is a calendar day (YYYY-MM-DD) or an instant (${untilP.why}).`, expected: untilP.expected });
     const until = untilP ? untilP.ms : Date.now();
-    for (const c of claims) {
-      verEvent('claim.corrected', { claimId: c.id, subjectId: c.subjectId, orgId: req.org.id, before: { current: true }, after: { current: false, validUntil: until }, reason: 'marked departed' }, req);
-      c.current = false;            // history is NOT erased — the verified period closes
-      c.validUntil = c.validUntil ?? until;
-      c.updatedAt = Date.now();
-    }
-    // Powers tied to the relationship end immediately.
-    for (const a of db.verAdmins.filter((x) => x.orgId === req.org.id && x.userId === req.params.userId && x.status === 'active')) {
-      a.status = 'revoked'; a.revokedAt = Date.now(); a.revokedBy = req.orgUser.id;
-      verEvent('admin.revoked', { orgId: req.org.id, subjectId: a.userId, reason: 'departed' }, req);
-    }
+    unit(() => {
+      for (const c of claims) {
+        verEvent('claim.corrected', { claimId: c.id, subjectId: c.subjectId, orgId: req.org.id, before: { current: true }, after: { current: false, validUntil: until }, reason: 'marked departed' }, req);
+        verification.claims.update(c.id, (d) => {
+          d.current = false;            // history is NOT erased — the verified period closes
+          d.validUntil = d.validUntil ?? until;
+          d.updatedAt = Date.now();
+        });
+      }
+      // Powers tied to the relationship end immediately.
+      for (const a of reads.admins.activeFor(req.org.id, req.params.userId)) {
+        verification.admins.update(a.id, (d) => { d.status = 'revoked'; d.revokedAt = Date.now(); d.revokedBy = req.orgUser.id; });
+        verEvent('admin.revoked', { orgId: req.org.id, subjectId: a.userId, reason: 'departed' }, req);
+      }
+    });
     notify({ kind: 'org_user', id: req.params.userId }, 'verification', `${req.org.name} recorded you as departed. Your verified history stays on your profile; if this is wrong you can dispute it from Verification.`, claims[0].id);
     persistNow();
     res.json({ closed: claims.length, note: 'Current badges end now; the historical verified period remains. The person can dispute this.' });
@@ -500,38 +537,39 @@ export function registerOrganisationVerification(ctx) {
   orgRouter.get('/verification/domains', (req, res) => {
     if (!requireVer(req, res, 'verification_viewer')) return;
     res.json({
-      domains: req.org.verification?.domains ?? [],
-      requests: db.verDomainRequests.filter((r) => r.orgId === req.org.id),
+      domains: reads.domains.forOrg(req.org.id),
+      requests: reads.domainRequests.forOrg(req.org.id),
     });
   });
 
   orgRouter.post('/verification/domains', async (req, res) => {
     if (!requireVer(req, res, 'verification_admin')) return;
+    for (const k of ['domain', 'challengeEmail']) if (!(req.body?.[k] === undefined || req.body?.[k] === null || typeof req.body[k] === 'string')) return fieldInvalid(res, k, `${k} is text.`);
     const domain = normalizeDomain(req.body?.domain);
     const challengeEmail = String(req.body?.challengeEmail ?? '').trim().toLowerCase();
-    if (!domain || !domain.includes('.')) return res.status(400).json({ error: 'DOMAIN_INVALID' });
+    if (!domain || !domain.includes('.') || domain.length > L.domain) return res.status(400).json({ error: 'DOMAIN_INVALID' });
     if (isFreeMail(domain) || isDisposable(domain)) return res.status(422).json({ error: 'SHARED_PROVIDER_DOMAIN', message: 'Free/shared email providers cannot be organisation domains.' });
-    if ((req.org.verification.domains ?? []).some((d) => d.domain === domain)) return res.status(409).json({ error: 'DOMAIN_EXISTS' });
-    const otherOrg = db.orgs.find((o) => o.id !== req.org.id && (o.verification?.domains ?? []).some((d) => d.domain === domain && d.status === 'verified'));
-    const verifiedRoot = (req.org.verification.domains ?? []).find((d) => d.status === 'verified' && domainCovered(domain, d.domain));
+    const mine = verifiedDomainsOf(req.org.id);
+    if (reads.domains.has(req.org.id, domain)) return res.status(409).json({ error: 'DOMAIN_EXISTS' });
+    const otherOrg = reads.domains.verifiedElsewhere(domain, req.org.id);
+    const verifiedRoot = mine.find((d) => domainCovered(domain, d));
     const highRisk = !verifiedRoot || !!otherOrg; // first/root domain or contested → human review
-    const r = {
-      id: nextId('vdom'), orgId: req.org.id, domain, requestedBy: req.orgUser.id,
-      status: highRisk ? 'requires_human_review' : 'email_challenge',
-      reviewReasons: [...(otherOrg ? ['DOMAIN_OWNERSHIP_AMBIGUOUS'] : []), ...(!verifiedRoot ? ['HIGH_RISK_ADMIN_CHANGE'] : [])],
-      method: null, createdAt: Date.now(), decidedAt: null, decidedBy: null,
-    };
-    db.verDomainRequests.push(r);
-    verEvent('organisation.domain_added', { orgId: req.org.id, after: { domain, status: r.status } }, req);
-    if (r.status === 'email_challenge') {
-      const problem = emailProblem(challengeEmail);
-      if (problem || domainOfEmail(challengeEmail) !== domain) {
-        r.status = 'requires_human_review';
-        r.reviewReasons.push('DOMAIN_OWNERSHIP_AMBIGUOUS');
-      } else {
-        const secret = mintToken({ purpose: 'domain_email', email: challengeEmail, orgId: req.org.id, refId: r.id });
-        await mailer.send({ to: challengeEmail, subject: `Confirm ${domain} for ${req.org.name} on ScoutBox`, text: `Confirmation code for adding ${domain} as an official ${req.org.name} domain: ${secret}\n\nSingle use, expires in 30 minutes.` });
-      }
+    const reasons = [...(otherOrg ? ['DOMAIN_OWNERSHIP_AMBIGUOUS'] : []), ...(!verifiedRoot ? ['HIGH_RISK_ADMIN_CHANGE'] : [])];
+    let status = highRisk ? 'requires_human_review' : 'email_challenge';
+    const challengeOk = status === 'email_challenge' && !emailProblem(challengeEmail) && domainOfEmail(challengeEmail) === domain;
+    if (status === 'email_challenge' && !challengeOk) { status = 'requires_human_review'; if (!reasons.includes('DOMAIN_OWNERSHIP_AMBIGUOUS')) reasons.push('DOMAIN_OWNERSHIP_AMBIGUOUS'); }
+    const id = nextId('vdom');
+    const r = unit(() => {
+      const created = verification.domainRequests.create({
+        id, orgId: req.org.id, domain, requestedBy: req.orgUser.id, status, reviewReasons: reasons,
+        method: null, createdAt: Date.now(), decidedAt: null, decidedBy: null, decidedById: null,
+      });
+      verEvent('organisation.domain_added', { orgId: req.org.id, after: { domain, status: highRisk ? 'requires_human_review' : 'email_challenge' } }, req);
+      return created;
+    });
+    if (challengeOk) {
+      const secret = mintToken({ purpose: 'domain_email', email: challengeEmail, orgId: req.org.id, refId: r.id });
+      await mailer.send({ to: challengeEmail, subject: `Confirm ${domain} for ${req.org.name} on ScoutBox`, text: `Confirmation code for adding ${domain} as an official ${req.org.name} domain: ${secret}\n\nSingle use, expires in 30 minutes.` });
     }
     persistNow();
     res.status(201).json({
@@ -544,34 +582,41 @@ export function registerOrganisationVerification(ctx) {
 
   orgRouter.post('/verification/domains/:id/confirm', (req, res) => {
     if (!requireVer(req, res, 'verification_admin')) return;
-    const r = db.verDomainRequests.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const r = onlyOrg(req, reads.domainRequests.byId(req.params.id));
     if (!r) return res.status(404).json({ error: 'DOMAIN_REQUEST_NOT_FOUND' });
     if (r.status !== 'email_challenge') return res.status(409).json({ error: 'NOT_IN_EMAIL_CHALLENGE' });
-    const out = consumeToken({ purpose: 'domain_email', secret: req.body?.code });
-    if (out.error || out.token.refId !== r.id) {
+    if (!(req.body?.code === undefined || req.body?.code === null || typeof req.body.code === 'string')) return fieldInvalid(res, 'code', 'code is text.');
+    const peek = ctx.peekToken({ purpose: 'domain_email', secret: req.body?.code });
+    if (peek.error || peek.token.refId !== r.id) {
+      if (!peek.error) ctx.useToken(peek.token); // a valid code for another request is spent, as before
       vmetric('emailChallengeFailures');
-      return res.status(401).json({ error: out.error ?? 'TOKEN_WRONG_PURPOSE' });
+      return res.status(401).json({ error: peek.error ?? 'TOKEN_WRONG_PURPOSE' });
     }
-    r.status = 'verified'; r.method = 'official_domain_email'; r.decidedAt = Date.now();
-    req.org.verification.domains.push({ domain: r.domain, status: 'verified', method: 'official_domain_email', verifiedAt: Date.now(), addedBy: req.orgUser.id });
-    createClaim({
-      subjectType: 'org', subjectId: req.org.id, claimType: 'ORGANISATION_DOMAIN', organisationId: req.org.id,
-      status: 'verified', verificationMethod: 'official_domain_email', verifiedAt: Date.now(),
-      verifiedBy: { kind: 'org_admin', id: req.orgUser.id }, metadata: { domain: r.domain },
-    }, req);
-    verEvent('organisation.domain_verified', { orgId: req.org.id, after: { domain: r.domain } }, req);
+    unit(() => {
+      ctx.useToken(peek.token);
+      verification.domainRequests.update(r.id, (d) => { d.status = 'verified'; d.method = 'official_domain_email'; d.decidedAt = Date.now(); });
+      if (!reads.domains.has(req.org.id, r.domain)) verification.domains.add(req.org.id, { domain: r.domain, status: 'verified', method: 'official_domain_email', verifiedAt: Date.now(), addedBy: req.orgUser.id });
+      createClaim({
+        subjectType: 'org', subjectId: req.org.id, claimType: 'ORGANISATION_DOMAIN', organisationId: req.org.id,
+        status: 'verified', verificationMethod: 'official_domain_email', verifiedAt: Date.now(),
+        verifiedBy: { kind: 'org_admin', id: req.orgUser.id }, metadata: { domain: r.domain },
+      }, req);
+      verEvent('organisation.domain_verified', { orgId: req.org.id, after: { domain: r.domain } }, req);
+    });
     persistNow();
     res.json({ domain: r.domain, status: 'verified' });
   });
 
   orgRouter.post('/verification/domains/:id/remove', (req, res) => {
-    const list = req.org.verification?.domains ?? [];
+    const list = reads.domains.forOrg(req.org.id);
     const d = list.find((x) => x.domain === normalizeDomain(req.params.id) || x.domain === req.params.id);
     if (!d) return res.status(404).json({ error: 'DOMAIN_NOT_FOUND' });
-    const isRoot = !list.some((o) => o !== d && d.domain.endsWith(`.${o.domain}`));
+    const isRoot = !list.some((o) => o.domain !== d.domain && d.domain.endsWith(`.${o.domain}`));
     if (!requireVer(req, res, isRoot ? 'verification_root_admin' : 'verification_admin', { root: isRoot })) return;
-    req.org.verification.domains = list.filter((x) => x !== d);
-    verEvent('organisation.domain_removed', { orgId: req.org.id, before: { domain: d.domain } }, req);
+    unit(() => {
+      verification.domains.remove(req.org.id, d.domain);
+      verEvent('organisation.domain_removed', { orgId: req.org.id, before: { domain: d.domain } }, req);
+    });
     persistNow();
     res.json({ removed: d.domain });
   });
@@ -580,16 +625,17 @@ export function registerOrganisationVerification(ctx) {
   orgRouter.get('/verification/admins', (req, res) => {
     if (!requireVer(req, res, 'verification_viewer')) return;
     res.json({
-      items: db.verAdmins.filter((a) => a.orgId === req.org.id).map((a) => ({
+      items: reads.admins.forOrg(req.org.id).map((a) => ({
         ...a, person: { id: a.userId, name: byId.user(a.userId)?.name ?? '(removed)' },
       })),
-      transfers: db.verRootTransfers?.filter((t) => t.orgId === req.org.id) ?? [],
+      transfers: reads.rootTransfers.forOrg(req.org.id),
     });
   });
 
   orgRouter.post('/verification/admins', (req, res) => {
     const { userId, level } = req.body ?? {};
     if (!VER_LEVELS.includes(level)) return res.status(400).json({ error: 'LEVEL_UNKNOWN' });
+    if (typeof userId !== 'string') return res.status(404).json({ error: 'USER_NOT_FOUND' });
     const needsRoot = ['verification_admin', 'verification_root_admin'].includes(level);
     if (!requireVer(req, res, needsRoot ? 'verification_root_admin' : 'verification_admin', { root: needsRoot })) return;
     if (userId === req.orgUser.id) {
@@ -601,21 +647,25 @@ export function registerOrganisationVerification(ctx) {
     if (!target) return res.status(404).json({ error: 'USER_NOT_FOUND' });
     if (level === 'verification_root_admin') {
       // §28 dual control: a second root admin (or Trust & Safety) must approve.
-      if (db.verRootTransfers.some((t) => t.orgId === req.org.id && t.status === 'pending')) {
+      if (reads.rootTransfers.hasPending(req.org.id)) {
         return res.status(409).json({ error: 'TRANSFER_ALREADY_PENDING' });
       }
-      const t = { id: nextId('vrtx'), orgId: req.org.id, toUserId: userId, proposedBy: req.orgUser.id, status: 'pending', createdAt: Date.now(), approvedBy: null, approvedAt: null };
-      db.verRootTransfers.push(t);
-      verEvent('admin.invited', { orgId: req.org.id, subjectId: userId, after: { level, dualControl: 'pending' } }, req);
+      const t = unit(() => {
+        const created = verification.rootTransfers.create({ id: nextId('vrtx'), orgId: req.org.id, toUserId: userId, proposedBy: req.orgUser.id, status: 'pending', createdAt: Date.now(), approvedBy: null, approvedAt: null });
+        verEvent('admin.invited', { orgId: req.org.id, subjectId: userId, after: { level, dualControl: 'pending' } }, req);
+        return created;
+      });
       persistNow();
       return res.status(202).json({ transfer: t, note: 'Root authority changes need a second approval: another root administrator, or Trust & Safety.' });
     }
-    if (db.verAdmins.some((a) => a.orgId === req.org.id && a.userId === userId && a.status === 'active' && a.level === level)) {
+    if (reads.admins.activeFor(req.org.id, userId).some((a) => a.level === level)) {
       return res.status(409).json({ error: 'ALREADY_GRANTED' });
     }
-    const a = { id: nextId('vadm'), orgId: req.org.id, userId, level, status: 'active', invitedBy: req.orgUser.id, createdAt: Date.now(), acceptedAt: Date.now(), revokedAt: null, revokedBy: null };
-    db.verAdmins.push(a);
-    verEvent('admin.accepted', { orgId: req.org.id, subjectId: userId, after: { level } }, req);
+    const a = unit(() => {
+      const created = verification.admins.create({ id: nextId('vadm'), orgId: req.org.id, userId, level, status: 'active', invitedBy: req.orgUser.id, createdAt: Date.now(), acceptedAt: Date.now(), revokedAt: null, revokedBy: null });
+      verEvent('admin.accepted', { orgId: req.org.id, subjectId: userId, after: { level } }, req);
+      return created;
+    });
     notify({ kind: 'org_user', id: userId }, 'verification', `You now hold ${level.replace(/_/g, ' ')} authority for ${req.org.name}.`, a.id);
     persistNow();
     res.status(201).json({ admin: a });
@@ -623,7 +673,7 @@ export function registerOrganisationVerification(ctx) {
 
   orgRouter.post('/verification/root-transfers/:id/approve', (req, res) => {
     if (!requireVer(req, res, 'verification_root_admin', { root: true })) return;
-    const t = (db.verRootTransfers ?? []).find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const t = onlyOrg(req, reads.rootTransfers.byId(req.params.id));
     if (!t) return res.status(404).json({ error: 'TRANSFER_NOT_FOUND' });
     if (t.status !== 'pending') return res.status(409).json({ error: 'TRANSFER_NOT_PENDING' });
     if (t.proposedBy === req.orgUser.id) {
@@ -632,64 +682,72 @@ export function registerOrganisationVerification(ctx) {
     if (t.toUserId === req.orgUser.id) {
       return res.status(403).json({ error: 'SELF_PROMOTION_FORBIDDEN', message: 'The beneficiary cannot approve their own root authority.' });
     }
-    t.status = 'approved'; t.approvedBy = req.orgUser.id; t.approvedAt = Date.now();
-    const a = { id: nextId('vadm'), orgId: req.org.id, userId: t.toUserId, level: 'verification_root_admin', status: 'active', invitedBy: t.proposedBy, createdAt: Date.now(), acceptedAt: Date.now(), revokedAt: null, revokedBy: null };
-    db.verAdmins.push(a);
-    verEvent('admin.accepted', { orgId: req.org.id, subjectId: t.toUserId, after: { level: 'verification_root_admin', dualControl: `approved by ${req.orgUser.id}` } }, req);
+    const [approved, a] = unit(() => {
+      const tr = verification.rootTransfers.update(t.id, (d) => { d.status = 'approved'; d.approvedBy = req.orgUser.id; d.approvedAt = Date.now(); });
+      // An existing active root grant is not duplicated (one active grant per person and level).
+      const held = reads.admins.activeFor(req.org.id, t.toUserId).find((x) => x.level === 'verification_root_admin');
+      const grant = held ?? verification.admins.create({ id: nextId('vadm'), orgId: req.org.id, userId: t.toUserId, level: 'verification_root_admin', status: 'active', invitedBy: t.proposedBy, createdAt: Date.now(), acceptedAt: Date.now(), revokedAt: null, revokedBy: null });
+      verEvent('admin.accepted', { orgId: req.org.id, subjectId: t.toUserId, after: { level: 'verification_root_admin', dualControl: `approved by ${req.orgUser.id}` } }, req);
+      return [tr, grant];
+    });
     persistNow();
-    res.json({ transfer: t, admin: a });
+    res.json({ transfer: approved, admin: a });
   });
 
   orgRouter.post('/verification/admins/:id/revoke', (req, res) => {
-    const a = db.verAdmins.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const a = onlyOrg(req, reads.admins.byId(req.params.id));
     if (!a) return res.status(404).json({ error: 'ADMIN_NOT_FOUND' });
     const isRootRow = a.level === 'verification_root_admin';
     if (!requireVer(req, res, isRootRow ? 'verification_root_admin' : 'verification_admin', { root: isRootRow })) return;
     if (a.userId === req.orgUser.id) return res.status(403).json({ error: 'SELF_REVOKE_FORBIDDEN', message: 'Another administrator (or Trust & Safety) must change your authority.' });
     if (a.status !== 'active') return res.status(409).json({ error: 'ALREADY_REVOKED' });
     if (isRootRow) {
-      const roots = db.verAdmins.filter((x) => x.orgId === req.org.id && x.level === 'verification_root_admin' && x.status === 'active');
-      if (roots.length <= 1) {
+      if (reads.admins.activeRootCount(req.org.id) <= 1) {
         return res.status(409).json({ error: 'LAST_ROOT_ADMIN', message: 'An organisation cannot remove its final root administrator itself — Trust & Safety handles root recovery so the organisation is never orphaned.' });
       }
     }
-    a.status = 'revoked'; a.revokedAt = Date.now(); a.revokedBy = req.orgUser.id;
-    verEvent('admin.revoked', { orgId: req.org.id, subjectId: a.userId, reason: String(req.body?.reason ?? 'revoked by organisation') }, req);
+    const revoked = unit(() => {
+      const next = verification.admins.update(a.id, (d) => { d.status = 'revoked'; d.revokedAt = Date.now(); d.revokedBy = req.orgUser.id; });
+      verEvent('admin.revoked', { orgId: req.org.id, subjectId: a.userId, reason: String(req.body?.reason ?? 'revoked by organisation') }, req);
+      return next;
+    });
     persistNow();
-    res.json({ admin: a, note: 'Authority ends immediately. Claims this person previously approved keep their provenance and can be reviewed (Trust & Safety cascade tools).' });
+    res.json({ admin: revoked, note: 'Authority ends immediately. Claims this person previously approved keep their provenance and can be reviewed (Trust & Safety cascade tools).' });
   });
 
   // ========================================== conflict declarations (§17)
   orgRouter.post('/verification/conflicts', (req, res) => {
     const { kind, subject, note } = req.body ?? {};
-    const KINDS = ['family_relationship', 'agent_relationship', 'financial_interest', 'coaching_relationship', 'other'];
+    const KINDS = CONFLICT_KINDS;
     if (!KINDS.includes(kind)) return res.status(400).json({ error: 'KIND_UNKNOWN', kinds: KINDS });
-    const c = { id: nextId('vcoi'), userId: req.orgUser.id, orgId: req.org.id, kind, subject: String(subject ?? '').slice(0, 120), note: String(note ?? '').slice(0, 400), createdAt: Date.now(), withdrawnAt: null };
-    db.verConflicts.push(c);
-    persistNow();
+    for (const [k, v] of [['subject', subject], ['note', note]]) if (!(v === undefined || v === null || typeof v === 'string')) return fieldInvalid(res, k, `${k} is text.`);
+    const c = verification.conflicts.create({ id: nextId('vcoi'), userId: req.orgUser.id, orgId: req.org.id, kind, subject: String(subject ?? '').slice(0, L.subject), note: String(note ?? '').slice(0, L.note), createdAt: Date.now(), withdrawnAt: null });
     res.status(201).json({ conflict: c, note: 'Declarations are explicit and visible to your organisation’s verification administrators and Trust & Safety — never inferred, never public.' });
   });
   orgRouter.get('/verification/conflicts', (req, res) => {
     const admin = hasVerLevel(req.org.id, req.orgUser.id, 'verification_reviewer');
-    res.json({ items: db.verConflicts.filter((c) => c.orgId === req.org.id && (admin || c.userId === req.orgUser.id)) });
+    res.json({ items: admin ? reads.conflicts.forOrg(req.org.id) : reads.conflicts.forOrgUser(req.org.id, req.orgUser.id) });
   });
   orgRouter.post('/verification/conflicts/:id/withdraw', (req, res) => {
-    const c = db.verConflicts.find((x) => x.id === req.params.id && x.orgId === req.org.id && x.userId === req.orgUser.id);
+    const found = reads.conflicts.byId(req.params.id);
+    const c = found && found.orgId === req.org.id && found.userId === req.orgUser.id ? found : null;
     if (!c) return res.status(404).json({ error: 'CONFLICT_NOT_FOUND' });
-    c.withdrawnAt = Date.now();
-    persistNow();
-    res.json({ conflict: c });
+    const withdrawn = verification.conflicts.update(c.id, (d) => { d.withdrawnAt = Date.now(); });
+    res.json({ conflict: withdrawn });
   });
 
   // ============================================== squad invitations (§20)
   const INVITES_PER_DAY = 20;
   orgRouter.post('/verification/player-invites', async (req, res) => {
     if (!orgCanAttest(req.org)) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can send squad invitations.' });
-    const today = db.verPlayerInvites.filter((i) => i.orgId === req.org.id && i.createdAt > Date.now() - 86_400_000).length;
+    const today = reads.playerInvites.countSince(req.org.id, Date.now() - 86_400_000);
     if (today >= INVITES_PER_DAY) return res.status(429).json({ error: 'INVITE_RATE_LIMIT', message: `Deterministic limit: ${INVITES_PER_DAY} invitations per organisation per day.` });
-    const { name, email, squad, playerId } = req.body ?? {};
+    const { name, squad, playerId } = req.body ?? {};
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim() : req.body?.email;
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
     if (email && (typeof email !== 'string' || emailProblem(email))) return res.status(400).json({ error: 'EMAIL_SYNTAX' }); // a string only: emailProblem would coerce an array
+    if (!(squad === undefined || squad === null || typeof squad === 'string')) return fieldInvalid(res, 'squad', 'squad is text.');
+    if (!(playerId === undefined || playerId === null || playerId === '' || typeof playerId === 'string')) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     // M14.1 recipient binding: when the invite targets an EXISTING ScoutBox
     // player, the token is bound to that identity and nobody else can attach
     // it. (Player targeting uses the standing visibility rules — an invite
@@ -702,24 +760,27 @@ export function registerOrganisationVerification(ctx) {
         return res.status(404).json({ error: 'PLAYER_NOT_FOUND' }); // concealment — no probing hidden players
       }
     }
-    const inv = {
-      id: nextId('vpin'), orgId: req.org.id, byUserId: req.orgUser.id, byName: req.orgUser.name,
-      name: String(name).trim().slice(0, 80), squad: String(squad ?? '').slice(0, 60),
-      status: 'pending', playerId: null, targetPlayerId: targetPlayer?.id ?? null, guardianApproved: null,
-      createdAt: Date.now(), expiresAt: Date.now() + 14 * 86_400_000, acceptedAt: null,
-    };
-    db.verPlayerInvites.push(inv);
-    const secret = mintToken({
-      purpose: 'player_invite', email: email ?? null, orgId: req.org.id, refId: inv.id,
-      subjectKind: targetPlayer ? 'player' : null, subjectId: targetPlayer?.id ?? null,
-      ttlMs: 14 * 86_400_000,
+    let secret = null;
+    const inv = unit(() => {
+      const created = verification.playerInvites.create({
+        id: nextId('vpin'), orgId: req.org.id, byUserId: req.orgUser.id, byName: (req.orgUser.name == null ? null : String(req.orgUser.name).slice(0, L.name)),
+        name: String(name).trim().slice(0, L.inviteeName), squad: String(squad ?? '').slice(0, L.squad),
+        status: 'pending', playerId: null, targetPlayerId: targetPlayer?.id ?? null, guardianApproved: null,
+        createdAt: Date.now(), expiresAt: Date.now() + 14 * 86_400_000, acceptedAt: null,
+      });
+      secret = mintToken({
+        purpose: 'player_invite', email: email ?? null, orgId: req.org.id, refId: created.id,
+        subjectKind: targetPlayer ? 'player' : null, subjectId: targetPlayer?.id ?? null,
+        ttlMs: 14 * 86_400_000,
+      });
+      return created;
     });
     if (email) await mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} at ${req.org.name} invites you to join ScoutBox${inv.squad ? ` (${inv.squad})` : ''}.\n\nInvitation code: ${secret}\n\nJoining is your choice — an invitation gives the club no control over your profile. Under-18s join through a parent or guardian.` });
     persistNow();
     res.status(201).json({ invite: inv, ...(email ? {} : { code: secret, note: 'No email supplied — hand the single-use code to the player (or their guardian) directly.' }) });
   });
   orgRouter.get('/verification/player-invites', (req, res) => {
-    res.json({ items: db.verPlayerInvites.filter((i) => i.orgId === req.org.id) });
+    res.json({ items: reads.playerInvites.forOrg(req.org.id) });
   });
 
   // Acceptance NEVER creates identity claims and never bypasses guardianship:
@@ -740,9 +801,11 @@ export function registerOrganisationVerification(ctx) {
     // M14.1 recipient binding: peek first, run EVERY binding check, and only
     // then consume — a wrong-recipient attempt must never burn the rightful
     // recipient's single-use secret.
+    if (!(code === undefined || code === null || typeof code === 'string')) return res.status(404).json({ error: 'TOKEN_UNKNOWN' });
     const out = ctx.peekToken({ purpose: 'player_invite', secret: code });
     if (out.error) return res.status(out.error === 'TOKEN_EXPIRED' ? 410 : 404).json({ error: out.error });
-    const inv = db.verPlayerInvites.find((i) => i.id === out.token.refId && i.status === 'pending' && !i.playerId);
+    const found = reads.playerInvites.byId(out.token.refId);
+    const inv = found && found.status === 'pending' && !found.playerId ? found : null;
     if (!inv) return res.status(404).json({ error: 'INVITE_NOT_FOUND' });
     const org = orgOf(inv.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
@@ -765,13 +828,18 @@ export function registerOrganisationVerification(ctx) {
         return res.status(403).json({ error: 'INVITE_RECIPIENT_MISMATCH', message: guardian ? 'This invitation was addressed to a different guardian email.' : 'Confirm the email address the invitation was sent to.' });
       }
     }
-    out.token.usedAt = Date.now(); // all binding checks passed — consume now
-    inv.status = 'accepted'; inv.playerId = player.id; inv.acceptedAt = Date.now();
-    inv.guardianApproved = guardian ? { guardianId: guardian.id, at: Date.now() } : null;
-    verEvent('claim.created', { orgId: inv.orgId, subjectId: player.id, after: { invite: inv.id, guardianApproved: !!guardian } });
-    notify({ kind: 'org_user', id: inv.byUserId }, 'verification', `${player.name} accepted your squad invitation${guardian ? ' (guardian-approved)' : ''}.`, inv.id);
+    const accepted = unit(() => {
+      ctx.useToken(out.token); // all binding checks passed — consume now
+      const next = verification.playerInvites.update(inv.id, (d) => {
+        d.status = 'accepted'; d.playerId = player.id; d.acceptedAt = Date.now();
+        d.guardianApproved = guardian ? { guardianId: guardian.id, at: Date.now() } : null;
+      });
+      verEvent('claim.created', { orgId: inv.orgId, subjectId: player.id, after: { invite: inv.id, guardianApproved: !!guardian } });
+      notify({ kind: 'org_user', id: inv.byUserId }, 'verification', `${player.name} accepted your squad invitation${guardian ? ' (guardian-approved)' : ''}.`, inv.id);
+      return next;
+    });
     persistNow();
-    return res.json({ invite: inv, note: 'Joining links nothing else: club visibility, contact and consent all still follow the standing safeguarding rules.' });
+    return res.json({ invite: accepted, note: 'Joining links nothing else: club visibility, contact and consent all still follow the standing safeguarding rules.' });
   }
 
   // ================================================ coach references (§18)
@@ -787,71 +855,88 @@ export function registerOrganisationVerification(ctx) {
       return res.status(403).json({ error: 'UNDER_18_WALL', message: 'A verified role does not widen player visibility — the standing consent and safeguarding rules decide who you can reference.' });
     }
     const { relationship, capacity, fromYear, toYear, strengths, development, summary } = req.body ?? {};
+    for (const [k, v] of [['relationship', relationship], ['summary', summary], ['capacity', capacity], ['strengths', strengths], ['development', development]]) {
+      if (!(v === undefined || v === null || typeof v === 'string')) return fieldInvalid(res, k, `${k} is text.`);
+    }
     if (!relationship?.trim() || !summary?.trim()) return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'relationship and summary are required.' });
-    const ref = {
-      id: nextId('vref'), version: 1, supersedesId: null, playerId: p.id, playerName: p.name,
-      coachUserId: req.orgUser.id, coachName: req.orgUser.name, orgId: req.org.id, orgName: req.org.name,
-      roleAtTime: roleClaim.role ?? req.orgUser.role,
-      provenanceSnapshot: { // §18: snapshot at submission — later changes never rewrite it
-        claimId: roleClaim.id, claimType: roleClaim.claimType, status: 'verified',
-        method: roleClaim.verificationMethod, verifiedAt: roleClaim.verifiedAt, snapshotAt: Date.now(),
-      },
-      relationship: String(relationship).slice(0, 80), capacity: String(capacity ?? '').slice(0, 120),
-      fromYear: Number(fromYear) || null, toYear: Number(toYear) || null,
-      structured: { strengths: String(strengths ?? '').slice(0, 500), development: String(development ?? '').slice(0, 500), summary: String(summary).slice(0, 800) },
-      status: 'active', withdrawnAt: null, withdrawReason: null, createdAt: Date.now(),
-    };
-    db.verReferences.push(ref);
-    verEvent('claim.created', { orgId: req.org.id, subjectId: p.id, after: { reference: ref.id, provenance: ref.provenanceSnapshot.claimId } }, req);
-    // Guardian routing for minors — existing DOB/country logic, untouched.
-    if (isAdult(p)) notify({ kind: 'player', id: p.id }, 'verification', `${req.orgUser.name} (${req.org.name}) added a structured reference to your profile.`, ref.id);
-    else if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'verification', `${req.orgUser.name} (verified at ${req.org.name}) added a structured reference for ${p.name}. You can review it in the app.`, ref.id);
+    // A year is a whole number (or digits) between 1900 and 2100, or nothing; `Number(x) || null` used to read junk as "no year".
+    const yearOf = (v) => (v === undefined || v === null || v === '' ? { ok: true, year: null } : (Number.isInteger(v) || (typeof v === 'string' && /^\d{4}$/.test(v.trim()))) && Number(v) >= 1900 && Number(v) <= 2100 ? { ok: true, year: Number(v) } : { ok: false });
+    const fy = yearOf(fromYear); if (!fy.ok) return fieldInvalid(res, 'fromYear', 'fromYear is a year between 1900 and 2100.');
+    const ty = yearOf(toYear); if (!ty.ok) return fieldInvalid(res, 'toYear', 'toYear is a year between 1900 and 2100.');
+    const ref = unit(() => {
+      const created = verification.references.create({
+        id: nextId('vref'), version: 1, supersedesId: null, playerId: p.id, playerName: p.name == null ? null : String(p.name).slice(0, L.name),
+        coachUserId: req.orgUser.id, coachName: (req.orgUser.name == null ? null : String(req.orgUser.name).slice(0, L.name)), orgId: req.org.id, orgName: String(req.org.name).slice(0, L.name),
+        roleAtTime: roleClaim.role ?? (req.orgUser.role == null ? null : String(req.orgUser.role).slice(0, L.name)),
+        provenanceSnapshot: { // §18: snapshot at submission — later changes never rewrite it
+          claimId: roleClaim.id, claimType: roleClaim.claimType, status: 'verified',
+          method: roleClaim.verificationMethod, verifiedAt: roleClaim.verifiedAt, snapshotAt: Date.now(),
+        },
+        relationship: String(relationship).slice(0, L.relationship), capacity: String(capacity ?? '').slice(0, L.capacity),
+        fromYear: fy.year, toYear: ty.year,
+        structured: { strengths: String(strengths ?? '').slice(0, L.strengths), development: String(development ?? '').slice(0, L.development), summary: String(summary).slice(0, L.summary) },
+        status: 'active', withdrawnAt: null, withdrawReason: null, createdAt: Date.now(),
+      });
+      verEvent('claim.created', { orgId: req.org.id, subjectId: p.id, after: { reference: created.id, provenance: created.provenanceSnapshot.claimId } }, req);
+      // Guardian routing for minors — existing DOB/country logic, untouched.
+      if (isAdult(p)) notify({ kind: 'player', id: p.id }, 'verification', `${req.orgUser.name} (${req.org.name}) added a structured reference to your profile.`, created.id);
+      else if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'verification', `${req.orgUser.name} (verified at ${req.org.name}) added a structured reference for ${p.name}. You can review it in the app.`, created.id);
+      return created;
+    });
     persistNow();
     res.status(201).json({ reference: ref });
   });
 
   orgRouter.get('/verification/references', (req, res) => {
-    res.json({ items: db.verReferences.filter((r) => r.orgId === req.org.id) });
+    res.json({ items: reads.references.forOrg(req.org.id) });
   });
 
   orgRouter.post('/verification/references/:id/withdraw', (req, res) => {
-    const ref = db.verReferences.find((r) => r.id === req.params.id && r.orgId === req.org.id && r.coachUserId === req.orgUser.id);
+    const ref = ownReference(req, reads.references.byId(req.params.id));
     if (!ref) return res.status(404).json({ error: 'REFERENCE_NOT_FOUND' });
     if (ref.status !== 'active') return res.status(409).json({ error: 'NOT_ACTIVE' });
-    if (!req.body?.reason?.trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
-    ref.status = 'withdrawn'; ref.withdrawnAt = Date.now(); ref.withdrawReason = String(req.body.reason).slice(0, 300);
-    verEvent('claim.corrected', { orgId: req.org.id, subjectId: ref.playerId, before: { reference: ref.id, status: 'active' }, after: { status: 'withdrawn' }, reason: ref.withdrawReason }, req);
+    if (typeof req.body?.reason !== 'string' || !req.body.reason.trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
+    const withdrawn = unit(() => {
+      const next = verification.references.update(ref.id, (d) => { d.status = 'withdrawn'; d.withdrawnAt = Date.now(); d.withdrawReason = req.body.reason.slice(0, L.withdrawReason); });
+      verEvent('claim.corrected', { orgId: req.org.id, subjectId: ref.playerId, before: { reference: ref.id, status: 'active' }, after: { status: 'withdrawn' }, reason: next.withdrawReason }, req);
+      return next;
+    });
     persistNow();
-    res.json({ reference: ref, note: 'Withdrawal is an event — the original text and its provenance remain in the record.' });
+    res.json({ reference: withdrawn, note: 'Withdrawal is an event — the original text and its provenance remain in the record.' });
   });
 
   orgRouter.post('/verification/references/:id/correct', (req, res) => {
-    const old = db.verReferences.find((r) => r.id === req.params.id && r.orgId === req.org.id && r.coachUserId === req.orgUser.id);
+    const old = ownReference(req, reads.references.byId(req.params.id));
     if (!old) return res.status(404).json({ error: 'REFERENCE_NOT_FOUND' });
     if (old.status !== 'active') return res.status(409).json({ error: 'NOT_ACTIVE' });
-    const next = {
-      ...structuredClone(old), id: nextId('vref'), version: old.version + 1, supersedesId: old.id,
-      structured: {
-        strengths: String(req.body?.strengths ?? old.structured.strengths).slice(0, 500),
-        development: String(req.body?.development ?? old.structured.development).slice(0, 500),
-        summary: String(req.body?.summary ?? old.structured.summary).slice(0, 800),
-      },
-      createdAt: Date.now(),
-    };
-    old.status = 'superseded';
-    db.verReferences.push(next);
-    verEvent('claim.corrected', { orgId: req.org.id, subjectId: old.playerId, before: { reference: old.id }, after: { reference: next.id, version: next.version } }, req);
+    for (const k of ['strengths', 'development', 'summary']) if (!(req.body?.[k] === undefined || req.body?.[k] === null || typeof req.body[k] === 'string')) return fieldInvalid(res, k, `${k} is text.`);
+    if (typeof req.body?.summary === 'string' && !req.body.summary.trim()) return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'A reference keeps its summary.' });
+    const next = unit(() => {
+      verification.references.update(old.id, (d) => { d.status = 'superseded'; });
+      const created = verification.references.create({
+        ...structuredClone(old), id: nextId('vref'), version: old.version + 1, supersedesId: old.id,
+        structured: {
+          strengths: String(req.body?.strengths ?? old.structured.strengths).slice(0, L.strengths),
+          development: String(req.body?.development ?? old.structured.development).slice(0, L.development),
+          summary: String(req.body?.summary ?? old.structured.summary).slice(0, L.summary),
+        },
+        createdAt: Date.now(),
+      });
+      verEvent('claim.corrected', { orgId: req.org.id, subjectId: old.playerId, before: { reference: old.id }, after: { reference: created.id, version: created.version } }, req);
+      return created;
+    });
     persistNow();
     res.json({ reference: next, superseded: old.id, note: 'Corrections create a new version — the original is never silently edited.' });
   });
 
+  const ownReference = (req, r) => (r && r.orgId === req.org.id && r.coachUserId === req.orgUser.id ? r : null);
   // Player/guardian read their references, with honest provenance wording.
   const refPlayerView = (r) => ({
     id: r.id, version: r.version, coachName: r.coachName, orgName: r.orgName, roleAtTime: r.roleAtTime,
     relationship: r.relationship, capacity: r.capacity, fromYear: r.fromYear, toYear: r.toYear,
     structured: r.structured, status: r.status, createdAt: r.createdAt,
     provenance: (() => {
-      const claim = db.verClaims.find((c) => c.id === r.provenanceSnapshot.claimId);
+      const claim = reads.claims.byId(r.provenanceSnapshot.claimId);
       const stillCurrent = claim && effectiveStatus(claim, { org: orgOf(r.orgId) }).current;
       return stillCurrent
         ? `Coach's ${r.orgName} affiliation is verified.`
@@ -859,11 +944,11 @@ export function registerOrganisationVerification(ctx) {
     })(),
   });
   playerRouter.get('/references', (req, res) => {
-    res.json({ items: db.verReferences.filter((r) => r.playerId === req.player.id && r.status !== 'superseded').map(refPlayerView) });
+    res.json({ items: reads.references.forPlayer(req.player.id).filter((r) => r.status !== 'superseded').map(refPlayerView) });
   });
   guardianRouter.get('/children/:id/references', (req, res) => {
     if (!req.guardian.childIds.includes(req.params.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-    res.json({ items: db.verReferences.filter((r) => r.playerId === req.params.id && r.status !== 'superseded').map(refPlayerView) });
+    res.json({ items: reads.references.forPlayer(req.params.id).filter((r) => r.status !== 'superseded').map(refPlayerView) });
   });
 
   // ====================================== root organisation bootstrap (§6)
@@ -872,21 +957,28 @@ export function registerOrganisationVerification(ctx) {
   app.post('/auth/org/verification/apply', async (req, res) => {
     const b = req.body ?? {};
     const required = ['orgName', 'orgType', 'country', 'website', 'applicantName', 'applicantRole', 'workEmail'];
+    for (const k of [...required, 'federation', 'domain', 'officialContact']) if (!(b[k] === undefined || b[k] === null || typeof b[k] === 'string')) return fieldInvalid(res, k, `${k} is text.`);
     const missing = required.filter((k) => !String(b[k] ?? '').trim());
     if (missing.length) return res.status(400).json({ error: 'FIELDS_REQUIRED', missing });
+    // Declarations are a fixed statement: { authorised: true|false }, or none. Anything else used to be stored verbatim.
+    const decl = b.declarations;
+    if (!(decl === undefined || decl === null || (typeof decl === 'object' && !Array.isArray(decl) && Object.keys(decl).every((k) => k === 'authorised') && typeof decl.authorised === 'boolean'))) {
+      return fieldInvalid(res, 'declarations', 'declarations is { authorised: true } or { authorised: false }.');
+    }
     const ORG_TYPES = ['professional club', 'academy', 'grassroots club', 'federation/association', 'agency', 'other approved football organisation'];
     if (!ORG_TYPES.includes(b.orgType)) return res.status(400).json({ error: 'ORG_TYPE_UNKNOWN', types: ORG_TYPES });
     const problem = emailProblem(b.workEmail);
     if (problem) return res.status(400).json({ error: problem });
     const domain = normalizeDomain(b.domain || b.website);
+    if (domain.length > L.domain) return fieldInvalid(res, 'domain', 'The domain is too long.');
+    if (String(b.workEmail).length > L.email) return res.status(400).json({ error: 'EMAIL_TOO_LONG' });
     const emailDom = domainOfEmail(b.workEmail);
     // ---- deterministic automated checks (§6). No network fetch happens here:
     // DNS/https probing from this environment is not implemented — recorded
     // honestly as not_configured rather than pretended.
     const dupOrg = db.orgs.find((o) => o.name.trim().toLowerCase() === String(b.orgName).trim().toLowerCase());
-    const dupDomainOrg = db.orgs.find((o) => (o.verification?.domains ?? []).some((d) => d.status === 'verified' && d.domain === domain));
-    const dupRequest = db.verRootRequests.find((r) => ['pending', 'requires_human_review', 'collecting_evidence'].includes(r.status)
-      && (normalizeDomain(r.domain) === domain || r.orgName.trim().toLowerCase() === String(b.orgName).trim().toLowerCase()));
+    const dupDomainOrg = domain ? reads.domains.verifiedElsewhere(domain) : null;
+    const dupRequest = reads.rootRequests.openDuplicate(domain, String(b.orgName).trim().toLowerCase());
     const checks = {
       emailSyntax: 'passed',
       emailDomainAlignment: domainCovered(emailDom, domain) ? 'passed' : 'mismatch',
@@ -901,20 +993,23 @@ export function registerOrganisationVerification(ctx) {
     };
     const flags = riskFlags({ email: b.workEmail, orgDomains: domain ? [domain] : [] });
     const applicantSecret = randomHex(18);
-    const r = {
-      id: nextId('vroot'), status: 'collecting_evidence',
-      orgName: String(b.orgName).trim().slice(0, 120), orgType: b.orgType, country: String(b.country).slice(0, 40),
-      federation: String(b.federation ?? '').slice(0, 80) || null, website: String(b.website).slice(0, 200),
-      domain, applicantName: String(b.applicantName).trim().slice(0, 80), applicantRole: String(b.applicantRole).slice(0, 60),
-      workEmail: String(b.workEmail).toLowerCase(), officialContact: String(b.officialContact ?? '').slice(0, 200) || null,
-      declarations: b.declarations ?? null, evidenceIds: [], checks, riskFlags: flags,
-      reviewReasons: [], emailProved: false, existingOrgId: dupOrg?.id ?? null,
-      applicantSecretHash: sha256(applicantSecret),
-      createdAt: Date.now(), decidedAt: null, decidedBy: null, decisionReason: null,
-      resultOrgId: null, resultUserId: null,
-    };
-    db.verRootRequests.push(r);
-    const secret = mintToken({ purpose: 'root_email', email: r.workEmail, refId: r.id });
+    let secret = null;
+    const r = unit(() => {
+      const created = verification.rootRequests.create({
+        id: nextId('vroot'), status: 'collecting_evidence',
+        orgName: String(b.orgName).trim().slice(0, L.orgName), orgType: b.orgType, country: String(b.country).slice(0, L.country),
+        federation: String(b.federation ?? '').slice(0, L.federation) || null, website: String(b.website).slice(0, L.website),
+        domain, applicantName: String(b.applicantName).trim().slice(0, L.applicantName), applicantRole: String(b.applicantRole).slice(0, L.applicantRole),
+        workEmail: String(b.workEmail).toLowerCase(), officialContact: String(b.officialContact ?? '').slice(0, L.officialContact) || null,
+        declarations: decl ? { authorised: decl.authorised } : null, checks, riskFlags: flags,
+        reviewReasons: [], emailProved: false, existingOrgId: dupOrg?.id ?? null,
+        applicantSecretHash: sha256(applicantSecret),
+        createdAt: Date.now(), decidedAt: null, decidedBy: null, decidedById: null, decisionAttribution: null, decisionReason: null,
+        resultOrgId: null, resultUserId: null, identityLink: null,
+      });
+      secret = mintToken({ purpose: 'root_email', email: created.workEmail, refId: created.id });
+      return created;
+    });
     await mailer.send({ to: r.workEmail, subject: `Verify your email for the ${r.orgName} ScoutBox application`, text: `Your ScoutBox organisation-application code is ${secret}\n\nSingle use, expires in 30 minutes.` });
     verEvent('review.requested', { orgId: null, subjectId: null, after: { rootRequest: r.id, checks } });
     persistNow();
@@ -925,7 +1020,7 @@ export function registerOrganisationVerification(ctx) {
   });
 
   const rootReqBySecret = (req, res) => {
-    const r = db.verRootRequests.find((x) => x.id === req.params.id);
+    const r = reads.rootRequests.byId(req.params.id);
     if (!r || r.applicantSecretHash !== sha256(String(req.body?.applicantSecret ?? req.query?.applicantSecret ?? ''))) {
       res.status(404).json({ error: 'REQUEST_NOT_FOUND' }); // concealment — no probing which ids exist
       return null;
@@ -935,14 +1030,18 @@ export function registerOrganisationVerification(ctx) {
 
   app.post('/auth/org/verification/apply/:id/confirm-email', (req, res) => {
     const r = rootReqBySecret(req, res); if (!r) return;
-    const out = consumeToken({ purpose: 'root_email', secret: req.body?.code, email: r.workEmail });
-    if (out.error || out.token.refId !== r.id) {
+    if (!(req.body?.code === undefined || req.body?.code === null || typeof req.body.code === 'string')) return fieldInvalid(res, 'code', 'code is text.');
+    const peek = ctx.peekToken({ purpose: 'root_email', secret: req.body?.code, email: r.workEmail });
+    if (peek.error || peek.token.refId !== r.id) {
+      if (!peek.error) ctx.useToken(peek.token);
       vmetric('emailChallengeFailures');
-      return res.status(401).json({ error: out.error ?? 'TOKEN_WRONG_PURPOSE' });
+      return res.status(401).json({ error: peek.error ?? 'TOKEN_WRONG_PURPOSE' });
     }
-    r.emailProved = true;
-    r.checks.evidenceCompleteness = 'email_proved';
-    verEvent('email.challenge_passed', { after: { rootRequest: r.id } });
+    unit(() => {
+      ctx.useToken(peek.token);
+      verification.rootRequests.update(r.id, (d) => { d.emailProved = true; d.checks.evidenceCompleteness = 'email_proved'; });
+      verEvent('email.challenge_passed', { after: { rootRequest: r.id } });
+    });
     persistNow();
     res.json({ emailProved: true });
   });
@@ -951,20 +1050,24 @@ export function registerOrganisationVerification(ctx) {
     const r = rootReqBySecret(req, res); if (!r) return;
     if (!['collecting_evidence', 'requires_human_review'].includes(r.status)) return res.status(409).json({ error: 'REQUEST_CLOSED' });
     const { dataUrl, filename, note } = req.body ?? {};
+    if (!(note === undefined || note === null || typeof note === 'string')) return fieldInvalid(res, 'note', 'note is text.');
+    if (!(filename === undefined || filename === null || typeof filename === 'string')) return fieldInvalid(res, 'filename', 'filename is text.');
     let fileFields = {};
     if (dataUrl) {
       const stored = storeEvidenceFile(dataUrl, filename, req);
       if (stored.error) return res.status(422).json({ error: stored.error });
       fileFields = stored;
     } else if (!note?.trim()) return res.status(400).json({ error: 'EVIDENCE_REQUIRED' });
-    const dup = fileFields.sha256 && db.verEvidence.some((e) => e.sha256 === fileFields.sha256);
-    const ev = addEvidence({
-      type: 'document', source: 'root_application', suppliedByKind: 'applicant', suppliedById: r.id,
-      orgId: null, claimIds: [], ...fileFields, meta: { note: String(note ?? '').slice(0, 400), rootRequest: r.id },
-      visibility: 'trust_and_safety',
+    const dup = fileFields.sha256 && reads.evidence.digestSeen(fileFields.sha256);
+    const ev = unit(() => {
+      const added = addEvidence({
+        type: 'document', source: 'root_application', suppliedByKind: 'applicant', suppliedById: r.id,
+        orgId: null, claimIds: [], ...fileFields, meta: { note: String(note ?? '').slice(0, L.note), rootRequest: r.id },
+        visibility: 'trust_and_safety',
+      });
+      if (dup && !r.riskFlags.includes('DUPLICATE_EVIDENCE_HASH')) verification.rootRequests.update(r.id, (d) => { d.riskFlags.push('DUPLICATE_EVIDENCE_HASH'); });
+      return added;
     });
-    r.evidenceIds.push(ev.id);
-    if (dup && !r.riskFlags.includes('DUPLICATE_EVIDENCE_HASH')) r.riskFlags.push('DUPLICATE_EVIDENCE_HASH');
     persistNow();
     res.status(201).json({ evidence: { id: ev.id, checks: ev.checks } });
   });
@@ -981,19 +1084,20 @@ export function registerOrganisationVerification(ctx) {
       domainAmbiguous: r.checks.emailDomainAlignment === 'mismatch',
       riskFlagCount: r.riskFlags.length,
     });
-    r.reviewReasons = reasons;
-    r.status = 'requires_human_review';
+    unit(() => {
+      verification.rootRequests.update(r.id, (d) => { d.reviewReasons = reasons; d.status = 'requires_human_review'; });
+      verEvent('review.requested', { after: { rootRequest: r.id, reasons } });
+    });
     vmetric('routedToHumanReview');
-    verEvent('review.requested', { after: { rootRequest: r.id, reasons } });
     persistNow();
     res.json({
-      status: r.status, reasons,
+      status: 'requires_human_review', reasons,
       explanation: `ScoutBox has confirmed control of a ${domainOfEmail(r.workEmail)} mailbox, but an authorised organisation administrator has not yet been established — Trust & Safety reviews the application and the evidence before the first administrator is appointed.`,
     });
   });
 
   app.get('/auth/org/verification/apply/:id/status', (req, res) => {
-    const r = db.verRootRequests.find((x) => x.id === req.params.id);
+    const r = reads.rootRequests.byId(req.params.id);
     if (!r || r.applicantSecretHash !== sha256(String(req.query.applicantSecret ?? ''))) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
     res.json({ id: r.id, status: r.status, checks: r.checks, reviewReasons: r.reviewReasons, decisionReason: r.decisionReason, resultOrgId: r.resultOrgId });
   });

@@ -737,7 +737,7 @@ export function registerCompliance(rawCtx) {
     broadcast('regulatory_consent_requested', { orgId: c.agencyOrgId, consentId: k.id, ctxId: c.id });
     const agentName = p.displayName ?? req.orgUser.name;
     if (party.subjectKind === 'player') notify({ kind: 'player', id: party.subjectId }, 'regulatory_consent_requested', `${agentName} (${req.org.name}) asks your written consent to also act for another party in a ${c.type.replace(/_/g, ' ')} involving you. You may decline. Nothing changes until you answer.`, k.id);
-    else for (const u of (db.verAdmins ?? []).filter((a) => a.orgId === party.subjectId && a.status === 'active')) notify({ kind: 'org_user', id: u.userId }, 'regulatory_consent_requested', `${agentName} (${req.org.name}) asks your club's written consent to act for more than one party in a ${c.type.replace(/_/g, ' ')}. Only a recorded signatory may answer.`, k.id);
+    else for (const u of rawCtx.verificationReads.admins.activeForOrg(party.subjectId)) notify({ kind: 'org_user', id: u.userId }, 'regulatory_consent_requested', `${agentName} (${req.org.name}) asks your club's written consent to act for more than one party in a ${c.type.replace(/_/g, ' ')}. Only a recorded signatory may answer.`, k.id);
     persistNow();
     res.status(201).json({ consent: consentForAgent(k) });
   }
@@ -811,12 +811,12 @@ export function registerCompliance(rawCtx) {
   const clubWho = (req) => (k) => {
     if (req.org.type !== 'club') return { ok: false, error: 'CONSENT_NOT_FOUND' };
     if (k.subject?.kind !== 'club' || k.subject.id !== req.org.id) return { ok: false, error: 'CONSENT_NOT_FOUND' };
-    if (!hasVerLevel(db, req.org.id, req.orgUser.id, 'verification_admin')) return { ok: false, error: 'SIGNATORY_REQUIRED', message: 'Only a recorded club signatory (a verification administrator) may answer for the club.' };
+    if (!hasVerLevel(rawCtx.verificationReads, req.org.id, req.orgUser.id, 'verification_admin')) return { ok: false, error: 'SIGNATORY_REQUIRED', message: 'Only a recorded club signatory (a verification administrator) may answer for the club.' };
     return { ok: true, signatory: true };
   };
   orgRouter.get('/compliance/consents', (req, res) => {
     if (req.org.type !== 'club') return sendComplianceError(res, { error: 'COMPLIANCE_ACTION_NOT_PERMITTED' }, 'consents');
-    res.json({ items: db.regulatoryConsents.filter((k) => k && k.kind === 'dual_representation' && k.subject?.kind === 'club' && k.subject.id === req.org.id).map(consentForParty), signatory: hasVerLevel(db, req.org.id, req.orgUser.id, 'verification_admin') });
+    res.json({ items: db.regulatoryConsents.filter((k) => k && k.kind === 'dual_representation' && k.subject?.kind === 'club' && k.subject.id === req.org.id).map(consentForParty), signatory: hasVerLevel(rawCtx.verificationReads, req.org.id, req.orgUser.id, 'verification_admin') });
   });
   for (const action of ['grant', 'decline', 'revoke']) {
     orgRouter.post(`/compliance/consents/:id/${action}`, (req, res) => consentAnswer(req, res, { action, who: clubWho(req), by: byClubUser(req), rateKey: req.orgUser.id }));

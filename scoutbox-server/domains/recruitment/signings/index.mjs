@@ -75,7 +75,11 @@ export function registerSigning(rawCtx) {
     recruitmentReads,
     // S9c: a grassroots signing's squad row is a row of org_squad_members.
     clubSetup,
+    // S10a: the document vault is the verification repository's evidence.
+    verificationReads,
   } = ctx;
+  /** The vault record `id` owned by `orgId`, or null. */
+  const vaultRecordOf = (id, orgId) => { const e = typeof id === 'string' ? verificationReads?.evidence.byId(id) ?? null : null; return e && e.orgId === orgId ? e : null; };
   if (typeof recruitmentReads?.offers?.byId !== 'function') throw new TypeError('registerSigning needs recruitmentReads (offers) from the data layer');
   const offerReads = recruitmentReads.offers;
   /** A case of this organisation, or null (§4.3 step 2: read through SQL). */
@@ -229,7 +233,7 @@ export function registerSigning(rawCtx) {
    */
   function documentBytesProblem(pkg, doc) {
     if (!doc?.evidenceId || !doc.sha256) return 'missing';
-    const ev = (db.verEvidence ?? []).find((e) => e && e.id === doc.evidenceId && e.orgId === pkg.orgId) ?? null;
+    const ev = vaultRecordOf(doc.evidenceId, pkg.orgId);
     if (!ev) return 'evidence_missing';
     if (ev.meta?.signingPackageId !== pkg.id) return 'foreign';
     if (ev.sha256 !== doc.sha256) return 'digest_mismatch';
@@ -238,7 +242,7 @@ export function registerSigning(rawCtx) {
     return createHash('sha256').update(blob.buffer).digest('hex') === doc.sha256 ? null : 'bytes_mismatch';
   }
   function documentFile(doc, orgId) {
-    const ev = (db.verEvidence ?? []).find((e) => e && e.id === doc?.evidenceId && e.orgId === orgId);
+    const ev = vaultRecordOf(doc?.evidenceId, orgId);
     if (!ev) return null;
     const blob = ev.mediaId && storage?.read ? storage.read(ev.mediaId) : null;
     return { document: { id: doc.id, label: doc.label ?? null, filename: ev.filename ?? null, mime: ev.mime ?? blob?.contentType ?? null, bytes: ev.bytes ?? blob?.buffer?.length ?? null, sha256: ev.sha256 ?? null }, file: blob ? { mime: ev.mime ?? blob.contentType, base64: blob.buffer.toString('base64') } : null };

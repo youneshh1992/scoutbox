@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import {
   evidenceFileProblem, sniffFileSignature, toPublicVerificationProfile,
   assuranceForClaim, claimProvenanceLabel, mintToken, consumeToken, peekToken,
+ arrayTokenStore,
 } from '../../domains/verification/claims/shared.mjs';
 
 const PORT = 4600 + Math.floor(Math.random() * 300);
@@ -83,7 +84,7 @@ section('U1 — evidence content signatures: bytes must BE the claimed format');
 
 section('U2 — assurance semantics: the projector is provenance-sensitive');
 {
-  const org = { id: 'o1', name: 'Testchester FC', suspended: false, verification: { revokedAt: null } };
+  const org = { id: 'o1', name: 'Testchester FC', suspended: false, verificationRevokedAt: null };
   const lic = (method) => ({ id: 'c', subjectType: 'user', subjectId: 'u1', claimType: 'LICENCE', organisationId: null, status: 'verified', current: true, validFrom: 1, validUntil: null, verificationMethod: method, verifiedAt: 5, metadata: { licenceType: 'UEFA A Licence' }, evidenceIds: [] });
   ok(assuranceForClaim(lic('authoritative_registry')) === 'authoritative', 'registry match → authoritative');
   ok(assuranceForClaim(lic('scoutbox_manual_review')) === 'scoutbox_document_review', 'manual review → scoutbox_document_review');
@@ -115,7 +116,7 @@ section('U3 — identity provenance: structured, method-distinguishing, no evide
 
 section('U4 — subjectRemoved + peekToken primitives');
 {
-  const org = { id: 'o1', name: 'X', suspended: false, verification: { revokedAt: null } };
+  const org = { id: 'o1', name: 'X', suspended: false, verificationRevokedAt: null };
   const cur = { id: 'c', subjectType: 'user', subjectId: 'u1', claimType: 'CLUB_ROLE', organisationId: 'o1', status: 'verified', current: true, validFrom: 1, validUntil: null, verificationMethod: 'organisation_admin_confirmation', verifiedAt: 2, role: 'Scout', metadata: {}, evidenceIds: [] };
   const hist = { ...cur, id: 'h', current: false, validUntil: 99 };
   const alive = toPublicVerificationProfile({ subjectType: 'user', subjectId: 'u1', claims: [cur, hist], orgsById: new Map([['o1', org]]) });
@@ -123,14 +124,14 @@ section('U4 — subjectRemoved + peekToken primitives');
   ok(alive.badges.some((b) => b.current), 'active account: current badge displays');
   ok(!removed.badges.some((b) => b.current), 'subjectRemoved: NO current badge survives the projector');
   ok(removed.badges.some((b) => b.historical), 'closed historical periods remain as history (policy: truth preserved)');
-  const fdb = { verTokens: [] };
+  const fdb = { verTokens: [] }; const ts = arrayTokenStore(fdb.verTokens); // S10a: the token functions take a store (the server's is the repository)
   const nid = (() => { let n = 0; return (p) => `${p}-${++n}`; })();
-  const secret = mintToken(fdb, nid, { purpose: 'player_invite', subjectId: 'alice' });
-  ok(peekToken(fdb, { purpose: 'player_invite', secret }).token && !fdb.verTokens[0].usedAt, 'peek validates WITHOUT consuming');
-  ok(peekToken(fdb, { purpose: 'player_invite', secret, subjectId: 'bob' }).error === 'TOKEN_WRONG_ACCOUNT', 'peek enforces subject binding');
-  ok(consumeToken(fdb, { purpose: 'player_invite', secret, subjectId: 'alice' }).token && fdb.verTokens[0].usedAt, 'consume marks used on success');
-  const expired = mintToken(fdb, nid, { purpose: 'player_invite', ttlMs: -1 });
-  ok(peekToken(fdb, { purpose: 'player_invite', secret: expired }).error === 'TOKEN_EXPIRED', 'expired invite token refused');
+  const secret = mintToken(ts, nid, { purpose: 'player_invite', subjectId: 'alice' });
+  ok(peekToken(ts, { purpose: 'player_invite', secret }).token && !fdb.verTokens[0].usedAt, 'peek validates WITHOUT consuming');
+  ok(peekToken(ts, { purpose: 'player_invite', secret, subjectId: 'bob' }).error === 'TOKEN_WRONG_ACCOUNT', 'peek enforces subject binding');
+  ok(consumeToken(ts, { purpose: 'player_invite', secret, subjectId: 'alice' }).token && fdb.verTokens[0].usedAt, 'consume marks used on success');
+  const expired = mintToken(ts, nid, { purpose: 'player_invite', ttlMs: -1 });
+  ok(peekToken(ts, { purpose: 'player_invite', secret: expired }).error === 'TOKEN_EXPIRED', 'expired invite token refused');
 }
 
 // ====================================================== HTTP scenarios

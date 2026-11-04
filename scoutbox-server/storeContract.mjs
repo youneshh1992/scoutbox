@@ -199,19 +199,11 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // vacancies: never a db.* read since S9c — a typed table (migration 0021), read through repositories/clubSetup.mjs
   // (scoutingReads). db.vacancies throws. The organisation facets tactical, squad, lookingFor and federationCheck moved
   // to the same repository's tables.
-  verAdmins: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verClaims: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verConflicts: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verDisputes: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verDomainRequests: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verEvents: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verEvidence: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verMigrated: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verPlayerInvites: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verReferences: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verRootRequests: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
-  verRootTransfers: { guarantee: 'module', owner: 'm14', reason: 'was created inside the transfer route; moved to domains/verification/claims/shared.mjs beside its twelve siblings' },
-  verTokens: { guarantee: 'module', owner: 'm14', reason: 'M14 verification collection, created by migrateM14 at registration' },
+  // verAdmins, verClaims, verConflicts, verDisputes, verDomainRequests, verEvents, verEvidence, verPlayerInvites,
+  // verReferences, verRootRequests, verRootTransfers, verTokens (and the boot marker verMigrated): never a db.* read since
+  // S10a — typed tables (migration 0023), read through repositories/verification.mjs (verificationReads). db.<name>
+  // throws. The organisation facet `verification` moved to the same repository (verified domains) and to the orgs column
+  // verification_revoked_at (verificationRevokedAt).
   vouches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   watchlistHistory: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   webhookDeliveries: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },

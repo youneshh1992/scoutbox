@@ -39,7 +39,7 @@ export function registerTrust(ctx) {
    *  boolean only when no structured claim exists — and then states honestly
    *  that it was a ScoutBox review. */
   function identitySource(player) {
-    const claims = (db.verClaims ?? []).filter((c) => c.claimType === 'PERSON_IDENTITY' && c.subjectId === player.id);
+    const claims = ctx.verificationReads.claims.forSubjectId(player.id).filter((c) => c.claimType === 'PERSON_IDENTITY');
     let best = null;
     for (const c of claims) {
       const eff = effectiveStatus(c, { org: c.organisationId ? byId.org(c.organisationId) : null, now: Date.now() });
@@ -76,9 +76,8 @@ export function registerTrust(ctx) {
       clubs.add(o.id);
       out.push({ key: `rel:club:${o.id}`, kind: 'club', verified: !!o.verified });
     }
-    for (const r of (db.verReferences ?? [])) {
-      if (r.playerId !== player.id || r.status !== 'active') continue;
-      const claim = (db.verClaims ?? []).find((c) => c.id === r.provenanceSnapshot?.claimId);
+    for (const r of ctx.verificationReads.references.activeForPlayer(player.id)) {
+      const claim = ctx.verificationReads.claims.byId(r.provenanceSnapshot?.claimId);
       const verified = !!claim && claim.status === 'verified';
       out.push({ key: `rel:coach:${r.coachUserId ?? r.byUserId ?? r.id}`, kind: 'coach', verified });
     }
@@ -159,10 +158,9 @@ export function registerTrust(ctx) {
   }
 
   function referenceSource(player) {
-    return (db.verReferences ?? [])
-      .filter((r) => r.playerId === player.id && r.status === 'active')
+    return ctx.verificationReads.references.activeForPlayer(player.id)
       .map((r) => {
-        const claim = (db.verClaims ?? []).find((c) => c.id === r.provenanceSnapshot?.claimId);
+        const claim = ctx.verificationReads.claims.byId(r.provenanceSnapshot?.claimId);
         return { key: `ref:${r.id}`, verified: !!claim && claim.status === 'verified' };
       });
   }

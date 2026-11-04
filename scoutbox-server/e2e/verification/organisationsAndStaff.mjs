@@ -14,6 +14,7 @@ import {
   emailProblem, domainOfEmail, isFreeMail, isDisposable, domainCovered,
   normalizeDomain, evidenceFileProblem, evidenceCompleteness, mintToken,
   consumeToken, toPublicVerificationProfile, verLevelFor, orgVerificationStatus,
+ arrayTokenStore,
 } from '../../domains/verification/claims/shared.mjs';
 import { totp } from '../../m13/shared.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
@@ -86,14 +87,14 @@ section('unit fixtures — state machine');
 section('unit fixtures — effective engine (read-time truth)');
 {
   const base = { status: 'verified', current: true, validFrom: 1, validUntil: null, organisationId: 'o1', verificationMethod: 'organisation_admin_confirmation' };
-  const okOrg = { id: 'o1', suspended: false, verification: { revokedAt: null } };
+  const okOrg = { id: 'o1', suspended: false, verificationRevokedAt: null };
   ok(effectiveStatus({ ...base }, { org: okOrg }).displayable === true, 'verified + eligible org displays');
   ok(effectiveStatus({ ...base, validUntil: Date.now() - 1000 }, { org: okOrg }).status === 'expired', 'validUntil in the past reads as expired regardless of stored status');
   ok(effectiveStatus({ ...base }, { org: { ...okOrg, suspended: true } }).displayable === false, 'suspended organisation suppresses the badge at read time');
-  ok(effectiveStatus({ ...base }, { org: { ...okOrg, verification: { revokedAt: 5 } } }).displayable === false, 'revoked organisation suppresses the badge');
+  ok(effectiveStatus({ ...base }, { org: { ...okOrg, verificationRevokedAt: 5 } }).displayable === false, 'revoked organisation suppresses the badge');
   const hist = effectiveStatus({ ...base, current: false, validUntil: Date.now() + 10 }, { org: okOrg });
   ok(hist.displayable === true && hist.historical === true && hist.current === false, 'closed period stays displayable as HISTORY (security case 15: never as current)');
-  ok(effectiveStatus({ ...base, current: false, validUntil: 99 }, { org: { ...okOrg, verification: { revokedAt: 5 } } }).displayable === false, 'a fraud-revoked organisation stops lending even historical badges');
+  ok(effectiveStatus({ ...base, current: false, validUntil: 99 }, { org: { ...okOrg, verificationRevokedAt: 5 } }).displayable === false, 'a fraud-revoked organisation stops lending even historical badges');
 }
 
 section('unit fixtures — deterministic decision engine + risk flags');
@@ -123,23 +124,23 @@ section('unit fixtures — email/domain/evidence/token primitives');
   ok(evidenceFileProblem({ mime: 'application/pdf', bytes: 9 * 1024 * 1024, filename: 'big.pdf' }) === 'FILE_TOO_LARGE', 'oversize refused');
   ok(!evidenceCompleteness('PERSON_IDENTITY', []).complete && evidenceCompleteness('PERSON_IDENTITY', ['document']).complete, 'identity claims need a document before submission');
 
-  const fdb = { verTokens: [] };
+  const fdb = { verTokens: [] }; const ts = arrayTokenStore(fdb.verTokens); // S10a: the token functions take a store (the server's is the repository)
   const nid = (() => { let n = 0; return (p) => `${p}-${++n}`; })();
-  const secret = mintToken(fdb, nid, { purpose: 'work_email', email: 'a@club.com', subjectId: 'u1' });
+  const secret = mintToken(ts, nid, { purpose: 'work_email', email: 'a@club.com', subjectId: 'u1' });
   ok(!fdb.verTokens[0].hash.includes(secret) && fdb.verTokens[0].hash.length === 64, 'tokens are stored hashed, never in plain text');
-  ok(consumeToken(fdb, { purpose: 'player_invite', secret }).error === 'TOKEN_WRONG_PURPOSE', 'purpose binding enforced');
-  ok(consumeToken(fdb, { purpose: 'work_email', secret, subjectId: 'u2' }).error === 'TOKEN_WRONG_ACCOUNT', 'account binding enforced (Alice token refused for Bob)');
-  ok(consumeToken(fdb, { purpose: 'work_email', secret, email: 'other@club.com' }).error === 'TOKEN_WRONG_ADDRESS', 'address binding enforced');
-  ok(consumeToken(fdb, { purpose: 'work_email', secret, subjectId: 'u1', email: 'a@club.com' }).token != null, 'correct bindings consume the token');
-  ok(consumeToken(fdb, { purpose: 'work_email', secret }).error === 'TOKEN_ALREADY_USED', 'single use: replay refused (security case 5/11)');
-  const secret2 = mintToken(fdb, nid, { purpose: 'work_email', ttlMs: -1 });
-  ok(consumeToken(fdb, { purpose: 'work_email', secret: secret2 }).error === 'TOKEN_EXPIRED', 'expired token refused');
-  ok(consumeToken(fdb, { purpose: 'work_email', secret: 'guess' }).error === 'TOKEN_UNKNOWN', 'unknown token refused');
+  ok(consumeToken(ts, { purpose: 'player_invite', secret }).error === 'TOKEN_WRONG_PURPOSE', 'purpose binding enforced');
+  ok(consumeToken(ts, { purpose: 'work_email', secret, subjectId: 'u2' }).error === 'TOKEN_WRONG_ACCOUNT', 'account binding enforced (Alice token refused for Bob)');
+  ok(consumeToken(ts, { purpose: 'work_email', secret, email: 'other@club.com' }).error === 'TOKEN_WRONG_ADDRESS', 'address binding enforced');
+  ok(consumeToken(ts, { purpose: 'work_email', secret, subjectId: 'u1', email: 'a@club.com' }).token != null, 'correct bindings consume the token');
+  ok(consumeToken(ts, { purpose: 'work_email', secret }).error === 'TOKEN_ALREADY_USED', 'single use: replay refused (security case 5/11)');
+  const secret2 = mintToken(ts, nid, { purpose: 'work_email', ttlMs: -1 });
+  ok(consumeToken(ts, { purpose: 'work_email', secret: secret2 }).error === 'TOKEN_EXPIRED', 'expired token refused');
+  ok(consumeToken(ts, { purpose: 'work_email', secret: 'guess' }).error === 'TOKEN_UNKNOWN', 'unknown token refused');
 }
 
 section('unit fixtures — safe public projector');
 {
-  const org = { id: 'o1', name: 'Chelsea FC', suspended: false, verification: { revokedAt: null } };
+  const org = { id: 'o1', name: 'Chelsea FC', suspended: false, verificationRevokedAt: null };
   const claims = [
     { subjectType: 'user', subjectId: 'u1', claimType: 'PERSON_IDENTITY', status: 'verified', current: true, verificationMethod: 'scoutbox_manual_review', organisationId: null, metadata: {} },
     { subjectType: 'user', subjectId: 'u1', claimType: 'CLUB_ROLE', role: 'Academy Scout', status: 'verified', current: true, organisationId: 'o1', verificationMethod: 'organisation_admin_confirmation', verifiedAt: 5, validFrom: 1, metadata: { workEmail: 'secret@chelseafc.com' }, riskFlags: ['X'], evidenceIds: ['e1'] },
@@ -150,8 +151,8 @@ section('unit fixtures — safe public projector');
   ok(prof.badges[0].label === 'Role verified: Academy Scout' && prof.badges[0].provenance.includes('authorised Chelsea FC administrator'), 'badge defines the verified fact and its provenance in plain English');
   const s = JSON.stringify(prof);
   ok(!s.includes('secret@') && !s.includes('riskFlags') && !s.includes('evidenceIds') && !s.includes('workEmail'), 'projector leaks no emails, no evidence, no risk flags');
-  ok(orgVerificationStatus({ verified: true, suspended: true }, { verRootRequests: [] }) === 'suspended', 'org lifecycle: suspension outranks verified');
-  ok(verLevelFor({ verAdmins: [{ orgId: 'o', userId: 'u', level: 'verification_reviewer', status: 'active' }, { orgId: 'o', userId: 'u', level: 'verification_root_admin', status: 'revoked' }] }, 'o', 'u') === 'verification_reviewer', 'revoked authority rows do not count');
+  ok(orgVerificationStatus({ verified: true, suspended: true }, false) === 'suspended', 'org lifecycle: suspension outranks verified');
+  ok(verLevelFor([{ orgId: 'o', userId: 'u', level: 'verification_reviewer', status: 'active' }, { orgId: 'o', userId: 'u', level: 'verification_root_admin', status: 'revoked' }], 'o', 'u') === 'verification_reviewer', 'revoked authority rows do not count');
 }
 
 // ================================================================ boot
@@ -664,6 +665,45 @@ section('operational: deterministic rate limit, batch projector, metrics');
   ok(!JSON.stringify(m.body.verification).match(/@|Maria|Tom/), 'metrics carry no names or emails');
   const audit = await j('GET', '/org/audit/export', undefined, maria.token);
   ok(audit.body.ledger.some((l) => l.type === 'verification_decision'), 'verification decisions appear in the tenant audit export');
+}
+
+section('S10a — junk input is refused at the route (typed tables)');
+{
+  const bad = (r, field, what) => ok(r.status === 400 && (r.body.field === field || r.body.error === field), `${what} → 400 naming ${field}`);
+  bad(await j('POST', '/org/verification/affiliation', { role: 'Scout', validFrom: 'soon' }, eve.token), 'validFrom', 'an affiliation start that is not a date');
+  bad(await j('POST', '/org/verification/affiliation', { role: 42 }, eve.token), 'role', 'a role that is not text');
+  const apply = { orgName: 'Junk Town FC', orgType: 'professional club', country: 'GB', website: 'https://junktown.example', applicantName: 'J Unk', applicantRole: 'Secretary', workEmail: 'j@junktown.example' };
+  bad(await j('POST', '/auth/org/verification/apply', { ...apply, declarations: { authorised: 'yes' } }), 'declarations', 'a declaration that is not true or false');
+  bad(await j('POST', '/auth/org/verification/apply', { ...apply, declarations: { authorised: true, extra: 1 } }), 'declarations', 'a declaration with an unknown statement');
+  bad(await j('POST', '/auth/org/verification/apply', { ...apply, orgName: ['Junk'] }), 'orgName', 'an organisation name that is not text');
+  bad(await j('POST', '/org/verification/conflicts', { kind: 'other', note: { a: 1 } }, eve.token), 'note', 'a conflict note that is not text');
+  bad(await j('POST', '/org/verification/domains', { domain: 42 }, maria.token, { 'x-mfa-code': totp(maria.mfaSecret) }), 'domain', 'a domain that is not text');
+  bad(await j('POST', '/org/verification/licence', { licenceType: 'UEFA C', issuer: 'UEFA', identifier: 123 }, eve.token), 'identifier', 'a licence identifier that is not text');
+  const mine = (await j('GET', '/org/verification/me', undefined, tom.token)).body.claims[0];
+  bad(await j('POST', `/org/verification/claims/${mine.id}/dispute`, { reason: { why: 'x' } }, tom.token), 'reason', 'a dispute reason that is not text');
+  await j('POST', `/org/verification/claims/${mine.id}/dispute`, { reason: 'probe for the resolution vocabulary' }, tom.token); // opens one unless one is open already
+  const open = (await j('GET', '/admin/verification/disputes', undefined, null, A)).body.items.find((d) => d.status === 'open' && d.claimId === mine.id);
+  ok(!!open, 'an open dispute to resolve');
+  bad(await j('POST', `/admin/verification/disputes/${open.id}/resolve`, { action: 'explode', reason: 'junk' }, null, A), 'action', 'an unknown dispute resolution');
+  ok((await j('GET', '/admin/verification/disputes', undefined, null, A)).body.items.find((d) => d.id === open.id).status === 'open', 'and the refused resolution changed nothing');
+}
+
+section('S10a — one open identity claim per user, reinstatement included');
+{
+  let r = await j('POST', '/org/verification/identity', {}, eve.token);
+  const first = r.body.claim.id;
+  await j('POST', `/org/verification/claims/${first}/evidence`, { dataUrl: PNG, filename: 'passport.png' }, eve.token);
+  r = await j('POST', `/org/verification/claims/${first}/submit`, {}, eve.token);
+  r = await j('POST', `/admin/verification/claims/${first}/approve`, { reason: 'document checked' }, null, A);
+  ok(r.status === 200 && r.body.claim.status === 'verified', 'identity verified by T&S');
+  r = await j('POST', `/admin/verification/claims/${first}/suspend`, { reason: 'query raised' }, null, A);
+  ok(r.status === 200, 'then suspended');
+  r = await j('POST', '/org/verification/identity', {}, eve.token);
+  ok(r.status === 201, 'a suspended claim does not block a new identity request (as before)');
+  r = await j('POST', `/admin/verification/claims/${first}/reinstate`, { reason: 'query resolved' }, null, A);
+  ok(r.status === 409 && r.body.error === 'IDENTITY_CLAIM_EXISTS', 'reinstating while a new identity claim is open is refused with 409, never a server error');
+  r = await j('GET', `/admin/verification/cases/${first}`, undefined, null, A);
+  ok(r.body.claim.status === 'suspended', 'and the old claim is unchanged');
 }
 
 console.log(`\nverification/organisationsAndStaff: ${process.exitCode ? 'FAILED — see ✗ above' : `all ${passed} checks passed`}`);

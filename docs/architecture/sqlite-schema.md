@@ -502,10 +502,10 @@ guardians ──< guardian_children >── players ──< player_* (12 sub-rec
   (**transitional**): the nested `tactical`, `squad`, `lookingFor`, `federationCheck`,
   `agencySettings`, the whole `verification` object and any field the schema does not know,
   plus the record's key order, explicit nulls and composite presence so the record the
-  server sees is byte-for-byte the record it wrote. `verification_revoked_at` and
-  `verification_org_type` are **derived mirrors** of `verification.revokedAt` /
-  `verification.orgType` written at every flush; nothing reads them until S10 moves the
-  verification object out of the facets, when they become authoritative. Index
+  server sees is byte-for-byte the record it wrote. Since S10a (migration 0023) the
+  `verification` object is gone from the facets: `verification_revoked_at` is the
+  authoritative scalar `verificationRevokedAt`, the domains are `org_verified_domains`
+  rows, and `verification_org_type` was dropped (never read). Index
   `orgs_type_level`. Three guarantees the repository enforces (review corrections after
   `0851d38`): a facet change is tracked as persisted only once the save that flushed it
   **committed** (the store reports commit or rollback to the repository's save hook, so a

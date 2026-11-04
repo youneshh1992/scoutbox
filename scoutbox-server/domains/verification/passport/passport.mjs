@@ -87,8 +87,8 @@ export function registerPassportCore(ctx) {
       if (!o || o.suspended) continue; // a suspended organisation lends no CURRENT relationship (§79#20)
       squads.push({ orgId: o.id, orgName: o.name, rowId: row.id, addedAt: row.addedAt, orgVerified: !!o.verified });
     }
-    for (const inv of db.verPlayerInvites ?? []) {
-      if (inv.playerId === pid && inv.status === 'accepted' && !squads.some((s) => s.orgId === inv.orgId)) {
+    for (const inv of ctx.verificationReads.playerInvites.acceptedForPlayer(pid)) {
+      if (!squads.some((s) => s.orgId === inv.orgId)) {
         const o = orgOf(inv.orgId);
         if (!o || o.suspended) continue; // same suspension rule as squad rows (§79#20)
         squads.push({ orgId: inv.orgId, orgName: o.name, rowId: inv.id, addedAt: inv.acceptedAt, orgVerified: !!o.verified });
@@ -108,10 +108,10 @@ export function registerPassportCore(ctx) {
     const assessments = ctx.scoutingReads.assessments.forPlayer(pid)
       .filter((a) => a.state !== 'draft')
       .map((a) => ({ ...a, orgName: orgOf(a.orgId)?.name ?? null }));
-    const references = (db.verReferences ?? []).filter((r) => r.playerId === pid && r.status === 'active').map((r) => ({
+    const references = ctx.verificationReads.references.activeForPlayer(pid).map((r) => ({
       ...r,
       provenanceStillCurrent: (() => {
-        const claim = (db.verClaims ?? []).find((c) => c.id === r.provenanceSnapshot?.claimId);
+        const claim = ctx.verificationReads.claims.byId(r.provenanceSnapshot?.claimId);
         return !!claim && claim.status === 'verified' && claim.current !== false;
       })(),
     }));

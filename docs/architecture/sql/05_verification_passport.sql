@@ -11,6 +11,8 @@
 --             02_recruitment.sql (evidence, assessments).
 -- Conventions: docs/architecture/sql conventions (STRICT tables, snake_case,
 --   epoch-ms INTEGER *_at, hashed secrets, *_json only with a stated reason).
+-- S10a: the verification tables are implemented and carry NO JSON column (see their section); the JSON
+-- policy below now applies only to the passport, transition and representation tables (S10b, S10c).
 -- JSON policy for this file:
 --   * review_reasons_json / risk_flags_json — bounded arrays of reason/flag
 --     CODES (REVIEW_REASONS + 'REGISTRY_RECORD_UNREADABLE'; riskFlags()
@@ -35,813 +37,410 @@
 -- =============================================================================
 
 
--- -----------------------------------------------------------------------------
--- source: db.verClaims  created at domains/verification/claims/index.mjs:56 (createClaim) and
---         domains/verification/claims/shared.mjs:507 (mkClaim, migrated rows vclm-m-N)
--- owner/writer: m14 (organisations.mjs, review.mjs, shared.mjs applyTransition)
--- lifecycle: status unverified → collecting_evidence → pending →
---   automated_checks_passed | requires_human_review → verified | rejected;
---   verified → expired | suspended | revoked | disputed | superseded;
---   VALID_TRANSITIONS in domains/verification/claims/shared.mjs:61. No deletes. `current=0` closes a
---   verified period (departed / mark_former) without erasing it.
--- mapping:
---   id -> id (vclm-N; vclm-m-N for M14 migration rows)
---   subjectType -> subject_kind ('user' | 'org')
---   subjectId -> subject_id (org_users.id when subject_kind='user', orgs.id
---     when 'org'; polymorphic, no FK)
---   claimType -> claim_type
---   organisationId -> organisation_id
---   role -> role (≤60)
---   status -> status
---   validFrom -> valid_from   validUntil -> valid_until (EXCLUSIVE expiry ms;
---     NULL = no expiry; domains/verification/claims/shared.mjs:124)
---   current -> current
---   verificationMethod -> verification_method
---   authorityType -> authority_kind   authorityId -> authority_id (org_users.id
---     for org_admin, literal 'admin' for trust_safety; no FK)
---   evidenceIds[] -> ver_claim_evidence (junction, see ver_evidence)
---   createdAt -> created_at   updatedAt -> updated_at   verifiedAt -> verified_at
---   verifiedBy{kind,id} -> verified_by_kind, verified_by_id
---   revokedAt -> revoked_at   revokedBy{kind,id} -> revoked_by_kind, revoked_by_id
---   revocationReason -> revocation_reason
---   suspendedAt -> suspended_at   suspendReason -> suspend_reason
---   disputedAt -> disputed_at   expiredAt -> expired_at
---   supersedesClaimId -> dead field, not migrated (initialised null at
---     index.mjs:65 / shared.mjs:511, never assigned anywhere)
---   reviewReasons[] -> review_reasons_json
---   riskFlags[] -> risk_flags_json
---   metadata.pairId -> pair_id (vpair-N; links affiliation+role claims)
---   metadata.workEmail -> work_email  (plaintext today; organisations.mjs:269)
---   metadata.assignedTo -> assigned_to (review.mjs:281)
---   metadata.expiryWarned -> expiry_warned_at (review.mjs:654)
---   metadata.<everything else> -> metadata_json (declaredName, requestedStart,
---     domainControl, domainCoveredByOrg, domain, licenceType, issuer,
---     identifier, holderName, issueDate, expiry, display, registry{}, rootRequest,
---     orgType, website, level, identityLink, appointedReason, via,
---     flaggedForReview{at,reason}, migratedFrom, note, representationId,
---     documentReviewed)
---   history[] -> ver_claim_history (migration rows only; see that table)
--- notes:
---   * Uniqueness enforced by code today (409 IDENTITY_CLAIM_EXISTS /
---     AFFILIATION_CLAIM_EXISTS): one PERSON_IDENTITY per user in an open or
---     verified state; one current affiliation/role claim per (user, org,
---     claim_type) in an open or verified state. Both expressed below as
---     partial unique indexes.
---   * Self-verification forbidden (authority_id ≠ subject_id) — code rule,
---     not a constraint (authority is set after the fact).
---   * Privacy: work_email is personal data; metadata_json may hold licence
---     identifiers and holder names; never public (toPublicVerificationProfile
---     is the only projector).
---   * Read patterns: by (subject_kind, subject_id) [claim index]; by
---     authority_id where authority_kind='org_admin' [cascade]; by
---     (organisation_id, subject_kind, status) [console]; global by status
---     [T&S queue]; verified with valid_until in next 30d [sweep/queue];
---     revoked in last 14d [queue]; by pair_id [decide]; by claim_type [queue].
--- -----------------------------------------------------------------------------
-CREATE TABLE ver_claims (
-  id                  TEXT PRIMARY KEY,
-  subject_kind        TEXT NOT NULL CHECK (subject_kind IN ('user','org')),
-  subject_id          TEXT NOT NULL,                       -- org_users.id | orgs.id (polymorphic, no FK)
-  claim_type          TEXT NOT NULL CHECK (claim_type IN (
-                        'PERSON_IDENTITY','ORGANISATION_IDENTITY','ORGANISATION_DOMAIN',
-                        'ORGANISATION_ADMIN','CLUB_AFFILIATION','CLUB_ROLE','LICENCE',
-                        'AGENCY_AFFILIATION','AGENCY_ROLE','GRASSROOTS_AFFILIATION',
-                        'FEDERATION_AFFILIATION')),
-  organisation_id     TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  role                TEXT CHECK (role IS NULL OR length(role) <= 60),
-  status              TEXT NOT NULL CHECK (status IN (
-                        'unverified','collecting_evidence','pending','automated_checks_passed',
-                        'requires_human_review','verified','rejected','expired','suspended',
-                        'revoked','disputed','superseded')),
-  valid_from          INTEGER,
-  valid_until         INTEGER,                             -- exclusive expiry instant
-  current             INTEGER NOT NULL DEFAULT 1 CHECK (current IN (0,1)),
-  verification_method TEXT CHECK (verification_method IS NULL OR verification_method IN (
-                        'official_domain_email','organisation_admin_confirmation',
-                        'authoritative_registry','federation_confirmation',
-                        'existing_verified_org_admin','scoutbox_manual_review',
-                        'document_submitted','reference_confirmation','migration')),
-  authority_kind      TEXT CHECK (authority_kind IS NULL OR authority_kind IN ('org_admin','trust_safety')),
-  authority_id        TEXT,                                -- org_users.id | 'admin' (no FK)
-  created_at          INTEGER NOT NULL,
-  updated_at          INTEGER NOT NULL,
-  verified_at         INTEGER,
-  verified_by_kind    TEXT CHECK (verified_by_kind IS NULL OR verified_by_kind IN ('system','org_user','org_admin','trust_safety')),
-  verified_by_id      TEXT,                                -- org_users.id | reviewer id | 'admin' | NULL
-  revoked_at          INTEGER,
-  revoked_by_kind     TEXT CHECK (revoked_by_kind IS NULL OR revoked_by_kind IN ('system','org_user','trust_safety')),
-  revoked_by_id       TEXT,
-  revocation_reason   TEXT,
-  suspended_at        INTEGER,
-  suspend_reason      TEXT,
-  disputed_at         INTEGER,
-  expired_at          INTEGER,
-  review_reasons_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(review_reasons_json) AND json_type(review_reasons_json) = 'array'),
-  risk_flags_json     TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(risk_flags_json) AND json_type(risk_flags_json) = 'array'),
-  pair_id             TEXT,                                -- vpair-N, shared by the affiliation+role pair
-  work_email          TEXT,                                -- personal data (lower-cased, plaintext today)
-  assigned_to         TEXT CHECK (assigned_to IS NULL OR length(assigned_to) <= 60),
-  expiry_warned_at    INTEGER,
-  metadata_json       TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json) AND json_type(metadata_json) = 'object')
-) STRICT;
-
-CREATE INDEX ver_claims_subject ON ver_claims(subject_kind, subject_id);
-CREATE INDEX ver_claims_authority ON ver_claims(authority_id) WHERE authority_kind = 'org_admin';
-CREATE INDEX ver_claims_org_subject_status ON ver_claims(organisation_id, subject_kind, status);
-CREATE INDEX ver_claims_status ON ver_claims(status);
-CREATE INDEX ver_claims_claim_type_status ON ver_claims(claim_type, status);
-CREATE INDEX ver_claims_valid_until ON ver_claims(valid_until) WHERE status = 'verified';
-CREATE INDEX ver_claims_revoked_at ON ver_claims(revoked_at) WHERE status = 'revoked';
-CREATE INDEX ver_claims_pair_id ON ver_claims(pair_id) WHERE pair_id IS NOT NULL;
--- enforced by code today (organisations.mjs:108)
-CREATE UNIQUE INDEX ver_claims_one_identity_per_user ON ver_claims(subject_id)
-  WHERE subject_kind = 'user' AND claim_type = 'PERSON_IDENTITY'
-    AND status IN ('unverified','collecting_evidence','pending','automated_checks_passed','requires_human_review','verified');
--- enforced by code today (organisations.mjs:211)
-CREATE UNIQUE INDEX ver_claims_one_current_affiliation ON ver_claims(subject_id, organisation_id, claim_type)
-  WHERE subject_kind = 'user' AND current = 1
-    AND claim_type IN ('CLUB_AFFILIATION','CLUB_ROLE','AGENCY_AFFILIATION','AGENCY_ROLE','GRASSROOTS_AFFILIATION')
-    AND status IN ('unverified','collecting_evidence','pending','automated_checks_passed','requires_human_review','verified');
-
-
--- -----------------------------------------------------------------------------
--- source: db.verClaims[].history[]  created at domains/verification/claims/shared.mjs:509 (mkClaim)
--- owner/writer: m14 migration only
--- lifecycle: append-only
--- mapping: history[] entries would be {id,at,byKind,byId,byName,action,detail}
---   by the shared histAppend convention -> columns of the same name.
--- notes: TODAY ALWAYS EMPTY — mkClaim initialises history: [] and nothing ever
---   pushes; createClaim does not even set the field. The audit trail for
---   claims lives in ver_events. Table kept so migrated rows with a non-empty
---   array (none expected) are not dropped silently; expected row count 0.
--- -----------------------------------------------------------------------------
-CREATE TABLE ver_claim_history (
-  id            TEXT PRIMARY KEY,
-  ver_claim_id  TEXT NOT NULL REFERENCES ver_claims(id) ON DELETE CASCADE,
-  at            INTEGER NOT NULL,
-  by_kind       TEXT,
-  by_id         TEXT,
-  by_name       TEXT,                                      -- snapshot
-  action        TEXT NOT NULL,
-  detail_json   TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
-) STRICT;
-
-CREATE INDEX ver_claim_history_claim ON ver_claim_history(ver_claim_id, at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.verEvents  created at domains/verification/claims/index.mjs:35 (verEvent) and
---         domains/verification/claims/shared.mjs:516 (migration rows vevt-m-N)
--- owner/writer: m14; append-only — nothing mutates or deletes a row
--- lifecycle: none (immutable)
--- mapping:
---   id -> id (vevt-N | vevt-m-N)
---   ts -> occurred_at (source field is literally `ts`)
---   type -> type
---   actorKind -> actor_kind   actorId -> actor_id   actorName -> actor_name
---   actorOrgId -> actor_org_id
---   requestId -> request_id (correlation id / x-request-id header)
---   attribution -> attribution (M14.1 reviewer attribution; NULL for org actors)
---   claimId -> ver_claim_id
---   subjectId -> subject_id (polymorphic: org_users.id, orgs.id, players.id,
---     ver_root_requests.id (evidence.added for root applications); no FK)
---   orgId -> org_id
---   before -> before_json   after -> after_json   reason -> reason
--- notes:
---   * Read pattern: by ver_claim_id (admin case view, chronological).
---   * type values are the closed set below; `claim.<status>` is generated
---     from CLAIM_STATES, the rest are literals in domains/verification/claims/*.mjs.
---   * subject_id/org_id FKs: org_id RESTRICT (audit must outlive org);
---     ver_claim_id RESTRICT.
--- -----------------------------------------------------------------------------
-CREATE TABLE ver_events (
-  id            TEXT PRIMARY KEY,
-  occurred_at   INTEGER NOT NULL,                          -- source: ts
-  type          TEXT NOT NULL CHECK (type IN (
-                  'claim.created','claim.unverified','claim.collecting_evidence','claim.pending',
-                  'claim.automated_checks_passed','claim.requires_human_review','claim.verified',
-                  'claim.rejected','claim.expired','claim.suspended','claim.revoked','claim.disputed',
-                  'claim.superseded','claim.reinstated','claim.corrected',
-                  'review.requested','review.assigned','review.approved','review.rejected',
-                  'automated_check.passed','automated_check.failed',
-                  'evidence.added','evidence.accessed',
-                  'email.challenge_sent','email.challenge_passed',
-                  'security.self_verification_blocked',
-                  'organisation.domain_added','organisation.domain_verified','organisation.domain_removed',
-                  'admin.invited','admin.accepted','admin.revoked')),
-  actor_kind    TEXT NOT NULL CHECK (actor_kind IN ('org_user','system','trust_safety')),
-  actor_id      TEXT,                                      -- org_users.id | reviewer id | 'admin' | NULL
-  actor_name    TEXT,                                      -- snapshot
-  actor_org_id  TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  request_id    TEXT,
-  attribution   TEXT CHECK (attribution IS NULL OR attribution IN ('authenticated_reviewer','declared_reviewer','shared_admin_key')),
-  ver_claim_id  TEXT REFERENCES ver_claims(id) ON DELETE RESTRICT,
-  subject_id    TEXT,                                      -- polymorphic, see header
-  org_id        TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  before_json   TEXT CHECK (before_json IS NULL OR json_valid(before_json)),
-  after_json    TEXT CHECK (after_json IS NULL OR json_valid(after_json)),
-  reason        TEXT
-) STRICT;
-
-CREATE INDEX ver_events_claim ON ver_events(ver_claim_id, occurred_at);
-CREATE INDEX ver_events_org ON ver_events(org_id, occurred_at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.verEvidence  created at domains/verification/claims/index.mjs:99 (addEvidence); callers in
---         domains/verification/claims/organisations.mjs:137,262,961, domains/verification/claims/review.mjs:118,173 and
---         domains/recruitment/signings/index.mjs:176 (signing documents, via ctx.evidence.add)
--- owner/writer: m14 (+ m29 signing vault rows); never deleted
--- lifecycle: no status; retention policy string is declared but UNENFORCED
---   (no purge job exists); expires_at is always null today.
--- mapping:
---   id -> id (vevd-N)
---   type -> type ('document' | 'official_email' | 'registry_result' — the
---     three values written; EVIDENCE_TYPES also declares
---     organisation_confirmation, federation_confirmation, reference,
---     existing_claim which no code path writes)
---   source -> source ('subject_upload' | 'email_challenge' | 'root_application'
---     | 'club_upload' | a licence provider id such as 'local-test-registry')
---   suppliedByKind -> supplied_by_kind
---   suppliedById -> supplied_by_id (org_users.id for org_user,
---     ver_root_requests.id for applicant, NULL for system; polymorphic, no FK)
---   orgId -> org_id
---   claimIds[] -> ver_claim_evidence junction
---   receivedAt -> received_at
---   mediaId -> media_id (vfil-N storage key; never on a public path)
---   sha256 -> sha256 (hex digest of the exact bytes)
---   mime -> mime   bytes -> bytes   filename -> filename (≤120)
---   meta{} -> meta_json
---   checks.malwareScan -> check_malware_scan ('not_configured' always)
---   checks.contentSignature -> check_content_signature ('matched_claimed_type'
---     when a file was stored, NULL for note-only / email / registry rows)
---   retention -> retention
---   visibility -> visibility
---   expiresAt -> expires_at (always NULL today)
--- notes:
---   * Privacy: identity documents and licences (trust_and_safety visibility);
---     the row is never public; org readers see only organisation_internal rows
---     of their own org with media_id stripped (review.mjs:216).
---   * Duplicate detection: sha256 compared across ALL rows (risk signal).
---   * Read patterns: by id; by sha256; by (org_id, visibility); by
---     supplied_by_id; by meta.signingPackageId (m29 — JSON path, not indexed:
---     m29 keeps its own evidenceId on the signing document row).
--- -----------------------------------------------------------------------------
-CREATE TABLE ver_evidence (
-  id                      TEXT PRIMARY KEY,
-  type                    TEXT NOT NULL CHECK (type IN ('document','official_email','registry_result')),
-  source                  TEXT NOT NULL,
-  supplied_by_kind        TEXT NOT NULL CHECK (supplied_by_kind IN ('org_user','applicant','system')),
-  supplied_by_id          TEXT,                            -- org_users.id | ver_root_requests.id | NULL (no FK)
-  org_id                  TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  received_at             INTEGER NOT NULL,
-  media_id                TEXT,                            -- vfil-N storage key, never public
-  sha256                  TEXT CHECK (sha256 IS NULL OR length(sha256) = 64),
-  mime                    TEXT CHECK (mime IS NULL OR mime IN ('application/pdf','image/png','image/jpeg','image/webp')),
-  bytes                   INTEGER CHECK (bytes IS NULL OR (bytes > 0 AND bytes <= 8388608)),
-  filename                TEXT CHECK (filename IS NULL OR length(filename) <= 120),
-  meta_json               TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta_json) AND json_type(meta_json) = 'object'),
-  check_malware_scan      TEXT NOT NULL DEFAULT 'not_configured' CHECK (check_malware_scan IN ('not_configured')),
-  check_content_signature TEXT CHECK (check_content_signature IS NULL OR check_content_signature IN ('matched_claimed_type')),
-  retention               TEXT NOT NULL DEFAULT 'until_claim_resolution' CHECK (retention IN ('until_claim_resolution','until_signing_resolution')),
-  visibility              TEXT NOT NULL DEFAULT 'trust_and_safety' CHECK (visibility IN ('trust_and_safety','organisation_internal','subject_only')),
-  expires_at              INTEGER
-) STRICT;
-
-CREATE INDEX ver_evidence_sha256 ON ver_evidence(sha256) WHERE sha256 IS NOT NULL;
-CREATE INDEX ver_evidence_org_visibility ON ver_evidence(org_id, visibility);
-CREATE INDEX ver_evidence_supplied_by ON ver_evidence(supplied_by_id);
-
-
--- -----------------------------------------------------------------------------
--- source: db.verClaims[].evidenceIds[] AND db.verEvidence[].claimIds[]
---         (maintained in tandem at organisations.mjs:142/262-268,
---         review.mjs:122/178; root-request evidence is attached to the
---         ORGANISATION_IDENTITY claim at review.mjs:438 via claim.evidenceIds
---         only — its claimIds stays [])
--- owner/writer: m14
--- lifecycle: rows are never removed
--- mapping: claim.evidenceIds[i] -> (ver_claim_id, ver_evidence_id);
---   evidence.claimIds[i] -> the same pair. Migration takes the UNION of both
---   sides; `position` preserves claim.evidenceIds order (evidence.claimIds[0]
---   is what verEvent('evidence.added') records as claimId).
--- notes: the side-table replaces two denormalised arrays; the pair is unique.
--- -----------------------------------------------------------------------------
-CREATE TABLE ver_claim_evidence (
-  ver_claim_id    TEXT NOT NULL REFERENCES ver_claims(id) ON DELETE CASCADE,
-  ver_evidence_id TEXT NOT NULL REFERENCES ver_evidence(id) ON DELETE CASCADE,
-  position        INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (ver_claim_id, ver_evidence_id)
-) STRICT;
-
-CREATE INDEX ver_claim_evidence_evidence ON ver_claim_evidence(ver_evidence_id);
-
-
--- -----------------------------------------------------------------------------
--- source: db.verTokens  created at domains/verification/claims/shared.mjs:299 (mintToken)
--- owner/writer: m14; never purged (expired/used rows stay)
--- lifecycle: single-use: used_at set on successful consume; expires_at checked
---   at peek; attempts_failed incremented on wrong-code attempts for the user's
---   open work_email tokens (organisations.mjs:251).
--- mapping:
---   id -> id (vtk-N)
---   hash -> token_hash (sha256 hex of the base64url secret; unsalted; the
---     plain secret is NEVER stored — it travels only in the email)
---   purpose -> purpose
---   email -> email (lower-cased recipient; NULL for identity-bound invites)
---   subjectKind -> subject_kind ('org_user' | 'player' | NULL)
---   subjectId -> subject_id (org_users.id | players.id; polymorphic, no FK)
---   orgId -> org_id
---   refId -> ref_id (polymorphic: ver_domain_requests.id for domain_email,
---     ver_player_invites.id for player_invite, ver_root_requests.id for
---     root_email; NULL for work_email)
---   createdAt -> created_at   expiresAt -> expires_at   usedAt -> used_at
---   attemptsFailed? -> attempts_failed (optional in source; default 0)
--- notes:
---   * Read patterns: by token_hash (unique); by (subject_id, purpose) for the
---     failure counter; by ref_id when checking the token belongs to a request.
---   * Privacy: email is personal data (plaintext).
--- -----------------------------------------------------------------------------
-CREATE TABLE ver_tokens (
-  id              TEXT PRIMARY KEY,
-  token_hash      TEXT NOT NULL CHECK (length(token_hash) = 64),
-  purpose         TEXT NOT NULL CHECK (purpose IN ('work_email','domain_email','player_invite','root_email')),
-  email           TEXT,                                    -- personal data
-  subject_kind    TEXT CHECK (subject_kind IS NULL OR subject_kind IN ('org_user','player')),
-  subject_id      TEXT,                                    -- org_users.id | players.id (no FK)
-  org_id          TEXT REFERENCES orgs(id) ON DELETE SET NULL,
-  ref_id          TEXT,                                    -- polymorphic by purpose, see header
-  created_at      INTEGER NOT NULL,
-  expires_at      INTEGER NOT NULL,
-  used_at         INTEGER,
-  attempts_failed INTEGER NOT NULL DEFAULT 0
-) STRICT;
-
-CREATE UNIQUE INDEX ver_tokens_hash ON ver_tokens(token_hash);
-CREATE INDEX ver_tokens_subject_purpose ON ver_tokens(subject_id, purpose);
-CREATE INDEX ver_tokens_ref ON ver_tokens(ref_id);
-
-
--- -----------------------------------------------------------------------------
--- source: db.verAdmins  created at domains/verification/claims/organisations.mjs:616,636 and
---         domains/verification/claims/review.mjs:459,495
--- owner/writer: m14
--- lifecycle: status active → revoked (revoke route, departed route); rows
---   never deleted
--- mapping:
---   id -> id (vadm-N)   orgId -> org_id   userId -> user_id   level -> level
---   status -> status
---   invitedBy -> invited_by (org_users.id, or literal 'trust_safety' when
---     appointed from the admin console; no FK)
---   createdAt -> created_at   acceptedAt -> accepted_at (always = created_at
---   today: there is no pending-acceptance step)
---   revokedAt -> revoked_at   revokedBy -> revoked_by (org_users.id)
--- notes:
---   * One ACTIVE row per (org, user, level) — enforced by code today
---     (ALREADY_GRANTED 409 / ALREADY_ROOT_ADMIN 409).
---   * Cannot revoke the last active root admin (LAST_ROOT_ADMIN) — code rule.
---   * Root-level grants/revokes require MFA on the acting account — code rule.
---   * Read patterns: (org_id, user_id, status) for verLevelFor;
---     (org_id, status) for reviewers/counters; m25/m26 notify active admins of
---     an org.
--- -----------------------------------------------------------------------------
-CREATE TABLE ver_admins (
-  id          TEXT PRIMARY KEY,
-  org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  user_id     TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  level       TEXT NOT NULL CHECK (level IN ('verification_viewer','verification_reviewer','verification_admin','verification_root_admin')),
-  status      TEXT NOT NULL CHECK (status IN ('active','revoked')),
-  invited_by  TEXT NOT NULL,                               -- org_users.id | 'trust_safety' (no FK)
-  created_at  INTEGER NOT NULL,
-  accepted_at INTEGER,
-  revoked_at  INTEGER,
-  revoked_by  TEXT REFERENCES org_users(id) ON DELETE SET NULL
-) STRICT;
-
-CREATE INDEX ver_admins_org_user_status ON ver_admins(org_id, user_id, status);
-CREATE INDEX ver_admins_org_status ON ver_admins(org_id, status);
--- enforced by code today
-CREATE UNIQUE INDEX ver_admins_one_active_grant ON ver_admins(org_id, user_id, level) WHERE status = 'active';
-
-
--- -----------------------------------------------------------------------------
--- source: db.verRootTransfers  created at domains/verification/claims/organisations.mjs:607
--- owner/writer: m14 (dual-control root-admin grants)
--- lifecycle: status pending → approved; no reject/expiry path exists
--- mapping:
---   id -> id (vrtx-N)   orgId -> org_id   toUserId -> to_user_id
---   proposedBy -> proposed_by   status -> status   createdAt -> created_at
---   approvedBy -> approved_by   approvedAt -> approved_at
--- notes:
---   * One pending transfer per org — enforced by code (TRANSFER_ALREADY_PENDING).
---   * approver ≠ proposer ≠ beneficiary — code rules at approve time.
---   * Known defect: a pending transfer can never be cancelled or rejected, so a
---     stale proposal blocks the org until approved.
---   * Read pattern: by org_id (admins console).
--- -----------------------------------------------------------------------------
-CREATE TABLE ver_root_transfers (
-  id          TEXT PRIMARY KEY,
-  org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  to_user_id  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  proposed_by TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  status      TEXT NOT NULL CHECK (status IN ('pending','approved')),
-  created_at  INTEGER NOT NULL,
-  approved_by TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  approved_at INTEGER
-) STRICT;
-
-CREATE INDEX ver_root_transfers_org ON ver_root_transfers(org_id);
--- enforced by code today
-CREATE UNIQUE INDEX ver_root_transfers_one_pending ON ver_root_transfers(org_id) WHERE status = 'pending';
-
-
--- -----------------------------------------------------------------------------
--- source: db.verRootRequests  created at domains/verification/claims/organisations.mjs:904
---         (public POST /auth/org/verification/apply)
--- owner/writer: m14 (applicant lane with applicant secret; T&S decision in
---   review.mjs:373/471)
--- lifecycle: status collecting_evidence → requires_human_review → approved |
---   rejected. ('pending' appears in two filters but is never written.)
--- mapping:
---   id -> id (vroot-N)   status -> status
---   orgName -> org_name (≤120)   orgType -> org_type   country -> country (≤40)
---   federation -> federation (≤80)   website -> website (≤200)
---   domain -> domain (normalised from body.domain || website)
---   applicantName -> applicant_name (≤80)   applicantRole -> applicant_role (≤60)
---   workEmail -> work_email (lower-cased)   officialContact -> official_contact (≤200)
---   declarations -> declarations_json (client object, stored as given, or NULL)
---   evidenceIds[] -> ver_root_request_evidence (junction)
---   checks.emailSyntax -> check_email_syntax
---   checks.emailDomainAlignment -> check_email_domain_alignment
---   checks.freeEmailProvider -> check_free_email_provider
---   checks.disposableEmail -> check_disposable_email
---   checks.domainNormalized -> check_domain_normalized ('(none)' when empty)
---   checks.dnsOwnership -> check_dns_ownership ('not_configured' — no probe exists)
---   checks.duplicateOrganisation -> check_duplicate_organisation
---   checks.duplicateRequest -> check_duplicate_request
---   checks.domainAlreadyVerifiedElsewhere -> check_domain_already_verified_elsewhere
---   checks.evidenceCompleteness -> check_evidence_completeness
---   riskFlags[] -> risk_flags_json   reviewReasons[] -> review_reasons_json
---   emailProved -> email_proved   existingOrgId -> existing_org_id
---   applicantSecretHash -> applicant_secret_hash (sha256 hex of randomHex(18);
---     unsalted; the secret is returned once at apply time, never stored)
---   createdAt -> created_at   decidedAt -> decided_at
---   decidedBy -> decided_by_name (source holds the reviewer NAME)
---   decidedById -> decided_by_id   decisionAttribution -> decision_attribution
---   decisionReason -> decision_reason (≤400)
---   resultOrgId -> result_org_id   resultUserId -> result_user_id
---   identityLink -> identity_link (set on approve only)
--- notes:
---   * Privacy: applicant_name / work_email / official_contact are personal
---     data; applicantSecretHash is stripped from every admin response.
---   * Approval may CREATE an org (review.mjs:382) and an org_user
---     (review.mjs:429) — result_* link to them.
---   * Read patterns: by id + secret hash compare (applicant); by status
---     (queue); by country (queue filter); by existing_org_id / result_org_id
---     with open status (orgVerificationStatus 'pending'); dup check by domain
---     and lower(org_name) among open requests.
--- -----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
+-- S10a: IMPLEMENTED, migration 0023_verification REGISTERED (repositories/verification.mjs, 4 Nov 2026).
+-- The definitions below are the migration's DDL (generated from the repository's field specs, so typing, rows and
+-- columns cannot drift); scripts/testSchemaDdl.mjs compares them column by column.
+-- Sources: domains/verification/claims/ (index.mjs, organisations.mjs, review.mjs, shared.mjs); the signing,
+-- offer and transaction documents filed through the same vault (domains/recruitment/signings, offers; m26).
+-- How the model differs from the first draft of this file:
+--   * No JSON columns. A claim's metadata is a fixed set of optional typed columns (declared_name … expiry_warned_at;
+--     the registry result and the authority-cascade flag are column groups); an evidence record's meta likewise
+--     (note … label); review reasons and risk flags are code rows (ver_claim_codes, ver_root_request_codes,
+--     ver_domain_request_codes) with their vocabularies; a root application's declarations are one boolean
+--     (declared_authorised); an event's before/after payload is one line of text (detail).
+--   * Dropped: ver_claim_history (claims.history was never written past []), supersedes_claim_id (never assigned),
+--     the licence's raw issueDate/expiry metadata (the same days are valid_from / valid_until), the org facet's
+--     orgType (never read) and its column orgs.verification_org_type.
+--   * ver_root_request_evidence is gone: a root application's evidence is the evidence whose root_request_id names it.
+--   * The claim↔evidence link table keeps the claim's order (position); evidence.claimIds is read from it.
+--   * orgs.verification.revokedAt is the orgs column verification_revoked_at (the record field verificationRevokedAt),
+--     01_identity.sql; the domains list is org_verified_domains.
+--   * Player ids (references, invitations, tokens) carry no foreign key: tolerant, like recruitment and scouting.
+--     Every org and staff key is immediate RESTRICT (organisations are never deleted, O2); keys inside the domain
+--     (a claim's evidence, a dispute's or a reference's claim, a reference's predecessor, root applications) RESTRICT.
+--   * ver_migrations holds the one boot marker 'm14': organisations already verified (the seed) become migration
+--     claims once per database.
+-- ----------------------------------------------------------------------------
 CREATE TABLE ver_root_requests (
-  id                                      TEXT PRIMARY KEY,
-  status                                  TEXT NOT NULL CHECK (status IN ('collecting_evidence','requires_human_review','approved','rejected')),
-  org_name                                TEXT NOT NULL CHECK (length(org_name) <= 120),
-  org_type                                TEXT NOT NULL CHECK (org_type IN ('professional club','academy','grassroots club','federation/association','agency','other approved football organisation')),
-  country                                 TEXT NOT NULL CHECK (length(country) <= 40),
-  federation                              TEXT CHECK (federation IS NULL OR length(federation) <= 80),
-  website                                 TEXT NOT NULL CHECK (length(website) <= 200),
-  domain                                  TEXT NOT NULL,                  -- normalised; '' when none could be derived
-  applicant_name                          TEXT NOT NULL CHECK (length(applicant_name) <= 80),   -- personal data
-  applicant_role                          TEXT NOT NULL CHECK (length(applicant_role) <= 60),
-  work_email                              TEXT NOT NULL,                  -- personal data
-  official_contact                        TEXT CHECK (official_contact IS NULL OR length(official_contact) <= 200), -- personal data
-  declarations_json                       TEXT CHECK (declarations_json IS NULL OR json_valid(declarations_json)),
-  check_email_syntax                      TEXT NOT NULL CHECK (check_email_syntax IN ('passed')),
-  check_email_domain_alignment            TEXT NOT NULL CHECK (check_email_domain_alignment IN ('passed','mismatch')),
-  check_free_email_provider               TEXT NOT NULL CHECK (check_free_email_provider IN ('passed','flagged')),
-  check_disposable_email                  TEXT NOT NULL CHECK (check_disposable_email IN ('passed','flagged')),
-  check_domain_normalized                 TEXT NOT NULL,
-  check_dns_ownership                     TEXT NOT NULL CHECK (check_dns_ownership IN ('not_configured')),
-  check_duplicate_organisation            TEXT NOT NULL CHECK (check_duplicate_organisation IN ('passed','flagged')),
-  check_duplicate_request                 TEXT NOT NULL CHECK (check_duplicate_request IN ('passed','flagged')),
-  check_domain_already_verified_elsewhere TEXT NOT NULL CHECK (check_domain_already_verified_elsewhere IN ('passed','flagged')),
-  check_evidence_completeness             TEXT NOT NULL CHECK (check_evidence_completeness IN ('pending_email_proof','email_proved')),
-  risk_flags_json                         TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(risk_flags_json) AND json_type(risk_flags_json) = 'array'),
-  review_reasons_json                     TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(review_reasons_json) AND json_type(review_reasons_json) = 'array'),
-  email_proved                            INTEGER NOT NULL DEFAULT 0 CHECK (email_proved IN (0,1)),
-  existing_org_id                         TEXT REFERENCES orgs(id) ON DELETE SET NULL,
-  applicant_secret_hash                   TEXT NOT NULL CHECK (length(applicant_secret_hash) = 64),
-  created_at                              INTEGER NOT NULL,
-  decided_at                              INTEGER,
-  decided_by_name                         TEXT,                           -- snapshot (reviewer display name)
-  decided_by_id                           TEXT,                           -- reviewer id | 'admin'
-  decision_attribution                    TEXT CHECK (decision_attribution IS NULL OR decision_attribution IN ('authenticated_reviewer','declared_reviewer','shared_admin_key')),
-  decision_reason                         TEXT CHECK (decision_reason IS NULL OR length(decision_reason) <= 400),
-  result_org_id                           TEXT REFERENCES orgs(id) ON DELETE SET NULL,
-  result_user_id                          TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  identity_link                           TEXT CHECK (identity_link IS NULL OR identity_link IN ('trust_safety_selection','provisioned_new_user','verified_work_email'))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  status                                   TEXT NOT NULL CHECK (status IN ('collecting_evidence','requires_human_review','approved','rejected')),
+  org_name                                 TEXT NOT NULL CHECK (length(org_name) <= 120 AND length(org_name) > 0),
+  org_type                                 TEXT NOT NULL CHECK (org_type IN ('professional club','academy','grassroots club','federation/association','agency','other approved football organisation')),
+  country                                  TEXT NOT NULL CHECK (length(country) <= 40),
+  federation                               TEXT CHECK (federation IS NULL OR length(federation) <= 80),
+  website                                  TEXT NOT NULL CHECK (length(website) <= 200),
+  domain                                   TEXT NOT NULL CHECK (length(domain) <= 253),
+  applicant_name                           TEXT NOT NULL CHECK (length(applicant_name) <= 80 AND length(applicant_name) > 0),
+  applicant_role                           TEXT NOT NULL CHECK (length(applicant_role) <= 60),
+  work_email                               TEXT NOT NULL CHECK (length(work_email) <= 254 AND length(work_email) > 0),
+  official_contact                         TEXT CHECK (official_contact IS NULL OR length(official_contact) <= 200),
+  declared_authorised                      INTEGER CHECK (declared_authorised IS NULL OR declared_authorised IN (0,1)),
+  check_email_syntax                       TEXT NOT NULL CHECK (check_email_syntax IN ('passed')),
+  check_email_domain_alignment             TEXT NOT NULL CHECK (check_email_domain_alignment IN ('passed','mismatch')),
+  check_free_email_provider                TEXT NOT NULL CHECK (check_free_email_provider IN ('passed','flagged')),
+  check_disposable_email                   TEXT NOT NULL CHECK (check_disposable_email IN ('passed','flagged')),
+  check_domain_normalized                  TEXT NOT NULL CHECK (length(check_domain_normalized) <= 263),
+  check_dns_ownership                      TEXT NOT NULL CHECK (check_dns_ownership IN ('not_configured')),
+  check_duplicate_organisation             TEXT NOT NULL CHECK (check_duplicate_organisation IN ('passed','flagged')),
+  check_duplicate_request                  TEXT NOT NULL CHECK (check_duplicate_request IN ('passed','flagged')),
+  check_domain_already_verified_elsewhere  TEXT NOT NULL CHECK (check_domain_already_verified_elsewhere IN ('passed','flagged')),
+  check_evidence_completeness              TEXT NOT NULL CHECK (check_evidence_completeness IN ('pending_email_proof','email_proved')),
+  email_proved                             INTEGER NOT NULL CHECK (email_proved IN (0,1)),
+  existing_org_id                          TEXT CHECK (existing_org_id IS NULL OR length(existing_org_id) <= 80),
+  applicant_secret_hash                    TEXT NOT NULL CHECK (length(applicant_secret_hash) <= 64 AND length(applicant_secret_hash) > 0),
+  created_at                               INTEGER NOT NULL,
+  decided_at                               INTEGER,
+  decided_by_name                          TEXT CHECK (decided_by_name IS NULL OR length(decided_by_name) <= 200),
+  decided_by_id                            TEXT CHECK (decided_by_id IS NULL OR length(decided_by_id) <= 80),
+  decision_attribution                     TEXT CHECK (decision_attribution IS NULL OR decision_attribution IN ('authenticated_reviewer','declared_reviewer','shared_admin_key')),
+  decision_reason                          TEXT CHECK (decision_reason IS NULL OR length(decision_reason) <= 400),
+  result_org_id                            TEXT CHECK (result_org_id IS NULL OR length(result_org_id) <= 80),
+  result_user_id                           TEXT CHECK (result_user_id IS NULL OR length(result_user_id) <= 80),
+  identity_link                            TEXT CHECK (identity_link IS NULL OR identity_link IN ('trust_safety_selection','provisioned_new_user','verified_work_email')),
+  FOREIGN KEY (existing_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (result_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (result_user_id) REFERENCES org_users(id) ON DELETE RESTRICT
 ) STRICT;
-
-CREATE INDEX ver_root_requests_status ON ver_root_requests(status);
-CREATE INDEX ver_root_requests_status_country ON ver_root_requests(status, country);
-CREATE INDEX ver_root_requests_existing_org ON ver_root_requests(existing_org_id, status);
-CREATE INDEX ver_root_requests_result_org ON ver_root_requests(result_org_id, status);
-CREATE INDEX ver_root_requests_domain ON ver_root_requests(domain, status);
-
-
--- -----------------------------------------------------------------------------
--- source: db.verRootRequests[].evidenceIds[]  pushed at domains/verification/claims/organisations.mjs:966
--- owner/writer: m14 applicant evidence route
--- lifecycle: append-only; copied onto the ORGANISATION_IDENTITY claim at approval
--- mapping: evidenceIds[i] -> (ver_root_request_id, ver_evidence_id, position)
--- notes: the evidence rows themselves carry supplied_by_kind='applicant' and
---   supplied_by_id = the request id, visibility trust_and_safety.
--- -----------------------------------------------------------------------------
-CREATE TABLE ver_root_request_evidence (
-  ver_root_request_id TEXT NOT NULL REFERENCES ver_root_requests(id) ON DELETE CASCADE,
-  ver_evidence_id     TEXT NOT NULL REFERENCES ver_evidence(id) ON DELETE CASCADE,
-  position            INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (ver_root_request_id, ver_evidence_id)
+CREATE INDEX ver_root_requests_status ON ver_root_requests (status, country);
+CREATE INDEX ver_root_requests_existing_org ON ver_root_requests (existing_org_id, status);
+CREATE INDEX ver_root_requests_result_org ON ver_root_requests (result_org_id, status);
+CREATE TABLE ver_root_request_codes (
+  root_request_id  TEXT NOT NULL REFERENCES ver_root_requests(id) ON DELETE CASCADE,
+  list      TEXT NOT NULL CHECK (list IN ('review_reason','risk_flag')),
+  position  INTEGER NOT NULL,
+  code      TEXT NOT NULL CHECK ((list = 'review_reason' AND code IN ('ROOT_ORGANISATION_BOOTSTRAP','NO_AUTHORITATIVE_SOURCE','CONFLICTING_EVIDENCE','IDENTITY_MISMATCH','DOMAIN_OWNERSHIP_AMBIGUOUS','DUPLICATE_ORGANISATION','HIGH_RISK_ADMIN_CHANGE','DOCUMENT_AUTHENTICITY_UNCONFIRMED','REGISTRY_AMBIGUOUS_MATCH','DISPUTED_CLAIM','SUSPECTED_FRAUD_SIGNALS','MANUAL_EXCEPTION_REQUESTED','REGISTRY_RECORD_UNREADABLE')) OR (list = 'risk_flag' AND code IN ('DISPOSABLE_EMAIL','FREE_EMAIL_PROVIDER','ORG_DOMAIN_MISMATCH','REPEATED_EMAIL_CHALLENGE_FAILURES','COMPETING_ORGANISATION_CLAIMS','CREDENTIAL_REUSED_ACROSS_USERS','DUPLICATE_EVIDENCE_HASH','RECENT_REVOCATION_REAPPLY','ORGANISATION_SUSPENDED','CONFLICTING_ACTIVE_ROLES','UNUSUAL_MASS_ACTIVITY','SELF_VERIFICATION_ATTEMPT'))),
+  PRIMARY KEY (root_request_id, list, position),
+  UNIQUE (root_request_id, list, code)
 ) STRICT;
-
-
--- -----------------------------------------------------------------------------
--- source: db.verDisputes  created at domains/verification/claims/organisations.mjs:299 (openDispute)
--- owner/writer: m14 (subject opens; T&S resolves at review.mjs:540)
--- lifecycle: status open → resolved; never deleted
--- mapping:
---   id -> id (vdsp-N; prefix shared with m13 dispatches — see survey)
---   claimId -> ver_claim_id
---   byKind -> by_kind ('org_user' is the only value written: the sole caller
---     is the org subject route; ctx.openDispute is exported but unused)
---   byId -> by_id   byName -> by_name
---   reason -> reason (≤600)   status -> status
---   resolution -> resolution ('<action>: <reason≤300>' string)
---   createdAt -> created_at   resolvedAt -> resolved_at
---   resolvedBy -> resolved_by_name (source holds the reviewer NAME)
---   resolvedById -> resolved_by_id   resolutionAttribution -> resolution_attribution
--- notes:
---   * One open dispute per claim — enforced by code (DISPUTE_ALREADY_OPEN).
---   * Read patterns: by (ver_claim_id, status); global by status (queue).
--- -----------------------------------------------------------------------------
+CREATE TABLE ver_claims (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  subject_kind                             TEXT NOT NULL CHECK (subject_kind IN ('user','org')),
+  subject_id                               TEXT NOT NULL CHECK (length(subject_id) <= 80 AND length(subject_id) > 0),
+  claim_type                               TEXT NOT NULL CHECK (claim_type IN ('PERSON_IDENTITY','ORGANISATION_IDENTITY','ORGANISATION_DOMAIN','ORGANISATION_ADMIN','CLUB_AFFILIATION','CLUB_ROLE','LICENCE','AGENCY_AFFILIATION','AGENCY_ROLE','GRASSROOTS_AFFILIATION','FEDERATION_AFFILIATION')),
+  organisation_id                          TEXT CHECK (organisation_id IS NULL OR length(organisation_id) <= 80),
+  role                                     TEXT CHECK (role IS NULL OR length(role) <= 60),
+  status                                   TEXT NOT NULL CHECK (status IN ('unverified','collecting_evidence','pending','automated_checks_passed','requires_human_review','verified','rejected','expired','suspended','revoked','disputed','superseded')),
+  valid_from                               INTEGER,
+  valid_until                              INTEGER,
+  current                                  INTEGER NOT NULL CHECK (current IN (0,1)),
+  verification_method                      TEXT CHECK (verification_method IS NULL OR verification_method IN ('official_domain_email','organisation_admin_confirmation','authoritative_registry','federation_confirmation','existing_verified_org_admin','scoutbox_manual_review','document_submitted','reference_confirmation','migration')),
+  authority_kind                           TEXT CHECK (authority_kind IS NULL OR authority_kind IN ('org_admin','trust_safety')),
+  authority_id                             TEXT CHECK (authority_id IS NULL OR length(authority_id) <= 80),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  verified_at                              INTEGER,
+  verified_by_kind                         TEXT CHECK (verified_by_kind IS NULL OR verified_by_kind IN ('system','org_user','org_admin','trust_safety')),
+  verified_by_id                           TEXT CHECK (verified_by_id IS NULL OR length(verified_by_id) <= 80),
+  revoked_at                               INTEGER,
+  revoked_by_kind                          TEXT CHECK (revoked_by_kind IS NULL OR revoked_by_kind IN ('system','org_user','org_admin','trust_safety')),
+  revoked_by_id                            TEXT CHECK (revoked_by_id IS NULL OR length(revoked_by_id) <= 80),
+  revocation_reason                        TEXT CHECK (revocation_reason IS NULL OR length(revocation_reason) <= 600),
+  suspended_at                             INTEGER,
+  suspend_reason                           TEXT CHECK (suspend_reason IS NULL OR length(suspend_reason) <= 600),
+  disputed_at                              INTEGER,
+  expired_at                               INTEGER,
+  declared_name                            TEXT CHECK (declared_name IS NULL OR length(declared_name) <= 200),
+  pair_id                                  TEXT CHECK (pair_id IS NULL OR length(pair_id) <= 80),
+  requested_start                          INTEGER,
+  work_email                               TEXT CHECK (work_email IS NULL OR length(work_email) <= 254),
+  domain_control                           TEXT CHECK (domain_control IS NULL OR domain_control IN ('passed')),
+  domain_covered_by_org                    INTEGER CHECK (domain_covered_by_org IS NULL OR domain_covered_by_org IN (0,1)),
+  domain                                   TEXT CHECK (domain IS NULL OR length(domain) <= 253),
+  licence_type                             TEXT CHECK (licence_type IS NULL OR length(licence_type) <= 80),
+  issuer                                   TEXT CHECK (issuer IS NULL OR length(issuer) <= 80),
+  identifier                               TEXT CHECK (identifier IS NULL OR length(identifier) <= 60),
+  holder_name                              TEXT CHECK (holder_name IS NULL OR length(holder_name) <= 80),
+  display                                  TEXT CHECK (display IS NULL OR length(display) <= 300),
+  registry_provider                        TEXT CHECK (registry_provider IS NULL OR length(registry_provider) <= 60),
+  registry_state                           TEXT CHECK (registry_state IS NULL OR registry_state IN ('not_configured','temporarily_unavailable','unsupported')),
+  registry_result                          TEXT CHECK (registry_result IS NULL OR registry_result IN ('match','no_match','unreadable_record')),
+  registry_checked_at                      INTEGER,
+  registry_reference                       TEXT CHECK (registry_reference IS NULL OR length(registry_reference) <= 60),
+  root_request_id                          TEXT CHECK (root_request_id IS NULL OR length(root_request_id) <= 80),
+  org_type                                 TEXT CHECK (org_type IS NULL OR org_type IN ('professional club','academy','grassroots club','federation/association','agency','other approved football organisation')),
+  website                                  TEXT CHECK (website IS NULL OR length(website) <= 200),
+  admin_level                              TEXT CHECK (admin_level IS NULL OR admin_level IN ('verification_viewer','verification_reviewer','verification_admin','verification_root_admin')),
+  identity_link                            TEXT CHECK (identity_link IS NULL OR identity_link IN ('trust_safety_selection','provisioned_new_user','verified_work_email')),
+  appointed_reason                         TEXT CHECK (appointed_reason IS NULL OR length(appointed_reason) <= 300),
+  via                                      TEXT CHECK (via IS NULL OR length(via) <= 60),
+  flagged_at                               INTEGER,
+  flagged_reason                           TEXT CHECK (flagged_reason IS NULL OR length(flagged_reason) <= 300),
+  migrated_from                            TEXT CHECK (migrated_from IS NULL OR length(migrated_from) <= 200),
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 400),
+  representation_id                        TEXT CHECK (representation_id IS NULL OR length(representation_id) <= 80),
+  document_reviewed                        TEXT CHECK (document_reviewed IS NULL OR length(document_reviewed) <= 200),
+  assigned_to                              TEXT CHECK (assigned_to IS NULL OR length(assigned_to) <= 60),
+  expiry_warned_at                         INTEGER,
+  FOREIGN KEY (organisation_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (root_request_id) REFERENCES ver_root_requests(id) ON DELETE RESTRICT,
+  CHECK (verified_by_kind IS NOT NULL OR verified_by_id IS NULL),
+  CHECK (revoked_by_kind IS NOT NULL OR revoked_by_id IS NULL),
+  CHECK ((flagged_at IS NULL) = (flagged_reason IS NULL)),
+  CHECK (registry_provider IS NOT NULL OR (registry_state IS NULL AND registry_result IS NULL AND registry_checked_at IS NULL AND registry_reference IS NULL))
+) STRICT;
+CREATE INDEX ver_claims_subject ON ver_claims (subject_kind, subject_id);
+CREATE INDEX ver_claims_authority ON ver_claims (authority_id) WHERE authority_kind = 'org_admin';
+CREATE INDEX ver_claims_org_subject_status ON ver_claims (organisation_id, subject_kind, status);
+CREATE INDEX ver_claims_status ON ver_claims (status, claim_type);
+CREATE INDEX ver_claims_valid_until ON ver_claims (valid_until) WHERE status = 'verified';
+CREATE INDEX ver_claims_revoked_at ON ver_claims (revoked_at) WHERE status = 'revoked';
+CREATE INDEX ver_claims_pair ON ver_claims (pair_id) WHERE pair_id IS NOT NULL;
+CREATE UNIQUE INDEX ver_claims_one_identity_per_user ON ver_claims (subject_id) WHERE subject_kind = 'user' AND claim_type = 'PERSON_IDENTITY' AND status IN ('unverified','collecting_evidence','pending','automated_checks_passed','requires_human_review','verified');
+CREATE UNIQUE INDEX ver_claims_one_current_affiliation ON ver_claims (subject_id, organisation_id, claim_type) WHERE subject_kind = 'user' AND current = 1 AND claim_type IN ('CLUB_AFFILIATION','CLUB_ROLE','AGENCY_AFFILIATION','AGENCY_ROLE','GRASSROOTS_AFFILIATION') AND status IN ('unverified','collecting_evidence','pending','automated_checks_passed','requires_human_review','verified');
+CREATE TABLE ver_claim_codes (
+  claim_id  TEXT NOT NULL REFERENCES ver_claims(id) ON DELETE CASCADE,
+  list      TEXT NOT NULL CHECK (list IN ('review_reason','risk_flag')),
+  position  INTEGER NOT NULL,
+  code      TEXT NOT NULL CHECK ((list = 'review_reason' AND code IN ('ROOT_ORGANISATION_BOOTSTRAP','NO_AUTHORITATIVE_SOURCE','CONFLICTING_EVIDENCE','IDENTITY_MISMATCH','DOMAIN_OWNERSHIP_AMBIGUOUS','DUPLICATE_ORGANISATION','HIGH_RISK_ADMIN_CHANGE','DOCUMENT_AUTHENTICITY_UNCONFIRMED','REGISTRY_AMBIGUOUS_MATCH','DISPUTED_CLAIM','SUSPECTED_FRAUD_SIGNALS','MANUAL_EXCEPTION_REQUESTED','REGISTRY_RECORD_UNREADABLE')) OR (list = 'risk_flag' AND code IN ('DISPOSABLE_EMAIL','FREE_EMAIL_PROVIDER','ORG_DOMAIN_MISMATCH','REPEATED_EMAIL_CHALLENGE_FAILURES','COMPETING_ORGANISATION_CLAIMS','CREDENTIAL_REUSED_ACROSS_USERS','DUPLICATE_EVIDENCE_HASH','RECENT_REVOCATION_REAPPLY','ORGANISATION_SUSPENDED','CONFLICTING_ACTIVE_ROLES','UNUSUAL_MASS_ACTIVITY','SELF_VERIFICATION_ATTEMPT'))),
+  PRIMARY KEY (claim_id, list, position),
+  UNIQUE (claim_id, list, code)
+) STRICT;
+CREATE TABLE ver_evidence (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  type                                     TEXT NOT NULL CHECK (type IN ('official_email','document','registry_result','organisation_confirmation','federation_confirmation','reference','existing_claim')),
+  source                                   TEXT NOT NULL CHECK (length(source) <= 60 AND length(source) > 0),
+  supplied_by_kind                         TEXT NOT NULL CHECK (supplied_by_kind IN ('org_user','applicant','system')),
+  supplied_by_id                           TEXT CHECK (supplied_by_id IS NULL OR length(supplied_by_id) <= 80),
+  org_id                                   TEXT CHECK (org_id IS NULL OR length(org_id) <= 80),
+  received_at                              INTEGER NOT NULL,
+  media_id                                 TEXT CHECK (media_id IS NULL OR length(media_id) <= 80),
+  sha256                                   TEXT CHECK (sha256 IS NULL OR length(sha256) <= 64),
+  mime                                     TEXT CHECK (mime IS NULL OR mime IN ('application/pdf','image/png','image/jpeg','image/webp')),
+  bytes                                    INTEGER,
+  filename                                 TEXT CHECK (filename IS NULL OR length(filename) <= 120),
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 400),
+  domain                                   TEXT CHECK (domain IS NULL OR length(domain) <= 253),
+  domain_covered_by_org                    INTEGER CHECK (domain_covered_by_org IS NULL OR domain_covered_by_org IN (0,1)),
+  address_hash                             TEXT CHECK (address_hash IS NULL OR length(address_hash) <= 64),
+  root_request_id                          TEXT CHECK (root_request_id IS NULL OR length(root_request_id) <= 80),
+  identifier                               TEXT CHECK (identifier IS NULL OR length(identifier) <= 60),
+  licence_type                             TEXT CHECK (licence_type IS NULL OR length(licence_type) <= 80),
+  registry_valid_until                     TEXT CHECK (registry_valid_until IS NULL OR length(registry_valid_until) <= 40),
+  signing_package_id                       TEXT CHECK (signing_package_id IS NULL OR length(signing_package_id) <= 80),
+  signing_document_kind                    TEXT CHECK (signing_document_kind IS NULL OR signing_document_kind IN ('signing','executed')),
+  label                                    TEXT CHECK (label IS NULL OR length(label) <= 120),
+  check_malware_scan                       TEXT NOT NULL CHECK (check_malware_scan IN ('not_configured')),
+  check_content_signature                  TEXT CHECK (check_content_signature IS NULL OR check_content_signature IN ('matched_claimed_type')),
+  retention                                TEXT NOT NULL CHECK (retention IN ('until_claim_resolution','until_signing_resolution')),
+  visibility                               TEXT NOT NULL CHECK (visibility IN ('trust_and_safety','organisation_internal','subject_only')),
+  expires_at                               INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (root_request_id) REFERENCES ver_root_requests(id) ON DELETE RESTRICT,
+  CHECK (sha256 IS NULL OR length(sha256) = 64),
+  CHECK (bytes IS NULL OR (bytes > 0 AND bytes <= 8388608))
+) STRICT;
+CREATE INDEX ver_evidence_sha256 ON ver_evidence (sha256) WHERE sha256 IS NOT NULL;
+CREATE INDEX ver_evidence_root_request ON ver_evidence (root_request_id) WHERE root_request_id IS NOT NULL;
+CREATE TABLE ver_claim_evidence (
+  claim_id     TEXT NOT NULL REFERENCES ver_claims(id) ON DELETE CASCADE,
+  position     INTEGER NOT NULL,
+  evidence_id  TEXT NOT NULL REFERENCES ver_evidence(id) ON DELETE RESTRICT,
+  PRIMARY KEY (claim_id, position),
+  UNIQUE (claim_id, evidence_id)
+) STRICT;
+CREATE INDEX ver_claim_evidence_evidence ON ver_claim_evidence (evidence_id);
+CREATE TABLE ver_events (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  occurred_at                              INTEGER NOT NULL,
+  type                                     TEXT NOT NULL CHECK (type IN ('claim.created','claim.collecting_evidence','claim.pending','claim.automated_checks_passed','claim.requires_human_review','claim.verified','claim.rejected','claim.expired','claim.suspended','claim.revoked','claim.disputed','claim.superseded','claim.unverified','claim.reinstated','claim.corrected','review.requested','review.assigned','review.approved','review.rejected','automated_check.passed','automated_check.failed','evidence.added','evidence.accessed','email.challenge_sent','email.challenge_passed','security.self_verification_blocked','organisation.domain_added','organisation.domain_verified','organisation.domain_removed','admin.invited','admin.accepted','admin.revoked')),
+  actor_kind                               TEXT NOT NULL CHECK (actor_kind IN ('org_user','system','trust_safety')),
+  actor_id                                 TEXT CHECK (actor_id IS NULL OR length(actor_id) <= 80),
+  actor_name                               TEXT CHECK (actor_name IS NULL OR length(actor_name) <= 200),
+  actor_org_id                             TEXT CHECK (actor_org_id IS NULL OR length(actor_org_id) <= 80),
+  request_id                               TEXT CHECK (request_id IS NULL OR length(request_id) <= 120),
+  attribution                              TEXT CHECK (attribution IS NULL OR attribution IN ('authenticated_reviewer','declared_reviewer','shared_admin_key')),
+  claim_id                                 TEXT CHECK (claim_id IS NULL OR length(claim_id) <= 80),
+  subject_id                               TEXT CHECK (subject_id IS NULL OR length(subject_id) <= 80),
+  org_id                                   TEXT CHECK (org_id IS NULL OR length(org_id) <= 80),
+  detail                                   TEXT CHECK (detail IS NULL OR length(detail) <= 1000),
+  reason                                   TEXT CHECK (reason IS NULL OR length(reason) <= 600),
+  FOREIGN KEY (actor_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (claim_id) REFERENCES ver_claims(id) ON DELETE RESTRICT
+) STRICT;
+CREATE INDEX ver_events_claim ON ver_events (claim_id) WHERE claim_id IS NOT NULL;
+CREATE TABLE ver_tokens (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  token_hash                               TEXT NOT NULL CHECK (length(token_hash) <= 64 AND length(token_hash) > 0),
+  purpose                                  TEXT NOT NULL CHECK (purpose IN ('work_email','domain_email','player_invite','root_email')),
+  email                                    TEXT CHECK (email IS NULL OR length(email) <= 254),
+  subject_kind                             TEXT CHECK (subject_kind IS NULL OR subject_kind IN ('org_user','player')),
+  subject_id                               TEXT CHECK (subject_id IS NULL OR length(subject_id) <= 80),
+  org_id                                   TEXT CHECK (org_id IS NULL OR length(org_id) <= 80),
+  ref_id                                   TEXT CHECK (ref_id IS NULL OR length(ref_id) <= 80),
+  created_at                               INTEGER NOT NULL,
+  expires_at                               INTEGER NOT NULL,
+  used_at                                  INTEGER,
+  attempts_failed                          INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (length(token_hash) = 64),
+  CHECK (attempts_failed >= 0)
+) STRICT;
+CREATE UNIQUE INDEX ver_tokens_hash ON ver_tokens (token_hash);
+CREATE INDEX ver_tokens_subject_purpose ON ver_tokens (subject_id, purpose);
+CREATE TABLE ver_admins (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  user_id                                  TEXT NOT NULL CHECK (length(user_id) <= 80 AND length(user_id) > 0),
+  level                                    TEXT NOT NULL CHECK (level IN ('verification_viewer','verification_reviewer','verification_admin','verification_root_admin')),
+  status                                   TEXT NOT NULL CHECK (status IN ('active','revoked')),
+  invited_by                               TEXT NOT NULL CHECK (length(invited_by) <= 80 AND length(invited_by) > 0),
+  created_at                               INTEGER NOT NULL,
+  accepted_at                              INTEGER,
+  revoked_at                               INTEGER,
+  revoked_by                               TEXT CHECK (revoked_by IS NULL OR length(revoked_by) <= 80),
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (revoked_by) REFERENCES org_users(id) ON DELETE RESTRICT
+) STRICT;
+CREATE INDEX ver_admins_org_user ON ver_admins (org_id, user_id, status);
+CREATE UNIQUE INDEX ver_admins_one_active_grant ON ver_admins (org_id, user_id, level) WHERE status = 'active';
+CREATE TABLE ver_root_transfers (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  to_user_id                               TEXT NOT NULL CHECK (length(to_user_id) <= 80 AND length(to_user_id) > 0),
+  proposed_by                              TEXT NOT NULL CHECK (length(proposed_by) <= 80 AND length(proposed_by) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('pending','approved')),
+  created_at                               INTEGER NOT NULL,
+  approved_by                              TEXT CHECK (approved_by IS NULL OR length(approved_by) <= 80),
+  approved_at                              INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (to_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (proposed_by) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (approved_by) REFERENCES org_users(id) ON DELETE RESTRICT
+) STRICT;
+CREATE UNIQUE INDEX ver_root_transfers_one_pending ON ver_root_transfers (org_id) WHERE status = 'pending';
 CREATE TABLE ver_disputes (
-  id                     TEXT PRIMARY KEY,
-  ver_claim_id           TEXT NOT NULL REFERENCES ver_claims(id) ON DELETE RESTRICT,
-  by_kind                TEXT NOT NULL CHECK (by_kind IN ('org_user')),
-  by_id                  TEXT NOT NULL,                     -- org_users.id
-  by_name                TEXT,                              -- snapshot
-  reason                 TEXT NOT NULL CHECK (length(reason) <= 600),
-  status                 TEXT NOT NULL CHECK (status IN ('open','resolved')),
-  resolution             TEXT,
-  created_at             INTEGER NOT NULL,
-  resolved_at            INTEGER,
-  resolved_by_name       TEXT,                              -- snapshot
-  resolved_by_id         TEXT,
-  resolution_attribution TEXT CHECK (resolution_attribution IS NULL OR resolution_attribution IN ('authenticated_reviewer','declared_reviewer','shared_admin_key'))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  claim_id                                 TEXT NOT NULL CHECK (length(claim_id) <= 80 AND length(claim_id) > 0),
+  by_kind                                  TEXT NOT NULL CHECK (by_kind IN ('org_user')),
+  by_id                                    TEXT NOT NULL CHECK (length(by_id) <= 80 AND length(by_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  reason                                   TEXT NOT NULL CHECK (length(reason) <= 600 AND length(reason) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('open','resolved')),
+  resolution                               TEXT CHECK (resolution IS NULL OR length(resolution) <= 320),
+  created_at                               INTEGER NOT NULL,
+  resolved_at                              INTEGER,
+  resolved_by_name                         TEXT CHECK (resolved_by_name IS NULL OR length(resolved_by_name) <= 200),
+  resolved_by_id                           TEXT CHECK (resolved_by_id IS NULL OR length(resolved_by_id) <= 80),
+  resolution_attribution                   TEXT CHECK (resolution_attribution IS NULL OR resolution_attribution IN ('authenticated_reviewer','declared_reviewer','shared_admin_key')),
+  FOREIGN KEY (claim_id) REFERENCES ver_claims(id) ON DELETE RESTRICT,
+  FOREIGN KEY (by_id) REFERENCES org_users(id) ON DELETE RESTRICT
 ) STRICT;
-
-CREATE INDEX ver_disputes_claim_status ON ver_disputes(ver_claim_id, status);
-CREATE INDEX ver_disputes_status ON ver_disputes(status);
--- enforced by code today
-CREATE UNIQUE INDEX ver_disputes_one_open_per_claim ON ver_disputes(ver_claim_id) WHERE status = 'open';
-
-
--- -----------------------------------------------------------------------------
--- source: db.verReferences  created at domains/verification/claims/organisations.mjs:791 (new) and
---         :832 (correction = new version row)
--- owner/writer: m14; versioned — a correction inserts version+1 and marks the
---   old row superseded; withdrawal is a status change, text is kept
--- lifecycle: status active → withdrawn | superseded; never deleted
--- mapping:
---   id -> id (vref-N)   version -> version   supersedesId -> supersedes_id
---   playerId -> player_id   playerName -> player_name
---   coachUserId -> coach_user_id   coachName -> coach_name
---   orgId -> org_id   orgName -> org_name   roleAtTime -> role_at_time
---   provenanceSnapshot.claimId -> provenance_claim_id
---   provenanceSnapshot.claimType -> provenance_claim_type
---   provenanceSnapshot.status -> provenance_status ('verified' always)
---   provenanceSnapshot.method -> provenance_method
---   provenanceSnapshot.verifiedAt -> provenance_verified_at
---   provenanceSnapshot.snapshotAt -> provenance_snapshot_at
---   relationship -> relationship (≤80)   capacity -> capacity (≤120)
---   fromYear -> from_year   toYear -> to_year (Number(x)||null)
---   structured.strengths -> strengths (≤500)
---   structured.development -> development (≤500)
---   structured.summary -> summary (≤800)
---   status -> status   withdrawnAt -> withdrawn_at
---   withdrawReason -> withdraw_reason (≤300)   createdAt -> created_at
--- notes:
---   * Minor-safe: creation requires visibleToOrg + !isBlocked; a minor's
---     notification routes to the guardian.
---   * The provenance snapshot is never rewritten; "still current" is derived
---     at read (domains/verification/passport/passport.mjs:109, domains/verification/trust/trust.mjs:78).
---   * Read patterns: (player_id, status) [passport, player view, trust];
---     org_id [org list]; coach_user_id [withdraw/correct ownership].
--- -----------------------------------------------------------------------------
+CREATE UNIQUE INDEX ver_disputes_one_open_per_claim ON ver_disputes (claim_id) WHERE status = 'open';
+CREATE INDEX ver_disputes_status ON ver_disputes (status);
 CREATE TABLE ver_references (
-  id                     TEXT PRIMARY KEY,
-  version                INTEGER NOT NULL DEFAULT 1,
-  supersedes_id          TEXT REFERENCES ver_references(id) ON DELETE RESTRICT,
-  player_id              TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
-  player_name            TEXT,                                -- snapshot
-  coach_user_id          TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  coach_name             TEXT,                                -- snapshot
-  org_id                 TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name               TEXT,                                -- snapshot
-  role_at_time           TEXT,
-  provenance_claim_id    TEXT NOT NULL REFERENCES ver_claims(id) ON DELETE RESTRICT,
-  provenance_claim_type  TEXT NOT NULL,
-  provenance_status      TEXT NOT NULL CHECK (provenance_status IN ('verified')),
-  provenance_method      TEXT,
-  provenance_verified_at INTEGER,
-  provenance_snapshot_at INTEGER NOT NULL,
-  relationship           TEXT NOT NULL CHECK (length(relationship) <= 80),
-  capacity               TEXT NOT NULL DEFAULT '' CHECK (length(capacity) <= 120),
-  from_year              INTEGER,
-  to_year                INTEGER,
-  strengths              TEXT NOT NULL DEFAULT '' CHECK (length(strengths) <= 500),
-  development            TEXT NOT NULL DEFAULT '' CHECK (length(development) <= 500),
-  summary                TEXT NOT NULL CHECK (length(summary) <= 800),
-  status                 TEXT NOT NULL CHECK (status IN ('active','withdrawn','superseded')),
-  withdrawn_at           INTEGER,
-  withdraw_reason        TEXT CHECK (withdraw_reason IS NULL OR length(withdraw_reason) <= 300),
-  created_at             INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  version                                  INTEGER NOT NULL,
+  supersedes_id                            TEXT CHECK (supersedes_id IS NULL OR length(supersedes_id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  player_name                              TEXT CHECK (player_name IS NULL OR length(player_name) <= 200),
+  coach_user_id                            TEXT NOT NULL CHECK (length(coach_user_id) <= 80 AND length(coach_user_id) > 0),
+  coach_name                               TEXT CHECK (coach_name IS NULL OR length(coach_name) <= 200),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  org_name                                 TEXT CHECK (org_name IS NULL OR length(org_name) <= 200),
+  role_at_time                             TEXT CHECK (role_at_time IS NULL OR length(role_at_time) <= 200),
+  provenance_claim_id                      TEXT NOT NULL CHECK (length(provenance_claim_id) <= 80 AND length(provenance_claim_id) > 0),
+  provenance_claim_type                    TEXT NOT NULL CHECK (provenance_claim_type IN ('PERSON_IDENTITY','ORGANISATION_IDENTITY','ORGANISATION_DOMAIN','ORGANISATION_ADMIN','CLUB_AFFILIATION','CLUB_ROLE','LICENCE','AGENCY_AFFILIATION','AGENCY_ROLE','GRASSROOTS_AFFILIATION','FEDERATION_AFFILIATION')),
+  provenance_status                        TEXT NOT NULL CHECK (provenance_status IN ('verified')),
+  provenance_method                        TEXT CHECK (provenance_method IS NULL OR provenance_method IN ('official_domain_email','organisation_admin_confirmation','authoritative_registry','federation_confirmation','existing_verified_org_admin','scoutbox_manual_review','document_submitted','reference_confirmation','migration')),
+  provenance_verified_at                   INTEGER,
+  provenance_snapshot_at                   INTEGER NOT NULL,
+  relationship                             TEXT NOT NULL CHECK (length(relationship) <= 80 AND length(relationship) > 0),
+  capacity                                 TEXT NOT NULL CHECK (length(capacity) <= 120),
+  from_year                                INTEGER,
+  to_year                                  INTEGER,
+  strengths                                TEXT NOT NULL CHECK (length(strengths) <= 500),
+  development                              TEXT NOT NULL CHECK (length(development) <= 500),
+  summary                                  TEXT NOT NULL CHECK (length(summary) <= 800 AND length(summary) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('active','withdrawn','superseded')),
+  withdrawn_at                             INTEGER,
+  withdraw_reason                          TEXT CHECK (withdraw_reason IS NULL OR length(withdraw_reason) <= 300),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (supersedes_id) REFERENCES ver_references(id) ON DELETE RESTRICT,
+  FOREIGN KEY (coach_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (provenance_claim_id) REFERENCES ver_claims(id) ON DELETE RESTRICT,
+  CHECK (version >= 1)
 ) STRICT;
-
-CREATE INDEX ver_references_player_status ON ver_references(player_id, status);
-CREATE INDEX ver_references_org ON ver_references(org_id);
-CREATE INDEX ver_references_coach ON ver_references(coach_user_id);
-
-
--- -----------------------------------------------------------------------------
--- source: db.verPlayerInvites  created at domains/verification/claims/organisations.mjs:705
--- owner/writer: m14 (org sends; adult player or guardian accepts :739)
--- lifecycle: status pending → accepted; expiry (14d) lives on the token and on
---   expires_at (not swept — an expired pending row stays pending)
--- mapping:
---   id -> id (vpin-N)   orgId -> org_id   byUserId -> by_user_id   byName -> by_name
---   name -> invitee_name (≤80, typed by the club)   squad -> squad (≤60)
---   status -> status   playerId -> player_id (set on acceptance)
---   targetPlayerId -> target_player_id (identity-bound invite, M14.1)
---   guardianApproved{guardianId,at} -> guardian_approved_guardian_id,
---     guardian_approved_at (NULL for adult self-acceptance)
---   createdAt -> created_at   expiresAt -> expires_at   acceptedAt -> accepted_at
---   (email is NOT on the row — it lives only on the ver_tokens row with
---   ref_id = this id)
--- notes:
---   * Rate limit 20 invites / org / rolling 24h — code rule; needs
---     (org_id, created_at).
---   * Minors: only the guardian may accept (guardianRouter) — code rule.
---   * Read patterns: (org_id, created_at); (player_id, status) [passport
---     squad rows]; by id from token ref.
--- -----------------------------------------------------------------------------
+CREATE INDEX ver_references_player ON ver_references (player_id, status);
+CREATE INDEX ver_references_org ON ver_references (org_id);
 CREATE TABLE ver_player_invites (
-  id                           TEXT PRIMARY KEY,
-  org_id                       TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  by_user_id                   TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  by_name                      TEXT,                          -- snapshot
-  invitee_name                 TEXT NOT NULL CHECK (length(invitee_name) <= 80),   -- personal data
-  squad                        TEXT NOT NULL DEFAULT '' CHECK (length(squad) <= 60),
-  status                       TEXT NOT NULL CHECK (status IN ('pending','accepted')),
-  player_id                    TEXT REFERENCES players(id) ON DELETE SET NULL,
-  target_player_id             TEXT REFERENCES players(id) ON DELETE SET NULL,
-  guardian_approved_guardian_id TEXT REFERENCES guardians(id) ON DELETE SET NULL,
-  guardian_approved_at         INTEGER,
-  created_at                   INTEGER NOT NULL,
-  expires_at                   INTEGER NOT NULL,
-  accepted_at                  INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  by_user_id                               TEXT NOT NULL CHECK (length(by_user_id) <= 80 AND length(by_user_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  invitee_name                             TEXT NOT NULL CHECK (length(invitee_name) <= 80 AND length(invitee_name) > 0),
+  squad                                    TEXT NOT NULL CHECK (length(squad) <= 60),
+  status                                   TEXT NOT NULL CHECK (status IN ('pending','accepted')),
+  player_id                                TEXT CHECK (player_id IS NULL OR length(player_id) <= 80),
+  target_player_id                         TEXT CHECK (target_player_id IS NULL OR length(target_player_id) <= 80),
+  guardian_approved_id                     TEXT CHECK (guardian_approved_id IS NULL OR length(guardian_approved_id) <= 80 AND length(guardian_approved_id) > 0),
+  guardian_approved_at                     INTEGER,
+  created_at                               INTEGER NOT NULL,
+  expires_at                               INTEGER NOT NULL,
+  accepted_at                              INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK ((status = 'accepted') = (player_id IS NOT NULL AND accepted_at IS NOT NULL))
 ) STRICT;
-
-CREATE INDEX ver_player_invites_org_created ON ver_player_invites(org_id, created_at);
-CREATE INDEX ver_player_invites_player_status ON ver_player_invites(player_id, status);
-
-
--- -----------------------------------------------------------------------------
--- source: db.verConflicts  created at domains/verification/claims/organisations.mjs:667
--- owner/writer: m14 (self-declared conflicts of interest)
--- lifecycle: withdrawn_at soft-withdraw; never deleted
--- mapping:
---   id -> id (vcoi-N)   userId -> user_id   orgId -> org_id   kind -> kind
---   subject -> subject (≤120)   note -> note (≤400)
---   createdAt -> created_at   withdrawnAt -> withdrawn_at
--- notes:
---   * Visible to the declarer, the org's verification reviewers and T&S;
---     never public.
---   * Read patterns: by org_id (+ user_id for non-admins); by user_id with
---     withdrawn_at IS NULL (admin case view).
--- -----------------------------------------------------------------------------
+CREATE INDEX ver_player_invites_org_created ON ver_player_invites (org_id, created_at);
+CREATE INDEX ver_player_invites_player ON ver_player_invites (player_id, status);
 CREATE TABLE ver_conflicts (
-  id           TEXT PRIMARY KEY,
-  user_id      TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  kind         TEXT NOT NULL CHECK (kind IN ('family_relationship','agent_relationship','financial_interest','coaching_relationship','other')),
-  subject      TEXT NOT NULL DEFAULT '' CHECK (length(subject) <= 120),
-  note         TEXT NOT NULL DEFAULT '' CHECK (length(note) <= 400),
-  created_at   INTEGER NOT NULL,
-  withdrawn_at INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  user_id                                  TEXT NOT NULL CHECK (length(user_id) <= 80 AND length(user_id) > 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  kind                                     TEXT NOT NULL CHECK (kind IN ('family_relationship','agent_relationship','financial_interest','coaching_relationship','other')),
+  subject                                  TEXT NOT NULL CHECK (length(subject) <= 120),
+  note                                     TEXT NOT NULL CHECK (length(note) <= 400),
+  created_at                               INTEGER NOT NULL,
+  withdrawn_at                             INTEGER,
+  FOREIGN KEY (user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT
 ) STRICT;
-
-CREATE INDEX ver_conflicts_org_user ON ver_conflicts(org_id, user_id);
-CREATE INDEX ver_conflicts_user ON ver_conflicts(user_id, withdrawn_at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.verDomainRequests  created at domains/verification/claims/organisations.mjs:518
--- owner/writer: m14 (org admin requests; email challenge confirm :545; T&S
---   decide at review.mjs:510)
--- lifecycle: status email_challenge | requires_human_review → verified |
---   rejected; never deleted
--- mapping:
---   id -> id (vdom-N)   orgId -> org_id   domain -> domain (normalised)
---   requestedBy -> requested_by   status -> status
---   reviewReasons[] -> review_reasons_json (DOMAIN_OWNERSHIP_AMBIGUOUS may
---     appear twice — kept as an array for fidelity)
---   method -> method   createdAt -> created_at   decidedAt -> decided_at
---   decidedBy -> decided_by_name (reviewer NAME; NULL on the org email-confirm
---     path — known defect: that path records no actor)
---   decidedById -> decided_by_id (absent in source on the org path; NULL)
--- notes:
---   * Success appends to org_verified_domains and creates an
---     ORGANISATION_DOMAIN claim.
---   * Read patterns: by org_id (console); by status='requires_human_review'
---     (T&S).
--- -----------------------------------------------------------------------------
+CREATE INDEX ver_conflicts_org_user ON ver_conflicts (org_id, user_id);
+CREATE INDEX ver_conflicts_user ON ver_conflicts (user_id, withdrawn_at);
 CREATE TABLE ver_domain_requests (
-  id                  TEXT PRIMARY KEY,
-  org_id              TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  domain              TEXT NOT NULL,
-  requested_by        TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  status              TEXT NOT NULL CHECK (status IN ('email_challenge','requires_human_review','verified','rejected')),
-  review_reasons_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(review_reasons_json) AND json_type(review_reasons_json) = 'array'),
-  method              TEXT CHECK (method IS NULL OR method IN ('official_domain_email','scoutbox_manual_review')),
-  created_at          INTEGER NOT NULL,
-  decided_at          INTEGER,
-  decided_by_name     TEXT,                                 -- snapshot
-  decided_by_id       TEXT
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  domain                                   TEXT NOT NULL CHECK (length(domain) <= 253 AND length(domain) > 0),
+  requested_by                             TEXT NOT NULL CHECK (length(requested_by) <= 80 AND length(requested_by) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('email_challenge','requires_human_review','verified','rejected')),
+  method                                   TEXT CHECK (method IS NULL OR method IN ('official_domain_email','scoutbox_manual_review')),
+  created_at                               INTEGER NOT NULL,
+  decided_at                               INTEGER,
+  decided_by_name                          TEXT CHECK (decided_by_name IS NULL OR length(decided_by_name) <= 200),
+  decided_by_id                            TEXT CHECK (decided_by_id IS NULL OR length(decided_by_id) <= 80),
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (requested_by) REFERENCES org_users(id) ON DELETE RESTRICT
 ) STRICT;
-
-CREATE INDEX ver_domain_requests_org ON ver_domain_requests(org_id);
-CREATE INDEX ver_domain_requests_status ON ver_domain_requests(status);
-
-
--- -----------------------------------------------------------------------------
--- source: db.verMigrated  (object, not an array) written at domains/verification/claims/shared.mjs:560
---         as { m14: { at, claims } }
--- owner/writer: m14 migrateM14 (one-time guard)
--- lifecycle: write-once per key
--- mapping: key ('m14') -> key; m14.at -> ran_at; m14.claims -> claims_created
---   (db.verClaims.length after the run, i.e. a count not a list)
--- notes: a keyed marker table; absence of the 'm14' row means the migration
---   must run.
--- -----------------------------------------------------------------------------
-CREATE TABLE ver_migrations (
-  key            TEXT PRIMARY KEY,
-  ran_at         INTEGER NOT NULL,
-  claims_created INTEGER NOT NULL
+CREATE INDEX ver_domain_requests_org ON ver_domain_requests (org_id);
+CREATE INDEX ver_domain_requests_status ON ver_domain_requests (status);
+CREATE TABLE ver_domain_request_codes (
+  domain_request_id  TEXT NOT NULL REFERENCES ver_domain_requests(id) ON DELETE CASCADE,
+  list      TEXT NOT NULL CHECK (list IN ('review_reason')),
+  position  INTEGER NOT NULL,
+  code      TEXT NOT NULL CHECK ((list = 'review_reason' AND code IN ('ROOT_ORGANISATION_BOOTSTRAP','NO_AUTHORITATIVE_SOURCE','CONFLICTING_EVIDENCE','IDENTITY_MISMATCH','DOMAIN_OWNERSHIP_AMBIGUOUS','DUPLICATE_ORGANISATION','HIGH_RISK_ADMIN_CHANGE','DOCUMENT_AUTHENTICITY_UNCONFIRMED','REGISTRY_AMBIGUOUS_MATCH','DISPUTED_CLAIM','SUSPECTED_FRAUD_SIGNALS','MANUAL_EXCEPTION_REQUESTED','REGISTRY_RECORD_UNREADABLE'))),
+  PRIMARY KEY (domain_request_id, list, position),
+  UNIQUE (domain_request_id, list, code)
 ) STRICT;
-
-
--- -----------------------------------------------------------------------------
--- source: db.orgs[].verification.domains[]  pushed at domains/verification/claims/shared.mjs:534
---         (migration), organisations.mjs:556 (email challenge), review.mjs:446
---         (root approval), review.mjs:518 (T&S decide); removed (hard splice)
---         at organisations.mjs:573
--- owner/writer: m14
--- lifecycle: HARD DELETE on remove (the ver_events row
---   organisation.domain_removed is the only trace) — kept as a hard delete
---   here; status is always 'verified' (a domain only lands in the list once
---   proven).
--- mapping:
---   (parent org) -> org_id
---   domain -> domain (normalised)
---   status -> status ('verified' only)
---   method -> method
---   verifiedAt -> verified_at
---   addedBy -> added_by (org_users.id | 'migration' | 'root_request' |
---     'trust_safety'; no FK)
---   orgs[].verification.revokedAt / .orgType -> NOT here: scalar columns on
---     orgs in 01_identity.sql (orgs.verification_revoked_at,
---     orgs.verification_org_type); if that file does not carry them they must
---     be added there — they belong to the org row, not to the domain list.
--- notes:
---   * One entry per (org, domain) — enforced by code (DOMAIN_EXISTS 409).
---   * The same domain may be verified for two orgs (contested → human
---     review, not blocked); hence no global unique on domain.
---   * Root-domain removal needs root admin + MFA (isRoot derived from the
---     other entries of the same org) — code rule.
---   * Read patterns: by org_id (console, work-email coverage, risk flags);
---     by domain across orgs (contested-domain check, root duplicate check).
--- -----------------------------------------------------------------------------
 CREATE TABLE org_verified_domains (
-  org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  domain      TEXT NOT NULL,
-  status      TEXT NOT NULL CHECK (status IN ('verified')),
-  method      TEXT NOT NULL CHECK (method IN ('official_domain_email','scoutbox_manual_review')),
-  verified_at INTEGER NOT NULL,
-  added_by    TEXT NOT NULL,                                -- org_users.id | 'migration' | 'root_request' | 'trust_safety'
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  domain                                   TEXT NOT NULL CHECK (length(domain) <= 253 AND length(domain) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('verified')),
+  method                                   TEXT NOT NULL CHECK (method IN ('official_domain_email','scoutbox_manual_review')),
+  verified_at                              INTEGER NOT NULL,
+  added_by                                 TEXT NOT NULL CHECK (length(added_by) <= 80 AND length(added_by) > 0),
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
   PRIMARY KEY (org_id, domain)
 ) STRICT;
-
-CREATE INDEX org_verified_domains_domain ON org_verified_domains(domain);
+CREATE INDEX org_verified_domains_domain ON org_verified_domains (domain);
+CREATE TABLE ver_migrations (
+  key            TEXT PRIMARY KEY CHECK (key IN ('m14')),
+  ran_at         INTEGER NOT NULL,
+  claims_created INTEGER NOT NULL CHECK (claims_created >= 0)
+) STRICT;
 
 
 -- =============================================================================

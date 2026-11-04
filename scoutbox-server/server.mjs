@@ -200,7 +200,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -211,6 +211,9 @@ const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...
 // templates, assessments, segments, playlists; since S9c tacticalSetups, squad, shadow, lookingFor, federationChecks,
 // vacancies; since S9d opportunities, applications, campaigns, campaignSubmissions, playerPrefs).
 const scoutingReads = Object.freeze({ ...scoutingEvidence.reads, ...scoutingAssessments.reads, ...clubSetup.reads, ...opportunitiesCampaigns.reads });
+// The verification domain reads through SQL too (S10a): `verificationReads` (claims, events, evidence, tokens, admins,
+// rootTransfers, rootRequests, disputes, references, playerInvites, conflicts, domainRequests, domains).
+const verificationReads = verification.reads;
 // Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
 // every module context as `byId` (`byId.player(id)`, `byId.org(id)`, …; null when there is none).
 const byId = createLookups({ players, guardians, users, orgs });
@@ -4543,15 +4546,17 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
   const org = byId.org(req.params.id);
   if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
   const { verified, safeguardingContractSigned, verifiedDomain, suspended } = req.body || {};
-  orgs.update(org.id, {
-    verified: verified !== undefined ? !!verified : undefined,
-    safeguardingContractSigned: safeguardingContractSigned !== undefined ? !!safeguardingContractSigned : undefined,
-    verifiedDomain: verifiedDomain !== undefined ? (verifiedDomain || null) : undefined,
-    suspended: suspended !== undefined ? !!suspended : undefined,
-  });
   // M14: the legacy toggle stays functional, but its changes now carry
-  // claim-level provenance so the boolean and the claim engine never drift.
-  m14Ctx?.syncLegacyOrgVerification?.(org, req.body);
+  // claim-level provenance so the boolean and the claim engine never drift (one unit).
+  unit(() => {
+    orgs.update(org.id, {
+      verified: verified !== undefined ? !!verified : undefined,
+      safeguardingContractSigned: safeguardingContractSigned !== undefined ? !!safeguardingContractSigned : undefined,
+      verifiedDomain: verifiedDomain !== undefined ? (verifiedDomain || null) : undefined,
+      suspended: suspended !== undefined ? !!suspended : undefined,
+    });
+    m14Ctx?.syncLegacyOrgVerification?.(org, req.body);
+  });
   persist();
   broadcast('players'); // visibility rules may have changed
   res.json({ ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) });
@@ -4655,7 +4660,7 @@ function revokeOrgUserAccess(userId) {
 }
 
 registerM12({
-  db, byId, scoutingReads, recruitmentReads, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, recruitmentReads, users, players, guardians, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases, // S8a: requests and trials are explicit repository writes
   signingsFollowUps, // S8d: follow-ups and outcome reports are explicit repository writes
   scoutingEvidence, // S9a: evidence, coach affiliations and squad invitations are explicit repository writes
@@ -4672,7 +4677,7 @@ registerM12({
 // Same module pattern under m13/. registerM13 returns the enriched context so
 // the login path above can reach the MFA rate-limit guards.
 const m13Ctx = registerM13({
-  db, byId, scoutingReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
   opportunitiesCampaigns, // S9d: player suitability preferences and approved summaries are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
@@ -4687,7 +4692,8 @@ const m13Ctx = registerM13({
 // under domains/verification/claims/. Returns its context so the legacy admin verification route can
 // keep claim provenance in sync.
 const m14Ctx = registerM14({
-  db, byId, scoutingReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  verification, unit, // S10a: every verification record is an explicit repository write
+  db, byId, scoutingReads, verificationReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4706,7 +4712,7 @@ registerSourceChanges(srcCtx);
 // routers exist and before the milestone modules that emit notifications, so
 // the preference gate is in place for every notify() call that follows.
 m182Ctx = {
-  db, byId, scoutingReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
+  db, byId, scoutingReads, verificationReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, persist, findPlayer,
   // The same standing-gate composition M12's shared helpers use.
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
@@ -4728,7 +4734,7 @@ const rateLimit = createRateLimiter();
 // records. Registered after M14 so it can read verification stores; it
 // receives the same context and adds no new authorization surface.
 const m15Ctx = registerM15({
-  db, byId, scoutingReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, m14: m14Ctx,
@@ -4736,7 +4742,7 @@ const m15Ctx = registerM15({
 });
 const m16Ctx = registerM16({
   rateLimit,
-  db, byId, scoutingReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   players, unit, // S5: a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
@@ -4747,7 +4753,7 @@ const m16Ctx = registerM16({
 // Registered last because it consumes all of them; it adds no storage and no
 // authorization surface (a Trust Score grants nothing).
 const m162Ctx = registerM162({
-  db, byId, scoutingReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse,
   assemblePassport: m15Ctx.assemblePassport,
@@ -4762,7 +4768,7 @@ const m162Ctx = registerM162({
 const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
-  db, byId, scoutingReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
@@ -4795,7 +4801,7 @@ const m17Ctx = registerM17({
 // M18 registers no player, guardian or public route at all.
 const m18Ctx = registerM18({
   rateLimit,
-  db, byId, scoutingReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, scoutingReads, verificationReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, sessionFor, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
@@ -4822,7 +4828,7 @@ const m18Ctx = registerM18({
 const m19Ctx = {
   ...m18Ctx,
   recruitmentReads, // §4.3 step 2: contacts and offers are read through SQL
-  scoutingReads, // S9: the evidence and the assessments are read through SQL
+  scoutingReads, verificationReads, // S10a: verification reads; S9: the evidence and the assessments are read through SQL
   users,
   notifications, // S7a: the Agent module's inbox and unread count read the repository
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),

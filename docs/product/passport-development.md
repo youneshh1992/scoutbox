@@ -16,6 +16,7 @@ The player's evidence layer (Passport, verification, provenance, Trust) and the 
 - Revoking an admin stops new approvals; claims they already approved keep their provenance until acted on individually. (M14_VERIFICATION)
 - Only `authoritative` licences render "Licence verified"; a T&S document review renders "Credential reviewed". (M14_VERIFICATION)
 - References need a current verified role and snapshot the coach's verification at submission. They are corrected only by versioned supersession, never edited. Squad invites are recipient-bound and guardian-accepted for minors. (M14_VERIFICATION) A club relationship comes from a squad row only: a club's shadow list (players it is considering) never counts as a relationship on the passport or the Trust score. (S9c)
+- Verification requests refuse malformed input with `400 FIELD_INVALID` / `DATE_INVALID` naming the field instead of storing it: a requested start date that is not a date, application declarations other than `{ authorised: true|false }`, a reference year outside 1900–2100, an unknown dispute resolution, text fields sent as anything but text. Over-long text is still shortened. A refused licence file now leaves no claim behind. (S10a)
 
 **Football Passport (M15)**
 - The Passport is a server-side projection over existing records. It is not a store, rating, badge or endorsement, and it never contains a numeric score. (M15_FOOTBALL_PASSPORT, M16_2_TRUST_SCORE)

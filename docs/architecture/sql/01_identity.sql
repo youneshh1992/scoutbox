@@ -25,7 +25,7 @@
 --   trustedPartner→trusted_partner, verified→verified, verifiedDomain→verified_domain,
 --   safeguardingContractSigned→safeguarding_contract_signed, password→password_hash, suspended→suspended,
 --   emailDomain→email_domain, emailDomainVerified→email_domain_verified, mfaRequiredForLeads→mfa_required_for_leads,
---   verification.revokedAt→verification_revoked_at, verification.orgType→verification_org_type,
+--   verificationRevokedAt→verification_revoked_at (S10a; the facet's orgType was never read and is gone),
 --   squad[]→org_squad_members (04), tactical→org_tactical_setups (04), lookingFor[]→org_looking_for (04),
 --   federationCheck→org_federation_checks (04), verification.domains[]→org_verified_domains (05),
 --   agencySettings→org_agency_settings (06)
@@ -33,11 +33,11 @@
 --   'agent' at server.mjs:2598 but no row carries it; CHECK lists the written values. safeguardingCertified is derived.
 --   LIVE since migration 0004 (S3, repositories/orgs.mjs). `level` is nullable: the verification review creates
 --   non-grassroots organisations with level null (domains/verification/claims/review.mjs). `facets_json` is the S3 TRANSITIONAL storage for every
---   record field that has not cut over yet (squad, tactical, lookingFor, federationCheck, verification, agencySettings,
---   unknown fields) plus the record's shape metadata (`__meta`: key order, explicit nulls, present composites); it is
+--   record field that has not cut over yet (agencySettings and
+--   unknown fields; squad, tactical, lookingFor and federationCheck left in S9c, verification in S10a) plus the record's shape metadata (`__meta`: key order, explicit nulls, present composites); it is
 --   owned by the repository, mutated in place by the owning modules and flushed inside every save, and shrinks as
---   S9–S11 move those facets into the tables named above. verification_revoked_at / verification_org_type are a derived
---   MIRROR of the verification facet, rewritten at every flush and read by nothing; the facet is authoritative until S10.
+--   S9–S11 move those facets into the tables named above. verification_revoked_at is the organisation's verification
+--   revocation (S10a, migration 0023 dropped the unused verification_org_type column).
 CREATE TABLE orgs (
   id                           TEXT PRIMARY KEY,
   name                         TEXT NOT NULL,
@@ -59,8 +59,7 @@ CREATE TABLE orgs (
   email_domain                 TEXT,
   email_domain_verified        INTEGER NOT NULL DEFAULT 0 CHECK (email_domain_verified IN (0,1)),
   mfa_required_for_leads       INTEGER NOT NULL DEFAULT 0 CHECK (mfa_required_for_leads IN (0,1)),
-  verification_revoked_at      INTEGER,                    -- derived mirror of verification.revokedAt (see notes)
-  verification_org_type        TEXT,                       -- derived mirror of verification.orgType (see notes)
+  verification_revoked_at      INTEGER,                    -- the organisation's verification revocation (S10a)
   created_at                   INTEGER,
   facets_json                  TEXT CHECK (facets_json IS NULL OR json_valid(facets_json)), -- S3 transitional storage (see notes)
   CHECK ((lat IS NULL) = (lng IS NULL))

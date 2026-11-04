@@ -64,7 +64,7 @@ routes still miss the bar: they are listed, and deferred, at the end of §4.3 st
 
 ## 3. Status
 
-22 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0023`. Each
+23 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0024`. Each
 step takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Write model | Status |
@@ -89,12 +89,14 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 items 1–5 done (4 Nov); what still misses §2 is deferred (§4.3) |
 | — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left |
 | — | end-to-end test estate | — | — | — | done (§4.4, 4 Nov) |
-| — | server code by domain | — | — | — | recruitment, platform and scouting done (§4.4.1, 4 Nov); the rest per step |
+| — | server code by domain | — | — | — | recruitment, platform, scouting and verification done (§4.4.1, 4 Nov); the rest per step |
 | S9a | evidence passport, coach affiliations, squad invitations | `0019_scouting_evidence` | `scoutingEvidence.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S9b | assessment templates, assessments, video segments, playlists | `0020_scouting_assessments` | `scoutingAssessments.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S9c | tactical setup, squad, shadow list, looking-for, federation check, vacancies | `0021_club_setup` | `clubSetup.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S9d | opportunities, applications, campaigns, player preferences | `0022_opportunities_campaigns` | `opportunitiesCampaigns.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
-| S10 | verification and passport | | | | not started |
+| S10a | verification claims, evidence, tokens, administrators, root applications, disputes, references, squad invitations by code, conflicts, domain requests, verified domains | `0023_verification` | `verification.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
+| S10b | passport preferences, career entries, achievements, shares, corrections | | | | not started |
+| S10c | transition cases, representations, vouches | | | | not started |
 | S11 | agents, compliance, transactions | | | | not started |
 | S12 | development, Box Cam, discovery | | | | not started |
 | S13 | operations and integrations | | | | not started |
@@ -294,8 +296,10 @@ into `domains/<domain>/` alongside the migration, not as a separate rewrite:
   its own `index.mjs` and `errors.mjs`); `m181` and `m182` share `domains/platform/`. File names are unchanged. The
   batteries that scan source by folder name the new folders, and `platform/storeGuarantees` names a file's module by
   its folder under `domains/`.
-- **Each of S9–S13** first moves its domain's files, in a commit with no other change, then edits them. **S9: done (4 November):** `m12/passport.mjs`, `m12/scouting.mjs`, `m12/journeys.mjs` and `m13/suitability.mjs` are in `domains/scouting/` (`scouting.mjs` still holds the M12 recruitment-case routes, F3, which move with the final pass). The mixed
-  folders (`m12`, `m13`, `m14`) are split file by file as each domain's step comes round; `m20` and `m27` read across
+- **Each of S9–S13** first moves its domain's files, in a commit with no other change, then edits them. **S9: done (4 November):** `m12/passport.mjs`, `m12/scouting.mjs`, `m12/journeys.mjs` and `m13/suitability.mjs` are in `domains/scouting/` (`scouting.mjs` still holds the M12 recruitment-case routes, F3, which move with the final pass). **S10: done (4 November):** `m14/` is `domains/verification/claims/`, `m15/` `passport/`,
+  `m162/` `trust/` (subfolders: each has its own `index.mjs` and `shared.mjs`), and `m13/transitions.mjs` is
+  `domains/verification/transitions.mjs`. The mixed
+  folders (`m12`, `m13`) are split file by file as each domain's step comes round; `m20` and `m27` read across
   domains and are placed when their readers are. A step may move its domain's routes out of `server.mjs` while it
   rewrites them.
 - **After S14**: a final pass over whatever is left in milestone folders and `server.mjs`.
@@ -316,6 +320,11 @@ Each step starts by moving its domain's code into `domains/<domain>/` (§4.4.1).
 | S13 Operations and integrations | `08_operations_integrations.sql` | 45 | `apiKeys`, `webhook*`, `orgInvites`, `sso*`, `support*`, `importBatches`, `prospects`, `identityReviews`, `groups`, `groupGrants`, `uploadSessions`, `savedSearches`, `openTrials`, `matchdays`, `friendlies`, `invoices`, `plans`, `archetypes`, `reputationSeed`, the `delivery*` singletons | S3, S8 | Invites and SSO states are hashed. Invoices are stored exactly, in minor units. Backup becomes `VACUUM INTO`. Production's empty first boot (catalogues only, demo opt-in with `SCOUTBOX_SEED_DEMO=1`) exists since 3 Nov; keep it when the catalogues become rows. |
 
 S12 is large; consider splitting Box Cam/Combine from discovery and watchlists.
+
+S10 is split in three, each with its own migration: S10a the verification claims (`domains/verification/claims/`, 18
+tables), S10b the passport's own records (`domains/verification/passport/`), S10c transition cases, representations and
+vouches (`domains/verification/transitions.mjs`, the vouch routes in `server.mjs`). The Trust Score (`trust/`) stores
+nothing.
 
 **S9a as built (4 November).** `repositories/scoutingEvidence.mjs`, migration `0019`; modules read through
 `scoutingReads` (projectors that take `reads` get `reads.evidence`). Player and media ids carry no key (tolerant, as
@@ -366,6 +375,14 @@ as the guardian's; `GET /org/opportunities` and `GET /org/campaigns` page by cur
 player board still checks eligibility in code over the open opportunities (an indexed query); it pages with discovery
 (S12). **Left as before, for the Founder (retention, `decisions.md` Q6):** an account deletion keeps the player's
 applications, campaign submissions and private preferences (accessibility needs included) under the old id.
+
+**S10a as built (4 November).** `repositories/verification.mjs`, migration `0023`, read through `verificationReads` (on
+every module context). Its field specs generate the typing, the rows and the DDL, so they cannot drift: copy that for
+domains with many flat tables. The code's uniqueness rules are partial unique indexes. The `verification` org facet is
+retired (`org_verified_domains` rows, column `verification_revoked_at`). Signing, offer and transaction documents are
+evidence records, read with `evidence.byId` (S11). Staff writes cannot join a unit of work yet (`users.mjs`), so root
+approval creates the organisation and account before its unit. **Left for S10:** `orgs.verified` is synced by code,
+not derived from claims.
 
 ### 4.6 S14: retire the blob
 
