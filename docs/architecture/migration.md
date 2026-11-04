@@ -96,246 +96,79 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S13 | operations and integrations | | | | not started |
 | S14 | retire the blob | | | | not started |
 
-The lossless side columns (`extra_json`, `absent_keys_json`, `offtype_json`) of the old fidelity rule were dropped
-from S0–S7 and S6b on 3 November, and from S8c, S8a and S8b when they moved to explicit writes (§4.3, 3–4 November).
-No table carries them now.
-
 ## 4. The order of work
 
-### 4.1 Remove the rollback and compatibility machinery (done)
+### 4.1 Rollback and compatibility machinery removed (done 3 November)
 
-Removed with no behaviour change: the 15 rollback tools and their scripts, `rollbackChain.mjs`,
-`rollbackToPreS8c.mjs`, the core-identity preflight script, the `rollback:*` and `preflight:*` npm scripts,
-`copyDatabaseReadOnly`, the `SCOUTBOX_PRE_*` historical-build boots, the rollback cases in the unit suites, the
-recruitment-cases key-format marker, the stale-outbox refusal (`OUTBOX_PUSH_SCHEMA_STALE`), the `LATER_SCHEMA`
-refusals and the "in-memory array was ignored" warnings.
+The rollback tools, preflight scripts, historical-build boots, staleness refusals and their tests are gone. Kept:
+`repositories/identityPreflight.mjs`, whose validator migration `0005` and the identity repository use.
 
-Kept on purpose: `repositories/identityPreflight.mjs` (the identity validator migration `0005` and the identity
-repository use; only the script around it went), and the `db.json` import in `store.mjs`, which is how a backup is
-restored. It went in §4.2.
+### 4.2 Backups are database copies (done 3 November)
 
-### 4.2 Backups become database copies (done)
-
-This was planned for S14. Doing it now removes code that §4.3 and S9–S13 would otherwise rewrite.
-
-Before this step, `POST /admin/backup` wrote the whole snapshot as `db.json`, and a restore booted a fresh `DATA_DIR`
-that imported it as blobs, after which every table migration ran its blob import. On a first boot there are no blobs,
-and the seed goes through the repositories. The restore path was not the only other user of the blob imports, though:
-the CI persistence batteries (`m23*Persistence`, `m23BootContract`) build their fixtures with `openStore(dir).save(…)`
-into an empty directory, which wrote the table-backed collections as blobs for the next boot to import.
-
-**Done 3 November** (branch `migrate/backup-db-copy`). Snapshot mode runs the table migrations when it opens a
-file, so a fixture's save goes straight into the tables through the `*_SNAPSHOT` writers, and a saved snapshot settles
-the first-installation state (`orgsInit`, `coreIdentityInit`). Junk entries in a fixture are refused by the save, with
-the same codes the imports used. Kept on purpose: the shared validators and their `*_IMPORT_BLOCKED` codes (the
-snapshot writers use them; renaming would be churn) and snapshot mode itself (the m23 batteries and the unit suites
-build fixtures with it). The unit suites no longer plant blobs: the import and upgrade cases were deleted, the rest
-build their setup with a snapshot-mode save, and the backup cases read the copied `scoutbox.db`. `testBackup.mjs`
-proves the copy matches the source table for table, a restore brings everything back (sessions, media, the removal
-queue), and a corrupt `scoutbox.db` stops the boot. Left for §4.3: the recruitment readers' "blob before migration
-00NN" fallbacks (`readTrialsCollection`, `readRequestsCollection`, `readCasesCollection`).
-
-The step was:
-
-1. Backup writes `scoutbox.db` with `VACUUM INTO`, next to `media/` and `manifest.json` (checksums as now). Restore
-   stays "copy the backup into a new, empty directory and boot". Never restore over a live directory.
-2. Delete the legacy `db.json` import (`readLegacySnapshot`, `LEGACY_IMPORT_FAILED` in `store.mjs`, its check in
-   `server.mjs`) and the backup's legacy-shape export.
-3. Each table migration's `up()` becomes its DDL plus whatever the boot still needs. Delete the blob imports, their
-   normalise-and-report code, the `*_IMPORT_BLOCKED` refusals and the cutover counts in `meta`.
-4. Tests that plant blob rows before a boot in order to test an import or an upgrade go. Tests that only used
-   planting as setup write through the repositories or SQL instead. The backup and restore tests are rewritten for
-   the new format; their behaviour (everything comes back, media included, a bad backup is refused) stays.
-5. Check what still uses snapshot mode (`openStore(dir)` without options) and each domain's `*_SNAPSHOT`. Keep
-   them only if a tool or fixture still needs them.
-
-Update `OPERATIONS.md` (Backups and restore, the legacy `db.json` note) in the same change. The blob collections
-that haven't moved yet are inside `scoutbox.db`, so the new backup carries them unchanged.
+A backup is a `VACUUM INTO` copy of `scoutbox.db` next to `media/` and `manifest.json`; a restore copies it into a new,
+empty directory and boots (never over a live one). The `db.json` import and every migration's blob import are gone;
+tests don't plant blob rows. Snapshot mode (`openStore(dir).save(…)`) stays for fixtures and the persistence batteries:
+it runs the table migrations and writes through each domain's `*_SNAPSHOT` writer, refusing junk with the
+`*_IMPORT_BLOCKED` codes (the names were kept to avoid churn). One blob-era fallback remains:
+`readTrialsCollection` in `repositories/identity.mjs` (goes with §4.3.1 item 2).
 
 ### 4.3 Prove the end state on recruitment
 
-Before migrating ~227 more tables, make one domain look like §2, so S9–S13 copy a finished pattern and nothing needs
-a second pass:
+The aim was to make one domain look like §2, so S9–S13 copy a finished pattern. Steps 1–3 (explicit writes, SQL reads
+with paging, no side columns) were done for S8a–S8d on 3–4 November; step 4 (the measurement) showed the §2 bar is not
+met, and the fixes are below and in §4.3.1. Code comments cite "§4.3 step 2" and "§4.3 step 4": keep those labels.
 
-1. Convert S8a–S8c (`recruitment.mjs`, `recruitmentCases.mjs`, `recruitmentContactsOffers.mjs`) to explicit
-   writes like S8d. The route code calls repository operations instead of editing objects in place. That's more
-   than `m23/*` and `m28/*`: on 3 November about 25 route modules read or edit `db.recruitmentCases` and
-   `db.trials` directly (`git grep -c 'db\.recruitmentCases\b'`), so plan to split this into several PRs, for
-   example one per repository.
-2. Move the hot recruitment reads (case lists, the Room, contacts, offers) to SQL queries with pagination, and drop
-   those mirrors.
-3. Drop the lossless `*_json` side columns from the S8a–S8c tables as part of step 1 (decided 3 November; the
-   other domains lost theirs then).
-4. Measure with `scripts/recruitmentPerf.mjs` at 100k synthetic players (results below).
+**The pattern, for S9–S13.** The S8 repositories are the reference; `signingsFollowUps.mjs` is the simplest.
 
-**Decided 4 November, done 4 November (see the end of this section): page the club Requests and Trials lists and the inboxes.**
-`GET /org/requests`, `GET /org/trials`, `GET /player/inbox` and `GET /guardian/inbox` still return whole lists (from
-SQL since S8a). The Pro and Grassroots home dashboards count pending requests, trials awaiting a report and all trials
-from the first two, so paging them alone would make those figures wrong for a club with more than 50. The change, as one
-commit: add a counts response the two home dashboards read instead; page the four routes with
-`domains/platform/paging.mjs` (`{ items, nextCursor }`); change the Pro, Grassroots and Player apps to read `.items`
-(Pro and Grassroots share business logic: change both). No "load more" UI yet (decided 4 November): leave a comment in
-each app where only the first page is read, as `m12api.ts` and the admin `m12tabs.tsx` do.
+- **Tables.** Typed columns with the domain's vocabulary CHECKs, no side columns. Client and idempotency keys,
+  reminder markers and similar are columns or child rows of their owner, not shared tables.
+- **Writes.** `create` and `update(id, (draft) => …)`: the update hands the route a plain copy, types the whole
+  record, writes it at once and refuses an unknown field. Updating a record from inside its own update is refused.
+  Shared mutators (`applyStatus`, `audit`, `bumpRev`) work unchanged on the draft; a seam other modules call (the
+  lifecycle writer) does its own `update` and takes the extra detail its callers used to patch on afterwards.
+- **Units of work.** Every route that writes more than one row runs in one unit. A refusal is thrown inside the
+  unit, replacing hand-written undo code. Routes check every field before writing anything.
+- **Reads.** No mirror. The old `db.<collection>` name throws, naming the repository: don't delete it, or the
+  `??= []` lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries
+  (`byId`, `forOrg`, `forPlayer`, `forCase`, counts…) with fresh deep-frozen records; a read inside a unit sees the
+  unit's writes. Modules receive them as `recruitmentReads`; pure projectors take `reads`, and batteries that call
+  projectors directly build `reads` over plain arrays with `scripts/recruitmentReadsFixture.mjs`. Sweeps are
+  indexed predicates, admin figures are `GROUP BY`s.
+- **Paging.** `domains/platform/paging.mjs`: `?limit=&cursor=` → `{ items, nextCursor }`, 50 by default, junk
+  refused with 400, newest first by rowid where order isn't otherwise defined. Page lists that grow without limit;
+  per-case, per-player and per-client lists don't. Where a screen counted a list, add a counts route
+  (`GET /org/recruitment-counts`). Apps read the first page and leave a comment that "load more" is needed.
+- **Clean-up.** The `m182` steps that created or shaped the collections become recorded no-ops; the
+  `*_STORE_MISSING` codes go with the collections.
+- **Keys.** Keys between tables of one domain are immediate `RESTRICT`. `DEFERRABLE INITIALLY DEFERRED` is only for
+  a key whose other side is still written by a staged hook at COMMIT.
 
-Doing the same for players and guardians (S4a's whole-snapshot identity replace) would also settle the A0–A3
-foreign-key questions. It is now §4.3.1.
+**Lessons for S9–S13.**
 
-**S8c done 3 November** (branch `migrate/s8c-explicit-writes`). Contacts and offers are ten typed tables with the
-vocabulary and length CHECKs, no side columns, and their idempotency keys as columns plus `offer_keys` rows (no longer
-in `idempotency_keys`). Migration `0017` was amended in place: re-seed a development database. The repository offers
-`contacts.create` / `update` / `redactPlayer` and the same for offers; `update(id, (draft) => …)` hands the route a
-plain copy, types the whole record and writes it at once, and refuses an unknown field rather than drop it. Every
-contact and offer route runs in one unit of work, and so do the two request-respond routes (the answer and the
-contact commit together). A lifecycle refusal is thrown inside the unit, which replaces the offer routes' hand-written
-rollback. The guardian e-mail copy is sent after COMMIT. What we learned, for S8a and S8b:
+- Probe the shapes first: instrument the old save and run the batteries to list every field the writers produce and
+  every in-place write. Group writes by the first stack frame outside shared helpers (`audit`, `histAppend`), not
+  the innermost, or helper callers hide. The throwing getters and read-only views catch what the probe misses.
+- Typing the test fixtures finds drift (values the routes never accepted) before the batteries do.
+- Batteries that planted partial literals now plant the writers' whole literals. Records a typed table cannot store
+  are asserted to be refused by the save, naming the id; corruption a typed row can still carry stays planted and is
+  judged on read.
+- Domains that reference each other both ways (requests/trials ↔ cases) convert together, or one first with
+  deferred keys.
 
-- S8c went first because it is a leaf. Its `case_id` and `request_id` keys are `DEFERRABLE INITIALLY DEFERRED`
-  because cases and requests are still written by their staged hooks at the unit's COMMIT. When S8a and S8b become
-  explicit, those keys can go back to immediate `RESTRICT`.
-- Requests and trials point at cases, and cases link back to requests and trials, so S8a and S8b depend on each other.
-  Convert them in one PR, or convert one with deferred keys as S8c did.
-- Four end-to-end batteries planted records the typed tables now refuse (an offer with no revision, a pointer at a
-  missing revision, unknown status words, partial literals). Those assertions now check that the save refuses the
-  record and names its id. Corruption a typed row can still carry (a delivered contact with no recipient, an ACCEPTED
-  revision with no response, a stale but resolvable pointer) is still planted and still judged on read.
+**Recruitment shapes later domains depend on.** One case-history entry shape,
+`{ id, at, byKind, byId, byName, action, detail }`. A decision's `snapshot` is the `room_snapshots` row it names
+(`snapshot_id`), never a copy. A Room's `sourceRef` is `{ id, version }` from every caller (M18 Nobody Missed and
+Second Look, M19 watchlists: relevant to S12).
 
-**S8a done 3 November** (on `feat/sqlite-schema`). Requests and trials are sixteen typed tables with the vocabulary
-CHECKs of `m23/trial.mjs` and no side columns. Migration `0015` was amended in place (re-seed a development database)
-and `0016` no longer rebuilds them: it creates the shared `idempotency_keys` for the case graph's owners only. The
-invitation key is a column of the request; a trial's client keys, reminder markers and revision sessions are rows of
-`trial_keys`, `trial_reminders` and `trial_revision_sessions`; actors keep their kind (`<x>_kind`, `_user_id`,
-`_actor_id`, `_name`). Every trial reads back with its trial-day container, so the readers' `t.day ??= …` writes are
-gone. Two never-read fields were dropped: `trials.keys.accept` and `trials.blockedBy`. The repository offers
-`requests.create` / `update`, `trials.create` / `update` and `tombstoneForPlayer`, the same pattern as S8c, and every
-writer uses them: the request writer (the Trial invitation's case link, recipient and key are part of the one create),
-both respond routes, the report route, the urgent-report freeze (the `suspended` status, now in the vocabulary), the
-deletion unit, every trial route, the trial-day routes and the reminder sweep. The routes that move a case run in one
-unit of work, and the trial is written before the lifecycle move so the evidence provider sees it. What we learned, for
-S8b:
-
-- The coupling to S8b was smaller than it looked: S8b's flush only needs the final requests and trials (the views) and
-  the departures, which are always empty now that nothing deletes a request or a trial outside a snapshot.
-- The `case_id` keys are `DEFERRABLE INITIALLY DEFERRED` like S8c's. When S8b is explicit, they and S8c's can become
-  immediate `RESTRICT`.
-- The shape probe paid off: instrumenting the old save and running the batteries listed every field the writers
-  actually produce. One writer it missed (the urgent-report freeze) was caught by `testSafetyAuditServer`.
-- Five batteries planted partial literals (no organisation flags, no `workflowState`, no `rev`). They now plant the
-  writers' whole literals. `m23TrialPersistence` §3 plants only the corruption a typed row can carry (a state that
-  disagrees with its facts, a timezone that is not a zone, rev 0); the unstorable cases moved to a new §3c that
-  asserts the save refuses each one with its id.
-
-**S8b done 4 November** (on `feat/sqlite-schema`). Cases and the four room collections are twenty-five typed tables
-with the vocabulary CHECKs of `m17/shared.mjs`, `m23/decision.mjs`, `m13/shared.mjs` and `m27/integration.mjs`, and no
-side columns. Migration `0016` was amended in place (re-seed a development database). It no longer creates
-`idempotency_keys`: the draft's, the formal decision's and the handoff's keys are columns, and `0018` creates the table
-for the signing packages, its only owner. The repository offers `cases.create` / `update`, `comments`, `decisions` and
-`evidenceStates` `create` / `update`, `snapshots.create` and `redactPlayer`, the S8a pattern; an update of a record
-from inside its own update is refused. Every writer uses them: M12 cases, M13 budgets, every Room route, the lifecycle
-writer, the decision draft and finalize, the M27 handoff, the trial, contact, offer and signing couplings, and the
-deletion unit. Three model changes:
-
-- One case history shape, `{ id, at, byKind, byId, byName, action, detail }`. M27 wrote a second one that the activity
-  feed could not read, so handoff entries now show their actor there.
-- A decision's `snapshot` is the `room_snapshots` row it names (`snapshot_id`), read back with the decision, never a copy.
-- A Room's `sourceRef` is `{ id, version }` from every caller (M18 Nobody Missed and Second Look, M19 watchlists).
-
-Junk the routes now refuse instead of storing: a case `deadline` or an M12 assignment or task `dueAt` that is not a day
-or an instant (400 `DATE_INVALID`), and an FX assumption whose date is not a day (dropped, like a bad rate). The Room
-PATCH, task PATCH and link routes check every field before writing, so a refusal part-way no longer leaves the earlier
-fields changed in memory. The finalize route is one unit of work: a lifecycle refusal rolls back the formal row, its
-snapshot and the supersession instead of the hand-written undo. The `case_id` keys of requests, trials, contacts and
-offers are immediate `RESTRICT`, and the writers name a missing case with its ids. What we learned, for S9–S13:
-
-- The probe listed every in-place write, but grouping writes by their innermost frame hid the callers of shared helpers
-  (`audit` from M28 and M29, `histAppend`). The read-only views caught those on the first battery run. Group by the
-  first frame outside the shared helpers.
-- Shared mutators (`applyStatus`, `audit`, `bumpRev`) keep working unchanged on the draft `update` hands out. A seam
-  other modules call (the lifecycle writer) does its own `update` and takes the extra detail its callers used to patch
-  onto the last history entry (`statusDetail`).
-- Test fixtures had drifted from the writers (a `proceed` outcome, budget kinds the route never accepted, a string
-  passport revision stored as a number). Typing the fixtures found them before the batteries did.
-
-**Step 2: S8c reads through SQL, done 4 November** (on `feat/sqlite-schema`). The contacts and offers have no mirror and
-no `db.*` view: `db.recruitmentContacts` and `db.recruitmentOffers` throw when read or assigned, naming the repository,
-so a missed reader fails loudly instead of seeing an empty list. The repository answers `byId`, `forCase`,
-`forOrgPlayer`, `forPlayer`, `forRequest` / `forAgent` (contacts), `forPlayers` / `forAgentShare` (offers) and `forOrg`
-from the existing indexes, in insertion order, as fresh deep-frozen records. A read inside a unit of work sees the
-unit's own writes, so the participant hook that restored the mirrors is gone. Modules get the queries as
-`recruitmentReads` in their context; the pure projectors (the journey, the evidence provider, the dashboard context)
-take them as `reads` instead of reading `db`, and the journey reads a case's contacts and offers once instead of
-scanning both collections about a dozen times. The redactions are `UPDATE … WHERE player_id = ?`. The contacts and
-offers left the store contract, the `m230_004` snapshot step is a recorded no-op, and `CONTACT_STORE_MISSING` and
-`OFFER_STORE_MISSING` went with the collections. No list here grows without limit (each is per case, per player or per
-agent client), so nothing pages; the club audit feed, which merges every domain, pages when S8b moves. The batteries
-that call the projectors directly get the same queries over their plain arrays from `scripts/recruitmentReadsFixture.mjs`.
-What we learned, for the next repositories:
-
-- Make the old name throw rather than delete it. The `??= []` lines and `Array.isArray(db.x)` guards would otherwise
-  quietly create or report an empty collection; the throwing getter found every remaining reader on the first run.
-- The "store missing" branches (`storeOr500`, `JOURNEY_REQUIRED_STORES`) were about the blob; their tests now check
-  the same behaviour through the queries (a projector given no contact queries still reports the store missing).
-
-**Step 2: S8d reads through SQL, done 4 November** (on `feat/sqlite-schema`). Same pattern as S8c: no mirror, no view,
-`db.signingPackages` / `db.signings` / `db.followUps` / `db.outcomeReports` throw. The repository adds `forCase`,
-`forOffer`, `forPlayer`, `forOrg`, `forOrgPlayer` (packages and signings), the one-row `forPackage` / `forOffer`
-(signings) and `forFollowUp` (reports), `forSigning` / `forPlayers` (follow-ups), counts, and two new indexes
-(`signing_packages (org_id, player_id)`, `outcome_reports (player_id)`; `0018` amended in place: re-seed a development
-database). The paging convention lives in `domains/platform/paging.mjs` (the first module under `domains/`):
-`?limit=&cursor=` → `{ items, nextCursor }`, junk refused with 400. The club follow-ups (by due date, then id) and the club
-signings (newest first) page; the follow-ups response dropped `total` / `offset`, which no app read, and the signings
-response is an object instead of a bare array (no app reads it; the batteries read `.items`). The every-minute sweep is
-three indexed queries (signings missing a milestone, scheduled-and-past, due-and-unnotified) instead of a pass over every
-signing and follow-up; the admin outcome figures are one `GROUP BY`; the club track record reads the club's signings once
-and each involved player's signings by index. The journey and the evidence provider read the case's packages and the
-club's signings of the player through `reads`.
-
-**Step 2: S8a reads through SQL, done 4 November** (on `feat/sqlite-schema`). Same pattern: `db.requests` and `db.trials`
-throw. The repository adds `forOrg`, `forPlayer(s)`, `forOrgPlayer`, `forCase`, `forOrgStatus` and counts; the three trial
-sweeps (report overdue, confirmed and open, completed without the assessment reminder) are indexed predicates, and the
-admin staff-check queue pages by cursor over `trial_day_staff`. Four indexes were added to `0015` in place (re-seed a
-development database). The channels repository checks a request through `requestExists(id)` instead of scanning the
-requests. The pure helpers that took `db` (the journey, the evidence provider, the decision evidence, the M21 evidence
-links and plan) take `reads`; the batteries that call them get the queries over their plain arrays from
-`scripts/recruitmentReadsFixture.mjs`. The m182 steps that created or shaped `db.requests` / `db.trials` are no-ops, and
-`TRIAL_STORE_MISSING` went with the collection. The club Requests and Trials lists and the inboxes still return whole
-lists (from SQL): their paging waits on the home dashboards' counts (decided above).
-
-**Step 2: S8b reads through SQL, done 4 November** (on `feat/sqlite-schema`). The last recruitment mirror is gone:
-`db.recruitmentCases` and the four Room collections throw, and the recruitment domain has no `db.*` collection left.
-The repository adds `forOrg`, `forPlayer`, `forOrgPlayer`, `forHandoffAgent`, `withRoom`, counts and per-status Room
-counts for cases, `forRoom` for the Room records and `forOrg` / `forOrgPlayer` for decisions (one index added to `0016`
-in place: `room_decisions (org_id, player_id)`). The club Rooms list and the M12 cases list page by cursor
-(`{ items, nextCursor }`, the Rooms list keeping its funnel and statuses); the Pro and Grassroots apps read the first page
-and say a "load more" will be needed. Their filters are per viewer (restricted Rooms, views, the name search), so both
-read the organisation's cases by index and filter and page in code (`pageSorted`): the response is bounded, the read is
-one club's. A bad `limit` is now refused (400) where the Rooms list clamped it. The boot integrity report takes the
-Rooms from `cases.withRoom()`. The m182 steps that created or backfilled the case collections are no-ops, and
-`DECISION_STORE_MISSING` went with the collection. Still in memory, for step 4 to judge: the per-org filtering of those
-two lists, the audit feed's merge, the dashboard's per-org reads and the integrity report's boot read.
-
-**Step 2: the club Requests and Trials lists and the inboxes page, done 4 November** (on `feat/sqlite-schema`).
-`GET /org/requests`, `GET /org/trials`, `GET /player/inbox` and `GET /guardian/inbox` answer `{ items, nextCursor }`,
-newest first by rowid (an update is an upsert, so a row never moves), 50 by default, junk refused with 400. The club
-lists used to be oldest first; now all four read newest first, so a club sees its latest requests and trials on the
-first page. The guardian Inbox is one query over the children's requests routed to the guardian, and a child's Inbox
-pages the same rows as before, with the same guardian-managed wording. The home figures come from a new
-`GET /org/recruitment-counts` (`requestsPending`, `trialsAwaitingReport`, `trials`, three indexed `COUNT`s), which the
-Pro and Grassroots home dashboards read instead of counting the lists. The Pro, Grassroots and Player clients read the
-first page and say a "load more" will be needed. Until it exists, a club with more than 50 requests or trials sees only
-the newest 50 on the Requests, Trials and Trial days screens and in the Messages report picker, and an older trial awaiting
-a report drops off the Trials screen (the home figure still counts it). Two indexes were added to `0015` in place
-(`recruitment_requests (org_id)`, `trials (org_id)`, so the club lists read in rowid order without a sort; re-seed a
-development database). The batteries read `.items`; `m23P4AClosureE2E`'s "latest trial of a player" takes the first
-row instead of the last.
+**What clubs see until "load more" exists.** The Requests, Trials, Trial days, Rooms and cases screens and the
+Messages report picker show the newest 50. An older trial awaiting a report drops off the Trials screen, though the
+home figure still counts it.
 
 **Step 4: measured 4 November, the bar of §2 is not met** (`npm run perf:recruitment -- <players> <clones> <busy>`).
-The script builds a database of synthetic players (`scripts/perfPopulation.mjs`, shared with `dataLayerPerf.mjs`) and
-clones the S8a–S8d test fixtures' recruitment graph (a Room case with its request, trial, comments, snapshots,
-decisions, contacts, offers, signing packages, signings and follow-ups, plus three more cases) onto real clubs and
-players with fresh ids, through a snapshot-mode save, so every row passes the typed writers. It boots the real server on
-that database and times the hot routes over HTTP, one write and the sweep queries. The busy club has 500 graphs (2,000
-cases, 1,500 requests, 500 trials), a typical club one or two, the popular player 11 cases. Medians on a laptop, HTTP
-included:
+The script builds synthetic players (`scripts/perfPopulation.mjs`) and clones the S8 fixtures' recruitment graph onto
+real clubs and players through a snapshot-mode save, then boots the real server and times the hot routes over HTTP,
+one write and the sweep queries. The busy club has 500 graphs (2,000 cases, 1,500 requests, 500 trials), a typical
+club one or two. Medians on a laptop, HTTP included:
 
 | Route (busy club unless named) | 10k players | 30k players | 100k, extrapolated | Cost grows with |
 |---|---|---|---|---|
@@ -349,34 +182,28 @@ included:
 | `GET /org/trials`, a Room, a journey, `/player/signings` | 6–14 ms | 6–14 ms | same | the page |
 | requests, inboxes, counts, follow-ups, signings, Room tabs | 1–5 ms | 1–5 ms | same | the page |
 
-A typical club is at or near 5 ms everywhere (its audit about 20 ms at 30k). Boot: 9 s at 10k players, 18 s at 30k and
-77 s at 100k with no recruitment; at 100k players with 10,000 graphs it did not finish in 18 minutes (below). Each
-comment adds about 320 kB to the write-ahead log at any size, so no request rewrites the database file, but every write
-costs CPU in proportion to the whole player base. The causes, from CPU profiles, in the order to fix them:
+A typical club is at or near 5 ms everywhere (its audit about 20 ms at 30k). Boot: 9 s at 10k players, 18 s at 30k,
+77 s at 100k with no recruitment; at 100k with 10,000 graphs it did not finish in 18 minutes (item 3). A comment adds
+about 320 kB to the write-ahead log at any size, so no request rewrites the file, but every write costs CPU in
+proportion to the whole player base. The causes, from CPU profiles, in the order to fix them. Items 1 and 2 are not
+recruitment's and every later domain would inherit them, so they are §4.3.1. Fix items 3–6 after it and re-measure.
 
-Items 1 and 2 are not recruitment's and every later domain would inherit them, so they are a step of their own
-(§4.3.1). Items 3–6 are recruitment's: fix them after §4.3.1 and re-measure.
-
-1. **Every write walks every player.** At each unit-of-work commit and save, `identity.flushDomain` rebuilds every
-   player's row to compare its facets (`repositories/identity.mjs:1026`), and building a row reads the player's derived
-   trial reports (one query per player). Fixed by §4.3.1.
-2. **`findPlayer` is a linear scan** of the identity view (`server.mjs:702`, 184 callers), as are `usersOf` and
-   `db.orgs.find`. The audit feed calls it once per case, contact and trial; the sweeps once per item. Fixed by §4.3.1.
-3. **The trial-reminder sweep visits every confirmed, open trial every minute** and calls `findPlayer` for each before
-   checking whether a reminder is due (`m12/operations.mjs:362`); reading those trials alone takes 0.2 s per 1,000.
-   With 10,000 open trials and 100k players this blocked the boot for over 18 minutes. Select only the sessions starting
-   within 48 hours, in SQL.
-4. **The busy club's Rooms, cases, funnel and analytics decode every case** with its child tables (`decodeCase`, at least
-   16 queries a case) before filtering and paging in code. They need a summary query over `recruitment_cases` that
-   filters and pages in SQL, and per-viewer rules applied to the page.
+1. **Every write walks every player** (`identity.flushDomain`). §4.3.1.
+2. **`findPlayer`, `usersOf` and `db.orgs.find` are linear scans**, called per item by the audit feed and the
+   sweeps. §4.3.1.
+3. **The trial-reminder sweep visits every confirmed, open trial every minute** and calls `findPlayer` for each
+   before checking whether a reminder is due (`m12/operations.mjs:362`); with 10,000 open trials and 100k players
+   this blocked the boot for over 18 minutes. Select only sessions starting within 48 hours, in SQL.
+4. **The busy club's Rooms, cases, funnel and analytics decode every case** with its child tables (`decodeCase`, at
+   least 16 queries a case) and filter and page in code (`pageSorted`, because the filters are per viewer). They
+   need a summary query over `recruitment_cases` that filters and pages in SQL, with per-viewer rules applied to the
+   page.
 5. **The audit feed builds the club's whole history** on each page, then slices it; it should page per source.
-6. **The offers lists write a receipt on every read** inside a unit of work; once writes are cheap this is fine, but it
-   should only write when a revision is unseen.
+6. **The offers lists write a receipt on every read**; write only when a revision is unseen.
 
-A backlog is a separate risk: the boot runs the sweeps before it listens, and they handle due items one transaction
-and one notification at a time (a stale copy of the fixtures, 3,000 graphs at 10k players, booted in 68 s instead of
-23 s). The script moves the fixtures' instants to today and leaves out their 200-day-old legacy signing so it measures
-the steady state.
+A backlog is a separate risk: the boot runs the sweeps before it listens, one transaction and one notification per
+due item (3,000 stale graphs at 10k players booted in 68 s instead of 23 s). The script moves the fixtures' instants to
+today so it measures the steady state.
 
 ### 4.3.1 Remove the costs that grow with the whole player base (before S9)
 
