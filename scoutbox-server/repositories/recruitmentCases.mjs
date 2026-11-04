@@ -40,7 +40,7 @@
  *
  * Refusals name tables, fields and ids — never a name, a note, a body or a message.
  */
-import { transaction, migrationApplied, newestHistory } from './database.mjs';
+import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { describe, isPlainObject, nonEmpty, ids } from './recruitment.mjs';
 import {
@@ -848,26 +848,27 @@ function statements(sqlite) {
  * child table for the whole list (in chunks of ids), grouped by case, instead of about sixteen queries a case. The
  * rows and their order are the per-case statements' own, so a batch decode is the same record.
  */
-const BATCH_CHUNK = 500;
 function batchStatements(sqlite, st, ids) {
-  const fetch = (table, order) => {
-    const out = new Map();
-    for (let i = 0; i < ids.length; i += BATCH_CHUNK) {
-      const chunk = ids.slice(i, i + BATCH_CHUNK);
-      for (const r of sqlite.prepare(`SELECT * FROM ${table} WHERE case_id IN (${chunk.map(() => '?').join(',')}) ORDER BY case_id${order ? `, ${order}` : ''}`).all(...chunk)) {
-        const k = order === 'scenario_id, position' ? `${r.case_id}\u0000${r.scenario_id}` : r.case_id;
-        let list = out.get(k); if (!list) out.set(k, (list = [])); list.push(r);
-      }
-    }
-    return out;
-  };
-  const many = (m) => ({ all: (...k) => m.get(k.join('\u0000')) ?? [] });
-  const one = (m) => ({ get: (id) => m.get(id)?.[0] });
+  const rows = (t, subKey = []) => childRowsOf(sqlite, t, 'case_id', ids, { order: 'position', subKey });
+  const first = (t) => { const m = childRowsOf(sqlite, t, 'case_id', ids); return { get: (id) => m.all(id)[0] }; };
   return {
     ...st,
-    of: Object.fromEntries(Object.keys(st.of).map((t) => [t, many(fetch(t, 'position'))])),
-    draftOf: one(fetch('case_decision_drafts', null)), handoffOf: one(fetch('case_transaction_handoffs', null)),
-    scenarioChild: Object.fromEntries(Object.keys(st.scenarioChild).map((t) => [t, many(fetch(t, 'scenario_id, position'))])),
+    of: Object.fromEntries(Object.keys(st.of).map((t) => [t, rows(t)])),
+    draftOf: first('case_decision_drafts'), handoffOf: first('case_transaction_handoffs'),
+    scenarioChild: Object.fromEntries(Object.keys(st.scenarioChild).map((t) => [t, rows(t, ['scenario_id'])])),
+  };
+}
+
+/** The same for a list of decisions: their child rows, the snapshots they name and those snapshots' source references. */
+function batchDecisionStatements(sqlite, st, rows) {
+  const ids = rows.map((r) => r.id);
+  const snapshotIds = rows.map((r) => r.snapshot_id).filter((x) => x !== null);
+  const snapshots = childRowsOf(sqlite, 'room_snapshots', 'id', snapshotIds);
+  return {
+    ...st,
+    decisionChild: Object.fromEntries(Object.keys(st.decisionChild).map((t) => [t, childRowsOf(sqlite, t, 'decision_id', ids, { order: 'position' })])),
+    byId: { ...st.byId, room_snapshots: { get: (id) => snapshots.all(id)[0] } },
+    sourceRefsOf: childRowsOf(sqlite, 'room_snapshot_source_refs', 'snapshot_id', snapshotIds, { order: 'kind, position' }),
   };
 }
 
@@ -1146,12 +1147,15 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
   const decode = (name, row) => deepFreeze(DECODERS[name](st, row));
   const find = (name, id) => { if (typeof id !== 'string') return null; const row = st.byId[PARENT[name]].get(id); return row ? decode(name, row) : null; };
   const exists = (name, id) => typeof id === 'string' && !!st.byId[PARENT[name]].get(id);
-  /** Decode many rows; a list of cases reads its children in one batch (batchStatements). */
+  /** Decode many rows; a list of cases or decisions reads its children in one batch (batchStatements, batchDecisionStatements). */
   const decodeAll = (name, rows) => {
-    if (name !== 'recruitmentCases' || rows.length < 2) return rows.map((r) => decode(name, r));
+    if (rows.length < 2 || (name !== 'recruitmentCases' && name !== 'roomDecisions')) return rows.map((r) => decode(name, r));
+    if (name === 'roomDecisions') { const bst = batchDecisionStatements(sqlite, st, rows); return rows.map((r) => deepFreeze(decodeDecision(bst, r))); }
     const bst = batchStatements(sqlite, st, rows.map((r) => r.id));
     return rows.map((r) => deepFreeze(decodeCase(bst, r)));
   };
+  /** The records whose `col` is any of `values`, in insertion order, decoded in one batch. */
+  const inList = (name, col) => (values) => { const want = [...new Set((values ?? []).filter((v) => typeof v === 'string'))]; if (!want.length) return []; return decodeAll(name, sqlite.prepare(`SELECT * FROM ${PARENT[name]} WHERE ${col} IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want)); };
   const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => decodeAll(name, stmt.all(...args)); };
   const count = (sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.get(...args).n; };
   const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', t.reason); return t.record; };
@@ -1295,6 +1299,8 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
   const snapshots = { ...ops('roomSnapshots', { updatable: false }), forRoom: forRoom('roomSnapshots') };
   const decisions = {
     ...ops('roomDecisions'), forRoom: forRoom('roomDecisions'),
+    /** The decisions of several Rooms (a player's journeys), in insertion order. */
+    forRooms: inList('roomDecisions', 'room_id'),
     forOrgPlayer: list('roomDecisions', 'SELECT * FROM room_decisions WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
     forOrg: list('roomDecisions', 'SELECT * FROM room_decisions WHERE org_id = ? ORDER BY rowid'),
     /** The ids of the organisation's Rooms that hold any decision (a Set; nothing decoded). */

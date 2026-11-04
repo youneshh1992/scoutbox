@@ -31,7 +31,7 @@
  *
  * Refusals name tables, fields and ids — never a subject, a body, a note, a message or a name.
  */
-import { transaction, migrationApplied, newestHistory } from './database.mjs';
+import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
 import { isPlainObject, ids, tableExists } from './recruitment.mjs';
 import { CONTACT_STATUSES, CONTACT_CHANNELS, CONTACT_MODES, CONTACT_LIMITS, RESPONSE_KINDS } from '../domains/recruitment/lifecycle/contact.mjs';
 import { OFFER_STATUSES, OFFER_TYPES, OFFER_LIMITS, OFFER_RESPONSE_TYPES, OFFER_RESPONSE_ACTORS } from '../domains/recruitment/offers/offer.mjs';
@@ -663,6 +663,24 @@ function writeOffer(st, o) {
 function deleteContact(st, id) { for (const d of st.contactChildrenDel) d.run(id); st.contactDel.run(id); }
 function deleteOffer(st, id) { for (const d of st.offerChildrenDel) d.run(id); st.offerDel.run(id); }
 
+/**
+ * The statements `decodeContact` and `decodeOffer` read children through, answered for many records at once (§4.3
+ * step 4): each child table read once for the whole list (an offer's documents through its revisions) instead of two
+ * queries a contact and five an offer plus one a revision. Same rows, same order.
+ */
+function batchStatements(sqlite, st, { contactIds = [], offerIds = [] }) {
+  const rows = (table, col, ids, order = 'position') => childRowsOf(sqlite, table, col, ids, { order });
+  const revisionsOf = rows('offer_revisions', 'offer_id', offerIds);
+  const revisionIds = offerIds.flatMap((id) => revisionsOf.all(id).map((r) => r.id));
+  return {
+    ...st,
+    attemptsOf: rows('contact_attempts', 'contact_id', contactIds), chistOf: rows('contact_history', 'contact_id', contactIds),
+    revisionsOf, docsOf: rows('offer_revision_documents', 'revision_id', revisionIds),
+    responsesOf: rows('offer_responses', 'offer_id', offerIds), receiptsOf: rows('offer_read_receipts', 'offer_id', offerIds),
+    ohistOf: rows('offer_history', 'offer_id', offerIds), okeysOf: rows('offer_keys', 'offer_id', offerIds, 'act, position'),
+  };
+}
+
 const flagOut = (v) => (v === null ? null : v === 1);
 const pick = (row, p, keys) => keys.every((k) => row[`${p}_${k}`] === null);
 const contactHistoryOut = (h) => ({ id: h.id, at: h.at, action: h.action, by: h.by_kind === null ? null : h.by_kind === 'org' ? { kind: 'org', userId: h.by_user_id, name: h.by_name } : { kind: h.by_kind, name: h.by_name }, detail: h.detail_json === null ? null : JSON.parse(h.detail_json) });
@@ -725,8 +743,8 @@ function decodeOffer(st, row) {
     rev: row.rev, revAt: row.rev_at, revBy: row.rev_by_user_id === null && row.rev_by_name === null ? null : { userId: row.rev_by_user_id, name: row.rev_by_name }, policyVersion: row.policy_version, subjectRemovedAt: row.subject_removed_at,
   };
 }
-export const readContacts = (sqlite) => { const st = statements(sqlite); return st.contactAll.all().map((r) => decodeContact(st, r)); };
-export const readOffers = (sqlite) => { const st = statements(sqlite); return st.offerAll.all().map((r) => decodeOffer(st, r)); };
+export const readContacts = (sqlite) => { const st = statements(sqlite); const rows = st.contactAll.all(); const bst = batchStatements(sqlite, st, { contactIds: rows.map((r) => r.id) }); return rows.map((r) => decodeContact(bst, r)); };
+export const readOffers = (sqlite) => { const st = statements(sqlite); const rows = st.offerAll.all(); const bst = batchStatements(sqlite, st, { offerIds: rows.map((r) => r.id) }); return rows.map((r) => decodeOffer(bst, r)); };
 
 // ------------------------------------------------------------------ references (Q8c-a counted, Q8c-b strict on a snapshot write)
 const PLAYER_REFS_SQL = {
@@ -862,7 +880,17 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
   const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('CONTACTS_OFFERS_INPUT_INVALID', t.reason); return t.record; };
   const IMMUTABLE = ['id', 'orgId', 'caseId', 'playerId', 'createdAt'];
   const write = (name, record) => (name === 'recruitmentContacts' ? writeContact(st, record) : writeOffer(st, record));
-  const queries = (name, sql) => Object.fromEntries(Object.entries(sql).map(([k, q]) => { const stmt = sqlite.prepare(q); return [k, (...args) => stmt.all(...args).map(decode[name])]; }));
+  /** Decode many rows; a list reads its records' children in one batch (batchStatements). */
+  const BATCHED = { recruitmentContacts: [decodeContact, 'contactIds'], recruitmentOffers: [decodeOffer, 'offerIds'] };
+  const decodeAll = (name, rows) => {
+    if (rows.length < 2) return rows.map(decode[name]);
+    const [decodeOne, key] = BATCHED[name];
+    const bst = batchStatements(sqlite, st, { [key]: rows.map((r) => r.id) });
+    return rows.map((r) => deepFreeze(decodeOne(bst, r)));
+  };
+  const queries = (name, sql) => Object.fromEntries(Object.entries(sql).map(([k, q]) => { const stmt = sqlite.prepare(q); return [k, (...args) => decodeAll(name, stmt.all(...args))]; }));
+  /** The records naming any of `values` in `col`, in insertion order. */
+  const inList = (name, table, col) => (values) => { const want = [...new Set((values ?? []).filter((v) => typeof v === 'string'))]; if (!want.length) return []; return decodeAll(name, sqlite.prepare(`SELECT * FROM ${table} WHERE ${col} IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want)); };
   const countOf = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`);
   const counters = { recruitmentContacts: countOf('recruitment_contacts'), recruitmentOffers: countOf('recruitment_offers') };
 
@@ -893,6 +921,8 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
     byId: (id) => read('recruitmentContacts', id),
     /** forCase(caseId), forOrgPlayer(orgId, playerId), forPlayer(playerId), forRequest(requestId), forAgent(agentUserId), forOrg(orgId). */
     ...queries('recruitmentContacts', CONTACT_READS),
+    /** The contacts of several cases (a player's journeys), in insertion order. */
+    forCases: inList('recruitmentContacts', 'recruitment_contacts', 'case_id'),
     /**
      * The history of the organisation's contacts with one of `actions`, newest first, for a merged feed (the audit
      * feed): `{ contactId, caseId, playerId, entry }`. See `newestHistory` (database.mjs) for `atMost` and `n`.
@@ -918,7 +948,9 @@ export function createRecruitmentContactsOffersRepository({ sqlite, unit = null,
     /** forCase(caseId), forOrgPlayer(orgId, playerId), forPlayer(playerId), forAgentShare(agentUserId), forOrg(orgId). */
     ...queries('recruitmentOffers', OFFER_READS),
     /** The offers of several players (a guardian's children), in insertion order. */
-    forPlayers(playerIds) { const want = [...new Set((playerIds ?? []).filter((p) => typeof p === 'string'))]; if (!want.length) return []; return sqlite.prepare(`SELECT * FROM recruitment_offers WHERE player_id IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want).map(decode.recruitmentOffers); },
+    forPlayers: inList('recruitmentOffers', 'recruitment_offers', 'player_id'),
+    /** The offers of several cases (a player's journeys), in insertion order. */
+    forCases: inList('recruitmentOffers', 'recruitment_offers', 'case_id'),
     /** The deletion unit (P6.1 §66): ids, states and times stay; the player's name and words go; subject_removed_at set. */
     redactPlayer(playerId, at) {
       return operation(() => {

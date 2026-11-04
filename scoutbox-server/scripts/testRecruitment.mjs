@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { checkHistoryFeed } from './historyFeedCheck.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
@@ -41,6 +41,11 @@ const typed = (name, raw) => { const t = (name === 'requests' ? rec.typeRequest 
 
 /** Every writer shape: the accepted P4B pair (req-p4b ↔ trial-1, thread chan-1), a contact, an open-day invitation, a pending date-only invitation, the minor's invitation, and the M12-shaped reported trial on req-old. */
 const FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), contactRequest(), openDayRequest(), legacyTrialRequest(), minorInvitation(), legacyTrialRequest({ id: 'req-old', status: 'accepted', respondedAt: T.accepted - 30 * 86_400_000, respondedBy: 'player', contactChannel: null })], trials: [scheduledTrial(), preP4bTrial()] });
+/** FIX plus the accepted, worked (every child table) and cancelled trials, with their requests. */
+const EVERY_TRIAL_SHAPE = () => {
+  const fix = FIX(); const extra = { requests: [legacyTrialRequest({ id: 'req-legacy2', status: 'accepted', respondedAt: T.accepted, respondedBy: 'player', trialId: 'trial-legacy' }), legacyTrialRequest({ id: 'req-worked', status: 'accepted', trialId: 'trial-worked', caseId: 'case-2', respondedAt: T.accepted, respondedBy: 'player' }), legacyTrialRequest({ id: 'req-cancelled', status: 'accepted', respondedAt: T.accepted, respondedBy: 'player', trialId: 'trial-cancelled' })], trials: [acceptedTrial({ requestId: 'req-legacy2' }), workedTrial({ id: 'trial-worked', requestId: 'req-worked', caseId: 'case-2', report: report({ trialId: 'trial-worked' }) }), cancelledTrial({ caseId: null })] };
+  return { requests: [...fix.requests, ...extra.requests], trials: [...fix.trials, ...extra.trials] };
+};
 function fixtureCollections({ requests, trials, cases = CASES(), channels = [CHANNEL()], more = {} } = {}) {
   const db = { notifications: [], dispatches: [], recruitmentCases: cases, ...more };
   if (requests !== undefined) db.requests = requests; if (trials !== undefined) db.trials = trials; if (channels !== undefined) db.channels = channels;
@@ -86,8 +91,7 @@ test('[schema] migration 0015 is registered before 0016–0018 and creates the s
 });
 
 test('[snapshot][typed] every writer shape is typed into its columns and reads back as the typed record (an absent field null, an absent list empty, the trial-day container, the five key lists and the reminder map always present): the P4B invitation (slots, private details, invitation key, recipient), the contact, the open-day literal, the legacy and the minor\'s invitations, the scheduled, accepted, M12-shaped, worked and cancelled trials', () => {
-  const fix = FIX(); const extra = { requests: [legacyTrialRequest({ id: 'req-legacy2', status: 'accepted', respondedAt: T.accepted, respondedBy: 'player', trialId: 'trial-legacy' }), legacyTrialRequest({ id: 'req-worked', status: 'accepted', trialId: 'trial-worked', caseId: 'case-2', respondedAt: T.accepted, respondedBy: 'player' }), legacyTrialRequest({ id: 'req-cancelled', status: 'accepted', respondedAt: T.accepted, respondedBy: 'player', trialId: 'trial-cancelled' })], trials: [acceptedTrial({ requestId: 'req-legacy2' }), workedTrial({ id: 'trial-worked', requestId: 'req-worked', caseId: 'case-2', report: report({ trialId: 'trial-worked' }) }), cancelledTrial({ caseId: null })] };
-  const all = { requests: [...fix.requests, ...extra.requests], trials: [...fix.trials, ...extra.trials] };
+  const all = EVERY_TRIAL_SHAPE();
   const d = file('typed', all); const S = snapshotOpen(d);
   assert.deepEqual(plain(S.db.requests), all.requests.map((r) => typed('requests', r)), 'every request reads back as its typed record');
   assert.deepEqual(plain(S.db.trials), all.trials.map((t) => typed('trials', t)), 'every trial reads back as its typed record');
@@ -183,6 +187,27 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query return ex
   for (const pendingOnly of [true, false]) for (const limit of [1, 2, 100]) assert.deepEqual(walk(pendingOnly, limit), checks(pendingOnly), `staffChecksPage pendingOnly=${pendingOnly} by ${limit}`);
   for (const n of ['requests', 'trials']) { assert.ok(Object.isFrozen(L.repo.reads[n])); assert.equal(L.repo.reads[n].byId, L.repo[n].byId); assert.equal(L.repo.reads[n].create, undefined); assert.equal(L.repo.reads[n].update, undefined); }
   assert.deepEqual(L.repo.counts(), { requests: all.requests.length, trials: all.trials.length, trialReports: all.trials.filter((t) => t.report).length });
+  L.close(); rm(d);
+});
+
+test('[repository] batched trial lists (§4.3 step 4): every list, page and sweep decodes its trials\' child rows in one batch, and each trial is exactly the one byId decodes on its own (the worked trial exercises every child table); a page of five trials runs as many SQL statements as a page of two', () => {
+  const d = file('batch', EVERY_TRIAL_SHAPE()); const L = serverOpen(d); const { trials } = L.repo;
+  const all = L.repo.exportAll().trials;
+  assert.ok(all.length >= 5 && all.some((t) => t.id === 'trial-worked'), 'the fixture has the worked trial among five or more');
+  const whole = (label, list) => { assert.ok(list.length >= 2, `${label} is a list of several`); assert.deepEqual(plain(list), plain(list.map((t) => trials.byId(t.id))), `${label}: a batch-decoded list is the per-trial decode`); };
+  const players = [...new Set(all.map((t) => t.playerId))];
+  whole('forPlayers', trials.forPlayers(players));
+  for (const o of new Set(all.map((t) => t.orgId))) if (trials.forOrg(o).length >= 2) whole(`forOrg ${o}`, trials.forOrg(o));
+  const org = all.find((t) => t.id === 'trial-worked').orgId;
+  whole('pageForOrg', trials.pageForOrg(org, { limit: 50 }).items);
+  const counted = { on: false, n: 0 }; const original = StatementSync.prototype.all;
+  StatementSync.prototype.all = function counting(...args) { if (counted.on) counted.n += 1; return original.apply(this, args); };
+  try {
+    const statementsFor = (limit) => { counted.n = 0; counted.on = true; const page = trials.pageForOrg(org, { limit }); counted.on = false; assert.equal(page.items.length, limit); return counted.n; };
+    const two = statementsFor(2); const five = statementsFor(5);
+    assert.ok(two > 0, 'the counter saw the statements');
+    assert.equal(five, two, `a page's statements do not grow with its length (2 trials: ${two}, 5 trials: ${five})`);
+  } finally { StatementSync.prototype.all = original; }
   L.close(); rm(d);
 });
 

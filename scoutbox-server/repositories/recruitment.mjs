@@ -32,7 +32,7 @@
  * Refusals name tables, fields and ids — never a name, a message, a note, an address or a phone number.
  */
 import { pageOf } from '../domains/platform/paging.mjs';
-import { transaction, migrationApplied, newestHistory } from './database.mjs';
+import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
 import { ORG_TYPES } from './orgs.mjs';
 import {
   TRIAL_WORKFLOW_STATES, TRIAL_SESSION_KINDS, TRIAL_ATTENDANCE_STATES, TRIAL_ATTENDANCE_SOURCES, TRIAL_COMPLETION_STATES,
@@ -693,6 +693,8 @@ const COLS = {
 const TRIAL_CHILDREN = ['trial_session_evidence', 'trial_schedule_sessions', 'trial_revision_sessions', 'trial_schedule_revisions', 'trial_attendance', 'trial_history', 'trial_keys', 'trial_reminders', 'trial_reports', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events'];
 
 // ------------------------------------------------------------------ statements and the record readers
+/** A trial's child rows in list order; reminders in insertion order, and a trial has at most one report. */
+const TRIAL_CHILD_ORDER = (t) => (t === 'trial_reminders' || t === 'trial_reports' ? 'rowid' : 'position');
 const stmtCache = new WeakMap();
 function statements(sqlite) {
   let s = stmtCache.get(sqlite); if (s && s.preparedBy === sqlite.prepare) return s;
@@ -701,7 +703,7 @@ function statements(sqlite) {
     const tail = upsert ? ` ON CONFLICT(id) DO UPDATE SET ${cols.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}` : '';
     return sqlite.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})${tail}`);
   };
-  const childOf = (t) => sqlite.prepare(`SELECT * FROM ${t} WHERE trial_id = ?${t === 'trial_reminders' ? ' ORDER BY rowid' : t === 'trial_reports' ? '' : ' ORDER BY position'}`);
+  const childOf = (t) => sqlite.prepare(`SELECT * FROM ${t} WHERE trial_id = ? ORDER BY ${TRIAL_CHILD_ORDER(t)}`);
   s = {
     ins: Object.fromEntries(Object.keys(COLS).map((t) => [t, insert(t, { upsert: t === 'recruitment_requests' || t === 'trials' })])),
     slotsDel: sqlite.prepare('DELETE FROM request_trial_slots WHERE request_id = ?'),
@@ -720,6 +722,21 @@ function statements(sqlite) {
     preparedBy: sqlite.prepare,
   };
   stmtCache.set(sqlite, s); return s;
+}
+
+/**
+ * The statements `decodeTrial` reads children through, answered for many trials at once (§4.3 step 4): each child
+ * table read once for the whole list instead of about fourteen queries a trial. Same rows, same order.
+ */
+function batchTrialStatements(sqlite, st, ids) {
+  const rows = (t, order, subKey = []) => childRowsOf(sqlite, t, 'trial_id', ids, { order, subKey });
+  return {
+    ...st,
+    of: Object.fromEntries(Object.keys(st.of).map((t) => [t, rows(t, TRIAL_CHILD_ORDER(t))])),
+    evidenceOf: rows('trial_session_evidence', 'position', ['session_id']),
+    revisionSessionsOf: rows('trial_revision_sessions', 'position', ['revision']),
+    keysOf: rows('trial_keys', 'act, position'),
+  };
 }
 
 /** The case a request or a trial names is written first (an immediate key): a miss is named with the ids. */
@@ -813,7 +830,7 @@ function decodeTrial(st, row) {
   };
 }
 export const readRequests = (sqlite) => { const st = statements(sqlite); return st.requestAll.all().map((r) => decodeRequest(st, r)); };
-export const readTrials = (sqlite) => { const st = statements(sqlite); return st.trialAll.all().map((r) => decodeTrial(st, r)); };
+export const readTrials = (sqlite) => { const st = statements(sqlite); const rows = st.trialAll.all(); const via = rows.length > 1 ? batchTrialStatements(sqlite, st, rows.map((r) => r.id)) : st; return rows.map((r) => decodeTrial(via, r)); };
 
 // ------------------------------------------------------------------ references (Q7a counted, Q7c strict)
 const PLAYER_REFS_SQL = {
@@ -934,11 +951,17 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
   const st = statements(sqlite);
   const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
   const decode = { requests: (row) => deepFreeze(decodeRequest(st, row)), trials: (row) => deepFreeze(decodeTrial(st, row)) };
+  /** Decode many rows; a list of trials reads its children in one batch (batchTrialStatements). */
+  const decodeAll = (name, rows) => {
+    if (name !== 'trials' || rows.length < 2) return rows.map(decode[name]);
+    const bst = batchTrialStatements(sqlite, st, rows.map((r) => r.id));
+    return rows.map((r) => deepFreeze(decodeTrial(bst, r)));
+  };
   const rowById = { requests: st.requestById, trials: st.trialById };
   const read = (name, id) => { if (typeof id !== 'string') return null; const row = rowById[name].get(id); return row ? decode[name](row) : null; };
   const must = (name, id) => { const r = read(name, id); if (!r) throw refusal('RECRUITMENT_NOT_FOUND', `${name} ${id} is not a record of the repository`); return r; };
-  const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.all(...args).map(decode[name]); };
-  const inList = (name, table, col) => (values) => { const want = [...new Set((values ?? []).filter((v) => typeof v === 'string'))]; if (!want.length) return []; return sqlite.prepare(`SELECT * FROM ${table} WHERE ${col} IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want).map(decode[name]); };
+  const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => decodeAll(name, stmt.all(...args)); };
+  const inList = (name, table, col) => (values) => { const want = [...new Set((values ?? []).filter((v) => typeof v === 'string'))]; if (!want.length) return []; return decodeAll(name, sqlite.prepare(`SELECT * FROM ${table} WHERE ${col} IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want)); };
   const count = (sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.get(...args).n; };
   /**
    * Newest first by cursor (domains/platform/paging.mjs): `where` takes `args`, the key is the rowid (insertion order;
@@ -950,7 +973,7 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     if (!pageStmts.has(sql)) pageStmts.set(sql, sqlite.prepare(sql));
     const rows = pageStmts.get(sql).all(...args, ...(after ? [after[0]] : []), limit + 1);
     const page = pageOf(rows, limit, (r) => [r.page_key]);
-    return { items: page.items.map(decode[name]), nextCursor: page.nextCursor };
+    return { items: decodeAll(name, page.items), nextCursor: page.nextCursor };
   };
   const placeholders = (args) => args.map(() => '?').join(',');
   const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_INPUT_INVALID', t.reason); return t.record; };
@@ -993,6 +1016,8 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     forPlayers: inList('requests', 'recruitment_requests', 'player_id'),
     forOrgPlayer: list('requests', 'SELECT * FROM recruitment_requests WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
     forCase: list('requests', 'SELECT * FROM recruitment_requests WHERE case_id = ? ORDER BY rowid'),
+    /** The requests of several cases (a player's journeys), in insertion order. */
+    forCases: inList('requests', 'recruitment_requests', 'case_id'),
     countForOrg: count('SELECT COUNT(*) AS n FROM recruitment_requests WHERE org_id = ?'),
     countForOrgStatus: count('SELECT COUNT(*) AS n FROM recruitment_requests WHERE org_id = ? AND status = ?'),
     /** The club's Requests list, newest first, by cursor: `{ items, nextCursor }`. */
@@ -1020,6 +1045,8 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     forPlayers: inList('trials', 'trials', 'player_id'),
     forOrgPlayer: list('trials', 'SELECT * FROM trials WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
     forCase: list('trials', 'SELECT * FROM trials WHERE case_id = ? ORDER BY rowid'),
+    /** The trials of several cases (a player's journeys), in insertion order. */
+    forCases: inList('trials', 'trials', 'case_id'),
     countForOrg: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ?'),
     countForOrgStatus: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ? AND status = ?'),
     /**
@@ -1057,7 +1084,7 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
              AND EXISTS (SELECT 1 FROM trial_schedule_sessions s WHERE s.trial_id = t.id AND s.ends_at > 0)
              AND NOT EXISTS (SELECT 1 FROM trial_schedule_sessions s WHERE s.trial_id = t.id AND s.ends_at >= :now - 86400000)
         ) ORDER BY rowid`);
-      return (now) => stmt.all({ now }).map(decode.trials);
+      return (now) => decodeAll('trials', stmt.all({ now }));
     })(),
     /** The assessment reminder: completed at or before `before`, the subject not removed, not yet reminded. */
     completedUnreminded: list('trials', "SELECT * FROM trials t WHERE t.completion_state = 'completed' AND t.completion_at <= ? AND t.subject_removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM trial_reminders m WHERE m.trial_id = t.id AND m.marker = 'assessmentPending') ORDER BY t.rowid"),

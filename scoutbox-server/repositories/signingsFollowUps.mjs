@@ -31,7 +31,7 @@
  */
 import { idempotencyKeysDdl, isPlainObject, ids, tableExists } from './recruitment.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
-import { transaction, migrationApplied } from './database.mjs';
+import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 
 export const SIGNINGS_FOLLOWUPS_MIGRATION = '0018_signings_follow_ups';
 export const SIGNINGS_FOLLOWUPS_COLLECTIONS = Object.freeze(['signingPackages', 'signings', 'followUps', 'outcomeReports']);
@@ -565,6 +565,24 @@ function statements(sqlite) {
     ids: (table) => sqlite.prepare(`SELECT id FROM ${table} ORDER BY rowid`).all().map((r) => r.id),
   };
 }
+/**
+ * The statements `decodePackage` and `decodeSigning` read children through, answered for many records at once
+ * (§4.3 step 4): each child table read once for the whole list (a package's documents and parties through its
+ * revisions) instead of three queries a package plus two a revision. Same rows, same order.
+ */
+function batchStatements(sqlite, st, { packageIds = [], signingIds = [] }) {
+  const revsBy = childRowsOf(sqlite, 'signing_revisions', 'package_id', packageIds, { order: 'position' });
+  const revisionIds = packageIds.flatMap((id) => revsBy.all(id).map((r) => r.id));
+  return {
+    ...st,
+    revsBy,
+    docsBy: childRowsOf(sqlite, 'signing_documents', 'revision_id', revisionIds),
+    partiesBy: childRowsOf(sqlite, 'signing_revision_parties', 'revision_id', revisionIds, { order: 'position' }),
+    histBy: childRowsOf(sqlite, 'signing_history', 'package_id', packageIds, { order: 'position' }),
+    keysBy: childRowsOf(sqlite, 'idempotency_keys', 'owner_id', packageIds, { order: 'position', where: "owner_table = 'signing_packages'" }),
+    spartiesBy: childRowsOf(sqlite, 'signing_parties', 'signing_id', signingIds, { order: 'position' }),
+  };
+}
 const contractOut = (row, p) => (row[`${p}start_date`] === null && row[`${p}end_date`] === null ? null : { startDate: row[`${p}start_date`], endDate: row[`${p}end_date`] });
 function decodeDocument(row) { return { id: row.id, evidenceId: row.evidence_id, sha256: row.sha256, filename: row.filename, mime: row.mime, bytes: row.bytes, label: row.label, uploadedAt: row.uploaded_at, uploadedBy: actorOut('uploaded_by', row) }; }
 function decodeParty(row) {
@@ -703,7 +721,7 @@ function assertKeys(sqlite, label) {
 /** Whole-snapshot access (readTableBacked / writeTableBacked). */
 export const SIGNINGS_FOLLOWUPS_SNAPSHOT = {
   names: SIGNINGS_FOLLOWUPS_COLLECTIONS,
-  read(sqlite) { if (!signingsFollowUpsLive(sqlite)) return null; const st = statements(sqlite); return { signingPackages: st.pkgAll.all().map((r) => decodePackage(st, r)), signings: st.signingAll.all().map((r) => decodeSigning(st, r)), followUps: st.fupAll.all().map(decodeFollowUp), outcomeReports: st.outAll.all().map((r) => decodeOutcome(st, r)) }; },
+  read(sqlite) { if (!signingsFollowUpsLive(sqlite)) return null; const st = statements(sqlite); const pkgs = st.pkgAll.all(); const sgs = st.signingAll.all(); const bst = batchStatements(sqlite, st, { packageIds: pkgs.map((r) => r.id), signingIds: sgs.map((r) => r.id) }); return { signingPackages: pkgs.map((r) => decodePackage(bst, r)), signings: sgs.map((r) => decodeSigning(bst, r)), followUps: st.fupAll.all().map(decodeFollowUp), outcomeReports: st.outAll.all().map((r) => decodeOutcome(st, r)) }; },
   /**
    * The supplied collections typed (refused on junk, ids only; a legacy backup's rows normalised as the cutover
    * normalises them, logged), the departures — the rows a supplied array no longer lists — removed children first
@@ -784,7 +802,15 @@ export function createSigningsFollowUpsRepository({ sqlite, unit = null, now = D
   const rowById = { signingPackages: st.pkgById, signings: st.signingById, followUps: st.fupById, outcomeReports: st.outById };
   const read = (name, id) => { if (typeof id !== 'string') return null; const row = rowById[name].get(id); return row ? decode[name](row) : null; };
   const exists = (name, id) => typeof id === 'string' && !!rowById[name].get(id);
-  const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.all(...args).map(decode[name]); };
+  /** Decode many rows; a list of packages or signings reads its children in one batch (batchStatements). */
+  const BATCHED = { signingPackages: [decodePackage, 'packageIds'], signings: [decodeSigning, 'signingIds'] };
+  const decodeAll = (name, rows) => {
+    if (!BATCHED[name] || rows.length < 2) return rows.map(decode[name]);
+    const [decodeOne, key] = BATCHED[name];
+    const bst = batchStatements(sqlite, st, { [key]: rows.map((r) => r.id) });
+    return rows.map((r) => deepFreeze(decodeOne(bst, r)));
+  };
+  const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => decodeAll(name, stmt.all(...args)); };
   const one = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => { const row = stmt.get(...args); return row ? decode[name](row) : null; }; };
   const count = (sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.get(...args).n; };
   const refreshPackage = (id) => read('signingPackages', id);
@@ -820,6 +846,8 @@ export function createSigningsFollowUpsRepository({ sqlite, unit = null, now = D
     redactPlayer(playerId, at) { return operation(() => { const touched = []; for (const p of sqlite.prepare('SELECT id FROM signing_packages WHERE player_id = ? ORDER BY rowid').all(playerId)) { sqlite.prepare("UPDATE signing_revision_parties SET completed_by_name = NULL WHERE completed_by_kind = 'player' AND revision_id IN (SELECT id FROM signing_revisions WHERE package_id = ?)").run(p.id); sqlite.prepare("UPDATE signing_history SET by_name = NULL WHERE by_kind = 'player' AND package_id = ?").run(p.id); sqlite.prepare('UPDATE signing_packages SET subject_removed_at = ? WHERE id = ?').run(at, p.id); touched.push(refreshPackage(p.id)); } return touched; }); },
     byId: (id) => read('signingPackages', id),
     forCase: list('signingPackages', 'SELECT * FROM signing_packages WHERE case_id = ? ORDER BY rowid'),
+    /** The packages of several cases (a player's journeys), in insertion order. */
+    forCases(caseIds) { const want = [...new Set((caseIds ?? []).filter((c) => typeof c === 'string'))]; if (!want.length) return []; return decodeAll('signingPackages', sqlite.prepare(`SELECT * FROM signing_packages WHERE case_id IN (${want.map(() => '?').join(',')}) ORDER BY rowid`).all(...want)); },
     forOffer: list('signingPackages', 'SELECT * FROM signing_packages WHERE offer_id = ? ORDER BY rowid'),
     forPlayer: list('signingPackages', 'SELECT * FROM signing_packages WHERE player_id = ? ORDER BY rowid'),
     forOrg: list('signingPackages', 'SELECT * FROM signing_packages WHERE org_id = ? ORDER BY rowid'),
@@ -843,7 +871,7 @@ export function createSigningsFollowUpsRepository({ sqlite, unit = null, now = D
     pageForOrg(orgId, { limit, after = null }) {
       const rows = after ? signingPage.after.all(orgId, after[0], limit + 1) : signingPage.first.all(orgId, limit + 1);
       const page = pageOf(rows, limit, (r) => [r.page_key]);
-      return { items: page.items.map(decode.signings), nextCursor: page.nextCursor };
+      return { items: decodeAll('signings', page.items), nextCursor: page.nextCursor };
     },
   };
   const followUps = {

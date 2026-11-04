@@ -20,12 +20,13 @@
 
 import { buildRecruitmentJourney } from './journey.mjs';
 import { currentSigningForOffer } from './journeyModel.mjs';
+import { playerJourneyReads } from './journeyReads.mjs';
 
 export function registerJourneyRoutes(ctx) {
   const { db, recruitmentReads, playerRouter, guardianRouter, orgRouter, agent = null, integration = null, findPlayer, guardianOwnsChild } = ctx;
   if (!recruitmentReads?.contacts || !recruitmentReads?.offers || !recruitmentReads?.signings || !recruitmentReads?.signingPackages) throw new TypeError('registerJourneyRoutes needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
   const evidence = () => ctx.recruitmentEvidenceProvider ?? undefined;
-  const orgOf = (orgId) => (db.orgs ?? []).find((o) => o && o.id === orgId) ?? null;
+  const orgOf = (orgId) => (ctx.byId ? ctx.byId.org(orgId) : (db.orgs ?? []).find((o) => o && o.id === orgId) ?? null);
   // The same per-request test clock the Offer and signing routes honour (development only).
   const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1' && process.env.NODE_ENV !== 'production';
   const now = (req = null) => { if (TEST_CLOCK && req?.get) { const n = Number(req.get('x-scoutbox-test-clock')); if (Number.isFinite(n) && n > 0) return n; } return Date.now(); };
@@ -33,9 +34,12 @@ export function registerJourneyRoutes(ctx) {
 
   function playerJourneys(viewer, playerId, at) {
     const items = [];
-    for (const k of recruitmentReads.cases.forPlayer(playerId)) {
+    // Every case's records read once for the whole list (journeyReads.mjs), not a dozen queries a case.
+    const cases = recruitmentReads.cases.forPlayer(playerId);
+    const reads = playerJourneyReads(recruitmentReads, playerId, cases.filter((k) => k.room));
+    for (const k of cases) {
       if (!k.room) continue;
-      const out = buildRecruitmentJourney(db, k.id, viewer, { now: at, evidence: evidence(), reads: recruitmentReads });
+      const out = buildRecruitmentJourney(db, k.id, viewer, { now: at, evidence: evidence(), reads });
       if (!out.ok) continue; // nothing crossed the share boundary: the case does not exist for them
       items.push({ club: clubOf(k.orgId), shared: out.shared, journey: out.journey });
     }
@@ -84,9 +88,11 @@ export function registerJourneyRoutes(ctx) {
     const g = agentGrants(req, a, at);
     if (!g.ok) return res.status(403).json({ error: g.decision.code, rule: g.decision.rule ?? null, message: 'This client\'s record is not open to you right now.' });
     const items = [];
-    for (const k of recruitmentReads.cases.forPlayer(a.clientId)) {
+    const cases = recruitmentReads.cases.forPlayer(a.clientId);
+    const reads = playerJourneyReads(recruitmentReads, a.clientId, cases.filter((k) => k.room));
+    for (const k of cases) {
       if (!k.room) continue;
-      const out = buildRecruitmentJourney(db, k.id, { kind: 'agent', authorized: true, playerId: a.clientId, userId: req.orgUser.id, grants: g.grants }, { now: at, evidence: evidence(), reads: recruitmentReads });
+      const out = buildRecruitmentJourney(db, k.id, { kind: 'agent', authorized: true, playerId: a.clientId, userId: req.orgUser.id, grants: g.grants }, { now: at, evidence: evidence(), reads });
       if (!out.ok) continue;
       // A club that shared nothing with this agent is not a club the agent learns about.
       if (out.journey.stage === 'none' && out.journey.timeline.length === 0) continue;

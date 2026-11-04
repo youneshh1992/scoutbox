@@ -12,10 +12,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED, readTableBacked } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
+import { playerJourneyReads } from '../domains/recruitment/lifecycle/journeyReads.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
 import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
@@ -249,6 +250,71 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query return ex
   assert.equal(totals.has('nobody'), false);
   // the read-only queries
   for (const n of COLLECTIONS) { assert.ok(Object.isFrozen(L.repo.reads[n])); assert.equal(L.repo.reads[n].byId, L.repo[n].byId); for (const w of ['insert', 'patch', 'record', 'schedule', 'file', 'addConfirmation', 'redactPlayer']) assert.equal(L.repo.reads[n][w], undefined, `reads.${n} has no ${w}`); }
+  L.close(); rm(d);
+});
+
+test('[repository] batched lists (§4.3 step 4): a list of packages decodes their revisions, documents, parties, history and keys in one batch, a list of signings their parties; each record is exactly the one byId decodes on its own; a list of five packages runs as many SQL statements as a list of two', () => {
+  need();
+  const d = file('batch'); const L = serverOpen(d); const { signingPackages: sp, signings: sg } = L.repo;
+  const whole = (label, list, repo) => { assert.ok(list.length >= 2, `${label} is a list of several`); assert.deepEqual(plain(list), plain(list.map((r) => repo.byId(r.id))), `${label}: a batch-decoded list is the per-record decode`); };
+  const pkg = sp.byId('spk-2');
+  assert.ok(pkg.revisions[0].document && pkg.revisions[0].executedDocument && pkg.revisions[0].requiredParties.length && pkg.history.length && pkg.keys.party.length, 'the completed package exercises every child table');
+  const counted = { on: false, n: 0 }; const original = StatementSync.prototype.all;
+  StatementSync.prototype.all = function counting(...args) { if (counted.on) counted.n += 1; return original.apply(this, args); };
+  const statementsFor = (fn) => { counted.n = 0; counted.on = true; try { fn(); } finally { counted.on = false; } return counted.n; };
+  try {
+    const caseId = pkg.caseId;
+    const two = statementsFor(() => assert.equal(sp.forCase(caseId).length, 2));
+    for (const i of [3, 4, 5]) sp.insert(draftPackage({ id: `spk-b${i}`, currentRevisionId: `spr-b${i}`, revisions: [srevision({ id: `spr-b${i}` })], history: [shist(`aud-b${i}`, T.started, 'signing_created', { revisionId: `spr-b${i}`, offerId: 'rof-1', offerRevisionId: 'rofr-1' })] }));
+    const five = statementsFor(() => assert.equal(sp.forCase(caseId).length, 5));
+    assert.ok(two > 0, 'the counter saw the statements');
+    assert.equal(five, two, `a list's statements do not grow with its length (2 packages: ${two}, 5 packages: ${five})`);
+  } finally { StatementSync.prototype.all = original; }
+  for (const [label, list] of [['signingPackages.forCase', sp.forCase(pkg.caseId)], ['signingPackages.forPlayer', sp.forPlayer(pkg.playerId)], ['signingPackages.forOrg', sp.forOrg(pkg.orgId)]]) whole(label, list, sp);
+  sg.record(legacySigning({ id: 'sign-b2', playerId: 'pl-child2', ts: T.started + 5, note: null }));
+  const org = sg.byId('sign-b2').orgId;
+  whole('signings.forOrg', sg.forOrg(org), sg); whole('signings.pageForOrg', sg.pageForOrg(org, { limit: 50 }).items, sg);
+  assert.ok(sg.forOrg(org).some((s) => s.parties.length), 'a listed signing has parties');
+  L.close(); rm(d);
+});
+
+test('[repository] a player\'s journey reads (§4.3 step 4): the bulk lists forCases / forRooms return the per-case lists merged in insertion order, each record the one byId decodes (contacts, offers and decisions batch-decoded too); playerJourneyReads answers every question the journey asks exactly as the repositories do, for this player, another player, a case outside the list and an unknown id', () => {
+  need();
+  const d = file('journey-reads'); const L = serverOpen(d); const lay = L.layer;
+  const reads = Object.freeze({ ...lay.recruitmentContactsOffers.reads, ...lay.signingsFollowUps.reads, ...lay.recruitment.reads, ...lay.recruitmentCases.reads });
+  const ids = (rows) => rows.map((r) => r.id);
+  const cases = lay.recruitmentCases.exportAll().recruitmentCases;
+  const caseIds = [...cases.map((k) => k.id), 'case-nobody'];
+  const rec = lay.recruitment.exportAll(); const co = lay.recruitmentContactsOffers.exportAll();
+  const inserted = { requests: rec.requests, trials: rec.trials, contacts: co.recruitmentContacts, offers: co.recruitmentOffers, signingPackages: lay.signingsFollowUps.exportAll().signingPackages, decisions: lay.recruitmentCases.exportAll().roomDecisions };
+  // the bulk lists
+  for (const [name, method, single] of [['requests', 'forCases', 'forCase'], ['trials', 'forCases', 'forCase'], ['contacts', 'forCases', 'forCase'], ['offers', 'forCases', 'forCase'], ['signingPackages', 'forCases', 'forCase'], ['decisions', 'forRooms', 'forRoom']]) {
+    const bulk = reads[name][method]([...caseIds, caseIds[0], 42, null]);
+    const want = caseIds.flatMap((c) => reads[name][single](c));
+    assert.deepEqual(ids(bulk).sort(), ids(want).sort(), `${name}.${method} holds every record of the cases`);
+    assert.deepEqual(ids(bulk), ids(inserted[name]).filter((id) => ids(want).includes(id)), `${name}.${method} is in insertion order`);
+    assert.deepEqual(plain(bulk), plain(bulk.map((r) => reads[name].byId(r.id))), `${name}.${method}: a batch-decoded list is the per-record decode`);
+    assert.deepEqual(reads[name][method]([]), []);
+  }
+  assert.ok(reads.contacts.forCases(caseIds).length >= 2 && reads.offers.forCases(caseIds).length >= 2 && reads.decisions.forRooms(caseIds).length >= 2, 'the fixture has several contacts, offers and decisions');
+  // the scope
+  const players = [...new Set(cases.map((k) => k.playerId))];
+  const orgs = [...new Set(cases.map((k) => k.orgId)), 'org-nobody'];
+  const everyId = () => [...ids(lay.recruitment.exportAll().requests), ...ids(lay.recruitment.exportAll().trials), ...ids(lay.recruitmentContactsOffers.exportAll().recruitmentContacts), ...ids(lay.signingsFollowUps.exportAll().signings), ...ids(cases), 'nope'];
+  let scopes = 0;
+  for (const playerId of players) {
+    const mine = cases.filter((k) => k.playerId === playerId && k.room);
+    if (!mine.length) continue;
+    scopes += 1;
+    const scoped = playerJourneyReads(reads, playerId, mine);
+    const same = (label, got, want) => assert.deepEqual(plain(got), plain(want), `${playerId}: ${label}`);
+    for (const name of ['cases', 'requests', 'trials', 'signings', 'contacts']) for (const org of orgs) for (const pid of [...players, 'pl-nobody']) same(`${name}.forOrgPlayer ${org}/${pid}`, scoped[name].forOrgPlayer(org, pid), reads[name].forOrgPlayer(org, pid));
+    for (const name of ['requests', 'trials', 'contacts', 'offers', 'signingPackages']) for (const c of caseIds) same(`${name}.forCase ${c}`, scoped[name].forCase(c), reads[name].forCase(c));
+    for (const c of caseIds) same(`decisions.forRoom ${c}`, scoped.decisions.forRoom(c), reads.decisions.forRoom(c));
+    for (const name of ['cases', 'trials', 'signings', 'contacts']) for (const id of everyId(name)) same(`${name}.byId ${id}`, scoped[name].byId(id), reads[name].byId(id));
+    assert.ok(Object.isFrozen(scoped) && Object.isFrozen(scoped.trials), 'the scope is read-only');
+  }
+  assert.ok(scopes >= 1, 'a player with a Room was checked');
   L.close(); rm(d);
 });
 

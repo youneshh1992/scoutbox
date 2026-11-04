@@ -60,7 +60,7 @@ The migration is finished when:
 Moving storage alone isn't the goal. A domain that is in tables but still loaded whole into memory (explicit writes,
 but every read scanning a whole-collection mirror, as S8a–S8d were until 4 November) is only part-way there. The
 recruitment domain now reads through SQL and its unbounded lists page (§4.3 step 2), and the step 4 fixes are in, but a few
-routes still miss the bar: they are listed at the end of §4.3 step 4.
+routes still miss the bar: they are listed, and deferred, at the end of §4.3 step 4.
 
 ## 3. Status
 
@@ -86,7 +86,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 items 1–4 done (4 Nov); what still misses §2 is listed in §4.3 |
+| — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 items 1–5 done (4 Nov); what still misses §2 is deferred (§4.3) |
 | — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left |
 | — | end-to-end test estate | — | — | — | done (§4.4, 4 Nov) |
 | — | server code by domain | — | — | — | recruitment and platform done (§4.4.1, 4 Nov); the rest per step |
@@ -193,11 +193,30 @@ the whole player base; §4.3.1 removed them. What is left, in the order to fix i
    organisations' per-unit flush even when no receipt is new. They now open one only when a receipt is due
    (`receiptDue`), so reading seen offers commits nothing. `/player/offers` 27 → 6 ms, `/guardian/offers` 27 → 1.8 ms.
 
-**What still misses §2 after items 1–4** (30k players, busy club, 4 November): `/org/recruitment-analytics` 890 ms
-(item 2); `/org/rooms` 124 ms and a Room 10–22 ms (the per-player Passport and Trust assembly, S10); `/player/journeys`
-38 ms, `/player/signings` 10 ms, `/org/trials` 11 ms (the page decodes each trial's ~14 child tables: batch-decode
-them like cases); the Room comment write 66 ms (the organisations' per-unit cost, §4.3.1). Decide which of these are
-hot paths before S9; the rest of recruitment is under 5 ms.
+5. **Done (4 November).** Every list decodes its records' child rows in one batch: one query per child table for the
+   whole list (`childRowsOf` in `repositories/database.mjs`, one prepared statement per table, the ids passed as JSON),
+   for trials, contacts, offers, decisions, signing packages and signings as for cases. A player's journey list reads
+   the player's records once for all their cases (`domains/recruitment/lifecycle/journeyReads.mjs`, through the bulk
+   reads `forCases` and `decisions.forRooms`) instead of a dozen queries a case, and a recipient's signings read their
+   offers, cases and signing rows once (`lookupsForPlayers`). Measured back to back with the code before (30k players,
+   the popular player in 191 clubs' Rooms, so these are worst cases): `/player/journeys` 646 → 166 ms,
+   `/player/signings` 158 → 65 ms, `/player/trials` 48 → 15 ms, `/org/trials` 12 → 4.5 ms; as a side effect
+   `/org/rooms` 299 → 197 ms (typical club 201 → 85 ms) and `/org/recruitment-analytics` 869 → 526 ms. A single Room
+   showed no clear change (10.2 → 10.4 ms on the same database; up to 2 ms slower in other pairs of runs).
+   `PERF_ONLY=<path>` limits the script to matching routes, for a CPU profile of one route.
+
+**Deferred: what still misses §2** (decided 4 November). None of these blocks S9:
+
+- `/org/recruitment-analytics` (526 ms busy club, 14 ms typical): an occasional reporting page, not a hot path. It
+  needs its own projections in SQL, not the decoded records. After S14, in the performance pass.
+- `/org/rooms` (197 ms busy club) and a Room (10–12 ms): most of the time is the per-player Passport and Trust
+  assembly, which S10 rewrites, and a scan of the organisation's staff for each comment's author (`orgUsers` in
+  `domains/recruitment/rooms/rooms.mjs`), which goes when that read uses the staff index.
+- `/player/journeys` (166 ms), `/player/signings` (65 ms), `/player/offers` (74 ms) and `/player/trials` (15 ms) for a
+  player in 191 clubs' Rooms (the perf script's stress case): each still decodes every record of each club's case, so
+  the cost grows with the number of clubs. Revisit with projections after S14.
+- The Room comment write (75 ms): the organisations' per-unit cost (§4.3.1), which S9–S11 remove as the facets move
+  into tables.
 
 A backlog is a separate risk: the boot runs the sweeps before it listens, one transaction and one notification per due
 item. The script moves the fixtures' instants to today so it measures the steady state.
@@ -305,15 +324,14 @@ point, if that helps.
 
 ### The process
 
-1. Branch from `main` (`migrate/s9-scouting`).
-2. Write a short design note **in the PR description**, not a new file: the tables, how the model differs from
+1. Write a short design note **to the user**, not a new file: the tables, how the model differs from
    `sql/*.sql` and from the old behaviour, what junk is now rejected, and the tests. Ask the Founder only about
    product consequences, in product terms; if a question doesn't need him, don't ask it.
-3. Implement (§5.2). Run `cd scoutbox-server && npm test`, the domain's end-to-end scripts and, if anything in
+2. Implement (§5.2). Run `cd scoutbox-server && npm test`, the domain's end-to-end scripts and, if anything in
    `scoutbox-player/` changed, `cd scoutbox-player && npm test`.
-4. One review of the implementation, under the scope in [`../decisions.md`](../decisions.md) §1. A blocking
+3. One review of the implementation, under the scope in [`../decisions.md`](../decisions.md) §1. A blocking
    finding is one a real user could hit through a real route. Everything else is a note.
-5. Merge to `main`. Update the status table in §3 in the same PR.
+4. Merge to `main`. Update the status table in §3 in the same PR.
 
 ### The mechanics
 

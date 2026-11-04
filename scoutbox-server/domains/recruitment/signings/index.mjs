@@ -120,13 +120,30 @@ export function registerSigning(rawCtx) {
   const subjectRemoved = (kase) => !!kase?.subjectRemovedAt || !findPlayer(kase?.playerId);
   const completedRowFor = (pkg) => sg.forPackage(pkg.id);
 
-  const consistencyOf = (pkg, offer, kase, at) => signingConsistency(pkg, { offer, kase, rows: [sg.forPackage(pkg.id)].filter(Boolean), player: findPlayer(pkg.playerId) ?? null }, at);
+  const consistencyOf = (pkg, offer, kase, at, rowFor = (id) => sg.forPackage(id)) => signingConsistency(pkg, { offer, kase, rows: [rowFor(pkg.id)].filter(Boolean), player: findPlayer(pkg.playerId) ?? null }, at);
+  /** The lookups soundPackage makes, one query each. */
+  const LOOKUPS = Object.freeze({ offerOf, caseOf, rowFor: (id) => sg.forPackage(id) });
+  /**
+   * The same lookups for the packages of `playerIds`, answered from the players' offers, cases and signings read once
+   * (§4.3 step 4) rather than three queries a package; anything they do not hold is asked of the repository.
+   */
+  function lookupsForPlayers(playerIds) {
+    const pids = [...new Set(playerIds)];
+    const offers = new Map(offerReads.forPlayers(pids).map((o) => [o.id, o]));
+    const cases = new Map(pids.flatMap((pid) => recruitmentReads.cases.forPlayer(pid)).map((k) => [k.id, k]));
+    const rows = new Map(pids.flatMap((pid) => sg.forPlayer(pid)).filter((r) => r.signingPackageId).map((r) => [r.signingPackageId, r]));
+    return Object.freeze({
+      offerOf: (pkg) => { const o = offers.get(pkg.offerId) ?? offerReads.byId(pkg.offerId); return o && o.orgId === pkg.orgId ? o : null; },
+      caseOf: (pkg) => { const k = cases.get(pkg.caseId) ?? recruitmentReads.cases.byId(pkg.caseId); return k && k.orgId === pkg.orgId ? k : null; },
+      rowFor: (id) => rows.get(id) ?? sg.forPackage(id),
+    });
+  }
   /** A sound row whose Offer, case and completed record do not contradict it; anything else is omitted from every projection (the P6.1 rule). */
-  function soundPackage(pkg, at) {
+  function soundPackage(pkg, at, look = LOOKUPS) {
     if (!pkg || signingIntegrity(pkg).length) return false;
-    const offer = offerOf(pkg); const kase = caseOf(pkg);
+    const offer = look.offerOf(pkg); const kase = look.caseOf(pkg);
     if (!offer || !kase) return false;
-    const c = consistencyOf(pkg, offer, kase, at);
+    const c = consistencyOf(pkg, offer, kase, at, look.rowFor);
     if (signingCorrupt(c)) { console.error(`SIGNING consistency ${pkg.id}: ${c.join(',')}`); return false; }
     return true;
   }
@@ -762,8 +779,9 @@ export function registerSigning(rawCtx) {
   /** Packages presented to this person, re-authorised live: the addressed adult, over an Offer they accepted, on a sound row. */
   function recipientPackages({ by, actorId, playerIds, at }) {
     const out = [];
+    const look = lookupsForPlayers(playerIds);
     for (const p of [...new Set(playerIds)].flatMap((pid) => sp.forPlayer(pid))) {
-      if (!soundPackage(p, at)) continue;
+      if (!soundPackage(p, at, look)) continue;
       const rev = currentRevision(p);
       const presented = (p.revisions ?? []).some((r) => r && r.readyAt);
       if (!presented) continue; // a draft is invisible, not redacted

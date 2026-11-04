@@ -18,6 +18,7 @@
 // PERF_DIR=<dir> keeps the database there and reuses it on the next run with the same arguments (the build is
 // deterministic; a reused database has been booted, so its rows may have moved on by the sweeps' minutes).
 // PERF_BOOT_ONLY=1 stops after the boot (and, with PERF_CPU_PROF=<dir>, writes a CPU profile of it there).
+// PERF_ONLY=<text> times only the routes whose path contains it (with PERF_CPU_PROF, a profile of those routes).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -195,7 +196,7 @@ const ROUTES = [
   ['guardian', tokens.guardian, ['/guardian/inbox', '/guardian/trials', '/guardian/offers']],
 ];
 const results = [];
-for (const [who, token, routes] of ROUTES) for (const route of routes) results.push({ who, ...(await timeRoute(S, who, route, token)) });
+for (const [who, token, routes] of ROUTES) for (const route of routes) if (!process.env.PERF_ONLY || route.includes(process.env.PERF_ONLY)) results.push({ who, ...(await timeRoute(S, who, route, token)) });
 
 say(`\nreads (${RUNS} sequential requests each, 5 for a route slower than 500 ms, after 5 warm-up; p50 / p95 / response size)`);
 for (const r of results) {

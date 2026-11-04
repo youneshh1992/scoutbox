@@ -94,6 +94,29 @@ export function newestHistory(sqlite, { select, from, where, params = [] }, atMo
 }
 
 /**
+ * The child rows of many parents in one query per chunk of ids, for decoding a list (§4.3 step 4): rather than one
+ * query per child table per record, a list reads each child table once. Returns a stand-in for the per-record
+ * statement, `{ all(parentId, ...subKey) }`, answering the same rows in the same order: `order` must be the per-record
+ * statement's ORDER BY, and `subKey` names the further columns that statement filters on (a revision, a session).
+ * The ids travel as one JSON parameter, so each child table has one prepared statement, whatever the list's length.
+ */
+const childStatements = new WeakMap();
+export function childRowsOf(sqlite, table, parentCol, parentIds, { order = 'rowid', subKey = [], where = '' } = {}) {
+  const groups = new Map();
+  const ids = [...new Set(parentIds)];
+  if (ids.length) {
+    let cache = childStatements.get(sqlite); if (!cache || cache.preparedBy !== sqlite.prepare) { cache = new Map(); cache.preparedBy = sqlite.prepare; childStatements.set(sqlite, cache); }
+    const sql = `SELECT * FROM ${table} WHERE ${where ? `${where} AND ` : ''}${parentCol} IN (SELECT value FROM json_each(?)) ORDER BY ${parentCol}, ${order}`;
+    let stmt = cache.get(sql); if (!stmt) cache.set(sql, (stmt = sqlite.prepare(sql)));
+    for (const r of stmt.all(JSON.stringify(ids))) {
+      const k = [r[parentCol], ...subKey.map((c) => r[c])].join('\u0000');
+      let list = groups.get(k); if (!list) groups.set(k, (list = [])); list.push(r);
+    }
+  }
+  return { all: (...k) => groups.get(k.join('\u0000')) ?? [] };
+}
+
+/**
  * Has this migration been recorded as applied? False when the bookkeeping
  * table does not exist yet. This is the ONLY way to tell whether a domain has
  * cut over: a table's existence or occupancy says nothing (the S1 shadow
