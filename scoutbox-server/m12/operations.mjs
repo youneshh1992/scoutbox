@@ -359,7 +359,7 @@ export function registerOperations(ctx) {
     // ago without completion, and a completed trial without an assessment
     // after a week, remind the club lead once each. A blocked club sends the
     // family nothing (D-16); a tombstoned trial has nobody to remind.
-    for (const t of trials.confirmedOpen()) { // confirmed, not completed or cancelled, the subject not removed
+    for (const t of trials.remindersDue(now)) { // §4.3 step 4: only the confirmed, open trials with a reminder due
       if (t.subjectRemovedAt || !t.schedule?.confirmedAt) continue;
       if (deriveWorkflowState(t) !== 'scheduled') continue;
       const marks = {}; // the markers this sweep sets, written once below

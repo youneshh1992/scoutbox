@@ -171,9 +171,9 @@ real server and times the hot routes over HTTP. The busy club has 500 graphs (2,
 a typical club has one or two and is near 5 ms everywhere. The first run (4 November) failed §2 on costs that grew with
 the whole player base; §4.3.1 removed them. What is left, in the order to fix it, then re-measure:
 
-1. **The trial-reminder sweep visits every confirmed, open trial every minute** (`m12/operations.mjs`), looking up the
-   player before checking whether a reminder is due. Select only sessions starting within 48 hours, in SQL. With
-   10,000 open trials at 100k players it blocked the boot for over 18 minutes.
+1. **Done (4 November).** The trial-reminder sweep visited every confirmed, open trial every minute. It now asks
+   `trials.remindersDue(now)`, which finds sessions starting within 48 hours through a start-time index and decodes
+   only the trials with a reminder due (1,000 open trials: 252 ms → 1.6 ms).
 2. **The busy club's Rooms, cases, funnel and analytics decode every case** with its child tables (at least 16 queries
    a case) and filter and page in code, because the filters are per viewer: 0.3–1.3 s. They need a summary query over
    `recruitment_cases` that filters and pages in SQL, with the per-viewer rules applied to the page.

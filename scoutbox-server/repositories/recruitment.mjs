@@ -232,6 +232,7 @@ ${sessionCols()},
   CHECK (ends_at > starts_at)
 ) STRICT;
 CREATE INDEX trial_schedule_sessions_trial_starts ON trial_schedule_sessions (trial_id, starts_at);
+CREATE INDEX trial_schedule_sessions_starts ON trial_schedule_sessions (starts_at);
 CREATE TABLE trial_session_evidence (
   trial_id TEXT NOT NULL,
   session_id TEXT NOT NULL,
@@ -1023,8 +1024,28 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     pageForOrg: (orgId, page) => pageOfTrials([orgId], page),
     /** The report sweep: a deadline passed, no report, never escalated, the subject not removed. */
     reportOverdue: list('trials', 'SELECT * FROM trials t WHERE t.report_due_at < ? AND t.feedback_escalated_at IS NULL AND t.subject_removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM trial_reports r WHERE r.trial_id = t.id) ORDER BY t.rowid'),
-    /** The reminder sweep: a confirmed schedule, not completed or cancelled, the subject not removed (the sweep derives the rest). */
-    confirmedOpen: list('trials', 'SELECT * FROM trials WHERE schedule_confirmed_at IS NOT NULL AND completion_state IS NULL AND subject_removed_at IS NULL ORDER BY rowid'),
+    /**
+     * The reminder sweep (§4.3 step 4): the confirmed, open trials with a reminder due at `now`, and no others. Either a
+     * session starts within 48 hours and its `t48:<session>:<revision>` marker is unset (found through the sessions'
+     * start index: the CROSS JOIN keeps SQLite from starting at the trials instead), or the last session ended over a
+     * day ago and `completionPending` is unset (a pass over the open trials' index with a marker probe each, in SQL;
+     * nothing is decoded until it is due). The sweep re-checks each trial before writing.
+     */
+    remindersDue: (() => {
+      const stmt = sqlite.prepare(`SELECT * FROM trials WHERE rowid IN (
+          SELECT t.rowid FROM trial_schedule_sessions s CROSS JOIN trials t ON t.id = s.trial_id
+           WHERE s.starts_at > :now AND s.starts_at <= :now + 172800000
+             AND t.schedule_confirmed_at IS NOT NULL AND t.completion_state IS NULL AND t.subject_removed_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM trial_reminders m WHERE m.trial_id = t.id AND m.marker = 't48:' || s.id || ':' || t.schedule_revision)
+          UNION
+          SELECT t.rowid FROM trials t
+           WHERE t.schedule_confirmed_at IS NOT NULL AND t.completion_state IS NULL AND t.subject_removed_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM trial_reminders m WHERE m.trial_id = t.id AND m.marker = 'completionPending')
+             AND EXISTS (SELECT 1 FROM trial_schedule_sessions s WHERE s.trial_id = t.id AND s.ends_at > 0)
+             AND NOT EXISTS (SELECT 1 FROM trial_schedule_sessions s WHERE s.trial_id = t.id AND s.ends_at >= :now - 86400000)
+        ) ORDER BY rowid`);
+      return (now) => stmt.all({ now }).map(decode.trials);
+    })(),
     /** The assessment reminder: completed at or before `before`, the subject not removed, not yet reminded. */
     completedUnreminded: list('trials', "SELECT * FROM trials t WHERE t.completion_state = 'completed' AND t.completion_at <= ? AND t.subject_removed_at IS NULL AND NOT EXISTS (SELECT 1 FROM trial_reminders m WHERE m.trial_id = t.id AND m.marker = 'assessmentPending') ORDER BY t.rowid"),
     /** The admin staff-check queue by cursor (trial, then staff position): `{ items, nextCursor }` rows, not trials. */

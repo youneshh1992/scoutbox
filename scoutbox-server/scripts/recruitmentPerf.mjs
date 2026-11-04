@@ -238,7 +238,7 @@ await S.stop();
   const time = (label, fn) => { fn(); const xs = []; let rows = 0; for (let i = 0; i < 10; i += 1) { const t = t0(); rows = fn().length; xs.push(since(t)); } say(`  ${label.padEnd(44)} ${fmt(quantile(xs, 0.5)).padStart(9)}  (${rows} rows)`); };
   say('\nsweep queries (median of 10)');
   time('trials: report overdue', () => rec.trials.reportOverdue(now));
-  time('trials: confirmed and open', () => rec.trials.confirmedOpen());
+  time('trials: reminders due', () => rec.trials.remindersDue(now));
   time('trials: completed, assessment not reminded', () => rec.trials.completedUnreminded(now));
   time('signings: missing follow-ups', () => sfu.signings.missingFollowUps(4));
   time('follow-ups: due to mark', () => sfu.followUps.dueToMark(now));

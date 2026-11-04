@@ -16,7 +16,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
-import { legacyTrialRequest, contactRequest, openDayRequest, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, acceptedTrial, preP4bTrial, workedTrial, cancelledTrial, report, CASES, persisted, T, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
+import { legacyTrialRequest, contactRequest, openDayRequest, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, acceptedTrial, session, preP4bTrial, workedTrial, cancelledTrial, report, CASES, persisted, T, saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -155,7 +155,7 @@ test('[repository] a unit of work: a request and a trial written in a unit with 
   L.close(); rm(d);
 });
 
-test('[repository] SQL reads (§4.3 step 2): byId and every list query return exactly what a scan of the tables would, in insertion order; the counts agree; the sweep queries are the old filters (report overdue, confirmed and open, completed a week ago without the reminder); the staff-check pages walk every check, pending only or all, at every page size; `reads` carries no write', () => {
+test('[repository] SQL reads (§4.3 step 2): byId and every list query return exactly what a scan of the tables would, in insertion order; the counts agree; the sweep queries are the old filters (report overdue, completed a week ago without the reminder); the staff-check pages walk every check, pending only or all, at every page size; `reads` carries no write', () => {
   const d = file('reads'); const L = serverOpen(d); const { requests, trials } = L.repo;
   const all = L.repo.exportAll();
   assert.ok(all.requests.length >= 3 && all.trials.length >= 1, 'the fixture has records to query');
@@ -175,12 +175,47 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query return ex
     check(`trials.reportOverdue ${at}`, trials.reportOverdue(at), all.trials.filter((t) => Number.isFinite(t.reportDueAt) && t.reportDueAt < at && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt));
     check(`trials.completedUnreminded ${at}`, trials.completedUnreminded(at), all.trials.filter((t) => t.completion?.state === 'completed' && t.completion.at <= at && !t.subjectRemovedAt && !t.reminders?.assessmentPending));
   }
-  check('trials.confirmedOpen', trials.confirmedOpen(), all.trials.filter((t) => t.schedule?.confirmedAt && !t.completion && !t.subjectRemovedAt));
   const checks = (pendingOnly) => all.trials.flatMap((t) => (t.day?.staff ?? []).filter((x) => x.check && (!pendingOnly || x.check.status === 'pending')).map((x) => `${t.id}/${x.id}`));
   const walk = (pendingOnly, limit) => { const seen = []; let after = null; for (let i = 0; i < 50; i += 1) { const page = trials.staffChecksPage({ pendingOnly, limit, after }); seen.push(...page.items.map((r) => `${r.trialId}/${r.staffId}`)); if (!page.nextCursor) return seen; after = JSON.parse(Buffer.from(page.nextCursor, 'base64url').toString('utf8')); } throw new Error('the pages never ended'); };
   for (const pendingOnly of [true, false]) for (const limit of [1, 2, 100]) assert.deepEqual(walk(pendingOnly, limit), checks(pendingOnly), `staffChecksPage pendingOnly=${pendingOnly} by ${limit}`);
   for (const n of ['requests', 'trials']) { assert.ok(Object.isFrozen(L.repo.reads[n])); assert.equal(L.repo.reads[n].byId, L.repo[n].byId); assert.equal(L.repo.reads[n].create, undefined); assert.equal(L.repo.reads[n].update, undefined); }
   assert.deepEqual(L.repo.counts(), { requests: all.requests.length, trials: all.trials.length, trialReports: all.trials.filter((t) => t.report).length });
+  L.close(); rm(d);
+});
+
+test('[repository] the reminder sweep query (§4.3 step 4): remindersDue(now) is exactly the confirmed, open trials the sweep would remind at that instant — a session starting within 48 hours whose marker for the current revision is unset, or the last session ended over a day ago without completionPending — at every boundary', () => {
+  const H = 3_600_000; const D = 24 * H;
+  const copy = ({ evidence: _e, ...x }) => x;
+  const multi = (id, starts, over = {}) => {
+    const base = scheduledTrial(); const sessions = starts.map((at, i) => session({ id: `${id}-s${i}`, startsAt: at, endsAt: at + 90 * 60_000 }));
+    return scheduledTrial({ id, requestId: `req-${id}`, caseId: null, schedule: { ...base.schedule, sessions, revisions: [{ ...base.schedule.revisions[0], sessions: sessions.map(copy) }] }, ...over });
+  };
+  const reqFor = (id) => acceptedRequest(p4bInvitation({ id: `req-${id}`, caseId: null, keys: { invite: { key: `ck-${id}`, fp: `fp-${id}` } } }), id);
+  const made = [
+    multi('trial-a', [T.session, T.session + 3 * D], { reminders: { 't48:trial-a-s0:1': T.session - 40 * H } }), // the first session reminded
+    multi('trial-b', [T.session], { reminders: { 't48:trial-b-s0:0': T.accepted } }), // a marker of an older revision
+    multi('trial-c', [T.session], { reminders: { completionPending: T.accepted } }),
+    multi('trial-d', [T.session - 4 * D, T.session]), // one session past, one to come
+  ];
+  const fix = FIX(); fix.requests.push(...made.map((t) => reqFor(t.id)), legacyTrialRequest({ id: 'req-cancelled', status: 'accepted', respondedAt: T.accepted, respondedBy: 'player', trialId: 'trial-cancelled' }));
+  fix.trials.push(...made, cancelledTrial({ caseId: null }));
+  const d = file('reminders', fix); const L = serverOpen(d); const { trials } = L.repo;
+  const all = L.repo.exportAll().trials;
+  const due = (t, now) => {
+    if (!t.schedule?.confirmedAt || t.completion || t.subjectRemovedAt) return false;
+    const ss = t.schedule.sessions ?? [];
+    if (ss.some((x) => x.startsAt > now && x.startsAt - now <= 48 * H && !t.reminders[`t48:${x.id}:${t.schedule.revision}`])) return true;
+    const lastEnd = ss.reduce((m, x) => Math.max(m, x.endsAt), 0);
+    return Boolean(lastEnd) && now - lastEnd > 24 * H && !t.reminders.completionPending;
+  };
+  const instants = new Set();
+  for (let k = -24; k <= 32; k += 1) instants.add(T.session + k * 6 * H);
+  for (const t of all) for (const x of t.schedule?.sessions ?? []) for (const at of [x.startsAt - 48 * H - 1, x.startsAt - 48 * H, x.startsAt - 1, x.startsAt, x.endsAt + 24 * H - 1, x.endsAt + 24 * H, x.endsAt + 24 * H + 1]) instants.add(at);
+  let some = 0;
+  for (const at of instants) { const want = all.filter((t) => due(t, at)); some += want.length; assert.deepEqual(trials.remindersDue(at).map((t) => t.id), want.map((t) => t.id), `remindersDue at ${at - T.session}`); }
+  assert.ok(some > 0, 'the instants exercise due reminders');
+  assert.deepEqual(trials.remindersDue(T.session - 47 * H).map((t) => t.id), ['trial-1', 'trial-b', 'trial-c', 'trial-d'], 'trial-a\'s session is reminded; a marker of an older revision is not this revision\'s');
+  assert.deepEqual(trials.remindersDue(T.session + 2 * D).map((t) => t.id), ['trial-1', 'trial-a', 'trial-b', 'trial-d'], 'over a day after the session: completion pending except trial-c (marked); trial-a\'s second session is within 48 hours');
   L.close(); rm(d);
 });
 

@@ -547,6 +547,7 @@ CREATE TABLE trial_schedule_sessions (
   CHECK (ends_at > starts_at)
 ) STRICT;
 CREATE INDEX trial_schedule_sessions_trial_starts ON trial_schedule_sessions (trial_id, starts_at);
+CREATE INDEX trial_schedule_sessions_starts ON trial_schedule_sessions (starts_at);
 CREATE TABLE trial_session_evidence (
   trial_id TEXT NOT NULL,
   session_id TEXT NOT NULL,
