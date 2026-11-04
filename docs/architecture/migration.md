@@ -245,8 +245,8 @@ correctness batteries now live in `scoutbox-server/e2e/<domain>/`, named after w
    recruitment, scouting, verification, agents, development, discovery, operations, platform). Move and rename first,
    with no content changes, in one commit; merge duplicates in separate commits, with a count of checks before and
    after each merge. Never delete a behavioural assertion. **Moved (4 November)**: 50 batteries, the same checks before
-   and after. Left to merge or split: the six `recruitment/*Persistence` batteries (much of them describes blob-era
-   storage the repository suites now cover), `platform/storeGuarantees` with `platform/bootContract`, and the
+   and after. `platform/bootContract` merged into `platform/storeGuarantees` (one shared check ran twice). Left to merge or split: the six `recruitment/*Persistence` batteries (much of them describes blob-era
+   storage the repository suites now cover), and the
    cross-domain `scouting/clubWorkflows` (was `m12E2E`) and `operations/clubOperations` (was `m13E2E`), split by
    section into their domains.
 4. Put every passing battery in CI, through a runner like `scripts/runTests.mjs`: parallel, and refusing to run while
