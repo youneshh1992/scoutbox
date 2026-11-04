@@ -393,5 +393,5 @@ section('H7 — dashboard counts follow the effective engine');
   ok(umaBack.body.badges.some((b) => b.organisation?.id === 'org-eastport' && b.current), 'lifting the suspension restores display — nothing was destroyed');
 }
 
-console.log(`\nM14.1 adversarial suite: ${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}`);
+console.log(`\nverification/organisationsAndStaffAdversarial: ${passed} checks passed${process.exitCode ? ' (WITH FAILURES)' : ''}`);
 process.exit(process.exitCode ?? 0);

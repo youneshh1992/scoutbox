@@ -764,7 +764,7 @@ section('Z — the boundary: ONE writer of db.signings, signed and under_contrac
   ok((await stage(D.RID, re.token)) === 'signed', 'Z11 the case is still signed');
 }
 
-console.log(`\nM23 P7 Signing suite: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
-if (failures) console.error(`\n✗ M23 P7 Signing has ${failures} failure(s).`); else console.log('all M23 P7 Signing checks passed');
+console.log(`\nrecruitment/signings: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
+if (failures) console.error(`\n✗ recruitment/signings has ${failures} failure(s).`); else console.log('all recruitment/signings checks passed');
 server.kill('SIGKILL');
 process.exit(failures ? 1 : 0);

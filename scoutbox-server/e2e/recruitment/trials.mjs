@@ -1263,7 +1263,7 @@ section('Z — restart: keys, links and truth survive the process dying');
 // ---------------------------------------------------------------- report
 const total = passed;
 const ratio = total ? Math.round((negatives / total) * 100) : 0;
-console.log(`\nM23 P4B Trial suite: ${total} checks passed, ${negatives} negative/security/safeguarding checks (${ratio}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P4B Trial has failures.');
-else console.log('all M23 P4B Trial checks passed');
+console.log(`\nrecruitment/trials: ${total} checks passed, ${negatives} negative/security/safeguarding checks (${ratio}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/trials has failures.');
+else console.log('all recruitment/trials checks passed');
 process.exit(process.exitCode ?? 0);

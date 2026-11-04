@@ -962,8 +962,8 @@ section('The boundary holds: Passport is player truth, Room is club decision');
 // ---------------------------------------------------------------- summary
 const total = passed;
 const pct = Math.round((negatives / total) * 100);
-console.log(`\nM17 acceptance suite: ${total} checks passed, ${negatives} negative/abuse checks (${pct}% of all checks)`);
+console.log(`\nrecruitment/rooms: ${total} checks passed, ${negatives} negative/abuse checks (${pct}% of all checks)`);
 if (pct < 40) { fail(`negative coverage ${pct}% is below the 40% floor`); }
-if (process.exitCode) console.error('\nM17 FAILURES ABOVE');
-else console.log('all M17 checks passed');
+if (process.exitCode) console.error('\nrecruitment/rooms FAILURES ABOVE');
+else console.log('all recruitment/rooms checks passed');
 process.exit(process.exitCode ?? 0);

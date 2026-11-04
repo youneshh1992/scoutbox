@@ -336,7 +336,7 @@ section('5 — clean boot: draft → finalize → stop → reboot: one store, ke
 }
 
 // ------------------------------------------------------------ report
-console.log(`\nM23 P5 Decision persistence: ${passed} checks passed, ${negatives} negative (${Math.round((negatives / passed) * 100)}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P5 Decision persistence has failures.');
-else console.log('all M23 P5 Decision persistence checks passed');
+console.log(`\nrecruitment/decisionsPersistence: ${passed} checks passed, ${negatives} negative (${Math.round((negatives / passed) * 100)}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/decisionsPersistence has failures.');
+else console.log('all recruitment/decisionsPersistence checks passed');
 process.exit(process.exitCode ?? 0);

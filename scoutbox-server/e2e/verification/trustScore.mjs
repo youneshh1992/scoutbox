@@ -548,7 +548,7 @@ section('metrics — privacy-safe aggregate counters');
 
 await sleep(50);
 const total = passed;
-console.log(`\nM16.2 acceptance suite: ${total} checks passed, ${negatives} negative/abuse checks (${Math.round((negatives / total) * 100)}% of all checks)`);
+console.log(`\nverification/trustScore: ${total} checks passed, ${negatives} negative/abuse checks (${Math.round((negatives / total) * 100)}% of all checks)`);
 if (negatives * 10 < total * 4) fail(`negative coverage ${negatives}/${total} below the 40% floor`);
-if (process.exitCode) console.error('\nSOME CHECKS FAILED'); else console.log('all M16.2 checks passed');
+if (process.exitCode) console.error('\nSOME CHECKS FAILED'); else console.log('all verification/trustScore checks passed');
 process.exit(process.exitCode || 0);

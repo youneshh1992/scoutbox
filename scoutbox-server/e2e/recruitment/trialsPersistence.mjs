@@ -345,7 +345,7 @@ section('4 — clean boot: invitation, acceptance, restart — keys and stages s
 
 // ---------------------------------------------------------------- report
 const total = passed;
-console.log(`\nM23 P4B Trial persistence: ${total} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / total) * 100)}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P4B Trial persistence has failures.');
-else console.log('all M23 P4B Trial persistence checks passed');
+console.log(`\nrecruitment/trialsPersistence: ${total} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / total) * 100)}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/trialsPersistence has failures.');
+else console.log('all recruitment/trialsPersistence checks passed');
 process.exit(process.exitCode ?? 0);

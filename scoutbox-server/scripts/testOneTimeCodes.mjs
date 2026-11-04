@@ -195,7 +195,7 @@ const swallowing = (L, work) => {
   return { caught, outer };
 };
 
-test('review of b2a237e — a caught repository failure cannot commit partial work: the pairing reissue deletes the old row, then the replacement insert fails (temporary trigger) and the caller catches the error; the enclosing unit refuses to commit — the old code is kept (independent connection), the unrelated in-memory edit is restored, saveSeq is unchanged, no transaction is left open; the standalone control still rolls back on its own; an explicit retry lands', () => {
+test('a caught repository failure cannot commit partial work: the pairing reissue deletes the old row, then the replacement insert fails (temporary trigger) and the caller catches the error; the enclosing unit refuses to commit — the old code is kept (independent connection), the unrelated in-memory edit is restored, saveSeq is unchanged, no transaction is left open; the standalone control still rolls back on its own; an explicit retry lands', () => {
   const dir = tempDir('otc-joined-pair'); s5File(dir);
   const L = live(dir);
   const first = L.codes.issuePairingCode('pl-child1');
@@ -226,7 +226,7 @@ test('review of b2a237e — a caught repository failure cannot commit partial wo
   L.close(); rm(dir);
 });
 
-test('review of b2a237e — e-mail side, a multi-statement operation that already wrote: the tenth wrong attempt increments the count, then the cancellation fails (temporary trigger on the delete); standalone the count stays at nine; inside a unit whose caller catches the error the whole unit rolls back — nine in the file, the unrelated edit restored, saveSeq unchanged, no transaction open; the retry cancels the challenge', () => {
+test('e-mail side, a multi-statement operation that already wrote: the tenth wrong attempt increments the count, then the cancellation fails (temporary trigger on the delete); standalone the count stays at nine; inside a unit whose caller catches the error the whole unit rolls back — nine in the file, the unrelated edit restored, saveSeq unchanged, no transaction open; the retry cancels the challenge', () => {
   const dir = tempDir('otc-joined-mail'); s5File(dir);
   const L = live(dir);
   const { code } = L.codes.issueEmailChallenge('org-pro', 'x@eastport.test');
@@ -251,7 +251,7 @@ test('review of b2a237e — e-mail side, a multi-statement operation that alread
   L.close(); rm(dir);
 });
 
-test('review of b2a237e — the boundary itself: joined successes commit with the unit (issue, consume and an unrelated edit, one revision); an uncaught failure rolls back as before; expected negative results stay return values and never poison a unit; a validation failure is part of the operation (caught inside a unit, it still poisons the unit); a raw SQLite transaction a tool opened is honoured without a nested BEGIN and is not mistaken for a unit (its ROLLBACK undoes the operation); a malformed participant API is refused at construction', () => {
+test('the boundary itself: joined successes commit with the unit (issue, consume and an unrelated edit, one revision); an uncaught failure rolls back as before; expected negative results stay return values and never poison a unit; a validation failure is part of the operation (caught inside a unit, it still poisons the unit); a raw SQLite transaction a tool opened is honoured without a nested BEGIN and is not mistaken for a unit (its ROLLBACK undoes the operation); a malformed participant API is refused at construction', () => {
   const dir = tempDir('otc-joined-edge'); s5File(dir);
   const L = live(dir);
   L.store.save(L.snapshot());
@@ -409,7 +409,7 @@ test('validation is format-exact and never coerces: validateCodeRows reports the
 });
 
 // ============================================================= review of e020aba
-test('review of e020aba, finding 2 — stored attempts: a stored-format challenge must carry an explicit attempt count from 0 to 9 (missing, null, negative, fractional, nonnumeric, unsafe, at or above the limit are refused); a legacy challenge carries none and starts at 0; a snapshot save refuses such an entry whole (nothing written, the save revision not advanced, the unrelated edit not written); a legitimate count survives the snapshot round trip', () => {
+test('stored attempts: a stored-format challenge must carry an explicit attempt count from 0 to 9 (missing, null, negative, fractional, nonnumeric, unsafe, at or above the limit are refused); a legacy challenge carries none and starts at 0; a snapshot save refuses such an entry whole (nothing written, the save revision not advanced, the unrelated edit not written); a legitimate count survives the snapshot round trip', () => {
   const stored = (over = {}) => ({ orgId: 'org-pro', email: 'a@b.test', codeHash: hashCode('GOOD22'), expiresAt: NOW + MIN, attempts: 0, ...over });
   const missing = stored(); delete missing.attempts;
   for (const [label, entry, re] of [
@@ -440,7 +440,7 @@ test('review of e020aba, finding 2 — stored attempts: a stored-format challeng
   tool.sqlite.close(); rm(dir);
 });
 
-test('review of e020aba, finding 2 — runtime: an exhausted row that somehow exists (planted directly) is never redeemed — check answers none, consumption returns nothing and deletes nothing, a wrong code counts nothing, it is not outstanding, and the sweep removes it; at nine attempts the tenth wrong code cancels a valid challenge', () => {
+test('runtime: an exhausted row that somehow exists (planted directly) is never redeemed — check answers none, consumption returns nothing and deletes nothing, a wrong code counts nothing, it is not outstanding, and the sweep removes it; at nine attempts the tenth wrong code cancels a valid challenge', () => {
   const dir = tempDir('otc-f2-rt'); s5File(dir);
   const s = openRaw(dir);
   const codes = createOneTimeCodesRepository({ sqlite: s, now: () => NOW });

@@ -504,7 +504,7 @@ function standaloneCommitFails(t, fn) {
   assert.equal(t.store.sqlite.isTransaction, false);
 }
 
-test('review 1: a standalone operation whose COMMIT fails restores repository memory as well as SQL — update, insert with link, remove, link, ageUp, guardians.insert and guardians.update leave held views, nested arrays, childIds, indexes and counts as before; a write committed earlier stays, a later ordinary save persists no fragment, an explicit retry succeeds and a reopen agrees', () => {
+test('a standalone operation whose COMMIT fails restores repository memory as well as SQL — update, insert with link, remove, link, ageUp, guardians.insert and guardians.update leave held views, nested arrays, childIds, indexes and counts as before; a write committed earlier stays, a later ordinary save persists no fragment, an explicit retry succeeds and a reopen agrees', () => {
   const dir = tempDir('idrepo-standalone-commit');
   const t = boot(dir, { ...FIXTURE() });
   const adultView = t.players.byId('pl-adult'); const seededView = t.players.byId('pl-seeded'); const primary = t.guardians.byId('gd-primary'); const kids = primary.childIds; const co = t.guardians.byId('gd-co'); const coKids = co.childIds;
@@ -545,7 +545,7 @@ test('review 1: a standalone operation whose COMMIT fails restores repository me
   r.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('review 2: inside a real unit, a repository operation that fails after its first SQL write poisons the unit even when the caller catches the error — the outer unit fails, nothing of it commits, after-commit work never runs, memory is restored, earlier edits survive, a later ordinary save persists no fragment and a retry succeeds; a caught VALIDATION refusal (thrown before any SQL) does not poison the unit', () => {
+test('inside a real unit, a repository operation that fails after its first SQL write poisons the unit even when the caller catches the error — the outer unit fails, nothing of it commits, after-commit work never runs, memory is restored, earlier edits survive, a later ordinary save persists no fragment and a retry succeeds; a caught VALIDATION refusal (thrown before any SQL) does not poison the unit', () => {
   const dir = tempDir('idrepo-unit-caught');
   const t = boot(dir, { ...FIXTURE() });
   const refs = prepare(t);
@@ -609,7 +609,7 @@ test('review 2: inside a real unit, a repository operation that fails after its 
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('review 3: initialisation validates the supplied collections as given — an object, null, a string, a number or a missing collection (either domain) is refused through the preflight contract, writes nothing, leaves the state pending and the input untouched, and a corrected explicit snapshot initialises afterwards; explicitly empty arrays stay valid', () => {
+test('initialisation validates the supplied collections as given — an object, null, a string, a number or a missing collection (either domain) is refused through the preflight contract, writes nothing, leaves the state pending and the input untouched, and a corrected explicit snapshot initialises afterwards; explicitly empty arrays stay valid', () => {
   const s = freshShadowDb(); prepareLiveIdentitySchema(s, { initState: 'pending', now: NOW });
   const identity = createIdentityRepositories({ sqlite: s, now: () => NOW });
   const rows = () => s.prepare('SELECT COUNT(*) AS n FROM players').get().n + s.prepare('SELECT COUNT(*) AS n FROM guardians').get().n + s.prepare('SELECT COUNT(*) AS n FROM guardian_children').get().n;

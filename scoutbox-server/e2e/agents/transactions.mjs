@@ -905,6 +905,6 @@ section('Z — every refusal in this run: a code, and no private field');
 
 await stop(server);
 const total = passed;
-console.log(`\nM23 P5.6D Transaction suite: ${total} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / total) * 100)}%)`);
-if (process.exitCode) console.error('M23 P5.6D Transaction suite has failures.');
-else console.log('all M23 P5.6D Transaction checks passed');
+console.log(`\nagents/transactions: ${total} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / total) * 100)}%)`);
+if (process.exitCode) console.error('agents/transactions has failures.');
+else console.log('all agents/transactions checks passed');

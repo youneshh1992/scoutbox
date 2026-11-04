@@ -655,5 +655,5 @@ section('operational: deterministic rate limit, batch projector, metrics');
   ok(audit.body.ledger.some((l) => l.type === 'verification_decision'), 'verification decisions appear in the tenant audit export');
 }
 
-console.log(`\nm14E2E: ${process.exitCode ? 'FAILED — see ✗ above' : `all ${passed} checks passed`}`);
+console.log(`\nverification/organisationsAndStaff: ${process.exitCode ? 'FAILED — see ✗ above' : `all ${passed} checks passed`}`);
 process.exit(process.exitCode ?? 0);

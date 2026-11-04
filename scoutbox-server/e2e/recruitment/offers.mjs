@@ -894,7 +894,7 @@ section('Z — temporal regressions: every Offer instant through P5.7, none thro
 server.kill('SIGKILL');
 const total = passed;
 const ratio = total ? Math.round((negatives / total) * 100) : 0;
-console.log(`\nM23 P6 Offer suite: ${total} checks passed, ${negatives} negative/security/safeguarding checks (${ratio}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P6 Offer has failures.');
-else console.log('all M23 P6 Offer checks passed');
+console.log(`\nrecruitment/offers: ${total} checks passed, ${negatives} negative/security/safeguarding checks (${ratio}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/offers has failures.');
+else console.log('all recruitment/offers checks passed');
 process.exit(process.exitCode ?? 0);

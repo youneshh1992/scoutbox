@@ -698,7 +698,7 @@ section('R — D5: the finalize rate limit is enforced; a clean boot needs no sc
   ok((await j('POST', '/player/box-cam/sessions/no-such-session/cv/finalize', { nonce: 'x' }, other.token)).status === 404, 'R2b the limit is per player: another player is not throttled');
 }
 
-console.log(`\nM23 P4A closure suite: ${passed} checks passed, ${negatives} negative/abuse checks (${Math.round((negatives / passed) * 100)}%)`);
+console.log(`\nrecruitment/trialDatesMinorsAndErasure: ${passed} checks passed, ${negatives} negative/abuse checks (${Math.round((negatives / passed) * 100)}%)`);
 if (process.exitCode) console.error('SOME CHECKS FAILED');
 server.kill('SIGKILL');
 process.exit(process.exitCode ?? 0);

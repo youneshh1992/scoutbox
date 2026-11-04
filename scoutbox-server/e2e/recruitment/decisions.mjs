@@ -913,7 +913,7 @@ section('Z — restart: draft, chain, keys and case survive the process dying');
 // ---------------------------------------------------------------- report
 const total = passed;
 const ratio = total ? Math.round((negatives / total) * 100) : 0;
-console.log(`\nM23 P5 Decision suite: ${total} checks passed, ${negatives} negative/security/safeguarding checks (${ratio}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P5 Decision has failures.');
-else console.log('all M23 P5 Decision checks passed');
+console.log(`\nrecruitment/decisions: ${total} checks passed, ${negatives} negative/security/safeguarding checks (${ratio}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/decisions has failures.');
+else console.log('all recruitment/decisions checks passed');
 process.exit(process.exitCode ?? 0);

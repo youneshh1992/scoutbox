@@ -364,6 +364,6 @@ section('5 — P8.1: stale pointers, cross-case, legacy mixes, a signed mismatch
 }
 
 await S.stop();
-console.log(`\nM23 P8 Recruitment Journey Persistence: ${passed} checks passed, ${negatives} negative, ${failures} failed`);
-if (failures) console.error(`✗ M23 P8 Recruitment Journey Persistence has ${failures} failure(s).`);
+console.log(`\nrecruitment/journeyPersistence: ${passed} checks passed, ${negatives} negative, ${failures} failed`);
+if (failures) console.error(`✗ recruitment/journeyPersistence has ${failures} failure(s).`);
 process.exit(failures ? 1 : 0);

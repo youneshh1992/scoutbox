@@ -930,8 +930,8 @@ const missingAbuse = Array.from({ length: 60 }, (_, i) => i + 1).filter((n) => !
 ok(missingAbuse.length === 0, `all 60 enumerated abuse cases exercised${missingAbuse.length ? `: missing A${missingAbuse.join(', A')}` : ''}`);
 const total = passed;
 const pct = Math.round((negatives / total) * 100);
-console.log(`\nM19 acceptance suite: ${total} checks passed, ${negatives} negative/abuse checks (${pct}% of all checks)`);
+console.log(`\ndiscovery/matchingAndWatchlists: ${total} checks passed, ${negatives} negative/abuse checks (${pct}% of all checks)`);
 if (pct < 50) fail(`negative coverage ${pct}% is below the 50% floor this milestone requires`);
-if (process.exitCode) console.error('\nM19 FAILURES ABOVE');
-else console.log('all M19 checks passed');
+if (process.exitCode) console.error('\ndiscovery/matchingAndWatchlists FAILURES ABOVE');
+else console.log('all discovery/matchingAndWatchlists checks passed');
 process.exit(process.exitCode ?? 0);

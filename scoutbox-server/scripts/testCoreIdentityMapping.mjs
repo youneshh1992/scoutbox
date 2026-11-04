@@ -502,7 +502,7 @@ const invalidWith = (snap, collection, id, re) => {
 };
 const bare = (extra = {}) => ({ id: 'pl-b', name: 'Bare', dob: '2001-01-01', country: 'GB', ...extra });
 
-test('review 1: an empty relationship id is a present, invalid reference — guardianId "" and coGuardianOf "" are refused by record id and field, no candidate is emitted, the input is untouched; null and absent stay lossless', () => {
+test('an empty relationship id is a present, invalid reference — guardianId "" and coGuardianOf "" are refused by record id and field, no candidate is emitted, the input is untouched; null and absent stay lossless', () => {
   invalidWith({ players: [bare({ guardianId: '' })], guardians: [] }, 'players', 'pl-b', /guardianId is empty/);
   invalidWith({ players: [], guardians: [{ id: 'gd-b', name: 'G', email: 'g@example.com', coGuardianOf: '', childIds: [] }] }, 'guardians', 'gd-b', /coGuardianOf is empty/);
   invalidWith({ players: [], guardians: [{ id: 'gd-b', name: 'G', email: 'g@example.com', childIds: [''] }] }, 'guardians', 'gd-b', /childIds\[0\] is a string, not a player id|childIds\[0\] is empty/);
@@ -516,7 +516,7 @@ test('review 1: an empty relationship id is a present, invalid reference — gua
   assert.equal(out.players[0].guardianId, null); assert.equal('guardianId' in out.players[2], false); assert.equal(out.guardians[0].coGuardianOf, null); assert.equal(out.guardians[1].coGuardianOf, 'gd-ok');
 });
 
-test('review 1: the two-pass candidate writer cannot drop a present co_guardian_of or guardian_id — a malformed candidate row (empty or non-text reference) is refused before anything is written', () => {
+test('the two-pass candidate writer cannot drop a present co_guardian_of or guardian_id — a malformed candidate row (empty or non-text reference) is refused before anything is written', () => {
   const good = validateCoreIdentity({ players: [bare()], guardians: [{ id: 'gd-a', name: 'A', email: 'a@example.com', childIds: [] }, { id: 'gd-b', name: 'B', email: 'b@example.com', coGuardianOf: 'gd-a', childIds: [] }] }, { now: NOW }).candidate;
   for (const [mutate, re] of [
     [(c) => { c.guardians[1].co_guardian_of = ''; }, /guardians gd-b: co_guardian_of is an empty string/],
@@ -535,7 +535,7 @@ test('review 1: the two-pass candidate writer cannot drop a present co_guardian_
   assert.equal(s.prepare("SELECT co_guardian_of FROM guardians WHERE id = 'gd-b'").get().co_guardian_of, 'gd-a'); s.close();
 });
 
-test('review 2: every INTEGER-mapped field must be a safe integer (exactly storable and readable through node:sqlite Numbers) — 2^53−1 and −(2^53−1) load and read back exactly, 2^53 and 1e20 are refused by field with no candidate; REAL-mapped fields keep accepting finite numbers', () => {
+test('every INTEGER-mapped field must be a safe integer (exactly storable and readable through node:sqlite Numbers) — 2^53−1 and −(2^53−1) load and read back exactly, 2^53 and 1e20 are refused by field with no candidate; REAL-mapped fields keep accepting finite numbers', () => {
   const MAX = Number.MAX_SAFE_INTEGER;
   // Boundaries: accepted, loaded, read back identical (through the intended STRICT schema).
   const out = loadAndReadBack({
@@ -562,7 +562,7 @@ test('review 2: every INTEGER-mapped field must be a safe integer (exactly stora
   invalidWith({ players: [bare({ stats: { paceKmh: NaN } })], guardians: [] }, 'players', 'pl-b', /stats.paceKmh is NaN, not a finite number/);
 });
 
-test('review 2: every fixture shape that is reported complete really loads and round-trips through the intended schema (the SQL check is part of "complete", not a separate hope)', () => {
+test('every fixture shape that is reported complete really loads and round-trips through the intended schema (the SQL check is part of "complete", not a separate hope)', () => {
   loadAndReadBack(consistentSnapshot());
   loadAndReadBack({ players: [adultSignup(), seededAdult(), bare()], guardians: [guardianSignup(), seededGuardian(), coGuardianOf(seededGuardian())].map((g, i) => ({ ...g, childIds: [] })) });
 });
@@ -582,7 +582,7 @@ const assertPrototypesClean = () => {
   assert.equal(Object.getPrototypeOf(Object.prototype), null);
 };
 
-test('review 3: own JSON properties named constructor, toString, __proto__ and hasOwnProperty survive the forward and reverse mapping as data — top level, inside a composite (stats), inside a composite remainder — and no prototype is touched (sub-record items are typed columns: their unknown keys are not stored, testPlayerSubrecords.mjs)', () => {
+test('own JSON properties named constructor, toString, __proto__ and hasOwnProperty survive the forward and reverse mapping as data — top level, inside a composite (stats), inside a composite remainder — and no prototype is touched (sub-record items are typed columns: their unknown keys are not stored, testPlayerSubrecords.mjs)', () => {
   const p = protoPlayer();
   const row = playerToRow(p);
   assert.equal(row.stats_goals, 1, 'the real column sub-key is still mapped');
@@ -604,7 +604,7 @@ test('review 3: own JSON properties named constructor, toString, __proto__ and h
   assertPrototypesClean();
 });
 
-test('review 3: the same records through the preflight, real temporary SQLite storage and the read-back are byte-identical with every such key as an own property; prototypes stay clean', () => {
+test('the same records through the preflight, real temporary SQLite storage and the read-back are byte-identical with every such key as an own property; prototypes stay clean', () => {
   const p = protoPlayer(); const g = protoGuardian();
   const out = loadAndReadBack({ players: [p], guardians: [g] });
   assertProtoKept(p, out.players[0], 'player via SQLite'); assertProtoKept(g, out.guardians[0], 'guardian via SQLite');

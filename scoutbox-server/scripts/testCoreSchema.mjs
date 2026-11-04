@@ -242,7 +242,7 @@ test('identity snapshot (tool mode): a malformed collection, a refused record, a
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('identity snapshot (tool mode, review of 9656a4b): a VALID full replacement is accepted whatever the obsolete rows or the input order — a removed guardian\'s e-mail reused by its replacement, two retained guardians swapping e-mails, retained players moving to the replacement, co-guardian references, each also with the collections in reversed order; actual duplicates, missing references and the legacy-minor rule stay refused; a failure in the middle of the rewrite and a failure of the REAL COMMIT leave every row, link, facet and other collection intact and a correct retry succeeds', () => {
+test('identity snapshot (tool mode): a VALID full replacement is accepted whatever the obsolete rows or the input order — a removed guardian\'s e-mail reused by its replacement, two retained guardians swapping e-mails, retained players moving to the replacement, co-guardian references, each also with the collections in reversed order; actual duplicates, missing references and the legacy-minor rule stay refused; a failure in the middle of the rewrite and a failure of the REAL COMMIT leave every row, link, facet and other collection intact and a correct retry succeeds', () => {
   const dir = tempDir('s4-snap-order');
   const server = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = cleanSnapshot(); // gd-1 one@ (primary of pl-minor), gd-2 two@ (co of gd-1, co link to pl-minor), pl-adult, pl-minor

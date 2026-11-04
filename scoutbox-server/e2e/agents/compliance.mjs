@@ -779,6 +779,6 @@ section('Z — every refusal in this run: a code, no private field');
   neg(!/"agentUserId"|"note":/.test(text), 'Z13 no agent id and no prose reason rides on a reason entry');
 }
 
-console.log(`\nM23 P5.6C Compliance suite: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / passed) * 100)}%)`);
-if (process.exitCode) { console.error('M23 P5.6C Compliance suite has failures.'); } else console.log('all M23 P5.6C Compliance checks passed');
+console.log(`\nagents/compliance: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / passed) * 100)}%)`);
+if (process.exitCode) { console.error('agents/compliance has failures.'); } else console.log('all agents/compliance checks passed');
 server.kill('SIGTERM');

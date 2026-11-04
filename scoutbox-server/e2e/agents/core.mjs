@@ -834,6 +834,6 @@ section('E2 — every refusal in this run carried a status and a code, and no pr
   neg(!ERROR_BODIES.some((e) => JSON.stringify(e.body).includes('never agreed') || JSON.stringify(e.body).includes('SECRET_DISPUTE_TEXT')), 'E2 no dispute reason in any refusal');
 }
 
-console.log(`\nM23 P5.6B Agent suite: ${passed} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / passed) * 100)}%)`);
-if (process.exitCode) console.error('SOME CHECKS FAILED'); else console.log('all M23 P5.6B Agent checks passed');
+console.log(`\nagents/core: ${passed} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / passed) * 100)}%)`);
+if (process.exitCode) console.error('SOME CHECKS FAILED'); else console.log('all agents/core checks passed');
 process.exit(process.exitCode ?? 0);

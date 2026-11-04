@@ -87,7 +87,7 @@ test('transaction coupling: an entry queued inside a unit of work that rolls bac
   store.sqlite.close(); rm(dir, storageDir);
 });
 
-test('snapshot tools (review of 9656a4b): the queue is the mediaDeletions collection — a snapshot tool reads it from the table and writes it back through the table, validated whole (a path instead of an id, an unknown field, a duplicate, a bad time or a non-array refuses the save with nothing written); a stale in-memory array at boot is dropped and any blob row of that name deleted — the queue never imports from memory', () => {
+test('snapshot tools: the queue is the mediaDeletions collection — a snapshot tool reads it from the table and writes it back through the table, validated whole (a path instead of an id, an unknown field, a duplicate, a bad time or a non-array refuses the save with nothing written); a stale in-memory array at boot is dropped and any blob row of that name deleted — the queue never imports from memory', () => {
   // (a) A migrated file, snapshot mode: read from the table, written back through it.
   const dir = tempDir('media-snap'); savedFile(dir);
   let tool = openStore(dir);
@@ -130,7 +130,7 @@ test('snapshot tools (review of 9656a4b): the queue is the mediaDeletions collec
 // The invariant: a file referenced by ANY live player (`media[].id` on the
 // authoritative identity records, read through the mapping) is never deleted by
 // the removed-owner cleanup queue — whatever the queue entry's own player_id says.
-test('ownership guard (review of 4ef9345): a queue entry naming a clip a live player still references is a conflict — the sweep retains it with a diagnostic and never unlinks the file (legitimate entries in the same sweep still complete), whether the entry names an unrelated player, no player or the owner itself, and an in-memory record not yet flushed counts too; once the owner is really gone the entry is a legitimate removal again', () => {
+test('ownership guard: a queue entry naming a clip a live player still references is a conflict — the sweep retains it with a diagnostic and never unlinks the file (legitimate entries in the same sweep still complete), whether the entry names an unrelated player, no player or the owner itself, and an in-memory record not yet flushed counts too; once the owner is really gone the entry is a legitimate removal again', () => {
   const dir = tempDir('media-own'); savedFile(dir); // FIXTURE: pl-seeded carries media med-1
   const s = openRaw(dir);
   const warnings = [];
@@ -165,7 +165,7 @@ test('ownership guard (review of 4ef9345): a queue entry naming a clip a live pl
   s.close(); rm(dir);
 });
 
-test('ownership guard (review of 4ef9345): a snapshot whose FINAL state has a queue entry naming a live-referenced clip is refused whole — a queue-only write against the retained players, and an identity-only write that adds the reference against the retained queue; a consistent whole replacement that removes the owner and queues the file is accepted; a failure of the real COMMIT where the check participated leaves everything unchanged and the retry succeeds', () => {
+test('ownership guard: a snapshot whose FINAL state has a queue entry naming a live-referenced clip is refused whole — a queue-only write against the retained players, and an identity-only write that adds the reference against the retained queue; a consistent whole replacement that removes the owner and queues the file is accepted; a failure of the real COMMIT where the check participated leaves everything unchanged and the retry succeeds', () => {
   const dir = tempDir('media-own-snap'); savedFile(dir);
   const tool = openStore(dir);
   const before = dump(tool.sqlite); const seq = tool.revision();

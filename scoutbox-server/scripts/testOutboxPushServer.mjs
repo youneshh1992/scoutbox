@@ -174,7 +174,7 @@ await test('D2 through the real route: five string registrations with repeats ar
 });
 
 // ============================================================= [compat] the null destination
-await test('[compat] an accepted queued dispatch with to: null (the stored state the review of 6ca66ba wrote through the real dispatch repository) is swept by the real boot sweep into a delivery outbox record with an explicit to: null and the dispatch is accepted; the record survives a restart and is listed by the admin outbox; the admin backup carries it with the key present', async () => {
+await test('[compat] an accepted queued dispatch with to: null (the stored state an earlier build wrote through the real dispatch repository) is swept by the real boot sweep into a delivery outbox record with an explicit to: null and the dispatch is accepted; the record survives a restart and is listed by the admin outbox; the admin backup carries it with the key present', async () => {
   const dir = tempDir('s7c-null'); let S = await boot(dir); await S.stop();
   const { createDispatchesRepository } = await import('../repositories/dispatches.mjs');
   { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA foreign_keys = ON;'); const dispatches = createDispatchesRepository({ sqlite: s, now: Date.now }); dispatches.create({ id: 'synthetic-null-dest', notificationId: 'synthetic-orphan', audience: { kind: 'player', id: 'pl-adeyemi' }, channel: 'email', to: null, provider: 'local-fake', status: 'queued', skipReason: null, providerMessageId: null, attempts: [], nextAt: Date.now(), actionDeadline: null, createdAt: Date.now(), deliveredAt: null, openedAt: null, actionedAt: null, failedAt: null, failReason: null }); s.close(); }

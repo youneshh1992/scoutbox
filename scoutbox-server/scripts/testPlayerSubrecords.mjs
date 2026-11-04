@@ -455,7 +455,7 @@ test('audience allowlists are unchanged by the storage move: an organisation nev
 });
 
 // ------------------------------------------------------------------ review of 132eda2 (three findings, corrected failing-first)
-test('review of 132eda2, finding 1: a snapshot save never discards a trialReports copy — a copy with no trial report of that id, one whose content differs, one in a different order, a duplicated entry, each refuses the WHOLE save (player and report ids named; the unrelated edit and the save revision rolled back) whether the snapshot supplies the trials or omits them (the retained trials judge); a trials collection that is not an array is refused while a copy exists; a consistent whole replacement, a trials-only write (the derived view changes), a record without the key (no claim) and a null (no claim) are accepted; an injected COMMIT failure of an accepted save rolls everything back and the retry lands; the same rule at insert, restore and initialize', () => {
+test('a snapshot save never discards a trialReports copy — a copy with no trial report of that id, one whose content differs, one in a different order, a duplicated entry, each refuses the WHOLE save (player and report ids named; the unrelated edit and the save revision rolled back) whether the snapshot supplies the trials or omits them (the retained trials judge); a trials collection that is not an array is refused while a copy exists; a consistent whole replacement, a trials-only write (the derived view changes), a record without the key (no claim) and a null (no claim) are accepted; an injected COMMIT failure of an accepted save rolls everything back and the retry lands; the same rule at insert, restore and initialize', () => {
   const dir = tempDir('s5-f1');
   const t = boot(dir, { players: [adult(), rich()], guardians: [], trialList: trials() }); t.close();
   const store = openStore(dir); const s = store.sqlite;
@@ -512,7 +512,7 @@ test('review of 132eda2, finding 1: a snapshot save never discards a trialReport
   f.close(); rm(dir, fresh);
 });
 
-test('review of 132eda2, finding 2: the derived trialReports follows the trials for EVERY accepted shape — a record whose key was absent, null or an empty array shows a newly filed report at once on the held view, on a fresh lookup, in a spread, in JSON (the backup\'s serialisation) and in the club view (its own club only); the empty-state shape is preserved (absent stays absent, null stays null, [] stays []) in memory, in the row\'s shape metadata, after a reopen; a unit of work that fails restores the shape; players.restore adopts the restored record\'s shape', () => {
+test('the derived trialReports follows the trials for EVERY accepted shape — a record whose key was absent, null or an empty array shows a newly filed report at once on the held view, on a fresh lookup, in a spread, in JSON (the backup\'s serialisation) and in the club view (its own club only); the empty-state shape is preserved (absent stays absent, null stays null, [] stays []) in memory, in the row\'s shape metadata, after a reopen; a unit of work that fails restores the shape; players.restore adopts the restored record\'s shape', () => {
   const dir = tempDir('s5-f2');
   const t = boot(dir, { players: [noKeys(), { ...adult(), id: 'pl-null', trialReports: null }, { ...adult(), id: 'pl-empty' }], guardians: [] });
   const ids = { absent: 'pl-nokeys', null: 'pl-null', empty: 'pl-empty' };
@@ -555,7 +555,7 @@ test('review of 132eda2, finding 2: the derived trialReports follows the trials 
   r.close(); rm(dir);
 });
 
-test('review of 132eda2, finding 3: a whole-null medical or programme update is refused while the player has records or completions (rows of the child table) — everything unchanged, the error naming the player, the rows and the explicit clearing operation; a scalar sub-key update keeps the rows and the held references; a failure inside a unit after the mutation and a real COMMIT failure leave the rows; the explicit clear (setItems to []) then null, a null composite without rows and the key appearing again are supported; export and reopen agree with the rows; a deliberately inconsistent file (a null composite over child rows, written outside the repositories) is refused by the export and the boot — the source untouched', () => {
+test('a whole-null medical or programme update is refused while the player has records or completions (rows of the child table) — everything unchanged, the error naming the player, the rows and the explicit clearing operation; a scalar sub-key update keeps the rows and the held references; a failure inside a unit after the mutation and a real COMMIT failure leave the rows; the explicit clear (setItems to []) then null, a null composite without rows and the key appearing again are supported; export and reopen agree with the rows; a deliberately inconsistent file (a null composite over child rows, written outside the repositories) is refused by the export and the boot — the source untouched', () => {
   const dir = tempDir('s5-f3');
   const t = boot(dir, { players: [adult(), rich()], guardians: [], trialList: trials() });
   t.players.addItem('pl-adult', 'medical.records', { id: 'md-a1', type: 'note', title: 'Synthetic note' });

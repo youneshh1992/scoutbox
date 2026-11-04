@@ -88,7 +88,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
 | — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 items 1–4 done (4 Nov); what still misses §2 is listed in §4.3 |
 | — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left |
-| — | end-to-end test estate | — | — | — | §4.4, any time before S9; steps 1–4 done (4 Nov), step 5 left |
+| — | end-to-end test estate | — | — | — | done (§4.4, 4 Nov) |
 | — | server code by domain | — | — | — | §4.4.1: recruitment and platform before S9, then per step |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -253,8 +253,9 @@ correctness batteries now live in `scoutbox-server/e2e/<domain>/`, named after w
 4. **Done (4 November).** `npm run e2e` (`scripts/runE2E.mjs`, sharing `scripts/suiteRunner.mjs` with `npm test`) runs
    all 50 batteries, four at a time (about 70 s), and refuses to run while a file in `e2e/` is unlisted. CI runs it. The
    two checks that fail for a recorded reason are `knownFailure` checks (`e2e/support/`), so their batteries stay in CI.
-5. Name tests after what they check, not after the review that produced them ("review of 2fe05df, R1"). The unit
-   suites (`scripts/test*.mjs`) get the same treatment. Do this last.
+5. **Done (4 November).** Tests are named after what they check, not after the review that produced them: 57 unit
+   tests lost their "review of <sha>, finding N" prefixes, and each battery's summary names the battery
+   (`recruitment/offers: 447 checks passed`), not the milestone. New tests follow the same rule.
 
 This is independent of the storage work and can run in parallel, but it should be done before S9, so new domains
 add to the regrouped batteries.

@@ -410,6 +410,6 @@ provider.disposeAll();
 
 // =====================================================================
 console.log(`\n${'='.repeat(66)}`);
-console.log(`m22Blocker: ${fail === 0 ? `all ${pass} checks passed` : `${fail} FAILED of ${pass + fail}`}`);
+console.log(`development/combineProductionGate: ${fail === 0 ? `all ${pass} checks passed` : `${fail} FAILED of ${pass + fail}`}`);
 console.log('production Combine eligibility: NOT ELIGIBLE — real-world validation not completed');
 if (fail > 0) process.exit(1);

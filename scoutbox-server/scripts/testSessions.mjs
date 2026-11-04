@@ -195,7 +195,7 @@ test('snapshot mode: load exposes hashed rows, save writes them back unchanged, 
   assert.ok(layer2.sessions.byToken(a.token) && layer2.sessions.byToken(b.token) && layer2.sessions.byToken('fixture-token'));
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('snapshot mode (review correction 3): an invalid or conflicting session row rejects the whole save; sessions and unrelated data are untouched', () => {
+test('snapshot mode: an invalid or conflicting session row rejects the whole save; sessions and unrelated data are untouched', () => {
   const dir = tempDir('s2-snap-reject');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = { orgs: [ORG_A], guardians: [], players: [PLAYER_1('Original')], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }, { id: 'usr-2', orgId: 'org-a', name: 'B', role: 'Scout', createdAt: 1 }] };
@@ -488,7 +488,7 @@ await atest('server (review correction 2): player and org sessions survive the a
 });
 
 // ------------------------------------------------------------- collection shape (review correction 5)
-test('snapshot mode (review correction 5): a table-backed collection that is not an array is refused whole; an omitted collection is a partial snapshot', () => {
+test('snapshot mode: a table-backed collection that is not an array is refused whole; an omitted collection is a partial snapshot', () => {
   const dir = tempDir('s2-shape');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = { orgs: [ORG_A], guardians: [], players: [PLAYER_1('Original')], sessions: [], users: [{ id: 'usr-1', orgId: 'org-a', name: 'A', role: 'Scout', createdAt: 1 }] };

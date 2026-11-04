@@ -228,7 +228,7 @@ await test('backup/restore: the admin backup\'s database copy holds the codes as
 });
 
 // ------------------------------------------------------------- review of e020aba, finding 1: the mail's copy of the code
-await test('review of e020aba, finding 1 — the challenge mail: on the dev transport the admin outbox still delivers the full mail while the process runs, but the saved outbox record withholds the code (no raw code in the database file), and after a restart the outbox shows the withheld text; on the live transport (provider stubbed locally) the provider receives the code while the database, the backup and the admin outbox never hold it; the code is redeemable in both; an unrelated mail is kept unchanged', async () => {
+await test('the challenge mail: on the dev transport the admin outbox still delivers the full mail while the process runs, but the saved outbox record withholds the code (no raw code in the database file), and after a restart the outbox shows the withheld text; on the live transport (provider stubbed locally) the provider receives the code while the database, the backup and the admin outbox never hold it; the code is redeemable in both; an unrelated mail is kept unchanged', async () => {
   // Dev transport.
   const dir = tempDir('s6a-f1-dev'); let S = await boot(dir);
   const pro = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
@@ -262,7 +262,7 @@ await test('review of e020aba, finding 1 — the challenge mail: on the dev tran
 });
 
 // ------------------------------------------------------------- review of e020aba, finding 2: an exhausted row is never redeemed
-await test('review of e020aba, finding 2 — an exhausted challenge row (attempts at the limit, planted through a second connection as a hand-edited file could hold it) is refused at the real route even with the correct code (404, the organisation unverified), and the boot sweep removes it', async () => {
+await test('an exhausted challenge row (attempts at the limit, planted through a second connection as a hand-edited file could hold it) is refused at the real route even with the correct code (404, the organisation unverified), and the boot sweep removes it', async () => {
   const dir = tempDir('s6a-f2'); let S = await boot(dir);
   const pro = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
   assert.equal((await S.j('POST', '/org/verification/email', { email: 'f2@eastportfc.test' }, pro)).status, 201);

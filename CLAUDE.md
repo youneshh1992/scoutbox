@@ -48,7 +48,8 @@ consequences in plain terms, and don't ask him storage questions.
 - Every server change ships with a test. Unit suites are `scoutbox-server/scripts/test*.mjs` (`npm test`). The
   end-to-end batteries in `scoutbox-server/e2e/<domain>/` are the behavioural specification: rewrite an assertion
   only if it describes old storage, and never delete a behavioural one.
-- Before you finish, run `cd scoutbox-server && npm test` if anything under `scoutbox-server/` changed, and
+- Before you finish, run `cd scoutbox-server && npm test` if anything under `scoutbox-server/` changed, plus
+  `npm run e2e` (about a minute) if a route, a repository or a battery changed, and
   `cd scoutbox-player && npm test` if anything under `scoutbox-player/` changed. Report the results honestly:
   failures, pre-existing failures and anything not run. Use synthetic data only.
 - CI must be green on `main`. Fix a red step; don't skip it.

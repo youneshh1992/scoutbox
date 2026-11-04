@@ -803,7 +803,7 @@ section('Z — restart: idempotency keys, terminal states, the paused-case warni
 // ---------------------------------------------------------------- report
 server.kill('SIGKILL');
 const ratio = passed ? Math.round((negatives / passed) * 100) : 0;
-console.log(`\nM23 P6.1 Offer hardening suite: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${ratio}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P6.1 Offer hardening has failures.');
-else console.log('all M23 P6.1 Offer hardening checks passed');
+console.log(`\nrecruitment/offersAdversarial: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${ratio}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/offersAdversarial has failures.');
+else console.log('all recruitment/offersAdversarial checks passed');
 process.exit(process.exitCode ?? 0);

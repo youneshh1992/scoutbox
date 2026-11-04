@@ -418,7 +418,7 @@ await test('backup/restore keeps the intent of a pending media removal: a commit
 });
 
 // ------------------------------------------------------------- the ownership guard of the media queue (review of 4ef9345)
-await test('ownership guard (review of 4ef9345): a conflicting entry stored in a data directory (a queue entry naming a clip a live player still references) is retained with a diagnostic at boot and at every sweep — the file and the live reference survive, /capabilities counts it, the backup route refuses rather than omit a live-owned clip — and once resolved the backup and a legitimate pending removal work as before', async () => {
+await test('ownership guard: a conflicting entry stored in a data directory (a queue entry naming a clip a live player still references) is retained with a diagnostic at boot and at every sweep — the file and the live reference survive, /capabilities counts it, the backup route refuses rather than omit a live-owned clip — and once resolved the backup and a legitimate pending removal work as before', async () => {
   const dir = tempDir('s4srv-own');
   let S = await boot(dir, await freePort());
   const su = await S.j('POST', '/auth/player/signup', { name: 'Live Media Owner', dob: '2000-01-01', country: 'GB', password: 'owner-pass-1' }); assert.equal(su.status, 201);
@@ -572,7 +572,7 @@ await test('S5 sub-records through the real routes: clips (a file and a null url
 });
 
 // ------------------------------------------------------------- review of 132eda2, finding 2: a report filed for a legacy-shaped account appears at once
-await test('review of 132eda2 (finding 2): a trial report filed through the real route for an accepted LEGACY-shaped account — a record saved without any trialReports key, and one saved with null — appears on /player/me, in the CV and on the club\'s view at once, without a restart, exactly as for an ordinary sign-up (trialReports: []); a restart serves the same', async () => {
+await test('a trial report filed through the real route for an accepted LEGACY-shaped account — a record saved without any trialReports key, and one saved with null — appears on /player/me, in the CV and on the club\'s view at once, without a restart, exactly as for an ordinary sign-up (trialReports: []); a restart serves the same', async () => {
   const dir = tempDir('s5srv-legacy-report');
   // A saved file whose adults were written without the key and with null (a snapshot save accepts both).
   const noKey = { ...adult(), id: 'pl-legacy-absent', name: 'Legacy Absent', password: null }; delete noKey.trialReports;

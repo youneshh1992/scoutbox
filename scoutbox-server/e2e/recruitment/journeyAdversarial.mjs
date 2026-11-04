@@ -1227,6 +1227,6 @@ section('Z — boundary invariants, read from the source');
 }
 
 section('summary');
-console.log(`\nM23 P8.1 Recruitment Journey Hardening: ${passed} checks passed, ${negatives} negative, ${failures} failed`);
-if (failures) console.error(`✗ M23 P8.1 Recruitment Journey Hardening has ${failures} failure(s).`);
+console.log(`\nrecruitment/journeyAdversarial: ${passed} checks passed, ${negatives} negative, ${failures} failed`);
+if (failures) console.error(`✗ recruitment/journeyAdversarial has ${failures} failure(s).`);
 process.exit(failures ? 1 : 0);

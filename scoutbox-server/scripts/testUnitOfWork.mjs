@@ -292,7 +292,7 @@ async function withUnhandled(fn) {
   return seen;
 }
 
-await test('review 1: a failure at BEGIN leaves no unit open — the work never runs, no transaction is left behind, ordinary saves and later units work; a failing cleanup step (a participant whose restore throws) is reported and still clears the unit', () => {
+await test('a failure at BEGIN leaves no unit open — the work never runs, no transaction is left behind, ordinary saves and later units work; a failing cleanup step (a participant whose restore throws) is reported and still clears the unit', () => {
   const dir = tempDir('uow-begin'); const t = boot(dir);
   const exec = t.store.sqlite.exec.bind(t.store.sqlite);
   let failBegin = true; let invoked = 0;
@@ -324,7 +324,7 @@ await test('review 1: a failure at BEGIN leaves no unit open — the work never 
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await test('review 2: a nested (joined) unit that fails poisons the whole unit even when its caller catches the error — nothing commits, nothing is published, memory is restored, a later ordinary save persists no fragment', () => {
+await test('a nested (joined) unit that fails poisons the whole unit even when its caller catches the error — nothing commits, nothing is published, memory is restored, a later ordinary save persists no fragment', () => {
   const dir = tempDir('uow-swallow'); const t = boot(dir);
   const req1 = t.db.vouches[0];
   let events = 0; let outer = null; let innerSeen = null; let continued = false;
@@ -360,7 +360,7 @@ await test('review 2: a nested (joined) unit that fails poisons the whole unit e
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await test('review 3: a facet value written by a row update inside a unit and then changed back before COMMIT is overwritten in the database — view and table agree after commit, after rollback, after an ordinary save and after a restart', () => {
+await test('a facet value written by a row update inside a unit and then changed back before COMMIT is overwritten in the database — view and table agree after commit, after rollback, after an ordinary save and after a restart', () => {
   const dir = tempDir('uow-revert'); const t = boot(dir);
   const pro = t.db.orgs.find((o) => o.id === 'org-pro');
   const squad = (id = 'org-pro') => JSON.parse(t.raw('SELECT facets_json FROM orgs WHERE id = ?', id).facets_json).squad.length;
@@ -392,7 +392,7 @@ await test('review 3: a facet value written by a row update inside a unit and th
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await test('review 4: an async function is refused BEFORE it is invoked (top-level and nested), so nothing of it ever runs; an unexpected thenable from a plain function is rolled back, its rejection is observed and counted, and the fact that its continuation is NOT cancelled is recorded, not hidden', async () => {
+await test('an async function is refused BEFORE it is invoked (top-level and nested), so nothing of it ever runs; an unexpected thenable from a plain function is rolled back, its rejection is observed and counted, and the fact that its continuation is NOT cancelled is recorded, not hidden', async () => {
   const dir = tempDir('uow-async'); const t = boot(dir);
   const pro = t.db.orgs.find((o) => o.id === 'org-pro');
   let invoked = 0;
@@ -438,7 +438,7 @@ await test('review 4: an async function is refused BEFORE it is invoked (top-lev
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await test('review 5: after-commit side effects that return a promise are observed — an asynchronous failure is counted and logged (never an unhandled rejection, never a rollback), a success is not, and later callbacks still run; the same holds outside a unit', async () => {
+await test('after-commit side effects that return a promise are observed — an asynchronous failure is counted and logged (never an unhandled rejection, never a rollback), a success is not, and later callbacks still run; the same holds outside a unit', async () => {
   const dir = tempDir('uow-async-after'); const t = boot(dir);
   const order = [];
   const unhandled = await withUnhandled(async () => {

@@ -581,7 +581,7 @@ function armCommitFailure(s, on = 'INSERT') {
   return () => s.exec('DROP TRIGGER rv_commit_fail');
 }
 
-test('review of ba6956d, finding 2 — an owned immediate transaction that fails restores the repository\'s memory, not only the rows: a failing INSERT (statement failure), a failing category insert after the parent upsert (multi-statement), a failing UPDATE under a coalesce (in-place mutation) and a REAL COMMIT failure each leave the mirror, the id index, the counts, the preferences and previously held read-only views exactly as before; the retry with the same id and with different preference values lands without any reload', () => {
+test('an owned immediate transaction that fails restores the repository\'s memory, not only the rows: a failing INSERT (statement failure), a failing category insert after the parent upsert (multi-statement), a failing UPDATE under a coalesce (in-place mutation) and a REAL COMMIT failure each leave the mirror, the id index, the counts, the preferences and previously held read-only views exactly as before; the retry with the same id and with different preference values lands without any reload', () => {
   const dir = tempDir('ntf-rv-owned'); s6File(dir);
   const s = openRaw(dir);
   const repo = bare(s);
@@ -630,7 +630,7 @@ test('review of ba6956d, finding 2 — an owned immediate transaction that fails
   s.close(); rm(dir);
 });
 
-test('review of ba6956d, finding 2 — joined units in immediate mode: a repository given the participant API refuses to join a unit until its save hook is registered with the store (the hook is how a rollback restores its memory); once registered, a failure the caller catches still poisons the unit and the rollback restores the mirror, the held views and the counts', () => {
+test('joined units in immediate mode: a repository given the participant API refuses to join a unit until its save hook is registered with the store (the hook is how a rollback restores its memory); once registered, a failure the caller catches still poisons the unit and the rollback restores the mirror, the held views and the counts', () => {
   const dir = tempDir('ntf-rv-joined'); s6File(dir);
   const L = live(dir); L.save();
   const tool = createNotificationsRepository({ sqlite: L.store.sqlite, now: () => NOW, nextId, unit: L.store.unit });
@@ -648,7 +648,7 @@ test('review of ba6956d, finding 2 — joined units in immediate mode: a reposit
   L.close(); rm(dir);
 });
 
-test('review of ba6956d, finding 1 — effects wait for the durable write: in staged mode an effect registered with a pending write (the push, the SSE frame) runs only once the save that carries the write COMMITTED — never before the save, never after a failed save (statement or real COMMIT failure; the write and its effect stay pending for the retry), exactly once on the successful retry; an effect registered inside a unit of work is discarded with the unit\'s rollback while effects of writes pending BEFORE the unit survive and run when the next save or unit commits them; an effect that throws or rejects is counted and never fails the save; no effect schedules another save', () => {
+test('effects wait for the durable write: in staged mode an effect registered with a pending write (the push, the SSE frame) runs only once the save that carries the write COMMITTED — never before the save, never after a failed save (statement or real COMMIT failure; the write and its effect stay pending for the retry), exactly once on the successful retry; an effect registered inside a unit of work is discarded with the unit\'s rollback while effects of writes pending BEFORE the unit survive and run when the next save or unit commits them; an effect that throws or rejects is counted and never fails the save; no effect schedules another save', () => {
   const dir = tempDir('ntf-rv-effects'); s6File(dir);
   const L = live(dir); L.save();
   const ran = []; const effect = (label) => () => { ran.push(label); };
@@ -689,7 +689,7 @@ test('review of ba6956d, finding 1 — effects wait for the durable write: in st
   return new Promise((resolve) => setTimeout(resolve, 10)).then(() => { assert.equal(L.store.unitOfWorkState().afterCommitFailures, failuresBefore + 2, 'both failures counted, neither a rollback'); L.close(); rm(dir); });
 });
 
-test('review of 7655bae, finding 1 — the default immediate participant (factory default runEffect, store.unit given, save hook registered) defers an effect registered inside a unit of work to the unit\'s COMMIT report: nothing while the unit is active, nothing after a thrown abort, a caught operation failure or a real COMMIT failure (the effect is discarded with the unit), exactly once after a successful commit and never again; a throwing or rejecting effect is reported through warn and never undoes the committed data; a standalone owned write still runs its effect at once after its own commit; a caller-owned raw transaction still refuses', () => {
+test('the default immediate participant (factory default runEffect, store.unit given, save hook registered) defers an effect registered inside a unit of work to the unit\'s COMMIT report: nothing while the unit is active, nothing after a thrown abort, a caught operation failure or a real COMMIT failure (the effect is discarded with the unit), exactly once after a successful commit and never again; a throwing or rejecting effect is reported through warn and never undoes the committed data; a standalone owned write still runs its effect at once after its own commit; a caller-owned raw transaction still refuses', () => {
   const dir = tempDir('ntf-rv2-effects'); s6File(dir);
   const L = live(dir); L.save();
   const warnings = [];
@@ -726,7 +726,7 @@ test('review of 7655bae, finding 1 — the default immediate participant (factor
   return new Promise((resolve) => setTimeout(resolve, 10)).then(() => { assert.equal(warnings.filter((w) => /provider down|provider rejected/.test(w)).length, 2, 'both provider failures reported through warn'); L.close(); rm(dir); });
 });
 
-test('review of 7655bae, finding 2 — a participant precondition refused inside a unit of work is a participant FAILURE: an immediate or staged repository given store.unit but no registered save hook refuses a write (and an effect) THROUGH unit.join, so a caller that catches the refusal still cannot commit the unit — the unrelated edit is restored, SQLite, the revision and the mirror unchanged, no transaction open — and uncaught it fails the same way; after store.setSaveHook(repo.saveHook()) the same unit succeeds; outside a unit the standalone refusal (staged) and the own transaction (immediate) are unchanged', () => {
+test('a participant precondition refused inside a unit of work is a participant FAILURE: an immediate or staged repository given store.unit but no registered save hook refuses a write (and an effect) THROUGH unit.join, so a caller that catches the refusal still cannot commit the unit — the unrelated edit is restored, SQLite, the revision and the mirror unchanged, no transaction open — and uncaught it fails the same way; after store.setSaveHook(repo.saveHook()) the same unit succeeds; outside a unit the standalone refusal (staged) and the own transaction (immediate) are unchanged', () => {
   const dir = tempDir('ntf-rv2-guard'); s6File(dir);
   const L = live(dir); L.save();
   const seq0 = seqOf(dir); const blob0 = blobOf(dir, 'vouches'); const mem0 = JSON.stringify(L.db.vouches);
@@ -752,7 +752,7 @@ test('review of 7655bae, finding 2 — a participant precondition refused inside
   L.close(); rm(dir);
 });
 
-test('review of ba6956d, finding 3 (under the S8d fidelity rule) — unknown data is dropped, never stored: an own "__proto__" key and nested unknown fields on a legacy notification are dropped by the snapshot save (the prototype never touched); an audience or acknowledgment contract that carries a field this schema has no column for refuses the whole snapshot write before anything is written (saveSeq unchanged, diagnostic text-free)', () => {
+test('unknown data is dropped, never stored: an own "__proto__" key and nested unknown fields on a legacy notification are dropped by the snapshot save (the prototype never touched); an audience or acknowledgment contract that carries a field this schema has no column for refuses the whole snapshot write before anything is written (saveSeq unchanged, diagnostic text-free)', () => {
   const SECRET = 'SECRET-TEXT-RV3';
   const special = JSON.parse('{"id":"ntf-proto","ts":1,"audience":{"kind":"player","id":"pl-adult"},"type":"message","text":"Synthetic","read":false,"__proto__":{"legacyMarker":"keep-me"},"nested":{"a":[1,{"b":null}]}}');
   const dir = tempDir('ntf-rv-extra'); s6File(dir, { notifications: [special, ntf({ id: 'ntf-plain' })] });
@@ -777,7 +777,7 @@ test('review of ba6956d, finding 3 (under the S8d fidelity rule) — unknown dat
 });
 
 // ============================================================= review of ac50b60 — restores in place (the extras parts retired with extra_json, S8d fidelity rule)
-test('review of ac50b60 — a repository write inside an aborted unit and a real COMMIT failure leave the held view on the restored row; a reload (restart) and the snapshot dispatcher reproduce the stored row; coalescing, preferences and the acknowledgment work on a row a snapshot wrote; a wrong-typed or non-JSON value for a known field refuses the validation and the snapshot write whole, by row id and field, never the text', () => {
+test('a repository write inside an aborted unit and a real COMMIT failure leave the held view on the restored row; a reload (restart) and the snapshot dispatcher reproduce the stored row; coalescing, preferences and the acknowledgment work on a row a snapshot wrote; a wrong-typed or non-JSON value for a known field refuses the validation and the snapshot write whole, by row id and field, never the text', () => {
   const dir = tempDir('ntf-rv-extras');
   const legacy = { ...ntf({ id: 'ntf-x' }), category: 'messages', text: 'Synthetic.', actionRequired: { deadline: NOW + HOUR, ackedAt: null, ackedBy: null } };
   s6File(dir, { notifications: [legacy, ntf({ id: 'plain' })] });

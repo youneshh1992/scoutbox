@@ -710,6 +710,6 @@ section('restart durability (SIGKILL)');
   ok(list.body.items.some((t) => t.status === 'placed'), 'transition history intact across the crash');
 }
 
-console.log(`\nm13E2E: ${process.exitCode ? 'FAILURES above —' : 'all'} ${passed} checks passed`);
+console.log(`\noperations/clubOperations: ${process.exitCode ? 'FAILURES above —' : 'all'} ${passed} checks passed`);
 server?.kill('SIGTERM');
 process.exit(process.exitCode ?? 0);

@@ -633,6 +633,6 @@ section('H18 — share token enumeration hits the rate limit (§79#5)');
 }
 
 const ratio = Math.round((negatives / passed) * 100);
-console.log(`\nM15 acceptance suite: ${passed} checks passed, ${negatives} negative/abuse checks (${ratio}% of all checks)${process.exitCode ? ' (WITH FAILURES)' : ''}`);
+console.log(`\nverification/passport: ${passed} checks passed, ${negatives} negative/abuse checks (${ratio}% of all checks)${process.exitCode ? ' (WITH FAILURES)' : ''}`);
 if (negatives * 3 < passed) { console.error('✗ negative-test ratio below one third'); process.exitCode = 1; }
 process.exit(process.exitCode ?? 0);

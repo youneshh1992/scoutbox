@@ -768,8 +768,8 @@ section('§8b — /capabilities is the only new unauthenticated surface');
 // ---------------------------------------------------------------- summary
 const total = passed;
 const pct = Math.round((negatives / total) * 100);
-console.log(`\nM18.1 acceptance suite: ${total} checks passed, ${negatives} negative/abuse checks (${pct}% of all checks)`);
+console.log(`\nplatform/productionHardening: ${total} checks passed, ${negatives} negative/abuse checks (${pct}% of all checks)`);
 if (pct < 50) fail(`negative coverage ${pct}% is below the 50% floor this milestone requires`);
-if (process.exitCode) console.error('\nM18.1 FAILURES ABOVE');
-else console.log('all M18.1 checks passed');
+if (process.exitCode) console.error('\nplatform/productionHardening FAILURES ABOVE');
+else console.log('all platform/productionHardening checks passed');
 process.exit(process.exitCode ?? 0);

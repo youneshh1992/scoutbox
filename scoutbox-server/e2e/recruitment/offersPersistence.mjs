@@ -376,7 +376,7 @@ section('5 — P6.1: lazy expiry, temporal corruption, unknown statuses, legacy 
   neg(JSON.stringify(db4.recruitmentCases.filter((c) => c.id !== R.kim.RID).map((c) => [c.id, c.room?.status ?? null])) === JSON.stringify(JSON.parse(casesBefore).filter(([id]) => id !== R.kim.RID)), '5.23 no case moved because of a planted row');
 }
 
-console.log(`\nM23 P6/P6.1 Offer persistence: ${passed} checks passed, ${negatives} negative (${Math.round((negatives / passed) * 100)}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P6 Offer persistence has failures.');
-else console.log('all M23 P6 Offer persistence checks passed');
+console.log(`\nrecruitment/offersPersistence: ${passed} checks passed, ${negatives} negative (${Math.round((negatives / passed) * 100)}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/offersPersistence has failures.');
+else console.log('all recruitment/offersPersistence checks passed');
 process.exit(process.exitCode ?? 0);

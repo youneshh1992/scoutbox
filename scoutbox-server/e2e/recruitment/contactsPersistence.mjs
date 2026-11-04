@@ -327,7 +327,7 @@ const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-clean-'));
 }
 
 const total = passed;
-console.log(`\nM23 P3 Contact persistence: ${total} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / total) * 100)}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P3 Contact persistence has failures.');
-else console.log('all M23 P3 Contact persistence checks passed');
+console.log(`\nrecruitment/contactsPersistence: ${total} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / total) * 100)}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/contactsPersistence has failures.');
+else console.log('all recruitment/contactsPersistence checks passed');
 process.exit(process.exitCode ?? 0);

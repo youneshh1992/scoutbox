@@ -805,6 +805,6 @@ for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } }
   const total = passed + (process.exitCode ? 1 : 0);
   const pct = Math.round((negatives / Math.max(total, 1)) * 100);
   ok(pct >= 50, `negative/security/edge coverage is ${pct}% (${negatives} of ${total})`);
-  console.log(`\nM20 acceptance suite: ${passed} checks passed, ${negatives} negative/abuse checks (${pct}% of all checks)`);
+  console.log(`\nrecruitment/analytics: ${passed} checks passed, ${negatives} negative/abuse checks (${pct}% of all checks)`);
 }
-if (!process.exitCode) console.log('all M20 checks passed');
+if (!process.exitCode) console.log('all recruitment/analytics checks passed');

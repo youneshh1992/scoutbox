@@ -294,7 +294,7 @@ test('[cutover] the STRICT guardian reference (Q4b), every direction, judged on 
 });
 
 // ============================================================= [S6b correction] the two findings of the independent review of c6cf5e1
-test('[S6b correction F1] a REJECTED staged patch changes nothing: reports.patch({ status, outcome }) with a valid status and an invalid LATER field (undefined; a function; a Map) throws and leaves the held view, a fresh view, the export, the pending queue (a valid write queued before it stays queued) and the file exactly as before; a later valid patch of another field persists only that field (the rejected status never lands); an idvQueue.patch with an invalid value changes nothing either; inside a unit of work the caught refusal still refuses the unit and restores the pre-unit state; an ACCEPTED patch whose save COMMIT fails is kept and lands once on the retry; held-view identity kept throughout', () => {
+test('a REJECTED staged patch changes nothing: reports.patch({ status, outcome }) with a valid status and an invalid LATER field (undefined; a function; a Map) throws and leaves the held view, a fresh view, the export, the pending queue (a valid write queued before it stays queued) and the file exactly as before; a later valid patch of another field persists only that field (the rejected status never lands); an idvQueue.patch with an invalid value changes nothing either; inside a unit of work the caught refusal still refuses the unit and restores the pre-unit state; an ACCEPTED patch whose save COMMIT fails is kept and lands once on the retry; held-view identity kept throughout', () => {
   const dir = tempDir('sa-f1'); s7dFile(dir, { blobs: { reports: [report()], idvQueue: [idv()] } });
   const L = live(dir); L.save(); const seq0 = seqOf(dir);
   const held = L.repo.reports.byId('rep-1'); const heldIdv = L.repo.idvQueue.byId('idv-1');
@@ -329,7 +329,7 @@ test('[S6b correction F1] a REJECTED staged patch changes nothing: reports.patch
   L.close(); rm(dir);
 });
 
-test('[S6b correction F2] a nested OPTIONAL value that JSON cannot carry is stored the way JSON.stringify stores it, never refused: ledger detail { share: undefined } (the Box Cam prefs writer on a partial prefs row) is accepted, the key is ABSENT in the mirror, the file and the export; an undefined array entry becomes null; the same holds for a nested context; a TOP-LEVEL undefined is a NULL column (null in the record); an unknown top-level field is dropped; a nested function, a Map, a BigInt or a cyclic object is still refused by path', () => {
+test('a nested OPTIONAL value that JSON cannot carry is stored the way JSON.stringify stores it, never refused: ledger detail { share: undefined } (the Box Cam prefs writer on a partial prefs row) is accepted, the key is ABSENT in the mirror, the file and the export; an undefined array entry becomes null; the same holds for a nested context; a TOP-LEVEL undefined is a NULL column (null in the record); an unknown top-level field is dropped; a nested function, a Map, a BigInt or a cyclic object is still refused by path', () => {
   const dir = tempDir('sa-f2'); s7dFile(dir, { blobs: { reports: [report()] } });
   const L = live(dir); L.save();
   const detail = { by: 'player', share: undefined, retainClips: true };

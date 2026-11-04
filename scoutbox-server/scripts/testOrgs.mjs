@@ -231,7 +231,7 @@ test('repository: authority is the cutover record — attach refuses without it;
 });
 
 // ------------------------------------------------------------- review corrections after 0851d38
-test('correction 1: facet change tracking reflects committed state only — a save that fails after the flush, inside the flush or at commit leaves every pending change eligible for retry; the retry persists them and a restart reads them', () => {
+test('facet change tracking reflects committed state only — a save that fails after the flush, inside the flush or at commit leaves every pending change eligible for retry; the retry persists them and a restart reads them', () => {
   const dir = tempDir('s3-c1');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = { orgs: ORGS(), guardians: [], players: [PLAYER_1()], sessions: [], users: [] };
@@ -286,7 +286,7 @@ test('correction 1: facet change tracking reflects committed state only — a sa
   assert.deepEqual(grass2.lookingFor, ['GK']); assert.deepEqual(grass2.agencySettings, { n: 1 });
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('correction 2: nested migrated fields are protected — assigning, deleting or defining a property inside location or federationRef throws, the view never diverges from the table, and a repository update of a composite persists across a restart', () => {
+test('nested migrated fields are protected — assigning, deleting or defining a property inside location or federationRef throws, the view never diverges from the table, and a repository update of a composite persists across a restart', () => {
   const dir = tempDir('s3-c2');
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = { orgs: ORGS(), guardians: [], players: [PLAYER_1()], sessions: [], users: [] };
@@ -323,7 +323,7 @@ test('correction 2: nested migrated fields are protected — assigning, deleting
   assert.equal(JSON.stringify(ORGS_TABLE.read(store.sqlite)), JSON.stringify(db2.orgs));
   store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
-test('correction 3: initialisation is explicit state, never a row count — an empty initialised table stays authoritative against stale arrays; a genuine first installation initialises once, atomically, and retries after an interruption; an intentionally empty table stays empty', () => {
+test('initialisation is explicit state, never a row count — an empty initialised table stays authoritative against stale arrays; a genuine first installation initialises once, atomically, and retries after an interruption; an intentionally empty table stays empty', () => {
   // (a) An initialised database whose table was emptied: a stale array is ignored, nothing is imported.
   const dirA = tempDir('s3-c3a');
   let s = openRaw(dirA);
@@ -396,7 +396,7 @@ test('correction 3: initialisation is explicit state, never a row count — an e
   s.close();
 });
 
-test('review (cb1d22b): initialise refuses a collection that is not an array — an object, null, a string, a number or nothing — writing no row, keeping the state pending and the input untouched; an explicitly empty array stays a valid, empty installation and a later valid retry initialises', () => {
+test('initialise refuses a collection that is not an array — an object, null, a string, a number or nothing — writing no row, keeping the state pending and the input untouched; an explicitly empty array stays a valid, empty installation and a later valid retry initialises', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   const r = createOrgsRepository({ sqlite: s });

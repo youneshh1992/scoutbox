@@ -289,7 +289,7 @@ await test('[cutover] the admin backup and a restore: the backup\'s database cop
   rm(dir, restored);
 });
 
-await test('[S6b correction F2] an EXISTING partial Box Cam prefs row ({ playerId } only, as an older build or a restore can leave it) and the real authenticated PATCH /player/box-cam/prefs { retainClips: true }: answered 200 with the same payload the pre-S6b build gives (no preference default introduced), the box_prefs_changed ledger row recorded with detail { by, retainClips } — the absent share key absent, exactly as the pre-S6b blob stored it; the prefs and the row survive a restart; the admin backup carries the row exactly', async () => {
+await test('an EXISTING partial Box Cam prefs row ({ playerId } only, as an older build or a restore can leave it) and the real authenticated PATCH /player/box-cam/prefs { retainClips: true }: answered 200 with the same payload the pre-S6b build gives (no preference default introduced), the box_prefs_changed ledger row recorded with detail { by, retainClips } — the absent share key absent, exactly as the pre-S6b blob stored it; the prefs and the row survive a restart; the admin backup carries the row exactly', async () => {
   const dir = tempDir('s6b-f2'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Prefs Adult');
   assert.equal((await S.j('PATCH', '/player/box-cam/prefs', { retainClips: false }, token)).status, 200, 'control: a full prefs row created by the route');

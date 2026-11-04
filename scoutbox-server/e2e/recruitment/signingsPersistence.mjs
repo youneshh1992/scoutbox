@@ -433,6 +433,6 @@ section('5 — P7.1: bytes, rows and evidence edited on disk fail closed after a
   }
 }
 
-console.log(`\nM23 P7 Signing persistence: ${passed} checks passed, ${negatives} negative (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P7 Signing persistence has failures.');
-else console.log('all M23 P7 Signing persistence checks passed');
+console.log(`\nrecruitment/signingsPersistence: ${passed} checks passed, ${negatives} negative (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/signingsPersistence has failures.');
+else console.log('all recruitment/signingsPersistence checks passed');

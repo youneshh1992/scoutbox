@@ -834,7 +834,7 @@ section('Z — the P7 invariants, re-proven at this tip');
   void src;
 }
 
-console.log(`\nM23 P7.1 Signing hardening: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
-if (failures) console.error(`\n✗ M23 P7.1 Signing hardening has ${failures} failure(s).`); else console.log('all M23 P7.1 Signing hardening checks passed');
+console.log(`\nrecruitment/signingsAdversarial: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
+if (failures) console.error(`\n✗ recruitment/signingsAdversarial has ${failures} failure(s).`); else console.log('all recruitment/signingsAdversarial checks passed');
 server.kill('SIGKILL');
 process.exit(failures ? 1 : 0);

@@ -590,7 +590,7 @@ section('AI/live — the store survives a restart with its authority intact');
   ok(schemaHeader === String(SCHEMA_VERSION), `AI3 the persisted store is still at schema ${SCHEMA_VERSION} (header said ${schemaHeader})`);
 }
 
-section('AD/live — sign-up refuses a date of birth it cannot read (review finding F-12)');
+section('AD/live — sign-up refuses a date of birth it cannot read');
 {
   // Registration already refused an ABSENT dob. It did not refuse an UNREADABLE
   // one, so `dob: 12345` created an account whose age could never be
@@ -642,7 +642,7 @@ section('AA/live — the failed-login budget, per identifier (F-5)');
   ok(other.status === 200, 'AA5 while a DIFFERENT reviewer signs in normally from the same IP — which an IP-scoped limit alone could never satisfy, and is the whole reason this policy exists');
 }
 
-section('AA/live — one account, two names, ONE budget (review finding F-11)');
+section('AA/live — one account, two names, ONE budget');
 {
   // A guardian can be named by id or by email. Until the review pass those were
   // two failed-login buckets for one password — a guesser alternating them got
@@ -662,8 +662,8 @@ section('AA/live — one account, two names, ONE budget (review finding F-11)');
   neg(rightViaEmail.status === 429, `AA8b even with the right password (${rightViaEmail.status}) — the lockout is checked before the credential on the alias path too`);
 }
 
-console.log(`\nM23 P5.6F final hardening (reconstructed): ${passed} checks passed, ${negatives} negative/security/privacy checks (${Math.round((negatives / passed) * 100)}%)`);
+console.log(`\nagents/adversarial: ${passed} checks passed, ${negatives} negative/security/privacy checks (${Math.round((negatives / passed) * 100)}%)`);
 if (process.exitCode) console.error('\nSOME P5.6F HARDENING CHECKS FAILED');
-else console.log('all M23 P5.6F reconstructed hardening checks passed');
+else console.log('all agents/adversarial checks passed');
 await stop(server);
 process.exit(process.exitCode ?? 0);

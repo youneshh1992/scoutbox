@@ -308,6 +308,6 @@ section('5 — corruption on disk is contained, named by its effect, never repai
   }
 }
 
-console.log(`\nM23 P5.6B Agent persistence suite: ${passed} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / passed) * 100)}%)`);
-if (process.exitCode) console.error('SOME CHECKS FAILED'); else console.log('all M23 P5.6B Agent persistence checks passed');
+console.log(`\nagents/corePersistence: ${passed} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / passed) * 100)}%)`);
+if (process.exitCode) console.error('SOME CHECKS FAILED'); else console.log('all agents/corePersistence checks passed');
 process.exit(process.exitCode ?? 0);

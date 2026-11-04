@@ -296,6 +296,6 @@ section('pure — the staleness verdict and the machine are the same functions t
 }
 
 const total = passed;
-console.log(`\nM23 P5.6D Transaction persistence suite: ${total} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / total) * 100)}%)`);
+console.log(`\nagents/transactionsPersistence: ${total} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / total) * 100)}%)`);
 if (process.exitCode) console.error('SOME CHECKS FAILED');
-else console.log('all M23 P5.6D Transaction persistence checks passed');
+else console.log('all agents/transactionsPersistence checks passed');

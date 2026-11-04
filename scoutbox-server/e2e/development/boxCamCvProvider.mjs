@@ -632,7 +632,7 @@ section('§121/§122 — boot mode is honest about what is built in');
 // ---------------------------------------------------------------- report
 const total = passed;
 const ratio = total ? Math.round((negatives / total) * 100) : 0;
-console.log(`\nM22 acceptance suite: ${total} checks passed, ${negatives} negative/integrity/security checks (${ratio}% of all checks)`);
+console.log(`\ndevelopment/boxCamCvProvider: ${total} checks passed, ${negatives} negative/integrity/security checks (${ratio}% of all checks)`);
 if (ratio < 60) {
   console.error(`\n✗ §99 requires at least 60% negative/integrity/security coverage; this run is ${ratio}%.`);
   process.exitCode = 1;

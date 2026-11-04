@@ -1723,6 +1723,6 @@ section('R — restart: what survived the process going away');
 // ---------------------------------------------------------------- report
 const total = passed;
 const ratio = total ? Math.round((negatives / total) * 100) : 0;
-console.log(`\nM23 acceptance suite (P2): ${total} checks passed, ${negatives} negative/security/edge checks (${ratio}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P2 has failures.');
-else console.log('all M23 P2 checks passed');
+console.log(`\nrecruitment/lifecycle: ${total} checks passed, ${negatives} negative/security/edge checks (${ratio}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/lifecycle has failures.');
+else console.log('all recruitment/lifecycle checks passed');

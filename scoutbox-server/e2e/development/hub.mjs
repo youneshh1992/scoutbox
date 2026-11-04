@@ -1307,5 +1307,5 @@ section('§20 — a second boot: the migration does not run again');
 }
 
 for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } }
-console.log(`\nM21 acceptance suite: ${passed} checks passed, ${negatives} negative/abuse checks (${Math.round((negatives / passed) * 100)}% of all checks)`);
-if (!process.exitCode) console.log('all M21 checks passed');
+console.log(`\ndevelopment/hub: ${passed} checks passed, ${negatives} negative/abuse checks (${Math.round((negatives / passed) * 100)}% of all checks)`);
+if (!process.exitCode) console.log('all development/hub checks passed');

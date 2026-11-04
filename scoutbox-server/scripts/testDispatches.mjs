@@ -173,7 +173,7 @@ test('snapshot save refusals: a dispatch that is not an object, without an id, w
 });
 
 // ============================================================= the actual schema, in SQL
-test('the actual schema (direct SQL, review of dc4b559 finding 1 and 2): dispatch_attempts refuses a send row with ok NULL (the CHECK is total: ok IS NOT NULL), a send row with a note, a note row with ok or error, an unknown kind; accepts both send outcomes and a quiet re-check note; the attempt key is (dispatch, position) with no minted id; the dispatch timestamp columns written by the callback route (delivered_at, opened_at) are REAL — the writer\'s JavaScript double, stored exactly whether integer-valued or fractional — and refuse text; the writer-only clocks are INTEGER columns that refuse a fraction', () => {
+test('the actual schema (direct SQL): dispatch_attempts refuses a send row with ok NULL (the CHECK is total: ok IS NOT NULL), a send row with a note, a note row with ok or error, an unknown kind; accepts both send outcomes and a quiet re-check note; the attempt key is (dispatch, position) with no minted id; the dispatch timestamp columns written by the callback route (delivered_at, opened_at) are REAL — the writer\'s JavaScript double, stored exactly whether integer-valued or fractional — and refuse text; the writer-only clocks are INTEGER columns that refuse a fraction', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
   migrate(s);
   s.prepare("INSERT INTO dispatches (id, notification_id, audience_kind, audience_id, channel, to_address, provider, status, next_at, created_at) VALUES ('dsp-x', 'ntf-1', 'org_user', 'usr-1', 'email', NULL, 'local-fake', 'queued', 1, 1)").run();
@@ -329,7 +329,7 @@ test('snapshot dispatcher: a tool that loads and saves the whole file round-trip
 });
 
 // ============================================================= review of 26d492b (three independently reproduced findings)
-test('review of 26d492b, finding 1 — EVERY patch refusal is a participant failure: a null or non-object patch, a missing row, an unknown field and an invalid value each refuse INSIDE the joined boundary, so a unit that catches the refusal still rolls back — the earlier patch of the same unit, the blob row it appended, the status in the table (second connection) and saveSeq are all as before, the held view shows the restored row — caught and uncaught, for the staged repository and for an immediate one participating in the same store unit, and for a repository whose hook is not registered; a write pending BEFORE the refused unit stays pending and lands with the successful retry; a valid empty patch stays a no-op', () => {
+test('EVERY patch refusal is a participant failure: a null or non-object patch, a missing row, an unknown field and an invalid value each refuse INSIDE the joined boundary, so a unit that catches the refusal still rolls back — the earlier patch of the same unit, the blob row it appended, the status in the table (second connection) and saveSeq are all as before, the held view shows the restored row — caught and uncaught, for the staged repository and for an immediate one participating in the same store unit, and for a repository whose hook is not registered; a write pending BEFORE the refused unit stays pending and lands with the successful retry; a valid empty patch stays a no-op', () => {
   const dir = tempDir('dsp-rv1'); s7aFile(dir, { dispatches: [] });
   const L = live(dir); L.dispatches.create(dsp({ id: 'dsp-1', attempts: [] })); L.save();
   const seq0 = seqOf(dir); const held = L.dispatches.byId('dsp-1');
@@ -403,7 +403,7 @@ test('typed columns only (S8d fidelity rule): create drops an unknown top-level 
   L2.close(); rm(dir);
 });
 
-test('review of 26d492b, finding 3 (the repository) — a non-finite callback clock is the legacy in-memory state the live route produces (`Number(ev.at) || Date.now()`): patch accepts it for deliveredAt / openedAt, the MIRROR keeps the number (a later nullish assignment sees the clock as set, as before S7b), the COLUMN stores NULL, the export and the snapshot shape carry null (what the JSON save persisted), a unit rollback restores the in-memory value, a reload (restart) shows null; create and the import still refuse a non-finite value (JSON never carries one); finite clocks are unchanged', () => {
+test('in the repository, a non-finite callback clock is the legacy in-memory state the live route produces (`Number(ev.at) || Date.now()`): patch accepts it for deliveredAt / openedAt, the MIRROR keeps the number (a later nullish assignment sees the clock as set, as before S7b), the COLUMN stores NULL, the export and the snapshot shape carry null (what the JSON save persisted), a unit rollback restores the in-memory value, a reload (restart) shows null; create and the import still refuse a non-finite value (JSON never carries one); finite clocks are unchanged', () => {
   const dir = tempDir('dsp-rv3'); s7aFile(dir, { dispatches: [] });
   const L = live(dir); L.dispatches.create(dsp({ id: 'dsp-1', attempts: [] })); L.dispatches.create(dsp({ id: 'dsp-2', attempts: [], providerMessageId: 'fm_2' })); L.save();
   const held = L.dispatches.byId('dsp-1');

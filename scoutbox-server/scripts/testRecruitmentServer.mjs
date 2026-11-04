@@ -155,7 +155,7 @@ await test('[backup] the admin backup is a copy of the database: its requests an
 });
 
 // ------------------------------------------------------------- review of 6d77aa7 (F1)
-await test('[routes] F1 (review of 6d77aa7) through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a snapshot save of an act the routes never write (an unknown act, a prototype-named own act) is refused with the trial\'s id, and the real keys survive a backup and a restore (where the same clientKey still replays)', async () => {
+await test('[routes] through the real routes: an invitation with a clientKey replays (the same row, idempotent) and conflicts (TRIAL_IDEMPOTENCY_CONFLICT); a reschedule with a clientKey replays across a restart; a snapshot save of an act the routes never write (an unknown act, a prototype-named own act) is refused with the trial\'s id, and the real keys survive a backup and a restore (where the same clientKey still replays)', async () => {
   const dir = tempDir('s8a-f1'); let S = await boot(dir); let maria = await orgLogin(S); const a = await signupAdult(S, 'Keyed Adult');
   const room = await S.j('POST', '/org/rooms', { playerId: a.pid, sourceContext: 'search' }, maria); assert.equal(room.status, 201, room.text); const RID = room.body.room.roomId;
   const jr = (await S.j('GET', `/org/rooms/${RID}/journey`, undefined, maria)).body; if (jr.lifecycle.currentStage === 'watching') { const mv = await S.j('POST', `/org/rooms/${RID}/lifecycle`, { action: 'startReview', expectedRev: jr.case.rev }, maria); assert.equal(mv.status, 200, mv.text); }

@@ -518,6 +518,6 @@ section('RN/§24 — demo and dev cannot masquerade as regulator truth');
   ok(mtxt.includes('testVerificationProvider'), 'RN6 and it says outright that a synthetic verification provider is in use, so a demo state cannot be mistaken for a real one');
 }
 
-console.log(`\nM23 P5.6E repair audit: ${passed} checks passed, ${negatives} negative/security/privacy checks (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
-if (process.exitCode) console.error('M23 P5.6E repair audit has failures.');
-else console.log('all M23 P5.6E repair-audit checks passed');
+console.log(`\nagents/crossAppAdversarial: ${passed} checks passed, ${negatives} negative/security/privacy checks (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
+if (process.exitCode) console.error('agents/crossAppAdversarial has failures.');
+else console.log('all agents/crossAppAdversarial checks passed');

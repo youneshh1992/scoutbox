@@ -1061,7 +1061,7 @@ section('Z — restart: idempotency and truth survive the process dying');
 // ---------------------------------------------------------------- report
 const total = passed;
 const ratio = total ? Math.round((negatives / total) * 100) : 0;
-console.log(`\nM23 P3 Contact suite: ${total} checks passed, ${negatives} negative/security/safeguarding checks (${ratio}%)`);
-if (process.exitCode === 1) console.error('\n✗ M23 P3 Contact has failures.');
-else console.log('all M23 P3 Contact checks passed');
+console.log(`\nrecruitment/contacts: ${total} checks passed, ${negatives} negative/security/safeguarding checks (${ratio}%)`);
+if (process.exitCode === 1) console.error('\n✗ recruitment/contacts has failures.');
+else console.log('all recruitment/contacts checks passed');
 process.exit(process.exitCode ?? 0);

@@ -681,6 +681,6 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
 }
 
 section('summary');
-console.log(`\nM23 P8 Recruitment Journey: ${passed} checks passed, ${negatives} negative, ${failures} failed`);
-if (failures) console.error(`✗ M23 P8 Recruitment Journey has ${failures} failure(s).`);
+console.log(`\nrecruitment/journey: ${passed} checks passed, ${negatives} negative, ${failures} failed`);
+if (failures) console.error(`✗ recruitment/journey has ${failures} failure(s).`);
 process.exit(failures ? 1 : 0);

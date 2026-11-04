@@ -517,6 +517,6 @@ r = await j('/player/benchmarks', {}, bearer(OSEI));
 ok(typeof r.body.method === 'string' && r.body.method.includes('not enough evidence'), 'benchmarks disclose method + insufficiency rule');
 ok([...r.body.drills, ...r.body.stats].every((row) => 'sampleSize' in row), 'every comparison row carries its sample size');
 
-console.log(`\nm12E2E: all ${passed} checks passed`);
+console.log(`\nscouting/clubWorkflows: all ${passed} checks passed`);
 killServer();
 process.exit(0);

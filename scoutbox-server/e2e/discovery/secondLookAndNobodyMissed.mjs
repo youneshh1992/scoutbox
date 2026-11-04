@@ -765,8 +765,8 @@ section('A second archived room for the same player does not double the alert');
 // ---------------------------------------------------------------- summary
 const total = passed;
 const pct = Math.round((negatives / total) * 100);
-console.log(`\nM18 acceptance suite: ${total} checks passed, ${negatives} negative/abuse checks (${pct}% of all checks)`);
+console.log(`\ndiscovery/secondLookAndNobodyMissed: ${total} checks passed, ${negatives} negative/abuse checks (${pct}% of all checks)`);
 if (pct < 40) fail(`negative coverage ${pct}% is below the 40% floor`);
-if (process.exitCode) console.error('\nM18 FAILURES ABOVE');
-else console.log('all M18 checks passed');
+if (process.exitCode) console.error('\ndiscovery/secondLookAndNobodyMissed FAILURES ABOVE');
+else console.log('all discovery/secondLookAndNobodyMissed checks passed');
 process.exit(process.exitCode ?? 0);

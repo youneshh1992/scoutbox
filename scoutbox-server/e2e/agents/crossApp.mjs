@@ -1354,4 +1354,4 @@ section('refusal hygiene — every refusal this suite provoked, swept at once');
 }
 
 await stop(server);
-console.log(`\nM23 P5.6E integration suite: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);
+console.log(`\nagents/crossApp: ${passed} checks passed, ${negatives} negative/security/safeguarding checks (${Math.round((negatives / Math.max(passed, 1)) * 100)}%)`);

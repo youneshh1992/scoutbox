@@ -559,8 +559,8 @@ section('the production blocker (§37, §32)');
 // =========================================================================
 console.log(`\nengine v${CV_ENGINE_VERSION}, CV policy v${BOX_CAM_CV_POLICY_VERSION}`);
 if (failures.length) {
-  console.error(`\nm22Robustness: FAILED — ${failures.length} of ${passed + failures.length} checks`);
+  console.error(`\ndevelopment/boxCamCvRobustness: FAILED — ${failures.length} of ${passed + failures.length} checks`);
   for (const f of failures) console.error(`  · ${f}`);
   process.exit(1);
 }
-console.log(`\nm22Robustness: all ${passed} checks passed`);
+console.log(`\ndevelopment/boxCamCvRobustness: all ${passed} checks passed`);

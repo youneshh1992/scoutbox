@@ -283,6 +283,6 @@ section('H — no suite can draw a port that fetch() refuses (TH-6)');
   neg(bad.length === 0, `H3 no server suite's random port range reaches a fetch-refused port${bad.length ? `: ${[...new Set(bad)].slice(0, 6).join(', ')}` : ''}`);
 }
 
-console.log(`\nPRE-M24 sweep server regressions: ${passed} checks passed, ${negatives} negative, ${failures} failed`);
-if (failures) console.error(`✗ PRE-M24 sweep server regressions have ${failures} failure(s).`);
+console.log(`\nplatform/sessionsAndPorts: ${passed} checks passed, ${negatives} negative, ${failures} failed`);
+if (failures) console.error(`✗ platform/sessionsAndPorts have ${failures} failure(s).`);
 process.exit(failures ? 1 : 0);
