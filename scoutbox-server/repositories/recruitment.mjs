@@ -1020,6 +1020,8 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     forCase: list('trials', 'SELECT * FROM trials WHERE case_id = ? ORDER BY rowid'),
     countForOrg: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ?'),
     countForOrgStatus: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ? AND status = ?'),
+    /** The players of the organisation's trials at `status` (a Set; nothing decoded). */
+    playerIdsForOrgStatus: (orgId, status) => new Set(sqlite.prepare('SELECT DISTINCT player_id FROM trials WHERE org_id = ? AND status = ?').all(orgId, status).map((r) => r.player_id)),
     /** The club's Trials list, newest first, by cursor: `{ items, nextCursor }`. */
     pageForOrg: (orgId, page) => pageOfTrials([orgId], page),
     /** The report sweep: a deadline passed, no report, never escalated, the subject not removed. */

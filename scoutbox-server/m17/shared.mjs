@@ -825,11 +825,17 @@ export function roomSummary(room, { player = null, trust = null, openTasks = 0, 
 
 /** Aggregate funnel counts for one organisation. No player identifiers. */
 export function roomFunnel(rooms = []) {
-  const counts = Object.fromEntries(ROOM_STATUSES.map((s) => [s, 0]));
-  for (const r of rooms) if (counts[r.room?.status] != null) counts[r.room.status] += 1;
+  const byStatus = {};
+  for (const r of rooms) byStatus[r.room?.status] = (byStatus[r.room?.status] ?? 0) + 1;
+  return roomFunnelFromCounts(byStatus, rooms.length);
+}
+
+/** The same funnel from Room counts by status (`{ status: n }`, as the cases repository's GROUP BY answers). */
+export function roomFunnelFromCounts(byStatus = {}, total = Object.values(byStatus).reduce((t, n) => t + n, 0)) {
+  const counts = Object.fromEntries(ROOM_STATUSES.map((s) => [s, byStatus[s] ?? 0]));
   const active = OPEN_ROOM_STATUSES.reduce((t, s) => t + counts[s], 0);
   return {
-    total: rooms.length,
+    total,
     active,
     shortlisted: counts.shortlisted + counts.priority,
     trials: counts.trial_requested + counts.trial_scheduled + counts.trial_completed,

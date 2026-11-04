@@ -3164,14 +3164,13 @@ orgRouter.post('/friendlies/:id/respond', (req, res) => {
 orgRouter.get('/funnel', (req, res) => {
   const mine = db.ledger.filter((l) => l.orgId === req.org.id);
   const count = (type) => mine.filter((l) => l.type.startsWith(type)).length;
-  const requests = recruitment.requests.forOrg(req.org.id);
   res.json({
     stages: [
       { key: 'views', label: 'Profile views', count: count('view') },
       { key: 'saves', label: 'Saves', count: count('save') },
       { key: 'shortlists', label: 'Shortlists', count: count('shortlist') },
-      { key: 'requests', label: 'Requests sent', count: requests.length },
-      { key: 'accepted', label: 'Requests accepted', count: requests.filter((r) => r.status === 'accepted').length },
+      { key: 'requests', label: 'Requests sent', count: recruitment.requests.countForOrg(req.org.id) },
+      { key: 'accepted', label: 'Requests accepted', count: recruitment.requests.countForOrgStatus(req.org.id, 'accepted') },
       { key: 'trials', label: 'Trials booked', count: recruitment.trials.countForOrg(req.org.id) },
       { key: 'reports', label: 'Reports filed', count: recruitment.trials.countForOrgStatus(req.org.id, 'reported') },
       { key: 'signings', label: 'Signings', count: signingsFollowUps.signings.countForOrg(req.org.id) },

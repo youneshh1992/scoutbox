@@ -170,6 +170,7 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query return ex
     const players = values(all[name], (r) => r.playerId); check(`${name}.forPlayers`, repo.forPlayers([...players, 42, null, players[0]]), all[name].filter((r) => players.includes(r.playerId))); assert.deepEqual(repo.forPlayers([]), []);
     for (const v of values(all[name], (r) => r.orgId)) assert.equal(repo.countForOrg(v), all[name].filter((r) => r.orgId === v).length);
   }
+  for (const t of all.trials) for (const st of [t.status, 'nothing']) assert.deepEqual([...trials.playerIdsForOrgStatus(t.orgId, st)].sort(), [...new Set(all.trials.filter((x) => x.orgId === t.orgId && x.status === st).map((x) => x.playerId))].sort(), `trials.playerIdsForOrgStatus ${st}`);
   for (const t of all.trials) for (const st of [t.status, 'nothing']) { check(`trials.forOrgStatus ${st}`, trials.forOrgStatus(t.orgId, st), all.trials.filter((x) => x.orgId === t.orgId && x.status === st)); assert.equal(trials.countForOrgStatus(t.orgId, st), all.trials.filter((x) => x.orgId === t.orgId && x.status === st).length); }
   for (const at of [0, NOW, NOW + 400 * 86_400_000]) {
     check(`trials.reportOverdue ${at}`, trials.reportOverdue(at), all.trials.filter((t) => Number.isFinite(t.reportDueAt) && t.reportDueAt < at && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt));

@@ -41,6 +41,7 @@
  * Refusals name tables, fields and ids — never a name, a note, a body or a message.
  */
 import { transaction, migrationApplied } from './database.mjs';
+import { pageOf } from '../domains/platform/paging.mjs';
 import { describe, isPlainObject, nonEmpty, ids } from './recruitment.mjs';
 import {
   ROOM_STATUSES, ROOM_PRIORITIES, SOURCE_CONTEXTS, TASK_STATES, LINKED_RESOURCE_TYPES, EVIDENCE_REVIEW_STATES,
@@ -133,7 +134,8 @@ ${dayOrInstantCols('deadline')},
   CHECK ((room_reopened_at IS NULL) = (room_reopened_reason_codes_json IS NULL)),
   CHECK (room_status IS NOT NULL OR room_reopened_at IS NULL)
 ) STRICT;
-CREATE INDEX recruitment_cases_org_created ON recruitment_cases (org_id, created_at);
+CREATE INDEX recruitment_cases_org_created ON recruitment_cases (org_id, created_at, id);
+CREATE INDEX recruitment_cases_org_room_updated ON recruitment_cases (org_id, room_updated_at, id) WHERE room_status IS NOT NULL;
 CREATE INDEX recruitment_cases_org_player ON recruitment_cases (org_id, player_id);
 CREATE INDEX recruitment_cases_org_room_status_updated ON recruitment_cases (org_id, room_status, room_updated_at);
 CREATE INDEX recruitment_cases_org_stage ON recruitment_cases (org_id, stage);
@@ -841,6 +843,34 @@ function statements(sqlite) {
   stmtCache.set(sqlite, s); return s;
 }
 
+/**
+ * The statements `decodeCase` reads children through, answered for many cases at once (§4.3 step 4): one query per
+ * child table for the whole list (in chunks of ids), grouped by case, instead of about sixteen queries a case. The
+ * rows and their order are the per-case statements' own, so a batch decode is the same record.
+ */
+const BATCH_CHUNK = 500;
+function batchStatements(sqlite, st, ids) {
+  const fetch = (table, order) => {
+    const out = new Map();
+    for (let i = 0; i < ids.length; i += BATCH_CHUNK) {
+      const chunk = ids.slice(i, i + BATCH_CHUNK);
+      for (const r of sqlite.prepare(`SELECT * FROM ${table} WHERE case_id IN (${chunk.map(() => '?').join(',')}) ORDER BY case_id${order ? `, ${order}` : ''}`).all(...chunk)) {
+        const k = order === 'scenario_id, position' ? `${r.case_id}\u0000${r.scenario_id}` : r.case_id;
+        let list = out.get(k); if (!list) out.set(k, (list = [])); list.push(r);
+      }
+    }
+    return out;
+  };
+  const many = (m) => ({ all: (...k) => m.get(k.join('\u0000')) ?? [] });
+  const one = (m) => ({ get: (id) => m.get(id)?.[0] });
+  return {
+    ...st,
+    of: Object.fromEntries(Object.keys(st.of).map((t) => [t, many(fetch(t, 'position'))])),
+    draftOf: one(fetch('case_decision_drafts', null)), handoffOf: one(fetch('case_transaction_handoffs', null)),
+    scenarioChild: Object.fromEntries(Object.keys(st.scenarioChild).map((t) => [t, many(fetch(t, 'scenario_id, position'))])),
+  };
+}
+
 /** Write a typed case whole: the row upserted (its rowid, and so its place in the mirror, kept), every child replaced. `links: false` leaves the link rows to `writeCaseLinks` (the snapshot path writes them after the requests and trials). */
 function writeCase(st, c, { links = true } = {}) {
   st.ins.recruitment_cases.run(caseRow(c));
@@ -950,7 +980,11 @@ function decodeDecision(st, r) {
 }
 const decodeEvidence = (_st, r) => ({ id: r.id, roomId: r.room_id, orgId: r.org_id, evidenceId: r.evidence_id, state: r.state, note: r.note, byId: r.by_user_id, byName: r.by_name, at: r.at });
 const DECODERS = { recruitmentCases: decodeCase, roomComments: decodeComment, roomSnapshots: decodeSnapshot, roomDecisions: decodeDecision, roomEvidenceState: decodeEvidence };
-const readAll = (sqlite, name) => { const st = statements(sqlite); return st.all[PARENT[name]].all().map((r) => DECODERS[name](st, r)); };
+const readAll = (sqlite, name) => {
+  const st = statements(sqlite); const rows = st.all[PARENT[name]].all();
+  const via = name === 'recruitmentCases' && rows.length > 1 ? batchStatements(sqlite, st, rows.map((r) => r.id)) : st;
+  return rows.map((r) => DECODERS[name](via, r));
+};
 export const readCases = (sqlite) => readAll(sqlite, 'recruitmentCases');
 export const readRoomComments = (sqlite) => readAll(sqlite, 'roomComments');
 export const readRoomSnapshots = (sqlite) => readAll(sqlite, 'roomSnapshots');
@@ -1111,7 +1145,13 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
   const decode = (name, row) => deepFreeze(DECODERS[name](st, row));
   const find = (name, id) => { if (typeof id !== 'string') return null; const row = st.byId[PARENT[name]].get(id); return row ? decode(name, row) : null; };
   const exists = (name, id) => typeof id === 'string' && !!st.byId[PARENT[name]].get(id);
-  const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.all(...args).map((r) => decode(name, r)); };
+  /** Decode many rows; a list of cases reads its children in one batch (batchStatements). */
+  const decodeAll = (name, rows) => {
+    if (name !== 'recruitmentCases' || rows.length < 2) return rows.map((r) => decode(name, r));
+    const bst = batchStatements(sqlite, st, rows.map((r) => r.id));
+    return rows.map((r) => deepFreeze(decodeCase(bst, r)));
+  };
+  const list = (name, sql) => { const stmt = sqlite.prepare(sql); return (...args) => decodeAll(name, stmt.all(...args)); };
   const count = (sql) => { const stmt = sqlite.prepare(sql); return (...args) => stmt.get(...args).n; };
   const typedOr = (name, raw) => { const t = TYPERS[name](raw, name); if (!t.ok) throw refusal('RECRUITMENT_CASES_INPUT_INVALID', t.reason); return t.record; };
   const IMMUTABLE = { recruitmentCases: ['id', 'orgId', 'playerId', 'createdAt'], roomComments: ['id', 'roomId', 'orgId', 'authorId', 'createdAt'], roomSnapshots: ['id', 'roomId'], roomDecisions: ['id', 'roomId', 'orgId', 'playerId', 'createdAt'], roomEvidenceState: ['id', 'roomId', 'orgId', 'evidenceId'] };
@@ -1166,15 +1206,87 @@ export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Da
     /** Every case that has a Room (the boot integrity report reads them once). */
     withRoom: list('recruitmentCases', 'SELECT * FROM recruitment_cases WHERE room_status IS NOT NULL ORDER BY rowid'),
     roomCount: count('SELECT COUNT(*) AS n FROM recruitment_cases WHERE room_status IS NOT NULL'),
-    /** Room statuses of the organisation's Rooms, counted: `{ status: n }`. */
-    roomStatusCounts(orgId) { return Object.fromEntries(sqlite.prepare('SELECT room_status AS status, COUNT(*) AS n FROM recruitment_cases WHERE org_id = ? AND room_status IS NOT NULL GROUP BY room_status').all(orgId).map((r) => [r.status, r.n])); },
+    /** Room statuses of the organisation's Rooms, counted: `{ status: n }`; with a viewer, only the Rooms they may open. */
+    roomStatusCounts(orgId, viewer = null) {
+      const a = viewer ? access(viewer, { room: true }) : { sql: '1', params: [] };
+      return Object.fromEntries(sqlite.prepare(`SELECT c.room_status AS status, COUNT(*) AS n FROM recruitment_cases c WHERE c.org_id = ? AND c.room_status IS NOT NULL AND ${a.sql} GROUP BY c.room_status`).all(orgId, ...a.params).map((r) => [r.status, r.n]));
+    },
+    /**
+     * The club's cases list (§4.3 step 4): the cases `viewer` may open, optionally at one stage, newest first by
+     * cursor ([createdAt, id]), filtered and paged in SQL; only the page is decoded.
+     */
+    pageForViewer(orgId, viewer, { stage = null } = {}, page) {
+      const a = access(viewer, { room: false });
+      const where = [`c.org_id = ?`, a.sql, ...(stage === null ? [] : ['c.stage = ?'])];
+      return keyset({ where, params: [orgId, ...a.params, ...(stage === null ? [] : [stage])], page, order: 'c.created_at DESC, c.id DESC', after: '(c.created_at < ? OR (c.created_at = ? AND c.id < ?))', rowKey: (r) => [r.created_at, r.id], key: (c) => [c.createdAt, c.id] });
+    },
+    /**
+     * The club's Rooms list (§4.3 step 4): the Rooms `viewer` may open, filtered (`roomFilter`) and paged in SQL by
+     * most recent activity ([room.updatedAt, id]); only the page is decoded. `accept(light)` is a filter SQL cannot
+     * express (the search, which needs the player's visibility): it sees `{ id, playerId, playerName, status, tags }`
+     * and the rows are read in chunks until the page is full.
+     */
+    roomPageForViewer(orgId, viewer, filter, page, accept = null) {
+      const f = roomWhere(viewer, filter);
+      return keyset({ where: ['c.org_id = ?', 'c.room_status IS NOT NULL', ...f.where], params: [orgId, ...f.params], page, order: 'c.room_updated_at DESC, c.id ASC', after: '(c.room_updated_at < ? OR (c.room_updated_at = ? AND c.id > ?))', rowKey: (r) => [r.room_updated_at, r.id], key: (c) => [c.room.updatedAt, c.id], accept });
+    },
+    /** The Rooms `viewer` may open, filtered like the list, in insertion order, as light rows `{ id, playerId, playerName, status }` (nothing decoded). */
+    roomRowsForViewer(orgId, viewer, filter = {}) {
+      const f = roomWhere(viewer, filter);
+      return sqlite.prepare(`SELECT c.id, c.player_id, c.player_name, c.room_status FROM recruitment_cases c WHERE ${['c.org_id = ?', 'c.room_status IS NOT NULL', ...f.where].join(' AND ')} ORDER BY c.rowid`).all(orgId, ...f.params).map(light);
+    },
+    /** Open and in-progress tasks of the organisation's cases due (an instant) before `at`, counted by case: `Map(caseId → n)`. */
+    overdueTaskCounts(orgId, at) {
+      return new Map(sqlite.prepare("SELECT t.case_id, COUNT(*) AS n FROM case_tasks t JOIN recruitment_cases c ON c.id = t.case_id WHERE c.org_id = ? AND t.status IN ('open', 'in_progress') AND t.due_at IS NOT NULL AND t.due_at <> 0 AND t.due_at < ? GROUP BY t.case_id").all(orgId, at).map((r) => [r.case_id, r.n]));
+    },
   };
+  /**
+   * Who may open a case or a Room, as SQL over `recruitment_cases c`: the rule of `caseAccess` (m12/scouting.mjs) and,
+   * for a Room, of `roomRole` (m17/shared.mjs) being non-null. A recruitment lead opens everything.
+   */
+  function access({ userId, isLead }, { room }) {
+    if (isLead) return { sql: '1', params: [] };
+    return { sql: `(c.restricted = 0 OR c.owner_user_id = ?${room ? ' OR c.room_lead_scout_user_id = ?' : ''} OR EXISTS (SELECT 1 FROM case_assignments a WHERE a.case_id = c.id AND a.user_id = ?))`, params: room ? [userId, userId, userId] : [userId, userId] };
+  }
+  /** The Rooms list's filters as SQL (each optional): statuses, one status, owned or led by, assigned to, a tag, an assignee. */
+  function roomWhere(viewer, { statuses = null, status = null, mineOf = null, assignedTo = null, tag = null, assignee = null } = {}) {
+    const a = access(viewer, { room: true }); const where = [a.sql]; const params = [...a.params];
+    const add = (sql, ...p) => { where.push(sql); params.push(...p); };
+    if (statuses) add(statuses.length ? `c.room_status IN (${statuses.map(() => '?').join(', ')})` : '0', ...statuses);
+    if (status !== null) add('c.room_status = ?', status);
+    if (mineOf !== null) add('(c.owner_user_id = ? OR c.room_lead_scout_user_id = ?)', mineOf, mineOf);
+    if (assignedTo !== null) add("(EXISTS (SELECT 1 FROM case_assignments a2 WHERE a2.case_id = c.id AND a2.user_id = ?) OR EXISTS (SELECT 1 FROM case_tasks t WHERE t.case_id = c.id AND t.assignee_user_id = ? AND t.status IN ('open', 'in_progress')))", assignedTo, assignedTo);
+    if (tag !== null) add('EXISTS (SELECT 1 FROM case_room_tags g WHERE g.case_id = c.id AND g.tag = ?)', tag);
+    if (assignee !== null) add('(EXISTS (SELECT 1 FROM case_tasks t2 WHERE t2.case_id = c.id AND t2.assignee_user_id = ?) OR c.room_lead_scout_user_id = ? OR c.owner_user_id = ?)', assignee, assignee, assignee);
+    return { where, params };
+  }
+  const light = (r) => ({ id: r.id, playerId: r.player_id, playerName: r.player_name, status: r.room_status });
+  /**
+   * Keyset paging over `recruitment_cases c`: `limit + 1` rows after the cursor, decoded in one batch. With `accept`,
+   * rows are read in chunks and kept only when accepted (with their tags), until the page is full or the rows end.
+   */
+  function keyset({ where, params, page: { limit, after = null }, order, after: afterSql, rowKey, key, accept = null }) {
+    const chunk = accept ? Math.max(limit + 1, 200) : limit + 1;
+    const kept = []; let cursor = after;
+    for (;;) {
+      const sql = `SELECT c.* FROM recruitment_cases c WHERE ${[...where, ...(cursor ? [afterSql] : [])].join(' AND ')} ORDER BY ${order} LIMIT ?`;
+      const rows = sqlite.prepare(sql).all(...params, ...(cursor ? [cursor[0], cursor[0], cursor[1]] : []), chunk);
+      let tags = null;
+      if (accept && rows.length) { tags = new Map(); for (const t of sqlite.prepare(`SELECT case_id, tag FROM case_room_tags WHERE case_id IN (${rows.map(() => '?').join(',')}) ORDER BY case_id, position`).all(...rows.map((r) => r.id))) { if (!tags.has(t.case_id)) tags.set(t.case_id, []); tags.get(t.case_id).push(t.tag); } }
+      for (const r of rows) { if (!accept || accept({ ...light(r), tags: tags.get(r.id) ?? [] })) kept.push(r); if (kept.length > limit) break; }
+      if (kept.length > limit || rows.length < chunk) break;
+      cursor = rowKey(rows[rows.length - 1]);
+    }
+    return pageOf(decodeAll('recruitmentCases', kept), limit, key);
+  }
   const comments = { ...ops('roomComments'), forRoom: forRoom('roomComments') };
   const snapshots = { ...ops('roomSnapshots', { updatable: false }), forRoom: forRoom('roomSnapshots') };
   const decisions = {
     ...ops('roomDecisions'), forRoom: forRoom('roomDecisions'),
     forOrgPlayer: list('roomDecisions', 'SELECT * FROM room_decisions WHERE org_id = ? AND player_id = ? ORDER BY rowid'),
     forOrg: list('roomDecisions', 'SELECT * FROM room_decisions WHERE org_id = ? ORDER BY rowid'),
+    /** The ids of the organisation's Rooms that hold any decision (a Set; nothing decoded). */
+    roomIdsForOrg: (orgId) => new Set(sqlite.prepare('SELECT DISTINCT d.room_id FROM room_decisions d JOIN recruitment_cases c ON c.id = d.room_id WHERE c.org_id = ?').all(orgId).map((r) => r.room_id)),
   };
   const evidenceStates = { ...ops('roomEvidenceState'), forRoom: forRoom('roomEvidenceState') };
   const WRITES = new Set(['create', 'update']);

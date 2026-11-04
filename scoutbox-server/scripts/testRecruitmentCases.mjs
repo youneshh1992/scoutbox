@@ -15,7 +15,9 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
-import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
+import { NOW, TTL, tempDir, USERS } from './coreIdentityTestFixtures.mjs';
+import { ROOM_STATUSES, OPEN_ROOM_STATUSES, CASE_STAGES, TASK_STATES, roomRole } from '../m17/shared.mjs';
+import { pageSorted } from '../domains/platform/paging.mjs';
 import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture, fixtureDb, SCOUT } from './recruitmentTestFixtures.mjs';
 import { roomCase, m12Case, comment, snapshot, trustedSnapshot, recommendation, formalDecision, evidenceState, hist, S8B_FIX, persisted, TC } from './recruitmentCasesTestFixtures.mjs';
 
@@ -175,6 +177,11 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query of the fi
   for (const c of cases) check('cases.forOrgPlayer', R.cases.forOrgPlayer(c.orgId, c.playerId), cases.filter((x) => x.orgId === c.orgId && x.playerId === c.playerId));
   for (const v of values(cases, (c) => c.transactionHandoff?.invitedAgentUserId)) check(`cases.forHandoffAgent ${v}`, R.cases.forHandoffAgent(v), cases.filter((c) => c.transactionHandoff?.invitedAgentUserId === v));
   check('cases.withRoom', R.cases.withRoom(), cases.filter((c) => c.room)); assert.equal(R.cases.roomCount(), cases.filter((c) => c.room).length);
+  // §4.3 step 4: a list decodes its cases' children in one batch; each record is the one byId decodes on its own.
+  const whole = (list) => assert.deepEqual(plain(list), plain(list.map((c) => R.cases.byId(c.id))), 'a batch-decoded list is the per-case decode');
+  for (const v of values(cases, (c) => c.orgId)) whole(R.cases.forOrg(v)); whole(R.cases.withRoom()); whole(cases);
+  for (const part of ['budget', 'decisionDraft', 'transactionHandoff', 'room']) assert.ok(cases.some((c) => c[part]), `the fixture exercises ${part}`);
+  assert.ok(cases.some((c) => c.tasks.length && c.history.length && c.assignments.length), 'the fixture exercises tasks, history and assignments');
   for (const v of values(cases, (c) => c.orgId)) {
     assert.equal(R.cases.countForOrg(v), cases.filter((c) => c.orgId === v).length);
     const want = {}; for (const c of cases.filter((x) => x.orgId === v && x.room)) want[c.room.status] = (want[c.room.status] ?? 0) + 1;
@@ -184,6 +191,81 @@ test('[repository] SQL reads (§4.3 step 2): byId and every list query of the fi
   for (const v of values(decs, (r) => r.orgId)) check(`decisions.forOrg ${v}`, R.decisions.forOrg(v), decs.filter((r) => r.orgId === v));
   for (const r of decs) check('decisions.forOrgPlayer', R.decisions.forOrgPlayer(r.orgId, r.playerId), decs.filter((x) => x.orgId === r.orgId && x.playerId === r.playerId));
   for (const n of ['cases', 'comments', 'snapshots', 'decisions', 'evidenceStates']) { assert.ok(Object.isFrozen(R.reads[n])); assert.equal(R.reads[n].byId, R[n].byId); assert.equal(R.reads[n].create, undefined); assert.equal(R.reads[n].update, undefined); }
+  L.close(); rm(d);
+});
+
+test('[repository] the per-viewer lists in SQL (§4.3 step 4): over sixty varied cases, every viewer (lead or not, owner, Room lead, assignee, stranger), every filter and every page size, pageForViewer and roomPageForViewer return exactly the pages the old in-code filter, sort and pageSorted returned; the search filter keeps reading until the page is full; the access-scoped Room counts, the open-Room rows, the overdue-task counts and the Rooms with a decision agree with the records', () => {
+  const H = 3_600_000;
+  let seed = 7; const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return Math.floor(seed / 65536) % n; };
+  const pick = (xs) => xs[rnd(xs.length)];
+  const STAFF = ['usr-1', 'usr-2', 'usr-3'];
+  const users = [...USERS(), { id: 'usr-2', orgId: 'org-pro', name: 'Sam', role: 'Scout', createdAt: 1 }, { id: 'usr-3', orgId: 'org-pro', name: 'Ola', role: 'Analyst', createdAt: 1 }];
+  const made = [];
+  for (let i = 0; i < 64; i += 1) {
+    const due = () => pick([null, NOW - 2 * H, NOW + 2 * H, '2026-11-20', 0]);
+    const base = {
+      id: `case-v${String(i).padStart(2, '0')}`, playerId: pick(['pl-adult', 'pl-child1']), playerName: pick(['Adult Signup', 'Child pl-child1', null]),
+      ownerUserId: pick(STAFF), stage: pick(CASE_STAGES), restricted: rnd(3) === 0, createdAt: TC.created + rnd(6) * H,
+      assignments: rnd(2) ? [{ id: 'asg-x', userId: pick(STAFF), name: 'X', task: 'Look', dueAt: null, status: pick(TASK_STATES), createdAt: TC.created }] : [],
+      tasks: Array.from({ length: rnd(3) }, (_, k) => ({ id: `tsk-x${k}`, title: 'Do', dueAt: due(), assigneeUserId: pick([...STAFF, null]), status: pick(TASK_STATES), createdAt: TC.created })),
+      links: { requestIds: [], trialIds: [], signingId: null }, history: [],
+    };
+    if (rnd(4) === 0) { made.push(m12Case({ ...base, approvals: [], decision: null })); continue; }
+    const tags = ['watch', 'u18', 'left'].filter(() => rnd(2));
+    made.push(roomCase({ ...base, decisionDraft: null, transactionHandoff: null, budget: null, room: { ...roomCase().room, status: pick(ROOM_STATUSES), tags, leadScoutUserId: pick([...STAFF, null]), updatedAt: TC.moved + rnd(5) * H, reopened: null } }));
+  }
+  const d = file('viewers', { users }); const L = serverOpen(d); const R = L.repo;
+  L.unit(() => { for (const c of made) R.cases.create(c); });
+  const all = R.exportAll().recruitmentCases.filter((c) => c.orgId === 'org-pro');
+  const decs = R.exportAll().roomDecisions;
+  assert.ok(all.filter((c) => c.room).length > 30 && all.some((c) => c.room && c.restricted) && all.some((c) => !c.room && c.restricted), 'rooms and cases, restricted and open');
+  const ids = (xs) => xs.map((c) => c.id);
+  const walk = (fetch, limit) => { const seen = []; let cursor; for (let n = 0; n < 200; n += 1) { const p = fetch(cursor === undefined ? { limit } : { limit, after: JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) }); seen.push(p); if (!p.nextCursor) return seen; cursor = p.nextCursor; } throw new Error('the pages never ended'); };
+  const same = (label, got, want) => { assert.deepEqual(got.map((p) => [ids(p.items), p.nextCursor]), want.map((p) => [ids(p.items), p.nextCursor]), label); };
+  const newestFirst = (a, b) => (b[0] - a[0]) || (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0);
+  const recentFirst = (a, b) => (b[0] - a[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+  const viewers = [...STAFF.map((userId) => ({ userId, isLead: false })), { userId: 'usr-1', isLead: true }, { userId: 'nobody', isLead: false }];
+  let nonEmpty = 0;
+  for (const v of viewers) {
+    const user = { id: v.userId };
+    const caseOk = (c) => !c.restricted || c.ownerUserId === v.userId || c.assignments.some((a) => a.userId === v.userId) || v.isLead;
+    const roomOk = (c) => c.room && roomRole({ room: c, user, isLead: v.isLead }) !== null;
+    for (const stage of [null, 'identified', 'trial']) {
+      const want = all.filter(caseOk).filter((c) => stage === null || c.stage === stage).sort((a, b) => newestFirst([a.createdAt, a.id], [b.createdAt, b.id]));
+      for (const limit of [1, 3, 100]) same(`cases ${v.userId}/${v.isLead} ${stage} by ${limit}`, walk((page) => R.cases.pageForViewer('org-pro', v, { stage }, page), limit), walk((page) => pageSorted(want, page, (c) => [c.createdAt, c.id], newestFirst), limit));
+    }
+    const filters = [
+      [{}, () => true],
+      [{ statuses: OPEN_ROOM_STATUSES }, (c) => OPEN_ROOM_STATUSES.includes(c.room.status)],
+      [{ statuses: ['shortlisted', 'priority'] }, (c) => ['shortlisted', 'priority'].includes(c.room.status)],
+      [{ mineOf: v.userId }, (c) => c.ownerUserId === v.userId || c.room.leadScoutUserId === v.userId],
+      [{ assignedTo: v.userId }, (c) => c.assignments.some((a) => a.userId === v.userId) || c.tasks.some((t) => t.assigneeUserId === v.userId && ['open', 'in_progress'].includes(t.status))],
+      [{ status: 'shortlisted' }, (c) => c.room.status === 'shortlisted'],
+      [{ tag: 'watch' }, (c) => c.room.tags.includes('watch')],
+      [{ assignee: 'usr-2' }, (c) => c.tasks.some((t) => t.assigneeUserId === 'usr-2') || c.room.leadScoutUserId === 'usr-2' || c.ownerUserId === 'usr-2'],
+      [{ statuses: OPEN_ROOM_STATUSES, tag: 'u18', assignee: 'usr-3' }, (c) => OPEN_ROOM_STATUSES.includes(c.room.status) && c.room.tags.includes('u18') && (c.tasks.some((t) => t.assigneeUserId === 'usr-3') || c.room.leadScoutUserId === 'usr-3' || c.ownerUserId === 'usr-3')],
+    ];
+    for (const [filter, keep] of filters) {
+      for (const search of [null, (x) => x.tags.includes('left') || (x.playerName ?? '').includes('Child')]) {
+        const want = all.filter(roomOk).filter(keep).filter((c) => !search || search({ ...c, status: c.room.status, tags: c.room.tags })).sort((a, b) => recentFirst([a.room.updatedAt, a.id], [b.room.updatedAt, b.id]));
+        nonEmpty += want.length ? 1 : 0;
+        for (const limit of [1, 3, 100]) same(`rooms ${v.userId}/${v.isLead} ${JSON.stringify(filter)} search=${!!search} by ${limit}`, walk((page) => R.cases.roomPageForViewer('org-pro', v, filter, page, search), limit), walk((page) => pageSorted(want, page, (c) => [c.room.updatedAt, c.id], recentFirst), limit));
+      }
+      assert.deepEqual(R.cases.roomRowsForViewer('org-pro', v, filter).map((x) => x.id), ids(all.filter(roomOk).filter(keep)), `roomRowsForViewer ${JSON.stringify(filter)}`);
+    }
+    const counts = {}; for (const c of all.filter(roomOk)) counts[c.room.status] = (counts[c.room.status] ?? 0) + 1;
+    assert.deepEqual(R.cases.roomStatusCounts('org-pro', v), counts, `roomStatusCounts for ${v.userId}/${v.isLead}`);
+  }
+  assert.ok(nonEmpty > 50, `the filters select rooms (${nonEmpty} of 90 non-empty)`);
+  const light = R.cases.roomRowsForViewer('org-pro', viewers[3], {})[0]; const full = all.find((c) => c.id === light.id);
+  assert.deepEqual(light, { id: full.id, playerId: full.playerId, playerName: full.playerName, status: full.room.status });
+  for (const at of [NOW - 3 * H, NOW, NOW + 3 * H]) {
+    const want = new Map(); for (const c of all) { const n = c.tasks.filter((t) => ['open', 'in_progress'].includes(t.status) && t.dueAt && t.dueAt < at).length; if (n) want.set(c.id, n); }
+    assert.deepEqual([...R.cases.overdueTaskCounts('org-pro', at)].sort(), [...want].sort(), `overdueTaskCounts at ${at - NOW}`);
+  }
+  assert.ok(R.cases.overdueTaskCounts('org-pro', NOW).size > 0, 'some tasks are overdue');
+  assert.deepEqual([...R.decisions.roomIdsForOrg('org-pro')].sort(), [...new Set(decs.filter((x) => all.some((c) => c.id === x.roomId)).map((x) => x.roomId))].sort());
+  assert.ok(R.decisions.roomIdsForOrg('org-pro').size > 0); assert.equal(R.decisions.roomIdsForOrg('nobody').size, 0);
   L.close(); rm(d);
 });
 

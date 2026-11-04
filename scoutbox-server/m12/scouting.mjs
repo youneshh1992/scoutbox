@@ -12,7 +12,7 @@ const CONFIDENCE = ['low', 'medium', 'high'];
 const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
 
-import { readPage, sendPageError, pageSorted } from '../domains/platform/paging.mjs';
+import { readPage, sendPageError } from '../domains/platform/paging.mjs';
 export function registerScouting(ctx) {
   const {
     db, byId, users, nextId, persistNow, notify, ledgerAppend, broadcast, findPlayer,
@@ -445,16 +445,14 @@ export function registerScouting(ctx) {
   function caseView(c) { return c; } // history is intentionally included: it is append-only
 
   orgRouter.get('/cases', (req, res) => {
-    // Newest first, paged by cursor ({ items, nextCursor }; domains/platform/paging.mjs). The access rule is per viewer,
-    // so the organisation's cases are read by index and filtered here. The apps read the first page only; a "load more"
-    // is not built yet (the decision of 4 November 2026).
+    // Newest first, paged by cursor ({ items, nextCursor }; domains/platform/paging.mjs). The access rule (caseAccess)
+    // and the stage are applied in SQL and only the page is decoded (§4.3 step 4). The apps read the first page only; a
+    // "load more" is not built yet (the decision of 4 November 2026).
     let page;
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
-    let list = reads.cases.forOrg(req.org.id).filter((c) => caseAccess(req, c));
-    if (req.query.stage) list = list.filter((c) => c.stage === req.query.stage);
-    const newestFirst = (a, b) => (b[0] - a[0]) || (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0);
-    list.sort((a, b) => newestFirst([a.createdAt, a.id], [b.createdAt, b.id]));
-    const { items, nextCursor } = pageSorted(list, page, (c) => [c.createdAt, c.id], newestFirst);
+    const stage = req.query.stage === undefined || req.query.stage === '' ? null : req.query.stage;
+    if (stage !== null && typeof stage !== 'string') return res.status(400).json({ error: 'STAGE_INVALID', message: 'stage is one stage name.' });
+    const { items, nextCursor } = reads.cases.pageForViewer(req.org.id, { userId: req.orgUser.id, isLead: isLead(req.orgUser) }, { stage }, page);
     res.json({ items: items.map(caseView), nextCursor, stages: stagesFor(req.org) });
   });
 

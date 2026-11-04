@@ -21,7 +21,7 @@ import {
   decisionReadiness, roomHealth, ROOM_HEALTH_LABELS, roomRole, roomCan,
   normaliseSourceContext, SOURCE_CONTEXTS, TASK_STATES, canTaskTransition,
   LINKED_RESOURCE_TYPES, EVIDENCE_REVIEW_STATES, ROOM_PRIORITIES,
-  ROOM_PRIORITY_NOTE, roomActivity, buildRoomSnapshot, roomSummary, roomFunnel,
+  ROOM_PRIORITY_NOTE, roomActivity, buildRoomSnapshot, roomSummary, roomFunnelFromCounts,
   secondLookEvent, ROOM_TRUST_NOTE, ROOM_DEV_NOTE, ROOM_PRIVACY_NOTE,
   ROOM_UNAVAILABLE_NOTE, LIMITS, clampPage, validateTag, SNAPSHOT_STATUSES,
   adoptionStatusForStage, INITIAL_ROOM_STATUS,
@@ -33,7 +33,7 @@ import { rateLimitedBody } from '../m181/rateLimit.mjs';
 // `signed` here while `confirmSignedOutcome` needs a recruitment lead).
 import { LIFECYCLE_ACTIONS } from '../m23/lifecycle.mjs';
 
-import { readPage, sendPageError, pageSorted } from '../domains/platform/paging.mjs';
+import { readPage, sendPageError } from '../domains/platform/paging.mjs';
 export function registerRooms(ctx) {
   const {
     db, orgRouter, adminRouter, nextId, persistNow, notify, ledgerAppend, broadcast,
@@ -456,38 +456,35 @@ export function registerRooms(ctx) {
   orgRouter.get('/rooms', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
-    const all = reads.cases.forOrg(req.org.id).filter((c) => isRoom(c));
-    const mine = all.filter((c) => !c.restricted || roomRole({ room: c, user: req.orgUser, isLead: isLead(req.orgUser) }));
+    const viewer = { userId: req.orgUser.id, isLead: isLead(req.orgUser) };
 
-    let list = mine;
+    // The access rule (roomRole), the view and the filters are applied in SQL; only the page is decoded (§4.3 step 4).
+    const VIEW_STATUSES = {
+      shortlisted: ['shortlisted', 'priority'], trials: ['trial_requested', 'trial_scheduled', 'trial_completed'],
+      offers: ['offer_consideration', 'offer_made'], archived: ['archived', 'closed', 'withdrawn'], active: OPEN_ROOM_STATUSES,
+    };
     const view = String(req.query.view ?? 'all');
-    if (view === 'mine') list = list.filter((c) => c.ownerUserId === req.orgUser.id || c.room.leadScoutUserId === req.orgUser.id);
-    if (view === 'assigned') list = list.filter((c) => (c.assignments ?? []).some((a) => a.userId === req.orgUser.id) || (c.tasks ?? []).some((t) => t.assigneeUserId === req.orgUser.id && ['open', 'in_progress'].includes(t.status)));
-    if (view === 'shortlisted') list = list.filter((c) => ['shortlisted', 'priority'].includes(c.room.status));
-    if (view === 'trials') list = list.filter((c) => ['trial_requested', 'trial_scheduled', 'trial_completed'].includes(c.room.status));
-    if (view === 'offers') list = list.filter((c) => ['offer_consideration', 'offer_made'].includes(c.room.status));
-    if (view === 'archived') list = list.filter((c) => ['archived', 'closed', 'withdrawn'].includes(c.room.status));
-    if (view === 'active') list = list.filter((c) => OPEN_ROOM_STATUSES.includes(c.room.status));
-    if (req.query.status) list = list.filter((c) => c.room.status === String(req.query.status));
-    if (req.query.tag) list = list.filter((c) => (c.room.tags ?? []).includes(String(req.query.tag)));
-    if (req.query.assignee) list = list.filter((c) => (c.tasks ?? []).some((t) => t.assigneeUserId === String(req.query.assignee)) || c.room.leadScoutUserId === String(req.query.assignee) || c.ownerUserId === String(req.query.assignee));
+    const filter = {
+      statuses: VIEW_STATUSES[view] ?? null,
+      mineOf: view === 'mine' ? req.orgUser.id : null,
+      assignedTo: view === 'assigned' ? req.orgUser.id : null,
+      status: req.query.status ? String(req.query.status) : null,
+      tag: req.query.tag ? String(req.query.tag) : null,
+      assignee: req.query.assignee ? String(req.query.assignee) : null,
+    };
 
+    // The search needs the player's visibility, so it is the one filter applied in code, as the rows are read.
     const q = String(req.query.q ?? '').trim().toLowerCase();
-    if (q) {
-      list = list.filter((c) => {
-        const p = findPlayer(c.playerId);
-        const visible = p && orgCanSee(req.org, p);
-        return (visible && (c.playerName ?? '').toLowerCase().includes(q))
-          || (c.room.tags ?? []).some((t) => t.toLowerCase().includes(q))
-          || ROOM_STATUS_LABELS[c.room.status].toLowerCase().includes(q);
-      });
-    }
+    const matches = q ? (c) => {
+      const p = findPlayer(c.playerId);
+      const visible = p && orgCanSee(req.org, p);
+      return (visible && (c.playerName ?? '').toLowerCase().includes(q))
+        || c.tags.some((t) => t.toLowerCase().includes(q))
+        || ROOM_STATUS_LABELS[c.status].toLowerCase().includes(q);
+    } : null;
 
-    // Most recent activity first, paged by cursor ({ items, nextCursor }; domains/platform/paging.mjs). The view, the
-    // access rule and the search are per viewer, so the organisation's Rooms are read by index and filtered here.
-    const recentFirst = (a, b) => (b[0] - a[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
-    const sorted = list.slice().sort((a, b) => recentFirst([a.room.updatedAt, a.id], [b.room.updatedAt, b.id]));
-    const { items: pageRows, nextCursor } = pageSorted(sorted, page, (c) => [c.room.updatedAt, c.id], recentFirst);
+    // Most recent activity first, paged by cursor ({ items, nextCursor }; domains/platform/paging.mjs).
+    const { items: pageRows, nextCursor } = reads.cases.roomPageForViewer(req.org.id, viewer, filter, page, matches);
 
     // One light assembly per player on the page, shared between the Passport
     // and Trust engines — no per-row source round trip.
@@ -506,30 +503,31 @@ export function registerRooms(ctx) {
 
     res.json({
       items, nextCursor,
-      funnel: roomFunnel(mine),
+      funnel: roomFunnelFromCounts(reads.cases.roomStatusCounts(req.org.id, viewer)),
       statuses: ROOM_STATUSES.map((s) => ({ id: s, label: ROOM_STATUS_LABELS[s] })),
       note: 'Rooms are listed by most recent activity. ScoutBox never orders players by Trust Score.',
     });
   });
 
-  /** Needs-attention: deterministic, no priority scoring of any kind. */
+  /** Needs-attention: deterministic, no priority scoring of any kind. Read as sets, not per Room (§4.3 step 4). */
   orgRouter.get('/rooms/needs-attention', (req, res) => {
-    const mine = reads.cases.forOrg(req.org.id).filter((c) => isRoom(c)
-      && (!c.restricted || roomRole({ room: c, user: req.orgUser, isLead: isLead(req.orgUser) }))
-      && OPEN_ROOM_STATUSES.includes(c.room.status));
+    const orgId = req.org.id;
+    const open = reads.cases.roomRowsForViewer(orgId, { userId: req.orgUser.id, isLead: isLead(req.orgUser) }, { statuses: OPEN_ROOM_STATUSES });
+    const overdue = reads.cases.overdueTaskCounts(orgId, now());
+    const supplied = new Set(db.evidenceSuggestions.filter((s) => s.orgId === orgId && s.status === 'supplied').map((s) => s.playerId));
+    const doneCombine = new Set(db.combineRequests.filter((r) => r.orgId === orgId && r.state === 'completed').map((r) => r.playerId));
+    const reported = reads.trials.playerIdsForOrgStatus(orgId, 'reported');
+    const decided = reads.decisions.roomIdsForOrg(orgId);
     const items = [];
-    for (const c of mine) {
+    for (const c of open) {
       const reasons = [];
-      const overdue = (c.tasks ?? []).filter((t) => ['open', 'in_progress'].includes(t.status) && t.dueAt && t.dueAt < now());
-      if (overdue.length) reasons.push({ code: 'TASK_OVERDUE', text: `${overdue.length} task(s) past their due date.` });
-      const supplied = db.evidenceSuggestions.filter((s) => s.orgId === req.org.id && s.playerId === c.playerId && s.status === 'supplied');
-      if (supplied.length) reasons.push({ code: 'EVIDENCE_RETURNED', text: 'Requested evidence has arrived.' });
-      const doneCombine = db.combineRequests.filter((r) => r.orgId === req.org.id && r.playerId === c.playerId && r.state === 'completed');
-      if (doneCombine.length) reasons.push({ code: 'COMBINE_COMPLETED', text: 'A requested Combine has been completed.' });
-      const reported = reads.trials.forOrgPlayer(req.org.id, c.playerId).filter((t) => t.status === 'reported');
-      if (reported.length && c.room.status === 'trial_scheduled') reasons.push({ code: 'TRIAL_REPORTED', text: 'A trial report is in.' });
-      if (['offer_consideration', 'offer_made'].includes(c.room.status) && !currentDecision(c.id)) reasons.push({ code: 'DECISION_OUTSTANDING', text: 'No decision has been recorded yet.' });
-      if (reasons.length) items.push({ roomId: c.id, playerId: c.playerId, playerName: c.playerName, status: c.room.status, reasons });
+      const n = overdue.get(c.id) ?? 0;
+      if (n) reasons.push({ code: 'TASK_OVERDUE', text: `${n} task(s) past their due date.` });
+      if (supplied.has(c.playerId)) reasons.push({ code: 'EVIDENCE_RETURNED', text: 'Requested evidence has arrived.' });
+      if (doneCombine.has(c.playerId)) reasons.push({ code: 'COMBINE_COMPLETED', text: 'A requested Combine has been completed.' });
+      if (reported.has(c.playerId) && c.status === 'trial_scheduled') reasons.push({ code: 'TRIAL_REPORTED', text: 'A trial report is in.' });
+      if (['offer_consideration', 'offer_made'].includes(c.status) && !decided.has(c.id)) reasons.push({ code: 'DECISION_OUTSTANDING', text: 'No decision has been recorded yet.' });
+      if (reasons.length) items.push({ roomId: c.id, playerId: c.playerId, playerName: c.playerName, status: c.status, reasons });
     }
     res.json({ items, note: 'Deterministic workflow signals only. ScoutBox does not rank or score these for you.' });
   });
@@ -1356,8 +1354,7 @@ export function registerRooms(ctx) {
 
   /** Organisation-private recruitment funnel. No cross-club comparison exists. */
   orgRouter.get('/rooms-funnel', (req, res) => {
-    const mine = reads.cases.forOrg(req.org.id).filter((c) => isRoom(c));
-    res.json(roomFunnel(mine));
+    res.json(roomFunnelFromCounts(reads.cases.roomStatusCounts(req.org.id)));
   });
 
   // ------------------------------------------------------------------ T&S

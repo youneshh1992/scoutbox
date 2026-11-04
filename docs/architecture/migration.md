@@ -174,9 +174,15 @@ the whole player base; §4.3.1 removed them. What is left, in the order to fix i
 1. **Done (4 November).** The trial-reminder sweep visited every confirmed, open trial every minute. It now asks
    `trials.remindersDue(now)`, which finds sessions starting within 48 hours through a start-time index and decodes
    only the trials with a reminder due (1,000 open trials: 252 ms → 1.6 ms).
-2. **The busy club's Rooms, cases, funnel and analytics decode every case** with its child tables (at least 16 queries
-   a case) and filter and page in code, because the filters are per viewer: 0.3–1.3 s. They need a summary query over
-   `recruitment_cases` that filters and pages in SQL, with the per-viewer rules applied to the page.
+2. **Done for Rooms, cases and funnels (4 November).** The per-viewer access rule, the views and the filters are SQL
+   (`cases.pageForViewer`, `roomPageForViewer`, `roomStatusCounts(orgId, viewer)`), only the page is decoded, and a list
+   of cases decodes its children in one batch rather than about sixteen queries a case. Needs-attention reads sets
+   (overdue tasks, Rooms with a decision, reported trials) instead of per-Room lookups. The Rooms search needs the
+   player's visibility, so it filters in code as the rows are read. Busy club: `/org/cases` 292 → 8 ms, rooms-funnel
+   290 → 0.7 ms, needs-attention 422 → 4.4 ms, `/org/funnel` 35 → 0.7 ms. **Left:** `/org/rooms` is 126 ms, almost
+   all of it the Passport and Trust assembly for each of the 50 players on the page (a typical club's three Rooms
+   take 12 ms), which belongs to S10; and `/org/recruitment-analytics` (870 ms) decodes every record of the club in
+   eight kinds. It needs its own projections read in SQL, not the decoded records.
 3. **The audit feed builds the club's whole history** on each page, then slices it (0.5 s); page per source instead.
 4. **The offers lists write a receipt on every read**; write only when a revision is unseen.
 

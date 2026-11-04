@@ -137,7 +137,8 @@ CREATE TABLE recruitment_cases (
   CHECK ((room_reopened_at IS NULL) = (room_reopened_reason_codes_json IS NULL)),
   CHECK (room_status IS NOT NULL OR room_reopened_at IS NULL)
 ) STRICT;
-CREATE INDEX recruitment_cases_org_created ON recruitment_cases (org_id, created_at);
+CREATE INDEX recruitment_cases_org_created ON recruitment_cases (org_id, created_at, id);
+CREATE INDEX recruitment_cases_org_room_updated ON recruitment_cases (org_id, room_updated_at, id) WHERE room_status IS NOT NULL;
 CREATE INDEX recruitment_cases_org_player ON recruitment_cases (org_id, player_id);
 CREATE INDEX recruitment_cases_org_room_status_updated ON recruitment_cases (org_id, room_status, room_updated_at);
 CREATE INDEX recruitment_cases_org_stage ON recruitment_cases (org_id, stage);
