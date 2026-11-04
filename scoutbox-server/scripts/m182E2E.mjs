@@ -134,7 +134,8 @@ const grassI18n = read('scoutbox-grassroots/src/i18n.ts');
 const keysOf = (src, lang) => {
   const start = src.indexOf(lang === 'en' ? 'const en' : 'const fr');
   const end = lang === 'en' ? src.indexOf('const fr') : src.indexOf('export function t(');
-  return new Map([...src.slice(start, end).matchAll(/'([\w.\-]+)':\s*(['"`])((?:\\.|(?!\2).)*)\2/g)].map((m) => [m[1], m[3]]));
+  // Keys are written with either quote ("desk.scouting": … in Grassroots).
+  return new Map([...src.slice(start, end).matchAll(/(['"])([\w.\-]+)\1:\s*(['"`])((?:\\.|(?!\3).)*)\3/g)].map((m) => [m[2], m[4]]));
 };
 const EN = keysOf(clubI18n, 'en'); const FR = keysOf(clubI18n, 'fr');
 const ENg = keysOf(grassI18n, 'en'); const FRg = keysOf(grassI18n, 'fr');

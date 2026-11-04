@@ -18,17 +18,17 @@ fixed on 3 November; these were found while fixing it.
   reproduce in 18 further runs under heavy load. Its strictest check compares the backup with the source table for
   table, so anything the server writes after the copy (other than the `backup_created` event) fails it. If it fails
   again, the runner prints the whole log: note which table differed.
-- **`scripts/m181E2E.mjs` fails one check** ("no … key-shaped value appears anywhere"). The heuristic
-  `/[A-Za-z0-9_-]{32,}/` matches table, index and migration names in `/capabilities.dataLayer` (for example
-  `0017_recruitment_contacts_offers`); it is a false positive, not a leak. Not in CI.
-- **`scripts/m182E2E.mjs` fails two checks** (also before 3 Nov): Grassroots screens ask for `desk.*` translation
-  keys that don't exist; and `orgPanels.tsx` is no longer byte-identical in `scoutbox-club` and `scoutbox-grassroots`
-  (which must share business logic). Not in CI.
+- **`scripts/m182E2E.mjs` fails one check**: `orgPanels.tsx` is no longer byte-identical in `scoutbox-club` and
+  `scoutbox-grassroots` (which must share business logic). Grassroots shows audit entries as structured facts since
+  `7f93a14` (1 Nov); Club still shows one sentence. Deciding which one both apps use is a design question. Not in CI.
 - **`scripts/m182Perf.mjs` stops at start-up**: it registers the notification preferences without the notifications
-  repository (`registerNotificationPrefs needs the notifications repository`), so it fails the same way on the code
-  before §4.3 step 2. Not in CI.
-- **`scripts/m23AgentPersistence.mjs` fails one check** ("the migrated staff member is an assistant"), also before
-  the S8a change of 3 Nov. Not related to recruitment storage. Not in CI.
+  repository (`registerNotificationPrefs needs the notifications repository`). Not in CI; removed with the other
+  performance scripts in §4.4.
+- **`scripts/m23AgentPersistence.mjs` fails one check** ("the migrated staff member is an assistant"). It boots over a
+  schema-2304 blob snapshot, but `server.mjs` runs the `m182` steps before `attachDataLayer`, and staff accounts are
+  table-backed since S0, so `m240_001_agent_core_stores` sees no `db.users` and gives the staff member no
+  affiliation. Only an old development-build file reaches this. It goes when S11 moves the affiliations into tables
+  and the step becomes a no-op. Not in CI.
 - **`e2e/m24f2DensityAudit` (3 checks) and `e2e/m24fVisualAudit` (2 checks) fail**, like the M24F audits fixed on
   3 Nov: Player Account categories, the portal ™ label, the Grassroots and Player Home single primary action, and
   the Player Card/ListRow check. Triage them against [`design.md`](design.md).

@@ -88,7 +88,8 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
 | — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 items 1–4 done (4 Nov); what still misses §2 is listed in §4.3 |
 | — | whole-player-base costs (lookups, identity writes) | — | `identity.mjs`, `orgs.mjs`, `users.mjs` | explicit (S4a-E) | done (§4.3.1, 4 Nov); the organisations' per-unit cost is left |
-| — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
+| — | end-to-end test estate | — | — | — | §4.4, any time before S9; step 1 in progress (4 Nov) |
+| — | server code by domain | — | — | — | §4.4.1: recruitment and platform before S9, then per step |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
 | S11 | agents, compliance, transactions | | | | not started |
@@ -232,20 +233,42 @@ The behavioural specification is spread over 67 milestone-named scripts in `scou
 … `m23*`, `preM24SweepE2E.mjs`, about 3 MB). CI runs ten of them, plus `connectedE2E.mjs` and `apiE2E.mjs`. Some of
 the rest fail (see [`../known-issues.md`](../known-issues.md)), and nobody knows the state of the others.
 
-1. Run every script once and record which pass, which fail and why.
-2. Separate the correctness batteries from performance, probe and evaluation scripts (`*Perf`, `*Load`,
-   `*Bench`, `*Probe`, `m22CvEval`, `m22Holdout`, `m22Robustness`, `m22Blocker`). Those aren't CI gates.
-3. Regroup the batteries by domain, not milestone. Merge duplicates. Never delete a behavioural assertion.
-4. Put every passing battery in CI. List any that stay out, with the reason, in `known-issues.md`.
+1. Run every script once and record which pass, which fail and why (in the PR description).
+2. Delete the performance and probe scripts (`*Perf`, `*Load`, `*Bench`, `*Probe`, including `dataLayerPerf` and
+   `probeS7b`/`probeS7c`). Performance is re-evaluated once the migration is done. Keep `recruitmentPerf` and
+   `perfPopulation` (§2 and §4.3 step 4 use them). `m22Robustness` and `m22Blocker` are correctness batteries and are
+   regrouped like the rest; `m22CvEval` writes the artefact the Combine production gate reads, so check what the gate
+   needs before removing it or `m22Holdout`.
+3. Regroup the batteries by domain, not milestone, using the domain names of `sql/*.sql` and `domains/` (identity,
+   recruitment, scouting, verification, agents, development, operations, platform). Move and rename first, with no
+   content changes, in one commit; merge duplicates in separate commits, with a count of checks before and after
+   each merge. Never delete a behavioural assertion.
+4. Put every passing battery in CI, through a runner like `scripts/runTests.mjs`: parallel, and refusing to run while
+   a battery is unlisted. Fix the cheap failures; list any that stay out, with the reason, in `known-issues.md`.
 5. Name tests after what they check, not after the review that produced them ("review of 2fe05df, R1"). The unit
-   suites (`scripts/test*.mjs`) get the same treatment once §4.2 has shrunk them.
+   suites (`scripts/test*.mjs`) get the same treatment. Do this last.
 
 This is independent of the storage work and can run in parallel, but it should be done before S9, so new domains
 add to the regrouped batteries.
 
+### 4.4.1 Server code by domain
+
+The server code is organised by milestone (`m12/` … `m29/`) and `server.mjs` holds routes from every domain. It moves
+into `domains/<domain>/` alongside the migration, not as a separate rewrite:
+
+- **Before S9**, after §4.4: move recruitment (`m17`, `m23`, `m28`, `m29`) and platform (`m181`, `m182`) into
+  `domains/recruitment/` and `domains/platform/`. File moves and import paths only, in one commit, so S9 copies a
+  finished layout. Most cross-milestone imports point at these two.
+- **Each of S9–S13** first moves its domain's files, in a commit with no other change, then edits them. The mixed
+  folders (`m12`, `m13`, `m14`) are split file by file as each domain's step comes round; `m20` and `m27` read across
+  domains and are placed when their readers are. A step may move its domain's routes out of `server.mjs` while it
+  rewrites them.
+- **After S14**: a final pass over whatever is left in milestone folders and `server.mjs`.
+
 ### 4.5 S9–S13: the remaining domains
 
 One step per `sql/*.sql` file, split only if a step gets too big to review. Each is a short branch and a PR into `main`.
+Each step starts by moving its domain's code into `domains/<domain>/` (§4.4.1).
 
 | Step | Schema file | Tables | Collections | Depends on | Watch out for |
 |---|---|---|---|---|---|

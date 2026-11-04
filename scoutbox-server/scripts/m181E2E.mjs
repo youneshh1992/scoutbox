@@ -640,8 +640,12 @@ section('§35 — /capabilities is reachable and honest about this deployment');
     && r.body.capabilities.production_cv.combineVerifiedProtocols.length === 0,
     'and the same report says real-world validation is not completed and no Combine protocol is verified');
   const capsRaw = JSON.stringify(r.body);
-  neg(!/smtp:\/\/|postgres:\/\/|redis:\/\/|Bearer |[A-Za-z0-9_-]{32,}/.test(capsRaw),
-    'no connection string, bearer token or key-shaped value appears anywhere in it');
+  // A long run of key characters is a key unless it is a name made of words: the data layer
+  // reports table, index and migration names such as `0017_recruitment_contacts_offers`.
+  // A prefixed key (`sk_live_<hex>`) still counts, because its last part is not a word.
+  const keyShaped = (capsRaw.match(/[A-Za-z0-9_-]{32,}/g) ?? []).filter((s) => !/^(?:\d{1,4}_)?[a-z]+(?:_[a-z]+)+$/.test(s));
+  neg(!/smtp:\/\/|postgres:\/\/|redis:\/\/|Bearer /.test(capsRaw) && keyShaped.length === 0,
+    `no connection string, bearer token or key-shaped value appears anywhere in it${keyShaped.length ? `: ${keyShaped.join(', ')}` : ''}`);
 }
 
 section('§36 — the capability report is not an authenticated data leak');

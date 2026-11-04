@@ -156,7 +156,8 @@ section('1 — the P5.6C step: one step at 2306, five stores, three seeded polic
   ok(fresh.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && fresh.jurisdictionPolicies.map((p) => p.id).sort().join() === SEEDED_POLICY_VERSIONS.map((p) => p.id).sort().join(), `the ${SEEDED_POLICY_VERSIONS.length} P5.6A policy versions are seeded (FIFA baseline, England 2026/27, USA)`);
   ok(fresh.jurisdictionPolicies.every((p) => p.status === 'published' && p.proposedBy === null && p.approvedBy === null && p.history[0].by.name === 'migration 2306' && p.history[0].detail.seeded === true), 'each seeded version is published, attributed to the migration, with no reviewer invented');
   neg(fresh.tsReviewers.length === 0 && fresh.regulatoryReviews.length === 0 && fresh.regulatoryConsents.length === 0 && fresh.complianceContexts.length === 0, 'reviewers, reviews, consents and contexts start EMPTY — nobody is a reviewer by default');
-  neg(fresh.offers === undefined && fresh.negotiations === undefined && fresh.signings !== undefined && !String(step.up).includes('agentTransactions'), 'the P5.6C step invented no offer or negotiation store and created no transaction store of its own (out of scope for P5.6C)');
+  // Signings and offers are tables since S8c/S8d, so no blob step creates either collection any more.
+  neg(fresh.offers === undefined && fresh.negotiations === undefined && !String(step.up).includes('agentTransactions'), 'the P5.6C step invented no offer or negotiation store and created no transaction store of its own (out of scope for P5.6C)');
   const { schema: _s1, ...storesBefore } = fresh;
   const idsBefore = fresh.schema.migrations.map((m) => m.id).join();
   const before = stableJson(storesBefore);
