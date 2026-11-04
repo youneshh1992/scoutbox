@@ -12,6 +12,16 @@ fixed on 3 November; these were found while fixing it.
   every mode and any document reference passes. `/capabilities` now says so (`authoritative_identity_provider:
   not_configured`), but nothing stops a production guardian from completing the ID gate.
 
+## Data model
+
+- **Evidence records copy people's names as text and cut them at 200 characters.** The evidence passport, disputes,
+  evidence history, coach affiliations and squad invitations store a copy of the player's, scout's or club's name
+  (an org dispute stores "scout · club"). Player signup has no name length limit, and a scout name plus a club
+  name can reach 243 characters, so `domains/scouting/passport.mjs` (`storedName`) shortens names to fit rather
+  than failing the action. The robust fix is to store only the person's or organisation's id, referencing the
+  players, staff and orgs tables, and read the current name from there. That also stops the copies going stale
+  when someone renames themselves.
+
 ## Tests
 
 - **`testBackup` failed once in about 40 parallel `npm test` runs** (3 Nov), and the log wasn't kept. It didn't

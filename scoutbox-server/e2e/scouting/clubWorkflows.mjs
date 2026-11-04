@@ -148,6 +148,24 @@ ok(r.status === 200 && r.body.evidence.verification.method === 'downgraded after
   const badNote = await post('/org/squad/invite', { playerId: 'pl-adeyemi', note: 7 }, bearer(MARIA));
   ok(badNote.status === 400 && badNote.body.field === 'note', 'S9a a squad invitation note that is not text is refused');
 }
+// S9a: names from other domains are longer than the evidence tables' 200 characters; the action still succeeds
+{
+  const longName = 'A'.repeat(230);
+  const su = await post('/auth/player/signup', { name: longName, dob: '1999-01-01', country: 'GB', password: 'longenough1', position: 'CM' });
+  const LONG = su.body.token;
+  const filed = await post('/player/evidence', { claimType: 'statistic', label: 'Goals', value: 3 }, bearer(LONG));
+  ok(filed.status === 201 && filed.body.evidence.source.name === longName.slice(0, 200), 'S9a a player with a 230-character name files evidence (name shortened to 200)');
+  const corrected = await post(`/player/evidence/${filed.body.evidence.id}/correct`, { value: 4, reason: 'miscounted' }, bearer(LONG));
+  ok(corrected.status === 201, 'S9a and corrects it');
+  const disputed = await post(`/player/evidence/${corrected.body.evidence.id}/dispute`, { reason: 'the club entry is wrong' }, bearer(LONG));
+  ok(disputed.status === 201 && disputed.body.dispute.by.name.length === 200, 'S9a and disputes it');
+  const reg = await post('/auth/org/register-grassroots', { name: 'C'.repeat(120), city: 'London', lat: 51.5, lng: -0.12, federation: 'FA', registrationId: 'S9A-LONG', scoutName: 'S'.repeat(120) });
+  const oseiClaim = await post('/player/evidence', { claimType: 'statistic', label: 'Assists', value: 5 }, bearer(OSEI));
+  const orgDispute = await post(`/org/evidence/${oseiClaim.body.evidence.id}/dispute`, { reason: 'our records differ' }, bearer(reg.body.token));
+  ok(reg.status === 201 && orgDispute.status === 201 && orgDispute.body.dispute.by.name.length === 200, 'S9a a club whose scout and club names total 243 characters files a dispute');
+  const queue = await j('/admin/evidence/disputes?limit=200', {}, admin);
+  ok(queue.body.items.some((d) => d.id === orgDispute.body.dispute.id) && queue.body.items.some((d) => d.id === disputed.body.dispute.id), 'S9a and both disputes reach the T&S queue');
+}
 // legacy relabelling
 r = await j('/player/passport', {}, bearer(KOLA));
 ok(r.body.legacy.every((l) => l.tier !== 'independent'), 'no legacy surface claims independent measurement');

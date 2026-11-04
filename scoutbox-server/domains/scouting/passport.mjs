@@ -25,6 +25,13 @@ function textOrRefuse(res, raw, field, max, { required = false } = {}) {
   return raw.slice(0, max);
 }
 
+/**
+ * A person's or organisation's name as the evidence tables store it: text, at most `max` characters, or null. Names
+ * come from other domains (a player's signup has no length limit; an org dispute stores "scout · club"), so they are
+ * shortened here rather than refused: refusing would block a real user's action. See docs/known-issues.md.
+ */
+const storedName = (name, max = LIMITS.name) => (name === undefined || name === null ? null : String(name).slice(0, max));
+
 export function registerPassport(ctx) {
   const {
     db, byId, nextId, persist, persistNow, notify, ledgerAppend, broadcast, findPlayer,
@@ -70,7 +77,7 @@ export function registerPassport(ctx) {
       value: typeof value === 'string' ? value.slice(0, LIMITS.valueText) : (value ?? null),
       units: units ? String(units).slice(0, LIMITS.units) : null,
       season: season ? String(season).slice(0, LIMITS.season) : null,
-      source, // { kind: 'player'|'guardian'|'org', id, name }
+      source: { kind: source.kind, id: source.id, name: storedName(source.name, LIMITS.sourceName) ?? '' }, // kind: 'player'|'guardian'|'org'
       // M23 P5.7: an evidence date the route has already validated (readInstant
       // keeps a legacy row's finite number and drops anything else to null).
       observedAt: readInstant(observedAt),
@@ -83,7 +90,7 @@ export function registerPassport(ctx) {
         status: tier,
         method: method ?? null,
         reviewerId: reviewer?.id ?? null,
-        reviewerName: reviewer?.name ?? null,
+        reviewerName: storedName(reviewer?.name),
         reviewedAt: reviewer ? at : null,
       },
       expiresAt: claimType === 'availability' ? at + 90 * 86_400_000 : null,
@@ -96,7 +103,7 @@ export function registerPassport(ctx) {
     return rec;
   }
   /** Append an audit entry to a record draft (the shared history shape). */
-  const auditDraft = (rec, byKind, byId, byName, action, detail = null) => audit(rec, byKind, byId, byName, action, detail === null ? null : String(detail).slice(0, LIMITS.detail));
+  const auditDraft = (rec, byKind, byId, byName, action, detail = null) => audit(rec, byKind, byId, storedName(byName), action, detail === null ? null : String(detail).slice(0, LIMITS.detail));
 
   function evidenceView(rec) {
     const { disputes, history, ...rest } = rec;
@@ -239,7 +246,7 @@ export function registerPassport(ctx) {
   function fileDispute(req, res, rec, actor) {
     const reason = textOrRefuse(res, req.body?.reason, 'reason', LIMITS.reason, { required: true }); if (reason === undefined) return;
     if (!moderateOrRefuse(res, reason, { kind: 'evidence_dispute', playerId: rec.playerId })) return;
-    const d = { id: nextId('dsp'), at: Date.now(), by: { kind: actor.kind, id: actor.id, name: String(actor.name).slice(0, LIMITS.name) }, reason, status: 'open', resolution: null };
+    const d = { id: nextId('dsp'), at: Date.now(), by: { kind: actor.kind, id: actor.id, name: storedName(actor.name) }, reason, status: 'open', resolution: null };
     scoutingEvidence.evidence.update(rec.id, (e) => { e.disputes.push(d); auditDraft(e, actor.kind, actor.id, actor.name, 'disputed', d.reason); });
     persistNow();
     res.status(201).json({ dispute: d });
@@ -293,7 +300,7 @@ export function registerPassport(ctx) {
       status: affiliation ? 'coach_confirmed' : 'club_assessed',
       method: (affiliation ? `confirmed by club-affiliated coach (${affiliation.role})` : `corroborated by ${req.org.name}`).slice(0, LIMITS.method),
       reviewerId: req.orgUser.id,
-      reviewerName: req.orgUser.name,
+      reviewerName: storedName(req.orgUser.name),
       reviewedAt: Date.now(),
     };
     // The upgrade and its notifications commit together.
@@ -374,11 +381,11 @@ export function registerPassport(ctx) {
       from = req.body.from;
     }
     const draft = {
-      id: nextId('aff'), orgId: req.org.id, orgName: req.org.name,
+      id: nextId('aff'), orgId: req.org.id, orgName: storedName(req.org.name),
       coachName, coachEmail, role, from,
       to: null,
       status: 'confirmed', // the CLUB is the confirmer — this endpoint runs under org auth
-      confirmedBy: { userId: req.orgUser.id, name: req.orgUser.name },
+      confirmedBy: { userId: req.orgUser.id, name: storedName(req.orgUser.name) },
       conflictOfInterest,
       createdAt: Date.now(),
       history: [],
@@ -436,8 +443,8 @@ export function registerPassport(ctx) {
     }
     const minor = !isAdult(p);
     const draft = {
-      id: nextId('sqi'), orgId: req.org.id, orgName: req.org.name, playerId: p.id, playerName: p.name,
-      byUserId: req.orgUser.id, byName: req.orgUser.name, note,
+      id: nextId('sqi'), orgId: req.org.id, orgName: storedName(req.org.name), playerId: p.id, playerName: storedName(p.name),
+      byUserId: req.orgUser.id, byName: storedName(req.orgUser.name), note,
       status: minor ? 'pending_guardian' : 'pending_player',
       createdAt: Date.now(), respondedAt: null,
     };
