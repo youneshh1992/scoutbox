@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openStore } from '../store.mjs';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
+import { syntheticPopulation } from './perfPopulation.mjs';
 
 const PLAYERS = Number(process.argv[2]) || 10_000;
 const SESSIONS = Number(process.argv[3]) || 20_000;
@@ -26,29 +27,7 @@ const now = Date.now();
 const pick = (arr, i) => arr[i % arr.length];
 
 function build() {
-  const orgs = Array.from({ length: ORGS }, (_, i) => ({
-    id: `org-${i}`, name: `Club ${i}`, type: i % 7 === 0 ? 'agency' : 'club', level: i % 7 === 0 ? 'agency' : pick(['pro', 'academy', 'grassroots'], i),
-    plan: i % 7 === 0 ? 'Agency' : pick(['Pro', 'Academy', 'Grassroots'], i), country: 'GB', location: { lat: 51 + i / 1000, lng: -1 + i / 1000, city: `Town ${i}` },
-    verified: i % 3 === 0, safeguardingContractSigned: i % 3 === 0, trustedPartner: false, password: 'scrypt$ab$cd',
-  }));
-  const users = Array.from({ length: ORGS * 3 }, (_, i) => ({ id: `usr-${i}`, orgId: `org-${i % ORGS}`, name: `Staff ${i}`, role: i % 3 ? 'Scout' : 'Head of Recruitment', createdAt: now - i * 1000 }));
-  const guardians = Array.from({ length: GUARDIANS }, (_, i) => ({ id: `gd-${i}`, name: `Guardian ${i}`, email: `g${i}@example.com`, emailVerified: true, idVerified: true, disclaimerAccepted: true, childIds: [] }));
-  const players = Array.from({ length: PLAYERS }, (_, i) => {
-    const minor = i % 3 === 0;
-    const guardianId = minor ? `gd-${i % GUARDIANS}` : null;
-    if (guardianId) guardians[i % GUARDIANS].childIds.push(`pl-${i}`);
-    return {
-      id: `pl-${i}`, name: `Player ${i}`, dob: minor ? '2011-05-05' : '1999-05-05', country: pick(['GB', 'PT', 'FR', 'NG'], i), city: `Town ${i % ORGS}`,
-      position: pick(['GK', 'CB', 'CM', 'ST', 'LW'], i), foot: pick(['left', 'right'], i), heightCm: 160 + (i % 30), weightKg: 55 + (i % 30),
-      stats: { appearances: i % 40, goals: i % 15, assists: i % 9, paceKmh: 28 + (i % 7), passCompletionPct: 60 + (i % 35), duelSuccessPct: 40 + (i % 50) },
-      seasonHistory: [{ season: '2024/25', appearances: 20, goals: 3, assists: 2 }], academyPlus: i % 5 === 0, badges: ['Fresh Start'],
-      availability: pick(['available_now', 'end_of_season', 'not_seeking'], i), contractStatus: 'unknown', identityVerified: i % 2 === 0,
-      attendance: [{ id: `att-${i}`, fixture: 'Match', venue: 'Ground', date: '2026-09-01', gps: { lat: 51.5, lng: -0.1 }, verified: true }],
-      timeline: [{ year: '2024', event: 'Joined' }], media: [{ id: `media-${i}`, title: 'Clip', kind: 'video', uploadedAt: new Date(now).toISOString(), url: null, views: 0, tags: {}, verifiedClip: null }],
-      trialReports: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, guardianId, drills: [], drillResults: [],
-      activityLog: [now - DAY, now], createdAt: now - (i % 60) * DAY, password: minor ? null : 'scrypt$ab$cd', level: 'amateur', location: { lat: 51.5, lng: -0.1 },
-    };
-  });
+  const { orgs, users, guardians, players } = syntheticPopulation({ players: PLAYERS, now });
   const sessions = Array.from({ length: SESSIONS }, (_, i) => {
     const kind = pick(['player', 'org', 'guardian'], i);
     return { token: crypto.randomBytes(24).toString('hex'), sid: crypto.randomBytes(6).toString('hex'), kind, refId: kind === 'player' ? `pl-${i % PLAYERS}` : kind === 'org' ? `org-${i % ORGS}` : `gd-${i % GUARDIANS}`, ...(kind === 'org' ? { userId: `usr-${i % (ORGS * 3)}` } : {}), createdAt: now - (i % 20) * DAY };

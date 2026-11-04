@@ -54,12 +54,13 @@ The migration is finished when:
   not scans of in-memory arrays;
 - the in-memory mirrors are gone for domains whose reads have moved to SQL;
 - the blob store is retired (S14);
-- a synthetic load of 100k players (`scripts/dataLayerPerf.mjs`) gives p50 under 5 ms on hot paths, with
+- a synthetic load of 100k players (`scripts/recruitmentPerf.mjs` for recruitment) gives p50 under 5 ms on hot paths, with
   no request writing the whole database.
 
 Moving storage alone isn't the goal. A domain that is in tables but still loaded whole into memory (explicit writes,
 but every read scanning a whole-collection mirror, as S8a–S8d were until 4 November) is only part-way there. The
-recruitment domain now reads through SQL and its unbounded lists page (§4.3 step 2); what is left of §4.3 is step 4.
+recruitment domain now reads through SQL and its unbounded lists page (§4.3 step 2), but the measurement of step 4 shows
+it does not meet the bar yet; the work it found is listed at the end of §4.3.
 
 ## 3. Status
 
@@ -85,7 +86,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | — | rollback machinery removed | — | — | — | done (§4.1) |
 | — | lossless side columns dropped outside recruitment | — | — | — | done (3 Nov) |
 | — | backups become database copies | — | — | — | done (§4.2, 3 Nov) |
-| — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov), including the requests/trials/inbox paging; step 4 next |
+| — | recruitment end-state proof | — | — | — | §4.3 steps 1–3 done (4 Nov); step 4 measured (4 Nov): fails §2, fixes listed in §4.3 |
 | — | end-to-end test estate | — | — | — | §4.4, any time before S9 |
 | S9 | scouting and assessment | | | | not started |
 | S10 | verification and passport | | | | not started |
@@ -164,7 +165,7 @@ a second pass:
    those mirrors.
 3. Drop the lossless `*_json` side columns from the S8a–S8c tables as part of step 1 (decided 3 November; the
    other domains lost theirs then).
-4. Measure with `scripts/dataLayerPerf.mjs` at 100k synthetic players.
+4. Measure with `scripts/recruitmentPerf.mjs` at 100k synthetic players (results below).
 
 **Decided 4 November, done 4 November (see the end of this section): page the club Requests and Trials lists and the inboxes.**
 `GET /org/requests`, `GET /org/trials`, `GET /player/inbox` and `GET /guardian/inbox` still return whole lists (from
@@ -325,6 +326,56 @@ a report drops off the Trials screen (the home figure still counts it). Two inde
 (`recruitment_requests (org_id)`, `trials (org_id)`, so the club lists read in rowid order without a sort; re-seed a
 development database). The batteries read `.items`; `m23P4AClosureE2E`'s "latest trial of a player" takes the first
 row instead of the last.
+
+**Step 4: measured 4 November, the bar of §2 is not met** (`npm run perf:recruitment -- <players> <clones> <busy>`).
+The script builds a database of synthetic players (`scripts/perfPopulation.mjs`, shared with `dataLayerPerf.mjs`) and
+clones the S8a–S8d test fixtures' recruitment graph (a Room case with its request, trial, comments, snapshots,
+decisions, contacts, offers, signing packages, signings and follow-ups, plus three more cases) onto real clubs and
+players with fresh ids, through a snapshot-mode save, so every row passes the typed writers. It boots the real server on
+that database and times the hot routes over HTTP, one write and the sweep queries. The busy club has 500 graphs (2,000
+cases, 1,500 requests, 500 trials), a typical club one or two, the popular player 11 cases. Medians on a laptop, HTTP
+included:
+
+| Route (busy club unless named) | 10k players | 30k players | 100k, extrapolated | Cost grows with |
+|---|---|---|---|---|
+| `GET /org/audit` | 3.1 s | 9.0 s | ~30 s | club × players |
+| `GET /player/offers`, `/guardian/offers` | 1.3 s | 3.5 s | ~11 s | players (every read is a write) |
+| `POST /org/rooms/:id/comments` (any write) | 2.4 s | 6.4 s | ~21 s | players |
+| `GET /org/recruitment-analytics` | 1.2 s | 1.3 s | ~1.3 s | the club's cases |
+| `GET /org/rooms`, `/org/rooms/needs-attention` | 0.45 s | 0.5–0.6 s | ~0.6 s | the club's cases |
+| `GET /org/cases`, `/org/rooms-funnel` | 0.33 s | 0.34 s | ~0.35 s | the club's cases |
+| `GET /org/funnel`, `/player/journeys` | 40 ms | 42 ms | ~45 ms | the club's / player's cases |
+| `GET /org/trials`, a Room, a journey, `/player/signings` | 6–14 ms | 6–14 ms | same | the page |
+| requests, inboxes, counts, follow-ups, signings, Room tabs | 1–5 ms | 1–5 ms | same | the page |
+
+A typical club is at or near 5 ms everywhere (its audit about 20 ms at 30k). Boot: 9 s at 10k players, 18 s at 30k and
+77 s at 100k with no recruitment; at 100k players with 10,000 graphs it did not finish in 18 minutes (below). Each
+comment adds about 320 kB to the write-ahead log at any size, so no request rewrites the database file, but every write
+costs CPU in proportion to the whole player base. The causes, from CPU profiles, in the order to fix them:
+
+1. **Every write walks every player.** At each unit-of-work commit and save, `identity.flushDomain` rebuilds every
+   player's row to compare its facets (`repositories/identity.mjs:1026`), and building a row reads the player's derived
+   trial reports (one query per player). This is S4a's whole-snapshot write model; making the identity writes explicit,
+   as recruitment's are, removes it (and settles A0–A3, see above). After that, check what the unit of work's
+   `captureGraph` of the in-memory database (`store.mjs:294`) still costs.
+2. **`findPlayer` is a linear scan** of the identity view (`server.mjs:702`, 184 callers), as are `usersOf` and
+   `db.orgs.find`. The audit feed calls it once per case, contact and trial; the sweeps once per item. The identity
+   repository already has `players.byId`.
+3. **The trial-reminder sweep visits every confirmed, open trial every minute** and calls `findPlayer` for each before
+   checking whether a reminder is due (`m12/operations.mjs:362`); reading those trials alone takes 0.2 s per 1,000.
+   With 10,000 open trials and 100k players this blocked the boot for over 18 minutes. Select only the sessions starting
+   within 48 hours, in SQL.
+4. **The busy club's Rooms, cases, funnel and analytics decode every case** with its child tables (`decodeCase`, at least
+   16 queries a case) before filtering and paging in code. They need a summary query over `recruitment_cases` that
+   filters and pages in SQL, and per-viewer rules applied to the page.
+5. **The audit feed builds the club's whole history** on each page, then slices it; it should page per source.
+6. **The offers lists write a receipt on every read** inside a unit of work; once writes are cheap this is fine, but it
+   should only write when a revision is unseen.
+
+A backlog is a separate risk: the boot runs the sweeps before it listens, and they handle due items one transaction
+and one notification at a time (a stale copy of the fixtures, 3,000 graphs at 10k players, booted in 68 s instead of
+23 s). The script moves the fixtures' instants to today and leaves out their 200-day-old legacy signing so it measures
+the steady state.
 
 ### 4.4 The end-to-end test estate
 
