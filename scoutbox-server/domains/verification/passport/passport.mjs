@@ -117,9 +117,10 @@ export function registerPassportCore(ctx) {
       tier: e.verification?.status ?? 'self_reported', sourceKind: e.source?.kind ?? 'player',
       superseded: !!e.supersededBy, expired: e.expiresAt ? e.expiresAt < now : false,
     }));
-    const objectives = db.devObjectives.filter((o) => o.playerId === pid).map((o) => ({
+    // S12a: read through SQL. An objective has no completion instant (no route ever set one), so completedAt is null.
+    const objectives = ctx.developmentReads.objectives.forPlayer(pid).map((o) => ({
       id: o.id, orgId: o.orgId, orgName: orgOf(o.orgId)?.name ?? null, createdAt: o.createdAt,
-      status: o.status, completedAt: o.completedAt ?? null, sharingOrgIds: o.sharing?.orgIds ?? [],
+      status: o.status, completedAt: null, sharingOrgIds: [...o.sharing.orgIds],
     }));
     // S9d: read through SQL, and built from an allowlist (the player's own application, as before).
     const applications = ctx.scoutingReads.applications.forPlayers([pid]).map((a) => ({

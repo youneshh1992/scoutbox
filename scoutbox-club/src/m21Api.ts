@@ -166,7 +166,8 @@ export type Result<T> = { ok: true; value: T } | Refusal;
 export interface M21Api {
   catalogue(s: Session): Promise<DevelopmentCatalogue>;
   linkable(s: Session, playerId: string): Promise<{ items: LinkableEvidence[]; note: string }>;
-  plans(s: Session, playerId?: string): Promise<{ items: PlanListItem[]; total: number; note: string }>;
+  /** The first page (newest change first); `nextCursor` continues it (S12a). */
+  plans(s: Session, playerId?: string): Promise<{ items: PlanListItem[]; total: number; nextCursor: string | null; note: string }>;
   plan(s: Session, id: string): Promise<DevelopmentPlanView>;
   createPlan(s: Session, body: Record<string, unknown>): Promise<Result<DevelopmentPlanView>>;
   addGoal(s: Session, planId: string, body: Record<string, unknown>): Promise<Result<DevelopmentPlanView>>;

@@ -34,16 +34,19 @@ import {
   assertDevelopmentVocabulary, scanCopyForForbiddenNames, refusedClientFields, scanPayloadForForbiddenFields,
   transitionAllowed, dueState, reviewDueState, actionCounts, completionPhrase,
   boundedText, parseDate, utcDay, daysBetween,
-} from '../../m21/shared.mjs';
+} from '../../domains/development/hub/shared.mjs';
 import {
   TARGET_SOURCES, TARGET_OPERATORS, TARGET_STATES, NO_MEASUREMENT_REASONS,
   validateTarget, evaluateTarget, compare, bestValidAttempt,
-} from '../../m21/targets.mjs';
-import { EVIDENCE_LINK_FIELDS, summariseEvidence } from '../../m21/evidence.mjs';
-import { planAccess, canAssign, reviewView, VIEWER_KINDS, CAPABILITIES } from '../../m21/permissions.mjs';
-import { buildTimeline, TIMELINE_ACTIONS, planSummary } from '../../m21/plan.mjs';
-import { buildGoalSnapshots, pageReviews } from '../../m21/reviews.mjs';
-import { migrateM21, M21_STORES } from '../../m21/index.mjs';
+} from '../../domains/development/hub/targets.mjs';
+import { EVIDENCE_LINK_FIELDS, summariseEvidence } from '../../domains/development/hub/evidence.mjs';
+import { planAccess, canAssign, reviewView, VIEWER_KINDS, CAPABILITIES } from '../../domains/development/hub/permissions.mjs';
+import { buildTimeline, TIMELINE_ACTIONS, planSummary } from '../../domains/development/hub/plan.mjs';
+import { buildGoalSnapshots, pageReviews } from '../../domains/development/hub/reviews.mjs';
+import { M21_STORES } from '../../domains/development/hub/index.mjs';
+import { PAGE_LIMITS } from '../../domains/platform/paging.mjs';
+import { DEVELOPMENT_COLLECTIONS, DEVELOPMENT_MIGRATION } from '../../repositories/development.mjs';
+import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { liveCombineState, isProductionValidCombine } from '../../m16/combineShared.mjs';
 import { PROVIDERS } from '../../m16/drills.mjs';
 import { EVENT_NAMES, EVENT_REGISTRY, assertEventRegistry } from '../../domains/platform/eventRegistry.mjs';
@@ -247,7 +250,7 @@ section('§3 — objective targets: one comparison, three states, no formula');
   for (const r of NO_MEASUREMENT_REASONS) ok(typeof r === 'string', `"${r}" is a distinct absence a coach can act on`);
 
   // ---- the production-validity predicate is M16.1's, not a second copy
-  const src = code('scoutbox-server/m21/targets.mjs') + code('scoutbox-server/m21/evidence.mjs');
+  const src = code('scoutbox-server/domains/development/hub/targets.mjs') + code('scoutbox-server/domains/development/hub/evidence.mjs');
   N(13, !/combineState\s*===\s*'combine_verified'/.test(src.replace(/liveCombineState[^\n]*/g, '')),
     'M21 does not re-implement the Combine-verified test; it calls M16.1’s');
   ok(isProductionValidCombine(attempt({}), sessions[0], PROVIDERS.web_client) === true
@@ -258,7 +261,7 @@ section('§3 — objective targets: one comparison, three states, no formula');
   ok(bestValidAttempt({ attempts: [attempt({ id: 'a', value: 161 }), attempt({ id: 'b', value: 170 })], sessions, target: T }).id === 'b',
     'best means best in the protocol’s own direction');
   ok(TARGET_OPERATORS.length === 5, 'five operators, and no expression language (§30)');
-  neg(!/\beval\(|new Function|Function\s*\(\s*['"`]/.test(code('scoutbox-server/m21/targets.mjs')), 'no formula is executed anywhere in target evaluation');
+  neg(!/\beval\(|new Function|Function\s*\(\s*['"`]/.test(code('scoutbox-server/domains/development/hub/targets.mjs')), 'no formula is executed anywhere in target evaluation');
 }
 
 // =========================================================================
@@ -453,15 +456,14 @@ section('§7 — migration, stores and the clean-boot proof');
   ok(!!step, 'the M21 migration is registered with a stable id');
   ok(SCHEMA_VERSION >= 2100, `SCHEMA_VERSION is at or beyond 2100 (${SCHEMA_VERSION})`);
 
+  // S12a (storage, rewritten): the stores are tables created by data migration 0030; the blob step creates nothing.
   const fresh = {};
   runMigrations(fresh, { now: NOW });
-  for (const s of M21_STORES) ok(Array.isArray(fresh[s]), `a clean database has db.${s} after migration and before any write`);
+  for (const s of M21_STORES) neg(!(s in fresh), `the blob migrations no longer create db.${s} (a table since S12a)`);
   const again = runMigrations(fresh, { now: NOW });
   ok(again.ran.length === 0, 'a second boot applies no migration again');
-
-  const seeded = { developmentPlans: [{ id: 'keep' }] };
-  migrateM21(seeded); migrateM21(seeded);
-  neg(seeded.developmentPlans.length === 1, 'running the migration twice destroys nothing');
+  ok(DATA_MIGRATIONS.some((m) => m.id === DEVELOPMENT_MIGRATION), `the development tables come from data migration ${DEVELOPMENT_MIGRATION}`);
+  ok(M21_STORES.every((s) => DEVELOPMENT_COLLECTIONS.includes(s)), 'every M21 store is a collection of the development repository');
 
   // §156/§157: the whole point. `db.trials` existed only because the seed made
   // it, so a restored snapshot without it threw. Prove no M21 store depends on
@@ -477,7 +479,7 @@ section('§7 — migration, stores and the clean-boot proof');
   }
   ok(RATE_LIMIT_POLICY.development_item_write.max >= 300,
     'the item limit is generous — being told to slow down for doing the work is the wrong message from a development tool');
-  neg(!/new Map\(\)/.test(code('scoutbox-server/m21/index.mjs').replace(/const sessions = new Map\([^)]*\)/g, '')) || true,
+  neg(!/new Map\(\)/.test(code('scoutbox-server/domains/development/hub/index.mjs').replace(/const sessions = new Map\([^)]*\)/g, '')) || true,
     'M21 invents no limiter of its own');
 
   // Events: registered, org-private, ids only.
@@ -925,8 +927,21 @@ section('§16b — a longer adversarial pass over the whole surface');
     'and so is a made-up review cursor');
   N(67, (await j('GET', '/org/development/plans?status=imaginary', undefined, maria.token)).body.error === 'PLAN_STATUS_UNKNOWN',
     'an unknown status filter is refused, not ignored');
+  // S12a: the plan list pages by cursor (domains/platform/paging.mjs): an out-of-range limit is refused, not clamped.
   const big = await j('GET', '/org/development/plans?limit=9999', undefined, maria.token);
-  N(67, big.body.limit <= M21_LIMITS.listPageMax, `a list page is capped at ${M21_LIMITS.listPageMax} however large a limit is asked for`);
+  N(67, big.status === 400 && big.body.error === 'PAGE_LIMIT_INVALID', `a list page is bounded: a limit over ${PAGE_LIMITS.max} is refused`);
+  const all = await j('GET', '/org/development/plans', undefined, maria.token);
+  const p1 = await j('GET', '/org/development/plans?limit=1', undefined, maria.token);
+  ok(all.body.total >= 2 && p1.status === 200 && p1.body.items.length === 1 && p1.body.total === all.body.total && typeof p1.body.nextCursor === 'string',
+    'S12a the club plan list pages by cursor, newest change first, and still counts every plan it may read');
+  const p2 = await j('GET', `/org/development/plans?limit=1&cursor=${p1.body.nextCursor}`, undefined, maria.token);
+  ok(p2.status === 200 && p2.body.items[0]?.id === all.body.items[1].id, 'S12a …the next page continues where the first stopped');
+  N(67, (await j('GET', '/org/development/plans?cursor=made-up', undefined, maria.token)).body.error === 'PAGE_CURSOR_INVALID', 'S12a a made-up list cursor is refused');
+  N(67, (await j('POST', '/player/development/plans', { title: 42, visibility: 'private' }, kola.token)).body.error === 'FIELD_INVALID', 'S12a a title that is not text is refused, not turned into text');
+  const datePlan = (await j('POST', '/player/development/plans', { title: 'S12a dates', visibility: 'private' }, kola.token)).body.plan.id;
+  N(67, (await j('PATCH', `/player/development/plans/${datePlan}`, { endDate: 1e20 }, kola.token)).body.error === 'DATE_INVALID', 'S12a an instant beyond the safe range is refused (400, not a server error)');
+  const emptied = await j('PATCH', `/player/development/plans/${datePlan}`, { startDate: '' }, kola.token);
+  ok(emptied.status === 200 && Number.isSafeInteger(emptied.body.plan.startDate), 'S12a an emptied start date keeps the stored start (a plan always has one)');
   const hBig = await j('GET', `/org/development/plans/${clubPlan}/history?limit=9999`, undefined, maria.token);
   N(67, hBig.body.items.length <= M21_LIMITS.historyPageMax, 'and so is a history page');
 

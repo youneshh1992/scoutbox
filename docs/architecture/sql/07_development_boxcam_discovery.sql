@@ -22,170 +22,126 @@
 
 
 -- =============================================================================
--- M12 F8 — development objectives (the pre-M21 objective record)
+-- M12 F8 — development objectives · M12 F6 — drill-guidance reviews
+-- S12a: IMPLEMENTED, migration 0030_development REGISTERED (repositories/development.mjs, 5 Nov 2026).
+-- The DDL below is the migration's, generated from the repository's field specs (scripts/testSchemaDdl.mjs compares
+-- them column for column).
 -- =============================================================================
+--
+-- An objective (obj-*) grows from feedback a club published (source_assessment_id: no key, the assessment is another
+-- domain's record, checked by the route). One or two items (objx-*), each with up to four exercise references and the
+-- player's baseline evidence ids as ordered rows; progress entries (prg-*) name an item of the same objective or none;
+-- shares are the organisations the player chose; one open reassessment (ras-*) at a time, its outcome evidence as rows.
+-- review_at is an instant (the route refuses a value that is not a date). No completed_at: no route ever set one.
+-- Player and evidence ids carry no key (tolerant: an account deletion removes the evidence, the objective keeps the
+-- id). The organisation and the staff named are RESTRICT keys.
+--
+-- Drill guidance: the recording instructions are the same for every combine drill and live in code
+-- (domains/development/objectives.mjs DRILL_RECORDING). A row exists only once a named person reviewed the drill; a
+-- drill with no row reads as unreviewed.
 
--- source: db.devObjectives  created at domains/scouting/journeys.mjs:405
--- owner/writer: domains/scouting/journeys.mjs (createObjective, progress, share, reassessment);
---   read by m16/training.mjs (developmentPlan, assignment objectiveId check),
---   m21/index.mjs (originObjectiveFor)
--- lifecycle: status is only ever written as 'active' (no close/archive route);
---   no soft delete
--- mapping:
---   id -> id (obj-*)
---   playerId -> player_id
---   sourceFeedbackId -> source_assessment_id (the published-feedback assessment)
---   orgId -> org_id (the assessment's org)
---   reviewer.userId / .name / .orgName -> reviewer_user_id / reviewer_name / reviewer_org_name
---   objectives[] -> dev_objective_items (child)
---   progress[] -> dev_objective_progress (child)
---   sharing.orgIds[] -> dev_objective_shares (child)
---   reassessments[] -> dev_objective_reassessments (child)
---   reviewAt -> review_at_raw (client-supplied, never validated or parsed: kept raw)
---   status -> status
---   createdBy.kind / .id / .name -> created_by_kind / created_by_id / created_by_name
---   createdAt -> created_at
--- notes: minors create via guardian only; a club sees the objective only while
---   its org id is in dev_objective_shares. Read patterns: by player, by
---   (org, player) for the club view and box assignment validation.
 CREATE TABLE dev_objectives (
-  id                    TEXT PRIMARY KEY,
-  player_id             TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  source_assessment_id  TEXT NOT NULL REFERENCES assessments(id) ON DELETE RESTRICT,
-  org_id                TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  reviewer_user_id      TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  reviewer_name         TEXT,                    -- snapshot
-  reviewer_org_name     TEXT,                    -- snapshot
-  review_at_raw         TEXT,                    -- raw client value, unparsed today
-  status                TEXT NOT NULL CHECK (status IN ('active')),
-  created_by_kind       TEXT NOT NULL CHECK (created_by_kind IN ('player','guardian')),
-  created_by_id         TEXT NOT NULL,
-  created_by_name       TEXT,                    -- snapshot
-  created_at            INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  source_assessment_id                     TEXT NOT NULL CHECK (length(source_assessment_id) <= 80 AND length(source_assessment_id) > 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  reviewer_user_id                         TEXT NOT NULL CHECK (length(reviewer_user_id) <= 80 AND length(reviewer_user_id) > 0),
+  reviewer_name                            TEXT CHECK (reviewer_name IS NULL OR length(reviewer_name) <= 200),
+  reviewer_org_name                        TEXT CHECK (reviewer_org_name IS NULL OR length(reviewer_org_name) <= 200),
+  review_at                                INTEGER,
+  status                                   TEXT NOT NULL CHECK (status IN ('active')),
+  created_by_kind                          TEXT NOT NULL CHECK (created_by_kind IN ('player','guardian')),
+  created_by_id                            TEXT NOT NULL CHECK (length(created_by_id) <= 80 AND length(created_by_id) > 0),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (reviewer_user_id) REFERENCES org_users(id) ON DELETE RESTRICT
 ) STRICT;
 CREATE INDEX dev_objectives_player ON dev_objectives (player_id);
-CREATE INDEX dev_objectives_org_player ON dev_objectives (org_id, player_id);
 
--- source: db.devObjectives[].objectives[]  created at domains/scouting/journeys.mjs:408
--- owner/writer: domains/scouting/journeys.mjs (write-once at objective creation)
--- lifecycle: immutable; 1–2 per objective
--- mapping:
---   id -> id (objx-*)
---   (parent) -> objective_id
---   text -> text (<=200)
---   exerciseRefs[] -> exercise_refs_json (free-form client strings, <=4, never
---     validated or queried: free-form by design)
---   baselineEvidenceIds[] -> dev_objective_item_evidence (child)
---   (array position) -> position
 CREATE TABLE dev_objective_items (
-  id                 TEXT PRIMARY KEY,
-  objective_id       TEXT NOT NULL REFERENCES dev_objectives(id) ON DELETE CASCADE,
-  position           INTEGER NOT NULL,
-  text               TEXT NOT NULL,
-  exercise_refs_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(exercise_refs_json))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  objective_id                             TEXT NOT NULL CHECK (length(objective_id) <= 80 AND length(objective_id) > 0),
+  text                                     TEXT NOT NULL CHECK (length(text) <= 200 AND length(text) > 0),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 2),
+  FOREIGN KEY (objective_id) REFERENCES dev_objectives(id) ON DELETE CASCADE,
+  UNIQUE (objective_id, ord)
 ) STRICT;
-CREATE INDEX dev_objective_items_objective ON dev_objective_items (objective_id, position);
 
--- source: db.devObjectives[].objectives[].baselineEvidenceIds[]  domains/scouting/journeys.mjs:411
--- owner/writer: domains/scouting/journeys.mjs (validated against db.evidence for the same player)
--- mapping: each id -> (item_id, evidence_id)
+CREATE TABLE dev_objective_item_exercises (
+  item_id                                  TEXT NOT NULL CHECK (length(item_id) > 0 AND length(item_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 4),
+  ref                                      TEXT NOT NULL CHECK (length(ref) > 0 AND length(ref) <= 200),
+  FOREIGN KEY (item_id) REFERENCES dev_objective_items(id) ON DELETE CASCADE,
+  PRIMARY KEY (item_id, ord)
+) STRICT;
+
 CREATE TABLE dev_objective_item_evidence (
-  item_id      TEXT NOT NULL REFERENCES dev_objective_items(id) ON DELETE CASCADE,
-  evidence_id  TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
-  PRIMARY KEY (item_id, evidence_id)
+  item_id                                  TEXT NOT NULL CHECK (length(item_id) > 0 AND length(item_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 50),
+  evidence_id                              TEXT NOT NULL CHECK (length(evidence_id) > 0 AND length(evidence_id) <= 80),
+  FOREIGN KEY (item_id) REFERENCES dev_objective_items(id) ON DELETE CASCADE,
+  PRIMARY KEY (item_id, ord),
+  UNIQUE (item_id, evidence_id)
 ) STRICT;
 
--- source: db.devObjectives[].progress[]  created at domains/scouting/journeys.mjs:445
--- owner/writer: domains/scouting/journeys.mjs (player only, minors included)
--- lifecycle: append-only
--- mapping:
---   id -> id (prg-*)
---   (parent) -> objective_id
---   at -> created_at (source field is literally `at`)
---   objectiveId -> item_id (client-supplied, NOT validated today; migration
---     nulls any value that does not resolve to a dev_objective_items row)
---   note -> note (<=300)
---   evidenceId -> evidence_id (validated against the player's evidence)
 CREATE TABLE dev_objective_progress (
-  id            TEXT PRIMARY KEY,
-  objective_id  TEXT NOT NULL REFERENCES dev_objectives(id) ON DELETE CASCADE,
-  created_at    INTEGER NOT NULL,
-  item_id       TEXT REFERENCES dev_objective_items(id) ON DELETE SET NULL,
-  note          TEXT,
-  evidence_id   TEXT REFERENCES evidence(id) ON DELETE SET NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  objective_id                             TEXT NOT NULL CHECK (length(objective_id) <= 80 AND length(objective_id) > 0),
+  at                                       INTEGER NOT NULL,
+  item_id                                  TEXT CHECK (item_id IS NULL OR length(item_id) <= 80 AND length(item_id) > 0),
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 300),
+  evidence_id                              TEXT CHECK (evidence_id IS NULL OR length(evidence_id) <= 80 AND length(evidence_id) > 0),
+  FOREIGN KEY (objective_id) REFERENCES dev_objectives(id) ON DELETE CASCADE,
+  FOREIGN KEY (item_id) REFERENCES dev_objective_items(id) ON DELETE CASCADE
 ) STRICT;
-CREATE INDEX dev_objective_progress_objective ON dev_objective_progress (objective_id, created_at);
+CREATE INDEX dev_objective_progress_objective ON dev_objective_progress (objective_id);
 
--- source: db.devObjectives[].sharing.orgIds[]  domains/scouting/journeys.mjs:456
--- owner/writer: domains/scouting/journeys.mjs setSharing (add/remove = hard delete of the row)
--- mapping: each org id -> (objective_id, org_id)
--- notes: the org must exist (checked); no "shared at" is recorded today.
 CREATE TABLE dev_objective_shares (
-  objective_id  TEXT NOT NULL REFERENCES dev_objectives(id) ON DELETE CASCADE,
-  org_id        TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  PRIMARY KEY (objective_id, org_id)
+  objective_id                             TEXT NOT NULL CHECK (length(objective_id) > 0 AND length(objective_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) > 0 AND length(org_id) <= 80),
+  FOREIGN KEY (objective_id) REFERENCES dev_objectives(id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  PRIMARY KEY (objective_id, org_id),
+  UNIQUE (objective_id, ord)
 ) STRICT;
+CREATE INDEX dev_objective_shares_org ON dev_objective_shares (org_id);
 
--- source: db.devObjectives[].reassessments[]  created at domains/scouting/journeys.mjs:472
--- owner/writer: domains/scouting/journeys.mjs (requestReassessment; outcome by the owning org)
--- lifecycle: status requested -> completed; one open ('requested') per objective
--- mapping:
---   id -> id (ras-*)
---   (parent) -> objective_id
---   requestedBy.kind / .id / .name -> requested_by_kind / requested_by_id / requested_by_name
---   requestedAt -> requested_at
---   status -> status
---   outcome.note -> outcome_note (<=500)
---   outcome.evidenceIds[] -> dev_objective_reassessment_evidence (child)
---   outcome.byUserId / .byName / .at -> outcome_by_user_id / outcome_by_name / outcome_at
 CREATE TABLE dev_objective_reassessments (
-  id                  TEXT PRIMARY KEY,
-  objective_id        TEXT NOT NULL REFERENCES dev_objectives(id) ON DELETE CASCADE,
-  requested_by_kind   TEXT NOT NULL CHECK (requested_by_kind IN ('player','guardian')),
-  requested_by_id     TEXT NOT NULL,
-  requested_by_name   TEXT,                       -- snapshot
-  requested_at        INTEGER NOT NULL,
-  status              TEXT NOT NULL CHECK (status IN ('requested','completed')),
-  outcome_note        TEXT,
-  outcome_by_user_id  TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  outcome_by_name     TEXT,                       -- snapshot
-  outcome_at          INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  objective_id                             TEXT NOT NULL CHECK (length(objective_id) <= 80 AND length(objective_id) > 0),
+  requested_by_kind                        TEXT NOT NULL CHECK (requested_by_kind IN ('player','guardian')),
+  requested_by_id                          TEXT NOT NULL CHECK (length(requested_by_id) <= 80 AND length(requested_by_id) > 0),
+  requested_by_name                        TEXT CHECK (requested_by_name IS NULL OR length(requested_by_name) <= 200),
+  requested_at                             INTEGER NOT NULL,
+  status                                   TEXT NOT NULL CHECK (status IN ('requested','completed')),
+  outcome_note                             TEXT CHECK (outcome_note IS NULL OR length(outcome_note) <= 500 AND length(outcome_note) > 0),
+  outcome_by_user_id                       TEXT CHECK (outcome_by_user_id IS NULL OR length(outcome_by_user_id) <= 80 AND length(outcome_by_user_id) > 0),
+  outcome_by_name                          TEXT CHECK (outcome_by_name IS NULL OR length(outcome_by_name) <= 200),
+  outcome_at                               INTEGER,
+  FOREIGN KEY (objective_id) REFERENCES dev_objectives(id) ON DELETE CASCADE,
+  FOREIGN KEY (outcome_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK ((status = 'completed') = (outcome_at IS NOT NULL)),
+  CHECK ((outcome_at IS NULL) = (outcome_note IS NULL) AND (outcome_at IS NULL) = (outcome_by_user_id IS NULL))
 ) STRICT;
-CREATE INDEX dev_objective_reassessments_objective ON dev_objective_reassessments (objective_id, status);
+CREATE INDEX dev_objective_reassessments_objective ON dev_objective_reassessments (objective_id);
+CREATE UNIQUE INDEX dev_objective_reassessments_open ON dev_objective_reassessments (objective_id) WHERE status = 'requested';
 
--- source: db.devObjectives[].reassessments[].outcome.evidenceIds[]  domains/scouting/journeys.mjs:505
--- mapping: each id -> (reassessment_id, evidence_id)
 CREATE TABLE dev_objective_reassessment_evidence (
-  reassessment_id  TEXT NOT NULL REFERENCES dev_objective_reassessments(id) ON DELETE CASCADE,
-  evidence_id      TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
-  PRIMARY KEY (reassessment_id, evidence_id)
+  reassessment_id                          TEXT NOT NULL CHECK (length(reassessment_id) > 0 AND length(reassessment_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 50),
+  evidence_id                              TEXT NOT NULL CHECK (length(evidence_id) > 0 AND length(evidence_id) <= 80),
+  FOREIGN KEY (reassessment_id) REFERENCES dev_objective_reassessments(id) ON DELETE CASCADE,
+  PRIMARY KEY (reassessment_id, ord),
+  UNIQUE (reassessment_id, evidence_id)
 ) STRICT;
 
-
--- =============================================================================
--- M12 F6 — drill guidance (recording instructions + coach review status)
--- =============================================================================
-
--- source: db.drillGuidance  created at domains/scouting/journeys.mjs:205 (seeded from the
---   server.mjs DRILLS registry — the legacy combine drills, NOT m16/drills.mjs)
--- owner/writer: domains/scouting/journeys.mjs (seed on boot; adminRouter review sets coachReview)
--- lifecycle: one row per legacy drill id; never deleted
--- mapping:
---   drillId -> drill_id (natural PK; key into the code registry server.mjs DRILLS)
---   recording.equipment / .distance / .surface / .camera -> recording_equipment / recording_distance / recording_surface / recording_camera
---   coachReview.status -> coach_review_status
---   coachReview.reviewer -> coach_review_reviewer (free-text name, <=60)
---   coachReview.at -> coach_reviewed_at
--- notes: "reviewed" means a named reviewer actually reviewed it; seeds start unreviewed.
 CREATE TABLE drill_guidance (
-  drill_id               TEXT PRIMARY KEY,
-  recording_equipment    TEXT NOT NULL,
-  recording_distance     TEXT NOT NULL,
-  recording_surface      TEXT NOT NULL,
-  recording_camera       TEXT NOT NULL,
-  coach_review_status    TEXT NOT NULL DEFAULT 'unreviewed' CHECK (coach_review_status IN ('unreviewed','reviewed')),
-  coach_review_reviewer  TEXT,
-  coach_reviewed_at      INTEGER
+  drill_id                                 TEXT NOT NULL CHECK (length(drill_id) <= 80 AND length(drill_id) > 0),
+  reviewer                                 TEXT NOT NULL CHECK (length(reviewer) <= 60 AND length(reviewer) > 0),
+  reviewed_at                              INTEGER NOT NULL,
+  PRIMARY KEY (drill_id)
 ) STRICT;
 
 
@@ -1125,370 +1081,243 @@ CREATE INDEX watchlist_membership_events_watchlist_at ON watchlist_membership_ev
 
 -- =============================================================================
 -- M21 — Development Hub
+-- S12a: IMPLEMENTED, migration 0030_development REGISTERED (repositories/development.mjs, 5 Nov 2026).
 -- =============================================================================
+--
+-- Plans (devplan-*), goals (devgoal-*), actions (devact-*), evidence links (devlink-*, a reference and no content:
+-- exactly EVIDENCE_LINK_FIELDS) and reviews (devrev-*, append-only). Differences from the first draft of this file:
+--   - one development_history table for the four record kinds; every entry names its plan (and at most one goal,
+--     action or review), so a plan's timeline is one indexed query; the detail is typed columns, present keys only;
+--   - a goal's Combine target is columns (frozen at creation); a review's goal snapshots are rows, their cited evidence
+--     references child rows (no JSON); completion is worked out from the counts;
+--   - a review's superseded_by is not stored (it is the review whose supersedes names it, unique); share scopes are
+--     three flags; a plan's origin_trial_id is gone (nothing ever set it);
+--   - player, guardian, cited-record and actor ids carry no key (tolerant); organisations are RESTRICT; keys inside the
+--     domain are RESTRICT; child rows cascade with their owner.
 
--- source: db.developmentPlans  created at m21/index.mjs:525
--- owner/writer: m21/index.mjs (same routes mounted on player/guardian/org routers)
--- lifecycle: status draft -> active -> paused | completed -> ... -> archived (PLAN_TRANSITIONS);
---   archived is terminal and read-only; completed can be reopened; never deleted;
---   max 5 non-(archived|completed) per (player, owner kind, owner org)
--- mapping:
---   id -> id (devplan-*)
---   playerId -> player_id
---   owner.kind -> owner_kind
---   owner.orgId -> owner_org_id (null for player-owned)
---   owner.orgName -> owner_org_name
---   createdBy{kind,id,name} -> created_by_kind / created_by_id / created_by_name
---     (kind 'player' | 'guardian' | 'org' — 'org' carries an org_user id)
---   title -> title (<=120)
---   status -> status
---   visibility -> visibility (VISIBILITY_BY_OWNER: player -> private|player_guardian|shared_with_org; org -> org_private|player_guardian)
---   sharedWithOrgIds[] -> development_plan_shares (child; player-owned plans only; cleared when visibility narrows)
---   startDate -> start_at (epoch ms: parseDate yields an instant; defaults to createdAt)
---   nextReviewAt -> next_review_at
---   endDate -> end_at (epoch ms instant, not a calendar day)
---   templateId -> template_id
---   originObjectiveId -> origin_objective_id (M12 bridge, validated for the same player)
---   originTrialId -> origin_trial_id (ALWAYS null today: written as null, never set; kept nullable, no FK)
---   createdAt / updatedAt -> created_at / updated_at
---   rev / revAt / revBy{userId,name} -> rev / rev_at / rev_by_user_id / rev_by_name
---   completedAt / archivedAt -> completed_at / archived_at
---   history[] -> development_plans_history (timeline is projected from it; no separate event log)
--- notes: minors read-only on own plan; guardian manages while minor; org access
---   needs orgCanSee + ownership/share. Read patterns: list scan with
---   (player_id[, status]); active-count per (player_id, owner_kind, owner_org_id, status);
---   idempotent-create match (player_id, title, created_by_id, created_at window).
 CREATE TABLE development_plans (
-  id                   TEXT PRIMARY KEY,
-  player_id            TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  owner_kind           TEXT NOT NULL CHECK (owner_kind IN ('player','org')),
-  owner_org_id         TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  owner_org_name       TEXT,                      -- snapshot
-  created_by_kind      TEXT NOT NULL CHECK (created_by_kind IN ('player','guardian','org')),
-  created_by_id        TEXT NOT NULL,
-  created_by_name      TEXT,                      -- snapshot
-  title                TEXT NOT NULL,
-  status               TEXT NOT NULL CHECK (status IN ('draft','active','paused','completed','archived')),
-  visibility           TEXT NOT NULL CHECK (visibility IN ('private','player_guardian','shared_with_org','org_private')),
-  start_at             INTEGER NOT NULL,
-  next_review_at       INTEGER,
-  end_at               INTEGER,
-  template_id          TEXT CHECK (template_id IS NULL OR template_id IN ('technical_development','positional_development','trial_follow_up')),
-  origin_objective_id  TEXT REFERENCES dev_objectives(id) ON DELETE SET NULL,
-  origin_trial_id      TEXT,                      -- never set today
-  created_at           INTEGER NOT NULL,
-  updated_at           INTEGER NOT NULL,
-  rev                  INTEGER NOT NULL DEFAULT 1,
-  rev_at               INTEGER,
-  rev_by_user_id       TEXT,
-  rev_by_name          TEXT,                      -- snapshot
-  completed_at         INTEGER,
-  archived_at          INTEGER,
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  owner_kind                               TEXT NOT NULL CHECK (owner_kind IN ('player','org')),
+  owner_org_id                             TEXT CHECK (owner_org_id IS NULL OR length(owner_org_id) <= 80 AND length(owner_org_id) > 0),
+  owner_org_name                           TEXT CHECK (owner_org_name IS NULL OR length(owner_org_name) <= 200),
+  created_by_kind                          TEXT NOT NULL CHECK (created_by_kind IN ('player','guardian','org')),
+  created_by_id                            TEXT NOT NULL CHECK (length(created_by_id) <= 80 AND length(created_by_id) > 0),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  title                                    TEXT NOT NULL CHECK (length(title) <= 120 AND length(title) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('draft','active','paused','completed','archived')),
+  visibility                               TEXT NOT NULL CHECK (visibility IN ('private','player_guardian','shared_with_org','org_private')),
+  start_at                                 INTEGER NOT NULL,
+  next_review_at                           INTEGER,
+  end_at                                   INTEGER,
+  template_id                              TEXT CHECK (template_id IS NULL OR template_id IN ('technical_development','positional_development','trial_follow_up')),
+  origin_objective_id                      TEXT CHECK (origin_objective_id IS NULL OR length(origin_objective_id) <= 80 AND length(origin_objective_id) > 0),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_user_id                           TEXT CHECK (rev_by_user_id IS NULL OR length(rev_by_user_id) <= 80 AND length(rev_by_user_id) > 0),
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  completed_at                             INTEGER,
+  archived_at                              INTEGER,
+  FOREIGN KEY (owner_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (origin_objective_id) REFERENCES dev_objectives(id) ON DELETE RESTRICT,
   CHECK ((owner_kind = 'org') = (owner_org_id IS NOT NULL)),
-  CHECK ((owner_kind = 'player' AND visibility IN ('private','player_guardian','shared_with_org'))
-      OR (owner_kind = 'org' AND visibility IN ('org_private','player_guardian')))
+  CHECK (owner_kind <> 'player' OR visibility IN ('private','player_guardian','shared_with_org')),
+  CHECK (owner_kind <> 'org' OR visibility IN ('org_private','player_guardian')),
+  CHECK (status <> 'completed' OR completed_at IS NOT NULL),
+  CHECK (status <> 'archived' OR archived_at IS NOT NULL)
 ) STRICT;
-CREATE INDEX development_plans_player_owner ON development_plans (player_id, owner_kind, owner_org_id, status);
+CREATE INDEX development_plans_player ON development_plans (player_id, owner_kind, owner_org_id, status);
 CREATE INDEX development_plans_owner_org ON development_plans (owner_org_id, updated_at);
 
--- source: db.developmentPlans[].sharedWithOrgIds[]  m21/index.mjs:688 (share) / :677 (revoke) / :603 (narrowing clears all)
--- owner/writer: m21/index.mjs (player-owned plans only; the org must be able to see the player)
--- mapping: each org id -> (plan_id, org_id); the share/unshare moment is in development_plans_history
 CREATE TABLE development_plan_shares (
-  plan_id  TEXT NOT NULL REFERENCES development_plans(id) ON DELETE CASCADE,
-  org_id   TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  PRIMARY KEY (plan_id, org_id)
+  plan_id                                  TEXT NOT NULL CHECK (length(plan_id) > 0 AND length(plan_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) > 0 AND length(org_id) <= 80),
+  FOREIGN KEY (plan_id) REFERENCES development_plans(id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  PRIMARY KEY (plan_id, org_id),
+  UNIQUE (plan_id, ord)
 ) STRICT;
 CREATE INDEX development_plan_shares_org ON development_plan_shares (org_id);
 
--- source: db.developmentPlans[].history[]  via audit() m12/shared.mjs:70 (writeHistory, m21/index.mjs:165)
--- owner/writer: m21/index.mjs
--- lifecycle: append-only; actions are TIMELINE_ACTIONS keys (plan_created, plan_activated,
---   plan_paused, plan_completed, plan_archived, plan_shared, plan_unshared,
---   plan_visibility_changed) plus 'plan_updated' fallback
--- mapping: id -> id (aud-*); (parent) -> plan_id; at -> at; byKind -> by_kind; byId -> by_id; byName -> by_name; action -> action; detail -> detail_json (server-written ids/status names only)
-CREATE TABLE development_plans_history (
-  id           TEXT PRIMARY KEY,
-  plan_id      TEXT NOT NULL REFERENCES development_plans(id) ON DELETE CASCADE,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT,
-  by_id        TEXT,
-  by_name      TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
-) STRICT;
-CREATE INDEX development_plans_history_plan_at ON development_plans_history (plan_id, at);
-
--- source: db.developmentGoals  created at m21/index.mjs:1134 (newGoal)
--- owner/writer: m21/index.mjs (create with plan or later; patch with rev guard)
--- lifecycle: status not_started -> in_progress -> blocked | achieved | stopped (GOAL_TRANSITIONS,
---   achieved/stopped reversible); never deleted; max 20 per plan
--- mapping:
---   id -> id (devgoal-*)
---   planId -> plan_id
---   playerId -> player_id (denormalised from the plan)
---   title -> title (<=120)
---   description -> description (<=1000)
---   category -> category
---   status -> status
---   blockReason -> block_reason (set only while blocked)
---   blockNote -> block_note (<=300)
---   targetDate -> target_at (epoch ms instant from parseDate)
---   target{sourceType,protocolId,protocolVersion,metricType,metricUnit,operator,value,protocolTitle,direction,precision}
---     -> target_source_type / target_protocol_id / target_protocol_version / target_metric_type /
---        target_metric_unit / target_operator / target_value / target_protocol_title /
---        target_direction / target_precision (all null when no target; frozen at creation)
---   originObjectiveId -> origin_objective_id
---   createdBy{kind,id,name} -> created_by_kind / created_by_id / created_by_name
---   createdAt / updatedAt / completedAt -> created_at / updated_at / completed_at
---   rev / revAt / revBy{userId,name} -> rev / rev_at / rev_by_user_id / rev_by_name
---   history[] -> development_goals_history
--- notes: targetState is derived at read from combine_attempts (never stored);
---   meeting a target never auto-achieves. No health vocabulary by design.
 CREATE TABLE development_goals (
-  id                       TEXT PRIMARY KEY,
-  plan_id                  TEXT NOT NULL REFERENCES development_plans(id) ON DELETE CASCADE,
-  player_id                TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  title                    TEXT NOT NULL,
-  description              TEXT,
-  category                 TEXT NOT NULL CHECK (category IN ('technical','tactical','physical','psychological','match_understanding','position_specific','other')),
-  status                   TEXT NOT NULL CHECK (status IN ('not_started','in_progress','blocked','achieved','stopped')),
-  block_reason             TEXT CHECK (block_reason IS NULL OR block_reason IN ('waiting_for_assessment','schedule','facility','coach_review','other')),
-  block_note               TEXT,
-  target_at                INTEGER,
-  target_source_type       TEXT CHECK (target_source_type IS NULL OR target_source_type IN ('combine_attempt')),
-  target_protocol_id       TEXT,
-  target_protocol_version  INTEGER,
-  target_metric_type       TEXT CHECK (target_metric_type IS NULL OR target_metric_type IN ('count','time','distance','duration','set','percentage')),
-  target_metric_unit       TEXT,
-  target_operator          TEXT CHECK (target_operator IS NULL OR target_operator IN ('gte','gt','lte','lt','eq')),
-  target_value             REAL,
-  target_protocol_title    TEXT,
-  target_direction         TEXT CHECK (target_direction IS NULL OR target_direction IN ('higher','lower')),
-  target_precision         TEXT CHECK (target_precision IS NULL OR target_precision IN ('integer','tenths','hundredths','centimetres')),
-  origin_objective_id      TEXT REFERENCES dev_objectives(id) ON DELETE SET NULL,
-  created_by_kind          TEXT NOT NULL CHECK (created_by_kind IN ('player','guardian','org')),
-  created_by_id            TEXT NOT NULL,
-  created_by_name          TEXT,                  -- snapshot
-  created_at               INTEGER NOT NULL,
-  updated_at               INTEGER NOT NULL,
-  completed_at             INTEGER,
-  rev                      INTEGER NOT NULL DEFAULT 1,
-  rev_at                   INTEGER,
-  rev_by_user_id           TEXT,
-  rev_by_name              TEXT,                  -- snapshot
-  CHECK ((target_source_type IS NULL) = (target_protocol_id IS NULL))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  plan_id                                  TEXT NOT NULL CHECK (length(plan_id) <= 80 AND length(plan_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  title                                    TEXT NOT NULL CHECK (length(title) <= 120 AND length(title) > 0),
+  description                              TEXT CHECK (description IS NULL OR length(description) <= 1000),
+  category                                 TEXT NOT NULL CHECK (category IN ('technical','tactical','physical','psychological','match_understanding','position_specific','other')),
+  status                                   TEXT NOT NULL CHECK (status IN ('not_started','in_progress','blocked','achieved','stopped')),
+  block_reason                             TEXT CHECK (block_reason IS NULL OR block_reason IN ('waiting_for_assessment','schedule','facility','coach_review','other')),
+  block_note                               TEXT CHECK (block_note IS NULL OR length(block_note) <= 300),
+  target_at                                INTEGER,
+  target_source_type                       TEXT CHECK (target_source_type IS NULL OR target_source_type IN ('combine_attempt')),
+  target_protocol_id                       TEXT CHECK (target_protocol_id IS NULL OR length(target_protocol_id) <= 80 AND length(target_protocol_id) > 0),
+  target_protocol_version                  INTEGER,
+  target_metric_type                       TEXT CHECK (target_metric_type IS NULL OR target_metric_type IN ('count','time','distance','duration','set','percentage')),
+  target_metric_unit                       TEXT CHECK (target_metric_unit IS NULL OR length(target_metric_unit) <= 40 AND length(target_metric_unit) > 0),
+  target_operator                          TEXT CHECK (target_operator IS NULL OR target_operator IN ('gte','gt','lte','lt','eq')),
+  target_value                             REAL,
+  target_protocol_title                    TEXT CHECK (target_protocol_title IS NULL OR length(target_protocol_title) <= 120 AND length(target_protocol_title) > 0),
+  target_direction                         TEXT CHECK (target_direction IS NULL OR target_direction IN ('higher','lower')),
+  target_precision                         TEXT CHECK (target_precision IS NULL OR target_precision IN ('integer','tenths','hundredths','centimetres')),
+  origin_objective_id                      TEXT CHECK (origin_objective_id IS NULL OR length(origin_objective_id) <= 80 AND length(origin_objective_id) > 0),
+  created_by_kind                          TEXT NOT NULL CHECK (created_by_kind IN ('player','guardian','org')),
+  created_by_id                            TEXT NOT NULL CHECK (length(created_by_id) <= 80 AND length(created_by_id) > 0),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  completed_at                             INTEGER,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_user_id                           TEXT CHECK (rev_by_user_id IS NULL OR length(rev_by_user_id) <= 80 AND length(rev_by_user_id) > 0),
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  FOREIGN KEY (plan_id) REFERENCES development_plans(id) ON DELETE RESTRICT,
+  FOREIGN KEY (origin_objective_id) REFERENCES dev_objectives(id) ON DELETE RESTRICT,
+  CHECK ((status = 'blocked') = (block_reason IS NOT NULL)),
+  CHECK (status = 'blocked' OR block_note IS NULL),
+  CHECK ((status = 'achieved') = (completed_at IS NOT NULL))
 ) STRICT;
-CREATE INDEX development_goals_plan_created ON development_goals (plan_id, created_at);
+CREATE INDEX development_goals_plan ON development_goals (plan_id);
 
--- source: db.developmentGoals[].history[]  via audit()
--- lifecycle: append-only; actions goal_created, goal_updated, goal_status_changed, goal_target_set, evidence_linked, evidence_unlinked
--- mapping: as development_plans_history with goal_id
-CREATE TABLE development_goals_history (
-  id           TEXT PRIMARY KEY,
-  goal_id      TEXT NOT NULL REFERENCES development_goals(id) ON DELETE CASCADE,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT,
-  by_id        TEXT,
-  by_name      TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
-) STRICT;
-CREATE INDEX development_goals_history_goal_at ON development_goals_history (goal_id, at);
-
--- source: db.developmentActions  created at m21/index.mjs:840
--- owner/writer: m21/index.mjs (create under a goal; patch — an assignee may tick their own)
--- lifecycle: status todo -> in_progress -> done | blocked | cancelled (ACTION_TRANSITIONS; cancelled terminal);
---   never deleted; max 20 per goal; no rev (deliberately unversioned)
--- mapping:
---   id -> id (devact-*)
---   planId -> plan_id
---   goalId -> goal_id
---   playerId -> player_id (denormalised from the plan)
---   type -> type
---   title -> title (<=120)
---   dueAt -> due_at
---   assignee{kind,id,name} -> assignee_kind / assignee_id / assignee_name
---     (player = the plan's player; guardian = a guardian of the minor; org_user = current staff of the owning org)
---   status -> status
---   createdBy{kind,id,name} -> created_by_kind / created_by_id / created_by_name
---   createdAt / updatedAt / completedAt -> created_at / updated_at / completed_at
---   history[] -> development_actions_history
--- notes: due/overdue is derived at read; there is no scheduler. Read patterns:
---   collectPlan (plan_id OR goal_id in plan's goals); per goal ordered by due_at.
 CREATE TABLE development_actions (
-  id               TEXT PRIMARY KEY,
-  plan_id          TEXT NOT NULL REFERENCES development_plans(id) ON DELETE CASCADE,
-  goal_id          TEXT NOT NULL REFERENCES development_goals(id) ON DELETE CASCADE,
-  player_id        TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  type             TEXT NOT NULL CHECK (type IN ('training','assessment','video_review','match_objective','coach_review','combine','box_cam','evidence_request','custom')),
-  title            TEXT NOT NULL,
-  due_at           INTEGER,
-  assignee_kind    TEXT CHECK (assignee_kind IS NULL OR assignee_kind IN ('player','guardian','org_user')),
-  assignee_id      TEXT,
-  assignee_name    TEXT,                          -- snapshot
-  status           TEXT NOT NULL CHECK (status IN ('todo','in_progress','done','blocked','cancelled')),
-  created_by_kind  TEXT NOT NULL CHECK (created_by_kind IN ('player','guardian','org')),
-  created_by_id    TEXT NOT NULL,
-  created_by_name  TEXT,                          -- snapshot
-  created_at       INTEGER NOT NULL,
-  updated_at       INTEGER NOT NULL,
-  completed_at     INTEGER,
-  CHECK ((assignee_kind IS NULL) = (assignee_id IS NULL))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  plan_id                                  TEXT NOT NULL CHECK (length(plan_id) <= 80 AND length(plan_id) > 0),
+  goal_id                                  TEXT NOT NULL CHECK (length(goal_id) <= 80 AND length(goal_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  type                                     TEXT NOT NULL CHECK (type IN ('training','assessment','video_review','match_objective','coach_review','combine','box_cam','evidence_request','custom')),
+  title                                    TEXT NOT NULL CHECK (length(title) <= 120 AND length(title) > 0),
+  due_at                                   INTEGER,
+  assignee_kind                            TEXT CHECK (assignee_kind IS NULL OR assignee_kind IN ('player','guardian','org_user')),
+  assignee_id                              TEXT CHECK (assignee_id IS NULL OR length(assignee_id) <= 80 AND length(assignee_id) > 0),
+  assignee_name                            TEXT CHECK (assignee_name IS NULL OR length(assignee_name) <= 200),
+  status                                   TEXT NOT NULL CHECK (status IN ('todo','in_progress','done','blocked','cancelled')),
+  created_by_kind                          TEXT NOT NULL CHECK (created_by_kind IN ('player','guardian','org')),
+  created_by_id                            TEXT NOT NULL CHECK (length(created_by_id) <= 80 AND length(created_by_id) > 0),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  completed_at                             INTEGER,
+  FOREIGN KEY (plan_id) REFERENCES development_plans(id) ON DELETE RESTRICT,
+  FOREIGN KEY (goal_id) REFERENCES development_goals(id) ON DELETE RESTRICT,
+  CHECK ((status = 'done') = (completed_at IS NOT NULL))
 ) STRICT;
 CREATE INDEX development_actions_plan ON development_actions (plan_id);
-CREATE INDEX development_actions_goal_due ON development_actions (goal_id, due_at, created_at);
+CREATE INDEX development_actions_goal ON development_actions (goal_id);
 
--- source: db.developmentActions[].history[]  via audit()
--- lifecycle: append-only; actions action_created, action_status_changed, action_completed, evidence_linked, evidence_unlinked
-CREATE TABLE development_actions_history (
-  id           TEXT PRIMARY KEY,
-  action_id    TEXT NOT NULL REFERENCES development_actions(id) ON DELETE CASCADE,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT,
-  by_id        TEXT,
-  by_name      TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
-) STRICT;
-CREATE INDEX development_actions_history_action_at ON development_actions_history (action_id, at);
-
--- source: db.developmentEvidenceLinks  created at m21/index.mjs:951 (EVIDENCE_LINK_FIELDS is the complete key set)
--- owner/writer: m21/index.mjs (link to a goal or an action; DELETE /development/evidence/:linkId is a HARD DELETE)
--- lifecycle: no status; hard-deleted on unlink (the unlink is recorded in the holder's history)
--- mapping:
---   id -> id (devlink-*)
---   planId -> plan_id
---   goalId -> goal_id   } exactly one of the two is set
---   actionId -> action_id }
---   playerId -> player_id (the plan's player; ownership of the cited record is checked at write and read)
---   sourceType -> source_type
---   sourceId -> source_id (polymorphic, no FK: passport_evidence -> evidence(id),
---     assessment -> assessments(id), box_cam_session -> box_sessions(id),
---     combine_attempt -> combine_attempts(id), trial_report -> trials(id))
---   linkedByKind / linkedById / linkedByName -> linked_by_kind / linked_by_id / linked_by_name
---   linkedAt -> linked_at
--- notes: a link stores a reference and no content — everything is resolved live.
---   UNIQUE (target, source_type, source_id) enforced by code today (max 30 per target).
 CREATE TABLE development_evidence_links (
-  id              TEXT PRIMARY KEY,
-  plan_id         TEXT NOT NULL REFERENCES development_plans(id) ON DELETE CASCADE,
-  goal_id         TEXT REFERENCES development_goals(id) ON DELETE CASCADE,
-  action_id       TEXT REFERENCES development_actions(id) ON DELETE CASCADE,
-  player_id       TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  source_type     TEXT NOT NULL CHECK (source_type IN ('passport_evidence','assessment','box_cam_session','combine_attempt','trial_report')),
-  source_id       TEXT NOT NULL,
-  linked_by_kind  TEXT NOT NULL CHECK (linked_by_kind IN ('player','guardian','org')),
-  linked_by_id    TEXT NOT NULL,
-  linked_by_name  TEXT,                           -- snapshot
-  linked_at       INTEGER NOT NULL,
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  plan_id                                  TEXT NOT NULL CHECK (length(plan_id) <= 80 AND length(plan_id) > 0),
+  goal_id                                  TEXT CHECK (goal_id IS NULL OR length(goal_id) <= 80 AND length(goal_id) > 0),
+  action_id                                TEXT CHECK (action_id IS NULL OR length(action_id) <= 80 AND length(action_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  source_type                              TEXT NOT NULL CHECK (source_type IN ('passport_evidence','assessment','box_cam_session','combine_attempt','trial_report')),
+  source_id                                TEXT NOT NULL CHECK (length(source_id) <= 80 AND length(source_id) > 0),
+  linked_by_kind                           TEXT NOT NULL CHECK (linked_by_kind IN ('player','guardian','org')),
+  linked_by_id                             TEXT NOT NULL CHECK (length(linked_by_id) <= 80 AND length(linked_by_id) > 0),
+  linked_by_name                           TEXT CHECK (linked_by_name IS NULL OR length(linked_by_name) <= 200),
+  linked_at                                INTEGER NOT NULL,
+  FOREIGN KEY (plan_id) REFERENCES development_plans(id) ON DELETE RESTRICT,
+  FOREIGN KEY (goal_id) REFERENCES development_goals(id) ON DELETE RESTRICT,
+  FOREIGN KEY (action_id) REFERENCES development_actions(id) ON DELETE RESTRICT,
   CHECK ((goal_id IS NULL) <> (action_id IS NULL))
 ) STRICT;
 CREATE UNIQUE INDEX development_evidence_links_target_source ON development_evidence_links (coalesce(goal_id, action_id), source_type, source_id);
 CREATE INDEX development_evidence_links_plan ON development_evidence_links (plan_id);
 
--- source: db.developmentReviews  created at m21/index.mjs:1035
--- owner/writer: m21/index.mjs (submit; share summary later; supersede = new row)
--- lifecycle: APPEND-ONLY — no PATCH route exists; corrections are a new review
---   naming `supersedes`, and the old row gets `supersededBy`. Never deleted.
--- mapping:
---   id -> id (devrev-*)
---   planId -> plan_id
---   playerId -> player_id
---   reviewerKind -> reviewer_kind (follows from who the viewer is, never chosen)
---   reviewedBy{kind,id,name} -> reviewed_by_kind / reviewed_by_id / reviewed_by_name
---   orgId -> org_id (coach reviews only)
---   reviewedAt -> reviewed_at
---   sharedSummary -> shared_summary (<=2000)
---   internalNote -> internal_note (<=2000; club-private — stripped unless access.readInternal; never shared)
---   goalSnapshots[] -> development_review_goal_snapshots (child table — see its header for why)
---   nextReviewAt -> next_review_at
---   sharedWithPlayerAt -> shared_with_player_at (reflections: always = created_at)
---   shareScopes[] -> share_summary / share_goals / share_actions (SHARE_SCOPES is a fixed
---     3-value set; three booleans replace the array exactly)
---   supersedes -> supersedes_review_id
---   supersededBy -> superseded_by_review_id
---   createdAt -> created_at
---   history[] -> development_reviews_history
--- notes: internal_note is the most sensitive column in this file (club talking
---   to itself about a player who may read the same plan). Read patterns:
---   (plan_id, reviewed_at desc, id) cursor pages; idempotent-create match on
---   (plan_id, reviewed_by_id, shared_summary, internal_note, created_at window).
 CREATE TABLE development_reviews (
-  id                        TEXT PRIMARY KEY,
-  plan_id                   TEXT NOT NULL REFERENCES development_plans(id) ON DELETE CASCADE,
-  player_id                 TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  reviewer_kind             TEXT NOT NULL CHECK (reviewer_kind IN ('player_reflection','guardian_reflection','coach_review')),
-  reviewed_by_kind          TEXT NOT NULL CHECK (reviewed_by_kind IN ('player','guardian','org')),
-  reviewed_by_id            TEXT NOT NULL,
-  reviewed_by_name          TEXT,                 -- snapshot
-  org_id                    TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  reviewed_at               INTEGER NOT NULL,
-  shared_summary            TEXT,
-  internal_note             TEXT,                 -- club-private
-  next_review_at            INTEGER,
-  shared_with_player_at     INTEGER,
-  share_summary             INTEGER NOT NULL DEFAULT 0 CHECK (share_summary IN (0,1)),
-  share_goals               INTEGER NOT NULL DEFAULT 0 CHECK (share_goals IN (0,1)),
-  share_actions             INTEGER NOT NULL DEFAULT 0 CHECK (share_actions IN (0,1)),
-  supersedes_review_id      TEXT REFERENCES development_reviews(id) ON DELETE RESTRICT,
-  superseded_by_review_id   TEXT REFERENCES development_reviews(id) ON DELETE RESTRICT,
-  created_at                INTEGER NOT NULL,
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  plan_id                                  TEXT NOT NULL CHECK (length(plan_id) <= 80 AND length(plan_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  reviewer_kind                            TEXT NOT NULL CHECK (reviewer_kind IN ('player_reflection','guardian_reflection','coach_review')),
+  reviewed_by_kind                         TEXT NOT NULL CHECK (reviewed_by_kind IN ('player','guardian','org')),
+  reviewed_by_id                           TEXT NOT NULL CHECK (length(reviewed_by_id) <= 80 AND length(reviewed_by_id) > 0),
+  reviewed_by_name                         TEXT CHECK (reviewed_by_name IS NULL OR length(reviewed_by_name) <= 200),
+  org_id                                   TEXT CHECK (org_id IS NULL OR length(org_id) <= 80 AND length(org_id) > 0),
+  reviewed_at                              INTEGER NOT NULL,
+  shared_summary                           TEXT CHECK (shared_summary IS NULL OR length(shared_summary) <= 2000),
+  internal_note                            TEXT CHECK (internal_note IS NULL OR length(internal_note) <= 2000),
+  next_review_at                           INTEGER,
+  shared_with_player_at                    INTEGER,
+  supersedes_review_id                     TEXT CHECK (supersedes_review_id IS NULL OR length(supersedes_review_id) <= 80 AND length(supersedes_review_id) > 0),
+  created_at                               INTEGER NOT NULL,
+  share_summary                            INTEGER NOT NULL CHECK (share_summary IN (0,1)),
+  share_goals                              INTEGER NOT NULL CHECK (share_goals IN (0,1)),
+  share_actions                            INTEGER NOT NULL CHECK (share_actions IN (0,1)),
+  FOREIGN KEY (plan_id) REFERENCES development_plans(id) ON DELETE RESTRICT,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (supersedes_review_id) REFERENCES development_reviews(id) ON DELETE RESTRICT,
   CHECK (shared_summary IS NOT NULL OR internal_note IS NOT NULL),
-  CHECK ((reviewer_kind = 'coach_review') = (org_id IS NOT NULL))
+  CHECK ((reviewer_kind = 'coach_review') = (org_id IS NOT NULL)),
+  CHECK (reviewer_kind = 'coach_review' OR internal_note IS NULL),
+  CHECK ((share_summary + share_goals + share_actions = 0) OR shared_with_player_at IS NOT NULL)
 ) STRICT;
-CREATE INDEX development_reviews_plan_reviewed ON development_reviews (plan_id, reviewed_at, id);
-CREATE UNIQUE INDEX development_reviews_supersedes ON development_reviews (supersedes_review_id);
+CREATE INDEX development_reviews_plan ON development_reviews (plan_id);
+CREATE INDEX development_reviews_org ON development_reviews (org_id) WHERE org_id IS NOT NULL;
+CREATE UNIQUE INDEX development_reviews_supersedes ON development_reviews (supersedes_review_id) WHERE supersedes_review_id IS NOT NULL;
 
--- source: db.developmentReviews[].goalSnapshots[]  built at m21/reviews.mjs:35 (buildGoalSnapshots)
--- owner/writer: m21/index.mjs (write-once with the review)
--- lifecycle: immutable point-in-time copy of goal state at review time
--- why a child table and not JSON: each snapshot is a fixed, typed row keyed by
---   a real goal id — status, four action counts, a target state and a measured
---   value — and the whole value of a review is reading "what was true then" per
---   goal next to what is true now. A row per goal lets that comparison be a
---   join (review snapshot vs development_goals) rather than a JSON walk, and
---   keeps the sensitive text (summary/note) on the parent only.
--- mapping:
---   goalId -> goal_id
---   title -> title (snapshot) ; category -> category (snapshot) ; status -> status (snapshot)
---   actionCounts.total / .done / .blocked / .cancelled -> actions_total / actions_done / actions_blocked / actions_cancelled
---   completion{done, of, phrase} -> derived, not stored: of = total - cancelled; phrase = "<done> of <of> actions completed"
---   evidenceRefs[] -> evidence_refs_json (retained JSON: frozen list of {sourceType, sourceId}
---     references cited at review time — references, not evidence; resolved live when read, never queried)
---   targetStateAtReview{state, reason, measured} -> target_state / target_reason / target_measured
---   (array position) -> position
-CREATE TABLE development_review_goal_snapshots (
-  review_id          TEXT NOT NULL REFERENCES development_reviews(id) ON DELETE CASCADE,
-  goal_id            TEXT NOT NULL REFERENCES development_goals(id) ON DELETE RESTRICT,
-  position           INTEGER NOT NULL,
-  title              TEXT NOT NULL,                -- snapshot
-  category           TEXT NOT NULL,                -- snapshot
-  status             TEXT NOT NULL CHECK (status IN ('not_started','in_progress','blocked','achieved','stopped')),
-  actions_total      INTEGER NOT NULL DEFAULT 0,
-  actions_done       INTEGER NOT NULL DEFAULT 0,
-  actions_blocked    INTEGER NOT NULL DEFAULT 0,
-  actions_cancelled  INTEGER NOT NULL DEFAULT 0,
-  evidence_refs_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(evidence_refs_json)),
-  target_state       TEXT CHECK (target_state IS NULL OR target_state IN ('target_met','target_not_met','no_current_valid_measurement')),
-  target_reason      TEXT CHECK (target_reason IS NULL OR target_reason IN ('no_attempts','no_production_valid_attempt','protocol_version_mismatch','measurement_invalidated')),
-  target_measured    REAL,
-  PRIMARY KEY (review_id, goal_id)
+CREATE TABLE development_review_snapshots (
+  review_id                                TEXT NOT NULL CHECK (length(review_id) <= 80 AND length(review_id) > 0),
+  ord                                      INTEGER NOT NULL,
+  goal_id                                  TEXT NOT NULL CHECK (length(goal_id) <= 80 AND length(goal_id) > 0),
+  title                                    TEXT NOT NULL CHECK (length(title) <= 120 AND length(title) > 0),
+  category                                 TEXT NOT NULL CHECK (category IN ('technical','tactical','physical','psychological','match_understanding','position_specific','other')),
+  status                                   TEXT NOT NULL CHECK (status IN ('not_started','in_progress','blocked','achieved','stopped')),
+  actions_total                            INTEGER NOT NULL,
+  actions_done                             INTEGER NOT NULL,
+  actions_blocked                          INTEGER NOT NULL,
+  actions_cancelled                        INTEGER NOT NULL,
+  target_state                             TEXT CHECK (target_state IS NULL OR target_state IN ('target_met','target_not_met','no_current_valid_measurement')),
+  target_reason                            TEXT CHECK (target_reason IS NULL OR target_reason IN ('no_attempts','no_production_valid_attempt','protocol_version_mismatch','measurement_invalidated')),
+  target_measured                          REAL,
+  FOREIGN KEY (review_id) REFERENCES development_reviews(id) ON DELETE CASCADE,
+  FOREIGN KEY (goal_id) REFERENCES development_goals(id) ON DELETE RESTRICT,
+  PRIMARY KEY (review_id, goal_id),
+  UNIQUE (review_id, ord),
+  CHECK (ord >= 0),
+  CHECK (actions_total >= 0 AND actions_done >= 0 AND actions_blocked >= 0 AND actions_cancelled >= 0 AND actions_done + actions_blocked + actions_cancelled <= actions_total)
 ) STRICT;
 
--- source: db.developmentReviews[].history[]  via audit()
--- lifecycle: append-only; actions review_submitted, review_shared, review_superseded
-CREATE TABLE development_reviews_history (
-  id           TEXT PRIMARY KEY,
-  review_id    TEXT NOT NULL REFERENCES development_reviews(id) ON DELETE CASCADE,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT,
-  by_id        TEXT,
-  by_name      TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+CREATE TABLE development_review_snapshot_refs (
+  review_id                                TEXT NOT NULL CHECK (length(review_id) > 0 AND length(review_id) <= 80),
+  goal_id                                  TEXT NOT NULL CHECK (length(goal_id) > 0 AND length(goal_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  source_type                              TEXT NOT NULL CHECK (source_type IN ('passport_evidence','assessment','box_cam_session','combine_attempt','trial_report')),
+  source_id                                TEXT NOT NULL CHECK (length(source_id) > 0 AND length(source_id) <= 80),
+  FOREIGN KEY (review_id, goal_id) REFERENCES development_review_snapshots(review_id, goal_id) ON DELETE CASCADE,
+  PRIMARY KEY (review_id, goal_id, ord)
 ) STRICT;
-CREATE INDEX development_reviews_history_review_at ON development_reviews_history (review_id, at);
+
+CREATE TABLE development_history (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  plan_id                                  TEXT NOT NULL CHECK (length(plan_id) <= 80 AND length(plan_id) > 0),
+  goal_id                                  TEXT CHECK (goal_id IS NULL OR length(goal_id) <= 80 AND length(goal_id) > 0),
+  action_id                                TEXT CHECK (action_id IS NULL OR length(action_id) <= 80 AND length(action_id) > 0),
+  review_id                                TEXT CHECK (review_id IS NULL OR length(review_id) <= 80 AND length(review_id) > 0),
+  at                                       INTEGER NOT NULL,
+  by_kind                                  TEXT NOT NULL CHECK (by_kind IN ('player','guardian','org')),
+  by_id                                    TEXT NOT NULL CHECK (length(by_id) <= 80 AND length(by_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  action                                   TEXT NOT NULL CHECK (action IN ('plan_created','plan_activated','plan_paused','plan_completed','plan_archived','plan_shared','plan_unshared','plan_visibility_changed','plan_updated','goal_created','goal_updated','goal_status_changed','goal_target_set','action_created','action_status_changed','action_completed','evidence_linked','evidence_unlinked','review_submitted','review_shared','review_superseded')),
+  detail_from                              TEXT CHECK (detail_from IS NULL OR length(detail_from) <= 40 AND length(detail_from) > 0),
+  detail_to                                TEXT CHECK (detail_to IS NULL OR length(detail_to) <= 40 AND length(detail_to) > 0),
+  detail_visibility                        TEXT CHECK (detail_visibility IS NULL OR detail_visibility IN ('private','player_guardian','shared_with_org','org_private')),
+  detail_owner                             TEXT CHECK (detail_owner IS NULL OR detail_owner IN ('player','org')),
+  detail_kind                              TEXT CHECK (detail_kind IS NULL OR length(detail_kind) <= 40 AND length(detail_kind) > 0),
+  detail_protocol_id                       TEXT CHECK (detail_protocol_id IS NULL OR length(detail_protocol_id) <= 80 AND length(detail_protocol_id) > 0),
+  detail_note                              INTEGER CHECK (detail_note IS NULL OR detail_note IN (0,1)),
+  FOREIGN KEY (plan_id) REFERENCES development_plans(id) ON DELETE CASCADE,
+  FOREIGN KEY (goal_id) REFERENCES development_goals(id) ON DELETE CASCADE,
+  FOREIGN KEY (action_id) REFERENCES development_actions(id) ON DELETE CASCADE,
+  FOREIGN KEY (review_id) REFERENCES development_reviews(id) ON DELETE CASCADE,
+  CHECK ((goal_id IS NOT NULL) + (action_id IS NOT NULL) + (review_id IS NOT NULL) <= 1)
+) STRICT;
+CREATE INDEX development_history_plan ON development_history (plan_id);
+CREATE INDEX development_history_goal ON development_history (goal_id) WHERE goal_id IS NOT NULL;
+CREATE INDEX development_history_action ON development_history (action_id) WHERE action_id IS NOT NULL;
+CREATE INDEX development_history_review ON development_history (review_id) WHERE review_id IS NOT NULL;
 
 
 -- =============================================================================

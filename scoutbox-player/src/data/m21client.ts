@@ -179,7 +179,8 @@ const withChild = (a: DevActor, body: Record<string, unknown>) =>
 export interface PlayerM21 {
   catalogue(a: DevActor): Promise<DevelopmentCatalogue>;
   linkable(a: DevActor): Promise<{ items: LinkableEvidence[]; note: string }>;
-  plans(a: DevActor): Promise<{ items: PlanListItem[]; total: number; note: string }>;
+  /** The first page (newest change first); `nextCursor` continues it (S12a). */
+  plans(a: DevActor): Promise<{ items: PlanListItem[]; total: number; nextCursor: string | null; note: string }>;
   plan(a: DevActor, id: string): Promise<DevelopmentPlanView>;
   createPlan(a: DevActor, body: Record<string, unknown>): Promise<DevelopmentPlanView>;
   addGoal(a: DevActor, planId: string, body: Record<string, unknown>): Promise<DevelopmentPlanView>;

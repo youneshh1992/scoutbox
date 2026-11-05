@@ -59,6 +59,11 @@ The player's evidence layer (Passport, verification, provenance, Trust) and the 
 - Objective targets: one Combine metric, one operator and a value, pinned to a protocol version. Only a production-valid Combine result can satisfy one. Box Cam and assessments cannot. States: target_met / target_not_met / no_current_valid_measurement. (M21)
 - Reviews are append-only. A correction supersedes once and only by the original author. Internal notes never reach the player payload. (M21)
 - Minors read but cannot write (the guardian manages). Agencies have no access at all. Room notes and tasks are never copied in. M21 data never enters the Passport, M19 matching, M20 analytics, Trust or Second Look triggers. SSE events are org-private and ids-only. (M21)
+- Since S12a the Hub's records are typed tables written in one unit of work per route (`repositories/development.mjs`). A title, description, note or summary that is not text is refused with `400 FIELD_INVALID` (it used to be turned into text). The plan list pages by cursor, newest change first, with `total` still counting every plan the viewer may read; a limit over 100 or a made-up cursor is refused (the club apps read the first page). (S12a)
+
+**Development objectives and drill guidance (M12 F6, F8)**
+- An objective grows only from feedback a club published: one or two items, each with up to four exercise references and the player's own baseline evidence. Since S12a junk is refused naming the field instead of being cut off or dropped: an item that is not text, a fifth exercise reference, evidence that is not the player's (`EVIDENCE_INVALID`), a `reviewAt` that is not a date (`DATE_INVALID`; it is stored as an instant), progress naming an item of another objective, a non-boolean `enabled` when sharing, and reassessment-outcome evidence that is not the player's. Over-long objective, progress and outcome text is still shortened. (S12a)
+- Drill guidance: the recording instructions are the same for every combine drill. A drill reads as reviewed only once a named person reviewed it through the T&S route; a reviewer name that is not text is refused. (S12a)
 
 **CV provider and Combine gate (M22)**
 - Governing rule: *"A refused measurement is acceptable. A falsely verified measurement is not."* (M22_CV_THREAT_MODEL)
@@ -124,6 +129,6 @@ The player's evidence layer (Passport, verification, provenance, Trust) and the 
 - ✓ The validation gate denies unless `verdict?.pass !== true` is false: `m22/eligibility.mjs:111`. All three protocols `not_completed`: `m22/validation.mjs:54-56`.
 - ✓ Share tokens stored as sha256: `domains/verification/passport/sharing.mjs:32,112`. Minor share gets `GUARDIAN_MANAGED`: `domains/verification/passport/sharing.mjs:55`.
 - ✓ Trust weights must total 100 at boot: `domains/verification/trust/index.mjs:15`.
-- ✓ The development vocabulary is asserted at boot: `m21/index.mjs:84`.
-- ✓ The M21 transition tables match the docs: `m21/shared.mjs:127-211`.
+- ✓ The development vocabulary is asserted at boot: `scoutbox-server/domains/development/hub/index.mjs:84`.
+- ✓ The M21 transition tables match the docs: `scoutbox-server/domains/development/hub/shared.mjs:127-211`.
 - ✓ A trial never creates history: `domains/verification/passport/shared.mjs:196,406` (comments plus logic).

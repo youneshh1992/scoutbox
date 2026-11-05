@@ -296,6 +296,7 @@ export function DevelopmentPanel({ session, playerId, notify }: {
   const load = useCallback(async () => {
     setError(null);
     try {
+      // Reads the first page of plans only; "load more" (list.nextCursor) is needed once a club has more than 50.
       const list = await m21.plans(session, playerId);
       const mine = list.items.filter((p) => p.playerId === playerId || list.items.length === 1);
       setHasPlan(mine.length > 0);

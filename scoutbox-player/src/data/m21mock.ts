@@ -304,7 +304,7 @@ export const m21mock: PlayerM21 = {
     ],
     note: 'Canonical records you can cite. Linking one stores a reference — the evidence itself stays where it lives, and is read live every time.',
   }),
-  plans: async () => ({ items: [listItem()], total: 1, note: 'Plans you can see. ScoutBox does not report how many other plans exist.' }),
+  plans: async () => ({ items: [listItem()], total: 1, nextCursor: null, note: 'Plans you can see. ScoutBox does not report how many other plans exist.' }),
   plan: ok,
   createPlan: async (a, body) => {
     const g = (body.goals as { title?: string; category?: string }[] | undefined) ?? [];

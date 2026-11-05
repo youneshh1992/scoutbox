@@ -39,7 +39,7 @@ import { parseInstant as trialParseInstant, validateTimezone, validateSessionInp
 import { resolveWindow, previousWindow } from '../../m20/metrics.mjs';
 import { briefIsLiveOn, validateRecruitmentBrief } from '../../m18/shared.mjs';
 import { normWhen } from '../../domains/verification/passport/shared.mjs';
-import { parseDate as devParseDate } from '../../m21/shared.mjs';
+import { parseDate as devParseDate } from '../../domains/development/hub/shared.mjs';
 import { SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 

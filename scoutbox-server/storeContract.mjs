@@ -86,18 +86,15 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   deliveryCallbacksSeen: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   deliveryCentreSince: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   deliveryFailInject: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  devObjectives: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
-  developmentActions: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
-  developmentEvidenceLinks: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
-  developmentGoals: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
-  developmentPlans: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
-  developmentReviews: { guarantee: 'migration', owner: 'm21', reason: 'Development Plan collection, guaranteed by the migration registry' },
+  // devObjectives, drillGuidance (the reviews only; the guidance is code), developmentPlans, developmentGoals,
+  // developmentActions, developmentEvidenceLinks, developmentReviews: never a db.* read since S12a — typed tables (migration
+  // 0030), read through repositories/development.mjs (developmentReads). Each db.* name throws; blob step m210_001 is a
+  // recorded no-op.
   // dispatches: no longer a blob collection since S7b — the rows live in dispatches / dispatch_attempts (migration 0010,
   // repositories/dispatches.mjs); the data layer defines a read-only view at db.dispatches (insertion order, attempts
   // nested) and m13/delivery.mjs writes through the repository. S7b filed it as 'migration' after the notifications
   // precedent, but no snapshot migration creates it (notifications is in m182_002's list); the boot proves 'module'.
   dispatches: { guarantee: 'module', owner: 'm13', reason: 'container created by migrateM13 (??= []); since S7b a read-only view over the dispatches table, written only through the dispatches repository' },
-  drillGuidance: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   dynamicWatchlists: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   // emailChallenges: no longer a production db.* read since S6a — the rows live in email_challenges (migration 0008,
   // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free

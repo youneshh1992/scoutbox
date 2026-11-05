@@ -313,7 +313,7 @@ export const demoM21: M21Api = {
     note: 'Canonical records you can cite. Linking one stores a reference — the evidence itself stays where it lives, and is read live every time.',
   }),
   plans: async (_s, playerId) => ({
-    items: [listItem(playerId ?? 'pl-mbuguni')], total: 1,
+    items: [listItem(playerId ?? 'pl-mbuguni')], total: 1, nextCursor: null,
     note: 'Plans you can see. ScoutBox does not report how many other plans exist.',
   }),
   plan: async () => view(),

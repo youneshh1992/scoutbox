@@ -31,8 +31,8 @@
  */
 import {
   COMBINE_PROTOCOLS, combineProtocol, latestCombineProtocol, isProductionValidCombine,
-} from '../m16/combineShared.mjs';
-import { PROVIDERS } from '../m16/drills.mjs';
+} from '../../../m16/combineShared.mjs';
+import { PROVIDERS } from '../../../m16/drills.mjs';
 
 /** Sources a target may measure against. Deliberately one. */
 export const TARGET_SOURCES = Object.freeze(['combine_attempt']);

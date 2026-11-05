@@ -7,6 +7,7 @@ import { registerPassport } from '../domains/scouting/passport.mjs';
 import { registerScouting } from '../domains/scouting/scouting.mjs';
 import { registerJourneys } from '../domains/scouting/journeys.mjs';
 import { registerOperations } from './operations.mjs';
+import { registerObjectives } from '../domains/development/objectives.mjs';
 
 export function registerM12(ctx) {
   migrateM12(ctx.db, ctx.players);
@@ -14,6 +15,7 @@ export function registerM12(ctx) {
   const full = { ...ctx, ...shared };
   registerPassport(full);   // F1 evidence · F10 coach identity
   registerScouting(full);   // F2 assessments · F7 video · F3 recruitment · F4 tactical fit
-  registerJourneys(full);   // F5 opportunities · F6 campaigns · F8 development · F9 trial-day
+  registerJourneys(full);   // F5 opportunities · F6 campaigns · F9 trial-day
+  registerObjectives(full); // F6 drill guidance · F8 development objectives
   registerOperations(full); // F11 outcomes + jobs · F12 uploads/captions/benchmarks
 }

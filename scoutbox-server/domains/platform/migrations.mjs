@@ -154,11 +154,10 @@ export const MIGRATIONS = [
     // holds. Evidence links carry `{sourceType, sourceId}` and no content, so
     // there is nothing here that could ever disagree with the Passport.
     note: 'Development Hub workflow stores: plans, goals, actions, evidence references and reviews.',
-    up(db) {
-      for (const k of [
-        'developmentPlans', 'developmentGoals', 'developmentActions',
-        'developmentEvidenceLinks', 'developmentReviews',
-      ]) db[k] ??= [];
+    up() {
+      // The five stores are tables since S12a (migration 0030, repositories/development.mjs): there is no
+      // db.developmentPlans, db.developmentGoals, db.developmentActions, db.developmentEvidenceLinks or
+      // db.developmentReviews to create. A recorded no-op (its id stays).
     },
   },
   {

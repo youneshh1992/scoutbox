@@ -533,17 +533,40 @@ r = await j('/org/campaigns', {}, bearer(MARIA));
 ok(r.body.items[0]?.id === campId && r.body.items[0].submissions === 1 && r.body.items[0].awaitingReview === 0 && 'nextCursor' in r.body, 'S9d the club campaign list pages, with submission counts');
 r = await j('/player/drill-guidance', {}, bearer(KOLA));
 ok(r.body.items.every((g) => g.coachReview.status === 'unreviewed') && r.body.note.includes('honestly'), 'drill library shows unreviewed guidance as unreviewed');
+// S12a: a review is a row of the development repository; a reviewer that is not text is refused, not coerced.
+const drillId = r.body.items[0].drillId;
+r = await post(`/admin/drill-guidance/${drillId}/review`, { reviewer: 42 }, admin);
+ok(r.status === 400 && r.body.field === 'reviewer', 'S12a a reviewer that is not text is refused');
+r = await post(`/admin/drill-guidance/${drillId}/review`, { reviewer: 'Coach Ade' }, admin);
+ok(r.status === 200 && r.body.guidance.coachReview.status === 'reviewed' && r.body.guidance.coachReview.reviewer === 'Coach Ade', 'S12a a named review is recorded');
+r = await j('/player/drill-guidance', {}, bearer(KOLA));
+ok(r.body.items.find((g) => g.drillId === drillId).coachReview.reviewer === 'Coach Ade' && r.body.items.filter((g) => g.coachReview.status === 'reviewed').length === 1, 'S12a the player sees that one drill reviewed, the rest still unreviewed');
 
 // ======================================================== §8 development
 r = await j('/player/feedback', {}, bearer(KOLA));
 const fbId = r.body.items[0].id;
 r = await post('/player/objectives', { feedbackId: assV, objectives: [{ text: 'x' }] }, bearer(KOLA));
 ok(r.status === 404, 'a PRIVATE assessment cannot seed an objective');
+// S12a: junk is refused naming the field (it used to be cut off, dropped or stored as given).
+r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 42 }] }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'objectives[0].text', 'S12a an objective that is not text is refused');
+r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 'Press', exerciseRefs: ['a', 'b', 'c', 'd', 'e'] }] }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'objectives[0].exerciseRefs', 'S12a a fifth exercise reference is refused, not cut off');
+r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 'Press', baselineEvidenceIds: ['ev-not-mine'] }] }, bearer(KOLA));
+ok(r.status === 400 && r.body.error === 'EVIDENCE_INVALID' && r.body.field === 'objectives[0].baselineEvidenceIds[0]', 'S12a baseline evidence that is not the player\'s is refused, not dropped');
+r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 'Press' }], reviewAt: 'after the break' }, bearer(KOLA));
+ok(r.status === 400 && r.body.error === 'DATE_INVALID' && r.body.field === 'reviewAt', 'S12a a review date that is not a date is refused');
 r = await post('/player/objectives', { feedbackId: fbId, objectives: [{ text: 'Set the press on the trigger, not the chase', baselineEvidenceIds: [ev2] }] }, bearer(KOLA));
 const objId = r.body.objective.id;
 ok(r.status === 201, 'published feedback becomes an agreed objective with baseline evidence');
 r = await post(`/player/objectives/${objId}/progress`, { note: 'Two pressing sessions with Sunday league', evidenceId: ev2 }, bearer(KOLA));
 ok(r.status === 201, 'player records progress against the objective');
+r = await post(`/player/objectives/${objId}/progress`, { note: 'x', objectiveId: 'objx-not-this-one' }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'objectiveId', 'S12a progress against an item of another objective is refused');
+r = await post(`/player/objectives/${objId}/progress`, { note: 42 }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'note', 'S12a a progress note that is not text is refused');
+r = await post(`/player/objectives/${objId}/share`, { orgId: 'org-eastport', enabled: 'yes' }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'enabled', 'S12a sharing needs a true or false');
 r = await post(`/player/objectives/${objId}/reassessment`, {}, bearer(KOLA));
 ok(r.status === 409 && r.body.error === 'SHARING_REQUIRED', 'reassessment needs the player’s explicit sharing choice first');
 r = await j('/org/players/pl-adeyemi/objectives', {}, bearer(MARIA));
@@ -555,6 +578,8 @@ ok(r.body.length === 1, 'shared objective is now club-visible');
 r = await post(`/player/objectives/${objId}/reassessment`, {}, bearer(KOLA));
 const rasId = r.body.reassessment.id;
 ok(r.status === 201, 'authorised reassessment request reaches the club');
+r = await post(`/org/reassessments/${rasId}/outcome`, { note: 'Better.', evidenceIds: ['ev-not-theirs'] }, bearer(MARIA));
+ok(r.status === 400 && r.body.error === 'EVIDENCE_INVALID', 'S12a outcome evidence that is not the player\'s is refused, not dropped');
 r = await post(`/org/reassessments/${rasId}/outcome`, { note: 'Pressing triggers much sharper — evidenced in the linked sessions. Keep the second objective for spring.', evidenceIds: [ev2] }, bearer(MARIA));
 ok(r.status === 200 && r.body.reassessment.outcome.evidenceIds.includes(ev2), 'reviewer records an evidence-supported outcome');
 

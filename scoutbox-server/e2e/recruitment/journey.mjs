@@ -646,7 +646,7 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   const src = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
   const files = (dir) => readdirSync(path.join(ROOT, dir)).filter((f) => f.endsWith('.mjs')).map((f) => `${dir}/${f}`);
-  const serverFiles = ['server.mjs', 'seed.mjs', 'domain.mjs', ...['m12', 'm13', 'm16', 'm18', 'm19', 'm20', 'm21', 'm22', 'm27', 'domains/platform', 'domains/recruitment/rooms', 'domains/recruitment/lifecycle', 'domains/recruitment/offers', 'domains/recruitment/signings', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust', 'domains/agents/core', 'domains/agents/compliance', 'domains/agents/transactions'].flatMap(files)];
+  const serverFiles = ['server.mjs', 'seed.mjs', 'domain.mjs', ...['m12', 'm13', 'm16', 'm18', 'm19', 'm20', 'domains/development/hub', 'm22', 'm27', 'domains/platform', 'domains/recruitment/rooms', 'domains/recruitment/lifecycle', 'domains/recruitment/offers', 'domains/recruitment/signings', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust', 'domains/agents/core', 'domains/agents/compliance', 'domains/agents/transactions'].flatMap(files)];
   const statusWriters = serverFiles.filter((f) => /\.room\.status\s*=[^=]/.test(strip(src(f))));
   neg(statusWriters.length === 1 && statusWriters[0] === 'domains/recruitment/rooms/rooms.mjs', `Z1 exactly one file assigns room.status on a live case: ${statusWriters.join(', ')}`);
   const stageWriters = serverFiles.filter((f) => /(?:kase|room|c|k)\.stage\s*=[^=]/.test(strip(src(f))));

@@ -42,31 +42,19 @@ import { validateEvidenceLink, resolveEvidenceLink, EVIDENCE_LINK_FIELDS } from 
 import { viewerFor, planAccess, canAssign, VIEWER_KINDS, CAPABILITIES } from './permissions.mjs';
 import { collectPlan, buildDevelopmentPlan, planListItem, buildTimeline, TIMELINE_ACTIONS, PLAN_LIMITATION } from './plan.mjs';
 import { buildGoalSnapshots, validateReview, validateSupersession, pageReviews } from './reviews.mjs';
-import { guardRev, bumpRev } from '../domains/platform/concurrency.mjs';
-import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
-import { metrics } from '../m13/enterprise.mjs';
+import { guardRev, bumpRev } from '../../platform/concurrency.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { metrics } from '../../../m13/enterprise.mjs';
+import { readPage, sendPageError, pageSorted } from '../../platform/paging.mjs';
 
 /** How close together two identical creates must be to count as one retry. */
 const IDEMPOTENCY_WINDOW_MS = 60_000;
 
 /**
- * The M21 migration. Additive, idempotent, and — the point of §156/§157 —
- * the ONLY thing that creates these collections.
- *
- * M20 found `db.trials` had never been created by anything but the demo seed,
- * so a snapshot restored without it would have thrown on the first read. Every
- * store below is created here, at boot, on every boot, seeded or not, and the
- * acceptance suite proves it by booting with an empty data directory and
- * reading each one before anything writes.
+ * The Hub's records are tables of the development repository since S12a (migration 0030,
+ * repositories/development.mjs): plans, goals, actions, evidence links and reviews, with one history table. Every
+ * route that writes runs in one unit of work and writes through the repository; nothing here creates a db.* store.
  */
-export function migrateM21(db) {
-  db.developmentPlans ??= [];
-  db.developmentGoals ??= [];
-  db.developmentActions ??= [];
-  db.developmentEvidenceLinks ??= [];
-  db.developmentReviews ??= [];
-}
-
 export const M21_STORES = Object.freeze([
   'developmentPlans', 'developmentGoals', 'developmentActions',
   'developmentEvidenceLinks', 'developmentReviews',
@@ -74,13 +62,16 @@ export const M21_STORES = Object.freeze([
 
 export function registerDevelopment(ctx) {
   const {
-    db, byId, nextId, persistNow, notify, broadcast, findPlayer, orgCanSee, isLead,
-    orgRouter, playerRouter, guardianRouter, audit, isAdult,
+    db, byId, nextId, notify, broadcast, findPlayer, orgCanSee, isLead,
+    orgRouter, playerRouter, guardianRouter, audit, isAdult, unit,
     recruitmentReads, scoutingReads, // §4.3 step 2: the trials (and, since S9a, the evidence) are read through SQL
+    development, developmentReads, // S12a: the Hub's own records
   } = ctx;
-  const reads = { ...recruitmentReads, ...scoutingReads };
+  const reads = { ...recruitmentReads, ...scoutingReads, development: developmentReads };
   if (typeof reads?.trials?.byId !== 'function') throw new TypeError('registerDevelopment needs recruitmentReads (trials) from the data layer');
-  migrateM21(db);
+  if (typeof development?.plans?.create !== 'function' || !developmentReads) throw new TypeError('registerDevelopment needs the development repository from the data layer');
+  /** A plain, editable copy of a stored (read-only) record: a route edits it, then writes it whole through the repository. */
+  const copy = (r) => structuredClone(r);
 
   // Boot assertion. A development server whose own vocabulary has drifted
   // towards a rating does not start.
@@ -170,7 +161,7 @@ export function registerDevelopment(ctx) {
 
   /**
    * A create that is the same create, by the same actor, moments ago, is a
-   * retry rather than a second record (§109).
+   * retry rather than a second record (§109). (Plans ask the repository: reads.development.plans.recentCreate.)
    */
   const recentDuplicate = (list, match, at) =>
     list.find((r) => at - (r.createdAt ?? 0) < IDEMPOTENCY_WINDOW_MS && match(r)) ?? null;
@@ -197,7 +188,7 @@ export function registerDevelopment(ctx) {
    * be probed for existence from outside (§78/§79).
    */
   function resolvePlan(req, res, planId, viewer) {
-    const bundle = collectPlan(db, planId);
+    const bundle = collectPlan(developmentReads, planId);
     const notFound = () => {
       res.status(404).json({ error: 'DEVELOPMENT_PLAN_NOT_FOUND', message: 'No such development plan.' });
       return null;
@@ -226,6 +217,8 @@ export function registerDevelopment(ctx) {
     plan.updatedAt = now();
     bumpRev(plan, { by: { id: actor.id, name: actor.name } });
   };
+  /** Mark the plan changed (its updatedAt and rev), as a write of the plan: called inside the route's unit. */
+  const touchPlan = (planId, actor) => development.plans.update(planId, (d) => { touch(d, actor); });
 
   // ------------------------------------------------------------- catalogue
 
@@ -311,7 +304,8 @@ export function registerDevelopment(ctx) {
       return { error: 'TEMPLATE_UNKNOWN', allowed: PLAN_TEMPLATES.map((t) => t.id), detail: `Unknown template "${templateId}".` };
     }
 
-    return { value: { title: title.value, visibility, startDate: start.value, nextReviewAt: nextReview.value, endDate: end.value, templateId } };
+    // A plan always has a start: an emptied start keeps the stored one (a new plan starts at creation).
+    return { value: { title: title.value, visibility, startDate: start.value ?? existing?.startDate ?? null, nextReviewAt: nextReview.value, endDate: end.value, templateId } };
   }
 
   function validateGoalBody(body, { existing = null }) {
@@ -430,37 +424,42 @@ export function registerDevelopment(ctx) {
     });
 
     // ---- list
+    // S12a: the plans this viewer may read, newest change first then id, paged by cursor (`?limit=&cursor=` →
+    // `{ items, nextCursor, total }`). The candidates come from an indexed query (one player's, one guardian's
+    // children's, or the plans one organisation owns or was shared); the access rule is applied in code, so the page
+    // is cut from the filtered list. The count is of plans THIS viewer may read.
     router.get('/development/plans', (req, res) => {
       const viewer = V(req);
-      const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), M21_LIMITS.listPageMax);
-      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      let page;
+      try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
       const status = req.query.status ? String(req.query.status) : null;
       if (status && !PLAN_STATUSES.includes(status)) {
         return res.status(400).json({ error: 'PLAN_STATUS_UNKNOWN', allowed: PLAN_STATUSES });
       }
       const playerFilter = req.query.playerId ? String(req.query.playerId) : null;
+      const dev = developmentReads.plans;
+      let candidates;
+      if (viewer.kind === 'player_self') candidates = playerFilter && playerFilter !== viewer.playerId ? [] : dev.forPlayers([viewer.playerId], { status });
+      else if (viewer.kind === 'guardian') candidates = dev.forPlayers((viewer.childIds ?? []).filter((id) => !playerFilter || id === playerFilter), { status });
+      else candidates = dev.forOrg(viewer.org.id, { playerId: playerFilter, status });
 
-      const rows = [];
-      for (const plan of db.developmentPlans) {
-        if (playerFilter && plan.playerId !== playerFilter) continue;
-        if (status && plan.status !== status) continue;
+      const readable = [];
+      for (const plan of candidates) {
         const p = findPlayer(plan.playerId);
         if (!p) continue;
         const subject = { ...p, isMinor: !isAdult(p) };
-        const access = planAccess(viewer, plan, { player: subject, orgCanSee, isLead });
-        if (!access.read) continue;
-        const goals = db.developmentGoals.filter((g) => g.planId === plan.id);
-        const actions = db.developmentActions.filter((a) => a.planId === plan.id);
-        rows.push(planListItem({ plan, player: subject, goals, actions, now: now() }));
+        if (planAccess(viewer, plan, { player: subject, orgCanSee, isLead }).read) readable.push({ plan, subject });
       }
-      // Stable: most recently updated first, id as the tie-break.
-      rows.sort((a, b) => b.updatedAt - a.updatedAt || String(a.id).localeCompare(String(b.id)));
+      const keyOf = (r) => [r.plan.updatedAt, r.plan.id];
+      // Most recently updated first, id as the tie-break: the repository's order, and the cursor's.
+      const cmpKey = (a, b) => (b[0] - a[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+      const { items, nextCursor } = pageSorted(readable, page, keyOf, cmpKey);
+      const counts = dev.listCounts(items.map((r) => r.plan.id));
       res.set('X-ScoutBox-Ordering', 'recently_updated_then_id');
       res.json({
-        // The count is of plans THIS viewer may read. A club never learns how
-        // many plans a player has elsewhere (§72).
-        total: rows.length, limit, offset,
-        items: rows.slice(offset, offset + limit),
+        total: readable.length,
+        items: items.map(({ plan, subject }) => planListItem({ plan, player: subject, goals: counts.goals.get(plan.id), actions: counts.actions.get(plan.id), now: now() })),
+        nextCursor,
         note: 'Plans you can see. ScoutBox does not report how many other plans exist.',
       });
     });
@@ -495,20 +494,16 @@ export function registerDevelopment(ctx) {
       }
 
       const ownerOrgId = ownerKind === 'org' ? req.org.id : null;
-      const activeCount = db.developmentPlans.filter((p) => p.playerId === player.id
-        && p.owner.kind === ownerKind && (p.owner.orgId ?? null) === ownerOrgId
-        && !['archived', 'completed'].includes(p.status)).length;
+      const activeCount = developmentReads.plans.openCount(player.id, ownerKind, ownerOrgId);
       if (activeCount >= M21_LIMITS.activePlansPerOwner) {
         return res.status(400).json({ error: 'TOO_MANY_ACTIVE_PLANS', max: M21_LIMITS.activePlansPerOwner, detail: 'Complete or archive an existing plan first.' });
       }
 
       const actor = actorOf(viewer, req);
       const at = now();
-      const dup = recentDuplicate(
-        db.developmentPlans.filter((p) => p.playerId === player.id),
-        (p) => p.title === parsed.value.title && p.createdBy?.id === actor.id && p.owner.kind === ownerKind && (p.owner.orgId ?? null) === ownerOrgId,
-        at,
-      );
+      const dup = developmentReads.plans.recentCreate({
+        playerId: player.id, title: parsed.value.title, createdById: actor.id, ownerKind, ownerOrgId, since: at - IDEMPOTENCY_WINDOW_MS,
+      });
       if (dup) {
         vmetric('development_idempotent_retries');
         const bundle = resolvePlan(req, res, dup.id, viewer);
@@ -542,7 +537,6 @@ export function registerDevelopment(ctx) {
         // Recording an origin is not adopting the record — the objective and
         // its Passport projection are untouched.
         originObjectiveId: originObjectiveFor(req.body?.originObjectiveId, player, res),
-        originTrialId: null,
         createdAt: at, updatedAt: at,
         rev: 1, revAt: at, revBy: { userId: actor.id, name: actor.name },
         completedAt: null, archivedAt: null,
@@ -552,19 +546,15 @@ export function registerDevelopment(ctx) {
 
       writeHistory(plan, actor, 'plan_created', { visibility: plan.visibility, owner: ownerKind });
       if (wantsActive) writeHistory(plan, actor, 'plan_activated');
-      db.developmentPlans.push(plan);
-
-      for (const g of prepared) {
-        const goal = newGoal(plan, g, actor, at);
-        db.developmentGoals.push(goal);
-      }
-
+      unit(() => {
+        development.plans.create(plan);
+        for (const g of prepared) development.goals.create(newGoal(plan, g, actor, at));
+        emitAll('development_plan_created', plan, {});
+        if (plan.owner.kind === 'org' && plan.visibility === 'player_guardian') {
+          tellPlayer(plan, `${req.org.name} shared a development plan with you: ${plan.title}`);
+        }
+      });
       vmetric('development_plan_created');
-      emitAll('development_plan_created', plan, {});
-      if (plan.owner.kind === 'org' && plan.visibility === 'player_guardian') {
-        tellPlayer(plan, `${req.org.name} shared a development plan with you: ${plan.title}`);
-      }
-      persistNow();
       const bundle = resolvePlan(req, res, plan.id, viewer);
       if (!bundle) return undefined;
       return res.status(201).json(project(bundle, viewer));
@@ -585,7 +575,8 @@ export function registerDevelopment(ctx) {
       const viewer = V(req);
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
-      const { plan, access } = bundle;
+      const { access } = bundle;
+      const plan = copy(bundle.plan);
       if (!requireCap(res, access, 'manage', 'You cannot change this plan.')) return undefined;
       if (plan.status === 'archived') return res.status(409).json({ error: 'PLAN_ARCHIVED', detail: 'An archived plan is a historical record and cannot be changed. Its history is preserved.' });
       if (limited('development_plan_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_plan_write'));
@@ -596,20 +587,24 @@ export function registerDevelopment(ctx) {
 
       const actor = actorOf(viewer, req);
       const visibilityChanged = parsed.value.visibility !== plan.visibility;
+      const withdrawn = [];
       Object.assign(plan, parsed.value);
       if (visibilityChanged) {
         writeHistory(plan, actor, 'plan_visibility_changed', { to: plan.visibility });
         // Narrowing a player-owned plan withdraws every share with it: a plan
         // that is no longer shared is no longer shared with anyone.
         if (plan.owner.kind === 'player' && plan.visibility !== 'shared_with_org' && (plan.sharedWithOrgIds ?? []).length) {
-          for (const orgId of plan.sharedWithOrgIds) emit('development_plan_updated', orgId, { planId: plan.id });
+          withdrawn.push(...plan.sharedWithOrgIds);
           plan.sharedWithOrgIds = [];
           writeHistory(plan, actor, 'plan_unshared');
         }
       }
       touch(plan, actor);
-      emitAll('development_plan_updated', plan, {});
-      persistNow();
+      unit(() => {
+        development.plans.update(plan.id, () => plan);
+        for (const orgId of withdrawn) emit('development_plan_updated', orgId, { planId: plan.id });
+        emitAll('development_plan_updated', plan, {});
+      });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
@@ -619,7 +614,8 @@ export function registerDevelopment(ctx) {
       const viewer = V(req);
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
-      const { plan, goals, access } = bundle;
+      const { goals, access } = bundle;
+      const plan = copy(bundle.plan);
       if (!requireCap(res, access, 'manage', 'You cannot change this plan’s status.')) return undefined;
       if (limited('development_plan_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_plan_write'));
 
@@ -645,8 +641,10 @@ export function registerDevelopment(ctx) {
       const ACTION_BY_STATUS = { active: 'plan_activated', paused: 'plan_paused', completed: 'plan_completed', archived: 'plan_archived' };
       writeHistory(plan, actor, ACTION_BY_STATUS[to] ?? 'plan_updated', { from, to });
       touch(plan, actor);
-      emitAll(to === 'completed' ? 'development_plan_completed' : 'development_plan_updated', plan, {});
-      persistNow();
+      unit(() => {
+        development.plans.update(plan.id, () => plan);
+        emitAll(to === 'completed' ? 'development_plan_completed' : 'development_plan_updated', plan, {});
+      });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
@@ -656,14 +654,17 @@ export function registerDevelopment(ctx) {
       const viewer = V(req);
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
-      const { plan, player, access } = bundle;
+      const { player, access } = bundle;
+      const plan = copy(bundle.plan);
       if (!requireCap(res, access, 'manage', 'You cannot change who this plan is shared with.')) return undefined;
       if (plan.owner.kind !== 'player') {
         return res.status(400).json({ error: 'SHARE_NOT_APPLICABLE', detail: 'A club plan is shared with the player by changing its visibility, not by sharing it with another club.' });
       }
       if (limited('development_plan_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_plan_write'));
 
-      const orgId = String(req.body?.orgId ?? '');
+      const orgId = req.body?.orgId;
+      if (typeof orgId !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'orgId', message: 'orgId names the organisation, as text.' });
+      if (req.body?.revoke !== undefined && typeof req.body.revoke !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'revoke', message: 'revoke is true or false.' });
       const org = byId.org(orgId);
       // The organisation must be one that can actually see this player.
       // Sharing with a club that cannot see the player would create access
@@ -673,13 +674,14 @@ export function registerDevelopment(ctx) {
       }
       const revoke = req.body?.revoke === true;
       const actor = actorOf(viewer, req);
-      plan.sharedWithOrgIds ??= [];
+      // Live events and notifications are queued while the change is worked out, and sent inside the unit (events wait for the commit).
+      const effects = [];
 
       if (revoke) {
         if (!plan.sharedWithOrgIds.includes(orgId)) return res.status(200).json({ ...project(bundle, viewer), idempotent: true });
         plan.sharedWithOrgIds = plan.sharedWithOrgIds.filter((x) => x !== orgId);
         writeHistory(plan, actor, 'plan_unshared', { kind: 'org' });
-        emit('development_plan_updated', orgId, { planId: plan.id });
+        effects.push(() => emit('development_plan_updated', orgId, { planId: plan.id }));
       } else {
         if (plan.visibility !== 'shared_with_org') {
           return res.status(400).json({ error: 'PLAN_NOT_SHAREABLE', detail: 'Set this plan’s visibility to “shared with clubs” before choosing which clubs can read it.' });
@@ -690,11 +692,14 @@ export function registerDevelopment(ctx) {
         }
         plan.sharedWithOrgIds.push(orgId);
         writeHistory(plan, actor, 'plan_shared', { kind: 'org' });
-        emit('development_plan_created', orgId, { planId: plan.id });
-        tellOrg(orgId, `${player.name} shared a development plan with your club.`);
+        effects.push(() => emit('development_plan_created', orgId, { planId: plan.id }));
+        effects.push(() => tellOrg(orgId, `${player.name} shared a development plan with your club.`));
       }
       touch(plan, actor);
-      persistNow();
+      unit(() => {
+        development.plans.update(plan.id, () => plan);
+        for (const fx of effects) fx();
+      });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
@@ -727,23 +732,24 @@ export function registerDevelopment(ctx) {
 
       const origin = originObjectiveFor(req.body?.originObjectiveId, bundle.player, res);
       if (origin === false) return undefined;
-      const goal = newGoal(plan, { ...parsed.value, originObjectiveId: origin }, actor, at);
-      db.developmentGoals.push(goal);
-      touch(plan, actor);
+      unit(() => {
+        const g = development.goals.create(newGoal(plan, { ...parsed.value, originObjectiveId: origin }, actor, at));
+        touchPlan(plan.id, actor);
+        emitAll('development_goal_created', plan, { goalId: g.id });
+        if (plan.owner.kind === 'org' && plan.visibility === 'player_guardian') {
+          tellPlayer(plan, `A new development goal was shared with you: ${g.title}`);
+        }
+      });
       vmetric('development_goal_created');
-      emitAll('development_goal_created', plan, { goalId: goal.id });
-      if (plan.owner.kind === 'org' && plan.visibility === 'player_guardian') {
-        tellPlayer(plan, `A new development goal was shared with you: ${goal.title}`);
-      }
-      persistNow();
       return res.status(201).json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
     router.patch('/development/goals/:goalId', (req, res) => {
       if (refuseDerived(req, res)) return;
       const viewer = V(req);
-      const goal = db.developmentGoals.find((g) => g.id === req.params.goalId);
-      if (!goal) return res.status(404).json({ error: 'DEVELOPMENT_GOAL_NOT_FOUND' });
+      const stored = developmentReads.goals.byId(req.params.goalId);
+      if (!stored) return res.status(404).json({ error: 'DEVELOPMENT_GOAL_NOT_FOUND' });
+      const goal = copy(stored);
       const bundle = resolvePlan(req, res, goal.planId, viewer);
       if (!bundle) return undefined;
       const { plan, access } = bundle;
@@ -803,12 +809,14 @@ export function registerDevelopment(ctx) {
       if (targetChanged && goal.target) writeHistory(goal, actor, 'goal_target_set', { protocolId: goal.target.protocolId });
       if (!statusChanged && !targetChanged) writeHistory(goal, actor, 'goal_updated');
 
-      touch(plan, actor);
-      emitAll('development_goal_updated', plan, { goalId: goal.id });
-      if (statusChanged?.to === 'achieved' && plan.owner.kind === 'org' && plan.visibility === 'player_guardian') {
-        tellPlayer(plan, `A development goal was marked achieved: ${goal.title}`);
-      }
-      persistNow();
+      unit(() => {
+        development.goals.update(goal.id, () => goal);
+        touchPlan(plan.id, actor);
+        emitAll('development_goal_updated', plan, { goalId: goal.id });
+        if (statusChanged?.to === 'achieved' && plan.owner.kind === 'org' && plan.visibility === 'player_guardian') {
+          tellPlayer(plan, `A development goal was marked achieved: ${goal.title}`);
+        }
+      });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
@@ -816,7 +824,7 @@ export function registerDevelopment(ctx) {
     router.post('/development/goals/:goalId/actions', (req, res) => {
       if (refuseDerived(req, res)) return;
       const viewer = V(req);
-      const goal = db.developmentGoals.find((g) => g.id === req.params.goalId);
+      const goal = developmentReads.goals.byId(req.params.goalId);
       if (!goal) return res.status(404).json({ error: 'DEVELOPMENT_GOAL_NOT_FOUND' });
       const bundle = resolvePlan(req, res, goal.planId, viewer);
       if (!bundle) return undefined;
@@ -850,17 +858,19 @@ export function registerDevelopment(ctx) {
         history: [],
       };
       writeHistory(action, actor, 'action_created', { kind: action.type });
-      db.developmentActions.push(action);
-      touch(plan, actor);
-      persistNow();
+      unit(() => {
+        development.actions.create(action);
+        touchPlan(plan.id, actor);
+      });
       return res.status(201).json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
     router.patch('/development/actions/:actionId', (req, res) => {
       if (refuseDerived(req, res)) return;
       const viewer = V(req);
-      const action = db.developmentActions.find((a) => a.id === req.params.actionId);
-      if (!action) return res.status(404).json({ error: 'DEVELOPMENT_ACTION_NOT_FOUND' });
+      const stored = developmentReads.actions.byId(req.params.actionId);
+      if (!stored) return res.status(404).json({ error: 'DEVELOPMENT_ACTION_NOT_FOUND' });
+      const action = copy(stored);
       const bundle = resolvePlan(req, res, action.planId, viewer);
       if (!bundle) return undefined;
       const { plan, access, player } = bundle;
@@ -900,18 +910,18 @@ export function registerDevelopment(ctx) {
       }
       action.updatedAt = at;
 
-      if (statusChanged) {
-        writeHistory(action, actor, statusChanged.to === 'done' ? 'action_completed' : 'action_status_changed', statusChanged);
-        if (statusChanged.to === 'done') {
-          vmetric('development_action_completed');
+      if (statusChanged) writeHistory(action, actor, statusChanged.to === 'done' ? 'action_completed' : 'action_status_changed', statusChanged);
+      unit(() => {
+        development.actions.update(action.id, () => action);
+        if (statusChanged?.to === 'done') {
           // The goal does NOT move. Completing an action is completing an
           // action (§123/G5) — no code path here touches goal.status.
           emitAll('development_action_completed', plan, { actionId: action.id });
           if (plan.owner.kind === 'org' && actor.kind !== 'org') tellOrg(plan.owner.orgId, `${player.name} completed a development action: ${action.title}`);
         }
-      }
-      touch(plan, actor);
-      persistNow();
+        touchPlan(plan.id, actor);
+      });
+      if (statusChanged?.to === 'done') vmetric('development_action_completed');
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
@@ -919,9 +929,10 @@ export function registerDevelopment(ctx) {
     const linkEvidence = (targetKind) => (req, res) => {
       if (refuseDerived(req, res)) return;
       const viewer = V(req);
-      const holder = targetKind === 'goal'
-        ? db.developmentGoals.find((g) => g.id === req.params.goalId)
-        : db.developmentActions.find((a) => a.id === req.params.actionId);
+      const stored = targetKind === 'goal'
+        ? developmentReads.goals.byId(req.params.goalId)
+        : developmentReads.actions.byId(req.params.actionId);
+      const holder = stored ? copy(stored) : null;
       if (!holder) return res.status(404).json({ error: targetKind === 'goal' ? 'DEVELOPMENT_GOAL_NOT_FOUND' : 'DEVELOPMENT_ACTION_NOT_FOUND' });
       const bundle = resolvePlan(req, res, holder.planId, viewer);
       if (!bundle) return undefined;
@@ -962,12 +973,14 @@ export function registerDevelopment(ctx) {
         linkedByKind: actor.kind, linkedById: actor.id, linkedByName: actor.name,
         linkedAt: at,
       };
-      db.developmentEvidenceLinks.push(link);
       writeHistory(holder, actor, 'evidence_linked', { kind: link.sourceType });
-      touch(plan, actor);
+      unit(() => {
+        development.links.create(link);
+        (targetKind === 'goal' ? development.goals : development.actions).update(holder.id, () => holder);
+        touchPlan(plan.id, actor);
+        emitAll('development_evidence_linked', plan, { goalId: link.goalId, actionId: link.actionId });
+      });
       vmetric('development_evidence_linked');
-      emitAll('development_evidence_linked', plan, { goalId: link.goalId, actionId: link.actionId });
-      persistNow();
       return res.status(201).json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     };
 
@@ -976,7 +989,7 @@ export function registerDevelopment(ctx) {
 
     router.delete('/development/evidence/:linkId', (req, res) => {
       const viewer = V(req);
-      const link = db.developmentEvidenceLinks.find((l) => l.id === req.params.linkId);
+      const link = developmentReads.links.byId(req.params.linkId);
       if (!link) return res.status(404).json({ error: 'EVIDENCE_LINK_NOT_FOUND' });
       const bundle = resolvePlan(req, res, link.planId, viewer);
       if (!bundle) return undefined;
@@ -985,11 +998,14 @@ export function registerDevelopment(ctx) {
       if (['archived', 'completed'].includes(plan.status)) return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
 
       const actor = actorOf(viewer, req);
-      db.developmentEvidenceLinks = db.developmentEvidenceLinks.filter((l) => l.id !== link.id);
-      const holder = link.goalId ? goals.find((g) => g.id === link.goalId) : actions.find((a) => a.id === link.actionId);
+      const found = link.goalId ? goals.find((g) => g.id === link.goalId) : actions.find((a) => a.id === link.actionId);
+      const holder = found ? copy(found) : null;
       if (holder) writeHistory(holder, actor, 'evidence_unlinked', { kind: link.sourceType });
-      touch(plan, actor);
-      persistNow();
+      unit(() => {
+        development.links.remove(link.id);
+        if (holder) (link.goalId ? development.goals : development.actions).update(holder.id, () => holder);
+        touchPlan(plan.id, actor);
+      });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
@@ -1049,7 +1065,6 @@ export function registerDevelopment(ctx) {
         sharedWithPlayerAt: parsed.value.shareWithPlayer ? at : null,
         shareScopes: parsed.value.shareScopes,
         supersedes: superseded?.id ?? null,
-        supersededBy: null,
         createdAt: at,
         history: [],
       };
@@ -1057,25 +1072,24 @@ export function registerDevelopment(ctx) {
       if (review.reviewerKind !== 'coach_review') review.sharedWithPlayerAt = at;
 
       writeHistory(review, actor, 'review_submitted', { kind: review.reviewerKind, note: !!review.internalNote });
-      if (superseded) {
-        superseded.supersededBy = review.id;
-        writeHistory(superseded, actor, 'review_superseded');
-      }
       if (review.sharedWithPlayerAt && review.reviewerKind === 'coach_review') writeHistory(review, actor, 'review_shared');
-      db.developmentReviews.push(review);
-
-      if (parsed.value.nextReviewAt != null) plan.nextReviewAt = parsed.value.nextReviewAt;
-      touch(plan, actor);
-
+      // The corrected review is marked by the correction naming it (`supersedes`); its own history records it.
+      unit(() => {
+        development.reviews.create(review);
+        if (superseded) development.reviews.update(superseded.id, (d) => { writeHistory(d, actor, 'review_superseded'); });
+        development.plans.update(plan.id, (d) => {
+          if (parsed.value.nextReviewAt != null) d.nextReviewAt = parsed.value.nextReviewAt;
+          touch(d, actor);
+        });
+        emitAll('development_review_submitted', plan, { reviewId: review.id });
+        if (review.reviewerKind === 'coach_review' && review.sharedWithPlayerAt) {
+          tellPlayer(plan, 'A development review was shared with you.');
+        }
+        if (review.reviewerKind !== 'coach_review' && plan.owner.kind === 'org') {
+          tellOrg(plan.owner.orgId, `${player.name} added a development reflection.`);
+        }
+      });
       vmetric('development_review_submitted');
-      emitAll('development_review_submitted', plan, { reviewId: review.id });
-      if (review.reviewerKind === 'coach_review' && review.sharedWithPlayerAt) {
-        tellPlayer(plan, 'A development review was shared with you.');
-      }
-      if (review.reviewerKind !== 'coach_review' && plan.owner.kind === 'org') {
-        tellOrg(plan.owner.orgId, `${player.name} added a development reflection.`);
-      }
-      persistNow();
       return res.status(201).json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
@@ -1083,7 +1097,7 @@ export function registerDevelopment(ctx) {
     router.post('/development/reviews/:reviewId/share', (req, res) => {
       if (refuseDerived(req, res)) return;
       const viewer = V(req);
-      const review = db.developmentReviews.find((r) => r.id === req.params.reviewId);
+      const review = developmentReads.reviews.byId(req.params.reviewId);
       if (!review) return res.status(404).json({ error: 'REVIEW_NOT_FOUND' });
       const bundle = resolvePlan(req, res, review.planId, viewer);
       if (!bundle) return undefined;
@@ -1099,12 +1113,15 @@ export function registerDevelopment(ctx) {
       if (unknown.length) return res.status(400).json({ error: 'SHARE_SCOPE_UNKNOWN', allowed: SHARE_SCOPES });
 
       const actor = actorOf(viewer, req);
-      review.sharedWithPlayerAt = now();
-      review.shareScopes = [...new Set(asked)];
-      writeHistory(review, actor, 'review_shared');
-      touch(plan, actor);
-      tellPlayer(plan, 'A development review was shared with you.');
-      persistNow();
+      unit(() => {
+        development.reviews.update(review.id, (d) => {
+          d.sharedWithPlayerAt = now();
+          d.shareScopes = [...new Set(asked)];
+          writeHistory(d, actor, 'review_shared');
+        });
+        touchPlan(plan.id, actor);
+        tellPlayer(plan, 'A development review was shared with you.');
+      });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
@@ -1160,7 +1177,8 @@ export function registerDevelopment(ctx) {
    */
   function originObjectiveFor(raw, player, res) {
     if (raw == null || raw === '') return null;
-    const rec = (db.devObjectives ?? []).find((o) => o.id === String(raw) && o.playerId === player.id);
+    const found = typeof raw === 'string' ? developmentReads.objectives.byId(raw) : null; // S12a: read through SQL
+    const rec = found && found.playerId === player.id ? found : null;
     if (!rec) {
       res.status(404).json({ error: 'DEVELOPMENT_OBJECTIVE_NOT_FOUND', detail: 'No such development objective exists for this player.' });
       return false;

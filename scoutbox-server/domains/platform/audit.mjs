@@ -167,33 +167,20 @@ export function registerAudit(ctx) {
     // M21: development plans this organisation OWNS. A plan a player shared
     // with the club is the player's record, not the club's administrative
     // history, so it is read in the Hub and never mirrored into this feed.
-    for (const plan of db.developmentPlans ?? []) {
-      if (plan.owner?.kind !== 'org' || plan.owner.orgId !== org.id) continue;
-      const p = findPlayer(plan.playerId);
-      const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };
-      for (const h of plan.history ?? []) {
-        if (!DEVELOPMENT_ACTIONS.has(h.action)) continue;
-        rows.push({
-          id: h.id, at: h.at, action: h.action, domain: 'development',
-          actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
-          target: { type: 'development_plan', id: plan.id, title: plan.title, ...subject },
-          detail: safeDetail(h.action, h.detail),
-        });
-      }
-    }
-    // Review SUBMISSIONS, from the reviews themselves. What the review says —
-    // shared summary or internal note — never reaches this feed (§118#44).
-    for (const r of db.developmentReviews ?? []) {
-      if (r.orgId !== org.id) continue;
-      for (const h of r.history ?? []) {
-        if (!DEVELOPMENT_ACTIONS.has(h.action)) continue;
-        rows.push({
-          id: h.id, at: h.at, action: h.action, domain: 'development',
-          actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
-          target: { type: 'development_review', id: r.id },
-          detail: safeDetail(h.action, h.detail),
-        });
-      }
+    // S12a: both read through SQL (developmentReads.plans.orgFeed), the plan named only where the org may see its player.
+    for (const { entry: h, plan, review } of ctx.developmentReads.plans.orgFeed(org.id, [...DEVELOPMENT_ACTIONS])) {
+      let target;
+      if (plan) {
+        const p = findPlayer(plan.playerId);
+        const subject = p && orgCanSee(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null };
+        target = { type: 'development_plan', id: plan.id, title: plan.title, ...subject };
+      } else target = { type: 'development_review', id: review.id };
+      rows.push({
+        id: h.id, at: h.at, action: h.action, domain: 'development',
+        actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
+        target,
+        detail: safeDetail(h.action, h.detail),
+      });
     }
     // M23 P5.6B: the Agent domain — profile, affiliation and relationship
     // lifecycle for an agency organisation. Same rules: subject named only

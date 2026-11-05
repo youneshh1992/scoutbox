@@ -69,19 +69,11 @@ export const TIMELINE_ACTIONS = Object.freeze({
 export const TIMELINE_ACTION_NAMES = Object.freeze(Object.keys(TIMELINE_ACTIONS));
 
 /**
- * Gather every record belonging to one plan, in one pass per collection. The
- * snapshot store has no indexes — a scan IS the access path — so the shape of
- * this function is the performance story.
+ * Every record belonging to one plan: `{ plan, goals, actions, links, reviews }`, or null. Since S12a one indexed
+ * query per table (`reads.plans.collect`, the development repository's `developmentReads`).
  */
-export function collectPlan(db, planId) {
-  const plan = (db.developmentPlans ?? []).find((p) => p.id === planId) ?? null;
-  if (!plan) return null;
-  const goals = (db.developmentGoals ?? []).filter((g) => g.planId === planId);
-  const goalIds = new Set(goals.map((g) => g.id));
-  const actions = (db.developmentActions ?? []).filter((a) => a.planId === planId || goalIds.has(a.goalId));
-  const links = (db.developmentEvidenceLinks ?? []).filter((l) => l.planId === planId);
-  const reviews = (db.developmentReviews ?? []).filter((r) => r.planId === planId);
-  return { plan, goals, actions, links, reviews };
+export function collectPlan(reads, planId) {
+  return reads.plans.collect(planId);
 }
 
 /**
@@ -94,7 +86,7 @@ export function collectPlan(db, planId) {
 export function buildDevelopmentPlan({
   db, reads = {}, planId, player, viewer, access, orgCanSee, now = Date.now(), collected = null,
 }) {
-  const bundle = collected ?? collectPlan(db, planId);
+  const bundle = collected ?? collectPlan(reads.development, planId);
   if (!bundle) return null;
   const { plan, goals, actions, links, reviews } = bundle;
   if (!access?.read) return null;

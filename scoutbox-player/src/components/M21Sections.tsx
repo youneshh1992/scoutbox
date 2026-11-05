@@ -315,6 +315,7 @@ function ReviewCard({ r }: { r: ReviewView }) {
 export function DevelopmentHubSection({ actor }: { actor: DevActor }) {
   const colors = useColors();
   const [cat] = useLoad<DevelopmentCatalogue>(() => m21.catalogue(actor), [actor.id]);
+  // Reads the first page of plans only; "load more" (nextCursor) is needed if a player ever has more than 50.
   const [list, reloadList] = useLoad(() => m21.plans(actor), [actor.id]);
   const [planId, setPlanId] = useState<string | null>(null);
   const [view, reloadPlan, err] = useLoad<DevelopmentPlanView | null>(

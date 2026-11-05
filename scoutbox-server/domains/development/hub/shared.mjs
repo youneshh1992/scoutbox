@@ -19,7 +19,7 @@
  * development server whose own vocabulary has drifted towards a rating.
  */
 
-import { parseDateOrInstant } from '../temporal.mjs';
+import { parseDateOrInstant } from '../../../temporal.mjs';
 
 export const DEVELOPMENT_POLICY_VERSION = 1;
 
@@ -354,10 +354,11 @@ export function reviewDueState(nextReviewAt, now) {
   return { state: 'review_upcoming', days: d.days };
 }
 
-/** Bounded, trimmed text. Returns null for empty; never truncates silently. */
+/** Bounded, trimmed text. Returns null for empty; never truncates silently; refuses anything that is not text (S12a). */
 export function boundedText(raw, max, { field }) {
   if (raw == null || raw === '') return { value: null };
-  const s = String(raw).trim();
+  if (typeof raw !== 'string') return { error: 'FIELD_INVALID', field, detail: `${field} is text.` };
+  const s = raw.trim();
   if (!s) return { value: null };
   if (s.length > max) {
     return { error: 'TEXT_TOO_LONG', field, max, length: s.length, detail: `${field} may be at most ${max} characters.` };
@@ -376,6 +377,8 @@ export function parseDate(raw, { field }) {
   if (raw == null || raw === '') return { value: null };
   const p = parseDateOrInstant(raw, { dayEdge: 'start' });
   if (!p.ok) return { error: 'DATE_INVALID', field, detail: `${field} is not a date (${p.why}).`, expected: p.expected };
+  // S12a: an instant is stored as an integer column; one beyond the safe range is refused, not stored.
+  if (!Number.isSafeInteger(p.ms)) return { error: 'DATE_INVALID', field, detail: `${field} is not a date (out of range).` };
   return { value: p.ms };
 }
 

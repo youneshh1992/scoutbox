@@ -1,5 +1,5 @@
 // F5 — Structured opportunity board · F6 — Club-run assessment campaigns ·
-// F8 — Feedback → development → reassessment · F9 — Trial-day experience.
+// F9 — Trial-day experience. (F8 objectives and the F6 drill guidance: domains/development/objectives.mjs.)
 //
 // Everything guardian-routed for minors, everything eligibility-checked
 // server-side (fail-closed on missing location), grassroots 50 km preserved.
@@ -277,29 +277,6 @@ export function registerJourneys(ctx) {
   // Campaigns: structured remote assessments. The machine checks FILES; a
   // HUMAN checks football. The two verdicts are never conflated.
 
-  // Drill library guidance (F6): recording instructions + review status for
-  // the existing combine drills. Nothing is "professionally validated" unless
-  // a named reviewer actually reviewed it — seeds start unreviewed.
-  db.drillGuidance ??= DRILLS.map((d) => ({
-    drillId: d.id,
-    recording: { equipment: 'Any phone camera ≥ 720p', distance: 'Full drill area in frame', surface: 'Flat grass or turf', camera: 'Fixed position, side-on, no zooming during the attempt' },
-    coachReview: { status: 'unreviewed', reviewer: null, at: null },
-  }));
-
-  playerRouter.get('/drill-guidance', (_req, res) => {
-    res.json({ items: db.drillGuidance, note: 'Coach review status is shown honestly — "unreviewed" guidance has not been validated by a professional.' });
-  });
-
-  adminRouter.get('/drill-guidance', (_req, res) => res.json({ items: db.drillGuidance }));
-
-  adminRouter.post('/drill-guidance/:drillId/review', (req, res) => {
-    const g = db.drillGuidance.find((x) => x.drillId === req.params.drillId);
-    if (!g) return res.status(404).json({ error: 'DRILL_NOT_FOUND' });
-    g.coachReview = { status: 'reviewed', reviewer: String(req.body?.reviewer ?? 'T&S football staff').slice(0, 60), at: Date.now() };
-    persistNow();
-    res.json({ guidance: g });
-  });
-
   /** A campaign's drills from a request: the recording defaults fill what is absent; wrong types are refused. */
   function drillsOrRefuse(res, drills) {
     if (drills.length > OL.drills) return fieldInvalid(res, 'drills', `a campaign has at most ${OL.drills} drills.`);
@@ -491,135 +468,6 @@ export function registerJourneys(ctx) {
       return fresh;
     });
     res.json({ attempt: attemptView(reviewed) });
-  });
-
-  // ================================================================== F8
-  // Feedback → objectives → reassessment. Private assessments never leak
-  // into objectives; only the published feedback record can seed one, and
-  // sharing progress back is the player's (or guardian's) explicit choice.
-
-  function objectiveActorFor(req, childId) {
-    if (childId) return { player: findPlayer(childId), actor: { kind: 'guardian', id: req.guardian.id, name: req.guardian.name } };
-    return { player: req.player, actor: { kind: 'player', id: req.player.id, name: req.player.name } };
-  }
-
-  function createObjective(req, res, player, actor) {
-    const { feedbackId, objectives } = req.body ?? {};
-    const found = typeof feedbackId === 'string' ? ctx.scoutingReads.assessments.byId(feedbackId) : null;
-    const a = found && found.playerId === player.id && found.publishedFeedback ? found : null;
-    if (!a) return res.status(404).json({ error: 'PUBLISHED_FEEDBACK_NOT_FOUND', message: 'Objectives grow from feedback a club chose to publish — private assessments cannot seed them.' });
-    if (!Array.isArray(objectives) || objectives.length < 1 || objectives.length > 2) {
-      return res.status(400).json({ error: 'ONE_OR_TWO_OBJECTIVES', message: 'One or two focused objectives — not a laundry list.' });
-    }
-    const rec = {
-      id: nextId('obj'), playerId: player.id, sourceFeedbackId: a.id, orgId: a.orgId,
-      reviewer: { userId: a.publishedFeedback.byUserId, name: a.publishedFeedback.byName, orgName: byId.org(a.orgId)?.name },
-      objectives: objectives.map((o) => ({
-        id: nextId('objx'), text: String(o.text ?? '').slice(0, 200),
-        exerciseRefs: Array.isArray(o.exerciseRefs) ? o.exerciseRefs.slice(0, 4) : [],
-        baselineEvidenceIds: (Array.isArray(o.baselineEvidenceIds) ? o.baselineEvidenceIds : []).filter((id) => scoutingReads.evidence.byId(id)?.playerId === player.id),
-      })),
-      progress: [], sharing: { orgIds: [] },
-      reassessments: [], reviewAt: req.body?.reviewAt ?? null,
-      status: 'active', createdBy: actor, createdAt: Date.now(),
-    };
-    db.devObjectives.push(rec);
-    persistNow();
-    res.status(201).json({ objective: rec });
-  }
-
-  playerRouter.post('/objectives', (req, res) => {
-    if (req.playerIsMinor) return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Your parent/guardian agrees development objectives with clubs.' });
-    createObjective(req, res, req.player, { kind: 'player', id: req.player.id, name: req.player.name });
-  });
-  guardianRouter.post('/children/:id/objectives', (req, res) => {
-    if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
-    createObjective(req, res, findPlayer(req.params.id), { kind: 'guardian', id: req.guardian.id, name: req.guardian.name });
-  });
-
-  const objectivesFor = (playerIds) => db.devObjectives.filter((o) => playerIds.includes(o.playerId));
-  playerRouter.get('/objectives', (req, res) => res.json(objectivesFor([req.player.id])));
-  guardianRouter.get('/children/:id/objectives', (req, res) => {
-    if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
-    res.json(objectivesFor([req.params.id]));
-  });
-
-  // Progress: players (minors included — it's football activity) log
-  // completions and follow-up evidence against their own objectives.
-  playerRouter.post('/objectives/:id/progress', (req, res) => {
-    const o = db.devObjectives.find((x) => x.id === req.params.id && x.playerId === req.player.id);
-    if (!o) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });
-    const { note, evidenceId, objectiveId } = req.body ?? {};
-    if (evidenceId && scoutingReads.evidence.byId(evidenceId)?.playerId !== req.player.id) return res.status(400).json({ error: 'EVIDENCE_INVALID' });
-    o.progress.push({ id: nextId('prg'), at: Date.now(), objectiveId: objectiveId ?? null, note: note ? String(note).slice(0, 300) : null, evidenceId: evidenceId ?? null });
-    recordActivity(req.player);
-    persistNow();
-    res.status(201).json({ objective: o });
-  });
-
-  function setSharing(req, res, playerIds) {
-    const o = db.devObjectives.find((x) => x.id === req.params.id && playerIds.includes(x.playerId));
-    if (!o) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });
-    const { orgId, enabled } = req.body ?? {};
-    if (!db.orgs.some((x) => x.id === orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-    if (enabled && !o.sharing.orgIds.includes(orgId)) o.sharing.orgIds.push(orgId);
-    if (!enabled) o.sharing.orgIds = o.sharing.orgIds.filter((x) => x !== orgId);
-    persistNow();
-    res.json({ objective: o });
-  }
-  playerRouter.post('/objectives/:id/share', (req, res) => {
-    if (req.playerIsMinor) return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Sharing progress with a club is a guardian decision for under-18s.' });
-    setSharing(req, res, [req.player.id]);
-  });
-  guardianRouter.post('/objectives/:id/share', (req, res) => setSharing(req, res, req.guardian.childIds));
-
-  function requestReassessment(req, res, playerIds, actor) {
-    const o = db.devObjectives.find((x) => x.id === req.params.id && playerIds.includes(x.playerId));
-    if (!o) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });
-    if (!o.sharing.orgIds.includes(o.orgId)) return res.status(409).json({ error: 'SHARING_REQUIRED', message: 'Share progress with the club before asking them to look again.' });
-    if (o.reassessments.some((r) => r.status === 'requested')) return res.status(409).json({ error: 'ALREADY_REQUESTED' });
-    const r = { id: nextId('ras'), requestedBy: actor, requestedAt: Date.now(), status: 'requested', outcome: null };
-    o.reassessments.push(r);
-    const p = findPlayer(o.playerId);
-    notify({ kind: 'org_user', id: o.reviewer.userId }, 'reassessment', `🔁 ${p?.name} (via ${actor.name}) requests a reassessment on: ${o.objectives.map((x) => x.text).join(' · ')}`, o.id);
-    persistNow();
-    res.status(201).json({ reassessment: r });
-  }
-  playerRouter.post('/objectives/:id/reassessment', (req, res) => {
-    if (req.playerIsMinor) return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Re-engaging a club for you is your guardian’s call.' });
-    requestReassessment(req, res, [req.player.id], { kind: 'player', id: req.player.id, name: req.player.name });
-  });
-  guardianRouter.post('/objectives/:id/reassessment', (req, res) =>
-    requestReassessment(req, res, req.guardian.childIds, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }));
-
-  // Club follow-up: sees only SHARED objectives; outcomes cite evidence.
-  orgRouter.get('/players/:id/objectives', (req, res) => {
-    const p = findPlayer(req.params.id);
-    if (!p || !orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
-    res.json(db.devObjectives.filter((o) => o.playerId === p.id && o.sharing.orgIds.includes(req.org.id)));
-  });
-
-  orgRouter.post('/reassessments/:id/outcome', (req, res) => {
-    const o = db.devObjectives.find((x) => x.reassessments.some((r) => r.id === req.params.id));
-    const r = o?.reassessments.find((x) => x.id === req.params.id);
-    if (!r || o.orgId !== req.org.id) return res.status(404).json({ error: 'REASSESSMENT_NOT_FOUND' });
-    if (!o.sharing.orgIds.includes(req.org.id)) return res.status(403).json({ error: 'SHARING_REVOKED' });
-    if (r.status !== 'requested') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-    const { note, evidenceIds } = req.body ?? {};
-    if (!note || !String(note).trim()) return res.status(400).json({ error: 'NOTE_REQUIRED', message: 'Reassessment outcomes point at evidence, not vibes.' });
-    if (!moderateOrRefuse(res, String(note), { kind: 'reassessment_outcome', playerId: o.playerId, orgId: req.org.id })) return;
-    r.status = 'completed';
-    r.outcome = {
-      note: String(note).slice(0, 500),
-      evidenceIds: (Array.isArray(evidenceIds) ? evidenceIds : []).filter((id) => scoutingReads.evidence.byId(id)?.playerId === o.playerId),
-      byUserId: req.orgUser.id, byName: req.orgUser.name, at: Date.now(),
-    };
-    const p = findPlayer(o.playerId);
-    const text = `📝 ${req.org.name} completed the reassessment: ${r.outcome.note.slice(0, 120)}`;
-    if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'reassessment', text, o.id);
-    else if (p) notify({ kind: 'player', id: p.id }, 'reassessment', text, o.id);
-    persistNow();
-    res.json({ reassessment: r });
   });
 
   // ================================================================== F9

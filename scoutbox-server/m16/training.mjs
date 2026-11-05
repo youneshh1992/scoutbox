@@ -73,7 +73,8 @@ export function registerBoxTraining(ctx) {
     if (req.body?.instructions && !moderateOrRefuse(res, String(req.body.instructions), { kind: 'box_assignment', orgId: req.org.id, playerId: p.id })) return;
     let objectiveId = null;
     if (req.body?.objectiveId) {
-      const obj = db.devObjectives.find((o) => o.id === req.body.objectiveId && o.playerId === p.id && o.orgId === req.org.id);
+      const found = typeof req.body.objectiveId === 'string' ? ctx.developmentReads.objectives.byId(req.body.objectiveId) : null; // S12a: read through SQL
+      const obj = found && found.playerId === p.id && found.orgId === req.org.id ? found : null;
       if (!obj) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });
       objectiveId = obj.id;
     }
@@ -294,7 +295,7 @@ export function registerBoxTraining(ctx) {
 
   // -------------------------------------------------------- development plan
   function developmentPlan(player) {
-    const objectives = db.devObjectives.filter((o) => o.playerId === player.id);
+    const objectives = ctx.developmentReads.objectives.forPlayer(player.id); // S12a: read through SQL
     const assignments = db.boxAssignments.filter((a) => a.playerId === player.id && !['cancelled', 'superseded'].includes(a.state));
     const sessions = db.boxSessions.filter((s) => s.playerId === player.id && TERMINAL_STATES.has(s.status) && !['cancelled', 'invalidated'].includes(s.verificationState));
     return {

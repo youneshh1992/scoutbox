@@ -3,7 +3,7 @@
  * the three cannot drift (S10a, repositories/verification.mjs; reused by S10b, repositories/passport.mjs).
  *
  * A field is `{ k, c, t, … }`: the record key `k`, the column `c` and the type `t` — `text` (with `max`, optionally
- * `nonEmpty`), `int`, `bool`, `enum` (with `vals`) or `date` (a football date as given: 'YYYY', 'YYYY-MM' or
+ * `nonEmpty`), `int`, `num` (a finite number, REAL; S12a), `bool`, `enum` (with `vals`) or `date` (a football date as given: 'YYYY', 'YYYY-MM' or
  * 'YYYY-MM-DD', a day that exists). `req` makes it required, `def` gives a default. A `group` is a nested object stored
  * as columns: `nullable` groups are null when their first column is; `sparse` objects keep only non-null keys.
  */
@@ -11,6 +11,7 @@ import { isPlainObject, describe } from './recruitment.mjs';
 
 export const text = (k, c, max, o = {}) => ({ k, c, t: 'text', max, ...o });
 export const int = (k, c, o = {}) => ({ k, c, t: 'int', ...o });
+export const num = (k, c, o = {}) => ({ k, c, t: 'num', ...o });
 export const bool = (k, c, o = {}) => ({ k, c, t: 'bool', ...o });
 export const oneOf = (k, c, vals, o = {}) => ({ k, c, t: 'enum', vals, ...o });
 export const date = (k, c, o = {}) => ({ k, c, t: 'date', ...o });
@@ -26,6 +27,7 @@ export function columnDdl(f, { nullable = false } = {}) {
   const guard = (cond) => (notNull ? `CHECK (${cond})` : `CHECK (${f.c} IS NULL OR ${cond})`);
   if (f.t === 'text') return `TEXT${nn} ${guard(`length(${f.c}) <= ${f.max}${f.nonEmpty ? ` AND length(${f.c}) > 0` : ''}`)}`;
   if (f.t === 'int') return `INTEGER${nn}${f.def !== undefined ? ` DEFAULT ${f.def}` : ''}`;
+  if (f.t === 'num') return `REAL${nn}`;
   if (f.t === 'bool') return `INTEGER${nn} ${guard(`${f.c} IN (0,1)`)}`;
   if (f.t === 'date') return `TEXT${nn} ${guard(DATE_SQL(f.c))}`;
   return `TEXT${nn} ${guard(`${f.c} IN (${f.vals.map(quote).join(',')})`)}`;
@@ -59,6 +61,8 @@ export function typeScalar(f, v, at) {
     if (f.nonEmpty && !v.length) return bad(at, f.k, 'must not be empty');
   } else if (f.t === 'int') {
     if (!Number.isSafeInteger(v)) return bad(at, f.k, `must be an integer (got ${describe(v)})`);
+  } else if (f.t === 'num') {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return bad(at, f.k, `must be a finite number (got ${describe(v)})`);
   } else if (f.t === 'bool') {
     if (typeof v !== 'boolean') return bad(at, f.k, `must be true or false (got ${describe(v)})`);
   } else if (f.t === 'date') {

@@ -18,7 +18,7 @@ export function migrateM12(db, players) {
   // SQL (scoutingReads); no db.* and no organisation facet here.
   // F5 opportunities and applications, F6 campaigns and their submissions: tables of the opportunities and campaigns
   // repository (S9d), read through SQL (scoutingReads); no db.* here.
-  db.devObjectives ??= [];       // F8 — development objectives
+  // F8 development objectives: a table since S12a (repositories/development.mjs, developmentReads.objectives).
   // F11 follow-ups and outcome reports: tables of the signings repository, read through SQL (§4.3 step 2); no db.* here.
   db.uploadSessions ??= [];      // F12 — resumable upload sessions
   // F12E — caption track (vtt text) or null. Since S5 a media item is a row of

@@ -9,9 +9,9 @@
 import { buildRecruitmentJourney as journey } from '../domains/recruitment/lifecycle/journey.mjs';
 import { createEvidenceProvider as provider } from '../domains/recruitment/lifecycle/evidence.mjs';
 import { buildReportingContext as reportingContext } from '../m20/dashboard.mjs';
-import { resolveEvidenceLink as resolveLink, recordBelongsToPlayer as belongs, validateEvidenceLink as validateLink } from '../m21/evidence.mjs';
+import { resolveEvidenceLink as resolveLink, recordBelongsToPlayer as belongs, validateEvidenceLink as validateLink } from '../domains/development/hub/evidence.mjs';
 import { resolveEvidenceRefs as resolveRefs, evidenceCandidates as candidates } from '../domains/recruitment/lifecycle/decision.mjs';
-import { buildDevelopmentPlan as buildPlan } from '../m21/plan.mjs';
+import { buildDevelopmentPlan as buildPlan } from '../domains/development/hub/plan.mjs';
 
 const sound = (r) => r !== null && typeof r === 'object';
 
@@ -195,4 +195,5 @@ export const recordBelongsToPlayer = (opts = {}) => belongs({ reads: arrayReads(
 export const validateEvidenceLink = (opts = {}) => validateLink({ reads: arrayReads(opts.db), ...opts });
 export const resolveEvidenceRefs = (refs, opts = {}) => resolveRefs(refs, { reads: arrayReads(opts.db), ...opts });
 export const evidenceCandidates = (opts = {}) => candidates({ reads: arrayReads(opts.db), ...opts });
+// S12a: a plan's own records are the development repository's, so give `collected` ({ plan, goals, actions, links, reviews }).
 export const buildDevelopmentPlan = (opts = {}) => buildPlan({ reads: arrayReads(opts.db), ...opts });
