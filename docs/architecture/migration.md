@@ -64,7 +64,7 @@ routes still miss the bar: they are listed, and deferred, at the end of §4.3 st
 
 ## 3. Status
 
-26 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0027`. Each
+27 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0028`. Each
 step takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Write model | Status |
@@ -98,7 +98,9 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S10b | passport preferences, career entries, achievements, shares, corrections | `0024_passport` | `passport.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S10c | transition cases, coach references (vouches) | `0025_transitions_vouches` | `transitionsVouches.mjs` | **explicit, typed, SQL reads** (5 Nov) | done; the legacy representations moved to S11 |
 | S11a | agent profiles, agency affiliations, representation agreements, agency settings; the legacy representation lane removed | `0026_agent_core` | `agentCore.mjs` | **explicit, typed, SQL reads** (5 Nov) | done |
-| S11b–c | compliance, transactions | | | | not started |
+| S11b-1 | Trust & Safety reviewers, jurisdiction policy versions (the seeded versions inserted by the migration) | `0027_compliance_policies` | `compliancePolicies.mjs` | **explicit, typed, SQL reads** (5 Nov) | done |
+| S11b-2 | regulatory reviews, compliance contexts and evaluations, consents | | | | not started |
+| S11c | transactions | | | | not started |
 | S12 | development, Box Cam, discovery | | | | not started |
 | S13 | operations and integrations | | | | not started |
 | S14 | retire the blob | | | | not started |
@@ -421,9 +423,19 @@ domestic facet, review items for facets and disputes already waiting) are record
 a first login, a profile is written whole with every facet, and a review is requested by the route that needs one.
 The two notices a read used to write (a relationship ending within 30 days, a stale facet) come from a sweep, each
 marker committing with its notification. Routes refuse junk with the existing codes (`AGENT_INPUT_INVALID`, field
-named; `AGENT_SCOPE_INVALID`, `AGENT_TERM_INVALID`, `AGENT_JURISDICTION_INVALID`). Compliance
-(S11b) still reads the policies from `db.jurisdictionPolicies`, so a request's policy versions are checked against
-them in code.
+named; `AGENT_SCOPE_INVALID`, `AGENT_TERM_INVALID`, `AGENT_JURISDICTION_INVALID`). A request's
+policy versions are checked against the policy table in code (since S11b-1).
+
+**S11b-1 as built (5 November).** `repositories/compliancePolicies.mjs`, migration `0027`, which also inserts the three seeded
+policy versions (FIFA, the FA, U.S. Soccer), attributed to it; blob step 2306 no longer creates the two collections. The
+module receives the repository as `compliancePolicies`. A rule's parameters are typed against the engine's vocabulary
+(`RULE_PARAMS` in `domains/agents/compliance/policyVersions.mjs`, which now also holds `PARTY_ROLES` and `CONSENT_KINDS`):
+one row per parameter, scalars as columns, list, role-set and age-map elements as item rows. Publishing a parameter the
+engine does not read, or of the wrong type, is refused with `POLICY_INPUT_INVALID` naming it (it used to be stored and
+ignored), as are an unknown rule or policy field, a bad source or override, and a `supersedes` that does not name an
+existing version of the same jurisdiction. The published set is decoded once per change. Reviewer creation refuses
+non-text fields and secrets over 200 characters; a revocation (with its sessions) is one unit. The agent core checks an
+agreement's policy versions against the table. The review queue and contexts are S11b-2.
 
 ### 4.6 S14: retire the blob
 

@@ -13,6 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { resolveScope, ruleAt } from './policy.mjs';
+import { PARTY_ROLES } from './policyVersions.mjs';
 import { readInstant } from '../../../temporal.mjs';
 
 export const CONFLICT_OUTCOMES = Object.freeze([
@@ -39,7 +40,7 @@ export const OUTCOME_ALIASES = Object.freeze({ PERMITTED_WITH_CONSENT });
 const SEVERITY = Object.freeze({ PROHIBITED_CONFLICT: 4, INSUFFICIENT_DATA: 3, MANUAL_REGULATORY_REVIEW_REQUIRED: 2, [PERMITTED_WITH_CONSENT]: 1, CLEAR: 0 });
 export const mostSevere = (a, b) => (SEVERITY[a] >= SEVERITY[b] ? a : b);
 
-export const PARTY_ROLES = Object.freeze(['individual', 'engaging_entity', 'releasing_entity']);
+export { PARTY_ROLES };
 export const CONTEXT_TYPES = Object.freeze(['employment_contract', 'transfer', 'loan', 'other_services']);
 
 // ------------------------------------------------------------ canonical hashing

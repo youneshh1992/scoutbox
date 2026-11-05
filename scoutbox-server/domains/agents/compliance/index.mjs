@@ -31,16 +31,19 @@ import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecy
 import { hasVerLevel } from '../../verification/claims/shared.mjs';
 import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt } from '../core/shared.mjs';
 import { sendComplianceError } from './errors.mjs';
-import { RULE_STATUSES, SEEDED_POLICY_VERSIONS } from './policyVersions.mjs';
+import { RULE_STATUSES, CONSENT_KINDS } from './policyVersions.mjs';
+
+export { CONSENT_KINDS };
 import { applicablePolicySet, evaluatePolicy, evaluateMinorGate, representationScopeProblem, resolveScope, ruleAt, MINOR_PATHWAY_PRODUCTION_ENABLED, POLICY_FACETS, POLICY_ACTIONS } from './policy.mjs';
 import { evaluateConflict, conflictSummaryForParty, PARTY_ROLES, CONTEXT_TYPES, PERMITTED_WITH_CONSENT } from './conflict.mjs';
 import { createVerificationProvider, facetFromProviderAnswer, FACET_METHOD } from './provider.mjs';
 import { complianceAuditRows, reviewerDecisionRows } from './audit.mjs';
+import { REVIEWER_ROLES } from '../../../repositories/compliancePolicies.mjs';
 
-export const REVIEWER_ROLES = Object.freeze(['trust_safety_reviewer', 'trust_safety_admin']);
+export { REVIEWER_ROLES };
+
 export const REVIEW_KINDS = Object.freeze(['verification_facet', 'representation_declared', 'conflict_evaluation', 'representation_dispute']);
 export const REVIEW_STATUSES = Object.freeze(['PENDING', 'IN_REVIEW', 'APPROVED', 'REJECTED', 'CANCELLED', 'SUPERSEDED']);
-export const CONSENT_KINDS = Object.freeze(['dual_representation', 'agency_performance', 'guardian_approach', 'guardian_agreement', 'legal_advice_ack']);
 export const CONSENT_STATUSES = Object.freeze(['requested', 'granted', 'declined', 'revoked']);
 /** Reason codes only a policy version can settle: a reviewer may not "approve" past them (mandate §37). */
 export const POLICY_LEVEL_REASONS = Object.freeze(['RULE_STATUS_UNCERTAIN', 'POLICY_NOT_ENCODED', 'NO_ACTIVE_RULE_DECIDES', 'SCOPE_MIXED', 'EXCLUSIVITY_WINDOW_DOUBTFUL']);
@@ -52,13 +55,13 @@ export function registerCompliance(rawCtx) {
     db, byId, app, orgRouter, playerRouter, adminRouter, tsRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isBlocked, isAdult, orgCanSee, moderateOrRefuse, rateLimit,
     hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins, agent, verificationProvider, agentCore, unit,
+    compliancePolicies,
   } = rawCtx;
 
   const provider = verificationProvider ?? createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
-  // Registration-time presence (the migration guarantees these; this is the
-  // module-class belt to that brace, never a read-time repair).
-  db.tsReviewers ??= [];
-  db.jurisdictionPolicies ??= [];
+  // S11b-1: reviewers and policy versions are tables of repositories/compliancePolicies.mjs. Registration-time
+  // presence of the remaining collections (the migration guarantees these; never a read-time repair).
+  if (typeof compliancePolicies?.reviewers?.update !== 'function') throw new TypeError('registerCompliance needs the compliance policies repository from the data layer');
   db.regulatoryReviews ??= [];
   db.regulatoryConsents ??= [];
   db.complianceContexts ??= [];
@@ -87,29 +90,28 @@ export function registerCompliance(rawCtx) {
   const agencyJurisdictions = (orgId) => agentReads.settings.forOrg(orgId).jurisdictions;
 
   // ============================================================ G-C0 — reviewer identity
-  const reviewerById = (id) => db.tsReviewers.find((r) => r && r.id === id) ?? null;
-  const activeReviewers = () => db.tsReviewers.filter((r) => r && r.status === 'active');
+  const { reviewers, policies } = compliancePolicies;
+  const reviewerById = (id) => reviewers.byId(id);
   const publicReviewer = (r) => ({ id: r.id, name: r.name, role: r.role, status: r.status, createdAt: r.createdAt, revokedAt: r.revokedAt ?? null, ...revMeta(r) });
 
-  function upsertReviewer({ id, name, role, secret, createdBy }) {
-    let r = reviewerById(id);
-    if (r) return r;
-    r = { id, name, role, status: 'active', secretHash: hashPassword(secret), createdAt: now(), createdBy, revokedAt: null, revokedBy: null, rev: 1, revAt: now(), revBy: null, history: [] };
+  /** A new, active reviewer (the secret stored only as its hash). The caller checked the id is free. */
+  function createReviewer({ id, name, role, secret, createdBy }) {
+    const r = { id, name, role, status: 'active', secretHash: hashPassword(secret), createdAt: now(), createdBy, revokedAt: null, revokedBy: null, rev: 1, revAt: now(), revBy: null, history: [] };
     hist(r, 'reviewer_created', createdBy, { role });
-    db.tsReviewers.push(r);
-    return r;
+    return reviewers.create(r);
   }
   // Bootstrap: an operator-provided root reviewer (production) — never the shared key.
   if (process.env.TS_REVIEWER_BOOTSTRAP_ID && process.env.TS_REVIEWER_BOOTSTRAP_SECRET) {
-    upsertReviewer({ id: String(process.env.TS_REVIEWER_BOOTSTRAP_ID).slice(0, 40), name: String(process.env.TS_REVIEWER_BOOTSTRAP_NAME ?? process.env.TS_REVIEWER_BOOTSTRAP_ID).slice(0, 80), role: 'trust_safety_admin', secret: process.env.TS_REVIEWER_BOOTSTRAP_SECRET, createdBy: bySystem('bootstrap env') });
-    persistNow();
+    const id = String(process.env.TS_REVIEWER_BOOTSTRAP_ID).slice(0, 40);
+    if (!reviewerById(id)) createReviewer({ id, name: String(process.env.TS_REVIEWER_BOOTSTRAP_NAME ?? process.env.TS_REVIEWER_BOOTSTRAP_ID).slice(0, 80), role: 'trust_safety_admin', secret: process.env.TS_REVIEWER_BOOTSTRAP_SECRET, createdBy: bySystem('bootstrap env') });
   }
   // Development and tests only: seeded reviewers with known secrets. Never when dev logins are off.
-  if (devLogins && !db.tsReviewers.length) {
-    upsertReviewer({ id: 'tsr-dev-admin', name: 'Priya Shah', role: 'trust_safety_admin', secret: 'dev-reviewer-admin', createdBy: bySystem('dev seed') });
-    upsertReviewer({ id: 'tsr-dev-reviewer', name: 'Marcus Bell', role: 'trust_safety_reviewer', secret: 'dev-reviewer', createdBy: bySystem('dev seed') });
-    upsertReviewer({ id: 'tsr-dev-admin2', name: 'Léa Fontaine', role: 'trust_safety_admin', secret: 'dev-reviewer-admin2', createdBy: bySystem('dev seed') });
-    persistNow();
+  if (devLogins && !reviewers.count()) {
+    unit(() => {
+      createReviewer({ id: 'tsr-dev-admin', name: 'Priya Shah', role: 'trust_safety_admin', secret: 'dev-reviewer-admin', createdBy: bySystem('dev seed') });
+      createReviewer({ id: 'tsr-dev-reviewer', name: 'Marcus Bell', role: 'trust_safety_reviewer', secret: 'dev-reviewer', createdBy: bySystem('dev seed') });
+      createReviewer({ id: 'tsr-dev-admin2', name: 'Léa Fontaine', role: 'trust_safety_admin', secret: 'dev-reviewer-admin2', createdBy: bySystem('dev seed') });
+    });
   }
 
   /** Credentialed login. Uniform refusal for an unknown id, a wrong secret and a revoked reviewer. */
@@ -125,8 +127,8 @@ export function registerCompliance(rawCtx) {
     if (rateLimit.peek('login_failure', bucket).limited) {
       return res.status(429).json(rateLimitedBody('login_failure'));
     }
-    const r = reviewerById(id);
-    const good = r && r.status === 'active' && !!verifyPassword(secret, r.secretHash);
+    const r = reviewers.activeById(id);
+    const good = !!r && !!verifyPassword(secret, r.secretHash);
     if (!good) {
       rateLimit.limited('login_failure', bucket);
       return sendComplianceError(res, { error: 'REVIEWER_CREDENTIALS_INVALID', message: 'Reviewer id and secret do not match an active reviewer.' }, 'login');
@@ -139,8 +141,8 @@ export function registerCompliance(rawCtx) {
   function reviewerAuth(req, res, next) {
     const session = sessionFor(req);
     if (session?.kind !== 'ts_reviewer') return sendComplianceError(res, { error: 'REVIEWER_AUTH_REQUIRED', message: 'An authenticated Trust & Safety reviewer session is required. The shared admin key is not a reviewer.' }, 'reviewerAuth');
-    const r = reviewerById(session.refId);
-    if (!r || r.status !== 'active') {
+    const r = reviewers.activeById(session.refId);
+    if (!r) {
       sessions.revokeSid(session.sid);
       return sendComplianceError(res, { error: 'REVIEWER_REVOKED', message: 'This reviewer\'s access has been revoked.' }, 'reviewerAuth');
     }
@@ -157,20 +159,23 @@ export function registerCompliance(rawCtx) {
   tsRouter.get('/me', (req, res) => res.json({ reviewer: publicReviewer(req.reviewer), attribution: 'authenticated_reviewer', note: 'Every authoritative compliance action is recorded against this identity.' }));
   tsRouter.get('/reviewers', (req, res) => {
     if (!requireReviewerRole(req, res, 'trust_safety_admin')) return;
-    res.json({ items: db.tsReviewers.map(publicReviewer), legacyNote: REVIEWER_LEGACY_NOTE });
+    res.json({ items: reviewers.all().map(publicReviewer), legacyNote: REVIEWER_LEGACY_NOTE });
   });
   tsRouter.post('/reviewers', (req, res) => {
     if (!requireReviewerRole(req, res, 'trust_safety_admin')) return;
-    const id = String(req.body?.id ?? '').trim().slice(0, 40);
-    const name = String(req.body?.name ?? '').trim().slice(0, 80);
-    const role = String(req.body?.role ?? 'trust_safety_reviewer');
-    const secret = String(req.body?.secret ?? '');
+    const b = req.body ?? {};
+    for (const k of ['id', 'name', 'secret']) if (typeof b[k] !== 'string') return sendComplianceError(res, { error: 'COMPLIANCE_INPUT_INVALID', field: k, message: `${k} must be text.` }, 'reviewers');
+    if (b.role !== undefined && typeof b.role !== 'string') return sendComplianceError(res, { error: 'COMPLIANCE_INPUT_INVALID', field: 'role', allowed: REVIEWER_ROLES }, 'reviewers');
+    const id = b.id.trim();
+    const name = b.name.trim().slice(0, 80);
+    const role = b.role ?? 'trust_safety_reviewer';
+    const secret = b.secret;
     if (!/^[a-z0-9][a-z0-9-]{2,39}$/i.test(id) || !name) return sendComplianceError(res, { error: 'COMPLIANCE_INPUT_INVALID', field: 'id', message: 'id (3–40 chars, letters, digits, dashes) and name are required.' }, 'reviewers');
     if (!REVIEWER_ROLES.includes(role)) return sendComplianceError(res, { error: 'COMPLIANCE_INPUT_INVALID', field: 'role', allowed: REVIEWER_ROLES }, 'reviewers');
     if (secret.length < 12) return sendComplianceError(res, { error: 'COMPLIANCE_INPUT_INVALID', field: 'secret', message: 'A reviewer secret needs at least 12 characters.' }, 'reviewers');
+    if (b.secret.length > 200) return sendComplianceError(res, { error: 'COMPLIANCE_INPUT_INVALID', field: 'secret', message: 'A reviewer secret has at most 200 characters.' }, 'reviewers');
     if (reviewerById(id)) return sendComplianceError(res, { error: 'REVIEWER_EXISTS' }, 'reviewers');
-    const r = upsertReviewer({ id, name, role, secret, createdBy: byReviewer(req) });
-    persistNow();
+    const r = createReviewer({ id, name, role, secret, createdBy: byReviewer(req) });
     res.status(201).json({ reviewer: publicReviewer(r) });
   });
   tsRouter.post('/reviewers/:id/revoke', (req, res) => {
@@ -178,18 +183,23 @@ export function registerCompliance(rawCtx) {
     const r = reviewerById(req.params.id);
     if (!r) return sendComplianceError(res, { error: 'REVIEWER_NOT_FOUND' }, 'reviewers');
     if (r.status === 'revoked') return res.json({ reviewer: publicReviewer(r), idempotent: true });
-    if (r.role === 'trust_safety_admin' && activeReviewers().filter((x) => x.role === 'trust_safety_admin').length <= 1) return sendComplianceError(res, { error: 'LAST_REVIEWER_ADMIN', message: 'At least one Trust & Safety administrator must remain.' }, 'reviewers');
+    if (req.body?.reason !== undefined && req.body.reason !== null && typeof req.body.reason !== 'string') return sendComplianceError(res, { error: 'COMPLIANCE_INPUT_INVALID', field: 'reason', message: 'reason must be text.' }, 'reviewers');
+    if (r.role === 'trust_safety_admin' && reviewers.activeCount('trust_safety_admin') <= 1) return sendComplianceError(res, { error: 'LAST_REVIEWER_ADMIN', message: 'At least one Trust & Safety administrator must remain.' }, 'reviewers');
     if (!guardRev(req, res, r, { errorCode: 'REVIEWER_VERSION_CONFLICT', current: {} })) return;
-    r.status = 'revoked'; r.revokedAt = now(); r.revokedBy = { id: req.reviewer.id, name: req.reviewer.name };
-    hist(r, 'reviewer_revoked', byReviewer(req), { reason: String(req.body?.reason ?? '').slice(0, 200) || null });
-    bumpRev(r, { by: req.reviewer, at: now() });
-    revokeReviewerSessions(r.id);
-    persistNow();
-    res.json({ reviewer: publicReviewer(r) });
+    const out = unit(() => {
+      const next = reviewers.update(r.id, (d) => {
+        d.status = 'revoked'; d.revokedAt = now(); d.revokedBy = { id: req.reviewer.id, name: req.reviewer.name };
+        hist(d, 'reviewer_revoked', byReviewer(req), { reason: String(req.body?.reason ?? '').trim().slice(0, 200) || null });
+        bumpRev(d, { by: req.reviewer, at: now() });
+      });
+      revokeReviewerSessions(r.id);
+      return next;
+    });
+    res.json({ reviewer: publicReviewer(out) });
   });
 
   // ============================================================ policies
-  const publishedPolicies = () => db.jurisdictionPolicies.filter((p) => p && p.status === 'published');
+  const publishedPolicies = () => policies.published();
   const policySetFor = (mas, at = now()) => applicablePolicySet(publishedPolicies(), mas, at);
   const policyPublic = (p) => ({
     id: p.id, regulator: p.regulator, jurisdiction: p.jurisdiction, policyVersion: p.policyVersion, supersedes: p.supersedes ?? null,
@@ -198,7 +208,12 @@ export function registerCompliance(rawCtx) {
     rules: Object.fromEntries(Object.entries(p.rules ?? {}).map(([id, r]) => [id, { ruleStatus: r.ruleStatus, textStatus: r.textStatus ?? null, note: r.note ?? null, params: r.params ?? {}, sourceRef: r.sourceRef ?? [] }])),
     rev: p.rev ?? 1,
   });
-  function validatePolicyBody(b) {
+  /**
+   * The proposed version a body describes, or `{ field, message }`. The route checks the shape a person types (id,
+   * jurisdiction, version, days, at least one rule with a status and a source); the repository types the rest — rule
+   * texts, sources, overrides and every parameter against the engine's vocabulary — and its refusal names the field.
+   */
+  function policyFromBody(b, req) {
     const errs = [];
     if (!/^jp-[a-z]{2,6}-[0-9a-z-]{2,20}$/i.test(String(b.id ?? ''))) errs.push('id');
     if (!JURISDICTIONS.includes(b.jurisdiction)) errs.push('jurisdiction');
@@ -207,52 +222,69 @@ export function registerCompliance(rawCtx) {
     if (!parseStrictDateOnly(b.effectiveFrom).ok) errs.push('effectiveFrom');
     if (b.effectiveTo != null && !parseStrictDateOnly(b.effectiveTo).ok) errs.push('effectiveTo');
     if (b.effectiveTo != null && parseStrictDateOnly(b.effectiveFrom).ok && parseStrictDateOnly(b.effectiveTo).ok && !(b.effectiveFrom < b.effectiveTo)) errs.push('effectiveTo');
-    if (!b.rules || typeof b.rules !== 'object' || !Object.keys(b.rules).length) errs.push('rules');
+    if (b.regulator !== undefined && b.regulator !== null && typeof b.regulator !== 'string') errs.push('regulator');
+    if (b.supersedes !== undefined && b.supersedes !== null && typeof b.supersedes !== 'string') errs.push('supersedes');
+    if (!b.rules || typeof b.rules !== 'object' || Array.isArray(b.rules) || !Object.keys(b.rules).length) errs.push('rules');
     else for (const [id, r] of Object.entries(b.rules)) {
       if (!RULE_STATUSES.includes(r?.ruleStatus)) errs.push(`rules.${id}.ruleStatus`);
       if (!Array.isArray(r?.sourceRef) || !r.sourceRef.length || r.sourceRef.some((s) => !s?.source || !s?.retrievedDate)) errs.push(`rules.${id}.sourceRef`);
+      if (r && typeof r === 'object' && r.note !== undefined && r.note !== null && typeof r.note !== 'string') errs.push(`rules.${id}.note`);
     }
-    return errs;
-  }
-  tsRouter.get('/compliance/policies', (req, res) => res.json({ items: db.jurisdictionPolicies.map(policyPublic), ruleStatuses: RULE_STATUSES, dualControl: true }));
-  tsRouter.post('/compliance/policies', (req, res) => {
-    if (!requireReviewerRole(req, res, 'trust_safety_admin')) return;
-    if (limitedOr429(res, 'ts_policy_publish', req.reviewer.id)) return;
-    const b = req.body ?? {};
-    const errs = validatePolicyBody(b);
-    if (errs.length) return sendComplianceError(res, { error: 'POLICY_INPUT_INVALID', field: errs[0], message: `Invalid policy fields: ${errs.join(', ')}.` }, 'policies');
-    if (db.jurisdictionPolicies.some((p) => p.id === b.id)) return sendComplianceError(res, { error: 'POLICY_VERSION_EXISTS' }, 'policies');
+    if (errs.length) return { field: errs[0], message: `Invalid policy fields: ${errs.join(', ')}.` };
+    const at = now();
+    const unknown = Object.keys(b).filter((k) => !['id', 'regulator', 'jurisdiction', 'policyVersion', 'supersedes', 'effectiveFrom', 'effectiveTo', 'rules', 'expectedRev', 'clientKey'].includes(k));
+    if (unknown.length) return { field: unknown[0], message: `This build stores no policy field ${unknown.join(', ')}.` };
     const row = {
       id: b.id, regulator: String(b.regulator ?? '').slice(0, 20) || 'UNKNOWN', jurisdiction: b.jurisdiction, policyVersion: b.policyVersion, supersedes: b.supersedes ?? null,
       effectiveFrom: b.effectiveFrom, effectiveTo: b.effectiveTo ?? null,
-      rules: Object.fromEntries(Object.entries(b.rules).map(([id, r]) => [id, { ruleStatus: r.ruleStatus, textStatus: r.textStatus ?? null, sourceRef: r.sourceRef, params: r.params ?? {}, note: String(r.note ?? '').slice(0, 1000) || null, ...(Array.isArray(r.overrides) ? { overrides: r.overrides } : {}), ...(r.effectiveFrom ? { effectiveFrom: r.effectiveFrom } : {}) }])),
-      status: 'proposed', proposedBy: { id: req.reviewer.id, name: req.reviewer.name, at: now() }, approvedBy: null, publishedAt: null, publishedBy: null,
-      createdAt: now(), rev: 1, revAt: now(), revBy: null, history: [],
+      rules: Object.fromEntries(Object.entries(b.rules).map(([id, r]) => [id, { ...r, note: String(r.note ?? '').slice(0, 1000) || null }])),
+      status: 'proposed', proposedBy: { id: req.reviewer.id, name: req.reviewer.name, at }, approvedBy: null, publishedAt: null, publishedBy: null,
+      createdAt: at, rev: 1, revAt: at, revBy: null, history: [],
     };
     hist(row, 'policy_version_proposed', byReviewer(req), { policyVersion: row.id });
-    db.jurisdictionPolicies.push(row);
-    persistNow();
-    res.status(201).json({ policy: policyPublic(row), note: 'Proposed. A DIFFERENT Trust & Safety administrator must approve before it takes effect (dual control, C7).' });
+    return { row };
+  }
+  /** A repository refusal of a policy body, as the route's 400 (the field named, never its content). */
+  const policyRefusal = (res, e) => {
+    if (e?.code === 'COMPLIANCE_POLICIES_DUPLICATE' && e.field === 'id') return sendComplianceError(res, { error: 'POLICY_VERSION_EXISTS' }, 'policies');
+    if (e?.code === 'COMPLIANCE_POLICIES_INPUT_INVALID') return sendComplianceError(res, { error: 'POLICY_INPUT_INVALID', field: e.field ?? 'policy', message: e.message.replace(/^[A-Z_]+: /, '') }, 'policies');
+    throw e;
+  };
+  tsRouter.get('/compliance/policies', (req, res) => res.json({ items: policies.all().map(policyPublic), ruleStatuses: RULE_STATUSES, dualControl: true }));
+  tsRouter.post('/compliance/policies', (req, res) => {
+    if (!requireReviewerRole(req, res, 'trust_safety_admin')) return;
+    if (limitedOr429(res, 'ts_policy_publish', req.reviewer.id)) return;
+    const built = policyFromBody(req.body ?? {}, req);
+    if (!built.row) return sendComplianceError(res, { error: 'POLICY_INPUT_INVALID', field: built.field, message: built.message }, 'policies');
+    if (policies.exists(built.row.id)) return sendComplianceError(res, { error: 'POLICY_VERSION_EXISTS' }, 'policies');
+    let p;
+    try { p = policies.create(built.row); } catch (e) { return policyRefusal(res, e); }
+    res.status(201).json({ policy: policyPublic(p), note: 'Proposed. A DIFFERENT Trust & Safety administrator must approve before it takes effect (dual control, C7).' });
   });
   tsRouter.post('/compliance/policies/:id/approve', (req, res) => {
     if (!requireReviewerRole(req, res, 'trust_safety_admin')) return;
-    const p = db.jurisdictionPolicies.find((x) => x && x.id === req.params.id);
+    const p = policies.byId(req.params.id);
     if (!p) return sendComplianceError(res, { error: 'POLICY_NOT_FOUND' }, 'policies');
     if (p.status !== 'proposed') return sendComplianceError(res, { error: 'POLICY_NOT_PROPOSED', status: p.status }, 'policies');
     if (p.proposedBy?.id === req.reviewer.id) return sendComplianceError(res, { error: 'POLICY_DUAL_CONTROL_REQUIRED', message: 'The approving administrator must be a different person from the proposer.' }, 'policies');
-    p.status = 'published'; p.approvedBy = { id: req.reviewer.id, name: req.reviewer.name, at: now() }; p.publishedAt = now();
-    p.publishedBy = [{ kind: 'ts_reviewer', id: p.proposedBy.id, name: p.proposedBy.name }, { kind: 'ts_reviewer', id: req.reviewer.id, name: req.reviewer.name }];
-    hist(p, 'policy_version_published', byReviewer(req), { policyVersion: p.id });
-    bumpRev(p, { by: req.reviewer, at: now() });
-    // Every open context evaluated under an older version of this jurisdiction is flagged — never silently re-verdicted.
-    for (const c of db.complianceContexts ?? []) {
-      if (!c || c.status !== 'open') continue;
-      const last = c.evaluations?.[c.evaluations.length - 1];
-      if (last && (c.jurisdictions ?? []).includes(p.jurisdiction) && !last.policyVersions.includes(p.id)) { c.reEvaluationPending = true; hist(c, 'compliance_context_policy_changed', bySystem('policy publication'), { policyVersions: [p.id] }); }
-    }
-    persistNow();
+    const out = unit(() => {
+      const next = policies.update(p.id, (d) => {
+        d.status = 'published'; d.approvedBy = { id: req.reviewer.id, name: req.reviewer.name, at: now() }; d.publishedAt = now();
+        d.publishedBy = [{ kind: 'ts_reviewer', id: d.proposedBy.id, name: d.proposedBy.name }, { kind: 'ts_reviewer', id: req.reviewer.id, name: req.reviewer.name }];
+        hist(d, 'policy_version_published', byReviewer(req), { policyVersion: d.id });
+        bumpRev(d, { by: req.reviewer, at: now() });
+      });
+      // Every open context evaluated under an older version of this jurisdiction is flagged — never silently re-verdicted.
+      for (const c of db.complianceContexts ?? []) {
+        if (!c || c.status !== 'open') continue;
+        const last = c.evaluations?.[c.evaluations.length - 1];
+        if (last && (c.jurisdictions ?? []).includes(next.jurisdiction) && !last.policyVersions.includes(next.id)) { c.reEvaluationPending = true; hist(c, 'compliance_context_policy_changed', bySystem('policy publication'), { policyVersions: [next.id] }); }
+      }
+      persistNow();
+      return next;
+    });
     broadcast('policy_version_published', {});
-    res.json({ policy: policyPublic(p) });
+    res.json({ policy: policyPublic(out) });
   });
   orgRouter.get('/agent/compliance/policies', (req, res) => {
     if (!agent.resolveMembership(req, res)) return;
@@ -260,7 +292,7 @@ export function registerCompliance(rawCtx) {
     const set = policySetFor(mas);
     res.json({ inEffect: set.policies.map(policyPublic), missing: set.missing, ruleStatuses: RULE_STATUSES, honest: 'These are ScoutBox\'s encoded platform rules with their operative status as recorded on the retrieval date. They are not legal advice and a status can change without a deploy.' });
   });
-  adminRouter.get('/compliance/policies', (_req, res) => res.json({ items: db.jurisdictionPolicies.map(policyPublic), readOnly: true, note: 'Read-only. Publishing needs two authenticated Trust & Safety administrators (/ts).' }));
+  adminRouter.get('/compliance/policies', (_req, res) => res.json({ items: policies.all().map(policyPublic), readOnly: true, note: 'Read-only. Publishing needs two authenticated Trust & Safety administrators (/ts).' }));
 
   // ============================================================ facets and the provider
   const facetStatesOf = (p, at = now()) => ({

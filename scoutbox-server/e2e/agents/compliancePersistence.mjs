@@ -18,6 +18,8 @@
 // (migration 0026), planted in the writers' whole literals. The 2306 step no
 // longer bootstraps review items from them: a review is requested by the route
 // that needs one, which section 3 now exercises.
+// S11b-1: the reviewers and the policy versions are typed tables too (migration 0027 inserts the seeded versions, read
+// back exactly); a reviewer row the table cannot hold (an unknown status word) is refused by the save, naming it.
 //   4  clean boot → context → declared representation → attributed review →
 //      consent → revocation → stop → snapshot → reboot: bytes survive
 //      (ledger rows incl. the revocation row, evaluations, revs, keys, the
@@ -88,7 +90,10 @@ async function bootOn(dataDir, port) {
 
 const PORT = 6800 + Math.floor(Math.random() * 150);
 const T0 = 1_700_000_000_000;
-const STORES = ['tsReviewers', 'jurisdictionPolicies', 'regulatoryReviews', 'regulatoryConsents', 'complianceContexts'];
+// S11b-1: the reviewers and the policy versions are tables (migration 0027, which inserts the seeded versions); the
+// step's three remaining stores are collections until S11b-2.
+const STORES = ['regulatoryReviews', 'regulatoryConsents', 'complianceContexts'];
+const TABLE_STORES = ['tsReviewers', 'jurisdictionPolicies'];
 const STEP = 'm250_001_compliance_stores';
 
 // ------------------------------------------------------------- fixtures
@@ -137,7 +142,7 @@ function snapshot2305() {
 }
 
 // ======================================================= 1 — the step
-section('1 — the P5.6C step: one step at 2306, five stores, three seeded policies, idempotent, production-required');
+section('1 — the P5.6C step: one step at 2306, three stores, idempotent, production-required; the seeded policies are rows of 0027');
 {
   const step = MIGRATIONS.find((m) => m.id === STEP);
   ok(step?.version === 2306 && SCHEMA_VERSION >= 2306, `${STEP} is version 2306; the current schema is ${SCHEMA_VERSION}`);
@@ -148,10 +153,14 @@ section('1 — the P5.6C step: one step at 2306, five stores, three seeded polic
   neg(new Set(versionsAbove).size === versionsAbove.length, 'every schema version above 2305 is reached by exactly one step — no version is advanced twice');
   const fresh = {};
   const up = runMigrations(fresh);
-  ok(up.to === SCHEMA_VERSION && STORES.every((s) => Array.isArray(fresh[s])), 'a clean database gets the five stores');
-  ok(fresh.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && fresh.jurisdictionPolicies.map((p) => p.id).sort().join() === SEEDED_POLICY_VERSIONS.map((p) => p.id).sort().join(), `the ${SEEDED_POLICY_VERSIONS.length} P5.6A policy versions are seeded (FIFA baseline, England 2026/27, USA)`);
-  ok(fresh.jurisdictionPolicies.every((p) => p.status === 'published' && p.proposedBy === null && p.approvedBy === null && p.history[0].by.name === 'migration 2306' && p.history[0].detail.seeded === true), 'each seeded version is published, attributed to the migration, with no reviewer invented');
-  neg(fresh.tsReviewers.length === 0 && fresh.regulatoryReviews.length === 0 && fresh.regulatoryConsents.length === 0 && fresh.complianceContexts.length === 0, 'reviewers, reviews, consents and contexts start EMPTY — nobody is a reviewer by default');
+  ok(up.to === SCHEMA_VERSION && STORES.every((s) => Array.isArray(fresh[s])) && TABLE_STORES.every((s) => fresh[s] === undefined), 'a clean database gets the three stores, and no reviewer or policy collection (they are tables)');
+  const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m25p1-'));
+  openStore(freshDir).save({ db: fresh });
+  const tables = openStore(freshDir).load().db;
+  ok(tables.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && tables.jurisdictionPolicies.map((p) => p.id).sort().join() === SEEDED_POLICY_VERSIONS.map((p) => p.id).sort().join(), `the ${SEEDED_POLICY_VERSIONS.length} P5.6A policy versions are seeded (FIFA baseline, England 2026/27, USA)`);
+  ok(tables.jurisdictionPolicies.every((p) => p.status === 'published' && p.proposedBy === null && p.approvedBy === null && p.history[0].by.name === 'migration 0027_compliance_policies' && p.history[0].detail.seeded === true), 'each seeded version is published, attributed to the migration, with no reviewer invented');
+  ok(tables.jurisdictionPolicies.every((p) => stableJson(p.rules) === stableJson(SEEDED_POLICY_VERSIONS.find((v) => v.id === p.id).rules)), 'each seeded version\'s rules (statuses, sources, parameters, overrides) read back exactly as encoded');
+  neg(tables.tsReviewers.length === 0 && fresh.regulatoryReviews.length === 0 && fresh.regulatoryConsents.length === 0 && fresh.complianceContexts.length === 0, 'reviewers, reviews, consents and contexts start EMPTY — nobody is a reviewer by default');
   // Signings and offers are tables since S8c/S8d, so no blob step creates either collection any more.
   neg(fresh.offers === undefined && fresh.negotiations === undefined && !String(step.up).includes('agentTransactions'), 'the P5.6C step invented no offer or negotiation store and created no transaction store of its own (out of scope for P5.6C)');
   const { schema: _s1, ...storesBefore } = fresh;
@@ -161,10 +170,11 @@ section('1 — the P5.6C step: one step at 2306, five stores, three seeded polic
   const { schema: _s2, ...storesAfter } = fresh;
   ok(again.ran.length === 0 && stableJson(storesAfter) === before && fresh.schema.migrations.map((m) => m.id).join() === idsBefore && fresh.schema.version === SCHEMA_VERSION, 'running again changes no store and adds no migration record');
   for (const s of STORES) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `${s} is migration-guaranteed and production-required`);
+  for (const s of TABLE_STORES) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s), `${s} is a table, not a migration-guaranteed collection`);
 }
 
 // ======================================================= 2 — upgrade
-section('2 — upgrade from 2305: seeded policies, nothing invented, nothing else touched');
+section('2 — upgrade from 2305: nothing invented, nothing else touched');
 {
   const db = snapshot2305();
   ok(db.schema.version === 2305 && db.tsReviewers === undefined && db.agentProfiles.length === 2 && db.representationAgreements.length === 2, 'the fixture is a 2305 snapshot with two profiles, two agreements and no compliance store');
@@ -172,19 +182,19 @@ section('2 — upgrade from 2305: seeded policies, nothing invented, nothing els
   const usersBefore = stableJson(db.users);
   const up = runMigrations(db);
   ok(up.ran[0] === STEP && up.to === SCHEMA_VERSION, 'a 2305 snapshot runs the P5.6C step first, then any later milestone\'s step, and lands on the current schema');
-  ok(db.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && db.jurisdictionPolicies.every((p) => p.status === 'published'), 'the policy versions are seeded as published rows');
+  ok(db.jurisdictionPolicies === undefined, 'the step seeds no policy collection (migration 0027 inserts the seeded versions as rows, section 1)');
   neg(stableJson([db.agentProfiles, db.agencyAffiliations, db.representationAgreements]) === agentBefore, 'the step reads and changes no agent row (S11a: they are typed tables, written whole with every facet)');
   neg(stableJson(db.users) === usersBefore, 'no user row was touched');
   neg(db.regulatoryReviews.length === 0, 'the step requests no review item: a review is requested by the route that needs one');
-  neg(db.tsReviewers.length === 0, 'NO reviewer identity was invented by the migration (G-C0: production reviewers come from the operator bootstrap)');
+  neg(db.tsReviewers === undefined, 'NO reviewer identity was invented by the migration (G-C0: production reviewers come from the operator bootstrap)');
   const again = runMigrations(db);
-  ok(again.ran.length === 0 && db.regulatoryReviews.length === 0 && db.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length, 'running again creates nothing twice');
+  ok(again.ran.length === 0 && db.regulatoryReviews.length === 0 && db.jurisdictionPolicies === undefined, 'running again creates nothing twice');
   // A partially-applied re-run (stores present, step record missing) is still idempotent, and leaves an existing item alone.
   db.regulatoryReviews.push({ id: 'rrv-kept', kind: 'representation_dispute', status: 'REJECTED', subject: { agreementId: 'rep-disputed' } });
   const kept = stableJson(db.regulatoryReviews);
   db.schema.version = 2305; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP);
   const third = runMigrations(db);
-  ok(third.ran.join(',') === STEP && db.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length, 'a re-applied step over existing rows adds no duplicate policy');
+  ok(third.ran.join(',') === STEP && db.jurisdictionPolicies === undefined, 'a re-applied step over existing rows adds no policy');
   neg(stableJson(db.regulatoryReviews) === kept, 'and leaves an existing review item exactly as it was (a resolved item stays resolved; nothing is raised)');
 }
 
@@ -342,20 +352,24 @@ section('5 — corruption on disk is contained, named by its effect, never repai
   ok(s0.up, 'a first boot seeds the dev reviewers (empty store)');
   const seeded = await s0.stop();
   ok(seeded.tsReviewers.length === 3, 'three dev reviewers on disk');
-  seeded.tsReviewers.push({ id: 'tsr-odd', name: 'Odd Reviewer', role: 'trust_safety_admin', status: 'enabled', secretHash: 'not-a-hash', createdAt: T0, rev: 1, revAt: T0, revBy: null, history: [] });
-  openStore(dir).save({ db: seeded });
-  const stored = stableJson(seeded.tsReviewers.find((r) => r.id === 'tsr-odd'));
+  // S11b-1: a reviewer row with an unknown status word is not a row the typed table can hold: the save refuses it,
+  // naming it, and nothing is written.
+  const odd = { id: 'tsr-odd', name: 'Odd Reviewer', role: 'trust_safety_admin', status: 'enabled', secretHash: 'not-a-hash', createdAt: T0, createdBy: { kind: 'system', userId: null, name: 'fixture' }, revokedAt: null, revokedBy: null, rev: 1, revAt: T0, revBy: null, history: [] };
+  let refused = null;
+  try { openStore(dir).save({ db: { ...seeded, tsReviewers: [...seeded.tsReviewers, odd] } }); } catch (e) { refused = e; }
+  neg(refused?.code === 'COMPLIANCE_POLICIES_IMPORT_BLOCKED' && /tsr-odd/.test(refused.message) && /status/.test(refused.message), 'a reviewer row with status "enabled" (unknown) is refused by the save, naming the row and the field');
+  neg(openStore(dir).load().db.tsReviewers.length === 3, 'and nothing was written: the three seeds are still the reviewers');
   const s = await bootOn(dir, PORT + 3);
   ok(s.up, 'the server boots over the corrupt rows');
   if (s.up) {
-    neg(expect(await s.j('POST', '/auth/reviewer/login', { reviewerId: 'tsr-odd', secret: 'anything' }), 401, 'REVIEWER_CREDENTIALS_INVALID'), 'a reviewer row with status "enabled" (unknown) cannot log in — only "active" can');
+    neg(expect(await s.j('POST', '/auth/reviewer/login', { reviewerId: 'tsr-odd', secret: 'anything' }), 401, 'REVIEWER_CREDENTIALS_INVALID'), 'the refused reviewer cannot log in — only an active reviewer can');
     const priya = (await s.j('POST', '/auth/reviewer/login', { reviewerId: 'tsr-dev-admin', secret: 'dev-reviewer-admin' })).body;
-    ok(!!priya?.token && (await s.j('GET', '/ts/reviewers', undefined, priya.token)).body.items.length === 4, 'a real reviewer logs in; the odd row is listed beside the three seeds, not repaired and not dropped');
+    ok(!!priya?.token && (await s.j('GET', '/ts/reviewers', undefined, priya.token)).body.items.length === 3, 'a real reviewer logs in; the three seeds are listed and nothing else');
     neg(expect(await s.j('POST', '/ts/compliance/reviews/rrv-prohibited/resolve', { outcome: 'APPROVED', reasonCode: 'x', reason: 'looks fine', evidenceRefs: ['e'] }, priya.token), 409, 'REVIEW_CANNOT_OVERRIDE_ACTIVE_RULE'), 'an administrator cannot approve a review whose snapshot is PROHIBITED under an ACTIVE rule');
     const rej = await s.j('POST', '/ts/compliance/reviews/rrv-prohibited/resolve', { outcome: 'REJECTED', reasonCode: 'prohibited', reason: 'Prohibited; closed.' }, priya.token);
     ok(rej.status === 200 && rej.body.review.status === 'REJECTED' && rej.body.review.decision.resultingState.note === 'context gone', 'rejecting it works and says honestly that its context is gone');
     const after = await s.stop();
-    neg(stableJson(after.tsReviewers.find((r) => r.id === 'tsr-odd')) === stored, 'the odd reviewer row was not repaired on boot or by the failed login — the bytes are the bytes');
+    neg(!after.tsReviewers.some((r) => r.id === 'tsr-odd') && after.tsReviewers.every((r) => r.status === 'active'), 'the failed login wrote no reviewer row and changed no status');
     // Now wipe the policy store and boot again: nothing is CLEAR without an encoded policy.
     after.jurisdictionPolicies = [];
     openStore(dir).save({ db: after });

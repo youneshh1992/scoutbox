@@ -166,8 +166,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // agentProfiles, agencyAffiliations, representationAgreements: never a db.* read since S11a — typed tables (migration
   // 0026), read through repositories/agentCore.mjs (agentReads). Each db.* name throws.
   // M23 P5.6C — Conflict & Compliance Engine. Guaranteed by migration 2306.
-  tsReviewers: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: per-reviewer Trust & Safety identity (G-C0); empty in production until an operator bootstraps one — the shared key creates none' },
-  jurisdictionPolicies: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: versioned jurisdiction policy rows with per-rule operative status; seeded from code, published thereafter under dual control' },
+  // tsReviewers, jurisdictionPolicies: never a db.* read since S11b-1 — typed tables (migration 0027, which also inserts
+  // the seeded policy versions), read through repositories/compliancePolicies.mjs. Each db.* name throws.
   regulatoryReviews: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: attributed manual regulatory review items; every decision names its reviewer' },
   regulatoryConsents: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: the append-only, party-specific consent ledger; a revocation is a new row' },
   complianceContexts: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: the minimal conflict-evaluation context with its evaluation snapshots; not a Transaction Room' },

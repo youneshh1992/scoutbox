@@ -53,7 +53,7 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 - Before any pathway opens: ACTIVE rules with resolvable timing under dual control, a deliberate flag flip, guardian-first consent, individual minors accreditation checked against a real register, safeguarding review and age-oracle audit.
 
 **Policy engine** (P56C_POLICY_ENGINE; `domains/agents/compliance/policy.mjs`, `policyVersions.mjs`)
-- Policy is data; no jurisdiction conditionals in routes or clients. Only published versions inside their effective window are read.
+- Policy is data; no jurisdiction conditionals in routes or clients. Only published versions inside their effective window are read. A rule's parameters are typed against the engine's vocabulary (`RULE_PARAMS`): publishing an unknown parameter, or one of the wrong type, is refused.
 - `ruleStatus` (separate from `textStatus`): `ACTIVE` decides; `SUSPENDED`/`PENDING_IMPLEMENTATION` → `NO_ACTIVE_RULE_DECIDES` (never permission); `PARTIALLY_SUSPENDED`/`UNDER_LEGAL_REVIEW`/`UNKNOWN` → review; `JURISDICTION_OVERRIDE` names both rule ids.
 - The set is always INT plus each named member association; anything unencoded → `JURISDICTION_UNSUPPORTED`/`POLICY_NOT_ENCODED`.
 - Seeded: `jp-fifa-2025-1` (FFAR 12(8)–(10) `UNDER_LEGAL_REVIEW` with overrides to England; 19 `SUSPENDED`; `FIFA-RSTP-2027` pending from 2027-01-01); `jp-eng-2026-27-1` (6.3 ACTIVE with consent, particulars and legal-advice offer; 6.4 prohibition; 6.5 connected agents; 7.13 partially suspended); `jp-usa-2024-1` (multiple representation and minors `UNKNOWN`).
@@ -77,7 +77,7 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 - Revocation stops future acts immediately and undoes nothing; a revoked consent needs a new request. No fee, terms or other party's data on the card. Notifications are in the mandatory `compliance` category.
 
 **Attributed T&S reviewers (G-C0)** (P56C_GC0_REVIEWER_ATTRIBUTION)
-- `db.tsReviewers` (roles `trust_safety_reviewer`, `trust_safety_admin`; scrypt-hashed secrets); `/auth/reviewer/login` creates a `ts_reviewer` session. A `reviewerId` or timestamp in the body is ignored. The shared admin key is read-only and decides nothing.
+- Reviewers are rows of `ts_reviewers` (roles `trust_safety_reviewer`, `trust_safety_admin`; scrypt-hashed secrets); `/auth/reviewer/login` creates a `ts_reviewer` session. A `reviewerId` or timestamp in the body is ignored. The shared admin key is read-only and decides nothing.
 - Revocation kills sessions but keeps past decisions attributed; at least one admin must remain. Bootstrap via `TS_REVIEWER_BOOTSTRAP_*` only; no reviewer is invented and nothing is back-filled.
 - Approvals need evidence. Reviewers resolve facts only: they cannot override an ACTIVE prohibition (`REVIEW_CANNOT_OVERRIDE_ACTIVE_RULE`) or decide on an uncertain rule (`REVIEW_REQUIRES_POLICY_VERSION`). Decided items are superseded, never edited.
 

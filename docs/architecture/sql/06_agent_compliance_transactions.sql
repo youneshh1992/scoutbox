@@ -34,195 +34,189 @@
 
 
 -- -----------------------------------------------------------------------------
--- source: db.tsReviewers   created at domains/agents/compliance/index.mjs:92 (upsertReviewer); bootstrap
---         from TS_REVIEWER_BOOTSTRAP_* env (domains/agents/compliance/index.mjs:99) or dev seed (:104)
--- owner/writer: m25 (tsRouter /reviewers, /reviewers/:id/revoke)
--- lifecycle: status active -> revoked (never deleted; revoked keeps the row and
---            its sessions are dropped). ≥1 active trust_safety_admin invariant
---            enforced by code (LAST_REVIEWER_ADMIN).
--- mapping: id -> id (natural, /^[a-z0-9][a-z0-9-]{2,39}$/i, operator-chosen);
---   name -> name (≤80); role -> role; status -> status;
---   secretHash -> secret_hash (scrypt string from hashPassword(); the plain
---     secret was NEVER stored — only its hash — so this is a rename, not a
---     hardening); createdAt -> created_at; createdBy{kind,userId,name} ->
---     created_by_kind / created_by_id / created_by_name (kind is 'system' for
---     bootstrap/dev seed, 'ts_reviewer' for an admin-created reviewer);
---   revokedAt -> revoked_at; revokedBy{id,name} -> revoked_by_id (self FK) /
---     revoked_by_name (snapshot); rev/revAt/revBy -> rev / rev_at /
---     rev_by_user_id / rev_by_name; history[] -> ts_reviewer_history.
--- notes: reviewer identity is the G-C0 attribution record; a reviewer row is
---   never removed. Login lockout is in-memory rate limiting (not a table).
+-- S11b-1: IMPLEMENTED, migration 0027_compliance_policies REGISTERED (repositories/compliancePolicies.mjs, 5 Nov 2026).
+-- The definitions below are the migration's DDL (generated from the repository's field specs, like S10a–S11a);
+-- scripts/testSchemaDdl.mjs compares them column by column.
+-- Sources: domains/agents/compliance/index.mjs (reviewers: the dev seed, the operator bootstrap, POST /ts/reviewers and
+-- its revoke; policy versions: POST /ts/compliance/policies and its approve); the three seeded versions
+-- (domains/agents/compliance/policyVersions.mjs) are inserted by the migration, attributed to it.
+-- How the model differs from the first draft of this file:
+--   * No JSON columns. A rule's parameters are typed against the engine's vocabulary (RULE_PARAMS in
+--     policyVersions.mjs): one row per parameter, its scalar value a flag, count or text column; a list's, a role
+--     set's or an age map's elements are jurisdiction_policy_rule_param_items rows. A parameter the engine does not
+--     read, or of the wrong type, is refused on publication (it used to be stored and silently ignored).
+--   * A history entry's detail is typed columns: a reviewer's creation names the role, a revocation its reason; a
+--     policy entry's policyVersion is the policy's own id (not stored) and a seeded publication is marked.
+--   * Rules, sources, overrides, parameters and publishers keep their order (the engine searches rules in order).
+--   * ts_reviewers keeps the creating reviewer's role; the reviewer id is at most 40 characters (the route's rule).
+--   * supersedes_id names an existing version of the same jurisdiction (checked on creation; RESTRICT).
+-- Read patterns: a reviewer by id (every reviewer request) and the active administrators' count (the last-admin rule);
+--   the published versions (every evaluation; decoded once per change), a version by id, every version (T&S list).
 -- -----------------------------------------------------------------------------
 CREATE TABLE ts_reviewers (
-  id               TEXT PRIMARY KEY,
-  name             TEXT NOT NULL,
-  role             TEXT NOT NULL CHECK (role IN ('trust_safety_reviewer','trust_safety_admin')),
-  status           TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),
-  secret_hash      TEXT NOT NULL,                       -- scrypt string; plain secret never stored
-  created_at       INTEGER NOT NULL,
-  created_by_kind  TEXT CHECK (created_by_kind IN ('system','ts_reviewer')),
-  created_by_id    TEXT,
-  created_by_name  TEXT,                                -- snapshot
-  revoked_at       INTEGER,
-  revoked_by_id    TEXT REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
-  revoked_by_name  TEXT,                                -- snapshot
-  rev              INTEGER NOT NULL DEFAULT 1,
-  rev_at           INTEGER,
-  rev_by_user_id   TEXT,
-  rev_by_name      TEXT                                 -- snapshot
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  name                                     TEXT NOT NULL CHECK (length(name) <= 80 AND length(name) > 0),
+  role                                     TEXT NOT NULL CHECK (role IN ('trust_safety_reviewer','trust_safety_admin')),
+  status                                   TEXT NOT NULL CHECK (status IN ('active','revoked')),
+  secret_hash                              TEXT NOT NULL CHECK (length(secret_hash) <= 400 AND length(secret_hash) > 0),
+  created_at                               INTEGER NOT NULL,
+  created_by_kind                          TEXT NOT NULL CHECK (created_by_kind IN ('ts_reviewer','system')),
+  created_by_id                            TEXT CHECK (created_by_id IS NULL OR length(created_by_id) <= 80 AND length(created_by_id) > 0),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_by_role                          TEXT CHECK (created_by_role IS NULL OR length(created_by_role) <= 60 AND length(created_by_role) > 0),
+  revoked_at                               INTEGER,
+  revoked_by_id                            TEXT CHECK (revoked_by_id IS NULL OR length(revoked_by_id) <= 40 AND length(revoked_by_id) > 0),
+  revoked_by_name                          TEXT CHECK (revoked_by_name IS NULL OR length(revoked_by_name) <= 80),
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  rev_by_id                                TEXT CHECK (rev_by_id IS NULL OR length(rev_by_id) <= 80),
+  FOREIGN KEY (revoked_by_id) REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
+  CHECK (rev >= 1),
+  CHECK ((status = 'revoked') = (revoked_at IS NOT NULL)),
+  CHECK ((revoked_at IS NULL) = (revoked_by_id IS NULL)),
+  CHECK (created_by_kind = 'ts_reviewer' OR (created_by_id IS NULL AND created_by_role IS NULL))
 ) STRICT;
-CREATE INDEX ts_reviewers_status ON ts_reviewers(status);
-
--- source: db.tsReviewers[].history[]   (domains/agents/compliance/index.mjs:66 hist())
--- actions: reviewer_created, reviewer_revoked
+CREATE INDEX ts_reviewers_status_role ON ts_reviewers(status, role);
 CREATE TABLE ts_reviewer_history (
-  id           TEXT PRIMARY KEY,                        -- aud-*
-  reviewer_id  TEXT NOT NULL REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id        TEXT,
-  by_name      TEXT,
-  by_role      TEXT,
-  by_org_id    TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  reviewer_id  TEXT NOT NULL REFERENCES ts_reviewers(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  at  INTEGER NOT NULL,
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('ts_reviewer','system')),
+  by_id  TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role  TEXT CHECK (by_role IS NULL OR by_role IN ('trust_safety_reviewer','trust_safety_admin')),
+  action  TEXT NOT NULL CHECK (action IN ('reviewer_created','reviewer_revoked')),
+  detail_role  TEXT CHECK (detail_role IS NULL OR detail_role IN ('trust_safety_reviewer','trust_safety_admin')),
+  detail_reason  TEXT CHECK (detail_reason IS NULL OR (length(detail_reason) > 0 AND length(detail_reason) <= 200)),
+  UNIQUE (reviewer_id, ord),
+  CHECK ((action = 'reviewer_created') = (detail_role IS NOT NULL)),
+  CHECK (action = 'reviewer_revoked' OR detail_reason IS NULL)
 ) STRICT;
-CREATE INDEX ts_reviewer_history_reviewer ON ts_reviewer_history(reviewer_id, at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.jurisdictionPolicies   created at domains/agents/compliance/index.mjs:220 (proposed via
---         POST /ts/compliance/policies) and domains/platform/migrations.mjs:482 (seeded
---         from domains/agents/compliance/policyVersions.mjs SEEDED_POLICY_VERSIONS)
--- owner/writer: m25   lifecycle: status proposed -> published (dual control:
---         approver must differ from proposer). Never deleted or edited after
---         publication; a later version is a new row with `supersedes`.
--- mapping: id -> id (natural 'jp-<regulator>-<ver>', /^jp-[a-z]{2,6}-[0-9a-z-]{2,20}$/i);
---   regulator -> regulator (≤20, 'UNKNOWN' default); jurisdiction -> jurisdiction;
---   policyVersion -> policy_version (int ≥1); supersedes -> supersedes_id (self FK;
---     the code does not validate the value today — the FK is new);
---   effectiveFrom/effectiveTo -> effective_from_date / effective_to_date (strict
---     date-only); status -> status; proposedBy{id,name,at} -> proposed_by_id /
---     proposed_by_name / proposed_at (all null on seeded rows);
---   approvedBy{id,name,at} -> approved_by_id / approved_by_name / approved_at;
---   publishedAt -> published_at; publishedBy[] -> jurisdiction_policy_publishers;
---   rules{ruleId: Rule} -> jurisdiction_policy_rules (+ _sources, _overrides);
---   createdAt -> created_at; rev/revAt/revBy -> rev / rev_at / rev_by_*;
---   history[] -> jurisdiction_policy_history.
--- notes: uniqueness of id enforced by code (POLICY_VERSION_EXISTS) and by the
---   PK. The in-force version per jurisdiction is derived at read time
---   (selectPolicyVersion: published, effective window covers now, highest
---   policyVersion wins) — not stored.
--- -----------------------------------------------------------------------------
 CREATE TABLE jurisdiction_policies (
-  id                   TEXT PRIMARY KEY,
-  regulator            TEXT NOT NULL,
-  jurisdiction         TEXT NOT NULL CHECK (length(jurisdiction) = 3),
-  policy_version       INTEGER NOT NULL CHECK (policy_version >= 1),
-  supersedes_id        TEXT REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
-  effective_from_date  TEXT NOT NULL CHECK (length(effective_from_date) = 10),
-  effective_to_date    TEXT CHECK (effective_to_date IS NULL OR length(effective_to_date) = 10),
-  status               TEXT NOT NULL CHECK (status IN ('proposed','published')),
-  proposed_by_id       TEXT REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
-  proposed_by_name     TEXT,                            -- snapshot
-  proposed_at          INTEGER,
-  approved_by_id       TEXT REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
-  approved_by_name     TEXT,                            -- snapshot
-  approved_at          INTEGER,
-  published_at         INTEGER,
-  created_at           INTEGER NOT NULL,
-  rev                  INTEGER NOT NULL DEFAULT 1,
-  rev_at               INTEGER,
-  rev_by_user_id       TEXT,
-  rev_by_name          TEXT                             -- snapshot
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  regulator                                TEXT NOT NULL CHECK (length(regulator) <= 20 AND length(regulator) > 0),
+  jurisdiction                             TEXT NOT NULL CHECK (jurisdiction IN ('INT','ENG','USA')),
+  policy_version                           INTEGER NOT NULL,
+  supersedes_id                            TEXT CHECK (supersedes_id IS NULL OR length(supersedes_id) <= 80 AND length(supersedes_id) > 0),
+  effective_from_date                      TEXT NOT NULL CHECK (length(effective_from_date) <= 10),
+  effective_to_date                        TEXT CHECK (effective_to_date IS NULL OR length(effective_to_date) <= 10),
+  status                                   TEXT NOT NULL CHECK (status IN ('proposed','published')),
+  proposed_by_id                           TEXT CHECK (proposed_by_id IS NULL OR length(proposed_by_id) <= 40 AND length(proposed_by_id) > 0),
+  proposed_by_name                         TEXT CHECK (proposed_by_name IS NULL OR length(proposed_by_name) <= 80),
+  proposed_at                              INTEGER,
+  approved_by_id                           TEXT CHECK (approved_by_id IS NULL OR length(approved_by_id) <= 40 AND length(approved_by_id) > 0),
+  approved_by_name                         TEXT CHECK (approved_by_name IS NULL OR length(approved_by_name) <= 80),
+  approved_at                              INTEGER,
+  published_at                             INTEGER,
+  created_at                               INTEGER NOT NULL,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  rev_by_id                                TEXT CHECK (rev_by_id IS NULL OR length(rev_by_id) <= 80),
+  FOREIGN KEY (supersedes_id) REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
+  FOREIGN KEY (proposed_by_id) REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
+  FOREIGN KEY (approved_by_id) REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
+  CHECK (effective_from_date IS NULL OR effective_from_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  CHECK (effective_to_date IS NULL OR effective_to_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  CHECK (policy_version >= 1),
+  CHECK (rev >= 1),
+  CHECK (effective_to_date IS NULL OR effective_to_date > effective_from_date),
+  CHECK ((status = 'published') = (published_at IS NOT NULL)),
+  CHECK (status = 'published' OR approved_by_id IS NULL),
+  CHECK (supersedes_id IS NULL OR supersedes_id <> id)
 ) STRICT;
 CREATE INDEX jurisdiction_policies_jurisdiction_status ON jurisdiction_policies(jurisdiction, status);
-
--- source: db.jurisdictionPolicies[].publishedBy[]  (domains/agents/compliance/index.mjs:239 — two
---         ts_reviewer entries [proposer, approver]; migrations.mjs:482 /
---         policyVersions.mjs:51 — one {kind:'system', id:'migration-2306', name})
--- mapping: array index -> position; kind -> by_kind; id -> by_id; name -> by_name
 CREATE TABLE jurisdiction_policy_publishers (
   policy_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE CASCADE,
-  position   INTEGER NOT NULL CHECK (position >= 0),
-  by_kind    TEXT NOT NULL CHECK (by_kind IN ('ts_reviewer','system')),
-  by_id      TEXT NOT NULL,
-  by_name    TEXT,                                      -- snapshot
-  PRIMARY KEY (policy_id, position)
+  ord  INTEGER NOT NULL CHECK (ord >= 0 AND ord < 2),
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('ts_reviewer','system')),
+  by_id  TEXT NOT NULL CHECK (length(by_id) > 0 AND length(by_id) <= 80),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  PRIMARY KEY (policy_id, ord)
 ) STRICT;
-
--- source: db.jurisdictionPolicies[].rules{ruleId}   (domains/agents/compliance/index.mjs:223 route;
---         domains/agents/compliance/policyVersions.mjs:43 rule() for seeds)
--- mapping: key -> rule_id; ruleStatus -> rule_status; textStatus -> text_status;
---   note -> note (≤1000); effectiveFrom (rule-level, optional) -> effective_from_date;
---   params{} -> params_json: FREE-FORM BY DESIGN — each rule carries its own
---     parameter vocabulary (maxTermMonthsIndividual, permittedSets[], formula,
---     firstContractAge{}, exclusivityWindowMonths, activeLimbs[], …) and the
---     engine reads them by name per rule (domains/agents/compliance/policy.mjs, domains/agents/compliance/conflict.mjs);
---     a column per parameter would change with every policy publication.
---   sourceRef[] -> jurisdiction_policy_rule_sources; overrides[] ->
---   jurisdiction_policy_rule_overrides.
--- notes: ruleStatusAt() (PENDING_IMPLEMENTATION reads ACTIVE after its
---   effectiveFrom) is derived, not stored.
 CREATE TABLE jurisdiction_policy_rules (
-  policy_id            TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE CASCADE,
-  rule_id              TEXT NOT NULL,
-  rule_status          TEXT NOT NULL CHECK (rule_status IN ('ACTIVE','SUSPENDED','PARTIALLY_SUSPENDED','JURISDICTION_OVERRIDE','PENDING_IMPLEMENTATION','UNDER_LEGAL_REVIEW','UNKNOWN')),
-  text_status          TEXT CHECK (text_status IS NULL OR text_status IN ('CURRENT','CURRENT_BUT_SUSPENDED','CURRENT_WITH_PARTIAL_SUSPENSION','UNCERTAIN_OPERATIVE_STATUS','HISTORICAL','SUPERSEDED','ANNOUNCED')),
-  note                 TEXT,
-  effective_from_date  TEXT CHECK (effective_from_date IS NULL OR length(effective_from_date) = 10),
-  params_json          TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(params_json)),
-  PRIMARY KEY (policy_id, rule_id)
+  policy_id                                TEXT NOT NULL CHECK (length(policy_id) <= 80 AND length(policy_id) > 0),
+  rule_id                                  TEXT NOT NULL CHECK (length(rule_id) <= 40 AND length(rule_id) > 0),
+  ord                                      INTEGER NOT NULL,
+  rule_status                              TEXT NOT NULL CHECK (rule_status IN ('ACTIVE','SUSPENDED','PARTIALLY_SUSPENDED','JURISDICTION_OVERRIDE','PENDING_IMPLEMENTATION','UNDER_LEGAL_REVIEW','UNKNOWN')),
+  text_status                              TEXT CHECK (text_status IS NULL OR text_status IN ('CURRENT','CURRENT_BUT_SUSPENDED','CURRENT_WITH_PARTIAL_SUSPENSION','UNCERTAIN_OPERATIVE_STATUS','HISTORICAL','SUPERSEDED','ANNOUNCED')),
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 1000 AND length(note) > 0),
+  effective_from_date                      TEXT CHECK (effective_from_date IS NULL OR length(effective_from_date) <= 10),
+  PRIMARY KEY (policy_id, rule_id),
+  UNIQUE (policy_id, ord),
+  CHECK (ord >= 0 AND ord < 200),
+  CHECK (effective_from_date IS NULL OR effective_from_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  FOREIGN KEY (policy_id) REFERENCES jurisdiction_policies(id) ON DELETE CASCADE
 ) STRICT;
-
--- source: db.jurisdictionPolicies[].rules{}.sourceRef[]  ({source, version,
---         effectiveDate, retrievedDate}; domains/agents/compliance/policyVersions.mjs:31 src())
--- mapping: index -> position; source -> source; version -> version (free text,
---   e.g. 'edition approved 10 Dec 2024'); effectiveDate -> effective_date;
---   retrievedDate -> retrieved_date. Route validation requires source and
---   retrievedDate only (domains/agents/compliance/index.mjs:208).
 CREATE TABLE jurisdiction_policy_rule_sources (
-  policy_id       TEXT NOT NULL,
-  rule_id         TEXT NOT NULL,
-  position        INTEGER NOT NULL CHECK (position >= 0),
-  source          TEXT NOT NULL,
-  version         TEXT,
-  effective_date  TEXT CHECK (effective_date IS NULL OR length(effective_date) = 10),
-  retrieved_date  TEXT NOT NULL CHECK (length(retrieved_date) = 10),
-  PRIMARY KEY (policy_id, rule_id, position),
+  policy_id                                TEXT NOT NULL CHECK (length(policy_id) <= 80 AND length(policy_id) > 0),
+  rule_id                                  TEXT NOT NULL CHECK (length(rule_id) <= 40 AND length(rule_id) > 0),
+  ord                                      INTEGER NOT NULL,
+  source                                   TEXT NOT NULL CHECK (length(source) <= 300 AND length(source) > 0),
+  version                                  TEXT CHECK (version IS NULL OR length(version) <= 120 AND length(version) > 0),
+  effective_date                           TEXT CHECK (effective_date IS NULL OR length(effective_date) <= 10),
+  retrieved_date                           TEXT NOT NULL CHECK (length(retrieved_date) <= 10),
+  PRIMARY KEY (policy_id, rule_id, ord),
+  CHECK (ord >= 0 AND ord < 20),
+  CHECK (effective_date IS NULL OR effective_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  CHECK (retrieved_date IS NULL OR retrieved_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
   FOREIGN KEY (policy_id, rule_id) REFERENCES jurisdiction_policy_rules(policy_id, rule_id) ON DELETE CASCADE
 ) STRICT;
-
--- source: db.jurisdictionPolicies[].rules{}.overrides[]  ({jurisdiction, scope,
---         overrideRuleId}; seeds FIFA-12.8/12.9/12.10 -> ENG-6.3/6.4/6.5)
--- mapping: jurisdiction -> jurisdiction; scope -> scope ('national' only
---   written); overrideRuleId -> override_rule_id (a rule id in another policy
---   version; resolved by name at evaluation time, no FK).
 CREATE TABLE jurisdiction_policy_rule_overrides (
-  policy_id         TEXT NOT NULL,
-  rule_id           TEXT NOT NULL,
-  jurisdiction      TEXT NOT NULL CHECK (length(jurisdiction) = 3),
-  scope             TEXT NOT NULL CHECK (scope IN ('national')),
-  override_rule_id  TEXT NOT NULL,
-  PRIMARY KEY (policy_id, rule_id, jurisdiction),
+  policy_id                                TEXT NOT NULL CHECK (length(policy_id) <= 80 AND length(policy_id) > 0),
+  rule_id                                  TEXT NOT NULL CHECK (length(rule_id) <= 40 AND length(rule_id) > 0),
+  ord                                      INTEGER NOT NULL,
+  jurisdiction                             TEXT NOT NULL CHECK (jurisdiction IN ('INT','ENG','USA')),
+  scope                                    TEXT NOT NULL CHECK (scope IN ('national')),
+  override_rule_id                         TEXT NOT NULL CHECK (length(override_rule_id) <= 40 AND length(override_rule_id) > 0),
+  PRIMARY KEY (policy_id, rule_id, ord),
+  UNIQUE (policy_id, rule_id, jurisdiction),
+  CHECK (ord >= 0 AND ord < 10),
   FOREIGN KEY (policy_id, rule_id) REFERENCES jurisdiction_policy_rules(policy_id, rule_id) ON DELETE CASCADE
 ) STRICT;
-
--- source: db.jurisdictionPolicies[].history[]
--- actions: policy_version_proposed, policy_version_published
-CREATE TABLE jurisdiction_policy_history (
-  id           TEXT PRIMARY KEY,
-  policy_id    TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id        TEXT,
-  by_name      TEXT,
-  by_role      TEXT,
-  by_org_id    TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+CREATE TABLE jurisdiction_policy_rule_params (
+  policy_id  TEXT NOT NULL,
+  rule_id  TEXT NOT NULL,
+  name  TEXT NOT NULL CHECK (name IN ('licenceRequired','licenceHolder','onlyLicensedAgentPerforms','agencyStaffMayNotApproach','onlyLicensedAgentApproaches','maxTermMonthsIndividual','oneAgreementPerPair','legalAdviceNotice','permittedSets','consentKind','consentInAdvance','prohibitedWith','connectedAgentsAreOne','sameAgencyConnected','formula','firstContractAge','guardianConsentBeforeApproach','minorsAccreditationRequired','validityYears','informational','noFeeForMinorWithoutProContract','otherServicesPresumptionMonths','exclusivityWindowMonths','discloseConflicts','effectiveFrom','nationalRegistrationRequired','requiresFifaLicence','cascadeFromFifaLicence','onlyRegisteredAgentPerforms','agencyPartyColleaguePerformance','productionEnabled','pendingLegalReview','pfaLmaNotice','academicYearStart','coversIndirectApproach','minorsAuthorisationRequired','enhancedDbsWithinMonths','permittedMultiple','excludedRole','fullParticularsRequired','legalAdviceOfferRequired','prescribedForm','activeLimbs','lodgeWithinDays','domesticAuthorisationRequired','kind')),
+  ord  INTEGER NOT NULL CHECK (ord >= 0 AND ord < 46),
+  flag_value  INTEGER CHECK (flag_value IS NULL OR flag_value IN (0,1)),
+  count_value  INTEGER CHECK (count_value IS NULL OR count_value >= 0),
+  text_value  TEXT CHECK (text_value IS NULL OR (length(text_value) > 0 AND length(text_value) <= 200)),
+  PRIMARY KEY (policy_id, rule_id, name),
+  UNIQUE (policy_id, rule_id, ord),
+  CHECK ((flag_value IS NOT NULL) + (count_value IS NOT NULL) + (text_value IS NOT NULL) <= 1),
+  FOREIGN KEY (policy_id, rule_id) REFERENCES jurisdiction_policy_rules(policy_id, rule_id) ON DELETE CASCADE
 ) STRICT;
-CREATE INDEX jurisdiction_policy_history_policy ON jurisdiction_policy_history(policy_id, at);
+CREATE TABLE jurisdiction_policy_rule_param_items (
+  policy_id  TEXT NOT NULL,
+  rule_id  TEXT NOT NULL,
+  name  TEXT NOT NULL,
+  set_no  INTEGER NOT NULL CHECK (set_no >= 0),
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  member  TEXT CHECK (member IS NULL OR (length(member) = 3 AND member GLOB '[A-Z][A-Z][A-Z]')),
+  count_value  INTEGER CHECK (count_value IS NULL OR count_value >= 0),
+  text_value  TEXT CHECK (text_value IS NULL OR (length(text_value) > 0 AND length(text_value) <= 200)),
+  PRIMARY KEY (policy_id, rule_id, name, set_no, ord),
+  CHECK ((member IS NULL) = (count_value IS NULL)),
+  CHECK ((member IS NULL) <> (text_value IS NULL)),
+  FOREIGN KEY (policy_id, rule_id, name) REFERENCES jurisdiction_policy_rule_params(policy_id, rule_id, name) ON DELETE CASCADE
+) STRICT;
+CREATE TABLE jurisdiction_policy_history (
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  policy_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  at  INTEGER NOT NULL,
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('ts_reviewer','system')),
+  by_id  TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role  TEXT CHECK (by_role IS NULL OR by_role IN ('trust_safety_reviewer','trust_safety_admin')),
+  action  TEXT NOT NULL CHECK (action IN ('policy_version_proposed','policy_version_published')),
+  detail_seeded  INTEGER NOT NULL DEFAULT 0 CHECK (detail_seeded IN (0,1)),
+  UNIQUE (policy_id, ord),
+  CHECK (detail_seeded = 0 OR (action = 'policy_version_published' AND by_kind = 'system'))
+) STRICT;
 
 
 -- -----------------------------------------------------------------------------

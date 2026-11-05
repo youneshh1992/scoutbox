@@ -201,7 +201,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -4464,7 +4464,7 @@ app.use('/admin', (req, res, next) => {
   // remains what it was: read-only and non-authoritative for compliance.
   const session = sessionFor(req);
   if (session?.kind === 'ts_reviewer') {
-    const reviewer = (db.tsReviewers ?? []).find((r) => r && r.id === session.refId && r.status === 'active');
+    const reviewer = compliancePolicies.reviewers.activeById(session.refId);
     if (reviewer) req.reviewer = reviewer;
   }
   next();
@@ -4982,6 +4982,7 @@ m25Ctx = registerCompliance({
   hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins: DEV_LOGINS,
   agent: m24Ctx,
   agentCore, unit, // S11a: a review decision's effect on a facet or an agreement is an explicit repository write
+  compliancePolicies, // S11b-1: reviewers and policy versions are tables (repositories/compliancePolicies.mjs)
 });
 // The Agent core's hooks into the compliance lane (review items for
 // manual-review facets and disputes; the policy layer's verdict on an Approach).

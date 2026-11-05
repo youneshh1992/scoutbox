@@ -28,6 +28,89 @@ export const RULE_STATUSES = Object.freeze([
 
 export const TEXT_STATUSES = Object.freeze(['CURRENT', 'CURRENT_BUT_SUSPENDED', 'CURRENT_WITH_PARTIAL_SUSPENSION', 'UNCERTAIN_OPERATIVE_STATUS', 'HISTORICAL', 'SUPERSEDED', 'ANNOUNCED']);
 
+/** The parties of a transaction (the engine's vocabulary; conflict.mjs re-exports it). */
+export const PARTY_ROLES = Object.freeze(['individual', 'engaging_entity', 'releasing_entity']);
+/** The consents the ledger knows (only `dual_representation` is requested by a route today). */
+export const CONSENT_KINDS = Object.freeze(['dual_representation', 'agency_performance', 'guardian_approach', 'guardian_agreement', 'legal_advice_ack']);
+/** The minors approach-timing formulas the engine computes (policy.mjs earliestPermittedApproachAt). */
+export const TIMING_FORMULAS = Object.freeze(['academic_year_16', 'six_months_before_first_contract_age']);
+/** How a published override applies (only national entries exist). */
+export const OVERRIDE_SCOPES = Object.freeze(['national']);
+
+/**
+ * S11b: the rule parameters a policy version may carry, by name, with their type. The engine reads parameters by name
+ * (policy.mjs, conflict.mjs, the consent route), so a name it does not know is a typo that would silently change
+ * nothing: publishing one is refused, like a value of the wrong type. A new parameter needs a build that reads it, and
+ * is added here with it. Types:
+ *   flag      true or false
+ *   count     a whole number, 0 or more
+ *   text      free text, at most 200 characters
+ *   [values]  one of the listed values
+ *   date      a calendar day, YYYY-MM-DD
+ *   monthDay  a day of the year, MM-DD
+ *   textList  a list of distinct texts (may be empty)
+ *   roleSets  a list of party-role sets, each a non-empty list of distinct party roles
+ *   ageMap    a map from a three-letter country code to an age in whole years (may be empty)
+ */
+export const RULE_PARAMS = Object.freeze({
+  licenceRequired: 'flag', licenceHolder: 'text', onlyLicensedAgentPerforms: 'flag', agencyStaffMayNotApproach: 'flag',
+  onlyLicensedAgentApproaches: 'flag', maxTermMonthsIndividual: 'count', oneAgreementPerPair: 'flag', legalAdviceNotice: 'flag',
+  permittedSets: 'roleSets', consentKind: CONSENT_KINDS, consentInAdvance: 'flag', prohibitedWith: PARTY_ROLES,
+  connectedAgentsAreOne: 'flag', sameAgencyConnected: 'flag', formula: TIMING_FORMULAS, firstContractAge: 'ageMap',
+  guardianConsentBeforeApproach: 'flag', minorsAccreditationRequired: 'flag', validityYears: 'count', informational: 'flag',
+  noFeeForMinorWithoutProContract: 'flag', otherServicesPresumptionMonths: 'count', exclusivityWindowMonths: 'count',
+  discloseConflicts: 'flag', effectiveFrom: 'date', nationalRegistrationRequired: 'flag', requiresFifaLicence: 'flag',
+  cascadeFromFifaLicence: 'flag', onlyRegisteredAgentPerforms: 'flag', agencyPartyColleaguePerformance: 'flag',
+  productionEnabled: 'flag', pendingLegalReview: 'text', pfaLmaNotice: 'flag', academicYearStart: 'monthDay',
+  coversIndirectApproach: 'flag', minorsAuthorisationRequired: 'flag', enhancedDbsWithinMonths: 'count',
+  permittedMultiple: 'flag', excludedRole: PARTY_ROLES, fullParticularsRequired: 'flag', legalAdviceOfferRequired: 'flag',
+  prescribedForm: 'text', activeLimbs: 'textList', lodgeWithinDays: 'count', domesticAuthorisationRequired: 'flag',
+  kind: 'text',
+});
+export const RULE_PARAM_TEXT_MAX = 200;
+const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+/** Is `v` a calendar day written YYYY-MM-DD (a day that exists)? */
+export function isCalendarDay(v) {
+  const m = typeof v === 'string' ? DAY_RE.exec(v) : null;
+  if (!m) return false;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.getUTCFullYear() === Number(m[1]) && d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]);
+}
+const isMonthDay = (v) => typeof v === 'string' && /^\d{2}-\d{2}$/.test(v) && isCalendarDay(`2000-${v}`);
+const plain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
+/**
+ * Type a rule's `params` against RULE_PARAMS: `{ ok: true, params }` (a fresh copy, keys in the given order) or
+ * `{ ok: false, field, why }` naming the parameter, never its value.
+ */
+export function typeRuleParams(params) {
+  if (params === undefined || params === null) return { ok: true, params: {} };
+  if (!plain(params)) return { ok: false, field: 'params', why: 'must be an object of named parameters' };
+  const out = {};
+  for (const [name, v] of Object.entries(params)) {
+    const type = Object.hasOwn(RULE_PARAMS, name) ? RULE_PARAMS[name] : null;
+    const no = (why) => ({ ok: false, field: `params.${name}`, why });
+    if (!type) return no('is not a parameter this build reads');
+    if (Array.isArray(type)) { if (!type.includes(v)) return no(`must be one of ${type.join('|')}`); out[name] = v; continue; }
+    if (type === 'flag') { if (typeof v !== 'boolean') return no('must be true or false'); out[name] = v; continue; }
+    if (type === 'count') { if (!Number.isSafeInteger(v) || v < 0) return no('must be a whole number, 0 or more'); out[name] = v; continue; }
+    if (type === 'text') { if (typeof v !== 'string' || !v.length || v.length > RULE_PARAM_TEXT_MAX) return no(`must be text of 1 to ${RULE_PARAM_TEXT_MAX} characters`); out[name] = v; continue; }
+    if (type === 'date') { if (!isCalendarDay(v)) return no('must be a calendar day written YYYY-MM-DD'); out[name] = v; continue; }
+    if (type === 'monthDay') { if (!isMonthDay(v)) return no('must be a day of the year written MM-DD'); out[name] = v; continue; }
+    if (type === 'textList') {
+      if (!Array.isArray(v) || v.some((x) => typeof x !== 'string' || !x.length || x.length > RULE_PARAM_TEXT_MAX) || new Set(v).size !== v.length) return no(`must be a list of distinct texts of 1 to ${RULE_PARAM_TEXT_MAX} characters`);
+      out[name] = [...v]; continue;
+    }
+    if (type === 'roleSets') {
+      if (!Array.isArray(v) || v.some((set) => !Array.isArray(set) || !set.length || set.some((r) => !PARTY_ROLES.includes(r)) || new Set(set).size !== set.length)) return no(`must be a list of non-empty sets of distinct party roles (${PARTY_ROLES.join('|')})`);
+      out[name] = v.map((set) => [...set]); continue;
+    }
+    // ageMap
+    if (!plain(v) || Object.entries(v).some(([k, age]) => !/^[A-Z]{3}$/.test(k) || !Number.isSafeInteger(age) || age < 0 || age > 30)) return no('must map three-letter country codes to an age of 0 to 30 years');
+    out[name] = { ...v };
+  }
+  return { ok: true, params: out };
+}
+
 const src = (source, version, effectiveDate, retrievedDate = '2026-09-18') => ({ source, version, effectiveDate, retrievedDate });
 const S1 = src('FIFA Football Agent Regulations (FFAR)', 'edition approved 10 Dec 2024', '2025-01-01');
 const S2 = src('FIFA Circular no. 1873 — update on implementation', '30 Dec 2023', '2023-12-30');
