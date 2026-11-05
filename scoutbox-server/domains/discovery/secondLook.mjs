@@ -124,8 +124,7 @@ export function registerSecondLook(ctx) {
     for (const a of ctx.scoutingReads.assessments.forOrgPlayer(org.id, player.id)) {
       if (a.submittedAt && a.submittedAt > since) add('assessment_submitted', 'assessment', a.id, a.submittedAt);
     }
-    for (const s of ctx.db.evidenceSuggestions ?? []) {
-      if (s.playerId !== player.id || s.orgId !== org.id) continue;
+    for (const s of ctx.insightReads.suggestions.forOrgPlayer(org.id, player.id)) { // S12d: one indexed query
       if (s.status === 'supplied' && s.updatedAt > since) add('evidence_gap_closed', 'evidence_gap', s.id, s.updatedAt);
     }
 

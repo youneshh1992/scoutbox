@@ -3,6 +3,8 @@
 // The exposure funnel and review queue, calibration sessions, the missing-evidence engine and
 // coverage planning (S12 collections). Moved out of e2e/operations/clubOperations.mjs (was
 // m13E2E, sections F4–F7) with the same server setup and actors; the checks are unchanged.
+// S12d (typed tables) adds the last section: junk the routes used to clamp or coerce is refused naming the field, the
+// growing lists page, and reading a player's evidence gaps rewrites nothing that did not change.
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
@@ -228,6 +230,87 @@ section('F7 — coverage planning');
 
   r = await j('GET', '/org/coverage/suggestions', undefined, maria.token);
   ok(r.status === 200 && r.body.note.includes('never includes players outside your visibility rules'), 'suggestions honestly scoped to permitted players/events');
+}
+
+// ================================================================ S12d
+section('S12d — junk refused, paging, explicit upserts');
+{
+  const field = (r, f) => r.status === 400 && r.body?.field === f;
+  let r = await j('POST', '/org/exposure/impressions', { playerIds: 'pl-adeyemi' }, maria.token);
+  ok(field(r, 'playerIds'), 'impressions: a list is required (no longer read as empty)');
+  r = await j('POST', '/org/exposure/impressions', { playerIds: Array.from({ length: 51 }, (_, i) => `pl-${i}`) }, maria.token);
+  ok(field(r, 'playerIds'), 'impressions: more than 50 ids is refused, not cut off');
+  r = await j('POST', '/org/exposure/impressions', { playerIds: ['pl-nobody', 'pl-osei'] }, maria.token);
+  ok(r.status === 200, 'impressions: an unknown or hidden player is skipped, never refused (no leak)');
+
+  r = await j('POST', '/org/review-queue/pl-osei/later', { days: 0 }, maria.token);
+  ok(field(r, 'days'), 'review-later: 0 days is refused, not clamped to 1');
+  r = await j('POST', '/org/review-queue/pl-osei/later', { days: '7' }, maria.token);
+  ok(field(r, 'days'), 'review-later: days as text is refused');
+  r = await j('POST', '/org/review-queue/pl-nobody/later', {}, maria.token);
+  ok(r.status === 403, 'review-later: a player who does not exist (or is hidden) cannot be deferred');
+  r = await j('POST', '/org/review-queue/pl-osei/later', {}, maria.token);
+  ok(r.status === 200 && r.body.deferredDays === 7, 'review-later: absent days defaults to 7');
+
+  const templates = (await j('GET', '/org/assessment-templates', undefined, maria.token)).body;
+  const tpl = (templates.templates ?? templates.items ?? templates)[0];
+  r = await j('POST', '/org/calibration', { templateId: tpl.id, participantUserIds: [maria.userId, hackney.userId] }, maria.token);
+  ok(field(r, 'participantUserIds'), 'calibration: another organisation\'s staff member is refused, not dropped');
+  r = await j('POST', '/org/calibration', { templateId: tpl.id, participantUserIds: [maria.userId, maria.userId] }, maria.token);
+  ok(field(r, 'participantUserIds'), 'calibration: a participant named twice is refused');
+  r = await j('POST', '/org/calibration', { templateId: tpl.id, title: 'Second', participantUserIds: [maria.userId, scout2.userId] }, maria.token);
+  const cal2 = r.body.session;
+  ok(r.status === 201 && cal2.attributesSnapshot.length >= 2 && cal2.blind === true, 'calibration: a second session pins the rubric and starts blind');
+  const attr = cal2.attributesSnapshot[0].id;
+  r = await j('POST', `/org/calibration/${cal2.id}/submit`, { ratings: [{ attrId: attr, value: 9 }] }, scout2.token);
+  ok(field(r, 'ratings'), 'calibration: a rating of 9 is refused, not clamped to 5');
+  r = await j('POST', `/org/calibration/${cal2.id}/submit`, { ratings: [{ attrId: 'not-an-attribute', value: 3 }] }, scout2.token);
+  ok(field(r, 'ratings'), 'calibration: an attribute outside the pinned rubric is refused, not dropped');
+  r = await j('POST', `/org/calibration/${cal2.id}/submit`, { ratings: [{ attrId: attr, value: 3 }], confidence: 'huge' }, scout2.token);
+  ok(field(r, 'confidence'), 'calibration: an unknown confidence is refused, not read as medium');
+  r = await j('POST', `/org/calibration/${cal2.id}/submit`, { ratings: [{ attrId: attr, value: 3 }] }, scout2.token);
+  ok(r.status === 201 && r.body.session.submissions.length === 1, 'calibration: a valid submission after the refusals is the only one');
+  r = await j('POST', `/org/calibration/${cal2.id}/notes`, { text: '   ' }, scout2.token);
+  ok(field(r, 'text'), 'calibration: an empty note is refused');
+  r = await j('GET', '/org/calibration?limit=1', undefined, maria.token);
+  ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].id === cal2.id && typeof r.body.nextCursor === 'string', 'calibration list pages, newest first');
+  const p2 = await j('GET', `/org/calibration?limit=1&cursor=${r.body.nextCursor}`, undefined, maria.token);
+  ok(p2.status === 200 && p2.body.items.length === 1 && p2.body.items[0].id !== cal2.id, 'the next page continues where the first stopped');
+  r = await j('GET', '/org/calibration?limit=0', undefined, maria.token);
+  ok(r.status === 400 && r.body.error === 'PAGE_LIMIT_INVALID', 'a junk page limit is refused');
+
+  const g1 = (await j('GET', '/org/players/pl-osei/evidence-gaps', undefined, maria.token)).body.items;
+  await sleep(20);
+  const g2 = (await j('GET', '/org/players/pl-osei/evidence-gaps', undefined, maria.token)).body.items;
+  ok(g1.length > 0 && JSON.stringify(g1.map((x) => [x.id, x.updatedAt])) === JSON.stringify(g2.map((x) => [x.id, x.updatedAt])), 'evidence gaps: reading again rewrites nothing that did not change');
+  ok(g2.every((x) => typeof x.action === 'string' && x.action.length > 0), 'evidence gaps: each suggestion still carries its rule\'s action');
+
+  r = await j('POST', '/org/coverage/fixtures', { home: 'A', away: 'B', date: '2026-02-30' }, maria.token);
+  ok(r.status === 400 && r.body.error === 'DATE_INVALID', 'fixture: a day that does not exist is refused');
+  r = await j('POST', '/org/coverage/fixtures', { home: 'A', away: 'B', date: '2026-10-01T18:00' }, maria.token);
+  ok(r.status === 400 && r.body.error === 'DATE_INVALID', 'fixture: a date with a time is refused, not cut to 10 characters');
+  r = await j('POST', '/org/coverage/fixtures', { home: 'A', away: 'B', date: '2026-10-02', lat: 51.5 }, maria.token);
+  ok(field(r, 'lng'), 'fixture: half a location is refused, not silently dropped');
+  r = await j('POST', '/org/coverage-plans', { goalObservations: 0 }, maria.token);
+  ok(field(r, 'goalObservations'), 'plan: a goal of 0 is refused, not clamped to 1');
+  r = await j('POST', '/org/coverage-plans', { windowDays: 1000 }, maria.token);
+  ok(field(r, 'windowDays'), 'plan: a 1000-day window is refused, not clamped');
+  const fx = (await j('POST', '/org/coverage/fixtures', { home: 'C', away: 'D', date: '2026-11-01' }, maria.token)).body.fixture;
+  r = await j('POST', '/org/coverage/assignments', { fixtureId: fx.id, scoutUserId: scout2.userId, travelBudgetMinor: -5 }, maria.token);
+  ok(r.status === 400 && r.body.error === 'AMOUNT_INVALID', 'assignment: a negative travel budget is refused, not dropped');
+  r = await j('POST', '/org/coverage/assignments', { fixtureId: fx.id, scoutUserId: scout2.userId, travelBudgetMinor: 100, travelCurrency: 'XYZ' }, maria.token);
+  ok(field(r, 'travelCurrency'), 'assignment: an unknown currency is refused');
+  r = await j('POST', '/org/coverage/assignments', { fixtureId: fx.id, scoutUserId: scout2.userId, targetPlayerIds: ['pl-osei', 'pl-osei'] }, maria.token);
+  ok(field(r, 'targetPlayerIds'), 'assignment: a target named twice is refused');
+  r = await j('POST', '/org/coverage/assignments', { fixtureId: fx.id, scoutUserId: scout2.userId, travelBudgetMinor: 1200, travelCurrency: 'EUR' }, maria.token);
+  const asg2 = r.body.assignment;
+  ok(r.status === 201 && asg2.travelBudget.currency === 'EUR' && asg2.fixtureId === fx.id, 'assignment: a valid one is created');
+  r = await j('POST', `/org/coverage/assignments/${asg2.id}/complete`, { assessmentId: 'asm-not-ours' }, scout2.token);
+  ok(field(r, 'assessmentId'), 'complete: an assessment that is not the organisation\'s is refused, not ignored');
+  r = await j('GET', '/org/coverage/assignments?limit=1', undefined, maria.token);
+  ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].id === asg2.id && typeof r.body.nextCursor === 'string', 'assignment list pages, newest first');
+  r = await j('GET', '/org/coverage/assignments', undefined, scout2.token);
+  ok(r.body.items.every((a) => a.scoutUserId === scout2.userId), 'a scout sees only their own assignments');
 }
 
 console.log(`\nexposure and coverage: ${process.exitCode ? 'FAILURES above —' : 'all'} ${passed} checks passed`);

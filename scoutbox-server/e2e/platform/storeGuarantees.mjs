@@ -950,7 +950,7 @@ const OLD_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-bootc-old-'));
   ok(Array.isArray(p?.lifecycleBody?.actions) && p.lifecycleBody.actions.length === 19,
     'answering with all 19 lifecycle actions, so the module is composed and not half-registered');
   neg(p?.reviewQueue === 200,
-    'and a route over a MODULE-OWNED store (db.reviewLater, m13) answers rather than crashing on a missing collection');
+    'and a route over the review-later deferrals (a table since S12d, migration 0033) answers on the first request');
   neg(p?.notes !== undefined && p.notes < 500,
     'and a route over a newly migration-owned store (db.orgNotes) answers on its own terms, not with a 500');
   const have = new Set(Object.keys(old.db ?? {}));

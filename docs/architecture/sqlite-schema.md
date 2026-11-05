@@ -234,13 +234,13 @@ them.
 | `developmentActions` | persistent | 07 | `development_actions`, `development_actions_history` | S12 |
 | `developmentEvidenceLinks` | persistent | 07 | `development_evidence_links` | S12 |
 | `developmentReviews` | audit (append-only) | 07 | `development_reviews`, `development_review_goal_snapshots`, `development_reviews_history` | S12 |
-| `exposureEvents` | audit (capped 50k) | 07 | `exposure_events` | S12 |
-| `reviewLater` | persistent | 07 | `review_later` | S12 |
-| `evidenceSuggestions` | persistent (written on GET) | 07 | `evidence_suggestions` | S12 |
-| `calibrationSessions` | persistent | 07 | `calibration_sessions`, `_participants`, `_submissions`, `_ratings`, `_notes` | S12 |
-| `fixtures` | persistent | 07 | `fixtures` (read-time union with `fr-`/`tr-` synthetic rows stays derived) | S12 |
-| `coveragePlans` | persistent | 07 | `coverage_plans` | S12 |
-| `coverageAssignments` | persistent | 07 | `coverage_assignments`, `_targets`, `_assessments` | S12 |
+| `exposureEvents` | audit (the 90-day window; older events pruned by the sweep) | 07 | `exposure_events` | S12d (0033) |
+| `reviewLater` | persistent | 07 | `review_later` | S12d (0033) |
+| `evidenceSuggestions` | persistent (an explicit upsert on GET) | 07 | `evidence_suggestions`, `evidence_suggestion_records` | S12d (0033) |
+| `calibrationSessions` | persistent | 07 | `calibration_sessions`, `_participants`, `_submissions`, `_ratings`, `_notes` | S12d (0033) |
+| `fixtures` | persistent | 07 | `fixtures` (read-time union with `fr-`/`tr-` synthetic rows stays derived) | S12d (0033) |
+| `coveragePlans` | persistent | 07 | `coverage_plans` | S12d (0033) |
+| `coverageAssignments` | persistent | 07 | `coverage_assignments`, `_targets`, `_warnings` | S12d (0033) |
 | `apiKeys` | persistent | 08 | `api_keys`, `api_key_scopes` | S13 |
 | `webhookEndpoints` | persistent | 08 | `webhook_endpoints`, `webhook_endpoint_events` | S13 |
 | `webhookDeliveries` | audit (never pruned) | 08 | `webhook_deliveries`, `webhook_delivery_attempts` | S13 |

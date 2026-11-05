@@ -65,7 +65,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // combineAttempts, boxCamCvResults: never a db.* read since S12b — typed tables (migration 0031), read through
   // repositories/boxCam.mjs (boxCamReads). Each db.* name throws, boxSessionEvents (reserved, never written) with them;
   // the blob steps that created them are recorded no-ops.
-  calibrationSessions: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   // campaignSubmissions: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
   // (scoutingReads). db.campaignSubmissions throws.
   // campaigns: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
@@ -75,8 +74,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // order, messages nested in array order), written only through the channels repository (the acceptance routes'
   // openChannel, postMessage, the three receipt routes, the account deletion).
   channels: { guarantee: 'migration', owner: 'core', reason: 'moderated message threads, opened on acceptance (D2); container guaranteed by the migration registry before the data layer attaches; since S7d a read-only view over the channels table, written only through the channels repository' },
-  coverageAssignments: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  coveragePlans: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   deliveryCallbacksSeen: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   deliveryCentreSince: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   deliveryFailInject: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
@@ -84,6 +81,9 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // developmentActions, developmentEvidenceLinks, developmentReviews: never a db.* read since S12a — typed tables (migration
   // 0030), read through repositories/development.mjs (developmentReads). Each db.* name throws; blob step m210_001 is a
   // recorded no-op.
+  // exposureEvents, reviewLater, evidenceSuggestions, calibrationSessions, fixtures, coveragePlans, coverageAssignments: never a
+  // db.* read since S12d — typed tables (migration 0033), read through repositories/insightCoverage.mjs (insightReads). Each
+  // db.* name throws; migrateM13 no longer creates them.
   // dynamicWatchlists, watchlistHistory (and recruitmentBriefs, nobodyMissedReviews, secondLookItems): never a db.* read
   // since S12c — typed tables (migration 0032), read through repositories/discovery.mjs (discoveryReads). Each db.* name
   // throws; the blob steps that created them (m182_002's entries, m182_003, m190_001, m200_001) are recorded no-ops.
@@ -99,9 +99,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // 0020), read through repositories/scoutingAssessments.mjs (scoutingReads). db.<name> throws.
   // evidence, coachAffiliations, squadInvites: never a db.* read since S9a — typed tables (migration 0019), read through
   // repositories/scoutingEvidence.mjs (scoutingReads). db.<name> throws.
-  evidenceSuggestions: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  exposureEvents: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  fixtures: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   friendlies: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   groupGrants: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   groups: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
@@ -165,7 +162,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // db.* read since S11c — typed tables (migration 0029), read through repositories/agentTransactions.mjs. Each db.*
   // name throws; blob step 2307 is a recorded no-op.
   reputationSeed: { guarantee: 'migration', owner: 'core', reason: 'demo track records; EMPTY is the correct production value — fabricating them would be worse than the bug (D2)' },
-  reviewLater: { guarantee: 'module', owner: 'm13', reason: 'existed only because insightSweep() happens to run once synchronously at registration; a store whose existence depends on a sweep moves the day the sweep is made lazy' },
   savedSearches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   sessions: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   sourceChanges: { guarantee: 'migration', owner: 'm18.1', reason: 'M18.1 source-change clock, guaranteed by the migration registry; since S6b a read-only view over the source_changes table, written only through recordSourceChange → the safetyAudit repository (the 20 000 cap deletes the oldest rows)' },

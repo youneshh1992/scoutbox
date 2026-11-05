@@ -1057,319 +1057,227 @@ CREATE INDEX development_history_review ON development_history (review_id) WHERE
 
 
 -- =============================================================================
--- M13 F4 — exposure, review queue, evidence gaps
+-- M13 F4 exposure, review queue · F6 evidence gaps · F5 calibration · F7 fixtures and coverage
+-- S12d: IMPLEMENTED, migration 0033_insight_coverage REGISTERED (repositories/insightCoverage.mjs, 5 Nov 2026).
+-- The DDL below is the migration's, generated from the repository's field specs (scripts/testSchemaDdl.mjs compares
+-- them column for column).
 -- =============================================================================
 
--- source: db.exposureEvents  created at m13/insight.mjs:28 (recordExposure; passive hook on GET /org/players/:id[/passport] + POST /exposure/impressions)
--- owner/writer: m13/insight.mjs
--- lifecycle: append-only; capped at 50,000 rows globally (oldest 10,000 spliced) —
---   a retention rule the repository must reproduce (delete oldest by at)
--- mapping:
---   id -> id (exp-*)
---   orgId -> org_id
---   playerId -> player_id (profile/evidence views take the id from the URL after a 200 response)
---   kind -> kind
---   day -> day_index (integer UTC day number = floor(at / 86400000); the dedupe key)
---   at -> at
--- notes: UNIQUE (org_id, player_id, kind, day_index) enforced by code today.
---   Players see only coarse 90-day bands, never which org. Read patterns:
---   (org, day_index >= since) funnel/queue; (player, day_index >= since).
+-- Exposure events (exposure_events): one per (organisation, player, kind, UTC day), unique; recording one is an insert
+-- that does nothing when the day has it. The old global 50k cap is gone: every reader looks at the last 90 days, and the
+-- insight sweep deletes the events before that window.
+-- Review-later (review_later): one deferral per (organisation, player), replaced on re-defer; the reminder sweep reads
+-- the due ones through the partial index and marks each reminded with its notification.
+-- Evidence suggestions (evidence_suggestions): the cited record ids are ordered rows (evidence_suggestion_records) —
+-- media, assessment or evidence ids by rule, no key (tolerant). At most one open (suggested|requested) suggestion per
+-- (organisation, player, rule). The rule's action copy comes from the rule registry, not stored.
+-- Calibration (calibration_sessions): the rubric is the pinned template version, a key to assessment_templates (id,
+-- version), never a copy. Participants, blind submissions (one per participant: a key to the participant row),
+-- ratings (1–5 or not observed) and notes are rows. The reference media id has no key (tolerant).
+-- Fixtures (fixtures): an organisation's own matches on a real day; a location is lat, lng and city together.
+-- Coverage plans (coverage_plans): a goal of 1–200 observations over 7–365 days; progress is counted on read.
+-- Coverage assignments (coverage_assignments): the fixture is the organisation's own (fixture_id, a RESTRICT key) or a
+-- friendly or an open day (event_id, no key: blob records until S13). Targets and the warnings raised at creation
+-- (a code and the scout named; the sentence is rendered on read) are rows; the travel note is constant copy; the
+-- assessment the observation produced is one column.
+-- Player, media and assessment ids carry no key (tolerant). Organisations and the staff named are RESTRICT keys.
+
 CREATE TABLE exposure_events (
-  id         TEXT PRIMARY KEY,
-  org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  player_id  TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  kind       TEXT NOT NULL CHECK (kind IN ('impression','profile_view','evidence_view')),
-  day_index  INTEGER NOT NULL,
-  at         INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  kind                                     TEXT NOT NULL CHECK (kind IN ('impression','profile_view','evidence_view')),
+  day_index                                INTEGER NOT NULL,
+  at                                       INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (day_index >= 0),
+  UNIQUE (org_id, player_id, kind, day_index)
 ) STRICT;
-CREATE UNIQUE INDEX exposure_events_org_player_kind_day ON exposure_events (org_id, player_id, kind, day_index);
 CREATE INDEX exposure_events_org_day ON exposure_events (org_id, day_index);
 CREATE INDEX exposure_events_player_day ON exposure_events (player_id, day_index);
-
--- source: db.reviewLater  created at m13/insight.mjs:151 (delete-then-insert per (org, player))
--- owner/writer: m13/insight.mjs (defer; insightSweep sets remindedAt); read by m18 (review_deferred signal)
--- lifecycle: HARD DELETE on re-defer (replace); otherwise rows stay forever
--- mapping:
---   id -> id (rvl-*)
---   orgId -> org_id
---   playerId -> player_id (taken from the URL, NOT validated against players today)
---   byUserId -> by_user_id
---   dueAt -> due_at (1–60 days ahead)
---   remindedAt -> reminded_at
--- notes: UNIQUE (org_id, player_id) enforced by code via delete+insert (new as a constraint).
+CREATE INDEX exposure_events_day ON exposure_events (day_index);
 CREATE TABLE review_later (
-  id           TEXT PRIMARY KEY,
-  org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  player_id    TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  by_user_id   TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  due_at       INTEGER NOT NULL,
-  reminded_at  INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  by_user_id                               TEXT NOT NULL CHECK (length(by_user_id) <= 80 AND length(by_user_id) > 0),
+  due_at                                   INTEGER NOT NULL,
+  reminded_at                              INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  UNIQUE (org_id, player_id)
 ) STRICT;
-CREATE UNIQUE INDEX review_later_org_player ON review_later (org_id, player_id);
-CREATE INDEX review_later_due ON review_later (due_at, reminded_at);
-
--- source: db.evidenceSuggestions  created at m13/insight.mjs:449 (computeGaps — upserted on GET /players/:id/evidence-gaps; also via ctx.computeEvidenceGaps / ctx.requestEvidenceGap from M17 rooms)
--- owner/writer: m13/insight.mjs; read by m18 (evidence_gap_closed when status becomes 'supplied')
--- lifecycle: status suggested -> requested -> supplied -> reviewed; suggested -> dismissed;
---   open rows (suggested|requested) whose rule no longer fires become 'supplied'; never deleted
--- mapping:
---   id -> id (gap-*)
---   orgId -> org_id
---   playerId -> player_id
---   playerName -> player_name
---   ruleId -> rule_id (RULES registry in m13/insight.mjs)
---   ruleVersion -> rule_version
---   records[] -> records_json (retained JSON: polymorphic ids cited by the rule —
---     player media ids, assessment ids or evidence ids depending on rule_id;
---     rewritten on every recompute, displayed as "the records behind it", never queried)
---   explanation -> explanation (club-private wording)
---   action -> action (the rule's recommended action copy)
---   status -> status
---   requestedAt -> requested_at (anti-pestering: one request per (org, player, rule) per 14 days)
---   createdAt / updatedAt -> created_at / updated_at
--- notes: the player-facing text is whitelisted per rule, never the explanation.
---   Read patterns: (org, player) list; (org, player, rule_id, requested_at) window check.
+CREATE INDEX review_later_due ON review_later (due_at) WHERE reminded_at IS NULL;
 CREATE TABLE evidence_suggestions (
-  id            TEXT PRIMARY KEY,
-  org_id        TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  player_id     TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  player_name   TEXT,                             -- snapshot
-  rule_id       TEXT NOT NULL CHECK (rule_id IN ('no_recent_footage','single_match_sample','attribute_never_observed','assessment_disagreement','stale_assessment','uncorroborated_claims')),
-  rule_version  INTEGER NOT NULL,
-  records_json  TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(records_json)),
-  explanation   TEXT NOT NULL,
-  action        TEXT NOT NULL,
-  status        TEXT NOT NULL CHECK (status IN ('suggested','requested','supplied','dismissed','reviewed')),
-  requested_at  INTEGER,
-  created_at    INTEGER NOT NULL,
-  updated_at    INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  player_name                              TEXT CHECK (player_name IS NULL OR length(player_name) <= 200),
+  rule_id                                  TEXT NOT NULL CHECK (rule_id IN ('no_recent_footage','single_match_sample','attribute_never_observed','assessment_disagreement','stale_assessment','uncorroborated_claims')),
+  rule_version                             INTEGER NOT NULL,
+  explanation                              TEXT NOT NULL CHECK (length(explanation) <= 1000 AND length(explanation) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('suggested','requested','supplied','dismissed','reviewed')),
+  requested_at                             INTEGER,
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (rule_version >= 1),
+  CHECK (status <> 'requested' OR requested_at IS NOT NULL)
 ) STRICT;
-CREATE INDEX evidence_suggestions_org_player ON evidence_suggestions (org_id, player_id, status);
-CREATE INDEX evidence_suggestions_org_player_rule ON evidence_suggestions (org_id, player_id, rule_id, requested_at);
-
-
--- =============================================================================
--- M13 F5 — scout calibration sessions
--- =============================================================================
-
--- source: db.calibrationSessions  created at m13/insight.mjs:217
--- owner/writer: m13/insight.mjs (lead creates/closes; participants submit blind; notes)
--- lifecycle: status open -> closed; never deleted
--- mapping:
---   id -> id (cal-*)
---   orgId -> org_id
---   title -> title (<=120)
---   templateId / templateVersion -> template_id / template_version (assessmentTemplates key (id, version); no FK — the template id is reused across versions, see 02)
---   attributesSnapshot -> attributes_snapshot_json (retained JSON: the rubric's attribute list
---     [{id,label,...}] pinned at creation so later template edits change nothing; read as a whole)
---   mediaId -> media_id (reference footage; must be visible to the org at creation; access re-checked on read)
---   participants[] -> calibration_participants (child)
---   submissions[] -> calibration_submissions (+ calibration_ratings)
---   notes[] -> calibration_notes
---   status -> status
---   createdBy -> created_by_user_id
---   createdAt / closedAt -> created_at / closed_at
--- notes: blind until the viewer has submitted or the session is closed; comparison derived.
+CREATE INDEX evidence_suggestions_org_player ON evidence_suggestions (org_id, player_id);
+CREATE INDEX evidence_suggestions_org_status ON evidence_suggestions (org_id, status);
+CREATE UNIQUE INDEX evidence_suggestions_one_open ON evidence_suggestions (org_id, player_id, rule_id) WHERE status IN ('suggested','requested');
+CREATE TABLE evidence_suggestion_records (
+  suggestion_id                            TEXT NOT NULL CHECK (length(suggestion_id) > 0 AND length(suggestion_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  record_id                                TEXT NOT NULL CHECK (length(record_id) > 0 AND length(record_id) <= 80),
+  FOREIGN KEY (suggestion_id) REFERENCES evidence_suggestions(id) ON DELETE CASCADE,
+  PRIMARY KEY (suggestion_id, ord)
+) STRICT;
 CREATE TABLE calibration_sessions (
-  id                        TEXT PRIMARY KEY,
-  org_id                    TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  title                     TEXT NOT NULL,
-  template_id               TEXT NOT NULL,
-  template_version          INTEGER NOT NULL,
-  attributes_snapshot_json  TEXT NOT NULL CHECK (json_valid(attributes_snapshot_json)),
-  media_id                  TEXT REFERENCES player_media(id) ON DELETE SET NULL,
-  status                    TEXT NOT NULL CHECK (status IN ('open','closed')),
-  created_by_user_id        TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  created_at                INTEGER NOT NULL,
-  closed_at                 INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  title                                    TEXT NOT NULL CHECK (length(title) <= 120 AND length(title) > 0),
+  template_id                              TEXT NOT NULL CHECK (length(template_id) <= 80 AND length(template_id) > 0),
+  template_version                         INTEGER NOT NULL,
+  media_id                                 TEXT CHECK (media_id IS NULL OR length(media_id) <= 80 AND length(media_id) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('open','closed')),
+  created_by_user_id                       TEXT NOT NULL CHECK (length(created_by_user_id) <= 80 AND length(created_by_user_id) > 0),
+  created_at                               INTEGER NOT NULL,
+  closed_at                                INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (created_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (template_id, template_version) REFERENCES assessment_templates(id, version) ON DELETE RESTRICT,
+  CHECK ((status = 'closed') = (closed_at IS NOT NULL))
 ) STRICT;
-CREATE INDEX calibration_sessions_org ON calibration_sessions (org_id, created_at);
-
--- source: db.calibrationSessions[].participants[]  m13/insight.mjs:214 (validated current org users; >=2)
--- mapping: each user id -> (session_id, user_id)
+CREATE INDEX calibration_sessions_org_created ON calibration_sessions (org_id, created_at);
 CREATE TABLE calibration_participants (
-  session_id  TEXT NOT NULL REFERENCES calibration_sessions(id) ON DELETE CASCADE,
-  user_id     TEXT NOT NULL REFERENCES org_users(id) ON DELETE CASCADE,
+  session_id                               TEXT NOT NULL CHECK (length(session_id) > 0 AND length(session_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  user_id                                  TEXT NOT NULL CHECK (length(user_id) > 0 AND length(user_id) <= 80),
+  FOREIGN KEY (session_id) REFERENCES calibration_sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  PRIMARY KEY (session_id, ord),
+  UNIQUE (session_id, user_id)
+) STRICT;
+CREATE INDEX calibration_participants_user ON calibration_participants (user_id);
+CREATE TABLE calibration_submissions (
+  session_id                               TEXT NOT NULL CHECK (length(session_id) > 0 AND length(session_id) <= 80),
+  user_id                                  TEXT NOT NULL CHECK (length(user_id) > 0 AND length(user_id) <= 80),
+  user_name                                TEXT CHECK (user_name IS NULL OR length(user_name) <= 200),
+  confidence                               TEXT NOT NULL CHECK (confidence IN ('low','medium','high')),
+  submitted_at                             INTEGER NOT NULL,
+  FOREIGN KEY (session_id, user_id) REFERENCES calibration_participants(session_id, user_id) ON DELETE CASCADE,
   PRIMARY KEY (session_id, user_id)
 ) STRICT;
-
--- source: db.calibrationSessions[].submissions[]  created at m13/insight.mjs:291
--- owner/writer: m13/insight.mjs (one per participant, final)
--- mapping:
---   (no id) -> id (new, minted calsub-<n>)
---   (parent) -> session_id
---   userId / userName -> user_id / user_name
---   ratings[] -> calibration_ratings (child)
---   confidence -> confidence
---   submittedAt -> submitted_at
--- notes: UNIQUE (session_id, user_id) enforced by code ("blind submissions are final").
-CREATE TABLE calibration_submissions (
-  id            TEXT PRIMARY KEY,
-  session_id    TEXT NOT NULL REFERENCES calibration_sessions(id) ON DELETE CASCADE,
-  user_id       TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  user_name     TEXT,                             -- snapshot
-  confidence    TEXT NOT NULL DEFAULT 'medium' CHECK (confidence IN ('low','medium','high')),
-  submitted_at  INTEGER NOT NULL
-) STRICT;
-CREATE UNIQUE INDEX calibration_submissions_session_user ON calibration_submissions (session_id, user_id);
-
--- source: db.calibrationSessions[].submissions[].ratings[]  m13/insight.mjs:287
--- mapping: {attrId, value 1–5, notObserved} -> (submission_id, attr_id, value, not_observed);
---   attr_id must be an id inside the parent session's attributes_snapshot_json
 CREATE TABLE calibration_ratings (
-  submission_id  TEXT NOT NULL REFERENCES calibration_submissions(id) ON DELETE CASCADE,
-  attr_id        TEXT NOT NULL,
-  value          INTEGER CHECK (value IS NULL OR (value BETWEEN 1 AND 5)),
-  not_observed   INTEGER NOT NULL DEFAULT 0 CHECK (not_observed IN (0,1)),
-  PRIMARY KEY (submission_id, attr_id),
+  session_id                               TEXT NOT NULL CHECK (length(session_id) > 0 AND length(session_id) <= 80),
+  user_id                                  TEXT NOT NULL CHECK (length(user_id) > 0 AND length(user_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  attr_id                                  TEXT NOT NULL CHECK (length(attr_id) > 0 AND length(attr_id) <= 40),
+  value                                    INTEGER CHECK (value IS NULL OR (value >= 1 AND value <= 5)),
+  not_observed                             INTEGER NOT NULL CHECK (not_observed IN (0,1)),
+  FOREIGN KEY (session_id, user_id) REFERENCES calibration_submissions(session_id, user_id) ON DELETE CASCADE,
+  PRIMARY KEY (session_id, user_id, ord),
+  UNIQUE (session_id, user_id, attr_id),
   CHECK ((not_observed = 1) = (value IS NULL))
 ) STRICT;
-
--- source: db.calibrationSessions[].notes[]  created at m13/insight.mjs:315
--- lifecycle: append-only discussion notes (after own submission or close)
--- mapping: (no id) -> id (new, minted calnote-<n>); (parent) -> session_id; at -> created_at (source field is `at`);
---   byUserId / byName -> by_user_id / by_name; text -> text (<=500)
 CREATE TABLE calibration_notes (
-  id          TEXT PRIMARY KEY,
-  session_id  TEXT NOT NULL REFERENCES calibration_sessions(id) ON DELETE CASCADE,
-  created_at  INTEGER NOT NULL,
-  by_user_id  TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  by_name     TEXT,                               -- snapshot
-  text        TEXT NOT NULL
+  session_id                               TEXT NOT NULL CHECK (length(session_id) > 0 AND length(session_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  at                                       INTEGER NOT NULL,
+  by_user_id                               TEXT NOT NULL CHECK (length(by_user_id) > 0 AND length(by_user_id) <= 80),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  text                                     TEXT NOT NULL CHECK (length(text) > 0 AND length(text) <= 500),
+  FOREIGN KEY (session_id) REFERENCES calibration_sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  PRIMARY KEY (session_id, ord)
 ) STRICT;
-CREATE INDEX calibration_notes_session_at ON calibration_notes (session_id, created_at);
-
-
--- =============================================================================
--- M13 F7 — fixtures, coverage plans, coverage assignments
--- =============================================================================
-
--- source: db.fixtures  created at m13/planning.mjs:65 (org's OWN fixture records)
--- owner/writer: m13/planning.mjs
--- lifecycle: no status, never deleted
--- mapping:
---   id -> id (fix-*)
---   orgId -> org_id
---   source -> source ('own' only; the read-time union adds synthetic 'friendly_board' /
---     'open_trial' rows with ids fr-<id> / tr-<id> that are NOT stored)
---   competition -> competition (<=80 or null)
---   home / away -> home / away (<=80)
---   date -> fixture_date (sliced to 10 chars, NOT validated today; migration verifies YYYY-MM-DD)
---   location.lat / .lng / .city -> lat / lng / city (all null when no location)
---   createdBy -> created_by_name (display name only; no user id stored)
---   createdAt -> created_at
--- notes: read pattern: org's fixtures by date (union with friendlies/open trials at read).
 CREATE TABLE fixtures (
-  id               TEXT PRIMARY KEY,
-  org_id           TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  source           TEXT NOT NULL DEFAULT 'own' CHECK (source IN ('own')),
-  competition      TEXT,
-  home             TEXT NOT NULL,
-  away             TEXT NOT NULL,
-  fixture_date     TEXT NOT NULL CHECK (length(fixture_date) = 10),
-  lat              REAL,
-  lng              REAL,
-  city             TEXT,
-  created_by_name  TEXT,                          -- snapshot
-  created_at       INTEGER NOT NULL,
-  CHECK ((lat IS NULL) = (lng IS NULL))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  competition                              TEXT CHECK (competition IS NULL OR length(competition) <= 80 AND length(competition) > 0),
+  home                                     TEXT NOT NULL CHECK (length(home) <= 80 AND length(home) > 0),
+  away                                     TEXT NOT NULL CHECK (length(away) <= 80 AND length(away) > 0),
+  fixture_date                             TEXT NOT NULL CHECK (length(fixture_date) <= 10),
+  lat                                      REAL,
+  lng                                      REAL,
+  city                                     TEXT CHECK (city IS NULL OR length(city) <= 60),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (fixture_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  CHECK ((lat IS NULL) = (lng IS NULL)),
+  CHECK ((lat IS NULL) = (city IS NULL)),
+  CHECK (lat IS NULL OR (lat >= -90 AND lat <= 90 AND lng >= -180 AND lng <= 180))
 ) STRICT;
 CREATE INDEX fixtures_org_date ON fixtures (org_id, fixture_date);
-
--- source: db.coveragePlans  created at m13/planning.mjs:105
--- owner/writer: m13/planning.mjs (lead only)
--- lifecycle: no status, never deleted
--- mapping:
---   id -> id (cvp-*)
---   orgId -> org_id
---   label -> label (<=100)
---   competition -> competition (<=80; progress counts only assignments with the same fixture_competition)
---   region -> region (<=80, informational)
---   goalObservations -> goal_observations (1–200)
---   windowDays -> window_days (7–365)
---   createdBy -> created_by_name (display name only)
---   createdAt -> created_at
--- notes: progress {done, goal, complete} is derived at read from coverage_assignments.
 CREATE TABLE coverage_plans (
-  id                 TEXT PRIMARY KEY,
-  org_id             TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  label              TEXT NOT NULL,
-  competition        TEXT,
-  region             TEXT,
-  goal_observations  INTEGER NOT NULL,
-  window_days        INTEGER NOT NULL,
-  created_by_name    TEXT,                        -- snapshot
-  created_at         INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  label                                    TEXT NOT NULL CHECK (length(label) <= 100 AND length(label) > 0),
+  competition                              TEXT CHECK (competition IS NULL OR length(competition) <= 80 AND length(competition) > 0),
+  region                                   TEXT CHECK (region IS NULL OR length(region) <= 80 AND length(region) > 0),
+  goal_observations                        INTEGER NOT NULL,
+  window_days                              INTEGER NOT NULL,
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (goal_observations >= 1 AND goal_observations <= 200),
+  CHECK (window_days >= 7 AND window_days <= 365)
 ) STRICT;
-CREATE INDEX coverage_plans_org ON coverage_plans (org_id);
-
--- source: db.coverageAssignments  created at m13/planning.mjs:145
--- owner/writer: m13/planning.mjs (lead assigns/cancels; scout or lead completes)
--- lifecycle: soft-cancelled via cancelled_at; completed via observed_at; never deleted
--- mapping:
---   id -> id (cva-*)
---   orgId -> org_id
---   fixtureId -> (fixture_kind, fixture_id): polymorphic. The source stores one string —
---     'fix-*' for an own fixtures(id), 'fr-<friendly id>' for a friendlies board row,
---     'tr-<open trial id>' for an open trial. The migration splits the prefix into
---     fixture_kind and stores the underlying id; no FK (two of the targets are read-time
---     synthetic views). Duplicate-visit warning keys on it.
---   fixtureDate -> fixture_date (snapshot of the fixture's date; clash check keys on it)
---   fixtureLabel -> fixture_label ("<home> v <away>")
---   fixtureCompetition -> fixture_competition
---   scoutUserId / scoutName -> scout_user_id / scout_name
---   targetPlayerIds[] -> coverage_assignment_targets (child; only players visible to the org at creation)
---   travelBudget{amountMinor, currency, enteredBy} -> travel_budget_minor / travel_currency / travel_budget_entered_by_name
---     (all null when no valid budget was supplied)
---   travelNote -> derived, not stored: constant copy ("no routing provider is configured")
---   warnings[] -> warnings_json (retained JSON: free-form warning sentences computed at
---     creation — duplicate visit / scout clash — returned verbatim; free-form by design)
---   assignedBy -> assigned_by_name (display name only)
---   createdAt -> created_at
---   observedAt -> observed_at
---   assessmentIds[] -> coverage_assignment_assessments (child)
---   cancelledAt -> cancelled_at
--- notes: read patterns: org open list (org_id, cancelled_at IS NULL) [scout-only filter];
---   duplicate check (org, fixture); clash (org, scout, fixture_date); plan progress
---   (org, observed_at >= since[, fixture_competition]); covered set (org, fixture).
+CREATE INDEX coverage_plans_org ON coverage_plans (org_id, created_at);
 CREATE TABLE coverage_assignments (
-  id                             TEXT PRIMARY KEY,
-  org_id                         TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  fixture_kind                   TEXT NOT NULL CHECK (fixture_kind IN ('own','friendly_board','open_trial')),
-  fixture_id                     TEXT NOT NULL,
-  fixture_date                   TEXT CHECK (fixture_date IS NULL OR length(fixture_date) = 10),
-  fixture_label                  TEXT NOT NULL,     -- snapshot
-  fixture_competition            TEXT,              -- snapshot
-  scout_user_id                  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  scout_name                     TEXT,              -- snapshot
-  travel_budget_minor            INTEGER,
-  travel_currency                TEXT CHECK (travel_currency IS NULL OR length(travel_currency) = 3),
-  travel_budget_entered_by_name  TEXT,              -- snapshot
-  warnings_json                  TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(warnings_json)),
-  assigned_by_name               TEXT,              -- snapshot
-  created_at                     INTEGER NOT NULL,
-  observed_at                    INTEGER,
-  cancelled_at                   INTEGER,
-  CHECK ((travel_budget_minor IS NULL) = (travel_currency IS NULL))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  fixture_kind                             TEXT NOT NULL CHECK (fixture_kind IN ('own','friendly_board','open_trial')),
+  fixture_id                               TEXT CHECK (fixture_id IS NULL OR length(fixture_id) <= 80 AND length(fixture_id) > 0),
+  event_id                                 TEXT CHECK (event_id IS NULL OR length(event_id) <= 80 AND length(event_id) > 0),
+  fixture_date                             TEXT NOT NULL CHECK (length(fixture_date) <= 10),
+  fixture_label                            TEXT NOT NULL CHECK (length(fixture_label) <= 200 AND length(fixture_label) > 0),
+  fixture_competition                      TEXT CHECK (fixture_competition IS NULL OR length(fixture_competition) <= 80 AND length(fixture_competition) > 0),
+  scout_user_id                            TEXT NOT NULL CHECK (length(scout_user_id) <= 80 AND length(scout_user_id) > 0),
+  scout_name                               TEXT CHECK (scout_name IS NULL OR length(scout_name) <= 200),
+  travel_budget_minor                      INTEGER,
+  travel_currency                          TEXT CHECK (travel_currency IS NULL OR travel_currency IN ('GBP','EUR','USD','CHF','SEK','NOK','DKK','PLN','BRL')),
+  travel_entered_by_name                   TEXT CHECK (travel_entered_by_name IS NULL OR length(travel_entered_by_name) <= 200),
+  assigned_by_name                         TEXT CHECK (assigned_by_name IS NULL OR length(assigned_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  observed_at                              INTEGER,
+  assessment_id                            TEXT CHECK (assessment_id IS NULL OR length(assessment_id) <= 80 AND length(assessment_id) > 0),
+  cancelled_at                             INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (fixture_id) REFERENCES fixtures(id) ON DELETE RESTRICT,
+  FOREIGN KEY (scout_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (fixture_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  CHECK ((fixture_kind = 'own') = (fixture_id IS NOT NULL)),
+  CHECK ((fixture_kind = 'own') = (event_id IS NULL)),
+  CHECK ((travel_budget_minor IS NULL) = (travel_currency IS NULL)),
+  CHECK (travel_budget_minor IS NULL OR travel_budget_minor >= 0),
+  CHECK (travel_budget_minor IS NOT NULL OR travel_entered_by_name IS NULL),
+  CHECK (assessment_id IS NULL OR observed_at IS NOT NULL)
 ) STRICT;
-CREATE INDEX coverage_assignments_org_fixture ON coverage_assignments (org_id, fixture_kind, fixture_id, cancelled_at);
+CREATE INDEX coverage_assignments_org_created ON coverage_assignments (org_id, created_at, id);
+CREATE INDEX coverage_assignments_org_fixture ON coverage_assignments (org_id, fixture_kind, fixture_id, event_id);
 CREATE INDEX coverage_assignments_org_scout_date ON coverage_assignments (org_id, scout_user_id, fixture_date);
 CREATE INDEX coverage_assignments_org_observed ON coverage_assignments (org_id, observed_at);
-
--- source: db.coverageAssignments[].targetPlayerIds[]  m13/planning.mjs:138
--- mapping: each id -> (assignment_id, player_id)
+CREATE INDEX coverage_assignments_fixture ON coverage_assignments (fixture_id);
 CREATE TABLE coverage_assignment_targets (
-  assignment_id  TEXT NOT NULL REFERENCES coverage_assignments(id) ON DELETE CASCADE,
-  player_id      TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  PRIMARY KEY (assignment_id, player_id)
+  assignment_id                            TEXT NOT NULL CHECK (length(assignment_id) > 0 AND length(assignment_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) > 0 AND length(player_id) <= 80),
+  FOREIGN KEY (assignment_id) REFERENCES coverage_assignments(id) ON DELETE CASCADE,
+  PRIMARY KEY (assignment_id, ord),
+  UNIQUE (assignment_id, player_id)
 ) STRICT;
-
--- source: db.coverageAssignments[].assessmentIds[]  m13/planning.mjs:173 (pushed on complete, validated as the org's own assessment)
--- mapping: each id -> (assignment_id, assessment_id)
-CREATE TABLE coverage_assignment_assessments (
-  assignment_id  TEXT NOT NULL REFERENCES coverage_assignments(id) ON DELETE CASCADE,
-  assessment_id  TEXT NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
-  PRIMARY KEY (assignment_id, assessment_id)
+CREATE TABLE coverage_assignment_warnings (
+  assignment_id                            TEXT NOT NULL CHECK (length(assignment_id) > 0 AND length(assignment_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  code                                     TEXT NOT NULL CHECK (code IN ('duplicate_visit','scout_clash')),
+  scout_name                               TEXT CHECK (scout_name IS NULL OR length(scout_name) <= 200),
+  FOREIGN KEY (assignment_id) REFERENCES coverage_assignments(id) ON DELETE CASCADE,
+  PRIMARY KEY (assignment_id, ord),
+  UNIQUE (assignment_id, code)
 ) STRICT;
 
 
@@ -1385,7 +1293,7 @@ CREATE TABLE coverage_assignment_assessments (
 --   GOAL_LIBRARY, PLAN_TEMPLATES, M21_LIMITS; domains/discovery/shared.mjs CHANGE_TYPES,
 --   REASON_CHANGE_MAP, POLICY, EVALUATION_SIGNALS, POSITIONS, TRUST_BANDS,
 --   EVIDENCE_REQUIREMENTS; domains/discovery/matching/criteria.mjs CRITERION_TYPES, OPERATORS;
---   m13/insight.mjs RULES (evidence-gap rule engine); server.mjs DRILLS (legacy
+--   domains/insight/insight.mjs RULES (evidence-gap rule engine); server.mjs DRILLS (legacy
 --   drill registry seeding drill_guidance).
 -- In-memory state (lost on restart by design, never persisted):
 --   rate-limit buckets (domains/platform/rateLimit.mjs), box dispute windows (m16/training.mjs

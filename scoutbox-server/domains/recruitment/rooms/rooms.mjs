@@ -513,7 +513,7 @@ export function registerRooms(ctx) {
     const orgId = req.org.id;
     const open = reads.cases.roomRowsForViewer(orgId, { userId: req.orgUser.id, isLead: isLead(req.orgUser) }, { statuses: OPEN_ROOM_STATUSES });
     const overdue = reads.cases.overdueTaskCounts(orgId, now());
-    const supplied = new Set(db.evidenceSuggestions.filter((s) => s.orgId === orgId && s.status === 'supplied').map((s) => s.playerId));
+    const supplied = ctx.insightReads.suggestions.playerIdsWithStatus(orgId, 'supplied'); // S12d: one indexed query
     const doneCombine = ctx.boxCamReads.requests.completedPlayerIds(orgId); // S12b: one indexed query
     const reported = reads.trials.playerIdsForOrgStatus(orgId, 'reported');
     const decided = reads.decisions.roomIdsForOrg(orgId);
@@ -1281,9 +1281,13 @@ export function registerRooms(ctx) {
     // M23 P8.1 (D-P81-6): the suggestion must be about THIS room's player. A
     // room's request authority never reaches another player's profile — not
     // even one this org may otherwise see — so the id is scoped to the room.
-    const out = ctx.requestEvidenceGap({ org: req.org, suggestionId, playerId: room.playerId });
+    // One unit (S12d): the request, its notice and the Room's activity entry commit together, or none of them.
+    const out = unit(() => {
+      const r = ctx.requestEvidenceGap({ org: req.org, suggestionId, playerId: room.playerId });
+      if (r.ok) touch(room, (d) => { activity(d, req, 'room_evidence_requested', { suggestionId, ruleId: r.suggestion.ruleId, routedTo: r.routedTo }); d.room.updatedAt = now(); });
+      return r;
+    });
     if (!out.ok) return res.status(out.status).json({ error: out.error, ...(out.message ? { message: out.message } : {}), ...(out.detail ?? {}) });
-    touch(room, (d) => { activity(d, req, 'room_evidence_requested', { suggestionId, ruleId: out.suggestion.ruleId, routedTo: out.routedTo }); d.room.updatedAt = now(); });
     vmetric('room_evidence_requested');
     persistNow();
     res.status(201).json({ suggestion: out.suggestion, routedTo: out.routedTo, note: 'Routed through the standing evidence-request rules, including guardian routing for under-18s.' });

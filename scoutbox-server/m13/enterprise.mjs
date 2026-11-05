@@ -138,7 +138,7 @@ export function registerEnterprise(ctx) {
       { id: 'invite_staff', label: 'Invite your staff', done: staff.length > 1, help: 'Each person works under their own named account — no shared logins.' },
       { id: 'mfa_leads', label: 'Enable MFA for privileged accounts', done: leads.every((u) => u.mfa?.enabledAt), help: 'Leads approve signings and manage staff — protect those accounts first.' },
       { id: 'first_import', label: 'Import or add your player records', done: db.importBatches.some((b) => b.orgId === org.id && b.status === 'committed') || db.prospects.some((p) => p.orgId === org.id), help: 'CSV import with dry-run preview, or add prospects by hand.' },
-      { id: 'coverage_plan', label: 'Set up a coverage plan', done: db.coveragePlans.some((c) => c.orgId === org.id), help: 'Fixtures, assignments and observation tracking live under Coverage.' },
+      { id: 'coverage_plan', label: 'Set up a coverage plan', done: ctx.insightReads.plans.countForOrg(org.id) > 0, help: 'Fixtures, assignments and observation tracking live under Coverage.' },
     ];
     return {
       tasks, complete: tasks.every((t) => t.done),

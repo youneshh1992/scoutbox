@@ -195,11 +195,13 @@ export const httpM13: M13Api = {
   createFixture: async (s, input) => (await P(s, '/org/coverage/fixtures', input)).fixture,
   listPlans: async (s) => (await G(s, '/org/coverage-plans')).items,
   createPlan: async (s, input) => (await P(s, '/org/coverage-plans', input)).plan,
+  // The server pages this list ({ items, nextCursor }, newest first, S12d); the first page is shown. TODO: "load more" with ?cursor=.
   listAssignments: async (s) => (await G(s, '/org/coverage/assignments')).items,
   createAssignment: (s, input) => P(s, '/org/coverage/assignments', input),
   completeAssignment: (s, id) => P(s, `/org/coverage/assignments/${id}/complete`),
   visitSuggestions: (s) => G(s, '/org/coverage/suggestions'),
 
+  // The server pages this list ({ items, nextCursor }, newest first, S12d); the first page is shown. TODO: "load more" with ?cursor=.
   listCalibrations: async (s) => (await G(s, '/org/calibration')).items,
   createCalibration: async (s, input) => (await P(s, '/org/calibration', input)).session,
   getCalibration: async (s, id) => (await G(s, `/org/calibration/${id}`)).session,

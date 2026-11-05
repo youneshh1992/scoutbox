@@ -5,19 +5,43 @@
 // rankings, no pay-for-priority, small aggregates suppressed, absent evidence
 // is NEVER recorded as poor ability, and exposure metrics carry their
 // denominators and windows instead of claims about discrimination.
+//
+// S12d: every record here is a typed row of repositories/insightCoverage.mjs, written by an explicit operation and read
+// through `insightReads`.
 import crypto from 'node:crypto';
 import { exposureHook } from '../../m13/enterprise.mjs';
 import { parseStrictDateOnly } from '../../temporal.mjs';
+import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';
+import { EVIDENCE_RULE_IDS, CALIBRATION_CONFIDENCE, INSIGHT_LIMITS, typeSubmission } from '../../repositories/insightCoverage.mjs';
 
 const EXPOSURE_WINDOW_DAYS = 90;
 const STALE_DAYS = 180;
+const DAY_MS = 86_400_000;
+/** How long a reviewer may defer a player, in days (default 7). */
+export const REVIEW_LATER_DAYS = Object.freeze({ min: 1, max: 60, default: 7 });
+/** How many players one impressions report may name. */
+export const IMPRESSIONS_MAX = 50;
+const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
+const isId = (v) => typeof v === 'string' && v.length > 0 && v.length <= INSIGHT_LIMITS.id;
+/**
+ * A rule's hit within what a suggestion stores: the explanation shortened to INSIGHT_LIMITS.explanation, the cited
+ * records to the first INSIGHT_LIMITS.records (a player with hundreds of clips, or a 20-attribute rubric never observed,
+ * would otherwise exceed them and fail the read — and with it the Room view that runs the rules).
+ */
+export function boundGap(hit) {
+  const max = INSIGHT_LIMITS.explanation;
+  const explanation = hit.explanation.length > max ? `${hit.explanation.slice(0, max - 1)}…` : hit.explanation;
+  return { records: [...new Set(hit.records)].slice(0, INSIGHT_LIMITS.records), explanation };
+}
 
 export function registerInsight(ctx) {
   const {
-    db, byId, orgRouter, playerRouter, adminRouter, nextId, persist, persistNow,
-    notify, findPlayer, isAdult, orgCanSee, paginate, histAppend, suppress,
-    isLead, requireLead, playerViewForOrg,
+    db, byId, orgRouter, playerRouter, nextId,
+    notify, findPlayer, isAdult, orgCanSee, suppress,
+    isLead, requireLead, playerViewForOrg, insightCoverage, unit,
   } = ctx;
+  if (!insightCoverage || typeof unit !== 'function') throw new TypeError('registerInsight needs the insight and coverage repository and the unit of work');
+  const { exposure, reviewLater, suggestions, calibration } = insightCoverage;
   // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerInsight needs recruitmentReads (signings) from the data layer');
@@ -25,13 +49,11 @@ export function registerInsight(ctx) {
   // =========================================================== F4 exposure
   const dayKey = (ts = Date.now()) => Math.floor(ts / 86_400_000);
   function recordExposure(orgId, playerId, kind) {
-    // Dedupe: one event per (org, player, kind, day).
-    const dk = dayKey();
-    if (db.exposureEvents.some((e) => e.orgId === orgId && e.playerId === playerId && e.kind === kind && e.day === dk)) return false;
-    db.exposureEvents.push({ id: nextId('exp'), orgId, playerId, kind, day: dk, at: Date.now() });
-    if (db.exposureEvents.length > 50_000) db.exposureEvents.splice(0, 10_000);
-    persist();
-    return true;
+    // Dedupe: one event per (org, player, kind, day) — the table's unique key; the id is minted only for a new one.
+    const at = Date.now();
+    const dk = dayKey(at);
+    if (exposure.has(orgId, playerId, kind, dk)) return false;
+    return exposure.record({ id: nextId('exp'), orgId, playerId, kind, day: dk, at });
   }
   ctx.recordExposure = recordExposure;
 
@@ -48,24 +70,23 @@ export function registerInsight(ctx) {
 
   // Impressions: the client reports which players a search actually rendered.
   orgRouter.post('/exposure/impressions', (req, res) => {
-    const ids = (Array.isArray(req.body?.playerIds) ? req.body.playerIds : []).slice(0, 50);
-    let recorded = 0;
-    for (const id of ids) {
+    const ids = req.body?.playerIds;
+    if (!Array.isArray(ids) || ids.length > IMPRESSIONS_MAX || !ids.every(isId)) return fieldInvalid(res, 'playerIds', `playerIds must be a list of at most ${IMPRESSIONS_MAX} player ids.`);
+    // Players this organisation cannot see are skipped, never refused: a refusal would say who is hidden.
+    const recorded = unit(() => ids.filter((id) => {
       const p = findPlayer(id);
-      if (p && orgCanSee(req.org, p) && recordExposure(req.org.id, id, 'impression')) recorded++;
-    }
+      return p && orgCanSee(req.org, p) && recordExposure(req.org.id, id, 'impression');
+    }).length);
     res.json({ recorded });
   });
 
   const windowStartDay = () => dayKey() - EXPOSURE_WINDOW_DAYS;
 
   function funnelFor(orgId) {
-    const since = windowStartDay();
-    const ev = db.exposureEvents.filter((e) => e.orgId === orgId && e.day >= since);
-    const byKind = (k) => new Set(ev.filter((e) => e.kind === k).map((e) => e.playerId));
-    const impressions = byKind('impression');
-    const profiles = byKind('profile_view');
-    const evidence = byKind('evidence_view');
+    const seen = exposure.distinctPlayersByKind(orgId, windowStartDay());
+    const impressions = { size: seen.impression };
+    const profiles = { size: seen.profile_view };
+    const evidence = { size: seen.evidence_view };
     const sinceTs = Date.now() - EXPOSURE_WINDOW_DAYS * 86_400_000;
     const invited = new Set(reads.requests.forOrg(orgId).filter((r) => r.createdAt >= sinceTs).map((r) => r.playerId));
     const outcomes = new Set(reads.signings.forOrg(orgId).filter((s) => (s.ts ?? 0) >= sinceTs).map((s) => s.playerId));
@@ -116,20 +137,15 @@ export function registerInsight(ctx) {
   // submitted assessment from this org, oldest exposure first.
   function reviewQueueFor(org) {
     const assessedIds = new Set(ctx.scoutingReads.assessments.forOrg(org.id).filter((a) => a.state !== 'draft').map((a) => a.playerId));
-    const since = windowStartDay();
-    const seen = new Map(); // playerId → first day seen
-    for (const e of db.exposureEvents.filter((e) => e.orgId === org.id && e.day >= since)) {
-      if (!seen.has(e.playerId) || seen.get(e.playerId) > e.day) seen.set(e.playerId, e.day);
-    }
-    return [...seen.entries()]
-      .filter(([pid]) => !assessedIds.has(pid))
-      .map(([pid, day]) => ({ player: findPlayer(pid), firstSeenDay: day }))
-      .filter((x) => x.player && orgCanSee(org, x.player)) // live eligibility, always
-      .sort((a, b) => a.firstSeenDay - b.firstSeenDay);
+    // One GROUP BY: each player the organisation saw in the window with the first day, oldest first.
+    return exposure.firstSeen(org.id, windowStartDay())
+      .filter(({ playerId }) => !assessedIds.has(playerId))
+      .map(({ playerId, firstDay }) => ({ player: findPlayer(playerId), firstSeenDay: firstDay }))
+      .filter((x) => x.player && orgCanSee(org, x.player)); // live eligibility, always
   }
 
   orgRouter.get('/review-queue', (req, res) => {
-    const later = new Map(db.reviewLater.filter((r) => r.orgId === req.org.id && r.dueAt > Date.now()).map((r) => [r.playerId, r.dueAt]));
+    const later = reviewLater.activeFor(req.org.id, Date.now());
     const items = reviewQueueFor(req.org).map(({ player, firstSeenDay }) => ({
       player: playerViewForOrg ? playerViewForOrg(player, req.org) : { id: player.id, name: player.name, position: player.position, age: null },
       firstSeenDaysAgo: dayKey() - firstSeenDay,
@@ -150,10 +166,13 @@ export function registerInsight(ctx) {
   });
 
   orgRouter.post('/review-queue/:playerId/later', (req, res) => {
-    const days = Math.min(Math.max(Number(req.body?.days) || 7, 1), 60);
-    db.reviewLater = db.reviewLater.filter((r) => !(r.orgId === req.org.id && r.playerId === req.params.playerId));
-    db.reviewLater.push({ id: nextId('rvl'), orgId: req.org.id, playerId: req.params.playerId, byUserId: req.orgUser.id, dueAt: Date.now() + days * 86_400_000, remindedAt: null });
-    persistNow();
+    const raw = req.body?.days;
+    const days = raw === undefined || raw === null ? REVIEW_LATER_DAYS.default : raw;
+    if (!Number.isInteger(days) || days < REVIEW_LATER_DAYS.min || days > REVIEW_LATER_DAYS.max) return fieldInvalid(res, 'days', `days must be a whole number from ${REVIEW_LATER_DAYS.min} to ${REVIEW_LATER_DAYS.max}.`);
+    // Only a player the organisation can see now can be deferred (the same answer as the evidence gaps for any other).
+    const p = findPlayer(req.params.playerId);
+    if (!p || !orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
+    reviewLater.defer({ id: nextId('rvl'), orgId: req.org.id, playerId: p.id, byUserId: req.orgUser.id, dueAt: Date.now() + days * DAY_MS, remindedAt: null });
     res.json({ deferredDays: days });
   });
 
@@ -176,80 +195,96 @@ export function registerInsight(ctx) {
 
   // Limited player visibility: coarse counts only, no org identities.
   playerRouter.get('/exposure', (req, res) => {
-    const since = windowStartDay();
-    const mine = db.exposureEvents.filter((e) => e.playerId === req.player.id && e.day >= since);
-    const orgCount = new Set(mine.map((e) => e.orgId)).size;
+    const mine = exposure.forPlayer(req.player.id, windowStartDay());
     const band = (n) => (n === 0 ? '0' : n <= 5 ? '1–5' : n <= 20 ? '6–20' : '20+');
     res.json({
       windowDays: EXPOSURE_WINDOW_DAYS,
-      appearedInSearches: band(mine.filter((e) => e.kind === 'impression').length),
-      profileViews: band(mine.filter((e) => e.kind === 'profile_view').length),
-      clubs: band(orgCount),
+      appearedInSearches: band(mine.byKind.impression),
+      profileViews: band(mine.byKind.profile_view),
+      clubs: band(mine.orgCount),
       note: 'Coarse ranges over the last 90 days. Which club looked is not shown — interest becomes visible when a club actually contacts you through the proper channel.',
     });
   });
 
+  /**
+   * The insight sweep: each deferral that fell due is marked reminded in one unit with its reminder; the exposure
+   * events before the window (which no reader looks at) are deleted.
+   */
   function insightSweep() {
+    const at = Date.now();
     let changed = 0;
-    for (const r of db.reviewLater) {
-      if (r.dueAt < Date.now() && !r.remindedAt) {
-        r.remindedAt = Date.now();
+    for (const r of reviewLater.dueForReminder(at)) {
+      unit(() => {
+        reviewLater.markReminded(r.id, at);
         const p = findPlayer(r.playerId);
         notify({ kind: 'org_user', id: r.byUserId }, 'review_queue', `⏰ Review reminder: you deferred ${p?.name ?? 'a player'} — they are back in your review queue.`, r.playerId);
-        changed++;
-      }
+      });
+      changed++;
     }
-    if (changed) persistNow();
+    exposure.prune(dayKey(at) - EXPOSURE_WINDOW_DAYS);
     return changed;
   }
   ctx.insightSweep = insightSweep;
 
   // ======================================================== F5 calibration
+  const activeStaffOf = (orgId, uid) => byId.user(uid, (u) => u.orgId === orgId && !u.removedAt);
   orgRouter.post('/calibration', (req, res) => {
     if (!requireLead(req, res)) return;
-    const tmpl = ctx.scoutingReads.templates.currentById(req.body?.templateId); // the current version (it used to be the first, v1)
+    const b = req.body ?? {};
+    const tmpl = ctx.scoutingReads.templates.currentById(b.templateId); // the current version (it used to be the first, v1)
     if (!tmpl) return res.status(404).json({ error: 'TEMPLATE_NOT_FOUND' });
+    if (b.title !== undefined && b.title !== null && typeof b.title !== 'string') return fieldInvalid(res, 'title', 'title must be text.');
+    const title = (typeof b.title === 'string' ? b.title.trim() : '').slice(0, INSIGHT_LIMITS.calibrationTitle) || 'Calibration session';
     // Reference footage must be footage this org can legitimately see NOW.
-    const mediaId = req.body?.mediaId ? String(req.body.mediaId) : null;
+    if (b.mediaId !== undefined && b.mediaId !== null && !isId(b.mediaId)) return fieldInvalid(res, 'mediaId', 'mediaId must be a media id.');
+    const mediaId = b.mediaId ?? null;
     if (mediaId) {
       const owner = byId.mediaOwner(mediaId);
       if (!owner || !orgCanSee(req.org, owner)) return res.status(403).json({ error: 'FOOTAGE_NOT_ACCESSIBLE', message: 'Calibration footage must be footage your organisation can legitimately access.' });
     }
-    const participants = (Array.isArray(req.body?.participantUserIds) ? req.body.participantUserIds : [])
-      .filter((uid) => db.users.some((u) => u.id === uid && u.orgId === req.org.id && !u.removedAt));
-    if (participants.length < 2) return res.status(400).json({ error: 'PARTICIPANTS_REQUIRED', message: 'Calibration needs at least two participating scouts.' });
-    const s = {
-      id: nextId('cal'), orgId: req.org.id, title: String(req.body?.title ?? 'Calibration session').slice(0, 120),
-      templateId: tmpl.id, templateVersion: tmpl.version, attributesSnapshot: tmpl.attributes, // rubric pinned — later template edits change nothing here
-      mediaId, participants, submissions: [], notes: [],
-      status: 'open', createdBy: req.orgUser.id, createdAt: Date.now(), closedAt: null,
-    };
-    db.calibrationSessions.push(s);
-    for (const uid of participants) notify({ kind: 'org_user', id: uid }, 'calibration', `🎯 You were added to calibration “${s.title}”. Watch the reference footage and submit blind — you cannot see colleagues’ ratings until you do.`, s.id);
-    persistNow();
-    res.status(201).json({ session: { ...s, submissions: [] } });
+    const ids = b.participantUserIds;
+    if (!Array.isArray(ids) || ids.length > INSIGHT_LIMITS.participants || !ids.every(isId)) return fieldInvalid(res, 'participantUserIds', `participantUserIds must be a list of at most ${INSIGHT_LIMITS.participants} staff ids.`);
+    if (new Set(ids).size !== ids.length) return fieldInvalid(res, 'participantUserIds', 'participantUserIds names a scout twice.');
+    const stranger = ids.find((uid) => !activeStaffOf(req.org.id, uid));
+    if (stranger) return fieldInvalid(res, 'participantUserIds', 'Every participant must be a current member of your organisation.');
+    if (ids.length < 2) return res.status(400).json({ error: 'PARTICIPANTS_REQUIRED', message: 'Calibration needs at least two participating scouts.' });
+    const s = unit(() => {
+      const created = calibration.create({
+        id: nextId('cal'), orgId: req.org.id, title, templateId: tmpl.id, templateVersion: tmpl.version, // rubric pinned — later template edits change nothing here
+        mediaId, participants: ids, submissions: [], notes: [], status: 'open', createdBy: req.orgUser.id, createdAt: Date.now(), closedAt: null,
+      });
+      for (const uid of ids) notify({ kind: 'org_user', id: uid }, 'calibration', `🎯 You were added to calibration “${created.title}”. Watch the reference footage and submit blind — you cannot see colleagues’ ratings until you do.`, created.id);
+      return created;
+    });
+    res.status(201).json({ session: sessionView(s, req) });
   });
 
+  /** A session as its viewer may see it: an explicit allowlist, the pinned rubric read from the template version. */
   function sessionView(s, req) {
     const mySubmitted = s.submissions.some((x) => x.userId === req.orgUser.id);
     const released = s.status === 'closed' || mySubmitted;
     const owner = s.mediaId ? byId.mediaOwner(s.mediaId) : null;
     const footageAccessible = owner ? orgCanSee(req.org, owner) : false;
+    const attributesSnapshot = calibration.attributesOf(s);
     return {
-      ...s,
+      id: s.id, orgId: s.orgId, title: s.title, templateId: s.templateId, templateVersion: s.templateVersion, attributesSnapshot,
+      mediaId: s.mediaId, participants: [...s.participants], notes: s.notes.map((n) => ({ at: n.at, byUserId: n.byUserId, byName: n.byName, text: n.text })),
+      status: s.status, createdBy: s.createdBy, createdAt: s.createdAt, closedAt: s.closedAt,
       mediaUrl: footageAccessible ? `/media/${s.mediaId}` : null,
       footageNote: s.mediaId && !footageAccessible ? 'Reference footage is no longer accessible to your organisation.' : null,
       // BLIND: until you submit (or a lead closes the session), you see only
       // who has submitted — never what.
-      submissions: released ? s.submissions : s.submissions.map((x) => ({ userId: x.userId, userName: x.userName, submittedAt: x.submittedAt })),
-      comparison: released ? comparisonFor(s) : null,
+      submissions: s.submissions.map((x) => (released
+        ? { userId: x.userId, userName: x.userName, ratings: x.ratings.map((r) => ({ ...r })), confidence: x.confidence, submittedAt: x.submittedAt }
+        : { userId: x.userId, userName: x.userName, submittedAt: x.submittedAt })),
+      comparison: released ? comparisonFor(s, attributesSnapshot) : null,
       blind: !released,
     };
   }
 
-  function comparisonFor(s) {
+  function comparisonFor(s, attributes) {
     const rows = [];
-    for (const attr of s.attributesSnapshot) {
+    for (const attr of attributes) {
       const vals = s.submissions
         .map((sub) => sub.ratings.find((r) => r.attrId === attr.id))
         .filter((r) => r && !r.notObserved)
@@ -269,56 +304,57 @@ export function registerInsight(ctx) {
     };
   }
 
+  /** The sessions a viewer may see, newest first, a page at a time (a lead sees every session of the organisation). */
   orgRouter.get('/calibration', (req, res) => {
-    const mine = db.calibrationSessions.filter((s) => s.orgId === req.org.id && (s.participants.includes(req.orgUser.id) || isLead(req.orgUser)));
-    res.json({ items: mine.map((s) => ({ id: s.id, title: s.title, status: s.status, participants: s.participants.length, submitted: s.submissions.length, createdAt: s.createdAt })) });
+    let page;
+    try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
+    const rows = calibration.page(req.org.id, { userId: isLead(req.orgUser) ? null : req.orgUser.id, after: page.after, limit: page.limit });
+    res.json(pageOf(rows.map((r) => ({ id: r.id, title: r.title, status: r.status, participants: r.participants, submitted: r.submitted, createdAt: r.createdAt })), page.limit, (r) => [r.createdAt, r.id]));
   });
 
   orgRouter.get('/calibration/:id', (req, res) => {
-    const s = db.calibrationSessions.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const s = calibration.forOrgById(req.org.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     if (!s.participants.includes(req.orgUser.id) && !isLead(req.orgUser)) return res.status(403).json({ error: 'NOT_A_PARTICIPANT' });
     res.json({ session: sessionView(s, req) });
   });
 
   orgRouter.post('/calibration/:id/submit', (req, res) => {
-    const s = db.calibrationSessions.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const s = calibration.forOrgById(req.org.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     if (s.status !== 'open') return res.status(409).json({ error: 'SESSION_CLOSED' });
     if (!s.participants.includes(req.orgUser.id)) return res.status(403).json({ error: 'NOT_A_PARTICIPANT' });
     if (s.submissions.some((x) => x.userId === req.orgUser.id)) return res.status(409).json({ error: 'ALREADY_SUBMITTED', message: 'Blind submissions are final — one per participant.' });
-    const valid = new Set(s.attributesSnapshot.map((a) => a.id));
-    const ratings = (Array.isArray(req.body?.ratings) ? req.body.ratings : [])
-      .filter((r) => valid.has(r.attrId))
-      .map((r) => (r.notObserved ? { attrId: r.attrId, notObserved: true } : { attrId: r.attrId, value: Math.min(Math.max(Number(r.value) || 1, 1), 5), notObserved: false }));
-    if (!ratings.length) return res.status(400).json({ error: 'RATINGS_REQUIRED' });
-    s.submissions.push({
-      userId: req.orgUser.id, userName: req.orgUser.name, ratings,
-      confidence: ['low', 'medium', 'high'].includes(req.body?.confidence) ? req.body.confidence : 'medium',
-      submittedAt: Date.now(),
-    });
-    persistNow();
-    res.status(201).json({ session: sessionView(s, req), note: 'Submitted — the comparison is now visible to you.' });
+    const b = req.body ?? {};
+    if (!Array.isArray(b.ratings) || !b.ratings.length) return res.status(400).json({ error: 'RATINGS_REQUIRED' });
+    const confidence = b.confidence === undefined || b.confidence === null ? 'medium' : b.confidence;
+    if (!CALIBRATION_CONFIDENCE.includes(confidence)) return fieldInvalid(res, 'confidence', `confidence must be one of ${CALIBRATION_CONFIDENCE.join(', ')}.`);
+    const sub = typeSubmission({ userId: req.orgUser.id, userName: req.orgUser.name ?? null, ratings: b.ratings, confidence, submittedAt: Date.now() }, 'submission');
+    if (!sub.ok) return fieldInvalid(res, 'ratings', `Each rating is { attrId, value 1–5 } or { attrId, notObserved: true }, one per attribute (${sub.reason.replace(/^submission\.?/, '')}).`);
+    const rubric = new Set(calibration.attributesOf(s).map((a) => a.id));
+    const unknown = sub.record.ratings.find((r) => !rubric.has(r.attrId));
+    if (unknown) return fieldInvalid(res, 'ratings', `The pinned rubric has no attribute ${unknown.attrId}.`);
+    const fresh = calibration.submit(s.id, sub.record);
+    res.status(201).json({ session: sessionView(fresh, req), note: 'Submitted — the comparison is now visible to you.' });
   });
 
   orgRouter.post('/calibration/:id/close', (req, res) => {
     if (!requireLead(req, res)) return;
-    const s = db.calibrationSessions.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const s = calibration.forOrgById(req.org.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-    s.status = 'closed';
-    s.closedAt = Date.now();
-    persistNow();
-    res.json({ session: sessionView(s, req) });
+    res.json({ session: sessionView(calibration.close(s.id, Date.now()), req) });
   });
 
   orgRouter.post('/calibration/:id/notes', (req, res) => {
-    const s = db.calibrationSessions.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const s = calibration.forOrgById(req.org.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     if (!s.participants.includes(req.orgUser.id) && !isLead(req.orgUser)) return res.status(403).json({ error: 'NOT_A_PARTICIPANT' });
     if (s.status !== 'closed' && !s.submissions.some((x) => x.userId === req.orgUser.id)) return res.status(409).json({ error: 'SUBMIT_FIRST', message: 'Discussion notes open after your blind submission.' });
-    s.notes.push({ at: Date.now(), byUserId: req.orgUser.id, byName: req.orgUser.name, text: String(req.body?.text ?? '').slice(0, 500) });
-    persistNow();
-    res.status(201).json({ notes: s.notes });
+    const t = req.body?.text;
+    if (typeof t !== 'string' || !t.trim()) return fieldInvalid(res, 'text', 'text must be a non-empty note.');
+    if (s.notes.length >= INSIGHT_LIMITS.notes) return res.status(409).json({ error: 'TOO_MANY_NOTES', message: `A session keeps at most ${INSIGHT_LIMITS.notes} notes.` });
+    const fresh = calibration.addNote(s.id, { at: Date.now(), byUserId: req.orgUser.id, byName: req.orgUser.name ?? null, text: t.trim().slice(0, INSIGHT_LIMITS.note) });
+    res.status(201).json({ notes: fresh.notes.map((n) => ({ at: n.at, byUserId: n.byUserId, byName: n.byName, text: n.text })) });
   });
 
   // Decision-quality review: earlier recommendations next to what happened
@@ -429,38 +465,29 @@ export function registerInsight(ctx) {
     },
   ];
 
+  if (RULES.map((r) => r.id).join() !== EVIDENCE_RULE_IDS.join()) throw new Error('insight: the evidence-gap rules and the stored rule vocabulary (EVIDENCE_RULE_IDS) differ');
+  const RULE_ACTION = Object.fromEntries(RULES.map((r) => [r.id, r.action]));
+
+  /** A suggestion as the club sees it: an explicit allowlist, the rule's action copy from the registry. */
+  const suggestionView = (s) => ({
+    id: s.id, orgId: s.orgId, playerId: s.playerId, playerName: s.playerName, ruleId: s.ruleId, ruleVersion: s.ruleVersion,
+    records: [...s.records], explanation: s.explanation, action: RULE_ACTION[s.ruleId], status: s.status,
+    requestedAt: s.requestedAt, createdAt: s.createdAt, updatedAt: s.updatedAt,
+  });
+
+  /**
+   * Run the rules for one player and record the result as one explicit upsert (S12d; it used to be edited in place on
+   * a read): open suggestions that no longer fire become 'supplied' (the gap closed), new hits become 'suggested', and
+   * an open one is rewritten only when its records or explanation changed. Returns the player's suggestions (views).
+   */
   function computeGaps(org, player) {
     const found = [];
     for (const rule of RULES) {
       const hit = rule.evaluate(player, org);
-      if (hit) found.push({ ruleId: rule.id, ruleVersion: rule.version, action: rule.action, ...hit });
+      if (hit) found.push({ ruleId: rule.id, ruleVersion: rule.version, ...boundGap(hit) });
     }
-    // Upsert against stored suggestions: open ones that no longer hit become
-    // 'supplied' (the gap closed); new hits become 'suggested'.
-    const open = db.evidenceSuggestions.filter((s) => s.orgId === org.id && s.playerId === player.id && ['suggested', 'requested'].includes(s.status));
-    for (const s of open) {
-      if (!found.some((f) => f.ruleId === s.ruleId)) {
-        s.status = 'supplied';
-        s.updatedAt = Date.now();
-      }
-    }
-    for (const f of found) {
-      const existing = open.find((s) => s.ruleId === f.ruleId);
-      if (existing) {
-        existing.records = f.records;
-        existing.explanation = f.explanation;
-        existing.updatedAt = Date.now();
-      } else {
-        db.evidenceSuggestions.push({
-          id: nextId('gap'), orgId: org.id, playerId: player.id, playerName: player.name,
-          ruleId: f.ruleId, ruleVersion: f.ruleVersion, records: f.records,
-          explanation: f.explanation, action: f.action,
-          status: 'suggested', requestedAt: null, createdAt: Date.now(), updatedAt: Date.now(),
-        });
-      }
-    }
-    persist();
-    return db.evidenceSuggestions.filter((s) => s.orgId === org.id && s.playerId === player.id);
+    const list = unit(() => suggestions.reconcile({ orgId: org.id, playerId: player.id, playerName: player.name ?? null, found, at: Date.now(), mintId: () => nextId('gap') }));
+    return list.map(suggestionView);
   }
 
   orgRouter.get('/players/:id/evidence-gaps', (req, res) => {
@@ -482,25 +509,27 @@ export function registerInsight(ctx) {
     // `playerId` (M23 P8.1): when the caller acts from a Recruitment Room, the
     // suggestion must be about that room's player; any other player's
     // suggestion reads as not found, the same answer as a fabricated id.
-    const s = db.evidenceSuggestions.find((x) => x.id === suggestionId && x.orgId === org.id && (playerId === null || x.playerId === playerId));
+    const found = suggestions.forOrgById(org.id, suggestionId);
+    const s = found && (playerId === null || found.playerId === playerId) ? found : null;
     if (!s) return { ok: false, status: 404, error: 'SUGGESTION_NOT_FOUND' };
     if (s.status !== 'suggested') return { ok: false, status: 409, error: 'NOT_OPEN', detail: { status: s.status } };
     const p = findPlayer(s.playerId);
     if (!p || !orgCanSee(org, p)) return { ok: false, status: 403, error: 'NOT_VISIBLE' };
     // Anti-pestering: one open request per player+rule; a fresh request within
     // 14 days of the last one is refused.
-    const recent = db.evidenceSuggestions.find((x) => x.orgId === org.id && x.playerId === s.playerId && x.ruleId === s.ruleId && x.requestedAt && x.requestedAt > Date.now() - 14 * 86_400_000 && x.id !== s.id);
-    if (recent) return { ok: false, status: 429, error: 'RECENTLY_REQUESTED', message: 'You asked for this within the last 14 days — give them time.' };
-    s.status = 'requested';
-    s.requestedAt = Date.now();
-    s.updatedAt = Date.now();
+    const at = Date.now();
+    if (suggestions.recentRequest(org.id, s.playerId, s.ruleId, at - 14 * DAY_MS, s.id)) return { ok: false, status: 429, error: 'RECENTLY_REQUESTED', message: 'You asked for this within the last 14 days — give them time.' };
     // PLAYER-VISIBLE text is built from the request action only — club-private
     // observations never travel in the explanation.
     const audience = !isAdult(p) && p.guardianId ? { kind: 'guardian', id: p.guardianId } : { kind: 'player', id: p.id };
     const who = audience.kind === 'guardian' ? `${p.name}'s profile` : 'your profile';
-    notify(audience, 'evidence_request', `📎 ${org.name} would find ${who} easier to assess with more evidence: ${playerSafeText(s)} You choose what (and whether) to add.`, s.id);
-    persistNow();
-    return { ok: true, suggestion: s, routedTo: audience.kind };
+    // One unit: the status and the ask commit together (a Room caller's unit joins this one).
+    const fresh = unit(() => {
+      const moved = suggestions.setStatus(s.id, 'requested', at);
+      notify(audience, 'evidence_request', `📎 ${org.name} would find ${who} easier to assess with more evidence: ${playerSafeText(s)} You choose what (and whether) to add.`, s.id);
+      return moved;
+    });
+    return { ok: true, suggestion: suggestionView(fresh), routedTo: audience.kind };
   }
   ctx.requestEvidenceGap = requestEvidenceGap;
   ctx.computeEvidenceGaps = computeGaps;
@@ -525,21 +554,15 @@ export function registerInsight(ctx) {
   }
 
   orgRouter.post('/evidence-gaps/:id/dismiss', (req, res) => {
-    const s = db.evidenceSuggestions.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const s = suggestions.forOrgById(req.org.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SUGGESTION_NOT_FOUND' });
-    s.status = 'dismissed';
-    s.updatedAt = Date.now();
-    persistNow();
-    res.json({ suggestion: s });
+    res.json({ suggestion: suggestionView(suggestions.setStatus(s.id, 'dismissed', Date.now())) });
   });
 
   orgRouter.post('/evidence-gaps/:id/reviewed', (req, res) => {
-    const s = db.evidenceSuggestions.find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const s = suggestions.forOrgById(req.org.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SUGGESTION_NOT_FOUND' });
     if (s.status !== 'supplied') return res.status(409).json({ error: 'NOT_SUPPLIED', message: 'Mark reviewed once the gap shows as supplied.' });
-    s.status = 'reviewed';
-    s.updatedAt = Date.now();
-    persistNow();
-    res.json({ suggestion: s });
+    res.json({ suggestion: suggestionView(suggestions.setStatus(s.id, 'reviewed', Date.now())) });
   });
 }

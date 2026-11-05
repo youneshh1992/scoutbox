@@ -17,12 +17,8 @@ export function migrateM13(db, players) {
   // F3 private suitability preferences: the player_prefs tables of the opportunities and campaigns repository (S9d).
   // F2 transition cases: tables of repositories/transitionsVouches.mjs (S10c), read through verificationReads.
   // F10 adult representation (the legacy lane): removed in S11a; agent relationships are repositories/agentCore.mjs.
-  db.exposureEvents ??= [];       // F4 — deduplicated exposure funnel events
-  db.calibrationSessions ??= [];  // F5 — scout calibration sessions
-  db.evidenceSuggestions ??= [];  // F6 — rule-engine suggestions + statuses
-  db.fixtures ??= [];             // F7 — observable fixtures (own records; friendlies/trials join at read)
-  db.coveragePlans ??= [];        // F7 — org coverage plans + goals
-  db.coverageAssignments ??= [];  // F7 — scout↔fixture assignments → observations
+  // F4–F7 exposure, review-later, evidence suggestions, calibration, fixtures and coverage: tables of
+  // repositories/insightCoverage.mjs (S12d), read through insightReads.
   db.groups ??= [];               // F8 — parent organisations / federations
   db.groupGrants ??= [];          // F8 — explicit, expiring, revocable sharing grants
   db.dispatches ??= [];           // F11 — per-channel delivery records for notifications (S7b: a table; attachDataLayer replaces this container with the repository's read-only view before m13 registers)
@@ -33,12 +29,6 @@ export function migrateM13(db, players) {
   db.supportTickets ??= [];       // F12 — support tickets referencing records by id
   db.supportAccessGrants ??= [];  // F12 — explicit, time-limited support access
   db.opsEvents ??= [];            // F12 — persisted operational failures/alerts
-  // M23 boot contract: F4 — deferred review reminders. This existed only
-  // because `insightSweep()` happens to run once synchronously at
-  // registration and created it on the way past. A store whose existence
-  // depends on a sweep having been scheduled is a store that moves if the
-  // sweep is ever made lazy.
-  db.reviewLater ??= [];
   // F9 — deal scenarios live on the case (typed rows since S8b: a case without one reads back `budget: null`).
   // Staff records (`db.users`) are owned by the users repository
   // (repositories/users.mjs) and are read-only here: an unset `mfa` or
