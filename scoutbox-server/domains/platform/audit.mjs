@@ -91,6 +91,7 @@ function safeDetail(action, detail) {
 export function registerAudit(ctx) {
   const { db, recruitmentReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
   if (typeof recruitmentReads?.contacts?.forOrg !== 'function') throw new TypeError('registerAudit needs recruitmentReads (contacts) from the data layer');
+  if (typeof ctx.discoveryReads?.briefs?.historyFeed !== 'function') throw new TypeError('registerAudit needs discoveryReads (briefs, watchlists) from the data layer');
 
   const ROOM_ACTION_LIST = [...ROOM_ACTIONS]; const CONTACT_ACTION_LIST = [...CONTACT_ACTIONS]; const TRIAL_ACTION_LIST = [...TRIAL_ACTIONS];
   /** Newest first, id as the tie-break so two rows in the same millisecond keep their order between reads. */
@@ -135,34 +136,27 @@ export function registerAudit(ctx) {
   const recruitmentCount = (org) => recruitmentReads.cases.roomHistoryCount(org.id, ROOM_ACTION_LIST)
     + recruitmentReads.contacts.historyCount(org.id, CONTACT_ACTION_LIST) + recruitmentReads.trials.historyCount(org.id, TRIAL_ACTION_LIST);
 
-  /** The sources not yet in tables (briefs, watchlists, development, agents, compliance, the ledger), read whole. */
+  /** The sources read whole and merged (briefs, watchlists, development, agents, compliance, the ledger). */
   function memoryEntries(org) {
     const rows = [];
-    for (const b of db.recruitmentBriefs ?? []) {
-      if (b.orgId !== org.id) continue;
-      for (const h of b.history ?? []) {
-        if (!BRIEF_ACTIONS.has(h.action)) continue;
-        rows.push({
-          id: h.id, at: h.at, action: h.action, domain: 'recruitment_brief',
-          actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
-          target: { type: 'brief', id: b.id, title: b.title },
-          detail: safeDetail(h.action, h.detail),
-        });
-      }
+    // S12c: the briefs' and the watchlists' trails come from SQL (discoveryReads), the organisation's own only.
+    for (const { entry: h, brief } of ctx.discoveryReads.briefs.historyFeed(org.id, [...BRIEF_ACTIONS])) {
+      rows.push({
+        id: h.id, at: h.at, action: h.action, domain: 'recruitment_brief',
+        actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
+        target: { type: 'brief', id: brief.id, title: brief.title },
+        detail: safeDetail(h.action, h.detail),
+      });
     }
     // M19: watchlist LIFECYCLE only. Which players entered or left belongs in
     // the watchlist's own history, not in an administrator's audit feed.
-    for (const w of db.dynamicWatchlists ?? []) {
-      if (w.orgId !== org.id) continue;
-      for (const h of w.history ?? []) {
-        if (!WATCHLIST_ACTIONS.has(h.action)) continue;
-        rows.push({
-          id: h.id, at: h.at, action: h.action, domain: 'dynamic_watchlist',
-          actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
-          target: { type: 'watchlist', id: w.id, title: w.name },
-          detail: safeDetail(h.action, h.detail),
-        });
-      }
+    for (const { entry: h, watchlist } of ctx.discoveryReads.watchlists.historyFeed(org.id, [...WATCHLIST_ACTIONS])) {
+      rows.push({
+        id: h.id, at: h.at, action: h.action, domain: 'dynamic_watchlist',
+        actor: h.byKind === 'org' ? { userId: h.byId, name: h.byName } : null,
+        target: { type: 'watchlist', id: watchlist.id, title: watchlist.name },
+        detail: safeDetail(h.action, h.detail),
+      });
     }
     // M21: development plans this organisation OWNS. A plan a player shared
     // with the club is the player's record, not the club's administrative

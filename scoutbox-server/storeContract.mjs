@@ -84,12 +84,14 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // developmentActions, developmentEvidenceLinks, developmentReviews: never a db.* read since S12a — typed tables (migration
   // 0030), read through repositories/development.mjs (developmentReads). Each db.* name throws; blob step m210_001 is a
   // recorded no-op.
+  // dynamicWatchlists, watchlistHistory (and recruitmentBriefs, nobodyMissedReviews, secondLookItems): never a db.* read
+  // since S12c — typed tables (migration 0032), read through repositories/discovery.mjs (discoveryReads). Each db.* name
+  // throws; the blob steps that created them (m182_002's entries, m182_003, m190_001, m200_001) are recorded no-ops.
   // dispatches: no longer a blob collection since S7b — the rows live in dispatches / dispatch_attempts (migration 0010,
   // repositories/dispatches.mjs); the data layer defines a read-only view at db.dispatches (insertion order, attempts
   // nested) and m13/delivery.mjs writes through the repository. S7b filed it as 'migration' after the notifications
   // precedent, but no snapshot migration creates it (notifications is in m182_002's list); the boot proves 'module'.
   dispatches: { guarantee: 'module', owner: 'm13', reason: 'container created by migrateM13 (??= []); since S7b a read-only view over the dispatches table, written only through the dispatches repository' },
-  dynamicWatchlists: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   // emailChallenges: no longer a production db.* read since S6a — the rows live in email_challenges (migration 0008,
   // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free
   // read-only view at db.emailChallenges, like the other table-backed collections. (mediaDeletions is the precedent.)
@@ -112,7 +114,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   matchdays: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   mediaBlobs: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   moderationLog: { guarantee: 'migration', owner: 'core', reason: 'moderation hits, counted on the T&S dashboard (D2); since S6b a read-only view over the moderation_log table, written only through moderateOrRefuse → the safetyAudit repository' },
-  nobodyMissedReviews: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
   // notificationPrefs / notifications: since S7a the rows live in notification_prefs / notification_pref_categories and
   // notifications (migration 0009, repositories/notifications.mjs) and every production reader and writer goes through the
   // repository. The entries stay because the snapshot migrations m182_002 / m182_004 / m182_005 still name the containers
@@ -145,7 +146,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   prospects: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   pushLog: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_log table (defined by attachDataLayer), written only through the push log repository' },
   pushTokens: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, created during synchronous composition before the socket opens; since S7c a read-only view over the push_tokens table (defined by attachDataLayer), written only through the push tokens repository' },
-  recruitmentBriefs: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
   // recruitmentContacts, recruitmentOffers: never a db.* read since §4.3 step 2 — the contacts and offers live in their
   // typed tables (migration 0017) and are read through repositories/recruitmentContactsOffers.mjs. db.<name> throws.
   // signingPackages, signings, followUps, outcomeReports: the same since §4.3 step 2 — typed tables (migration 0018),
@@ -167,7 +167,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   reputationSeed: { guarantee: 'migration', owner: 'core', reason: 'demo track records; EMPTY is the correct production value — fabricating them would be worse than the bug (D2)' },
   reviewLater: { guarantee: 'module', owner: 'm13', reason: 'existed only because insightSweep() happens to run once synchronously at registration; a store whose existence depends on a sweep moves the day the sweep is made lazy' },
   savedSearches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
-  secondLookItems: { guarantee: 'migration', owner: 'm18', reason: 'Second Look / Nobody Missed collection, guaranteed by the migration registry' },
   sessions: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   sourceChanges: { guarantee: 'migration', owner: 'm18.1', reason: 'M18.1 source-change clock, guaranteed by the migration registry; since S6b a read-only view over the source_changes table, written only through recordSourceChange → the safetyAudit repository (the 20 000 cap deletes the oldest rows)' },
   ssoConfigs: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
@@ -188,7 +187,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // passportPrefs, passportCareerEntries, passportAchievements, passportShares, passportCorrections: never a db.* read since
   // S10b — typed tables (migration 0024), read through repositories/passport.mjs (verificationReads). db.<name> throws.
   // vouches: never a db.* read since S10c — a typed table (migration 0025), read through repositories/transitionsVouches.mjs (verificationReads). db.vouches throws.
-  watchlistHistory: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   webhookDeliveries: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   webhookEndpoints: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },});
 

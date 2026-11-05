@@ -530,6 +530,14 @@ section('N — Recruitment Briefs and Nobody Missed');
   neg((await j('POST', '/org/recruitment-briefs', { title: 'x', minAge: 20, maxAge: 16 }, maria.token)).status === 400, '[45] an inverted age range is refused');
   neg((await j('POST', '/org/recruitment-briefs', { title: 'x', positions: ['SWEEPER'] }, maria.token)).status === 400, '[46] an unsupported position is refused');
   neg((await j('POST', '/org/recruitment-briefs', { title: 'x', evidenceRequirements: ['is_talented'] }, maria.token)).status === 400, '[47] an unsupported evidence criterion is refused');
+  // S12c: a field of the wrong type is refused, naming it, where it used to be dropped or coerced into the record.
+  const field = (r) => r.body?.details?.map((d) => `${d.field}:${d.error}`) ?? [r.body?.error, r.body?.field];
+  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', foot: 'left' }, maria.token)).includes('foot:BRIEF_FOOT_UNKNOWN'), 'S12c: an unknown foot is refused, not dropped');
+  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', positions: 'CB' }, maria.token)).includes('positions:FIELD_INVALID'), 'S12c: positions that are not a list are refused, not read as none');
+  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', combineProtocols: ['made-up-drill'] }, maria.token)).includes('combineProtocols:BRIEF_COMBINE_PROTOCOL_UNKNOWN'), 'S12c: an unknown Combine protocol is refused');
+  neg(field(await j('POST', '/org/recruitment-briefs', { title: { text: 'x' } }, maria.token)).includes('title:FIELD_INVALID'), 'S12c: a title that is not text is refused');
+  neg(field(await j('POST', '/org/recruitment-briefs', { title: 'x', availability: 7 }, maria.token)).includes('availability:FIELD_INVALID'), 'S12c: an availability that is not text is refused');
+  { const r = await j('POST', '/org/recruitment-briefs', { title: 'x', roleId: { id: 'r1' } }, maria.token); neg(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'roleId', 'S12c: a role reference that is not a short id is refused, not stored as it came'); }
   // permissions
   const notLead = await j('POST', '/org/recruitment-briefs', { title: 'Scout brief', positions: ['CM'] }, tom.token);
   neg(notLead.status === 403, 'a non-lead scout cannot create a brief');
@@ -538,6 +546,12 @@ section('N — Recruitment Briefs and Nobody Missed');
   ok(created.status === 201 && created.body.brief.version === 1, 'a valid brief is created at version 1 in draft');
   const BRIEF = created.body.brief.id;
   neg(/no hidden criteria/i.test(created.body.brief.note), 'the brief states it has no hidden criteria, weights or ranking');
+
+  // S12c: everything is checked before anything is written — a refused criteria change does not half-apply the status
+  // change that came with it.
+  const half = await j('PATCH', `/org/recruitment-briefs/${BRIEF}`, { status: 'active', foot: 'sideways' }, maria.token);
+  const still = await j('GET', `/org/recruitment-briefs/${BRIEF}`, undefined, maria.token);
+  neg(half.status === 400 && still.body.brief.status === 'draft' && still.body.brief.rev === created.body.brief.rev, 'S12c: a refused PATCH leaves the brief exactly as it was (still draft, same rev)');
 
   // A draft produces nothing.
   const draftQ = await j('GET', `/org/nobody-missed?briefId=${BRIEF}`, undefined, maria.token);

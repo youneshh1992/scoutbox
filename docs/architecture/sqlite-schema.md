@@ -224,11 +224,11 @@ them.
 | `combineRequests` | persistent | 07 | `combine_requests`, `combine_request_protocols` | S12 |
 | `combineAttempts` | persistent | 07 | `combine_attempts` | S12 |
 | `boxCamCvResults` | persistent (immutable) | 07 | `box_cam_cv_results` (PK `provider_session_id`) | S12 |
-| `recruitmentBriefs` | persistent | 07 | `recruitment_briefs`, `recruitment_brief_criteria_values`, `recruitment_briefs_history` | S12 |
-| `nobodyMissedReviews` | persistent | 07 | `nobody_missed_reviews`, `nobody_missed_reviews_history` | S12 |
-| `secondLookItems` | persistent | 07 | `second_look_items`, `second_look_item_fingerprints`, `second_look_items_history` | S12 |
-| `dynamicWatchlists` | persistent | 07 | `dynamic_watchlists`, `watchlist_criteria`, `watchlist_memberships`, `dynamic_watchlists_history` | S12 |
-| `watchlistHistory` | audit | 07 | `watchlist_membership_events` | S12 |
+| `recruitmentBriefs` | persistent | 07 | `recruitment_briefs`, `recruitment_brief_values`, `recruitment_brief_history` | S12c (0032) |
+| `nobodyMissedReviews` | persistent | 07 | `nobody_missed_reviews`, `nobody_missed_review_history` | S12c (0032) |
+| `secondLookItems` | persistent | 07 | `second_look_items`, `second_look_item_fingerprints`, `second_look_item_reasons`, `second_look_item_history` | S12c (0032) |
+| `dynamicWatchlists` | persistent | 07 | `dynamic_watchlists`, `watchlist_criteria`, `watchlist_criterion_values`, `watchlist_members`, `watchlist_member_checks`, `watchlist_history` | S12c (0032) |
+| `watchlistHistory` | audit | 07 | `watchlist_membership_events` | S12c (0032) |
 | `developmentPlans` | persistent | 07 | `development_plans`, `development_plan_shares`, `development_plans_history` | S12 |
 | `developmentGoals` | persistent | 07 | `development_goals`, `development_goals_history` | S12 |
 | `developmentActions` | persistent | 07 | `development_actions`, `development_actions_history` | S12 |

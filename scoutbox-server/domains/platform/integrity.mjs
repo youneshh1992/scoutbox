@@ -45,21 +45,11 @@ export function integrityReport(db, { cases: allCases = [] } = {}) {
     (c) => `${c.orgId}:${c.playerId}`,
   ));
   push('CASE_ID_DUPLICATE', dupes(allCases, (c) => c?.id));
-  push('BRIEF_ID_DUPLICATE', dupes(db.recruitmentBriefs ?? [], (b) => b?.id));
   push('PLAYER_ID_DUPLICATE', dupes(db.players ?? [], (p) => p?.id));
   push('ORG_ID_DUPLICATE', dupes(db.orgs ?? [], (o) => o?.id));
-  // One Second Look item per (org, room): the engine's own invariant.
-  push('SECOND_LOOK_ITEM_DUPLICATE', dupes(db.secondLookItems ?? [], (i) => i ? `${i.orgId}:${i.roomId}` : null));
-  // Within one item, a change fingerprint appears once — a duplicated
-  // fingerprint would count the same evidence twice towards the threshold.
-  for (const item of db.secondLookItems ?? []) {
-    const seen = new Set();
-    for (const c of item?.changes ?? []) {
-      if (!c?.fingerprint) continue;
-      if (seen.has(c.fingerprint)) violations.push({ code: 'SECOND_LOOK_FINGERPRINT_DUPLICATE', key: `${item.id}:${c.fingerprint}`, ids: [String(item.id)] });
-      seen.add(c.fingerprint);
-    }
-  }
+  // A brief id, one Second Look item per (organisation, room, decision cycle), a fingerprint once per item and a brief's
+  // rev ≥ 1 are the discovery tables' own keys and CHECKs since S12c (repositories/discovery.mjs): a row that breaks
+  // them is never written, so there is nothing left to report here.
   // A Room must belong to an organisation and a player that exist.
   const orgIds = new Set((db.orgs ?? []).map((o) => o?.id));
   const playerIds = new Set((db.players ?? []).map((p) => p?.id));
@@ -69,10 +59,8 @@ export function integrityReport(db, { cases: allCases = [] } = {}) {
   }
   // A rev-guarded record carries a positive integer rev after migration.
   for (const c of cases) if (!Number.isInteger(c.room.rev) || c.room.rev < 1) violations.push({ code: 'ROOM_REV_INVALID', key: String(c.room.rev), ids: [String(c.id)] });
-  for (const b of db.recruitmentBriefs ?? []) if (!Number.isInteger(b?.rev) || b.rev < 1) violations.push({ code: 'BRIEF_REV_INVALID', key: String(b?.rev), ids: [String(b?.id)] });
 
-  const checked = cases.length + (db.recruitmentBriefs ?? []).length + (db.players ?? []).length
-    + (db.orgs ?? []).length + (db.secondLookItems ?? []).length;
+  const checked = cases.length + (db.players ?? []).length + (db.orgs ?? []).length;
 
   // M23-D2 — required collections that are absent.
   //

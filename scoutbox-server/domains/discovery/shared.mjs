@@ -592,10 +592,18 @@ export const PROHIBITED_BRIEF_FIELDS = [
   'physical_maturity', 'immigration_status', 'national_origin',
 ];
 
-export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro' } = {}) {
+export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protocols = null } = {}) {
   const errs = [];
-  const title = String(input.title ?? '').trim().slice(0, 120);
-  if (!title) errs.push({ field: 'title', error: 'BRIEF_TITLE_REQUIRED' });
+  // S12c: a field of the wrong type is refused, naming it, rather than coerced (an object title, a list that is not a
+  // list, an unknown foot or Combine protocol). Over-long free text is still shortened.
+  if (input.title != null && typeof input.title !== 'string') errs.push({ field: 'title', error: 'FIELD_INVALID' });
+  const title = typeof input.title === 'string' ? input.title.trim().slice(0, 120) : '';
+  if (!title && !errs.length) errs.push({ field: 'title', error: 'BRIEF_TITLE_REQUIRED' });
+  const listOf = (k) => {
+    if (input[k] == null) return [];
+    if (!Array.isArray(input[k])) { errs.push({ field: k, error: 'FIELD_INVALID' }); return []; }
+    return [...new Set(input[k].map(String))];
+  };
 
   // A protected characteristic must never become a recruitment filter.
   const offered = Object.keys(input).map((k) => k.toLowerCase().replace(/[^a-z]+/g, '_'));
@@ -604,7 +612,7 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro' } = {}) 
     return { ok: false, error: 'BRIEF_CRITERION_PROHIBITED', prohibited, message: 'A recruitment brief can never filter players by a protected characteristic.' };
   }
 
-  const positions = Array.isArray(input.positions) ? [...new Set(input.positions.map(String))] : [];
+  const positions = listOf('positions');
   const unknownPos = positions.filter((p) => !POSITIONS.includes(p));
   if (unknownPos.length) errs.push({ field: 'positions', error: 'BRIEF_POSITION_UNKNOWN', unknown: unknownPos });
 
@@ -623,14 +631,21 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro' } = {}) 
   const maxLevel = input.maxLevel ?? null;
   if (maxLevel != null && !['amateur', 'semi_pro', 'pro'].includes(maxLevel)) errs.push({ field: 'maxLevel', error: 'BRIEF_LEVEL_UNKNOWN' });
 
-  const evidence = Array.isArray(input.evidenceRequirements) ? [...new Set(input.evidenceRequirements.map(String))] : [];
+  const evidence = listOf('evidenceRequirements');
   const unknownEv = evidence.filter((e) => !EVIDENCE_REQUIREMENTS.some((r) => r.key === e));
   if (unknownEv.length) errs.push({ field: 'evidenceRequirements', error: 'BRIEF_EVIDENCE_REQUIREMENT_UNKNOWN', unknown: unknownEv });
 
   const minTrustBand = input.minTrustBand ?? null;
   if (minTrustBand != null && !TRUST_BANDS.includes(minTrustBand)) errs.push({ field: 'minTrustBand', error: 'BRIEF_TRUST_BAND_UNKNOWN' });
 
-  const combineProtocols = Array.isArray(input.combineProtocols) ? [...new Set(input.combineProtocols.map(String))] : [];
+  const combineProtocols = listOf('combineProtocols');
+  const unknownProtocols = protocols ? combineProtocols.filter((p) => !protocols.includes(p)) : [];
+  if (unknownProtocols.length) errs.push({ field: 'combineProtocols', error: 'BRIEF_COMBINE_PROTOCOL_UNKNOWN', unknown: unknownProtocols });
+
+  const foot = input.foot ?? null;
+  if (foot !== null && !['Left', 'Right', 'Both'].includes(foot)) errs.push({ field: 'foot', error: 'BRIEF_FOOT_UNKNOWN' });
+  const availability = input.availability ?? null;
+  if (availability !== null && typeof availability !== 'string') errs.push({ field: 'availability', error: 'FIELD_INVALID' });
 
   // M23 P5.7: the window bounds are calendar days that EXIST. An unreadable
   // `activeUntil` used to compare as "never passed" and keep a brief live for ever.
@@ -650,8 +665,8 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro' } = {}) 
     minAge, maxAge,
     radiusKm: orgLevel === 'grassroots' ? Math.min(radiusKm ?? 50, 50) : radiusKm,
     maxLevel: orgLevel === 'grassroots' ? 'semi_pro' : maxLevel,
-    foot: ['Left', 'Right', 'Both'].includes(input.foot) ? input.foot : null,
-    availability: input.availability ? String(input.availability).slice(0, 40) : null,
+    foot,
+    availability: availability ? availability.slice(0, 40) : null,
     evidenceRequirements: evidence,
     minTrustBand,
     combineProtocols,

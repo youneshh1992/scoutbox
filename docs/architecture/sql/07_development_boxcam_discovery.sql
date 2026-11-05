@@ -505,393 +505,314 @@ CREATE TABLE box_cam_cv_result_trace (
 
 
 -- =============================================================================
--- M18 — Recruitment Briefs, Nobody Missed, Second Look
+-- M18 Recruitment Briefs, Nobody Missed, Second Look · M19 Dynamic Watchlists
+-- S12c: IMPLEMENTED, migration 0032_discovery REGISTERED (repositories/discovery.mjs, 5 Nov 2026).
+-- The DDL below is the migration's, generated from the repository's field specs (scripts/testSchemaDdl.mjs compares
+-- them column for column).
 -- =============================================================================
 
--- source: db.recruitmentBriefs  created at m18/nobodyMissed.mjs:182
--- owner/writer: m18/nobodyMissed.mjs (lead-only create/patch); read by m19 (brief-sourced
---   criteria / live-linked watchlists), m17 rooms (sourceRef)
--- lifecycle: status draft -> active -> paused | closed -> ... -> archived (BRIEF_TRANSITIONS);
---   archived is terminal and refuses edits; never deleted; max 40 per org
--- mapping:
---   id -> id (brf-*)
---   orgId -> org_id
---   title -> title (<=120)
---   criteria.positions[] -> recruitment_brief_criteria_values kind 'position'
---   criteria.positionGroups[] -> derived, not stored: POSITION_GROUP_OF over positions (m18/shared.mjs:649)
---   criteria.minAge / .maxAge -> min_age / max_age
---   criteria.radiusKm -> radius_km (grassroots clamped to <=50 at write)
---   criteria.maxLevel -> max_level (grassroots forced to 'semi_pro')
---   criteria.foot -> foot
---   criteria.availability -> availability (free text <=40)
---   criteria.evidenceRequirements[] -> recruitment_brief_criteria_values kind 'evidence_requirement'
---   criteria.minTrustBand -> min_trust_band
---   criteria.combineProtocols[] -> recruitment_brief_criteria_values kind 'combine_protocol'
---   version -> version (CRITERIA version: +1 on a material criteria change; historical
---     coverage and nobody_missed_reviews.brief_version point at it; old criteria are NOT retained)
---   status -> status
---   activeFrom / activeUntil -> active_from_date / active_until_date (strict YYYY-MM-DD, inclusive)
---   roleId -> role_id (unvalidated free reference, no FK)
---   vacancyId -> vacancy_id (unvalidated; intended target vacancies(id), no FK today)
---   createdBy.userId / .name -> created_by_user_id / created_by_name
---   createdAt / updatedAt -> created_at / updated_at
---   history[] -> recruitment_briefs_history
---   rev / revAt / revBy{userId,name} -> rev / rev_at / rev_by_user_id / rev_by_name (M18.1 concurrency token)
--- notes: change detection today is JSON.stringify(criteria) equality; with the
---   flattened columns + child rows the migration/repository compares the
---   canonical tuple. Protected-characteristic criteria are refused at write.
---   Read patterns: org list by updated_at desc; (id, org_id).
+-- Briefs (recruitment_briefs): the criteria's scalars as columns, positions, evidence requirements and Combine protocols
+-- as ordered value rows by kind (recruitment_brief_values); the position groups are worked out from the positions and
+-- never stored. version is the CRITERIA version (Nobody Missed points at it), rev the concurrency token. The audit trail
+-- is recruitment_brief_history, its detail typed columns (version, from, to, criteria_changed).
+-- Nobody Missed reviews (nobody_missed_reviews): one per (organisation, brief, player), unique; the trail of states is
+-- ordered rows. A review's brief and the Room add-to-room opened are RESTRICT keys.
+-- Second Look items (second_look_items): one per (organisation, room, decision cycle), unique — the engine's key; the
+-- room and decision are RESTRICT keys. Change fingerprints, the archive reasons the changes resolve and the trail are
+-- ordered rows (no direct_reason_codes_json); a trail row's reason is the resurfacing verdict or the dismissal reason.
+-- Watchlists (dynamic_watchlists): a brief-sourced list names its brief by key (brief_id); any other carries a free
+-- reference (source_ref) — sql/07's single untyped source_id is split. Criteria are typed columns by kind
+-- (watchlist_criteria: value_text, value_num, range_min/range_max, primary_only, evidence_kind, protocol) with their
+-- values as rows (watchlist_criterion_values) — no params_json. The last derived membership is rows
+-- (watchlist_members, with the required criteria each member met in watchlist_member_checks — no required_met_json),
+-- replaced only by a reconciliation. watchlist_history is the lifecycle trail (the changed fields as four flags);
+-- watchlist_membership_events the transitions, one per fingerprint.
+-- Player ids carry no key (tolerant). Organisations and the staff named are RESTRICT; child rows cascade.
+
 CREATE TABLE recruitment_briefs (
-  id                  TEXT PRIMARY KEY,
-  org_id              TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  title               TEXT NOT NULL,
-  min_age             INTEGER,
-  max_age             INTEGER,
-  radius_km           REAL,
-  max_level           TEXT CHECK (max_level IS NULL OR max_level IN ('amateur','semi_pro','pro')),
-  foot                TEXT CHECK (foot IS NULL OR foot IN ('Left','Right','Both')),
-  availability        TEXT,
-  min_trust_band      TEXT CHECK (min_trust_band IS NULL OR min_trust_band IN ('limited_evidence','developing_evidence','established_evidence','strong_evidence','very_strong_evidence')),
-  version             INTEGER NOT NULL DEFAULT 1,
-  status              TEXT NOT NULL CHECK (status IN ('draft','active','paused','closed','archived')),
-  active_from_date    TEXT CHECK (active_from_date IS NULL OR length(active_from_date) = 10),
-  active_until_date   TEXT CHECK (active_until_date IS NULL OR length(active_until_date) = 10),
-  role_id             TEXT,
-  vacancy_id          TEXT,
-  created_by_user_id  TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  created_by_name     TEXT,                      -- snapshot
-  created_at          INTEGER NOT NULL,
-  updated_at          INTEGER NOT NULL,
-  rev                 INTEGER NOT NULL DEFAULT 1,
-  rev_at              INTEGER,
-  rev_by_user_id      TEXT,
-  rev_by_name         TEXT                       -- snapshot
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  title                                    TEXT NOT NULL CHECK (length(title) <= 120 AND length(title) > 0),
+  version                                  INTEGER NOT NULL,
+  status                                   TEXT NOT NULL CHECK (status IN ('draft','active','paused','closed','archived')),
+  active_from_date                         TEXT CHECK (active_from_date IS NULL OR length(active_from_date) <= 10),
+  active_until_date                        TEXT CHECK (active_until_date IS NULL OR length(active_until_date) <= 10),
+  role_id                                  TEXT CHECK (role_id IS NULL OR length(role_id) <= 64 AND length(role_id) > 0),
+  vacancy_id                               TEXT CHECK (vacancy_id IS NULL OR length(vacancy_id) <= 64 AND length(vacancy_id) > 0),
+  created_by_user_id                       TEXT NOT NULL CHECK (length(created_by_user_id) <= 80 AND length(created_by_user_id) > 0),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_user_id                           TEXT CHECK (rev_by_user_id IS NULL OR length(rev_by_user_id) <= 80 AND length(rev_by_user_id) > 0),
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  min_age                                  INTEGER,
+  max_age                                  INTEGER,
+  radius_km                                REAL,
+  max_level                                TEXT CHECK (max_level IS NULL OR max_level IN ('amateur','semi_pro','pro')),
+  foot                                     TEXT CHECK (foot IS NULL OR foot IN ('Left','Right','Both')),
+  availability                             TEXT CHECK (availability IS NULL OR length(availability) <= 40),
+  min_trust_band                           TEXT CHECK (min_trust_band IS NULL OR min_trust_band IN ('limited_evidence','developing_evidence','established_evidence','strong_evidence','very_strong_evidence')),
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (created_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (active_from_date IS NULL OR active_from_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  CHECK (active_until_date IS NULL OR active_until_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+  CHECK (version >= 1),
+  CHECK (rev >= 1),
+  CHECK (min_age IS NULL OR (min_age >= 5 AND min_age <= 60)),
+  CHECK (max_age IS NULL OR (max_age >= 5 AND max_age <= 60)),
+  CHECK (min_age IS NULL OR max_age IS NULL OR min_age <= max_age),
+  CHECK (radius_km IS NULL OR (radius_km > 0 AND radius_km <= 20000)),
+  CHECK (active_from_date IS NULL OR active_until_date IS NULL OR active_from_date <= active_until_date)
 ) STRICT;
 CREATE INDEX recruitment_briefs_org_updated ON recruitment_briefs (org_id, updated_at);
-CREATE INDEX recruitment_briefs_org_status ON recruitment_briefs (org_id, status);
-
--- source: db.recruitmentBriefs[].criteria.{positions[], evidenceRequirements[], combineProtocols[]}  m18/shared.mjs:647
--- owner/writer: m18/nobodyMissed.mjs (replaced wholesale on a criteria change)
--- mapping: each list entry -> (brief_id, kind, value); kind names the source list
---   ('position' values from POSITIONS, 'evidence_requirement' keys from
---    EVIDENCE_REQUIREMENTS, 'combine_protocol' = COMBINE_PROTOCOLS id, unvalidated)
-CREATE TABLE recruitment_brief_criteria_values (
-  brief_id  TEXT NOT NULL REFERENCES recruitment_briefs(id) ON DELETE CASCADE,
-  kind      TEXT NOT NULL CHECK (kind IN ('position','evidence_requirement','combine_protocol')),
-  value     TEXT NOT NULL,
-  PRIMARY KEY (brief_id, kind, value)
+CREATE TABLE recruitment_brief_values (
+  brief_id                                 TEXT NOT NULL CHECK (length(brief_id) > 0 AND length(brief_id) <= 80),
+  kind                                     TEXT NOT NULL CHECK (kind IN ('position','evidence_requirement','combine_protocol')),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  value                                    TEXT NOT NULL CHECK (length(value) > 0 AND length(value) <= 80),
+  CHECK (kind <> 'position' OR value IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
+  CHECK (kind <> 'evidence_requirement' OR value IN ('recent_full_match','coach_reference','confirmed_current_club','combine_verified')),
+  FOREIGN KEY (brief_id) REFERENCES recruitment_briefs(id) ON DELETE CASCADE,
+  PRIMARY KEY (brief_id, kind, ord),
+  UNIQUE (brief_id, kind, value)
 ) STRICT;
-
--- source: db.recruitmentBriefs[].history[]  via audit() m12/shared.mjs:70 (entries {id aud-*, at, byKind, byId, byName, action, detail})
--- owner/writer: m18/nobodyMissed.mjs
--- lifecycle: append-only; actions recruitment_brief_created | recruitment_brief_activated | recruitment_brief_updated
--- mapping: id -> id; (parent) -> brief_id; at -> at; byKind -> by_kind ('org'); byId -> by_id (org_user id); byName -> by_name; action -> action; detail -> detail_json
-CREATE TABLE recruitment_briefs_history (
-  id           TEXT PRIMARY KEY,
-  brief_id     TEXT NOT NULL REFERENCES recruitment_briefs(id) ON DELETE CASCADE,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT,
-  by_id        TEXT,
-  by_name      TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+CREATE TABLE recruitment_brief_history (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  brief_id                                 TEXT NOT NULL CHECK (length(brief_id) <= 80 AND length(brief_id) > 0),
+  at                                       INTEGER NOT NULL,
+  by_kind                                  TEXT NOT NULL CHECK (by_kind IN ('org')),
+  by_id                                    TEXT NOT NULL CHECK (length(by_id) <= 80 AND length(by_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  action                                   TEXT NOT NULL CHECK (action IN ('recruitment_brief_created','recruitment_brief_activated','recruitment_brief_updated')),
+  detail_version                           INTEGER,
+  detail_from                              TEXT CHECK (detail_from IS NULL OR detail_from IN ('draft','active','paused','closed','archived')),
+  detail_to                                TEXT CHECK (detail_to IS NULL OR detail_to IN ('draft','active','paused','closed','archived')),
+  detail_criteria_changed                  INTEGER CHECK (detail_criteria_changed IS NULL OR detail_criteria_changed IN (0,1)),
+  FOREIGN KEY (brief_id) REFERENCES recruitment_briefs(id) ON DELETE CASCADE
 ) STRICT;
-CREATE INDEX recruitment_briefs_history_brief_at ON recruitment_briefs_history (brief_id, at);
-
--- source: db.nobodyMissedReviews  created at m18/nobodyMissed.mjs:343 (setReview, upsert)
--- owner/writer: m18/nobodyMissed.mjs (review / dismiss / add-to-room)
--- lifecycle: state open -> reviewed | dismissed | added_to_room (overwritten in place;
---   the trail is the history); never deleted
--- mapping:
---   id -> id (nmr-*)
---   orgId -> org_id
---   briefId -> brief_id
---   briefVersion -> brief_version (rewritten to the brief's current version on every action)
---   playerId -> player_id
---   state -> state
---   createdAt / updatedAt -> created_at / updated_at
---   reviewedBy{userId,name} / reviewedAt -> reviewed_by_user_id / reviewed_by_name / reviewed_at
---   dismissReason -> dismiss_reason
---   dismissedBy{userId,name} / dismissedAt -> dismissed_by_user_id / dismissed_by_name / dismissed_at
---   roomId -> room_id (the M17 room created by add-to-room)
---   history[] -> nobody_missed_reviews_history
--- notes: UNIQUE (org_id, brief_id, player_id) enforced by code (find-or-create).
---   Dismissal is per brief, never written to the player's record. Coverage
---   suppression (0<n<3) is computed on read. player_id is nullable only so a
---   deleted player can SET NULL instead of orphaning (orphans today).
+CREATE INDEX recruitment_brief_history_brief ON recruitment_brief_history (brief_id);
 CREATE TABLE nobody_missed_reviews (
-  id                    TEXT PRIMARY KEY,
-  org_id                TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  brief_id              TEXT NOT NULL REFERENCES recruitment_briefs(id) ON DELETE CASCADE,
-  brief_version         INTEGER NOT NULL,
-  player_id             TEXT REFERENCES players(id) ON DELETE SET NULL,
-  state                 TEXT NOT NULL CHECK (state IN ('open','reviewed','added_to_room','dismissed')),
-  created_at            INTEGER NOT NULL,
-  updated_at            INTEGER NOT NULL,
-  reviewed_by_user_id   TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  reviewed_by_name      TEXT,                      -- snapshot
-  reviewed_at           INTEGER,
-  dismiss_reason        TEXT CHECK (dismiss_reason IS NULL OR dismiss_reason IN ('already_known','not_current_need','evidence_insufficient','role_mismatch_after_review','timing','other')),
-  dismissed_by_user_id  TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  dismissed_by_name     TEXT,                      -- snapshot
-  dismissed_at          INTEGER,
-  room_id               TEXT REFERENCES recruitment_cases(id) ON DELETE SET NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  brief_id                                 TEXT NOT NULL CHECK (length(brief_id) <= 80 AND length(brief_id) > 0),
+  brief_version                            INTEGER NOT NULL,
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  state                                    TEXT NOT NULL CHECK (state IN ('open','reviewed','added_to_room','dismissed')),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  reviewed_by_user_id                      TEXT CHECK (reviewed_by_user_id IS NULL OR length(reviewed_by_user_id) <= 80 AND length(reviewed_by_user_id) > 0),
+  reviewed_by_name                         TEXT CHECK (reviewed_by_name IS NULL OR length(reviewed_by_name) <= 200),
+  reviewed_at                              INTEGER,
+  dismiss_reason                           TEXT CHECK (dismiss_reason IS NULL OR dismiss_reason IN ('already_known','not_current_need','evidence_insufficient','role_mismatch_after_review','timing','other')),
+  dismissed_by_user_id                     TEXT CHECK (dismissed_by_user_id IS NULL OR length(dismissed_by_user_id) <= 80 AND length(dismissed_by_user_id) > 0),
+  dismissed_by_name                        TEXT CHECK (dismissed_by_name IS NULL OR length(dismissed_by_name) <= 200),
+  dismissed_at                             INTEGER,
+  room_id                                  TEXT CHECK (room_id IS NULL OR length(room_id) <= 80 AND length(room_id) > 0),
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (brief_id) REFERENCES recruitment_briefs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (reviewed_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (dismissed_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (room_id) REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  CHECK (state <> 'dismissed' OR dismissed_at IS NOT NULL),
+  CHECK (state <> 'added_to_room' OR room_id IS NOT NULL),
+  UNIQUE (org_id, brief_id, player_id)
 ) STRICT;
-CREATE UNIQUE INDEX nobody_missed_reviews_org_brief_player ON nobody_missed_reviews (org_id, brief_id, player_id);
-
--- source: db.nobodyMissedReviews[].history[]  m18/nobodyMissed.mjs:350 (entries {at, state, by{userId,name}} — no ids)
--- owner/writer: m18/nobodyMissed.mjs
--- lifecycle: append-only
--- mapping: (no id) -> id (new, minted nmrh-<n>); (parent) -> review_id; at -> at;
---   by.userId -> by_id with by_kind 'org'; by.name -> by_name; state -> action
---   (the entry records the state entered); detail_json always null
-CREATE TABLE nobody_missed_reviews_history (
-  id           TEXT PRIMARY KEY,
-  review_id    TEXT NOT NULL REFERENCES nobody_missed_reviews(id) ON DELETE CASCADE,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT,
-  by_id        TEXT,
-  by_name      TEXT,
-  action       TEXT NOT NULL CHECK (action IN ('open','reviewed','added_to_room','dismissed')),
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+CREATE INDEX nobody_missed_reviews_brief ON nobody_missed_reviews (brief_id);
+CREATE TABLE nobody_missed_review_history (
+  review_id                                TEXT NOT NULL CHECK (length(review_id) <= 80 AND length(review_id) > 0),
+  ord                                      INTEGER NOT NULL,
+  at                                       INTEGER NOT NULL,
+  state                                    TEXT NOT NULL CHECK (state IN ('open','reviewed','added_to_room','dismissed')),
+  by_user_id                               TEXT NOT NULL CHECK (length(by_user_id) <= 80 AND length(by_user_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  FOREIGN KEY (review_id) REFERENCES nobody_missed_reviews(id) ON DELETE CASCADE,
+  FOREIGN KEY (by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  PRIMARY KEY (review_id, ord),
+  CHECK (ord >= 0)
 ) STRICT;
-CREATE INDEX nobody_missed_reviews_history_review_at ON nobody_missed_reviews_history (review_id, at);
-
--- source: db.secondLookItems  created at m18/secondLook.mjs:283 (reconcile — a GET that writes)
--- owner/writer: m18/secondLook.mjs (reconcile on every list/detail read; review / dismiss / reopen-room)
--- lifecycle: status open -> reviewed | dismissed | reopened_room | expired;
---   dismissed/expired -> open only via genuinely new fingerprints (SECOND_LOOK_TRANSITIONS);
---   reopened_room is terminal; never deleted
--- mapping:
---   id -> id (slk-*)
---   orgId -> org_id
---   playerId -> player_id
---   roomId -> room_id (recruitment_cases row carrying .room)
---   decisionId -> decision_id (head of the room's decision chain at surfacing)
---   policyVersion -> policy_version
---   triggerType -> trigger_type (SECOND_LOOK_KINDS)
---   changeFingerprints[] -> second_look_item_fingerprints (child; replaced wholesale on reconcile)
---   directReasonCodes[] -> direct_reason_codes_json (retained JSON: subset of the M17 archive
---     reason codes the changes resolve; replaced wholesale on every reconcile and only
---     rendered, never queried)
---   status -> status
---   createdAt / updatedAt -> created_at / updated_at
---   latestChangeAt -> latest_change_at (expiry clock: open for 120 days after it)
---   reviewedAt / reviewedBy{userId,name} -> reviewed_at / reviewed_by_user_id / reviewed_by_name
---   dismissedAt / dismissedBy{userId,name} / dismissReason -> dismissed_at / dismissed_by_user_id / dismissed_by_name / dismiss_reason
---   reopenedAt / reopenedBy{userId,name} -> reopened_at / reopened_by_user_id / reopened_by_name
---   history[] -> second_look_items_history
--- notes: natural key (org_id, room_id, decision_id) per the engine (itemFor);
---   the M18.2 integrity check uses (org_id, room_id) — a known disagreement,
---   the engine's key is the one enforced here. Org-private: never shown to a
---   player. Read patterns: (org, status) lists; (org, player) detail reconcile;
---   (id, org).
 CREATE TABLE second_look_items (
-  id                    TEXT PRIMARY KEY,
-  org_id                TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  player_id             TEXT REFERENCES players(id) ON DELETE SET NULL,
-  room_id               TEXT NOT NULL REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
-  decision_id           TEXT NOT NULL REFERENCES room_decisions(id) ON DELETE RESTRICT,
-  policy_version        INTEGER NOT NULL,
-  trigger_type          TEXT NOT NULL CHECK (trigger_type IN ('direct_reason_resolved','significant_new_evidence','evidence_removed','general_update')),
-  direct_reason_codes_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(direct_reason_codes_json)),
-  status                TEXT NOT NULL CHECK (status IN ('open','reviewed','dismissed','reopened_room','expired')),
-  created_at            INTEGER NOT NULL,
-  updated_at            INTEGER NOT NULL,
-  latest_change_at      INTEGER NOT NULL,
-  reviewed_at           INTEGER,
-  reviewed_by_user_id   TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  reviewed_by_name      TEXT,                      -- snapshot
-  dismissed_at          INTEGER,
-  dismissed_by_user_id  TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  dismissed_by_name     TEXT,                      -- snapshot
-  dismiss_reason        TEXT CHECK (dismiss_reason IS NULL OR dismiss_reason IN ('already_reviewed_elsewhere','change_not_material','timing_not_right','squad_need_changed','no_action_required','other')),
-  reopened_at           INTEGER,
-  reopened_by_user_id   TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  reopened_by_name      TEXT                       -- snapshot
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  room_id                                  TEXT NOT NULL CHECK (length(room_id) <= 80 AND length(room_id) > 0),
+  decision_id                              TEXT NOT NULL CHECK (length(decision_id) <= 80 AND length(decision_id) > 0),
+  policy_version                           INTEGER NOT NULL,
+  trigger_type                             TEXT NOT NULL CHECK (trigger_type IN ('direct_reason_resolved','significant_new_evidence','evidence_removed','general_update')),
+  status                                   TEXT NOT NULL CHECK (status IN ('open','reviewed','dismissed','reopened_room','expired')),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  latest_change_at                         INTEGER NOT NULL,
+  reviewed_at                              INTEGER,
+  reviewed_by_user_id                      TEXT CHECK (reviewed_by_user_id IS NULL OR length(reviewed_by_user_id) <= 80 AND length(reviewed_by_user_id) > 0),
+  reviewed_by_name                         TEXT CHECK (reviewed_by_name IS NULL OR length(reviewed_by_name) <= 200),
+  dismissed_at                             INTEGER,
+  dismissed_by_user_id                     TEXT CHECK (dismissed_by_user_id IS NULL OR length(dismissed_by_user_id) <= 80 AND length(dismissed_by_user_id) > 0),
+  dismissed_by_name                        TEXT CHECK (dismissed_by_name IS NULL OR length(dismissed_by_name) <= 200),
+  dismiss_reason                           TEXT CHECK (dismiss_reason IS NULL OR dismiss_reason IN ('already_reviewed_elsewhere','change_not_material','timing_not_right','squad_need_changed','no_action_required','other')),
+  reopened_at                              INTEGER,
+  reopened_by_user_id                      TEXT CHECK (reopened_by_user_id IS NULL OR length(reopened_by_user_id) <= 80 AND length(reopened_by_user_id) > 0),
+  reopened_by_name                         TEXT CHECK (reopened_by_name IS NULL OR length(reopened_by_name) <= 200),
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (room_id) REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  FOREIGN KEY (decision_id) REFERENCES room_decisions(id) ON DELETE RESTRICT,
+  FOREIGN KEY (reviewed_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (dismissed_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (reopened_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (status <> 'reviewed' OR reviewed_at IS NOT NULL),
+  CHECK (status <> 'dismissed' OR dismissed_at IS NOT NULL),
+  CHECK (status <> 'reopened_room' OR reopened_at IS NOT NULL),
+  UNIQUE (org_id, room_id, decision_id)
 ) STRICT;
-CREATE UNIQUE INDEX second_look_items_org_room_decision ON second_look_items (org_id, room_id, decision_id);
-CREATE INDEX second_look_items_org_status ON second_look_items (org_id, status);
 CREATE INDEX second_look_items_org_player ON second_look_items (org_id, player_id);
-
--- source: db.secondLookItems[].changeFingerprints[]  m18/secondLook.mjs:289 (sorted 'type:sourceSystem:sourceId')
--- owner/writer: m18/secondLook.mjs reconcile (replaced wholesale on create/reopen/update)
--- mapping: each fingerprint -> (item_id, fingerprint). The cooldown test is
---   "candidate fingerprints not in this set".
 CREATE TABLE second_look_item_fingerprints (
-  item_id      TEXT NOT NULL REFERENCES second_look_items(id) ON DELETE CASCADE,
-  fingerprint  TEXT NOT NULL,
-  PRIMARY KEY (item_id, fingerprint)
+  item_id                                  TEXT NOT NULL CHECK (length(item_id) > 0 AND length(item_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  fingerprint                              TEXT NOT NULL CHECK (length(fingerprint) > 0 AND length(fingerprint) <= 400),
+  FOREIGN KEY (item_id) REFERENCES second_look_items(id) ON DELETE CASCADE,
+  PRIMARY KEY (item_id, ord),
+  UNIQUE (item_id, fingerprint)
 ) STRICT;
-
--- source: db.secondLookItems[].history[]  m18/secondLook.mjs:294,317,489,509,543 (entries {at, action, by{userId,name}|null, reason?} — no ids)
--- owner/writer: m18/secondLook.mjs
--- lifecycle: append-only; actions surfaced | resurfaced | reviewed | dismissed | reopened_room
--- mapping: (no id) -> id (new, minted slkh-<n>); (parent) -> item_id; at -> at;
---   by.userId -> by_id with by_kind 'org' (null by => system row: by_kind 'system');
---   by.name -> by_name; action -> action; reason -> detail_json {"reason": ...}
---   (resurfaced carries the verdict reason, dismissed the dismissal reason)
-CREATE TABLE second_look_items_history (
-  id           TEXT PRIMARY KEY,
-  item_id      TEXT NOT NULL REFERENCES second_look_items(id) ON DELETE CASCADE,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT CHECK (by_kind IS NULL OR by_kind IN ('org','system')),
-  by_id        TEXT,
-  by_name      TEXT,
-  action       TEXT NOT NULL CHECK (action IN ('surfaced','resurfaced','reviewed','dismissed','reopened_room')),
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+CREATE TABLE second_look_item_reasons (
+  item_id                                  TEXT NOT NULL CHECK (length(item_id) > 0 AND length(item_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  code                                     TEXT NOT NULL CHECK (code IN ('insufficient_recent_evidence','insufficient_full_match','reference_missing','combine_missing','trial_needed','continue_monitoring','physical_profile','technical_fit','tactical_fit','development_upside','not_current_priority','position_need','trial_outcome','squad_space','budget','timing','registration','travel_logistics','eligibility','player_unavailable')),
+  FOREIGN KEY (item_id) REFERENCES second_look_items(id) ON DELETE CASCADE,
+  PRIMARY KEY (item_id, ord),
+  UNIQUE (item_id, code)
 ) STRICT;
-CREATE INDEX second_look_items_history_item_at ON second_look_items_history (item_id, at);
-
-
--- =============================================================================
--- M19 — Dynamic Watchlists
--- =============================================================================
-
--- source: db.dynamicWatchlists  created at m19/index.mjs:283
--- owner/writer: m19/index.mjs (create/patch; reconcile on every GET /watchlists/:id — a read that writes)
--- lifecycle: status active | paused | archived (archived is terminal); max 60 non-archived per org; never deleted
--- mapping:
---   id -> id (wl-*)
---   orgId -> org_id
---   name -> name (<=80)
---   mode -> mode
---   status -> status
---   sourceType -> source_type
---   sourceId -> source_id (brief: validated recruitment_briefs id; saved_search/criteria: free string <=64)
---   criteria{required[],preferred[],schemaVersion} -> watchlist_criteria (child) + schema_version
---     (even a live-linked list stores the criteria it was created from)
---   criteriaVersion -> criteria_version ('cv1:<fnv32>' over sorted criterion ids)
---   schemaVersion -> schema_version
---   notify -> notify
---   createdBy -> created_by_user_id (plain user id string in the source — NOT the {kind,id} shape used elsewhere)
---   createdByName -> created_by_name
---   createdAt / updatedAt -> created_at / updated_at
---   rev / revAt / revBy{userId,name} -> rev / rev_at / rev_by_user_id / rev_by_name
---   lastMembership[] + lastMatchSnapshot{playerId:{required[]}} -> watchlist_memberships (child;
---     the two source fields always hold the same player set — snapshot keys == membership)
---   lastCriteriaVersion -> last_criteria_version
---   lastBriefVersion -> last_brief_version
---   lastReconciledAt -> last_reconciled_at
---   history[] -> dynamic_watchlists_history
--- notes: membership is derived on read; no scheduler. Read patterns: org list
---   by (status,) updated_at desc; (id, org_id).
+CREATE TABLE second_look_item_history (
+  item_id                                  TEXT NOT NULL CHECK (length(item_id) > 0 AND length(item_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  at                                       INTEGER NOT NULL,
+  action                                   TEXT NOT NULL CHECK (action IN ('surfaced','resurfaced','reviewed','dismissed','reopened_room')),
+  by_user_id                               TEXT CHECK (by_user_id IS NULL OR (length(by_user_id) > 0 AND length(by_user_id) <= 80)),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  reason                                   TEXT CHECK (reason IS NULL OR reason IN ('materially_new_evidence','already_reviewed_elsewhere','change_not_material','timing_not_right','squad_need_changed','no_action_required','other')),
+  FOREIGN KEY (item_id) REFERENCES second_look_items(id) ON DELETE CASCADE,
+  FOREIGN KEY (by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  PRIMARY KEY (item_id, ord),
+  CHECK ((action IN ('surfaced','resurfaced')) = (by_user_id IS NULL)),
+  CHECK (by_user_id IS NOT NULL OR by_name IS NULL),
+  CHECK (action IN ('resurfaced','dismissed') OR reason IS NULL),
+  CHECK (action <> 'resurfaced' OR reason IS NOT NULL)
+) STRICT;
 CREATE TABLE dynamic_watchlists (
-  id                     TEXT PRIMARY KEY,
-  org_id                 TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  name                   TEXT NOT NULL,
-  mode                   TEXT NOT NULL CHECK (mode IN ('live_linked','snapshot')),
-  status                 TEXT NOT NULL CHECK (status IN ('active','paused','archived')),
-  source_type            TEXT NOT NULL CHECK (source_type IN ('brief','saved_search','criteria')),
-  source_id              TEXT,
-  schema_version         INTEGER NOT NULL,
-  criteria_version       TEXT NOT NULL,
-  notify                 INTEGER NOT NULL DEFAULT 1 CHECK (notify IN (0,1)),
-  created_by_user_id     TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  created_by_name        TEXT,                      -- snapshot
-  created_at             INTEGER NOT NULL,
-  updated_at             INTEGER NOT NULL,
-  rev                    INTEGER NOT NULL DEFAULT 1,
-  rev_at                 INTEGER,
-  rev_by_user_id         TEXT,
-  rev_by_name            TEXT,                      -- snapshot
-  last_criteria_version  TEXT,
-  last_brief_version     INTEGER,
-  last_reconciled_at     INTEGER,
-  CHECK (mode <> 'live_linked' OR source_type = 'brief')
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  name                                     TEXT NOT NULL CHECK (length(name) <= 80 AND length(name) > 0),
+  mode                                     TEXT NOT NULL CHECK (mode IN ('live_linked','snapshot')),
+  status                                   TEXT NOT NULL CHECK (status IN ('active','paused','archived')),
+  source_type                              TEXT NOT NULL CHECK (source_type IN ('brief','saved_search','criteria')),
+  brief_id                                 TEXT CHECK (brief_id IS NULL OR length(brief_id) <= 80 AND length(brief_id) > 0),
+  source_ref                               TEXT CHECK (source_ref IS NULL OR length(source_ref) <= 64 AND length(source_ref) > 0),
+  schema_version                           INTEGER NOT NULL,
+  criteria_version                         TEXT NOT NULL CHECK (length(criteria_version) <= 40 AND length(criteria_version) > 0),
+  notify                                   INTEGER NOT NULL CHECK (notify IN (0,1)),
+  created_by_user_id                       TEXT NOT NULL CHECK (length(created_by_user_id) <= 80 AND length(created_by_user_id) > 0),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_user_id                           TEXT CHECK (rev_by_user_id IS NULL OR length(rev_by_user_id) <= 80 AND length(rev_by_user_id) > 0),
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  last_criteria_version                    TEXT CHECK (last_criteria_version IS NULL OR length(last_criteria_version) <= 40 AND length(last_criteria_version) > 0),
+  last_brief_version                       INTEGER,
+  last_reconciled_at                       INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (brief_id) REFERENCES recruitment_briefs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (created_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK ((source_type = 'brief') = (brief_id IS NOT NULL)),
+  CHECK (source_type <> 'brief' OR source_ref IS NULL),
+  CHECK (mode <> 'live_linked' OR source_type = 'brief'),
+  CHECK (rev >= 1),
+  CHECK ((last_reconciled_at IS NULL) = (last_criteria_version IS NULL))
 ) STRICT;
-CREATE INDEX dynamic_watchlists_org_status_updated ON dynamic_watchlists (org_id, status, updated_at);
-
--- source: db.dynamicWatchlists[].criteria.{required[],preferred[]}  m19/criteria.mjs:264 (validateCriteria output)
--- owner/writer: m19/index.mjs (replaced wholesale on criteria change; never for live_linked)
--- mapping: each criterion -> one row: class -> class; id -> criterion_id (stable
---   'type:operator:k=v,...'); type -> type; operator -> operator; the type-specific
---   normalised body (values[], value, primaryOnly, evidenceKind, protocol) -> params_json
---   (retained JSON: the body shape varies per criterion type and is consumed only by
---   matchPlayerToCriteria as a unit; criterion_id already encodes it canonically)
--- notes: dedupe key is (class, criterion_id) — same test twice is one test.
+CREATE INDEX dynamic_watchlists_org_updated ON dynamic_watchlists (org_id, updated_at);
 CREATE TABLE watchlist_criteria (
-  watchlist_id  TEXT NOT NULL REFERENCES dynamic_watchlists(id) ON DELETE CASCADE,
-  class         TEXT NOT NULL CHECK (class IN ('required','preferred')),
-  criterion_id  TEXT NOT NULL,
-  position      INTEGER NOT NULL,
-  type          TEXT NOT NULL CHECK (type IN ('position','age','geography','level','foot','availability','evidence','evidence_recency','trust_band','combine_result','combine_measurement')),
-  operator      TEXT NOT NULL CHECK (operator IN ('in','equals','between','gte','lte','within_radius','within_days','exists')),
-  params_json   TEXT NOT NULL CHECK (json_valid(params_json)),
-  PRIMARY KEY (watchlist_id, class, criterion_id)
+  watchlist_id                             TEXT NOT NULL CHECK (length(watchlist_id) > 0 AND length(watchlist_id) <= 80),
+  class                                    TEXT NOT NULL CHECK (class IN ('required','preferred')),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  criterion_id                             TEXT NOT NULL CHECK (length(criterion_id) > 0 AND length(criterion_id) <= 600),
+  type                                     TEXT NOT NULL CHECK (type IN ('position','age','geography','level','foot','availability','evidence','evidence_recency','trust_band','combine_result','combine_measurement')),
+  operator                                 TEXT NOT NULL CHECK (operator IN ('in','between','gte','lte','within_radius','equals','exists','within_days')),
+  value_text                               TEXT CHECK (value_text IS NULL OR (length(value_text) > 0 AND length(value_text) <= 80)),
+  value_num                                REAL,
+  range_min                                INTEGER,
+  range_max                                INTEGER,
+  primary_only                             INTEGER CHECK (primary_only IS NULL OR primary_only IN (0,1)),
+  evidence_kind                            TEXT CHECK (evidence_kind IS NULL OR evidence_kind IN ('any','footage')),
+  protocol                                 TEXT CHECK (protocol IS NULL OR (length(protocol) > 0 AND length(protocol) <= 80)),
+  FOREIGN KEY (watchlist_id) REFERENCES dynamic_watchlists(id) ON DELETE CASCADE,
+  PRIMARY KEY (watchlist_id, class, ord),
+  UNIQUE (watchlist_id, class, criterion_id),
+  CHECK ((range_min IS NULL) = (range_max IS NULL))
 ) STRICT;
-
--- source: db.dynamicWatchlists[].lastMembership[] + .lastMatchSnapshot{}  m19/index.mjs:409,415
--- owner/writer: m19/index.mjs reconcile (replaced wholesale on every recorded reconcile)
--- lifecycle: derived cache of the last evaluation — kept because the NEXT
---   reconcile diffs against it to explain transitions; a null lastMembership
---   (never evaluated) is "no rows and last_reconciled_at IS NULL"
--- mapping: each player id -> (watchlist_id, player_id); lastMatchSnapshot[playerId].required[]
---   -> required_met_json ([{criterionId, met}] — only the required lines' met flags,
---   consumed as a unit by explainTransition; never queried per criterion)
-CREATE TABLE watchlist_memberships (
-  watchlist_id       TEXT NOT NULL REFERENCES dynamic_watchlists(id) ON DELETE CASCADE,
-  player_id          TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  required_met_json  TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(required_met_json)),
+CREATE TABLE watchlist_criterion_values (
+  watchlist_id                             TEXT NOT NULL CHECK (length(watchlist_id) > 0 AND length(watchlist_id) <= 80),
+  class                                    TEXT NOT NULL CHECK (class IN ('required','preferred')),
+  criterion_ord                            INTEGER NOT NULL CHECK (criterion_ord >= 0),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  value                                    TEXT NOT NULL CHECK (length(value) > 0 AND length(value) <= 80),
+  FOREIGN KEY (watchlist_id, class, criterion_ord) REFERENCES watchlist_criteria(watchlist_id, class, ord) ON DELETE CASCADE,
+  PRIMARY KEY (watchlist_id, class, criterion_ord, ord)
+) STRICT;
+CREATE TABLE watchlist_members (
+  watchlist_id                             TEXT NOT NULL CHECK (length(watchlist_id) > 0 AND length(watchlist_id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) > 0 AND length(player_id) <= 80),
+  FOREIGN KEY (watchlist_id) REFERENCES dynamic_watchlists(id) ON DELETE CASCADE,
   PRIMARY KEY (watchlist_id, player_id)
 ) STRICT;
-
--- source: db.dynamicWatchlists[].history[]  via audit() m12/shared.mjs:70
--- owner/writer: m19/index.mjs
--- lifecycle: append-only; actions watchlist_created | watchlist_updated | watchlist_archived
--- mapping: id -> id (aud-*); (parent) -> watchlist_id; at -> at; byKind -> by_kind ('org'); byId -> by_id; byName -> by_name; action -> action; detail -> detail_json
-CREATE TABLE dynamic_watchlists_history (
-  id            TEXT PRIMARY KEY,
-  watchlist_id  TEXT NOT NULL REFERENCES dynamic_watchlists(id) ON DELETE CASCADE,
-  at            INTEGER NOT NULL,
-  by_kind       TEXT,
-  by_id         TEXT,
-  by_name       TEXT,
-  action        TEXT NOT NULL,
-  detail_json   TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+CREATE TABLE watchlist_member_checks (
+  watchlist_id                             TEXT NOT NULL CHECK (length(watchlist_id) > 0 AND length(watchlist_id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) > 0 AND length(player_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  criterion_id                             TEXT NOT NULL CHECK (length(criterion_id) > 0 AND length(criterion_id) <= 600),
+  met                                      INTEGER NOT NULL CHECK (met IN (0,1)),
+  FOREIGN KEY (watchlist_id, player_id) REFERENCES watchlist_members(watchlist_id, player_id) ON DELETE CASCADE,
+  PRIMARY KEY (watchlist_id, player_id, ord)
 ) STRICT;
-CREATE INDEX dynamic_watchlists_history_watchlist_at ON dynamic_watchlists_history (watchlist_id, at);
-
--- source: db.watchlistHistory  created at m19/index.mjs:378 (reconcile)
--- owner/writer: m19/index.mjs (reconcile only); read by GET /watchlists/:id/history and lastChangeSummary
--- lifecycle: append-only; never pruned
--- naming: called watchlist_membership_events here, NOT watchlist_history — the
---   `<table>_history` suffix is reserved for audit trails (dynamic_watchlists_history
---   above) and this store is a domain event log of membership transitions.
--- mapping:
---   id -> id (wlh-*)
---   watchlistId -> watchlist_id
---   orgId -> org_id
---   playerId -> player_id
---   transition -> transition
---   reason -> reason
---   criterionId -> criterion_id (the criterion that flipped, or null)
---   text -> text (explanation copy at the time)
---   criteriaVersion -> criteria_version
---   briefVersion -> brief_version
---   policyVersion -> policy_version
---   at -> at
---   fingerprint -> fingerprint ('wl:<wl>:<player>:<cv>:<transition>:<reason>', UNIQUE — enforced by code today)
--- notes: a player who later becomes invisible keeps the row; the name is
---   resolved live and withheld. Read patterns: (watchlist_id, at desc, id)
---   cursor pages; max(at) batch for the summary; fingerprint existence.
+CREATE TABLE watchlist_history (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  watchlist_id                             TEXT NOT NULL CHECK (length(watchlist_id) <= 80 AND length(watchlist_id) > 0),
+  at                                       INTEGER NOT NULL,
+  by_kind                                  TEXT NOT NULL CHECK (by_kind IN ('org')),
+  by_id                                    TEXT NOT NULL CHECK (length(by_id) <= 80 AND length(by_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  action                                   TEXT NOT NULL CHECK (action IN ('watchlist_created','watchlist_updated','watchlist_archived')),
+  detail_mode                              TEXT CHECK (detail_mode IS NULL OR detail_mode IN ('live_linked','snapshot')),
+  detail_source_type                       TEXT CHECK (detail_source_type IS NULL OR detail_source_type IN ('brief','saved_search','criteria')),
+  detail_status                            TEXT CHECK (detail_status IS NULL OR detail_status IN ('active','paused','archived')),
+  detail_changed_name                      INTEGER CHECK (detail_changed_name IS NULL OR detail_changed_name IN (0,1)),
+  detail_changed_mode                      INTEGER CHECK (detail_changed_mode IS NULL OR detail_changed_mode IN (0,1)),
+  detail_changed_status                    INTEGER CHECK (detail_changed_status IS NULL OR detail_changed_status IN (0,1)),
+  detail_changed_criteria                  INTEGER CHECK (detail_changed_criteria IS NULL OR detail_changed_criteria IN (0,1)),
+  FOREIGN KEY (watchlist_id) REFERENCES dynamic_watchlists(id) ON DELETE CASCADE,
+  CHECK ((detail_changed_name IS NULL AND detail_changed_mode IS NULL AND detail_changed_status IS NULL AND detail_changed_criteria IS NULL) OR (detail_changed_name IS NOT NULL AND detail_changed_mode IS NOT NULL AND detail_changed_status IS NOT NULL AND detail_changed_criteria IS NOT NULL))
+) STRICT;
+CREATE INDEX watchlist_history_watchlist ON watchlist_history (watchlist_id);
 CREATE TABLE watchlist_membership_events (
-  id                TEXT PRIMARY KEY,
-  watchlist_id      TEXT NOT NULL REFERENCES dynamic_watchlists(id) ON DELETE CASCADE,
-  org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  player_id         TEXT REFERENCES players(id) ON DELETE SET NULL,
-  transition        TEXT NOT NULL CHECK (transition IN ('entered','left')),
-  reason            TEXT NOT NULL CHECK (reason IN ('criterion_now_met','criteria_changed','brief_changed','newly_visible','first_evaluation','criterion_no_longer_met','unavailable')),
-  criterion_id      TEXT,
-  text              TEXT NOT NULL,
-  criteria_version  TEXT NOT NULL,
-  brief_version     INTEGER,
-  policy_version    INTEGER NOT NULL,
-  at                INTEGER NOT NULL,
-  fingerprint       TEXT NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  watchlist_id                             TEXT NOT NULL CHECK (length(watchlist_id) <= 80 AND length(watchlist_id) > 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  transition                               TEXT NOT NULL CHECK (transition IN ('entered','left')),
+  reason                                   TEXT NOT NULL CHECK (reason IN ('criterion_now_met','criteria_changed','brief_changed','newly_visible','first_evaluation','criterion_no_longer_met','unavailable')),
+  criterion_id                             TEXT CHECK (criterion_id IS NULL OR length(criterion_id) <= 600 AND length(criterion_id) > 0),
+  text                                     TEXT NOT NULL CHECK (length(text) <= 2000 AND length(text) > 0),
+  criteria_version                         TEXT NOT NULL CHECK (length(criteria_version) <= 40 AND length(criteria_version) > 0),
+  brief_version                            INTEGER,
+  policy_version                           INTEGER NOT NULL,
+  at                                       INTEGER NOT NULL,
+  fingerprint                              TEXT NOT NULL CHECK (length(fingerprint) <= 400 AND length(fingerprint) > 0),
+  FOREIGN KEY (watchlist_id) REFERENCES dynamic_watchlists(id) ON DELETE RESTRICT,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  UNIQUE (fingerprint)
 ) STRICT;
-CREATE UNIQUE INDEX watchlist_membership_events_fingerprint ON watchlist_membership_events (fingerprint);
 CREATE INDEX watchlist_membership_events_watchlist_at ON watchlist_membership_events (watchlist_id, at, id);
+CREATE INDEX watchlist_membership_events_org_at ON watchlist_membership_events (org_id, at);
 
 
 -- =============================================================================
@@ -1461,9 +1382,9 @@ CREATE TABLE coverage_assignment_assessments (
 --   measurement_algorithm_version); m22/policy.mjs CANDIDATE_PROTOCOLS, FRAME_LIMITS,
 --   CV_ENGINE_VERSION / BOX_CAM_CV_POLICY_VERSION; m22/eligibility.mjs validation
 --   record (combine eligibility, currently empty); m21/shared.mjs vocabularies,
---   GOAL_LIBRARY, PLAN_TEMPLATES, M21_LIMITS; m18/shared.mjs CHANGE_TYPES,
+--   GOAL_LIBRARY, PLAN_TEMPLATES, M21_LIMITS; domains/discovery/shared.mjs CHANGE_TYPES,
 --   REASON_CHANGE_MAP, POLICY, EVALUATION_SIGNALS, POSITIONS, TRUST_BANDS,
---   EVIDENCE_REQUIREMENTS; m19/criteria.mjs CRITERION_TYPES, OPERATORS;
+--   EVIDENCE_REQUIREMENTS; domains/discovery/matching/criteria.mjs CRITERION_TYPES, OPERATORS;
 --   m13/insight.mjs RULES (evidence-gap rule engine); server.mjs DRILLS (legacy
 --   drill registry seeding drill_guidance).
 -- In-memory state (lost on restart by design, never persisted):

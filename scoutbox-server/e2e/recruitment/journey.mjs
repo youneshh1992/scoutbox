@@ -567,7 +567,7 @@ section('H — one writer, one authority: the legacy route, the reopen bridge, t
 {
   // Role parity on the legacy status route.
   const M = await reviewed(maria.token, 'pl-martin');
-  await lifecycle(M, 'shortlist'); await decided(M, 'progress');
+  await lifecycle(M, 'shortlist'); const MDEC = await decided(M, 'progress');
   const OID = await offerDrafted(M); const { R } = await offerIssued(OID); await offerAccepted(OID, R, 'pl-martin');
   const promote = await j('PATCH', `/org/rooms/${M}`, { leadScoutUserId: TOM_ID, expectedRev: await caseRev(M) }, maria.token);
   ok(promote.status === 200, 'H1 Tom is room lead of Martin\'s case (offer_accepted)');
@@ -575,7 +575,10 @@ section('H — one writer, one authority: the legacy route, the reopen bridge, t
   neg(expect(await legacyStatus(M, 'signed', maria.token), 422, 'ROOM_EVIDENCE_REQUIRED'), '#14 H3 a recruitment lead is refused for the real reason: no signing supports it');
   neg(expect(await j('POST', `/org/rooms/${M}/status`, { status: 'contact_planned', expectedRev: await caseRev(M) }, tom.token), 409, 'ROOM_TRANSITION_INVALID'), 'H4 the transition table still applies before anything else');
   // The Second Look bridge reopens only a closed-out room.
-  await offline((db) => { db.secondLookItems ??= []; db.secondLookItems.push({ id: 'slk-p8-live', orgId: 'org-eastport', playerId: 'pl-martin', roomId: M, decisionId: null, policyVersion: 1, triggerType: 'trust_change', changeFingerprints: [], directReasonCodes: [], status: 'open', createdAt: Date.now(), updatedAt: Date.now(), latestChangeAt: Date.now(), history: [] }); });
+  // S12c (rewritten: a Second Look item is a typed row naming the decision cycle it belongs to, so the planted item is the
+  // writer's whole literal — secondLook.mjs reconcile — on the Room's real decision; the old literal's null decision and
+  // made-up trigger are refused by the table).
+  await offline((db) => { db.secondLookItems = [...db.secondLookItems, { id: 'slk-p8-live', orgId: 'org-eastport', playerId: 'pl-martin', roomId: M, decisionId: MDEC, policyVersion: 1, triggerType: 'general_update', changeFingerprints: ['evidence_added:evidence:ev-p8-planted'], directReasonCodes: [], status: 'open', createdAt: Date.now(), updatedAt: Date.now(), latestChangeAt: Date.now(), history: [{ at: Date.now(), action: 'surfaced', by: null }] }]; });
   await relogin();
   neg(expect(await j('POST', '/org/second-look/slk-p8-live/reopen-room', { reasonCodes: ['continue_monitoring'] }, maria.token), 409, 'ROOM_NOT_REOPENABLE') && (await stage(M)) === 'offer_accepted', 'H5 Second Look cannot "reopen" a live case: 409 ROOM_NOT_REOPENABLE, the case untouched');
   // Contract truth: the self-service route.

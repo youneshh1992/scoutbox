@@ -127,7 +127,10 @@ export function buildReportingContext({
     decisionsByRoom.get(d.roomId).push(d);
   }
 
-  let briefs = (db.recruitmentBriefs ?? []).filter((b) => b.orgId === orgId);
+  // S12c: the briefs, reviews, Second Look items, watchlists and their transitions come from SQL (`reads.discovery`, the
+  // data layer's discoveryReads); a context built without it (a unit fixture) has none.
+  const discovery = reads.discovery ?? null;
+  let briefs = [...(discovery?.briefs.forOrg(orgId) ?? [])];
   if (filters.briefId) {
     briefs = briefs.filter((b) => b.id === filters.briefId);
     applied.push({ filter: 'briefId', value: filters.briefId });
@@ -166,14 +169,13 @@ export function buildReportingContext({
     decisions: decisions.filter((d) => keptRoomIds.has(d.roomId)),
     decisionsByRoom,
     briefs,
-    nmReviews: (db.nobodyMissedReviews ?? []).filter((r) => r.orgId === orgId && briefIds.has(r.briefId)),
+    nmReviews: (discovery?.reviews.forOrg(orgId) ?? []).filter((r) => briefIds.has(r.briefId)),
     // A room filter narrows Second Look too — an item is about a room, and
     // showing whole-club Second Look figures under a "source: matching" label
     // would answer a question the director did not ask.
-    secondLook: (db.secondLookItems ?? []).filter((i) => i.orgId === orgId
-      && (!roomFiltered || (i.roomId ? keptRoomIds.has(i.roomId) : false))),
-    watchlists: (db.dynamicWatchlists ?? []).filter((w2) => w2.orgId === orgId),
-    watchlistHistory: (db.watchlistHistory ?? []).filter((h) => h.orgId === orgId),
+    secondLook: (discovery?.secondLook.forOrg(orgId) ?? []).filter((i) => !roomFiltered || keptRoomIds.has(i.roomId)),
+    watchlists: discovery?.watchlists.forOrg(orgId) ?? [],
+    watchlistHistory: discovery?.events.forOrg(orgId) ?? [],
     trials: reads.trials?.forOrg(orgId) ?? [],
     // M23 P8 — the canonical records the journey funnel counts. Org-scoped and
     // room-filtered like decisions; ids, states and instants only reach the

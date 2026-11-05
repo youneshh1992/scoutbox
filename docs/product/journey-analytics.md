@@ -122,8 +122,15 @@ One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used
   - States: active ↔ paused; any → archived (terminal).
   - A foreign id returns 404.
   - "Add to Room" uses the M17 creator and is idempotent.
+  - Since S12c the list of watchlists and a watchlist's history page (50 at a time, "continue from here"); the apps show the first page of the list for now. A `notify` that is not true or false, an unknown source type, a source reference that is not short text and an unknown status filter are refused, naming the field.
+  - Opening a watchlist records its membership, the new transitions, the time and the notification together, or not at all.
 
   (M19)
+- Briefs, Nobody Missed and Second Look (M18), since S12c:
+  - A brief with an unknown foot, an unknown Combine protocol, a list field that is not a list, a title or availability that is not text, or a role or vacancy reference that is not a short id is refused, naming the field. (Before, most of these were quietly dropped.)
+  - A brief edit is checked whole before anything is saved: a refused criteria change no longer half-applies the status change sent with it.
+  - Opening Second Look records new, resurfaced and expired items with the owner's notification together; opening it when nothing has changed saves nothing.
+  - "Add to Room" from Nobody Missed, and "Reopen Room" from Second Look, save the Room and the review or item together.
 
 ## Open questions and deferred work
 
@@ -133,6 +140,7 @@ One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used
 - Free-text reasons travel in push/email bodies (N-P8-5).
 - Minor items recorded, not fixed: lockout keyed by identifier, revise-key replay honesty, unchecked task `linkedResourceId` (N-P81-5/6/7).
 - M19 has no scheduler: membership is correct as of the last read. A maintained projection for the linear scan is deferred.
+- Matching, Nobody Missed and watchlist membership still evaluate the visible players in code, at most the first 2,000 scanned (the response says when it was cut short). Moving that to SQL needs the facts projected across domains; deferred (migration.md §4.3).
 
 ## Also worth knowing
 

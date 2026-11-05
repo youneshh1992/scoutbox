@@ -27,9 +27,12 @@ import { guardRev, bumpRev, revMeta } from '../platform/concurrency.mjs';
 
 export function registerNobodyMissed(ctx) {
   const {
-    db, orgRouter, nextId, persistNow, findPlayer, orgCanSee,
-    isLead, requireLead, playerViewForOrg, audit, vmetric, suppress,
+    db, orgRouter, nextId, findPlayer, orgCanSee,
+    isLead, requireLead, playerViewForOrg, audit, vmetric, suppress, discovery, unit,
   } = ctx;
+  // S12c: briefs and reviews are rows of the discovery repository, written only through its operations.
+  const dreads = ctx.discoveryReads;
+  if (typeof dreads?.briefs?.forOrg !== 'function' || typeof discovery?.briefs?.create !== 'function') throw new TypeError('registerNobodyMissed needs the discovery repository and discoveryReads from the data layer');
   // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerNobodyMissed needs recruitmentReads (signings) from the data layer');
@@ -140,10 +143,11 @@ export function registerNobodyMissed(ctx) {
 
   // ----------------------------------------------------------------- briefs
 
-  const briefsFor = (orgId) => (db.recruitmentBriefs ?? []).filter((b) => b.orgId === orgId);
+  /** The organisation's briefs, most recently updated first. */
+  const briefsFor = (orgId) => dreads.briefs.forOrg(orgId);
 
   function findBrief(req, res) {
-    const b = (db.recruitmentBriefs ?? []).find((x) => x.id === req.params.id && x.orgId === req.org.id);
+    const b = dreads.briefs.forOrgById(String(req.params.id), req.org.id);
     // A foreign brief is indistinguishable from one that does not exist.
     if (!b) { res.status(404).json({ error: 'BRIEF_NOT_FOUND' }); return null; }
     return b;
@@ -162,7 +166,8 @@ export function registerNobodyMissed(ctx) {
   });
 
   orgRouter.get('/recruitment-briefs', (req, res) => {
-    const list = briefsFor(req.org.id).slice().sort((a, b) => b.updatedAt - a.updatedAt);
+    // At most LIMITS.briefsPerOrg per organisation, so the offset page stays.
+    const list = briefsFor(req.org.id);
     const limit = clampPage(req.query.limit);
     const offset = Math.max(0, Number(req.query.offset) || 0);
     res.json({
@@ -177,25 +182,33 @@ export function registerNobodyMissed(ctx) {
   orgRouter.post('/recruitment-briefs', (req, res) => {
     if (!requireLead(req, res)) return;
     if (limited('brief_write', req.org.id)) return res.status(429).json(rateLimitedBody('brief_write'));
-    if (briefsFor(req.org.id).length >= LIMITS.briefsPerOrg) return res.status(409).json({ error: 'BRIEFS_FULL' });
-    const v = validateRecruitmentBrief(req.body ?? {}, { orgLevel: req.org.level });
+    if (dreads.briefs.countForOrg(req.org.id) >= LIMITS.briefsPerOrg) return res.status(409).json({ error: 'BRIEFS_FULL' });
+    const v = validateRecruitmentBrief(req.body ?? {}, { orgLevel: req.org.level, protocols: ctx.combineProtocolIds?.() ?? null });
     // An invalid brief is refused, never silently repaired.
     if (!v.ok) return res.status(400).json(v);
+    // S12c: a role or vacancy reference is a short id, or absent; anything else is refused, never stored as it came.
+    const refs = {};
+    for (const k of ['roleId', 'vacancyId']) {
+      const raw = req.body?.[k];
+      if (raw === undefined || raw === null || raw === '') { refs[k] = null; continue; }
+      if (typeof raw !== 'string' || raw.length > 64) return res.status(400).json({ error: 'FIELD_INVALID', field: k, message: `${k} must be an id of at most 64 characters.` });
+      refs[k] = raw;
+    }
 
+    const at = now();
     const b = {
       id: nextId('brf'), orgId: req.org.id, title: v.title,
       criteria: v.criteria, version: 1, status: 'draft',
       activeFrom: v.activeFrom, activeUntil: v.activeUntil,
-      roleId: req.body?.roleId ?? null, vacancyId: req.body?.vacancyId ?? null,
+      roleId: refs.roleId, vacancyId: refs.vacancyId,
       createdBy: { userId: req.orgUser.id, name: req.orgUser.name },
-      createdAt: now(), updatedAt: now(), history: [],
-      rev: 1, revAt: now(), revBy: { userId: req.orgUser.id, name: req.orgUser.name },
+      createdAt: at, updatedAt: at, history: [],
+      rev: 1, revAt: at, revBy: { userId: req.orgUser.id, name: req.orgUser.name },
     };
     audit(b, 'org', req.orgUser.id, req.orgUser.name, 'recruitment_brief_created', { version: 1 });
-    db.recruitmentBriefs.push(b);
+    const stored = discovery.briefs.create(b);
     vmetric('recruitment_brief_created');
-    persistNow();
-    res.status(201).json({ brief: briefView(b) });
+    res.status(201).json({ brief: briefView(stored) });
   });
 
   orgRouter.get('/recruitment-briefs/:id', (req, res) => {
@@ -217,39 +230,49 @@ export function registerNobodyMissed(ctx) {
       current: { currentVersion: b.version, status: b.status, updatedAt: b.updatedAt, updatedBy: b.revBy?.name ?? null },
     })) return;
 
+    // Everything is checked before anything is written.
+    let statusTo = null;
     if (req.body?.status !== undefined) {
       const to = String(req.body.status);
       if (!BRIEF_STATUSES.includes(to)) return res.status(400).json({ error: 'BRIEF_STATUS_UNKNOWN' });
       if (!canBriefTransition(b.status, to)) return res.status(409).json({ error: 'BRIEF_TRANSITION_INVALID', from: b.status, to });
-      const from = b.status;
-      b.status = to;
-      audit(b, 'org', req.orgUser.id, req.orgUser.name, to === 'active' ? 'recruitment_brief_activated' : 'recruitment_brief_updated', { from, to });
-      if (to === 'active') vmetric('recruitment_brief_activated');
+      statusTo = to;
     }
-
     const wantsCriteria = ['title', 'positions', 'minAge', 'maxAge', 'radiusKm', 'maxLevel', 'foot', 'availability', 'evidenceRequirements', 'minTrustBand', 'combineProtocols', 'activeFrom', 'activeUntil']
       .some((k) => req.body?.[k] !== undefined);
+    let v = null;
     if (wantsCriteria) {
       const merged = { title: b.title, ...b.criteria, activeFrom: b.activeFrom, activeUntil: b.activeUntil, ...req.body };
       delete merged.status;
-      const v = validateRecruitmentBrief(merged, { orgLevel: req.org.level });
+      delete merged.positionGroups; // worked out from the positions, never an input
+      v = validateRecruitmentBrief(merged, { orgLevel: req.org.level, protocols: ctx.combineProtocolIds?.() ?? null });
       if (!v.ok) return res.status(400).json(v);
-      const changed = JSON.stringify(v.criteria) !== JSON.stringify(b.criteria);
-      b.title = v.title;
-      b.activeFrom = v.activeFrom;
-      b.activeUntil = v.activeUntil;
-      if (changed) {
-        // A material criteria change is a NEW version. Historical coverage keeps
-        // pointing at the version it was computed against.
-        b.criteria = v.criteria;
-        b.version += 1;
-        audit(b, 'org', req.orgUser.id, req.orgUser.name, 'recruitment_brief_updated', { version: b.version, criteriaChanged: true });
-      }
     }
-    b.updatedAt = now();
-    bumpRev(b, { by: req.orgUser, at: b.updatedAt });
-    persistNow();
-    res.json({ brief: briefView(b) });
+
+    const stored = discovery.briefs.update(b.id, (d) => {
+      if (statusTo !== null) {
+        const from = d.status;
+        d.status = statusTo;
+        audit(d, 'org', req.orgUser.id, req.orgUser.name, statusTo === 'active' ? 'recruitment_brief_activated' : 'recruitment_brief_updated', { from, to: statusTo });
+      }
+      if (v) {
+        const changed = JSON.stringify(v.criteria) !== JSON.stringify(d.criteria);
+        d.title = v.title;
+        d.activeFrom = v.activeFrom;
+        d.activeUntil = v.activeUntil;
+        if (changed) {
+          // A material criteria change is a NEW version. Historical coverage keeps
+          // pointing at the version it was computed against.
+          d.criteria = v.criteria;
+          d.version += 1;
+          audit(d, 'org', req.orgUser.id, req.orgUser.name, 'recruitment_brief_updated', { version: d.version, criteriaChanged: true });
+        }
+      }
+      d.updatedAt = now();
+      bumpRev(d, { by: req.orgUser, at: d.updatedAt });
+    });
+    if (statusTo === 'active') vmetric('recruitment_brief_activated');
+    res.json({ brief: briefView(stored) });
   });
 
   // --------------------------------------------------------- nobody missed
@@ -257,8 +280,8 @@ export function registerNobodyMissed(ctx) {
   // M18.2: the window rule lives in shared.mjs so its boundaries are testable.
   const briefIsLive = (b) => briefIsLiveOn(b);
 
-  const reviewFor = (orgId, briefId, playerId) => (db.nobodyMissedReviews ?? [])
-    .find((r) => r.orgId === orgId && r.briefId === briefId && r.playerId === playerId) ?? null;
+  /** The organisation's reviews for this brief, by player: one query per computation, not one per candidate. */
+  const reviewsByPlayer = (orgId, briefId) => new Map(dreads.reviews.forBrief(orgId, briefId).map((r) => [r.playerId, r]));
 
   /**
    * Compute the brief's candidate set. Gates first, always.
@@ -269,6 +292,7 @@ export function registerNobodyMissed(ctx) {
     const evaluatedIds = [];
     const candidates = [];
     let scanned = 0;
+    const reviewOf = reviewsByPlayer(org.id, brief.id);
 
     for (const player of db.players) {
       if (++scanned > LIMITS.maxCandidateScan) break;
@@ -291,7 +315,7 @@ export function registerNobodyMissed(ctx) {
         facts, brief, match, evaluation, roomOpen: !!signals.openRoomId,
       });
       if (!candidate) continue;
-      const review = reviewFor(org.id, brief.id, player.id);
+      const review = reviewOf.get(player.id) ?? null;
       if (review && ['dismissed', 'added_to_room'].includes(review.state)) continue;
       candidates.push({
         ...candidate,
@@ -307,7 +331,7 @@ export function registerNobodyMissed(ctx) {
 
   orgRouter.get('/nobody-missed', (req, res) => {
     const briefId = String(req.query.briefId ?? '');
-    const brief = (db.recruitmentBriefs ?? []).find((b) => b.id === briefId && b.orgId === req.org.id);
+    const brief = dreads.briefs.forOrgById(briefId, req.org.id);
     if (!brief) return res.status(404).json({ error: 'BRIEF_NOT_FOUND' });
     if (!briefIsLive(brief)) {
       return res.json({
@@ -340,23 +364,32 @@ export function registerNobodyMissed(ctx) {
     });
   });
 
+  /** Record what the club did with a candidate: the first action creates the review, later ones update it; the trail grows. */
   const setReview = (req, brief, playerId, patch) => {
-    let r = reviewFor(req.org.id, brief.id, playerId);
-    if (!r) {
-      r = {
+    const at = now();
+    const by = { userId: req.orgUser.id, name: req.orgUser.name };
+    const existing = dreads.reviews.byKey(req.org.id, brief.id, playerId);
+    if (!existing) {
+      return discovery.reviews.create({
         id: nextId('nmr'), orgId: req.org.id, briefId: brief.id, briefVersion: brief.version,
-        playerId, state: 'open', createdAt: now(), updatedAt: now(), history: [],
-      };
-      db.nobodyMissedReviews.push(r);
+        playerId, createdAt: at, updatedAt: at, ...patch, history: [{ at, state: patch.state, by }],
+      });
     }
-    Object.assign(r, patch, { updatedAt: now(), briefVersion: brief.version });
-    r.history.push({ at: now(), state: r.state, by: { userId: req.orgUser.id, name: req.orgUser.name } });
-    persistNow();
-    return r;
+    return discovery.reviews.update(existing.id, (d) => {
+      Object.assign(d, patch, { updatedAt: at, briefVersion: brief.version });
+      d.history.push({ at, state: d.state, by });
+    });
   };
+  /** Wire shape: the review's own fields, listed. */
+  const reviewView = (r) => ({
+    id: r.id, orgId: r.orgId, briefId: r.briefId, briefVersion: r.briefVersion, playerId: r.playerId, state: r.state,
+    createdAt: r.createdAt, updatedAt: r.updatedAt, reviewedBy: r.reviewedBy, reviewedAt: r.reviewedAt,
+    dismissReason: r.dismissReason, dismissedBy: r.dismissedBy, dismissedAt: r.dismissedAt, roomId: r.roomId,
+    history: r.history.map((h) => ({ at: h.at, state: h.state, by: h.by })),
+  });
 
   function briefAndPlayer(req, res) {
-    const brief = (db.recruitmentBriefs ?? []).find((b) => b.id === String(req.body?.briefId ?? req.params.briefId) && b.orgId === req.org.id);
+    const brief = dreads.briefs.forOrgById(String(req.body?.briefId ?? req.params.briefId), req.org.id);
     if (!brief) { res.status(404).json({ error: 'BRIEF_NOT_FOUND' }); return null; }
     const player = findPlayer(String(req.body?.playerId ?? req.params.playerId));
     if (!player || !orgCanSee(req.org, player)) { res.status(403).json({ error: 'NOT_VISIBLE' }); return null; }
@@ -371,7 +404,7 @@ export function registerNobodyMissed(ctx) {
       state: 'reviewed', reviewedBy: { userId: req.orgUser.id, name: req.orgUser.name }, reviewedAt: now(),
     });
     vmetric('nobody_missed_player_reviewed');
-    res.json({ review: r, note: 'Reviewing a candidate records nothing on the player’s own record.' });
+    res.json({ review: reviewView(r), note: 'Reviewing a candidate records nothing on the player’s own record.' });
   });
 
   orgRouter.post('/nobody-missed/dismiss', (req, res) => {
@@ -388,7 +421,7 @@ export function registerNobodyMissed(ctx) {
     vmetric('nobody_missed_player_dismissed');
     // Dismissal is scoped to THIS brief. It is not a global rejection and it is
     // never written to the player's Passport.
-    res.json({ review: r, note: 'Dismissed for this brief only. Nothing is written to the player’s record.' });
+    res.json({ review: reviewView(r), note: 'Dismissed for this brief only. Nothing is written to the player’s record.' });
   });
 
   /**
@@ -400,21 +433,28 @@ export function registerNobodyMissed(ctx) {
     if (!ctxp) return;
     if (limited('nobody_missed_action', req.org.id)) return res.status(429).json(rateLimitedBody('nobody_missed_action'));
     if (!ctx.createRoomForPlayer) return res.status(503).json({ error: 'ROOM_ENGINE_UNAVAILABLE' });
-    const out = ctx.createRoomForPlayer({
-      req, player: ctxp.player, sourceContext: 'nobody_missed',
-      sourceRef: { id: ctxp.brief.id, version: ctxp.brief.version },
+    // One unit: the Room (or the open one it adopts) and the review commit together.
+    const { out, r } = unit(() => {
+      const created = ctx.createRoomForPlayer({
+        req, player: ctxp.player, sourceContext: 'nobody_missed',
+        sourceRef: { id: ctxp.brief.id, version: ctxp.brief.version },
+      });
+      if (!created.ok) return { out: created, r: null };
+      return {
+        out: created,
+        r: setReview(req, ctxp.brief, ctxp.player.id, {
+          state: 'added_to_room', roomId: created.roomId,
+          reviewedBy: { userId: req.orgUser.id, name: req.orgUser.name }, reviewedAt: now(),
+        }),
+      };
     });
     if (!out.ok) return res.status(out.status).json(out);
-    const r = setReview(req, ctxp.brief, ctxp.player.id, {
-      state: 'added_to_room', roomId: out.roomId,
-      reviewedBy: { userId: req.orgUser.id, name: req.orgUser.name }, reviewedAt: now(),
-    });
     vmetric('nobody_missed_player_added_to_room');
     // M18.1: a double click adds the candidate ONCE. M17's creator already
     // returns the existing open room rather than making a second one; the
     // response now says so instead of reporting a creation that did not happen.
     res.status(out.existed ? 200 : 201).json({
-      review: r, roomId: out.roomId, room: out.room, idempotent: !!out.existed,
+      review: reviewView(r), roomId: out.roomId, room: out.room, idempotent: !!out.existed,
     });
   });
 

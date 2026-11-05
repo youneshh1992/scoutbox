@@ -47,13 +47,15 @@ const PAGE_DEFAULT = 25;
  * without it would have thrown on the first trial read, M20 or not.
  */
 export function migrateM20(db) {
-  for (const k of ['dynamicWatchlists', 'watchlistHistory'] /* the trials, requests and signings are SQL (§4.3 step 2) */) db[k] ??= [];
+  // Nothing left to guarantee: the trials, requests and signings are SQL since §4.3 step 2, the watchlists and their
+  // history since S12c. Kept as the documented no-op the analytics battery checks.
+  void db;
 }
 
 export function registerAnalytics(ctx) {
   const { db, recruitmentReads, scoutingReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
   // The reporting context reads the recruitment records and (S9b) the club's assessments through SQL.
-  const reportingReads = { ...recruitmentReads, ...scoutingReads };
+  const reportingReads = { ...recruitmentReads, ...scoutingReads, discovery: ctx.discoveryReads };
   if (typeof recruitmentReads?.contacts?.forOrg !== 'function' || typeof recruitmentReads?.offers?.forOrg !== 'function' || typeof recruitmentReads?.signings?.forOrg !== 'function' || typeof recruitmentReads?.signingPackages?.forOrg !== 'function') throw new TypeError('registerAnalytics needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
   migrateM20(db);
 

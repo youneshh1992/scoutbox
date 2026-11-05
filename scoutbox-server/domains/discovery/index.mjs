@@ -20,18 +20,11 @@ import {
   SECOND_LOOK_TRANSITIONS, BRIEF_STATUSES, BRIEF_TRANSITIONS,
 } from './shared.mjs';
 
-export function migrateM18(db) {
-  // Additive only. M18 persists WORKFLOW, never player truth: candidate
-  // eligibility and material changes are derived live on every read so a
-  // block, a removal or a visibility change takes effect immediately.
-  db.secondLookItems ??= [];        // one per (org, room): what the club did with it
-  db.recruitmentBriefs ??= [];      // explicit, versioned club demand
-  db.nobodyMissedReviews ??= [];    // one per (org, brief, player): workflow only
-}
+// M18 persists WORKFLOW, never player truth: candidate eligibility and material changes are derived live on every read
+// so a block, a removal or a visibility change takes effect immediately. The workflow (briefs, Nobody Missed reviews,
+// Second Look items) lives in the discovery repository's tables since S12c (repositories/discovery.mjs).
 
 export function registerM18(ctx) {
-  migrateM18(ctx.db);
-
   // Boot assertions: cheap, and they catch the two ways this design could rot.
   for (const [reason, types] of Object.entries(REASON_CHANGE_MAP)) {
     for (const t of types) {

@@ -249,17 +249,18 @@ section('§10 — migrations: ordered, idempotent, recorded, and a failure abort
   ok(schemaReport(db).upToDate === true, 'the report says up to date');
   ok(new Set(MIGRATIONS.map((m) => m.id)).size === MIGRATIONS.length, 'migration ids are unique');
   ok(MIGRATIONS.every((m) => /^m\d+_\d{3}_[a-z_]+$/.test(m.id) && m.note), 'every step has a stable id and a note');
-  // Prior-schema fixture: rooms and briefs without rev, notifications without repeatCount, no schema record.
-  const old = { recruitmentCases: [{ id: 'c1', room: { status: 'watching' } }], recruitmentBriefs: [{ id: 'b1' }], notifications: [{ id: 'n1' }], players: [] };
+  // Prior-schema fixture: a room without rev, notifications without repeatCount, no schema record.
+  const old = { recruitmentCases: [{ id: 'c1', room: { status: 'watching' } }], notifications: [{ id: 'n1' }], players: [] };
   const up = runMigrations(old, { now: 3000 });
-  // §4.3 step 2 (rewritten: the Rooms are typed rows where rev is required, so the step no longer touches cases).
-  ok(up.from === 0 && old.recruitmentCases[0].room.rev === undefined && old.recruitmentBriefs[0].rev === 1 && old.notifications[0].repeatCount === 1,
-    'a pre-M18.1 snapshot is upgraded: briefs rev 1, repeatCount 1, prefs collection present (a Room is not a blob row to backfill)');
+  // §4.3 step 2 and S12c (rewritten: the Rooms and the briefs are typed rows where rev is required, so the rev backfill
+  // is a recorded no-op and touches neither).
+  ok(up.from === 0 && old.recruitmentCases[0].room.rev === undefined && old.notifications[0].repeatCount === 1 && !('recruitmentBriefs' in old),
+    'a pre-M18.1 snapshot is upgraded: repeatCount 1, prefs collection present (a Room or a brief is not a blob row to backfill)');
   ok(Array.isArray(old.notificationPrefs) && old.players.length === 0, 'no step invents data');
-  const broken = { recruitmentBriefs: 5 }; // §4.3 step 2: the briefs are what m182_003 still walks
+  const broken = { notifications: 5 }; // S12c: the notifications are what an m182 step still walks
   let threw = null;
   try { runMigrations(broken); } catch (e) { threw = e; }
-  neg(!!threw && /m182_003_rev_backfill failed/.test(threw.message) && /not modified/.test(threw.message), 'a failing step names itself and promises the disk was untouched');
+  neg(!!threw && /m182_005_notification_repeat_count failed/.test(threw.message) && /not modified/.test(threw.message), 'a failing step names itself and promises the disk was untouched');
   neg(schemaReport({}).upToDate === false && schemaReport({}).version === 0, 'an unmigrated database reports version 0, never "fine"');
   neg(schemaReport({ schema: { version: SCHEMA_VERSION, migrations: [] } }).upToDate === false, 'the right version number with no applied list is NOT up to date');
 }
@@ -273,7 +274,6 @@ section('§11 — boot-time integrity reports and never repairs');
       { id: 'c1', orgId: 'o1', playerId: 'p1', room: { status: 'archived', rev: 3 } },
       { id: 'c2', orgId: 'o1', playerId: 'p1', room: { status: 'watching', rev: 1 } },
     ],
-    recruitmentBriefs: [{ id: 'b1', rev: 1 }], secondLookItems: [{ id: 's1', orgId: 'o1', roomId: 'c1', changes: [{ fingerprint: 'f1' }, { fingerprint: 'f2' }] }],
   };
   const r = integrityReport(sane, { cases: sane.recruitmentCases ?? [] });
   ok(r.ok && r.violations.length === 0, 'an archived Room plus an open one for the same player is fine — history repeats, activity does not');
@@ -284,10 +284,17 @@ section('§11 — boot-time integrity reports and never repairs');
   ok(dup.recruitmentCases.length === 3, 'and nothing was deleted or repaired');
   const orphan = { ...sane, recruitmentCases: [{ id: 'c9', orgId: 'nope', playerId: 'p1', room: { status: 'watching', rev: 1 } }] };
   neg(integrityReport(orphan, { cases: orphan.recruitmentCases ?? [] }).violations.some((v) => v.code === 'ROOM_ORPHAN_ORG'), 'a Room whose organisation does not exist is reported');
-  neg(integrityReport({ ...sane, recruitmentBriefs: [{ id: 'b1', rev: 1 }, { id: 'b1', rev: 1 }] }, { cases: sane.recruitmentCases }).violations.some((v) => v.code === 'BRIEF_ID_DUPLICATE'), 'a duplicated brief id is reported');
-  neg(integrityReport({ ...sane, secondLookItems: [{ id: 's1', orgId: 'o1', roomId: 'c1', changes: [{ fingerprint: 'f1' }, { fingerprint: 'f1' }] }] }, { cases: sane.recruitmentCases }).violations.some((v) => v.code === 'SECOND_LOOK_FINGERPRINT_DUPLICATE'),
-    'the same evidence counted twice inside one Second Look item is reported');
-  neg(integrityReport({ ...sane, recruitmentBriefs: [{ id: 'b1' }] }, { cases: sane.recruitmentCases }).violations.some((v) => v.code === 'BRIEF_REV_INVALID'), 'a rev-guarded record with no rev is reported (the migration should have set it)');
+  // S12c (rewritten: these were reports over blob rows; the discovery tables now refuse the row instead, so a duplicated
+  // brief id, a fingerprint counted twice in one item and a brief without rev are never stored to be reported).
+  const { typeBrief, typeSecondLookItem, DISCOVERY_DDL } = await import('../../repositories/discovery.mjs');
+  neg(/CREATE TABLE recruitment_briefs \(\n\s+id\s+TEXT PRIMARY KEY/.test(DISCOVERY_DDL), 'a duplicated brief id is refused: the brief id is the table\'s primary key');
+  neg(/the same evidence|names an entry twice/.test(typeSecondLookItem({ id: 's1', orgId: 'o1', playerId: 'p1', roomId: 'c1', decisionId: 'd1', policyVersion: 1, triggerType: 'general_update', changeFingerprints: ['f1', 'f1'], directReasonCodes: [], status: 'open', createdAt: 1, updatedAt: 1, latestChangeAt: 1, history: [] }).reason ?? '')
+    && /UNIQUE \(item_id, fingerprint\)/.test(DISCOVERY_DDL),
+    'the same evidence counted twice inside one Second Look item is refused (typed, and unique per item in the table)');
+  neg(/rev is required/.test(typeBrief({ id: 'b1', orgId: 'o1', title: 'T', version: 1, status: 'draft', createdBy: { userId: 'u1', name: 'U' }, createdAt: 1, updatedAt: 1, criteria: { positions: [], minAge: null, maxAge: null, radiusKm: null, maxLevel: null, foot: null, availability: null, evidenceRequirements: [], minTrustBand: null, combineProtocols: [] } }).reason ?? ''),
+    'a rev-guarded brief with no rev is refused (rev is a required column)');
+  neg(!['BRIEF_ID_DUPLICATE', 'SECOND_LOOK_ITEM_DUPLICATE', 'SECOND_LOOK_FINGERPRINT_DUPLICATE', 'BRIEF_REV_INVALID'].some((code) => integrityReport(sane, { cases: sane.recruitmentCases }).violations.some((v) => v.code === code)),
+    'and the boot report no longer reads the discovery collections at all');
   const summary = integritySummary(r2);
   neg(!JSON.stringify(summary).includes('c2'), 'the operator summary carries counts by code, never ids');
   ok(integrityReport({}, { cases: [] }).ok, 'an empty database is not a violation');
@@ -768,7 +775,8 @@ section('§42 — a snapshot written before M18.2 upgrades in place');
   snap.db.notificationPrefs = [];
   // (A Room's rev is a typed NOT NULL column since S8b: a case cannot be regressed to a rev-less Room any more; the pure
   // backfill of an in-memory pre-M18.2 snapshot is proved above.)
-  for (const b of snap.db.recruitmentBriefs ?? []) delete b.rev;
+  // (A brief's rev is a typed NOT NULL column since S12c, like a Room's since S8b: neither can be regressed to a rev-less
+  // record any more, and the snapshot save refuses one, naming it — proved in scripts/testDiscovery.mjs.)
   for (const n of snap.db.notifications ?? []) delete n.repeatCount;
   store.save(snap);
   serverProc = await boot(ENV, BASE);

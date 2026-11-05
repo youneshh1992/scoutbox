@@ -737,6 +737,8 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
   useEffect(() => {
     let live = true;
     setErr(null);
+    // The server pages this list (first 50, newest activity first; `nextCursor` names the next page): a "load more" is
+    // needed here once a club keeps more than 50 watchlists, archived ones included (S12c).
     m19.watchlists(session, status || undefined)
       .then((d) => { if (live) { setItems(d.items); setNote(d.note); } })
       .catch((e) => { if (live) setErr(errMessage(e)); });

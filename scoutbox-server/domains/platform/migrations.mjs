@@ -99,7 +99,8 @@ export const MIGRATIONS = [
       for (const k of [
         'notifications', 'ledger', 'sessions', 'users', 'orgs', 'players', 'guardians',
         // the recruitment cases and the four Room collections are tables read through SQL since §4.3 step 2
-        'recruitmentBriefs', 'nobodyMissedReviews', 'secondLookItems', 'sourceChanges',
+        'sourceChanges',
+        // the briefs, Nobody Missed reviews and Second Look items are tables since S12c (migration 0032)
         // the Box Cam sessions and the Combine attempts and requests are tables since S12b (migration 0031)
       ]) db[k] ??= [];
     },
@@ -107,10 +108,8 @@ export const MIGRATIONS = [
   {
     id: 'm182_003_rev_backfill',
     note: 'Rooms and Briefs written before M18.1 carry rev 1 explicitly rather than implicitly.',
-    up(db) {
-      // The Rooms are typed rows since S8b, where rev is required; nothing to backfill on them (§4.3 step 2).
-      for (const b of db.recruitmentBriefs ?? []) if (b.rev == null) b.rev = 1;
-    },
+    // A recorded no-op: the Rooms are typed rows since S8b and the briefs since S12c, where rev is required.
+    up() {},
   },
   {
     id: 'm182_004_notification_prefs',
@@ -120,7 +119,7 @@ export const MIGRATIONS = [
   {
     id: 'm190_001_dynamic_watchlists',
     note: 'M19 Dynamic Watchlists and their membership history.',
-    up(db) { db.dynamicWatchlists ??= []; db.watchlistHistory ??= []; },
+    up() {}, // a recorded no-op: the watchlists and their membership history are tables since S12c (migration 0032)
   },
   {
     id: 'm182_005_notification_repeat_count',
@@ -136,9 +135,9 @@ export const MIGRATIONS = [
     // created by the seed, so a snapshot restored without it would have thrown
     // on the first trial read — with or without M20.
     note: 'Collections the recruitment analytics projection reads. No analytics store is created.',
-    up(db) {
+    up() {
       // The signings are a table read through SQL since §4.3 step 2, so this step no longer creates them.
-      for (const k of ['dynamicWatchlists', 'watchlistHistory']) db[k] ??= []; // the trials and requests too are tables since §4.3 step 2
+      // The watchlists and their history are tables since S12c, the trials and requests since §4.3 step 2: nothing to create.
     },
   },
   {

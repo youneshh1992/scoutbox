@@ -687,6 +687,13 @@ let WL = null; let BRIEF = null;
   abuse(46, liveWithoutBrief.status === 400 && liveWithoutBrief.body.error === 'WATCHLIST_MODE_INVALID',
     'only a watchlist linked to a brief can follow one live');
 
+  // S12c: a field of the wrong type is refused, naming it, where it used to be read as the default or cut down.
+  const junk = async (body) => (await j('POST', '/org/watchlists', { name: 'Junk', mode: 'snapshot', criteria: CDM, ...body }, maria.token)).body;
+  neg((await junk({ notify: 'no' })).field === 'notify', 'S12c: a notify that is not true or false is refused, not read as "on"');
+  neg((await junk({ sourceType: 'spreadsheet' })).error === 'WATCHLIST_SOURCE_UNKNOWN', 'S12c: an unknown source type is refused, not read as saved criteria');
+  neg((await junk({ sourceId: { id: 'x' } })).field === 'sourceId', 'S12c: a source reference that is not short text is refused, not stored as it came');
+  neg((await j('GET', '/org/watchlists?status=deleted', undefined, maria.token)).body.error === 'WATCHLIST_STATUS_UNKNOWN', 'S12c: an unknown status filter is refused, not answered with an empty list');
+
   const created = await j('POST', '/org/watchlists', { name: '2027 Defensive Midfielders', mode: 'snapshot', criteria: MIDFIELD }, maria.token);
   WL = created.body.watchlist;
   expect(8, created.status === 201 && WL.criteriaVersion.startsWith('cv1:') && WL.status === 'active' && WL.mode === 'snapshot',
@@ -744,6 +751,17 @@ section('§17 — membership is derived on read, with the transitions explained'
     'they left because the CRITERIA changed, and the history says that rather than blaming the player');
   const badCursor = await j('GET', `/org/watchlists/${WL.id}/history?cursor=nope`, undefined, maria.token);
   neg(badCursor.status === 400 && badCursor.body.error === 'HISTORY_CURSOR_INVALID', 'a fabricated history cursor is refused, not silently ignored');
+  // S12c: the transitions page through SQL ("continue from here"): two pages hold every transition once, newest first.
+  const pg1 = await j('GET', `/org/watchlists/${WL.id}/history?limit=1`, undefined, maria.token);
+  const pg2 = await j('GET', `/org/watchlists/${WL.id}/history?limit=100&cursor=${pg1.body.nextCursor}`, undefined, maria.token);
+  ok(pg1.body.items.length === 1 && typeof pg1.body.nextCursor === 'string' && pg2.status === 200
+    && [...pg1.body.items, ...pg2.body.items].map((x) => x.id).join() === h3.body.items.map((x) => x.id).join() && pg2.body.nextCursor === null,
+  'S12c: the history pages: the second page continues exactly where the first stopped');
+  neg((await j('GET', `/org/watchlists/${WL.id}/history?limit=abc`, undefined, maria.token)).body.error === 'PAGE_LIMIT_INVALID', 'S12c: a junk page size is refused, not clamped');
+  const wl1 = await j('GET', '/org/watchlists?limit=1', undefined, maria.token);
+  const wl2 = await j('GET', `/org/watchlists?limit=100&cursor=${wl1.body.nextCursor}`, undefined, maria.token);
+  ok(wl1.body.items.length === 1 && typeof wl1.body.total === 'number' && new Set([...wl1.body.items, ...wl2.body.items].map((w) => w.id)).size === wl1.body.total,
+    'S12c: the watchlist list pages too, every watchlist exactly once');
 }
 
 // ================================= §18 concurrency, lifecycle and limits
