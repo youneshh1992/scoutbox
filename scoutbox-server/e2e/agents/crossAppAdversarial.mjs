@@ -157,10 +157,10 @@ section('RA/§20 — no non-active relationship is active Trust evidence, in eit
     neg((after?.detail?.distinct ?? 0) === (base?.detail?.distinct ?? 0), `RA6 ${label}: contributes nothing to Trust (${base?.detail?.distinct} → ${after?.detail?.distinct})`);
   }
 
-  // The legacy lane, directly: a mirror row that names nobody.
+  // The legacy lane is gone (S11a): Trust has no second relationship source to get wrong.
   const trustSrc = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'trust', 'trust.mjs'), 'utf8');
-  ok(/status !== 'active'/.test(trustSrc) && /!rep\.confirmedAt/.test(trustSrc), 'RA7 the legacy lane\'s Trust input requires confirmedAt AND an active status');
-  ok(/endAt && rep\.endAt < now/.test(trustSrc), 'RA8 and rejects one past its end date, because confirmedAt survives an ending');
+  neg(!/db\.representations\b/.test(trustSrc), 'RA7 Trust reads no legacy representation lane (removed in S11a)');
+  ok(/status !== 'active'/.test(trustSrc) && /confirmedAt/.test(trustSrc), 'RA8 its one relationship source requires confirmedAt AND an active status');
   ok(/typeof a\.agentUserId !== 'string'/.test(trustSrc), 'RA9 the canonical lane additionally requires a NAMED individual, so a legacy mirror counts through neither lane');
 }
 
@@ -173,9 +173,9 @@ section('RB/§21 — the Passport: the agent reads, and writes nothing');
   neg(expect(collect('RB write post', await j('POST', '/org/players/pl-adeyemi/football-passport', { position: 'ST' }, ana.token)), 404, null), 'RB3 nor with a different verb');
   neg(expect(collect('RB provenance', await j('PATCH', '/org/players/pl-adeyemi/football-passport/provenance', { verified: true }, ana.token)), 404, null), 'RB4 nor its provenance');
   neg(expect(collect('RB trust write', await j('POST', '/org/players/pl-adeyemi/trust-profile', { score: 99 }, ana.token)), 404, null), 'RB5 nor the Trust Score');
-  // The legacy row is HISTORY in the Passport, never the headline (P5.6E E-2).
+  // The Passport headline comes from the canonical lane alone (P5.6E E-2; the legacy lane was removed in S11a).
   const src = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'passport', 'passport.mjs'), 'utf8');
-  ok(/HEADLINE is not built from them/.test(src), 'RB6 the Passport says in its own source that the headline is not built from legacy rows');
+  neg(!/db\.representations\b/.test(src), 'RB6 the Passport reads no legacy representation rows');
   ok(/typeof a\.agentUserId === 'string'/.test(src), 'RB7 and the canonical projection it does use requires a named individual');
   // A player revoking a share closes the agent's shared-evidence surface.
   await setD({ trialVisibility: true });

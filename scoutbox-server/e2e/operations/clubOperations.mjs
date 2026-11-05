@@ -558,43 +558,35 @@ section('F2 — consent-based transitions');
 }
 
 // ================================================================ F10
-section('F10 — the legacy representation lane is CLOSED (M23 P5.6E E-1)');
+section('F10 — the legacy representation lane is gone (M23 P5.6E E-1, removed in S11a)');
 {
   // P5.6E §5/§7 permit exactly ONE active authority writer, and it is the
   // canonical P5.6B lane: a licensed individual requests, the client confirms.
-  // This lane created relationships with no licence check, no jurisdiction
+  // The legacy lane created relationships with no licence check, no jurisdiction
   // policy, no conflict evaluation, no consent ledger, no rev and no
-  // idempotency — and a confirmed row fed the Trust relationship input and the
-  // Passport representation headline. It now creates nothing.
-  //
-  // What an EXISTING legacy row can and cannot do is proven in
-  // m23AgentIntegrationE2E, which seeds one; there is deliberately no way to
-  // create one here any more.
+  // idempotency. It was closed in P5.6E and removed in S11a (no record could
+  // exist), so every one of its routes is now simply not there.
   const bodies = [];
   for (const [label, playerId] of [['a 14-year-old', 'pl-guni'], ['a 17-year-old', kid17Id], ['a 16-year-old', kid16Id], ['an adult', 'pl-adeyemi']]) {
     const r = await j('POST', '/org/representation/propose', { playerId, representativeName: 'Alex Agent', scope: 'full' }, agency.token);
-    ok(r.status === 410 && r.body.error === 'REPRESENTATION_LANE_CLOSED', `the closed lane creates nothing for ${label}`);
+    ok(r.status === 404, `the removed lane creates nothing for ${label}`);
     bodies.push(JSON.stringify(r.body));
   }
-  // The closure is UNIFORM: the answer for a 14-year-old is byte-identical to
-  // the answer for an adult, so the refusal no longer distinguishes a minor
-  // from a visible adult. The old lane's 403 UNDER_18_WALL / NOT_VISIBLE split
-  // told the caller which one they had asked about.
-  ok(new Set(bodies).size === 1, 'and the refusal is identical for a minor and an adult — the closure is not an age oracle');
+  // The answer is UNIFORM: the answer for a 14-year-old is byte-identical to
+  // the answer for an adult, so it does not distinguish a minor from a visible
+  // adult (the old lane's 403 UNDER_18_WALL / NOT_VISIBLE split did).
+  ok(new Set(bodies).size === 1, 'and the refusal is identical for a minor and an adult — it is not an age oracle');
   const r2 = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi' }, maria.token);
-  ok(r2.status === 403 && r2.body.error === 'AGENCY_ONLY', 'a club is still refused the agency lane before the closure is even reached');
-  // The read routes stay open: history must remain visible to the people named
-  // in it, and a player must always be able to see what exists about them.
-  const list = await j('GET', '/org/representation', undefined, agency.token);
-  ok(list.status === 200 && Array.isArray(list.body.items), 'the agency can still READ the historical lane');
-  const mine = await j('GET', '/player/representation', undefined, adeyemi.token);
-  ok(mine.status === 200 && Array.isArray(mine.body.items), 'and the adult player can still read their own records');
-  ok(mine.body.items.length === 0, 'with nothing in it, because the writer is closed and nothing was ever created here');
-  // The canonical lane is where a relationship comes from now, and it is named
-  // in the refusal so a caller is redirected rather than merely blocked.
-  const closed = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi' }, agency.token);
-  ok(closed.body.canonicalRoute === 'POST /org/agent/clients/request', 'the refusal names the canonical route');
-  ok(/licensed agent/.test(closed.body.message) && /confirm/.test(closed.body.message), 'and explains that a relationship is requested by a licensed agent and becomes active when the client confirms it');
+  ok(r2.status === 404, 'a club gets the same: there is no such route');
+  for (const [m, u, tok] of [['GET', '/org/representation', agency.token], ['GET', '/player/representation', adeyemi.token], ['POST', '/player/representation/rep-x/confirm', adeyemi.token], ['POST', '/player/representation/rep-x/withdraw', adeyemi.token], ['POST', '/player/representation/rep-x/dispute', adeyemi.token]]) {
+    const r = await j(m, u, m === 'POST' ? {} : undefined, tok);
+    ok(r.status === 404, `${m} ${u} is gone (404)`);
+  }
+  const adminList = await fetch(`${BASE}/admin/representations`, { headers: A() });
+  ok(adminList.status === 404, 'and so is the Trust & Safety list of legacy records');
+  // The canonical lane is where a relationship comes from: a licensed agent requests it.
+  const canonical = await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi' }, agency.token);
+  ok(canonical.status !== 404, `the canonical route exists (POST /org/agent/clients/request answers ${canonical.status})`);
 }
 
 // ================================================================ F8

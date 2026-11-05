@@ -148,7 +148,7 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 - A club Offer may cite a transaction only if the club is its engaging entity and it is linked to the same case (else a uniform 400). Readiness is re-evaluated at issue; blockers returned as codes. Recipient payloads never name a transaction.
 
 ### Legacy representation
-- `db.representations` (M13 F10 club notes, `agentUserId: null`) grants nothing, isn't written by new code, still reads as history, and reads as "nothing" rather than "not active". (P56E_LEGACY_REPRESENTATION_CLOSURE)
+- The M13 F10 lane (`/org/representation`, `/player/representation`, `/admin/representations`) was closed in P5.6E and removed in S11a with its screens (the player app's Representation section, the club and Grassroots Representation page, the admin tab): no record could exist. An agent relationship is only ever requested by a licensed agent and confirmed by the client.
 
 ### Idempotency
 - `clientKey` goes in the body (1–64 chars); replay answers `idempotent: true`; same key, different payload is 409. (P56F_CONCURRENCY_IDEMPOTENCY)
@@ -167,7 +167,6 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
   - L-18: domestic versus international scope.
 - **Fees, signatures, retention.** Fees are recorded but never validated (L-5). E-signature sufficiency is open (L-17), as is tombstone retention (L-11).
 - **Deferred:** the Trust projection for agent clients (DR-21) and per-agent blocks (DR-27).
-- **Legacy lane:** F10 `db.representations` is mirrored read-only until it is retired in P5.6E.
 
 - Fee/commission/payment workflows: deferred entirely.
 - `renewal` transaction type: deferred.

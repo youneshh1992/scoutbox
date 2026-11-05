@@ -155,7 +155,7 @@ interface DemoRel extends Omit<Relationship, 'client' | 'mode' | 'status'> { sta
 const rel = (over: Partial<DemoRel> & Pick<DemoRel, 'id' | 'clientId' | 'status'>): DemoRel => ({
   agentUserId: 'usr-ana', agencyOrgId: ORG.id, clientKind: 'player', storedStatus: over.status, scope: ['employment'], exclusive: false, jurisdiction: 'INT',
   termMonths: 12, startAt: null, endAt: null, proposedAt: NOW - 5 * DAY, confirmedAt: null, declinedAt: null, terminatedAt: null, terminatedBy: null,
-  terminationReasonCode: null, disputedAt: null, shareWithAgencyStaff: false, documents: [], legacy: null, subjectRemovedAt: null, policyVersion: 1,
+  terminationReasonCode: null, disputedAt: null, shareWithAgencyStaff: false, documents: [], subjectRemovedAt: null, policyVersion: 1,
   rev: 1, revAt: NOW - 5 * DAY, history: [{ id: id('h'), at: NOW - 5 * DAY, action: 'representation_requested', byKind: 'org', byName: 'Ana Costa', detail: { scope: ['employment'], termMonths: 12 } }],
   honest: 'A ScoutBox relationship record. It is not a representation contract and ScoutBox has not assessed its legal validity; the client confirmed it in ScoutBox.',
   ...over,
@@ -182,7 +182,7 @@ const identity = (r: DemoRel, userId: string) => {
   return { ...minimal, accessBasis: eff(r) === 'proposed' ? ('pending_request' as const) : ('none' as const) };
 };
 const forAgent = (r: DemoRel, userId: string): Relationship => ({ ...(structuredClone(r) as unknown as Relationship), status: eff(r), client: identity(r, userId), mode: 'own' });
-const summary = (r: DemoRel) => ({ id: r.id, agentUserId: r.agentUserId, clientId: r.clientId, status: eff(r), startAt: r.startAt, endAt: r.endAt, summaryOnly: true as const, client: { id: r.clientId, name: PLAYERS.find((p) => p.id === r.clientId)?.name ?? null }, legacy: r.legacy, mode: 'summary' as const });
+const summary = (r: DemoRel) => ({ id: r.id, agentUserId: r.agentUserId, clientId: r.clientId, status: eff(r), startAt: r.startAt, endAt: r.endAt, summaryOnly: true as const, client: { id: r.clientId, name: PLAYERS.find((p) => p.id === r.clientId)?.name ?? null }, mode: 'summary' as const });
 
 // ------------------------------------------------------------- notifications
 const NOTES: Record<string, Notification[]> = {
@@ -567,7 +567,7 @@ export const demoAgent: AgentApi = {
   async agency(s) {
     affOf(s);
     const active = AFFS.filter((a) => a.endedAt === null);
-    const o: AgencyOverview = { org: { id: ORG.id, name: ORG.name, type: 'agency', verified: false, plan: 'Agency' }, settings: SETTINGS, members: { active: active.length, admins: active.filter((a) => a.tiers.includes('agency_admin')).length, licensedAgents: active.filter((a) => a.tiers.includes('licensed_agent')).length }, relationships: { active: RELS.filter((r) => eff(r) === 'active').length, pending: RELS.filter((r) => eff(r) === 'proposed').length, legacy: RELS.filter((r) => r.legacy).length }, tiers: ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], permissions: PERMISSIONS, honest: 'An agency organisation holds no football-agent licence. Roles here decide what a member may do in ScoutBox, never whether they may perform football-agent services.' };
+    const o: AgencyOverview = { org: { id: ORG.id, name: ORG.name, type: 'agency', verified: false, plan: 'Agency' }, settings: SETTINGS, members: { active: active.length, admins: active.filter((a) => a.tiers.includes('agency_admin')).length, licensedAgents: active.filter((a) => a.tiers.includes('licensed_agent')).length }, relationships: { active: RELS.filter((r) => eff(r) === 'active').length, pending: RELS.filter((r) => eff(r) === 'proposed').length }, tiers: ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'], permissions: PERMISSIONS, honest: 'An agency organisation holds no football-agent licence. Roles here decide what a member may do in ScoutBox, never whether they may perform football-agent services.' };
     return delay(o);
   },
   async team(s) { need(s, 'agency.team.read'); return delay({ members: AFFS.map(memberRow).sort((x, y) => (x.active === y.active ? x.startedAt - y.startedAt : x.active ? -1 : 1)), tiers: ['licensed_agent', 'agency_admin', 'analyst', 'assistant', 'finance'] as Tier[] }); },
@@ -633,7 +633,7 @@ export const demoAgent: AgentApi = {
     const rows: ClientRow[] = [];
     for (const r of RELS) {
       if (r.agentUserId === s.userId && can(a.tiers, 'clients.read.own')) rows.push(forAgent(r, s.userId) as ClientRow);
-      else if (can(a.tiers, 'clients.read.shared_summary') && (r.shareWithAgencyStaff || r.legacy)) rows.push(summary(r));
+      else if (can(a.tiers, 'clients.read.shared_summary') && r.shareWithAgencyStaff) rows.push(summary(r));
     }
     rows.sort((x, y) => ((y as Relationship).proposedAt ?? y.startAt ?? 0) - ((x as Relationship).proposedAt ?? x.startAt ?? 0));
     return delay({ items: rows, scopes: ['employment', 'transfer', 'commercial', 'other_services'], maxTermMonths: 24, jurisdictions: ['INT', 'ENG', 'USA'] });
@@ -661,7 +661,7 @@ export const demoAgent: AgentApi = {
     const r = RELS.find((x) => x.id === cid);
     if (!r) refuse(404, 'REPRESENTATION_NOT_FOUND', 'Not found.');
     if (r!.agentUserId === s.userId && can(a.tiers, 'clients.read.own')) return delay({ relationship: forAgent(r!, s.userId), client: identity(r!, s.userId), access: grants(r!, s.userId), mode: 'own' as const });
-    if (can(a.tiers, 'clients.read.shared_summary') && (r!.shareWithAgencyStaff || r!.legacy)) return delay({ relationship: summary(r!), mode: 'summary' as const });
+    if (can(a.tiers, 'clients.read.shared_summary') && r!.shareWithAgencyStaff) return delay({ relationship: summary(r!), mode: 'summary' as const });
     return refuse(404, 'REPRESENTATION_NOT_FOUND', 'Not found.');
   },
   async terminate(s, cid, input) {

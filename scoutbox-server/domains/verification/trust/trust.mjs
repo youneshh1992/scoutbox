@@ -81,18 +81,7 @@ export function registerTrust(ctx) {
       const verified = !!claim && claim.status === 'verified';
       out.push({ key: `rel:coach:${r.coachUserId ?? r.byUserId ?? r.id}`, kind: 'coach', verified });
     }
-    // Agency representation is adult-only by the standing rules; for a minor
-    // it is excluded from the denominator rather than scored as missing.
-    // D-P56A-1: the record's agency key is `agencyOrgId` (there is no
-    // `orgId` on an M13 F10 representation), and `confirmedAt` survives a
-    // withdrawal, a dispute and expiry — only a currently ACTIVE, unexpired,
-    // player-confirmed relationship is a verified relationship.
     const now = Date.now();
-    for (const rep of (db.representations ?? [])) {
-      if (rep.playerId !== player.id || !rep.confirmedAt || rep.status !== 'active') continue;
-      if (rep.endAt && rep.endAt < now) continue;
-      out.push({ key: `rel:agency:${rep.agencyOrgId}`, kind: 'agency', verified: true });
-    }
     // M23 P5.6E: the CANONICAL P5.6B lane is a relationship source too. Without
     // this, Trust was blind to the authoritative lane and could only see the
     // legacy one — so a real, licensed, client-confirmed relationship counted

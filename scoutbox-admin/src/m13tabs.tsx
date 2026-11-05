@@ -1,6 +1,6 @@
 import { Hint } from '../../design-system/About';
 import { fmtClock, fmtStamp } from '../../design-system/time';
-// M13 Trust & Safety additions: representation review, federation groups,
+// M13 Trust & Safety additions: federation groups,
 // support desk (with the explicit time-limited access flow), the delivery
 // centre, service metrics and backups. VITE_DEMO=1 runs on canned rows.
 import { useCallback, useEffect, useState } from 'react';
@@ -8,9 +8,8 @@ import { useCallback, useEffect, useState } from 'react';
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
 const DEMO = import.meta.env.VITE_DEMO === '1';
 
-export type M13Tab = 'representation' | 'groups' | 'supportdesk' | 'deliverycentre' | 'servicehealth' | 'backups';
+export type M13Tab = 'groups' | 'supportdesk' | 'deliverycentre' | 'servicehealth' | 'backups';
 export const M13_TABS: { id: M13Tab; label: string }[] = [
-  { id: 'representation', label: 'Representation' },
   { id: 'groups', label: 'Federation groups' },
   { id: 'supportdesk', label: 'Support desk' },
   { id: 'deliverycentre', label: 'Delivery centre' },
@@ -18,7 +17,6 @@ export const M13_TABS: { id: M13Tab; label: string }[] = [
   { id: 'backups', label: 'Backups' },
 ];
 
-interface Rep { id: string; playerName: string; agencyName: string; representativeName: string; scope: string; status: string; credential: { note: string; reviewStatus: string; honest: string } | null }
 interface Grp { id: string; name: string; memberOrgIds: string[]; adminOrgIds: string[]; pendingInvites: { orgId: string }[] }
 interface Ticket { id: string; orgId: string; byName: string; subject: string; status: string; refs: { kind: string; id: string }[]; replies: { by: string; text: string }[] }
 interface AccessGrant { id: string; ticketId: string; status: string; hours: number; expiresAt: number | null; accessLog: { at: number; what: string }[] }
@@ -28,10 +26,6 @@ interface Backup { dir: string; manifest: { createdAt: number; counts: Record<st
 
 const NOW = Date.now();
 const canned = {
-  representation: [
-    { id: 'rep-1', playerName: 'Kola Adeyemi', agencyName: 'North Star Sports Agency', representativeName: 'Alex Agent', scope: 'contracts_only', status: 'active', credential: { note: 'FA intermediary licence PDF', reviewStatus: 'pending', honest: 'uploaded document, review pending — NOT an independently verified licence' } },
-    { id: 'rep-2', playerName: 'Astrid Svensson', agencyName: 'North Star Sports Agency', representativeName: 'Alex Agent', scope: 'full', status: 'disputed', credential: null },
-  ] as Rep[],
   groups: [
     { id: 'grp-1', name: 'North West Development Group', memberOrgIds: ['org-eastport', 'org-hackneymarsh'], adminOrgIds: ['org-eastport'], pendingInvites: [] },
   ] as Grp[],
@@ -71,7 +65,6 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
 }
 
 export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string; say: (t: string) => void }) {
-  const [reps, setReps] = useState<Rep[]>([]);
   const [groups, setGroups] = useState<Grp[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [grants, setGrants] = useState<AccessGrant[]>([]);
@@ -81,12 +74,11 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
 
   const load = useCallback(async () => {
     if (DEMO) {
-      setReps(canned.representation); setGroups(canned.groups); setTickets(canned.tickets);
+      setGroups(canned.groups); setTickets(canned.tickets);
       setGrants(canned.grants); setDelivery(canned.delivery); setMetrics(canned.metrics); setBackups(canned.backups);
       return;
     }
     try {
-      if (tab === 'representation') setReps((await call<{ items: Rep[] }>(adminKey, '/admin/representations')).items);
       if (tab === 'groups') setGroups((await call<{ items: Grp[] }>(adminKey, '/admin/groups')).items);
       if (tab === 'supportdesk') {
         const r = await call<{ items: Ticket[]; grants: AccessGrant[] }>(adminKey, '/admin/support');
@@ -101,27 +93,6 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
 
   const act = (fn: () => Promise<unknown>, done: string) =>
     (DEMO ? Promise.resolve() : fn()).then(() => { say(done); void load(); }).catch((e) => say(e instanceof Error ? e.message : 'failed'));
-
-  if (tab === 'representation') {
-    return (
-      <div className="list-rows">
-        <details className="f-about"><summary>About</summary><div className="notice">Adult-only representation relationships. Age is DOB-evaluated on every request; an uploaded credential is a document review at best — no licence-register integration exists.</div></details>
-        {reps.map((r) => (
-          <div key={r.id} className="list-row">
-            <span className="grow">
-              <b>{r.playerName}</b> — {r.agencyName} <span className="dim">({r.representativeName} · {r.scope.replace(/_/g, ' ')})</span>
-              {r.credential && <div className="dim" style={{ fontSize: 12 }}>{r.credential.note} — {r.credential.reviewStatus.replace(/_/g, ' ')}. {r.credential.honest}</div>}
-            </span>
-            <span className={`pill ${r.status === 'active' ? 'green' : r.status === 'disputed' || r.status === 'withdrawn' ? 'red' : ''}`}>{r.status}</span>
-            {r.credential?.reviewStatus === 'pending' && (
-              <button onClick={() => act(() => call(adminKey, `/admin/representations/${r.id}/review-credential`, { method: 'POST', body: JSON.stringify({ valid: true }) }), 'Document review recorded (NOT an independent register check).')}>Review document</button>
-            )}
-          </div>
-        ))}
-        {reps.length === 0 && <div className="notice">No representation records.</div>}
-      </div>
-    );
-  }
 
   if (tab === 'groups') {
     return (

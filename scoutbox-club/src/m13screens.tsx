@@ -3,7 +3,7 @@ import { ProNetworkMap } from './proExperience';
 import { ProChart } from './proDesign';
 // M13 org screens: Imports & Integrations, Coverage, Calibration, Scouting
 // Insight (exposure + review queue + evidence gaps), Club Network (groups +
-// transition packs), Deal Budgets, Representation (agency lane) and
+// transition packs), Deal Budgets and
 // Organisation (onboarding, MFA, SSO, sessions, support, delivery).
 // Same conventions as m12screens: labelled controls, honest empty/error
 // states, live/demo through the m13 client.
@@ -527,36 +527,6 @@ export function BudgetsScreen({ session, notify }: ScreenProps) {
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-// ==================================================== F10 Representation
-export function RepresentationScreen({ session, notify }: ScreenProps) {
-  const [data, reload, err] = useAsync(() => m13.listRepresentations(session), [session]);
-  const [playerId, setPlayerId] = useState('');
-  if (session.org.type !== 'agency') {
-    return <div><div className="notice block">{t('m13.rep.agencyOnly')}</div></div>;
-  }
-  return (
-    <div>
-      <div className="notice" style={{ fontSize: 12.5 }}>{data?.note ?? err}</div>
-      {(data?.items ?? []).map((r) => (
-        <div key={r.id} className="section">
-          <b>{r.playerName}</b> <span className={`pill ${r.status === 'active' ? 'green' : r.status === 'withdrawn' || r.status === 'disputed' ? 'red' : 'blue'}`}>{r.status}</span>
-          <div className="dim" style={{ fontSize: 12.5 }}>{r.representativeName} · {r.scope.replace(/_/g, ' ')} · {r.endAt ? `until ${fmtDate(r.endAt)}` : 'open-ended'}</div>
-          {r.credential && <div className="notice" style={{ fontSize: 12 }}>{r.credential.note} — <b>{r.credential.reviewStatus.replace(/_/g, ' ')}</b>. {r.credential.honest}</div>}
-          <div className="dim" style={{ fontSize: 11.5 }}>{r.history.map((h) => `${h.action} (${h.byName})`).join(' → ')}</div>
-        </div>
-      ))}
-      <div className="enter-row">
-        <input aria-label="Adult player id" placeholder={t('m13.rep.playerId')} value={playerId} onChange={(e) => setPlayerId(e.target.value)} />
-        <button onClick={async () => {
-          try { await m13.proposeRepresentation(session, { playerId, representativeName: session.scoutName, scope: 'full', endMonths: 12 }); reload(); notify('Proposed — nothing is active until the PLAYER confirms.'); }
-          catch (e) { notify(e instanceof Error ? e.message : 'Adults only — the wall is DOB-evaluated live.', true); }
-        }}>{t('m13.rep.propose')}</button>
-      </div>
-      <div className="notice block" style={{ fontSize: 12.5 }}>{t('m13.rep.wallNote')}</div>
     </div>
   );
 }

@@ -469,11 +469,10 @@ export function badgeLabel(claim, org, eff) {
 /**
  * HONEST one-time conversion, run once per database (the ver_migrations marker): organisations already marked
  * verified (the seed, or the legacy boolean set by Trust & Safety) become an ORGANISATION_IDENTITY claim with method
- * `migration`, and a verified email domain an ORGANISATION_DOMAIN claim and a verified-domain row; F10 representation
- * credentials become LICENCE claims in `pending` — nothing is upgraded to a state it never legitimately reached. One
+ * `migration`, and a verified email domain an ORGANISATION_DOMAIN claim and a verified-domain row — nothing is upgraded to a state it never legitimately reached. One
  * transaction with the marker.
  */
-export function bootstrapVerification({ verification, orgs, representations = [], now = Date.now() }) {
+export function bootstrapVerification({ verification, orgs, now = Date.now() }) {
   if (verification.bootstrap.ran()) return 0;
   return verification.atomically(() => {
     let created = 0;
@@ -502,16 +501,6 @@ export function bootstrapVerification({ verification, orgs, representations = []
           verifiedAt: now, metadata: { domain, migratedFrom: 'legacy emailDomainVerified challenge' },
         });
       }
-    }
-    for (const r of representations) {
-      if (!r.credential) continue;
-      mkClaim({
-        subjectType: 'org', subjectId: r.agencyOrgId, claimType: 'LICENCE', organisationId: r.agencyOrgId, status: 'pending', verificationMethod: 'document_submitted',
-        metadata: {
-          licenceType: 'agency credential', ...(r.credential.note ? { note: String(r.credential.note).slice(0, VERIFICATION_LIMITS.note) } : {}), representationId: r.id,
-          ...(r.credential.reviewStatus === 'reviewed_valid' ? { documentReviewed: 'document reviewed by Trust & Safety — a document review, not an independent register check' } : {}),
-        },
-      });
     }
     verification.bootstrap.recordBootstrap(now, created);
     return created;

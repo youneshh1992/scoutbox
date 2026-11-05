@@ -100,16 +100,11 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
             {r.endAt ? <DetailFact label={pt('m24ends')} value={fmt(r.endAt)} icon="clock" /> : null}
           </View>
           {/* M24F.2 — the licence is one fact; only an UNVERIFIED licence earns its warning sentence. */}
-          {r.legacy ? (
-            <GuidanceNote icon="info" size={11.5}>{pt('m24legacy')}</GuidanceNote>
-          ) : (
-            <GuidanceNote icon="shield" title="Licence status">
-              {pt('m24licence')}: {(r.agent.verification?.fifaLicence ?? 'UNVERIFIED').replace(/_/g, ' ').toLowerCase()}{r.agent.verification?.fifaLicence === 'VERIFIED' ? '' : ` — ${pt('m24honestUnverified')}`}
-            </GuidanceNote>
-          )}
+          <GuidanceNote icon="shield" title="Licence status">
+            {pt('m24licence')}: {(r.agent.verification?.fifaLicence ?? 'UNVERIFIED').replace(/_/g, ' ').toLowerCase()}{r.agent.verification?.fifaLicence === 'VERIFIED' ? '' : ` — ${pt('m24honestUnverified')}`}
+          </GuidanceNote>
           {r.status === 'disputed' && <GuidanceNote icon="info" size={11.5}>{pt('m24disputedMsg')}</GuidanceNote>}
-          {!r.legacy && (
-            <>
+          <>
               <Row style={{ marginTop: 6 }}>
                 {r.status === 'proposed' && <Button small primary disabled={busy} label={pt('m24confirm')} onPress={() => act(r, 'confirm', 'm24confirmed')} />}
                 {r.status === 'proposed' && <Button small disabled={busy} label={pt('m24decline')} onPress={() => act(r, 'decline', 'm24declinedMsg')} />}
@@ -167,8 +162,7 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
                   })}
                 </View>
               )}
-            </>
-          )}
+          </>
         </View>
       ))}
       {items.length === 0 && !err && <GuidanceNote icon="info" size={12}>{pt('m24none')}</GuidanceNote>}

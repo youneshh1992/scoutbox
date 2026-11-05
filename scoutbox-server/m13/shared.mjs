@@ -16,7 +16,7 @@ export function migrateM13(db, players) {
   db.webhookDeliveries ??= [];    // F1 — durable delivery attempts (bounded retries)
   // F3 private suitability preferences: the player_prefs tables of the opportunities and campaigns repository (S9d).
   // F2 transition cases: tables of repositories/transitionsVouches.mjs (S10c), read through verificationReads.
-  db.representations ??= [];      // F10 — adult representation relationships (legacy lane; moves with the agent stores in S11)
+  // F10 adult representation (the legacy lane): removed in S11a; agent relationships are repositories/agentCore.mjs.
   db.exposureEvents ??= [];       // F4 — deduplicated exposure funnel events
   db.calibrationSessions ??= [];  // F5 — scout calibration sessions
   db.evidenceSuggestions ??= [];  // F6 — rule-engine suggestions + statuses

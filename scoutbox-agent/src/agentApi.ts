@@ -110,7 +110,6 @@ export interface Relationship {
   disputedAt: number | null;
   shareWithAgencyStaff: boolean;
   documents: { id: string; label: string | null; addedAt: number | null }[];
-  legacy: { fromRepresentationId: string; regulatoryStatus: string; representativeName: string | null } | null;
   subjectRemovedAt: number | null;
   policyVersion: number;
   rev: number;
@@ -132,7 +131,6 @@ export interface RelationshipSummary {
   endAt: number | null;
   summaryOnly: true;
   client: { id: string; name: string | null };
-  legacy: Relationship['legacy'];
   mode?: 'summary';
 }
 
@@ -268,7 +266,7 @@ export interface AgencyOverview {
   org: { id: string; name: string; type: string; verified?: boolean; plan?: string };
   settings: { jurisdictions: string[]; description: string };
   members: { active: number; admins: number; licensedAgents: number };
-  relationships: { active: number; pending: number; legacy: number };
+  relationships: { active: number; pending: number };
   tiers: Tier[];
   permissions: Record<string, string[]>;
   honest: string;

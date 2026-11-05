@@ -70,13 +70,6 @@ export interface ScenarioTotals {
   conditionalNote: string;
 }
 
-export interface Representation {
-  id: string; playerId: string; playerName: string; agencyName: string; representativeName: string; scope: string;
-  status: string; startAt: number; endAt: number | null; confirmedAt: number | null;
-  credential: { source: string; note: string; reviewStatus: string; honest: string } | null;
-  history: { at: number; byName: string; action: string }[];
-}
-
 export interface OnboardingState { tasks: { id: string; label: string; done: boolean; help: string }[]; complete: boolean; roleHelp: string }
 export interface InviteRow { id: string; email: string; name: string; role: string; status: string; createdAt: number }
 export interface SessionRow { sid: string; createdAt: number; current: boolean; via: string }
@@ -146,8 +139,6 @@ export interface M13Api {
   updateScenario(s: Session, caseId: string, sid: string, patch: Partial<Scenario>): Promise<{ scenario: Scenario; totals: ScenarioTotals }>;
   approveScenario(s: Session, caseId: string, sid: string): Promise<{ scenario: Scenario; note: string }>;
   // F10 (agency lane)
-  listRepresentations(s: Session): Promise<{ items: Representation[]; note: string }>;
-  proposeRepresentation(s: Session, input: { playerId: string; representativeName: string; scope: string; endMonths?: number; credentialNote?: string }): Promise<Representation>;
   // F12 + F11
   onboarding(s: Session): Promise<OnboardingState>;
   listInvites(s: Session): Promise<InviteRow[]>;
@@ -244,8 +235,6 @@ export const httpM13: M13Api = {
   updateScenario: (s, caseId, sid, patch) => P(s, `/org/cases/${caseId}/budget/scenarios/${sid}`, patch, 'PUT'),
   approveScenario: (s, caseId, sid) => P(s, `/org/cases/${caseId}/budget/scenarios/${sid}/approve`),
 
-  listRepresentations: (s) => G(s, '/org/representation'),
-  proposeRepresentation: async (s, input) => (await P(s, '/org/representation/propose', input)).representation,
 
   onboarding: (s) => G(s, '/org/onboarding'),
   listInvites: async (s) => (await G(s, '/org/invites')).items,

@@ -366,7 +366,7 @@ export default function App() {
           {(['disputes', 'coaches', 'staffchecks', 'outcomes', 'drillguide'] as Tab[]).includes(tab) && (
             <M12Panel tab={tab as M12Tab} adminKey={key} say={say} />
           )}
-          {(['representation', 'groups', 'supportdesk', 'deliverycentre', 'servicehealth', 'backups'] as Tab[]).includes(tab) && (
+          {(['groups', 'supportdesk', 'deliverycentre', 'servicehealth', 'backups'] as Tab[]).includes(tab) && (
             <M13Panel tab={tab as M13Tab} adminKey={key} say={say} />
           )}
           {M14_TABS.some((x) => x.id === tab) && (

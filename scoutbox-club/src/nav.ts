@@ -164,7 +164,6 @@ export const NAV_SECTIONS: NavSection[] = [
     id: 'network', labelKey: 'navsec.network', icon: 'globe',
     children: [
       { id: 'network', labelKey: 'nav2.network', shortKey: 'navshort.network', aliases: ['clubs', 'groups', 'federation', 'club network', 'réseau'] },
-      { id: 'representation', labelKey: 'nav.representation', aliases: ['agents', 'agencies', 'représentation'] },
     ],
   },
   {

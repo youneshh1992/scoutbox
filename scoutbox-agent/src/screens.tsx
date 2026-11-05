@@ -270,7 +270,6 @@ export function ProfileScreen({ session, tick, notify, me }: ScreenProps & { me:
 
 // ============================================================ Clients
 function accessLine(r: Relationship, access?: boolean) {
-  if (r.legacy) return t('clients.legacyNote');
   if (r.subjectRemovedAt) return t('clients.removedNote');
   if (access) return t('clients.accessActive');
   if (r.status === 'proposed') return t('clients.accessPending');
@@ -380,7 +379,7 @@ function ClientList({ rows, onOpen }: { rows: ClientRow[]; onOpen: (id: string) 
         <Section title="Shared client records"><div className="a-shared-explainer"><Icon name="shield-check" size={15}/><span>Summary access · shared with agency staff</span></div>
           <div className="list-rows" data-testid="clients-summary">
             {shared.map((r) => (
-              <div key={r.id} className="list-row a-client-row a-shared-client"><span className="a-client-avatar" aria-hidden="true">{(r.client.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow"><span className="a-record-caption">SHARED CLIENT</span><b>{r.client.name ?? r.clientId}</b>{r.legacy ? <span className="pill" style={{ marginLeft: 8 }}>Legacy</span> : null}</span><StatusPill status={r.status} /><button className="a-open-record" onClick={() => onOpen(r.id)}>View record<Icon name="arrow-up-right" size={15}/></button></div>
+              <div key={r.id} className="list-row a-client-row a-shared-client"><span className="a-client-avatar" aria-hidden="true">{(r.client.name??'').split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow"><span className="a-record-caption">SHARED CLIENT</span><b>{r.client.name ?? r.clientId}</b></span><StatusPill status={r.status} /><button className="a-open-record" onClick={() => onOpen(r.id)}>View record<Icon name="arrow-up-right" size={15}/></button></div>
             ))}
           </div>
         </Section>
@@ -453,7 +452,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
         <button onClick={onBack}>← {t('clients.back')}</button>
         <h3 style={{ margin: '12px 0 6px' }}>{s.client.name ?? s.clientId}</h3>
         <StatusPill status={s.status} />
-        <div className="notice" style={{ marginTop: 10 }} data-testid="summary-only">{s.legacy ? t('clients.legacyNote') : t('clients.summaryOnly')}</div>
+        <div className="notice" style={{ marginTop: 10 }} data-testid="summary-only">{t('clients.summaryOnly')}</div>
         <div className="dim" style={{ marginTop: 8 }}>{s.startAt ? `${t('clients.startedAt')} ${fmtDate(s.startAt)}` : ''}{s.endAt ? ` · ${t('clients.endsAt')} ${fmtDate(s.endAt)}` : ''}</div>
       </div>
     );
@@ -594,7 +593,7 @@ function ClientDetailView({ session, id, tab, onTab, onBack, notify, tick }: { s
             </div>
             <Hint className="dim" style={{ fontSize: 12.5, marginTop: 8 }}>{r.honest}</Hint>
             {conflict ? <ConflictNotice conflict={conflict} onReload={() => { setErr(null); d.reload(); }} /> : <ErrorLine error={err} />}
-            {(r.status === 'proposed' || r.status === 'active') && !r.legacy && (
+            {(r.status === 'proposed' || r.status === 'active') && (
               <div style={{ marginTop: 10 }}><button disabled={busy} onClick={end} data-testid="terminate">{r.status === 'proposed' ? t('clients.withdraw') : t('clients.terminate')}</button></div>
             )}
           </>)}
@@ -1069,7 +1068,6 @@ export function AgencyScreen({ session, tick, notify, me, tab, onTab }: ScreenPr
                 <Stat v={o.members.licensedAgents} k={t('agency.licensed')} />
                 <Stat v={o.relationships.active} k={t('agency.relActive')} />
                 <Stat v={o.relationships.pending} k={t('agency.relPending')} />
-                <Stat v={o.relationships.legacy} k={t('agency.relLegacy')} />
               </div>
               <Section title={t('agency.roles')}>
                 <div className="list-rows">{o.tiers.map((x) => <div key={x} className="list-row a-permission-row"><span className="a-role-symbol"><Icon name={x==='licensed_agent'?'badge-check':x==='agency_admin'?'building':'user'} size={19}/></span><span className="grow"><b>{tr(`tier.${x}`)}</b> <span className="dim">· {tr(`tierNote.${x}`)}</span></span><span className="dim">{(Object.entries(o.permissions).filter(([, v]) => v.includes(x)).map(([k]) => k)).length} permissions</span></div>)}</div>

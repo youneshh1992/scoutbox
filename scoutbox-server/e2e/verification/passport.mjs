@@ -461,7 +461,7 @@ let signingDone = false;
   // named licensed agent requests and the client confirms. The legacy F10
   // writer is closed (E-1) and is asserted closed below.
   const closed = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'contracts_only' }, alex.token);
-  neg(closed.status === 410 && closed.body.error === 'REPRESENTATION_LANE_CLOSED', 'the legacy representation writer is closed and names the canonical route (P5.6E E-1)');
+  neg(closed.status === 404, 'the legacy representation writer is gone (P5.6E E-1, removed in S11a)');
   await j('POST', '/org/agent/agency/team', { name: 'Ana Agent', tiers: ['licensed_agent'] }, alex.token);
   const ana = await login('org-northstar', 'Ana Agent', 'Agent', 'agent');
   await j('POST', '/org/agent/profile', { displayName: 'Ana Agent', jurisdictions: ['ENG'] }, ana.token);

@@ -369,13 +369,7 @@ export const MIGRATIONS = [
     //      becomes `agency_admin`; everyone else becomes `assistant`; an
     //      agency left with no admin gets its earliest member as admin, so a
     //      restored snapshot can still be administered.
-    //   2. Every M13 F10 `db.representations` row is mirrored into
-    //      `representationAgreements` as a LEGACY, agency-level record with
-    //      `agentUserId: null` (P5.6A store proposal §3). A legacy row names
-    //      no licensed individual and, by construction of the access
-    //      predicate, authorises no regulated action. The source rows are
-    //      left in place: the F10 routes and the M16.2 relationship source
-    //      keep reading them until P5.6E retires that lane.
+    // (It also mirrored the M13 F10 legacy representations into agreements; that lane was removed in S11a.)
     note: 'M23 P5.6B: Agent core stores (agentProfiles, agencyAffiliations, representationAgreements) with non-destructive bootstraps.',
     up(db) {
       db.agentProfiles ??= [];
@@ -410,28 +404,6 @@ export const MIGRATIONS = [
             first.history.push({ id: id('aud'), at: now, action: 'agency_affiliation_updated', by: { kind: 'system', userId: null, name: 'migration 2305' }, detail: { tiers: first.tiers, legacy: true } });
           }
         }
-      }
-      for (const r of db.representations ?? []) {
-        if (!r || !r.id) continue;
-        if (db.representationAgreements.some((a) => a?.legacy?.fromRepresentationId === r.id)) continue;
-        const status = r.status === 'active' && r.endAt && r.endAt < now ? 'expired'
-          : r.status === 'proposed' ? 'proposed'
-            : r.status === 'active' ? 'active'
-              : r.status === 'withdrawn' ? 'terminated_by_client'
-                : r.status === 'disputed' ? 'disputed' : 'terminated_by_client';
-        db.representationAgreements.push({
-          id: id('rep'), agentUserId: null, agencyOrgId: r.agencyOrgId ?? null,
-          clientKind: 'player', clientId: r.playerId, isRegulatoryMinor: false,
-          jurisdiction: null, scope: [r.scope === 'contracts_only' ? 'employment' : r.scope === 'commercial_only' ? 'commercial' : 'employment'],
-          exclusive: false, termMonths: null, startAt: r.startAt ?? null, endAt: r.endAt ?? null,
-          status, proposedAt: r.createdAt ?? null, confirmedAt: r.confirmedAt ?? null, confirmedBy: r.confirmedAt ? { kind: 'player', id: r.playerId } : null,
-          declinedAt: null, terminatedAt: r.withdrawnAt ?? null, terminatedBy: r.withdrawnAt ? 'client' : null, terminationReasonCode: null,
-          disputedAt: r.disputedAt ?? null, disputeReason: null,
-          shareWithAgencyStaff: false, documents: [],
-          legacy: { fromRepresentationId: r.id, regulatoryStatus: 'not_regulated_record', representativeName: r.representativeName ?? null },
-          policyVersion: 1, keys: {}, createdAt: now, rev: 1, revAt: now, revBy: null,
-          history: [{ id: id('aud'), at: now, action: 'representation_requested', by: { kind: 'system', userId: null, name: 'migration 2305' }, detail: { legacy: true, phase: status } }],
-        });
       }
     },
   },

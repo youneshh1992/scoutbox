@@ -15,7 +15,7 @@ export const ADMIN_NAV_GROUPS = [
   { id: 'evidence', label: 'Evidence', tabs: ['passport', 'boxcam', 'trust'] },
   { id: 'verification', label: 'Verification', tabs: ['verification', 'clubs', 'guardians', 'staffchecks', 'coaches'] },
   { id: 'safety', label: 'Safety', tabs: ['blocks', 'moderation', 'threads', 'drillguide'] },
-  { id: 'operations', label: 'Operations', tabs: ['outcomes', 'representation', 'groups'] },
+  { id: 'operations', label: 'Operations', tabs: ['outcomes', 'groups'] },
   { id: 'delivery', label: 'Delivery & Billing', tabs: ['deliverycentre', 'outbox', 'billing'] },
   // M23 P5.6C: the attributed compliance lane. Its own credentialed sign-in —
   // the admin key that opens this console is not a reviewer identity (G-C0).

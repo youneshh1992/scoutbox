@@ -162,7 +162,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // through repositories/recruitment.mjs. recruitmentCases, roomComments, roomSnapshots, roomDecisions,
   // roomEvidenceState: the same — typed tables (migration 0016), read through repositories/recruitmentCases.mjs.
   reports: { guarantee: 'migration', owner: 'core', reason: 'report-user/scout/club submissions (D2); since S6b a read-only view over the reports table, written only through handleReport / moderateOrRefuse and the resolve route → the safetyAudit repository (a report naming an unknown player is accepted, Q4)' },
-  representations: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
+  // representations (the M13 F10 legacy lane): removed in S11a, with its routes and screens.
   // M23 P5.6B — ScoutBox Agent core. Guaranteed by migration 2305 so a
   // restored older snapshot has them before any Agent route can run.
   agentProfiles: { guarantee: 'migration', owner: 'm24', reason: 'P5.6B: the licensed natural person\'s agent profile and verification facets; personal, survives agency departure' },

@@ -24,11 +24,6 @@ export interface TransitionCase {
   pack: { mediaIds: string[]; evidenceIds: string[]; feedbackIds: string[] };
   history: { at: number; byName: string; action: string }[];
 }
-export interface RepresentationView {
-  id: string; agencyName: string; representativeName: string; scope: string; status: string;
-  endAt: number | null; credential: { note: string; reviewStatus: string; honest: string } | null;
-  history: { at: number; byName: string; action: string }[];
-}
 export interface ExposureView { windowDays: number; appearedInSearches: string; profileViews: string; clubs: string; note: string }
 export interface AckNotification { id: string; ts: number; type: string; text: string; actionRequired: { deadline: number | null; ackedAt: number | null } | null }
 
@@ -44,8 +39,6 @@ export interface PlayerM13 {
   addRecipient(playerId: string, id: string, orgId: string): Promise<void>;
   revokeRecipient(playerId: string, id: string, orgId: string): Promise<{ honest: string }>;
   placeTransition(playerId: string, id: string, orgId: string): Promise<void>;
-  listRepresentation(playerId: string): Promise<RepresentationView[]>;
-  actRepresentation(playerId: string, id: string, action: 'confirm' | 'withdraw' | 'dispute', reason?: string): Promise<RepresentationView>;
   exposure(playerId: string): Promise<ExposureView>;
   ackList(playerId: string): Promise<AckNotification[]>;
   ack(playerId: string, id: string): Promise<void>;
@@ -76,8 +69,6 @@ const live: PlayerM13 = {
   addRecipient: (pid, id, orgId) => post(`/player/transitions/${id}/recipients`, pid, { orgId }),
   revokeRecipient: (pid, id, orgId) => post(`/player/transitions/${id}/revoke-recipient`, pid, { orgId }),
   placeTransition: (pid, id, orgId) => post(`/player/transitions/${id}/place`, pid, { orgId }),
-  listRepresentation: async (pid) => (await get('/player/representation', pid)).items,
-  actRepresentation: async (pid, id, action, reason) => (await post(`/player/representation/${id}/${action}`, pid, { reason })).representation,
   exposure: (pid) => get('/player/exposure', pid),
   ackList: async (pid) => ((await get('/player/notifications', pid)) as AckNotification[]).filter((n) => n.actionRequired),
   ack: (pid, id) => post(`/player/notifications/${id}/ack`, pid),

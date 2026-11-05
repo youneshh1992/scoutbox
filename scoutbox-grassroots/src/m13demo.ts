@@ -6,7 +6,7 @@ import type {
   M13Api, ImportBatch, IdentityReview, ApiKeyRow, WebhookRow, WebhookDelivery, Connector,
   Fixture, CoveragePlan, CoverageAssignment, VisitSuggestion, CalibrationSession, CalibrationListRow,
   ExposureReport, ReviewQueue, EvidenceGap, GroupRow, GrantRow, SharedResource,
-  TransitionListRow, TransitionPack, Scenario, ScenarioTotals, Representation,
+  TransitionListRow, TransitionPack, Scenario, ScenarioTotals,
   OnboardingState, InviteRow, SessionRow, SupportTicket, OrgNotification, SuitabilitySummary,
 } from './m13api';
 
@@ -166,14 +166,6 @@ const SCENARIOS: Record<string, Scenario[]> = {
     fxAssumptions: [], approval: { by: 'Maria Keane', at: NOW - 5 * DAY, version: 2 }, actuals: [{ lineId: 'ln-1', amountMinor: 95000, at: NOW - DAY }],
   }],
 };
-
-// ------------------------------------------------------------ F10 fixtures
-const REPRESENTATIONS: Representation[] = [{
-  id: 'rep-d1', playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', agencyName: 'North Star Sports Agency',
-  representativeName: 'Alex Agent', scope: 'contracts_only', status: 'proposed', startAt: NOW - DAY, endAt: NOW + 360 * DAY, confirmedAt: null,
-  credential: { source: 'uploaded_document', note: 'FA intermediary licence PDF', reviewStatus: 'pending', honest: 'uploaded document, review pending — NOT an independently verified licence' },
-  history: [{ at: NOW - DAY, byName: 'Alex Agent', action: 'proposed' }],
-}];
 
 // ------------------------------------------------------------ F12 fixtures
 const ONBOARDING: OnboardingState = {
@@ -388,21 +380,6 @@ export const demoM13: M13Api = {
     const scn = (SCENARIOS[cid] ?? []).find((x) => x.id === sid)!;
     scn.approval = { by: s.scoutName, at: Date.now(), version: scn.version };
     return delay({ scenario: scn, note: 'Internal planning approval by a named lead for THIS version. It is not legal, regulatory or financial-services approval.' });
-  },
-
-  listRepresentations: (s) => (s.org.type === 'agency'
-    ? delay({ items: REPRESENTATIONS, note: 'Active representation requires the player’s confirmation and ends the moment they withdraw it. States are labelled exactly as they are.' })
-    : Promise.reject(new Error('AGENCY_ONLY'))),
-  proposeRepresentation: (s, input) => {
-    const r: Representation = {
-      id: id('rep'), playerId: input.playerId, playerName: input.playerId, agencyName: s.org.name,
-      representativeName: input.representativeName, scope: input.scope, status: 'proposed', startAt: Date.now(),
-      endAt: input.endMonths ? Date.now() + input.endMonths * 30 * DAY : null, confirmedAt: null,
-      credential: input.credentialNote ? { source: 'uploaded_document', note: input.credentialNote, reviewStatus: 'pending', honest: 'uploaded document, review pending — NOT an independently verified licence' } : null,
-      history: [{ at: Date.now(), byName: s.scoutName, action: 'proposed' }],
-    };
-    REPRESENTATIONS.push(r);
-    return delay(r);
   },
 
   onboarding: () => delay(ONBOARDING),

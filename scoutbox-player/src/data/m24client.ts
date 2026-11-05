@@ -16,7 +16,7 @@ export interface AgentIdentity {
   userId: string | null;
   displayName: string | null;
   agency: { id: string; name: string } | null;
-  /** Null for a legacy agency-level record: nobody's licence is claimed. */
+  /** Null when the agent has no profile: nobody's licence is claimed. */
   verification: { fifaLicence: string | null; jurisdictions: { memberAssociation: string; nationalRegistration: string }[] } | null;
   honest: string;
 }
@@ -42,7 +42,6 @@ export interface AgentRelationship {
    * relationship turns none of them on.
    */
   disclosure: { clubPresence: boolean; contactRouting: boolean; trialVisibility: boolean };
-  legacy: { fromRepresentationId: string } | null;
   rev: number;
   honest: string;
   agent: AgentIdentity;

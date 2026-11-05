@@ -1,5 +1,4 @@
 // F2 — Consent-based academy transition + second-chance network.
-// F10 — Adult representation verification (legacy lane; a blob collection until S11).
 // A transition is a consent lifecycle: nothing is visible to any org without an
 // explicit, revocable, expiring grant; nothing about a player is labelled
 // "released"; agencies stay structurally walled from transition packs.
@@ -17,9 +16,9 @@ const FOLLOW_UP_DAYS = 60;
 
 export function registerTransitions(ctx) {
   const {
-    db, byId, orgRouter, playerRouter, guardianRouter, adminRouter, nextId,
-    persistNow, notify, notifyAction, ledgerAppend, findPlayer, isAdult,
-    orgCanSee, histAppend, emitWebhook, players, unit, users, transitionsVouches,
+    byId, orgRouter, playerRouter, guardianRouter, adminRouter, nextId,
+    notify, notifyAction, ledgerAppend, findPlayer, isAdult,
+    orgCanSee, emitWebhook, players, unit, users, transitionsVouches,
   } = ctx;
   if (typeof transitionsVouches?.transitionCases?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerTransitions needs the transitions repository and unit from the data layer');
   const { transitionCases } = transitionsVouches;
@@ -305,119 +304,4 @@ export function registerTransitions(ctx) {
     return changed;
   }
   ctx.transitionSweep = transitionSweep;
-
-  // ========================================================== F10 helpers
-  // The legacy lane still reads and writes db.representations, unchanged by S10c: its rows feed the 2305 mirror into
-  // the agent agreements, so the collection moves with the agent stores in S11.
-  const repFresh = (r) => {
-    if (r.status === 'active' && r.endAt && r.endAt < Date.now()) return 'expired';
-    return r.status;
-  };
-  const repView = (r) => ({ ...r, status: repFresh(r), credential: r.credential && { ...r.credential, honest: r.credential.reviewStatus === 'reviewed_valid' ? 'document reviewed by Trust & Safety — this is a document review, not an independent licence-register check (no register integration is configured)' : 'uploaded document, review pending — NOT an independently verified licence' } });
-
-  /**
-   * M23 P5.6E — CLOSED (E-1). This was the legacy F10 writer: any member of any
-   * agency-typed org could create a relationship that the player could confirm
-   * to `active`, with no licence check, no jurisdiction policy, no conflict
-   * evaluation, no consent ledger, no rev and no idempotency. A confirmed
-   * legacy row then fed the M16.2 Trust relationship input and the Passport
-   * representation headline — which is authority, even though the P5.6B access
-   * predicate refused it private client access.
-   *
-   * P5.6E §5/§7 permit exactly one active authority writer, and it is the
-   * canonical P5.6B lane: a LICENSED individual requests, the client confirms.
-   * So this route now creates nothing and says where the real one is. The
-   * refusal is deliberately explicit rather than a 404: the caller is a
-   * legitimate agency user being redirected, not someone probing.
-   *
-   * The player-side confirm / withdraw / dispute routes below stay OPEN on
-   * purpose. A player must always be able to end or dispute a record that
-   * already names them; closing those would trap them in it.
-   */
-  orgRouter.post('/representation/propose', (req, res) => {
-    if (req.org.type !== 'agency') return res.status(403).json({ error: 'AGENCY_ONLY', message: 'Representation relationships belong to the agency lane.' });
-    return res.status(410).json({
-      error: 'REPRESENTATION_LANE_CLOSED',
-      message: 'This lane no longer creates relationships. A representation relationship is requested by a licensed agent in ScoutBox Agent and becomes active only when the client confirms it.',
-      canonicalRoute: 'POST /org/agent/clients/request',
-      note: 'Existing records here remain readable as history, and the player can still withdraw or dispute one.',
-    });
-  });
-
-  orgRouter.get('/representation', (req, res) => {
-    if (req.org.type !== 'agency') return res.status(403).json({ error: 'AGENCY_ONLY' });
-    const mine = db.representations.filter((r) => r.agencyOrgId === req.org.id);
-    res.json({
-      items: mine.map(repView),
-      note: 'Active representation requires the player’s confirmation and ends the moment they withdraw it. States are labelled exactly as they are.',
-    });
-  });
-
-  // Player lane — adult-gated live on EVERY route (16/17-year-olds get 403
-  // even if a record somehow existed).
-  function adultOnly(req, res) {
-    if (!isAdult(req.player)) {
-      res.status(403).json({ error: 'UNDER_18_WALL', message: 'Representation tools unlock at the age of majority — evaluated from your date of birth.' });
-      return false;
-    }
-    return true;
-  }
-
-  playerRouter.get('/representation', (req, res) => {
-    if (!adultOnly(req, res)) return;
-    res.json({ items: db.representations.filter((r) => r.playerId === req.player.id).map(repView) });
-  });
-
-  playerRouter.post('/representation/:id/confirm', (req, res) => {
-    if (!adultOnly(req, res)) return;
-    const r = db.representations.find((x) => x.id === req.params.id && x.playerId === req.player.id);
-    if (!r) return res.status(404).json({ error: 'NOT_FOUND' });
-    if (repFresh(r) !== 'proposed') return res.status(409).json({ error: 'NOT_PROPOSED', status: repFresh(r) });
-    r.status = 'active';
-    r.confirmedAt = Date.now();
-    histAppend(r, 'player', req.player.id, req.player.name, 'confirmed');
-    persistNow();
-    res.json({ representation: repView(r) });
-  });
-
-  playerRouter.post('/representation/:id/withdraw', (req, res) => {
-    if (!adultOnly(req, res)) return;
-    const r = db.representations.find((x) => x.id === req.params.id && x.playerId === req.player.id);
-    if (!r) return res.status(404).json({ error: 'NOT_FOUND' });
-    if (!['proposed', 'active'].includes(repFresh(r))) return res.status(409).json({ error: 'NOT_ACTIVE', status: repFresh(r) });
-    r.status = 'withdrawn';
-    r.withdrawnAt = Date.now();
-    histAppend(r, 'player', req.player.id, req.player.name, 'withdrawn');
-    const firstUser = db.users.find((u) => u.orgId === r.agencyOrgId && !u.removedAt);
-    if (firstUser) notify({ kind: 'org_user', id: firstUser.id }, 'representation', `${r.playerName} withdrew the representation relationship. Current access ends now; the historical record stays attributed.`, r.id);
-    persistNow();
-    res.json({ representation: repView(r), note: 'Current representation access is revoked. History is retained for accountability.' });
-  });
-
-  playerRouter.post('/representation/:id/dispute', (req, res) => {
-    if (!adultOnly(req, res)) return;
-    const r = db.representations.find((x) => x.id === req.params.id && x.playerId === req.player.id);
-    if (!r) return res.status(404).json({ error: 'NOT_FOUND' });
-    r.status = 'disputed';
-    r.disputedAt = Date.now();
-    r.disputeReason = String(req.body?.reason ?? '').slice(0, 300);
-    histAppend(r, 'player', req.player.id, req.player.name, 'disputed', { reason: r.disputeReason });
-    persistNow();
-    res.json({ representation: repView(r), note: 'Trust & Safety reviews disputed relationships.' });
-  });
-
-  adminRouter.get('/representations', (_req, res) => {
-    res.json({ items: db.representations.map(repView) });
-  });
-
-  adminRouter.post('/representations/:id/review-credential', (req, res) => {
-    const r = db.representations.find((x) => x.id === req.params.id);
-    if (!r?.credential) return res.status(404).json({ error: 'NO_CREDENTIAL' });
-    const status = req.body?.valid === true ? 'reviewed_valid' : 'reviewed_invalid';
-    r.credential.reviewStatus = status;
-    r.credential.reviewedAt = Date.now();
-    histAppend(r, 'admin', 'ts', 'Trust & Safety', 'credential_reviewed', { status });
-    persistNow();
-    res.json({ representation: repView(r), honest: 'This records a human document review. No independent licence-register integration exists in this environment, and the record says so.' });
-  });
 }

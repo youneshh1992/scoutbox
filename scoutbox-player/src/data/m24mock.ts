@@ -16,8 +16,8 @@ const UNVERIFIED_AGENT = { userId: 'usr-tomas', displayName: 'Tomás Rivera', ag
 
 const RELS: Record<string, AgentRelationship[]> = {
   'pl-adeyemi': [
-    { id: 'rep-p1', status: 'proposed', pending: true, scope: ['employment', 'transfer'], exclusive: false, jurisdiction: 'ENG', termMonths: 18, startAt: null, endAt: null, proposedAt: NOW - 2 * DAY, confirmedAt: null, terminatedBy: null, disputeReason: null, shareWithAgencyStaff: false, disclosure: { clubPresence: false, contactRouting: false, trialVisibility: false }, legacy: null, rev: 1, honest: HONEST, agent: ANA },
-    { id: 'rep-p2', status: 'proposed', pending: true, scope: ['commercial'], exclusive: false, jurisdiction: 'INT', termMonths: 12, startAt: null, endAt: null, proposedAt: NOW - DAY, confirmedAt: null, terminatedBy: null, disputeReason: null, shareWithAgencyStaff: false, disclosure: { clubPresence: false, contactRouting: false, trialVisibility: false }, legacy: null, rev: 1, honest: HONEST, agent: UNVERIFIED_AGENT },
+    { id: 'rep-p1', status: 'proposed', pending: true, scope: ['employment', 'transfer'], exclusive: false, jurisdiction: 'ENG', termMonths: 18, startAt: null, endAt: null, proposedAt: NOW - 2 * DAY, confirmedAt: null, terminatedBy: null, disputeReason: null, shareWithAgencyStaff: false, disclosure: { clubPresence: false, contactRouting: false, trialVisibility: false }, rev: 1, honest: HONEST, agent: ANA },
+    { id: 'rep-p2', status: 'proposed', pending: true, scope: ['commercial'], exclusive: false, jurisdiction: 'INT', termMonths: 12, startAt: null, endAt: null, proposedAt: NOW - DAY, confirmedAt: null, terminatedBy: null, disputeReason: null, shareWithAgencyStaff: false, disclosure: { clubPresence: false, contactRouting: false, trialVisibility: false }, rev: 1, honest: HONEST, agent: UNVERIFIED_AGENT },
   ],
 };
 

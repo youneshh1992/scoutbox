@@ -18,7 +18,7 @@ import {
 } from './m12screens';
 import {
   ImportsScreen, CoverageScreen, CalibrationScreen, InsightScreen,
-  NetworkScreen, BudgetsScreen, RepresentationScreen, OrganisationScreen,
+  NetworkScreen, BudgetsScreen, OrganisationScreen,
 } from './m13screens';
 import { VerificationScreen } from './m14screens';
 import { RoomsScreen } from './roomsScreens';
@@ -55,7 +55,7 @@ export type ScreenId =
   | 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'fixtures'
   | 'ledger' | 'funnel' | 'reputation' | 'plan'
   | 'assessments' | 'recruitment' | 'planner' | 'opportunities' | 'campaigns' | 'video' | 'outcomes' | 'trialdays'
-  | 'imports' | 'coverage' | 'calibration' | 'insight' | 'network' | 'budgets' | 'representation' | 'organisation'
+  | 'imports' | 'coverage' | 'calibration' | 'insight' | 'network' | 'budgets' | 'organisation'
   | 'verification' | 'rooms'
   | 'secondlook' | 'nobodymissed' | 'briefs'
   | 'matching' | 'watchlists'
@@ -95,7 +95,6 @@ const NOTIFICATION_SCREEN: Record<string, ScreenId> = {
   review_queue: 'campaigns',
   coverage: 'coverage',
   calibration: 'calibration',
-  representation: 'representation',
   saved_search: 'search',
 };
 
@@ -634,7 +633,6 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           {screen === 'insight' && <InsightScreen {...props} />}
           {screen === 'network' && <NetworkScreen {...props} />}
           {screen === 'budgets' && <BudgetsScreen {...props} />}
-          {screen === 'representation' && <RepresentationScreen {...props} />}
           {screen === 'organisation' && <OrganisationScreen {...props} />}
           {screen === 'verification' && <VerificationScreen {...props} />}
         </div>

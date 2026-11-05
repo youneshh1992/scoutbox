@@ -127,10 +127,6 @@ export function registerPassportCore(ctx) {
       opportunityTitle: ctx.scoutingReads.opportunities.byId(a.opportunityId)?.title ?? null,
     }));
     const transitions = vreads.transitionCases.forPlayer(pid); // S10c: read through SQL
-    // History: every legacy M13 F10 row that was once confirmed, whatever became
-    // of it. The timeline is the right place for these; the representation
-    // HEADLINE is not built from them (M23 P5.6E, E-2).
-    const representations = db.representations.filter((r) => r.playerId === pid && r.confirmedAt);
     /**
      * The canonical P5.6B relationships, shaped for the projection: a named
      * licensed individual, their agency, the scope and the dates. Read here so
@@ -214,7 +210,7 @@ export function registerPassportCore(ctx) {
       identity,
       prefs,
       history,
-      status: currentStatus({ history, prefs, representations, agreements: agentAgreements, identity }),
+      status: currentStatus({ history, prefs, agreements: agentAgreements, identity }),
       evidenceSummary: {
         fullMatches: fullMatchEvidence.length,
         clips: (player.media ?? []).length,
@@ -248,7 +244,7 @@ export function registerPassportCore(ctx) {
       full.timeline = buildTimeline({
         affiliations: [], careerEntries, squads, trials, assessments, references,
         evidence, objectives, applications, transitions, signings, outcomes,
-        representations, achievements, positionHistory: prefs.positionHistory,
+        achievements, positionHistory: prefs.positionHistory,
         boxSessions: boxTimelineSessions, boxChallenges: boxChallengeCompletions,
       });
       full.temporalConflicts = temporalConflicts({ events: full.timeline, history: history.rows, dob: player.dob });

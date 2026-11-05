@@ -249,7 +249,7 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'passport_shares_token_hash'").get().sql, /UNIQUE/, 'one share per token hash');
   // S10c (migration 0025): the transition and reference definitions of 05 — no JSON column (a history entry's detail is
   // two typed columns), no player or guardian key (tolerant), a grant's and a placement's organisation RESTRICT, the
-  // pack, grants and history cascading with their case (the legacy representations stay a draft until S11).
+  // pack, grants and history cascading with their case.
   assert.match(header05, /0025_transitions_vouches REGISTERED/, 'the S10c section of 05 states that 0025 is registered');
   for (const t of S10C_TABLES) {
     const cols = docs.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);

@@ -419,7 +419,7 @@ let kid17;
   // changes nothing about a minor — moves to the canonical lane, which refuses a
   // minor on its own gate.
   let r = await j('POST', '/org/representation/propose', { playerId: kid17.id, scope: 'full_representation' }, alex.token);
-  ok(r.status === 410 && r.body.error === 'REPRESENTATION_LANE_CLOSED', 'the legacy representation lane is closed — verification does not reopen it');
+  ok(r.status === 404, 'the legacy representation lane is gone — verification does not reopen it');
   const canonicalMinor = await j('POST', '/org/agent/clients/request', { playerId: kid17.id, scope: ['employment'], jurisdiction: 'INT' }, alex.token);
   ok(canonicalMinor.status >= 400, `and the canonical lane refuses a 17-year-old too — verification changes nothing (${canonicalMinor.status} ${canonicalMinor.body?.error ?? ''})`);
   const kidTok = (await j('POST', '/auth/player/login', { playerId: kid17.id })).body;

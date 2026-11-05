@@ -9,7 +9,7 @@ import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
 import { RecordPanel, DetailFact, InfoNote, Button, Card, Disclosure, Muted, Pill, Row, SectionTitle } from './ui';
-import { m13, type AckNotification, type Preferences, type RepresentationView, type TransitionCase, type Verdict } from '../data/m13client';
+import { m13, type AckNotification, type Preferences, type TransitionCase, type Verdict } from '../data/m13client';
 import { m12, type BoardItem } from '../data/m12client';
 import { pt } from '../i18n';
 import type { Actor } from './M12Sections';
@@ -207,34 +207,6 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
           );
         }} />
       )}
-      {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
-    </Card>
-  );
-}
-
-// ------------------------------------------------------ F10 representation
-export function RepresentationSection({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
-  const colors = useColors();
-  const [items, reload, err] = useLoad<RepresentationView[]>(() => m13.listRepresentation(playerId), [playerId]);
-  const [msg, setMsg] = useState<string | null>(null);
-  if (isMinor) return null; // structurally absent for under-18s — nothing to render
-  return (
-    <Card>
-      <SectionTitle>{pt('m13rep')}</SectionTitle>
-      {err && <Muted size={12}>{err}</Muted>}
-      {(items ?? []).map((r) => (
-        <View key={r.id} style={{ marginTop: 8, gap: 14, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 16 }}>
-          <RecordIdentity name={r.agencyName} subtitle={r.representativeName} icon="building-2" status={<Pill label={r.status.charAt(0).toUpperCase() + r.status.slice(1)} tone={r.status === 'active' ? 'green' : r.status === 'withdrawn' || r.status === 'disputed' ? 'red' : 'blue'} />} />
-          <DetailFact label="Scope" value={r.scope.replace(/_/g, ' ')} icon="file-text" />
-          {r.credential && <GuidanceNote title="Credential review" icon="shield">{r.credential.note} — {r.credential.reviewStatus.replace(/_/g, ' ')}. {r.credential.honest}</GuidanceNote>}
-          <Row style={{ marginTop: 6 }}>
-            {r.status === 'proposed' && <Button small primary label={pt('m13repConfirm')} onPress={async () => { await m13.actRepresentation(playerId, r.id, 'confirm'); setMsg(pt('m13repConfirmed')); reload(); }} />}
-            {['proposed', 'active'].includes(r.status) && <Button small label={pt('m13repWithdraw')} onPress={async () => { await m13.actRepresentation(playerId, r.id, 'withdraw'); setMsg(pt('m13repWithdrawn')); reload(); }} />}
-            {r.status !== 'disputed' && <Button small label={pt('m13repDispute')} onPress={async () => { await m13.actRepresentation(playerId, r.id, 'dispute', 'I did not agree to this.'); setMsg(pt('m13repDisputed')); reload(); }} />}
-          </Row>
-        </View>
-      ))}
-      {(items ?? []).length === 0 && !err && <GuidanceNote icon="info" size={12}>{pt('m13repNone')}</GuidanceNote>}
       {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
     </Card>
   );

@@ -17,7 +17,7 @@ import type { InboxRequest } from '../domain/types';
 import { useColors, type Palette } from '../theme';
 import { pt } from '../i18n';
 import { TimelineItem, RecordPanel, DetailFact, InfoNote, Button, Disclosure, FactRow, ListRow, Muted, Row, SectionTitle } from './ui';
-import { AckSection, ExposureSection, RepresentationSection, TransitionsSection } from './M13Sections';
+import { AckSection, ExposureSection, TransitionsSection } from './M13Sections';
 import { ReferencesSection } from './M14Sections';
 import { AgentSharedOpportunities, MyAgentSection } from './MyAgentSection';
 import { AgentConsentSection } from './AgentConsentSection';
@@ -58,7 +58,6 @@ export function ClubsCurrent({ actor, isMinor, mediaOptions }: { actor: Actor; i
           : <Muted size={13.5}>{pt('clubsNoClub')}</Muted>}
       </View>
       <MyAgentSection playerId={actor.id} isMinor={isMinor} />
-      <RepresentationSection playerId={actor.id} isMinor={isMinor} />
       <TransitionsSection actor={actor} isMinor={isMinor} mediaOptions={mediaOptions} />
       <ExposureSection playerId={actor.id} />
     </View>

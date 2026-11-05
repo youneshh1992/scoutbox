@@ -1,7 +1,7 @@
 // Demo mirror of the M13 player/guardian surface (EXPO_PUBLIC_DEMO=1).
 // Synthetic examples; state lives in this tab's memory and resets on reload.
 import type {
-  PlayerM13, Preferences, Verdict, TransitionCase, RepresentationView,
+  PlayerM13, Preferences, Verdict, TransitionCase,
   ExposureView, AckNotification,
 } from './m13client';
 
@@ -48,13 +48,6 @@ const TRANSITIONS: TransitionCase[] = [{
   history: [{ at: NOW - 10 * DAY, byName: 'Kola Adeyemi', action: 'opened' }, { at: NOW - 3 * DAY, byName: 'Kola Adeyemi', action: 'recipient_added' }, { at: NOW - 2 * DAY, byName: 'Kola Adeyemi', action: 'recipient_revoked' }],
 }];
 
-const REPS: RepresentationView[] = [{
-  id: 'rep-m1', agencyName: 'North Star Sports Agency', representativeName: 'Alex Agent', scope: 'contracts_only',
-  status: 'proposed', endAt: NOW + 350 * DAY,
-  credential: { note: 'FA intermediary licence PDF', reviewStatus: 'pending', honest: 'uploaded document, review pending — NOT an independently verified licence' },
-  history: [{ at: NOW - DAY, byName: 'Alex Agent', action: 'proposed' }],
-}];
-
 const EXPOSURE: ExposureView = {
   windowDays: 90, appearedInSearches: '6–20', profileViews: '1–5', clubs: '1–5',
   note: 'Coarse ranges over the last 90 days. Which club looked is not shown — interest becomes visible when a club actually contacts you through the proper channel.',
@@ -99,13 +92,6 @@ export const m13mock: PlayerM13 = {
     const t = TRANSITIONS.find((x) => x.id === tid);
     if (t) { t.status = 'placed'; t.placement = { orgName: orgId, at: Date.now() }; }
     return delay(undefined);
-  },
-  listRepresentation: (pid) => (pid === 'pl-guni' ? Promise.reject(new Error('Representation tools unlock at the age of majority — evaluated from your date of birth.')) : delay(REPS)),
-  actRepresentation: (pid, rid, action) => {
-    const r = REPS.find((x) => x.id === rid)!;
-    r.status = action === 'confirm' ? 'active' : action === 'withdraw' ? 'withdrawn' : 'disputed';
-    r.history.push({ at: Date.now(), byName: 'you', action });
-    return delay(r);
   },
   exposure: () => delay(EXPOSURE),
   ackList: () => delay(ACKS.filter((a) => !a.actionRequired?.ackedAt)),

@@ -199,7 +199,7 @@ them.
 | `passportShares` | temporary | 05 | `passport_shares` (`token_hash` already) | S10 |
 | `passportCorrections` | persistent | 05 | `passport_corrections` | S10 |
 | `transitionCases` | persistent | 05 | `transition_cases`, `transition_case_pack_items`, `transition_case_recipients`, `transition_case_history` | S10 |
-| `representations` | persistent (legacy, no live creator) | 05 | `representations`, `representation_history` | S10 |
+| `representations` | removed in S11a (the legacy lane, with its routes and screens; no record could exist) | — | none | S11a |
 | `vouches` | persistent | 05 | `vouches` (`code_hash`) | S10 |
 | `agentProfiles` | persistent | 06 | `agent_profiles`, `agent_profile_declared_jurisdictions`, `agent_profile_facets`, `agent_profile_history` | S11 |
 | `agencyAffiliations` | persistent | 06 | `agency_affiliations`, `agency_affiliation_tiers`, `agency_affiliation_history` | S11 |
@@ -399,7 +399,7 @@ this branch: 13 checks passed.
 | `02_recruitment.sql` | requests, trials, cases and rooms, decisions, contacts, offers, signing packages, signings, follow-ups, idempotency keys | 55 | S8 |
 | `03_messaging_safety_audit.sql` | channels and messages, notifications, delivery, push, blocks, reports, moderation, notes, ledger, ops events, source changes, one-time codes, IDV queue | 21 | S6, S7 |
 | `04_scouting_assessment.sql` | evidence, coach affiliations, squads and tactical setups, assessment templates and assessments, video, vacancies, opportunities, applications, campaigns, player preferences | 33 | S9 |
-| `05_verification_passport.sql` | verification claims, events, evidence, tokens, admins, root requests, disputes, references, invites, conflicts, domains; passport; transition cases; representations; vouches | 31 | S10 |
+| `05_verification_passport.sql` | verification claims, events, evidence, tokens, admins, root requests, disputes, references, invites, conflicts, domains; passport; transition cases; vouches | 31 | S10 |
 | `06_agent_compliance_transactions.sql` | agent profiles, affiliations, representation agreements, reviewers, jurisdiction policies, regulatory reviews and consents, compliance contexts, agent transactions, documents | 61 | S11 |
 | `07_development_boxcam_discovery.sql` | development objectives and plans, drill guidance, Box Cam sessions, challenges, assignments, disputes, Combine, CV results, briefs, Nobody Missed, Second Look, watchlists, exposure, review-later, suggestions, calibration, fixtures, coverage | 57 | S12 |
 | `08_operations_integrations.sql` | API keys, webhooks, invites, SSO, support, imports and prospects, groups, uploads, saved searches, open trials, matchdays, friendlies, invoices, plans, archetypes, reputation seed, callback ids, operational settings | 44 | S13 |
@@ -1025,7 +1025,7 @@ catalogue; shadow-then-cutover per domain; no integer keys; no triggers or views
   or stored as JSON belt-and-braces?
 - O7. Second Look natural key: the engine uses `(org, room, decision)`, the integrity check
   uses `(org, room)`; the schema enforces the engine's; the integrity check needs updating.
-- O8. `representations` (legacy, creation closed with 410): migrate or archive as JSON?
+- O8. `representations` (legacy, creation closed with 410): migrate or archive as JSON? *Settled in S11a: removed, with its routes and screens.*
   Proposed: migrate (it is small, and the shape is known from commit `e865531`).
 - O9. Player foreign keys on the recruitment tables (file 02 has none; §10). **Decided for S8a-core by
   Q7a (22 October 2026, "Approve tolerant (Recommended)"):** `recruitment_requests.player_id` and

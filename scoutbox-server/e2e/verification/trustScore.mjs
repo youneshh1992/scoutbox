@@ -491,7 +491,7 @@ section('D-P56A-1 — an agency relationship counts only while it is active');
   // with it: the state filter is the point, and it is asserted here against the
   // lane that can actually create a relationship.
   const closed = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi', scope: 'full' }, alex.token);
-  neg(closed.status === 410 && closed.body.error === 'REPRESENTATION_LANE_CLOSED', 'the legacy representation writer creates nothing (P5.6E E-1)');
+  neg(closed.status === 404, 'the legacy representation writer is gone and creates nothing (P5.6E E-1, removed in S11a)');
   await j('POST', '/org/agent/agency/team', { name: 'Ana Agent', tiers: ['licensed_agent'] }, alex.token);
   const ana = await login('org-northstar', 'Ana Agent', 'Agent', 'agent');
   await j('POST', '/org/agent/profile', { displayName: 'Ana Agent', jurisdictions: ['ENG'] }, ana.token);
@@ -526,12 +526,12 @@ section('D-P56A-1 — an agency relationship counts only while it is active');
   const active2 = (await j('GET', '/player/agent/relationships', undefined, mateus.token)).body.items.find((x) => x.id === id2);
   ok((await j('POST', `/player/agent/relationships/${id2}/dispute`, { reason: 'not my agent', expectedRev: active2.rev }, mateus.token)).status === 200, 'the client disputes it');
   neg((await distinctMateus()) === m0, 'a DISPUTED relationship stops counting');
-  // Source guards. The legacy key must still read the field the record actually
-  // carries, and the canonical source must apply the same state filter rather
-  // than counting any agreement it finds.
+  // Source guards. The relationship key is the agency (`agencyOrgId`, the field
+  // the record carries), and the canonical source must apply the same state
+  // filter rather than counting any agreement it finds. The legacy lane is gone (S11a).
   const { readFileSync } = await import('node:fs');
   const trustSrc = readFileSync(new URL('../../domains/verification/trust/trust.mjs', import.meta.url), 'utf8');
-  neg(!/rel:agency:\$\{rep\.orgId\}/.test(trustSrc) && /rel:agency:\$\{rep\.agencyOrgId\}/.test(trustSrc), 'the legacy relationship key reads `agencyOrgId`, the field the representation record actually carries');
+  neg(!/rel:agency:\$\{\w+\.orgId\}/.test(trustSrc) && /rel:agency:\$\{a\.agencyOrgId\}/.test(trustSrc) && !/db\.representations\b/.test(trustSrc), 'the relationship key reads `agencyOrgId`, the field the agreement actually carries, and no legacy lane is read');
   neg(/db\.representationAgreements/.test(trustSrc) && /a\.confirmedAt \&\& a\.status !== 'active'|!a\.confirmedAt \|\| a\.status !== 'active'/.test(trustSrc), 'the canonical source requires confirmedAt AND an active status');
   neg(/typeof a\.agentUserId !== 'string'/.test(trustSrc), 'and it refuses a legacy mirror row, which names no licensed individual');
 }
