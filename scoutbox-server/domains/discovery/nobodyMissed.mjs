@@ -13,7 +13,7 @@
 //
 // Hidden players never enter the candidate set. They are not matched and then
 // concealed — concealment after matching is how side channels are born.
-import { PROVIDERS } from '../domains/development/boxcam/drills.mjs';
+import { PROVIDERS } from '../development/boxcam/drills.mjs';
 import {
   validateRecruitmentBrief, explainBriefCriteria, playerMatchesBrief,
   buildNobodyMissedCandidate, evaluationCoverageState, isMeaningfullyEvaluated,
@@ -22,8 +22,8 @@ import {
   NOBODY_MISSED_STATES, NM_DISMISSAL_REASONS, NM_SORTS, orderNobodyMissed,
   EVIDENCE_REQUIREMENTS, POSITIONS, TRUST_BANDS, LIMITS, clampPage, briefIsLiveOn,
 } from './shared.mjs';
-import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
-import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
+import { rateLimitedBody } from '../platform/rateLimit.mjs';
+import { guardRev, bumpRev, revMeta } from '../platform/concurrency.mjs';
 
 export function registerNobodyMissed(ctx) {
   const {

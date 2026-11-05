@@ -71,7 +71,7 @@ const EVIDENCE_LABELS: Record<string, string> = {
 };
 
 // --------------------------------------------------------- the demo engine
-// A faithful mirror of m19/match.mjs: same fail-closed rules, same words.
+// A faithful mirror of scoutbox-server/domains/discovery/matching/match.mjs: same fail-closed rules, same words.
 type Crit = CriteriaInput['required'][number];
 
 function criterionId(c: Crit): string {

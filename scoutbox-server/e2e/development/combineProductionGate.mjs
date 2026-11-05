@@ -34,7 +34,7 @@ import {
 } from '../../domains/development/boxcam/cv/eligibility.mjs';
 import { ProductionCvProvider } from '../../domains/development/boxcam/cv/provider.mjs';
 import { measureAttempt, measurementSupported, combineProtocol } from '../../domains/development/boxcam/combineShared.mjs';
-import { matchPlayerToCriteria } from '../../m19/match.mjs';
+import { matchPlayerToCriteria } from '../../domains/discovery/matching/match.mjs';
 import { REAL_WORLD_VALIDATION, REQUIRED_RECORD_FIELDS } from '../../domains/development/boxcam/cv/validation.mjs';
 import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION, CANDIDATE_PROTOCOLS } from '../../domains/development/boxcam/cv/policy.mjs';
 import { PROVIDERS } from '../../domains/development/boxcam/drills.mjs';

@@ -22,9 +22,9 @@
 // `playerMatchesBrief` delegates to it so that Nobody Missed and Matching
 // cannot drift apart. The import is circular (the engine reads this file's
 // vocabulary), which is safe because the engine touches that vocabulary only
-// inside function bodies — see the lazy band rank in m19/match.mjs.
-import { matchBrief } from '../m19/match.mjs';
-import { parseStrictDateOnly, isDayWithin, isAbsent } from '../temporal.mjs';
+// inside function bodies — see the lazy band rank in matching/match.mjs.
+import { matchBrief } from './matching/match.mjs';
+import { parseStrictDateOnly, isDayWithin, isAbsent } from '../../temporal.mjs';
 
 // =====================================================================
 // SECOND LOOK POLICY
@@ -689,7 +689,7 @@ export function explainBriefCriteria(criteria = {}) {
  * `facts` is the lightweight match projection, never a full Passport.
  */
 export function playerMatchesBrief(facts, criteria = {}, opts = {}) {
-  // M19: a thin adapter over the ONE explainable match engine (m19/match.mjs).
+  // M19: a thin adapter over the ONE explainable match engine (matching/match.mjs).
   // Everything a brief carries is REQUIRED, which is what a brief has always
   // meant, so the output is unchanged: the same keys, the same `met` flags,
   // the same words, in the same order. There is deliberately no second

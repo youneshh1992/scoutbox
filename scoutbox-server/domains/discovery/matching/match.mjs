@@ -21,10 +21,10 @@
  * about it. An unknown age is not "probably fine", and a distance that could
  * not be established is not "probably near".
  */
-import { EVIDENCE_REQUIREMENTS, TRUST_BANDS } from '../m18/shared.mjs';
+import { EVIDENCE_REQUIREMENTS, TRUST_BANDS } from '../shared.mjs';
 import { MATCH_POLICY_VERSION, criteriaVersion } from './criteria.mjs';
 
-// Built on first use, never at module load: m18/shared.mjs imports this
+// Built on first use, never at module load: domains/discovery/shared.mjs imports this
 // module, so TRUST_BANDS may still be initialising while this file evaluates.
 let BAND_RANK_MEMO = null;
 const bandRank = () => (BAND_RANK_MEMO ??= Object.fromEntries(TRUST_BANDS.map((b, i) => [b, i])));

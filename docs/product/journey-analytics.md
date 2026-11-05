@@ -148,4 +148,4 @@ One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used
 - Player next-action priority, drift detection, single selectors: ✓ `domains/recruitment/lifecycle/journeyModel.mjs:381,535,150,167`
 - Events only trigger a refetch: ✓ `scoutbox-club/src/App.tsx:434-450` (same in grassroots and agent)
 - Analytics guards: ✓ `m20/index.mjs:91` (person grouping), `m20/metrics.mjs:46` (small-n), `m20/index.mjs:73` (registry at boot)
-- M19 guards (prohibited traits, distance sort, mode required): ✓ `m19/criteria.mjs:212`, `m19/index.mjs:170,261`
+- M19 guards (prohibited traits, distance sort, mode required): ✓ `domains/discovery/matching/criteria.mjs`, `domains/discovery/matching/index.mjs`

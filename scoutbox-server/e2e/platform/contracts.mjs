@@ -31,7 +31,7 @@ import { parseFaultRules, createFaultLayer } from '../../domains/platform/faults
 import { productionConfigProblems } from '../../domains/platform/capabilities.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { ageOn, isAdult, adultAgeFor } from '../../domain.mjs';
-import { POLICY, secondLookStatus, secondLookExpired, briefIsLiveOn, validateRecruitmentBrief } from '../../m18/shared.mjs';
+import { POLICY, secondLookStatus, secondLookExpired, briefIsLiveOn, validateRecruitmentBrief } from '../../domains/discovery/shared.mjs';
 import { PROVENANCE } from '../../domains/verification/passport/shared.mjs';
 import { openStore } from '../../store.mjs';
 import { DatabaseSync } from 'node:sqlite';
@@ -179,7 +179,7 @@ section('§7 — every sort has a stable tie-break, and the ordering is declared
   ok((discover.match(/String\(a\.id\)\.localeCompare\(String\(b\.id\)\)/g) ?? []).length === 2, 'both Discover sorts (Pro and Grassroots) end on the player id');
   ok(/X-ScoutBox-Ordering/.test(discover), 'the ordering is declared on the wire');
   neg(!/score|rank|quality|ability/i.test(discover.match(/X-ScoutBox-Ordering'[\s\S]*?\);/)[0]), 'the declared ordering names no score, rank or ability');
-  const shared = read('scoutbox-server/m18/shared.mjs');
+  const shared = read('scoutbox-server/domains/discovery/shared.mjs');
   ok(/orderNobodyMissed[\s\S]*localeCompare/.test(shared), 'Nobody Missed sorts have an id tie-break');
   ok(/orderSecondLook[\s\S]*KIND_ORDER/.test(shared), 'Second Look orders by relevance kind, then time — never a priority score');
   ok(/data-ordering/.test(read('scoutbox-club/src/screens.tsx')) && /data-ordering/.test(read('scoutbox-grassroots/src/screens.tsx')), 'both Discover screens state their ordering to the person');
@@ -196,7 +196,7 @@ section('§8 — every notification type is classified, mentions are recognised 
   neg(categoryOf('message', 'someone wrote "mentioned you" in a message') !== 'mentions', 'user text saying "mentioned you" in another type is NOT a mention');
   neg(categoryOf('never_seen_type') === null, 'an unknown type is unclassified (and, below, delivered)');
   // The server's notify() call sites: every literal type is classified.
-  const srv = ['server.mjs', 'domains/scouting/journeys.mjs', 'domains/scouting/scouting.mjs', 'm13/delivery.mjs', 'm13/enterprise.mjs', 'domains/verification/claims/index.mjs', 'domains/verification/passport/index.mjs', 'domains/development/boxcam/combine.mjs', 'domains/development/boxcam/index.mjs', 'domains/recruitment/rooms/rooms.mjs', 'm18/secondLook.mjs', 'm18/nobodyMissed.mjs', 'grassrootsJourney.mjs']
+  const srv = ['server.mjs', 'domains/scouting/journeys.mjs', 'domains/scouting/scouting.mjs', 'm13/delivery.mjs', 'm13/enterprise.mjs', 'domains/verification/claims/index.mjs', 'domains/verification/passport/index.mjs', 'domains/development/boxcam/combine.mjs', 'domains/development/boxcam/index.mjs', 'domains/recruitment/rooms/rooms.mjs', 'domains/discovery/secondLook.mjs', 'domains/discovery/nobodyMissed.mjs', 'grassrootsJourney.mjs']
     .filter((f) => fs.existsSync(path.join(SERVER_DIR, f)));
   const types = new Set();
   for (const f of srv) for (const m of fs.readFileSync(path.join(SERVER_DIR, f), 'utf8').matchAll(/notify\??\.?\([^,]+,\s*'([a-z_]+)'/g)) types.add(m[1]);
@@ -345,7 +345,7 @@ section('§14 — a Recruitment Brief window is inclusive calendar days, in UTC'
   neg(backwards.ok === false && backwards.error === 'BRIEF_INVALID', 'a window that ends before it starts cannot be saved');
   // The server evaluates "today" as a UTC calendar day: the same string a
   // client in any zone would compute from toISOString().
-  const src = read('scoutbox-server/m18/shared.mjs');
+  const src = read('scoutbox-server/domains/discovery/shared.mjs');
   ok(/toISOString\(\)\.slice\(0, 10\)/.test(src.slice(src.indexOf('export function briefIsLiveOn'))), 'today is the UTC calendar day');
 }
 
@@ -435,7 +435,7 @@ section('§19 — the request log carries no personal data');
   ok(/t: Date\.now\(\), id: req\.correlationId, m: req\.method, p: fullPath/.test(line), 'the structured log line is time, id, method, path, status, duration');
   neg(!/authorization|token|body|email|dob|query/.test(line), 'and nothing else');
   const files = fs.readdirSync(SERVER_DIR).filter((f) => f.endsWith('.mjs'));
-  for (const d of ['m12', 'm13', 'domains/development/boxcam', 'm18', 'domains/platform', 'domains/recruitment/rooms', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust']) for (const f of fs.readdirSync(path.join(SERVER_DIR, d)).filter((x) => x.endsWith('.mjs'))) files.push(`${d}/${f}`);
+  for (const d of ['m12', 'm13', 'domains/development/boxcam', 'domains/discovery', 'domains/platform', 'domains/recruitment/rooms', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust']) for (const f of fs.readdirSync(path.join(SERVER_DIR, d)).filter((x) => x.endsWith('.mjs'))) files.push(`${d}/${f}`);
   const leaks = [];
   for (const f of files) {
     const s = fs.readFileSync(path.join(SERVER_DIR, f), 'utf8');

@@ -12,7 +12,7 @@
 //   2. M18 never mutates the recruitment pipeline. Reopening a room goes
 //      through M17's own reopen path, so there is exactly one transition
 //      table, one decision memory and one activity trail.
-import { PROVIDERS } from '../domains/development/boxcam/drills.mjs';
+import { PROVIDERS } from '../development/boxcam/drills.mjs';
 import {
   SECOND_LOOK_POLICY_VERSION, SECOND_LOOK_STATUSES, canSecondLookTransition,
   DISMISSAL_REASONS, SECOND_LOOK_DISCLAIMER, SECOND_LOOK_KIND_COPY,
@@ -21,7 +21,7 @@ import {
   trustLevelChanges, POLICY, LIMITS, clampPage, safeM18Projection,
   CLUB_SIDE_REASONS, REASON_CHANGE_MAP,
 } from './shared.mjs';
-import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
+import { rateLimitedBody } from '../platform/rateLimit.mjs';
 
 export function registerSecondLook(ctx) {
   const {

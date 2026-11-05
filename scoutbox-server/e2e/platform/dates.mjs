@@ -37,7 +37,7 @@ import { effectiveStatus as licenceEffectiveStatus } from '../../domains/verific
 import { validateExternalRecord, cooldownFor, CONTACT_LIMITS } from '../../domains/recruitment/lifecycle/contact.mjs';
 import { parseInstant as trialParseInstant, validateTimezone, validateSessionInput, validateScheduleInput, localDay, icsLocal, TRIAL_LIMITS } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { resolveWindow, previousWindow } from '../../m20/metrics.mjs';
-import { briefIsLiveOn, validateRecruitmentBrief } from '../../m18/shared.mjs';
+import { briefIsLiveOn, validateRecruitmentBrief } from '../../domains/discovery/shared.mjs';
 import { normWhen } from '../../domains/verification/passport/shared.mjs';
 import { parseDate as devParseDate } from '../../domains/development/hub/shared.mjs';
 import { SCHEMA_VERSION } from '../../domains/platform/migrations.mjs';

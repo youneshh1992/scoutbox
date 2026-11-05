@@ -26,15 +26,15 @@ import {
   CRITERION_CLASSES, CRITERION_TYPES, CRITERION_TYPE_NAMES, OPERATORS, OPERATOR_NAMES,
   LIMITS, MATCH_POLICY_VERSION, CRITERIA_SCHEMA_VERSION, AVAILABILITY_VALUES,
   validateCriteria, criterionId, criteriaVersion, describeCriteria, isProhibitedCriterion,
-} from '../../m19/criteria.mjs';
-import { matchPlayerToCriteria, briefCriteriaToCanonical, matchBrief } from '../../m19/match.mjs';
+} from '../../domains/discovery/matching/criteria.mjs';
+import { matchPlayerToCriteria, briefCriteriaToCanonical, matchBrief } from '../../domains/discovery/matching/match.mjs';
 import {
   WATCHLIST_MODES, WATCHLIST_STATUSES, WATCHLIST_SOURCES, ENTRY_REASONS, EXIT_REASONS,
   PRIVACY_SAFE_EXIT, reconcileMembership, transitionFingerprint, explainTransition,
   membershipSummary, membershipNotification, watchlistBlockedState,
-} from '../../m19/watchlists.mjs';
-import { MATCH_SORTS, DEFAULT_MATCH_SORT } from '../../m19/index.mjs';
-import { playerMatchesBrief, POSITIONS, TRUST_BANDS, EVIDENCE_REQUIREMENTS, PROHIBITED_BRIEF_FIELDS } from '../../m18/shared.mjs';
+} from '../../domains/discovery/matching/watchlists.mjs';
+import { MATCH_SORTS, DEFAULT_MATCH_SORT } from '../../domains/discovery/matching/index.mjs';
+import { playerMatchesBrief, POSITIONS, TRUST_BANDS, EVIDENCE_REQUIREMENTS, PROHIBITED_BRIEF_FIELDS } from '../../domains/discovery/shared.mjs';
 import { EVENT_REGISTRY, isRegistered, minimizePayload } from '../../domains/platform/eventRegistry.mjs';
 import { audienceFor } from '../../domains/platform/eventAudience.mjs';
 import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';
@@ -296,9 +296,9 @@ section('§5 — there is ONE matching engine, and M18 uses it');
   const canonical = briefCriteriaToCanonical(brief);
   abuse(43, canonical.preferred.length === 0 && canonical.required.length > 0,
     'a Recruitment Brief becomes ALL-required criteria — M19 cannot silently soften what a club wrote as a requirement');
-  const src = read('scoutbox-server/m18/shared.mjs');
-  abuse(44, /from '\.\.\/m19\/match\.mjs'/.test(src) && !/function evaluateCriterion|switch \(c\.type\)/.test(src),
-    'm18/shared.mjs delegates and holds no second evaluator of its own');
+  const src = read('scoutbox-server/domains/discovery/shared.mjs');
+  abuse(44, /from '\.\/matching\/match\.mjs'/.test(src) && !/function evaluateCriterion|switch \(c\.type\)/.test(src),
+    'domains/discovery/shared.mjs delegates and holds no second evaluator of its own');
 }
 
 // ================================== §6 the watchlist reconciliation core
@@ -355,7 +355,7 @@ section('§7 — ordering is declared, deterministic, and never a ranking');
     'no ordering option is a match-quality ranking');
   abuse(51, DEFAULT_MATCH_SORT === 'recent_evidence',
     'the default ordering is the least suggestive useful one, not a quality order');
-  const src = read('scoutbox-server/m19/index.mjs');
+  const src = read('scoutbox-server/domains/discovery/matching/index.mjs');
   neg(/String\(a\.facts\.playerId\)\.localeCompare/.test(src) || /localeCompare\(String\(b\.facts\.playerId\)\)/.test(src),
     'every comparator ends on the player id, so two reads of the same data return the same order');
   neg(/preferredMet/.test(src) && !/sort[^\n]*preferredMet|preferredMet[^\n]*-\s*[ab]\./.test(src),
@@ -365,7 +365,7 @@ section('§7 — ordering is declared, deterministic, and never a ranking');
 // ======================================= §8 source sweeps over the tree
 section('§8 — the source itself carries no score, no ranking and no player surface');
 {
-  const files = ['m19/criteria.mjs', 'm19/match.mjs', 'm19/watchlists.mjs', 'm19/index.mjs']
+  const files = ['domains/discovery/matching/criteria.mjs', 'domains/discovery/matching/match.mjs', 'domains/discovery/matching/watchlists.mjs', 'domains/discovery/matching/index.mjs']
     .map((f) => ['scoutbox-server/' + f, read('scoutbox-server/' + f)]);
   const clients = ['scoutbox-club/src/m19Api.ts', 'scoutbox-club/src/m19Screens.tsx', 'scoutbox-club/src/m19Demo.ts',
     'scoutbox-grassroots/src/m19Api.ts', 'scoutbox-grassroots/src/m19Screens.tsx', 'scoutbox-grassroots/src/m19Demo.ts']
@@ -381,19 +381,19 @@ section('§8 — the source itself carries no score, no ranking and no player su
       abuse(52, !re.test(stripped), `${name}: no "${re.source.replace(/\\b|\\/g, '')}" outside a sentence that denies it`);
     }
   }
-  const routes = [...read('scoutbox-server/m19/index.mjs').matchAll(/orgRouter\.(get|post|patch|put|delete)\('([^']+)'/g)].map((m) => `${m[1].toUpperCase()} ${m[2]}`);
+  const routes = [...read('scoutbox-server/domains/discovery/matching/index.mjs').matchAll(/orgRouter\.(get|post|patch|put|delete)\('([^']+)'/g)].map((m) => `${m[1].toUpperCase()} ${m[2]}`);
   ok(routes.length === 8, `${routes.length} M19 routes, all on the ORGANISATION router`);
-  abuse(53, !/playerRouter|guardianRouter|publicRouter|tsRouter|adminRouter/.test(read('scoutbox-server/m19/index.mjs')),
+  abuse(53, !/playerRouter|guardianRouter|publicRouter|tsRouter|adminRouter/.test(read('scoutbox-server/domains/discovery/matching/index.mjs')),
     'M19 registers nothing on a player, guardian, public, T&S or admin router — there is no player-facing surface to leak from');
   {
     // Exactly one read of the player collection, inside the guarded scan.
     // Anything else would be a path around playerViewForOrg.
-    const src = read('scoutbox-server/m19/index.mjs').split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
+    const src = read('scoutbox-server/domains/discovery/matching/index.mjs').split('\n').filter((l) => !/^\s*(\*|\/\/)/.test(l)).join('\n');
     const reads = [...src.matchAll(/db\.players\b/g)].length;
     abuse(54, reads === 1 && /for \(const player of db\.players\)/.test(src),
       `the only read of db.players is the single guarded scan (${reads} occurrence)`);
   }
-  abuse(55, /orgCanSee\(org, player\)/.test(read('scoutbox-server/m19/index.mjs')) && /ctx\.m18MatchFacts\?\.\(player, org\)/.test(read('scoutbox-server/m19/index.mjs')),
+  abuse(55, /orgCanSee\(org, player\)/.test(read('scoutbox-server/domains/discovery/matching/index.mjs')) && /ctx\.m18MatchFacts\?\.\(player, org\)/.test(read('scoutbox-server/domains/discovery/matching/index.mjs')),
     'authorization and the visibility projection both run BEFORE any criterion is evaluated');
 }
 
@@ -456,7 +456,7 @@ section('§9b — age boundaries, time-driven change, and the things M19 must NO
 
   // Matching, Nobody Missed and Second Look answer different questions and
   // must not quietly filter one another.
-  const idxSrc = read('scoutbox-server/m19/index.mjs');
+  const idxSrc = read('scoutbox-server/domains/discovery/matching/index.mjs');
   const idxCode = idxSrc.replace(/^\s*(\/\/|\*).*$/gm, '');
   abuse(41, !/db\.secondLookItems|db\.nobodyMissed|nmDismissals|slDismissals|\bdismissed\b/i.test(idxCode),
     'matching reads no Second Look or Nobody Missed store — nobody is excluded for having been evaluated, dismissed or surfaced elsewhere');

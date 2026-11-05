@@ -22,7 +22,7 @@
  */
 import {
   POSITIONS, TRUST_BANDS, EVIDENCE_REQUIREMENTS, PROHIBITED_BRIEF_FIELDS,
-} from '../m18/shared.mjs';
+} from '../shared.mjs';
 
 /** The semantic interpretation rules. Bump when the MEANING of a criterion
  *  changes, even if its shape does not — a stored explanation is only
@@ -195,7 +195,7 @@ export const LIMITS = {
   maxCriteria: 24,
   maxRequired: 16,
   maxPreferred: 16,
-  // A literal, not POSITIONS.length: m18/shared.mjs imports the engine, so
+  // A literal, not POSITIONS.length: domains/discovery/shared.mjs imports the engine, so
   // the vocabulary is still initialising when this module is first evaluated.
   // Membership in POSITIONS is checked at call time, where it is safe.
   maxPositions: 13,

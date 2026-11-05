@@ -14,7 +14,7 @@
  */
 import { METRICS, wire, ratio, count, distribution, days, inWindow } from './metrics.mjs';
 import { REASON_CODES } from '../domains/recruitment/rooms/shared.mjs';
-import { briefIsLiveOn } from '../m18/shared.mjs';
+import { briefIsLiveOn } from '../domains/discovery/shared.mjs';
 import { firstTerminalAt } from './funnels.mjs';
 
 /** The four codes that mean "we could not tell, for want of evidence". */

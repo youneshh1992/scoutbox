@@ -23,8 +23,8 @@ import {
   reconcileMembership, transitionFingerprint, explainTransition,
   membershipSummary, membershipNotification, watchlistBlockedState,
 } from './watchlists.mjs';
-import { LIMITS, clampPage } from '../m18/shared.mjs';
-import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
+import { LIMITS, clampPage } from '../shared.mjs';
+import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 
 /** Every ordering M19 offers. None of them is a match quality rank, and the
  *  default is deliberately the least suggestive thing that is still useful. */

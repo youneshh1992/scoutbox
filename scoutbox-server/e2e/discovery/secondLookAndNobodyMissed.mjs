@@ -29,7 +29,7 @@ import {
   buildNobodyMissedCandidate, evaluationCoverageState, orderNobodyMissed,
   PROHIBITED_BRIEF_FIELDS, POSITIONS, POSITION_GROUP_OF, TRUST_BANDS,
   NM_DISMISSAL_REASONS, NM_SORTS, LIMITS, clampPage, safeM18Projection,
-} from '../../m18/shared.mjs';
+} from '../../domains/discovery/shared.mjs';
 
 const PORT = 5800 + Math.floor(Math.random() * 150);
 const BASE = `http://localhost:${PORT}`;
