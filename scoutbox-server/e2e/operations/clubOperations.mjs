@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import {
   totp, totpValid, b32encode, convertMinor, slotsOverlap, webhookUrlProblem,
 } from '../../m13/shared.mjs';
-import { computeScenarioTotals } from '../../m13/planning.mjs';
+import { computeScenarioTotals } from '../../domains/recruitment/budgets.mjs';
 import { ageOn, isAdult } from '../../domain.mjs';
 
 process.env.ALLOW_LOCAL_WEBHOOKS = '1'; // the SSRF guard reads this at call time — needed for the in-process fixtures too

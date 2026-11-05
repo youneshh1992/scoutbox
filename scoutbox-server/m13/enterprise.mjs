@@ -25,7 +25,7 @@ export const metrics = {
   failedUploads: 0,
   deliveryFailures: 0, jobRuns: 0, sseConnects: 0,
 };
-// Mutable hook: insight.mjs (F4) plugs exposure capture in here so profile
+// Mutable hook: domains/insight/insight.mjs (F4) plugs exposure capture in here so profile
 // and passport reads become funnel events without touching older handlers.
 export const exposureHook = { fn: null };
 export function requestInstrumentation() {

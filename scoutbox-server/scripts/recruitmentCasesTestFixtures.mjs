@@ -2,7 +2,7 @@
 // comments, room snapshots, room decisions and room evidence states in the EXACT shapes the writers produce
 // (domains/scouting/scouting.mjs the case, assignments, M12 tasks, approvals, the decision; domains/recruitment/rooms/rooms.mjs the room facet, M17 tasks,
 // assignments, links, reopen, comments, snapshots, recommendations, evidence states; domains/recruitment/lifecycle/decisionRoutes.mjs the draft
-// and the formal decision; m27/index.mjs the transaction handoff; m13/planning.mjs the budget; m12/shared.mjs /
+// and the formal decision; m27/index.mjs the transaction handoff; domains/recruitment/budgets.mjs the budget; m12/shared.mjs /
 // m13/shared.mjs the one history literal every case writer appends). Every record is one the typed tables hold.
 // Synthetic ids and names only. Shared by testRecruitmentCases.mjs and
 // testRecruitmentCasesServer.mjs. The ids agree with recruitmentTestFixtures.mjs: case-1 is the room of pl-adult that

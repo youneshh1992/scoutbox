@@ -6,8 +6,8 @@
 // is NEVER recorded as poor ability, and exposure metrics carry their
 // denominators and windows instead of claims about discrimination.
 import crypto from 'node:crypto';
-import { exposureHook } from './enterprise.mjs';
-import { parseStrictDateOnly } from '../temporal.mjs';
+import { exposureHook } from '../../m13/enterprise.mjs';
+import { parseStrictDateOnly } from '../../temporal.mjs';
 
 const EXPOSURE_WINDOW_DAYS = 90;
 const STALE_DAYS = 180;

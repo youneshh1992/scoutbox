@@ -11,8 +11,9 @@ import { registerDelivery } from './delivery.mjs';
 import { registerEnterprise } from './enterprise.mjs';
 import { registerSuitability } from '../domains/scouting/suitability.mjs';
 import { registerTransitions } from '../domains/verification/transitions.mjs';
-import { registerInsight } from './insight.mjs';
-import { registerPlanning } from './planning.mjs';
+import { registerInsight } from '../domains/insight/insight.mjs';
+import { registerCoverage } from '../domains/insight/coverage.mjs';
+import { registerBudgets } from '../domains/recruitment/budgets.mjs';
 import { registerGroups } from './groups.mjs';
 
 export function registerM13(ctx) {
@@ -24,7 +25,8 @@ export function registerM13(ctx) {
   registerSuitability(full); // F3  private preferences · verdicts · approved summaries
   registerTransitions(full); // F2  transition cases · F10 adult representation
   registerInsight(full);     // F4  exposure funnel · F5 calibration · F6 evidence gaps
-  registerPlanning(full);    // F7  fixtures/coverage · F9 deal scenarios
+  registerCoverage(full);    // F7  fixtures/coverage
+  registerBudgets(full);     // F9  deal scenarios
   registerGroups(full);      // F8  federation workspaces · grants
   // One shared slow tick for the m13 sweeps that are not already covered by
   // the delivery module's own timer.
