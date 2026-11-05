@@ -34,17 +34,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ObservationRun } from '../../m22/engine.mjs';
-import { decodeFrame } from '../../m22/frames.mjs';
+import { ObservationRun } from '../../domains/development/boxcam/cv/engine.mjs';
+import { decodeFrame } from '../../domains/development/boxcam/cv/frames.mjs';
 import {
   holdoutFamilies, holdoutFalseTouchStress, holdoutSeeds, DEV_SEEDS,
   GENERATION_PARAMETERS, HOLDOUT_GENERATIONS, ACTIVE_GENERATION,
-} from '../../m22/holdout.mjs';
-import { freezeStatus, geometryMirrorCheck, FREEZE } from '../../m22/freeze.mjs';
-import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../../m22/policy.mjs';
+} from '../../domains/development/boxcam/cv/holdout.mjs';
+import { freezeStatus, geometryMirrorCheck, FREEZE } from '../../domains/development/boxcam/cv/freeze.mjs';
+import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../../domains/development/boxcam/cv/policy.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const M22 = path.join(HERE, '..', '..', 'm22');
+const M22 = path.join(HERE, '..', '..', 'domains', 'development', 'boxcam', 'cv');
 const OUT = path.join(M22, 'holdout.json');
 const DEV_EVAL = path.join(M22, 'evaluation.json');
 
@@ -224,7 +224,7 @@ let dev = null;
 try {
   const raw = JSON.parse(fs.readFileSync(DEV_EVAL, 'utf8'));
   dev = {
-    source: 'm22/evaluation.json',
+    source: 'domains/development/boxcam/cv/evaluation.json',
     generatedAt: raw.generatedAt,
     engineVersion: raw.engineVersion,
     fixtures: raw.fixtureCount,
@@ -243,7 +243,7 @@ try {
 }
 
 const holdout = {
-  source: 'm22/holdout.mjs',
+  source: 'domains/development/boxcam/cv/holdout.mjs',
   familyCount: families.length,
   familyVariants: variants,
   offTruth,
@@ -314,7 +314,7 @@ if (gap) {
 }
 
 console.log('\nprovenance               synthetic — held out from development, not from reality');
-console.log(`written to               m22/holdout.json`);
+console.log(`written to               domains/development/boxcam/cv/holdout.json`);
 
 if (falseTouches > 0) {
   console.error(`\nm22Holdout: FAILED — ${falseTouches} false touch(es) on holdout material. §4 makes this a P0.`);

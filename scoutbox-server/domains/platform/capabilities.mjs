@@ -12,7 +12,7 @@
  * and one sentence on what its absence means.
  */
 
-import { combineVerifiedProtocols } from '../../m22/eligibility.mjs';
+import { combineVerifiedProtocols } from '../development/boxcam/cv/eligibility.mjs';
 import { parseTrustProxy } from '../../httpTrust.mjs';
 export const CAPABILITY_STATES = ['configured', 'not_configured', 'test_only'];
 

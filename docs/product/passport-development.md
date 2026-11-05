@@ -124,9 +124,9 @@ The player's evidence layer (Passport, verification, provenance, Trust) and the 
 *Spot-checked against the code on 3 November 2026. ✓ enforced, ✗ not found, ≠ differs from the old docs.*
 
 - ✓ Provenance order with box_cam_observed between historical_migration and scoutbox_reviewed: `scoutbox-server/m15/shared.mjs:20-29`.
-- ≠ `production_cv` status is `configured`, with `combineVerifiedProtocols: []`: `m16/drills.mjs:119-126` (the M16 docs say not_configured).
-- ✓ Test provider hidden unless enabled: `m16/drills.mjs:146`. `isProductionValidCombine` excludes testOnly: `m16/combineShared.mjs:231-235`.
-- ✓ The validation gate denies unless `verdict?.pass !== true` is false: `m22/eligibility.mjs:111`. All three protocols `not_completed`: `m22/validation.mjs:54-56`.
+- ≠ `production_cv` status is `configured`, with `combineVerifiedProtocols: []`: `domains/development/boxcam/drills.mjs:119-126` (the M16 docs say not_configured).
+- ✓ Test provider hidden unless enabled: `domains/development/boxcam/drills.mjs:146`. `isProductionValidCombine` excludes testOnly: `domains/development/boxcam/combineShared.mjs:231-235`.
+- ✓ The validation gate denies unless `verdict?.pass !== true` is false: `domains/development/boxcam/cv/eligibility.mjs:111`. All three protocols `not_completed`: `domains/development/boxcam/cv/validation.mjs:54-56`.
 - ✓ Share tokens stored as sha256: `domains/verification/passport/sharing.mjs:32,112`. Minor share gets `GUARDIAN_MANAGED`: `domains/verification/passport/sharing.mjs:55`.
 - ✓ Trust weights must total 100 at boot: `domains/verification/trust/index.mjs:15`.
 - ✓ The development vocabulary is asserted at boot: `scoutbox-server/domains/development/hub/index.mjs:84`.

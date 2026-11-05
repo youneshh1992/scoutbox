@@ -11,14 +11,14 @@
 // appear. Box Cam Verified can only originate here: an uploaded video can
 // never become `box_cam_observed`.
 import crypto from 'node:crypto';
-import { isAdult } from '../domain.mjs';
+import { isAdult } from '../../../domain.mjs';
 import {
   verifiedActiveMs, dedupeReps, targetCompleted, detectionQuality,
   deriveVerification, resultHash, boxStreakWeeks, boxBests, boxCamDetail,
   mergeIntervals, normIntervals, sumIntervals, fmtMs, STATE_COPY, TERMINAL_STATES,
 } from './shared.mjs';
 import { drillByIdVersion, latestDrill, providerFor, LIVENESS_CHALLENGES, PROVIDERS } from './drills.mjs';
-import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 
 const DRIFT_MS = 7_000;            // allowed client/server clock drift
 const SESSION_TTL_MS = 2 * 3_600_000;

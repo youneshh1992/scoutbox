@@ -19,15 +19,15 @@ import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ProductionCvProvider, PROVIDER_ERRORS, canTransition } from '../../m22/provider.mjs';
-import { combineVerifiedProtocols, combineEligibility } from '../../m22/eligibility.mjs';
-import { decodeFrame } from '../../m22/frames.mjs';
-import { FRAME_LIMITS, FRAME_ENCODING } from '../../m22/policy.mjs';
+import { ProductionCvProvider, PROVIDER_ERRORS, canTransition } from '../../domains/development/boxcam/cv/provider.mjs';
+import { combineVerifiedProtocols, combineEligibility } from '../../domains/development/boxcam/cv/eligibility.mjs';
+import { decodeFrame } from '../../domains/development/boxcam/cv/frames.mjs';
+import { FRAME_LIMITS, FRAME_ENCODING } from '../../domains/development/boxcam/cv/policy.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 import {
   sequence, jugglePath, touchPath, stationaryPath, rollPath,
   independentBouncePath, DEFAULT_PERSON,
-} from '../../m22/scenes.mjs';
+} from '../../domains/development/boxcam/cv/scenes.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PORT = pickPort(4960, 200, [0]); // TH-6: never a fetch-blocked port
@@ -423,7 +423,7 @@ section('§91 — identity, biometric and audio absence, swept in code');
       else if (full.endsWith('.mjs')) files.push(full);
     }
   };
-  walk(path.join(HERE, '..', '..', 'm22'));
+  walk(path.join(HERE, '..', '..', 'domains', 'development', 'boxcam', 'cv'));
   const found = [];
   for (const f of files) {
     let txt = readFileSync(f, 'utf8');
@@ -442,7 +442,7 @@ section('§91 — identity, biometric and audio absence, swept in code');
   }
   neg(found.length === 0, `§91. no identity, biometric, emotion or audio symbol exists in m22 (${found.join(', ') || 'none'})`);
   ok(files.length > 10, `§91. and the sweep actually covered the module (${files.length} files)`);
-  const elig = readFileSync(path.join(HERE, '..', '..', 'm22', 'eligibility.mjs'), 'utf8');
+  const elig = readFileSync(path.join(HERE, '..', '..', 'domains', 'development', 'boxcam', 'cv', 'eligibility.mjs'), 'utf8');
   ok(/identity:.*[Pp]rohibited/.test(elig), '§91. the absence is documented as deliberate, not accidental');
 }
 

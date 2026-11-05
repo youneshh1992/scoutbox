@@ -15,8 +15,8 @@ would have to look like.
 
 ## 1. Purpose, and the exact claim at stake
 
-Box Cam's synthetic evaluation (`m22/evaluation.json`) and its holdout
-(`m22/holdout.json`) establish real properties: the engine is deterministic, it
+Box Cam's synthetic evaluation (`domains/development/boxcam/cv/evaluation.json`) and its holdout
+(`domains/development/boxcam/cv/holdout.json`) establish real properties: the engine is deterministic, it
 is invariant to resolution, frame rate, ball scale, photometry and camera
 motion, it refuses what it says it will refuse, and across 56 adversarial scenes
 it has never counted a touch that did not happen.
@@ -36,8 +36,8 @@ time, or to demonstrate that it cannot be closed at acceptable quality — which
 is an acceptable outcome (§168) and the current expected one.
 
 **A protocol that has not completed this plan cannot be Combine Verified in
-production.** That is enforced in code, not policy: `m22/gate.mjs` reads
-`m22/validation.mjs` independently of the evaluation artefact, so a synthetic
+production.** That is enforced in code, not policy: `domains/development/boxcam/cv/gate.mjs` reads
+`domains/development/boxcam/cv/validation.mjs` independently of the evaluation artefact, so a synthetic
 result cannot assert its own real-world validity.
 
 ---
@@ -81,10 +81,10 @@ Rules that make the staging real rather than nominal:
 3. **The final holdout is run once per candidate build.** If it fails, the
    engine may be fixed, but the holdout is then **consumed**: it becomes
    development material and a new final holdout must be collected. This is the
-   same discipline the synthetic holdout already follows in `m22/holdout.mjs`,
+   same discipline the synthetic holdout already follows in `domains/development/boxcam/cv/holdout.mjs`,
    where generations 1 and 2 were consumed after they found defects.
 4. **Constants and layer source are frozen before the holdout run**, recorded by
-   `m22/freeze.mjs`, and the freeze is verified at run time. A drifted freeze
+   `domains/development/boxcam/cv/freeze.mjs`, and the freeze is verified at run time. A drifted freeze
    means the result is stale, not merely unlucky.
 
 Reusing a failed holdout until it passes is the single most likely way this
@@ -243,7 +243,7 @@ falsely verified measurement is not.*
 
 Any false verification in the final holdout **fails the protocol outright**,
 regardless of every other number. This matches `ACCEPTANCE_CRITERIA.maxFalseVerifications = 0`
-in `m22/gate.mjs`.
+in `domains/development/boxcam/cv/gate.mjs`.
 
 ---
 
@@ -389,7 +389,7 @@ need to be — but they must not overlap the holdout in any session.
 
 ## 15. The validation record
 
-A pass is recorded in `m22/validation.mjs`, which `m22/gate.mjs` reads. Every
+A pass is recorded in `domains/development/boxcam/cv/validation.mjs`, which `domains/development/boxcam/cv/gate.mjs` reads. Every
 field in `REQUIRED_RECORD_FIELDS` is mandatory; a record missing any of them is
 not a weak record, it is not a record.
 
@@ -409,7 +409,7 @@ not a weak record, it is not a record.
 match the current build. **A record validated against an older engine does not
 describe this engine's behaviour, so it does not transfer.** Any change to the
 engine, the policy constants, or the layer source — anything that moves the
-`m22/freeze.mjs` checksum — invalidates every existing record and requires
+`domains/development/boxcam/cv/freeze.mjs` checksum — invalidates every existing record and requires
 re-validation on a fresh holdout.
 
 The freeze checksum at validation time is recorded inside `result`, so a reader

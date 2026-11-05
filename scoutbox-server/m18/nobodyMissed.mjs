@@ -13,7 +13,7 @@
 //
 // Hidden players never enter the candidate set. They are not matched and then
 // concealed — concealment after matching is how side channels are born.
-import { PROVIDERS } from '../m16/drills.mjs';
+import { PROVIDERS } from '../domains/development/boxcam/drills.mjs';
 import {
   validateRecruitmentBrief, explainBriefCriteria, playerMatchesBrief,
   buildNobodyMissedCandidate, evaluationCoverageState, isMeaningfullyEvaluated,

@@ -15,9 +15,9 @@ import {
   verifiedActiveMs, dedupeReps, targetCompleted, detectionQuality,
   deriveVerification, boxStreakWeeks, challengeProgress, mergeIntervals,
   subtractIntervals, intersectIntervals, normIntervals, resultHash,
-} from '../../m16/shared.mjs';
-import { DRILLS, drillByIdVersion, providerFor, PROVIDERS } from '../../m16/drills.mjs';
-import { combineVerifiedProtocols, combineCapabilities } from '../../m22/eligibility.mjs';
+} from '../../domains/development/boxcam/shared.mjs';
+import { DRILLS, drillByIdVersion, providerFor, PROVIDERS } from '../../domains/development/boxcam/drills.mjs';
+import { combineVerifiedProtocols, combineCapabilities } from '../../domains/development/boxcam/cv/eligibility.mjs';
 
 const PORT = 4700 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;

@@ -31,15 +31,15 @@ import { strict as assert } from 'node:assert';
 import {
   combineCapabilities, combineEligibility, combineVerifiedProtocols,
   OBSERVATION_CAPABILITIES, boxCamObservedEligible,
-} from '../../m22/eligibility.mjs';
-import { ProductionCvProvider } from '../../m22/provider.mjs';
-import { measureAttempt, measurementSupported, combineProtocol } from '../../m16/combineShared.mjs';
+} from '../../domains/development/boxcam/cv/eligibility.mjs';
+import { ProductionCvProvider } from '../../domains/development/boxcam/cv/provider.mjs';
+import { measureAttempt, measurementSupported, combineProtocol } from '../../domains/development/boxcam/combineShared.mjs';
 import { matchPlayerToCriteria } from '../../m19/match.mjs';
-import { REAL_WORLD_VALIDATION, REQUIRED_RECORD_FIELDS } from '../../m22/validation.mjs';
-import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION, CANDIDATE_PROTOCOLS } from '../../m22/policy.mjs';
-import { PROVIDERS } from '../../m16/drills.mjs';
-import { decodeFrame } from '../../m22/frames.mjs';
-import { sequence, touchPath } from '../../m22/scenes.mjs';
+import { REAL_WORLD_VALIDATION, REQUIRED_RECORD_FIELDS } from '../../domains/development/boxcam/cv/validation.mjs';
+import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION, CANDIDATE_PROTOCOLS } from '../../domains/development/boxcam/cv/policy.mjs';
+import { PROVIDERS } from '../../domains/development/boxcam/drills.mjs';
+import { decodeFrame } from '../../domains/development/boxcam/cv/frames.mjs';
+import { sequence, touchPath } from '../../domains/development/boxcam/cv/scenes.mjs';
 
 let pass = 0, fail = 0;
 const ok = (cond, msg) => { if (cond) { pass += 1; console.log(`  ✓ ${msg}`); } else { fail += 1; console.error(`  ✗ ${msg}`); } };

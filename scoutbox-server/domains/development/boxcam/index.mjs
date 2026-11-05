@@ -8,12 +8,12 @@
 // assignments, challenges (+entries), disputes and privacy prefs. The
 // drill registry is versioned code, and the Football Passport PROJECTS
 // Box Cam data — it is never copied.
-import { metrics } from '../m13/enterprise.mjs';
+import { metrics } from '../../../m13/enterprise.mjs';
 import { DRILLS, PROVIDERS } from './drills.mjs';
 import { registerBoxCamSessions } from './sessions.mjs';
 import { registerBoxTraining } from './training.mjs';
 import { registerCombine } from './combine.mjs';
-import { registerM22Routes } from '../m22/routes.mjs';
+import { registerM22Routes } from './cv/routes.mjs';
 
 export function registerM16(ctx) {
   const { db } = ctx;

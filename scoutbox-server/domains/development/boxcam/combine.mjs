@@ -16,8 +16,8 @@
 // always labelled simulated. Future athletic protocols need capabilities no
 // provider has — not even the test one — so their sprint/jump/distance
 // numbers are never fabricated anywhere.
-import { isAdult, visibleToOrg } from '../domain.mjs';
-import { ageOrNull, endOfDayExclusive, parseStrictDateOnly, isAbsent } from '../temporal.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.mjs';
+import { ageOrNull, endOfDayExclusive, parseStrictDateOnly, isAbsent } from '../../../temporal.mjs';
 import { latestDrill, PROVIDERS, providerFor } from './drills.mjs';
 import {
   COMBINE_PROTOCOLS, combineProtocol, latestCombineProtocol, measurementSupported,
@@ -25,9 +25,9 @@ import {
   combineResultHash, comparisonMatrix, COMBINE_TERMINAL, COMBINE_STATE_COPY,
   liveCombineState,
 } from './combineShared.mjs';
-import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
-import { combineCapabilities } from '../m22/eligibility.mjs';
-import { CV_PROVIDER_ID } from '../m22/policy.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { combineCapabilities } from './cv/eligibility.mjs';
+import { CV_PROVIDER_ID } from './cv/policy.mjs';
 
 const PROD_PROVIDER_ID = 'web_client'; // the best honest production provider here
 

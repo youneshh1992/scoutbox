@@ -6,7 +6,7 @@
 // grassroots radius, blocks, verified organisation, not suspended).
 // Agencies cannot assign Box Training at all. Coaches receive session
 // RESULTS, never raw home footage — no such footage exists server-side.
-import { isAdult, visibleToOrg } from '../domain.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { challengeProgress, developmentActivity, fmtMs, TERMINAL_STATES } from './shared.mjs';
 import { latestDrill, DRILLS } from './drills.mjs';
 

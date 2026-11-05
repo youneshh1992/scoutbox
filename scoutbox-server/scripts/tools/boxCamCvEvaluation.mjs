@@ -15,15 +15,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ObservationRun } from '../../m22/engine.mjs';
-import { decodeFrame } from '../../m22/frames.mjs';
-import { goldenFixtures } from '../../m22/fixtures.mjs';
-import { variationFamilies, falseTouchStress } from '../../m22/families.mjs';
-import { consumedHoldoutCases, HOLDOUT_GENERATIONS } from '../../m22/holdout.mjs';
-import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../../m22/policy.mjs';
+import { ObservationRun } from '../../domains/development/boxcam/cv/engine.mjs';
+import { decodeFrame } from '../../domains/development/boxcam/cv/frames.mjs';
+import { goldenFixtures } from '../../domains/development/boxcam/cv/fixtures.mjs';
+import { variationFamilies, falseTouchStress } from '../../domains/development/boxcam/cv/families.mjs';
+import { consumedHoldoutCases, HOLDOUT_GENERATIONS } from '../../domains/development/boxcam/cv/holdout.mjs';
+import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../../domains/development/boxcam/cv/policy.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.join(HERE, '..', '..', 'm22', 'evaluation.json');
+const OUT = path.join(HERE, '..', '..', 'domains', 'development', 'boxcam', 'cv', 'evaluation.json');
 
 /** Run one fixture through the engine exactly as the provider would. */
 function evaluate(fx) {
@@ -342,7 +342,7 @@ console.log(`false-touch stress cases ${stress.length}`);
 console.log(`consumed holdout cases   ${consumed.length}  (off-truth ${consumedOffTruth})`);
 console.log(`FALSE TOUCHES            ${falseTouches}   (§4: any is a P0)`);
 console.log(`real-world validation    NO — synthetic fixtures only`);
-console.log(`written to               m22/evaluation.json`);
+console.log(`written to               domains/development/boxcam/cv/evaluation.json`);
 
 if (consumedFalseTouches > 0) {
   console.error(`\nm22CvEval: FAILED — ${consumedFalseTouches} false touch(es) on consumed holdout material. These are the scenes that already caught a defect once; §4 makes a recurrence a P0.`);

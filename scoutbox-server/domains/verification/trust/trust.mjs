@@ -15,7 +15,7 @@
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { effectiveStatus, assuranceForClaim } from '../claims/shared.mjs';
 import { agreementInForce } from '../../agents/core/shared.mjs';
-import { PROVIDERS } from '../../../m16/drills.mjs';
+import { PROVIDERS } from '../../development/boxcam/drills.mjs';
 import {
   POLICY, TRUST_SCORE_POLICY_VERSION, calculateTrustScore, safeTrustProjection,
   trustSummary, trustSnapshot, TRUST_DISCLAIMER,

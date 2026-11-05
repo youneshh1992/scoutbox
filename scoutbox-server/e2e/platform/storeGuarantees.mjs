@@ -883,7 +883,7 @@ section('§14 — route-before-store: a module initialises before it registers r
     m12: ['m12/index.mjs', 'migrateM12'],
     m13: ['m13/index.mjs', 'migrateM13'],
     m15: ['domains/verification/passport/index.mjs', null],
-    m16: ['m16/index.mjs', null],
+    m16: ['domains/development/boxcam/index.mjs', null],
   };
   for (const [mod, [file, migrateFn]] of Object.entries(ENTRY)) {
     if (!migrateFn) continue;
@@ -1039,7 +1039,7 @@ section('§9/§12 — the contract is checked against the running server, not tr
   // §12 OWNER VALIDATION. `owner: 'm14'` must mean M14 actually initialises it.
   // Proven by source: the init site the scan found must live under the owner's
   // directory (or be the core composition root).
-  const OWNER_DIR = { core: ['server.mjs', 'domains/platform/'], m12: ['m12/', 'domains/scouting/'], m13: ['m13/', 'domains/scouting/'], m14: ['domains/verification/claims/'], m15: ['domains/verification/passport/'], m16: ['m16/'], m17: ['domains/recruitment/rooms/'], m18: ['m18/'], 'm18.1': ['domains/platform/'], m21: ['domains/development/'], m28: ['domains/recruitment/offers/'] };
+  const OWNER_DIR = { core: ['server.mjs', 'domains/platform/'], m12: ['m12/', 'domains/scouting/'], m13: ['m13/', 'domains/scouting/'], m14: ['domains/verification/claims/'], m15: ['domains/verification/passport/'], m16: ['domains/development/boxcam/'], m17: ['domains/recruitment/rooms/'], m18: ['m18/'], 'm18.1': ['domains/platform/'], m21: ['domains/development/'], m28: ['domains/recruitment/offers/'] };
   const wrongOwner = [];
   for (const r of rows) {
     if (r.classification !== 'MODULE_BOOT') continue;

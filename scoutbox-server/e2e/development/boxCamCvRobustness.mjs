@@ -10,16 +10,16 @@
 //   clean, ends clean, and cannot inherit certainty from missing observations
 //   or another session.
 
-import { ObservationRun } from '../../m22/engine.mjs';
-import { decodeFrame } from '../../m22/frames.mjs';
+import { ObservationRun } from '../../domains/development/boxcam/cv/engine.mjs';
+import { decodeFrame } from '../../domains/development/boxcam/cv/frames.mjs';
 import {
   ObservationSessions, resetRun, runStateSnapshot, MUTABLE_RUN_KEYS, PERSISTENT_RUN_KEYS,
-} from '../../m22/session.mjs';
-import { interpretTouches } from '../../m22/protocol.mjs';
-import { primaryRefusal, REFUSAL_PRECEDENCE } from '../../m22/quality.mjs';
-import { EVENT_RULES, CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../../m22/policy.mjs';
-import { protocolProductionEnabled, readEvaluation } from '../../m22/gate.mjs';
-import { sequence, touchPath, jugglePath, stationaryPath } from '../../m22/scenes.mjs';
+} from '../../domains/development/boxcam/cv/session.mjs';
+import { interpretTouches } from '../../domains/development/boxcam/cv/protocol.mjs';
+import { primaryRefusal, REFUSAL_PRECEDENCE } from '../../domains/development/boxcam/cv/quality.mjs';
+import { EVENT_RULES, CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../../domains/development/boxcam/cv/policy.mjs';
+import { protocolProductionEnabled, readEvaluation } from '../../domains/development/boxcam/cv/gate.mjs';
+import { sequence, touchPath, jugglePath, stationaryPath } from '../../domains/development/boxcam/cv/scenes.mjs';
 
 let passed = 0;
 const failures = [];

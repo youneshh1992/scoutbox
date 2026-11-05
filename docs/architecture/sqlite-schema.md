@@ -924,7 +924,7 @@ the route and response half is named with its plan step.
    (`server.mjs:650`), guardian `emailCode` (`1244`; fixed 3 Nov 2026, hashed), `emailChallenges.code` (`3024`),
    `pairingCodes.code` (`3766`), `vouches.code` (`3692`), `orgInvites.token`
    (`m13/enterprise.mjs:80`), `ssoStates.state/nonce` (`274`), `boxSessions.nonce`
-   (`m16/sessions.mjs:89`), `users.mfa.secretB32` (`m13/mfa`), `webhookEndpoints.secret`,
+   (`domains/development/boxcam/sessions.mjs:89`), `users.mfa.secretB32` (`m13/mfa`), `webhookEndpoints.secret`,
    `secrets.mediaSign` (`server.mjs:345`; fixed 3 Nov 2026, the key is env-only), and one-time codes inside `outbox.text`. Schema:
    `*_hash` columns everywhere except push tokens and webhook secrets (OPEN: encrypt at rest
    with a key from env); `mediaSign` leaves the database; `outbox.text` retention OPEN.

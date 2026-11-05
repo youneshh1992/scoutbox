@@ -28,8 +28,8 @@
  * the difference between a development plan and a way to read another player's
  * assessments.
  */
-import { liveCombineState, isProductionValidCombine, combineProtocol, latestCombineProtocol } from '../../../m16/combineShared.mjs';
-import { PROVIDERS } from '../../../m16/drills.mjs';
+import { liveCombineState, isProductionValidCombine, combineProtocol, latestCombineProtocol } from '../boxcam/combineShared.mjs';
+import { PROVIDERS } from '../boxcam/drills.mjs';
 import { EVIDENCE_SOURCES, EVIDENCE_SOURCE_LABELS, UNAVAILABLE_REASONS } from './shared.mjs';
 import { parseTrialDate } from '../../../domain.mjs';
 

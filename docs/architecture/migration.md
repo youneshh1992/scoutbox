@@ -175,8 +175,8 @@ explicit like identity's.
 
 - Each step first moves its domain's files into `domains/<domain>/` in a commit with no other change, then edits
   them. The agents code is already in `domains/agents/` (`core/`, `compliance/`, `transactions/`), the development code
-  in `domains/development/` (`objectives.mjs`, `hub/`). Still in milestone folders: `m12`, `m13` (mixed: split file by file as each domain comes round; `domains/scouting/scouting.mjs` still
-  holds the M12 recruitment-case routes, F3), `m16`, `m18`–`m22`, `m27` (`m20` and `m27` read across domains and are
+  in `domains/development/` (`objectives.mjs`, `hub/`, `boxcam/` with the CV engine in `boxcam/cv/`). Still in milestone folders: `m12`, `m13` (mixed: split file by file as each domain comes round; `domains/scouting/scouting.mjs` still
+  holds the M12 recruitment-case routes, F3), `m18`–`m20`, `m27` (`m20` and `m27` read across domains and are
   placed when their readers are). A step may move its domain's routes out of `server.mjs`. Whatever is left goes in a
   final pass after S14.
 - End-to-end batteries live in `scoutbox-server/e2e/<domain>/`, named after what they check; add new checks to the

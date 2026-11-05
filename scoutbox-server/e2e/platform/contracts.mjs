@@ -196,7 +196,7 @@ section('§8 — every notification type is classified, mentions are recognised 
   neg(categoryOf('message', 'someone wrote "mentioned you" in a message') !== 'mentions', 'user text saying "mentioned you" in another type is NOT a mention');
   neg(categoryOf('never_seen_type') === null, 'an unknown type is unclassified (and, below, delivered)');
   // The server's notify() call sites: every literal type is classified.
-  const srv = ['server.mjs', 'domains/scouting/journeys.mjs', 'domains/scouting/scouting.mjs', 'm13/delivery.mjs', 'm13/enterprise.mjs', 'domains/verification/claims/index.mjs', 'domains/verification/passport/index.mjs', 'm16/combine.mjs', 'm16/index.mjs', 'domains/recruitment/rooms/rooms.mjs', 'm18/secondLook.mjs', 'm18/nobodyMissed.mjs', 'grassrootsJourney.mjs']
+  const srv = ['server.mjs', 'domains/scouting/journeys.mjs', 'domains/scouting/scouting.mjs', 'm13/delivery.mjs', 'm13/enterprise.mjs', 'domains/verification/claims/index.mjs', 'domains/verification/passport/index.mjs', 'domains/development/boxcam/combine.mjs', 'domains/development/boxcam/index.mjs', 'domains/recruitment/rooms/rooms.mjs', 'm18/secondLook.mjs', 'm18/nobodyMissed.mjs', 'grassrootsJourney.mjs']
     .filter((f) => fs.existsSync(path.join(SERVER_DIR, f)));
   const types = new Set();
   for (const f of srv) for (const m of fs.readFileSync(path.join(SERVER_DIR, f), 'utf8').matchAll(/notify\??\.?\([^,]+,\s*'([a-z_]+)'/g)) types.add(m[1]);
@@ -435,7 +435,7 @@ section('§19 — the request log carries no personal data');
   ok(/t: Date\.now\(\), id: req\.correlationId, m: req\.method, p: fullPath/.test(line), 'the structured log line is time, id, method, path, status, duration');
   neg(!/authorization|token|body|email|dob|query/.test(line), 'and nothing else');
   const files = fs.readdirSync(SERVER_DIR).filter((f) => f.endsWith('.mjs'));
-  for (const d of ['m12', 'm13', 'm16', 'm18', 'domains/platform', 'domains/recruitment/rooms', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust']) for (const f of fs.readdirSync(path.join(SERVER_DIR, d)).filter((x) => x.endsWith('.mjs'))) files.push(`${d}/${f}`);
+  for (const d of ['m12', 'm13', 'domains/development/boxcam', 'm18', 'domains/platform', 'domains/recruitment/rooms', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust']) for (const f of fs.readdirSync(path.join(SERVER_DIR, d)).filter((x) => x.endsWith('.mjs'))) files.push(`${d}/${f}`);
   const leaks = [];
   for (const f of files) {
     const s = fs.readFileSync(path.join(SERVER_DIR, f), 'utf8');

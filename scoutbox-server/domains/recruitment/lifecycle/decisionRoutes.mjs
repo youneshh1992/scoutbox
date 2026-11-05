@@ -24,7 +24,7 @@
 import { roomRole, roomCan, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
-import { PROVIDERS } from '../../../m16/drills.mjs';
+import { PROVIDERS } from '../../development/boxcam/drills.mjs';
 import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from './lifecycle.mjs';
 import { sendDomainError } from './errors.mjs';
 import {

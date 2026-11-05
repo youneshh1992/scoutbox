@@ -13,12 +13,12 @@ import {
   projectPassport, passportRevision, normWhen, whenDisplay, evId, PROVENANCE_COPY,
 } from './shared.mjs';
 // M16: the Passport PROJECTS Box Cam data — it never copies it.
-import { developmentActivity as boxDevelopmentActivity, fmtMs as boxFmtMs } from '../../../m16/shared.mjs';
-import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../../../m16/drills.mjs';
+import { developmentActivity as boxDevelopmentActivity, fmtMs as boxFmtMs } from '../../development/boxcam/shared.mjs';
+import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../../development/boxcam/drills.mjs';
 // M16.1 At-Home Combine — the Passport PROJECTS verified Combine results, it
 // never copies them. Computed with the pure engine so this stays independent
 // of module registration order.
-import { combineProtocol as combineProtocolDef, personalBest as combinePersonalBest, formatCombineValue } from '../../../m16/combineShared.mjs';
+import { combineProtocol as combineProtocolDef, personalBest as combinePersonalBest, formatCombineValue } from '../../development/boxcam/combineShared.mjs';
 import { applicationView } from '../../scouting/journeys.mjs';
 import { blankPrefs, PASSPORT_LIMITS as L, AVAILABILITY, CORRECTION_TARGETS, CORRECTION_OUTCOMES } from '../../../repositories/passport.mjs';
 import { PLAYER_POSITIONS } from '../../../repositories/identityMapping.mjs';

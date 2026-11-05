@@ -478,7 +478,7 @@ section('§9b — age boundaries, time-driven change, and the things M19 must NO
     'and the membership event is deliberately absent from the audit projection');
 
   // Trust & Safety has no routine watchlist access.
-  const tsFiles = ['scoutbox-server/domains/verification/claims/index.mjs', 'scoutbox-server/m16/index.mjs'];
+  const tsFiles = ['scoutbox-server/domains/verification/claims/index.mjs', 'scoutbox-server/domains/development/boxcam/index.mjs'];
   for (const f of tsFiles) {
     let src = '';
     try { src = read(f); } catch { continue; }

@@ -19,8 +19,8 @@ import {
   COMBINE_PROTOCOLS, combineProtocol, latestCombineProtocol, measurementSupported,
   measurementCapability, measureAttempt, formatCombineValue, personalBest,
   combineResultHash, comparisonMatrix,
-} from '../../m16/combineShared.mjs';
-import { PROVIDERS } from '../../m16/drills.mjs';
+} from '../../domains/development/boxcam/combineShared.mjs';
+import { PROVIDERS } from '../../domains/development/boxcam/drills.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 
 const PORT = pickPort(4900, 180, [0]); // TH-6: never a fetch-blocked port
