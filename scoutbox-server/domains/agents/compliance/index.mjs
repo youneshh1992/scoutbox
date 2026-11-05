@@ -29,7 +29,7 @@ import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
 import { hasVerLevel } from '../../verification/claims/shared.mjs';
-import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt, agencyJurisdictions } from '../core/shared.mjs';
+import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt } from '../core/shared.mjs';
 import { sendComplianceError } from './errors.mjs';
 import { RULE_STATUSES, SEEDED_POLICY_VERSIONS } from './policyVersions.mjs';
 import { applicablePolicySet, evaluatePolicy, evaluateMinorGate, representationScopeProblem, resolveScope, ruleAt, MINOR_PATHWAY_PRODUCTION_ENABLED, POLICY_FACETS, POLICY_ACTIONS } from './policy.mjs';
@@ -51,7 +51,7 @@ export function registerCompliance(rawCtx) {
   const {
     db, byId, app, orgRouter, playerRouter, adminRouter, tsRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isBlocked, isAdult, orgCanSee, moderateOrRefuse, rateLimit,
-    hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins, agent, verificationProvider,
+    hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins, agent, verificationProvider, agentCore, unit,
   } = rawCtx;
 
   const provider = verificationProvider ?? createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
@@ -78,8 +78,13 @@ export function registerCompliance(rawCtx) {
     if (!k.ok) { sendComplianceError(res, { error: 'COMPLIANCE_CLIENT_KEY_INVALID', message: k.message }, 'clientKey'); return undefined; }
     return k.key;
   };
-  const profileOf = (userId) => (db.agentProfiles ?? []).find((p) => p && p.userId === userId) ?? null;
-  const activeAffiliationOf = (userId, orgId) => (db.agencyAffiliations ?? []).find((a) => a && a.userId === userId && a.agencyOrgId === orgId && affiliationActive(a, now())) ?? null;
+  // S11a: the agent core is tables of repositories/agentCore.mjs; this module reads it through SQL and writes a facet or
+  // an agreement only through its explicit operations, inside the route's unit of work.
+  if (typeof agentCore?.profiles?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerCompliance needs the agent core repository and unit from the data layer');
+  const agentReads = agentCore.reads;
+  const profileOf = (userId) => agentReads.profiles.forUser(userId);
+  const activeAffiliationOf = (userId, orgId) => agentReads.affiliations.activeFor(userId, orgId, now());
+  const agencyJurisdictions = (orgId) => agentReads.settings.forOrg(orgId).jurisdictions;
 
   // ============================================================ G-C0 — reviewer identity
   const reviewerById = (id) => db.tsReviewers.find((r) => r && r.id === id) ?? null;
@@ -251,7 +256,7 @@ export function registerCompliance(rawCtx) {
   });
   orgRouter.get('/agent/compliance/policies', (req, res) => {
     if (!agent.resolveMembership(req, res)) return;
-    const mas = [...new Set(['INT', ...agencyJurisdictions(req.org), ...((profileOf(req.orgUser.id)?.declared?.jurisdictions) ?? [])])];
+    const mas = [...new Set(['INT', ...agencyJurisdictions(req.org.id), ...((profileOf(req.orgUser.id)?.declared?.jurisdictions) ?? [])])];
     const set = policySetFor(mas);
     res.json({ inEffect: set.policies.map(policyPublic), missing: set.missing, ruleStatuses: RULE_STATUSES, honest: 'These are ScoutBox\'s encoded platform rules with their operative status as recorded on the retrieval date. They are not legal advice and a status can change without a deploy.' });
   });
@@ -265,7 +270,8 @@ export function registerCompliance(rawCtx) {
     minors_authorisation: Object.fromEntries(Object.entries(p?.facets?.minors_authorisation ?? {}).map(([k, v]) => [k, effectiveFacetState(v, at)])),
   });
   const facetRecord = (p, facet, ma) => (facet === 'fifa_licence' ? p?.facets?.fifa_licence : p?.facets?.[facet]?.[ma]) ?? null;
-  const setFacet = (p, facet, ma, next) => { if (facet === 'fifa_licence') p.facets.fifa_licence = next; else { p.facets[facet] ??= {}; p.facets[facet][ma] = next; } };
+  /** Set a facet on a profile DRAFT (inside `profiles.update`); the stored facet keeps no stale marker from before. */
+  const setFacet = (d, facet, ma, next) => { const rec = { staleNotifiedAt: null, ...next }; if (facet === 'fifa_licence') d.facets.fifa_licence = rec; else d.facets[facet][ma] = rec; };
 
   const openReviewFor = (kind, subjectMatch) => db.regulatoryReviews.find((r) => r && r.kind === kind && (r.status === 'PENDING' || r.status === 'IN_REVIEW') && subjectMatch(r.subject ?? {}));
   const reviewPublic = (r, { forReviewer = false } = {}) => ({
@@ -306,7 +312,7 @@ export function registerCompliance(rawCtx) {
   /** Hook for m24's request route: the policy layer's verdict on an Approach (exclusivity window, USA domestic authorisation …). */
   function authorizeApproach({ profile, jurisdiction, player, agentUserId }) {
     const set = policySetFor([jurisdiction]);
-    const others = (db.representationAgreements ?? []).filter((a) => a && a.clientId === player.id && a.agentUserId && a.agentUserId !== agentUserId && a.exclusive && effectiveAgreementStatus(a, now()) === 'active' && a.confirmedAt).map((a) => ({ endAt: a.endAt ?? null }));
+    const others = agentReads.agreements.forClient(player.id).filter((a) => a.agentUserId !== agentUserId && a.exclusive && effectiveAgreementStatus(a, now()) === 'active' && a.confirmedAt).map((a) => ({ endAt: a.endAt ?? null }));
     const d = evaluatePolicy({ action: 'approach_adult', memberAssociations: [jurisdiction], facets: facetStatesOf(profile), policySet: set.policies, missingPolicies: set.missing, otherExclusiveAgreements: others, now: now() });
     return { decision: d, policySet: set };
   }
@@ -327,11 +333,18 @@ export function registerCompliance(rawCtx) {
     if (answer.state === 'UNAVAILABLE') return sendComplianceError(res, { error: 'REGULATORY_PROVIDER_UNAVAILABLE', retryAfter: 300, message: 'The verification source is unavailable. Nothing was changed; a cached VERIFIED facet stays usable only until its own recheck date.' }, 'recheck');
     const next = facetFromProviderAnswer(answer, { reference: cur.reference, memberAssociation: ma, now: now() });
     const prevState = effectiveFacetState(cur, now());
-    setFacet(p, facet, ma, next);
-    hist(p, 'agent_facet_rechecked', byOrg(req), { facet, memberAssociation: ma, from: prevState, to: effectiveFacetState(next, now()) });
-    if (next.state === 'MANUAL_REVIEW_REQUIRED') facetNeedsReview(p, { facet, memberAssociation: ma, reference: cur.reference }, byOrg(req));
-    if (prevState !== effectiveFacetState(next, now())) { hist(p, 'agent_verification_state_changed', byOrg(req), { facet, memberAssociation: ma, from: prevState, to: effectiveFacetState(next, now()), state: next.state }); broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: p.userId, facet, state: effectiveFacetState(next, now()) }); }
-    p.updatedAt = now(); bumpRev(p, { by: req.orgUser, at: now() }); persistNow();
+    const nextState = effectiveFacetState(next, now());
+    unit(() => {
+      const out = agentCore.profiles.update(p.id, (d) => {
+        setFacet(d, facet, ma, next);
+        hist(d, 'agent_facet_rechecked', byOrg(req), { facet, memberAssociation: ma, from: prevState, to: nextState });
+        if (prevState !== nextState) hist(d, 'agent_verification_state_changed', byOrg(req), { facet, memberAssociation: ma, from: prevState, to: nextState, state: next.state });
+        d.updatedAt = now(); bumpRev(d, { by: req.orgUser, at: now() });
+      });
+      if (next.state === 'MANUAL_REVIEW_REQUIRED') facetNeedsReview(out, { facet, memberAssociation: ma, reference: cur.reference }, byOrg(req));
+      if (prevState !== nextState) broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: out.userId, facet, state: nextState });
+      persistNow();
+    });
     res.json({ facet: { ...next, state: effectiveFacetState(next, now()), storedState: next.state }, provider: provider.status() });
   });
 
@@ -360,14 +373,13 @@ export function registerCompliance(rawCtx) {
       const push = (facet, ma, rec) => { if (!rec) return; const st = effectiveFacetState(rec, now()); freshness.push({ facet, memberAssociation: ma, state: st, storedState: rec.state, recheckAt: rec.recheckAt ?? null, daysUntilRecheck: typeof rec.recheckAt === 'number' ? Math.ceil((rec.recheckAt - now()) / 86_400_000) : null, provenance: rec.provenance ?? null, verifiedAt: rec.verifiedAt ?? null }); };
       push('fifa_licence', null, p.facets?.fifa_licence);
       for (const f of ['national_registration', 'domestic_authorisation', 'minors_authorisation']) for (const [ma, rec] of Object.entries(p.facets?.[f] ?? {})) push(f, ma, rec);
-      // A STALE facet is told once (mandate §70).
-      for (const f of freshness) if (f.state === 'STALE') { const rec = facetRecord(p, f.facet, f.memberAssociation); if (rec && !rec.staleNotifiedAt) { rec.staleNotifiedAt = now(); notify({ kind: 'org_user', id: p.userId }, 'agent_verification_stale', `Verification of ${f.facet}${f.memberAssociation ? ` (${f.memberAssociation})` : ''} has gone STALE. Re-check it or request attributed review before any regulated action.`, p.id); persistNow(); } }
+      // A STALE facet is told once (mandate §70) — by the agent core's sweep (S11a), not by this read.
     }
     const mine = (x) => x && x.agencyOrgId === req.org.id && (x.agentUserId === req.orgUser.id || can(req.tiers, 'agency.compliance.read'));
     const reviews = db.regulatoryReviews.filter(mine).map((r) => reviewPublic(r));
     const contexts = db.complianceContexts.filter((c) => c && c.agencyOrgId === req.org.id && c.agentUserId === req.orgUser.id).map(contextForAgent);
     const consents = db.regulatoryConsents.filter((k) => k && k.agencyOrgId === req.org.id && k.agentUserId === req.orgUser.id && k.kind !== 'revocation').map(consentForAgent);
-    const jurisdictions = [...new Set([...(p?.declared?.jurisdictions ?? []), ...agencyJurisdictions(req.org)])].filter((j) => JURISDICTIONS.includes(j));
+    const jurisdictions = [...new Set([...(p?.declared?.jurisdictions ?? []), ...agencyJurisdictions(req.org.id)])].filter((j) => JURISDICTIONS.includes(j));
     res.json({
       provider: provider.status(), facets, freshness,
       policies: { inEffect: policySetFor(['INT', ...jurisdictions]).policies.map((x) => ({ id: x.id, regulator: x.regulator, jurisdiction: x.jurisdiction, effectiveFrom: x.effectiveFrom })), missing: policySetFor(['INT', ...jurisdictions]).missing },
@@ -427,7 +439,7 @@ export function registerCompliance(rawCtx) {
     // representation of a party in the SAME transaction (another open context of
     // this agency naming the same parties) is attributed to this agent. The
     // colleague is never named in a reason; only the attributed party roles are.
-    const colleagues = (db.agencyAffiliations ?? []).filter((a) => a && a.agencyOrgId === c.agencyOrgId && a.userId !== c.agentUserId && affiliationActive(a, now())).map((a) => a.userId);
+    const colleagues = agentReads.affiliations.forAgency(c.agencyOrgId).filter((a) => a.userId !== c.agentUserId && affiliationActive(a, now())).map((a) => a.userId);
     for (const other of db.complianceContexts) {
       if (!other || other.id === c.id || other.agencyOrgId !== c.agencyOrgId || other.status !== 'open' || !colleagues.includes(other.agentUserId)) continue;
       if (!sameTransaction(c, other)) continue;
@@ -605,7 +617,8 @@ export function registerCompliance(rawCtx) {
     if (!p) return sendComplianceError(res, { error: 'AGENT_VERIFICATION_REQUIRED', message: 'Create your agent profile first.' }, 'representations');
     let agreement = null; let declaredOnly = false;
     if (party.subjectKind === 'player') {
-      agreement = (db.representationAgreements ?? []).find((a) => a && a.id === String(b.agreementId ?? '') && a.agentUserId === req.orgUser.id && a.agencyOrgId === req.org.id && a.clientId === party.subjectId) ?? null;
+      const found = typeof b.agreementId === 'string' ? agentReads.agreements.byId(b.agreementId) : null;
+      agreement = found && found.agentUserId === req.orgUser.id && found.agencyOrgId === req.org.id && found.clientId === party.subjectId ? found : null;
       // 9 blocks / safeguarding first: a block ends everything, agreement or not — and it must
       // not be distinguishable from "no such party" via a later scope refusal (uniform 404).
       const pl = findPlayer(party.subjectId);
@@ -836,8 +849,8 @@ export function registerCompliance(rawCtx) {
   });
   /** What a reviewer may see of the subject: states and ids, no client data beyond the review's need (mandate §62). */
   function reviewSubjectDetail(r) {
-    if (r.kind === 'verification_facet') { const p = (db.agentProfiles ?? []).find((x) => x.id === r.subject.profileId); const rec = p ? facetRecord(p, r.subject.facet, r.subject.memberAssociation) : null; return { agentDisplayName: p?.displayName ?? null, facet: r.subject.facet, memberAssociation: r.subject.memberAssociation, reference: rec?.reference ?? null, state: rec ? effectiveFacetState(rec, now()) : null, submittedAt: rec?.submittedAt ?? null }; }
-    if (r.kind === 'representation_dispute') { const a = (db.representationAgreements ?? []).find((x) => x.id === r.subject.agreementId); return a ? { agreementId: a.id, status: effectiveAgreementStatus(a, now()), disputedAt: a.disputedAt ?? null, hadReason: !!a.disputeReason, scope: a.scope, jurisdiction: a.jurisdiction ?? null } : null; }
+    if (r.kind === 'verification_facet') { const p = agentReads.profiles.byId(r.subject.profileId); const rec = p ? facetRecord(p, r.subject.facet, r.subject.memberAssociation) : null; return { agentDisplayName: p?.displayName ?? null, facet: r.subject.facet, memberAssociation: r.subject.memberAssociation, reference: rec?.reference ?? null, state: rec ? effectiveFacetState(rec, now()) : null, submittedAt: rec?.submittedAt ?? null }; }
+    if (r.kind === 'representation_dispute') { const a = agentReads.agreements.byId(r.subject.agreementId); return a ? { agreementId: a.id, status: effectiveAgreementStatus(a, now()), disputedAt: a.disputedAt ?? null, hadReason: !!a.disputeReason, scope: a.scope, jurisdiction: a.jurisdiction ?? null } : null; }
     const c = contextById(r.subject?.contextId);
     return c ? { contextId: c.id, type: c.type, jurisdictions: c.jurisdictions, partyRoles: c.parties.filter((p) => !p.removed).map((p) => p.partyRole), representations: c.representations.map((x) => ({ partyRole: x.partyRole, status: x.status })), lastOutcome: lastEvaluation(c)?.outcome ?? null } : null;
   }
@@ -878,57 +891,64 @@ export function registerCompliance(rawCtx) {
     if (!guardRev(req, res, r, { errorCode: 'REVIEW_VERSION_CONFLICT', current: { status: r.status } })) return;
     const priorState = { status: r.status, ...reviewEffectState(r) };
     const decision = { reviewerId: req.reviewer.id, reviewerName: req.reviewer.name, reviewerRole: req.reviewer.role, outcome, reasonCode, reason, evidenceRefs, policyVersions: r.policyVersions ?? [], at: now(), priorState, resultingState: null };
-    // Apply the platform effect of the decision.
-    const resulting = applyReviewDecision(r, outcome, req);
-    decision.resultingState = resulting;
-    r.status = outcome; r.decidedAt = now(); r.decision = decision;
-    r.keys ??= {}; if (key) r.keys.resolve = { key, fp };
-    hist(r, 'regulatory_review_resolved', byReviewer(req), { outcome, reasonCode, evidenceRefs, evidenceCount: evidenceRefs.length, policyVersions: decision.policyVersions, priorState, resultingState: resulting, rev: r.rev });
-    bumpRev(r, { by: req.reviewer, at: now() });
-    broadcast('regulatory_review_resolved', { orgId: r.agencyOrgId, reviewId: r.id, outcome });
-    if (r.agentUserId) notify({ kind: 'org_user', id: r.agentUserId }, 'regulatory_review_completed', `Attributed Trust & Safety review ${outcome === 'APPROVED' ? 'approved' : 'did not approve'} a ${r.kind.replace(/_/g, ' ')} item under ScoutBox policy. This is a platform decision, not a legal determination.`, r.id);
-    persistNow();
+    // Apply the platform effect of the decision and record it, as one unit (S11a: the effect on a facet or an agreement
+    // is a table write; the review is still a collection until S11b).
+    unit(() => {
+      const resulting = applyReviewDecision(r, outcome, req);
+      decision.resultingState = resulting;
+      r.status = outcome; r.decidedAt = now(); r.decision = decision;
+      r.keys ??= {}; if (key) r.keys.resolve = { key, fp };
+      hist(r, 'regulatory_review_resolved', byReviewer(req), { outcome, reasonCode, evidenceRefs, evidenceCount: evidenceRefs.length, policyVersions: decision.policyVersions, priorState, resultingState: resulting, rev: r.rev });
+      bumpRev(r, { by: req.reviewer, at: now() });
+      broadcast('regulatory_review_resolved', { orgId: r.agencyOrgId, reviewId: r.id, outcome });
+      if (r.agentUserId) notify({ kind: 'org_user', id: r.agentUserId }, 'regulatory_review_completed', `Attributed Trust & Safety review ${outcome === 'APPROVED' ? 'approved' : 'did not approve'} a ${r.kind.replace(/_/g, ' ')} item under ScoutBox policy. This is a platform decision, not a legal determination.`, r.id);
+      persistNow();
+    });
     res.json({ review: reviewPublic(r, { forReviewer: true }) });
   });
   function reviewEffectState(r) {
-    if (r.kind === 'verification_facet') { const p = (db.agentProfiles ?? []).find((x) => x.id === r.subject.profileId); const rec = p ? facetRecord(p, r.subject.facet, r.subject.memberAssociation) : null; return { facetState: rec ? effectiveFacetState(rec, now()) : null }; }
-    if (r.kind === 'representation_dispute') { const a = (db.representationAgreements ?? []).find((x) => x.id === r.subject.agreementId); return { agreementStatus: a ? effectiveAgreementStatus(a, now()) : null }; }
+    if (r.kind === 'verification_facet') { const p = agentReads.profiles.byId(r.subject.profileId); const rec = p ? facetRecord(p, r.subject.facet, r.subject.memberAssociation) : null; return { facetState: rec ? effectiveFacetState(rec, now()) : null }; }
+    if (r.kind === 'representation_dispute') { const a = agentReads.agreements.byId(r.subject.agreementId); return { agreementStatus: a ? effectiveAgreementStatus(a, now()) : null }; }
     const c = contextById(r.subject?.contextId); const rep = c?.representations.find((x) => x.id === r.subject?.representationId);
     return { contextOutcome: c ? lastEvaluation(c)?.outcome ?? null : null, representationStatus: rep?.status ?? null };
   }
   function applyReviewDecision(r, outcome, req) {
     const by = byReviewer(req);
     if (r.kind === 'verification_facet') {
-      const p = (db.agentProfiles ?? []).find((x) => x.id === r.subject.profileId);
+      const p = agentReads.profiles.byId(r.subject.profileId);
       if (!p) return { facetState: null, note: 'profile gone' };
-      const cur = facetRecord(p, r.subject.facet, r.subject.memberAssociation) ?? { reference: null };
+      const cur = facetRecord(p, r.subject.facet, r.subject.memberAssociation) ?? { state: 'UNVERIFIED', reference: null, memberAssociation: r.subject.memberAssociation ?? null, provenance: null, submittedAt: null, verifiedAt: null, recheckAt: null, note: null, staleNotifiedAt: null };
       const prev = effectiveFacetState(cur, now());
       const next = outcome === 'APPROVED'
-        ? { ...cur, state: 'VERIFIED', verifiedAt: now(), recheckAt: now() + RECHECK_MS, provenance: { provider: 'attributed_review', kind: 'human_review', reviewerId: req.reviewer.id, reviewId: r.id, at: now() }, note: 'Verified by attributed Trust & Safety review against the cited evidence. Re-check due in 30 days.', staleNotifiedAt: null }
-        : { ...cur, state: 'UNVERIFIED', verifiedAt: null, recheckAt: null, provenance: { provider: 'attributed_review', kind: 'human_review', reviewerId: req.reviewer.id, reviewId: r.id, at: now() }, note: 'Attributed Trust & Safety review could not verify this reference.' };
-      setFacet(p, r.subject.facet, r.subject.memberAssociation, next);
-      hist(p, 'agent_verification_state_changed', by, { facet: r.subject.facet, memberAssociation: r.subject.memberAssociation, from: prev, to: next.state, state: next.state, reviewId: r.id });
-      p.updatedAt = now(); bumpRev(p, { by: req.reviewer, at: now() });
+        ? { ...cur, state: 'VERIFIED', verifiedAt: now(), recheckAt: now() + RECHECK_MS, provenance: { provider: 'attributed_review', kind: 'human_review', at: now(), reviewerId: req.reviewer.id, reviewId: r.id }, note: 'Verified by attributed Trust & Safety review against the cited evidence. Re-check due in 30 days.', staleNotifiedAt: null }
+        : { ...cur, state: 'UNVERIFIED', verifiedAt: null, recheckAt: null, provenance: { provider: 'attributed_review', kind: 'human_review', at: now(), reviewerId: req.reviewer.id, reviewId: r.id }, note: 'Attributed Trust & Safety review could not verify this reference.' };
+      agentCore.profiles.update(p.id, (d) => {
+        setFacet(d, r.subject.facet, r.subject.memberAssociation, next);
+        hist(d, 'agent_verification_state_changed', by, { facet: r.subject.facet, memberAssociation: r.subject.memberAssociation, from: prev, to: next.state, state: next.state, reviewId: r.id });
+        d.updatedAt = now(); bumpRev(d, { by: req.reviewer, at: now() });
+      });
       broadcast('agent_verification_state_changed', { orgId: p.agencyOrgId, userId: p.userId, facet: r.subject.facet, state: next.state });
       broadcast('agent_authorisation_state_changed', { orgId: p.agencyOrgId, userId: p.userId, state: next.state });
       return { facetState: next.state };
     }
     if (r.kind === 'representation_dispute') {
-      const a = (db.representationAgreements ?? []).find((x) => x.id === r.subject.agreementId);
+      const a = agentReads.agreements.byId(r.subject.agreementId);
       if (!a || a.status !== 'disputed') return { agreementStatus: a ? effectiveAgreementStatus(a, now()) : null, note: 'not disputed any more' };
-      if (outcome === 'APPROVED') {
-        // Reinstate: the client's confirmation is unchanged; only the dispute suspension lifts. An expired term stays expired.
-        a.status = 'active'; a.disputeResolvedAt = now(); a.disputeResolution = { reviewId: r.id, outcome: 'reinstated' };
-        if (typeof a.endAt !== 'number' && a.confirmedAt) a.endAt = termEndAt(a.startAt ?? a.confirmedAt, a.termMonths ?? 12);
-      } else {
-        a.status = 'terminated_by_client'; a.terminatedAt = now(); a.terminatedBy = 'trust_safety'; a.terminationReasonCode = 'dispute_upheld'; a.disputeResolvedAt = now(); a.disputeResolution = { reviewId: r.id, outcome: 'ended' };
-      }
-      hist(a, outcome === 'APPROVED' ? 'representation_confirmed' : 'representation_terminated', by, { by: 'trust_safety', phase: 'disputed', reviewId: r.id, reasonCode: outcome === 'APPROVED' ? 'dispute_reinstated' : 'dispute_upheld' });
-      bumpRev(a, { by: req.reviewer, at: now() });
+      agentCore.agreements.update(a.id, (d) => {
+        if (outcome === 'APPROVED') {
+          // Reinstate: the client's confirmation is unchanged; only the dispute suspension lifts. An expired term stays expired.
+          d.status = 'active'; d.disputeResolvedAt = now(); d.disputeResolution = { reviewId: r.id, outcome: 'reinstated' };
+          if (typeof d.endAt !== 'number' && d.confirmedAt) d.endAt = termEndAt(d.startAt ?? d.confirmedAt, d.termMonths);
+        } else {
+          d.status = 'terminated_by_client'; d.terminatedAt = now(); d.terminatedBy = 'trust_safety'; d.terminationReasonCode = 'dispute_upheld'; d.disputeResolvedAt = now(); d.disputeResolution = { reviewId: r.id, outcome: 'ended' };
+        }
+        hist(d, outcome === 'APPROVED' ? 'representation_confirmed' : 'representation_terminated', by, { by: 'trust_safety', phase: 'disputed', reviewId: r.id, reasonCode: outcome === 'APPROVED' ? 'dispute_reinstated' : 'dispute_upheld' });
+        bumpRev(d, { by: req.reviewer, at: now() });
+      });
       broadcast(outcome === 'APPROVED' ? 'representation_confirmed' : 'representation_terminated', { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: a.agentUserId });
       notify({ kind: 'player', id: a.clientId }, 'representation_disputed', outcome === 'APPROVED' ? 'Attributed Trust & Safety review resolved your dispute: the relationship record is reinstated. You can still end it at any time.' : 'Attributed Trust & Safety review resolved your dispute: the relationship record has been ended.', a.id);
       if (a.agentUserId) notify({ kind: 'org_user', id: a.agentUserId }, 'representation_disputed', outcome === 'APPROVED' ? 'A disputed relationship was reinstated by attributed review.' : 'A disputed relationship was ended by attributed review.', a.id);
-      return { agreementStatus: effectiveAgreementStatus(a, now()) };
+      return { agreementStatus: effectiveAgreementStatus(agentReads.agreements.byId(a.id), now()) };
     }
     const c = contextById(r.subject?.contextId);
     if (!c) return { contextOutcome: null, note: 'context gone' };
@@ -997,7 +1017,7 @@ export function registerCompliance(rawCtx) {
     for (const c of db.complianceContexts) for (const e of c?.evaluations ?? []) outcomes[e.outcome] = (outcomes[e.outcome] ?? 0) + 1;
     const consents = db.regulatoryConsents.filter((k) => k && k.kind === 'dual_representation');
     let stale = 0;
-    for (const p of db.agentProfiles ?? []) { const s = facetStatesOf(p); if (s.fifa_licence === 'STALE') stale += 1; for (const f of ['national_registration', 'domestic_authorisation', 'minors_authorisation']) for (const v of Object.values(s[f])) if (v === 'STALE') stale += 1; }
+    for (const f of agentReads.profiles.facetStates()) if (effectiveFacetState(f, now()) === 'STALE') stale += 1;
     res.json({
       reviews: { byStatus: Object.fromEntries(REVIEW_STATUSES.map((s) => [s, reviews.filter((r) => r.status === s).length])), byKind: Object.fromEntries(REVIEW_KINDS.map((k) => [k, reviews.filter((r) => r.kind === k).length])), medianDurationMs: decided.length ? decided.map((r) => r.decidedAt - r.requestedAt).sort((a, b) => a - b)[Math.floor(decided.length / 2)] : null },
       conflictOutcomes: outcomes,

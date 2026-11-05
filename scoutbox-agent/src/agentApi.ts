@@ -109,7 +109,6 @@ export interface Relationship {
   terminationReasonCode: string | null;
   disputedAt: number | null;
   shareWithAgencyStaff: boolean;
-  documents: { id: string; label: string | null; addedAt: number | null }[];
   subjectRemovedAt: number | null;
   policyVersion: number;
   rev: number;

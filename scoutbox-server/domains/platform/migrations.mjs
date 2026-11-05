@@ -371,41 +371,11 @@ export const MIGRATIONS = [
     //      restored snapshot can still be administered.
     // (It also mirrored the M13 F10 legacy representations into agreements; that lane was removed in S11a.)
     note: 'M23 P5.6B: Agent core stores (agentProfiles, agencyAffiliations, representationAgreements) with non-destructive bootstraps.',
-    up(db) {
-      db.agentProfiles ??= [];
-      db.agencyAffiliations ??= [];
-      db.representationAgreements ??= [];
-      const now = Date.now();
-      const isLead = (role) => /head|director|lead|manager|owner|chief/i.test(role ?? '');
-      let seq = 0;
-      const id = (p) => `${p}-mig2305-${now.toString(36)}-${(seq += 1)}`;
-      const agencies = (db.orgs ?? []).filter((o) => o && o.type === 'agency');
-      for (const org of agencies) {
-        const members = (db.users ?? []).filter((u) => u && u.orgId === org.id && !u.removedAt)
-          .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-        for (const u of members) {
-          if (db.agencyAffiliations.some((a) => a && a.agencyOrgId === org.id && a.userId === u.id)) continue;
-          const tiers = [isLead(u.role) ? 'agency_admin' : 'assistant'];
-          db.agencyAffiliations.push({
-            id: id('aff'), agencyOrgId: org.id, userId: u.id, tiers,
-            // Never in the future: a clock skew on the user row must not
-            // produce a membership that has not "started" yet.
-            startedAt: Math.min(typeof u.createdAt === 'number' ? u.createdAt : now, now), endedAt: null, endedReason: null,
-            createdAt: now, rev: 1, revAt: now, revBy: null,
-            history: [{ id: id('aud'), at: now, action: 'agency_affiliation_created', by: { kind: 'system', userId: null, name: 'migration 2305' }, detail: { tiers, legacy: true } }],
-          });
-        }
-        const hasAdmin = db.agencyAffiliations.some((a) => a && a.agencyOrgId === org.id && a.endedAt == null && (a.tiers ?? []).includes('agency_admin'));
-        if (!hasAdmin) {
-          const first = db.agencyAffiliations.filter((a) => a && a.agencyOrgId === org.id && a.endedAt == null)
-            .sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))[0];
-          if (first && !(first.tiers ?? []).includes('agency_admin')) {
-            first.tiers = [...(first.tiers ?? []), 'agency_admin'];
-            first.history.push({ id: id('aud'), at: now, action: 'agency_affiliation_updated', by: { kind: 'system', userId: null, name: 'migration 2305' }, detail: { tiers: first.tiers, legacy: true } });
-          }
-        }
-      }
-    },
+    // Since migration 0026 (S11a) the agent profiles, affiliations and agreements are typed tables read through SQL
+    // (repositories/agentCore.mjs): there is no db.agentProfiles, db.agencyAffiliations or db.representationAgreements
+    // to create, and staff exist only from their first login (after every step ran), so there was never anyone to
+    // bootstrap on a database this build creates. A recorded no-op (its id stays).
+    up() {},
   },
   {
     id: 'm250_001_compliance_stores',
@@ -447,36 +417,9 @@ export const MIGRATIONS = [
           history: [{ id: id('aud'), at: now, action: 'policy_version_published', by: system, detail: { policyVersion: v.id, seeded: true } }],
         });
       }
-      for (const p of db.agentProfiles ?? []) {
-        if (!p) continue;
-        p.facets ??= {};
-        p.facets.domestic_authorisation ??= {};
-        const facets = [['fifa_licence', null, p.facets.fifa_licence]];
-        for (const f of ['national_registration', 'domestic_authorisation', 'minors_authorisation']) for (const [ma, rec] of Object.entries(p.facets[f] ?? {})) facets.push([f, ma, rec]);
-        for (const [facet, ma, rec] of facets) {
-          if (!rec || rec.state !== 'MANUAL_REVIEW_REQUIRED') continue;
-          if (db.regulatoryReviews.some((r) => r && r.kind === 'verification_facet' && r.subject?.profileId === p.id && r.subject?.facet === facet && (r.subject?.memberAssociation ?? null) === ma && (r.status === 'PENDING' || r.status === 'IN_REVIEW'))) continue;
-          db.regulatoryReviews.push({
-            id: id('rrv'), kind: 'verification_facet', status: 'PENDING', agencyOrgId: p.agencyOrgId ?? null, agentUserId: p.userId,
-            subject: { profileId: p.id, userId: p.userId, facet, memberAssociation: ma, referenceHash: rec.reference ? String(String(rec.reference).length) : null },
-            reasons: [{ code: 'NO_PROVIDER', ruleId: null, ruleStatus: null, policyVersion: null }], policyVersions: [], snapshot: null,
-            requestedAt: now, requestedBy: system, startedAt: null, startedBy: null, decidedAt: null, decision: null, supersedes: null, supersededBy: null,
-            keys: {}, rev: 1, revAt: now, revBy: null,
-            history: [{ id: id('aud'), at: now, action: 'regulatory_review_requested', by: system, detail: { kind: 'verification_facet', reasonCodes: ['NO_PROVIDER'], migrated: true } }],
-          });
-        }
-      }
-      for (const a of db.representationAgreements ?? []) {
-        if (!a || a.status !== 'disputed') continue;
-        if (db.regulatoryReviews.some((r) => r && r.kind === 'representation_dispute' && r.subject?.agreementId === a.id && (r.status === 'PENDING' || r.status === 'IN_REVIEW'))) continue;
-        db.regulatoryReviews.push({
-          id: id('rrv'), kind: 'representation_dispute', status: 'PENDING', agencyOrgId: a.agencyOrgId ?? null, agentUserId: a.agentUserId ?? null,
-          subject: { agreementId: a.id }, reasons: [{ code: 'CLIENT_DISPUTE', ruleId: null, ruleStatus: null, policyVersion: null }], policyVersions: [], snapshot: null,
-          requestedAt: now, requestedBy: system, startedAt: null, startedBy: null, decidedAt: null, decision: null, supersedes: null, supersededBy: null,
-          keys: {}, rev: 1, revAt: now, revBy: null,
-          history: [{ id: id('aud'), at: now, action: 'regulatory_review_requested', by: system, detail: { kind: 'representation_dispute', reasonCodes: ['CLIENT_DISPUTE'], migrated: true } }],
-        });
-      }
+      // Bootstraps 2 and 3 (an empty domestic_authorisation container on every profile; review items for facets and
+      // disputes already waiting) read the agent core, which is tables since S11a (migration 0026): a profile is
+      // written whole with its facets and a review is requested by the route that needs one. Nothing to do here.
     },
   },
   {

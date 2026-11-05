@@ -852,7 +852,7 @@ export function registerOffers(rawCtx) {
     const sole = integration?.soleActiveAgentFor?.(req.player.id, at) ?? { agreement: null, ambiguous: false };
     const agreementId = typeof req.body?.agreementId === 'string' ? req.body.agreementId : null;
     let agreement = sole.agreement;
-    if (agreementId) agreement = (db.representationAgreements ?? []).find((a) => a && a.id === agreementId && a.clientId === req.player.id && integration?.basisFor?.({ agentUserId: a.agentUserId, clientId: req.player.id, at })?.ok) ?? null;
+    if (agreementId) { const named = ctx.agentReads.agreements.byId(agreementId); agreement = named && named.clientId === req.player.id && integration?.basisFor?.({ agentUserId: named.agentUserId, clientId: req.player.id, at })?.ok ? named : null; }
     if (!agreement) return err(res, 'OFFER_INPUT_INVALID', sole.ambiguous ? 'You have more than one active agent. Name the agreement (agreementId) you are sharing with.' : 'No active representation agreement to share with.', { field: 'agreementId' });
     // A share is the recipient's own fact about their agent: it changes no term
     // and must not make the club's next edit conflict. No rev bump.

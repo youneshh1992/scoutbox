@@ -246,7 +246,7 @@ section('4 — a corrupt Offer row is named and refused, never repaired, and nev
   db.recruitmentOffers.push(fake);
   const kolaCase = db.recruitmentCases.find((c) => c.id === R.kola.RID);
   const kolaStage = kolaCase.room.status;
-  openStore(DIR).save({ db });
+  openStore(DIR).save({ db, idCounter: openStore(DIR).load().idCounter }); // keep the id counter: a save without one restarts the server's ids at 1000
   const s = await bootOn(DIR, PORT);
   ok(s.up, '4.1 the server boots with a corrupt row present — corruption is not fatal to the process');
   const { j } = s;
@@ -304,7 +304,7 @@ section('5 — P6.1: lazy expiry, temporal corruption, unknown statuses, legacy 
   db.recruitmentOffers.push(lazy, tIssuedBeforeCreated, tExpiryBound, tRespondedBeforeIssued, tPointer, disagree);
   const rowsBefore = JSON.stringify(db.recruitmentOffers);
   const casesBefore = JSON.stringify(db.recruitmentCases.map((c) => [c.id, c.room?.status ?? null]));
-  openStore(DIR).save({ db });
+  openStore(DIR).save({ db, idCounter: openStore(DIR).load().idCounter }); // keep the id counter (the planted rows' history ids must not be reissued)
   const s = await bootOn(DIR, PORT);
   ok(s.up && !/applied/.test(s.log()), '5.1 the server boots over six planted rows and a legacy case — no migration, no crash');
   const { j } = s;

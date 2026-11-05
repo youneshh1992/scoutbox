@@ -19,10 +19,12 @@
  */
 
 import { visibleToOrg } from '../../../domain.mjs';
+import { AGENT_CORE_LIMITS as LIM } from '../../../repositories/agentCore.mjs';
 import { buildShared } from '../../../m12/shared.mjs';
 import { opportunityBoardFor } from '../../scouting/journeys.mjs';
 import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
 import { sendAgentError } from './errors.mjs';
 import { agentAuditRows } from './audit.mjs';
@@ -30,8 +32,8 @@ import { facetFromProviderAnswer, FACET_METHOD } from '../compliance/provider.mj
 import {
   AGENT_POLICY_VERSION, VERIFICATION_STATES, FACETS, JURISDICTIONS, TIERS, SCOPES, MAX_TERM_MONTHS, EXPIRY_ALERT_MS,
   newFacets, effectiveFacetState, evaluateSubmission, requiredFacetsFor, verificationGap,
-  normaliseTiers, affiliationActive, tiersOf, PERMISSIONS, can, capabilitiesOf, affiliationChangeProblem,
-  normaliseScope, termMonthsOf, termEndAt, effectiveAgreementStatus, agreementGrantsAccess, requestConflict,
+  affiliationActive, tiersOf, PERMISSIONS, can, capabilitiesOf, affiliationChangeProblem,
+  DEFAULT_TERM_MONTHS, termEndAt, effectiveAgreementStatus, agreementGrantsAccess, requestConflict,
   DISCLOSURE_KEYS, normaliseDisclosure,
   clientTransitionAllowed, agentTransitionAllowed, agreementForAgent, agreementForClient, agreementSummaryForStaff,
 } from './shared.mjs';
@@ -39,11 +41,15 @@ import {
 export function registerAgent(rawCtx) {
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
   const {
-    db, byId, users, notifications, orgRouter, playerRouter, adminRouter, nextId, persistNow, notify, broadcast,
+    db, byId, users, notifications, orgRouter, playerRouter, adminRouter, nextId, notify, broadcast,
     findPlayer, isBlocked, playerViewForOrg, orgSafe, revokeOrgUserAccess, rateLimit, isAdult,
-    orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider,
+    orgCanSee, checkEligibility, distanceBand, moderateOrRefuse, verificationProvider, agentCore, unit, log = console,
   } = ctx;
   if (!notifications) throw new TypeError('registerAgent needs the notifications repository (ctx.notifications)');
+  // S11a: profiles, memberships, agreements and agency settings are tables of repositories/agentCore.mjs, written
+  // through these explicit operations (inside a unit of work with their notifications) and read through SQL.
+  if (typeof agentCore?.agreements?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerAgent needs the agent core repository and unit from the data layer');
+  const { profiles, affiliations, agreements, settings } = agentCore;
 
   const testProviderEnabled = process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1';
   // P5.6C seams the Compliance Engine fills after it registers: a facet that
@@ -58,11 +64,30 @@ export function registerAgent(rawCtx) {
   const byOrg = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const byPlayer = (req) => ({ kind: 'player', userId: req.player.id, name: req.player.name });
 
+  // ------------------------------------------------------------ input (S11a: junk is refused, naming the field)
+  const invalid = (res, field, message, scope = 'input') => { sendAgentError(res, { error: 'AGENT_INPUT_INVALID', field, message }, scope); return undefined; };
+  /** Optional text: undefined when absent, null when empty, the trimmed text otherwise; refused when not text or over `max`. */
+  const optText = (res, v, field, max, scope) => {
+    if (v === undefined) return undefined;
+    if (v === null) return null;
+    if (typeof v !== 'string') return invalid(res, field, `${field} must be text.`, scope) ?? false;
+    const t = v.trim();
+    if (t.length > max) return invalid(res, field, `${field} must be at most ${max} characters.`, scope) ?? false;
+    return t || null;
+  };
+  /** A list of distinct values from `vocab`, or false after refusing it with `code`. */
+  const listOf = (res, v, vocab, code, field, scope) => {
+    if (!Array.isArray(v) || v.some((x) => !vocab.includes(x)) || new Set(v).size !== v.length) {
+      sendAgentError(res, { error: code, field, allowed: vocab, message: `${field} must be a list of distinct values from: ${vocab.join(', ')}.` }, scope);
+      return false;
+    }
+    return [...v];
+  };
+
   // ------------------------------------------------------------ lookups
-  const activeAffiliationOf = (userId, orgId) =>
-    (db.agencyAffiliations ?? []).find((a) => a && a.userId === userId && a.agencyOrgId === orgId && affiliationActive(a, now())) ?? null;
-  const profileOf = (userId) => (db.agentProfiles ?? []).find((p) => p && p.userId === userId) ?? null;
-  const agreementsOfAgency = (orgId) => (db.representationAgreements ?? []).filter((a) => a && a.agencyOrgId === orgId);
+  const activeAffiliationOf = (userId, orgId) => affiliations.activeFor(userId, orgId, now());
+  const profileOf = (userId) => profiles.forUser(userId);
+  const agreementsOfAgency = (orgId) => agreements.forAgency(orgId);
 
   /** Step 3: agency membership. Bootstraps the first member of an agency as its admin. */
   function resolveMembership(req, res) {
@@ -72,21 +97,22 @@ export function registerAgent(rawCtx) {
     }
     let aff = activeAffiliationOf(req.orgUser.id, req.org.id);
     if (!aff) {
-      const anyActive = (db.agencyAffiliations ?? []).some((a) => a && a.agencyOrgId === req.org.id && affiliationActive(a, now()));
-      if (anyActive) {
+      if (affiliations.anyActiveIn(req.org.id, now())) {
         sendAgentError(res, { error: 'AGENCY_MEMBERSHIP_REQUIRED', message: 'You are not an active member of this agency. Ask an agency administrator to add you.' }, 'membership');
         return null;
       }
       // First person into an agency with no members: the same bootstrap rule
       // M14 uses for the first verification root admin.
-      aff = {
-        id: nextId('aff'), agencyOrgId: req.org.id, userId: req.orgUser.id, tiers: ['agency_admin'],
-        startedAt: now(), endedAt: null, endedReason: null, createdAt: now(), rev: 1, revAt: now(), revBy: null, keys: {}, history: [],
-      };
-      hist(aff, 'agency_affiliation_created', byOrg(req), { tiers: aff.tiers, bootstrap: true });
-      db.agencyAffiliations.push(aff);
-      persistNow();
-      broadcast('agency_affiliation_created', { orgId: req.org.id, userId: req.orgUser.id });
+      aff = unit(() => {
+        const draft = {
+          id: nextId('aff'), agencyOrgId: req.org.id, userId: req.orgUser.id, tiers: ['agency_admin'],
+          startedAt: now(), endedAt: null, endedReason: null, createdAt: now(), rev: 1, revAt: now(), revBy: null, keys: {}, history: [],
+        };
+        hist(draft, 'agency_affiliation_created', byOrg(req), { tiers: draft.tiers, bootstrap: true });
+        const created = affiliations.create(draft);
+        broadcast('agency_affiliation_created', { orgId: req.org.id, userId: req.orgUser.id });
+        return created;
+      });
     }
     req.affiliation = aff;
     req.tiers = tiersOf(aff);
@@ -98,6 +124,9 @@ export function registerAgent(rawCtx) {
     sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: `Your agency role does not include "${cap}".` }, cap);
     return false;
   };
+
+  /** `?limit=&cursor=` for a list paged newest first by rowid; null after answering a junk page with 400. */
+  const pageQuery = (req, res) => { try { return readPage(req.query, ['number']); } catch (e) { sendPageError(res, e); return null; } };
 
   const limitedOr429 = (res, action, key) => {
     if (rateLimit.limited(action, key)) { res.status(429).json(rateLimitedBody(action)); return true; }
@@ -188,13 +217,7 @@ export function registerAgent(rawCtx) {
         if (typeof a.endAt === 'number' && a.endAt - t <= EXPIRY_ALERT_MS) {
           counts.expiringSoon += 1;
           alerts.push({ kind: 'expiring', agreementId: a.id, endAt: a.endAt });
-          // One notification per agreement, lazily, when the agent looks.
-          if (!a.keys?.expiryNotifiedAt) {
-            a.keys ??= {};
-            a.keys.expiryNotifiedAt = t;
-            notify({ kind: 'org_user', id: me }, 'representation_expiring', 'A client relationship ends within 30 days. A new relationship needs a new client confirmation.', a.id);
-            persistNow();
-          }
+          // The one notification per agreement comes from the sweep (agentSweep), not from this read.
         }
       } else if (st === 'proposed') counts.pending += 1;
       else if (st === 'disputed') { counts.disputed += 1; alerts.push({ kind: 'disputed', agreementId: a.id }); }
@@ -224,45 +247,46 @@ export function registerAgent(rawCtx) {
     if (!requireCap(req, res, 'profile.write.own')) return;
     if (limitedOr429(res, 'agent_profile_write', req.orgUser.id)) return;
     const b = req.body ?? {};
-    const displayName = b.displayName === undefined ? undefined : String(b.displayName ?? '').trim().slice(0, 80);
-    if (displayName !== undefined && !displayName) return sendAgentError(res, { error: 'AGENT_INPUT_INVALID', field: 'displayName', message: 'displayName must not be empty.' }, 'profile');
-    const jurisdictions = b.jurisdictions === undefined ? undefined : (Array.isArray(b.jurisdictions) ? b.jurisdictions.filter((j) => JURISDICTIONS.includes(j)) : null);
-    if (jurisdictions === null) return sendAgentError(res, { error: 'AGENT_JURISDICTION_INVALID', allowed: JURISDICTIONS, message: 'jurisdictions must be a list of member-association codes.' }, 'profile');
-    const licenceNumber = b.fifaLicenceNumber === undefined ? undefined : String(b.fifaLicenceNumber ?? '').trim().slice(0, 40);
-    let p = profileOf(req.orgUser.id);
-    const created = !p;
+    const displayName = optText(res, b.displayName, 'displayName', LIM.displayName, 'profile'); if (displayName === false) return;
+    if (displayName === null) return sendAgentError(res, { error: 'AGENT_INPUT_INVALID', field: 'displayName', message: 'displayName must not be empty.' }, 'profile');
+    let jurisdictions;
+    if (b.jurisdictions !== undefined) { jurisdictions = listOf(res, b.jurisdictions, JURISDICTIONS, 'AGENT_JURISDICTION_INVALID', 'jurisdictions', 'profile'); if (!jurisdictions) return; }
+    const licenceNumber = optText(res, b.fifaLicenceNumber, 'fifaLicenceNumber', LIM.licenceNumber, 'profile'); if (licenceNumber === false) return;
+    const p = profileOf(req.orgUser.id);
     if (!p) {
-      p = {
-        id: nextId('agp'), userId: req.orgUser.id, agencyOrgId: req.org.id,
-        displayName: displayName ?? req.orgUser.name, declared: { fifaLicenceNumber: licenceNumber ?? null, jurisdictions: jurisdictions ?? [] },
-        facets: newFacets(), policyVersion: AGENT_POLICY_VERSION,
-        createdAt: now(), updatedAt: now(), rev: 1, revAt: now(), revBy: null, keys: {}, history: [],
-      };
-      hist(p, 'agent_profile_created', byOrg(req));
-      db.agentProfiles.push(p);
-    } else {
-      if (!guardRev(req, res, p, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: {} })) return;
+      const created = unit(() => {
+        const draft = {
+          id: nextId('agp'), userId: req.orgUser.id, agencyOrgId: req.org.id,
+          displayName: displayName ?? String(req.orgUser.name ?? '').slice(0, LIM.displayName), declared: { fifaLicenceNumber: licenceNumber ?? null, jurisdictions: jurisdictions ?? [] },
+          facets: newFacets(), createdAt: now(), updatedAt: now(), rev: 1, revAt: now(), revBy: null, history: [],
+        };
+        hist(draft, 'agent_profile_created', byOrg(req));
+        const out = profiles.create(draft);
+        broadcast('agent_profile_created', { orgId: req.org.id, userId: out.userId });
+        return out;
+      });
+      return res.status(201).json({ profile: profileView(created) });
+    }
+    if (!guardRev(req, res, p, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: {} })) return;
+    const updated = unit(() => profiles.update(p.id, (d) => {
       const changes = {};
-      if (displayName !== undefined && displayName !== p.displayName) { p.displayName = displayName; changes.displayName = true; }
-      if (jurisdictions !== undefined) { p.declared.jurisdictions = jurisdictions; changes.jurisdictions = true; }
-      if (licenceNumber !== undefined && licenceNumber !== p.declared.fifaLicenceNumber) {
-        p.declared.fifaLicenceNumber = licenceNumber || null;
-        // A changed declaration invalidates nothing verified? It does: the
-        // verified reference is no longer the declared one.
-        if (p.facets.fifa_licence?.state === 'VERIFIED' && p.facets.fifa_licence.reference !== licenceNumber) {
-          p.facets.fifa_licence = { ...p.facets.fifa_licence, state: 'UNVERIFIED', note: 'The declared licence number changed; re-submit for verification.' };
-          hist(p, 'agent_verification_state_changed', byOrg(req), { facet: 'fifa_licence', state: 'UNVERIFIED' });
-          broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: p.userId, facet: 'fifa_licence', state: 'UNVERIFIED' });
+      if (displayName !== undefined && displayName !== d.displayName) { d.displayName = displayName; changes.displayName = true; }
+      if (jurisdictions !== undefined) { d.declared.jurisdictions = jurisdictions; changes.jurisdictions = true; }
+      if (licenceNumber !== undefined && licenceNumber !== d.declared.fifaLicenceNumber) {
+        d.declared.fifaLicenceNumber = licenceNumber;
+        // A changed declaration invalidates the verified licence: the verified reference is no longer the declared one.
+        if (d.facets.fifa_licence.state === 'VERIFIED' && d.facets.fifa_licence.reference !== licenceNumber) {
+          d.facets.fifa_licence = { ...d.facets.fifa_licence, state: 'UNVERIFIED', note: 'The declared licence number changed; re-submit for verification.' };
+          hist(d, 'agent_verification_state_changed', byOrg(req), { facet: 'fifa_licence', memberAssociation: null, from: 'VERIFIED', to: 'UNVERIFIED', state: 'UNVERIFIED' });
+          broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: d.userId, facet: 'fifa_licence', state: 'UNVERIFIED' });
         }
         changes.fifaLicenceNumber = true;
       }
-      p.updatedAt = now();
-      hist(p, 'agent_profile_updated', byOrg(req), { fields: Object.keys(changes) });
-      bumpRev(p, { by: req.orgUser, at: now() });
-    }
-    persistNow();
-    if (created) broadcast('agent_profile_created', { orgId: req.org.id, userId: p.userId });
-    res.status(created ? 201 : 200).json({ profile: profileView(p) });
+      d.updatedAt = now();
+      hist(d, 'agent_profile_updated', byOrg(req), { fields: Object.keys(changes) });
+      bumpRev(d, { by: req.orgUser, at: now() });
+    }));
+    res.status(200).json({ profile: profileView(updated) });
   });
 
   /**
@@ -279,14 +303,14 @@ export function registerAgent(rawCtx) {
     if (!FACETS.includes(facet)) return sendAgentError(res, { error: 'AGENT_FACET_INVALID', allowed: FACETS }, 'facet');
     const p = profileOf(req.orgUser.id);
     if (!p) return sendAgentError(res, { error: 'AGENT_PROFILE_REQUIRED', message: 'Create your agent profile first.' }, 'facet');
-    const reference = String(req.body?.reference ?? '').trim().slice(0, 60);
+    const reference = optText(res, req.body?.reference, 'reference', LIM.reference, 'facet'); if (reference === false) return;
     if (!reference) return sendAgentError(res, { error: 'AGENT_INPUT_INVALID', field: 'reference', message: 'A reference is required.' }, 'facet');
-    const ma = facet === 'fifa_licence' ? null : String(req.body?.memberAssociation ?? '').trim().toUpperCase();
+    const rawMa = req.body?.memberAssociation;
+    if (facet !== 'fifa_licence' && rawMa !== undefined && typeof rawMa !== 'string') return invalid(res, 'memberAssociation', 'memberAssociation must be a member-association code.', 'facet');
+    const ma = facet === 'fifa_licence' ? null : String(rawMa ?? '').trim().toUpperCase();
     // A national facet belongs to a member association; INT is FIFA level, not one.
     if (facet !== 'fifa_licence' && (ma === 'INT' || !JURISDICTIONS.includes(ma))) return sendAgentError(res, { error: 'AGENT_JURISDICTION_INVALID', allowed: JURISDICTIONS.filter((j) => j !== 'INT') }, 'facet');
-    if (facet === 'minors_authorisation') {
-      // Recorded, never activated: no production minors pathway exists (P5.6A DR-49).
-    }
+    // Minors authorisation is recorded, never activated: no production minors pathway exists (P5.6A DR-49).
     // P5.6C: ONE provider abstraction (fail-honest). Without it, the P5.6B
     // synthetic/none evaluation; with it, the same states plus UNAVAILABLE,
     // which writes nothing and answers 503 — an outage is never a permission.
@@ -297,27 +321,30 @@ export function registerAgent(rawCtx) {
     const next = verificationProvider
       ? facetFromProviderAnswer(outcome, { reference, memberAssociation: ma, now: now() })
       : { state: outcome.state, reference, memberAssociation: ma, provenance: outcome.provenance, submittedAt: now(), verifiedAt: outcome.verifiedAt, recheckAt: outcome.recheckAt, note: outcome.note };
-    p.facets[facet] ??= {};
-    const prev = facet === 'fifa_licence' ? p.facets.fifa_licence : p.facets[facet][ma];
-    if (facet === 'fifa_licence') p.facets.fifa_licence = next; else p.facets[facet][ma] = next;
-    hist(p, 'agent_verification_submitted', byOrg(req), { facet, memberAssociation: ma });
-    if (next.state === 'MANUAL_REVIEW_REQUIRED' && hooks.facetNeedsReview) hooks.facetNeedsReview(p, { facet, memberAssociation: ma, reference }, byOrg(req));
-    if ((prev?.state ?? 'UNVERIFIED') !== next.state) {
-      hist(p, 'agent_verification_state_changed', byOrg(req), { facet, memberAssociation: ma, from: prev?.state ?? 'UNVERIFIED', to: next.state, state: next.state });
-      broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: p.userId, facet, state: next.state });
-      if (next.state === 'VERIFIED' || next.state === 'INACTIVE' || next.state === 'MANUAL_REVIEW_REQUIRED') {
-        notify({ kind: 'org_user', id: p.userId }, 'agent_verification', `Verification facet ${facet}${ma ? ` (${ma})` : ''} is now ${next.state.replace(/_/g, ' ').toLowerCase()}.`, p.id);
+    const prev = facet === 'fifa_licence' ? p.facets.fifa_licence : p.facets[facet]?.[ma];
+    const changed = (prev?.state ?? 'UNVERIFIED') !== next.state;
+    const updated = unit(() => {
+      const out = profiles.update(p.id, (d) => {
+        if (facet === 'fifa_licence') d.facets.fifa_licence = { ...next, staleNotifiedAt: null }; else d.facets[facet][ma] = { ...next, staleNotifiedAt: null };
+        hist(d, 'agent_verification_submitted', byOrg(req), { facet, memberAssociation: ma });
+        if (changed) hist(d, 'agent_verification_state_changed', byOrg(req), { facet, memberAssociation: ma, from: prev?.state ?? 'UNVERIFIED', to: next.state, state: next.state });
+        d.updatedAt = now();
+        bumpRev(d, { by: req.orgUser, at: now() });
+      });
+      if (next.state === 'MANUAL_REVIEW_REQUIRED' && hooks.facetNeedsReview) hooks.facetNeedsReview(out, { facet, memberAssociation: ma, reference }, byOrg(req));
+      if (changed) {
+        broadcast('agent_verification_state_changed', { orgId: req.org.id, userId: out.userId, facet, state: next.state });
+        if (next.state === 'VERIFIED' || next.state === 'INACTIVE' || next.state === 'MANUAL_REVIEW_REQUIRED') {
+          notify({ kind: 'org_user', id: out.userId }, 'agent_verification', `Verification facet ${facet}${ma ? ` (${ma})` : ''} is now ${next.state.replace(/_/g, ' ').toLowerCase()}.`, out.id);
+        }
       }
-    }
-    p.updatedAt = now();
-    bumpRev(p, { by: req.orgUser, at: now() });
-    persistNow();
-    res.json({ profile: profileView(p), facet: facetView(next), provider: testProviderEnabled ? 'local-synthetic-test-provider' : 'none' });
+      return out;
+    });
+    res.json({ profile: profileView(updated), facet: facetView(next), provider: testProviderEnabled ? 'local-synthetic-test-provider' : 'none' });
   });
 
   // ============================================================ ORG: agency
-  const memberRows = (org) => (db.agencyAffiliations ?? [])
-    .filter((a) => a && a.agencyOrgId === org.id)
+  const memberRows = (org) => affiliations.forAgency(org.id)
     .map((a) => {
       const u = byId.user(a.userId);
       const p = profileOf(a.userId);
@@ -334,12 +361,12 @@ export function registerAgent(rawCtx) {
     if (!resolveMembership(req, res)) return;
     const members = memberRows(req.org);
     const active = members.filter((m) => m.active);
-    const agreements = agreementsOfAgency(req.org.id);
+    const rels = agreementsOfAgency(req.org.id);
     res.json({
       org: orgSafe(req.org),
-      settings: req.org.agencySettings ?? { jurisdictions: [], description: '' },
+      settings: settings.forOrg(req.org.id),
       members: { active: active.length, admins: active.filter((m) => m.tiers.includes('agency_admin')).length, licensedAgents: active.filter((m) => m.tiers.includes('licensed_agent')).length },
-      relationships: { active: agreements.filter((a) => effectiveAgreementStatus(a, now()) === 'active').length, pending: agreements.filter((a) => effectiveAgreementStatus(a, now()) === 'proposed').length, legacy: agreements.filter((a) => a.legacy).length },
+      relationships: { active: rels.filter((a) => effectiveAgreementStatus(a, now()) === 'active').length, pending: rels.filter((a) => effectiveAgreementStatus(a, now()) === 'proposed').length },
       tiers: TIERS, permissions: PERMISSIONS,
       honest: 'An agency organisation holds no football-agent licence. Roles here decide what a member may do in ScoutBox, never whether they may perform football-agent services.',
     });
@@ -355,14 +382,15 @@ export function registerAgent(rawCtx) {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'agency.team.write')) return;
     if (limitedOr429(res, 'agent_affiliation_write', req.org.id)) return;
-    const name = String(req.body?.name ?? '').trim().slice(0, 80);
+    const name = optText(res, req.body?.name, 'name', LIM.staffName, 'team'); if (name === false) return;
     if (!name) return sendAgentError(res, { error: 'AGENT_INPUT_INVALID', field: 'name' }, 'team');
-    const tiers = normaliseTiers(req.body?.tiers);
+    const tiers = listOf(res, req.body?.tiers, TIERS, 'AGENT_TIERS_INVALID', 'tiers', 'team'); if (!tiers) return;
     if (!tiers.length) return sendAgentError(res, { error: 'AGENT_TIERS_INVALID', allowed: TIERS }, 'team');
+    const role = optText(res, req.body?.role, 'role', LIM.staffRole, 'team'); if (role === false) return;
     const key = clientKeyOr400(req, res); if (key === undefined) return;
     const fp = payloadFingerprint({ name: name.toLowerCase(), tiers });
     if (key) {
-      const hit = (db.agencyAffiliations ?? []).find((a) => a?.agencyOrgId === req.org.id && a.keys?.create?.key === key);
+      const hit = affiliations.byCreateKey(req.org.id, key);
       if (hit) {
         if (hit.keys.create.fp === fp) return res.status(200).json({ member: memberRows(req.org).find((m) => m.affiliationId === hit.id), idempotent: true });
         return sendAgentError(res, { error: 'AFFILIATION_IDEMPOTENCY_CONFLICT' }, 'team');
@@ -370,17 +398,20 @@ export function registerAgent(rawCtx) {
     }
     let user = db.users.find((u) => u.orgId === req.org.id && u.name.toLowerCase() === name.toLowerCase());
     if (user?.removedAt) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: 'This person\'s access was removed; removal is not undone from the team page.' }, 'team');
-    if (!user) user = users.insert({ orgId: req.org.id, name, role: String(req.body?.role ?? 'Agency staff').trim().slice(0, 60) || 'Agency staff', createdAt: now() });
-    if (activeAffiliationOf(user.id, req.org.id)) return sendAgentError(res, { error: 'MEMBER_ALREADY_AFFILIATED' }, 'team');
-    const aff = {
-      id: nextId('aff'), agencyOrgId: req.org.id, userId: user.id, tiers, startedAt: now(), endedAt: null, endedReason: null,
-      createdAt: now(), rev: 1, revAt: now(), revBy: null, keys: key ? { create: { key, fp } } : {}, history: [],
-    };
-    hist(aff, 'agency_affiliation_created', byOrg(req), { tiers });
-    db.agencyAffiliations.push(aff);
-    persistNow();
-    broadcast('agency_affiliation_created', { orgId: req.org.id, userId: user.id });
-    notify({ kind: 'org_user', id: user.id }, 'agency_membership', `You were added to ${req.org.name} (${tiers.join(', ')}).`, aff.id);
+    if (user && activeAffiliationOf(user.id, req.org.id)) return sendAgentError(res, { error: 'MEMBER_ALREADY_AFFILIATED' }, 'team');
+    // Staff writes cannot join a unit of work yet (repositories/users.mjs): the account exists before its membership.
+    if (!user) user = users.insert({ orgId: req.org.id, name, role: role ?? 'Agency staff', createdAt: now() });
+    const aff = unit(() => {
+      const draft = {
+        id: nextId('aff'), agencyOrgId: req.org.id, userId: user.id, tiers, startedAt: now(), endedAt: null, endedReason: null,
+        createdAt: now(), rev: 1, revAt: now(), revBy: null, keys: key ? { create: { key, fp } } : {}, history: [],
+      };
+      hist(draft, 'agency_affiliation_created', byOrg(req), { tiers });
+      const out = affiliations.create(draft);
+      broadcast('agency_affiliation_created', { orgId: req.org.id, userId: user.id });
+      notify({ kind: 'org_user', id: user.id }, 'agency_membership', `You were added to ${req.org.name} (${tiers.join(', ')}).`, out.id);
+      return out;
+    });
     res.status(201).json({ member: memberRows(req.org).find((m) => m.affiliationId === aff.id) });
   });
 
@@ -390,16 +421,17 @@ export function registerAgent(rawCtx) {
     if (limitedOr429(res, 'agent_affiliation_write', req.org.id)) return;
     const aff = activeAffiliationOf(req.params.userId, req.org.id);
     if (!aff) return sendAgentError(res, { error: 'MEMBER_NOT_FOUND' }, 'team');
-    const tiers = normaliseTiers(req.body?.tiers);
+    const tiers = listOf(res, req.body?.tiers, TIERS, 'AGENT_TIERS_INVALID', 'tiers', 'team'); if (!tiers) return;
     if (!tiers.length) return sendAgentError(res, { error: 'AGENT_TIERS_INVALID', allowed: TIERS }, 'team');
-    const problem = affiliationChangeProblem({ affiliations: (db.agencyAffiliations ?? []).filter((a) => a?.agencyOrgId === req.org.id), target: aff, actorUserId: req.orgUser.id, nextTiers: tiers, now: now() });
+    const problem = affiliationChangeProblem({ affiliations: affiliations.forAgency(req.org.id), target: aff, actorUserId: req.orgUser.id, nextTiers: tiers, now: now() });
     if (problem) return sendAgentError(res, { error: problem, message: problem === 'LAST_ADMIN' ? 'An agency must keep at least one administrator.' : 'You cannot grant yourself the administrator role.' }, 'team');
     if (!guardRev(req, res, aff, { errorCode: 'AFFILIATION_VERSION_CONFLICT', current: { tiers: tiersOf(aff) } })) return;
-    const from = tiersOf(aff);
-    aff.tiers = tiers;
-    hist(aff, 'agency_affiliation_updated', byOrg(req), { from, to: tiers, tiers });
-    bumpRev(aff, { by: req.orgUser, at: now() });
-    persistNow();
+    unit(() => affiliations.update(aff.id, (d) => {
+      const from = tiersOf(d);
+      d.tiers = tiers;
+      hist(d, 'agency_affiliation_updated', byOrg(req), { from, to: tiers, tiers });
+      bumpRev(d, { by: req.orgUser, at: now() });
+    }));
     res.json({ member: memberRows(req.org).find((m) => m.affiliationId === aff.id) });
   });
 
@@ -409,20 +441,24 @@ export function registerAgent(rawCtx) {
     if (limitedOr429(res, 'agent_affiliation_write', req.org.id)) return;
     const aff = activeAffiliationOf(req.params.userId, req.org.id);
     if (!aff) return sendAgentError(res, { error: 'MEMBER_NOT_FOUND' }, 'team');
-    const problem = affiliationChangeProblem({ affiliations: (db.agencyAffiliations ?? []).filter((a) => a?.agencyOrgId === req.org.id), target: aff, actorUserId: req.orgUser.id, nextTiers: [], now: now(), ending: true });
+    const reason = optText(res, req.body?.reason, 'reason', LIM.reasonCode, 'team'); if (reason === false) return;
+    const problem = affiliationChangeProblem({ affiliations: affiliations.forAgency(req.org.id), target: aff, actorUserId: req.orgUser.id, nextTiers: [], now: now(), ending: true });
     if (problem) return sendAgentError(res, { error: problem, message: 'An agency must keep at least one administrator.' }, 'team');
     if (!guardRev(req, res, aff, { errorCode: 'AFFILIATION_VERSION_CONFLICT', current: {} })) return;
-    aff.endedAt = now();
-    aff.endedReason = String(req.body?.reason ?? 'left').slice(0, 40);
-    hist(aff, 'agency_affiliation_ended', byOrg(req), { reasonCode: aff.endedReason });
-    bumpRev(aff, { by: req.orgUser, at: now() });
+    unit(() => {
+      affiliations.update(aff.id, (d) => {
+        d.endedAt = now();
+        d.endedReason = reason ?? 'left';
+        hist(d, 'agency_affiliation_ended', byOrg(req), { reasonCode: d.endedReason });
+        bumpRev(d, { by: req.orgUser, at: now() });
+      });
+      broadcast('agency_affiliation_ended', { orgId: req.org.id, userId: aff.userId });
+    });
     // Current agency access ends now; the person's agent profile and every
-    // historical attribution stay exactly as they are.
+    // historical attribution stay exactly as they are. (Staff writes commit on their own, after the membership.)
     const user = byId.user(aff.userId);
     if (user && !user.removedAt) users.update(user.id, { removedAt: now() });
     revokeOrgUserAccess?.(aff.userId);
-    persistNow();
-    broadcast('agency_affiliation_ended', { orgId: req.org.id, userId: aff.userId });
     res.json({ member: memberRows(req.org).find((m) => m.affiliationId === aff.id) });
   });
 
@@ -431,19 +467,19 @@ export function registerAgent(rawCtx) {
     if (!requireCap(req, res, 'agency.settings.write')) return;
     if (limitedOr429(res, 'agent_affiliation_write', req.org.id)) return;
     const b = req.body ?? {};
-    const settings = req.org.agencySettings ?? { jurisdictions: [], description: '' };
-    if (b.jurisdictions !== undefined) {
-      if (!Array.isArray(b.jurisdictions) || b.jurisdictions.some((j) => !JURISDICTIONS.includes(j))) return sendAgentError(res, { error: 'AGENT_JURISDICTION_INVALID', allowed: JURISDICTIONS }, 'settings');
-      settings.jurisdictions = [...new Set(b.jurisdictions)];
-    }
+    const current = settings.forOrg(req.org.id);
+    let jurisdictions = [...current.jurisdictions];
+    if (b.jurisdictions !== undefined) { jurisdictions = listOf(res, b.jurisdictions, JURISDICTIONS, 'AGENT_JURISDICTION_INVALID', 'jurisdictions', 'settings'); if (!jurisdictions) return; }
+    let description = current.description;
     if (b.description !== undefined) {
-      const d = String(b.description ?? '').slice(0, 300);
+      if (b.description !== null && typeof b.description !== 'string') return invalid(res, 'description', 'description must be text.', 'settings');
+      const d = b.description ?? '';
+      if (d.length > LIM.description) return invalid(res, 'description', `description must be at most ${LIM.description} characters.`, 'settings');
       if (d && !moderateOrRefuse(res, d, { kind: 'agency_settings', orgId: req.org.id })) return;
-      settings.description = d;
+      description = d;
     }
-    req.org.agencySettings = settings;
-    persistNow();
-    res.json({ settings });
+    const saved = unit(() => settings.save(req.org.id, { jurisdictions, description }));
+    res.json({ settings: saved });
   });
 
   orgRouter.get('/agent/agency/compliance', (req, res) => {
@@ -464,7 +500,7 @@ export function registerAgent(rawCtx) {
   orgRouter.get('/agent/agency/audit', (req, res) => {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'agency.audit.read')) return;
-    const all = agentAuditRows(db, req.org, { findPlayer, orgCanSee });
+    const all = agentAuditRows(agentCore.reads, req.org, { findPlayer, orgCanSee });
     // P5.6C: compliance rows (contexts, consents, attributed reviews) ride the same feed, same shape.
     if (hooks.auditRows) { all.push(...hooks.auditRows(req.org)); all.sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id))); }
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 25));
@@ -503,7 +539,7 @@ export function registerAgent(rawCtx) {
     const rows = [];
     for (const a of agreementsOfAgency(req.org.id)) {
       if (a.agentUserId === me && can(req.tiers, 'clients.read.own')) rows.push({ a, mode: 'own' });
-      else if (can(req.tiers, 'clients.read.shared_summary') && (a.shareWithAgencyStaff || a.legacy)) rows.push({ a, mode: 'summary' });
+      else if (can(req.tiers, 'clients.read.shared_summary') && a.shareWithAgencyStaff) rows.push({ a, mode: 'summary' });
     }
     return rows;
   }
@@ -511,7 +547,7 @@ export function registerAgent(rawCtx) {
     if (mode === 'summary') {
       const player = findPlayer(a.clientId);
       const name = player && orgCanSee(req.org, player) ? player.name : null;
-      return { ...agreementSummaryForStaff(a, now()), client: { id: a.clientId, name }, legacy: a.legacy ?? null };
+      return { ...agreementSummaryForStaff(a, now()), client: { id: a.clientId, name } };
     }
     return { ...agreementForAgent(a, now()), client: clientIdentity(a, req), mode: 'own' };
   };
@@ -524,10 +560,10 @@ export function registerAgent(rawCtx) {
   });
 
   function findOwnAgreement(req, res, id) {
-    const a = (db.representationAgreements ?? []).find((x) => x && x.id === id);
+    const a = typeof id === 'string' ? agreements.byId(id) : null;
     if (!a || a.agencyOrgId !== req.org.id) { sendAgentError(res, { error: 'REPRESENTATION_NOT_FOUND' }, 'client'); return null; }
     if (a.agentUserId === req.orgUser.id && can(req.tiers, 'clients.read.own')) return a;
-    if (can(req.tiers, 'clients.read.shared_summary') && (a.shareWithAgencyStaff || a.legacy)) return { summaryOnly: true, a };
+    if (can(req.tiers, 'clients.read.shared_summary') && a.shareWithAgencyStaff) return { summaryOnly: true, a };
     sendAgentError(res, { error: 'REPRESENTATION_NOT_FOUND' }, 'client');
     return null;
   }
@@ -545,20 +581,24 @@ export function registerAgent(rawCtx) {
     if (!requireCap(req, res, 'clients.request')) return;
     const b = req.body ?? {};
     const key = clientKeyOr400(req, res); if (key === undefined) return;
+    let scope = ['employment'];
     if (b.scope !== undefined) {
       const raw = Array.isArray(b.scope) ? b.scope : (typeof b.scope === 'string' ? [b.scope] : null);
-      if (!raw || raw.length === 0 || raw.some((s) => !SCOPES.includes(s))) return sendAgentError(res, { error: 'AGENT_SCOPE_INVALID', allowed: SCOPES }, 'request');
+      if (!raw || raw.length === 0 || raw.some((x) => !SCOPES.includes(x)) || new Set(raw).size !== raw.length) return sendAgentError(res, { error: 'AGENT_SCOPE_INVALID', allowed: SCOPES }, 'request');
+      scope = [...raw];
     }
-    const scope = normaliseScope(b.scope);
-    const termMonths = termMonthsOf(b.termMonths);
-    if (termMonths === null) return sendAgentError(res, { error: 'AGENT_TERM_INVALID', message: `termMonths must be a whole number from 1 to ${MAX_TERM_MONTHS}.` }, 'request');
-    const jurisdiction = String(b.jurisdiction ?? 'INT').toUpperCase();
+    const termMonths = b.termMonths === undefined || b.termMonths === null ? DEFAULT_TERM_MONTHS : b.termMonths;
+    if (!Number.isInteger(termMonths) || termMonths < 1 || termMonths > MAX_TERM_MONTHS) return sendAgentError(res, { error: 'AGENT_TERM_INVALID', message: `termMonths must be a whole number from 1 to ${MAX_TERM_MONTHS}.` }, 'request');
+    if (b.jurisdiction !== undefined && typeof b.jurisdiction !== 'string') return sendAgentError(res, { error: 'AGENT_JURISDICTION_INVALID', allowed: JURISDICTIONS }, 'request');
+    const jurisdiction = (b.jurisdiction ?? 'INT').toUpperCase();
     if (!JURISDICTIONS.includes(jurisdiction)) return sendAgentError(res, { error: 'AGENT_JURISDICTION_INVALID', allowed: JURISDICTIONS }, 'request');
-    const exclusive = !!b.exclusive;
-    const playerId = String(b.playerId ?? '');
+    if (b.exclusive !== undefined && typeof b.exclusive !== 'boolean') return invalid(res, 'exclusive', 'exclusive must be true or false.', 'request');
+    const exclusive = b.exclusive === true;
+    if (b.playerId !== undefined && typeof b.playerId !== 'string') return invalid(res, 'playerId', 'playerId must be a player id.', 'request');
+    const playerId = b.playerId ?? '';
     const fp = payloadFingerprint({ playerId, scope, termMonths, jurisdiction, exclusive });
     if (key) {
-      const hit = (db.representationAgreements ?? []).find((a) => a?.agencyOrgId === req.org.id && a.agentUserId === req.orgUser.id && a.keys?.request?.key === key);
+      const hit = agreements.byRequestKey(req.org.id, req.orgUser.id, key);
       if (hit) {
         if (hit.keys.request.fp === fp) return res.status(200).json({ relationship: { ...agreementForAgent(hit, now()), client: clientIdentity(hit, req) }, idempotent: true });
         return sendAgentError(res, { error: 'REPRESENTATION_IDEMPOTENCY_CONFLICT' }, 'request');
@@ -577,7 +617,7 @@ export function registerAgent(rawCtx) {
     if (!player || !isAdult(player) || !visibleToOrg(player, req.org) || isBlocked(player.id, req.org.id)) {
       return sendAgentError(res, { error: 'PLAYER_NOT_FOUND' }, 'request');
     }
-    const conflict = requestConflict(db.representationAgreements ?? [], { agentUserId: req.orgUser.id, playerId: player.id, now: now() });
+    const conflict = requestConflict(agreements.forAgentClient(req.orgUser.id, player.id), { agentUserId: req.orgUser.id, playerId: player.id, now: now() });
     if (conflict) return sendAgentError(res, { ...conflict, message: conflict.error === 'REPRESENTATION_COOLDOWN' ? 'A recent request to this player was declined or ended; wait before asking again.' : 'A relationship with this player already exists or is pending.' }, 'request');
     // P5.6C: an Approach is a regulated act — the versioned policy layer has
     // the last word at mutation time (registration and domestic authorisation
@@ -596,22 +636,23 @@ export function registerAgent(rawCtx) {
         return sendAgentError(res, { error: unsupported ? 'JURISDICTION_UNSUPPORTED' : 'REGULATORY_REVIEW_REQUIRED', reviewId: review?.id ?? undefined, reasons: decision.reasons.filter((r) => r.code !== 'FACET_VERIFIED'), policyVersions, message: unsupported ? 'No encoded policy covers this jurisdiction; the request cannot proceed.' : 'The deciding rule\'s operative status is uncertain. The request was not sent; an attributed Trust & Safety review item records the question.' }, 'request');
       }
     }
-    const a = {
-      id: nextId('rep'), agentUserId: req.orgUser.id, agencyOrgId: req.org.id,
-      clientKind: 'player', clientId: player.id, isRegulatoryMinor: false,
-      jurisdiction, scope, exclusive, termMonths, startAt: null, endAt: null,
-      status: 'proposed', proposedAt: now(), confirmedAt: null, confirmedBy: null,
-      declinedAt: null, terminatedAt: null, terminatedBy: null, terminationReasonCode: null, disputedAt: null, disputeReason: null,
-      shareWithAgencyStaff: false, documents: [], legacy: null,
-      policyVersion: AGENT_POLICY_VERSION, policyVersions, keys: key ? { request: { key, fp } } : {},
-      createdAt: now(), rev: 1, revAt: now(), revBy: null, history: [],
-    };
-    hist(a, 'representation_requested', byOrg(req), { scope, termMonths, jurisdiction, policyVersions });
-    db.representationAgreements.push(a);
-    persistNow();
-    broadcast('representation_requested', { orgId: req.org.id, agreementId: a.id, agentUserId: a.agentUserId });
     const agentName = profileOf(req.orgUser.id)?.displayName ?? req.orgUser.name;
-    notify({ kind: 'player', id: player.id }, 'representation_request', `${agentName} (${req.org.name}) asks to represent you (${scope.join(', ')}, ${termMonths} months). Nothing is active until YOU confirm it in My Agent.`, a.id);
+    const a = unit(() => {
+      const draft = {
+        id: nextId('rep'), agentUserId: req.orgUser.id, agencyOrgId: req.org.id,
+        clientKind: 'player', clientId: player.id, isRegulatoryMinor: false,
+        jurisdiction, scope, exclusive, termMonths, startAt: null, endAt: null,
+        status: 'proposed', proposedAt: now(), confirmedAt: null, confirmedBy: null,
+        declinedAt: null, terminatedAt: null, terminatedBy: null, terminationReasonCode: null, disputedAt: null, disputeReason: null,
+        shareWithAgencyStaff: false, policyVersions, keys: key ? { request: { key, fp } } : {},
+        createdAt: now(), rev: 1, revAt: now(), revBy: null, history: [],
+      };
+      hist(draft, 'representation_requested', byOrg(req), { scope, termMonths, jurisdiction, policyVersions });
+      const out = agreements.create(draft);
+      broadcast('representation_requested', { orgId: req.org.id, agreementId: out.id, agentUserId: out.agentUserId });
+      notify({ kind: 'player', id: player.id }, 'representation_request', `${agentName} (${req.org.name}) asks to represent you (${scope.join(', ')}, ${termMonths} months). Nothing is active until YOU confirm it in My Agent.`, out.id);
+      return out;
+    });
     res.status(201).json({ relationship: { ...agreementForAgent(a, now()), client: clientIdentity(a, req) } });
   });
 
@@ -635,28 +676,31 @@ export function registerAgent(rawCtx) {
     const found = findOwnAgreement(req, res, req.params.id);
     if (!found || found.summaryOnly) { if (found?.summaryOnly) sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED' }, 'terminate'); return; }
     const a = found;
-    if (a.legacy) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: 'Legacy agency-level relationships are read-only here.' }, 'terminate');
     const key = clientKeyOr400(req, res); if (key === undefined) return;
-    const reasonCode = String(req.body?.reasonCode ?? 'agent_ended').slice(0, 40);
+    const reasonCode = optText(res, req.body?.reasonCode, 'reasonCode', LIM.reasonCode, 'terminate') ?? 'agent_ended'; if (reasonCode === false) return;
     const fp = payloadFingerprint({ reasonCode });
-    if (key && a.keys?.terminate?.key === key) {
-      if (a.keys.terminate.fp === fp) return res.json({ relationship: agreementForAgent(a, now()), idempotent: true });
+    if (key && a.keys.agentTerminate?.key === key) {
+      if (a.keys.agentTerminate.fp === fp) return res.json({ relationship: agreementForAgent(a, now()), idempotent: true });
       return sendAgentError(res, { error: 'REPRESENTATION_IDEMPOTENCY_CONFLICT' }, 'terminate');
     }
     if (!agentTransitionAllowed(a, 'terminated_by_agent', now())) return sendAgentError(res, { error: 'REPRESENTATION_NOT_ACTIVE', status: effectiveAgreementStatus(a, now()) }, 'terminate');
     if (!guardRev(req, res, a, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: { status: effectiveAgreementStatus(a, now()) } })) return;
     const phase = effectiveAgreementStatus(a, now());
-    a.status = 'terminated_by_agent';
-    a.terminatedAt = now();
-    a.terminatedBy = 'agent';
-    a.terminationReasonCode = reasonCode;
-    if (key) a.keys.terminate = { key, fp };
-    hist(a, 'representation_terminated', byOrg(req), { by: 'agent', phase, reasonCode });
-    bumpRev(a, { by: req.orgUser, at: now() });
-    persistNow();
-    broadcast('representation_terminated', { orgId: req.org.id, agreementId: a.id, agentUserId: a.agentUserId });
-    notify({ kind: 'player', id: a.clientId }, 'representation_terminated', phase === 'proposed' ? 'An agent withdrew their representation request.' : 'Your agent ended the representation relationship. The record stays in your history.', a.id);
-    res.json({ relationship: agreementForAgent(a, now()) });
+    const updated = unit(() => {
+      const out = agreements.update(a.id, (d) => {
+        d.status = 'terminated_by_agent';
+        d.terminatedAt = now();
+        d.terminatedBy = 'agent';
+        d.terminationReasonCode = reasonCode;
+        if (key) d.keys.agentTerminate = { key, fp };
+        hist(d, 'representation_terminated', byOrg(req), { by: 'agent', phase, reasonCode });
+        bumpRev(d, { by: req.orgUser, at: now() });
+      });
+      broadcast('representation_terminated', { orgId: req.org.id, agreementId: out.id, agentUserId: out.agentUserId });
+      notify({ kind: 'player', id: out.clientId }, 'representation_terminated', phase === 'proposed' ? 'An agent withdrew their representation request.' : 'Your agent ended the representation relationship. The record stays in your history.', out.id);
+      return out;
+    });
+    res.json({ relationship: agreementForAgent(updated, now()) });
   });
 
   orgRouter.get('/agent/clients/:id/opportunities', (req, res) => {
@@ -707,7 +751,7 @@ export function registerAgent(rawCtx) {
     const org = byId.org(a.agencyOrgId);
     const fifa = p ? effectiveFacetState(p.facets?.fifa_licence, now()) : null;
     return {
-      userId: a.agentUserId, displayName: p?.displayName ?? user?.name ?? (a.legacy?.representativeName ?? null),
+      userId: a.agentUserId, displayName: p?.displayName ?? user?.name ?? null,
       agency: org ? { id: org.id, name: org.name } : null,
       verification: p ? { fifaLicence: fifa, jurisdictions: (p.declared?.jurisdictions ?? []).map((ma) => ({ memberAssociation: ma, nationalRegistration: effectiveFacetState(p.facets?.national_registration?.[ma], now()) })) } : null,
       honest: fifa === 'VERIFIED' ? 'Verified against recorded provenance; check the provenance before relying on it.' : 'This agent\'s licence is NOT verified in ScoutBox.',
@@ -716,7 +760,7 @@ export function registerAgent(rawCtx) {
 
   playerRouter.get('/agent/relationships', (req, res) => {
     if (req.playerIsMinor) return res.json({ items: [], minor: true, note: 'Agent representation is not available for under-18 accounts in ScoutBox.' });
-    const items = (db.representationAgreements ?? []).filter((a) => a && a.clientKind === 'player' && a.clientId === req.player.id)
+    const items = agreements.forClient(req.player.id)
       .map((a) => ({ ...agreementForClient(a, now()), agent: agentIdentityForClient(a) }))
       .sort((x, y) => (y.proposedAt ?? 0) - (x.proposedAt ?? 0));
     res.json({ items, note: 'Nothing is active until you confirm it. You can end an active relationship at any time; the record stays in your history.' });
@@ -725,14 +769,14 @@ export function registerAgent(rawCtx) {
   function clientMutation(req, res, to, { reasonField = null, notifyType, notifyText, event, action } = {}) {
     if (req.playerIsMinor) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: 'Guardian-managed accounts cannot hold agent relationships in ScoutBox.' }, action);
     if (limitedOr429(res, 'agent_client_response', req.player.id)) return;
-    const a = (db.representationAgreements ?? []).find((x) => x && x.id === req.params.id && x.clientId === req.player.id);
+    const found = typeof req.params.id === 'string' ? agreements.byId(req.params.id) : null;
+    const a = found && found.clientId === req.player.id ? found : null;
     if (!a) return sendAgentError(res, { error: 'REPRESENTATION_NOT_FOUND' }, action);
-    if (a.legacy) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: 'Legacy relationships are managed from the earlier representation screen.' }, action);
     const key = clientKeyOr400(req, res); if (key === undefined) return;
-    const reason = reasonField ? String(req.body?.[reasonField] ?? '').slice(0, 300) : null;
+    const reason = reasonField ? optText(res, req.body?.[reasonField], reasonField, LIM.disputeReason, action) ?? null : null; if (reason === false) return;
     if (reason && !moderateOrRefuse(res, reason, { kind: 'representation', playerId: req.player.id, orgId: a.agencyOrgId })) return;
     const fp = payloadFingerprint({ to, reason });
-    if (key && a.keys?.[action]?.key === key) {
+    if (key && a.keys[action]?.key === key) {
       if (a.keys[action].fp === fp) return res.json({ relationship: { ...agreementForClient(a, now()), agent: agentIdentityForClient(a) }, idempotent: true });
       return sendAgentError(res, { error: 'REPRESENTATION_IDEMPOTENCY_CONFLICT' }, action);
     }
@@ -746,25 +790,29 @@ export function registerAgent(rawCtx) {
     if (to === 'active' && isBlocked(req.player.id, a.agencyOrgId)) return sendAgentError(res, { error: 'REPRESENTATION_NOT_ACTIVE', status: st, message: 'You have blocked this agency. Lift the block first if you want to confirm.' }, action);
     if (!guardRev(req, res, a, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: { status: st } })) return;
     const t = now();
-    if (to === 'active') { a.status = 'active'; a.confirmedAt = t; a.confirmedBy = { kind: 'player', id: req.player.id }; a.startAt = t; a.endAt = termEndAt(t, a.termMonths ?? 12); }
-    else if (to === 'declined') { a.status = 'declined'; a.declinedAt = t; }
-    else if (to === 'terminated_by_client') { a.status = 'terminated_by_client'; a.terminatedAt = t; a.terminatedBy = 'client'; a.terminationReasonCode = 'client_ended'; }
-    else if (to === 'disputed') { a.status = 'disputed'; a.disputedAt = t; a.disputeReason = reason || null; }
-    if (key) { a.keys ??= {}; a.keys[action] = { key, fp }; }
-    hist(a, event === 'representation_confirmed' ? 'representation_confirmed' : event === 'representation_rejected' ? 'representation_rejected' : event === 'representation_disputed' ? 'representation_disputed' : 'representation_terminated', byPlayer(req), { from: st, to, by: 'client', hadReason: !!reason });
-    bumpRev(a, { by: { id: req.player.id, name: req.player.name }, at: t });
-    persistNow();
-    // Literal event names: the M18.2 registry audit reads call sites textually.
-    const ev = { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: a.agentUserId };
-    if (event === 'representation_confirmed') broadcast('representation_confirmed', ev);
-    else if (event === 'representation_rejected') broadcast('representation_rejected', ev);
-    else if (event === 'representation_disputed') broadcast('representation_disputed', ev);
-    else broadcast('representation_terminated', ev);
-    if (a.agentUserId) notify({ kind: 'org_user', id: a.agentUserId }, notifyType, notifyText, a.id);
-    // P5.6C: a dispute becomes an attributed review item (P5.6A C6). The
-    // reason stays with the client; the reviewer sees only that one exists.
-    if (to === 'disputed' && hooks.representationDisputed) hooks.representationDisputed(a, byPlayer(req));
-    res.json({ relationship: { ...agreementForClient(a, now()), agent: agentIdentityForClient(a) } });
+    const updated = unit(() => {
+      const out = agreements.update(a.id, (d) => {
+        if (to === 'active') { d.status = 'active'; d.confirmedAt = t; d.confirmedBy = { kind: 'player', id: req.player.id }; d.startAt = t; d.endAt = termEndAt(t, d.termMonths); }
+        else if (to === 'declined') { d.status = 'declined'; d.declinedAt = t; }
+        else if (to === 'terminated_by_client') { d.status = 'terminated_by_client'; d.terminatedAt = t; d.terminatedBy = 'client'; d.terminationReasonCode = 'client_ended'; }
+        else if (to === 'disputed') { d.status = 'disputed'; d.disputedAt = t; d.disputeReason = reason || null; }
+        if (key) d.keys[action] = { key, fp };
+        hist(d, event === 'representation_confirmed' ? 'representation_confirmed' : event === 'representation_rejected' ? 'representation_rejected' : event === 'representation_disputed' ? 'representation_disputed' : 'representation_terminated', byPlayer(req), { from: st, to, by: 'client', hadReason: !!reason });
+        bumpRev(d, { by: { id: req.player.id, name: req.player.name }, at: t });
+      });
+      // Literal event names: the M18.2 registry audit reads call sites textually.
+      const ev = { orgId: out.agencyOrgId, agreementId: out.id, agentUserId: out.agentUserId };
+      if (event === 'representation_confirmed') broadcast('representation_confirmed', ev);
+      else if (event === 'representation_rejected') broadcast('representation_rejected', ev);
+      else if (event === 'representation_disputed') broadcast('representation_disputed', ev);
+      else broadcast('representation_terminated', ev);
+      notify({ kind: 'org_user', id: out.agentUserId }, notifyType, notifyText, out.id);
+      // P5.6C: a dispute becomes an attributed review item (P5.6A C6). The
+      // reason stays with the client; the reviewer sees only that one exists.
+      if (to === 'disputed' && hooks.representationDisputed) hooks.representationDisputed(out, byPlayer(req));
+      return out;
+    });
+    res.json({ relationship: { ...agreementForClient(updated, now()), agent: agentIdentityForClient(updated) } });
   }
 
   playerRouter.post('/agent/relationships/:id/confirm', (req, res) => clientMutation(req, res, 'active', {
@@ -797,9 +845,13 @@ export function registerAgent(rawCtx) {
    */
   playerRouter.patch('/agent/relationships/:id/sharing', (req, res) => {
     if (req.playerIsMinor) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED' }, 'sharing');
-    const a = (db.representationAgreements ?? []).find((x) => x && x.id === req.params.id && x.clientId === req.player.id);
+    const found = typeof req.params.id === 'string' ? agreements.byId(req.params.id) : null;
+    const a = found && found.clientId === req.player.id ? found : null;
     if (!a) return sendAgentError(res, { error: 'REPRESENTATION_NOT_FOUND' }, 'sharing');
     const body = req.body ?? {};
+    if (body.shareWithAgencyStaff !== undefined && typeof body.shareWithAgencyStaff !== 'boolean') {
+      return sendAgentError(res, { error: 'REPRESENTATION_INPUT_INVALID', field: 'shareWithAgencyStaff', message: 'shareWithAgencyStaff is true or false. Send the choice as a boolean; nothing is assumed from another kind of value.' }, 'sharing');
+    }
     if (body.disclosure !== undefined && (body.disclosure === null || typeof body.disclosure !== 'object' || Array.isArray(body.disclosure))) {
       return sendAgentError(res, { error: 'REPRESENTATION_INPUT_INVALID', field: 'disclosure', message: `disclosure must be an object with any of: ${DISCLOSURE_KEYS.join(', ')}.` }, 'sharing');
     }
@@ -817,34 +869,33 @@ export function registerAgent(rawCtx) {
     if (!guardRev(req, res, a, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: {} })) return;
 
     const changed = {};
-    if (body.shareWithAgencyStaff !== undefined) {
-      const v = body.shareWithAgencyStaff === true;
-      if (v !== !!a.shareWithAgencyStaff) { a.shareWithAgencyStaff = v; changed.shareWithAgencyStaff = v; }
-    }
+    if (body.shareWithAgencyStaff !== undefined && body.shareWithAgencyStaff !== a.shareWithAgencyStaff) changed.shareWithAgencyStaff = body.shareWithAgencyStaff;
     if (body.disclosure !== undefined) {
-      const current = normaliseDisclosure(a.disclosure);
-      const next = { ...current };
-      for (const k of DISCLOSURE_KEYS) if (Object.hasOwn(body.disclosure, k)) next[k] = body.disclosure[k] === true;
-      for (const k of DISCLOSURE_KEYS) if (next[k] !== current[k]) changed[k] = next[k];
       // Turning a disclosure OFF is immediate and needs no reason: it stops the
       // next contact being routed, the next club screen naming the agent and the
       // next read of the trial schedule. What was already validly routed stays
       // in the record, because rewriting history would be a lie about what
       // happened (§22).
-      if (Object.keys(changed).some((k) => DISCLOSURE_KEYS.includes(k))) a.disclosure = next;
+      const current = normaliseDisclosure(a.disclosure);
+      for (const k of DISCLOSURE_KEYS) if (Object.hasOwn(body.disclosure, k) && body.disclosure[k] !== current[k]) changed[k] = body.disclosure[k];
     }
+    let rel = a;
     if (Object.keys(changed).length) {
-      hist(a, 'representation_sharing_changed', byPlayer(req), changed);
-      bumpRev(a, { by: { id: req.player.id, name: req.player.name }, at: now() });
-      persistNow();
-      broadcast('representation_disclosure_changed', { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: a.agentUserId });
-      if (a.agentUserId) {
-        notify({ kind: 'org_user', id: a.agentUserId }, 'representation_disclosure',
-          'A client changed what they share with you. Open the relationship to see which parts of their record and process you can currently see.', a.id);
-      }
+      rel = unit(() => {
+        const out = agreements.update(a.id, (d) => {
+          if (Object.hasOwn(changed, 'shareWithAgencyStaff')) d.shareWithAgencyStaff = changed.shareWithAgencyStaff;
+          for (const k of DISCLOSURE_KEYS) if (Object.hasOwn(changed, k)) d.disclosure[k] = changed[k];
+          hist(d, 'representation_sharing_changed', byPlayer(req), changed);
+          bumpRev(d, { by: { id: req.player.id, name: req.player.name }, at: now() });
+        });
+        broadcast('representation_disclosure_changed', { orgId: out.agencyOrgId, agreementId: out.id, agentUserId: out.agentUserId });
+        notify({ kind: 'org_user', id: out.agentUserId }, 'representation_disclosure',
+          'A client changed what they share with you. Open the relationship to see which parts of their record and process you can currently see.', out.id);
+        return out;
+      });
     }
     res.json({
-      relationship: { ...agreementForClient(a, now()), agent: agentIdentityForClient(a) },
+      relationship: { ...agreementForClient(rel, now()), agent: agentIdentityForClient(rel) },
       disclosureKeys: DISCLOSURE_KEYS,
       note: 'Each of these is a separate choice, each starts off, and each can be turned off again at any time. Confirming a relationship does not turn any of them on.',
     });
@@ -854,9 +905,11 @@ export function registerAgent(rawCtx) {
   // Trust & Safety may LOOK. There is deliberately no admin mutation in this
   // module: verifying a licence, resolving a dispute or overriding a state
   // requires attributed reviewer identity (G-C0) and belongs to P5.6C.
-  adminRouter.get('/agent/relationships', (_req, res) => {
+  adminRouter.get('/agent/relationships', (req, res) => {
+    const page = pageQuery(req, res); if (!page) return;
+    const { items, nextCursor } = pageOf(agreements.page(page).rows, page.limit, (r) => r.key);
     res.json({
-      items: (db.representationAgreements ?? []).map((a) => ({ ...agreementForAgent(a, now()), history: undefined })),
+      items: items.map((r) => ({ ...agreementForAgent(r.record, now()), history: undefined })), nextCursor,
       readOnly: true,
       note: 'Read-only. No Trust & Safety action on agent relationships or licences exists in this build (P5.6A gate G-C0).',
     });
@@ -865,9 +918,11 @@ export function registerAgent(rawCtx) {
   // reference are withheld: without an attributed review lane (P5.6C) the
   // shared key has no use for them, and an oversight view needs the STATE.
   const facetForOversight = (f) => (f ? { state: f.state, storedState: f.storedState, provenance: f.provenance, submittedAt: f.submittedAt, verifiedAt: f.verifiedAt, recheckAt: f.recheckAt } : null);
-  adminRouter.get('/agent/profiles', (_req, res) => {
+  adminRouter.get('/agent/profiles', (req, res) => {
+    const page = pageQuery(req, res); if (!page) return;
+    const { items, nextCursor } = pageOf(profiles.page(page).rows, page.limit, (r) => r.key);
     res.json({
-      items: (db.agentProfiles ?? []).map((p) => {
+      items: items.map(({ record: p }) => {
         const v = profileView(p);
         return {
           id: v.id, userId: v.userId, agencyOrgId: v.agencyOrgId, displayName: v.displayName,
@@ -880,26 +935,53 @@ export function registerAgent(rawCtx) {
           regulatoryState: v.regulatoryState, policyVersion: v.policyVersion, rev: v.rev, revAt: v.revAt,
         };
       }),
+      nextCursor,
       readOnly: true,
       note: 'Read-only oversight: states and provenance. Licence numbers and submitted references are not shown; attributed review (P5.6C) is where they would be needed.',
     });
   });
 
   // ============================================================ deletion hook
-  /** Player account removal: keep the relationship as an id-only tombstone. */
+  /** Player account removal (inside the deletion's unit): each relationship becomes an id-only tombstone. */
   function onPlayerDeleted(playerId, at = now()) {
-    for (const a of db.representationAgreements ?? []) {
-      if (!a || a.clientKind !== 'player' || a.clientId !== playerId) continue;
-      a.subjectRemovedAt = at;
-      a.disputeReason = null;
-      if (a.legacy) a.legacy = { ...a.legacy, representativeName: null };
-      if (a.status === 'proposed') { a.status = 'declined'; a.declinedAt = at; }
-      for (const h of a.history ?? []) if (h?.by?.kind === 'player') h.by = { kind: 'player', userId: null, name: null };
-    }
+    agreements.redactClient(playerId, at);
   }
 
+  // ============================================================ sweep
+  /**
+   * S11a: the two notices that a read used to write. An active relationship ending within 30 days tells its agent once,
+   * and a VERIFIED facet whose re-check date passed tells its agent once; each marker commits with its notification.
+   */
+  function agentSweep() {
+    const t = now();
+    for (const a of agreements.expiringUnnotified(t, EXPIRY_ALERT_MS)) {
+      try {
+        unit(() => {
+          agreements.update(a.id, (d) => { d.expiryNotifiedAt = t; });
+          // Only a current member is told (before S11a only an agent opening their home saw it); the marker is written either way.
+          if (affiliations.activeFor(a.agentUserId, a.agencyOrgId, t)) notify({ kind: 'org_user', id: a.agentUserId }, 'representation_expiring', 'A client relationship ends within 30 days. A new relationship needs a new client confirmation.', a.id);
+        });
+      } catch (err) { log.error?.(`agent sweep: the expiry notice for ${a.id} failed: ${err?.message ?? err}`); }
+    }
+    for (const p of profiles.staleUnnotified(t)) {
+      try {
+        unit(() => {
+          const told = [];
+          profiles.update(p.id, (d) => {
+            const mark = (facet, ma, rec) => { if (rec.state === 'VERIFIED' && rec.recheckAt !== null && rec.recheckAt <= t && rec.staleNotifiedAt === null) { rec.staleNotifiedAt = t; told.push([facet, ma]); } };
+            mark('fifa_licence', null, d.facets.fifa_licence);
+            for (const f of ['national_registration', 'domestic_authorisation', 'minors_authorisation']) for (const [ma, rec] of Object.entries(d.facets[f])) mark(f, ma, rec);
+          });
+          if (affiliations.activeFor(p.userId, p.agencyOrgId, t)) for (const [facet, ma] of told) notify({ kind: 'org_user', id: p.userId }, 'agent_verification_stale', `Verification of ${facet}${ma ? ` (${ma})` : ''} has gone STALE. Re-check it or request attributed review before any regulated action.`, p.id);
+        });
+      } catch (err) { log.error?.(`agent sweep: the stale notice for ${p.id} failed: ${err?.message ?? err}`); }
+    }
+  }
+  agentSweep();
+  setInterval(agentSweep, process.env.M13_FAST_RETRY === '1' ? 500 : 60_000).unref();
+
   return {
-    onPlayerDeleted, effectiveAgreementStatus, agreementGrantsAccess, testProviderEnabled,
+    onPlayerDeleted, agentSweep, effectiveAgreementStatus, agreementGrantsAccess, testProviderEnabled,
     // P5.6C: the Compliance Engine reuses exactly these gates rather than its own copies.
     resolveMembership, requireCap, profileOf, facetView, hooks,
     // P5.6E: the integration seam's agent-facing reads resolve `:id` through the

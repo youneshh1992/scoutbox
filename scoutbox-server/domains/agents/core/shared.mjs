@@ -52,9 +52,6 @@ export const RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
 /** Member associations a facet may be scoped to in P5.6B. `INT` = FIFA level. */
 export const JURISDICTIONS = Object.freeze(['INT', 'ENG', 'USA']);
 
-/** The markets an agency declared in its settings (PATCH /org/agent/agency/settings validates them). */
-export const agencyJurisdictions = (org) => org?.agencySettings?.jurisdictions ?? [];
-
 const emptyFacet = () => ({
   state: 'UNVERIFIED', reference: null, memberAssociation: null,
   provenance: null, submittedAt: null, verifiedAt: null, recheckAt: null, note: null,
@@ -330,12 +327,18 @@ export function effectiveAgreementStatus(a, now = Date.now()) {
  * visibility gates separately (step 8).
  */
 export function agreementGrantsAccess(a, agentUserId, now = Date.now()) {
-  // A legacy agency-level row has no agent; it can never match a caller,
-  // not even a caller with no id.
-  if (!a || typeof a.agentUserId !== 'string' || !a.agentUserId) return false;
-  if (a.agentUserId !== agentUserId || a.confirmedAt == null) return false;
-  // effectiveAgreementStatus covers the END boundary (including unreadable);
-  // the start boundary is this predicate's own responsibility.
+  return agreementInForce(a, now) && a.agentUserId === agentUserId;
+}
+
+/**
+ * Is the agreement a CURRENT representation at `now`, whoever asks: it names an agent, the client confirmed it, its
+ * status is active and its term covers now (started, not ended). The one rule behind the access predicate above and
+ * every "is this player represented" read (Trust, the Passport headline); S11a replaced their stored-status copies,
+ * which counted a mandate that had not started yet.
+ */
+export function agreementInForce(a, now = Date.now()) {
+  if (!a || typeof a.agentUserId !== 'string' || !a.agentUserId || a.confirmedAt == null) return false;
+  // effectiveAgreementStatus covers the END boundary (including unreadable); the start boundary is checked here.
   if (effectiveAgreementStatus(a, now) !== 'active') return false;
   return startBoundaryReached(a.startAt, now);
 }
@@ -459,15 +462,11 @@ export function agreementForAgent(a, now = Date.now()) {
     // agent's own permissions: an agent who is not routed a club's message
     // should know that, rather than wonder why nothing arrives.
     disclosure: normaliseDisclosure(a.disclosure),
-    documents: (a.documents ?? []).map((d) => ({ id: d.id, label: d.label ?? null, addedAt: d.addedAt ?? null })),
-    legacy: a.legacy ?? null,
     subjectRemovedAt: a.subjectRemovedAt ?? null,
-    policyVersion: a.policyVersion ?? AGENT_POLICY_VERSION,
+    policyVersion: AGENT_POLICY_VERSION,
     rev: a.rev ?? 1, revAt: a.revAt ?? null,
     history: (a.history ?? []).map((h) => ({ id: h.id, at: h.at, action: h.action, byKind: h.by?.kind ?? null, byName: h.by?.name ?? null, detail: h.detail ?? null })),
-    honest: a.legacy
-      ? 'Legacy agency-level relationship migrated from the earlier representation lane. It names no licensed individual and authorises no regulated action.'
-      : 'A ScoutBox relationship record. It is not a representation contract and ScoutBox has not assessed its legal validity; the client confirmed it in ScoutBox.',
+    honest: 'A ScoutBox relationship record. It is not a representation contract and ScoutBox has not assessed its legal validity; the client confirmed it in ScoutBox.',
   };
 }
 

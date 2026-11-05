@@ -64,7 +64,7 @@ routes still miss the bar: they are listed, and deferred, at the end of §4.3 st
 
 ## 3. Status
 
-25 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0026`. Each
+26 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0027`. Each
 step takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Write model | Status |
@@ -97,7 +97,8 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S10a | verification claims, evidence, tokens, administrators, root applications, disputes, references, squad invitations by code, conflicts, domain requests, verified domains | `0023_verification` | `verification.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S10b | passport preferences, career entries, achievements, shares, corrections | `0024_passport` | `passport.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S10c | transition cases, coach references (vouches) | `0025_transitions_vouches` | `transitionsVouches.mjs` | **explicit, typed, SQL reads** (5 Nov) | done; the legacy representations moved to S11 |
-| S11 | agents, compliance, transactions, legacy representations | | | | not started |
+| S11a | agent profiles, agency affiliations, representation agreements, agency settings; the legacy representation lane removed | `0026_agent_core` | `agentCore.mjs` | **explicit, typed, SQL reads** (5 Nov) | done |
+| S11b–c | compliance, transactions | | | | not started |
 | S12 | development, Box Cam, discovery | | | | not started |
 | S13 | operations and integrations | | | | not started |
 | S14 | retire the blob | | | | not started |
@@ -322,6 +323,9 @@ Each step starts by moving its domain's code into `domains/<domain>/` (§4.4.1).
 
 S12 is large; consider splitting Box Cam/Combine from discovery and watchlists.
 
+S11 is split like S10: S11a the agent core (`domains/agents/core/`, and the legacy M13 F10 lane removed first), S11b
+the compliance engine (`compliance/`), S11c the transaction workspace (`transactions/`).
+
 S10 is split in three, each with its own migration: S10a the verification claims (`domains/verification/claims/`, 18
 tables), S10b the passport's own records (`domains/verification/passport/`), S10c transition cases and coach references
 (`domains/verification/transitions.mjs`, the vouch routes in `server.mjs`). The Trust Score (`trust/`) stores
@@ -404,6 +408,22 @@ reads it). **Moved to S11:** the legacy M13 F10 `representations`. Nothing can c
 none, but step 2305 mirrors their rows into the agent agreements and the agents batteries test those mirrored rows, so they go
 with the agent stores. **Known, unchanged:** a club's release reference reads as `email_code` like a coach's, though no email
 was involved (a product label, for the Founder); the F2 section of `operations/clubOperations` still lives there.
+
+**S11a as built (5 November).** `repositories/agentCore.mjs`, migration `0026`, read through `agentReads` (on every
+module context), field specs as S10. A profile's declared jurisdictions, its facets (one row per facet and member
+association, the FIFA licence under `INT`), an affiliation's roles and an agreement's scope, policy versions and
+opportunity shares are ordered rows; a history entry's detail is typed columns by action; idempotency keys are columns
+of their owner. `policyVersion` and `isRegulatoryMinor` are read-time constants. The `agencySettings` org facet is
+retired (`org_agency_settings` rows). Staff and agency ids are RESTRICT; a client's id carries no key (tolerant). The
+legacy M13 F10 `representations` lane went first (its routes, screens and the 2305 mirror; agreements lost their
+`documents`). The blob steps 2305 (bootstrapping affiliations for existing staff) and 2306's bootstraps (an empty
+domestic facet, review items for facets and disputes already waiting) are recorded no-ops: there is no staff before
+a first login, a profile is written whole with every facet, and a review is requested by the route that needs one.
+The two notices a read used to write (a relationship ending within 30 days, a stale facet) come from a sweep, each
+marker committing with its notification. Routes refuse junk with the existing codes (`AGENT_INPUT_INVALID`, field
+named; `AGENT_SCOPE_INVALID`, `AGENT_TERM_INVALID`, `AGENT_JURISDICTION_INVALID`). Compliance
+(S11b) still reads the policies from `db.jurisdictionPolicies`, so a request's policy versions are checked against
+them in code.
 
 ### 4.6 S14: retire the blob
 

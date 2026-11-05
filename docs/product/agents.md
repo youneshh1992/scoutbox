@@ -25,7 +25,7 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 
 **Verification facets** (P56C_IMPLEMENTATION; DR-53)
 - There are four separate facets, each with its own state, provenance and 30-day `recheckAt`: `fifa_licence`, `national_registration[MA]`, `domestic_authorisation`, `minors_authorisation[MA]`.
-- A VERIFIED facet becomes STALE once `recheckAt` passes, and the agent is told once.
+- A VERIFIED facet becomes STALE once `recheckAt` passes, and the agent is told once, within about a minute, by the agent sweep (before S11a, only when they opened their compliance page). An agent who has left the agency is not told.
 - Requirements by jurisdiction:
   - INT needs `fifa_licence`.
   - ENG also needs `national_registration.ENG`.
@@ -40,6 +40,7 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 - Term 1–24 months (default 12). Scope ⊂ `employment, transfer, commercial, other_services`; unknown scope refused. One agreement per agent–client pair. (DR-10)
 - After a decline or an end, a 30-day cooldown before the same agent re-asks; a dispute blocks re-requests indefinitely.
 - Access = `agreementGrantsAccess` (term covers now) ∧ `orgCanSee`, re-checked on every read. A future-start agreement reads `active` but grants nothing. A block suspends access without changing status. (DR-28)
+- An active agreement ending within 30 days tells its agent once, by the agent sweep (before S11a, only when they opened their home page); an agent who has left the agency is not told.
 - The player card shows the licence *state*, never the number; nothing for minors. Player deletion tombstones agreements (ids only; pending → `declined`; reason and names nulled).
 
 **Minors** (P56C_MINOR_COMPLIANCE; AUTHORIZATION_CONTRACT §7)

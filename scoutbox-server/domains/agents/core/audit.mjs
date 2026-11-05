@@ -9,7 +9,7 @@
 
 export const AGENT_AUDIT_ACTIONS = new Set([
   'agent_profile_created', 'agent_profile_updated', 'agent_verification_submitted', 'agent_verification_state_changed',
-  'agency_affiliation_created', 'agency_affiliation_updated', 'agency_affiliation_ended', 'agency_settings_updated',
+  'agency_affiliation_created', 'agency_affiliation_updated', 'agency_affiliation_ended',
   'representation_requested', 'representation_confirmed', 'representation_rejected',
   'representation_terminated', 'representation_disputed', 'representation_sharing_changed',
   'agent_facet_rechecked',
@@ -18,7 +18,7 @@ export const AGENT_AUDIT_ACTIONS = new Set([
 function safeDetail(detail) {
   if (!detail || typeof detail !== 'object') return null;
   const out = {};
-  for (const k of ['from', 'to', 'facet', 'memberAssociation', 'state', 'tiers', 'phase', 'reasonCode', 'by', 'shareWithAgencyStaff', 'hadReason', 'scope', 'termMonths', 'legacy']) {
+  for (const k of ['from', 'to', 'facet', 'memberAssociation', 'state', 'tiers', 'phase', 'reasonCode', 'by', 'shareWithAgencyStaff', 'hadReason', 'scope', 'termMonths']) {
     if (detail[k] !== undefined) out[k] = detail[k];
   }
   return Object.keys(out).length ? out : null;
@@ -31,32 +31,23 @@ const actorOf = (h) => (h?.by?.kind === 'org' || h?.by?.kind === 'agent'
   : h?.by?.kind === 'ts_reviewer' ? { userId: null, name: 'Trust & Safety (attributed)' }
     : h?.by?.kind ? { userId: null, name: h.by.kind === 'player' ? 'Player' : h.by.kind } : null);
 
-/** Audit rows for one agency organisation. Pure over the db. */
-export function agentAuditRows(db, org, { findPlayer, orgCanSee }) {
+/** Audit rows for one agency organisation, from the agent core's reads (S11a: `agentReads.history.forAgency`). */
+export function agentAuditRows(agentReads, org, { findPlayer, orgCanSee }) {
   const rows = [];
-  for (const p of db.agentProfiles ?? []) {
-    if (!p || p.agencyOrgId !== org.id) continue;
-    for (const h of p.history ?? []) {
-      if (!AGENT_AUDIT_ACTIONS.has(h?.action)) continue;
-      rows.push({ id: h.id, at: h.at, action: h.action, domain: 'agent', actor: actorOf(h), target: { type: 'agent_profile', id: p.id, userId: p.userId }, detail: safeDetail(h.detail) });
+  const subjects = new Map();
+  const subjectOf = (a) => {
+    if (!subjects.has(a.id)) {
+      const player = a.clientKind === 'player' ? findPlayer(a.clientId) : null;
+      subjects.set(a.id, player && orgCanSee(org, player) ? { playerId: player.id, playerName: player.name } : { playerId: null, playerName: null });
     }
+    return subjects.get(a.id);
+  };
+  for (const { kind, entry: h, owner } of agentReads.history.forAgency(org.id)) {
+    if (!AGENT_AUDIT_ACTIONS.has(h.action)) continue;
+    const target = kind === 'profile' ? { type: 'agent_profile', id: owner.id, userId: owner.userId }
+      : kind === 'affiliation' ? { type: 'agency_affiliation', id: owner.id, userId: owner.userId }
+        : { type: 'representation', id: owner.id, agentUserId: owner.agentUserId, ...subjectOf(owner) };
+    rows.push({ id: h.id, at: h.at, action: h.action, domain: kind === 'profile' ? 'agent' : kind === 'affiliation' ? 'agency' : 'representation', actor: actorOf(h), target, detail: safeDetail(h.detail) });
   }
-  for (const a of db.agencyAffiliations ?? []) {
-    if (!a || a.agencyOrgId !== org.id) continue;
-    for (const h of a.history ?? []) {
-      if (!AGENT_AUDIT_ACTIONS.has(h?.action)) continue;
-      rows.push({ id: h.id, at: h.at, action: h.action, domain: 'agency', actor: actorOf(h), target: { type: 'agency_affiliation', id: a.id, userId: a.userId }, detail: safeDetail(h.detail) });
-    }
-  }
-  for (const r of db.representationAgreements ?? []) {
-    if (!r || r.agencyOrgId !== org.id) continue;
-    const player = r.clientKind === 'player' ? findPlayer(r.clientId) : null;
-    const subject = player && orgCanSee(org, player) ? { playerId: player.id, playerName: player.name } : { playerId: null, playerName: null };
-    for (const h of r.history ?? []) {
-      if (!AGENT_AUDIT_ACTIONS.has(h?.action)) continue;
-      rows.push({ id: h.id, at: h.at, action: h.action, domain: 'representation', actor: actorOf(h), target: { type: 'representation', id: r.id, agentUserId: r.agentUserId, ...subject }, detail: safeDetail(h.detail) });
-    }
-  }
-  rows.sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id)));
   return rows;
 }

@@ -58,6 +58,7 @@ import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPr
 import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
 import { openStore } from '../../store.mjs';
+import { TABLE_BACKED } from '../../repositories/index.mjs';
 
 const PORT = 6300 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -225,7 +226,8 @@ section('D — agreement statuses, transitions, the access predicate and the coo
   const summary = agreementSummaryForStaff(a, T0);
   neg(Object.keys(summary).sort().join() === 'agentUserId,clientId,endAt,id,startAt,status,summaryOnly' && !('scope' in summary) && !('history' in summary), 'D35 the staff summary is id, status and dates only');
   ok(/not a representation contract/.test(forAgent.honest) && /has not assessed/.test(forAgent.honest), 'D36 the agent projection says what the record is not');
-  ok(/legacy/i.test(agreementForAgent({ ...a, legacy: { fromRepresentationId: 'x' } }, T0).honest) && /no licensed individual/.test(agreementForAgent({ ...a, legacy: { fromRepresentationId: 'x' } }, T0).honest), 'D37 a legacy row says it names no licensed individual');
+  // S11a: the legacy agency-level rows are gone with their lane; every record names its licensed individual and says what it is.
+  ok(/not a representation contract/.test(agreementForAgent(a, T0).honest) && /client confirmed it/.test(agreementForAgent(a, T0).honest) && agreementForAgent(a, T0).legacy === undefined, 'D37 a relationship record says it is not a representation contract, only what the client confirmed (no legacy kind remains)');
   // Errors.
   ok(Object.getPrototypeOf(M24_ERROR_HTTP) === null && M24_ERROR_HTTP.constructor === undefined, 'D38 the error table is null-prototype');
   neg(M24_ERROR_HTTP.PLAYER_NOT_FOUND === 404 && M24_ERROR_HTTP.REPRESENTATION_NOT_FOUND === 404 && M24_ERROR_HTTP.AGENT_VERIFICATION_REQUIRED === 403 && M24_ERROR_HTTP.REPRESENTATION_COOLDOWN === 429 && M24_ERROR_HTTP.LAST_ADMIN === 409, 'D39 codes map to the right statuses');
@@ -250,7 +252,8 @@ section('T1 — events, notification categories, rate policies and stores are de
   for (const [k, scope] of [['agent_representation_request', 'actor'], ['agent_player_lookup', 'actor'], ['agent_profile_write', 'actor'], ['agent_affiliation_write', 'org'], ['agent_client_response', 'actor']]) {
     ok(RATE_LIMIT_POLICY[k] && RATE_LIMIT_POLICY[k].scope === scope && RATE_LIMIT_POLICY[k].max > 0, `T1 rate policy ${k} (${scope})`);
   }
-  for (const s of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `T1 ${s} is migration-guaranteed and production-required`);
+  // S11a: the three stores are tables of the agent core (migration 0026), not collections a migration must guarantee.
+  for (const s of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s) && TABLE_BACKED.includes(s), `T1 ${s} is a table of the agent core, not a collection`);
   const step = MIGRATIONS.find((m) => m.id === 'm240_001_agent_core_stores');
   // The P5.6B step is FROZEN at 2305 and is the only step at that version. Later
   // milestones keep adding steps above it (2306 Compliance, 2307 Transaction), so

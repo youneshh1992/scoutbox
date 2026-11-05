@@ -14,6 +14,7 @@
 // standing authorization gates FIRST and the score is only ever a payload.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { effectiveStatus, assuranceForClaim } from '../claims/shared.mjs';
+import { agreementInForce } from '../../agents/core/shared.mjs';
 import { PROVIDERS } from '../../../m16/drills.mjs';
 import {
   POLICY, TRUST_SCORE_POLICY_VERSION, calculateTrustScore, safeTrustProjection,
@@ -82,21 +83,13 @@ export function registerTrust(ctx) {
       out.push({ key: `rel:coach:${r.coachUserId ?? r.byUserId ?? r.id}`, kind: 'coach', verified });
     }
     const now = Date.now();
-    // M23 P5.6E: the CANONICAL P5.6B lane is a relationship source too. Without
-    // this, Trust was blind to the authoritative lane and could only see the
-    // legacy one — so a real, licensed, client-confirmed relationship counted
-    // for nothing while a legacy row counted.
-    //
-    // The same state filter applies, for the same reason (D-P56A-1): only a row
-    // that names a licensed individual, was confirmed by the client, is
-    // `active` and has not passed its end date is a verified relationship. The
-    // key is the AGENCY, so one client represented by two agencies is two
-    // relationships and moving between agents inside one agency is not.
-    for (const a of (db.representationAgreements ?? [])) {
-      if (!a || a.clientId !== player.id) continue;
-      if (typeof a.agentUserId !== 'string' || !a.agentUserId) continue; // a legacy mirror names nobody
-      if (!a.confirmedAt || a.status !== 'active') continue;
-      if (typeof a.endAt === 'number' && a.endAt <= now) continue;
+    // The agent relationships (repositories/agentCore.mjs): only a relationship IN FORCE — naming a licensed
+    // individual, confirmed by the client, active, its term covering now — is a verified relationship (D-P56A-1;
+    // agreementInForce is the access predicate's own rule, so a mandate that has not started counts for nothing). The
+    // key is the AGENCY, so one client represented by two agencies is two relationships and moving between agents
+    // inside one agency is not.
+    for (const a of ctx.agentReads.agreements.forClient(player.id)) {
+      if (!agreementInForce(a, now)) continue;
       out.push({ key: `rel:agency:${a.agencyOrgId}`, kind: 'agency', verified: true });
     }
     return out;

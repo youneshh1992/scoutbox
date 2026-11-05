@@ -9,6 +9,7 @@
 //
 // Everything in this file is a pure function over plain data so the engine
 // is unit-testable without a server.
+import { agreementInForce } from '../../agents/core/shared.mjs';
 import crypto from 'node:crypto';
 import { isLegacyTrial, currentAttendance, TRIAL_ATTENDED_STATES } from '../../recruitment/lifecycle/trial.mjs';
 import { parseStrictDateOnly } from '../../../temporal.mjs';
@@ -452,10 +453,9 @@ export function currentStatus({ history, prefs, agreements = [], identity = null
   }
   const anyCurrent = history.rows.find((r) => r.current);
   const currentClub = authoritative ?? anyCurrent ?? null;
-  const activeRep = (agreements ?? []).find((a) => a
-    && typeof a.agentUserId === 'string' && a.agentUserId
-    && a.confirmedAt && a.status === 'active'
-    && !(typeof a.endAt === 'number' && a.endAt <= now)) ?? null;
+  // The relationship in force now (agreementInForce: the access predicate's own rule, so a mandate that has not
+  // started yet is not the headline).
+  const activeRep = (agreements ?? []).find((a) => agreementInForce(a, now)) ?? null;
   return {
     currentClub: currentClub && {
       orgId: currentClub.orgId, orgName: currentClub.orgName, role: currentClub.role,

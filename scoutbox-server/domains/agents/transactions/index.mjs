@@ -109,7 +109,7 @@ export function registerTransactions(rawCtx) {
   const repsOf = (txId) => db.transactionRepresentations.filter((r) => r && r.transactionId === txId);
   const docsOf = (txId) => db.transactionDocuments.filter((d) => d && d.transactionId === txId && !d.removedAt);
   const orgById = (id) => byId.org(id) ?? null;
-  const activeAffiliationOf = (userId, orgId) => (db.agencyAffiliations ?? []).find((a) => a && a.userId === userId && a.agencyOrgId === orgId && affiliationActive(a, now())) ?? null;
+  const activeAffiliationOf = (userId, orgId) => rawCtx.agentReads.affiliations.activeFor(userId, orgId, now()); // S11a: SQL
 
   // ============================================================ compliance integration
 
@@ -739,7 +739,8 @@ export function registerTransactions(rawCtx) {
     if (party.subjectKind === 'player') {
       const pl = findPlayer(party.subjectId);
       if (!pl || !isAdult(pl) || !orgCanSee(req.org, pl) || isBlocked(pl.id, req.org.id)) return sendTransactionError(res, { error: 'TRANSACTION_PARTY_NOT_FOUND' }, 'representations');
-      agreement = (db.representationAgreements ?? []).find((a) => a && a.id === String(b.agreementId ?? '') && a.agentUserId === req.orgUser.id && a.agencyOrgId === req.org.id && a.clientId === party.subjectId) ?? null;
+      const named = typeof b.agreementId === 'string' ? rawCtx.agentReads.agreements.byId(b.agreementId) : null;
+      agreement = named && named.agentUserId === req.orgUser.id && named.agencyOrgId === req.org.id && named.clientId === party.subjectId ? named : null;
       if (!agreement) return sendTransactionError(res, { error: 'REPRESENTATION_REQUIRED', message: 'A client-confirmed, active relationship with this party is required (agreementId).' }, 'representations');
       const st = effectiveAgreementStatus(agreement, now());
       const problem = compliance.representationScopeProblem({

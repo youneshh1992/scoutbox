@@ -133,14 +133,12 @@ export function registerPassportCore(ctx) {
      * the Passport's representation headline comes from the authoritative lane
      * rather than being blind to it (M23 P5.6E §2/§5).
      */
-    const agentAgreements = (db.representationAgreements ?? [])
-      .filter((a) => a && a.clientId === pid && typeof a.agentUserId === 'string' && a.agentUserId)
+    const agentAgreements = ctx.agentReads.agreements.forClient(pid)
       .map((a) => ({
-        id: a.id, status: a.status, scope: Array.isArray(a.scope) ? a.scope : [],
-        startAt: a.startAt ?? null, endAt: a.endAt ?? null, confirmedAt: a.confirmedAt ?? null,
+        id: a.id, status: a.status, scope: [...a.scope],
+        startAt: a.startAt, endAt: a.endAt, confirmedAt: a.confirmedAt,
         agentUserId: a.agentUserId,
-        agentDisplayName: (db.agentProfiles ?? []).find((x) => x && x.userId === a.agentUserId)?.displayName
-          ?? byId.user(a.agentUserId)?.name ?? null,
+        agentDisplayName: ctx.agentReads.profiles.forUser(a.agentUserId)?.displayName ?? byId.user(a.agentUserId)?.name ?? null,
         agencyName: orgOf(a.agencyOrgId)?.name ?? null,
       }));
     const achievements = vreads.achievements.forPlayer(pid);

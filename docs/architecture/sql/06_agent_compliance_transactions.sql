@@ -226,396 +226,311 @@ CREATE INDEX jurisdiction_policy_history_policy ON jurisdiction_policy_history(p
 
 
 -- -----------------------------------------------------------------------------
--- source: db.agentProfiles   created at domains/agents/core/index.mjs:234 (POST /org/agent/profile)
--- owner/writer: m24 (profile, facet submit); m25 (facet recheck, attributed
---         review decision writes the facet; migration 2306 adds the
---         domestic_authorisation container)
--- lifecycle: no status, no soft delete. One profile per user (profileOf =
---         find by userId; enforced by code — unique index is new but safe).
--- mapping: id -> id (agp-*); userId -> user_id; agencyOrgId -> agency_org_id;
---   displayName -> display_name (≤80); declared.fifaLicenceNumber ->
---   declared_fifa_licence_number (≤40; a DECLARATION, never a verified
---   licence); declared.jurisdictions[] -> agent_profile_declared_jurisdictions;
---   facets{} -> agent_profile_facets; policyVersion -> policy_version;
---   createdAt/updatedAt -> created_at / updated_at; rev/revAt/revBy -> rev /
---   rev_at / rev_by_user_id / rev_by_name; keys{} -> never populated for a
---   profile (always {}): no idempotency_keys rows; history[] -> agent_profile_history.
--- notes: personal data (licence number, submitted references). Admin oversight
---   route withholds the number and references. regulatoryState.* in the
---   projection is derived (effectiveFacetState + verificationGap).
+-- S11a: IMPLEMENTED, migration 0026_agent_core REGISTERED (repositories/agentCore.mjs, 5 Nov 2026).
+-- The definitions below are the migration's DDL (generated from the repository's field specs, like S10a–S10c);
+-- scripts/testSchemaDdl.mjs compares them column by column.
+-- Sources: domains/agents/core/ (profiles, facets, affiliations, agreements, opportunity shares, agency settings);
+-- domains/agents/compliance/ (facet rechecks and review decisions write a profile's facet or an agreement's status).
+-- How the model differs from the first draft of this file:
+--   * No JSON columns. A history entry's detail is typed columns, by action (a facet change names the facet, member
+--     association and states; an affiliation change its roles, as rows; an agreement change its statuses, side,
+--     reason code or review). A request's scope, term and policy versions are read from the agreement itself.
+--   * Idempotency keys are columns of their owner (key + fp), not rows of a shared table: an affiliation's create; an
+--     agreement's request, confirm, decline, client terminate, dispute and agent terminate; a share's share.
+--   * A facet is one row per (profile, facet, member association); the FIFA licence is stored under 'INT'.
+--     agent_profile_declared_jurisdictions is agent_profile_jurisdictions (ordered).
+--   * policy_version (profiles, agreements) and is_regulatory_minor are not stored (constants of this build).
+--   * agreement_documents is gone with the legacy M13 F10 lane (S11a): no route wrote one.
+--   * The client's three disclosure choices are columns of the agreement.
+--   * org_agency_settings.org_id is RESTRICT, like every organisation key; the retired orgs.agencySettings facet is
+--     removed from facets_json by the migration.
+--   * Staff ids (org_users) and agencies (orgs) are immediate RESTRICT keys; a client (player) id carries no key
+--     (tolerant, as recruitment: an agreement outlives an account deletion as an id-only tombstone).
+-- Read patterns: a profile by user; affiliations by (user, agency) [every agent request] and active ones by agency
+--   [team, bootstrap]; agreements by id, by client [player lists, sole active agent] and by agent or agency [client
+--   lists]; an agency's settings by organisation.
 -- -----------------------------------------------------------------------------
 CREATE TABLE agent_profiles (
-  id                            TEXT PRIMARY KEY,
-  user_id                       TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  agency_org_id                 TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  display_name                  TEXT NOT NULL,
-  declared_fifa_licence_number  TEXT,                   -- personal data; declared, not verified
-  policy_version                INTEGER NOT NULL DEFAULT 1,
-  created_at                    INTEGER NOT NULL,
-  updated_at                    INTEGER NOT NULL,
-  rev                           INTEGER NOT NULL DEFAULT 1,
-  rev_at                        INTEGER,
-  rev_by_user_id                TEXT,
-  rev_by_name                   TEXT                    -- snapshot
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  user_id                                  TEXT NOT NULL CHECK (length(user_id) <= 80 AND length(user_id) > 0),
+  agency_org_id                            TEXT NOT NULL CHECK (length(agency_org_id) <= 80 AND length(agency_org_id) > 0),
+  display_name                             TEXT NOT NULL CHECK (length(display_name) <= 80 AND length(display_name) > 0),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  rev_by_id                                TEXT CHECK (rev_by_id IS NULL OR length(rev_by_id) <= 80),
+  declared_fifa_licence_number             TEXT CHECK (declared_fifa_licence_number IS NULL OR length(declared_fifa_licence_number) <= 40 AND length(declared_fifa_licence_number) > 0),
+  FOREIGN KEY (user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (agency_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  UNIQUE (user_id),
+  CHECK (rev >= 1)
 ) STRICT;
-CREATE UNIQUE INDEX agent_profiles_user ON agent_profiles(user_id);       -- enforced by code today (profileOf)
-CREATE INDEX agent_profiles_agency ON agent_profiles(agency_org_id);
-
--- source: db.agentProfiles[].declared.jurisdictions[]  (domains/agents/core/index.mjs:228, values
---         filtered to JURISDICTIONS INT|ENG|USA)
--- mapping: each element -> one row (member_association)
-CREATE TABLE agent_profile_declared_jurisdictions (
-  profile_id          TEXT NOT NULL REFERENCES agent_profiles(id) ON DELETE CASCADE,
-  member_association  TEXT NOT NULL CHECK (member_association IN ('INT','ENG','USA')),
-  PRIMARY KEY (profile_id, member_association)
+CREATE INDEX agent_profiles_agency ON agent_profiles (agency_org_id);
+CREATE TABLE agent_profile_jurisdictions (
+  profile_id    TEXT NOT NULL REFERENCES agent_profiles(id) ON DELETE CASCADE,
+  ord           INTEGER NOT NULL CHECK (ord >= 0),
+  jurisdiction  TEXT NOT NULL CHECK (jurisdiction IN ('INT','ENG','USA')),
+  PRIMARY KEY (profile_id, jurisdiction),
+  UNIQUE (profile_id, ord)
 ) STRICT;
-
--- source: db.agentProfiles[].facets  — facets.fifa_licence: Facet (domains/agents/core/shared.mjs:55
---         emptyFacet), facets.national_registration / domestic_authorisation /
---         minors_authorisation: {MA: Facet} (domains/agents/core/index.mjs:301, domains/agents/compliance/index.mjs:268
---         setFacet, domains/agents/compliance/index.mjs:907 review decision)
--- owner/writer: m24 submit, m25 recheck + attributed review
--- lifecycle: state is overwritten on each submission / recheck / decision;
---         STALE is DERIVED (VERIFIED past recheck_at, domains/agents/core/shared.mjs:77) and is
---         also a storable state from the synthetic provider (STALE answer maps
---         to VERIFIED on write, provider.mjs:75, so stored STALE never occurs
---         from code today; kept in the CHECK because VERIFICATION_STATES lists it).
--- mapping: object key (facet name) -> facet; MA key -> member_association —
---     for fifa_licence the source memberAssociation is null and the facet is
---     FIFA-level, which the vocabulary names 'INT' (JURISDICTIONS, and
---     policy.mjs:243 already addresses minors_authorisation under 'INT'), so
---     fifa_licence rows store member_association = 'INT' (lossless: the value
---     is implied by the facet); a STRICT composite PK cannot hold NULL.
---   state -> state; reference -> reference (≤60, personal data: a licence /
---     registration number); memberAssociation -> member_association (see above);
---   provenance{provider,kind,at,reviewerId?,reviewId?} -> provenance_provider /
---     provenance_kind / provenance_at / provenance_reviewer_id /
---     provenance_review_id (-> regulatory_reviews(id); no FK: reviews reference
---     profiles, cycle); submittedAt -> submitted_at; verifiedAt -> verified_at;
---   recheckAt -> recheck_at; note -> note; staleNotifiedAt -> stale_notified_at
---     (domains/agents/compliance/index.mjs:364, only on a VERIFIED-turned-STALE facet).
--- notes: an empty default fifa_licence facet (state UNVERIFIED, all null) is a
---   row too, so the profile always has its fifa_licence row; empty MA maps
---   ({}) have no rows. One review item per facet in PENDING/IN_REVIEW is
---   enforced by code (openReviewFor).
 CREATE TABLE agent_profile_facets (
-  profile_id              TEXT NOT NULL REFERENCES agent_profiles(id) ON DELETE CASCADE,
-  facet                   TEXT NOT NULL CHECK (facet IN ('fifa_licence','national_registration','domestic_authorisation','minors_authorisation')),
-  member_association      TEXT NOT NULL CHECK (length(member_association) = 3),   -- 'INT' for fifa_licence
-  state                   TEXT NOT NULL DEFAULT 'UNVERIFIED' CHECK (state IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
-  reference               TEXT,                         -- personal data
-  provenance_provider     TEXT CHECK (provenance_provider IS NULL OR provenance_provider IN ('none','local-synthetic-test-provider','attributed_review')),
-  provenance_kind         TEXT CHECK (provenance_kind IS NULL OR provenance_kind IN ('none','synthetic','human_review')),
-  provenance_at           INTEGER,
-  provenance_reviewer_id  TEXT REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
-  provenance_review_id    TEXT,                         -- -> regulatory_reviews(id), no FK (cycle)
-  submitted_at            INTEGER,
-  verified_at             INTEGER,
-  recheck_at              INTEGER,
-  note                    TEXT,
-  stale_notified_at       INTEGER,
+  profile_id                               TEXT NOT NULL CHECK (length(profile_id) <= 80 AND length(profile_id) > 0),
+  facet                                    TEXT NOT NULL CHECK (facet IN ('fifa_licence','national_registration','domestic_authorisation','minors_authorisation')),
+  member_association                       TEXT NOT NULL CHECK (member_association IN ('INT','ENG','USA')),
+  state                                    TEXT NOT NULL CHECK (state IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
+  reference                                TEXT CHECK (reference IS NULL OR length(reference) <= 60 AND length(reference) > 0),
+  provenance_provider                      TEXT CHECK (provenance_provider IS NULL OR provenance_provider IN ('none','local-synthetic-test-provider','attributed_review')),
+  provenance_kind                          TEXT CHECK (provenance_kind IS NULL OR provenance_kind IN ('none','synthetic','human_review')),
+  provenance_at                            INTEGER,
+  provenance_reviewer_id                   TEXT CHECK (provenance_reviewer_id IS NULL OR length(provenance_reviewer_id) <= 80 AND length(provenance_reviewer_id) > 0),
+  provenance_review_id                     TEXT CHECK (provenance_review_id IS NULL OR length(provenance_review_id) <= 80 AND length(provenance_review_id) > 0),
+  submitted_at                             INTEGER,
+  verified_at                              INTEGER,
+  recheck_at                               INTEGER,
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 1000),
+  stale_notified_at                        INTEGER,
+  FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE,
   PRIMARY KEY (profile_id, facet, member_association),
-  CHECK (facet <> 'fifa_licence' OR member_association = 'INT'),
-  CHECK (facet = 'fifa_licence' OR member_association <> 'INT' OR facet = 'minors_authorisation')
+  CHECK ((facet = 'fifa_licence') = (member_association = 'INT')),
+  CHECK (provenance_reviewer_id IS NULL OR provenance_provider = 'attributed_review')
 ) STRICT;
-
--- source: db.agentProfiles[].history[]  (domains/agents/core/index.mjs:53 hist; m25 recheck/review)
--- actions: agent_profile_created, agent_profile_updated, agent_verification_submitted,
---   agent_verification_state_changed, agent_facet_rechecked
+CREATE INDEX agent_profile_facets_stale ON agent_profile_facets (recheck_at) WHERE state = 'VERIFIED' AND stale_notified_at IS NULL AND recheck_at IS NOT NULL;
 CREATE TABLE agent_profile_history (
-  id           TEXT PRIMARY KEY,
-  profile_id   TEXT NOT NULL REFERENCES agent_profiles(id) ON DELETE RESTRICT,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id        TEXT,
-  by_name      TEXT,
-  by_role      TEXT,
-  by_org_id    TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  id                    TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  profile_id            TEXT NOT NULL REFERENCES agent_profiles(id) ON DELETE CASCADE,
+  ord                   INTEGER NOT NULL CHECK (ord >= 0),
+  at                    INTEGER NOT NULL,
+  by_kind               TEXT NOT NULL CHECK (by_kind IN ('org','player','ts_reviewer','system')),
+  by_id                 TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name               TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role               TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  action                TEXT NOT NULL CHECK (action IN ('agent_profile_created','agent_profile_updated','agent_verification_submitted','agent_verification_state_changed','agent_facet_rechecked')),
+  detail_display_name   INTEGER CHECK (detail_display_name IN (0,1)),
+  detail_jurisdictions  INTEGER CHECK (detail_jurisdictions IN (0,1)),
+  detail_licence_number INTEGER CHECK (detail_licence_number IN (0,1)),
+  detail_facet          TEXT CHECK (detail_facet IS NULL OR detail_facet IN ('fifa_licence','national_registration','domestic_authorisation','minors_authorisation')),
+  detail_ma             TEXT CHECK (detail_ma IS NULL OR detail_ma IN ('INT','ENG','USA')),
+  detail_from TEXT CHECK (detail_from IS NULL OR detail_from IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
+  detail_to TEXT CHECK (detail_to IS NULL OR detail_to IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
+  detail_state TEXT CHECK (detail_state IS NULL OR detail_state IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
+  detail_review_id      TEXT CHECK (detail_review_id IS NULL OR (length(detail_review_id) > 0 AND length(detail_review_id) <= 80)),
+  UNIQUE (profile_id, ord),
+  CHECK ((action = 'agent_profile_updated') = (detail_display_name IS NOT NULL)),
+  CHECK ((detail_display_name IS NULL) = (detail_jurisdictions IS NULL) AND (detail_display_name IS NULL) = (detail_licence_number IS NULL)),
+  CHECK ((action IN ('agent_verification_submitted','agent_verification_state_changed','agent_facet_rechecked')) = (detail_facet IS NOT NULL)),
+  CHECK ((action IN ('agent_verification_state_changed','agent_facet_rechecked')) = (detail_to IS NOT NULL)),
+  CHECK ((detail_from IS NULL) = (detail_to IS NULL)),
+  CHECK ((action = 'agent_verification_state_changed') = (detail_state IS NOT NULL)),
+  CHECK (detail_review_id IS NULL OR action = 'agent_verification_state_changed')
 ) STRICT;
-CREATE INDEX agent_profile_history_profile ON agent_profile_history(profile_id, at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.agencyAffiliations   created at domains/agents/core/index.mjs:81 (bootstrap first
---         member as admin), :374 (POST /org/agent/agency/team) and
---         domains/platform/migrations.mjs:405 (step 2305: every existing agency user)
--- owner/writer: m24   lifecycle: active while started_at <= now and ended_at is
---         null/future (affiliationActive); ended via /team/:userId/end (sets
---         ended_at + ended_reason, also soft-removes the org user). Never deleted.
--- mapping: id -> id (aff-*, or aff-mig2305-<base36>-<n> for migrated rows);
---   agencyOrgId -> agency_org_id; userId -> user_id; tiers[] ->
---   agency_affiliation_tiers; startedAt -> started_at; endedAt -> ended_at;
---   endedReason -> ended_reason (≤40, free text, default 'left');
---   createdAt -> created_at; rev/revAt/revBy -> rev / rev_at / rev_by_*;
---   keys.create {key,fp} -> idempotency_keys (action 'create', fp over
---     {name lowercased, tiers}; migrated rows have no keys);
---   history[] -> agency_affiliation_history.
--- notes: one ACTIVE affiliation per (user, agency) enforced by code
---   (MEMBER_ALREADY_AFFILIATED); the partial unique index below is new and
---   approximates "active" as ended_at IS NULL. ≥1 active agency_admin per
---   agency (LAST_ADMIN) is code-enforced only.
--- -----------------------------------------------------------------------------
 CREATE TABLE agency_affiliations (
-  id              TEXT PRIMARY KEY,
-  agency_org_id   TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  user_id         TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  started_at      INTEGER NOT NULL,
-  ended_at        INTEGER,
-  ended_reason    TEXT,
-  created_at      INTEGER NOT NULL,
-  rev             INTEGER NOT NULL DEFAULT 1,
-  rev_at          INTEGER,
-  rev_by_user_id  TEXT,
-  rev_by_name     TEXT                                  -- snapshot
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  agency_org_id                            TEXT NOT NULL CHECK (length(agency_org_id) <= 80 AND length(agency_org_id) > 0),
+  user_id                                  TEXT NOT NULL CHECK (length(user_id) <= 80 AND length(user_id) > 0),
+  started_at                               INTEGER NOT NULL,
+  ended_at                                 INTEGER,
+  ended_reason                             TEXT CHECK (ended_reason IS NULL OR length(ended_reason) <= 40),
+  created_at                               INTEGER NOT NULL,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  rev_by_id                                TEXT CHECK (rev_by_id IS NULL OR length(rev_by_id) <= 80),
+  create_key                               TEXT CHECK (create_key IS NULL OR length(create_key) <= 64 AND length(create_key) > 0),
+  create_fp                                TEXT CHECK (create_fp IS NULL OR length(create_fp) <= 4000),
+  FOREIGN KEY (agency_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (rev >= 1),
+  CHECK (ended_at IS NULL OR ended_reason IS NOT NULL),
+  CHECK ((create_key IS NULL) = (create_fp IS NULL))
 ) STRICT;
-CREATE INDEX agency_affiliations_agency ON agency_affiliations(agency_org_id);
-CREATE UNIQUE INDEX agency_affiliations_active_member ON agency_affiliations(user_id, agency_org_id) WHERE ended_at IS NULL;   -- new; code enforces "one active"
-
--- source: db.agencyAffiliations[].tiers[]  (normaliseTiers: TIERS, de-duplicated)
--- Junction, not JSON: tiers are queried as a set on every request (can(),
--- admins count, LAST_ADMIN / SELF_PROMOTION invariants, licensed_agent filters).
+CREATE INDEX agency_affiliations_member ON agency_affiliations (user_id, agency_org_id);
+CREATE INDEX agency_affiliations_agency ON agency_affiliations (agency_org_id, ended_at);
+CREATE UNIQUE INDEX agency_affiliations_create_key ON agency_affiliations (agency_org_id, create_key) WHERE create_key IS NOT NULL;
 CREATE TABLE agency_affiliation_tiers (
   affiliation_id  TEXT NOT NULL REFERENCES agency_affiliations(id) ON DELETE CASCADE,
+  ord             INTEGER NOT NULL CHECK (ord >= 0),
   tier            TEXT NOT NULL CHECK (tier IN ('licensed_agent','agency_admin','analyst','assistant','finance')),
-  PRIMARY KEY (affiliation_id, tier)
+  PRIMARY KEY (affiliation_id, tier),
+  UNIQUE (affiliation_id, ord)
 ) STRICT;
-
--- source: db.agencyAffiliations[].history[]
--- actions: agency_affiliation_created, agency_affiliation_updated, agency_affiliation_ended
 CREATE TABLE agency_affiliation_history (
-  id              TEXT PRIMARY KEY,
-  affiliation_id  TEXT NOT NULL REFERENCES agency_affiliations(id) ON DELETE RESTRICT,
-  at              INTEGER NOT NULL,
-  by_kind         TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id           TEXT,
-  by_name         TEXT,
-  by_role         TEXT,
-  by_org_id       TEXT,
-  action          TEXT NOT NULL,
-  detail_json     TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  id                    TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  affiliation_id        TEXT NOT NULL REFERENCES agency_affiliations(id) ON DELETE CASCADE,
+  ord                   INTEGER NOT NULL CHECK (ord >= 0),
+  at                    INTEGER NOT NULL,
+  by_kind               TEXT NOT NULL CHECK (by_kind IN ('org','player','ts_reviewer','system')),
+  by_id                 TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name               TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role               TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  action                TEXT NOT NULL CHECK (action IN ('agency_affiliation_created','agency_affiliation_updated','agency_affiliation_ended')),
+  detail_bootstrap      INTEGER CHECK (detail_bootstrap IN (1)),
+  detail_reason_code    TEXT CHECK (detail_reason_code IS NULL OR length(detail_reason_code) <= 40),
+  UNIQUE (affiliation_id, ord),
+  CHECK (detail_bootstrap IS NULL OR action = 'agency_affiliation_created'),
+  CHECK ((action = 'agency_affiliation_ended') = (detail_reason_code IS NOT NULL))
 ) STRICT;
-CREATE INDEX agency_affiliation_history_affiliation ON agency_affiliation_history(affiliation_id, at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.representationAgreements   created at domains/agents/core/index.mjs:598
---         (POST /org/agent/clients/request) and domains/platform/migrations.mjs:432
---         (step 2305: legacy mirror of every db.representations row)
--- owner/writer: m24 (request / terminate / client confirm, decline, terminate,
---         dispute / sharing+disclosure); m25 (dispute resolution by attributed
---         review); m27 (opportunityShares[], history); m24 onPlayerDeleted
---         (tombstone).
--- lifecycle: status proposed -> active | declined | disputed; active ->
---         terminated_by_client | terminated_by_agent | disputed; disputed ->
---         active (reinstated) | terminated_by_client (dispute_upheld);
---         'expired' is DERIVED (active past end_at) but migration 2305 stores
---         it for legacy rows. Soft delete: subject_removed_at (player deletion:
---         dispute_reason nulled, legacy name nulled, proposed -> declined).
--- mapping: id -> id (rep-*, rep-mig2305-… for legacy); agentUserId ->
---   agent_user_id (NULL on legacy agency-level rows); agencyOrgId ->
---   agency_org_id (nullable: migration copies r.agencyOrgId ?? null);
---   clientKind/clientId -> client_kind / client_id (polymorphic pair, no FK:
---     only 'player' today; a player row may be removed while this record stays
---     as an id-only tombstone); isRegulatoryMinor -> is_regulatory_minor;
---   jurisdiction -> jurisdiction (NULL on legacy); scope[] -> agreement_scopes;
---   exclusive -> exclusive; termMonths -> term_months (1..24, NULL legacy);
---   startAt/endAt -> start_at / end_at; status -> status; proposedAt ->
---   proposed_at; confirmedAt -> confirmed_at; confirmedBy{kind,id} ->
---   confirmed_by_kind / confirmed_by_id; declinedAt -> declined_at;
---   terminatedAt -> terminated_at; terminatedBy -> terminated_by;
---   terminationReasonCode -> termination_reason_code (≤40 free text; values
---     written: agent_ended default, client_ended, dispute_upheld, or caller's);
---   disputedAt -> disputed_at; disputeReason -> dispute_reason (≤300, moderated;
---     nulled on subject removal); disputeResolvedAt -> dispute_resolved_at;
---   disputeResolution{reviewId,outcome} -> dispute_resolution_review_id (->
---     regulatory_reviews(id), no FK: cycle) / dispute_resolution_outcome;
---   shareWithAgencyStaff -> share_with_agency_staff;
---   disclosure{clubPresence,contactRouting,trialVisibility} ->
---     disclosure_club_presence / disclosure_contact_routing /
---     disclosure_trial_visibility (absent object == all false, domains/agents/core/shared.mjs:389);
---   documents[] -> agreement_documents; legacy{fromRepresentationId,
---     regulatoryStatus,representativeName} -> legacy_from_representation_id /
---     legacy_regulatory_status / legacy_representative_name (legacy IS NULL
---     <=> all three NULL; from_representation_id points at the retired M13 F10
---     db.representations row, which has no table in this schema);
---   opportunityShares[] -> agreement_opportunity_shares (m27);
---   policyVersion -> policy_version; policyVersions[] -> agreement_policy_versions
---     (absent on legacy rows = no rows); keys.request/terminate/confirm/
---     decline/dispute {key,fp} -> idempotency_keys (actions 'request',
---     'terminate', 'confirm', 'decline', 'dispute'); keys.expiryNotifiedAt ->
---     expiry_notified_at (a TIMESTAMP stored under keys by domains/agents/core/index.mjs:193,
---     not an idempotency key — promoted to a column); createdAt -> created_at;
---   rev/revAt/revBy -> rev / rev_at / rev_by_user_id / rev_by_name;
---   history[] -> agreement_history; subjectRemovedAt -> subject_removed_at.
--- notes: one proposed/active/disputed agreement per (agent, client) and the
---   30-day re-request cooldown are enforced by code on EFFECTIVE status
---   (requestConflict); a unique index on stored status would wrongly block a
---   re-request after a stored-'active' row expired, so none is created.
---   Minors refused at request time (isAdult) — is_regulatory_minor is always
---   false today. Agreement terms carry no fee anywhere (P-5).
--- -----------------------------------------------------------------------------
+CREATE TABLE agency_affiliation_history_tiers (
+  history_id  TEXT NOT NULL REFERENCES agency_affiliation_history(id) ON DELETE CASCADE,
+  list        TEXT NOT NULL CHECK (list IN ('from','to')),
+  ord         INTEGER NOT NULL CHECK (ord >= 0),
+  tier        TEXT NOT NULL CHECK (tier IN ('licensed_agent','agency_admin','analyst','assistant','finance')),
+  PRIMARY KEY (history_id, list, ord)
+) STRICT;
 CREATE TABLE representation_agreements (
-  id                             TEXT PRIMARY KEY,
-  agent_user_id                  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,   -- NULL = legacy agency-level row
-  agency_org_id                  TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  client_kind                    TEXT NOT NULL CHECK (client_kind IN ('player')),
-  client_id                      TEXT NOT NULL,          -- polymorphic with client_kind: players(id); no FK (tombstoned, not cascaded)
-  is_regulatory_minor            INTEGER NOT NULL DEFAULT 0 CHECK (is_regulatory_minor IN (0,1)),
-  jurisdiction                   TEXT CHECK (jurisdiction IS NULL OR jurisdiction IN ('INT','ENG','USA')),
-  exclusive                      INTEGER NOT NULL DEFAULT 0 CHECK (exclusive IN (0,1)),
-  term_months                    INTEGER CHECK (term_months IS NULL OR (term_months >= 1 AND term_months <= 24)),
-  start_at                       INTEGER,
-  end_at                         INTEGER,
-  status                         TEXT NOT NULL CHECK (status IN ('proposed','active','declined','expired','terminated_by_client','terminated_by_agent','disputed')),
-  proposed_at                    INTEGER,
-  confirmed_at                   INTEGER,
-  confirmed_by_kind              TEXT CHECK (confirmed_by_kind IS NULL OR confirmed_by_kind IN ('player')),
-  confirmed_by_id                TEXT,
-  declined_at                    INTEGER,
-  terminated_at                  INTEGER,
-  terminated_by                  TEXT CHECK (terminated_by IS NULL OR terminated_by IN ('agent','client','trust_safety')),
-  termination_reason_code        TEXT,
-  disputed_at                    INTEGER,
-  dispute_reason                 TEXT,                   -- personal data (client's free text); nulled on subject removal
-  dispute_resolved_at            INTEGER,
-  dispute_resolution_review_id   TEXT,                   -- -> regulatory_reviews(id), no FK (cycle)
-  dispute_resolution_outcome     TEXT CHECK (dispute_resolution_outcome IS NULL OR dispute_resolution_outcome IN ('reinstated','ended')),
-  share_with_agency_staff        INTEGER NOT NULL DEFAULT 0 CHECK (share_with_agency_staff IN (0,1)),
-  disclosure_club_presence       INTEGER NOT NULL DEFAULT 0 CHECK (disclosure_club_presence IN (0,1)),
-  disclosure_contact_routing     INTEGER NOT NULL DEFAULT 0 CHECK (disclosure_contact_routing IN (0,1)),
-  disclosure_trial_visibility    INTEGER NOT NULL DEFAULT 0 CHECK (disclosure_trial_visibility IN (0,1)),
-  legacy_from_representation_id  TEXT,                   -- retired M13 F10 db.representations id; no table
-  legacy_regulatory_status       TEXT CHECK (legacy_regulatory_status IS NULL OR legacy_regulatory_status IN ('not_regulated_record')),
-  legacy_representative_name     TEXT,                   -- snapshot; personal data; nulled on subject removal
-  policy_version                 INTEGER NOT NULL DEFAULT 1,
-  expiry_notified_at             INTEGER,
-  created_at                     INTEGER NOT NULL,
-  rev                            INTEGER NOT NULL DEFAULT 1,
-  rev_at                         INTEGER,
-  rev_by_user_id                 TEXT,
-  rev_by_name                    TEXT,                   -- snapshot
-  subject_removed_at             INTEGER,
-  CHECK ((legacy_from_representation_id IS NULL) = (legacy_regulatory_status IS NULL))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  agent_user_id                            TEXT NOT NULL CHECK (length(agent_user_id) <= 80 AND length(agent_user_id) > 0),
+  agency_org_id                            TEXT NOT NULL CHECK (length(agency_org_id) <= 80 AND length(agency_org_id) > 0),
+  client_kind                              TEXT NOT NULL CHECK (client_kind IN ('player')),
+  client_id                                TEXT NOT NULL CHECK (length(client_id) <= 80 AND length(client_id) > 0),
+  jurisdiction                             TEXT NOT NULL CHECK (jurisdiction IN ('INT','ENG','USA')),
+  exclusive                                INTEGER NOT NULL CHECK (exclusive IN (0,1)),
+  term_months                              INTEGER NOT NULL,
+  start_at                                 INTEGER,
+  end_at                                   INTEGER,
+  status                                   TEXT NOT NULL CHECK (status IN ('proposed','active','declined','terminated_by_client','terminated_by_agent','disputed')),
+  proposed_at                              INTEGER NOT NULL,
+  confirmed_at                             INTEGER,
+  declined_at                              INTEGER,
+  terminated_at                            INTEGER,
+  terminated_by                            TEXT CHECK (terminated_by IS NULL OR terminated_by IN ('agent','client','trust_safety')),
+  termination_reason_code                  TEXT CHECK (termination_reason_code IS NULL OR length(termination_reason_code) <= 40),
+  disputed_at                              INTEGER,
+  dispute_reason                           TEXT CHECK (dispute_reason IS NULL OR length(dispute_reason) <= 300),
+  dispute_resolved_at                      INTEGER,
+  dispute_review_id                        TEXT CHECK (dispute_review_id IS NULL OR length(dispute_review_id) <= 80 AND length(dispute_review_id) > 0),
+  dispute_outcome                          TEXT CHECK (dispute_outcome IS NULL OR dispute_outcome IN ('reinstated','ended')),
+  share_with_agency_staff                  INTEGER NOT NULL CHECK (share_with_agency_staff IN (0,1)),
+  disclosure_club_presence                 INTEGER NOT NULL CHECK (disclosure_club_presence IN (0,1)),
+  disclosure_contact_routing               INTEGER NOT NULL CHECK (disclosure_contact_routing IN (0,1)),
+  disclosure_trial_visibility              INTEGER NOT NULL CHECK (disclosure_trial_visibility IN (0,1)),
+  subject_removed_at                       INTEGER,
+  expiry_notified_at                       INTEGER,
+  created_at                               INTEGER NOT NULL,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER,
+  rev_by_name                              TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  rev_by_id                                TEXT CHECK (rev_by_id IS NULL OR length(rev_by_id) <= 80),
+  confirmed_by_player_id                   TEXT CHECK (confirmed_by_player_id IS NULL OR length(confirmed_by_player_id) <= 80 AND length(confirmed_by_player_id) > 0),
+  request_key                              TEXT CHECK (request_key IS NULL OR length(request_key) <= 64 AND length(request_key) > 0),
+  request_fp                               TEXT CHECK (request_fp IS NULL OR length(request_fp) <= 4000),
+  confirm_key                              TEXT CHECK (confirm_key IS NULL OR length(confirm_key) <= 64 AND length(confirm_key) > 0),
+  confirm_fp                               TEXT CHECK (confirm_fp IS NULL OR length(confirm_fp) <= 4000),
+  decline_key                              TEXT CHECK (decline_key IS NULL OR length(decline_key) <= 64 AND length(decline_key) > 0),
+  decline_fp                               TEXT CHECK (decline_fp IS NULL OR length(decline_fp) <= 4000),
+  client_terminate_key                     TEXT CHECK (client_terminate_key IS NULL OR length(client_terminate_key) <= 64 AND length(client_terminate_key) > 0),
+  client_terminate_fp                      TEXT CHECK (client_terminate_fp IS NULL OR length(client_terminate_fp) <= 4000),
+  dispute_key                              TEXT CHECK (dispute_key IS NULL OR length(dispute_key) <= 64 AND length(dispute_key) > 0),
+  dispute_fp                               TEXT CHECK (dispute_fp IS NULL OR length(dispute_fp) <= 4000),
+  agent_terminate_key                      TEXT CHECK (agent_terminate_key IS NULL OR length(agent_terminate_key) <= 64 AND length(agent_terminate_key) > 0),
+  agent_terminate_fp                       TEXT CHECK (agent_terminate_fp IS NULL OR length(agent_terminate_fp) <= 4000),
+  FOREIGN KEY (agent_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (agency_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (term_months BETWEEN 1 AND 24),
+  CHECK (rev >= 1),
+  CHECK ((confirmed_at IS NULL) = (confirmed_by_player_id IS NULL)),
+  CHECK ((status = 'declined') = (declined_at IS NOT NULL)),
+  CHECK ((terminated_at IS NULL) = (terminated_by IS NULL)),
+  CHECK (status NOT IN ('terminated_by_client','terminated_by_agent') OR terminated_at IS NOT NULL),
+  CHECK (status <> 'disputed' OR disputed_at IS NOT NULL),
+  CHECK ((dispute_resolved_at IS NULL) = (dispute_review_id IS NULL)),
+  CHECK ((request_key IS NULL) = (request_fp IS NULL)),
+  CHECK ((confirm_key IS NULL) = (confirm_fp IS NULL)),
+  CHECK ((decline_key IS NULL) = (decline_fp IS NULL)),
+  CHECK ((client_terminate_key IS NULL) = (client_terminate_fp IS NULL)),
+  CHECK ((dispute_key IS NULL) = (dispute_fp IS NULL)),
+  CHECK ((agent_terminate_key IS NULL) = (agent_terminate_fp IS NULL))
 ) STRICT;
-CREATE INDEX representation_agreements_agency_agent ON representation_agreements(agency_org_id, agent_user_id);
-CREATE INDEX representation_agreements_client ON representation_agreements(client_kind, client_id);
-CREATE INDEX representation_agreements_agent_client ON representation_agreements(agent_user_id, client_id);
-CREATE INDEX representation_agreements_status ON representation_agreements(status);
-
--- source: db.representationAgreements[].scope[]  (normaliseScope: SCOPES, ≥1,
---         default ['employment']; legacy mapped from contracts_only/commercial_only)
--- Junction, not JSON: scope membership is tested on every regulated act
--- (representationScopeProblem, m27 SURFACES.scopes).
+CREATE INDEX representation_agreements_agency_agent ON representation_agreements (agency_org_id, agent_user_id);
+CREATE INDEX representation_agreements_client ON representation_agreements (client_id);
+CREATE INDEX representation_agreements_expiry ON representation_agreements (end_at) WHERE status = 'active' AND expiry_notified_at IS NULL AND end_at IS NOT NULL;
+CREATE UNIQUE INDEX representation_agreements_request_key ON representation_agreements (agency_org_id, agent_user_id, request_key) WHERE request_key IS NOT NULL;
 CREATE TABLE agreement_scopes (
   agreement_id  TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE CASCADE,
+  ord           INTEGER NOT NULL CHECK (ord >= 0),
   scope         TEXT NOT NULL CHECK (scope IN ('employment','transfer','commercial','other_services')),
-  PRIMARY KEY (agreement_id, scope)
+  PRIMARY KEY (agreement_id, scope),
+  UNIQUE (agreement_id, ord)
 ) STRICT;
-
--- source: db.representationAgreements[].policyVersions[]  (domains/agents/core/index.mjs:589:
---         ids of the policy set in force when the approach was authorised)
 CREATE TABLE agreement_policy_versions (
   agreement_id       TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE CASCADE,
-  policy_version_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
-  PRIMARY KEY (agreement_id, policy_version_id)
+  ord                INTEGER NOT NULL CHECK (ord >= 0),
+  policy_version_id  TEXT NOT NULL CHECK (length(policy_version_id) > 0 AND length(policy_version_id) <= 80),
+  PRIMARY KEY (agreement_id, policy_version_id),
+  UNIQUE (agreement_id, ord)
 ) STRICT;
-
--- source: db.representationAgreements[].documents[]  ({id, label, addedAt};
---         projected at domains/agents/core/shared.mjs:459, initialised [] at :604 and in
---         migration 2305:440)
--- notes: NO WRITER EXISTS in this build — every row is []. Table kept because
---   the projection reads the shape; expect it empty after migration.
---   -- dead field today (no writer); migrated as empty.
-CREATE TABLE agreement_documents (
-  id            TEXT PRIMARY KEY,
-  agreement_id  TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE CASCADE,
-  label         TEXT,
-  added_at      INTEGER
-) STRICT;
-
--- source: db.representationAgreements[].opportunityShares[]  created at
---         m27/index.mjs:460 (POST /org/agent/clients/:id/opportunities/:oppId/share)
--- owner/writer: m27 (share, withdraw)   lifecycle: withdrawn_at soft marker;
---         never deleted; cap 200 per agreement (MAX_OPPORTUNITY_SHARES).
--- mapping: id -> id (aos-*); opportunityId -> opportunity_id + via ->
---   via: a POLYMORPHIC pair — the board (domains/scouting/journeys.mjs:837/848) yields
---   via 'opportunity' (-> opportunities(id), 04) or 'open_trial' (an open
---   trial day row, 04), so no FK; title/orgName/deadline -> title / org_name /
---   deadline_date (snapshots of the board row at share time); note -> note
---   (≤300, plainShared); sharedAt -> shared_at; sharedBy{kind,userId,name} ->
---   shared_by_kind / shared_by_user_id / shared_by_name (name is the agent's
---   displayName, snapshot); withdrawnAt -> withdrawn_at; keys.share{key,fp} ->
---   idempotency_keys (action 'share', fp over {opportunityId, note});
---   rev/revAt -> rev / rev_at (no revBy on a share).
--- notes: one un-withdrawn share per (agreement, opportunity) enforced by code
---   (OPPORTUNITY_ALREADY_SHARED); partial unique index below is new.
 CREATE TABLE agreement_opportunity_shares (
-  id                 TEXT PRIMARY KEY,
-  agreement_id       TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE CASCADE,
-  via                TEXT CHECK (via IS NULL OR via IN ('opportunity','open_trial')),
-  opportunity_id     TEXT NOT NULL,                      -- polymorphic with via; no FK
-  title              TEXT,                               -- snapshot
-  org_name           TEXT,                               -- snapshot
-  deadline_date      TEXT CHECK (deadline_date IS NULL OR length(deadline_date) = 10),   -- snapshot
-  note               TEXT,
-  shared_at          INTEGER NOT NULL,
-  shared_by_kind     TEXT CHECK (shared_by_kind IN ('org')),
-  shared_by_user_id  TEXT,
-  shared_by_name     TEXT,                               -- snapshot
-  withdrawn_at       INTEGER,
-  rev                INTEGER NOT NULL DEFAULT 1,
-  rev_at             INTEGER
+  agreement_id                             TEXT NOT NULL CHECK (length(agreement_id) <= 80 AND length(agreement_id) > 0),
+  ord                                      INTEGER NOT NULL,
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  opportunity_id                           TEXT NOT NULL CHECK (length(opportunity_id) <= 80 AND length(opportunity_id) > 0),
+  via                                      TEXT CHECK (via IS NULL OR via IN ('opportunity','open_trial')),
+  title                                    TEXT CHECK (title IS NULL OR length(title) <= 200),
+  org_name                                 TEXT CHECK (org_name IS NULL OR length(org_name) <= 200),
+  deadline                                 TEXT CHECK (deadline IS NULL OR length(deadline) <= 40),
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 300 AND length(note) > 0),
+  shared_at                                INTEGER NOT NULL,
+  shared_by_kind                           TEXT NOT NULL CHECK (shared_by_kind IN ('org')),
+  shared_by_user_id                        TEXT NOT NULL CHECK (length(shared_by_user_id) <= 80 AND length(shared_by_user_id) > 0),
+  shared_by_name                           TEXT CHECK (shared_by_name IS NULL OR length(shared_by_name) <= 200),
+  withdrawn_at                             INTEGER,
+  rev                                      INTEGER NOT NULL,
+  rev_at                                   INTEGER NOT NULL,
+  share_key                                TEXT CHECK (share_key IS NULL OR length(share_key) <= 64 AND length(share_key) > 0),
+  share_fp                                 TEXT CHECK (share_fp IS NULL OR length(share_fp) <= 4000),
+  FOREIGN KEY (agreement_id) REFERENCES representation_agreements(id) ON DELETE CASCADE,
+  FOREIGN KEY (shared_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  UNIQUE (agreement_id, ord),
+  CHECK (ord >= 0 AND ord < 200),
+  CHECK (rev >= 1),
+  CHECK ((share_key IS NULL) = (share_fp IS NULL))
 ) STRICT;
-CREATE INDEX agreement_opportunity_shares_agreement ON agreement_opportunity_shares(agreement_id, shared_at);
-CREATE UNIQUE INDEX agreement_opportunity_shares_live ON agreement_opportunity_shares(agreement_id, opportunity_id) WHERE withdrawn_at IS NULL;   -- new; code enforces
-
--- source: db.representationAgreements[].history[]  (m24 hist; m25 review
---         decision; m27/index.mjs:472/505 opportunity_shared / _withdrawn;
---         migration 2305 representation_requested with detail.legacy)
--- actions: representation_requested, representation_confirmed,
---   representation_rejected, representation_terminated, representation_disputed,
---   representation_sharing_changed, opportunity_shared, opportunity_share_withdrawn
--- notes: on player deletion, by{kind:'player'} rows are reduced to
---   by_id/by_name NULL (domains/agents/core/index.mjs:896).
+CREATE UNIQUE INDEX agreement_opportunity_shares_live ON agreement_opportunity_shares (agreement_id, opportunity_id) WHERE withdrawn_at IS NULL;
+CREATE UNIQUE INDEX agreement_opportunity_shares_key ON agreement_opportunity_shares (agreement_id, share_key) WHERE share_key IS NOT NULL;
 CREATE TABLE agreement_history (
-  id            TEXT PRIMARY KEY,
-  agreement_id  TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE RESTRICT,
-  at            INTEGER NOT NULL,
-  by_kind       TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id         TEXT,
-  by_name       TEXT,
-  by_role       TEXT,
-  by_org_id     TEXT,
-  action        TEXT NOT NULL,
-  detail_json   TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  id                              TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  agreement_id                    TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE CASCADE,
+  ord                             INTEGER NOT NULL CHECK (ord >= 0),
+  at                              INTEGER NOT NULL,
+  by_kind                         TEXT NOT NULL CHECK (by_kind IN ('org','player','ts_reviewer','system')),
+  by_id                           TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name                         TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role                         TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  action                          TEXT NOT NULL CHECK (action IN ('representation_requested','representation_confirmed','representation_rejected','representation_terminated','representation_disputed','representation_sharing_changed','opportunity_shared','opportunity_share_withdrawn')),
+  detail_by                       TEXT CHECK (detail_by IS NULL OR detail_by IN ('agent','client','trust_safety')),
+  detail_from TEXT CHECK (detail_from IS NULL OR detail_from IN ('proposed','active','declined','expired','terminated_by_client','terminated_by_agent','disputed')),
+  detail_to TEXT CHECK (detail_to IS NULL OR detail_to IN ('proposed','active','declined','expired','terminated_by_client','terminated_by_agent','disputed')),
+  detail_had_reason               INTEGER CHECK (detail_had_reason IN (0,1)),
+  detail_phase TEXT CHECK (detail_phase IS NULL OR detail_phase IN ('proposed','active','declined','expired','terminated_by_client','terminated_by_agent','disputed')),
+  detail_reason_code              TEXT CHECK (detail_reason_code IS NULL OR length(detail_reason_code) <= 40),
+  detail_review_id                TEXT CHECK (detail_review_id IS NULL OR (length(detail_review_id) > 0 AND length(detail_review_id) <= 80)),
+  detail_share_with_agency_staff  INTEGER CHECK (detail_share_with_agency_staff IN (0,1)),
+  detail_club_presence            INTEGER CHECK (detail_club_presence IN (0,1)),
+  detail_contact_routing          INTEGER CHECK (detail_contact_routing IN (0,1)),
+  detail_trial_visibility         INTEGER CHECK (detail_trial_visibility IN (0,1)),
+  detail_share_id                 TEXT CHECK (detail_share_id IS NULL OR (length(detail_share_id) > 0 AND length(detail_share_id) <= 80)),
+  detail_via                      TEXT CHECK (detail_via IS NULL OR detail_via IN ('opportunity','open_trial')),
+  UNIQUE (agreement_id, ord),
+  CHECK ((action IN ('representation_confirmed','representation_rejected','representation_terminated','representation_disputed')) = (detail_by IS NOT NULL)),
+  CHECK ((detail_by = 'client') = (detail_from IS NOT NULL AND detail_to IS NOT NULL AND detail_had_reason IS NOT NULL)),
+  CHECK (detail_by IS NULL OR detail_by = 'client' OR (detail_phase IS NOT NULL AND detail_reason_code IS NOT NULL)),
+  CHECK ((detail_by = 'trust_safety') = (detail_review_id IS NOT NULL)),
+  CHECK ((action IN ('opportunity_shared','opportunity_share_withdrawn')) = (detail_share_id IS NOT NULL)),
+  CHECK (detail_via IS NULL OR action = 'opportunity_shared'),
+  CHECK ((action = 'representation_sharing_changed') = (coalesce(detail_share_with_agency_staff, detail_club_presence, detail_contact_routing, detail_trial_visibility) IS NOT NULL))
 ) STRICT;
-CREATE INDEX agreement_history_agreement ON agreement_history(agreement_id, at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.orgs[].agencySettings  {jurisdictions[], description}  written at
---         domains/agents/core/index.mjs:443 (PATCH /org/agent/agency/settings); absent until
---         first write (read as {jurisdictions:[], description:''})
--- owner/writer: m24   lifecycle: one optional row per agency org; no delete.
--- mapping: (org) -> org_id; description -> description (≤300, moderated);
---   jurisdictions[] -> org_agency_jurisdictions.
--- notes: KNOWN DEFECT — domains/agents/compliance/index.mjs:254 and :370 read `req.org.settings
---   ?.jurisdictions`, a field nobody writes, instead of `agencySettings`;
---   so the agency's declared jurisdictions never reach the compliance
---   overview/policy routes today. The data is still real and migrated.
--- -----------------------------------------------------------------------------
 CREATE TABLE org_agency_settings (
-  org_id       TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE CASCADE,
-  description  TEXT NOT NULL DEFAULT ''
+  org_id       TEXT PRIMARY KEY REFERENCES orgs(id) ON DELETE RESTRICT,
+  description  TEXT NOT NULL CHECK (length(description) <= 300),
+  updated_at   INTEGER NOT NULL
 ) STRICT;
-
--- source: db.orgs[].agencySettings.jurisdictions[]  (de-duplicated, JURISDICTIONS)
 CREATE TABLE org_agency_jurisdictions (
-  org_id              TEXT NOT NULL REFERENCES org_agency_settings(org_id) ON DELETE CASCADE,
-  member_association  TEXT NOT NULL CHECK (member_association IN ('INT','ENG','USA')),
-  PRIMARY KEY (org_id, member_association)
+  org_id        TEXT NOT NULL REFERENCES org_agency_settings(org_id) ON DELETE CASCADE,
+  ord           INTEGER NOT NULL CHECK (ord >= 0),
+  jurisdiction  TEXT NOT NULL CHECK (jurisdiction IN ('INT','ENG','USA')),
+  PRIMARY KEY (org_id, jurisdiction),
+  UNIQUE (org_id, ord)
 ) STRICT;
 
 

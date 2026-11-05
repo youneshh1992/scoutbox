@@ -1,20 +1,14 @@
 // M23 P5.6B — persistence, migration and restart audit for the Agent core.
+// S11a: the profiles, affiliations and agreements are typed tables (migration 0026); the blob step 2305 is a recorded
+// no-op, and a snapshot save types every record.
 //
-//   1  schema 2305: exactly one step, three empty stores on a clean database,
-//      idempotent, and every P5.6B store is production-required
-//   2  upgrade from a 2304 snapshot: existing agency staff gain affiliations
-//      (lead → agency_admin, others → assistant, never licensed_agent), an
-//      agency with no lead gets its earliest member as admin; a removed user
-//      gets nothing (the M13 F10 legacy lane and its mirror were removed in
-//      S11a, so no agreement comes from the upgrade)
-//   3  a real boot over that snapshot: /healthz 2305, and the migrated
-//      administrator can administer
-//   4  clean boot → a full relationship → stop → snapshot → reboot: bytes
-//      survive (keys, revs, provenance, history), and the 2305 step does not
-//      run twice
-//   5  corruption on disk is contained: a facet with an unknown state reads
-//      as MANUAL_REVIEW_REQUIRED, an agreement with an unknown status grants
-//      nothing and moves nowhere, and neither is "repaired" on boot
+//   1  step 2305: still exactly one step, a recorded no-op that creates no collection; the three stores are tables of
+//      the agent core, not collections a migration guarantees
+//   2  upgrade from a 2304 snapshot: nothing is bootstrapped or mirrored (no staff can exist before their login)
+//   3  a real boot over that snapshot: the first member into the agency becomes its administrator and can administer
+//   4  clean boot → a full relationship → stop → snapshot → reboot: bytes survive (keys, revs, provenance, history)
+//   5  junk is refused by the typed save, naming the record; an odd row a typed table CAN hold (an active agreement
+//      nobody confirmed) grants nothing and is never "repaired" on boot
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
@@ -29,9 +23,9 @@ import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES }
 const ABOVE_2304 = MIGRATIONS.filter((m) => m.version > 2304).map((m) => m.id);
 import { openStore } from '../../store.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
-import { effectiveFacetState, agreementGrantsAccess, clientTransitionAllowed, agentTransitionAllowed, verificationGap } from '../../domains/agents/core/shared.mjs';
+import { effectiveFacetState, agreementGrantsAccess, clientTransitionAllowed, agentTransitionAllowed, verificationGap, newFacets } from '../../domains/agents/core/shared.mjs';
+import { TABLE_BACKED } from '../../repositories/index.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
-import { knownFailure } from '../support/knownFailure.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -114,8 +108,7 @@ function snapshot2304() {
 }
 
 // ======================================================= 1 — the step
-// Pins updated in P5.6C: the Agent step is still the one 2305 step; the schema is now 2306 (Compliance stores, one step).
-section('1 — schema 2305: one step, three empty stores, idempotent, production-required');
+section('1 — schema 2305: one step, a recorded no-op since S11a');
 {
   const step = MIGRATIONS.find((m) => m.id === 'm240_001_agent_core_stores');
   ok(step?.version === 2305 && SCHEMA_VERSION >= 2306, `m240_001_agent_core_stores is frozen at 2305, and the schema has only moved forward since (now ${SCHEMA_VERSION})`);
@@ -123,7 +116,7 @@ section('1 — schema 2305: one step, three empty stores, idempotent, production
   neg(!MIGRATIONS.some((m) => m.version > SCHEMA_VERSION), `and no step claims a version above the declared schema (${SCHEMA_VERSION})`);
   const fresh = {};
   const up = runMigrations(fresh);
-  ok(up.to === SCHEMA_VERSION && Array.isArray(fresh.agentProfiles) && fresh.agentProfiles.length === 0 && Array.isArray(fresh.agencyAffiliations) && fresh.agencyAffiliations.length === 0 && Array.isArray(fresh.representationAgreements) && fresh.representationAgreements.length === 0, 'a clean database gets three EMPTY stores — empty is the truthful default');
+  ok(up.to === SCHEMA_VERSION && fresh.agentProfiles === undefined && fresh.agencyAffiliations === undefined && fresh.representationAgreements === undefined, 'a clean database gets no agent collection: the agent core is tables (migration 0026)');
   neg(fresh.agentAuth === undefined && fresh.agentSessions === undefined && fresh.agentUsers === undefined && fresh.offers === undefined, 'no agent auth database and no offers store was invented');
   const { schema: _s1, ...storesBefore } = fresh;
   const idsBefore = fresh.schema.migrations.map((m) => m.id).join();
@@ -131,42 +124,27 @@ section('1 — schema 2305: one step, three empty stores, idempotent, production
   const again = runMigrations(fresh);
   const { schema: _s2, ...storesAfter } = fresh;
   ok(again.ran.length === 0 && stableJson(storesAfter) === before && fresh.schema.migrations.map((m) => m.id).join() === idsBefore && fresh.schema.version === SCHEMA_VERSION, 'running again changes no store and adds no migration record');
-  for (const s of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `${s} is migration-guaranteed and production-required`);
+  for (const s2 of ['agentProfiles', 'agencyAffiliations', 'representationAgreements']) ok(guaranteeFor(s2) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s2) && TABLE_BACKED.includes(s2), `${s2} is a table of the agent core, not a collection a migration guarantees`);
 }
 
 // ======================================================= 2 — upgrade
-section('2 — upgrade from 2304: affiliations bootstrapped honestly, nothing mirrored');
+section('2 — upgrade from 2304: nothing bootstrapped, nothing mirrored');
 {
   const db = snapshot2304();
   ok(db.schema.version === 2304 && db.agencyAffiliations === undefined && db.representations === undefined, 'the fixture is a 2304 snapshot with no agent store (and no F10 lane: removed in S11a)');
   const usersBefore = stableJson(db.users);
   const up = runMigrations(db);
   ok(up.ran.join(',') === ABOVE_2304.join(',') && up.to === SCHEMA_VERSION, `a 2304 snapshot runs exactly the steps above 2304, in order (${up.ran.join(', ')})`);
-  const affs = db.agencyAffiliations;
-  const lead = affs.find((a) => a.userId === 'usr-lead');
-  const staff = affs.find((a) => a.userId === 'usr-staff');
-  ok(lead && lead.agencyOrgId === 'org-ag' && lead.tiers.join() === 'agency_admin' && lead.endedAt === null && lead.startedAt === T0, 'the lead-role member became agency_admin, active from their creation date');
-  ok(staff && staff.tiers.join() === 'assistant', 'the other member became assistant');
-  neg(!affs.some((a) => a.tiers.includes('licensed_agent')), 'NOBODY became licensed_agent — a self-typed role is not a licence (S9)');
-  neg(!affs.some((a) => a.userId === 'usr-gone'), 'a removed user got no affiliation');
-  neg(!affs.some((a) => a.userId === 'usr-club'), 'a club user got no affiliation');
-  const ag2 = affs.filter((a) => a.agencyOrgId === 'org-ag2');
-  ok(ag2.length === 2 && ag2.find((a) => a.userId === 'usr-ag2-a').tiers.includes('agency_admin') && !ag2.find((a) => a.userId === 'usr-ag2-b').tiers.includes('agency_admin'), 'an agency with no lead-role member gets its EARLIEST member as admin, and only that one');
-  ok(affs.every((a) => a.history?.[0]?.by?.kind === 'system' && a.history[0].by.name === 'migration 2305' && a.history[0].detail?.legacy === true), 'every bootstrapped affiliation is attributed to the migration, marked legacy');
-  ok(db.representationAgreements.length === 0, 'the upgrade creates no agreement (the F10 mirror went with the lane in S11a)');
+  neg(db.agencyAffiliations === undefined && db.agentProfiles === undefined && db.representationAgreements === undefined, 'the upgrade creates no agent record: staff exist only from their first login, after every step ran');
   const mirror = { id: 'rep-x', agentUserId: null, clientId: 'pl-a', status: 'active', confirmedAt: T0 + 10, startAt: T0 + 10, endAt: T0 + 400 * 24 * 3600 * 1000 };
   neg(!agreementGrantsAccess(mirror, null, T0 + 20) && !agreementGrantsAccess(mirror, 'usr-lead', T0 + 20) && !agreementGrantsAccess(mirror, undefined, T0 + 20), 'an ACTIVE agreement naming no agent grants access to nobody — null, the admin, undefined');
   neg(stableJson(db.users) === usersBefore, 'no user row was touched');
   const again = runMigrations(db);
-  ok(again.ran.length === 0 && db.representationAgreements.length === 0 && db.agencyAffiliations.length === 4, 'running again adds nothing');
-  // A partially-applied re-run (stores present, step record missing) is still idempotent.
-  db.schema.version = 2304; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== 'm240_001_agent_core_stores');
-  const third = runMigrations(db);
-  ok(third.ran.join(',') === 'm240_001_agent_core_stores' && db.representationAgreements.length === 0 && db.agencyAffiliations.length === 4 && db.agencyAffiliations.find((a) => a.userId === 'usr-lead').tiers.join() === 'agency_admin', 'a re-applied step over existing rows adds no duplicate affiliation and no agreement, and changes no tier');
+  ok(again.ran.length === 0 && db.agencyAffiliations === undefined, 'running again adds nothing');
 }
 
 // ======================================================= 3 — boot over it
-section('3 — a real boot over the upgraded snapshot');
+section('3 — a real boot over the upgraded snapshot: the first member becomes the administrator');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p3-'));
   const db = snapshot2304();
@@ -179,16 +157,15 @@ section('3 — a real boot over the upgraded snapshot');
     const lead = (await s.j('POST', '/auth/org/login', { orgId: 'org-ag', scoutName: 'Lead Person', role: 'Managing Director', platform: 'agent' })).body;
     const staff = (await s.j('POST', '/auth/org/login', { orgId: 'org-ag', scoutName: 'Staff Person', role: 'Scout', platform: 'agent' })).body;
     const me = await s.j('GET', '/org/agent/me', undefined, lead.token);
-    ok(me.status === 200 && me.body.affiliation.tiers.join() === 'agency_admin', 'the migrated lead is an administrator');
+    ok(me.status === 200 && me.body.affiliation.tiers.join() === 'agency_admin', 'the first member into the agency is its administrator (the bootstrap rule)');
     const staffMe = await s.j('GET', '/org/agent/me', undefined, staff.token);
-    if (staffMe.status !== 200) console.error('   staff /me', staffMe.status, JSON.stringify(staffMe.body).slice(0, 200), JSON.stringify(staff).slice(0, 200));
-    knownFailure(staffMe.status === 200 && staffMe.body.affiliation.tiers.join() === 'assistant', 'the migrated staff member is an assistant', 'agents/corePersistence staff upgrade');
+    neg(staffMe.status === 403 && staffMe.body.error === 'AGENCY_MEMBERSHIP_REQUIRED', 'a second person is not a member until an administrator adds them');
     const agency = await s.j('GET', '/org/agent/agency', undefined, lead.token);
     ok(agency.body.relationships.active === 0 && agency.body.relationships.pending === 0, 'the agency overview counts no relationship: none came from the upgrade');
     const list = await s.j('GET', '/org/agent/clients', undefined, lead.token);
     ok(list.status === 200 && list.body.items.length === 0, 'and the administrator sees no client row');
     const add = await s.j('POST', '/org/agent/agency/team', { name: 'Second Admin', tiers: ['agency_admin'] }, lead.token);
-    ok(add.status === 201, 'the migrated administrator can administer: a second admin is added');
+    ok(add.status === 201, 'the administrator can administer: a second admin is added');
     const pa = (await s.j('POST', '/auth/player/login', { playerId: 'pl-a' })).body;
     const mine = await s.j('GET', '/player/agent/relationships', undefined, pa.token);
     ok(mine.status === 200 && mine.body.items.length === 0, 'the player sees no relationship');
@@ -221,7 +198,7 @@ section('4 — clean boot → relationship → stop → snapshot → reboot');
     team: (await s.j('GET', '/org/agent/agency/team', undefined, tomas.token)).body.members,
   };
   const snap = await s.stop();
-  ok(snap && snap.schema.version === SCHEMA_VERSION && snap.representationAgreements.length === 1 && snap.agentProfiles.length === 1 && snap.agencyAffiliations.length === 2, 'the snapshot holds one agreement, one profile, two affiliations at 2306');
+  ok(snap && snap.schema.version === SCHEMA_VERSION && snap.representationAgreements.length === 1 && snap.agentProfiles.length === 1 && snap.agencyAffiliations.length === 2, 'the snapshot holds one agreement, one profile, two affiliations (read from the tables)');
   const row = snap.representationAgreements[0];
   ok(row.keys.request.key === 'rt-1' && row.keys.confirm.key === 'rt-c' && row.rev === 2 && row.history.length === 2 && row.confirmedBy?.id === 'pl-adeyemi', 'keys, rev, history and confirmation are on disk');
   ok(snap.agentProfiles[0].facets.fifa_licence.provenance.provider === 'local-synthetic-test-provider', 'provenance is on disk');
@@ -244,41 +221,80 @@ section('4 — clean boot → relationship → stop → snapshot → reboot');
 }
 
 // ======================================================= 5 — corruption
-section('5 — corruption on disk is contained, named by its effect, never repaired');
+section('5 — junk is refused by the typed save; what a typed row can hold is judged on read, never repaired');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p5-'));
   const db = snapshot2304();
   runMigrations(db);
-  db.agentProfiles.push({
+  const profile = {
     id: 'agp-x', userId: 'usr-lead', agencyOrgId: 'org-ag', displayName: 'Lead Person', declared: { fifaLicenceNumber: null, jurisdictions: ['INT'] },
-    facets: { fifa_licence: { state: 'approved', reference: 'X', provenance: null }, national_registration: {}, minors_authorisation: {} },
-    policyVersion: 1, createdAt: T0, updatedAt: T0, rev: 1, revAt: T0, revBy: null, keys: {}, history: [],
-  });
-  db.representationAgreements.push({
-    id: 'rep-x', agentUserId: 'usr-lead', agencyOrgId: 'org-ag', clientKind: 'player', clientId: 'pl-b', status: 'signed', confirmedAt: T0,
-    scope: ['employment'], termMonths: 12, startAt: T0, endAt: T0 + 1e10, proposedAt: T0, policyVersion: 1, keys: {}, createdAt: T0, rev: 1, revAt: T0, revBy: null, history: [],
-  });
-  neg(effectiveFacetState(db.agentProfiles[0].facets.fifa_licence, T0) === 'MANUAL_REVIEW_REQUIRED', 'an unknown facet state "approved" reads as MANUAL_REVIEW_REQUIRED');
-  neg(verificationGap(db.agentProfiles[0], 'INT', T0)?.state === 'MANUAL_REVIEW_REQUIRED', 'and is a verification gap');
-  neg(!agreementGrantsAccess(db.representationAgreements.find((r) => r.id === 'rep-x'), 'usr-lead', T0 + 1), 'an agreement with status "signed" grants NO access');
-  neg(!clientTransitionAllowed(db.representationAgreements.find((r) => r.id === 'rep-x'), 'active', T0 + 1) && !agentTransitionAllowed(db.representationAgreements.find((r) => r.id === 'rep-x'), 'terminated_by_agent', T0 + 1), 'and moves nowhere');
+    facets: { ...newFacets(), fifa_licence: { ...newFacets().fifa_licence, state: 'approved', reference: 'X' } },
+    createdAt: T0, updatedAt: T0, rev: 1, revAt: T0, revBy: null, history: [],
+  };
+  const signed = {
+    id: 'rep-x', agentUserId: 'usr-lead', agencyOrgId: 'org-ag', clientKind: 'player', clientId: 'pl-b', jurisdiction: 'INT', exclusive: false,
+    status: 'signed', confirmedAt: T0, confirmedBy: { kind: 'player', id: 'pl-b' }, scope: ['employment'], termMonths: 12, startAt: T0, endAt: T0 + 1e10, proposedAt: T0,
+    declinedAt: null, terminatedAt: null, terminatedBy: null, terminationReasonCode: null, disputedAt: null, disputeReason: null, shareWithAgencyStaff: false,
+    policyVersions: [], keys: {}, createdAt: T0, rev: 1, revAt: T0, revBy: null, history: [],
+  };
+  // The pure rules still judge such records, wherever they might come from.
+  neg(effectiveFacetState(profile.facets.fifa_licence, T0) === 'MANUAL_REVIEW_REQUIRED', 'an unknown facet state "approved" reads as MANUAL_REVIEW_REQUIRED');
+  neg(verificationGap(profile, 'INT', T0)?.state === 'MANUAL_REVIEW_REQUIRED', 'and is a verification gap');
+  neg(!agreementGrantsAccess(signed, 'usr-lead', T0 + 1), 'an agreement with status "signed" grants NO access');
+  neg(!clientTransitionAllowed(signed, 'active', T0 + 1) && !agentTransitionAllowed(signed, 'terminated_by_agent', T0 + 1), 'and moves nowhere');
+  // S11a: the typed save refuses both, naming the record; nothing is written.
+  let refused = null;
+  try { openStore(dir).save({ db: { ...db, agentProfiles: [profile] } }); } catch (e) { refused = e; }
+  neg(refused?.code === 'AGENT_CORE_IMPORT_BLOCKED' && /agp-x/.test(refused.message) && /state/.test(refused.message), `a facet state the table does not know is refused by the save, naming the profile (${refused?.message ?? 'saved'})`);
+  refused = null;
+  try { openStore(dir).save({ db: { ...db, representationAgreements: [signed] } }); } catch (e) { refused = e; }
+  neg(refused?.code === 'AGENT_CORE_IMPORT_BLOCKED' && /rep-x/.test(refused.message) && /status/.test(refused.message), `an agreement status the table does not know is refused by the save, naming the agreement (${refused?.message ?? 'saved'})`);
+  // An odd row a typed table CAN hold: an ACTIVE agreement nobody confirmed (a dispute of a proposal reinstated by review).
+  const unconfirmed = { ...signed, id: 'rep-y', status: 'active', confirmedAt: null, confirmedBy: null, endAt: Date.now() + 1e10 };
+  db.agentProfiles = [{ ...profile, facets: newFacets(), userId: 'usr-lead' }];
+  db.representationAgreements = [unconfirmed];
   openStore(dir).save({ db });
-  const stored = stableJson(db.representationAgreements.find((r) => r.id === 'rep-x')) + stableJson(db.agentProfiles[0]);
+  const stored = stableJson(openStore(dir).load().db.representationAgreements.find((r) => r.id === 'rep-y'));
   const s = await bootOn(dir, PORT + 3);
-  ok(s.up, 'the server boots over the corrupt rows');
+  ok(s.up, 'the server boots over the odd row');
   if (s.up) {
     const lead = (await s.j('POST', '/auth/org/login', { orgId: 'org-ag', scoutName: 'Lead Person', role: 'Managing Director', platform: 'agent' })).body;
     const me = await s.j('GET', '/org/agent/me', undefined, lead.token);
-    ok(me.status === 200 && me.body.profile.facets.fifa_licence.state === 'MANUAL_REVIEW_REQUIRED' && me.body.profile.facets.fifa_licence.storedState === 'approved', '/me shows the effective state and the stored one, honestly');
     const add = await s.j('POST', '/org/agent/agency/team', { name: 'Second Admin', tiers: ['agency_admin'] }, lead.token);
     await s.j('PATCH', `/org/agent/agency/team/${me.body.user.id}`, { tiers: ['agency_admin', 'licensed_agent'], expectedRev: me.body.affiliation.rev }, lead.token);
-    const d = await s.j('GET', '/org/agent/clients/rep-x', undefined, lead.token);
-    neg(d.status === 200 && d.body.access === false && d.body.relationship.status === 'signed', 'the corrupt agreement is shown with its stored word and access false');
-    neg((await s.j('GET', '/org/agent/clients/rep-x/opportunities', undefined, lead.token)).status === 409, 'and opens no board');
-    neg((await s.j('POST', '/org/agent/clients/rep-x/terminate', {}, lead.token)).status === 409, 'and cannot be moved');
+    const d = await s.j('GET', '/org/agent/clients/rep-y', undefined, lead.token);
+    neg(d.status === 200 && d.body.access === false && d.body.relationship.status === 'active', 'the unconfirmed agreement is shown with its stored word and access false');
+    neg((await s.j('GET', '/org/agent/clients/rep-y/opportunities', undefined, lead.token)).status === 409, 'and opens no board');
     const after = await s.stop();
-    neg(stableJson(after.representationAgreements.find((r) => r.id === 'rep-x')) + stableJson(after.agentProfiles.find((p) => p.id === 'agp-x')) === stored, 'nothing was repaired on boot or by reading — the bytes are the bytes');
+    neg(stableJson(after.representationAgreements.find((r) => r.id === 'rep-y')) === stored, 'nothing was repaired on boot or by reading — the bytes are the bytes');
     ok(add.status === 201, '(setup)');
+  }
+}
+
+// ======================================================= 6 — the sweep's notices
+section('6 — the sweep tells a current member once that a relationship is ending; an agent who left is not told');
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m24p6-'));
+  const db = snapshot2304();
+  runMigrations(db);
+  const aff = (id, userId, over = {}) => ({ id, agencyOrgId: 'org-ag', userId, tiers: ['agency_admin', 'licensed_agent'], startedAt: T0, endedAt: null, endedReason: null, createdAt: T0, rev: 1, revAt: T0, revBy: null, keys: {}, history: [], ...over });
+  const ending = (id, agentUserId, clientId) => ({
+    id, agentUserId, agencyOrgId: 'org-ag', clientKind: 'player', clientId, jurisdiction: 'INT', exclusive: false, termMonths: 12, startAt: T0, endAt: Date.now() + 10 * 86_400_000,
+    status: 'active', proposedAt: T0, confirmedAt: T0, confirmedBy: { kind: 'player', id: clientId }, declinedAt: null, terminatedAt: null, terminatedBy: null, terminationReasonCode: null,
+    disputedAt: null, disputeReason: null, shareWithAgencyStaff: false, scope: ['employment'], policyVersions: [], keys: {}, createdAt: T0, rev: 1, revAt: T0, revBy: null, history: [],
+  });
+  db.agencyAffiliations = [aff('aff-lead', 'usr-lead'), aff('aff-staff', 'usr-staff', { endedAt: T0 + 5, endedReason: 'left' })];
+  db.representationAgreements = [ending('rep-live', 'usr-lead', 'pl-a'), ending('rep-left', 'usr-staff', 'pl-b')];
+  openStore(dir).save({ db });
+  const s = await bootOn(dir, PORT + 4);
+  ok(s.up, 'the server boots over two relationships ending within 30 days');
+  if (s.up) {
+    await sleep(500); // the sweep runs once at boot
+    const after = await s.stop();
+    const expiring = (after.notifications ?? []).filter((n) => n.type === 'representation_expiring');
+    ok(expiring.length === 1 && JSON.stringify(expiring[0]).includes('usr-lead') && JSON.stringify(expiring[0]).includes('rep-live'), 'the current member is told once that their relationship is ending');
+    neg(!expiring.some((n) => JSON.stringify(n).includes('usr-staff')), 'an agent whose membership ended is not told');
+    neg(after.representationAgreements.every((a) => typeof a.expiryNotifiedAt === 'number'), 'both relationships are marked, so neither is looked at again');
   }
 }
 

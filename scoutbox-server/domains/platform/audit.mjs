@@ -198,7 +198,7 @@ export function registerAudit(ctx) {
     // M23 P5.6B: the Agent domain — profile, affiliation and relationship
     // lifecycle for an agency organisation. Same rules: subject named only
     // where the org may see them; no reference numbers, no reason text.
-    if (org.type === 'agency') rows.push(...agentAuditRows(db, org, { findPlayer, orgCanSee }));
+    if (org.type === 'agency') rows.push(...agentAuditRows(ctx.agentReads, org, { findPlayer, orgCanSee }));
     // M23 P5.6C: the compliance domain — contexts, consents and reviews, content-free.
     if (org.type === 'agency') rows.push(...complianceAuditRows(db, org));
     for (const l of db.ledger ?? []) {

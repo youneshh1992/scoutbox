@@ -155,7 +155,7 @@ interface DemoRel extends Omit<Relationship, 'client' | 'mode' | 'status'> { sta
 const rel = (over: Partial<DemoRel> & Pick<DemoRel, 'id' | 'clientId' | 'status'>): DemoRel => ({
   agentUserId: 'usr-ana', agencyOrgId: ORG.id, clientKind: 'player', storedStatus: over.status, scope: ['employment'], exclusive: false, jurisdiction: 'INT',
   termMonths: 12, startAt: null, endAt: null, proposedAt: NOW - 5 * DAY, confirmedAt: null, declinedAt: null, terminatedAt: null, terminatedBy: null,
-  terminationReasonCode: null, disputedAt: null, shareWithAgencyStaff: false, documents: [], subjectRemovedAt: null, policyVersion: 1,
+  terminationReasonCode: null, disputedAt: null, shareWithAgencyStaff: false, subjectRemovedAt: null, policyVersion: 1,
   rev: 1, revAt: NOW - 5 * DAY, history: [{ id: id('h'), at: NOW - 5 * DAY, action: 'representation_requested', byKind: 'org', byName: 'Ana Costa', detail: { scope: ['employment'], termMonths: 12 } }],
   honest: 'A ScoutBox relationship record. It is not a representation contract and ScoutBox has not assessed its legal validity; the client confirmed it in ScoutBox.',
   ...over,

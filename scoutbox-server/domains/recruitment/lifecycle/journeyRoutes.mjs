@@ -125,7 +125,8 @@ export function registerJourneyRoutes(ctx) {
     if (tab === 'offers') {
       const basis = integration?.basisFor?.({ agentUserId, clientId: playerId, at });
       const scopeOk = !!basis?.ok && (basis.scope ?? []).some((s) => s === 'employment' || s === 'transfer');
-      const agreement = (db.representationAgreements ?? []).find((a) => a && a.agentUserId === agentUserId && a.clientId === playerId && a.id === basis?.agreementId) ?? (db.representationAgreements ?? []).find((a) => a && a.agentUserId === agentUserId && a.clientId === playerId) ?? null;
+      const mine = ctx.agentReads.agreements.forClient(playerId).filter((a) => a.agentUserId === agentUserId);
+      const agreement = mine.find((a) => a.id === basis?.agreementId) ?? mine[0] ?? null;
       const licenceCurrent = integration?.licenceCurrentFor ? integration.licenceCurrentFor(agentUserId, agreement?.jurisdiction ?? null, at) : false;
       if (!scopeOk || licenceCurrent !== true) return null;
     }

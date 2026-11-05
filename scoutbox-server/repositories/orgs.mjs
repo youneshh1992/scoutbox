@@ -12,12 +12,10 @@
  *   two composites location{city,lat,lng} and federationRef{federation,
  *   registrationId}.
  *
- *   FACETS (`facets_json`, the transitional storage for everything else:
- *   agencySettings and any field this step
+ *   FACETS (`facets_json`, the transitional storage for any field this step
  *   does not know): mutated in place by the modules that own them, exactly as
  *   the blob record was, and persisted by `flush()` inside every snapshot save
- *   transaction. They have their own cutover steps (S11
- *   agency settings).
+ *   transaction.
  *
  *   RETIRED (S9c): tactical, squad, lookingFor and federationCheck are tables of
  *   the club setup repository (repositories/clubSetup.mjs). Reading, writing or
@@ -25,7 +23,8 @@
  *   record that carries one is refused, so a reader that was missed fails
  *   loudly instead of seeing (or `??=`-creating) an empty list. RETIRED (S10a): `verification` likewise — its domains are
  *   rows of the verification repository (repositories/verification.mjs) and its revokedAt is the scalar
- *   `verificationRevokedAt` (column verification_revoked_at).
+ *   `verificationRevokedAt` (column verification_revoked_at). RETIRED (S11a): `agencySettings` — rows of the agent core
+ *   repository (repositories/agentCore.mjs, `settings`).
  *
  * Shape preservation. A record read back from a row has the same keys, in
  * the same order, with the same absent-versus-null distinction as the record
@@ -78,8 +77,8 @@ const COMPOSITES = Object.freeze({
   location: { city: 'city', lat: 'lat', lng: 'lng' },
   federationRef: { federation: 'federation', registrationId: 'federation_registration_id' },
 });
-/** Organisation facets that moved to a domain repository's tables: the club setup (S9c) and verification (S10a). */
-const RETIRED_FACET_OWNER = Object.freeze({ tactical: 'clubSetup', squad: 'clubSetup', lookingFor: 'clubSetup', federationCheck: 'clubSetup', verification: 'verification' });
+/** Organisation facets that moved to a domain repository's tables: the club setup (S9c), verification (S10a) and the agent core's agency settings (S11a). */
+const RETIRED_FACET_OWNER = Object.freeze({ tactical: 'clubSetup', squad: 'clubSetup', lookingFor: 'clubSetup', federationCheck: 'clubSetup', verification: 'verification', agencySettings: 'agentCore' });
 export const RETIRED_FACETS = Object.freeze(new Set(Object.keys(RETIRED_FACET_OWNER)));
 const retiredFacet = (key) => new TypeError(`org.${String(key)} is gone: read and write it through the ${RETIRED_FACET_OWNER[key]} repository (repositories/${RETIRED_FACET_OWNER[key]}.mjs)${key === 'verification' ? '; its revokedAt is the organisation field verificationRevokedAt' : ''}`);
 /** Every record key the columns own; anything else is a facet. */
@@ -136,7 +135,7 @@ export function validateOrgRecord(rec) {
   if (rec.verificationRevokedAt !== undefined && rec.verificationRevokedAt !== null && !Number.isSafeInteger(rec.verificationRevokedAt)) return { ok: false, reason: `verificationRevokedAt is ${describe(rec.verificationRevokedAt)}, not an integer timestamp` };
   if ('__meta' in rec) return { ok: false, reason: 'the reserved field "__meta" is not allowed on a record' };
   const retired = Object.keys(rec).filter((k) => RETIRED_FACETS.has(k));
-  if (retired.length) return { ok: false, reason: `${retired.join(', ')} ${retired.length > 1 ? 'are' : 'is'} no longer an organisation field (club setup tables since S9c, verification tables since S10a: write it through that repository or its snapshot collections)` };
+  if (retired.length) return { ok: false, reason: `${retired.join(', ')} ${retired.length > 1 ? 'are' : 'is'} no longer an organisation field (club setup tables since S9c, verification tables since S10a, agent core tables since S11a: write it through that repository or its snapshot collections)` };
   return { ok: true };
 }
 

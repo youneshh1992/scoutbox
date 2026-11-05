@@ -54,10 +54,12 @@ export function registerIntegration(ctx) {
     db, orgRouter, playerRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isAdult, isBlocked, orgCanSee, checkEligibility, distanceBand,
     agent, compliance, rateLimit,
+    agentCore, unit, // S11a: an opportunity share is a row of its agreement, written by agreements.update in a unit
     recruitmentCases, // S8b: the handoff is part of its case, written by cases.update
     recruitmentReads, // §4.3 step 2: contacts are read through SQL
   } = ctx;
   if (!recruitmentCases?.cases) throw new TypeError('registerIntegration needs the recruitment-cases repository from the data layer');
+  if (typeof agentCore?.agreements?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerIntegration needs the agent core repository and unit from the data layer');
   if (typeof recruitmentReads?.contacts?.forAgent !== 'function') throw new TypeError('registerIntegration needs recruitmentReads (contacts) from the data layer');
   const { cases } = recruitmentCases;
   /** A case history entry in the one shape every case writer uses. */
@@ -108,8 +110,9 @@ export function registerIntegration(ctx) {
     }
     return { kase, role, canWrite };
   }
-  const agreementsFor = (clientId) => (db.representationAgreements ?? []).filter((a) => a && a.clientId === clientId);
-  const agreementById = (id) => (db.representationAgreements ?? []).find((a) => a && a.id === id) ?? null;
+  // S11a: agreements are rows of repositories/agentCore.mjs, read through SQL.
+  const agreementsFor = (clientId) => ctx.agentReads.agreements.forClient(clientId);
+  const agreementById = (id) => (typeof id === 'string' ? ctx.agentReads.agreements.byId(id) : null);
 
   // ---------------------------------------------------------------- basis
 
@@ -419,7 +422,6 @@ export function registerIntegration(ctx) {
 
     // Idempotency and the duplicate rule are the same question asked twice: the
     // same key replays, and the same opportunity is already shared.
-    a.opportunityShares ??= [];
     if (key) {
       const hit = a.opportunityShares.find((s) => s && s.keys?.share?.key === key);
       if (hit) {
@@ -464,23 +466,27 @@ export function registerIntegration(ctx) {
     // bound the rate and it does not span clients; the quota above does both.
 
     const at = now();
-    const share = {
-      id: nextId('aos'),
-      opportunityId: opp.id, via: opp.via ?? null, title: opp.title ?? null,
-      orgName: opp.orgName ?? null, deadline: opp.deadline ?? null,
-      note: note || null,
-      sharedAt: at, sharedBy: { kind: 'org', userId: req.orgUser.id, name: agentDisplayName(req.orgUser.id) },
-      withdrawnAt: null,
-      keys: key ? { share: { key, fp: payloadFingerprint({ opportunityId: opp.id, note }) } } : {},
-      rev: 1, revAt: at,
-    };
-    a.opportunityShares.push(share);
-    a.history ??= [];
-    a.history.push({ id: nextId('aud'), at, action: 'opportunity_shared', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: share.id, via: share.via } });
-    persistNow();
-    broadcast('agent_opportunity_shared', { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: req.orgUser.id });
-    notify({ kind: 'player', id: a.clientId }, 'representation_opportunity',
-      `${share.sharedBy.name ?? 'Your agent'} shared an opportunity with you${share.orgName ? ` at ${share.orgName}` : ''}. Applying is your own decision — nobody can apply on your behalf.`, share.id);
+    const share = unit(() => {
+      const draft = {
+        id: nextId('aos'),
+        opportunityId: opp.id, via: opp.via ?? null, title: opp.title ?? null,
+        orgName: opp.orgName ?? null, deadline: opp.deadline ?? null,
+        note: note || null,
+        sharedAt: at, sharedBy: { kind: 'org', userId: req.orgUser.id, name: agentDisplayName(req.orgUser.id) },
+        withdrawnAt: null,
+        keys: key ? { share: { key, fp: payloadFingerprint({ opportunityId: opp.id, note }) } } : {},
+        rev: 1, revAt: at,
+      };
+      // S11a: a share is a row of its agreement, written by an explicit update (no agreement rev: a share changes no term).
+      agentCore.agreements.update(a.id, (d) => {
+        d.opportunityShares.push(draft);
+        d.history.push({ id: nextId('aud'), at, action: 'opportunity_shared', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: draft.id, via: draft.via } });
+      });
+      broadcast('agent_opportunity_shared', { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: req.orgUser.id });
+      notify({ kind: 'player', id: a.clientId }, 'representation_opportunity',
+        `${draft.sharedBy.name ?? 'Your agent'} shared an opportunity with you${draft.orgName ? ` at ${draft.orgName}` : ''}. Applying is your own decision — nobody can apply on your behalf.`, draft.id);
+      return draft;
+    });
     res.status(201).json({
       share: shareView(share),
       note: 'Shared. Your client decides whether to apply, on their own screen, in their own name.',
@@ -494,7 +500,7 @@ export function registerIntegration(ctx) {
     const found = agent.findOwnAgreement(req, res, req.params.id);
     if (!found || found.summaryOnly) { if (found?.summaryOnly) res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED' }); return; }
     const a = found;
-    const share = (a.opportunityShares ?? []).find((s) => s && s.id === req.params.shareId);
+    const share = a.opportunityShares.find((s) => s.id === req.params.shareId);
     if (!share) return res.status(404).json({ error: 'OPPORTUNITY_SHARE_NOT_FOUND' });
     if (share.withdrawnAt) return res.json({ share: shareView(share), idempotent: true });
     // Withdrawing needs no live basis check: an agent whose relationship has
@@ -505,13 +511,14 @@ export function registerIntegration(ctx) {
     // the loop the quota exists to close.
     if (limitedOr429(res, 'opportunity_share', req.orgUser.id)) return;
     const at = now();
-    share.withdrawnAt = at;
-    share.rev = (share.rev ?? 1) + 1;
-    share.revAt = at;
-    a.history ??= [];
-    a.history.push({ id: nextId('aud'), at, action: 'opportunity_share_withdrawn', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: share.id } });
-    persistNow();
-    res.json({ share: shareView(share) });
+    const updated = unit(() => agentCore.agreements.update(a.id, (d) => {
+      const s2 = d.opportunityShares.find((x) => x.id === share.id);
+      s2.withdrawnAt = at;
+      s2.rev += 1;
+      s2.revAt = at;
+      d.history.push({ id: nextId('aud'), at, action: 'opportunity_share_withdrawn', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: share.id } });
+    }));
+    res.json({ share: shareView(updated.opportunityShares.find((x) => x.id === share.id)) });
   });
 
   /** The agent's own list for one client. */
@@ -529,7 +536,7 @@ export function registerIntegration(ctx) {
     if (decision.allowed !== true) {
       return res.status(403).json({ error: decision.code, rule: decision.rule, message: 'This client\'s record is not open to you right now.' });
     }
-    res.json({ items: (found.opportunityShares ?? []).map(shareView).sort((x, y) => y.sharedAt - x.sharedAt) });
+    res.json({ items: found.opportunityShares.map(shareView).sort((x, y) => y.sharedAt - x.sharedAt) });
   });
 
   /**
@@ -542,8 +549,8 @@ export function registerIntegration(ctx) {
     if (req.playerIsMinor) return res.json({ items: [], minor: true });
     const items = [];
     for (const a of activeAgentsFor(req.player.id)) {
-      for (const s of a.opportunityShares ?? []) {
-        if (!s || s.withdrawnAt) continue;
+      for (const s of a.opportunityShares) {
+        if (s.withdrawnAt) continue;
         items.push({ ...shareView(s), agreementId: a.id, agencyOrgId: a.agencyOrgId });
       }
     }

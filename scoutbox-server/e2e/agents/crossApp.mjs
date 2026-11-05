@@ -44,7 +44,7 @@ import {
   handoffBlockers, duplicateTransactionOf,
 } from '../../m27/integration.mjs';
 import {
-  agreementGrantsAccess, effectiveAgreementStatus, PERMISSIONS, can,
+  agreementGrantsAccess, agreementInForce, effectiveAgreementStatus, PERMISSIONS, can,
   MAX_OPPORTUNITY_SHARES, SCOPES,
 } from '../../domains/agents/core/shared.mjs';
 import { CONTACT_MODES, CONTACT_STATUSES, contactIntegrity, contactView, contactMilestone } from '../../domains/recruitment/lifecycle/contact.mjs';
@@ -867,10 +867,13 @@ section('#37 — a revoked relationship never contributes as an active Trust rel
   const t2 = await j('GET', '/player/trust-profile', undefined, mateus.token);
   ok(t2.status === 200, '#37b and so does the client whose relationship was terminated above');
   const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'verification', 'trust', 'trust.mjs'), 'utf8');
-  ok(/representationAgreements/.test(src), '#37c the Trust relationship input reads the canonical lane');
-  ok(/a\.confirmedAt \|\| a\.status !== 'active'/.test(src) || /!a\.confirmedAt \|\| a\.status !== 'active'/.test(src), '#37d and filters on confirmedAt AND an active status');
-  ok(/a\.endAt === 'number' && a\.endAt <= now/.test(src), '#37e and on expiry, so a lapsed agreement contributes nothing');
-  ok(/legacy mirror names nobody|typeof a\.agentUserId !== 'string'/.test(src), '#37f and skips a legacy mirror that names nobody (#1)');
+  // S11a: Trust reads the agreements through SQL and counts one only through agreementInForce, the access
+  // predicate's own rule (no stored-status copy of it any more).
+  ok(/agentReads\.agreements\.forClient/.test(src) && /agreementInForce\(a, now\)/.test(src), '#37c the Trust relationship input reads the canonical lane through the one in-force rule');
+  const live = { id: 'r', agentUserId: 'u', clientId: 'p', status: 'active', confirmedAt: T0 - DAY, startAt: T0 - DAY, endAt: T0 + 30 * DAY };
+  ok(agreementInForce(live, T0) && !agreementInForce({ ...live, confirmedAt: null }, T0) && !agreementInForce({ ...live, status: 'disputed' }, T0) && !agreementInForce({ ...live, status: 'terminated_by_client' }, T0), '#37d and it requires confirmedAt AND an active status');
+  ok(!agreementInForce({ ...live, endAt: T0 - 1 }, T0) && !agreementInForce({ ...live, startAt: T0 + DAY }, T0), '#37e and a term covering now, so a lapsed agreement (or one not yet started) contributes nothing');
+  ok(!agreementInForce({ ...live, agentUserId: null }, T0), '#37f and an agreement that names nobody counts for nothing (#1)');
 }
 
 section('AC — a deep link opened after permission is lost lands somewhere safe');

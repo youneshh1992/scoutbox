@@ -63,13 +63,13 @@ test('[schema] 0021 is registered after 0020, creates the nine STRICT tables emp
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(s, DATA_MIGRATIONS.filter((m) => m.id < MIGRATION), { now: NOW, log: () => {} });
-  const row = toRow({ id: 'org-old', name: 'Old FC', type: 'club', level: 'grassroots', plan: 'Grassroots', squad: [{ id: 'sq-x' }], tactical: null, lookingFor: ['ST'], federationCheck: { status: 'pending' }, agencySettings: { kept: true } });
+  const row = toRow({ id: 'org-old', name: 'Old FC', type: 'club', level: 'grassroots', plan: 'Grassroots', squad: [{ id: 'sq-x' }], tactical: null, lookingFor: ['ST'], federationCheck: { status: 'pending' }, agencyNotes: { kept: true } });
   const cols = Object.keys(row);
   s.prepare(`INSERT INTO orgs (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`).run(row);
   runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, log: () => {} });
   const facets = JSON.parse(s.prepare("SELECT facets_json FROM orgs WHERE id = 'org-old'").get().facets_json);
   for (const k of ['squad', 'tactical', 'lookingFor', 'federationCheck']) assert.ok(!(k in facets), `${k} is gone from the facets`);
-  assert.deepEqual(facets.agencySettings, { kept: true }, 'the other facets stay');
+  assert.deepEqual(facets.agencyNotes, { kept: true }, 'the other facets stay');
   for (const t of TABLES) {
     assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0);

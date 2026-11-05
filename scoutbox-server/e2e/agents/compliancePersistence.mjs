@@ -5,16 +5,19 @@
 //      database (three SEEDED policy versions, everything else empty),
 //      idempotent, and every P5.6C store is production-required
 //   2  upgrade from a 2305 snapshot: the policy versions are seeded as
-//      published rows attributed to the migration, every profile gains an
-//      EMPTY domestic_authorisation container, a facet already sitting in
-//      MANUAL_REVIEW_REQUIRED and a relationship already `disputed` get ONE
-//      pending attributed review item each, no reviewer identity is invented,
-//      no other byte of a profile or an agreement changes, and a re-run (even
+//      published rows attributed to the migration, no review item and no
+//      reviewer identity is invented, no user row changes, and a re-run (even
 //      a partial one) creates nothing twice
-//   3  a real boot over that snapshot: /healthz 2306, the migrated items are
-//      visible in the reviewer lane requested by the migration, the seeded
-//      policies are listed as published, and the shared admin key still has
-//      no reviewer lane (G-C0)
+//   3  a real boot over a snapshot carrying typed agent rows: /healthz 2306,
+//      every profile has the (empty) domestic_authorisation facet, a facet that
+//      needs a human and a client's dispute each raise ONE attributed review
+//      item, the seeded policies are listed as published, and the shared admin
+//      key still has no reviewer lane (G-C0)
+//
+// S11a: the agent profiles, affiliations and agreements are typed tables
+// (migration 0026), planted in the writers' whole literals. The 2306 step no
+// longer bootstraps review items from them: a review is requested by the route
+// that needs one, which section 3 now exercises.
 //   4  clean boot → context → declared representation → attributed review →
 //      consent → revocation → stop → snapshot → reboot: bytes survive
 //      (ledger rows incl. the revocation row, evaluations, revs, keys, the
@@ -39,6 +42,7 @@ import { guaranteeFor } from '../../storeContract.mjs';
 import { SEEDED_POLICY_VERSIONS } from '../../domains/agents/compliance/policyVersions.mjs';
 import { consentSufficiency, PERMITTED_WITH_CONSENT } from '../../domains/agents/compliance/conflict.mjs';
 import { applicablePolicySet } from '../../domains/agents/compliance/policy.mjs';
+import { newFacets } from '../../domains/agents/core/shared.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
@@ -89,7 +93,16 @@ const STEP = 'm250_001_compliance_stores';
 
 // ------------------------------------------------------------- fixtures
 
-/** A 2305 database: one agency with a licensed agent whose facets are in mixed states, one disputed and one active agreement. */
+/** The writers' whole literals for the agent core rows (S11a: typed tables; the save refuses a partial record). */
+const affiliation = (id, userId, tiers) => ({ id, agencyOrgId: 'org-ag', userId, tiers, startedAt: T0, endedAt: null, endedReason: null, createdAt: T0, rev: 1, revAt: T0, revBy: null, keys: {}, history: [] });
+const profile = (id, userId, displayName, jurisdictions, facets) => ({ id, userId, agencyOrgId: 'org-ag', displayName, declared: { fifaLicenceNumber: null, jurisdictions }, facets: { ...newFacets(), ...facets }, createdAt: T0, updatedAt: T0, rev: 1, revAt: T0, revBy: null, history: [] });
+const agreement = (id, clientId) => ({
+  id, agentUserId: 'usr-agent', agencyOrgId: 'org-ag', clientKind: 'player', clientId, jurisdiction: 'ENG', exclusive: false, termMonths: 12, startAt: T0 + 10, endAt: Date.now() + 1e10,
+  status: 'active', proposedAt: T0, confirmedAt: T0 + 10, confirmedBy: { kind: 'player', id: clientId }, declinedAt: null, terminatedAt: null, terminatedBy: null, terminationReasonCode: null,
+  disputedAt: null, disputeReason: null, shareWithAgencyStaff: false, scope: ['employment'], policyVersions: [], keys: {}, createdAt: T0, rev: 2, revAt: T0 + 10, revBy: null, history: [],
+});
+
+/** A 2305 database: one agency with a licensed agent (licence VERIFIED) and a licensed administrator, two active agreements. */
 function snapshot2305() {
   const db = {
     players: [
@@ -105,38 +118,21 @@ function snapshot2305() {
       { id: 'usr-lead', orgId: 'org-ag', name: 'Lead Person', role: 'Managing Director', createdAt: T0 },
       { id: 'usr-agent', orgId: 'org-ag', name: 'Agent Person', role: 'Agent', createdAt: T0 + 1 },
     ],
-    representations: [],
   };
   runMigrations(db);
   // Now REWIND to a 2305 snapshot: drop the P5.6C step and its stores.
   db.schema.version = 2305;
   db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP);
   for (const s of STORES) delete db[s];
-  // The Agent core (2305) rows this snapshot carries.
-  // The 2305 step bootstrapped 'Agent Person' as an assistant (a self-typed role is not a licence); an administrator later granted the licensed tier.
-  db.agencyAffiliations.find((a) => a.userId === 'usr-agent').tiers = ['licensed_agent'];
-  db.agentProfiles.push({
-    id: 'agp-1', userId: 'usr-agent', agencyOrgId: 'org-ag', displayName: 'Agent Person', declared: { fifaLicenceNumber: null, jurisdictions: ['ENG', 'INT'] },
-    facets: {
-      fifa_licence: { state: 'VERIFIED', reference: 'TEST-VERIFIED-1', verifiedAt: T0, recheckAt: Date.now() + 20 * 86_400_000, provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic' }, note: 'x' },
-      national_registration: { ENG: { state: 'MANUAL_REVIEW_REQUIRED', reference: 'FA-REAL-1', verifiedAt: null, recheckAt: null, provenance: { provider: 'none' }, note: 'queued' } },
-      minors_authorisation: {},
-    },
-    policyVersion: 1, createdAt: T0, updatedAt: T0, rev: 1, revAt: T0, revBy: null, keys: {}, history: [],
-  });
-  db.agentProfiles.push({
-    id: 'agp-2', userId: 'usr-lead', agencyOrgId: 'org-ag', displayName: 'Lead Person', declared: { fifaLicenceNumber: null, jurisdictions: ['INT'] },
-    facets: { fifa_licence: { state: 'MANUAL_REVIEW_REQUIRED', reference: 'FIFA-REAL-9', verifiedAt: null, recheckAt: null, provenance: { provider: 'none' }, note: 'queued' }, national_registration: {}, minors_authorisation: {} },
-    policyVersion: 1, createdAt: T0, updatedAt: T0, rev: 1, revAt: T0, revBy: null, keys: {}, history: [],
-  });
-  db.representationAgreements.push({
-    id: 'rep-disputed', agentUserId: 'usr-agent', agencyOrgId: 'org-ag', clientKind: 'player', clientId: 'pl-a', status: 'disputed', confirmedAt: T0 + 10, disputedAt: T0 + 20,
-    scope: ['employment'], jurisdiction: 'ENG', termMonths: 12, startAt: T0 + 10, endAt: Date.now() + 1e10, proposedAt: T0, policyVersion: 1, keys: {}, createdAt: T0, rev: 3, revAt: T0 + 20, revBy: null, history: [],
-  });
-  db.representationAgreements.push({
-    id: 'rep-active', agentUserId: 'usr-agent', agencyOrgId: 'org-ag', clientKind: 'player', clientId: 'pl-b', status: 'active', confirmedAt: T0 + 10,
-    scope: ['employment'], jurisdiction: 'ENG', termMonths: 12, startAt: T0 + 10, endAt: Date.now() + 1e10, proposedAt: T0, policyVersion: 1, keys: {}, createdAt: T0, rev: 2, revAt: T0 + 10, revBy: null, history: [],
-  });
+  // The Agent core rows this snapshot carries, as typed tables write them.
+  db.agencyAffiliations = [affiliation('aff-lead', 'usr-lead', ['agency_admin', 'licensed_agent']), affiliation('aff-agent', 'usr-agent', ['licensed_agent'])];
+  db.agentProfiles = [
+    profile('agp-1', 'usr-agent', 'Agent Person', ['ENG', 'INT'], {
+      fifa_licence: { ...newFacets().fifa_licence, state: 'VERIFIED', reference: 'TEST-VERIFIED-1', provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic', at: T0 }, submittedAt: T0, verifiedAt: T0, recheckAt: Date.now() + 20 * 86_400_000, note: 'x' },
+    }),
+    profile('agp-2', 'usr-lead', 'Lead Person', ['INT'], {}),
+  ];
+  db.representationAgreements = [agreement('rep-disputed', 'pl-a'), agreement('rep-active', 'pl-b')];
   return db;
 }
 
@@ -168,39 +164,28 @@ section('1 — the P5.6C step: one step at 2306, five stores, three seeded polic
 }
 
 // ======================================================= 2 — upgrade
-section('2 — upgrade from 2305: seeded policies, domestic container, migrated review items, nothing else touched');
+section('2 — upgrade from 2305: seeded policies, nothing invented, nothing else touched');
 {
   const db = snapshot2305();
   ok(db.schema.version === 2305 && db.tsReviewers === undefined && db.agentProfiles.length === 2 && db.representationAgreements.length === 2, 'the fixture is a 2305 snapshot with two profiles, two agreements and no compliance store');
-  const stripDomestic = (p) => { const { facets, ...rest } = p; const { domestic_authorisation: _d, ...f } = facets; return { ...rest, facets: f }; };
-  const profilesBefore = stableJson(db.agentProfiles.map(stripDomestic));
-  const agreementsBefore = stableJson(db.representationAgreements);
+  const agentBefore = stableJson([db.agentProfiles, db.agencyAffiliations, db.representationAgreements]);
   const usersBefore = stableJson(db.users);
   const up = runMigrations(db);
   ok(up.ran[0] === STEP && up.to === SCHEMA_VERSION, 'a 2305 snapshot runs the P5.6C step first, then any later milestone\'s step, and lands on the current schema');
   ok(db.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && db.jurisdictionPolicies.every((p) => p.status === 'published'), 'the policy versions are seeded as published rows');
-  ok(db.agentProfiles.every((p) => p.facets.domestic_authorisation && Object.keys(p.facets.domestic_authorisation).length === 0), 'every profile gains an EMPTY domestic_authorisation container — nothing is verified by a migration');
-  neg(stableJson(db.agentProfiles.map(stripDomestic)) === profilesBefore, 'apart from that container no byte of a profile changed (states, references, provenance, revs)');
-  neg(stableJson(db.representationAgreements) === agreementsBefore && stableJson(db.users) === usersBefore, 'no agreement and no user row was touched');
-  const reviews = db.regulatoryReviews;
-  const facetItems = reviews.filter((r) => r.kind === 'verification_facet');
-  const disputeItems = reviews.filter((r) => r.kind === 'representation_dispute');
-  ok(facetItems.length === 2 && facetItems.some((r) => r.subject.profileId === 'agp-1' && r.subject.facet === 'national_registration' && r.subject.memberAssociation === 'ENG') && facetItems.some((r) => r.subject.profileId === 'agp-2' && r.subject.facet === 'fifa_licence' && r.subject.memberAssociation === null), 'the two MANUAL_REVIEW_REQUIRED facets each get one pending review item (the VERIFIED one gets none)');
-  ok(disputeItems.length === 1 && disputeItems[0].subject.agreementId === 'rep-disputed', 'the disputed relationship gets one pending review item (the active one gets none)');
-  ok(reviews.every((r) => r.status === 'PENDING' && r.requestedBy.kind === 'system' && r.requestedBy.name === 'migration 2306' && r.startedBy === null && r.decision === null && r.history[0].detail.migrated === true), 'every migrated item is PENDING, requested by the migration, started by nobody, decided by nobody');
-  neg(reviews.every((r) => !JSON.stringify(r.subject).includes('FA-REAL-1') && !JSON.stringify(r.subject).includes('FIFA-REAL-9')), 'a migrated item carries no reference text — the reviewer reads it from the profile when they open the item');
+  neg(stableJson([db.agentProfiles, db.agencyAffiliations, db.representationAgreements]) === agentBefore, 'the step reads and changes no agent row (S11a: they are typed tables, written whole with every facet)');
+  neg(stableJson(db.users) === usersBefore, 'no user row was touched');
+  neg(db.regulatoryReviews.length === 0, 'the step requests no review item: a review is requested by the route that needs one');
   neg(db.tsReviewers.length === 0, 'NO reviewer identity was invented by the migration (G-C0: production reviewers come from the operator bootstrap)');
   const again = runMigrations(db);
-  ok(again.ran.length === 0 && db.regulatoryReviews.length === 3 && db.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length, 'running again creates nothing twice');
-  // A partially-applied re-run (stores present, step record missing) is still idempotent.
+  ok(again.ran.length === 0 && db.regulatoryReviews.length === 0 && db.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length, 'running again creates nothing twice');
+  // A partially-applied re-run (stores present, step record missing) is still idempotent, and leaves an existing item alone.
+  db.regulatoryReviews.push({ id: 'rrv-kept', kind: 'representation_dispute', status: 'REJECTED', subject: { agreementId: 'rep-disputed' } });
+  const kept = stableJson(db.regulatoryReviews);
   db.schema.version = 2305; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP);
   const third = runMigrations(db);
-  ok(third.ran.join(',') === STEP && db.regulatoryReviews.length === 3 && db.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && db.agentProfiles.every((p) => Object.keys(p.facets.domestic_authorisation).length === 0), 'a re-applied step over existing rows adds no duplicate policy, no duplicate review item, and empties nothing');
-  // A resolved item is not re-opened by a re-run.
-  db.regulatoryReviews[0].status = 'REJECTED';
-  db.schema.version = 2305; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP);
-  runMigrations(db);
-  neg(db.regulatoryReviews.length === 4 && db.regulatoryReviews.filter((r) => r.status === 'REJECTED').length === 1, 'a resolved item stays resolved; only the OPEN duplicate check applies (one new PENDING item is raised for the still-manual facet)');
+  ok(third.ran.join(',') === STEP && db.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length, 'a re-applied step over existing rows adds no duplicate policy');
+  neg(stableJson(db.regulatoryReviews) === kept, 'and leaves an existing review item exactly as it was (a resolved item stays resolved; nothing is raised)');
 }
 
 // ======================================================= 3 — boot over it
@@ -217,22 +202,32 @@ section('3 — a real boot over the upgraded snapshot');
     neg(expect(await s.j('GET', '/ts/compliance/reviews', undefined, null, ADMIN), 401, 'REVIEWER_AUTH_REQUIRED'), 'the shared admin key has no reviewer lane over a migrated database either (G-C0)');
     const priya = (await s.j('POST', '/auth/reviewer/login', { reviewerId: 'tsr-dev-admin', secret: 'dev-reviewer-admin' })).body;
     ok(priya?.token, 'a dev-seeded reviewer logs in (dev logins only; production uses TS_REVIEWER_BOOTSTRAP_*)');
+    neg((await s.j('GET', '/ts/compliance/reviews?status=PENDING', undefined, priya.token)).body?.items?.length === 0, 'the boot raised no review item of its own');
+    // The three items the 2306 step used to raise from the snapshot are raised by the routes that need a human.
+    const agent = (await s.j('POST', '/auth/org/login', { orgId: 'org-ag', scoutName: 'Agent Person', role: 'Agent', platform: 'agent' })).body;
+    const lead = (await s.j('POST', '/auth/org/login', { orgId: 'org-ag', scoutName: 'Lead Person', role: 'Managing Director', platform: 'agent' })).body;
+    const pa = (await s.j('POST', '/auth/player/login', { playerId: 'pl-a' })).body;
+    const f1 = await s.j('POST', '/org/agent/profile/facets/national_registration/submit', { reference: 'FA-REAL-1', memberAssociation: 'ENG' }, agent.token);
+    const f2 = await s.j('POST', '/org/agent/profile/facets/fifa_licence/submit', { reference: 'FIFA-REAL-9' }, lead.token);
+    const dp = await s.j('POST', '/player/agent/relationships/rep-disputed/dispute', { reason: 'I never agreed to this.', expectedRev: 2 }, pa.token);
+    if (f1.status !== 200 || f2.status !== 200 || dp.status !== 200) console.error('   setup', f1.status, JSON.stringify(f1.body).slice(0, 200), f2.status, JSON.stringify(f2.body).slice(0, 200), dp.status, JSON.stringify(dp.body).slice(0, 200));
+    ok(f1.body?.profile?.facets.national_registration.ENG?.state === 'MANUAL_REVIEW_REQUIRED' && f2.body?.profile?.facets.fifa_licence.state === 'MANUAL_REVIEW_REQUIRED' && dp.body?.relationship?.status === 'disputed', 'two real references with no provider answer need a human, and a client disputes a relationship');
     const pending = await s.j('GET', '/ts/compliance/reviews?status=PENDING', undefined, priya.token);
-    ok(pending.status === 200 && pending.body.items.length === 3 && pending.body.items.filter((r) => r.kind === 'verification_facet').length === 2 && pending.body.items.filter((r) => r.kind === 'representation_dispute').length === 1, 'the reviewer lane lists the three migrated items');
+    ok(pending.status === 200 && pending.body.items.length === 3 && pending.body.items.filter((r) => r.kind === 'verification_facet').length === 2 && pending.body.items.filter((r) => r.kind === 'representation_dispute').length === 1, 'the reviewer lane lists the three items');
+    neg(pending.body.items.every((r) => !JSON.stringify(r.subject).includes('FA-REAL-1') && !JSON.stringify(r.subject).includes('FIFA-REAL-9')), 'an item carries no reference text — the reviewer reads it from the profile when they open the item');
     const item = pending.body.items.find((r) => r.kind === 'verification_facet' && r.subject.profileId === 'agp-1');
-    const detail = await s.j('GET', `/ts/compliance/reviews/${item.id}`, undefined, priya.token);
-    ok(detail.status === 200 && detail.body.subjectDetail.reference === 'FA-REAL-1' && detail.body.subjectDetail.state === 'MANUAL_REVIEW_REQUIRED', 'opening a migrated item shows the live reference and state from the profile');
+    const detail = item && await s.j('GET', `/ts/compliance/reviews/${item.id}`, undefined, priya.token);
+    ok(detail?.status === 200 && detail.body.subjectDetail.reference === 'FA-REAL-1' && detail.body.subjectDetail.state === 'MANUAL_REVIEW_REQUIRED', 'opening an item shows the live reference and state from the profile');
     const pol = await s.j('GET', '/ts/compliance/policies', undefined, priya.token);
     ok(pol.status === 200 && pol.body.items.length === SEEDED_POLICY_VERSIONS.length && pol.body.items.every((p) => p.status === 'published'), 'the seeded policy versions are listed as published');
-    const agent = (await s.j('POST', '/auth/org/login', { orgId: 'org-ag', scoutName: 'Agent Person', role: 'Agent', platform: 'agent' })).body;
     const ov = await s.j('GET', '/org/agent/compliance/overview', undefined, agent.token);
-    ok(ov.status === 200 && ov.body.reviews.some((r) => r.kind === 'verification_facet' && r.status === 'PENDING') && ov.body.reviews.some((r) => r.kind === 'representation_dispute' && r.status === 'PENDING') && stableJson(ov.body.facets.domestic_authorisation) === '{}', 'the migrated agent sees their pending facet item, the pending dispute item, and the new (empty) facet');
-    // The migrated dispute item resolves through the attributed lane and the agreement moves — attributed to the reviewer, not to the migration.
+    ok(ov.status === 200 && ov.body.reviews.some((r) => r.kind === 'verification_facet' && r.status === 'PENDING') && ov.body.reviews.some((r) => r.kind === 'representation_dispute' && r.status === 'PENDING') && stableJson(ov.body.facets.domestic_authorisation) === '{}', 'the agent sees their pending facet item, the pending dispute item, and the (empty) domestic facet');
+    // The dispute item resolves through the attributed lane and the agreement moves — attributed to the reviewer.
     const disp = pending.body.items.find((r) => r.kind === 'representation_dispute');
-    const rs = await s.j('POST', `/ts/compliance/reviews/${disp.id}/resolve`, { outcome: 'REJECTED', reasonCode: 'client_dispute_upheld', reason: 'The client did not confirm the relationship.' }, priya.token);
-    ok(rs.status === 200 && rs.body.review.decision.reviewer.id === 'tsr-dev-admin' && rs.body.review.decision.resultingState.agreementStatus === 'terminated_by_client', 'a migrated dispute item is resolved by a NAMED reviewer and the relationship ends');
+    const rs = disp && await s.j('POST', `/ts/compliance/reviews/${disp.id}/resolve`, { outcome: 'REJECTED', reasonCode: 'client_dispute_upheld', reason: 'The client did not confirm the relationship.' }, priya.token);
+    ok(rs?.status === 200 && rs.body.review.decision.reviewer.id === 'tsr-dev-admin' && rs.body.review.decision.resultingState.agreementStatus === 'terminated_by_client', 'a dispute item is resolved by a NAMED reviewer and the relationship ends');
     const after = await s.stop();
-    ok(after.representationAgreements.find((a) => a.id === 'rep-disputed').terminationReasonCode === 'dispute_upheld' && after.regulatoryReviews.find((r) => r.id === disp.id).decision.reviewerId === 'tsr-dev-admin', 'the decision is on disk, attributed');
+    ok(after.representationAgreements.find((x) => x.id === 'rep-disputed').terminationReasonCode === 'dispute_upheld' && after.regulatoryReviews.find((r) => r.id === disp?.id)?.decision.reviewerId === 'tsr-dev-admin', 'the decision is on disk, attributed');
   }
 }
 

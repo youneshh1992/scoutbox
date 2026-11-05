@@ -28,9 +28,9 @@ let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 const ORGS = () => [
-  { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true, agencySettings: null, memos: [] },
+  { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true, agencyNotes: null, memos: [] },
   { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, safeguardingContractSigned: false, memos: [], tags: ['ST'] },
-  { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, agencySettings: { licence: 'FIFA-1' } },
+  { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false, agencyNotes: { licence: 'FIFA-1' } },
 ];
 // Since S4a the players and guardians are table-backed too: the fixture player is a valid record (the identity repositories validate it at the first boot's import).
 const fixtureDb = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2000-01-01', country: 'GB', medical: { shared: false, records: [], conditionStatus: 'unknown' } }], sessions: [], users: [{ id: 'usr-1', orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment', createdAt: 1 }], blobNotes: [{ id: 'vch-1', playerId: 'pl-1', status: 'pending', history: [] }] });

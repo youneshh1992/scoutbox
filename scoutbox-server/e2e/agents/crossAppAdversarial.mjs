@@ -33,6 +33,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { agreementInForce } from '../../domains/agents/core/shared.mjs';
 import { EVENT_REGISTRY, isRegistered } from '../../domains/platform/eventRegistry.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -160,8 +161,10 @@ section('RA/§20 — no non-active relationship is active Trust evidence, in eit
   // The legacy lane is gone (S11a): Trust has no second relationship source to get wrong.
   const trustSrc = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'trust', 'trust.mjs'), 'utf8');
   neg(!/db\.representations\b/.test(trustSrc), 'RA7 Trust reads no legacy representation lane (removed in S11a)');
-  ok(/status !== 'active'/.test(trustSrc) && /confirmedAt/.test(trustSrc), 'RA8 its one relationship source requires confirmedAt AND an active status');
-  ok(/typeof a\.agentUserId !== 'string'/.test(trustSrc), 'RA9 the canonical lane additionally requires a NAMED individual, so a legacy mirror counts through neither lane');
+  // Its one source counts an agreement only through agreementInForce (confirmed, active, term covering now, a NAMED
+  // individual), the access predicate's own rule.
+  ok(/agreementInForce\(a, now\)/.test(trustSrc), 'RA8 its one relationship source requires confirmedAt AND an active status (agreementInForce)');
+  ok(!agreementInForce({ id: 'x', agentUserId: null, status: 'active', confirmedAt: 1, startAt: 1, endAt: null }, 2), 'RA9 and a NAMED individual: a row naming nobody counts for nothing');
 }
 
 // ================================================ RB — §21 Passport / evidence
@@ -176,7 +179,8 @@ section('RB/§21 — the Passport: the agent reads, and writes nothing');
   // The Passport headline comes from the canonical lane alone (P5.6E E-2; the legacy lane was removed in S11a).
   const src = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'passport', 'passport.mjs'), 'utf8');
   neg(!/db\.representations\b/.test(src), 'RB6 the Passport reads no legacy representation rows');
-  ok(/typeof a\.agentUserId === 'string'/.test(src), 'RB7 and the canonical projection it does use requires a named individual');
+  const shared = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'passport', 'shared.mjs'), 'utf8');
+  ok(/agreementInForce\(a, now\)/.test(shared) && /agentReads\.agreements\.forClient/.test(src), 'RB7 and the canonical projection it does use requires a named individual (agreementInForce)');
   // A player revoking a share closes the agent's shared-evidence surface.
   await setD({ trialVisibility: true });
   const openTrials = await j('GET', `/org/agent/clients/${REL}/trials`, undefined, ana.token);

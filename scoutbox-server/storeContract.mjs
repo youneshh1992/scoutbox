@@ -163,11 +163,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // roomEvidenceState: the same — typed tables (migration 0016), read through repositories/recruitmentCases.mjs.
   reports: { guarantee: 'migration', owner: 'core', reason: 'report-user/scout/club submissions (D2); since S6b a read-only view over the reports table, written only through handleReport / moderateOrRefuse and the resolve route → the safetyAudit repository (a report naming an unknown player is accepted, Q4)' },
   // representations (the M13 F10 legacy lane): removed in S11a, with its routes and screens.
-  // M23 P5.6B — ScoutBox Agent core. Guaranteed by migration 2305 so a
-  // restored older snapshot has them before any Agent route can run.
-  agentProfiles: { guarantee: 'migration', owner: 'm24', reason: 'P5.6B: the licensed natural person\'s agent profile and verification facets; personal, survives agency departure' },
-  agencyAffiliations: { guarantee: 'migration', owner: 'm24', reason: 'P5.6B: time-aware Agent ↔ Agency membership with roles; the permission matrix reads it on every request' },
-  representationAgreements: { guarantee: 'migration', owner: 'm24', reason: 'P5.6B: the client-confirmed relationship record — the only basis for an agent\'s private client access' },
+  // agentProfiles, agencyAffiliations, representationAgreements: never a db.* read since S11a — typed tables (migration
+  // 0026), read through repositories/agentCore.mjs (agentReads). Each db.* name throws.
   // M23 P5.6C — Conflict & Compliance Engine. Guaranteed by migration 2306.
   tsReviewers: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: per-reviewer Trust & Safety identity (G-C0); empty in production until an operator bootstraps one — the shared key creates none' },
   jurisdictionPolicies: { guarantee: 'migration', owner: 'm25', reason: 'P5.6C: versioned jurisdiction policy rows with per-rule operative status; seeded from code, published thereafter under dual control' },

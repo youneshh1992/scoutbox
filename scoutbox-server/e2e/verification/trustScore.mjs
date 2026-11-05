@@ -21,6 +21,7 @@ import {
   scoreFootballHistoryConfidence, scoreIdentityConfidence,
   scoreRelationshipConfidence, scoreReferencesConfidence, TRUST_DISCLAIMER,
 } from '../../domains/verification/trust/shared.mjs';
+import { agreementInForce } from '../../domains/agents/core/shared.mjs';
 
 const PORT = 5100 + Math.floor(Math.random() * 200);
 const BASE = `http://localhost:${PORT}`;
@@ -532,8 +533,8 @@ section('D-P56A-1 — an agency relationship counts only while it is active');
   const { readFileSync } = await import('node:fs');
   const trustSrc = readFileSync(new URL('../../domains/verification/trust/trust.mjs', import.meta.url), 'utf8');
   neg(!/rel:agency:\$\{\w+\.orgId\}/.test(trustSrc) && /rel:agency:\$\{a\.agencyOrgId\}/.test(trustSrc) && !/db\.representations\b/.test(trustSrc), 'the relationship key reads `agencyOrgId`, the field the agreement actually carries, and no legacy lane is read');
-  neg(/db\.representationAgreements/.test(trustSrc) && /a\.confirmedAt \&\& a\.status !== 'active'|!a\.confirmedAt \|\| a\.status !== 'active'/.test(trustSrc), 'the canonical source requires confirmedAt AND an active status');
-  neg(/typeof a\.agentUserId !== 'string'/.test(trustSrc), 'and it refuses a legacy mirror row, which names no licensed individual');
+  neg(/agentReads\.agreements\.forClient/.test(trustSrc) && /agreementInForce\(a, now\)/.test(trustSrc), 'the canonical source requires confirmedAt AND an active status (agreementInForce, S11a)');
+  neg(!agreementInForce({ id: 'x', agentUserId: null, status: 'active', confirmedAt: 1, startAt: 1, endAt: null }, 2), 'and it refuses a row that names no licensed individual');
 }
 
 // ============================================================== metrics
