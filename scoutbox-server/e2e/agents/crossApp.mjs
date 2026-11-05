@@ -46,13 +46,13 @@ import {
 import {
   agreementGrantsAccess, effectiveAgreementStatus, PERMISSIONS, can,
   MAX_OPPORTUNITY_SHARES, SCOPES,
-} from '../../m24/shared.mjs';
+} from '../../domains/agents/core/shared.mjs';
 import { CONTACT_MODES, CONTACT_STATUSES, contactIntegrity, contactView, contactMilestone } from '../../domains/recruitment/lifecycle/contact.mjs';
 import { M23_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
-import { M26_ERROR_HTTP } from '../../m26/errors.mjs';
-import { TERMINAL_STATUSES } from '../../m26/transaction.mjs';
+import { M26_ERROR_HTTP } from '../../domains/agents/transactions/errors.mjs';
+import { TERMINAL_STATUSES } from '../../domains/agents/transactions/transaction.mjs';
 import { TRIAL_SCHEDULE_VIEWERS } from '../../domains/recruitment/lifecycle/trial.mjs';
-import { POLICY_ACTIONS, MINOR_PATHWAY_PRODUCTION_ENABLED } from '../../m25/policy.mjs';
+import { POLICY_ACTIONS, MINOR_PATHWAY_PRODUCTION_ENABLED } from '../../domains/agents/compliance/policy.mjs';
 import { EVENT_REGISTRY, EVENT_NAMES } from '../../domains/platform/eventRegistry.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
 import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';

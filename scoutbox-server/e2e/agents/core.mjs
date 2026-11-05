@@ -49,9 +49,9 @@ import {
   DEFAULT_TERM_MONTHS, REQUEST_COOLDOWN_MS, normaliseScope, termMonthsOf, termEndAt, effectiveAgreementStatus,
   agreementGrantsAccess, requestConflict, AGENT_TRANSITIONS, CLIENT_TRANSITIONS, clientTransitionAllowed,
   agentTransitionAllowed, agreementForAgent, agreementForClient, agreementSummaryForStaff,
-} from '../../m24/shared.mjs';
-import { M24_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../m24/errors.mjs';
-import { AGENT_AUDIT_ACTIONS } from '../../m24/audit.mjs';
+} from '../../domains/agents/core/shared.mjs';
+import { M24_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/agents/core/errors.mjs';
+import { AGENT_AUDIT_ACTIONS } from '../../domains/agents/core/audit.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';

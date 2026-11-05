@@ -34,12 +34,12 @@
  *                                   no rule, no policy and no consent row.
  */
 
-import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
-import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
-import { normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
-import { isExpiredAt, isAbsent, parseDateOrInstant } from '../temporal.mjs';
-import { hasVerLevel } from '../domains/verification/claims/shared.mjs';
-import { effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can } from '../m24/shared.mjs';
+import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
+import { isExpiredAt, isAbsent, parseDateOrInstant } from '../../../temporal.mjs';
+import { hasVerLevel } from '../../verification/claims/shared.mjs';
+import { effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can } from '../core/shared.mjs';
 import { sendTransactionError, notFound } from './errors.mjs';
 import { transactionAuditRows } from './audit.mjs';
 import {

@@ -39,7 +39,7 @@
  *   the seven room roles of M23_P56A_AGENT_FINAL_ARCHITECTURE.md §8.
  */
 
-import { inputHashOf, PARTY_ROLES, CONTEXT_TYPES, PERMITTED_WITH_CONSENT } from '../m25/conflict.mjs';
+import { inputHashOf, PARTY_ROLES, CONTEXT_TYPES, PERMITTED_WITH_CONSENT } from '../compliance/conflict.mjs';
 
 export { PARTY_ROLES, PERMITTED_WITH_CONSENT };
 

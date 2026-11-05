@@ -13,7 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { resolveScope, ruleAt } from './policy.mjs';
-import { readInstant } from '../temporal.mjs';
+import { readInstant } from '../../../temporal.mjs';
 
 export const CONFLICT_OUTCOMES = Object.freeze([
   'CLEAR',

@@ -298,7 +298,8 @@ into `domains/<domain>/` alongside the migration, not as a separate rewrite:
   its folder under `domains/`.
 - **Each of S9–S13** first moves its domain's files, in a commit with no other change, then edits them. **S9: done (4 November):** `m12/passport.mjs`, `m12/scouting.mjs`, `m12/journeys.mjs` and `m13/suitability.mjs` are in `domains/scouting/` (`scouting.mjs` still holds the M12 recruitment-case routes, F3, which move with the final pass). **S10: done (4 November):** `m14/` is `domains/verification/claims/`, `m15/` `passport/`,
   `m162/` `trust/` (subfolders: each has its own `index.mjs` and `shared.mjs`), and `m13/transitions.mjs` is
-  `domains/verification/transitions.mjs`. The mixed
+  `domains/verification/transitions.mjs`. **S11: done (5 November):** `m24/` is `domains/agents/core/`, `m25/`
+  `compliance/`, `m26/` `transactions/`. The mixed
   folders (`m12`, `m13`) are split file by file as each domain's step comes round; `m20` and `m27` read across
   domains and are placed when their readers are. A step may move its domain's routes out of `server.mjs` while it
   rewrites them.
@@ -423,7 +424,7 @@ point, if that helps.
    `scoutbox-player/` changed, `cd scoutbox-player && npm test`.
 3. One review of the implementation, under the scope in [`../decisions.md`](../decisions.md) §1. A blocking
    finding is one a real user could hit through a real route. Everything else is a note.
-4. Merge to `main`. Update the status table in §3 in the same PR.
+4. Commit to the current branch.
 
 ### The mechanics
 

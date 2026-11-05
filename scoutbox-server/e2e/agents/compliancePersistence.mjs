@@ -36,9 +36,9 @@ import { fileURLToPath } from 'node:url';
 import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
-import { SEEDED_POLICY_VERSIONS } from '../../m25/policyVersions.mjs';
-import { consentSufficiency, PERMITTED_WITH_CONSENT } from '../../m25/conflict.mjs';
-import { applicablePolicySet } from '../../m25/policy.mjs';
+import { SEEDED_POLICY_VERSIONS } from '../../domains/agents/compliance/policyVersions.mjs';
+import { consentSufficiency, PERMITTED_WITH_CONSENT } from '../../domains/agents/compliance/conflict.mjs';
+import { applicablePolicySet } from '../../domains/agents/compliance/policy.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');

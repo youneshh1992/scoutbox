@@ -25,7 +25,7 @@
 import {
   SCOPES, effectiveAgreementStatus, agreementGrantsAccess, normaliseScope,
   DISCLOSURE_KEYS, DISCLOSURE_DEFAULT, normaliseDisclosure,
-} from '../m24/shared.mjs';
+} from '../domains/agents/core/shared.mjs';
 import { readInstant } from '../temporal.mjs';
 
 const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
@@ -216,7 +216,7 @@ export function agentSurfaceDecision({
 
 /**
  * The client's disclosure choices are a FIELD OF THE AGREEMENT, so they are
- * defined with the agreement (`m24/shared.mjs`) and re-exported here: this layer
+ * defined with the agreement (`domains/agents/core/shared.mjs`) and re-exported here: this layer
  * is where they are read as permissions, not where they are stored. Each
  * defaults to false — §21 says do not automatically replace the player with the
  * agent, and §15 says a club does not get agent data merely because the player

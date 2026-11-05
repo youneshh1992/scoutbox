@@ -16,7 +16,7 @@
  * writes nothing (mandate §30).
  */
 
-import { RECHECK_MS } from '../m24/shared.mjs';
+import { RECHECK_MS } from '../core/shared.mjs';
 
 export const PROVIDER_STATES = Object.freeze(['VERIFIED', 'NOT_VERIFIED', 'INACTIVE', 'STALE', 'UNAVAILABLE', 'MANUAL_REVIEW_REQUIRED']);
 export const PROVIDER_METHODS = Object.freeze(['verifyFifaLicence', 'verifyNationalRegistration', 'verifyDomesticAuthorisation', 'verifyMinorAuthorisation']);

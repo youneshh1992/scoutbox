@@ -31,14 +31,14 @@
 import {
   effectiveAgreementStatus, agreementGrantsAccess, verificationGap,
   shareView, MAX_OPPORTUNITY_SHARES,
-} from '../m24/shared.mjs';
-import { MINOR_PATHWAY_PRODUCTION_ENABLED } from '../m25/policy.mjs';
+} from '../domains/agents/core/shared.mjs';
+import { MINOR_PATHWAY_PRODUCTION_ENABLED } from '../domains/agents/compliance/policy.mjs';
 import { opportunityBoardFor } from '../domains/scouting/journeys.mjs';
 import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
 import { plainShared, normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
 import { chainHead, isFormal } from '../domains/recruitment/lifecycle/decision.mjs';
 import { roomRole, roomCan } from '../domains/recruitment/rooms/shared.mjs';
-import { TERMINAL_STATUSES } from '../m26/transaction.mjs';
+import { TERMINAL_STATUSES } from '../domains/agents/transactions/transaction.mjs';
 import { scheduleView as trialScheduleView, deriveWorkflowState, TRIAL_WORKFLOW_LABELS, isLegacyTrial } from '../domains/recruitment/lifecycle/trial.mjs';
 import {
   SURFACES, SURFACE_NAMES, SURFACE_DISCLOSURE, POLICY_ACTION_FOR_SURFACE,

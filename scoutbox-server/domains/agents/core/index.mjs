@@ -18,15 +18,15 @@
  * verify or reject a licence, resolve a dispute or override a state (G-C0).
  */
 
-import { visibleToOrg } from '../domain.mjs';
-import { buildShared } from '../m12/shared.mjs';
-import { opportunityBoardFor } from '../domains/scouting/journeys.mjs';
-import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
-import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
-import { normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
+import { visibleToOrg } from '../../../domain.mjs';
+import { buildShared } from '../../../m12/shared.mjs';
+import { opportunityBoardFor } from '../../scouting/journeys.mjs';
+import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
 import { sendAgentError } from './errors.mjs';
 import { agentAuditRows } from './audit.mjs';
-import { facetFromProviderAnswer, FACET_METHOD } from '../m25/provider.mjs';
+import { facetFromProviderAnswer, FACET_METHOD } from '../compliance/provider.mjs';
 import {
   AGENT_POLICY_VERSION, VERIFICATION_STATES, FACETS, JURISDICTIONS, TIERS, SCOPES, MAX_TERM_MONTHS, EXPIRY_ALERT_MS,
   newFacets, effectiveFacetState, evaluateSubmission, requiredFacetsFor, verificationGap,

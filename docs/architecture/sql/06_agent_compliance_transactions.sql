@@ -10,7 +10,7 @@
 -- tsReviewers, jurisdictionPolicies, regulatoryReviews, regulatoryConsents,
 -- complianceContexts (step 2306, lines 471-475); agentTransactions,
 -- transactionRepresentations, transactionDocuments (step 2307, lines 547-549);
--- orgs.agencySettings (m24/index.mjs:443, no migration step).
+-- orgs.agencySettings (domains/agents/core/index.mjs:443, no migration step).
 --
 -- Conventions: see ddl-conventions.md. All epoch-ms instants are INTEGER *_at;
 -- all optimistic-concurrency tokens are rev / rev_at / rev_by_*; every
@@ -34,8 +34,8 @@
 
 
 -- -----------------------------------------------------------------------------
--- source: db.tsReviewers   created at m25/index.mjs:92 (upsertReviewer); bootstrap
---         from TS_REVIEWER_BOOTSTRAP_* env (m25/index.mjs:99) or dev seed (:104)
+-- source: db.tsReviewers   created at domains/agents/compliance/index.mjs:92 (upsertReviewer); bootstrap
+--         from TS_REVIEWER_BOOTSTRAP_* env (domains/agents/compliance/index.mjs:99) or dev seed (:104)
 -- owner/writer: m25 (tsRouter /reviewers, /reviewers/:id/revoke)
 -- lifecycle: status active -> revoked (never deleted; revoked keeps the row and
 --            its sessions are dropped). ≥1 active trust_safety_admin invariant
@@ -73,7 +73,7 @@ CREATE TABLE ts_reviewers (
 ) STRICT;
 CREATE INDEX ts_reviewers_status ON ts_reviewers(status);
 
--- source: db.tsReviewers[].history[]   (m25/index.mjs:66 hist())
+-- source: db.tsReviewers[].history[]   (domains/agents/compliance/index.mjs:66 hist())
 -- actions: reviewer_created, reviewer_revoked
 CREATE TABLE ts_reviewer_history (
   id           TEXT PRIMARY KEY,                        -- aud-*
@@ -91,9 +91,9 @@ CREATE INDEX ts_reviewer_history_reviewer ON ts_reviewer_history(reviewer_id, at
 
 
 -- -----------------------------------------------------------------------------
--- source: db.jurisdictionPolicies   created at m25/index.mjs:220 (proposed via
+-- source: db.jurisdictionPolicies   created at domains/agents/compliance/index.mjs:220 (proposed via
 --         POST /ts/compliance/policies) and domains/platform/migrations.mjs:482 (seeded
---         from m25/policyVersions.mjs SEEDED_POLICY_VERSIONS)
+--         from domains/agents/compliance/policyVersions.mjs SEEDED_POLICY_VERSIONS)
 -- owner/writer: m25   lifecycle: status proposed -> published (dual control:
 --         approver must differ from proposer). Never deleted or edited after
 --         publication; a later version is a new row with `supersedes`.
@@ -138,7 +138,7 @@ CREATE TABLE jurisdiction_policies (
 ) STRICT;
 CREATE INDEX jurisdiction_policies_jurisdiction_status ON jurisdiction_policies(jurisdiction, status);
 
--- source: db.jurisdictionPolicies[].publishedBy[]  (m25/index.mjs:239 — two
+-- source: db.jurisdictionPolicies[].publishedBy[]  (domains/agents/compliance/index.mjs:239 — two
 --         ts_reviewer entries [proposer, approver]; migrations.mjs:482 /
 --         policyVersions.mjs:51 — one {kind:'system', id:'migration-2306', name})
 -- mapping: array index -> position; kind -> by_kind; id -> by_id; name -> by_name
@@ -151,14 +151,14 @@ CREATE TABLE jurisdiction_policy_publishers (
   PRIMARY KEY (policy_id, position)
 ) STRICT;
 
--- source: db.jurisdictionPolicies[].rules{ruleId}   (m25/index.mjs:223 route;
---         m25/policyVersions.mjs:43 rule() for seeds)
+-- source: db.jurisdictionPolicies[].rules{ruleId}   (domains/agents/compliance/index.mjs:223 route;
+--         domains/agents/compliance/policyVersions.mjs:43 rule() for seeds)
 -- mapping: key -> rule_id; ruleStatus -> rule_status; textStatus -> text_status;
 --   note -> note (≤1000); effectiveFrom (rule-level, optional) -> effective_from_date;
 --   params{} -> params_json: FREE-FORM BY DESIGN — each rule carries its own
 --     parameter vocabulary (maxTermMonthsIndividual, permittedSets[], formula,
 --     firstContractAge{}, exclusivityWindowMonths, activeLimbs[], …) and the
---     engine reads them by name per rule (m25/policy.mjs, m25/conflict.mjs);
+--     engine reads them by name per rule (domains/agents/compliance/policy.mjs, domains/agents/compliance/conflict.mjs);
 --     a column per parameter would change with every policy publication.
 --   sourceRef[] -> jurisdiction_policy_rule_sources; overrides[] ->
 --   jurisdiction_policy_rule_overrides.
@@ -176,11 +176,11 @@ CREATE TABLE jurisdiction_policy_rules (
 ) STRICT;
 
 -- source: db.jurisdictionPolicies[].rules{}.sourceRef[]  ({source, version,
---         effectiveDate, retrievedDate}; m25/policyVersions.mjs:31 src())
+--         effectiveDate, retrievedDate}; domains/agents/compliance/policyVersions.mjs:31 src())
 -- mapping: index -> position; source -> source; version -> version (free text,
 --   e.g. 'edition approved 10 Dec 2024'); effectiveDate -> effective_date;
 --   retrievedDate -> retrieved_date. Route validation requires source and
---   retrievedDate only (m25/index.mjs:208).
+--   retrievedDate only (domains/agents/compliance/index.mjs:208).
 CREATE TABLE jurisdiction_policy_rule_sources (
   policy_id       TEXT NOT NULL,
   rule_id         TEXT NOT NULL,
@@ -226,7 +226,7 @@ CREATE INDEX jurisdiction_policy_history_policy ON jurisdiction_policy_history(p
 
 
 -- -----------------------------------------------------------------------------
--- source: db.agentProfiles   created at m24/index.mjs:234 (POST /org/agent/profile)
+-- source: db.agentProfiles   created at domains/agents/core/index.mjs:234 (POST /org/agent/profile)
 -- owner/writer: m24 (profile, facet submit); m25 (facet recheck, attributed
 --         review decision writes the facet; migration 2306 adds the
 --         domestic_authorisation container)
@@ -261,7 +261,7 @@ CREATE TABLE agent_profiles (
 CREATE UNIQUE INDEX agent_profiles_user ON agent_profiles(user_id);       -- enforced by code today (profileOf)
 CREATE INDEX agent_profiles_agency ON agent_profiles(agency_org_id);
 
--- source: db.agentProfiles[].declared.jurisdictions[]  (m24/index.mjs:228, values
+-- source: db.agentProfiles[].declared.jurisdictions[]  (domains/agents/core/index.mjs:228, values
 --         filtered to JURISDICTIONS INT|ENG|USA)
 -- mapping: each element -> one row (member_association)
 CREATE TABLE agent_profile_declared_jurisdictions (
@@ -270,13 +270,13 @@ CREATE TABLE agent_profile_declared_jurisdictions (
   PRIMARY KEY (profile_id, member_association)
 ) STRICT;
 
--- source: db.agentProfiles[].facets  — facets.fifa_licence: Facet (m24/shared.mjs:55
+-- source: db.agentProfiles[].facets  — facets.fifa_licence: Facet (domains/agents/core/shared.mjs:55
 --         emptyFacet), facets.national_registration / domestic_authorisation /
---         minors_authorisation: {MA: Facet} (m24/index.mjs:301, m25/index.mjs:268
---         setFacet, m25/index.mjs:907 review decision)
+--         minors_authorisation: {MA: Facet} (domains/agents/core/index.mjs:301, domains/agents/compliance/index.mjs:268
+--         setFacet, domains/agents/compliance/index.mjs:907 review decision)
 -- owner/writer: m24 submit, m25 recheck + attributed review
 -- lifecycle: state is overwritten on each submission / recheck / decision;
---         STALE is DERIVED (VERIFIED past recheck_at, m24/shared.mjs:77) and is
+--         STALE is DERIVED (VERIFIED past recheck_at, domains/agents/core/shared.mjs:77) and is
 --         also a storable state from the synthetic provider (STALE answer maps
 --         to VERIFIED on write, provider.mjs:75, so stored STALE never occurs
 --         from code today; kept in the CHECK because VERIFICATION_STATES lists it).
@@ -293,7 +293,7 @@ CREATE TABLE agent_profile_declared_jurisdictions (
 --     provenance_review_id (-> regulatory_reviews(id); no FK: reviews reference
 --     profiles, cycle); submittedAt -> submitted_at; verifiedAt -> verified_at;
 --   recheckAt -> recheck_at; note -> note; staleNotifiedAt -> stale_notified_at
---     (m25/index.mjs:364, only on a VERIFIED-turned-STALE facet).
+--     (domains/agents/compliance/index.mjs:364, only on a VERIFIED-turned-STALE facet).
 -- notes: an empty default fifa_licence facet (state UNVERIFIED, all null) is a
 --   row too, so the profile always has its fifa_licence row; empty MA maps
 --   ({}) have no rows. One review item per facet in PENDING/IN_REVIEW is
@@ -319,7 +319,7 @@ CREATE TABLE agent_profile_facets (
   CHECK (facet = 'fifa_licence' OR member_association <> 'INT' OR facet = 'minors_authorisation')
 ) STRICT;
 
--- source: db.agentProfiles[].history[]  (m24/index.mjs:53 hist; m25 recheck/review)
+-- source: db.agentProfiles[].history[]  (domains/agents/core/index.mjs:53 hist; m25 recheck/review)
 -- actions: agent_profile_created, agent_profile_updated, agent_verification_submitted,
 --   agent_verification_state_changed, agent_facet_rechecked
 CREATE TABLE agent_profile_history (
@@ -338,7 +338,7 @@ CREATE INDEX agent_profile_history_profile ON agent_profile_history(profile_id, 
 
 
 -- -----------------------------------------------------------------------------
--- source: db.agencyAffiliations   created at m24/index.mjs:81 (bootstrap first
+-- source: db.agencyAffiliations   created at domains/agents/core/index.mjs:81 (bootstrap first
 --         member as admin), :374 (POST /org/agent/agency/team) and
 --         domains/platform/migrations.mjs:405 (step 2305: every existing agency user)
 -- owner/writer: m24   lifecycle: active while started_at <= now and ended_at is
@@ -400,7 +400,7 @@ CREATE INDEX agency_affiliation_history_affiliation ON agency_affiliation_histor
 
 
 -- -----------------------------------------------------------------------------
--- source: db.representationAgreements   created at m24/index.mjs:598
+-- source: db.representationAgreements   created at domains/agents/core/index.mjs:598
 --         (POST /org/agent/clients/request) and domains/platform/migrations.mjs:432
 --         (step 2305: legacy mirror of every db.representations row)
 -- owner/writer: m24 (request / terminate / client confirm, decline, terminate,
@@ -434,7 +434,7 @@ CREATE INDEX agency_affiliation_history_affiliation ON agency_affiliation_histor
 --   shareWithAgencyStaff -> share_with_agency_staff;
 --   disclosure{clubPresence,contactRouting,trialVisibility} ->
 --     disclosure_club_presence / disclosure_contact_routing /
---     disclosure_trial_visibility (absent object == all false, m24/shared.mjs:389);
+--     disclosure_trial_visibility (absent object == all false, domains/agents/core/shared.mjs:389);
 --   documents[] -> agreement_documents; legacy{fromRepresentationId,
 --     regulatoryStatus,representativeName} -> legacy_from_representation_id /
 --     legacy_regulatory_status / legacy_representative_name (legacy IS NULL
@@ -445,7 +445,7 @@ CREATE INDEX agency_affiliation_history_affiliation ON agency_affiliation_histor
 --     (absent on legacy rows = no rows); keys.request/terminate/confirm/
 --     decline/dispute {key,fp} -> idempotency_keys (actions 'request',
 --     'terminate', 'confirm', 'decline', 'dispute'); keys.expiryNotifiedAt ->
---     expiry_notified_at (a TIMESTAMP stored under keys by m24/index.mjs:193,
+--     expiry_notified_at (a TIMESTAMP stored under keys by domains/agents/core/index.mjs:193,
 --     not an idempotency key — promoted to a column); createdAt -> created_at;
 --   rev/revAt/revBy -> rev / rev_at / rev_by_user_id / rev_by_name;
 --   history[] -> agreement_history; subjectRemovedAt -> subject_removed_at.
@@ -514,7 +514,7 @@ CREATE TABLE agreement_scopes (
   PRIMARY KEY (agreement_id, scope)
 ) STRICT;
 
--- source: db.representationAgreements[].policyVersions[]  (m24/index.mjs:589:
+-- source: db.representationAgreements[].policyVersions[]  (domains/agents/core/index.mjs:589:
 --         ids of the policy set in force when the approach was authorised)
 CREATE TABLE agreement_policy_versions (
   agreement_id       TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE CASCADE,
@@ -523,7 +523,7 @@ CREATE TABLE agreement_policy_versions (
 ) STRICT;
 
 -- source: db.representationAgreements[].documents[]  ({id, label, addedAt};
---         projected at m24/shared.mjs:459, initialised [] at :604 and in
+--         projected at domains/agents/core/shared.mjs:459, initialised [] at :604 and in
 --         migration 2305:440)
 -- notes: NO WRITER EXISTS in this build — every row is []. Table kept because
 --   the projection reads the shape; expect it empty after migration.
@@ -578,7 +578,7 @@ CREATE UNIQUE INDEX agreement_opportunity_shares_live ON agreement_opportunity_s
 --   representation_rejected, representation_terminated, representation_disputed,
 --   representation_sharing_changed, opportunity_shared, opportunity_share_withdrawn
 -- notes: on player deletion, by{kind:'player'} rows are reduced to
---   by_id/by_name NULL (m24/index.mjs:896).
+--   by_id/by_name NULL (domains/agents/core/index.mjs:896).
 CREATE TABLE agreement_history (
   id            TEXT PRIMARY KEY,
   agreement_id  TEXT NOT NULL REFERENCES representation_agreements(id) ON DELETE RESTRICT,
@@ -596,12 +596,12 @@ CREATE INDEX agreement_history_agreement ON agreement_history(agreement_id, at);
 
 -- -----------------------------------------------------------------------------
 -- source: db.orgs[].agencySettings  {jurisdictions[], description}  written at
---         m24/index.mjs:443 (PATCH /org/agent/agency/settings); absent until
+--         domains/agents/core/index.mjs:443 (PATCH /org/agent/agency/settings); absent until
 --         first write (read as {jurisdictions:[], description:''})
 -- owner/writer: m24   lifecycle: one optional row per agency org; no delete.
 -- mapping: (org) -> org_id; description -> description (≤300, moderated);
 --   jurisdictions[] -> org_agency_jurisdictions.
--- notes: KNOWN DEFECT — m25/index.mjs:254 and :370 read `req.org.settings
+-- notes: KNOWN DEFECT — domains/agents/compliance/index.mjs:254 and :370 read `req.org.settings
 --   ?.jurisdictions`, a field nobody writes, instead of `agencySettings`;
 --   so the agency's declared jurisdictions never reach the compliance
 --   overview/policy routes today. The data is still real and migrated.
@@ -620,9 +620,9 @@ CREATE TABLE org_agency_jurisdictions (
 
 
 -- -----------------------------------------------------------------------------
--- source: db.regulatoryReviews   created at m25/index.mjs:283 (createReview:
+-- source: db.regulatoryReviews   created at domains/agents/compliance/index.mjs:283 (createReview:
 --         facetNeedsReview, representationDisputed, declare/conflict routes,
---         createApproachReview, supersede) ; m26/index.mjs:779/792 (via
+--         createApproachReview, supersede) ; domains/agents/transactions/index.mjs:779/792 (via
 --         compliance.createReview) ; domains/platform/migrations.mjs:497/510 (step 2306)
 -- owner/writer: m25 (tsRouter start/resolve/cancel/supersede; context close
 --         cancels open items); m26 creates via the seam.
@@ -636,7 +636,7 @@ CREATE TABLE org_agency_jurisdictions (
 --       -> subject_profile_id / subject_user_id / subject_facet /
 --          subject_member_association / subject_reference_hash (KNOWN DEFECT:
 --          the value is String(reference.length), the reference's LENGTH, not
---          a hash — m25/index.mjs:299, migrations.mjs:499; kept as written);
+--          a hash — domains/agents/compliance/index.mjs:299, migrations.mjs:499; kept as written);
 --     representation_dispute {agreementId} -> subject_agreement_id;
 --     representation_declared / conflict_evaluation {contextId,
 --       representationId?, partyRole, transactionId?} -> subject_context_id
@@ -644,7 +644,7 @@ CREATE TABLE org_agency_jurisdictions (
 --       subject_representation_id (crp-* or txr-*; no FK), subject_party_role,
 --       subject_transaction_id (-> agent_transactions(id), no FK);
 --     conflict_evaluation approach {approach:true, playerId, jurisdiction}
---       (m25/index.mjs:1014) -> subject_is_approach / subject_player_id /
+--       (domains/agents/compliance/index.mjs:1014) -> subject_is_approach / subject_player_id /
 --       subject_jurisdiction.
 --   reasons[] -> regulatory_review_reasons; policyVersions[] ->
 --   regulatory_review_policy_versions; snapshot -> snapshot_json (an
@@ -730,8 +730,8 @@ CREATE INDEX regulatory_reviews_subject_facet ON regulatory_reviews(kind, subjec
 CREATE INDEX regulatory_reviews_subject_agreement ON regulatory_reviews(subject_agreement_id);
 CREATE INDEX regulatory_reviews_subject_context ON regulatory_reviews(subject_context_id);
 
--- source: db.regulatoryReviews[].reasons[]  — reason objects from m25/policy.mjs
---         reasonOf() / m25/conflict.mjs reason(): {code, ruleId, ruleStatus,
+-- source: db.regulatoryReviews[].reasons[]  — reason objects from domains/agents/compliance/policy.mjs
+--         reasonOf() / domains/agents/compliance/conflict.mjs reason(): {code, ruleId, ruleStatus,
 --         regulator, jurisdiction, policyVersion, ...extra}; migration/hook rows
 --         carry only {code, ruleId, ruleStatus, policyVersion}.
 -- mapping: index -> position; code -> code; ruleId -> rule_id; ruleStatus ->
@@ -761,7 +761,7 @@ CREATE TABLE regulatory_review_policy_versions (
   PRIMARY KEY (review_id, policy_version_id)
 ) STRICT;
 
--- source: db.regulatoryReviews[].decision.evidenceRefs[]  (m25/index.mjs:866:
+-- source: db.regulatoryReviews[].decision.evidenceRefs[]  (domains/agents/compliance/index.mjs:866:
 --         free strings ≤200, ≤10; an APPROVED decision needs ≥1)
 -- mapping: index -> position; element -> ref (free text; NOT a ver_evidence id
 --   by contract — the reviewer cites whatever evidence reference they hold)
@@ -775,7 +775,7 @@ CREATE TABLE regulatory_review_evidence_refs (
 -- source: db.regulatoryReviews[].history[]
 -- actions: regulatory_review_requested, regulatory_review_started,
 --   regulatory_review_resolved, regulatory_review_cancelled, regulatory_review_superseded
--- notes: the T&S decision audit (m25/audit.mjs reviewerDecisionRows) is a
+-- notes: the T&S decision audit (domains/agents/compliance/audit.mjs reviewerDecisionRows) is a
 --   projection over these rows' detail (outcome, reasonCode, evidenceRefs,
 --   policyVersions, priorState, resultingState, rev).
 CREATE TABLE regulatory_review_history (
@@ -794,8 +794,8 @@ CREATE INDEX regulatory_review_history_review ON regulatory_review_history(revie
 
 
 -- -----------------------------------------------------------------------------
--- source: db.complianceContexts   created at m25/index.mjs:547
---         (POST /org/agent/compliance/contexts) and m25/index.mjs:1046
+-- source: db.complianceContexts   created at domains/agents/compliance/index.mjs:547
+--         (POST /org/agent/compliance/contexts) and domains/agents/compliance/index.mjs:1046
 --         (transactionSeam.openContext, one per agent transaction)
 -- owner/writer: m25 (parties, representations, evaluate, close, review
 --         decisions, policy publication flag); m26 through the seam
@@ -821,7 +821,7 @@ CREATE INDEX regulatory_review_history_review ON regulatory_review_history(revie
 -- notes: personal to the opening agent (ownContext conceals colleagues').
 --   For origin='transaction' the parties/representations rows are a PROJECTION
 --   rebuilt from transaction_parties / transaction_representations on every
---   evaluation (m25/index.mjs:1063); the transaction rows are the truth.
+--   evaluation (domains/agents/compliance/index.mjs:1063); the transaction rows are the truth.
 -- -----------------------------------------------------------------------------
 CREATE TABLE compliance_contexts (
   id                     TEXT PRIMARY KEY,
@@ -854,9 +854,9 @@ CREATE TABLE compliance_context_jurisdictions (
   PRIMARY KEY (context_id, member_association)
 ) STRICT;
 
--- source: db.complianceContexts[].parties[]  created at m25/index.mjs:502/507
+-- source: db.complianceContexts[].parties[]  created at domains/agents/compliance/index.mjs:502/507
 --         (resolveParty, id cpt-*) or copied from a transaction's parties by
---         transactionSeam.project (m25/index.mjs:1064, id txp-*)
+--         transactionSeam.project (domains/agents/compliance/index.mjs:1064, id txp-*)
 -- mapping: id -> id; partyRole -> party_role; subjectKind/subjectId ->
 --   subject_kind / subject_id (polymorphic: players(id) | orgs(id); no FK —
 --   a removed player stays as an id); addedAt -> added_at; removed -> removed;
@@ -878,9 +878,9 @@ CREATE INDEX compliance_context_parties_context ON compliance_context_parties(co
 CREATE UNIQUE INDEX compliance_context_parties_live_role ON compliance_context_parties(context_id, party_role) WHERE removed = 0;   -- new; code enforces
 
 -- source: db.complianceContexts[].representations[]  created at
---         m25/index.mjs:635 (pending_review, declared-only) / :647 (verified)
+--         domains/agents/compliance/index.mjs:635 (pending_review, declared-only) / :647 (verified)
 --         (id crp-*), or projected from transaction_representations
---         (m25/index.mjs:1065, id txr-*)
+--         (domains/agents/compliance/index.mjs:1065, id txr-*)
 -- owner/writer: m25 (declare, withdraw, review decision); seam project()
 -- lifecycle: status verified | pending_review | withdrawn (withdrawn is terminal)
 -- mapping: id -> id; agentUserId -> agent_user_id; partyRole -> party_role;
@@ -911,7 +911,7 @@ CREATE TABLE compliance_context_representations (
 CREATE INDEX compliance_context_representations_context ON compliance_context_representations(context_id);
 CREATE UNIQUE INDEX compliance_context_representations_live ON compliance_context_representations(context_id, party_role, agent_user_id) WHERE status <> 'withdrawn';   -- new; code enforces
 
--- source: db.complianceContexts[].resolvedFacts[]  (m25/index.mjs:953: reason
+-- source: db.complianceContexts[].resolvedFacts[]  (domains/agents/compliance/index.mjs:953: reason
 --         codes an APPROVED conflict_evaluation review settled; de-duplicated)
 CREATE TABLE compliance_context_resolved_facts (
   context_id  TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE CASCADE,
@@ -920,12 +920,12 @@ CREATE TABLE compliance_context_resolved_facts (
 ) STRICT;
 
 -- source: db.complianceContexts[].evaluations[]  APPEND-ONLY, pushed at
---         m25/index.mjs:476 (evaluateAndRecord) with the m25/conflict.mjs
+--         domains/agents/compliance/index.mjs:476 (evaluateAndRecord) with the domains/agents/compliance/conflict.mjs
 --         evaluateConflict() result spread in.
 -- owner/writer: m25 only (m26 asks through the seam). Never edited or removed.
 -- mapping: (no source id) -> id = <context_id> || '#' || position, where
 --     position is the 1-based array index — this is exactly the evaluationId
---     m26 records on its compliance snapshot (m26/index.mjs:205), so the
+--     m26 records on its compliance snapshot (domains/agents/transactions/index.mjs:205), so the
 --     snapshot's reference becomes a real key; array index -> position;
 --   outcome -> outcome; alias -> derived, not stored ('PERMITTED_WITH_CONSENT'
 --     iff outcome is the long form); reasons[] -> compliance_evaluation_reasons;
@@ -950,7 +950,7 @@ CREATE TABLE compliance_evaluations (
 ) STRICT;
 CREATE UNIQUE INDEX compliance_evaluations_context_position ON compliance_evaluations(context_id, position);
 
--- source: db.complianceContexts[].evaluations[].reasons[]  (m25/conflict.mjs reason())
+-- source: db.complianceContexts[].evaluations[].reasons[]  (domains/agents/compliance/conflict.mjs reason())
 -- mapping: as regulatory_review_reasons (same object shape).
 CREATE TABLE compliance_evaluation_reasons (
   evaluation_id      TEXT NOT NULL REFERENCES compliance_evaluations(id) ON DELETE CASCADE,
@@ -1007,7 +1007,7 @@ CREATE INDEX compliance_context_history_context ON compliance_context_history(co
 
 -- -----------------------------------------------------------------------------
 -- source: db.regulatoryConsents (kind <> 'revocation')   created at
---         m25/index.mjs:728 (requestDualRepresentationConsent — from the
+--         domains/agents/compliance/index.mjs:728 (requestDualRepresentationConsent — from the
 --         context route and from m26 /agent/transactions/:id/consents/request)
 -- owner/writer: m25 (request; player/club grant, decline); m25 onPlayerDeleted
 --         anonymises player actors.
@@ -1041,7 +1041,7 @@ CREATE INDEX compliance_context_history_context ON compliance_context_history(co
 --   policyVersions[] -> regulatory_consent_policy_versions; ruleIds[] ->
 --   regulatory_consent_rule_ids; keys.request/grant/decline/revoke {key,fp} ->
 --   idempotency_keys (actions 'request','grant','decline','revoke' — note the
---   revoke key lives on the CONSENT row, m25/index.mjs:763); rev/revAt/revBy ->
+--   revoke key lives on the CONSENT row, domains/agents/compliance/index.mjs:763); rev/revAt/revBy ->
 --   rev / rev_at / rev_by_*; history[] -> regulatory_consent_history.
 -- notes: one requested/granted consent per (context, agent, partyRole, kind)
 --   enforced by code (CONSENT_ALREADY_REQUESTED, on effective status) —
@@ -1115,7 +1115,7 @@ CREATE TABLE regulatory_consent_rule_ids (
 ) STRICT;
 
 -- source: db.regulatoryConsents (kind = 'revocation')   created at
---         m25/index.mjs:760 ({id, kind:'revocation', of, contextId, agentUserId,
+--         domains/agents/compliance/index.mjs:760 ({id, kind:'revocation', of, contextId, agentUserId,
 --         agencyOrgId, partyRole, subject, at, by, history[]})
 -- owner/writer: m25 consentAnswer('revoke')   lifecycle: append-only fact; never edited.
 -- mapping: id -> id (rcs-*); kind -> implied by the table; of -> consent_id
@@ -1167,7 +1167,7 @@ CREATE INDEX regulatory_consent_history_consent ON regulatory_consent_history(co
 
 
 -- -----------------------------------------------------------------------------
--- source: db.agentTransactions   created at m26/index.mjs:594
+-- source: db.agentTransactions   created at domains/agents/transactions/index.mjs:594
 --         (POST /org/agent/transactions); migration 2307 creates the empty store
 -- owner/writer: m26 (agent lane: parties, representations, status, terms,
 --         links, documents, notes; club lane: confirm, documents, notes,
@@ -1178,12 +1178,12 @@ CREATE INDEX regulatory_consent_history_consent ON regulatory_consent_history(co
 -- lifecycle: status DRAFT | PARTIES_CONFIRMED | COMPLIANCE_PENDING |
 --         COMPLIANCE_BLOCKED | READY | ACTIVE | ON_HOLD | CANCELLED | CLOSED |
 --         ARCHIVED per ACTOR_TRANSITIONS / COMPLIANCE_TRANSITIONS
---         (m26/transaction.mjs:122/145). Never deleted; ARCHIVED is read-only.
+--         (domains/agents/transactions/transaction.mjs:122/145). Never deleted; ARCHIVED is read-only.
 -- mapping: id -> id (atx-*); agencyOrgId -> agency_org_id; agentUserId ->
 --   agent_user_id; type -> type; jurisdictions[] -> agent_transaction_jurisdictions;
 --   status -> status; parties[] -> transaction_parties; contextId -> context_id
 --   (1:1 with compliance_contexts, set at creation); compliance{} (snapshot,
---   m26/index.mjs:204) -> compliance_evaluation_id (either a compliance_evaluations
+--   domains/agents/transactions/index.mjs:204) -> compliance_evaluation_id (either a compliance_evaluations
 --     id '<ctx>#<n>' or '<tx-id>#gate' when the facet gate refused before the
 --     engine ran — hence no FK), compliance_context_id, compliance_evaluated_at,
 --     policyVersions[] -> agent_transaction_compliance_policy_versions,
@@ -1212,7 +1212,7 @@ CREATE INDEX regulatory_consent_history_consent ON regulatory_consent_history(co
 --     <key>); keys['status:<key>'] -> idempotency_keys (action 'status');
 --   rev/revAt/revBy -> rev / rev_at / rev_by_label (bumpTxRev stores
 --     {userId:null, name:<role label>} — the ROLE, never a person, by design
---     m26/index.mjs:104; rev_by_user_id is therefore omitted: always null);
+--     domains/agents/transactions/index.mjs:104; rev_by_user_id is therefore omitted: always null);
 --   history[] -> transaction_history.
 -- notes: duplicate rule "one live transaction per (individual, type, engaging
 --   org, releasing org)" is enforced by code over parties[] (m27
@@ -1303,7 +1303,7 @@ CREATE TABLE agent_transaction_consent_requirements (
   PRIMARY KEY (transaction_id, party_role, consent_kind)
 ) STRICT;
 
--- source: db.agentTransactions[].parties[]  created at m26/index.mjs:494/499
+-- source: db.agentTransactions[].parties[]  created at domains/agents/transactions/index.mjs:494/499
 --         (resolveParty: id txp-*)
 -- owner/writer: m26 (add, remove; club/player confirm; onPlayerDeleted tombstone)
 -- lifecycle: removed soft marker; cap 12 rows (TRANSACTION_LIMITS.parties*3);
@@ -1344,7 +1344,7 @@ CREATE INDEX transaction_parties_transaction ON transaction_parties(transaction_
 CREATE INDEX transaction_parties_subject ON transaction_parties(subject_kind, subject_id) WHERE removed = 0;   -- club lane / player lane listing
 CREATE UNIQUE INDEX transaction_parties_live_role ON transaction_parties(transaction_id, party_role) WHERE removed = 0;   -- new; code enforces
 
--- source: db.agentTransactions[].parties[].history[]  (m26/index.mjs:602/648/674/1177/1266)
+-- source: db.agentTransactions[].parties[].history[]  (domains/agents/transactions/index.mjs:602/648/674/1177/1266)
 -- actions: transaction_party_added, transaction_party_removed, transaction_party_confirmed
 CREATE TABLE transaction_party_history (
   id           TEXT PRIMARY KEY,
@@ -1360,7 +1360,7 @@ CREATE TABLE transaction_party_history (
 ) STRICT;
 CREATE INDEX transaction_party_history_party ON transaction_party_history(party_id, at);
 
--- source: db.agentTransactions[].notes[]  created at m26/index.mjs:1120 (addNote;
+-- source: db.agentTransactions[].notes[]  created at domains/agents/transactions/index.mjs:1120 (addNote;
 --         agent and club lanes; id txn-*); cap 200.
 -- mapping: id -> id; visibility -> visibility (NOTE_VISIBILITY = document
 --   classes minus T_AND_S_ONLY); text -> text (≤2000); by -> by_*; at ->
@@ -1381,7 +1381,7 @@ CREATE TABLE transaction_notes (
 ) STRICT;
 CREATE INDEX transaction_notes_transaction ON transaction_notes(transaction_id, created_at);
 
--- source: db.agentTransactions[].linkedThreads[]  created at m26/index.mjs:1222
+-- source: db.agentTransactions[].linkedThreads[]  created at domains/agents/transactions/index.mjs:1222
 --         (club signatory links a canonical Inbox channel; id txm-*); cap 20.
 -- mapping: id -> id; channelId -> channel_id (-> channels(id), 03; SET NULL
 --   because channels are deleted on player deletion while the link row is an
@@ -1401,7 +1401,7 @@ CREATE TABLE transaction_linked_threads (
 ) STRICT;
 CREATE UNIQUE INDEX transaction_linked_threads_channel ON transaction_linked_threads(transaction_id, channel_id) WHERE channel_id IS NOT NULL;   -- enforced by code today
 
--- source: db.agentTransactions[].terms.versions[]  created at m26/index.mjs:957
+-- source: db.agentTransactions[].terms.versions[]  created at domains/agents/transactions/index.mjs:957
 --         (POST /org/agent/transactions/:id/terms; id txt-*); cap 50.
 -- mapping: id -> id; version -> version (1-based, length+1 at write);
 --   at -> recorded_at; by -> recorded_by_*; recordedFor -> recorded_for;
@@ -1421,7 +1421,7 @@ CREATE TABLE transaction_terms_versions (
 ) STRICT;
 CREATE UNIQUE INDEX transaction_terms_versions_version ON transaction_terms_versions(transaction_id, version);
 
--- source: db.agentTransactions[].history[]  (m26/index.mjs hist on the tx; all lanes)
+-- source: db.agentTransactions[].history[]  (domains/agents/transactions/index.mjs hist on the tx; all lanes)
 -- actions: transaction_created, transaction_party_added, transaction_party_removed,
 --   transaction_party_confirmed, transaction_representation_attached,
 --   transaction_representation_withdrawn, transaction_compliance_evaluated,
@@ -1433,7 +1433,7 @@ CREATE UNIQUE INDEX transaction_terms_versions_version ON transaction_terms_vers
 -- notes: the timeline audience (all_parties | agent_only | player_and_agent |
 --   club_side | per_document | audit_only) is derived from action
 --   (timelineAudienceOf) — not stored. Link routes record a no-op
---   transaction_status_changed {from:x,to:x} (m26/index.mjs:978/1239).
+--   transaction_status_changed {from:x,to:x} (domains/agents/transactions/index.mjs:978/1239).
 --   Player actors anonymised on deletion.
 CREATE TABLE transaction_history (
   id              TEXT PRIMARY KEY,
@@ -1451,7 +1451,7 @@ CREATE INDEX transaction_history_transaction ON transaction_history(transaction_
 
 
 -- -----------------------------------------------------------------------------
--- source: db.transactionRepresentations   created at m26/index.mjs:784
+-- source: db.transactionRepresentations   created at domains/agents/transactions/index.mjs:784
 --         (POST /org/agent/transactions/:id/representations)
 -- owner/writer: m26 (attach, withdraw, party removal withdraws, review
 --         decision via representationReviewed, onPlayerDeleted withdraws)
@@ -1537,7 +1537,7 @@ CREATE INDEX transaction_representation_history_representation ON transaction_re
 
 
 -- -----------------------------------------------------------------------------
--- source: db.transactionDocuments   created at m26/index.mjs:1028 (addDocument:
+-- source: db.transactionDocuments   created at domains/agents/transactions/index.mjs:1028 (addDocument:
 --         agent, club signatory and player lanes) and :1090 (supersede: a new
 --         row copying the old one with version+1)
 -- owner/writer: m26   lifecycle: version chain via supersedes / superseded_by
@@ -1617,7 +1617,7 @@ CREATE INDEX transaction_document_history_document ON transaction_document_histo
 
 -- =============================================================================
 -- not tables:
---   - PERMISSIONS / TIERS capability matrix (m24/shared.mjs:165): code registry.
+--   - PERMISSIONS / TIERS capability matrix (domains/agents/core/shared.mjs:165): code registry.
 --   - VERIFICATION_STATES, FACETS, JURISDICTIONS, SCOPES, DISCLOSURE_KEYS,
 --     TRANSACTION_STATUSES, ACTOR_TRANSITIONS / COMPLIANCE_TRANSITIONS,
 --     ROOM_ROLES, DOCUMENT_TYPES, DOCUMENT_VISIBILITY + VISIBILITY_ROLES /
@@ -1627,10 +1627,10 @@ CREATE INDEX transaction_document_history_document ON transaction_document_histo
 --     RULE_STATUSES, TEXT_STATUSES, CONTEXT_TYPE_SCOPES, SURFACES / RULE_ORDER /
 --     DENY_CODES / CONTACT_ROUTING_MODES / HANDOFF_BLOCKERS (m27): enum
 --     vocabularies encoded as CHECK constraints or derived at read time.
---   - SEEDED_POLICY_VERSIONS (m25/policyVersions.mjs): code data; its rows ARE
+--   - SEEDED_POLICY_VERSIONS (domains/agents/compliance/policyVersions.mjs): code data; its rows ARE
 --     migrated into jurisdiction_policies by step 2306 (the registry is the
 --     seed, the table is the store).
---   - Verification provider (m25/provider.mjs: 'none' / synthetic test
+--   - Verification provider (domains/agents/compliance/provider.mjs: 'none' / synthetic test
 --     double), PROVIDER_STATES, FACET_METHOD: code; provider answers are
 --     recorded only as facet provenance.
 --   - Conflict engine evaluateConflict / evaluatePolicy / evaluateMinorGate /
@@ -1643,7 +1643,7 @@ CREATE INDEX transaction_document_history_document ON transaction_document_histo
 --     consent status 'revoked', evaluation alias / requiredActions /
 --     missingEvidence / ruleStatuses, transaction playerId / engagingOrgId /
 --     releasingOrgId, timeline audience, staleness verdict, offer readiness,
---     handoff 'expired', room roles, audit feeds (m24/m25/m26 audit.mjs).
+--     handoff 'expired', room roles, audit feeds (domains/agents/{core,compliance,transactions}/audit.mjs).
 --   - Rate-limit buckets (agent_profile_write, agent_affiliation_write,
 --     agent_representation_request, compliance_*, transaction_*, ts_*,
 --     opportunity_share, transaction_handoff, login_failure): in-memory.

@@ -23,13 +23,13 @@
  * audit/event. Nothing in a request body is trusted for any of those facts.
  */
 
-import { visibleToOrg } from '../domain.mjs';
-import { parseStrictDateOnly } from '../temporal.mjs';
-import { guardRev, bumpRev, revMeta } from '../domains/platform/concurrency.mjs';
-import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
-import { normaliseClientKey, payloadFingerprint } from '../domains/recruitment/lifecycle/contact.mjs';
-import { hasVerLevel } from '../domains/verification/claims/shared.mjs';
-import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt, agencyJurisdictions } from '../m24/shared.mjs';
+import { visibleToOrg } from '../../../domain.mjs';
+import { parseStrictDateOnly } from '../../../temporal.mjs';
+import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
+import { rateLimitedBody } from '../../platform/rateLimit.mjs';
+import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
+import { hasVerLevel } from '../../verification/claims/shared.mjs';
+import { effectiveFacetState, RECHECK_MS, effectiveAgreementStatus, agreementGrantsAccess, affiliationActive, tiersOf, can, JURISDICTIONS, termEndAt, agencyJurisdictions } from '../core/shared.mjs';
 import { sendComplianceError } from './errors.mjs';
 import { RULE_STATUSES, SEEDED_POLICY_VERSIONS } from './policyVersions.mjs';
 import { applicablePolicySet, evaluatePolicy, evaluateMinorGate, representationScopeProblem, resolveScope, ruleAt, MINOR_PATHWAY_PRODUCTION_ENABLED, POLICY_FACETS, POLICY_ACTIONS } from './policy.mjs';

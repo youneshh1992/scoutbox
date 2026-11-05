@@ -22,7 +22,7 @@
  *     representation, fee enforcement or Offer work (P5.6C/D).
  */
 
-import { isExpiredAt, readInstant } from '../temporal.mjs';
+import { isExpiredAt, readInstant } from '../../../temporal.mjs';
 
 export const AGENT_POLICY_VERSION = 1;
 
@@ -260,7 +260,7 @@ export const termEndAt = (startAt, months) => startAt + months * MONTH_MS;
  * them apart is the whole of the P5.6F F-2/F-3 repair:
  *
  *   ABSENT (null / undefined) — an OPEN boundary. This is legal and common: a
- *     proposal is written with `startAt: null, endAt: null` (m24/index.mjs), and
+ *     proposal is written with `startAt: null, endAt: null` (domains/agents/core/index.mjs), and
  *     an open-ended mandate is contract-legal for an entity under FFAR 12(5).
  *     An absent boundary keeps its meaning and constrains nothing.
  *

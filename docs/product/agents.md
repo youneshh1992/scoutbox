@@ -8,10 +8,10 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 
 **Principle.** A licence belongs to a person, not to the agency. A typed licence number does not count as verification, and only the client's confirmation creates a relationship. ScoutBox is infrastructure: it never negotiates, advises, recommends or ranks agents, and it never files with regulators. (P56B_AGENT_IMPLEMENTATION; P56A_REGULATORY_SNAPSHOT §6 P-1..P-8)
 
-**Actors and tiers** (`m24/` agents, `m25/` compliance)
+**Actors and tiers** (`domains/agents/core/` agents, `domains/agents/compliance/` compliance)
 - The agency is a tenant; the regulated actor is the licensed individual, whose `agentProfiles` record survives leaving. (DR-2)
 - `tiers[]` ⊂ `licensed_agent, agency_admin, analyst, assistant, finance`. First member of an empty agency becomes admin; thereafter only admins add members; no self-promotion, no removing the last admin. Ending membership revokes sessions at once; attributions stay.
-- Only `licensed_agent`: own profile, verification, own clients, request/terminate, player lookup, opportunities, compliance contexts, transactions. Other tiers see a client summary only if the client enabled `shareWithAgencyStaff` (default off), never data. Only `agency_admin` writes team/settings and reads the audit. (`m24/shared.mjs` PERMISSIONS)
+- Only `licensed_agent`: own profile, verification, own clients, request/terminate, player lookup, opportunities, compliance contexts, transactions. Other tiers see a client summary only if the client enabled `shareWithAgencyStaff` (default off), never data. Only `agency_admin` writes team/settings and reads the audit. (`domains/agents/core/shared.mjs` PERMISSIONS)
 - Session labels (`user.role`, `isLead`, typed job title) grant nothing. Agent login refused for non-agency orgs. No agent surface in Grassroots. (DR-43)
 
 **Action classes** (P56A_ACTION_CLASSIFICATION): regulated (licensed, verified, in scope, policy pass; never proxied), administrative (by tier), client (never by an agent), shared-workflow, compliance (T&S or engine). Agents never write Passport, Trust, assessments, decisions, Rooms or development plans.
@@ -51,7 +51,7 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 - England timing (`ENG-5.1`: 1 September of the academic year the minor turns 16) is never generalised; FIFA timing is unresolved (`timingEncoded:false`).
 - Before any pathway opens: ACTIVE rules with resolvable timing under dual control, a deliberate flag flip, guardian-first consent, individual minors accreditation checked against a real register, safeguarding review and age-oracle audit.
 
-**Policy engine** (P56C_POLICY_ENGINE; `m25/policy.mjs`, `policyVersions.mjs`)
+**Policy engine** (P56C_POLICY_ENGINE; `domains/agents/compliance/policy.mjs`, `policyVersions.mjs`)
 - Policy is data; no jurisdiction conditionals in routes or clients. Only published versions inside their effective window are read.
 - `ruleStatus` (separate from `textStatus`): `ACTIVE` decides; `SUSPENDED`/`PENDING_IMPLEMENTATION` → `NO_ACTIVE_RULE_DECIDES` (never permission); `PARTIALLY_SUSPENDED`/`UNDER_LEGAL_REVIEW`/`UNKNOWN` → review; `JURISDICTION_OVERRIDE` names both rule ids.
 - The set is always INT plus each named member association; anything unencoded → `JURISDICTION_UNSUPPORTED`/`POLICY_NOT_ENCODED`.
@@ -59,7 +59,7 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 - `evaluatePolicy` returns structured flags and reasons (rule id, status, version); callers never re-derive.
 - Publication: one T&S admin proposes (10/day), a *different* one approves (`POLICY_DUAL_CONTROL_REQUIRED`). Existing verdicts never change; open contexts get `reEvaluationPending`. A consent naming only a superseded version is stale.
 
-**Conflict engine** (P56C_CONFLICT_ENGINE; `m25/conflict.mjs`)
+**Conflict engine** (P56C_CONFLICT_ENGINE; `domains/agents/compliance/conflict.mjs`)
 - Pure, deterministic, with an `inputHash`. Outcomes: `CLEAR` (never called "compliant"); `PERMITTED_WITH_CONSENT` (alias; the long name `PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED` is stored); `PROHIBITED_CONFLICT` (no consent or reviewer cures it); `MANUAL_REGULATORY_REVIEW_REQUIRED`; `INSUFFICIENT_DATA`. Severity is monotonic.
 - England: one party → `CLEAR`; individual + engaging → consent from both; individual + releasing → prohibited; engaging + releasing → `COMBINATION_NOT_PERMITTED`; permitted with consents on record → `CLEAR`.
 - Connected agents (same agency by default, DR-20) count as one; reasons judge only the evaluated agent.
@@ -95,7 +95,7 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 - Duplicate rule: a second live transaction with the same individual, type and clubs on both sides is `TRANSACTION_DUPLICATE_CONTEXT` 409. A loan beside an employment contract, a different engaging club, or a fresh one after a terminal state are allowed. (P56E_TRANSACTION_HANDOFF_CONTRACT)
 - On account removal the transaction keeps its shape and tombstones the person (labels emptied, their documents dropped, representations withdrawn). (P56D_TRANSACTION_MODEL)
 
-### State machine (m26/transaction.mjs)
+### State machine (domains/agents/transactions/transaction.mjs)
 - Ten states; terminal are CANCELLED, CLOSED, ARCHIVED. `CLOSED` deliberately not `COMPLETED`, so it can't read as a signed transfer. READY means "ScoutBox's encoded rules currently permit", never legally valid. (P56D_TRANSACTION_STATE_MACHINE)
 - Actor (licensed agent) transitions: DRAFT→PARTIES_CONFIRMED|CANCELLED; PARTIES_CONFIRMED→CANCELLED; COMPLIANCE_PENDING/BLOCKED→ACTIVE|CANCELLED (ACTIVE then refused by compliance with the real reason); READY→ACTIVE|ON_HOLD|CANCELLED; ACTIVE→ON_HOLD|CLOSED|CANCELLED; ON_HOLD→ACTIVE|CLOSED|CANCELLED; CANCELLED/CLOSED→ARCHIVED.
 - Compliance transitions: PARTIES_CONFIRMED→READY|PENDING|BLOCKED; PENDING→READY|BLOCKED|PARTIES_CONFIRMED; BLOCKED→READY|PENDING|PARTIES_CONFIRMED; READY and ACTIVE→PENDING|BLOCKED. DRAFT, ON_HOLD and terminal states are never moved by compliance. No actor reaches READY/PENDING/BLOCKED; compliance never cancels, closes, archives or activates.
@@ -191,20 +191,20 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 *Spot-checked against the code on 3 November 2026. ✓ enforced, ✗ not found, ≠ differs from the old docs.*
 
 All ✓ unless noted (paths under `scoutbox-server/`):
-- ✓ Minors excluded from lookup and client detail: `m24/index.mjs:490`, `:577`.
-- ✓ Minor pathway off everywhere: `m25/policy.mjs:322`.
-- ✓ Dual-control publication `m25/index.mjs:237`; no review past ACTIVE prohibition `:875`; last reviewer admin `:176`.
+- ✓ Minors excluded from lookup and client detail: `domains/agents/core/index.mjs:490`, `:577`.
+- ✓ Minor pathway off everywhere: `domains/agents/compliance/policy.mjs:322`.
+- ✓ Dual-control publication `domains/agents/compliance/index.mjs:237`; no review past ACTIVE prohibition `:875`; last reviewer admin `:176`.
 - ✓ Two acknowledgements to grant `:776-777`; club signatory only `:814`; minor gets empty consents `:799`; revocation is a new row `:760`.
-- ✓ `/ts` behind `reviewerAuth`: `server.mjs:4427`. Production provider `none` → manual review: `m25/provider.mjs:31-32`.
+- ✓ `/ts` behind `reviewerAuth`: `server.mjs:4427`. Production provider `none` → manual review: `domains/agents/compliance/provider.mjs:31-32`.
 - ≠ `FIFA-RSTP-2027` is a rule, not a version (§3).
 
 - ✓ Actor transition map as documented: `scoutbox-server/m26/transaction.mjs:122`.
 - ✓ Contact modes `player_only`/`both` only: `domains/recruitment/lifecycle/contact.mjs:96`; unknown mode flagged at `:447`.
-- ✓ Disclosures default off: `m24/shared.mjs:361`.
-- ✓ Start-date check in the access predicate: `m24/shared.mjs:291,311`.
+- ✓ Disclosures default off: `domains/agents/core/shared.mjs:361`.
+- ✓ Start-date check in the access predicate: `domains/agents/core/shared.mjs:291,311`.
 - ✓ Handoff TTL 30 days: `m27/integration.mjs:366`; agent trial viewer `domains/recruitment/lifecycle/trial.mjs:476`.
-- ✓ Minor pathway disabled (ENG, INT, USA): `m25/policy.mjs:322`.
+- ✓ Minor pathway disabled (ENG, INT, USA): `domains/agents/compliance/policy.mjs:322`.
 - ✓ `sharedFor` always false: `m27/index.mjs:170`.
-- ✓ Duplicate rule: `m26/index.mjs:592`; handoff binding before create: `m26/index.mjs:610`.
-- ✓ Offer readiness seam used by Offers: `m26/index.mjs:1416`, `domains/recruitment/offers/index.mjs:323`; adult-only share-agent route `domains/recruitment/offers/index.mjs:793`.
+- ✓ Duplicate rule: `domains/agents/transactions/index.mjs:592`; handoff binding before create: `domains/agents/transactions/index.mjs:610`.
+- ✓ Offer readiness seam used by Offers: `domains/agents/transactions/index.mjs:1416`, `domains/recruitment/offers/index.mjs:323`; adult-only share-agent route `domains/recruitment/offers/index.mjs:793`.
 - ✓ Missing dob fails closed: `domain.mjs:35`.

@@ -31,7 +31,7 @@ import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES }
 const ABOVE_2304 = MIGRATIONS.filter((m) => m.version > 2304).map((m) => m.id);
 import { openStore } from '../../store.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
-import { effectiveFacetState, agreementGrantsAccess, clientTransitionAllowed, agentTransitionAllowed, verificationGap } from '../../m24/shared.mjs';
+import { effectiveFacetState, agreementGrantsAccess, clientTransitionAllowed, agentTransitionAllowed, verificationGap } from '../../domains/agents/core/shared.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 import { knownFailure } from '../support/knownFailure.mjs';
 

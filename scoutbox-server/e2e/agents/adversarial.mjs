@@ -45,15 +45,15 @@ import {
   agreementGrantsAccess, effectiveAgreementStatus, agreementTermCoversNow,
   AGREEMENT_STATUSES, PERMISSIONS, can, SCOPES, MAX_TERM_MONTHS, termMonthsOf,
   DISCLOSURE_KEYS, normaliseDisclosure,
-} from '../../m24/shared.mjs';
+} from '../../domains/agents/core/shared.mjs';
 import {
   evaluateConflict, CONFLICT_OUTCOMES, PERMITTED_WITH_CONSENT, mostSevere, inputHashOf, canonicalJson,
-} from '../../m25/conflict.mjs';
+} from '../../domains/agents/compliance/conflict.mjs';
 import {
   POLICY_ACTIONS, MINOR_PATHWAY_PRODUCTION_ENABLED, isRegulatoryMinor, evaluateMinorGate,
   ruleStatusAt, selectPolicyVersion,
-} from '../../m25/policy.mjs';
-import { TRANSACTION_STATUSES, DOCUMENT_TYPES, DOCUMENT_VISIBILITY, TIMELINE_AUDIENCES } from '../../m26/transaction.mjs';
+} from '../../domains/agents/compliance/policy.mjs';
+import { TRANSACTION_STATUSES, DOCUMENT_TYPES, DOCUMENT_VISIBILITY, TIMELINE_AUDIENCES } from '../../domains/agents/transactions/transaction.mjs';
 import { isAdult, ageOn, parseDob } from '../../domain.mjs';
 import { agentClientBasis } from '../../m27/integration.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';

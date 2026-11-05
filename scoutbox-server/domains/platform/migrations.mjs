@@ -28,7 +28,7 @@
 
 import { planCatalogue, archetypeCatalogue } from '../../catalogue.mjs';
 import { MIGRATION_GUARANTEED } from '../../storeContract.mjs';
-import { SEEDED_POLICY_VERSIONS } from '../../m25/policyVersions.mjs';
+import { SEEDED_POLICY_VERSIONS } from '../agents/compliance/policyVersions.mjs';
 
 // 23.0.0 — bumped because M23-D2 changes what a migrated database GUARANTEES:
 // seven more collections are present after an upgrade that were previously

@@ -672,7 +672,7 @@ review per subject) is deliberately not an index, because a stored-status index 
 rows the code allows after expiry; partial unique indexes exist only where stored state is
 the rule (one active affiliation, one live party role, the context↔transaction 1:1). The
 file records the defect that compliance routes read `req.org.settings.jurisdictions`, which
-is never written, instead of `agencySettings` (`m25/index.mjs:254, 370`).
+is never written, instead of `agencySettings` (`domains/agents/compliance/index.mjs:254, 370`).
 
 ### 5.7 Development, Box Cam and discovery (file 07)
 
@@ -1048,7 +1048,7 @@ Code read for this design (line numbers refer to this branch): `scoutbox-server/
 `adapters.mjs`, `storeContract.mjs`, `domains/platform/migrations.mjs`, `m12/*` (passport, scouting,
 journeys, operations, shared), `m13/*` (shared, imports, enterprise, delivery, suitability,
 insight, planning, groups, transitions, mfa), `domains/verification/claims/*`, `domains/verification/passport/*`, `m16/*`, `m17/*`, `m18/*`,
-`m19/*`, `m21/*`, `m22/*`, `m23/*`, `m24/*`–`m29/*`, `repositories/*`, the frontend type
+`m19/*`, `m21/*`, `m22/*`, `m23/*`, `domains/agents/core/*`–`m29/*`, `repositories/*`, the frontend type
 files (`scoutbox-club/src/api.ts`, `scoutbox-grassroots/src/api.ts`, `roomsApi.ts`,
 `scoutbox-agent/src/api.ts`, `scoutbox-player/src/domain/types.ts`,
 `scoutbox-player/src/httpClient.ts`), `OPERATIONS.md`, `AGENTS.md`, `CLAUDE.md`, and the

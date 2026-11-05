@@ -510,7 +510,7 @@ section('RN/§24 — demo and dev cannot masquerade as regulator truth');
   ok(/DISCLOSURE_WITHHELD/.test(demo), 'RN2 and it mirrors the refusals, so a demo does not teach that everything is open');
   const providerOff = await j('POST', '/org/agent/profile/facets/fifa_licence/submit', { reference: 'TEST-VERIFIED-ANA' }, ana.token);
   ok(providerOff.status === 200 || providerOff.status === 201, 'RN3 the synthetic verification provider is behind an env flag this suite set deliberately');
-  const src = readFileSync(path.join(ROOT, 'scoutbox-server', 'm25', 'index.mjs'), 'utf8');
+  const src = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'agents', 'compliance', 'index.mjs'), 'utf8');
   ok(/AGENT_VERIFICATION_TEST_PROVIDER/.test(src), 'RN4 and the flag is named in the source, so production cannot reach the synthetic answers by accident');
   const me = await j('GET', '/org/agent/me', undefined, ana.token);
   const mtxt = JSON.stringify(me.body ?? {});

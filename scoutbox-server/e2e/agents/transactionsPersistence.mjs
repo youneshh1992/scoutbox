@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
-import { partyRevisionOf, snapshotStaleness, actorTransitionAllowed, TRANSACTION_STATUSES } from '../../m26/transaction.mjs';
+import { partyRevisionOf, snapshotStaleness, actorTransitionAllowed, TRANSACTION_STATUSES } from '../../domains/agents/transactions/transaction.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');

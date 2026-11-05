@@ -21,8 +21,8 @@
  */
 
 import { RULE_STATUSES } from './policyVersions.mjs';
-import { parseDob } from '../domain.mjs';
-import { parseStrictDateOnly, readInstant } from '../temporal.mjs';
+import { parseDob } from '../../../domain.mjs';
+import { parseStrictDateOnly, readInstant } from '../../../temporal.mjs';
 
 export { RULE_STATUSES };
 

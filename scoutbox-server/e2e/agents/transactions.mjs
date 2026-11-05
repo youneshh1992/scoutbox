@@ -38,11 +38,11 @@ import {
   requiredPartyRoles, partiesConfirmed, partiesAwaitingConfirmation, roomRolesFor, clubPartyRoleOf,
   timelineFor, timelineAudienceOf, timelineVisible, actorLabel, TIMELINE_AUDIENCES,
   HOLD_REASON_CODES, CANCEL_REASON_CODES, CLOSE_REASON_CODES, TRANSACTION_LIMITS, RELEASING_PARTY_TYPES, PENDING_REASONS,
-} from '../../m26/transaction.mjs';
-import { M26_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../m26/errors.mjs';
-import { TRANSACTION_AUDIT_ACTIONS, transactionAuditRows } from '../../m26/audit.mjs';
-import { PERMISSIONS, can } from '../../m24/shared.mjs';
-import { CONTEXT_TYPES, PARTY_ROLES as ENGINE_PARTY_ROLES, PERMITTED_WITH_CONSENT } from '../../m25/conflict.mjs';
+} from '../../domains/agents/transactions/transaction.mjs';
+import { M26_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/agents/transactions/errors.mjs';
+import { TRANSACTION_AUDIT_ACTIONS, transactionAuditRows } from '../../domains/agents/transactions/audit.mjs';
+import { PERMISSIONS, can } from '../../domains/agents/core/shared.mjs';
+import { CONTEXT_TYPES, PARTY_ROLES as ENGINE_PARTY_ROLES, PERMITTED_WITH_CONSENT } from '../../domains/agents/compliance/conflict.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
@@ -277,8 +277,8 @@ section('pure §3/§4/§5 — the four separations are in the code, not only in 
   // and a comment that says "db.signings is never written" must not read as a
   // write. A scanner that cannot tell those apart proves nothing.
   const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  const m26index = strip(readFileSync(path.join(HERE, '..', '..', 'm26', 'index.mjs'), 'utf8'));
-  const m26pure = strip(readFileSync(path.join(HERE, '..', '..', 'm26', 'transaction.mjs'), 'utf8'));
+  const m26index = strip(readFileSync(path.join(HERE, '..', '..', 'domains', 'agents', 'transactions', 'index.mjs'), 'utf8'));
+  const m26pure = strip(readFileSync(path.join(HERE, '..', '..', 'domains', 'agents', 'transactions', 'transaction.mjs'), 'utf8'));
   const both = `${m26index}\n${m26pure}`;
   neg(!/db\.recruitmentCases/.test(both), '§3 the transaction module never reads or writes db.recruitmentCases');
   neg(!/db\.signings/.test(both), '§5 nor db.signings — no signing writer exists');
