@@ -102,8 +102,8 @@ export function resolveEvidenceLink(link, { db, reads = {}, player, viewer, orgC
   switch (link.sourceType) {
     case 'passport_evidence': return resolvePassportEvidence(link, { reads, player, now });
     case 'assessment': return resolveAssessment(link, { reads, player, viewer });
-    case 'box_cam_session': return resolveBoxSession(link, { db, player });
-    case 'combine_attempt': return resolveCombineAttempt(link, { db, player });
+    case 'box_cam_session': return resolveBoxSession(link, { reads, player });
+    case 'combine_attempt': return resolveCombineAttempt(link, { reads, player });
     case 'trial_report': return resolveTrialReport(link, { reads, player, viewer });
     default: return unavailable(link, 'evidence_not_found');
   }
@@ -151,8 +151,8 @@ function resolveAssessment(link, { reads, player, viewer }) {
   };
 }
 
-function resolveBoxSession(link, { db, player }) {
-  const s = (db.boxSessions ?? []).find((x) => x.id === link.sourceId);
+function resolveBoxSession(link, { reads, player }) {
+  const s = reads.boxCam?.sessions.byId(link.sourceId) ?? null; // S12b: read through SQL
   if (!s || s.playerId !== player.id) return unavailable(link, 'evidence_not_found');
   if (s.verificationState === 'invalidated') return unavailable(link, 'evidence_withdrawn');
   return {
@@ -171,10 +171,10 @@ function resolveBoxSession(link, { db, player }) {
   };
 }
 
-function resolveCombineAttempt(link, { db, player }) {
-  const a = (db.combineAttempts ?? []).find((x) => x.id === link.sourceId);
+function resolveCombineAttempt(link, { reads, player }) {
+  const a = reads.boxCam?.attempts.byId(link.sourceId) ?? null; // S12b: read through SQL
   if (!a || a.playerId !== player.id) return unavailable(link, 'evidence_not_found');
-  const session = (db.boxSessions ?? []).find((s) => s.id === a.boxSessionId) ?? null;
+  const session = reads.boxCam.sessions.byId(a.boxSessionId);
   const state = liveCombineState(a, session);
   if (state === 'invalidated') return unavailable(link, 'evidence_withdrawn');
   const provider = PROVIDERS[a.provider];
@@ -268,8 +268,8 @@ export function recordBelongsToPlayer({ db, reads = {}, sourceType, sourceId, pl
   switch (sourceType) {
     case 'passport_evidence': { const e = reads.evidence?.byId(sourceId) ?? null; return e && e.playerId === playerId ? e : null; }
     case 'assessment': { const a = reads.assessments?.byId(sourceId) ?? null; return a && a.playerId === playerId ? a : null; }
-    case 'box_cam_session': return find(db.boxSessions);
-    case 'combine_attempt': return find(db.combineAttempts);
+    case 'box_cam_session': { const s = reads.boxCam?.sessions.byId(sourceId) ?? null; return s && s.playerId === playerId ? s : null; }
+    case 'combine_attempt': { const a = reads.boxCam?.attempts.byId(sourceId) ?? null; return a && a.playerId === playerId ? a : null; }
     case 'trial_report': { const t = reads.trials?.byId(sourceId) ?? null; return t && t.playerId === playerId ? t : null; }
     default: return null;
   }

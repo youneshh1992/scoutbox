@@ -58,6 +58,7 @@ export function registerTrial(ctx) {
     combineOrgMaySeeResults, testProviderEnabled = false, recruitment, unit,
     recruitmentReads, // §4.3 step 2: the cases are read through SQL
     scoutingReads, // S9b: the assessments are read through SQL
+    boxCamReads, // S12b: Box Cam sessions and their CV results are read through SQL
   } = ctx;
   // S8a: every trial and request write is an explicit repository operation (trials.update / requests.update) inside `unit`.
   if (typeof unit !== 'function' || !recruitment?.trials) throw new TypeError('registerTrial needs the recruitment repository and unit from the data layer');
@@ -661,7 +662,7 @@ export function registerTrial(ctx) {
     // opt-in or an active Combine request from this organisation. A trial is
     // not consent to the player's home footage.
     if (!combineOrgMaySeeResults?.(req.org, player)) return { ok: false, error: 'EVIDENCE_CONSENT_REQUIRED', message: 'This player has not shared Box Cam activity with your organisation.' };
-    const s = (db.boxSessions ?? []).find((x) => x && x.id === boxSessionId) ?? null;
+    const s = typeof boxSessionId === 'string' ? boxCamReads.sessions.byId(boxSessionId) : null;
     if (!s || s.playerId !== room.playerId) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
     const provider = PROVIDERS[s.provider];
     if (provider?.testOnly && !testProviderEnabled) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
@@ -753,8 +754,8 @@ export function registerTrial(ctx) {
     if (!orgCanSee(req.org, player)) return res.json({ items: [], consent: false, reason: 'TRIAL_RECIPIENT_UNAVAILABLE' });
     if (!combineOrgMaySeeResults?.(req.org, player)) return res.json({ items: [], consent: false, reason: 'EVIDENCE_CONSENT_REQUIRED' });
     const linked = new Set((t.schedule?.sessions ?? []).flatMap((s) => (s.evidence ?? []).filter((e) => !e.removedAt && e.kind === 'box_cam_session').map((e) => e.sessionId)));
-    const items = (db.boxSessions ?? [])
-      .filter((s) => s && s.playerId === t.playerId && s.finalizedAt && !['cancelled', 'invalidated'].includes(s.verificationState) && s.status !== 'cancelled' && (!PROVIDERS[s.provider]?.testOnly || testProviderEnabled))
+    const items = boxCamReads.sessions.finishedForPlayer(t.playerId)
+      .filter((s) => s.finalizedAt && !['cancelled', 'invalidated'].includes(s.verificationState) && s.status !== 'cancelled' && (!PROVIDERS[s.provider]?.testOnly || testProviderEnabled))
       .sort((a, b) => ((b.endedAt ?? b.finalizedAt ?? 0) - (a.endedAt ?? a.finalizedAt ?? 0)) || String(b.id).localeCompare(String(a.id)))
       .slice(0, 50)
       .map((s) => ({ id: s.id, drillId: s.drillId ?? null, protocolId: s.protocolId ?? null, capturedAt: s.endedAt ?? s.finalizedAt ?? null, verificationState: s.verificationState ?? null, simulated: !!PROVIDERS[s.provider]?.testOnly, linked: linked.has(s.id) }));
@@ -786,12 +787,14 @@ export function registerTrial(ctx) {
   }
   function trialEvidenceView(t, s, e) {
     const base = { id: e.id, kind: e.kind, trialSessionId: s.id, linkedAt: e.linkedAt, linkedBy: { name: e.linkedBy?.name ?? null }, removedAt: e.removedAt ?? null, provenance: 'box_cam_observed', combineVerified: false, combineVerifiedBlockedBy: COMBINE_DISABLED_REASON.code };
-    const bs = (db.boxSessions ?? []).find((x) => x && x.id === e.sessionId && x.playerId === t.playerId) ?? null;
+    const found = boxCamReads.sessions.byId(e.sessionId);
+    const bs = found && found.playerId === t.playerId ? found : null;
     if (!bs) return { ...base, session: null, observation: { state: 'unavailable', copy: 'This Box Cam session is no longer available.', qualityState: null, experimental: null }, providerVersion: null, engineVersion: null, cvPolicyVersion: null };
     const invalidated = bs.verificationState === 'invalidated' || bs.status === 'cancelled' || bs.verificationState === 'cancelled';
     const session = { id: bs.id, drillId: bs.drillId ?? null, protocolId: bs.protocolId ?? null, capturedAt: bs.endedAt ?? bs.startedAt ?? bs.createdAt ?? null, verificationState: bs.verificationState ?? null, simulated: !!PROVIDERS[bs.provider]?.testOnly, invalidated };
     if (invalidated) return { ...base, session, observation: { state: 'evidence_withdrawn', copy: 'This Box Cam session was withdrawn after review; no observation is available.', qualityState: null, experimental: null }, providerVersion: bs.providerVersion ?? null, engineVersion: null, cvPolicyVersion: null };
-    const cv = (db.boxCamCvResults ?? []).find((r) => r && r.boxCamSessionId === bs.id) ?? null;
+    // S12b: the result recorded for this session (the old lookup named a field no result carries, so it never found one).
+    const cv = boxCamReads.cvResults.latestForSession(bs.id);
     let observation;
     if (!cv) {
       observation = { state: 'no_cv_result', copy: 'No reliable observation available for this session.', qualityState: null, experimental: null };

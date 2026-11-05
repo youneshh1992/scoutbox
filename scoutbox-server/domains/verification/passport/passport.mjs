@@ -32,6 +32,8 @@ export function registerPassportCore(ctx) {
     moderateOrRefuse, vmetric, passport, unit,
   } = ctx;
   const vreads = ctx.verificationReads;
+  const boxReads = ctx.boxCamReads; // S12b: Box Cam, Combine and the CV results are read through SQL
+  if (typeof boxReads?.sessions?.forPlayer !== 'function') throw new TypeError('registerPassportCore needs boxCamReads from the data layer');
   // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerPassportCore needs recruitmentReads (signings) from the data layer');
@@ -48,9 +50,10 @@ export function registerPassportCore(ctx) {
   // session has been invalidated (T&S). Recruitment-safe — no raw video, DOB,
   // notes or integrity internals.
   function combineProjectionFor(pid) {
-    const attempts = (db.combineAttempts ?? []).filter((a) => a.playerId === pid && a.combineState === 'combine_verified' && a.measuredValue != null);
+    const attempts = boxReads.attempts.forPlayer(pid).filter((a) => a.combineState === 'combine_verified' && a.measuredValue != null);
+    const sessions = new Map(boxReads.sessions.byIds(attempts.map((a) => a.boxSessionId)).map((s) => [s.id, s]));
     const live = attempts.filter((a) => {
-      const s = (db.boxSessions ?? []).find((x) => x.id === a.boxSessionId);
+      const s = sessions.get(a.boxSessionId);
       return !(s && s.verificationState === 'invalidated');
     }).map((a) => ({ ...a, effectiveState: 'combine_verified' }));
     const byKey = new Map();
@@ -148,26 +151,27 @@ export function registerPassportCore(ctx) {
     // M16 Box Cam — displayable (verified/partially verified, never
     // invalidated) sessions, challenge completions and the aggregate
     // development-activity summary.
-    const boxSessionsAll = (db.boxSessions ?? []).filter((s) => s.playerId === pid && s.finalizedAt && !['cancelled', 'invalidated'].includes(s.verificationState));
+    const boxSessionsAll = boxReads.sessions.finishedForPlayer(pid).filter((s) => s.finalizedAt && !['cancelled', 'invalidated'].includes(s.verificationState));
     const boxDisplayable = boxSessionsAll.filter((s) => ['verified', 'partially_verified'].includes(s.verificationState));
-    const boxAssignmentsAll = (db.boxAssignments ?? []).filter((a) => a.playerId === pid && !['cancelled', 'superseded'].includes(a.state));
-    const boxPrefs = (db.boxCamPrefs ?? []).find((x) => x.playerId === pid) ?? null;
+    const boxAssignmentsAll = boxReads.assignments.forPlayer(pid).filter((a) => a.state !== 'cancelled');
+    const boxAssignmentsById = new Map(boxAssignmentsAll.map((a) => [a.id, a]));
+    const boxPrefs = boxReads.prefs.forPlayer(pid);
     // Meaningful milestones only — the career timeline is never flooded.
     const boxTimelineSessions = boxDisplayable
       .filter((s) => s.targetCompleted === true || (s.verifiedActiveMs ?? 0) >= 15 * 60_000)
       .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)).slice(0, 10)
       .map((s) => {
-        const a = s.assignmentId ? (db.boxAssignments ?? []).find((x) => x.id === s.assignmentId) : null;
+        const a = s.assignmentId ? (boxAssignmentsById.get(s.assignmentId) ?? boxReads.assignments.byId(s.assignmentId)) : null;
         return {
           id: s.id, endedAt: s.endedAt, drillTitle: boxLatestDrill(s.drillId)?.title ?? s.drillId,
           verifiedActive: boxFmtMs(s.verifiedActiveMs ?? 0), verifiedReps: s.verifiedReps ?? null,
           targetCompleted: s.targetCompleted, assignedByOrg: a ? { id: a.orgId, name: a.orgName } : null,
         };
       });
-    const boxChallengeCompletions = (db.boxChallengeEntries ?? [])
-      .filter((e) => e.playerId === pid && e.status === 'completed')
+    const boxChallengeCompletions = boxReads.entries.forPlayer(pid)
+      .filter((e) => e.status === 'completed')
       .map((e) => {
-        const c = (db.boxChallenges ?? []).find((x) => x.id === e.challengeId);
+        const c = boxReads.challenges.byId(e.challengeId);
         return c ? {
           entryId: e.id, completedAt: e.completedAt, title: c.title,
           publisherName: c.publisher.kind === 'org' ? c.publisher.orgName : 'ScoutBox',

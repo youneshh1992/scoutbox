@@ -16,6 +16,10 @@
 // always labelled simulated. Future athletic protocols need capabilities no
 // provider has — not even the test one — so their sprint/jump/distance
 // numbers are never fabricated anywhere.
+//
+// S12b: requests and attempts are rows of repositories/boxCam.mjs, written by explicit operations (an attempt with
+// its minted session in one unit of work; the measurement inside the session's completion unit), read through
+// `boxCamReads`.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { ageOrNull, endOfDayExclusive, parseStrictDateOnly, isAbsent } from '../../../temporal.mjs';
 import { latestDrill, PROVIDERS, providerFor } from './drills.mjs';
@@ -28,18 +32,18 @@ import {
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import { combineCapabilities } from './cv/eligibility.mjs';
 import { CV_PROVIDER_ID } from './cv/policy.mjs';
+import { nonceMatches } from '../../../repositories/boxCam.mjs';
+import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
+import { pageNewestFirst } from './shared.mjs';
 
 const PROD_PROVIDER_ID = 'web_client'; // the best honest production provider here
 
 export function registerCombine(ctx) {
   const {
-    db, byId, playerRouter, guardianRouter, orgRouter, adminRouter, nextId,
-    persistNow, notify, ledgerAppend, broadcast, findPlayer, isBlocked,
-    moderateOrRefuse, vmetric, testProviderEnabled,
+    byId, playerRouter, guardianRouter, orgRouter, adminRouter, nextId,
+    notify, ledgerAppend, broadcast, findPlayer, isBlocked,
+    moderateOrRefuse, vmetric, testProviderEnabled, boxCam, boxCamReads: reads, unit,
   } = ctx;
-
-  db.combineAttempts ??= [];
-  db.combineRequests ??= [];
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
@@ -114,7 +118,7 @@ export function registerCombine(ctx) {
       ? 'Combine measurement is not yet supported on this device. ScoutBox will not estimate or fabricate a result for this test.' : null,
   });
 
-  function boundSession(a) { return db.boxSessions.find((s) => s.id === a.boxSessionId) ?? null; }
+  function boundSession(a) { return reads.sessions.byId(a.boxSessionId); }
 
   // Effective (live) Combine state: a Combine Verified result whose bound Box
   // Cam session is later invalidated by Trust & Safety immediately stops
@@ -165,10 +169,16 @@ export function registerCombine(ctx) {
   };
   ctx.combineAttemptView = attemptView;
 
-  const playerAttempts = (playerId) => db.combineAttempts.filter((a) => a.playerId === playerId);
-  const verifiedAttempts = (playerId) => playerAttempts(playerId)
-    .map((a) => ({ ...a, effectiveState: effectiveState(a) }))
-    .filter((a) => a.effectiveState === 'combine_verified' && a.measuredValue != null);
+  /** The player's attempts, newest created first. */
+  const playerAttempts = (playerId) => reads.attempts.forPlayer(playerId);
+  /** Verified attempts with their live state: the bound sessions read in one batch. */
+  const verifiedAttempts = (playerId) => {
+    const attempts = playerAttempts(playerId).filter((a) => a.combineState === 'combine_verified' && a.measuredValue != null);
+    const sessions = new Map(reads.sessions.byIds(attempts.map((a) => a.boxSessionId)).map((s) => [s.id, s]));
+    return attempts
+      .map((a) => ({ ...a, effectiveState: liveCombineState(a, sessions.get(a.boxSessionId) ?? null) }))
+      .filter((a) => a.effectiveState === 'combine_verified');
+  };
 
   /** Best verified attempt per protocol@version for a player. */
   function bestsFor(playerId) {
@@ -236,11 +246,11 @@ export function registerCombine(ctx) {
   function myCombine(player) {
     const attempts = playerAttempts(player.id);
     const bests = bestsFor(player.id);
-    const requests = db.combineRequests.filter((r) => r.playerId === player.id && r.state !== 'cancelled');
+    const requests = reads.requests.forPlayer(player.id).filter((r) => r.state !== 'cancelled');
     return {
       verifiedResults: [...bests.values()].filter(Boolean).map((a) => attemptView(a)),
       personalBests: [...bests.values()].filter(Boolean).length,
-      attempts: attempts.sort((a, b) => (b.createdAt) - (a.createdAt)).slice(0, 50).map((a) => attemptView(a)),
+      attempts: attempts.slice(0, 50).map((a) => attemptView(a)),
       activeRequests: requests.filter((r) => r.state !== 'completed').map((r) => requestView(r)),
       capabilityNote: 'Real numbers. Real evidence. From anywhere. Some tests are not yet measurable on this device — those are marked, never estimated.',
     };
@@ -268,13 +278,15 @@ export function registerCombine(ctx) {
   }
 
   playerRouter.get('/combine/attempts', (req, res) => {
-    res.json({ items: playerAttempts(req.player.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 100).map((a) => attemptView(a, { includeIntegrity: true })) });
+    res.json({ items: playerAttempts(req.player.id).slice(0, 100).map((a) => attemptView(a, { includeIntegrity: true })) });
   });
   playerRouter.get('/combine/attempts/:id', (req, res) => {
-    const a = db.combineAttempts.find((x) => x.id === req.params.id && x.playerId === req.player.id);
+    const a = ownAttempt(req.player.id, req.params.id);
     if (!a) return res.status(404).json({ error: 'ATTEMPT_NOT_FOUND' });
     res.json({ attempt: attemptView(a, { includeIntegrity: true }) });
   });
+
+  function ownAttempt(playerId, id) { const a = reads.attempts.byId(id); return a && a.playerId === playerId ? a : null; }
 
   // ------------------------------------------------------ create attempt
   playerRouter.post('/combine/attempts', (req, res) => {
@@ -319,31 +331,33 @@ export function registerCombine(ctx) {
     // rehearsal and is generously (not punitively) capped.
     const since = Date.now() - proto.windowMs;
     if (mode === 'verified') {
-      const recent = playerAttempts(req.player.id).filter((a) => a.protocolId === proto.id && a.mode === 'verified' && a.createdAt >= since).length;
+      const recent = reads.attempts.count(req.player.id, proto.id, { mode: 'verified', since });
       if (recent >= proto.maxVerifiedPerWindow) return res.status(429).json({ error: 'ATTEMPT_LIMIT_REACHED', maxVerifiedPerWindow: proto.maxVerifiedPerWindow, message: 'You have used your verified attempts for this Combine. Practice attempts remain available.' });
     } else {
-      const recentPractice = playerAttempts(req.player.id).filter((a) => a.protocolId === proto.id && a.mode === 'practice' && a.createdAt >= Date.now() - 86_400_000).length;
+      const recentPractice = reads.attempts.count(req.player.id, proto.id, { mode: 'practice', since: Date.now() - 86_400_000 });
       if (recentPractice >= 20) return res.status(429).json({ error: 'RATE_LIMITED' });
     }
 
     let request = null;
     if (requestId) {
-      request = db.combineRequests.find((r) => r.id === requestId && r.playerId === req.player.id && r.state !== 'cancelled');
-      if (!request) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
+      request = reads.requests.byId(requestId);
+      if (!request || request.playerId !== req.player.id || request.state === 'cancelled') return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
       if (!request.protocolIds.includes(proto.id)) return res.status(400).json({ error: 'PROTOCOL_NOT_IN_REQUEST' });
     }
 
     const drill = latestDrill(proto.drillId);
     if (!drill) return res.status(500).json({ error: 'PROTOCOL_DRILL_MISSING' });
-    const attemptNumber = playerAttempts(req.player.id).filter((a) => a.protocolId === proto.id).length + 1;
-    const session = ctx.boxMintSession({
-      player: req.player, drill, target: proto.drillTarget, provider,
-      meta: { combineAttemptId: null, captureContext },
+    const attemptNumber = reads.attempts.count(req.player.id, proto.id) + 1;
+    // One unit: the minted session and the attempt bound to it.
+    const { session, nonce, attempt } = unit(() => {
+      const minted = ctx.boxMintSession({ player: req.player, drill, target: { type: proto.drillTarget.type, value: proto.drillTarget.value }, provider, captureContext });
+      const row = boxCam.attempts.create(newAttempt(minted.session));
+      return { session: minted.session, nonce: minted.nonce, attempt: row };
     });
-    const attempt = {
+    function newAttempt(boxSession) { return {
       id: nextId('catt'), playerId: req.player.id,
       protocolId: proto.id, protocolVersion: proto.version,
-      boxSessionId: session.id, attemptNumber,
+      boxSessionId: boxSession.id, attemptNumber,
       mode, captureContext, requestId: request?.id ?? null,
       metricType: proto.metricType, metricUnit: proto.metricUnit, direction: proto.direction,
       measurementAlgorithmVersion: proto.measurementAlgorithmVersion,
@@ -352,16 +366,13 @@ export function registerCombine(ctx) {
         ? { required: [], passed: true, checks: ['geometry_ready_check'], at: Date.now() } : null,
       measuredValue: null, measurementState: null, combineState: 'ready', reasons: [],
       startedAt: null, completedAt: null, resultHash: null, createdAt: Date.now(),
-    };
-    session.combineAttemptId = attempt.id;
-    db.combineAttempts.push(attempt);
+    }; }
     vmetric('combine_attempt_started');
     if (mode === 'practice') vmetric('combine_practice_started');
-    persistNow();
     res.status(201).json({
       attempt: attemptView(attempt, { includeIntegrity: true }),
       boxSession: ctx.boxSessionView(session),
-      nonce: session.nonce, livenessChallenge: session.livenessChallenge,
+      nonce, livenessChallenge: session.livenessChallenge,
       livenessNote: 'The liveness check establishes live-session presence. It is not identity verification.',
       expiresAt: session.expiresAt, protocol: protocolPublic(proto),
       readyCheck: { automated: ['camera_permission', 'camera_stream', 'device_orientation'], unableToCheckAutomatically: ['lighting', 'framing', 'space', 'single_participant'] },
@@ -370,50 +381,57 @@ export function registerCombine(ctx) {
   });
 
   playerRouter.post('/combine/attempts/:id/calibrate', (req, res) => {
-    const a = db.combineAttempts.find((x) => x.id === req.params.id && x.playerId === req.player.id);
+    const a = ownAttempt(req.player.id, req.params.id);
     if (!a) return res.status(404).json({ error: 'ATTEMPT_NOT_FOUND' });
     if (COMBINE_TERMINAL.has(a.combineState)) return res.status(409).json({ error: 'ALREADY_FINALIZED' });
     const proto = combineProtocol(a.protocolId, a.protocolVersion);
     const required = proto?.calibrationRequirements ?? [];
-    const checks = Array.isArray(req.body?.checks) ? req.body.checks.map(String) : [];
+    // S12b: a list of check names as sent (anything else was turned into strings before).
+    const rawChecks = req.body?.checks;
+    if (rawChecks !== undefined && (!Array.isArray(rawChecks) || rawChecks.length > 10 || rawChecks.some((c) => typeof c !== 'string' || !c.length || c.length > 60))) {
+      return res.status(400).json({ error: 'FIELD_INVALID', field: 'checks', message: 'Calibration checks are a list of at most 10 check names.' });
+    }
+    const checks = rawChecks ?? [];
     // First-library protocols need standardized geometry only (passes when
     // the Ready Check geometry passes). Physical-scale calibration (Box
     // Marker) is required by future protocols, which are unsupported anyway.
     const passed = required.length === 0 ? true : required.every((r) => checks.includes(r));
-    a.calibrationResult = { required, passed, checks, at: Date.now() };
-    persistNow();
-    res.json({ attempt: attemptView(a, { includeIntegrity: true }), calibrationPassed: passed });
+    const next = boxCam.attempts.update(a.id, (d) => { d.calibrationResult = { passed, checks: [...checks], at: Date.now() }; });
+    res.json({ attempt: attemptView(next, { includeIntegrity: true }), calibrationPassed: passed });
   });
 
   // Complete: reuse the shared Box Cam completion path (finalize + hook).
   playerRouter.post('/combine/attempts/:id/complete', (req, res) => {
-    const a = db.combineAttempts.find((x) => x.id === req.params.id && x.playerId === req.player.id);
+    const a = ownAttempt(req.player.id, req.params.id);
     if (!a) return res.status(404).json({ error: 'ATTEMPT_NOT_FOUND' });
     if (COMBINE_TERMINAL.has(a.combineState)) return res.status(409).json({ error: 'ALREADY_FINALIZED', message: 'A completed Combine Attempt cannot be submitted again.' });
     const s = boundSession(a);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-    if ((req.body ?? {}).nonce !== s.nonce) return res.status(403).json({ error: 'NONCE_INVALID' });
+    if (!nonceMatches(s, (req.body ?? {}).nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
     if (s.status !== 'recording') return res.status(409).json({ error: 'SESSION_NOT_RECORDING', status: s.status });
-    a.startedAt = s.startedAt;
-    ctx.boxCompleteSession(s, req.player); // -> onSessionFinalized -> applyCombineProgress
-    res.json({ attempt: attemptView(a, { includeIntegrity: true }), boxSession: ctx.boxSessionView(s) });
+    const done = unit(() => {
+      boxCam.attempts.update(a.id, (d) => { d.startedAt = s.startedAt; });
+      return ctx.boxCompleteSession(s.id, req.player); // -> onSessionFinalized -> applyCombineProgress
+    });
+    res.json({ attempt: attemptView(reads.attempts.byId(a.id), { includeIntegrity: true }), boxSession: ctx.boxSessionView(done) });
   });
 
   playerRouter.post('/combine/attempts/:id/cancel', (req, res) => {
-    const a = db.combineAttempts.find((x) => x.id === req.params.id && x.playerId === req.player.id);
+    const a = ownAttempt(req.player.id, req.params.id);
     if (!a) return res.status(404).json({ error: 'ATTEMPT_NOT_FOUND' });
     if (COMBINE_TERMINAL.has(a.combineState)) return res.status(409).json({ error: 'ALREADY_FINALIZED' });
-    a.combineState = 'cancelled'; a.measurementState = 'cancelled'; a.completedAt = Date.now();
     const s = boundSession(a);
-    if (s && s.status === 'recording') { s.status = 'cancelled'; s.verificationState = 'cancelled'; }
-    persistNow();
-    res.json({ attempt: attemptView(a) });
+    const next = unit(() => {
+      if (s && s.status === 'recording') boxCam.sessions.update(s.id, (d) => { d.status = 'cancelled'; d.verificationState = 'cancelled'; });
+      return boxCam.attempts.update(a.id, (d) => { d.combineState = 'cancelled'; d.measurementState = 'cancelled'; d.completedAt = Date.now(); });
+    });
+    res.json({ attempt: attemptView(next) });
   });
 
   // -------------------------------- measurement derivation (server-side hook)
+  // Runs inside the session's completion unit of work.
   function applyCombineProgress(session, player) {
-    if (!session.combineAttemptId) return;
-    const a = db.combineAttempts.find((x) => x.id === session.combineAttemptId);
+    let a = reads.attempts.bySession(session.id);
     if (!a || COMBINE_TERMINAL.has(a.combineState)) return;
     const proto = combineProtocol(a.protocolId, a.protocolVersion);
     const provider = PROVIDERS[session.provider];
@@ -425,12 +443,15 @@ export function registerCombine(ctx) {
       providerCapabilities: combineCapsFor(session.provider, a.protocolId),
       mode: a.mode,
     });
-    a.measuredValue = r.measuredValue;
-    a.measurementState = r.measurementState;
-    a.combineState = r.combineState;
-    a.reasons = r.reasons ?? [];
-    a.completedAt = Date.now();
-    a.resultHash = combineResultHash(a);
+    const stored = boxCam.attempts.update(a.id, (d) => {
+      d.measuredValue = r.measuredValue;
+      d.measurementState = r.measurementState;
+      d.combineState = r.combineState;
+      d.reasons = r.reasons ?? [];
+      d.completedAt = Date.now();
+      d.resultHash = combineResultHash(d);
+    });
+    a = stored;
     vmetric('combine_attempt_completed');
     if (a.combineState === 'combine_verified') vmetric('combine_attempt_verified');
     else if (a.combineState === 'partially_measured') vmetric('combine_attempt_incomplete');
@@ -443,7 +464,6 @@ export function registerCombine(ctx) {
       notify({ kind: 'player', id: player.id }, 'combine', `${label}: ${COMBINE_STATE_COPY[a.combineState] ?? 'recorded'}`, a.id);
     }
     broadcast('player_development_evidence_changed', { playerId: player.id });
-    persistNow();
   }
   // Chain onto the existing hook so Box Training AND Combine both run.
   const prevHook = ctx.onSessionFinalized;
@@ -484,9 +504,9 @@ export function registerCombine(ctx) {
     return requiredDone(r).size >= r.protocolIds.length ? 'completed' : 'requested';
   }
   function applyRequestProgress(player) {
-    for (const r of db.combineRequests.filter((x) => x.playerId === player.id && x.state === 'requested')) {
+    for (const r of reads.requests.forPlayer(player.id).filter((x) => x.state === 'requested')) {
       if (requiredDone(r).size >= r.protocolIds.length) {
-        r.state = 'completed'; r.completedAt = Date.now();
+        boxCam.requests.update(r.id, (d) => { d.state = 'completed'; d.completedAt = Date.now(); });
         vmetric('combine_request_completed');
         const org = byId.org(r.orgId);
         const lead = byId.user(r.requestedBy?.userId, (u) => !u.removedAt);
@@ -497,11 +517,11 @@ export function registerCombine(ctx) {
   }
 
   playerRouter.get('/combine/requests', (req, res) => {
-    res.json({ items: db.combineRequests.filter((r) => r.playerId === req.player.id && r.state !== 'cancelled').map(requestView) });
+    res.json({ items: reads.requests.forPlayer(req.player.id).filter((r) => r.state !== 'cancelled').map(requestView) });
   });
   guardianRouter.get('/children/:id/combine/requests', (req, res) => {
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-    res.json({ items: db.combineRequests.filter((r) => r.playerId === req.params.id && r.state !== 'cancelled').map(requestView) });
+    res.json({ items: reads.requests.forPlayer(req.params.id).filter((r) => r.state !== 'cancelled').map(requestView) });
   });
 
   // ================================================================== CLUB
@@ -512,27 +532,26 @@ export function registerCombine(ctx) {
   function createRequests({ org, orgUser, playerIds, protocolIds, title, deadline, instructions }) {
     const created = [];
     const skipped = [];
-    for (const pid of playerIds) {
+    // One unit: every request, its ledger row and its notification commit together.
+    unit(() => { for (const pid of playerIds) {
       const p = findPlayer(pid);
       // Standing gates hold exactly as elsewhere — a request never widens access.
       if (!p || !orgCanSee(org, p)) { skipped.push({ playerId: pid, reason: p ? 'NOT_VISIBLE' : 'PLAYER_NOT_FOUND' }); continue; }
-      const r = {
+      const r = boxCam.requests.create({
         id: nextId('creq'), orgId: org.id, orgName: org.name,
         requestedBy: { userId: orgUser.id, name: orgUser.name, role: orgUser.role ?? null, at: Date.now() },
-        playerId: p.id, title: String(title ?? '').slice(0, 120) || null,
-        protocolIds, deadline: deadline ? String(deadline).slice(0, 10) : null,
+        playerId: p.id, title: String(title ?? '').trim().slice(0, 120) || null,
+        protocolIds, deadline: deadline || null,
         instructions: instructions ? String(instructions).slice(0, 300) : null,
         state: 'requested', createdAt: Date.now(), completedAt: null,
-      };
-      db.combineRequests.push(r);
+      });
       created.push(r);
       ledgerAppend?.({ type: 'combine_request_created', playerId: p.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name, detail: { requestId: r.id, protocols: protocolIds } });
       const msg = `${org.name} requested an At-Home Combine${r.title ? `: ${r.title}` : ''} (${protocolIds.length} test${protocolIds.length > 1 ? 's' : ''}). Powered by Box Cam.`;
       if (!isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'combine', `${p.name}: ${msg}`, r.id);
       else notify({ kind: 'player', id: p.id }, 'combine', msg, r.id);
-    }
+    } });
     vmetric('combine_request_created', created.length);
-    persistNow();
     return { created, skipped };
   }
   ctx.createCombineRequests = createRequests;
@@ -548,14 +567,19 @@ export function registerCombine(ctx) {
     if (req.org.suspended) return res.status(403).json({ error: 'ORG_SUSPENDED' });
     if (!req.org.verified) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can create a Club Combine.' });
     const { title, protocolIds, deadline, instructions } = req.body ?? {};
-    const ids = Array.isArray(protocolIds) ? [...new Set(protocolIds.map(String))] : [];
+    // S12b: protocol and player ids are text as sent (anything else was turned into strings before).
+    if (protocolIds !== undefined && (!Array.isArray(protocolIds) || protocolIds.some((x) => typeof x !== 'string'))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'protocolIds', message: 'protocolIds is a list of protocol ids.' });
+    if (req.body?.playerIds !== undefined && (!Array.isArray(req.body.playerIds) || req.body.playerIds.some((x) => typeof x !== 'string'))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'playerIds', message: 'playerIds is a list of player ids.' });
+    if (title !== undefined && title !== null && typeof title !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'title', message: 'A title is text.' });
+    const ids = Array.isArray(protocolIds) ? [...new Set(protocolIds)] : [];
     if (ids.length === 0) return res.status(400).json({ error: 'PROTOCOLS_REQUIRED' });
+    if (ids.length > 20) return res.status(400).json({ error: 'FIELD_INVALID', field: 'protocolIds', message: 'A Club Combine asks for at most 20 protocols.' });
     if (!isAbsent(deadline) && !parseStrictDateOnly(deadline).ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'deadline', message: 'A deadline is a calendar day written YYYY-MM-DD.', expected: 'YYYY-MM-DD' });
     for (const pid of ids) {
       const proto = latestCombineProtocol(pid);
       if (!proto || proto.status !== 'active') return res.status(404).json({ error: 'PROTOCOL_UNKNOWN', protocolId: pid });
     }
-    const playerIds = Array.isArray(req.body?.playerIds) ? req.body.playerIds.map(String) : (req.body?.playerId ? [String(req.body.playerId)] : []);
+    const playerIds = Array.isArray(req.body?.playerIds) ? req.body.playerIds : (req.body?.playerId ? [String(req.body.playerId)] : []);
     if (playerIds.length === 0) return res.status(400).json({ error: 'PLAYERS_REQUIRED' });
     if (instructions && !moderateOrRefuse(res, String(instructions), { kind: 'combine_request', orgId: req.org.id })) return;
 
@@ -565,19 +589,20 @@ export function registerCombine(ctx) {
   });
 
   orgRouter.get('/combine/requests', (req, res) => {
-    let mine = db.combineRequests.filter((r) => r.orgId === req.org.id);
-    if (req.query.playerId) mine = mine.filter((r) => r.playerId === String(req.query.playerId));
-    mine = mine.filter((r) => { const p = findPlayer(r.playerId); return p && orgCanSee(req.org, p); });
-    res.json({ items: mine.map(requestView) });
+    // Bounded by one club's requests: the visibility rule applied in code, then the page cut (S12b).
+    const mine = reads.requests.forOrg(req.org.id, { playerId: req.query.playerId ? String(req.query.playerId) : null })
+      .filter((r) => { const p = findPlayer(r.playerId); return p && orgCanSee(req.org, p); });
+    const page = pageNewestFirst(req, res, mine, { readPage, pageOf, sendPageError });
+    if (!page) return;
+    res.json({ items: page.items.map(requestView), nextCursor: page.nextCursor });
   });
 
   orgRouter.post('/combine/requests/:id/cancel', (req, res) => {
-    const r = db.combineRequests.find((x) => x.id === req.params.id && x.orgId === req.org.id);
-    if (!r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
+    const r = reads.requests.byId(req.params.id);
+    if (!r || r.orgId !== req.org.id) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
     if (r.state === 'completed') return res.status(409).json({ error: 'ALREADY_COMPLETED' });
-    r.state = 'cancelled';
-    persistNow();
-    res.json({ request: requestView(r) });
+    const next = boxCam.requests.update(r.id, (d) => { d.state = 'cancelled'; });
+    res.json({ request: requestView(next) });
   });
 
   // Club sees a visible player's verified Combine results (recruitment-safe).
@@ -586,9 +611,8 @@ export function registerCombine(ctx) {
   // request implies consent). Never raw video, DOB, notes or integrity.
   function orgMaySeeResults(org, p) {
     if (!orgCanSee(org, p)) return false;
-    const prefs = ctx.boxPrefsFor(p.id);
-    if (prefs.shareDevelopmentActivity === 'recruitment') return true;
-    return db.combineRequests.some((r) => r.orgId === org.id && r.playerId === p.id && r.state !== 'cancelled');
+    if (reads.prefs.sharesForRecruitment(p.id)) return true;
+    return reads.requests.activeBetween(org.id, p.id);
   }
   // Shared with M17 so a Recruitment Room applies the identical consent rule
   // rather than inventing a laxer one. A room is not consent.
@@ -628,7 +652,7 @@ export function registerCombine(ctx) {
   // invalidated session drops Combine Verified everywhere. T&S never types a
   // replacement number.
   adminRouter.get('/combine/attempts/:id', (req, res) => {
-    const a = db.combineAttempts.find((x) => x.id === req.params.id);
+    const a = reads.attempts.byId(req.params.id);
     if (!a) return res.status(404).json({ error: 'ATTEMPT_NOT_FOUND' });
     res.json({ attempt: attemptView(a, { includeIntegrity: true }), boxSession: ctx.boxSessionView(boundSession(a) ?? {}, { includeIntegrity: true }) });
   });

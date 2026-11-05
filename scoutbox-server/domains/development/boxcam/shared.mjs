@@ -297,3 +297,19 @@ export function boxCamDetail(session) {
   }
   return `${base} ScoutBox observed activity consistent with the selected supported drill for ${fmtMs(session.verifiedActiveMs)}.`;
 }
+
+// ------------------------------------------------------------- paging (S12b)
+/**
+ * One page of a newest-first list the route has already filtered (an organisation's assignments, challenges or
+ * Combine requests: bounded by one club's, the visibility rule applied in code before the page is cut).
+ * `?limit=&cursor=` → `{ items, nextCursor }`; junk refused with 400 (domains/platform/paging.mjs). Returns null once
+ * it has answered a page error.
+ */
+export function pageNewestFirst(req, res, list, { readPage, pageOf, sendPageError }) {
+  let page;
+  try { page = readPage(req.query, ['number', 'string']); } catch (e) { sendPageError(res, e); return null; }
+  const key = (r) => [r.createdAt, r.id];
+  const after = page.after;
+  const rest = after ? list.filter((r) => r.createdAt < after[0] || (r.createdAt === after[0] && r.id < after[1])) : list;
+  return pageOf(rest.slice(0, page.limit + 1), page.limit, key);
+}

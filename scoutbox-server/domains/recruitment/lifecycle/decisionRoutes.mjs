@@ -41,8 +41,9 @@ export function registerDecision(ctx) {
     rateLimit, isLead, moderateOrRefuse, audit, testProviderEnabled = false,
     recruitmentCases, unit, // S8b: drafts, formal rows and the case move are explicit repository writes, one unit per act
     recruitmentReads, scoutingReads, // §4.3 step 2: the trials (and, since S9a, the evidence) are read through SQL
+    boxCamReads, // S12b: a cited Box Cam session is read through SQL
   } = ctx;
-  const reads = { ...recruitmentReads, ...scoutingReads };
+  const reads = { ...recruitmentReads, ...scoutingReads, boxCam: boxCamReads };
   if (typeof reads?.trials?.forOrgPlayer !== 'function') throw new TypeError('registerDecision needs recruitmentReads (trials) from the data layer');
   if (typeof unit !== 'function' || !recruitmentCases?.cases) throw new TypeError('registerDecision needs the recruitment-cases repository and unit from the data layer');
   const { cases, decisions } = recruitmentCases;

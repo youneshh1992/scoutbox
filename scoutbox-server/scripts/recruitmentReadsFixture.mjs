@@ -177,7 +177,27 @@ export function arrayReads(db) {
   if (Array.isArray(db?.roomEvidenceState)) out.evidenceStates = roomRowQueries(db.roomEvidenceState);
   if (Array.isArray(db?.evidence)) out.evidence = evidenceQueries(db.evidence);
   if (Array.isArray(db?.assessments)) out.assessments = assessmentQueries(db.assessments);
+  if (Array.isArray(db?.boxSessions) || Array.isArray(db?.combineAttempts)) out.boxCam = boxCamQueries(db.boxSessions ?? [], db.combineAttempts ?? []);
   return out;
+}
+
+/** S12b: the Box Cam sessions and Combine attempts a pure projector reads (`reads.boxCam`), over plain arrays. */
+function boxCamQueries(sessions, attempts) {
+  const find = (list) => (id) => list.find((x) => x && x.id === id) ?? null;
+  const newest = (list) => [...list].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  return {
+    sessions: {
+      byId: find(sessions),
+      byIds: (ids) => sessions.filter((s) => ids.includes(s.id)),
+      forPlayer: (pid) => sessions.filter((s) => s.playerId === pid),
+      finishedForPlayer: (pid) => sessions.filter((s) => s.playerId === pid && s.finalizedAt),
+    },
+    attempts: {
+      byId: find(attempts),
+      forPlayer: (pid) => newest(attempts.filter((a) => a.playerId === pid)),
+      bySession: (sid) => attempts.find((a) => a.boxSessionId === sid) ?? null,
+    },
+  };
 }
 
 /** `buildRecruitmentJourney` over a plain database: `opts.reads` defaults to the database's own arrays. */

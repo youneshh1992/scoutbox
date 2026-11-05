@@ -380,6 +380,34 @@ section('§76 — abuse / edge / security catalogue');
   neg((await j('GET', '/org/players/pl-guni/football-passport', undefined, alex.token)).body?.combine == null, 'extra: agency passport view of a minor carries no Combine block');
 }
 
+// ============================================================ S12b
+section('S12b — typed rows: the nonce stored only as its hash, junk refused, the request list pages');
+{
+  const created = await j('POST', '/player/combine/attempts', { protocolId: 'combine-box-touch-60', provider: 'local_test', mode: 'practice' }, kola.token);
+  ok(created.status === 201, 'a practice attempt is minted for the S12b checks');
+  const { attempt, boxSession, nonce } = created.body;
+  const { DatabaseSync } = await import('node:sqlite');
+  const file = new DatabaseSync(path.join(DATA_DIR, 'scoutbox.db'), { readOnly: true });
+  const row = file.prepare('SELECT * FROM box_sessions WHERE id = ?').get(boxSession.id);
+  file.close();
+  neg(!!row && !Object.values(row).includes(nonce) && /^[0-9a-f]{64}$/.test(row.nonce_hash), 'the plain nonce is stored nowhere: only its SHA-256');
+  const cal = await j('POST', `/player/combine/attempts/${attempt.id}/calibrate`, { checks: ['geometry_ready_check', 7] }, kola.token);
+  neg(cal.status === 400 && cal.body.field === 'checks', 'a calibration check that is not a name is refused (it was turned into a string before)');
+  const many = await j('POST', `/player/combine/attempts/${attempt.id}/calibrate`, { checks: Array.from({ length: 11 }, (_, i) => `c${i}`) }, kola.token);
+  neg(many.status === 400 && many.body.field === 'checks', 'more than ten calibration checks are refused');
+  const badIds = await j('POST', '/org/combine/requests', { protocolIds: [['combine-box-touch-60']], playerId: 'pl-adeyemi' }, maria.token);
+  neg(badIds.status === 400 && badIds.body.field === 'protocolIds', 'a protocol id that is not text is refused (it was turned into a string before)');
+  const badTitle = await j('POST', '/org/combine/requests', { protocolIds: ['combine-box-touch-60'], playerId: 'pl-adeyemi', title: { x: 1 } }, maria.token);
+  neg(badTitle.status === 400 && badTitle.body.field === 'title', 'a title that is not text is refused');
+  const badDeadline = await j('POST', '/org/combine/requests', { protocolIds: ['combine-box-touch-60'], playerId: 'pl-adeyemi', deadline: '2027-02-30' }, maria.token);
+  neg(badDeadline.status === 400 && badDeadline.body.error === 'DATE_INVALID', 'a deadline that does not exist is refused');
+  const p1 = await j('GET', '/org/combine/requests?limit=1', undefined, maria.token);
+  ok(p1.status === 200 && p1.body.items.length === 1 && typeof p1.body.nextCursor === 'string', 'the club request list pages');
+  const p2 = await j('GET', `/org/combine/requests?limit=1&cursor=${p1.body.nextCursor}`, undefined, maria.token);
+  ok(p2.status === 200 && p2.body.items[0]?.id !== p1.body.items[0].id, 'and continues from the cursor');
+  neg((await j('GET', '/org/combine/requests?limit=500', undefined, maria.token)).status === 400, 'a limit over 100 is refused');
+}
+
 // ============================================================ metrics
 section('metrics — privacy-safe counters');
 {

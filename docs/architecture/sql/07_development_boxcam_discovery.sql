@@ -146,547 +146,362 @@ CREATE TABLE drill_guidance (
 
 
 -- =============================================================================
--- M16 — Box Cam
+-- M16 Box Cam · M16.1 At-Home Combine · M22 production CV results
+-- S12b: IMPLEMENTED, migration 0031_box_cam REGISTERED (repositories/boxCam.mjs, 5 Nov 2026).
+-- The DDL below is the migration's, generated from the repository's field specs (scripts/testSchemaDdl.mjs compares
+-- them column for column).
 -- =============================================================================
 
--- source: db.boxCamPrefs  created at m16/training.mjs:27 (lazy insert on read)
--- owner/writer: m16/training.mjs prefsFor/applyPrefs; read by m16/combine.mjs
---   (orgMaySeeResults consent gate) and sessions.mjs (clip retention gate)
--- lifecycle: one row per player, inserted on first read; never deleted
--- mapping:
---   playerId -> player_id (natural PK)
---   shareDevelopmentActivity -> share_development_activity
---   retainClips -> retain_clips
---   updatedAt -> updated_at (null until first explicit change)
---   updatedBy.kind / .id -> updated_by_kind / updated_by_id
--- notes: consent gate — 'recruitment' lets a visible org read Combine results
---   without a request. Minors: only the guardian may change prefs.
---   Insert-on-read today; the migration may pre-create a row per player.
+-- Preferences (box_cam_prefs): one row per player who saved them; a player with no row reads the defaults (reading
+-- never creates a row). Challenges (box_challenges): an organisation's, or ScoutBox's own two, which the migration
+-- inserts; status is only 'active', expiry is ends_at. Entries (box_challenge_entries): one per challenge and player;
+-- progress is recomputed from the sessions on every finalize, the session ids it counted are not stored.
+-- Assignments (box_assignments): the target as columns, a due date a real day, a frequency of 1 to 14 a week;
+-- 'superseded' was read but never written and is not a state.
+-- Sessions (box_sessions): server-minted. The nonce is stored only as its SHA-256 (nonce_hash); the plain value is in
+-- the creation response alone and every write compares its hash. A session cites at most one challenge entry
+-- (challenge_entry_id). The accepted observation stream is ordered rows (box_session_observations, one per event;
+-- a resume closes the open pause), read once by finalize; the verification reasons and the append-only integrity
+-- history (M18.1: survives a restore) are rows too. integrity {minted, drift}, captureMode and the note's provenance
+-- were constants and are worked out by the view; the bound Combine attempt is found through
+-- combine_attempts.box_session_id and the CV result through box_cam_cv_results.session_id. boxSessionEvents was
+-- reserved since M16 and never written: no table.
+-- Disputes (box_cam_disputes): the resolution as columns; resolved once.
+-- Combine requests (combine_requests): the protocols as ordered rows; deadline a real day. Combine attempts
+-- (combine_attempts): the reasons and the calibration checks as ordered rows; the checks a calibration required come
+-- from the pinned protocol version, never stored. The stored combine_state is the state the attempt finished in; the
+-- live state is derived from the bound session's verification_state.
+-- CV results (box_cam_cv_results): the provider's canonical result as columns, recorded once; quality reasons (code,
+-- value, threshold) and secondary diagnostics as coded rows, the bounded trace (<= 256) as rows; the experimental note
+-- is constant copy. No frame bytes, base64 or pixels anywhere.
+-- Player, guardian and media ids carry no key (tolerant). Organisations, the assigning or requesting staff and an
+-- assignment's objective are RESTRICT keys; so are the keys between these tables. Child rows cascade with their owner.
 CREATE TABLE box_cam_prefs (
-  player_id                   TEXT PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
-  share_development_activity  TEXT NOT NULL DEFAULT 'private' CHECK (share_development_activity IN ('private','recruitment')),
-  retain_clips                INTEGER NOT NULL DEFAULT 0 CHECK (retain_clips IN (0,1)),
-  updated_at                  INTEGER,
-  updated_by_kind             TEXT CHECK (updated_by_kind IN ('player','guardian')),
-  updated_by_id               TEXT
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  share_development_activity               TEXT NOT NULL CHECK (share_development_activity IN ('private','recruitment')),
+  retain_clips                             INTEGER NOT NULL CHECK (retain_clips IN (0,1)),
+  updated_at                               INTEGER,
+  updated_by_kind                          TEXT CHECK (updated_by_kind IS NULL OR updated_by_kind IN ('player','guardian')),
+  updated_by_id                            TEXT CHECK (updated_by_id IS NULL OR length(updated_by_id) <= 80 AND length(updated_by_id) > 0),
+  PRIMARY KEY (player_id),
+  CHECK ((updated_at IS NULL) = (updated_by_kind IS NULL))
 ) STRICT;
-
--- source: db.boxChallenges  created at m16/training.mjs:219 (org) and :429 (ScoutBox seed, 2 rows on boot)
--- owner/writer: m16/training.mjs
--- lifecycle: status is only ever 'active'; expiry is derived from ends_at
--- mapping:
---   id -> id (boxc-*)
---   title -> title (<=120)
---   publisher.kind -> publisher_kind
---   publisher.orgId -> publisher_org_id (null for 'scoutbox')
---   publisher.orgName -> publisher_org_name
---   publisher.byName -> publisher_by_name (org publisher only)
---   drillId -> drill_id (m16/drills.mjs registry id; no version pinned on a challenge)
---   metric -> metric
---   targetTotal -> target_total
---   startsAt / endsAt -> starts_at / ends_at
---   adultOnly -> adult_only
---   cap -> cap (null = unlimited)
---   status -> status
---   createdAt -> created_at
--- notes: participants count is derived from box_challenge_entries. Read
---   patterns: org's own challenges (publisher_org_id); player eligibility scan
---   over active challenges.
 CREATE TABLE box_challenges (
-  id                 TEXT PRIMARY KEY,
-  title              TEXT NOT NULL,
-  publisher_kind     TEXT NOT NULL CHECK (publisher_kind IN ('org','scoutbox')),
-  publisher_org_id   TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  publisher_org_name TEXT,                      -- snapshot
-  publisher_by_name  TEXT,                      -- snapshot
-  drill_id           TEXT NOT NULL,
-  metric             TEXT NOT NULL CHECK (metric IN ('reps','active_minutes')),
-  target_total       INTEGER NOT NULL,
-  starts_at          INTEGER NOT NULL,
-  ends_at            INTEGER NOT NULL,
-  adult_only         INTEGER NOT NULL DEFAULT 0 CHECK (adult_only IN (0,1)),
-  cap                INTEGER,
-  status             TEXT NOT NULL CHECK (status IN ('active')),
-  created_at         INTEGER NOT NULL,
-  CHECK ((publisher_kind = 'org') = (publisher_org_id IS NOT NULL))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  title                                    TEXT NOT NULL CHECK (length(title) <= 120 AND length(title) > 0),
+  publisher_kind                           TEXT NOT NULL CHECK (publisher_kind IN ('org','scoutbox')),
+  publisher_org_id                         TEXT CHECK (publisher_org_id IS NULL OR length(publisher_org_id) <= 80 AND length(publisher_org_id) > 0),
+  publisher_org_name                       TEXT CHECK (publisher_org_name IS NULL OR length(publisher_org_name) <= 200),
+  publisher_by_name                        TEXT CHECK (publisher_by_name IS NULL OR length(publisher_by_name) <= 200),
+  drill_id                                 TEXT NOT NULL CHECK (length(drill_id) <= 80 AND length(drill_id) > 0),
+  metric                                   TEXT NOT NULL CHECK (metric IN ('reps','active_minutes')),
+  target_total                             INTEGER NOT NULL,
+  starts_at                                INTEGER NOT NULL,
+  ends_at                                  INTEGER NOT NULL,
+  adult_only                               INTEGER NOT NULL CHECK (adult_only IN (0,1)),
+  cap                                      INTEGER,
+  status                                   TEXT NOT NULL CHECK (status IN ('active')),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (publisher_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK ((publisher_kind = 'org') = (publisher_org_id IS NOT NULL)),
+  CHECK (publisher_kind = 'org' OR (publisher_org_name IS NULL AND publisher_by_name IS NULL)),
+  CHECK (target_total >= 1),
+  CHECK (ends_at > starts_at),
+  CHECK (cap IS NULL OR cap >= 1)
 ) STRICT;
-CREATE INDEX box_challenges_publisher_org ON box_challenges (publisher_org_id);
+CREATE INDEX box_challenges_publisher_org ON box_challenges (publisher_org_id) WHERE publisher_org_id IS NOT NULL;
 CREATE INDEX box_challenges_status_ends ON box_challenges (status, ends_at);
-
--- source: db.boxChallengeEntries  created at m16/training.mjs:251
--- owner/writer: m16/training.mjs (joinChallenge; applyChallengeProgress on session finalize)
--- lifecycle: status active -> completed; never deleted
--- mapping:
---   id -> id (boxe-*)
---   challengeId -> challenge_id
---   playerId -> player_id
---   status -> status
---   progress -> progress (denormalised cache: recomputed deterministically by
---     challengeProgress() on every finalize from box_sessions)
---   sessionIds[] -> derived, not stored: recomputed from box_sessions on every
---     finalize (challengeProgress), never read back from the record
---   joinedAt -> joined_at
---   joinedBy.kind / .id -> joined_by_kind / joined_by_id
---   completedAt -> completed_at
--- notes: UNIQUE (challenge_id, player_id) enforced by code today.
 CREATE TABLE box_challenge_entries (
-  id              TEXT PRIMARY KEY,
-  challenge_id    TEXT NOT NULL REFERENCES box_challenges(id) ON DELETE CASCADE,
-  player_id       TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  status          TEXT NOT NULL CHECK (status IN ('active','completed')),
-  progress        INTEGER NOT NULL DEFAULT 0,
-  joined_at       INTEGER NOT NULL,
-  joined_by_kind  TEXT NOT NULL CHECK (joined_by_kind IN ('player','guardian')),
-  joined_by_id    TEXT NOT NULL,
-  completed_at    INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  challenge_id                             TEXT NOT NULL CHECK (length(challenge_id) <= 80 AND length(challenge_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('active','completed')),
+  progress                                 INTEGER NOT NULL,
+  joined_at                                INTEGER NOT NULL,
+  joined_by_kind                           TEXT NOT NULL CHECK (joined_by_kind IN ('player','guardian')),
+  joined_by_id                             TEXT NOT NULL CHECK (length(joined_by_id) <= 80 AND length(joined_by_id) > 0),
+  completed_at                             INTEGER,
+  FOREIGN KEY (challenge_id) REFERENCES box_challenges(id) ON DELETE RESTRICT,
+  CHECK (progress >= 0),
+  CHECK ((status = 'completed') = (completed_at IS NOT NULL))
 ) STRICT;
 CREATE UNIQUE INDEX box_challenge_entries_challenge_player ON box_challenge_entries (challenge_id, player_id);
-CREATE INDEX box_challenge_entries_player_status ON box_challenge_entries (player_id, status);
-
--- source: db.boxAssignments  created at m16/training.mjs:80
--- owner/writer: m16/training.mjs (create/cancel/accept; applyAssignmentProgress on finalize);
---   read by m18/secondLook.mjs (development_block_completed)
--- lifecycle: state assigned -> accepted -> in_progress | partially_completed -> completed | cancelled.
---   'superseded' is checked in several reads but never written: dead value, not in the CHECK.
--- mapping:
---   id -> id (boxa-*)
---   playerId -> player_id
---   orgId -> org_id
---   orgName -> org_name
---   assignedBy.userId / .name / .role -> assigned_by_user_id / assigned_by_name / assigned_by_role
---   assignedBy.orgVerifiedAtAssignment -> assigned_by_org_verified (always true at write)
---   assignedBy.at -> assigned_at
---   drillId / drillVersion -> drill_id / drill_version (pinned m16/drills.mjs id@version)
---   target.type / target.value -> target_type / target_value
---   frequencyPerWeek -> frequency_per_week
---   dueDate -> due_date (sliced to 10 chars but NOT validated today; migration must
---     verify YYYY-MM-DD or null the value)
---   instructions -> instructions (<=300, moderated)
---   objectiveId -> objective_id
---   state -> state
---   createdAt / updatedAt -> created_at / updated_at
--- notes: agencies cannot assign; only verified orgs. Read patterns: org list
---   (org_id [, player_id]); player/guardian list (player_id); session create
---   validates (id, player_id).
+CREATE INDEX box_challenge_entries_player ON box_challenge_entries (player_id, status);
 CREATE TABLE box_assignments (
-  id                       TEXT PRIMARY KEY,
-  player_id                TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  org_id                   TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name                 TEXT,                       -- snapshot
-  assigned_by_user_id      TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  assigned_by_name         TEXT,                       -- snapshot
-  assigned_by_role         TEXT,                       -- snapshot
-  assigned_by_org_verified INTEGER NOT NULL DEFAULT 1 CHECK (assigned_by_org_verified IN (0,1)),
-  assigned_at              INTEGER NOT NULL,
-  drill_id                 TEXT NOT NULL,
-  drill_version            INTEGER NOT NULL,
-  target_type              TEXT NOT NULL CHECK (target_type IN ('duration','repetitions','sets','combined')),
-  target_value             REAL NOT NULL,
-  frequency_per_week       INTEGER,
-  due_date                 TEXT CHECK (due_date IS NULL OR length(due_date) = 10),
-  instructions             TEXT,
-  objective_id             TEXT REFERENCES dev_objectives(id) ON DELETE SET NULL,
-  state                    TEXT NOT NULL CHECK (state IN ('assigned','accepted','in_progress','partially_completed','completed','cancelled')),
-  created_at               INTEGER NOT NULL,
-  updated_at               INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  org_name                                 TEXT CHECK (org_name IS NULL OR length(org_name) <= 200),
+  assigned_by_user_id                      TEXT NOT NULL CHECK (length(assigned_by_user_id) <= 80 AND length(assigned_by_user_id) > 0),
+  assigned_by_name                         TEXT CHECK (assigned_by_name IS NULL OR length(assigned_by_name) <= 200),
+  assigned_by_role                         TEXT CHECK (assigned_by_role IS NULL OR length(assigned_by_role) <= 80),
+  assigned_by_org_verified                 INTEGER NOT NULL CHECK (assigned_by_org_verified IN (0,1)),
+  assigned_at                              INTEGER NOT NULL,
+  drill_id                                 TEXT NOT NULL CHECK (length(drill_id) <= 80 AND length(drill_id) > 0),
+  drill_version                            INTEGER NOT NULL,
+  target_type                              TEXT NOT NULL CHECK (target_type IN ('repetitions','duration','sets')),
+  target_value                             REAL NOT NULL,
+  frequency_per_week                       INTEGER,
+  due_date                                 TEXT CHECK (due_date IS NULL OR length(due_date) <= 10),
+  instructions                             TEXT CHECK (instructions IS NULL OR length(instructions) <= 300),
+  objective_id                             TEXT CHECK (objective_id IS NULL OR length(objective_id) <= 80 AND length(objective_id) > 0),
+  state                                    TEXT NOT NULL CHECK (state IN ('assigned','accepted','in_progress','partially_completed','completed','cancelled')),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (assigned_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (objective_id) REFERENCES dev_objectives(id) ON DELETE RESTRICT,
+  CHECK (target_value > 0),
+  CHECK (frequency_per_week IS NULL OR frequency_per_week BETWEEN 1 AND 14),
+  CHECK (due_date IS NULL OR (length(due_date) = 10 AND due_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'))
 ) STRICT;
-CREATE INDEX box_assignments_org_player ON box_assignments (org_id, player_id);
-CREATE INDEX box_assignments_player_state ON box_assignments (player_id, state);
-CREATE INDEX box_assignments_objective ON box_assignments (objective_id);
-
--- source: db.boxSessions  created at m16/sessions.mjs:89 (ctx.boxMintSession, Combine) and :155 (player route)
--- owner/writer: m16/sessions.mjs (lifecycle, events, finalize, note, clip),
---   m16/training.mjs (T&S invalidate/restore -> integrity events),
---   m16/combine.mjs (combineAttemptId, captureContext via mint meta; cancel),
---   m22/routes.mjs (cvProviderSessionId, cvResultId)
--- lifecycle: status setup_required -> recording -> processing -> terminal
---   (verified | partially_verified | unable_to_verify | completed_unverified | cancelled | invalidated);
---   T&S restore returns status/verification_state to previous_verification_state.
---   SESSION_STATES also lists 'not_started' and 'ready' — never written.
--- mapping:
---   id -> id (boxs-*)
---   playerId -> player_id
---   drillId / drillVersion -> drill_id / drill_version (pinned m16/drills.mjs id@version)
---   assignmentId -> assignment_id
---   challengeEntryIds[] -> box_session_challenge_entries (child; 0 or 1 today)
---   target.type / .value / .sets / .repsPerSet -> target_type / target_value / target_sets / target_reps_per_set
---   nonce -> nonce_hash (sha256 hex; the plain 18-byte base64url bearer was stored before.
---     The plain value is returned once at creation and compared on every write.)
---   livenessChallenge -> liveness_challenge (one of 4 enum actions; kept plain: a 4-value
---     enum cannot be meaningfully hashed, and it is not a bearer secret)
---   provider / providerVersion -> provider_id / provider_version (m16/drills.mjs PROVIDERS)
---   status -> status
---   createdAt / expiresAt -> created_at / expires_at (TTL +2h)
---   startedAt / endedAt / livenessPassedAt -> started_at / ended_at / liveness_passed_at
---   lastSeq / batches -> last_seq / batches
---   obs{active[],presence[],ball[],reps[],sets[],pauses[],interruptions[],multiPerson[]} -> obs_json
---     (retained JSON, deferred normalisation: a write-once observation stream of up to
---      2,000 bounded intervals consumed exactly once by finalize(); nothing reads it by
---      column and T&S sees only the derived values. A box_session_observations child
---      table is the normalisation step if per-interval queries are ever needed.)
---   captureMode -> capture_mode ('live' only)
---   integrity.minted / integrity.drift -> integrity_minted / integrity_drift_ms
---   sessionDurationMs / verifiedActiveMs / verifiedReps / setsCompleted -> session_duration_ms / verified_active_ms / verified_reps / sets_completed
---   targetCompleted -> target_completed (nullable boolean: null = metric unsupported)
---   quality -> quality
---   interruptionsCount -> interruptions_count
---   verificationState -> verification_state
---   verificationReasons[] -> verification_reasons_json (retained JSON: bounded list of reason
---     codes SESSION_CANCELLED | PROVIDER_UNAVAILABLE | LIVENESS_NOT_ESTABLISHED |
---     NO_ACTIVITY_OBSERVED | OBSERVATION_INSUFFICIENT | TARGET_METRIC_NOT_SUPPORTED |
---     OBSERVATION_GAPS | OBSERVATION_QUALITY_DEGRADED | TARGET_NOT_YET_COMPLETED |
---     REP_COUNT_NOT_CONFIGURED, written once at finalize, displayed verbatim, never queried)
---   resultHash -> result_hash (sha256 of the canonical result, m16/shared.mjs resultHash)
---   finalizedAt -> finalized_at
---   note / noteProvenance -> note / note_provenance
---   clipMediaId -> clip_media_id (players.media[] item tagged capturedBy='box_cam')
---   previousVerificationState -> previous_verification_state (set on invalidate, cleared on restore)
---   invalidatedAt -> invalidated_at (cleared on restore; the durable record is box_session_integrity_events)
---   integrityEvents[] -> box_session_integrity_events (child)
---   combineAttemptId -> derived, not stored: inverse of combine_attempts.box_session_id (UNIQUE 1:1)
---   captureContext -> capture_context (Combine-minted sessions only)
---   cvProviderSessionId -> cv_provider_session_id (set at /cv/begin; the provider session itself is in-memory)
---   cvResultId -> derived, not stored: equals box_cam_cv_results.provider_session_id for the
---     row with session_id = this id (the source stores the same value twice)
--- notes: no raw frames or video are ever stored. Player deletion leaves orphans
---   today; target is CASCADE. Read patterns: player's terminal sessions newest
---   ended first (dashboard, list, challenge/assignment progress); by assignment;
---   T&S by id. Combine, M18 and M21 join by id only.
+CREATE INDEX box_assignments_org ON box_assignments (org_id, player_id);
+CREATE INDEX box_assignments_player ON box_assignments (player_id);
 CREATE TABLE box_sessions (
-  id                          TEXT PRIMARY KEY,
-  player_id                   TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  drill_id                    TEXT NOT NULL,
-  drill_version               INTEGER NOT NULL,
-  assignment_id               TEXT REFERENCES box_assignments(id) ON DELETE SET NULL,
-  target_type                 TEXT NOT NULL CHECK (target_type IN ('duration','repetitions','sets','combined')),
-  target_value                REAL NOT NULL,
-  target_sets                 INTEGER,
-  target_reps_per_set         INTEGER,
-  nonce_hash                  TEXT NOT NULL,
-  liveness_challenge          TEXT NOT NULL CHECK (liveness_challenge IN ('raise_right_hand','show_ball','left_foot_touch','step_into_zone')),
-  provider_id                 TEXT NOT NULL CHECK (provider_id IN ('production_cv','web_client','local_test')),
-  provider_version            INTEGER NOT NULL,
-  status                      TEXT NOT NULL CHECK (status IN ('setup_required','recording','processing','verified','partially_verified','unable_to_verify','completed_unverified','cancelled','invalidated')),
-  created_at                  INTEGER NOT NULL,
-  expires_at                  INTEGER NOT NULL,
-  started_at                  INTEGER,
-  ended_at                    INTEGER,
-  liveness_passed_at          INTEGER,
-  last_seq                    INTEGER NOT NULL DEFAULT 0,
-  batches                     INTEGER NOT NULL DEFAULT 0,
-  obs_json                    TEXT NOT NULL DEFAULT '{"active":[],"presence":[],"ball":[],"reps":[],"sets":[],"pauses":[],"interruptions":[],"multiPerson":[]}' CHECK (json_valid(obs_json)),
-  capture_mode                TEXT NOT NULL DEFAULT 'live' CHECK (capture_mode IN ('live')),
-  integrity_minted            TEXT NOT NULL DEFAULT 'server' CHECK (integrity_minted IN ('server')),
-  integrity_drift_ms          INTEGER NOT NULL DEFAULT 7000,
-  session_duration_ms         INTEGER,
-  verified_active_ms          INTEGER,
-  verified_reps               INTEGER,
-  sets_completed              INTEGER,
-  target_completed            INTEGER CHECK (target_completed IN (0,1)),
-  quality                     TEXT CHECK (quality IN ('good','degraded','insufficient')),
-  interruptions_count         INTEGER,
-  verification_state          TEXT CHECK (verification_state IN ('verified','partially_verified','unable_to_verify','completed_unverified','cancelled','invalidated')),
-  verification_reasons_json   TEXT CHECK (verification_reasons_json IS NULL OR json_valid(verification_reasons_json)),
-  result_hash                 TEXT,
-  finalized_at                INTEGER,
-  note                        TEXT,
-  note_provenance             TEXT CHECK (note_provenance IN ('player_submitted_note')),
-  clip_media_id               TEXT REFERENCES player_media(id) ON DELETE SET NULL,
-  previous_verification_state TEXT CHECK (previous_verification_state IN ('verified','partially_verified','unable_to_verify','completed_unverified','cancelled')),
-  invalidated_at              INTEGER,
-  capture_context             TEXT CHECK (capture_context IN ('at_home','club','event')),
-  cv_provider_session_id      TEXT
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  drill_id                                 TEXT NOT NULL CHECK (length(drill_id) <= 80 AND length(drill_id) > 0),
+  drill_version                            INTEGER NOT NULL,
+  assignment_id                            TEXT CHECK (assignment_id IS NULL OR length(assignment_id) <= 80 AND length(assignment_id) > 0),
+  challenge_entry_id                       TEXT CHECK (challenge_entry_id IS NULL OR length(challenge_entry_id) <= 80 AND length(challenge_entry_id) > 0),
+  target_type                              TEXT NOT NULL CHECK (target_type IN ('repetitions','duration','sets')),
+  target_value                             REAL NOT NULL,
+  nonce_hash                               TEXT NOT NULL CHECK (length(nonce_hash) <= 64 AND length(nonce_hash) > 0),
+  liveness_challenge                       TEXT NOT NULL CHECK (liveness_challenge IN ('raise_right_hand','show_ball','left_foot_touch','step_into_zone')),
+  provider_id                              TEXT NOT NULL CHECK (provider_id IN ('production_cv','web_client','local_test')),
+  provider_version                         INTEGER NOT NULL,
+  status                                   TEXT NOT NULL CHECK (status IN ('setup_required','recording','processing','verified','partially_verified','unable_to_verify','completed_unverified','cancelled','invalidated')),
+  created_at                               INTEGER NOT NULL,
+  expires_at                               INTEGER NOT NULL,
+  started_at                               INTEGER,
+  ended_at                                 INTEGER,
+  liveness_passed_at                       INTEGER,
+  last_seq                                 INTEGER NOT NULL,
+  batches                                  INTEGER NOT NULL,
+  capture_context                          TEXT CHECK (capture_context IS NULL OR capture_context IN ('at_home','club','event')),
+  session_duration_ms                      REAL,
+  verified_active_ms                       REAL,
+  verified_reps                            INTEGER,
+  sets_completed                           INTEGER,
+  target_completed                         INTEGER CHECK (target_completed IS NULL OR target_completed IN (0,1)),
+  quality                                  TEXT CHECK (quality IS NULL OR quality IN ('good','degraded','insufficient')),
+  interruptions_count                      INTEGER,
+  verification_state                       TEXT CHECK (verification_state IS NULL OR verification_state IN ('verified','partially_verified','unable_to_verify','completed_unverified','cancelled','invalidated')),
+  result_hash                              TEXT CHECK (result_hash IS NULL OR length(result_hash) <= 64),
+  finalized_at                             INTEGER,
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 300),
+  clip_media_id                            TEXT CHECK (clip_media_id IS NULL OR length(clip_media_id) <= 80 AND length(clip_media_id) > 0),
+  previous_verification_state              TEXT CHECK (previous_verification_state IS NULL OR previous_verification_state IN ('verified','partially_verified','unable_to_verify','completed_unverified','cancelled')),
+  invalidated_at                           INTEGER,
+  cv_provider_session_id                   TEXT CHECK (cv_provider_session_id IS NULL OR length(cv_provider_session_id) <= 80 AND length(cv_provider_session_id) > 0),
+  FOREIGN KEY (assignment_id) REFERENCES box_assignments(id) ON DELETE RESTRICT,
+  FOREIGN KEY (challenge_entry_id) REFERENCES box_challenge_entries(id) ON DELETE RESTRICT,
+  CHECK (length(nonce_hash) = 64),
+  CHECK (last_seq >= 0 AND batches >= 0),
+  CHECK (status NOT IN ('verified','partially_verified','unable_to_verify','completed_unverified','invalidated') OR status = verification_state),
+  CHECK ((verification_state = 'invalidated') = (previous_verification_state IS NOT NULL))
 ) STRICT;
-CREATE INDEX box_sessions_player_status_ended ON box_sessions (player_id, status, ended_at);
-CREATE INDEX box_sessions_assignment ON box_sessions (assignment_id);
-CREATE INDEX box_sessions_player_finalized ON box_sessions (player_id, finalized_at);
-
--- source: db.boxSessions[].challengeEntryIds[]  m16/sessions.mjs:148
--- owner/writer: m16/sessions.mjs (write-once at session creation)
--- mapping: each id -> (session_id, entry_id)
-CREATE TABLE box_session_challenge_entries (
-  session_id  TEXT NOT NULL REFERENCES box_sessions(id) ON DELETE CASCADE,
-  entry_id    TEXT NOT NULL REFERENCES box_challenge_entries(id) ON DELETE CASCADE,
-  PRIMARY KEY (session_id, entry_id)
+CREATE INDEX box_sessions_player ON box_sessions (player_id, ended_at);
+CREATE INDEX box_sessions_assignment ON box_sessions (assignment_id) WHERE assignment_id IS NOT NULL;
+CREATE TABLE box_session_observations (
+  session_id                               TEXT NOT NULL CHECK (length(session_id) > 0 AND length(session_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 4000),
+  kind                                     TEXT NOT NULL CHECK (kind IN ('active','presence','ball','rep','set','pause','interruption','multi_person')),
+  from_ms                                  REAL,
+  to_ms                                    REAL,
+  at_ms                                    REAL,
+  quality                                  TEXT CHECK (quality IS NULL OR quality IN ('good','degraded','insufficient')),
+  confidence                               REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+  FOREIGN KEY (session_id) REFERENCES box_sessions(id) ON DELETE CASCADE,
+  PRIMARY KEY (session_id, ord),
+  CHECK (kind NOT IN ('active','presence','ball','interruption','multi_person') OR (from_ms IS NOT NULL AND to_ms IS NOT NULL AND at_ms IS NULL)),
+  CHECK (kind NOT IN ('rep','set') OR (at_ms IS NOT NULL AND from_ms IS NULL AND to_ms IS NULL)),
+  CHECK (kind <> 'pause' OR (from_ms IS NOT NULL AND at_ms IS NULL)),
+  CHECK (kind IN ('active','presence') OR quality IS NULL),
+  CHECK (kind = 'rep' OR confidence IS NULL)
 ) STRICT;
-
--- source: db.boxCamDisputes  created at m16/training.mjs:358
--- owner/writer: m16/training.mjs (player/guardian file; T&S resolve)
--- lifecycle: status open -> resolved; never deleted
--- mapping:
---   id -> id (boxd-*)
---   sessionId -> session_id
---   playerId -> player_id
---   by.kind / .id / .name -> by_kind / by_id / by_name
---   reason -> reason (<=500, moderated)
---   status -> status
---   resolution.outcome / .reason / .at -> resolution_outcome / resolution_reason / resolved_at
---   createdAt -> created_at
--- notes: known defect — the resolving T&S actor is NOT stored anywhere
---   (resolver identity missing); resolution_by_* columns are reserved and
---   nullable so a fix can land without a schema change. Rate limit (5/day)
---   is in-memory. Read patterns: T&S open queue by created_at; by session.
-CREATE TABLE box_cam_disputes (
-  id                   TEXT PRIMARY KEY,
-  session_id           TEXT NOT NULL REFERENCES box_sessions(id) ON DELETE CASCADE,
-  player_id            TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  by_kind              TEXT NOT NULL CHECK (by_kind IN ('player','guardian')),
-  by_id                TEXT NOT NULL,
-  by_name              TEXT,                      -- snapshot
-  reason               TEXT NOT NULL,
-  status               TEXT NOT NULL CHECK (status IN ('open','resolved')),
-  resolution_outcome   TEXT CHECK (resolution_outcome IN ('stands','invalidated','provider_bug')),
-  resolution_reason    TEXT,
-  resolved_at          INTEGER,
-  resolution_by_id     TEXT,                      -- reserved: never written today (defect)
-  resolution_by_name   TEXT,                      -- reserved: never written today (defect)
-  created_at           INTEGER NOT NULL
+CREATE TABLE box_session_reasons (
+  session_id                               TEXT NOT NULL CHECK (length(session_id) > 0 AND length(session_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 40),
+  code                                     TEXT NOT NULL CHECK (length(code) > 0 AND length(code) <= 80 AND code NOT GLOB '*[^A-Za-z0-9_]*'),
+  FOREIGN KEY (session_id) REFERENCES box_sessions(id) ON DELETE CASCADE,
+  PRIMARY KEY (session_id, ord)
 ) STRICT;
-CREATE INDEX box_cam_disputes_status_created ON box_cam_disputes (status, created_at);
-CREATE INDEX box_cam_disputes_session ON box_cam_disputes (session_id);
-
--- source: db.boxSessions[].integrityEvents[]  created at m16/training.mjs:401 (invalidated) and :420 (restored)
--- owner/writer: m16/training.mjs T&S routes; read by m18/secondLook.mjs
---   (combine_verified_invalidated / _restored changes, fingerprinted on the session)
--- lifecycle: append-only (M18.1: survives a restore, unlike invalidatedAt)
--- mapping:
---   (no id) -> id (new, minted as bsie-<n>)
---   (parent) -> session_id
---   type -> type
---   at -> at
---   disputeId -> dispute_id (invalidated only)
---   outcome -> outcome (invalidated only: the dispute outcome that caused it)
---   to -> to_state (restored only: the verification state restored to)
--- notes: the restore reason is only written to the ledger (ledgerAppend), not here.
 CREATE TABLE box_session_integrity_events (
-  id          TEXT PRIMARY KEY,
-  session_id  TEXT NOT NULL REFERENCES box_sessions(id) ON DELETE CASCADE,
-  type        TEXT NOT NULL CHECK (type IN ('invalidated','restored')),
-  at          INTEGER NOT NULL,
-  dispute_id  TEXT REFERENCES box_cam_disputes(id) ON DELETE SET NULL,
-  outcome     TEXT CHECK (outcome IN ('invalidated','provider_bug')),
-  to_state    TEXT CHECK (to_state IN ('verified','partially_verified','unable_to_verify','completed_unverified','cancelled'))
+  session_id                               TEXT NOT NULL CHECK (length(session_id) <= 80 AND length(session_id) > 0),
+  ord                                      INTEGER NOT NULL,
+  type                                     TEXT NOT NULL CHECK (type IN ('invalidated','restored')),
+  at                                       INTEGER NOT NULL,
+  dispute_id                               TEXT CHECK (dispute_id IS NULL OR length(dispute_id) <= 80 AND length(dispute_id) > 0),
+  outcome                                  TEXT CHECK (outcome IS NULL OR outcome IN ('invalidated','provider_bug')),
+  to_state                                 TEXT CHECK (to_state IS NULL OR to_state IN ('verified','partially_verified','unable_to_verify','completed_unverified','cancelled')),
+  FOREIGN KEY (session_id) REFERENCES box_sessions(id) ON DELETE CASCADE,
+  PRIMARY KEY (session_id, ord),
+  CHECK (ord >= 0),
+  CHECK ((type = 'invalidated') = (outcome IS NOT NULL)),
+  CHECK ((type = 'restored') = (to_state IS NOT NULL)),
+  CHECK (type = 'invalidated' OR dispute_id IS NULL)
 ) STRICT;
-CREATE INDEX box_session_integrity_events_session_at ON box_session_integrity_events (session_id, at);
-
--- boxSessionEvents: db.boxSessionEvents is created at m16/index.mjs:21 as
--- "reserved: aggregates live on the session record" and is never written or
--- read anywhere. No table — a per-event row store would duplicate obs_json; if
--- per-interval queries are ever wanted, the normalisation step is a
--- box_session_observations table (session_id, kind, from_ms, to_ms, at_ms,
--- quality, confidence) replacing obs_json, not this reserved name.
-
-
--- =============================================================================
--- M16.1 — At-Home Combine
--- =============================================================================
-
--- source: db.combineRequests  created at m16/combine.mjs:519 (createRequests; also
---   reached from M17 rooms via ctx.createCombineRequests)
--- owner/writer: m16/combine.mjs
--- lifecycle: state requested -> completed | cancelled (requestState() is derived at read:
---   'completed' when every protocol has a Combine Verified attempt in window)
--- mapping:
---   id -> id (creq-*)
---   orgId / orgName -> org_id / org_name
---   requestedBy.userId / .name / .role / .at -> requested_by_user_id / requested_by_name / requested_by_role / requested_at
---   playerId -> player_id
---   title -> title (<=120 or null)
---   protocolIds[] -> combine_request_protocols (child)
---   deadline -> deadline_date (strict YYYY-MM-DD validated)
---   instructions -> instructions (<=300, moderated)
---   state -> state
---   createdAt / completedAt -> created_at / completed_at
--- notes: known defect — the cancelling actor is not stored. A non-cancelled
---   request from this org is implied consent to read the player's Combine
---   results (orgMaySeeResults). Read patterns: org list (org_id[, player_id]);
---   player list (player_id, state); attempt creation validates (id, player_id).
+CREATE TABLE box_cam_disputes (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  session_id                               TEXT NOT NULL CHECK (length(session_id) <= 80 AND length(session_id) > 0),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  by_kind                                  TEXT NOT NULL CHECK (by_kind IN ('player','guardian')),
+  by_id                                    TEXT NOT NULL CHECK (length(by_id) <= 80 AND length(by_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  reason                                   TEXT NOT NULL CHECK (length(reason) <= 500 AND length(reason) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('open','resolved')),
+  resolution_outcome                       TEXT CHECK (resolution_outcome IS NULL OR resolution_outcome IN ('stands','invalidated','provider_bug')),
+  resolution_reason                        TEXT CHECK (resolution_reason IS NULL OR length(resolution_reason) <= 400 AND length(resolution_reason) > 0),
+  resolved_at                              INTEGER,
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES box_sessions(id) ON DELETE CASCADE,
+  CHECK ((status = 'resolved') = (resolved_at IS NOT NULL))
+) STRICT;
+CREATE INDEX box_cam_disputes_queue ON box_cam_disputes (status, created_at, id);
+CREATE INDEX box_cam_disputes_created ON box_cam_disputes (created_at, id);
 CREATE TABLE combine_requests (
-  id                    TEXT PRIMARY KEY,
-  org_id                TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name              TEXT,                       -- snapshot
-  requested_by_user_id  TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  requested_by_name     TEXT,                       -- snapshot
-  requested_by_role     TEXT,                       -- snapshot
-  requested_at          INTEGER NOT NULL,
-  player_id             TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  title                 TEXT,
-  deadline_date         TEXT CHECK (deadline_date IS NULL OR length(deadline_date) = 10),
-  instructions          TEXT,
-  state                 TEXT NOT NULL CHECK (state IN ('requested','completed','cancelled')),
-  created_at            INTEGER NOT NULL,
-  completed_at          INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  org_name                                 TEXT CHECK (org_name IS NULL OR length(org_name) <= 200),
+  requested_by_user_id                     TEXT NOT NULL CHECK (length(requested_by_user_id) <= 80 AND length(requested_by_user_id) > 0),
+  requested_by_name                        TEXT CHECK (requested_by_name IS NULL OR length(requested_by_name) <= 200),
+  requested_by_role                        TEXT CHECK (requested_by_role IS NULL OR length(requested_by_role) <= 80),
+  requested_at                             INTEGER NOT NULL,
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  title                                    TEXT CHECK (title IS NULL OR length(title) <= 120 AND length(title) > 0),
+  deadline_date                            TEXT CHECK (deadline_date IS NULL OR length(deadline_date) <= 10),
+  instructions                             TEXT CHECK (instructions IS NULL OR length(instructions) <= 300),
+  state                                    TEXT NOT NULL CHECK (state IN ('requested','completed','cancelled')),
+  created_at                               INTEGER NOT NULL,
+  completed_at                             INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (requested_by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (deadline_date IS NULL OR (length(deadline_date) = 10 AND deadline_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')),
+  CHECK ((state = 'completed') = (completed_at IS NOT NULL) OR state = 'cancelled')
 ) STRICT;
-CREATE INDEX combine_requests_org_player ON combine_requests (org_id, player_id);
-CREATE INDEX combine_requests_player_state ON combine_requests (player_id, state);
-
--- source: db.combineRequests[].protocolIds[]  m16/combine.mjs:523 (deduped, validated active protocols)
--- mapping: each protocol id -> (request_id, protocol_id); position preserves order
+CREATE INDEX combine_requests_org ON combine_requests (org_id, player_id);
+CREATE INDEX combine_requests_player ON combine_requests (player_id, state);
 CREATE TABLE combine_request_protocols (
-  request_id   TEXT NOT NULL REFERENCES combine_requests(id) ON DELETE CASCADE,
-  protocol_id  TEXT NOT NULL,
-  position     INTEGER NOT NULL,
-  PRIMARY KEY (request_id, protocol_id)
+  request_id                               TEXT NOT NULL CHECK (length(request_id) > 0 AND length(request_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 20),
+  protocol_id                              TEXT NOT NULL CHECK (length(protocol_id) > 0 AND length(protocol_id) <= 80),
+  FOREIGN KEY (request_id) REFERENCES combine_requests(id) ON DELETE CASCADE,
+  PRIMARY KEY (request_id, ord),
+  UNIQUE (request_id, protocol_id)
 ) STRICT;
-
--- source: db.combineAttempts  created at m16/combine.mjs:343
--- owner/writer: m16/combine.mjs (create, calibrate, complete via Box Cam path,
---   cancel; applyCombineProgress on finalize); read by m18 (combine_verified_added),
---   m19 matchFacts, m21 targets/evidence, m23 trial routes
--- lifecycle: combineState ready -> terminal (combine_verified | partially_measured |
---   measurement_unavailable | protocol_invalid | invalidated | cancelled). The stored
---   state is the state it finished in; the LIVE state (liveCombineState) is derived
---   at read from the bound session's verification_state. COMBINE_STATES also lists
---   not_started, setup_required, attempt_in_progress, processing, integrity_review —
---   never written.
--- mapping:
---   id -> id (catt-*)
---   playerId -> player_id
---   protocolId / protocolVersion -> protocol_id / protocol_version (COMBINE_PROTOCOLS id@version, pinned)
---   boxSessionId -> box_session_id (UNIQUE: 1:1 with the server-minted session)
---   attemptNumber -> attempt_number (1-based count per player+protocol at creation)
---   mode -> mode
---   captureContext -> capture_context
---   requestId -> request_id
---   metricType / metricUnit / direction -> metric_type / metric_unit / direction (frozen from the protocol)
---   measurementAlgorithmVersion -> measurement_algorithm_version
---   provider / providerVersion -> provider_id / provider_version
---   calibrationResult -> calibration_required_json / calibration_passed / calibration_checks_json / calibrated_at
---     (required[] and checks[] are short lists of calibration check names such as
---      'box_marker_5m' / 'geometry_ready_check'; retained JSON because they are
---      free-form client strings compared as a set and never queried)
---   measuredValue -> measured_value (REAL: tenths for duration, integer counts otherwise)
---   measurementState -> measurement_state
---   combineState -> combine_state
---   reasons[] -> reasons_json (retained JSON: machine reason codes from measureAttempt,
---     e.g. MEASUREMENT_NOT_SUPPORTED, SESSION_INVALIDATED, MEASUREMENT_WINDOW_INCOMPLETE,
---     OBSERVATION_QUALITY_DEGRADED, PRACTICE_ATTEMPT, CALIBRATION_NOT_PASSED; displayed, never queried)
---   startedAt / completedAt / createdAt -> started_at / completed_at / created_at
---   resultHash -> result_hash (sha256, combineResultHash)
--- notes: practice attempts never become combine_verified. Read patterns: player
---   attempts newest first; per (player, protocol, mode, created_at) for attempt
---   limits; by box_session_id (invalidation, M18); personal bests over
---   (player, protocol, version).
 CREATE TABLE combine_attempts (
-  id                             TEXT PRIMARY KEY,
-  player_id                      TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  protocol_id                    TEXT NOT NULL,
-  protocol_version               INTEGER NOT NULL,
-  box_session_id                 TEXT NOT NULL REFERENCES box_sessions(id) ON DELETE CASCADE,
-  attempt_number                 INTEGER NOT NULL,
-  mode                           TEXT NOT NULL CHECK (mode IN ('verified','practice')),
-  capture_context                TEXT NOT NULL CHECK (capture_context IN ('at_home','club','event')),
-  request_id                     TEXT REFERENCES combine_requests(id) ON DELETE SET NULL,
-  metric_type                    TEXT NOT NULL CHECK (metric_type IN ('count','time','distance','duration','set','percentage')),
-  metric_unit                    TEXT NOT NULL,
-  direction                      TEXT NOT NULL CHECK (direction IN ('higher','lower')),
-  measurement_algorithm_version  INTEGER NOT NULL,
-  provider_id                    TEXT NOT NULL CHECK (provider_id IN ('production_cv','web_client','local_test')),
-  provider_version               INTEGER NOT NULL,
-  calibration_required_json      TEXT CHECK (calibration_required_json IS NULL OR json_valid(calibration_required_json)),
-  calibration_passed             INTEGER CHECK (calibration_passed IN (0,1)),
-  calibration_checks_json        TEXT CHECK (calibration_checks_json IS NULL OR json_valid(calibration_checks_json)),
-  calibrated_at                  INTEGER,
-  measured_value                 REAL,
-  measurement_state              TEXT CHECK (measurement_state IN ('measured','practice','partially_measured','measurement_unavailable','protocol_invalid','invalidated','cancelled')),
-  combine_state                  TEXT NOT NULL CHECK (combine_state IN ('ready','combine_verified','partially_measured','measurement_unavailable','protocol_invalid','invalidated','cancelled')),
-  reasons_json                   TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(reasons_json)),
-  started_at                     INTEGER,
-  completed_at                   INTEGER,
-  result_hash                    TEXT,
-  created_at                     INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  protocol_id                              TEXT NOT NULL CHECK (length(protocol_id) <= 80 AND length(protocol_id) > 0),
+  protocol_version                         INTEGER NOT NULL,
+  box_session_id                           TEXT NOT NULL CHECK (length(box_session_id) <= 80 AND length(box_session_id) > 0),
+  attempt_number                           INTEGER NOT NULL,
+  mode                                     TEXT NOT NULL CHECK (mode IN ('verified','practice')),
+  capture_context                          TEXT NOT NULL CHECK (capture_context IN ('at_home','club','event')),
+  request_id                               TEXT CHECK (request_id IS NULL OR length(request_id) <= 80 AND length(request_id) > 0),
+  metric_type                              TEXT NOT NULL CHECK (metric_type IN ('count','time','distance','duration','set','percentage')),
+  metric_unit                              TEXT NOT NULL CHECK (length(metric_unit) <= 40 AND length(metric_unit) > 0),
+  direction                                TEXT NOT NULL CHECK (direction IN ('higher','lower')),
+  measurement_algorithm_version            INTEGER NOT NULL,
+  provider_id                              TEXT NOT NULL CHECK (provider_id IN ('production_cv','web_client','local_test')),
+  provider_version                         INTEGER NOT NULL,
+  measured_value                           REAL,
+  measurement_state                        TEXT CHECK (measurement_state IS NULL OR measurement_state IN ('measured','practice','partially_measured','measurement_unavailable','protocol_invalid','invalidated','cancelled')),
+  combine_state                            TEXT NOT NULL CHECK (combine_state IN ('ready','combine_verified','partially_measured','measurement_unavailable','protocol_invalid','invalidated','cancelled')),
+  started_at                               INTEGER,
+  completed_at                             INTEGER,
+  result_hash                              TEXT CHECK (result_hash IS NULL OR length(result_hash) <= 64),
+  created_at                               INTEGER NOT NULL,
+  calibration_passed                       INTEGER CHECK (calibration_passed IS NULL OR calibration_passed IN (0,1)),
+  calibrated_at                            INTEGER,
+  FOREIGN KEY (box_session_id) REFERENCES box_sessions(id) ON DELETE RESTRICT,
+  FOREIGN KEY (request_id) REFERENCES combine_requests(id) ON DELETE RESTRICT,
+  CHECK ((calibration_passed IS NULL) = (calibrated_at IS NULL)),
+  CHECK (attempt_number >= 1)
 ) STRICT;
 CREATE UNIQUE INDEX combine_attempts_box_session ON combine_attempts (box_session_id);
-CREATE INDEX combine_attempts_player_created ON combine_attempts (player_id, created_at);
-CREATE INDEX combine_attempts_player_protocol ON combine_attempts (player_id, protocol_id, protocol_version, mode, created_at);
-CREATE INDEX combine_attempts_request ON combine_attempts (request_id);
-
-
--- =============================================================================
--- M22 — production CV provider results
--- =============================================================================
-
--- source: db.boxCamCvResults  created at m22/routes.mjs:257 (provider.finalize -> #buildResult, m22/provider.mjs:510)
--- owner/writer: m22/routes.mjs (single-shot finalize); read by m22 T&S diagnostics and domains/recruitment/lifecycle/trialRoutes.mjs
--- lifecycle: immutable once written (Object.freeze); a cancelled/expired/failed
---   provider session mints NO row; never deleted
--- mapping:
---   (no id field) -> provider_session_id is the effective PK ('pcv_<base64url 12>'), looked up by it everywhere
---   sessionId -> session_id (the bound Box Cam session; NB domains/recruitment/lifecycle/trialRoutes.mjs:796 reads
---     `boxCamSessionId` which does not exist — known defect)
---   providerSessionId -> provider_session_id
---   protocolId -> protocol_id (CANDIDATE_PROTOCOLS: combine-box-touch-60 | combine-box-juggle | combine-box-control-60)
---   providerId -> provider_id ('production_cv')
---   providerVersion / engineVersion / cvPolicyVersion -> provider_version / engine_version / cv_policy_version
---   outcome -> outcome
---   refusalReason / refusalDetail -> refusal_reason / refusal_detail
---   observationQuality.sufficient / .state / .aggregateConfidence / .coverage -> oq_sufficient / oq_state / oq_aggregate_confidence / oq_coverage
---   observationQuality.reasons[] / .secondaryDiagnostics[] -> oq_reasons_json / oq_secondary_diagnostics_json
---     (retained JSON: engine diagnostic code lists, displayed to T&S, never queried)
---   derived.personPresent / .ballPresent -> person_present / ball_present
---   derived.touchCount / .juggleCount / .activeDurationMs -> touch_count / juggle_count / active_duration_ms
---   experimental.exactCount -> experimental_exact_count
---   experimental.status -> experimental_status ('experimental_unvalidated')
---   experimental.note -> derived, not stored: constant copy
---   integrity.ok -> integrity_ok
---   integrity.framesAccepted / .framesRejected / .framesDroppedByServer -> frames_accepted / frames_rejected / frames_dropped_by_server
---   integrity.duplicatesRejected / .outOfOrderRejected / .clientClockAnomalies -> duplicates_rejected / out_of_order_rejected / client_clock_anomalies
---   integrity.framesAnalysed / .duplicateFrames / .effectiveFps / .maxBallGapMs -> frames_analysed / duplicate_frames / effective_fps / max_ball_gap_ms
---   integrity.nonceBound / .serverTimeline -> nonce_bound / server_timeline (always true)
---   trace[] -> trace_json (retained JSON: <=256 {atMs, confidence} event timestamps,
---     diagnostic only, bounded by construction, never queried) ; traceTruncated -> trace_truncated
---   serverStartedAt / serverEndedAt / serverDurationMs -> server_started_at / server_ended_at / server_duration_ms
---   combineVerified -> combine_verified (always false today)
---   combineVerifiedBlockedBy -> combine_verified_blocked_by ('REAL_WORLD_VALIDATION_NOT_COMPLETED')
--- notes: no frame bytes, no base64, no pixels — derived metadata only (§35/§37).
---   No player_id on the row: join through box_sessions. Read patterns: by
---   provider_session_id (finalize idempotency, T&S); by session_id.
+CREATE INDEX combine_attempts_player ON combine_attempts (player_id, protocol_id, created_at);
+CREATE TABLE combine_attempt_reasons (
+  attempt_id                               TEXT NOT NULL CHECK (length(attempt_id) > 0 AND length(attempt_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 40),
+  code                                     TEXT NOT NULL CHECK (length(code) > 0 AND length(code) <= 80 AND code NOT GLOB '*[^A-Za-z0-9_]*'),
+  FOREIGN KEY (attempt_id) REFERENCES combine_attempts(id) ON DELETE CASCADE,
+  PRIMARY KEY (attempt_id, ord)
+) STRICT;
+CREATE TABLE combine_attempt_calibration_checks (
+  attempt_id                               TEXT NOT NULL CHECK (length(attempt_id) > 0 AND length(attempt_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 10),
+  check_name                               TEXT NOT NULL CHECK (length(check_name) > 0 AND length(check_name) <= 60),
+  FOREIGN KEY (attempt_id) REFERENCES combine_attempts(id) ON DELETE CASCADE,
+  PRIMARY KEY (attempt_id, ord)
+) STRICT;
 CREATE TABLE box_cam_cv_results (
-  provider_session_id          TEXT PRIMARY KEY,
-  session_id                   TEXT NOT NULL REFERENCES box_sessions(id) ON DELETE CASCADE,
-  protocol_id                  TEXT NOT NULL CHECK (protocol_id IN ('combine-box-touch-60','combine-box-juggle','combine-box-control-60')),
-  provider_id                  TEXT NOT NULL CHECK (provider_id IN ('production_cv')),
-  provider_version             INTEGER NOT NULL,
-  engine_version               TEXT NOT NULL,
-  cv_policy_version            TEXT NOT NULL,
-  outcome                      TEXT NOT NULL CHECK (outcome IN ('accepted','refused')),
-  refusal_reason               TEXT,
-  refusal_detail               TEXT,
-  oq_sufficient                INTEGER NOT NULL CHECK (oq_sufficient IN (0,1)),
-  oq_state                     TEXT CHECK (oq_state IN ('sufficient','insufficient')),
-  oq_aggregate_confidence      REAL,
-  oq_coverage                  REAL,
-  oq_reasons_json              TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(oq_reasons_json)),
-  oq_secondary_diagnostics_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(oq_secondary_diagnostics_json)),
-  person_present               INTEGER NOT NULL CHECK (person_present IN (0,1)),
-  ball_present                 INTEGER NOT NULL CHECK (ball_present IN (0,1)),
-  touch_count                  INTEGER,
-  juggle_count                 INTEGER,
-  active_duration_ms           INTEGER NOT NULL DEFAULT 0,
-  experimental_exact_count     INTEGER,
-  experimental_status          TEXT NOT NULL CHECK (experimental_status IN ('experimental_unvalidated')),
-  integrity_ok                 INTEGER NOT NULL CHECK (integrity_ok IN (0,1)),
-  frames_accepted              INTEGER NOT NULL DEFAULT 0,
-  frames_rejected              INTEGER NOT NULL DEFAULT 0,
-  frames_dropped_by_server     INTEGER NOT NULL DEFAULT 0,
-  duplicates_rejected          INTEGER NOT NULL DEFAULT 0,
-  out_of_order_rejected        INTEGER NOT NULL DEFAULT 0,
-  client_clock_anomalies       INTEGER NOT NULL DEFAULT 0,
-  frames_analysed              INTEGER,
-  duplicate_frames             INTEGER,
-  effective_fps                REAL,
-  max_ball_gap_ms              INTEGER,
-  nonce_bound                  INTEGER NOT NULL DEFAULT 1 CHECK (nonce_bound IN (0,1)),
-  server_timeline              INTEGER NOT NULL DEFAULT 1 CHECK (server_timeline IN (0,1)),
-  trace_json                   TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(trace_json)),
-  trace_truncated              INTEGER NOT NULL DEFAULT 0 CHECK (trace_truncated IN (0,1)),
-  server_started_at            INTEGER,
-  server_ended_at              INTEGER,
-  server_duration_ms           INTEGER NOT NULL DEFAULT 0,
-  combine_verified             INTEGER NOT NULL DEFAULT 0 CHECK (combine_verified IN (0,1)),
-  combine_verified_blocked_by  TEXT
+  provider_session_id                      TEXT NOT NULL CHECK (length(provider_session_id) <= 80 AND length(provider_session_id) > 0),
+  session_id                               TEXT NOT NULL CHECK (length(session_id) <= 80 AND length(session_id) > 0),
+  protocol_id                              TEXT NOT NULL CHECK (protocol_id IN ('combine-box-touch-60','combine-box-juggle','combine-box-control-60')),
+  provider_id                              TEXT NOT NULL CHECK (provider_id IN ('production_cv')),
+  provider_version                         INTEGER NOT NULL,
+  engine_version                           INTEGER NOT NULL,
+  cv_policy_version                        INTEGER NOT NULL,
+  outcome                                  TEXT NOT NULL CHECK (outcome IN ('accepted','refused')),
+  refusal_reason                           TEXT CHECK (refusal_reason IS NULL OR length(refusal_reason) <= 80),
+  refusal_detail                           TEXT CHECK (refusal_detail IS NULL OR length(refusal_detail) <= 300),
+  oq_sufficient                            INTEGER NOT NULL CHECK (oq_sufficient IN (0,1)),
+  oq_state                                 TEXT CHECK (oq_state IS NULL OR oq_state IN ('sufficient','insufficient')),
+  oq_aggregate_confidence                  REAL,
+  oq_coverage                              REAL,
+  person_present                           INTEGER NOT NULL CHECK (person_present IN (0,1)),
+  ball_present                             INTEGER NOT NULL CHECK (ball_present IN (0,1)),
+  touch_count                              INTEGER,
+  juggle_count                             INTEGER,
+  active_duration_ms                       REAL NOT NULL,
+  experimental_exact_count                 INTEGER,
+  experimental_status                      TEXT NOT NULL CHECK (experimental_status IN ('experimental_unvalidated')),
+  integrity_ok                             INTEGER NOT NULL CHECK (integrity_ok IN (0,1)),
+  frames_accepted                          INTEGER NOT NULL,
+  frames_rejected                          INTEGER NOT NULL,
+  frames_dropped_by_server                 INTEGER NOT NULL,
+  duplicates_rejected                      INTEGER NOT NULL,
+  out_of_order_rejected                    INTEGER NOT NULL,
+  client_clock_anomalies                   INTEGER NOT NULL,
+  frames_analysed                          INTEGER,
+  duplicate_frames                         INTEGER,
+  effective_fps                            REAL,
+  max_ball_gap_ms                          REAL,
+  nonce_bound                              INTEGER NOT NULL CHECK (nonce_bound IN (0,1)),
+  server_timeline                          INTEGER NOT NULL CHECK (server_timeline IN (0,1)),
+  trace_truncated                          INTEGER NOT NULL CHECK (trace_truncated IN (0,1)),
+  server_started_at                        INTEGER,
+  server_ended_at                          INTEGER,
+  server_duration_ms                       INTEGER NOT NULL,
+  combine_verified                         INTEGER NOT NULL CHECK (combine_verified IN (0,1)),
+  combine_verified_blocked_by              TEXT CHECK (combine_verified_blocked_by IS NULL OR length(combine_verified_blocked_by) <= 80),
+  FOREIGN KEY (session_id) REFERENCES box_sessions(id) ON DELETE CASCADE,
+  PRIMARY KEY (provider_session_id),
+  CHECK ((outcome = 'refused') = (refusal_reason IS NOT NULL)),
+  CHECK (combine_verified = 0)
 ) STRICT;
 CREATE INDEX box_cam_cv_results_session ON box_cam_cv_results (session_id);
+CREATE TABLE box_cam_cv_result_codes (
+  provider_session_id                      TEXT NOT NULL CHECK (length(provider_session_id) > 0 AND length(provider_session_id) <= 80),
+  list                                     TEXT NOT NULL CHECK (list IN ('quality','secondary')),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 40),
+  code                                     TEXT NOT NULL CHECK (length(code) > 0 AND length(code) <= 80 AND code NOT GLOB '*[^A-Za-z0-9_]*'),
+  value                                    REAL,
+  threshold                                REAL,
+  FOREIGN KEY (provider_session_id) REFERENCES box_cam_cv_results(provider_session_id) ON DELETE CASCADE,
+  PRIMARY KEY (provider_session_id, list, ord),
+  CHECK (list = 'quality' OR (value IS NULL AND threshold IS NULL))
+) STRICT;
+CREATE TABLE box_cam_cv_result_trace (
+  provider_session_id                      TEXT NOT NULL CHECK (length(provider_session_id) > 0 AND length(provider_session_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0 AND ord < 256),
+  at_ms                                    REAL,
+  confidence                               REAL,
+  FOREIGN KEY (provider_session_id) REFERENCES box_cam_cv_results(provider_session_id) ON DELETE CASCADE,
+  PRIMARY KEY (provider_session_id, ord)
+) STRICT;
 
 
 -- =============================================================================

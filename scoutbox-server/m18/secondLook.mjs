@@ -82,12 +82,16 @@ export function registerSecondLook(ctx) {
     // PRODUCTION ONLY. A result captured through a test-only provider is
     // labelled simulated everywhere else in the product and must never become
     // production recruitment evidence here either.
-    for (const a of db.combineAttempts ?? []) {
-      if (a.playerId !== player.id) continue;
+    // S12b: the player's attempts and sessions, read through SQL once.
+    const boxReads = ctx.boxCamReads;
+    const playerAttempts = [...boxReads.attempts.forPlayer(player.id)].reverse();
+    const playerSessions = boxReads.sessions.forPlayer(player.id);
+    const sessionById = new Map(playerSessions.map((s) => [s.id, s]));
+    for (const a of playerAttempts) {
       if (a.combineState !== 'combine_verified' || !a.completedAt) continue;
       if (PROVIDERS[a.provider]?.testOnly) continue;
       // The live effective state: an invalidated bound session removes it.
-      const session = (db.boxSessions ?? []).find((s) => s.id === a.boxSessionId);
+      const session = sessionById.get(a.boxSessionId);
       if (session?.verificationState === 'invalidated') continue;
       if (a.completedAt > since) add('combine_verified_added', 'combine', `${a.protocolId}@${a.protocolVersion}`, a.completedAt);
     }
@@ -96,16 +100,16 @@ export function registerSecondLook(ctx) {
     // Never one change per session: that is notification spam, not news. Only
     // the FIRST development evidence since the review, or a completed
     // coach-assigned block, is material.
-    const sessions = (db.boxSessions ?? [])
-      .filter((s) => s.playerId === player.id && ['verified', 'partially_verified'].includes(s.verificationState) && s.finalizedAt);
+    const sessions = playerSessions
+      .filter((s) => ['verified', 'partially_verified'].includes(s.verificationState) && s.finalizedAt);
     const fresh = sessions.filter((s) => s.finalizedAt > since);
     const hadBefore = sessions.some((s) => s.finalizedAt <= since);
     if (!hadBefore && fresh.length >= POLICY.boxCam.minSessionsForFirstEvidence) {
       const first = fresh.sort((a, b) => a.finalizedAt - b.finalizedAt)[0];
       add('development_evidence_started', 'box_cam', first.id, first.finalizedAt);
     }
-    for (const a of db.boxAssignments ?? []) {
-      if (a.playerId !== player.id || a.orgId !== org.id) continue;
+    for (const a of boxReads.assignments.forPlayer(player.id)) {
+      if (a.orgId !== org.id) continue;
       if (a.state === 'completed' && a.updatedAt > since) add('development_block_completed', 'box_cam', a.id, a.updatedAt);
     }
 
@@ -128,14 +132,13 @@ export function registerSecondLook(ctx) {
     // keeps an append-only integrity history, so the change is first class and
     // fingerprinted on the SESSION: one invalidation stays one change however
     // many projections (Combine, Passport timeline, Trust) reflect it.
-    for (const session of db.boxSessions ?? []) {
-      if (session.playerId !== player.id) continue;
+    for (const session of playerSessions) {
       const events = session.integrityEvents ?? [];
       if (!events.length) continue;
       // Only sessions that actually backed a production Combine result matter
       // to a recruitment decision.
-      const backed = (db.combineAttempts ?? []).some((a) => a.boxSessionId === session.id
-        && a.playerId === player.id && a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly);
+      const backed = playerAttempts.some((a) => a.boxSessionId === session.id
+        && a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly);
       if (!backed) continue;
       for (const ev of events) {
         if (!(ev.at > since)) continue;

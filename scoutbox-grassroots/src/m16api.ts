@@ -17,9 +17,11 @@ export interface BoxChallengeRow { id: string; title: string; drillTitle: string
 
 export interface M16Api {
   drills(s: Session): Promise<BoxDrill[]>;
+  /** The first page, newest first (S12b: the list pages by cursor; `summary` counts them all). A "load more" that follows `nextCursor` is still needed. */
   assignments(s: Session, playerId?: string): Promise<BoxAssignments>;
   createAssignment(s: Session, input: { playerId: string; drillId: string; target: BoxTarget; frequencyPerWeek?: number; instructions?: string; dueDate?: string }): Promise<{ assignment: BoxAssignmentRow }>;
   cancelAssignment(s: Session, id: string): Promise<{ assignment: BoxAssignmentRow }>;
+  /** The first page, newest first (S12b: the list pages by cursor). A "load more" that follows `nextCursor` is still needed. */
   challenges(s: Session): Promise<BoxChallengeRow[]>;
   createChallenge(s: Session, input: { title: string; drillId: string; metric: string; targetTotal: number; days: number; adultOnly?: boolean }): Promise<{ challenge: BoxChallengeRow }>;
 }

@@ -21,7 +21,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const SUITES = [
   'testOutboxPushServer', 'testDispatchesServer', 'testSafetyAuditServer', 'testCoreIdentityServer',
   'testWriterAtomicity', 'testNotificationsServer', 'testOneTimeCodesServer', 'testRecruitmentServer',
-  'testScoutingEvidence', 'testScoutingAssessments', 'testClubSetup', 'testOpportunitiesCampaigns', 'testVerification', 'testPassport', 'testTransitionsVouches', 'testAgentCore', 'testCompliancePolicies', 'testComplianceRecords', 'testAgentTransactions', 'testDevelopment', 'testRecruitmentContactsOffersServer', 'testChannelsServer', 'testRecruitmentCasesServer', 'testPlayerErasureServer',
+  'testScoutingEvidence', 'testScoutingAssessments', 'testClubSetup', 'testOpportunitiesCampaigns', 'testVerification', 'testPassport', 'testTransitionsVouches', 'testAgentCore', 'testCompliancePolicies', 'testComplianceRecords', 'testAgentTransactions', 'testDevelopment', 'testBoxCam', 'testRecruitmentContactsOffersServer', 'testChannelsServer', 'testRecruitmentCasesServer', 'testPlayerErasureServer',
   'testBackup', 'testSessions', 'testOrgs', 'testIdentity',
   'testRuntime', 'testTrust', 'testDataLayer', 'testCoreSchema', 'testUnitOfWork', 'testCoreIdentityMapping',
   'testIdentityRepositories', 'testCoreIdentityMigration', 'testMediaDeletions', 'testPlayerSubrecords',

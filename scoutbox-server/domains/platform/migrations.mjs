@@ -100,7 +100,7 @@ export const MIGRATIONS = [
         'notifications', 'ledger', 'sessions', 'users', 'orgs', 'players', 'guardians',
         // the recruitment cases and the four Room collections are tables read through SQL since §4.3 step 2
         'recruitmentBriefs', 'nobodyMissedReviews', 'secondLookItems', 'sourceChanges',
-        'boxSessions', 'boxSessionEvents', 'combineAttempts', 'combineRequests',
+        // the Box Cam sessions and the Combine attempts and requests are tables since S12b (migration 0031)
       ]) db[k] ??= [];
     },
   },
@@ -194,8 +194,9 @@ export const MIGRATIONS = [
     // dropped — so there is nothing about them for a schema to represent. A
     // store would be the first place a "just for debugging" frame could land.
     note: 'Box Cam CV provider observation results (derived metadata only). No frame store exists, by design.',
-    up(db) {
-      db.boxCamCvResults ??= [];
+    up() {
+      // The CV results are a table since S12b (migration 0031, repositories/boxCam.mjs): there is no collection to
+      // create. A recorded no-op (its id stays).
     },
   },
   {

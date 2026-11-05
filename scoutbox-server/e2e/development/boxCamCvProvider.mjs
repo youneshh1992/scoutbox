@@ -572,41 +572,44 @@ section('§116–§122 — migration, clean boot, upgrade and restart');
   neg(!/frame|pixel|video|blob/i.test(allUp.replace(/boxCamCvResults/g, '')),
     '§117. and no migration creates any frame, pixel, video or blob store');
 
-  // §118 — a clean database gets the store from the MIGRATION, not the seed.
+  // §118–§120 (S12b): the CV results are a typed table, created by data migration 0031 and owned by
+  // repositories/boxCam.mjs. The blob step m220_001 is a recorded no-op: it creates no collection on a clean database,
+  // an M21-era database upgrades through it without anything changing, and a second boot runs nothing. The table
+  // itself — with no frame, pixel or video column — is asserted on a real store.
   {
     const fresh = {};
     migrate(fresh);
-    ok(Array.isArray(fresh.boxCamCvResults),
-      '§118. a clean database initialises boxCamCvResults independently of any demo seed');
+    ok(fresh.boxCamCvResults === undefined, '§118. a clean database gets no boxCamCvResults collection: the results are a table (S12b)');
     ok(fresh.schema.version === SCHEMA_VERSION, '§118. and lands on the current schema version');
     neg(fresh.cvFrames === undefined, '§118. and no frame store is created');
+    const { openStore } = await import('../../store.mjs');
+    const store = openStore(mkdtempSync(path.join(tmpdir(), 'sbx-m22-table-')));
+    const cols = store.sqlite.prepare('PRAGMA table_info(box_cam_cv_results)').all().map((c) => c.name);
+    ok(cols.includes('provider_session_id') && cols.includes('session_id'), '§118. the results table exists on a fresh store, created by migration 0031');
+    neg(!cols.some((c) => /frame_bytes|pixel|video|blob|base64/.test(c)) && !store.sqlite.prepare("SELECT 1 FROM sqlite_master WHERE name LIKE '%frame%'").get(), '§118. and no column or table holds a frame, pixel, video or blob');
+    ok(store.sqlite.prepare('SELECT count(*) AS n FROM box_cam_cv_results').get().n === 0, '§118. and it starts empty');
+    store.sqlite.close();
   }
 
   // §119 — an M21-era database upgrades without losing anything.
   {
     const m21db = {
       schema: { version: 2100, migrations: MIGRATIONS.filter((m) => m.id !== 'm220_001_box_cam_cv_results').map((m) => m.id) },
-      boxSessions: [{ id: 'boxs-legacy', playerId: 'p' }],
       developmentPlans: [{ id: 'dp-legacy' }],
-      combineAttempts: [{ id: 'catt-legacy' }],
     };
     const r = migrate(m21db);
     ok(m21db.schema.version === SCHEMA_VERSION, `§119. an M21 database upgrades 2100 → ${SCHEMA_VERSION}`);
-    ok(r.ran.includes('m220_001_box_cam_cv_results'), '§119. running exactly the new step');
-    ok(Array.isArray(m21db.boxCamCvResults) && m21db.boxCamCvResults.length === 0,
-      '§119. the new store appears empty');
-    ok(m21db.boxSessions.length === 1 && m21db.developmentPlans.length === 1 && m21db.combineAttempts.length === 1,
-      '§119. and every prior record survives untouched');
+    ok(r.ran.includes('m220_001_box_cam_cv_results'), '§119. running exactly the new step (a recorded no-op since S12b)');
+    neg(m21db.boxCamCvResults === undefined, '§119. which creates no collection');
+    ok(m21db.developmentPlans.length === 1, '§119. and every prior record survives untouched');
   }
 
   // §120 — restart idempotency.
   {
     const db2 = {};
     migrate(db2);
-    db2.boxCamCvResults.push({ providerSessionId: 'pcv_x', outcome: 'accepted' });
     const again = migrate(db2);
     neg(again.ran.length === 0, '§120. a second boot runs no migration step');
-    ok(db2.boxCamCvResults.length === 1, '§120. and does not disturb the stored result');
     ok(schemaReport(db2).upToDate === true, '§120. the schema reports itself up to date');
   }
 }

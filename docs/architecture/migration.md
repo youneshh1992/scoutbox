@@ -52,7 +52,7 @@ A domain that is in tables but still loaded whole into memory is only part-way t
 
 ## 3. Status
 
-30 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0031`. Each step
+31 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0032`. Each step
 takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Status |
@@ -66,8 +66,8 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S11b | T&S reviewers, policy versions; compliance contexts, evaluations, reviews, consents | `0027`, `0028` | `compliancePolicies`, `complianceRecords` | done |
 | S11c | transactions, representation bindings, transaction documents | `0029` | `agentTransactions` | done |
 | S12a | development objectives, drill-guidance reviews, Development Hub | `0030` | `development` | done |
-| S12b | Box Cam and Combine | | | **next** |
-| S12c | discovery and watchlists | | | not started |
+| S12b | Box Cam, Combine and the CV results | `0031` | `boxCam` | done |
+| S12c | discovery and watchlists | | | **next** |
 | S12d | insight and coverage | | | not started |
 | S13 | operations and integrations | | | not started |
 | S14 | retire the blob | | | not started |
@@ -97,7 +97,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -155,6 +155,7 @@ separate risk; the script moves the fixtures' instants to today to measure the s
 - The Development Hub's plan list (S12a): the access rule (`planAccess`, with the live `orgCanSee`) is applied in code
   to one club's, one player's or one guardian's candidate plans, so the page is cut after filtering. Bounded by one
   club's plans, not the player base.
+- Box Cam (S12b): an organisation's assignment, challenge and Combine request lists apply the visibility rule in code, so the page is cut after filtering (bounded by one club's); the Combine projection, Passport and Trust read one player's attempts and sessions. Not the player base.
 - Transactions (S11c): a projection reads each transaction's consents, context and evaluation by id (a page's bindings and
   documents are one batch); the T&S stale-snapshot figure and the agency audit decode their records. Bounded by one
   agent's, one club's or the live transactions, not the player base.
@@ -190,7 +191,7 @@ starts by moving its domain's code (§4.4).
 
 | Step | Schema file | Collections | Watch out for |
 |---|---|---|---|
-| S12 Development, Box Cam, discovery | `07_development_boxcam_discovery.sql` | Split in four, one migration each. **S12a (done)**: `devObjectives`, `drillGuidance`, `development*`. **S12b**: `boxCamPrefs`, `boxChallenges`, `boxChallengeEntries`, `boxAssignments`, `boxSessions`, `boxSessionEvents`, `boxCamDisputes`, `combineRequests`, `combineAttempts`, `boxCamCvResults`. **S12c**: `recruitmentBriefs`, `nobodyMissedReviews`, `secondLookItems`, `dynamicWatchlists`, `watchlistHistory`. **S12d**: `exposureEvents`, `reviewLater`, `evidenceSuggestions`, `calibrationSessions`, `fixtures`, `coverage*` | S12b: the Hub (`domains/development/hub/`) still reads `db.boxSessions` and `db.combineAttempts` for linkable evidence, evidence resolution and target states; move them to the Box Cam reads. A box assignment's objective is a `dev_objectives` key. Hash the nonce. Consent gate; one entry per challenge and player. The Box Cam evaluation tools in `scripts/tools/` write files the Combine production gate reads. S12c/d: reads that write (Second Look and watchlist reconciliation, evidence suggestions) become explicit upserts; split `fixture_id` into kind and id; the player opportunity board pages with discovery. |
+| S12 Development, Box Cam, discovery | `07_development_boxcam_discovery.sql` | Split in four, one migration each. **S12a (done)**: `devObjectives`, `drillGuidance`, `development*`. **S12b (done)**: `boxCamPrefs`, `boxChallenges`, `boxChallengeEntries`, `boxAssignments`, `boxSessions`, `boxSessionEvents` (retired, no table), `boxCamDisputes`, `combineRequests`, `combineAttempts`, `boxCamCvResults`. **S12c**: `recruitmentBriefs`, `nobodyMissedReviews`, `secondLookItems`, `dynamicWatchlists`, `watchlistHistory`. **S12d**: `exposureEvents`, `reviewLater`, `evidenceSuggestions`, `calibrationSessions`, `fixtures`, `coverage*` | S12c/d: Second Look and Nobody Missed already read Box Cam through `boxCamReads` (S12b). Reads that write (Second Look and watchlist reconciliation, evidence suggestions) become explicit upserts; split `fixture_id` into kind and id; the player opportunity board pages with discovery. |
 | S13 Operations and integrations | `08_operations_integrations.sql` | `apiKeys`, `webhook*`, `orgInvites`, `sso*`, `support*`, `importBatches`, `prospects`, `identityReviews`, `groups`, `groupGrants`, `uploadSessions`, `savedSearches`, `openTrials`, `matchdays`, `friendlies`, `invoices`, `plans`, `archetypes`, `reputationSeed`, the `delivery*` singletons | Invites and SSO states are hashed. Invoices are stored exactly, in minor units. Production's empty first boot (catalogues only, demo opt-in with `SCOUTBOX_SEED_DEMO=1`) must survive the catalogues becoming rows. |
 
 **Open from earlier steps** (not blocking): a coach affiliation is matched to a staff member by display name (a
@@ -200,8 +201,8 @@ code, not derived from claims; assessment templates are shared by every club unt
 ### 4.6 S14: retire the blob
 
 Depends on S2–S13. The `collections` table ends up empty. `meta.idCounter` moves to a `counters` table, and
-`db.schema` is replaced by `data_migrations`. The `m182` snapshot migrations become no-ops. `mediaBlobs`,
-`boxSessionEvents` and `NOT_A_STORE` leave `storeContract.mjs`. The `db.x ??= []` and `migrateMxx` lines are deleted,
+`db.schema` is replaced by `data_migrations`. The `m182` snapshot migrations become no-ops. `mediaBlobs` and
+`NOT_A_STORE` leave `storeContract.mjs` (`boxSessionEvents` left with S12b). The `db.x ??= []` and `migrateMxx` lines are deleted,
 as is the blob fallback `readTrialsCollection` in `repositories/identity.mjs`. The contract test asserts zero blob
 collections. The six `recruitment/*Persistence` batteries' checks that name the old storage go. The migrations
 `0001`–`00NN` may be squashed into one baseline, if that helps.

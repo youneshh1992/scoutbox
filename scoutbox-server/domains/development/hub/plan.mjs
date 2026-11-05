@@ -91,8 +91,9 @@ export function buildDevelopmentPlan({
   const { plan, goals, actions, links, reviews } = bundle;
   if (!access?.read) return null;
 
-  const attempts = (db.combineAttempts ?? []).filter((a) => a.playerId === plan.playerId);
-  const sessions = new Map((db.boxSessions ?? []).filter((s) => s.playerId === plan.playerId).map((s) => [s.id, s]));
+  // S12b: the player's attempts and sessions, read through SQL.
+  const attempts = reads.boxCam?.attempts.forPlayer(plan.playerId) ?? [];
+  const sessions = new Map((reads.boxCam?.sessions.forPlayer(plan.playerId) ?? []).map((s) => [s.id, s]));
 
   const actionsByGoal = new Map();
   for (const a of actions) {

@@ -901,6 +901,7 @@ const E = {};
   ok(linkedRefused.status === 201 && !!evR && (fin.status !== 200 || fin.body.result?.outcome !== 'accepted'), `E11 a session the CV pipeline refused still links — it happened (${fin.status} ${fin.body?.result?.outcome ?? fin.body?.error ?? ''})`);
   ok(!!evR && /^No reliable observation available/.test(evR.observation.copy) && evR.observation.state !== 'accepted', `E12 the refusal projects as "No reliable observation available. …" under the refusal state (${evR?.observation?.state}) — never as poor performance (D-17)`);
   neg(!!evR && !/\b0\.\d+\b|\d+%|score|rating/i.test(JSON.stringify(evR.observation)), 'E12b the observation carries no confidence number, percentage, score or rating');
+  ok(fin.status === 200 && fin.body.result?.outcome === 'refused' && evR?.observation.state === fin.body.result.refusalReason, `E12c the session's recorded CV result is the one projected, under its own refusal reason (S12b: the lookup named a field no result carries, so it projected no_cv_result) (${fin.status} ${evR?.observation?.state})`);
   // Withdrawn.
   E.CANCELLED = await mk(kola.token);
   await j('POST', `/player/box-cam/sessions/${E.CANCELLED.id}/cancel`, {}, kola.token);

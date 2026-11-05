@@ -41,6 +41,7 @@ export interface CompareMatrix {
 export interface CombineApi {
   standardProtocols(): StandardProtocol[];
   createRequest(s: Session, input: { title?: string; protocolIds: string[]; playerId?: string; playerIds?: string[]; deadline?: string; instructions?: string }): Promise<{ requests: CombineRequestRow[]; skipped: { playerId: string; reason: string }[] }>;
+  /** The first page, newest first (S12b: the list pages by cursor). A "load more" that follows `nextCursor` is still needed. */
   requests(s: Session, playerId?: string): Promise<CombineRequestRow[]>;
   cancelRequest(s: Session, id: string): Promise<{ request: CombineRequestRow }>;
   player(s: Session, playerId: string): Promise<PlayerCombine>;

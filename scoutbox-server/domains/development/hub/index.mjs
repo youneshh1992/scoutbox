@@ -66,8 +66,9 @@ export function registerDevelopment(ctx) {
     orgRouter, playerRouter, guardianRouter, audit, isAdult, unit,
     recruitmentReads, scoutingReads, // §4.3 step 2: the trials (and, since S9a, the evidence) are read through SQL
     development, developmentReads, // S12a: the Hub's own records
+    boxCamReads, // S12b: Box Cam sessions and Combine attempts, the Hub's linkable evidence and target states
   } = ctx;
-  const reads = { ...recruitmentReads, ...scoutingReads, development: developmentReads };
+  const reads = { ...recruitmentReads, ...scoutingReads, development: developmentReads, boxCam: boxCamReads };
   if (typeof reads?.trials?.byId !== 'function') throw new TypeError('registerDevelopment needs recruitmentReads (trials) from the data layer');
   if (typeof development?.plans?.create !== 'function' || !developmentReads) throw new TypeError('registerDevelopment needs the development repository from the data layer');
   /** A plain, editable copy of a stored (read-only) record: a route edits it, then writes it whole through the repository. */
@@ -398,8 +399,8 @@ export function registerDevelopment(ctx) {
       const candidates = [
         ...(reads.evidence?.forPlayer(player.id) ?? []).map((e) => ({ sourceType: 'passport_evidence', sourceId: e.id })),
         ...(reads.assessments?.forPlayer(player.id) ?? []).map((a) => ({ sourceType: 'assessment', sourceId: a.id })),
-        ...(db.boxSessions ?? []).filter((s) => s.playerId === player.id).map((s) => ({ sourceType: 'box_cam_session', sourceId: s.id })),
-        ...(db.combineAttempts ?? []).filter((a) => a.playerId === player.id).map((a) => ({ sourceType: 'combine_attempt', sourceId: a.id })),
+        ...boxCamReads.sessions.forPlayer(player.id).map((s) => ({ sourceType: 'box_cam_session', sourceId: s.id })),
+        ...[...boxCamReads.attempts.forPlayer(player.id)].reverse().map((a) => ({ sourceType: 'combine_attempt', sourceId: a.id })),
         ...reads.trials.forPlayer(player.id).map((t) => ({ sourceType: 'trial_report', sourceId: t.id })),
       ];
       const items = candidates
@@ -1049,8 +1050,8 @@ export function registerDevelopment(ctx) {
         return res.status(200).json({ ...project(bundle, viewer), idempotent: true });
       }
 
-      const attempts = db.combineAttempts.filter((a) => a.playerId === plan.playerId);
-      const sessions = new Map(db.boxSessions.filter((s) => s.playerId === plan.playerId).map((s) => [s.id, s]));
+      const attempts = boxCamReads.attempts.forPlayer(plan.playerId);
+      const sessions = new Map(boxCamReads.sessions.forPlayer(plan.playerId).map((s) => [s.id, s]));
       const review = {
         id: nextId('devrev'),
         planId: plan.id, playerId: plan.playerId,

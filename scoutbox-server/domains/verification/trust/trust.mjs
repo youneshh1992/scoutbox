@@ -23,7 +23,7 @@ import {
 
 export function registerTrust(ctx) {
   const {
-    db, byId, playerRouter, guardianRouter, orgRouter, adminRouter,
+    byId, playerRouter, guardianRouter, orgRouter, adminRouter,
     findPlayer, isBlocked, vmetric,
   } = ctx;
 
@@ -108,10 +108,10 @@ export function registerTrust(ctx) {
       }));
   }
 
-  /** Box Cam observed sessions (finalized, still standing). */
+  /** Box Cam observed sessions (finalized, still standing). S12b: read through SQL. */
   function boxCamSource(player) {
-    return (db.boxSessions ?? [])
-      .filter((s) => s.playerId === player.id && s.finalizedAt)
+    return ctx.boxCamReads.sessions.forPlayer(player.id)
+      .filter((s) => s.finalizedAt)
       .map((s) => ({
         key: `box:${s.id}`,
         verificationState: s.verificationState,
@@ -125,10 +125,11 @@ export function registerTrust(ctx) {
    *  and a restore brings it back, with no penalty either way. The measured
    *  VALUE is deliberately not included in this projection at all. */
   function combineSource(player) {
-    return (db.combineAttempts ?? [])
-      .filter((a) => a.playerId === player.id)
+    const attempts = [...ctx.boxCamReads.attempts.forPlayer(player.id)].reverse();
+    const sessions = new Map(ctx.boxCamReads.sessions.byIds(attempts.map((a) => a.boxSessionId)).map((s) => [s.id, s]));
+    return attempts
       .map((a) => {
-        const s = (db.boxSessions ?? []).find((x) => x.id === a.boxSessionId);
+        const s = sessions.get(a.boxSessionId);
         const invalidated = !!s && s.verificationState === 'invalidated';
         return {
           key: `catt:${a.id}`,

@@ -61,14 +61,10 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // "the name exists", and the record is the table. Writes go through `safetyAudit` only (ledgerAppend, moderateOrRefuse, handleReport,
   // the block / lift / note / IDV / resolve routes, the m13 ops events, m181's source changes).
   blocks: { guarantee: 'migration', owner: 'core', reason: 'read by isBlocked() inside every visibility check — a missing container crashed the safeguarding path (D2); since S6b a read-only view over the blocks table, written only through the safetyAudit repository (Q5: a lift deletes the row)' },
-  boxAssignments: { guarantee: 'module', owner: 'm16', reason: 'Box Cam feature collection, created at registration' },
-  boxCamCvResults: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
-  boxCamDisputes: { guarantee: 'module', owner: 'm16', reason: 'Box Cam feature collection, created at registration' },
-  boxCamPrefs: { guarantee: 'module', owner: 'm16', reason: 'Box Cam feature collection, created at registration' },
-  boxChallengeEntries: { guarantee: 'module', owner: 'm16', reason: 'Box Cam feature collection, created at registration' },
-  boxChallenges: { guarantee: 'module', owner: 'm16', reason: 'Box Cam feature collection, created at registration' },
-  boxSessionEvents: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
-  boxSessions: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
+  // boxCamPrefs, boxChallenges, boxChallengeEntries, boxAssignments, boxSessions, boxCamDisputes, combineRequests,
+  // combineAttempts, boxCamCvResults: never a db.* read since S12b — typed tables (migration 0031), read through
+  // repositories/boxCam.mjs (boxCamReads). Each db.* name throws, boxSessionEvents (reserved, never written) with them;
+  // the blob steps that created them are recorded no-ops.
   calibrationSessions: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   // campaignSubmissions: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
   // (scoutingReads). db.campaignSubmissions throws.
@@ -79,8 +75,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // order, messages nested in array order), written only through the channels repository (the acceptance routes'
   // openChannel, postMessage, the three receipt routes, the account deletion).
   channels: { guarantee: 'migration', owner: 'core', reason: 'moderated message threads, opened on acceptance (D2); container guaranteed by the migration registry before the data layer attaches; since S7d a read-only view over the channels table, written only through the channels repository' },
-  combineAttempts: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
-  combineRequests: { guarantee: 'migration', owner: 'm16', reason: 'Box Cam / Combine collection, guaranteed by the migration registry' },
   coverageAssignments: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   coveragePlans: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   deliveryCallbacksSeen: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },

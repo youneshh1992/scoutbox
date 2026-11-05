@@ -436,6 +436,68 @@ section('§99 — remaining abuse cases');
   neg(badMetric.status === 400 && badMetric.body.error === 'METRIC_NOT_SUPPORTED', 'challenge cannot demand rep counts a drill cannot verify');
 }
 
+section('S12b — junk refused naming the field, never coerced; lists that grow page by cursor');
+{
+  // Observation events the engine cannot read are refused (they were dropped at finalize, or read as 'good', before).
+  const c = await j('POST', '/player/box-cam/sessions', { drillId: 'box-touches', target: { type: 'repetitions', value: 50 }, provider: 'local_test' }, kola.token);
+  ok(c.status === 201, 'a session is minted for the junk checks');
+  const { session, nonce, livenessChallenge } = c.body;
+  await j('POST', `/player/box-cam/sessions/${session.id}/start`, { nonce, liveness: livenessChallenge }, kola.token);
+  const ev = (batch) => j('POST', `/player/box-cam/sessions/${session.id}/events`, { nonce, batch }, kola.token);
+  const noEnd = await ev([{ seq: 1, type: 'active_interval', fromMs: 0 }]);
+  neg(noEnd.status === 400 && noEnd.body.error === 'EVENT_INVALID' && noEnd.body.seq === 1, 'an interval without toMs is refused naming the event');
+  const badQuality = await ev([{ seq: 1, type: 'presence_interval', fromMs: 0, toMs: 1000, quality: 'great' }]);
+  neg(badQuality.status === 400 && /quality/.test(badQuality.body.message), 'an unknown observation quality is refused (it read as good before)');
+  const stringAt = await ev([{ seq: 1, type: 'rep', atMs: '400' }]);
+  neg(stringAt.status === 400 && /atMs/.test(stringAt.body.message), 'a timestamp written as text is refused');
+  const badConf = await ev([{ seq: 1, type: 'rep', atMs: 400, confidence: 3 }]);
+  neg(badConf.status === 400 && /confidence/.test(badConf.body.message), 'a confidence outside 0–1 is refused');
+  const mixed = await ev([{ seq: 1, type: 'rep', atMs: 400, confidence: 0.9 }, { seq: 2, type: 'rep' }]);
+  neg(mixed.status === 400 && mixed.body.seq === 2, 'one bad event refuses the whole batch');
+  const good = await ev([{ seq: 1, type: 'rep', atMs: 400, confidence: 0.9 }, { seq: 2, type: 'pause', atMs: 500 }, { seq: 3, type: 'resume', atMs: 900 }]);
+  ok(good.status === 200 && good.body.lastSeq === 3, 'the refused batches left the sequence where it was; a good batch lands');
+  const stringTarget = await j('POST', '/player/box-cam/sessions', { drillId: 'box-touches', target: { type: 'repetitions', value: '50' }, provider: 'local_test' }, kola.token);
+  neg(stringTarget.status === 400 && stringTarget.body.error === 'TARGET_VALUE_INVALID', 'a session target written as text is refused');
+
+  // Assignments: a frequency, a due date and a target value are refused when they are not what they say.
+  const base = { playerId: 'pl-adeyemi', drillId: 'box-control', target: { type: 'duration', value: 10 * MIN } };
+  const freq = await j('POST', '/org/box-cam/assignments', { ...base, frequencyPerWeek: 2.5 }, maria.token);
+  neg(freq.status === 400 && freq.body.field === 'frequencyPerWeek', 'a fractional weekly frequency is refused (it was coerced before)');
+  const due = await j('POST', '/org/box-cam/assignments', { ...base, dueDate: '2026-02-30' }, maria.token);
+  neg(due.status === 400 && due.body.error === 'DATE_INVALID' && due.body.field === 'dueDate', 'a due date that does not exist is refused (it was cut to ten characters and kept before)');
+  const tv = await j('POST', '/org/box-cam/assignments', { ...base, target: { type: 'duration', value: '600000' } }, maria.token);
+  neg(tv.status === 400 && tv.body.error === 'TARGET_INVALID', 'an assignment target written as text is refused');
+  const neg0 = await j('POST', '/org/box-cam/assignments', { ...base, target: { type: 'duration', value: 0 } }, maria.token);
+  neg(neg0.status === 400 && neg0.body.error === 'TARGET_INVALID', 'a zero target is refused');
+  const okDue = await j('POST', '/org/box-cam/assignments', { ...base, dueDate: '2026-12-01', frequencyPerWeek: 2 }, maria.token);
+  ok(okDue.status === 201 && okDue.body.assignment.dueDate === '2026-12-01' && okDue.body.assignment.frequencyPerWeek === 2, 'a real due date and a whole frequency are stored as given');
+
+  // Challenges: days, cap, adultOnly and the total are refused, never clamped or dropped.
+  const chal = { title: 'Junk', drillId: 'box-touches', metric: 'reps', targetTotal: 100, days: 7 };
+  const days = await j('POST', '/org/box-cam/challenges', { ...chal, days: 90 }, maria.token);
+  neg(days.status === 400 && days.body.field === 'days', 'a challenge longer than 60 days is refused (it was clamped before)');
+  const cap = await j('POST', '/org/box-cam/challenges', { ...chal, cap: -3 }, maria.token);
+  neg(cap.status === 400 && cap.body.field === 'cap', 'a negative cap is refused (it became unlimited before)');
+  const adult = await j('POST', '/org/box-cam/challenges', { ...chal, adultOnly: 'yes' }, maria.token);
+  neg(adult.status === 400 && adult.body.field === 'adultOnly', 'adultOnly must be true or false');
+  const total = await j('POST', '/org/box-cam/challenges', { ...chal, targetTotal: 12.5 }, maria.token);
+  neg(total.status === 400 && total.body.error === 'TARGET_INVALID', 'a fractional challenge total is refused');
+
+  // Prefs: retainClips is a boolean.
+  const prefs = await j('PATCH', '/player/box-cam/prefs', { retainClips: 'yes' }, kola.token);
+  neg(prefs.status === 400 && prefs.body.field === 'retainClips', 'retainClips must be true or false (anything truthy counted before)');
+
+  // Paging: the organisation's assignments and challenges, and the T&S dispute queue.
+  const p1 = await j('GET', '/org/box-cam/assignments?limit=1', undefined, maria.token);
+  ok(p1.status === 200 && p1.body.items.length === 1 && typeof p1.body.nextCursor === 'string' && p1.body.summary.assigned >= 2, 'the assignment list pages (the summary still counts them all)');
+  const p2 = await j('GET', `/org/box-cam/assignments?limit=1&cursor=${p1.body.nextCursor}`, undefined, maria.token);
+  ok(p2.status === 200 && p2.body.items.length === 1 && p2.body.items[0].id !== p1.body.items[0].id, 'the next page continues from the cursor');
+  neg((await j('GET', '/org/box-cam/assignments?limit=0', undefined, maria.token)).status === 400, 'a junk limit is refused');
+  neg((await j('GET', '/org/box-cam/challenges?cursor=nope', undefined, maria.token)).status === 400, 'a junk cursor is refused');
+  const q = await j('GET', '/admin/box-cam/disputes?all=1&limit=1', undefined, null, A);
+  ok(q.status === 200 && Array.isArray(q.body.items) && 'nextCursor' in q.body, 'the dispute queue pages');
+}
+
 section('metrics — privacy-safe counters, no PII');
 {
   const m = await j('GET', '/admin/metrics', undefined, null, A);

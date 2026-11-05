@@ -1047,8 +1047,8 @@ Code read for this design (line numbers refer to this branch): `scoutbox-server/
 1890, deletion 3978–4023, admin 4219–4294), `store.mjs`, `seed.mjs`, `domain.mjs`,
 `adapters.mjs`, `storeContract.mjs`, `domains/platform/migrations.mjs`, `m12/*` (passport, scouting,
 journeys, operations, shared), `m13/*` (shared, imports, enterprise, delivery, suitability,
-insight, planning, groups, transitions, mfa), `domains/verification/claims/*`, `domains/verification/passport/*`, `m16/*`, `m17/*`, `m18/*`,
-`m19/*`, `domains/development/*`, `m22/*`, `m23/*`, `domains/agents/core/*`–`m29/*`, `repositories/*`, the frontend type
+insight, planning, groups, transitions, mfa), `domains/verification/claims/*`, `domains/verification/passport/*`, `m17/*`, `m18/*`,
+`m19/*`, `domains/development/*` (with Box Cam and the CV engine since S12b), `m23/*`, `domains/agents/core/*`–`m29/*`, `repositories/*`, the frontend type
 files (`scoutbox-club/src/api.ts`, `scoutbox-grassroots/src/api.ts`, `roomsApi.ts`,
 `scoutbox-agent/src/api.ts`, `scoutbox-player/src/domain/types.ts`,
 `scoutbox-player/src/httpClient.ts`), `OPERATIONS.md`, `AGENTS.md`, `CLAUDE.md`, and the

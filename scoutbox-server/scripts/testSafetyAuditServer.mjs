@@ -289,29 +289,28 @@ await test('[cutover] the admin backup and a restore: the backup\'s database cop
   rm(dir, restored);
 });
 
-await test('an EXISTING partial Box Cam prefs row ({ playerId } only, as an older build or a restore can leave it) and the real authenticated PATCH /player/box-cam/prefs { retainClips: true }: answered 200 with the same payload the pre-S6b build gives (no preference default introduced), the box_prefs_changed ledger row recorded with detail { by, retainClips } — the absent share key absent, exactly as the pre-S6b blob stored it; the prefs and the row survive a restart; the admin backup carries the row exactly', async () => {
+// S12b: the Box Cam preferences are a typed row (repositories/boxCam.mjs): a partial row ({ playerId } only, which the
+// blob could hold) cannot be stored any more, so the check that it was served and updated as it was is replaced by the
+// typed behaviour: a player with no row reads the defaults, the PATCH writes the whole row, and its ledger row records
+// the share and the clip choice together.
+await test('the real authenticated PATCH /player/box-cam/prefs { retainClips: true } from the defaults: answered 200 with the whole preferences, the box_prefs_changed ledger row recorded with detail { by, share, retainClips }; the prefs and the row survive a SIGKILL and a restart; the admin backup carries the row exactly', async () => {
   const dir = tempDir('s6b-f2'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Prefs Adult');
-  assert.equal((await S.j('PATCH', '/player/box-cam/prefs', { retainClips: false }, token)).status, 200, 'control: a full prefs row created by the route');
-  await S.stop();
-  { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); const v = JSON.parse(s.prepare("SELECT value FROM collections WHERE name = 'boxCamPrefs'").get().value); const i = v.findIndex((p) => p.playerId === pid); assert.ok(i >= 0); v[i] = { playerId: pid }; s.prepare("UPDATE collections SET value = ? WHERE name = 'boxCamPrefs'").run(JSON.stringify(v)); s.close(); }
-  S = await boot(dir);
-  assert.deepEqual((await S.j('GET', '/player/box-cam/prefs', undefined, token)).body, { prefs: { playerId: pid } }, 'the partial row is served as it is');
+  assert.deepEqual((await S.j('GET', '/player/box-cam/prefs', undefined, token)).body, { prefs: { playerId: pid, shareDevelopmentActivity: 'private', retainClips: false, updatedAt: null, updatedBy: null } }, 'no row: the defaults');
   const r = await S.j('PATCH', '/player/box-cam/prefs', { retainClips: true }, token);
-  assert.equal(r.status, 200, `the update is answered (fails on c6cf5e1 with 500): ${r.text}`);
-  assert.deepEqual(Object.keys(r.body.prefs), ['playerId', 'retainClips', 'updatedAt', 'updatedBy'], 'no shareDevelopmentActivity default introduced'); assert.equal(r.body.prefs.retainClips, true); assert.deepEqual(r.body.prefs.updatedBy, { kind: 'player', id: pid });
+  assert.equal(r.status, 200, r.text);
+  assert.deepEqual(Object.keys(r.body.prefs), ['playerId', 'shareDevelopmentActivity', 'retainClips', 'updatedAt', 'updatedBy']); assert.equal(r.body.prefs.retainClips, true); assert.deepEqual(r.body.prefs.updatedBy, { kind: 'player', id: pid });
   const prefsRows = () => stored(dir, 'ledger').filter((l) => l.playerId === pid && l.type === 'box_prefs_changed');
-  assert.ok(await until(async () => prefsRows().length === 2, 8000), 'the second ledger row landed (persistNow)');
-  const row = prefsRows()[1];
-  assert.equal(JSON.stringify(row.detail), JSON.stringify({ by: 'player', retainClips: true }), 'the detail as the pre-S6b blob stored it: share absent');
-  assert.equal(Object.hasOwn(row.detail, 'share'), false);
+  assert.ok(await until(async () => prefsRows().length === 1, 8000), 'the ledger row landed');
+  const row = prefsRows()[0];
+  assert.equal(JSON.stringify(row.detail), JSON.stringify({ by: 'player', share: 'private', retainClips: true }));
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);
   const backupRow = stored(bk.body.dir, 'ledger').find((l) => l.id === row.id);
   assert.equal(JSON.stringify(backupRow), JSON.stringify(row), 'the backup carries the row exactly');
   await S.kill(); // SIGKILL after the answers: nothing pending is lost
   S = await boot(dir);
   assert.equal((await S.j('GET', '/player/box-cam/prefs', undefined, token)).body.prefs.retainClips, true, 'the prefs survived the restart');
-  assert.equal(JSON.stringify(prefsRows()[1]), JSON.stringify(row), 'the row survived the restart');
+  assert.equal(JSON.stringify(prefsRows()[0]), JSON.stringify(row), 'the row survived the restart');
   await S.stop();
   rm(dir, bk.body.dir);
 });

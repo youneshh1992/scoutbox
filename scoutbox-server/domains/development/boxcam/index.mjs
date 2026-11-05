@@ -3,9 +3,10 @@
 // context and register on the EXISTING authenticated routers, so every
 // standing gate runs before any M16 handler.
 //
-// New persistence is limited to what Box Cam genuinely introduces:
-// sessions (aggregated observations, never raw frames or video),
-// assignments, challenges (+entries), disputes and privacy prefs. The
+// Persistence is limited to what Box Cam genuinely introduces: sessions
+// (aggregated observations, never raw frames or video), assignments,
+// challenges (+entries), disputes and privacy prefs, Combine requests and
+// attempts, and CV results (all typed tables since S12b). The
 // drill registry is versioned code, and the Football Passport PROJECTS
 // Box Cam data — it is never copied.
 import { metrics } from '../../../m13/enterprise.mjs';
@@ -16,21 +17,9 @@ import { registerCombine } from './combine.mjs';
 import { registerM22Routes } from './cv/routes.mjs';
 
 export function registerM16(ctx) {
-  const { db } = ctx;
-  db.boxSessions ??= [];
-  db.boxSessionEvents ??= [];   // reserved: aggregates live on the session record
-  db.boxAssignments ??= [];
-  db.boxChallenges ??= [];
-  db.boxChallengeEntries ??= [];
-  db.boxCamDisputes ??= [];
-  db.boxCamPrefs ??= [];
-  db.combineAttempts ??= [];    // M16.1 At-Home Combine (measurement layer over Box Cam)
-  db.combineRequests ??= [];
-  // M22: canonical provider observation results. Derived metadata only —
-  // counts, presence, durations, integrity counters and bounded event
-  // timestamps. There is deliberately no frame store, and §117 records why:
-  // frames are ephemeral by design, so nothing about them needs representing.
-  db.boxCamCvResults ??= [];
+  // S12b: Box Cam, Combine and the CV results are tables (repositories/boxCam.mjs, migration 0031); every module
+  // writes through `boxCam` and reads through `boxCamReads`. There is no db.box* or db.combine* collection.
+  if (typeof ctx.boxCam?.sessions?.create !== 'function' || !ctx.boxCamReads) throw new TypeError('registerM16 needs the Box Cam repository from the data layer');
 
   // Privacy-safe operational metrics — counters only, never player labels.
   metrics.boxCam = {

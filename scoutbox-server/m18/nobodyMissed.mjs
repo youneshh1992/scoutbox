@@ -61,18 +61,17 @@ export function registerNobodyMissed(ctx) {
       || evidence.some((e) => e.verification?.status === 'coach_confirmed');
     // Production-valid Combine only: a simulated result never becomes
     // production recruitment eligibility.
-    const combineProtocols = (db.combineAttempts ?? [])
-      .filter((a) => a.playerId === player.id && a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly)
-      .filter((a) => (db.boxSessions ?? []).find((s) => s.id === a.boxSessionId)?.verificationState !== 'invalidated')
-      .map((a) => a.protocolId);
+    // S12b: the player's verified production attempts and their bound sessions, read through SQL once.
+    const verifiedAttempts = [...ctx.boxCamReads.attempts.forPlayer(player.id)].reverse()
+      .filter((a) => a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly);
+    const boundSessions = new Map(ctx.boxCamReads.sessions.byIds(verifiedAttempts.map((a) => a.boxSessionId)).map((s) => [s.id, s]));
+    const liveAttempts = verifiedAttempts.filter((a) => boundSessions.get(a.boxSessionId)?.verificationState !== 'invalidated');
+    const combineProtocols = liveAttempts.map((a) => a.protocolId);
     // M19 combine thresholds read the best production-valid measurement per
     // protocol. Simulated and invalidated results are already excluded above,
     // so a demo result can never satisfy a production threshold.
     const combineMeasurements = {};
-    for (const a of (db.combineAttempts ?? [])) {
-      if (a.playerId !== player.id || a.combineState !== 'combine_verified') continue;
-      if (PROVIDERS[a.provider]?.testOnly) continue;
-      if ((db.boxSessions ?? []).find((s) => s.id === a.boxSessionId)?.verificationState === 'invalidated') continue;
+    for (const a of liveAttempts) {
       const v = Number(a.measuredValue);
       if (!Number.isFinite(v)) continue;
       combineMeasurements[a.protocolId] = combineMeasurements[a.protocolId] == null ? v : Math.max(combineMeasurements[a.protocolId], v);

@@ -41,6 +41,7 @@ import {
 import { decodeFrame, FRAME_ERRORS } from './frames.mjs';
 import { productionCvProvider, PROVIDER_ERRORS } from './provider.mjs';
 import { combineEligibility, boxCamObservedEligible, COMBINE_DISABLED_REASON } from './eligibility.mjs';
+import { nonceMatches } from '../../../../repositories/boxCam.mjs';
 
 /** §39 — canonical typed errors, mapped to HTTP once, here. */
 const HTTP_FOR = {
@@ -94,18 +95,18 @@ function refuseClientFields(res, ...objects) {
 }
 
 export function registerM22Routes(ctx) {
+  // S12b: a CV result is a row of repositories/boxCam.mjs, recorded once; the session's provider binding is an
+  // explicit session update. The nonce is checked against the session's stored hash, then the plain value the
+  // client sent is what binds the in-memory provider session.
   const {
-    db, playerRouter, adminRouter, persistNow, vmetric, broadcast,
+    playerRouter, adminRouter, vmetric, broadcast, boxCam, boxCamReads: reads,
   } = ctx;
   const provider = ctx.productionCv ?? productionCvProvider();
   ctx.productionCv = provider;
 
-  db.boxCamCvResults ??= [];
-
   const limited = (action, keyPart) => !!ctx.rateLimit?.limited(action, keyPart);
 
-  const ownSession = (playerId, id) =>
-    db.boxSessions.find((s) => s.id === id && s.playerId === playerId) ?? null;
+  const ownSession = (playerId, id) => { const s = reads.sessions.byId(id); return s && s.playerId === playerId ? s : null; };
 
   // ====================================================================
   // Provider session lifecycle
@@ -124,7 +125,7 @@ export function registerM22Routes(ctx) {
     if (refuseClientFields(res, req.body)) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
-    if ((req.body ?? {}).nonce !== s.nonce) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
+    if (!nonceMatches(s, (req.body ?? {}).nonce)) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
     if (s.status !== 'recording') {
       return fail(res, PROVIDER_ERRORS.INVALID_STATE, { status: s.status });
     }
@@ -143,12 +144,11 @@ export function registerM22Routes(ctx) {
       boxCamSessionId: s.id,
       playerId: req.player.id,
       protocolId,
-      nonce: s.nonce,
+      nonce: req.body.nonce,
     });
     if (!begun.ok) return fail(res, begun.error, { protocolId: begun.protocolId, activeSessions: begun.activeSessions });
 
-    s.cvProviderSessionId = begun.providerSessionId;
-    persistNow();
+    boxCam.sessions.update(s.id, (d) => { d.cvProviderSessionId = begun.providerSessionId; });
     vmetric('box_cam_cv_sessions_started');
     broadcast('box_cam_cv_session_started', { playerId: req.player.id, sessionId: s.id });
 
@@ -183,7 +183,7 @@ export function registerM22Routes(ctx) {
     if (refuseClientFields(res, body, ...(Array.isArray(body.frames) ? body.frames : []))) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
-    if (body.nonce !== s.nonce) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
+    if (!nonceMatches(s, body.nonce)) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
 
     const providerSessionId = String(body.providerSessionId ?? '');
     const ps = provider.get(providerSessionId);
@@ -212,7 +212,7 @@ export function registerM22Routes(ctx) {
       const r = provider.ingestFrame({
         providerSessionId,
         boxCamSessionId: s.id,
-        nonce: s.nonce,
+        nonce: body.nonce,
         seq: raw.seq,
         frame: d.frame,
         clientCapturedAtMs: raw.capturedAtMs ?? null,
@@ -249,13 +249,13 @@ export function registerM22Routes(ctx) {
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
     const body = req.body ?? {};
-    if (body.nonce !== s.nonce) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
+    if (!nonceMatches(s, body.nonce)) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
 
     const providerSessionId = String(body.providerSessionId ?? s.cvProviderSessionId ?? '');
 
     // A session already finalized in a previous call returns its stored
     // result rather than running anything again (§7).
-    const existing = db.boxCamCvResults.find((r) => r.providerSessionId === providerSessionId);
+    const existing = reads.cvResults.byProviderSession(providerSessionId);
     if (existing) {
       return res.json({ result: existing, alreadyFinalized: true, ...observedView(s, existing) });
     }
@@ -263,15 +263,13 @@ export function registerM22Routes(ctx) {
     const fin = provider.finalize({
       providerSessionId,
       boxCamSessionId: s.id,
-      nonce: s.nonce,
+      nonce: body.nonce,
       protocolWindowMs: Number(body.protocolWindowMs) || null,
     });
     if (!fin.ok) return fail(res, fin.error, { state: fin.state });
 
-    const result = fin.result;
-    db.boxCamCvResults.push(result);
-    s.cvResultId = result.providerSessionId;
-    persistNow();
+    // Recorded once, as the provider built it (the session's result id is this row's key: S12b).
+    const result = boxCam.cvResults.record(fin.result);
 
     vmetric(result.outcome === 'accepted' ? 'box_cam_cv_accepted' : 'box_cam_cv_refused');
     if (result.outcome !== 'accepted') {
@@ -289,11 +287,10 @@ export function registerM22Routes(ctx) {
     if (refuseClientFields(res, req.body)) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
-    if ((req.body ?? {}).nonce !== s.nonce) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
+    if (!nonceMatches(s, (req.body ?? {}).nonce)) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
     const providerSessionId = String((req.body ?? {}).providerSessionId ?? s.cvProviderSessionId ?? '');
     const r = provider.cancel({ providerSessionId, boxCamSessionId: s.id });
     if (!r.ok) return fail(res, r.error);
-    persistNow();
     // A cancelled attempt mints no result. Stated in the response so a client
     // cannot interpret silence as success.
     res.json({ cancelled: true, result: null, state: r.state ?? 'cancelled' });
@@ -404,7 +401,7 @@ export function registerM22Routes(ctx) {
   // ====================================================================
 
   adminRouter.get('/box-cam/cv/results/:providerSessionId', (req, res) => {
-    const r = db.boxCamCvResults.find((x) => x.providerSessionId === req.params.providerSessionId);
+    const r = reads.cvResults.byProviderSession(req.params.providerSessionId);
     if (!r) return res.status(404).json({ error: 'NOT_FOUND' });
     // Deliberately a projection rather than the whole record: there is no raw
     // frame viewer, and §75 keeps the count uneditable by construction —

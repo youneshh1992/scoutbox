@@ -34,6 +34,7 @@ import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import { LIFECYCLE_ACTIONS } from '../lifecycle/lifecycle.mjs';
 
 import { readPage, sendPageError } from '../../platform/paging.mjs';
+import { isAbsent, parseStrictDateOnly } from '../../../temporal.mjs';
 export function registerRooms(ctx) {
   const {
     db, orgRouter, adminRouter, nextId, persistNow, notify, ledgerAppend, broadcast,
@@ -169,9 +170,8 @@ export function registerRooms(ctx) {
     // gates AND (the player's recruitment opt-in OR this org's own request).
     const maySeeCombine = ctx.combineOrgMaySeeResults?.(org, player) ?? false;
     const combine = maySeeCombine ? (ctx.combineProjection?.(player.id) ?? null) : null;
-    const combineRequests = db.combineRequests
-      .filter((r) => r.orgId === org.id && r.playerId === player.id)
-      .map((r) => ctx.combineRequestView?.(r) ?? r);
+    const combineRequests = ctx.boxCamReads.requests.forOrg(org.id, { playerId: player.id }).reverse() // S12b: read through SQL, oldest first
+      .map((r) => ctx.combineRequestView(r));
 
     // Development activity only behind the player's own recruitment share pref.
     const prefs = ctx.boxPrefsFor?.(player.id) ?? {};
@@ -514,7 +514,7 @@ export function registerRooms(ctx) {
     const open = reads.cases.roomRowsForViewer(orgId, { userId: req.orgUser.id, isLead: isLead(req.orgUser) }, { statuses: OPEN_ROOM_STATUSES });
     const overdue = reads.cases.overdueTaskCounts(orgId, now());
     const supplied = new Set(db.evidenceSuggestions.filter((s) => s.orgId === orgId && s.status === 'supplied').map((s) => s.playerId));
-    const doneCombine = new Set(db.combineRequests.filter((r) => r.orgId === orgId && r.state === 'completed').map((r) => r.playerId));
+    const doneCombine = ctx.boxCamReads.requests.completedPlayerIds(orgId); // S12b: one indexed query
     const reported = reads.trials.playerIdsForOrgStatus(orgId, 'reported');
     const decided = reads.decisions.roomIdsForOrg(orgId);
     const items = [];
@@ -1299,20 +1299,31 @@ export function registerRooms(ctx) {
     if (!req.org.verified) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can create a Club Combine.' });
     if (limited('room_combine_request', req.org.id)) return res.status(429).json(rateLimitedBody('room_combine_request'));
 
-    const ids = Array.isArray(req.body?.protocolIds) ? [...new Set(req.body.protocolIds.map(String))] : [];
+    // S12b: refused, not coerced: protocol ids are text, the title text, the deadline a real day (it was cut to ten
+    // characters and stored unchecked before).
+    const { protocolIds, title = null, deadline = null } = req.body ?? {};
+    if (protocolIds !== undefined && (!Array.isArray(protocolIds) || protocolIds.some((x) => typeof x !== 'string'))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'protocolIds', message: 'protocolIds is a list of protocol ids.' });
+    if (title !== null && typeof title !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'title', message: 'A title is text.' });
+    if (!isAbsent(deadline) && !parseStrictDateOnly(deadline).ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'deadline', message: 'A deadline is a calendar day written YYYY-MM-DD.', expected: 'YYYY-MM-DD' });
+    const ids = Array.isArray(protocolIds) ? [...new Set(protocolIds)] : [];
     if (!ids.length) return res.status(400).json({ error: 'PROTOCOLS_REQUIRED' });
+    if (ids.length > 20) return res.status(400).json({ error: 'FIELD_INVALID', field: 'protocolIds', message: 'A Club Combine asks for at most 20 protocols.' });
     // Protocols are selected from the standardized registry. A room can never
     // invent one or change one's rules.
     for (const pid of ids) if (!ctx.combineProtocolActive?.(pid)) return res.status(404).json({ error: 'PROTOCOL_UNKNOWN', protocolId: pid });
     const instructions = req.body?.instructions ? String(req.body.instructions) : null;
     if (instructions && !moderateOrRefuse(res, instructions, { kind: 'combine_request', orgId: req.org.id })) return;
 
-    const out = ctx.createCombineRequests({
-      org: req.org, orgUser: req.orgUser, playerIds: [room.playerId],
-      protocolIds: ids, title: req.body?.title ?? null, deadline: req.body?.deadline ?? null, instructions,
+    // One unit (S12b): the request, its ledger row and notification, and the Room's activity.
+    const out = unit(() => {
+      const o = ctx.createCombineRequests({
+        org: req.org, orgUser: req.orgUser, playerIds: [room.playerId],
+        protocolIds: ids, title, deadline: isAbsent(deadline) ? null : deadline, instructions,
+      });
+      if (o.created.length) touch(room, (d) => { activity(d, req, 'room_combine_requested', { requestId: o.created[0].id, protocols: ids }); d.room.updatedAt = now(); });
+      return o;
     });
     if (!out.created.length) return res.status(409).json({ error: 'NOT_VISIBLE', skipped: out.skipped });
-    touch(room, (d) => { activity(d, req, 'room_combine_requested', { requestId: out.created[0].id, protocols: ids }); d.room.updatedAt = now(); });
     vmetric('room_combine_requested');
     persistNow();
     res.status(201).json({ request: ctx.combineRequestView?.(out.created[0]) ?? out.created[0] });

@@ -176,7 +176,8 @@ export function resolveEvidenceRefs(refs, { db, reads = {}, kase, testProviderEn
         .flatMap((t) => (t.schedule?.sessions ?? []).flatMap((s) => (s?.evidence ?? []).map((e) => ({ trial: t, session: s, e }))))
         .find(({ e }) => e && e.kind === 'box_cam_session' && e.sessionId === ref.id && !e.removedAt);
       if (!link) return mismatch('That Box Cam session is not cited on any trial of this case.');
-      const bs = (db.boxSessions ?? []).find((x) => x && x.id === ref.id && x.playerId === kase.playerId) ?? null;
+      const found = reads.boxCam?.sessions.byId(ref.id) ?? null; // S12b: read through SQL
+      const bs = found && found.playerId === kase.playerId ? found : null;
       if (!bs) return mismatch('That Box Cam session is not available to this case.');
       if (providers[bs.provider]?.testOnly && !testProviderEnabled) return mismatch('That Box Cam session is not available to this case.');
       out.push({ kind: 'box_cam_session', id: bs.id, meta: { trialId: link.trial.id, trialSessionId: link.session.id, verificationState: bs.verificationState ?? null, simulated: !!providers[bs.provider]?.testOnly } });
