@@ -75,7 +75,7 @@ const srcc = (over = {}) => ({ id: 'srcc-1', playerId: 'pl-adult', type: 'positi
 const idv = (over = {}) => ({ id: 'idv-1', guardianId: 'gd-primary', guardianName: 'Primary Parent', documentType: 'passport', documentRef: '4567', provider: 'dev-attestation', reference: 'idv_0123456789abcdef', ts: T, status: 'approved', ...over });
 
 /** The fixture's identity, organisation and staff with the given audit collections, as a snapshot-mode save writes them. */
-const fixtureDb = (blobs = {}) => ({ ...FIXTURE(), orgs: ORGS(), users: USERS(), sessions: SESSIONS(), vouches: [], ...blobs });
+const fixtureDb = (blobs = {}) => ({ ...FIXTURE(), orgs: ORGS(), users: USERS(), sessions: SESSIONS(), blobNotes: [], ...blobs });
 /** A fully migrated file holding the fixture and the given audit rows, written by a snapshot-mode save (the writers' validation applies). */
 function s7dFile(dir, { blobs = {} } = {}) {
   const tool = openStore(dir); tool.save({ savedAt: NOW, idCounter: 1000, db: fixtureDb(blobs) }); tool.sqlite.close();
@@ -184,30 +184,30 @@ test('[cutover] repository, immediate mode: append on each of the eight collecti
 test('[cutover] staged mode (the server): a block, a ledger row, a report patch, a block removal and an IDV entry are visible in memory at once but NOT durable ahead of the next snapshot save, which lands them in ONE revision with the blob edits made alongside (the suspended request); a FAILED ORDINARY SAVE (statement or real COMMIT) keeps the mirror and the queue as they are and the retry lands everything once; an ABORTED UNIT OF WORK restores the mirror and the queue to the pre-unit state (held views, nested detail objects and the sequence state included) whether the unit threw, a queued statement failed at the flush, the real COMMIT failed or a participant refusal was caught; the removal joins the unit; writes pending before the unit stay pending; a repository given the participant API refuses to join or write until its save hook is registered', () => {
   const dir = tempDir('sa-staged'); s7dFile(dir, { blobs: { blocks: [block()], reports: [report()], ledger: [led()], idvQueue: [idv()] } });
   const L = live(dir); L.save(); const seq0 = seqOf(dir);
-  L.db.vouches.push({ id: 'req-s', playerId: 'pl-adult', orgId: 'org-pro', status: 'pending' });
-  L.repo.blocks.append(block({ id: 'blk-2', reason: 'suspended_pending_review' })); L.db.vouches[0].status = 'suspended';
+  L.db.blobNotes.push({ id: 'req-s', playerId: 'pl-adult', orgId: 'org-pro', status: 'pending' });
+  L.repo.blocks.append(block({ id: 'blk-2', reason: 'suspended_pending_review' })); L.db.blobNotes[0].status = 'suspended';
   L.repo.ledger.append(led({ id: 'led-2', type: 'org_blocked_by_player', userId: null, scoutName: 'player' })); L.repo.reports.patch('rep-1', { status: 'resolved', resolvedAt: NOW, outcome: 'Synthetic.' }); L.repo.blocks.remove('blk-1'); L.repo.idvQueue.append(idv({ id: 'idv-2' }));
   assert.equal(L.repo.pending(), 5); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1'], 'nothing durable before the save'); assert.deepEqual(L.db.blocks.map((b) => b.id), ['blk-2'], 'memory shows the new block and not the lifted one'); assert.equal(L.db.reports[0].status, 'resolved'); assert.equal(L.db.idvQueue.length, 2);
   L.store.sqlite.exec("CREATE TEMP TRIGGER sa_fx BEFORE INSERT ON ledger BEGIN SELECT RAISE(ABORT, 'synthetic flush failure'); END");
-  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1']); assert.equal(seqOf(dir), seq0); assert.equal(L.repo.pending(), 5); assert.equal(JSON.parse(blobOf(dir, 'vouches')).length, 0, 'the blob did not land without the rows');
+  assert.throws(() => L.save(), /synthetic flush failure/); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1']); assert.equal(seqOf(dir), seq0); assert.equal(L.repo.pending(), 5); assert.equal(JSON.parse(blobOf(dir, 'blobNotes')).length, 0, 'the blob did not land without the rows');
   L.store.sqlite.exec('DROP TRIGGER sa_fx');
   L.store.sqlite.exec('CREATE TEMP TABLE sa_parent (id TEXT PRIMARY KEY); CREATE TEMP TABLE sa_child (parent_id TEXT NOT NULL REFERENCES sa_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER sa_commit AFTER INSERT ON ledger BEGIN INSERT INTO sa_child (parent_id) VALUES (\'missing-on-purpose\'); END');
   assert.throws(() => L.save(), /FOREIGN KEY constraint failed/); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1']); assert.equal(seqOf(dir), seq0); assert.equal(L.repo.pending(), 5);
   L.store.sqlite.exec('DROP TRIGGER sa_commit');
   L.save();
-  assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-2']); assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2']); assert.deepEqual(rowsOf(dir, 'reports').map((r) => [r.id, r.status]), [['rep-1', 'resolved']]); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1', 'idv-2']); assert.equal(JSON.parse(blobOf(dir, 'vouches'))[0].status, 'suspended'); assert.equal(L.repo.pending(), 0);
+  assert.equal(seqOf(dir), seq0 + 1); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-2']); assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2']); assert.deepEqual(rowsOf(dir, 'reports').map((r) => [r.id, r.status]), [['rep-1', 'resolved']]); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1', 'idv-2']); assert.equal(JSON.parse(blobOf(dir, 'blobNotes'))[0].status, 'suspended'); assert.equal(L.repo.pending(), 0);
   L.save(); assert.equal(seqOf(dir), seq0 + 2); assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2'], 'a later save does not replay');
   // A unit of work: together or not at all.
   L.repo.ledger.append(led({ id: 'led-pre' })); assert.equal(L.repo.pending(), 1);
   const heldReport = L.repo.reports.byId('rep-1'); const heldDetailRow = L.repo.ledger.append({ ...led({ id: 'led-d' }), detail: { tag: 'keep' } }); const heldDetail = L.repo.ledger.byId('led-d').detail; assert.equal(L.repo.pending(), 2);
-  const state = () => ({ export: plain(L.repo.exportAll()), heldStatus: heldReport.status, heldDetail: plain(heldDetail), requests: JSON.stringify(L.db.vouches), durable: [idsIn(dir, 'blocks'), idsIn(dir, 'ledger'), idsIn(dir, 'idv_queue'), seqOf(dir)] });
+  const state = () => ({ export: plain(L.repo.exportAll()), heldStatus: heldReport.status, heldDetail: plain(heldDetail), requests: JSON.stringify(L.db.blobNotes), durable: [idsIn(dir, 'blocks'), idsIn(dir, 'ledger'), idsIn(dir, 'idv_queue'), seqOf(dir)] });
   const before = state();
   const unchanged = (label) => { assert.deepEqual(state(), before, label); assert.equal(L.repo.pending(), 2, `${label}: the pre-unit writes are still pending`); assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.repo.ledger.byId('led-d').detail, heldDetail, `${label}: nested identity kept`); };
-  const work = () => { L.db.vouches.push({ id: 'req-u', playerId: 'pl-adult', status: 'accepted' }); L.repo.blocks.append(block({ id: 'blk-u' })); L.repo.blocks.remove('blk-2'); L.repo.reports.patch('rep-1', { status: 'pending_review', resolvedAt: null, outcome: null }); L.repo.ledger.byId('led-d'); L.repo.idvQueue.patch('idv-1', { status: 'revoked' }); L.repo.sourceChanges.append(srcc({ id: 'srcc-u' })); };
+  const work = () => { L.db.blobNotes.push({ id: 'req-u', playerId: 'pl-adult', status: 'accepted' }); L.repo.blocks.append(block({ id: 'blk-u' })); L.repo.blocks.remove('blk-2'); L.repo.reports.patch('rep-1', { status: 'pending_review', resolvedAt: null, outcome: null }); L.repo.ledger.byId('led-d'); L.repo.idvQueue.patch('idv-1', { status: 'revoked' }); L.repo.sourceChanges.append(srcc({ id: 'srcc-u' })); };
   assert.throws(() => L.store.unitOfWork(() => { work(); throw new Error('synthetic unit failure'); }, { snapshot: L.snapshot }), /synthetic unit failure/);
   unchanged('thrown'); assert.equal(heldDetail.tag, 'keep', 'the nested detail object reads its pre-unit value'); assert.throws(() => { heldDetail.tag = 'x'; }, /written through its domain repository/, 'the held nested view is read-only');
   let caught = null; let outer = null;
-  try { L.store.unitOfWork(() => { L.db.vouches.push({ id: 'req-u' }); L.repo.blocks.append(block({ id: 'blk-ok' })); try { L.repo.idvQueue.append(idv({ id: 'idv-bad', guardianId: 'gd-missing' })); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  try { L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-u' }); L.repo.blocks.append(block({ id: 'blk-ok' })); try { L.repo.idvQueue.append(idv({ id: 'idv-bad', guardianId: 'gd-missing' })); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
   assert.equal(caught?.code, 'IDV_GUARDIAN_MISSING'); assert.ok(outer, 'the caught participant failure still refuses the unit'); assert.equal(outer.unitOfWork, 'rolled_back'); unchanged('caught');
   L.store.sqlite.exec("CREATE TEMP TRIGGER sa_j BEFORE DELETE ON blocks BEGIN SELECT RAISE(ABORT, 'synthetic joined failure'); END");
   assert.throws(() => L.store.unitOfWork(work, { snapshot: L.snapshot }), /synthetic joined failure/); unchanged('statement failure at the unit\'s flush');
@@ -216,15 +216,15 @@ test('[cutover] staged mode (the server): a block, a ledger row, a report patch,
   assert.throws(() => L.store.unitOfWork(work, { snapshot: L.snapshot }), /FOREIGN KEY constraint failed/); unchanged('real COMMIT failure');
   L.store.sqlite.exec('DROP TRIGGER sa_commit2');
   L.store.unitOfWork(work, { snapshot: L.snapshot });
-  assert.equal(seqOf(dir), before.durable[3] + 1); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-u']); assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2', 'led-pre', 'led-d'], 'the pre-unit writes landed with the unit'); assert.deepEqual(rowsOf(dir, 'reports').map((r) => [r.id, r.status]), [['rep-1', 'pending_review']]); assert.deepEqual(rowsOf(dir, 'idv_queue').map((r) => [r.id, r.status]), [['idv-1', 'revoked'], ['idv-2', 'approved']]); assert.deepEqual(idsIn(dir, 'source_changes'), ['srcc-u']); assert.ok(JSON.parse(blobOf(dir, 'vouches')).some((r) => r.id === 'req-u')); assert.equal(L.repo.pending(), 0);
+  assert.equal(seqOf(dir), before.durable[3] + 1); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-u']); assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2', 'led-pre', 'led-d'], 'the pre-unit writes landed with the unit'); assert.deepEqual(rowsOf(dir, 'reports').map((r) => [r.id, r.status]), [['rep-1', 'pending_review']]); assert.deepEqual(rowsOf(dir, 'idv_queue').map((r) => [r.id, r.status]), [['idv-1', 'revoked'], ['idv-2', 'approved']]); assert.deepEqual(idsIn(dir, 'source_changes'), ['srcc-u']); assert.ok(JSON.parse(blobOf(dir, 'blobNotes')).some((r) => r.id === 'req-u')); assert.equal(L.repo.pending(), 0);
   // Hook registration is a precondition inside the joined boundary.
   const { createSafetyAuditRepository } = needModule();
   const bareUnit = createSafetyAuditRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit });
   const stagedUnit = createSafetyAuditRepository({ sqlite: L.store.sqlite, now: () => NOW, unit: L.store.unit, staged: true });
   for (const [label, w] of [['immediate', () => bareUnit.blocks.append(block({ id: 'blk-h' }))], ['staged', () => stagedUnit.blocks.append(block({ id: 'blk-h' }))]]) {
     let c = null; let o = null;
-    try { L.store.unitOfWork(() => { L.db.vouches.push({ id: 'req-h' }); try { w(); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; }
-    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(JSON.parse(blobOf(dir, 'vouches')).some((r) => r.id === 'req-h'), false);
+    try { L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'req-h' }); try { w(); } catch (e) { c = e; } }, { snapshot: L.snapshot }); } catch (e) { o = e; }
+    assert.match(c?.message ?? '', /save hook/, label); assert.ok(o, `${label}: the caught refusal still refuses the unit`); assert.equal(JSON.parse(blobOf(dir, 'blobNotes')).some((r) => r.id === 'req-h'), false);
   }
   assert.throws(() => stagedUnit.blocks.append(block({ id: 'blk-h' })), /save hook/); assert.throws(() => createSafetyAuditRepository({ sqlite: L.store.sqlite, staged: true }), /needs the store's participant API/);
   void heldDetailRow;
@@ -242,16 +242,16 @@ test('[cutover] snapshot dispatcher: a tool that loads and saves the whole file 
   const seq0 = tool.revision(); tool.save(snap); assert.equal(tool.revision(), seq0 + 1);
   const again = tool.load(); for (const n of COLLECTIONS) assert.equal(JSON.stringify(again.db[n]), texts0[n], `${n} round-tripped through replace`);
   assert.equal(again.db.reports[1].targetPlayerId, null, 'the automatic report\'s absent key reads back as null');
-  const { ledger: _omit, blocks: _omit2, ...without } = snap.db; tool.save({ ...snap, db: { ...without, vouches: [{ id: 'v-1' }] } });
-  assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2'], 'an omitted collection leaves its table alone'); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1', 'blk-2']); for (const n of COLLECTIONS) assert.equal(blobOf(dir, n), null, `no shadow ${n} blob`); assert.equal(JSON.parse(blobOf(dir, 'vouches')).length, 1);
+  const { ledger: _omit, blocks: _omit2, ...without } = snap.db; tool.save({ ...snap, db: { ...without, blobNotes: [{ id: 'v-1' }] } });
+  assert.deepEqual(idsIn(dir, 'ledger'), ['led-1', 'led-2'], 'an omitted collection leaves its table alone'); assert.deepEqual(idsIn(dir, 'blocks'), ['blk-1', 'blk-2']); for (const n of COLLECTIONS) assert.equal(blobOf(dir, n), null, `no shadow ${n} blob`); assert.equal(JSON.parse(blobOf(dir, 'blobNotes')).length, 1);
   const beforeDump = dump(tool.sqlite); const seq1 = tool.revision();
-  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, vouches: [{ id: 'v-x' }], ledger: { id: 'x' } } }), /ledger: the snapshot collection must be an array/);
-  assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the save landed (vouches included)');
+  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, blobNotes: [{ id: 'v-x' }], ledger: { id: 'x' } } }), /ledger: the snapshot collection must be an array/);
+  assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the save landed (blobNotes included)');
   const SECRET = 'SECRET-NOTE-TEXT-77';
   assert.throws(() => tool.save({ ...snap, db: { ...snap.db, orgNotes: [note({ id: 'note-1', text: SECRET }), note({ id: 'note-1', text: SECRET })] } }), (e) => /SAFETY_AUDIT_IMPORT_BLOCKED/.test(e.message) && /duplicates the id/.test(e.message) && !e.message.includes(SECRET));
   assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump);
   const SECRET_VALUE = 'SECRET-ORG-VALUE-55';
-  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, vouches: [{ id: 'v-x' }], blocks: [block(), block({ id: 'blk-2', orgId: { name: SECRET_VALUE } })] } }), (e) => /SAFETY_AUDIT_IMPORT_BLOCKED/.test(e.message) && /blocks snapshot collection entry #1\.orgId must be a string or null \(got an object; id blk-2\)/.test(e.message) && !e.message.includes(SECRET_VALUE), 'a wrong-typed value is refused by name');
+  assert.throws(() => tool.save({ ...snap, db: { ...snap.db, blobNotes: [{ id: 'v-x' }], blocks: [block(), block({ id: 'blk-2', orgId: { name: SECRET_VALUE } })] } }), (e) => /SAFETY_AUDIT_IMPORT_BLOCKED/.test(e.message) && /blocks snapshot collection entry #1\.orgId must be a string or null \(got an object; id blk-2\)/.test(e.message) && !e.message.includes(SECRET_VALUE), 'a wrong-typed value is refused by name');
   assert.equal(tool.revision(), seq1); assert.deepEqual(dump(tool.sqlite), beforeDump, 'nothing of the refused save landed');
   tool.save({ ...snap, db: { ...snap.db, ledger: snap.db.ledger.map((l) => ({ ...l, futureField: 'dropped' })) } });
   assert.equal(JSON.stringify(tool.load().db.ledger), texts0.ledger, 'an unknown key is dropped silently: the table holds exactly the typed records');
@@ -280,12 +280,12 @@ test('[cutover] the STRICT guardian reference (Q4b), every direction, judged on 
   const textBefore = JSON.stringify(tool.load().db.idvQueue);
   // gd-signup has no child and no co-guardian link: its removal is valid for the identity snapshot itself, so the refusal is the queue's final-state assertion.
   const withoutSignup = base.guardians.filter((g) => g.id !== 'gd-signup'); assert.equal(withoutSignup.length, base.guardians.length - 1);
-  unchangedAfter(() => save({ ...noQueue, guardians: withoutSignup, vouches: [{ id: 'v-i' }] }), /IDV_GUARDIAN_MISSING[^;]*idv-3/, 'IDV_GUARDIAN_MISSING', '(i) identity pair only, the queue omitted, a referenced guardian removed');
-  save({ ...noQueue, guardians: base.guardians, vouches: [{ id: 'v-ii' }] }); assert.equal(JSON.stringify(tool.load().db.idvQueue), textBefore, '(ii) identity pair only, every guardian retained: the queue unchanged in order and content'); assert.equal(JSON.parse(blobOf(dir, 'vouches'))[0].id, 'v-ii');
-  save({ ...base, guardians: withoutSignup, idvQueue: base.idvQueue.filter((q) => q.id !== 'idv-3'), vouches: [{ id: 'v-iii' }] }); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1', 'idv-2'], '(iii) guardian and its entries removed together'); assert.equal(rowsOf(dir, 'guardians', 'rowid').some((g) => g.id === 'gd-signup'), false);
-  save({ ...base, vouches: [{ id: 'v-back' }] }); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1', 'idv-2', 'idv-3']); assert.ok(rowsOf(dir, 'guardians', 'rowid').some((g) => g.id === 'gd-signup'), 'the guardian is back');
-  unchangedAfter(() => save({ ...base, guardians: withoutSignup, idvQueue: base.idvQueue, vouches: [{ id: 'v-iv' }] }), /IDV_GUARDIAN_MISSING[^;]*idv-3/, 'IDV_GUARDIAN_MISSING', '(iv) invalid coordinated replacement: guardian removed, its entry kept');
-  assert.equal(JSON.parse(blobOf(dir, 'vouches'))[0].id, 'v-back', '(iv) the unrelated collection is untouched');
+  unchangedAfter(() => save({ ...noQueue, guardians: withoutSignup, blobNotes: [{ id: 'v-i' }] }), /IDV_GUARDIAN_MISSING[^;]*idv-3/, 'IDV_GUARDIAN_MISSING', '(i) identity pair only, the queue omitted, a referenced guardian removed');
+  save({ ...noQueue, guardians: base.guardians, blobNotes: [{ id: 'v-ii' }] }); assert.equal(JSON.stringify(tool.load().db.idvQueue), textBefore, '(ii) identity pair only, every guardian retained: the queue unchanged in order and content'); assert.equal(JSON.parse(blobOf(dir, 'blobNotes'))[0].id, 'v-ii');
+  save({ ...base, guardians: withoutSignup, idvQueue: base.idvQueue.filter((q) => q.id !== 'idv-3'), blobNotes: [{ id: 'v-iii' }] }); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1', 'idv-2'], '(iii) guardian and its entries removed together'); assert.equal(rowsOf(dir, 'guardians', 'rowid').some((g) => g.id === 'gd-signup'), false);
+  save({ ...base, blobNotes: [{ id: 'v-back' }] }); assert.deepEqual(idsIn(dir, 'idv_queue'), ['idv-1', 'idv-2', 'idv-3']); assert.ok(rowsOf(dir, 'guardians', 'rowid').some((g) => g.id === 'gd-signup'), 'the guardian is back');
+  unchangedAfter(() => save({ ...base, guardians: withoutSignup, idvQueue: base.idvQueue, blobNotes: [{ id: 'v-iv' }] }), /IDV_GUARDIAN_MISSING[^;]*idv-3/, 'IDV_GUARDIAN_MISSING', '(iv) invalid coordinated replacement: guardian removed, its entry kept');
+  assert.equal(JSON.parse(blobOf(dir, 'blobNotes'))[0].id, 'v-back', '(iv) the unrelated collection is untouched');
   const { players: _p, guardians: _g, ...noIdentity } = base;
   unchangedAfter(() => save({ ...noIdentity, idvQueue: [...base.idvQueue, idv({ id: 'idv-bad', guardianId: 'gd-missing' })] }), /IDV_GUARDIAN_MISSING/, undefined, '(v) queue only with an invalid guardian, against the retained identity tables');
   const newGuardian = { id: 'gd-new', name: 'New Parent', email: 'new@example.test', idVerified: false, disclaimerAccepted: false, childIds: [] };

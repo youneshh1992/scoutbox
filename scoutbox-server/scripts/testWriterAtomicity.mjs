@@ -189,7 +189,7 @@ await test('stats: the stat columns and the activity log (a facet) commit togeth
 });
 
 // ------------------------------------------------------------- squad release (a squad row, player columns, a vouch, the ledger, notifications)
-await test('squad release: the squad row (org_squad_members since S9c), the player\'s availability and contract columns, the published reference (a blob) and the ledger row commit together before the 200 — second connection, SIGKILL, both failure seams, retry', async () => {
+await test('squad release: the squad row (org_squad_members since S9c), the player\'s availability and contract columns, the published reference (a row of vouches since S10c) and the ledger row commit together before the 200 — second connection, SIGKILL, both failure seams, retry', async () => {
   const dir = tempDir('s4wa-release'); let S = await boot(dir);
   const { pid, token } = await signupAdult(S, 'Near Hackney', { lat: 51.55, lng: -0.02 });
   assert.equal((await S.j('POST', '/player/availability', { availability: 'not_seeking' }, token)).status, 200);
@@ -205,7 +205,7 @@ await test('squad release: the squad row (org_squad_members since S9c), the play
     act: () => S.j('POST', `/org/squad/${entryId}/release`, { referenceText: 'A reliable, committed player all season.' }, grass),
     dbState: () => {
       const p = q1(dir, 'SELECT availability AS a, contract_status AS c FROM players WHERE id = ?', pid);
-      return { availability: p.a, contract: p.c, onSquad: onSquadInDb(), vouches: blob(dir, 'vouches').filter((v) => v.playerId === pid).length, ledger: blob(dir, 'ledger').filter((l) => l.playerId === pid && l.type === 'released_by_club').length };
+      return { availability: p.a, contract: p.c, onSquad: onSquadInDb(), vouches: q1(dir, 'SELECT COUNT(*) AS n FROM vouches WHERE player_id = ?', pid).n, ledger: blob(dir, 'ledger').filter((l) => l.playerId === pid && l.type === 'released_by_club').length };
     },
     before: { availability: 'not_seeking', contract: 'unknown', onSquad: true, vouches: 0, ledger: 0 },
     after: { availability: 'available_now', contract: 'free_agent', onSquad: false, vouches: 1, ledger: 1 },

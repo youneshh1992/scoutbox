@@ -19,7 +19,7 @@ import { trialReportsFor } from '../repositories/playerSubrecords.mjs';
 export const fixtureDb = (db = {}) => {
   const trials = Array.isArray(db.trials) ? JSON.parse(JSON.stringify(db.trials)) : [];
   const players = FIXTURE().players.map((p) => ({ ...p, trialReports: trialReportsFor(trials, p.id) }));
-  return { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), players, guardians: FIXTURE().guardians, ledger: [], vouches: [], ...db };
+  return { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), players, guardians: FIXTURE().guardians, ledger: [], blobNotes: [], ...db };
 };
 export function saveFixture(dir, db = {}, { savedAt = NOW, idCounter = 1000 } = {}) {
   const store = openStore(dir);

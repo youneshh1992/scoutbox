@@ -126,7 +126,7 @@ export function registerPassportCore(ctx) {
       ...applicationView(a), orgName: orgOf(a.orgId)?.name ?? null,
       opportunityTitle: ctx.scoutingReads.opportunities.byId(a.opportunityId)?.title ?? null,
     }));
-    const transitions = db.transitionCases.filter((t) => t.playerId === pid);
+    const transitions = vreads.transitionCases.forPlayer(pid); // S10c: read through SQL
     // History: every legacy M13 F10 row that was once confirmed, whatever became
     // of it. The timeline is the right place for these; the representation
     // HEADLINE is not built from them (M23 P5.6E, E-2).
@@ -148,7 +148,7 @@ export function registerPassportCore(ctx) {
         agencyName: orgOf(a.agencyOrgId)?.name ?? null,
       }));
     const achievements = vreads.achievements.forPlayer(pid);
-    const vouches = (db.vouches ?? []).filter((v) => v.playerId === pid && v.status === 'published' && !v.withdrawn);
+    const vouches = vreads.vouches.publishedFor(pid);
 
     // M16 Box Cam — displayable (verified/partially verified, never
     // invalidated) sessions, challenge completions and the aggregate

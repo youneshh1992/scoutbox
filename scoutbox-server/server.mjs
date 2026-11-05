@@ -27,6 +27,7 @@ import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
+import { TRANSITION_LIMITS, vouchCodeHash } from './repositories/transitionsVouches.mjs';
 import { registerM12 } from './m12/index.mjs';
 import { registerM13 } from './m13/index.mjs';
 import { registerM14 } from './domains/verification/claims/index.mjs';
@@ -101,7 +102,7 @@ import {
   nextActions,
 } from './domain.mjs';
 import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIanaZone, localParts } from './temporal.mjs';
-import { readPage, sendPageError } from './domains/platform/paging.mjs';
+import { readPage, sendPageError, pageOf } from './domains/platform/paging.mjs';
 import { createLookups } from './domains/platform/lookups.mjs';
 
 /**
@@ -200,7 +201,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -213,8 +214,8 @@ const recruitmentReads = Object.freeze({ ...recruitmentContactsOffers.reads, ...
 const scoutingReads = Object.freeze({ ...scoutingEvidence.reads, ...scoutingAssessments.reads, ...clubSetup.reads, ...opportunitiesCampaigns.reads });
 // The verification domain reads through SQL too (S10a): `verificationReads` (claims, events, evidence, tokens, admins,
 // rootTransfers, rootRequests, disputes, references, playerInvites, conflicts, domainRequests, domains; since S10b the
-// Passport's passportPrefs, careerEntries, achievements, shares, corrections).
-const verificationReads = Object.freeze({ ...verification.reads, ...passport.reads });
+// Passport's passportPrefs, careerEntries, achievements, shares, corrections; since S10c transitionCases and vouches).
+const verificationReads = Object.freeze({ ...verification.reads, ...passport.reads, ...transitionsVouches.reads });
 // Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
 // every module context as `byId` (`byId.player(id)`, `byId.org(id)`, …; null when there is none).
 const byId = createLookups({ players, guardians, users, orgs });
@@ -293,7 +294,7 @@ db.pushTokens ??= [];      // device push tokens, registered per user
 db.invoices ??= [];        // billing records (success fees)
 // db.emailChallenges: the data layer's hash-free read-only view since S6a (rows of email_challenges) — never assigned here.
 db.openTrials ??= [];      // grassroots open trial days + registrations
-db.vouches ??= [];         // coach references (email-code verified)
+// Coach references (vouches) are a table of repositories/transitionsVouches.mjs since S10c (verificationReads.vouches).
 db.matchdays ??= [];       // grassroots match-day logs (squad-wide attendance)
 db.friendlies ??= [];      // club-to-club friendly-match board (local)
 db.mediaBlobs ??= {};
@@ -1090,16 +1091,20 @@ function refreshJourneyBadges(player) {
   }
 }
 
+/**
+ * A coach reference as every profile shows it: an allowlist, never the coach's email or the code. Honesty audit (M12
+ * F1/F10): an email-code reference proves mailbox control, NOT coach identity — say so wherever the reference travels.
+ */
+function vouchView(v) {
+  return {
+    id: v.id, playerId: v.playerId, playerName: v.playerName, coachName: v.coachName, role: v.role, status: v.status,
+    text: v.text, seasons: v.seasons, ts: v.ts, publishedAt: v.publishedAt, conflictOfInterest: v.conflictOfInterest,
+    withdrawn: v.withdrawn && { at: v.withdrawn.at, by: v.withdrawn.by, reason: v.withdrawn.reason },
+    verificationMethod: v.verificationMethod, identityVerified: v.identityVerified,
+  };
+}
 function publishedVouchesFor(playerId) {
-  return db.vouches
-    .filter((v) => v.playerId === playerId && v.status === 'published' && !v.withdrawn)
-    .map(({ coachEmail, code, ...visible }) => ({
-      ...visible,
-      // Honesty audit (M12 F1/F10): an email-code reference proves mailbox
-      // control, NOT coach identity — say so wherever the reference travels.
-      verificationMethod: visible.verificationMethod ?? 'email_code',
-      identityVerified: visible.identityVerified ?? false,
-    }));
+  return verificationReads.vouches.publishedFor(playerId).map(vouchView);
 }
 
 // Safeguarding certification is EARNED and losable: verification + signed
@@ -2994,7 +2999,9 @@ orgRouter.post('/squad/:entryId/release', (req, res) => {
   if (grassrootsOrgOnly(req, res)) return;
   const entry = clubSetup.squad.byId(req.params.entryId);
   if (!entry || entry.orgId !== req.org.id) return res.status(404).json({ error: 'SQUAD_ENTRY_NOT_FOUND' });
-  const { referenceText } = req.body || {};
+  const raw = (req.body || {}).referenceText;
+  if (raw !== undefined && raw !== null && typeof raw !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'referenceText', message: 'The reference is text.' });
+  const referenceText = raw ? raw.trim().slice(0, TRANSITION_LIMITS.text) : '';
   if (referenceText && !moderateOrRefuse(res, referenceText, { kind: 'release_reference', orgId: req.org.id })) return;
   // ONE unit of work (review of 9656a4b): the squad row (S9c: a row of org_squad_members),
   // the player's availability and contract columns, the published reference,
@@ -3011,11 +3018,12 @@ orgRouter.post('/squad/:entryId/release', (req, res) => {
       if (!other) players.update(p.id, { availability: 'available_now', contractStatus: 'free_agent' });
       seam('squad.release.after_row');
       if (referenceText) {
-        db.vouches.push({
-          id: nextId('vch'), playerId: p.id, playerName: p.name,
-          coachName: req.orgUser.name, coachEmail: null, role: `${req.orgUser.role || 'Manager'}, ${req.org.name}`,
-          status: 'published', code: null, text: String(referenceText).trim().slice(0, 400),
-          seasons: null, ts: Date.now(), publishedAt: Date.now(),
+        // S10c: a row of vouches, published at once (the club's identity is the session; no email, no code).
+        transitionsVouches.vouches.create({
+          id: nextId('vch'), playerId: p.id, playerName: p.name?.slice(0, TRANSITION_LIMITS.name) ?? null,
+          coachName: req.orgUser.name.slice(0, TRANSITION_LIMITS.coachName), coachEmail: null, role: `${req.orgUser.role || 'Manager'}, ${req.org.name}`.slice(0, TRANSITION_LIMITS.role),
+          status: 'published', codeHash: null, text: referenceText,
+          seasons: null, ts: Date.now(), publishedAt: Date.now(), conflictOfInterest: null, withdrawn: null,
         });
       }
       ledgerAppend({ type: 'released_by_club', playerId: p.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
@@ -3345,7 +3353,7 @@ playerRouter.get('/me', (req, res) => {
     // The Grassroots journey (null for pro-level players).
     pathway: pathwayFor(req.player, { vouchCount: publishedVouchesFor(req.player.id).length }),
     programme: programmeProgress(req.player),
-    vouches: db.vouches.filter((v) => v.playerId === req.player.id).map(({ coachEmail, code, ...v }) => v),
+    vouches: verificationReads.vouches.forPlayer(req.player.id).map(vouchView),
   });
 });
 
@@ -3973,16 +3981,26 @@ playerRouter.post('/first-team-seeker', (req, res) => {
 // Coach vouches: a named, verified local coach is the most valuable
 // credential an amateur can hold. The coach proves mailbox control with a
 // one-time code; the text is moderated like every other message.
+// S10c: the code is stored only as its SHA-256 hash (the coach's email carries it); junk is refused, not coerced.
 function createVouchRequest(player, { coachName, coachEmail, role }, res) {
-  if (!coachName || !coachEmail || !coachEmail.includes('@')) {
+  const VL = TRANSITION_LIMITS;
+  for (const [field, v] of [['coachName', coachName], ['coachEmail', coachEmail], ['role', role]]) {
+    if (v !== undefined && v !== null && typeof v !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
+  }
+  const name = (coachName ?? '').trim();
+  const email = (coachEmail ?? '').trim();
+  if (!name || !email || !/^[^\s@]+@[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'COACH_DETAILS_REQUIRED', message: 'Name the coach and their email address.' });
   }
-  const vouch = {
-    id: nextId('vch'), playerId: player.id, playerName: player.name,
-    coachName: String(coachName).trim(), coachEmail: String(coachEmail).trim(), role: String(role ?? 'Coach').trim(),
-    status: 'pending', code: randomCode(8), text: null, seasons: null, ts: Date.now(), publishedAt: null,
-  };
-  db.vouches.push(vouch);
+  if (name.length > VL.coachName) return res.status(400).json({ error: 'FIELD_INVALID', field: 'coachName', message: `At most ${VL.coachName} characters.` });
+  if (email.length > VL.coachEmail) return res.status(400).json({ error: 'FIELD_INVALID', field: 'coachEmail', message: `At most ${VL.coachEmail} characters.` });
+  const code = randomCode(8);
+  const vouch = unit(() => transitionsVouches.vouches.create({ // in a unit, so the id counter commits with the row
+    id: nextId('vch'), playerId: player.id, playerName: player.name?.slice(0, VL.name) ?? null, // names have no limit at signup: shortened, never refused
+    coachName: name, coachEmail: email, role: (role ?? '').trim().slice(0, VL.role) || 'Coach',
+    status: 'pending', codeHash: vouchCodeHash(code), text: null, seasons: null, ts: Date.now(), publishedAt: null,
+    conflictOfInterest: null, withdrawn: null,
+  }));
   mailer.send({
     to: vouch.coachEmail,
     subject: `Reference request for ${player.name} on ScoutBox`,
@@ -3990,11 +4008,10 @@ function createVouchRequest(player, { coachName, coachEmail, role }, res) {
 
 ${player.name} has asked you for a coach reference on ScoutBox Grassroots.
 
-Your one-time reference code is ${vouch.code}. Submitting with it confirms this mailbox is yours; your name and role will appear with the reference on ${player.name}'s profile.
+Your one-time reference code is ${code}. Submitting with it confirms this mailbox is yours; your name and role will appear with the reference on ${player.name}'s profile.
 
 References are screened by moderation and reviewed by Trust & Safety.`,
   }).catch((err) => console.error(`reference request ${vouch.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`)); // observed, never an unhandled rejection (review of 40aa05c, F2)
-  persist();
   res.status(201).json({ requested: true, vouchId: vouch.id });
 }
 
@@ -4404,23 +4421,31 @@ app.get('/orgs/directory', (_req, res) => {
 // Coach reference submission: the code from the emailed request proves the
 // mailbox; the text passes the same moderation screen as every message.
 app.post('/vouch/submit', (req, res) => {
-  const { code, text, seasons } = req.body || {};
-  const vouch = db.vouches.find((v) => v.code === String(code ?? '').trim().toUpperCase() && v.status === 'pending');
+  const { code, text, seasons, conflictOfInterest } = req.body || {};
+  const vouch = typeof code === 'string' && code.trim() ? transitionsVouches.vouches.pendingByCode(code) : null;
   if (!vouch) return res.status(404).json({ error: 'CODE_INVALID', message: 'That reference code is wrong or already used.' });
-  if (!text || !String(text).trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
+  for (const [field, v] of [['text', text], ['seasons', seasons], ['conflictOfInterest', conflictOfInterest]]) {
+    if (v !== undefined && v !== null && typeof v !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
+  }
+  if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
   if (!moderateOrRefuse(res, text, { kind: 'coach_vouch', playerId: vouch.playerId })) return;
-  vouch.text = String(text).trim().slice(0, 400);
-  vouch.seasons = seasons ? String(seasons).trim().slice(0, 40) : null;
-  // M12 F10: a reference carries its declared relationship to the player —
-  // "my son", "I run their agency" etc. must be visible, not discoverable.
-  vouch.conflictOfInterest = req.body?.conflictOfInterest ? String(req.body.conflictOfInterest).trim().slice(0, 200) : null;
-  vouch.status = 'published';
-  vouch.publishedAt = Date.now();
-  vouch.code = null; // single use
+  const VL = TRANSITION_LIMITS;
   const player = findPlayer(vouch.playerId);
-  notify({ kind: 'player', id: vouch.playerId }, 'vouch', `⭐ ${vouch.coachName} published a coach reference on your profile.`, vouch.id);
-  if (player?.guardianId) notify({ kind: 'guardian', id: player.guardianId }, 'vouch', `${vouch.coachName} published a coach reference on ${player.name}'s profile.`, vouch.id);
-  persist();
+  // S10c: the published reference (the code cleared: single use) and both notifications commit together.
+  unit(() => {
+    transitionsVouches.vouches.update(vouch.id, (d) => {
+      d.text = text.trim().slice(0, VL.text);
+      d.seasons = seasons?.trim() ? seasons.trim().slice(0, VL.seasons) : null;
+      // M12 F10: a reference carries its declared relationship to the player —
+      // "my son", "I run their agency" etc. must be visible, not discoverable.
+      d.conflictOfInterest = conflictOfInterest?.trim() ? conflictOfInterest.trim().slice(0, VL.conflictOfInterest) : null;
+      d.status = 'published';
+      d.publishedAt = Date.now();
+      d.codeHash = null; // single use
+    });
+    notify({ kind: 'player', id: vouch.playerId }, 'vouch', `⭐ ${vouch.coachName} published a coach reference on your profile.`, vouch.id);
+    if (player?.guardianId) notify({ kind: 'guardian', id: player.guardianId }, 'vouch', `${vouch.coachName} published a coach reference on ${player.name}'s profile.`, vouch.id);
+  });
   broadcast('players', { playerId: vouch.playerId });
   res.status(201).json({ published: true });
 });
@@ -4495,12 +4520,17 @@ adminRouter.get('/reports', (_req, res) => {
 adminRouter.get('/outbox', (_req, res) => res.json(db.outbox.slice().reverse().map((m) => { const full = mailer.devDeliveredText(m.id); return full ? { ...m, text: full } : m; })));
 adminRouter.get('/push-log', (_req, res) => res.json(db.pushLog.slice(-200).reverse()));
 adminRouter.get('/invoices', (_req, res) => res.json(db.invoices.slice().reverse()));
-adminRouter.get('/vouches', (_req, res) => res.json(db.vouches.map(({ code, ...v }) => v).reverse()));
+// Every coach reference, newest first, by cursor (`?limit=&cursor=`); the coach's email is shown to T&S, never the code.
+adminRouter.get('/vouches', (req, res) => {
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const { items, nextCursor } = pageOf(transitionsVouches.vouches.page(page).rows, page.limit, (r) => r.key);
+  res.json({ items: items.map(({ record: v }) => ({ ...vouchView(v), coachEmail: v.coachEmail })), nextCursor });
+});
 adminRouter.post('/vouches/:id/revoke', (req, res) => {
-  const vouch = db.vouches.find((v) => v.id === req.params.id);
+  const vouch = verificationReads.vouches.byId(req.params.id);
   if (!vouch) return res.status(404).json({ error: 'VOUCH_NOT_FOUND' });
-  vouch.status = 'revoked';
-  persist();
+  unit(() => transitionsVouches.vouches.update(vouch.id, (d) => { d.status = 'revoked'; d.codeHash = null; }));
   broadcast('players', { playerId: vouch.playerId });
   res.json({ revoked: true });
 });
@@ -4668,6 +4698,7 @@ registerM12({
   scoutingAssessments, // S9b: templates, assessments, video segments and playlists are explicit repository writes
   clubSetup, // S9c: tactical setups, squads, shadow lists and vacancies are explicit repository writes
   opportunitiesCampaigns, // S9d: opportunities, applications, campaigns and their submissions are explicit repository writes
+  transitionsVouches, // S10c: the T&S withdrawal of a coach reference is an explicit repository write
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4681,6 +4712,7 @@ const m13Ctx = registerM13({
   db, byId, scoutingReads, verificationReads, recruitmentReads, users, sessions, orgs, players, guardians, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitment, recruitmentCases,
   opportunitiesCampaigns, // S9d: player suitability preferences and approved summaries are explicit repository writes
+  transitionsVouches, // S10c: transition cases, their grants and history are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,

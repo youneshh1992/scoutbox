@@ -6,28 +6,14 @@
 --        verMigrated, orgs[].verification.domains[]), M15 Football Passport
 --        (passportPrefs, passportCareerEntries, passportAchievements,
 --        passportShares, passportCorrections), M13 F2 transitionCases,
---        M13 F10 representations (legacy, creation closed) and core vouches.
+--        M13 F10 representations (legacy, creation closed; a draft, moves with S11) and core vouches.
 -- Depends on: 01_identity.sql (orgs, org_users, players, guardians) and
 --             02_recruitment.sql (evidence, assessments).
 -- Conventions: docs/architecture/sql conventions (STRICT tables, snake_case,
 --   epoch-ms INTEGER *_at, hashed secrets, *_json only with a stated reason).
--- S10a and S10b: the verification and passport tables are implemented and carry NO JSON column (see their sections);
--- the JSON policy below now applies only to the transition and representation tables (S10c).
--- JSON policy for this file:
---   * review_reasons_json / risk_flags_json — bounded arrays of reason/flag
---     CODES (REVIEW_REASONS + 'REGISTRY_RECORD_UNREADABLE'; riskFlags()
---     output). Read whole with .includes(), never queried by element.
---     Deferred normalisation: a child table the day a queue filter by code is
---     needed.
---   * metadata_json (ver_claims) — free-form by design: the key set depends on
---     claimType (licence fields, registry result, root-request link, migration
---     provenance...). Lookup keys (pairId, workEmail, assignedTo, expiryWarned)
---     are promoted to columns.
---   * meta_json / declarations_json (evidence, root requests) — free-form by
---     design: supplied by the caller (note, address hash, signing package
---     link...) and echoed back verbatim.
---   * before_json / after_json / detail_json — audit payloads, free-form by
---     design (every event type carries a different shape).
+-- S10a, S10b and S10c: the verification, passport, transition and reference tables are implemented and carry NO JSON
+-- column (see their sections). The JSON policy of the first draft now applies only to the legacy representation draft
+-- (detail_json), which moves with S11.
 -- =============================================================================
 
 
@@ -566,139 +552,129 @@ CREATE INDEX passport_corrections_player ON passport_corrections (player_id);
 
 
 -- =============================================================================
--- M13 F2 — consent-based transition cases
+-- M13 F2 transition cases and core coach references (vouches)
 -- =============================================================================
 
--- -----------------------------------------------------------------------------
--- source: db.transitionCases  created at domains/verification/transitions.mjs:42
--- owner/writer: m13 transitions (adult player or guardian own the case; clubs
---   only read through a live grant)
--- lifecycle: status open → withdrawn | placed | expired (sweep at
---   periodEndsAt); never deleted
--- mapping:
---   id -> id (trn-N)   playerId -> player_id   playerName -> player_name
---   startedBy{kind,id,name} -> started_by_kind, started_by_id, started_by_name
---   caseOwner{kind,id,name} -> derived, not stored: always a copy of startedBy
---     at creation and never reassigned (transitions.mjs:44)
---   note -> note (≤500)
---   pack{mediaIds[],evidenceIds[],feedbackIds[]} -> transition_case_pack_items
---   periodEndsAt -> period_ends_at (14–180 days)
---   recipients[] -> transition_case_recipients
---   status -> status
---   placement{orgId,orgName,at,note} -> placement_org_id, placement_org_name,
---     placement_at, placement_note (≤300)
---   followUp{dueAt,completedAt,notifiedAt} -> follow_up_due_at,
---     follow_up_completed_at (initialised null, NEVER set by any route —
---     kept for fidelity), follow_up_notified_at (sweep)
---   createdAt -> created_at
---   history[] -> transition_case_history
--- notes:
---   * Minors: only the guardian may open/own a case — code rule.
---   * Agencies can never be recipients — code rule.
---   * Read patterns: by player_id (player/guardian list); by recipient org
---     with a live grant (club list) — see transition_case_recipients.
--- -----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
+-- S10c: IMPLEMENTED, migration 0025_transitions_vouches REGISTERED (repositories/transitionsVouches.mjs, 5 Nov 2026).
+-- The definitions below are the migration's DDL (generated from the repository's field specs, like S10a and S10b);
+-- scripts/testSchemaDdl.mjs compares them column by column.
+-- Sources: domains/verification/transitions.mjs (transition cases); server.mjs (reference request, /vouch/submit,
+-- the club release reference, the T&S list and revoke) and domains/scouting/passport.mjs (the T&S withdrawal).
+-- How the model differs from the first draft of this file:
+--   * No JSON columns. A history entry's detail is one of two typed columns, by action: detail_items (opened) or
+--     detail_org_id (a grant, a revocation, a placement); none for a withdrawal or an expiry.
+--   * A grant (transition_case_recipients) is keyed by its position in the case (ord), not (org, granted_at); its
+--     organisation is RESTRICT, as is a placement's. Pack items keep their order (ord).
+--   * follow_up_completed_at is dropped (no route ever set it); the follow-up is its due and notified instants.
+--   * caseOwner is not stored (always startedBy); vouches.verificationMethod / identityVerified are not stored (always
+--     'email_code' and false: an email code proves the mailbox, never the person).
+--   * A reference code is stored as its SHA-256 hash (code_hash), held exactly while the reference is pending
+--     (single use) and unique; the plain code exists only in the coach's email.
+--   * Player and guardian ids carry no key (tolerant, as S9, S10a and S10b): a case or a reference outlives an
+--     account deletion under the old id, as before (retention, decisions.md Q6).
+--   * The legacy M13 F10 representations are not part of this step (their draft follows): step 2305 mirrors them into
+--     the agent agreements, so they move with the agent stores in S11.
+-- Read patterns: transition_cases by player (player and guardian lists); open cases with a live grant for an
+--   organisation (club list, EXISTS over transition_case_recipients_org); the sweep by (status, period_ends_at) and
+--   the due follow-ups (partial index). vouches by (player_id, status) [every profile]; by code_hash while pending
+--   [submit]; by id [T&S revoke and withdraw]; newest first by rowid [the T&S list, paged by cursor].
+-- ----------------------------------------------------------------------------
 CREATE TABLE transition_cases (
-  id                     TEXT PRIMARY KEY,
-  player_id              TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  player_name            TEXT,                              -- snapshot
-  started_by_kind        TEXT NOT NULL CHECK (started_by_kind IN ('player','guardian')),
-  started_by_id          TEXT NOT NULL,                     -- players.id | guardians.id (polymorphic, no FK)
-  started_by_name        TEXT,                              -- snapshot
-  note                   TEXT CHECK (note IS NULL OR length(note) <= 500),
-  period_ends_at         INTEGER NOT NULL,
-  status                 TEXT NOT NULL CHECK (status IN ('open','withdrawn','placed','expired')),
-  placement_org_id       TEXT REFERENCES orgs(id) ON DELETE SET NULL,
-  placement_org_name     TEXT,                              -- snapshot
-  placement_at           INTEGER,
-  placement_note         TEXT CHECK (placement_note IS NULL OR length(placement_note) <= 300),
-  follow_up_due_at       INTEGER,
-  follow_up_completed_at INTEGER,                           -- never written non-null today
-  follow_up_notified_at  INTEGER,
-  created_at             INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  player_name                              TEXT CHECK (player_name IS NULL OR length(player_name) <= 200),
+  started_by_kind                          TEXT NOT NULL CHECK (started_by_kind IN ('player','guardian')),
+  started_by_id                            TEXT NOT NULL CHECK (length(started_by_id) <= 80 AND length(started_by_id) > 0),
+  started_by_name                          TEXT CHECK (started_by_name IS NULL OR length(started_by_name) <= 200),
+  note                                     TEXT CHECK (note IS NULL OR length(note) <= 500),
+  period_ends_at                           INTEGER NOT NULL,
+  status                                   TEXT NOT NULL CHECK (status IN ('open','withdrawn','placed','expired')),
+  placement_org_id                         TEXT CHECK (placement_org_id IS NULL OR length(placement_org_id) <= 80 AND length(placement_org_id) > 0),
+  placement_org_name                       TEXT CHECK (placement_org_name IS NULL OR length(placement_org_name) <= 200),
+  placement_at                             INTEGER,
+  placement_note                           TEXT CHECK (placement_note IS NULL OR length(placement_note) <= 300),
+  follow_up_due_at                         INTEGER,
+  follow_up_notified_at                    INTEGER,
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (placement_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK ((status = 'placed') = (placement_org_id IS NOT NULL)),
+  CHECK (follow_up_due_at IS NULL OR placement_org_id IS NOT NULL)
 ) STRICT;
-
-CREATE INDEX transition_cases_player ON transition_cases(player_id);
-CREATE INDEX transition_cases_status_period ON transition_cases(status, period_ends_at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.transitionCases[].pack.{mediaIds,evidenceIds,feedbackIds}[]
---         built at domains/verification/transitions.mjs:19 (buildPack whitelist)
--- owner/writer: m13 transitions; written once at case creation
--- lifecycle: immutable after creation
--- mapping: pack.mediaIds[i] -> (case_id, 'media', item_id) — players.media[].id
---   (player-owned media, table in 01_identity.sql); pack.evidenceIds[i] ->
---   (case_id, 'evidence', item_id) — evidence.id; pack.feedbackIds[i] ->
---   (case_id, 'feedback', item_id) — assessments.id with publishedFeedback.
--- notes: polymorphic by item_kind, so no FK; at least one item is required by
---   code (PACK_EMPTY 400).
--- -----------------------------------------------------------------------------
+CREATE INDEX transition_cases_player ON transition_cases (player_id);
+CREATE INDEX transition_cases_status_period ON transition_cases (status, period_ends_at);
+CREATE INDEX transition_cases_follow_up ON transition_cases (follow_up_due_at) WHERE follow_up_due_at IS NOT NULL AND follow_up_notified_at IS NULL;
 CREATE TABLE transition_case_pack_items (
   transition_case_id TEXT NOT NULL REFERENCES transition_cases(id) ON DELETE CASCADE,
-  item_kind          TEXT NOT NULL CHECK (item_kind IN ('media','evidence','feedback')),
-  item_id            TEXT NOT NULL,                         -- player media id | evidence.id | assessments.id
-  PRIMARY KEY (transition_case_id, item_kind, item_id)
+  item_kind         TEXT NOT NULL CHECK (item_kind IN ('media','evidence','feedback')),
+  ord                INTEGER NOT NULL CHECK (ord >= 0 AND ord < 100),
+  item_id            TEXT NOT NULL CHECK (length(item_id) > 0 AND length(item_id) <= 80),
+  PRIMARY KEY (transition_case_id, item_kind, item_id),
+  UNIQUE (transition_case_id, item_kind, ord)
 ) STRICT;
-
-
--- -----------------------------------------------------------------------------
--- source: db.transitionCases[].recipients[]  pushed at domains/verification/transitions.mjs:93
--- owner/writer: m13 transitions (grant / revoke / withdraw / place / club view)
--- lifecycle: revoked_at soft revoke (also set for every other recipient on
---   placement and for all on withdraw); expiry by expires_at (≤ case period)
--- mapping:
---   (parent) -> transition_case_id
---   orgId -> org_id   orgName -> org_name
---   grantedAt -> granted_at   expiresAt -> expires_at
---   revokedAt -> revoked_at   viewedAt -> viewed_at (last pack open)
--- notes:
---   * No id in source; natural PK (case, org, granted_at) — a club can be
---     re-granted after a revoke/expiry, so (case, org) alone is not unique.
---   * "Active" = revoked_at IS NULL AND expires_at > now — time-dependent, so
---     the one-active-grant-per-org rule (ALREADY_GRANTED) stays a code rule.
---   * Read pattern: by org_id where revoked_at IS NULL (club list + pack view).
--- -----------------------------------------------------------------------------
 CREATE TABLE transition_case_recipients (
-  transition_case_id TEXT NOT NULL REFERENCES transition_cases(id) ON DELETE CASCADE,
-  org_id             TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name           TEXT,                                  -- snapshot
-  granted_at         INTEGER NOT NULL,
-  expires_at         INTEGER NOT NULL,
-  revoked_at         INTEGER,
-  viewed_at          INTEGER,
-  PRIMARY KEY (transition_case_id, org_id, granted_at)
+  transition_case_id                       TEXT NOT NULL CHECK (length(transition_case_id) <= 80 AND length(transition_case_id) > 0),
+  ord                                      INTEGER NOT NULL,
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  org_name                                 TEXT CHECK (org_name IS NULL OR length(org_name) <= 200),
+  granted_at                               INTEGER NOT NULL,
+  expires_at                               INTEGER NOT NULL,
+  revoked_at                               INTEGER,
+  viewed_at                                INTEGER,
+  FOREIGN KEY (transition_case_id) REFERENCES transition_cases(id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  PRIMARY KEY (transition_case_id, ord),
+  CHECK (ord >= 0),
+  CHECK (expires_at >= granted_at)
 ) STRICT;
-
-CREATE INDEX transition_case_recipients_org ON transition_case_recipients(org_id, revoked_at, expires_at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.transitionCases[].history[]  via histAppend (m13/shared.mjs:206)
--- owner/writer: m13 transitions
--- lifecycle: append-only
--- mapping: id -> id (aud-N)   at -> at   byKind -> by_kind ('player' |
---   'guardian' | 'system')   byId -> by_id ('sweep' for system)   byName -> by_name
---   action -> action ('opened','recipient_added','recipient_revoked',
---   'withdrawn','placed','expired')   detail -> detail_json
--- -----------------------------------------------------------------------------
+CREATE INDEX transition_case_recipients_org ON transition_case_recipients (org_id, revoked_at, expires_at);
 CREATE TABLE transition_case_history (
-  id                 TEXT PRIMARY KEY,
-  transition_case_id TEXT NOT NULL REFERENCES transition_cases(id) ON DELETE CASCADE,
-  at                 INTEGER NOT NULL,
-  by_kind            TEXT CHECK (by_kind IS NULL OR by_kind IN ('player','guardian','system')),
-  by_id              TEXT,
-  by_name            TEXT,                                  -- snapshot
-  action             TEXT NOT NULL CHECK (action IN ('opened','recipient_added','recipient_revoked','withdrawn','placed','expired')),
-  detail_json        TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  transition_case_id                       TEXT NOT NULL CHECK (length(transition_case_id) <= 80 AND length(transition_case_id) > 0),
+  at                                       INTEGER NOT NULL,
+  by_kind                                  TEXT NOT NULL CHECK (by_kind IN ('player','guardian','system')),
+  by_id                                    TEXT NOT NULL CHECK (length(by_id) <= 80 AND length(by_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  action                                   TEXT NOT NULL CHECK (action IN ('opened','recipient_added','recipient_revoked','withdrawn','placed','expired')),
+  detail_items                             INTEGER,
+  detail_org_id                            TEXT CHECK (detail_org_id IS NULL OR length(detail_org_id) <= 80 AND length(detail_org_id) > 0),
+  FOREIGN KEY (transition_case_id) REFERENCES transition_cases(id) ON DELETE CASCADE,
+  CHECK (detail_items IS NULL OR detail_items > 0),
+  CHECK ((action = 'opened') = (detail_items IS NOT NULL)),
+  CHECK ((action IN ('recipient_added','recipient_revoked','placed')) = (detail_org_id IS NOT NULL))
 ) STRICT;
-
-CREATE INDEX transition_case_history_case ON transition_case_history(transition_case_id, at);
+CREATE INDEX transition_case_history_case ON transition_case_history (transition_case_id);
+CREATE TABLE vouches (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  player_name                              TEXT CHECK (player_name IS NULL OR length(player_name) <= 200),
+  coach_name                               TEXT NOT NULL CHECK (length(coach_name) <= 100 AND length(coach_name) > 0),
+  coach_email                              TEXT CHECK (coach_email IS NULL OR length(coach_email) <= 254),
+  role                                     TEXT NOT NULL CHECK (length(role) <= 200 AND length(role) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('pending','published','revoked')),
+  code_hash                                TEXT CHECK (code_hash IS NULL OR length(code_hash) <= 64),
+  text                                     TEXT CHECK (text IS NULL OR length(text) <= 400),
+  seasons                                  TEXT CHECK (seasons IS NULL OR length(seasons) <= 40),
+  created_at                               INTEGER NOT NULL,
+  published_at                             INTEGER,
+  conflict_of_interest                     TEXT CHECK (conflict_of_interest IS NULL OR length(conflict_of_interest) <= 200),
+  withdrawn_at                             INTEGER,
+  withdrawn_by                             TEXT CHECK (withdrawn_by IS NULL OR withdrawn_by IN ('admin')),
+  withdrawn_reason                         TEXT CHECK (withdrawn_reason IS NULL OR length(withdrawn_reason) <= 200 AND length(withdrawn_reason) > 0),
+  CHECK (length(code_hash) = 64),
+  CHECK ((status = 'pending') = (code_hash IS NOT NULL)),
+  CHECK (status <> 'published' OR (text IS NOT NULL AND published_at IS NOT NULL))
+) STRICT;
+CREATE INDEX vouches_player_status ON vouches (player_id, status);
+CREATE UNIQUE INDEX vouches_code_hash ON vouches (code_hash) WHERE code_hash IS NOT NULL;
 
 
 -- =============================================================================
 -- M13 F10 — legacy adult representation (creation closed, M23 P5.6E)
 -- =============================================================================
+-- NOT IMPLEMENTED: a draft. Not part of S10c: step 2305 mirrors these rows into the agent agreements
+-- (06_agent_compliance_transactions.sql), so the collection moves with the agent stores in S11, which may retire it
+-- instead (no writer since M23 P5.6E; the seed has none).
 
 -- -----------------------------------------------------------------------------
 -- source: db.representations  originally created by POST /org/representation/
@@ -779,68 +755,6 @@ CREATE TABLE representation_history (
 ) STRICT;
 
 CREATE INDEX representation_history_rep ON representation_history(representation_id, at);
-
-
--- =============================================================================
--- Core — coach vouches (email-code references)
--- =============================================================================
-
--- -----------------------------------------------------------------------------
--- source: db.vouches  created at server.mjs:3689 (createVouchRequest; player
---         or guardian request) and server.mjs:2823 (club release reference —
---         published immediately, no email, no code)
--- owner/writer: server.mjs (request, /vouch/submit publish, admin revoke) and
---   domains/scouting/passport.mjs:369 (admin withdraw)
--- lifecycle: status pending → published → revoked; withdrawn_at is a separate
---   T&S soft-withdraw on a published row; never deleted — survives player
---   deletion WITH names (known retention defect)
--- mapping:
---   id -> id (vch-N)   playerId -> player_id   playerName -> player_name
---   coachName -> coach_name   coachEmail -> coach_email (NULL on release path)
---   role -> role
---   status -> status
---   code -> code_hash (sha256 hex of the 8-char upper-case randomCode; stored
---     PLAIN today at server.mjs:3692 and compared plain at :4073; nulled on
---     publish — single use)
---   text -> text (≤400, moderated)   seasons -> seasons (≤40)
---   ts -> created_at (source field is literally `ts`)
---   publishedAt -> published_at
---   conflictOfInterest -> conflict_of_interest (≤200; only the submit path
---     sets it, release rows have no such key → NULL)
---   withdrawn{at,by,reason} -> withdrawn_at, withdrawn_by ('admin'),
---     withdrawn_reason (≤200)
---   verificationMethod -> derived, not stored: never written; every reader
---     defaults it to 'email_code' (server.mjs:969, domains/scouting/passport.mjs:103)
---   identityVerified -> derived, not stored: never written; readers default
---     it to false (an email code proves mailbox control, not identity)
--- notes:
---   * Privacy: coach_email is personal data; coach_email and code are
---     stripped from every player/org view (server.mjs:965, :3126).
---   * Read patterns: (player_id, status) with withdrawn_at IS NULL [profile,
---     passport counts, season wrap]; by code_hash where status='pending'
---     [submit]; by id [admin revoke/withdraw]; all reversed [admin list].
--- -----------------------------------------------------------------------------
-CREATE TABLE vouches (
-  id                   TEXT PRIMARY KEY,
-  player_id            TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
-  player_name          TEXT,                                -- snapshot
-  coach_name           TEXT NOT NULL,                       -- personal data
-  coach_email          TEXT,                                -- personal data
-  role                 TEXT NOT NULL,
-  status               TEXT NOT NULL CHECK (status IN ('pending','published','revoked')),
-  code_hash            TEXT CHECK (code_hash IS NULL OR length(code_hash) = 64),
-  text                 TEXT CHECK (text IS NULL OR length(text) <= 400),
-  seasons              TEXT CHECK (seasons IS NULL OR length(seasons) <= 40),
-  created_at           INTEGER NOT NULL,                    -- source: ts
-  published_at         INTEGER,
-  conflict_of_interest TEXT CHECK (conflict_of_interest IS NULL OR length(conflict_of_interest) <= 200),
-  withdrawn_at         INTEGER,
-  withdrawn_by         TEXT CHECK (withdrawn_by IS NULL OR withdrawn_by IN ('admin')),
-  withdrawn_reason     TEXT CHECK (withdrawn_reason IS NULL OR length(withdrawn_reason) <= 200)
-) STRICT;
-
-CREATE INDEX vouches_player_status ON vouches(player_id, status);
-CREATE INDEX vouches_code_hash ON vouches(code_hash) WHERE code_hash IS NOT NULL AND status = 'pending';
 
 
 -- =============================================================================

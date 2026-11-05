@@ -345,6 +345,17 @@ r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouc
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'vouch text passes through the same moderation screen');
 r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouchCode, text: 'Two seasons with me — never missed a session, leads the line brilliantly.', seasons: '2024–2026' }) });
 ok(r.status === 201, 'clean vouch publishes');
+// S10c: the code is single use (stored only as its hash, cleared on publish); junk is refused, not coerced.
+r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouchCode, text: 'A second go with the same code.' }) });
+ok(r.status === 404 && r.body.error === 'CODE_INVALID', 'a used reference code is refused');
+r = await j('/player/vouches/request', { method: 'POST', body: JSON.stringify({ coachName: { first: 'Ade' }, coachEmail: 'ade@sundayleague.org.uk' }) }, bearer(KOLA));
+ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'coachName', 'a coach name that is not text is refused, naming the field');
+r = await j('/player/vouches/request', { method: 'POST', body: JSON.stringify({ coachName: 'Ade', coachEmail: 'not-an-email' }) }, bearer(KOLA));
+ok(r.status === 400 && r.body.error === 'COACH_DETAILS_REQUIRED', 'a coach email without an address shape is refused');
+const tsVouches = await j('/admin/vouches?limit=1', {}, admin);
+ok(tsVouches.status === 200 && tsVouches.body.items.length === 1 && 'nextCursor' in tsVouches.body, 'the T&S reference list pages by cursor (items, nextCursor)');
+ok(tsVouches.body.items.every((v) => !('code' in v) && !('codeHash' in v) && 'coachEmail' in v), 'T&S sees the coach email, never the code or its hash');
+ok((await j('/admin/vouches?cursor=junk', {}, admin)).status === 400, 'a junk cursor is refused');
 gsearch = await j(`/org/players/pl-adeyemi`, {}, bearer(MOSS));
 ok(gsearch.body.vouches?.some((v) => /leads the line/.test(v.text)) && !('coachEmail' in (gsearch.body.vouches?.[0] ?? {})), 'published vouch visible to clubs, coach email never exposed');
 

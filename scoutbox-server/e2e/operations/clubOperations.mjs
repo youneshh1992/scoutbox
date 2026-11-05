@@ -500,6 +500,16 @@ section('F2 — consent-based transitions');
   const mediaId = me.media?.[0]?.id ?? (me.player?.media?.[0]?.id);
   let r = await j('POST', '/player/transitions', { pack: {} }, adeyemi.token);
   ok(r.status === 400 && r.body.error === 'PACK_EMPTY', 'an empty pack (or club-private material) cannot start a transition');
+  // S10c: junk is refused with the field named, never clamped or coerced.
+  r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId] }, periodDays: 7 }, adeyemi.token);
+  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'periodDays', 'a period outside 14-180 days is refused, not clamped');
+  r = await j('POST', '/player/transitions', { pack: { mediaIds: mediaId } }, adeyemi.token);
+  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'pack.mediaIds', 'a pack list that is not a list is refused');
+  r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId], notes: ['x'] } }, adeyemi.token);
+  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'pack.notes', 'a pack field the build does not store is refused');
+  r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId] }, note: { text: 'x' } }, adeyemi.token);
+  ok(r.status === 400 && r.body.field === 'note', 'a note that is not text is refused');
+  ok((await j('GET', '/player/transitions', undefined, adeyemi.token)).body.items.length === 0, 'and none of the refused requests opened a case');
   r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId] }, note: 'Looking for a new club after the academy', periodDays: 60 }, adeyemi.token);
   const trn = r.body.transition;
   ok(r.status === 201 && trn.status === 'open' && r.body.note.includes('never re-labels'), 'player opens a transition case; no “released” label anywhere');
@@ -507,6 +517,9 @@ section('F2 — consent-based transitions');
 
   r = await j('POST', `/player/transitions/${trn.id}/recipients`, { orgId: 'org-northstar' }, adeyemi.token);
   ok(r.status === 403 && r.body.error === 'AGENCIES_EXCLUDED', 'agencies can never be transition recipients');
+  r = await j('POST', `/player/transitions/${trn.id}/recipients`, { orgId: 'org-eastport', days: 365 }, adeyemi.token);
+  ok(r.status === 400 && r.body.field === 'days', 'a grant longer than 90 days is refused, not clamped');
+  ok(trn.caseOwner?.id === trn.startedBy?.id && trn.history.length === 1 && trn.history[0].action === 'opened', 'the case names its owner and records its opening');
   r = await j('POST', `/player/transitions/${trn.id}/recipients`, { orgId: 'org-eastport', days: 30 }, adeyemi.token);
   ok(r.status === 201, 'player grants a specific eligible club access');
 

@@ -40,6 +40,7 @@ export function registerPassport(ctx) {
     orgCanSee, paginate, audit, guardianOwnsChild, freshness, activeAffiliation,
     moderateOrRefuse, isAdult, scoutingReads, scoutingEvidence, unit,
     clubSetup, // S9c: an approved invitation adds the squad row through the club setup repository
+    transitionsVouches, verificationReads, // S10c: coach references are rows of vouches (the T&S withdrawal is a repository write)
   } = ctx;
   if (typeof scoutingEvidence?.evidence?.create !== 'function' || typeof unit !== 'function') throw new TypeError('registerPassport needs the scouting evidence repository and unit from the data layer');
   /** The player's own record, or null. */
@@ -128,7 +129,7 @@ export function registerPassport(ctx) {
         legacy.push({ kind: 'attendance', label: `Match attendance ${a.fixture ?? ''}`.trim(), tier: 'club_assessed', method: `match-day roster credited by ${a.corroboratedBy}`, at: a.date ?? null });
       }
     }
-    for (const v of db.vouches.filter((x) => x.playerId === player.id && x.status === 'published' && !x.withdrawn)) {
+    for (const v of verificationReads.vouches.publishedFor(player.id)) {
       legacy.push({
         kind: 'reference', label: `Reference from ${v.coachName} (${v.role})`, tier: 'coach_confirmed',
         method: 'email_code', identityVerified: false,
@@ -421,13 +422,13 @@ export function registerPassport(ctx) {
   });
 
   adminRouter.post('/vouches/:id/withdraw', (req, res) => {
-    const v = db.vouches.find((x) => x.id === req.params.id);
+    const v = verificationReads.vouches.byId(req.params.id);
     if (!v) return res.status(404).json({ error: 'VOUCH_NOT_FOUND' });
     if (v.withdrawn) return res.status(409).json({ error: 'ALREADY_WITHDRAWN' });
-    v.withdrawn = { at: Date.now(), by: 'admin', reason: String(req.body?.reason ?? '').slice(0, 200) || 'withdrawn by Trust & Safety' };
-    persistNow();
+    const reason = textOrRefuse(res, req.body?.reason, 'reason', 200); if (reason === undefined) return;
+    const stored = unit(() => transitionsVouches.vouches.update(v.id, (d) => { d.withdrawn = { at: Date.now(), by: 'admin', reason: reason?.trim() || 'withdrawn by Trust & Safety' }; }));
     broadcast('players', { playerId: v.playerId });
-    res.json({ withdrawn: v.withdrawn, note: 'The record is kept for history; it no longer appears on any profile view.' });
+    res.json({ withdrawn: { at: stored.withdrawn.at, by: stored.withdrawn.by, reason: stored.withdrawn.reason }, note: 'The record is kept for history; it no longer appears on any profile view.' });
   });
 
   // Squad invitations — the controlled onboarding path. A minor's invitation

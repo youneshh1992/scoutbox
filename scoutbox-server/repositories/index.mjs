@@ -55,6 +55,7 @@ import * as m0021 from './migrations/0021_club_setup.mjs';
 import * as m0022 from './migrations/0022_opportunities_campaigns.mjs';
 import * as m0023 from './migrations/0023_verification.mjs';
 import * as m0024 from './migrations/0024_passport.mjs';
+import * as m0025 from './migrations/0025_transitions_vouches.mjs';
 import { trialReportsFor } from './playerSubrecords.mjs';
 import { createRecruitmentRepository, RECRUITMENT_SNAPSHOT, RECRUITMENT_COLLECTIONS, RECRUITMENT_MIGRATION, assertRecruitmentConsistent, unresolvedPlayerReferences as unresolvedRecruitmentPlayers, retainedPlayerReferences as retainedRecruitmentPlayers } from './recruitment.mjs';
 import { createRecruitmentCasesRepository, RECRUITMENT_CASES_SNAPSHOT, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_MIGRATION, unresolvedPlayerReferences as unresolvedCasePlayers, retainedPlayerReferences as retainedCasePlayers } from './recruitmentCases.mjs';
@@ -66,6 +67,7 @@ import { createClubSetupRepository, CLUB_SETUP_SNAPSHOT, CLUB_SETUP_COLLECTIONS,
 import { createOpportunitiesCampaignsRepository, OPPORTUNITIES_CAMPAIGNS_SNAPSHOT, OPPORTUNITIES_CAMPAIGNS_COLLECTIONS, unresolvedPlayerReferences as unresolvedOpportunityPlayers, retainedPlayerReferences as retainedOpportunityPlayers } from './opportunitiesCampaigns.mjs';
 import { createVerificationRepository, VERIFICATION_SNAPSHOT, VERIFICATION_COLLECTIONS, VERIFICATION_RETIRED, unresolvedPlayerReferences as unresolvedVerificationPlayers, retainedPlayerReferences as retainedVerificationPlayers } from './verification.mjs';
 import { createPassportRepository, PASSPORT_SNAPSHOT, PASSPORT_COLLECTIONS, unresolvedPlayerReferences as unresolvedPassportPlayers, retainedPlayerReferences as retainedPassportPlayers } from './passport.mjs';
+import { createTransitionsVouchesRepository, TRANSITIONS_SNAPSHOT, TRANSITIONS_COLLECTIONS, unresolvedPlayerReferences as unresolvedTransitionPlayers, retainedPlayerReferences as retainedTransitionPlayers } from './transitionsVouches.mjs';
 import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, NOTIFICATIONS_MIGRATION } from './notifications.mjs';
 import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCHES_MIGRATION } from './dispatches.mjs';
@@ -73,7 +75,7 @@ import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MI
 import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, assertChannelReferencesConsistent } from './channels.mjs';
 import { createSafetyAuditRepository, AUDIT_COLLECTIONS, AUDIT_SNAPSHOT_TABLES, SAFETY_AUDIT_MIGRATION, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020, m0021, m0022, m0023, m0024]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020, m0021, m0022, m0023, m0024, m0025]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -124,7 +126,7 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
  * operations; a record the columns cannot hold is refused
  * (repositories/recruitmentContactsOffers.mjs).
  */
-export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS, ...RECRUITMENT_CASES_COLLECTIONS, ...RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, ...SIGNINGS_FOLLOWUPS_COLLECTIONS, ...SCOUTING_EVIDENCE_COLLECTIONS, ...SCOUTING_ASSESSMENTS_COLLECTIONS, ...CLUB_SETUP_COLLECTIONS, ...OPPORTUNITIES_CAMPAIGNS_COLLECTIONS, ...VERIFICATION_COLLECTIONS, ...PASSPORT_COLLECTIONS]);
+export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS, ...RECRUITMENT_CASES_COLLECTIONS, ...RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, ...SIGNINGS_FOLLOWUPS_COLLECTIONS, ...SCOUTING_EVIDENCE_COLLECTIONS, ...SCOUTING_ASSESSMENTS_COLLECTIONS, ...CLUB_SETUP_COLLECTIONS, ...OPPORTUNITIES_CAMPAIGNS_COLLECTIONS, ...VERIFICATION_COLLECTIONS, ...PASSPORT_COLLECTIONS, ...TRANSITIONS_COLLECTIONS]);
 /** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
 /** The notification, dispatch, outbox and push tables: no reference to any other table (polymorphic audiences; the dispatch's notification reference is indexed, not a foreign key; the outbox and push rows reference nothing), dispatched last. */
@@ -174,6 +176,8 @@ export function readTableBacked(sqlite) {
   if (verification) Object.assign(out, verification);
   const passport = PASSPORT_SNAPSHOT.read(sqlite); // S10b: Passport preferences, career entries, achievements, shares, corrections (null before the 0024 record)
   if (passport) Object.assign(out, passport);
+  const transitions = TRANSITIONS_SNAPSHOT.read(sqlite); // S10c: transition cases and coach references (null before the 0025 record)
+  if (transitions) Object.assign(out, transitions);
   return out;
 }
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
@@ -287,6 +291,8 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   written.push(...VERIFICATION_SNAPSHOT.replace(sqlite, snapshot));
   // S10b: the Passport's own records, the same way (a confirmation's organisation key is RESTRICT).
   written.push(...PASSPORT_SNAPSHOT.replace(sqlite, snapshot));
+  // S10c: transition cases and coach references, the same way (a grant's and a placement's organisation keys are RESTRICT).
+  written.push(...TRANSITIONS_SNAPSHOT.replace(sqlite, snapshot));
   if (present.includes(CHANNELS_TABLE.name) && CHANNELS_TABLE.replace(sqlite, snapshot[CHANNELS_TABLE.name], { requests: requestsSupplied ? snapshot.requests : undefined })) written.push(CHANNELS_TABLE.name);
   // Rows the snapshot no longer lists go last, children before parents, so a
   // parent that is still referenced makes the foreign key refuse the save
@@ -378,6 +384,7 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   if (written.some((n) => OPPORTUNITIES_CAMPAIGNS_COLLECTIONS.includes(n))) OPPORTUNITIES_CAMPAIGNS_SNAPSHOT.assert(sqlite);
   if (written.some((n) => VERIFICATION_COLLECTIONS.includes(n))) VERIFICATION_SNAPSHOT.assert(sqlite);
   if (written.some((n) => PASSPORT_COLLECTIONS.includes(n))) PASSPORT_SNAPSHOT.assert(sqlite);
+  if (written.some((n) => TRANSITIONS_COLLECTIONS.includes(n))) TRANSITIONS_SNAPSHOT.assert(sqlite);
   // A saved snapshot is never a first installation: the server attaches to the
   // tables it wrote and never initialises them from its seed.
   const settle = sqlite.prepare("UPDATE meta SET value = 'done' WHERE key = ? AND value = 'pending'");
@@ -709,6 +716,16 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     }
     retireCollection(db, name, 'passport');
   }
+  // S10c (migration 0025): transition cases and coach references (repositories/transitionsVouches.mjs); each db.* name throws.
+  const transitionsVouches = createTransitionsVouchesRepository({ sqlite, log, now, unit: store.unit });
+  const transitionsVouchesBoot = transitionsVouches.attach();
+  for (const name of TRANSITIONS_COLLECTIONS) {
+    if (Object.hasOwn(db, name)) {
+      delete db[name];
+      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
+    }
+    retireCollection(db, name, 'transitionsVouches');
+  }
   for (const name of ['requests', 'trials']) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
@@ -783,8 +800,9 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     opportunitiesCampaigns,
     verification,
     passport,
+    transitionsVouches,
     migrations,
-    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot, safetyAudit: safetyAuditBoot, recruitment: recruitmentBoot, recruitmentCases: recruitmentCasesBoot, recruitmentContactsOffers: recruitmentContactsOffersBoot, signingsFollowUps: signingsFollowUpsBoot, scoutingEvidence: scoutingEvidenceBoot, scoutingAssessments: scoutingAssessmentsBoot, clubSetup: clubSetupBoot, opportunitiesCampaigns: opportunitiesCampaignsBoot, verification: verificationBoot, passport: passportBoot },
+    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot, safetyAudit: safetyAuditBoot, recruitment: recruitmentBoot, recruitmentCases: recruitmentCasesBoot, recruitmentContactsOffers: recruitmentContactsOffersBoot, signingsFollowUps: signingsFollowUpsBoot, scoutingEvidence: scoutingEvidenceBoot, scoutingAssessments: scoutingAssessmentsBoot, clubSetup: clubSetupBoot, opportunitiesCampaigns: opportunitiesCampaignsBoot, verification: verificationBoot, passport: passportBoot, transitionsVouches: transitionsVouchesBoot },
     /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
     report: () => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
@@ -809,6 +827,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         opportunitiesCampaigns: { mode: 'live', rows: opportunitiesCampaigns.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedOpportunityPlayers(sqlite), retainedPlayerReferences: retainedOpportunityPlayers(sqlite), writeMode: 'explicit: opportunities create / update, applications create / update, campaigns.create, submissions create / update, preferences.save write a record\'s rows at once (inside the route\'s unit of work when one is open); a preference row exists only once saved', readMode: 'SQL: opportunities byId, ofOrg, openOn, the club list by cursor, applicationCounts; applications byId, ofOrg, ofPlayers, forPlayers, forOpportunity, pageForOpportunity, liveFor, remindersDue; campaigns byId, ofOrg, openOn, the club list by cursor, submissionCounts; submissions byId, forCampaign, forCampaignPlayer, forPlayer, byAttempt; preferences forPlayer; no mirror and no db.* view', references: 'player ids no foreign key, tolerant and counted (as recruitment); org_id → orgs and the staff ids → org_users (RESTRICT); an application\'s opportunity and a submission\'s campaign RESTRICT; owned children cascade; one live application per opportunity and player, one submission per campaign and player' },
         verification: { mode: 'live', rows: verification.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedVerificationPlayers(sqlite), retainedPlayerReferences: retainedVerificationPlayers(sqlite), writeMode: 'explicit: claims, evidence, tokens, admins, rootTransfers, rootRequests, disputes, references, playerInvites, conflicts and domainRequests create / update, events.append, domains add / remove write their rows at once (inside the route\'s unit of work when one is open)', readMode: 'SQL: per-kind indexed queries (byId, forSubject, byAuthority, forOrgStaff, byPair, inStatuses, the sweep\'s expiredBy / warnDue, forClaim, byHash, activeFor, openDuplicate, activeForPlayer, forOrg …); no mirror and no db.* view', typing: 'typed columns only: a claim\'s metadata and an evidence record\'s meta are fixed optional columns, review reasons and risk flags are code rows, an event\'s before/after is one detail line; no JSON columns', references: 'player ids no foreign key, tolerant and counted; org_id → orgs and the staff ids → org_users (RESTRICT); claim, evidence, root-application and reference keys inside the domain RESTRICT; codes and evidence links cascade with their claim; polymorphic subject, authority, actor and token ids carry no key' },
         passport: { mode: 'live', rows: passport.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedPassportPlayers(sqlite), retainedPlayerReferences: retainedPassportPlayers(sqlite), writeMode: 'explicit: passportPrefs.save (whole; the position history only grows), careerEntries, achievements, shares and corrections create / update, shares.recordView write their rows at once (inside the route\'s unit of work when one is open); a preference row exists only once saved', readMode: 'SQL: passportPrefs forPlayer; careerEntries and achievements byId, forPlayer; shares byId, byHash, forPlayer, activeCount, the T&S list by cursor; corrections byId, the T&S queue by cursor; no mirror and no db.* view', typing: 'typed columns only: football dates as given (YYYY, YYYY-MM or YYYY-MM-DD), position codes, secondary positions and public selections as ordered child rows; no JSON columns', references: 'player and guardian ids no foreign key, tolerant and counted; a confirmation\'s organisation → orgs (RESTRICT); the preferences\' child rows cascade' },
+        transitionsVouches: { mode: 'live', rows: transitionsVouches.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedTransitionPlayers(sqlite), retainedPlayerReferences: retainedTransitionPlayers(sqlite), writeMode: 'explicit: transitionCases and vouches create / update write a record\'s rows at once (inside the route\'s unit of work when one is open); a case\'s pack, owner, note and period never change, its grants only gain rows and its history only grows', readMode: 'SQL: transitionCases byId, forPlayer, forPlayers, grantedTo, the sweep\'s expiredBy / followUpsDue; vouches byId, pendingByCode, forPlayer, publishedFor, the T&S list by cursor; no mirror and no db.* view', typing: 'typed columns only: the pack, grants and history are ordered child rows, a history entry\'s detail is an item count or an organisation; a reference code is stored as its SHA-256 hash and cleared when used; no JSON columns', references: 'player and guardian ids no foreign key, tolerant and counted; a grant\'s and a placement\'s organisation → orgs (RESTRICT); pack items, grants and history cascade with their case' },
         safetyAudit: { mode: 'live', rows: safetyAudit.counts(), pendingWrites: safetyAudit.pending(), unresolvedPlayerReferences: unresolvedPlayerReferences(sqlite), retainedPlayerReferences: retainedPlayerReferences(sqlite), writeMode: 'staged: a block with its ledger row, a report with its suspension blocks, a note and a moderation hit land in the next save; a source change in its writer\'s save; an ops event in its caller\'s save; the IDV entry and the admin toggle land in their units\' commits', references: 'no foreign key on any of the eight tables. The five player references (blocks, reports, org_notes, ledger, source_changes) are tolerant historical references (Q4): an id that resolves to no player is counted here, never refused, never given a fabricated parent, never deleted; a count, not a claim about why it is absent. idv_queue.guardian_id is strict (Q4b): a write or import naming a missing guardian is refused and every snapshot that touches the queue or the identity pair is checked against the FINAL guardians table. A lifted block is deleted, as before (Q5). Organisation and staff references are historical pointers the routes never checked' },
       },
       identity: { initState: identity.initState() },

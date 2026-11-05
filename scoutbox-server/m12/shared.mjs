@@ -27,14 +27,8 @@ export function migrateM12(db, players) {
   for (const p of [...db.players]) {
     for (const m of [...(p.media ?? [])]) if (m.captions === undefined) players.patchItem(p.id, 'media', { id: m.id }, { captions: null });
   }
-  for (const v of db.vouches ?? []) {
-    // F10 honesty audit: an email-code reference confirms mailbox control,
-    // not coach identity. The flag is now explicit on the record.
-    v.identityVerified ??= false;
-    v.verificationMethod ??= 'email_code';
-    v.conflictOfInterest ??= null;
-    v.withdrawn ??= null; // { at, by, reason } — history kept, views exclude
-  }
+  // F10 honesty audit: coach references (S10c: rows of vouches) state on every read that an email code confirms
+  // mailbox control, not coach identity; conflictOfInterest and withdrawn are columns.
 }
 
 // ---------------------------------------------------------------- helpers

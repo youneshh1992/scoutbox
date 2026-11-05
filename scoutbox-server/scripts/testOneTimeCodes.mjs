@@ -42,7 +42,7 @@ const legacyPairing = (over = {}) => ({ code: 'PAIR22', playerId: 'pl-child1', e
  * save, so a malformed one is refused by it.
  */
 function s5File(dir, { emailChallenges, pairingCodes } = {}) {
-  const db = { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], vouches: [], ledger: [] };
+  const db = { users: USERS(), sessions: SESSIONS(), orgs: ORGS(), ...FIXTURE(), requests: [], blobNotes: [], ledger: [] };
   if (emailChallenges !== undefined) db.emailChallenges = emailChallenges;
   if (pairingCodes !== undefined) db.pairingCodes = pairingCodes;
   const tool = openStore(dir);
@@ -187,11 +187,11 @@ test('pairing as one unit of work: a failure after the consumption and a failure
 
 // ============================================================= review of b2a237e: the repository joins the store's unit of work
 /** Durable state read through an independent connection: the pairing rows, the `requests` blob and the save revision. */
-const durable = (dir) => ({ codes: rowsOf(dir, 'pairing_codes').map((r) => r.code_hash), challenges: rowsOf(dir, 'email_challenges').map((r) => [r.org_id, r.attempts]), requests: blobOf(dir, 'vouches'), seq: seqOf(dir) });
+const durable = (dir) => ({ codes: rowsOf(dir, 'pairing_codes').map((r) => r.code_hash), challenges: rowsOf(dir, 'email_challenges').map((r) => [r.org_id, r.attempts]), requests: blobOf(dir, 'blobNotes'), seq: seqOf(dir) });
 /** Run `work` in a unit of work whose caller swallows the repository error; returns what the caller caught and what the unit threw. */
 const swallowing = (L, work) => {
   let caught = null; let outer = null;
-  try { L.store.unitOfWork(() => { L.db.vouches.push({ id: 'unrelated-edit', status: 'pending' }); try { work(); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
+  try { L.store.unitOfWork(() => { L.db.blobNotes.push({ id: 'unrelated-edit', status: 'pending' }); try { work(); } catch (e) { caught = e; } }, { snapshot: L.snapshot }); } catch (e) { outer = e; }
   return { caught, outer };
 };
 
@@ -200,7 +200,7 @@ test('a caught repository failure cannot commit partial work: the pairing reissu
   const L = live(dir);
   const first = L.codes.issuePairingCode('pl-child1');
   L.store.save(L.snapshot());
-  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.vouches);
+  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.blobNotes);
   assert.equal(before.codes.length, 1);
   L.store.sqlite.exec("CREATE TEMP TRIGGER t_pair_insert BEFORE INSERT ON pairing_codes BEGIN SELECT RAISE(ABORT, 'injected pairing insert failure'); END");
   // Standalone: the repository's own transaction rolls the deletion back with the failed insert.
@@ -215,7 +215,7 @@ test('a caught repository failure cannot commit partial work: the pairing reissu
   assert.equal(outer.cause, caught, 'the unit names the swallowed error as its cause');
   assert.equal(outer.unitOfWork, 'rolled_back');
   assert.deepEqual(durable(dir), before, 'nothing durable changed: the old code, the requests blob and saveSeq');
-  assert.equal(JSON.stringify(L.db.vouches), memoryBefore, 'the unrelated in-memory edit was restored');
+  assert.equal(JSON.stringify(L.db.blobNotes), memoryBefore, 'the unrelated in-memory edit was restored');
   assert.equal(L.store.sqlite.isTransaction, false, 'no transaction left open'); assert.equal(L.store.unitOfWorkState().active, false, 'the unit is closed');
   assert.deepEqual(L.codes.peekPairingCode(first.code), { playerId: 'pl-child1' }, 'the old code still works');
   // Retry, explicitly, once the fault is gone.
@@ -232,7 +232,7 @@ test('e-mail side, a multi-statement operation that already wrote: the tenth wro
   const { code } = L.codes.issueEmailChallenge('org-pro', 'x@eastport.test');
   for (let i = 1; i < EMAIL_CHALLENGE_MAX_ATTEMPTS; i++) L.codes.noteFailedEmailAttempt('org-pro');
   L.store.save(L.snapshot());
-  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.vouches);
+  const before = durable(dir); const memoryBefore = JSON.stringify(L.db.blobNotes);
   assert.deepEqual(before.challenges, [['org-pro', EMAIL_CHALLENGE_MAX_ATTEMPTS - 1]]);
   L.store.sqlite.exec("CREATE TEMP TRIGGER t_mail_delete BEFORE DELETE ON email_challenges BEGIN SELECT RAISE(ABORT, 'injected challenge delete failure'); END");
   assert.throws(() => L.codes.noteFailedEmailAttempt('org-pro'), /injected challenge delete failure/);
@@ -242,7 +242,7 @@ test('e-mail side, a multi-statement operation that already wrote: the tenth wro
   assert.match(caught?.message ?? '', /injected challenge delete failure/);
   assert.ok(outer, 'the enclosing unit refused to commit'); assert.match(outer.message, /cannot commit.*injected challenge delete failure/s); assert.equal(outer.unitOfWork, 'rolled_back');
   assert.deepEqual(durable(dir), before, 'the count is still nine, the blob and saveSeq unchanged');
-  assert.equal(JSON.stringify(L.db.vouches), memoryBefore, 'memory restored');
+  assert.equal(JSON.stringify(L.db.blobNotes), memoryBefore, 'memory restored');
   assert.equal(L.store.sqlite.isTransaction, false); assert.equal(L.store.unitOfWorkState().active, false);
   assert.deepEqual(L.codes.checkEmailChallenge('org-pro', code), { status: 'ok', email: 'x@eastport.test' }, 'the challenge is still live at nine');
   L.store.sqlite.exec('DROP TRIGGER t_mail_delete');
@@ -257,8 +257,8 @@ test('the boundary itself: joined successes commit with the unit (issue, consume
   L.store.save(L.snapshot());
   // Joined successes.
   const seq0 = seqOf(dir);
-  const issued = L.store.unitOfWork(() => { const p = L.codes.issuePairingCode('pl-child1'); L.db.vouches.push({ id: 'edit-ok' }); assert.deepEqual(L.codes.consumePairingCode(p.code), { playerId: 'pl-child1' }); return p; }, { snapshot: L.snapshot });
-  assert.ok(issued.code); assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.match(blobOf(dir, 'vouches'), /edit-ok/); assert.equal(seqOf(dir), seq0 + 1, 'one commit, one revision');
+  const issued = L.store.unitOfWork(() => { const p = L.codes.issuePairingCode('pl-child1'); L.db.blobNotes.push({ id: 'edit-ok' }); assert.deepEqual(L.codes.consumePairingCode(p.code), { playerId: 'pl-child1' }); return p; }, { snapshot: L.snapshot });
+  assert.ok(issued.code); assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.match(blobOf(dir, 'blobNotes'), /edit-ok/); assert.equal(seqOf(dir), seq0 + 1, 'one commit, one revision');
   // An uncaught failure.
   assert.throws(() => L.store.unitOfWork(() => { L.codes.issuePairingCode('pl-child1'); throw new Error('ordinary failure'); }, { snapshot: L.snapshot }), /ordinary failure/);
   assert.deepEqual(rowsOf(dir, 'pairing_codes'), []); assert.equal(seqOf(dir), seq0 + 1);
@@ -267,13 +267,13 @@ test('the boundary itself: joined successes commit with the unit (issue, consume
     assert.equal(L.codes.consumePairingCode('NOPE22'), null); assert.equal(L.codes.consumeEmailChallenge('org-pro', 'NOPE22'), null);
     assert.deepEqual(L.codes.checkEmailChallenge('org-pro', 'NOPE22'), { status: 'none' }); assert.deepEqual(L.codes.noteFailedEmailAttempt('org-pro'), { attemptsRemaining: 0, invalidated: false });
     assert.equal(L.codes.revokePairingCodesFor('pl-nobody'), 0); assert.equal(L.codes.revokeEmailChallenge('org-pro'), 0); assert.deepEqual(L.codes.sweepExpired(), { emailChallenges: 0, pairingCodes: 0 });
-    L.db.vouches.push({ id: 'edit-after-negatives' });
+    L.db.blobNotes.push({ id: 'edit-after-negatives' });
   }, { snapshot: L.snapshot });
-  assert.match(blobOf(dir, 'vouches'), /edit-after-negatives/); assert.equal(seqOf(dir), seq0 + 2);
+  assert.match(blobOf(dir, 'blobNotes'), /edit-after-negatives/); assert.equal(seqOf(dir), seq0 + 2);
   // Validation is inside the boundary.
   const v = swallowing(L, () => L.codes.issuePairingCode(''));
   assert.match(v.caught?.message ?? '', /player id/); assert.ok(v.outer, 'a caught validation failure still poisons the unit'); assert.match(v.outer.message, /cannot commit.*player id/s);
-  assert.equal(seqOf(dir), seq0 + 2); assert.doesNotMatch(blobOf(dir, 'vouches'), /unrelated-edit/);
+  assert.equal(seqOf(dir), seq0 + 2); assert.doesNotMatch(blobOf(dir, 'blobNotes'), /unrelated-edit/);
   // A raw transaction on the store's connection, outside any unit (a tool, a test): honoured, no BEGIN of its own, no unit inferred.
   L.store.sqlite.exec('BEGIN');
   const raw = L.codes.issuePairingCode('pl-child1');

@@ -244,7 +244,7 @@ test('migration 0007: a first installation creates the twelve tables (empty) and
 });
 
 // ------------------------------------------------------------------ the repository with a real store
-const baseDb = (players, guardians, trialList = []) => ({ orgs: ORGS(), users: USERS(), sessions: [], players, guardians, trials: trialList, requests: trialList.map((x) => requestOf(x.report)), vouches: [{ id: 'vch-1', status: 'pending', history: [] }] });
+const baseDb = (players, guardians, trialList = []) => ({ orgs: ORGS(), users: USERS(), sessions: [], players, guardians, trials: trialList, requests: trialList.map((x) => requestOf(x.report)), blobNotes: [{ id: 'vch-1', status: 'pending', history: [] }] });
 function boot(dir, { players = [], guardians = [], trialList = [] } = {}) {
   const db = baseDb(clone(players), clone(guardians), clone(trialList));
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
@@ -352,14 +352,14 @@ test('repository: a standalone sub-record write whose COMMIT fails leaves SQL an
   let inner = null; let outer = null; let published = 0;
   try {
     t.unit(() => {
-      t.players.addItem('pl-rich', 'badges', 'InUnit'); t.db.vouches[0].status = 'in-unit';
+      t.players.addItem('pl-rich', 'badges', 'InUnit'); t.db.blobNotes[0].status = 'in-unit';
       try { t.players.addItem('pl-rich', 'timeline', { year: '2026', event: 'x' }); } catch (e) { inner = e; }
       t.store.afterCommit(() => { published += 1; });
     });
   } catch (e) { outer = e; }
   assert.match(String(inner?.message), /injected timeline failure/); assert.ok(outer && /cannot commit/.test(outer.message)); assert.equal(published, 0);
-  assert.deepEqual([...p.badges], ['Finisher', 'Captain', 'Finisher']); assert.equal(p.badges, badges, 'the same array, restored in place'); assert.equal(t.db.vouches[0].status, 'pending');
-  assert.equal(count(t.store.sqlite, 'player_badges', 'WHERE player_id = ?', 'pl-rich'), 3); assert.equal(blob(t.store.sqlite, 'vouches')[0].status, 'pending');
+  assert.deepEqual([...p.badges], ['Finisher', 'Captain', 'Finisher']); assert.equal(p.badges, badges, 'the same array, restored in place'); assert.equal(t.db.blobNotes[0].status, 'pending');
+  assert.equal(count(t.store.sqlite, 'player_badges', 'WHERE player_id = ?', 'pl-rich'), 3); assert.equal(blob(t.store.sqlite, 'blobNotes')[0].status, 'pending');
   t.store.sqlite.exec('DROP TRIGGER s5_fail');
   // A real COMMIT failure of the unit (a deferred foreign key violated inside the transaction).
   outer = null;
@@ -397,7 +397,7 @@ test('snapshot replacement under the child foreign keys: a whole-snapshot write 
   db.players.find((p) => p.id === 'pl-rich').badges = ['Rewritten'];
   db.players.find((p) => p.id === 'pl-rich').media.splice(1, 1);
   db.players.push({ ...child('pl-new', null, '2001-01-01'), media: [{ id: 'med-new', title: 'New', kind: 'video', junk: 1 }], attendance: [{ id: 'att-new', fixture: 'F', date: '2026-01-01' }] });
-  db.vouches.push({ id: 'vch-2', status: 'pending', history: [] });
+  db.blobNotes.push({ id: 'vch-2', status: 'pending', history: [] });
   store.save({ savedAt: NOW + DAY, idCounter: 1500, db });
   const s = store.sqlite;
   assert.equal(count(s, 'players'), 4); assert.equal(count(s, 'player_media', "WHERE player_id = 'pl-rich'"), 2); assert.deepEqual(s.prepare("SELECT badge FROM player_badges WHERE player_id = 'pl-rich'").all().map((r) => r.badge), ['Rewritten']);
@@ -409,13 +409,13 @@ test('snapshot replacement under the child foreign keys: a whole-snapshot write 
   assert.equal('junk' in loaded.db.players.find((p) => p.id === 'pl-new').media[0], false, 'an unknown item field is not stored');
   // Partial snapshot: no players/guardians → tables untouched.
   const before = dump(s, { except: ['meta', 'collections'] });
-  store.save({ savedAt: NOW + 2 * DAY, idCounter: 1500, db: { vouches: db.vouches } });
+  store.save({ savedAt: NOW + 2 * DAY, idCounter: 1500, db: { blobNotes: db.blobNotes } });
   assert.equal(dump(s, { except: ['meta', 'collections'] }), before);
   // Failure in the middle of the child rows: everything rolls back, the unrelated collection included.
-  const db2 = { ...store.load().db }; db2.players.find((p) => p.id === 'pl-rich').badges = ['Lost']; db2.vouches[0].status = 'should-not-land';
+  const db2 = { ...store.load().db }; db2.players.find((p) => p.id === 'pl-rich').badges = ['Lost']; db2.blobNotes[0].status = 'should-not-land';
   const probe = failRunAt(s, (sql) => /INSERT INTO player_media /.test(sql), 2, 'injected child-row failure');
   assert.throws(() => store.save({ savedAt: NOW + 3 * DAY, idCounter: 1500, db: db2 }), /injected child-row failure/); probe.restore(); assert.equal(probe.fired, 1);
-  assert.equal(dump(s, { except: ['meta', 'collections'] }), before); assert.equal(blob(s, 'vouches')[0].status, 'pending'); assert.equal(s.isTransaction, false);
+  assert.equal(dump(s, { except: ['meta', 'collections'] }), before); assert.equal(blob(s, 'blobNotes')[0].status, 'pending'); assert.equal(s.isTransaction, false);
   // An item the table refuses: the whole save is refused with the player, field and index.
   const db3 = { ...store.load().db }; db3.players.find((p) => p.id === 'pl-rich').media[0].title = null;
   assert.throws(() => store.save({ savedAt: NOW + 4 * DAY, idCounter: 1500, db: db3 }), /players pl-rich: media\[0\]\.title is null/);

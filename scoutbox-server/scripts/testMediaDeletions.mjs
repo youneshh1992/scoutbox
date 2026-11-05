@@ -62,13 +62,13 @@ test('storage adapter: delete() returns the number of files removed, 0 for an ab
 test('transaction coupling: an entry queued inside a unit of work that rolls back is gone with everything else; one queued inside a unit that commits is processed only after COMMIT, and the row stays across a reopen while the file could not be removed', () => {
   const dir = tempDir('media-unit'); const storageDir = tempDir('media-unit-files'); const storage = createStorage(storageDir);
   let store = openStore(dir, { tableBacked: TABLE_BACKED });
-  const db = { orgs: [], users: [], sessions: [], players: [adult()], guardians: [], requests: [], vouches: [] };
+  const db = { orgs: [], users: [], sessions: [], players: [adult()], guardians: [], requests: [], blobNotes: [] };
   let layer = attachDataLayer({ db, store, nextId, persist: () => {}, sessionTtlMs: TTL, now: () => NOW });
   const snapshot = () => ({ savedAt: NOW, idCounter: 1000, db });
   storage.saveDataUrl('media-x', 'data:video/webm;base64,AAAA');
   // Rolled back: the queue entry, the player removal and the blob edit all go.
-  assert.throws(() => store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.remove('pl-adult'); db.vouches.push({ id: 'r' }); throw new Error('boom'); }, { snapshot }), /boom/);
-  assert.equal(layer.mediaDeletions.count(), 0); assert.equal(layer.players.count(), 1); assert.equal(db.vouches.length, 0);
+  assert.throws(() => store.unitOfWork(() => { layer.mediaDeletions.enqueue(['media-x'], { playerId: 'pl-adult', at: NOW }); layer.players.remove('pl-adult'); db.blobNotes.push({ id: 'r' }); throw new Error('boom'); }, { snapshot }), /boom/);
+  assert.equal(layer.mediaDeletions.count(), 0); assert.equal(layer.players.count(), 1); assert.equal(db.blobNotes.length, 0);
   assert.ok(fs.existsSync(path.join(storageDir, 'media', 'media-x.webm')), 'the file was never touched');
   // Committed: the entry exists after COMMIT; processing then removes the file and clears the entry.
   let seenInside = null;

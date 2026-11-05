@@ -188,7 +188,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   ssoStates: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   supportAccessGrants: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   supportTickets: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  transitionCases: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
+  // transitionCases: never a db.* read since S10c — typed tables (migration 0025), read through repositories/transitionsVouches.mjs (verificationReads). db.transitionCases throws.
   uploadSessions: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   users: { guarantee: 'migration', owner: 'core', reason: 'staff accounts. Guaranteed by the migration registry in memory; since the data layer the rows live in the org_users table (repositories/users.mjs) and db.users is the repository\'s read-only view after attachDataLayer' },
   // vacancies: never a db.* read since S9c — a typed table (migration 0021), read through repositories/clubSetup.mjs
@@ -201,7 +201,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // verification_revoked_at (verificationRevokedAt).
   // passportPrefs, passportCareerEntries, passportAchievements, passportShares, passportCorrections: never a db.* read since
   // S10b — typed tables (migration 0024), read through repositories/passport.mjs (verificationReads). db.<name> throws.
-  vouches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
+  // vouches: never a db.* read since S10c — a typed table (migration 0025), read through repositories/transitionsVouches.mjs (verificationReads). db.vouches throws.
   watchlistHistory: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   webhookDeliveries: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   webhookEndpoints: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },});

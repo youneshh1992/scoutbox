@@ -71,7 +71,7 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
   mig.exec('PRAGMA foreign_keys = ON;');
   runDataMigrations(mig, DATA_MIGRATIONS, { now: Date.UTC(2026, 9, 11, 12), log: () => {} });
   assert.equal(mig.prepare('SELECT COUNT(*) AS n FROM data_migrations').get().n, DATA_MIGRATIONS.length);
-  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups', '0019_scouting_evidence', '0020_scouting_assessments', '0021_club_setup', '0022_opportunities_campaigns', '0023_verification', '0024_passport']);
+  assert.deepEqual(DATA_MIGRATIONS.map((m) => m.id), ['0001_org_users', '0002_core_identity_shadow', '0003_sessions_live', '0004_orgs_live', '0005_core_identity_live', '0006_media_deletions', '0007_player_subrecords', '0008_one_time_codes', '0009_notifications', '0010_dispatches', '0011_outbox_push', '0012_channels', '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups', '0019_scouting_evidence', '0020_scouting_assessments', '0021_club_setup', '0022_opportunities_campaigns', '0023_verification', '0024_passport', '0025_transitions_vouches']);
   const AUDIT_TABLES = ['blocks', 'reports', 'moderation_log', 'org_notes', 'ledger', 'ops_events', 'source_changes', 'idv_queue'];
   const S5_TABLES = ['player_season_history', 'player_badges', 'player_drills', 'player_attendance', 'player_timeline', 'player_media', 'player_media_tags', 'player_medical_records', 'player_drill_results', 'player_activity_log', 'player_external_ids', 'player_programme_completions'];
   const S8A_TABLES = ['recruitment_requests', 'request_trial_slots', 'trials', 'trial_schedule_sessions', 'trial_session_evidence', 'trial_schedule_revisions', 'trial_revision_sessions', 'trial_attendance', 'trial_keys', 'trial_reminders', 'trial_day_staff', 'trial_day_consents', 'trial_day_checkins', 'trial_day_status_events', 'trial_reports', 'trial_history', 'idempotency_keys'];
@@ -81,10 +81,11 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
   const S9A_TABLES = ['evidence', 'evidence_media', 'evidence_disputes', 'evidence_history', 'coach_affiliations', 'coach_affiliation_history', 'squad_invites'];
   const S9C_TABLES = ['org_tactical_setups', 'org_tactical_roles', 'org_tactical_role_criteria', 'org_tactical_windows', 'org_squad_members', 'org_shadow_players', 'org_looking_for', 'org_federation_checks', 'vacancies'];
   const S10A_TABLES = ['ver_root_requests', 'ver_root_request_codes', 'ver_claims', 'ver_claim_codes', 'ver_evidence', 'ver_claim_evidence', 'ver_events', 'ver_tokens', 'ver_admins', 'ver_root_transfers', 'ver_disputes', 'ver_references', 'ver_player_invites', 'ver_conflicts', 'ver_domain_requests', 'ver_domain_request_codes', 'org_verified_domains', 'ver_migrations'];
+  const S10C_TABLES = ['transition_cases', 'transition_case_pack_items', 'transition_case_recipients', 'transition_case_history', 'vouches'];
   const S10B_TABLES = ['passport_prefs', 'passport_pref_positions', 'passport_position_history', 'passport_position_history_positions', 'passport_public_selections', 'passport_career_entries', 'passport_achievements', 'passport_shares', 'passport_corrections'];
   const S9D_TABLES = ['opportunities', 'opportunity_training_slots', 'opportunity_texts', 'applications', 'application_suitability', 'application_history', 'campaigns', 'campaign_drills', 'campaign_rubric', 'campaign_submissions', 'campaign_attempts', 'campaign_attempt_issues', 'player_prefs', 'player_pref_slots', 'player_pref_texts'];
   const S9B_TABLES = ['assessment_templates', 'assessment_template_attributes', 'assessments', 'assessment_ratings', 'assessment_rating_refs', 'assessment_history', 'video_segments', 'video_segment_labels', 'playlists', 'playlist_segments'];
-  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', ...AUDIT_TABLES, ...S5_TABLES, ...S8A_TABLES, ...S8B_TABLES, ...S8C_TABLES, ...S8D_TABLES, ...S9A_TABLES, ...S9B_TABLES, ...S9C_TABLES, ...S9D_TABLES, ...S10A_TABLES, ...S10B_TABLES]) {
+  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', ...AUDIT_TABLES, ...S5_TABLES, ...S8A_TABLES, ...S8B_TABLES, ...S8C_TABLES, ...S8D_TABLES, ...S9A_TABLES, ...S9B_TABLES, ...S9C_TABLES, ...S9D_TABLES, ...S10A_TABLES, ...S10B_TABLES, ...S10C_TABLES]) {
     const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
     assert.deepEqual(cols(mig), cols(docs), `${t} columns`);
     const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all(t).map((r) => r.name);
@@ -246,6 +247,21 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
   }
   assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(passport_achievements)').all().map((f) => [f.from, f.table, f.on_delete]), [['confirmation_org_id', 'orgs', 'RESTRICT']]);
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'passport_shares_token_hash'").get().sql, /UNIQUE/, 'one share per token hash');
+  // S10c (migration 0025): the transition and reference definitions of 05 — no JSON column (a history entry's detail is
+  // two typed columns), no player or guardian key (tolerant), a grant's and a placement's organisation RESTRICT, the
+  // pack, grants and history cascading with their case (the legacy representations stay a draft until S11).
+  assert.match(header05, /0025_transitions_vouches REGISTERED/, 'the S10c section of 05 states that 0025 is registered');
+  for (const t of S10C_TABLES) {
+    const cols = docs.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+    assert.ok(!cols.some((c) => /_json$/.test(c)), `${t}: no JSON column (valid input only)`);
+    const fks = docs.prepare(`PRAGMA foreign_key_list(${t})`).all();
+    assert.ok(!fks.some((f) => ['players', 'guardians'].includes(f.table)), `${t}: no foreign key to players or guardians (tolerant)`);
+    assert.deepEqual(fks.map((f) => [f.from, f.table, f.on_delete]).sort(), mig.prepare(`PRAGMA foreign_key_list(${t})`).all().map((f) => [f.from, f.table, f.on_delete]).sort(), `${t}: the same keys in the migration`);
+  }
+  assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(transition_case_recipients)').all().map((f) => [f.from, f.table, f.on_delete]).sort(), [['org_id', 'orgs', 'RESTRICT'], ['transition_case_id', 'transition_cases', 'CASCADE']]);
+  assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(transition_cases)').all().map((f) => [f.from, f.table, f.on_delete]), [['placement_org_id', 'orgs', 'RESTRICT']]);
+  assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'vouches_code_hash'").get().sql, /UNIQUE/, 'one reference per code hash');
+  assert.ok(!docs.prepare('PRAGMA table_info(vouches)').all().some((c) => c.name === 'code'), 'vouches: the code is stored only as its hash');
   for (const d of [docs, mig]) assert.ok(!d.prepare('PRAGMA table_info(orgs)').all().some((c) => c.name === 'verification_org_type'), 'orgs: the unused verification_org_type column is gone');
   assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(applications)').all().map((f) => [f.from, f.table, f.on_delete]).sort(), [['opportunity_id', 'opportunities', 'RESTRICT'], ['org_id', 'orgs', 'RESTRICT'], ['outcome_by_user_id', 'org_users', 'RESTRICT']]);
   assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(campaign_attempts)').all().map((f) => [f.from, f.table, f.on_delete]).sort(), [['review_by_user_id', 'org_users', 'RESTRICT'], ['submission_id', 'campaign_submissions', 'CASCADE']]);

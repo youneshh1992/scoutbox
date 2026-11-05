@@ -64,7 +64,7 @@ routes still miss the bar: they are listed, and deferred, at the end of §4.3 st
 
 ## 3. Status
 
-24 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0025`. Each
+25 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0026`. Each
 step takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Write model | Status |
@@ -96,8 +96,8 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S9d | opportunities, applications, campaigns, player preferences | `0022_opportunities_campaigns` | `opportunitiesCampaigns.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S10a | verification claims, evidence, tokens, administrators, root applications, disputes, references, squad invitations by code, conflicts, domain requests, verified domains | `0023_verification` | `verification.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
 | S10b | passport preferences, career entries, achievements, shares, corrections | `0024_passport` | `passport.mjs` | **explicit, typed, SQL reads** (4 Nov) | done |
-| S10c | transition cases, representations, vouches | | | | not started |
-| S11 | agents, compliance, transactions | | | | not started |
+| S10c | transition cases, coach references (vouches) | `0025_transitions_vouches` | `transitionsVouches.mjs` | **explicit, typed, SQL reads** (5 Nov) | done; the legacy representations moved to S11 |
+| S11 | agents, compliance, transactions, legacy representations | | | | not started |
 | S12 | development, Box Cam, discovery | | | | not started |
 | S13 | operations and integrations | | | | not started |
 | S14 | retire the blob | | | | not started |
@@ -314,16 +314,16 @@ Each step starts by moving its domain's code into `domains/<domain>/` (§4.4.1).
 | Step | Schema file | Tables | Collections | Depends on | Watch out for |
 |---|---|---|---|---|---|
 | S9 Scouting and assessment | `04_scouting_assessment.sql` | 33 | `evidence`, `coachAffiliations`, `squadInvites`, `assessmentTemplates`, `assessments`, `videoSegments`, `playlists`, `vacancies`, `opportunities`, `applications`, `campaigns`, `campaignSubmissions`, `playerPrefs`; the org facets `tactical`, `squad`, `lookingFor`, `federationCheck` move out of `orgs.facets_json` | S5, S8, §4.3.1 | Template ids repeat across versions, so the key is `(id, version)`. A tactical re-save must diff roles by id so vacancies keep `role_id`. Coach affiliations are keyed by user id. `playerPrefs` is inserted on read, so it needs an upsert. Squads come in four shapes. Player foreign keys: tolerant, like recruitment, unless there's a reason not to. |
-| S10 Verification and passport | `05_verification_passport.sql` | 31 | the `ver*` collections (including `verMigrated`), `passportPrefs`, `passportCareerEntries`, `passportAchievements`, `passportShares`, `passportCorrections`, `transitionCases`, `representations`, `vouches`; the `orgs.verification` facet | S4, S9 | `orgs.verified` becomes derived from claims. Raw passport dates stay raw. Tokens and vouch codes are hashed. One identity claim per user; self-verification is refused. |
-| S11 Agents, compliance, transactions | `06_agent_compliance_transactions.sql` | 61 | `agentProfiles`, `agencyAffiliations`, `representationAgreements`, `tsReviewers`, `jurisdictionPolicies`, `regulatoryReviews`, `regulatoryConsents`, `complianceContexts`, `agentTransactions`, `transactionRepresentations`, `transactionDocuments`; `orgs.agencySettings` | S8, S10 | Uniqueness on an *effective* status stays in code. Policies are published under dual control. Each consent can be revoked once. Minors are refused on agreements. Reviewer secrets are hashed. |
+| S10 Verification and passport | `05_verification_passport.sql` | 31 | the `ver*` collections (including `verMigrated`), `passportPrefs`, `passportCareerEntries`, `passportAchievements`, `passportShares`, `passportCorrections`, `transitionCases`, `vouches`; the `orgs.verification` facet | S4, S9 | `orgs.verified` becomes derived from claims. Raw passport dates stay raw. Tokens and vouch codes are hashed. One identity claim per user; self-verification is refused. |
+| S11 Agents, compliance, transactions | `06_agent_compliance_transactions.sql` | 61 | `representations` (the legacy M13 F10 lane, drafted in 05; moved from S10c), `agentProfiles`, `agencyAffiliations`, `representationAgreements`, `tsReviewers`, `jurisdictionPolicies`, `regulatoryReviews`, `regulatoryConsents`, `complianceContexts`, `agentTransactions`, `transactionRepresentations`, `transactionDocuments`; `orgs.agencySettings` | S8, S10 | Uniqueness on an *effective* status stays in code. Policies are published under dual control. Each consent can be revoked once. Minors are refused on agreements. Reviewer secrets are hashed. |
 | S12 Development, Box Cam, discovery | `07_development_boxcam_discovery.sql` | 57 | about 30: `devObjectives`, `drillGuidance`, `boxCam*`/`box*`, `combine*`, `recruitmentBriefs`, `nobodyMissedReviews`, `secondLookItems`, `dynamicWatchlists`, `watchlistHistory`, `development*`, `exposureEvents`, `reviewLater`, `evidenceSuggestions`, `calibrationSessions`, `fixtures`, `coverage*` | S5, S8, S9 | Reads that write (Second Look and watchlist reconciliation, evidence suggestions) become explicit upserts. Hash the nonce. Split `fixture_id` into kind and id. Consent gate; one entry per challenge and player. |
 | S13 Operations and integrations | `08_operations_integrations.sql` | 45 | `apiKeys`, `webhook*`, `orgInvites`, `sso*`, `support*`, `importBatches`, `prospects`, `identityReviews`, `groups`, `groupGrants`, `uploadSessions`, `savedSearches`, `openTrials`, `matchdays`, `friendlies`, `invoices`, `plans`, `archetypes`, `reputationSeed`, the `delivery*` singletons | S3, S8 | Invites and SSO states are hashed. Invoices are stored exactly, in minor units. Backup becomes `VACUUM INTO`. Production's empty first boot (catalogues only, demo opt-in with `SCOUTBOX_SEED_DEMO=1`) exists since 3 Nov; keep it when the catalogues become rows. |
 
 S12 is large; consider splitting Box Cam/Combine from discovery and watchlists.
 
 S10 is split in three, each with its own migration: S10a the verification claims (`domains/verification/claims/`, 18
-tables), S10b the passport's own records (`domains/verification/passport/`), S10c transition cases, representations and
-vouches (`domains/verification/transitions.mjs`, the vouch routes in `server.mjs`). The Trust Score (`trust/`) stores
+tables), S10b the passport's own records (`domains/verification/passport/`), S10c transition cases and coach references
+(`domains/verification/transitions.mjs`, the vouch routes in `server.mjs`). The Trust Score (`trust/`) stores
 nothing.
 
 **S9a as built (4 November).** `repositories/scoutingEvidence.mjs`, migration `0019`; modules read through
@@ -387,6 +387,22 @@ not derived from claims.
 **S10b as built (4 November).** `repositories/passport.mjs`, migration `0024`, read through `verificationReads`. The
 field-spec helpers now live in `repositories/fieldSpecs.mjs`, shared with S10a: use them for later domains. They add a
 `date` type, a football date stored in the precision given (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`).
+
+**S10c as built (5 November).** `repositories/transitionsVouches.mjs`, migration `0025`, read through `verificationReads`
+(`transitionCases`, `vouches`), field specs as S10a/S10b. A transition case's pack items, grants and history are ordered child
+rows; a history entry's detail is an item count or an organisation (two columns, no JSON); `follow_up_completed_at` is gone (no
+route set it) and `caseOwner` is derived (always `startedBy`). A grant's and a placement's organisation are RESTRICT; player and
+guardian ids carry no key (tolerant). A reference's one-time code is stored only as its SHA-256 hash, held while pending and
+unique; `verificationMethod` / `identityVerified` are read-time constants. A grant with its notification, a revocation with its
+acknowledgement request, a pack view with its ledger row, a published reference with its notifications and a sweep's check-in
+with its notification each commit as one unit; the sweeps are indexed queries. Routes refuse junk with `400 FIELD_INVALID`
+naming the field: a period outside 14–180 days and a grant outside 1–90 days (both clamped before), a pack that is not lists of
+ids or names another field, non-text notes, coach names, emails, roles, reference text, seasons or conflicts; an email without an
+address shape is `COACH_DETAILS_REQUIRED`. Over-long free text is still shortened. `GET /admin/vouches` pages by cursor (no app
+reads it). **Moved to S11:** the legacy M13 F10 `representations`. Nothing can create one (410 since P5.6E) and the seed has
+none, but step 2305 mirrors their rows into the agent agreements and the agents batteries test those mirrored rows, so they go
+with the agent stores. **Known, unchanged:** a club's release reference reads as `email_code` like a coach's, though no email
+was involved (a product label, for the Founder); the F2 section of `operations/clubOperations` still lives there.
 
 ### 4.6 S14: retire the blob
 
