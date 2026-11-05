@@ -40,27 +40,27 @@ const actorOf = (h) => {
   return { userId: null, name: by.kind };
 };
 
-/** Agency-facing rows. Pure over the db. */
-export function complianceAuditRows(db, org) {
+/**
+ * Agency-facing rows, newest first. S11b-2: read through the compliance records repository (`complianceReads`); a
+ * revocation is recorded once, on its consent.
+ */
+export function complianceAuditRows(reads, org) {
   const rows = [];
-  for (const c of db.complianceContexts ?? []) {
-    if (!c || c.agencyOrgId !== org.id) continue;
-    for (const h of c.history ?? []) {
-      if (!COMPLIANCE_AUDIT_ACTIONS.has(h?.action)) continue;
+  for (const c of reads.contexts.forAgency(org.id)) {
+    for (const h of c.history) {
+      if (!COMPLIANCE_AUDIT_ACTIONS.has(h.action)) continue;
       rows.push({ id: h.id, at: h.at, action: h.action, domain: 'compliance', actor: actorOf(h), target: { type: 'compliance_context', id: c.id, agentUserId: c.agentUserId }, detail: safeDetail(h.detail) });
     }
   }
-  for (const r of db.regulatoryReviews ?? []) {
-    if (!r || r.agencyOrgId !== org.id) continue;
-    for (const h of r.history ?? []) {
-      if (!COMPLIANCE_AUDIT_ACTIONS.has(h?.action)) continue;
+  for (const r of reads.reviews.forAgency(org.id)) {
+    for (const h of r.history) {
+      if (!COMPLIANCE_AUDIT_ACTIONS.has(h.action)) continue;
       rows.push({ id: h.id, at: h.at, action: h.action, domain: 'compliance', actor: actorOf(h), target: { type: 'regulatory_review', id: r.id, kind: r.kind }, detail: safeDetail(h.detail) });
     }
   }
-  for (const k of db.regulatoryConsents ?? []) {
-    if (!k || k.agencyOrgId !== org.id) continue;
-    for (const h of k.history ?? []) {
-      if (!COMPLIANCE_AUDIT_ACTIONS.has(h?.action)) continue;
+  for (const k of reads.consents.forAgency(org.id)) {
+    for (const h of k.history) {
+      if (!COMPLIANCE_AUDIT_ACTIONS.has(h.action)) continue;
       rows.push({ id: h.id, at: h.at, action: h.action, domain: 'compliance', actor: actorOf(h), target: { type: 'regulatory_consent', id: k.id, contextId: k.contextId ?? null, partyRole: k.partyRole ?? null }, detail: safeDetail(h.detail) });
     }
   }
@@ -68,23 +68,16 @@ export function complianceAuditRows(db, org) {
   return rows;
 }
 
-/** The Trust & Safety decision record: attributed, complete, minimal PII. */
-export function reviewerDecisionRows(db) {
-  const rows = [];
-  for (const r of db.regulatoryReviews ?? []) {
-    if (!r) continue;
-    for (const h of r.history ?? []) {
-      if (!['regulatory_review_started', 'regulatory_review_resolved', 'regulatory_review_cancelled', 'regulatory_review_superseded'].includes(h?.action)) continue;
-      const d = h.detail ?? {};
-      rows.push({
-        id: h.id, at: h.at, action: h.action, reviewId: r.id, kind: r.kind,
-        reviewer: h.by?.kind === 'ts_reviewer' ? { reviewerId: h.by.userId ?? null, name: h.by.name ?? null, role: h.by.role ?? null, attribution: 'authenticated_reviewer' } : { reviewerId: null, name: h.by?.name ?? null, role: null, attribution: h.by?.kind === 'system' ? 'system' : 'legacy_unattributed' },
-        subject: r.subject ?? null, agencyOrgId: r.agencyOrgId ?? null,
-        outcome: d.outcome ?? null, reasonCode: d.reasonCode ?? null, evidenceRefs: d.evidenceRefs ?? [],
-        policyVersions: d.policyVersions ?? r.policyVersions ?? [], priorState: d.priorState ?? null, resultingState: d.resultingState ?? null, rev: d.rev ?? null,
-      });
-    }
-  }
-  rows.sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id)));
-  return rows;
+/** The Trust & Safety decision record, newest `limit` entries: attributed, complete, minimal PII (SQL-limited, S11b-2). */
+export function reviewerDecisionRows(reads, limit = 200) {
+  return reads.reviews.decisionEntries(limit).map(({ review: r, entry: h }) => {
+    const d = h.detail ?? {};
+    return {
+      id: h.id, at: h.at, action: h.action, reviewId: r.id, kind: r.kind,
+      reviewer: h.by?.kind === 'ts_reviewer' ? { reviewerId: h.by.userId ?? null, name: h.by.name ?? null, role: h.by.role ?? null, attribution: 'authenticated_reviewer' } : { reviewerId: null, name: h.by?.name ?? null, role: null, attribution: h.by?.kind === 'system' ? 'system' : 'legacy_unattributed' },
+      subject: r.subject ?? null, agencyOrgId: r.agencyOrgId ?? null,
+      outcome: d.outcome ?? null, reasonCode: d.reasonCode ?? null, evidenceRefs: d.evidenceRefs ?? [],
+      policyVersions: d.policyVersions ?? r.policyVersions ?? [], priorState: d.priorState ?? null, resultingState: d.resultingState ?? null, rev: d.rev ?? null,
+    };
+  });
 }

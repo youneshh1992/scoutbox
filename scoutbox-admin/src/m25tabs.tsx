@@ -266,9 +266,11 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
     }
     try {
       if (tab === 'agentreview') {
-        // Fetched whole and filtered here: a decision changes an item's status, and an
-        // item you are deciding must not vanish out from under you mid-decision.
-        const all = (await call<{ items: Review[] }>('/ts/compliance/reviews')).items;
+        // Filtered here: a decision changes an item's status, and an item you are
+        // deciding must not vanish out from under you mid-decision. Since S11b-2 the
+        // queue is paged (open items first, oldest first): this reads the first page of
+        // 50. TODO: "load more" (follow `nextCursor`) is still to be built.
+        const all = (await call<{ items: Review[]; nextCursor: string | null }>('/ts/compliance/reviews')).items;
         setReviews(all.filter((r) => matchesFilter(r, statusFilter)));
         setMetrics(await call<Metrics>('/ts/compliance/metrics'));
       }

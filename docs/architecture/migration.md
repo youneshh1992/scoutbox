@@ -64,7 +64,7 @@ routes still miss the bar: they are listed, and deferred, at the end of §4.3 st
 
 ## 3. Status
 
-27 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0028`. Each
+28 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0029`. Each
 step takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Write model | Status |
@@ -99,7 +99,7 @@ step takes the next free id; the placeholder ids in `sqlite-schema.md` mean noth
 | S10c | transition cases, coach references (vouches) | `0025_transitions_vouches` | `transitionsVouches.mjs` | **explicit, typed, SQL reads** (5 Nov) | done; the legacy representations moved to S11 |
 | S11a | agent profiles, agency affiliations, representation agreements, agency settings; the legacy representation lane removed | `0026_agent_core` | `agentCore.mjs` | **explicit, typed, SQL reads** (5 Nov) | done |
 | S11b-1 | Trust & Safety reviewers, jurisdiction policy versions (the seeded versions inserted by the migration) | `0027_compliance_policies` | `compliancePolicies.mjs` | **explicit, typed, SQL reads** (5 Nov) | done |
-| S11b-2 | regulatory reviews, compliance contexts and evaluations, consents | | | | not started |
+| S11b-2 | compliance contexts and evaluations, regulatory reviews, consents and revocations | `0028_compliance_records` | `complianceRecords.mjs` | **explicit, typed, SQL reads** (5 Nov) | done |
 | S11c | transactions | | | | not started |
 | S12 | development, Box Cam, discovery | | | | not started |
 | S13 | operations and integrations | | | | not started |
@@ -435,7 +435,26 @@ engine does not read, or of the wrong type, is refused with `POLICY_INPUT_INVALI
 ignored), as are an unknown rule or policy field, a bad source or override, and a `supersedes` that does not name an
 existing version of the same jurisdiction. The published set is decoded once per change. Reviewer creation refuses
 non-text fields and secrets over 200 characters; a revocation (with its sessions) is one unit. The agent core checks an
-agreement's policy versions against the table. The review queue and contexts are S11b-2.
+agreement's policy versions against the table.
+
+**S11b-2 as built (5 November).** `repositories/complianceRecords.mjs`, migration `0028`, read through `complianceReads` (on every
+module context); blob step 2306 is now a recorded no-op. A context's evaluations are their own append-only rows
+(`<context>#<n>`, the id a transaction's snapshot names), recorded with `contexts.recordEvaluation` together with their
+history entry; a context read carries its latest evaluation and the count; the alias, required actions, missing evidence
+and rule statuses are worked out on read (`derivedOfEvaluation` in conflict.mjs). A review's subject is typed columns by kind
+(the facet subject's `referenceHash`, which held the reference's length, is gone); its snapshot is the evaluation row it was
+taken from, never a copy (an Approach item keeps its outcome and instant); its decision and prior/resulting state are columns.
+A reason's extras are columns, its lists rows. A consent's revocation is its own row, once (UNIQUE); the agency audit now
+lists a revocation once (the blob kept a second copy on the revocation row). `otherServices` and `interests` are gone (no route
+wrote either). Every write route is one unit; a refusal after an evaluation that must not stand (a stale rev) rolls the unit
+back. The transaction workspace (S11c, still a blob) reaches its context only through the seam (`openContext`, `project`,
+`evaluate`, `clearReEvaluation`, `closeContext`); it no longer edits the context or counts its evaluations. Policy publication
+flags contexts with one query; the T&S metrics are `GROUP BY`s; the T&S decision audit reads the newest 200 entries in SQL.
+`GET /ts/compliance/reviews` and `GET /admin/compliance/reviews` page by cursor, **open items first, oldest first** (the T&S
+app reads the first 50; "load more" is still to be built). Routes refuse junk with the existing codes, field named:
+non-text party fields, more than six parties or ten jurisdictions, a non-boolean particular, evidence references that are not
+a list of at most ten texts (all clipped or coerced before). The snapshot path rewrites the three collections together
+(an omitted one is kept) and sets them aside while the agreements, profiles, policies and reviewers they name are rewritten.
 
 ### 4.6 S14: retire the blob
 

@@ -399,11 +399,9 @@ export const MIGRATIONS = [
     //   administrator; the shared admin key can create none.
     note: 'M23 P5.6C: compliance stores (tsReviewers, jurisdictionPolicies, regulatoryReviews, regulatoryConsents, complianceContexts); seeded policy versions; domestic_authorisation facet container; review items for pre-existing manual-review facets and disputes.',
     up(db) {
-      // S11b-1: the reviewers and the policy versions are tables (migration 0027, repositories/compliancePolicies.mjs),
-      // and 0027 inserts the seeded versions. The three remaining stores until S11b-2:
-      db.regulatoryReviews ??= [];
-      db.regulatoryConsents ??= [];
-      db.complianceContexts ??= [];
+      // The five stores are tables since S11b: reviewers and policy versions (migration 0027, which inserts the seeded
+      // versions; repositories/compliancePolicies.mjs), contexts, reviews and consents (migration 0028,
+      // repositories/complianceRecords.mjs). A recorded no-op.
       // Bootstraps 2 and 3 (an empty domestic_authorisation container on every profile; review items for facets and
       // disputes already waiting) read the agent core, which is tables since S11a (migration 0026): a profile is
       // written whole with its facets and a review is requested by the route that needs one. Nothing to do here.

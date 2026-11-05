@@ -249,9 +249,8 @@ section('Z — error contract, permissions, registry, notifications, rate polici
   for (const t of ['regulatory_review_required', 'regulatory_review_completed', 'regulatory_consent_requested', 'regulatory_consent_granted', 'regulatory_consent_declined', 'regulatory_consent_revoked', 'agent_verification_stale']) ok(TYPE_CATEGORY[t] === 'compliance', `AF1 notification ${t} → compliance category`);
   ok(CATEGORIES.compliance.mandatory === true && CATEGORIES.compliance.default === true, 'AF2 the compliance category is mandatory — a regulatory obligation cannot be muted');
   for (const [k, scope] of [['compliance_context_write', 'actor'], ['compliance_consent_request', 'actor'], ['compliance_consent_response', 'actor'], ['ts_review_decision', 'actor'], ['ts_policy_publish', 'actor']]) ok(RATE_LIMIT_POLICY[k]?.scope === scope && RATE_LIMIT_POLICY[k].max > 0, `Z8 rate policy ${k}`);
-  // S11b-1: reviewers and policy versions are tables (migration 0027), not collections.
-  for (const s of ['tsReviewers', 'jurisdictionPolicies']) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s) && TABLE_BACKED.includes(s), `AD1 ${s} is a table of the compliance policies repository, not a collection`);
-  for (const s of ['regulatoryReviews', 'regulatoryConsents', 'complianceContexts']) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `AD1 ${s} is migration-guaranteed and production-required`);
+  // S11b: the five stores are tables (migrations 0027 and 0028), not collections.
+  for (const s of ['tsReviewers', 'jurisdictionPolicies', 'regulatoryReviews', 'regulatoryConsents', 'complianceContexts']) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s) && TABLE_BACKED.includes(s), `AD1 ${s} is a table of the compliance repositories, not a collection`);
   const step = MIGRATIONS.find((m) => m.id === 'm250_001_compliance_stores');
   // P5.6C's own step is 2306 and is still the ONLY step at 2306. The current
   // schema has moved past it (P5.6D is 2307), which is what a later milestone

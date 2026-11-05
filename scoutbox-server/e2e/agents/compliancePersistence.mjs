@@ -90,10 +90,9 @@ async function bootOn(dataDir, port) {
 
 const PORT = 6800 + Math.floor(Math.random() * 150);
 const T0 = 1_700_000_000_000;
-// S11b-1: the reviewers and the policy versions are tables (migration 0027, which inserts the seeded versions); the
-// step's three remaining stores are collections until S11b-2.
-const STORES = ['regulatoryReviews', 'regulatoryConsents', 'complianceContexts'];
-const TABLE_STORES = ['tsReviewers', 'jurisdictionPolicies'];
+// S11b: the step's five stores are tables — reviewers and policy versions (migration 0027, which inserts the seeded
+// versions), contexts, reviews and consents (migration 0028). The blob step 2306 is a recorded no-op.
+const TABLE_STORES = ['tsReviewers', 'jurisdictionPolicies', 'regulatoryReviews', 'regulatoryConsents', 'complianceContexts'];
 const STEP = 'm250_001_compliance_stores';
 
 // ------------------------------------------------------------- fixtures
@@ -128,7 +127,7 @@ function snapshot2305() {
   // Now REWIND to a 2305 snapshot: drop the P5.6C step and its stores.
   db.schema.version = 2305;
   db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP);
-  for (const s of STORES) delete db[s];
+  for (const s of TABLE_STORES) delete db[s];
   // The Agent core rows this snapshot carries, as typed tables write them.
   db.agencyAffiliations = [affiliation('aff-lead', 'usr-lead', ['agency_admin', 'licensed_agent']), affiliation('aff-agent', 'usr-agent', ['licensed_agent'])];
   db.agentProfiles = [
@@ -153,14 +152,14 @@ section('1 — the P5.6C step: one step at 2306, three stores, idempotent, produ
   neg(new Set(versionsAbove).size === versionsAbove.length, 'every schema version above 2305 is reached by exactly one step — no version is advanced twice');
   const fresh = {};
   const up = runMigrations(fresh);
-  ok(up.to === SCHEMA_VERSION && STORES.every((s) => Array.isArray(fresh[s])) && TABLE_STORES.every((s) => fresh[s] === undefined), 'a clean database gets the three stores, and no reviewer or policy collection (they are tables)');
+  ok(up.to === SCHEMA_VERSION && TABLE_STORES.every((s) => fresh[s] === undefined), 'a clean database gets no compliance collection (the five stores are tables)');
   const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m25p1-'));
   openStore(freshDir).save({ db: fresh });
   const tables = openStore(freshDir).load().db;
   ok(tables.jurisdictionPolicies.length === SEEDED_POLICY_VERSIONS.length && tables.jurisdictionPolicies.map((p) => p.id).sort().join() === SEEDED_POLICY_VERSIONS.map((p) => p.id).sort().join(), `the ${SEEDED_POLICY_VERSIONS.length} P5.6A policy versions are seeded (FIFA baseline, England 2026/27, USA)`);
   ok(tables.jurisdictionPolicies.every((p) => p.status === 'published' && p.proposedBy === null && p.approvedBy === null && p.history[0].by.name === 'migration 0027_compliance_policies' && p.history[0].detail.seeded === true), 'each seeded version is published, attributed to the migration, with no reviewer invented');
   ok(tables.jurisdictionPolicies.every((p) => stableJson(p.rules) === stableJson(SEEDED_POLICY_VERSIONS.find((v) => v.id === p.id).rules)), 'each seeded version\'s rules (statuses, sources, parameters, overrides) read back exactly as encoded');
-  neg(tables.tsReviewers.length === 0 && fresh.regulatoryReviews.length === 0 && fresh.regulatoryConsents.length === 0 && fresh.complianceContexts.length === 0, 'reviewers, reviews, consents and contexts start EMPTY — nobody is a reviewer by default');
+  neg(tables.tsReviewers.length === 0 && tables.regulatoryReviews.length === 0 && tables.regulatoryConsents.length === 0 && tables.complianceContexts.length === 0, 'reviewers, reviews, consents and contexts start EMPTY — nobody is a reviewer by default');
   // Signings and offers are tables since S8c/S8d, so no blob step creates either collection any more.
   neg(fresh.offers === undefined && fresh.negotiations === undefined && !String(step.up).includes('agentTransactions'), 'the P5.6C step invented no offer or negotiation store and created no transaction store of its own (out of scope for P5.6C)');
   const { schema: _s1, ...storesBefore } = fresh;
@@ -169,7 +168,6 @@ section('1 — the P5.6C step: one step at 2306, three stores, idempotent, produ
   const again = runMigrations(fresh);
   const { schema: _s2, ...storesAfter } = fresh;
   ok(again.ran.length === 0 && stableJson(storesAfter) === before && fresh.schema.migrations.map((m) => m.id).join() === idsBefore && fresh.schema.version === SCHEMA_VERSION, 'running again changes no store and adds no migration record');
-  for (const s of STORES) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `${s} is migration-guaranteed and production-required`);
   for (const s of TABLE_STORES) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s), `${s} is a table, not a migration-guaranteed collection`);
 }
 
@@ -185,17 +183,16 @@ section('2 — upgrade from 2305: nothing invented, nothing else touched');
   ok(db.jurisdictionPolicies === undefined, 'the step seeds no policy collection (migration 0027 inserts the seeded versions as rows, section 1)');
   neg(stableJson([db.agentProfiles, db.agencyAffiliations, db.representationAgreements]) === agentBefore, 'the step reads and changes no agent row (S11a: they are typed tables, written whole with every facet)');
   neg(stableJson(db.users) === usersBefore, 'no user row was touched');
-  neg(db.regulatoryReviews.length === 0, 'the step requests no review item: a review is requested by the route that needs one');
+  neg(db.regulatoryReviews === undefined, 'the step requests no review item: a review is requested by the route that needs one');
   neg(db.tsReviewers === undefined, 'NO reviewer identity was invented by the migration (G-C0: production reviewers come from the operator bootstrap)');
   const again = runMigrations(db);
-  ok(again.ran.length === 0 && db.regulatoryReviews.length === 0 && db.jurisdictionPolicies === undefined, 'running again creates nothing twice');
-  // A partially-applied re-run (stores present, step record missing) is still idempotent, and leaves an existing item alone.
-  db.regulatoryReviews.push({ id: 'rrv-kept', kind: 'representation_dispute', status: 'REJECTED', subject: { agreementId: 'rep-disputed' } });
-  const kept = stableJson(db.regulatoryReviews);
+  ok(again.ran.length === 0 && db.regulatoryReviews === undefined && db.jurisdictionPolicies === undefined, 'running again creates nothing twice');
+  // A re-applied step (the record missing) still creates nothing: it is a recorded no-op since S11b.
+  const before = stableJson(db);
   db.schema.version = 2305; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP);
   const third = runMigrations(db);
-  ok(third.ran.join(',') === STEP && db.jurisdictionPolicies === undefined, 'a re-applied step over existing rows adds no policy');
-  neg(stableJson(db.regulatoryReviews) === kept, 'and leaves an existing review item exactly as it was (a resolved item stays resolved; nothing is raised)');
+  const { schema: _s3, ...afterThird } = db; const { schema: _s4, ...beforeThird } = JSON.parse(before);
+  neg(third.ran.join(',') === STEP && stableJson(afterThird) === stableJson(beforeThird), 'a re-applied step changes no store and raises nothing');
 }
 
 // ======================================================= 3 — boot over it
@@ -333,12 +330,18 @@ section('5 — corruption on disk is contained, named by its effect, never repai
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m25p5-'));
   const db = snapshot2305();
   runMigrations(db);
-  // (a) a review whose stored snapshot says PROHIBITED — nobody can approve it.
-  db.regulatoryReviews.push({
+  // (a) a review whose stored snapshot says PROHIBITED — nobody can approve it. S11b-2: a review naming a context that
+  // is not there is not a row the typed table can hold (the save refuses it, naming it); the same snapshot on an
+  // Approach item (no context) is, and stays planted.
+  const prohibited = (subject) => ({
     id: 'rrv-prohibited', kind: 'conflict_evaluation', status: 'PENDING', agencyOrgId: 'org-ag', agentUserId: 'usr-agent',
-    subject: { contextId: 'ctx-gone', representationId: null, partyRole: 'releasing_entity' }, reasons: [{ code: 'PROHIBITED_COMBINATION', ruleId: 'ENG-6.4', ruleStatus: 'ACTIVE', policyVersion: 'jp-eng-2026-27-1' }],
+    subject, reasons: [{ code: 'PROHIBITED_COMBINATION', ruleId: 'ENG-6.4', ruleStatus: 'ACTIVE', policyVersion: 'jp-eng-2026-27-1' }],
     policyVersions: ['jp-eng-2026-27-1'], snapshot: { outcome: 'PROHIBITED_CONFLICT' }, requestedAt: T0, requestedBy: { kind: 'system', userId: null, name: 'fixture' }, startedAt: null, startedBy: null, decidedAt: null, decision: null, supersedes: null, supersededBy: null, keys: {}, rev: 1, revAt: T0, revBy: null, history: [],
   });
+  let refusedCtx = null;
+  try { openStore(mkdtempSync(path.join(tmpdir(), 'sbx-m25p5a-'))).save({ db: { ...db, regulatoryReviews: [prohibited({ contextId: 'ctx-gone', representationId: null, partyRole: 'releasing_entity' })] } }); } catch (e) { refusedCtx = e; }
+  neg(refusedCtx?.code === 'COMPLIANCE_RECORDS_REFERENCE_MISSING', 'a review naming a context that is not there is refused by the save');
+  db.regulatoryReviews = [prohibited({ approach: true, playerId: 'pl-b', jurisdiction: 'ENG' })];
   // (b) a reviewer row with an unknown status word — injected after the first boot below.
   // (c) a consent naming a policy version that does not exist (pure).
   const stale = consentSufficiency({ kind: 'dual_representation', status: 'granted', grantedAt: T0, contextId: 'c', agentUserId: 'a', partyRole: 'individual', policyVersions: ['jp-eng-1999-1'], grantedBy: { kind: 'player', id: 'p' }, particulars: { fullParticularsProvided: true, legalAdviceOffered: true } }, { partyRole: 'individual', agentUserId: 'a', contextId: 'c', activePolicyIds: ['jp-eng-2026-27-1'], requireParticulars: true });
@@ -370,8 +373,9 @@ section('5 — corruption on disk is contained, named by its effect, never repai
     ok(rej.status === 200 && rej.body.review.status === 'REJECTED' && rej.body.review.decision.resultingState.note === 'context gone', 'rejecting it works and says honestly that its context is gone');
     const after = await s.stop();
     neg(!after.tsReviewers.some((r) => r.id === 'tsr-odd') && after.tsReviewers.every((r) => r.status === 'active'), 'the failed login wrote no reviewer row and changed no status');
-    // Now wipe the policy store and boot again: nothing is CLEAR without an encoded policy.
-    after.jurisdictionPolicies = [];
+    // Now wipe the policy store and boot again: nothing is CLEAR without an encoded policy. (S11b-2: the review that
+    // names a version goes with it — a typed row cannot name a version that is not there.)
+    after.jurisdictionPolicies = []; after.regulatoryReviews = [];
     openStore(dir).save({ db: after });
     const s2 = await bootOn(dir, PORT + 4);
     ok(s2.up, 'the server boots over an EMPTY policy store');

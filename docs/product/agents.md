@@ -70,7 +70,7 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 **Compliance contexts** (P56C_IMPLEMENTATION): the minimal record an evaluation needs; not a Transaction Room, no terms or fees. The regulated act `POST …/representations` runs idempotency → rate limit → visibility/blocks → agreement → scope → facets → conflict → consent → review → rev → mutate → audit; any refusal records nothing.
 
 **Consent ledger** (P56C_CONSENT_MODEL)
-- One row per party, context and agent; requestable only where an ACTIVE rule makes consent decisive. Append-only, server clock; a revocation is a new row (`kind:'revocation'`) and the grant is never edited.
+- One row per party, context and agent; requestable only where an ACTIVE rule makes consent decisive. Append-only, server clock; a revocation is its own row (`regulatory_consent_revocations`, once per consent) and the grant is never edited.
 - Who answers: the player in their own app (never under-18s); for a club, only its `verification_admin` signatory; never the agent.
 - A grant needs both `acknowledgedParticulars` and `acknowledgedLegalAdvice`; a decline needs neither.
 - A consent counts only if it is granted and not revoked, matches the context, agent and party role, came from the signatory, preceded the second-earliest `firstActAt`, names a version where the rule is ACTIVE, and (England) the request carried particulars and a legal-advice offer.
@@ -105,12 +105,12 @@ The Agent workspace: agents and agencies, client relationships, authorisation, t
 - `offerBoundary.canStartOfferWorkflow` = READY-or-ACTIVE + parties confirmed + compliance clear and current + required consents active + representation effective, with named `blockers[]`. It creates nothing.
 
 ### Compliance integration
-- A transaction owns exactly one P5.6C `complianceContexts` row and reads its verdict; it never re-implements evaluation. `transactionRepresentations` is the truth about who acts for whom; the context's inline representations are rebuilt from it before every evaluation. Bindings reference `agreementId` (scope/status read live); without a ScoutBox agreement a binding is `declaredOnly`, ineffective, and waits for an attributed review. (P56D_TRANSACTION_COMPLIANCE_INTEGRATION)
+- A transaction owns exactly one P5.6C compliance context (`compliance_contexts`) and reads its verdict; it never re-implements evaluation. `transactionRepresentations` is the truth about who acts for whom; the context's inline representations are rebuilt from it before every evaluation. Bindings reference `agreementId` (scope/status read live); without a ScoutBox agreement a binding is `declaredOnly`, ineffective, and waits for an attributed review. (P56D_TRANSACTION_COMPLIANCE_INTEGRATION)
 - Named pending reasons only (no generic pending): PARTIES_NOT_CONFIRMED, REPRESENTATION_MISSING (both map back to PARTIES_CONFIRMED state), CONSENT_REQUIRED, MANUAL_REVIEW, INSUFFICIENT_DATA, PROVIDER_UNAVAILABLE (fail-honest), JURISDICTION_UNSUPPORTED, FACET_NOT_VERIFIED. `PROHIBITED_CONFLICT` → blocked; no reviewer can approve past it.
 - A safeguarding block is evaluated before compliance; CLEAR never overrides a block.
 - Staleness: `partyRevisionOf` hashes parties, agent, representations, consents, facets, policy versions, blocks, minor state. Stale reasons: NO_SNAPSHOT, INPUTS_CHANGED, POLICY_REPUBLISHED, TOO_OLD. A stale snapshot authorises nothing; `clear` reports the current answer.
 - Every material mutation re-resolves representation, scope, licence facets, policy, conflict, consents, blocks and minor gate (fixed 18-step order; a foreign transaction is concealed as 404; party role comes from `parties[]`). Body-supplied auth facts are ignored. (P56D_TRANSACTION_AUTH_MATRIX)
-- Consents reuse the `regulatoryConsents` ledger; each party answers on its own surface; revocation bites at the next mutation. A party sees only its own consent.
+- Consents reuse the consent ledger (`regulatory_consents`); each party answers on its own surface; revocation bites at the next mutation. A party sees only its own consent.
 - Jurisdiction comes from party data, never the client; unsupported → 422.
 - Minors: `MINOR_PATHWAY_DISABLED` fails closed before the engine; guardian stays a distinct party and consent actor; agent never substitutes for a guardian.
 - Only licensed agents create/write transactions (not analysts, assistants, finance, agency admins, clubs or players). Agency audit shows reviewers as "Trust & Safety (attributed)", never by name.

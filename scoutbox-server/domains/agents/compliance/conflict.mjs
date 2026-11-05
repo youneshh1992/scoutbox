@@ -122,7 +122,7 @@ export function evaluateConflict(input) {
     // A consent is owed by a PARTY, once, whichever connected agent's evaluation surfaced it.
     consentsOutstanding: consentsOutstanding.filter((c, i, arr) => arr.findIndex((x) => x.partyRole === c.partyRole && x.consentKind === c.consentKind) === i),
     requiredActions: requiredActionsFor(outcome, reasons, consentsOutstanding),
-    missingEvidence: reasons.filter((r) => ['POLICY_NOT_ENCODED', 'SCOPE_UNRESOLVED', 'TYPE_UNKNOWN', 'PARTY_REMOVED', 'MINOR_PARTY', 'REPRESENTATION_UNVERIFIED', 'AGENT_STATE_INVALID', 'INSUFFICIENT_DATA'].includes(r.code)).map((r) => r.code),
+    missingEvidence: missingEvidenceOf(reasons),
     policyVersions: [...new Set(policySet.map((p) => p.id))],
     evaluatedAt: now, inputHash,
   });
@@ -249,6 +249,21 @@ export function evaluateConflict(input) {
   for (const i of Array.isArray(interests) ? interests : []) if (i?.agentUserId && agentIds.includes(i.agentUserId)) { raise('MANUAL_REGULATORY_REVIEW_REQUIRED'); reasons.push(reason('INTEREST_DECLARED', null, { agentUserId: i.agentUserId, kind: i.kind ?? null })); }
 
   return done();
+}
+
+const MISSING_EVIDENCE_CODES = Object.freeze(['POLICY_NOT_ENCODED', 'SCOPE_UNRESOLVED', 'TYPE_UNKNOWN', 'PARTY_REMOVED', 'MINOR_PARTY', 'REPRESENTATION_UNVERIFIED', 'AGENT_STATE_INVALID', 'INSUFFICIENT_DATA']);
+const missingEvidenceOf = (reasons) => reasons.filter((r) => MISSING_EVIDENCE_CODES.includes(r.code)).map((r) => r.code);
+/**
+ * S11b-2: the parts of a result that are functions of the stored ones (an evaluation row keeps its outcome, reasons,
+ * outstanding consents, versions, instant and input hash; these are worked out on read).
+ */
+export function derivedOfEvaluation({ outcome, reasons, consentsOutstanding }) {
+  return {
+    alias: outcome === PERMITTED_WITH_CONSENT ? 'PERMITTED_WITH_CONSENT' : null,
+    requiredActions: requiredActionsFor(outcome, reasons, consentsOutstanding),
+    missingEvidence: missingEvidenceOf(reasons),
+    ruleStatuses: Object.fromEntries(reasons.filter((r) => r.ruleId).map((r) => [r.ruleId, r.ruleStatus])),
+  };
 }
 
 function requiredActionsFor(outcome, reasons, consentsOutstanding) {

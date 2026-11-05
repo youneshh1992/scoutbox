@@ -200,7 +200,7 @@ export function registerAudit(ctx) {
     // where the org may see them; no reference numbers, no reason text.
     if (org.type === 'agency') rows.push(...agentAuditRows(ctx.agentReads, org, { findPlayer, orgCanSee }));
     // M23 P5.6C: the compliance domain — contexts, consents and reviews, content-free.
-    if (org.type === 'agency') rows.push(...complianceAuditRows(db, org));
+    if (org.type === 'agency') rows.push(...complianceAuditRows(ctx.complianceReads, org));
     for (const l of db.ledger ?? []) {
       if (l.orgId !== org.id || !LEDGER_ACTIONS.has(l.type)) continue;
       rows.push({

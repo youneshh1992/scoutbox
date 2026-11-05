@@ -204,7 +204,7 @@ export function registerTransactions(rawCtx) {
   function applyComplianceSnapshot(tx, { state, result, ctx, by, partyRevision }) {
     const prev = tx.compliance?.state ?? null;
     tx.compliance = {
-      evaluationId: result ? `${ctx.id}#${(ctx.evaluations ?? []).length}` : `${tx.id}#gate`,
+      evaluationId: result ? result.evaluationId : `${tx.id}#gate`, // S11b-2: the stored evaluation's id ('<context>#<n>')
       contextId: ctx?.id ?? null,
       evaluatedAt: now(),
       policyVersions: result?.policyVersions ?? [],
@@ -215,7 +215,7 @@ export function registerTransactions(rawCtx) {
       partyRevision, state,
     };
     tx.reEvaluationPending = false;
-    if (ctx) ctx.reEvaluationPending = false;
+    if (ctx) compliance.clearReEvaluation(ctx);
     const want = statusForComplianceState(state);
     if (want && want !== tx.status && complianceTransitionAllowed(tx.status, want)) {
       const from = tx.status;

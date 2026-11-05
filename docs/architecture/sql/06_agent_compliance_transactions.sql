@@ -529,550 +529,436 @@ CREATE TABLE org_agency_jurisdictions (
 
 
 -- -----------------------------------------------------------------------------
--- source: db.regulatoryReviews   created at domains/agents/compliance/index.mjs:283 (createReview:
---         facetNeedsReview, representationDisputed, declare/conflict routes,
---         createApproachReview, supersede) ; domains/agents/transactions/index.mjs:779/792 (via
---         compliance.createReview) ; domains/platform/migrations.mjs:497/510 (step 2306)
--- owner/writer: m25 (tsRouter start/resolve/cancel/supersede; context close
---         cancels open items); m26 creates via the seam.
--- lifecycle: PENDING -> IN_REVIEW -> APPROVED | REJECTED; PENDING/IN_REVIEW ->
---         CANCELLED; APPROVED/REJECTED -> SUPERSEDED (new row with supersedes).
---         Never deleted; decision object retained untouched after supersession.
--- mapping: id -> id (rrv-*, rrv-mig2306-…); kind -> kind; status -> status;
---   agencyOrgId -> agency_org_id; agentUserId -> agent_user_id;
---   subject{} -> per-kind columns PLUS subject_json (the object verbatim):
---     verification_facet {profileId,userId,facet,memberAssociation,referenceHash}
---       -> subject_profile_id / subject_user_id / subject_facet /
---          subject_member_association / subject_reference_hash (KNOWN DEFECT:
---          the value is String(reference.length), the reference's LENGTH, not
---          a hash — domains/agents/compliance/index.mjs:299, migrations.mjs:499; kept as written);
---     representation_dispute {agreementId} -> subject_agreement_id;
---     representation_declared / conflict_evaluation {contextId,
---       representationId?, partyRole, transactionId?} -> subject_context_id
---       (-> compliance_contexts(id), no FK: contexts reference reviews),
---       subject_representation_id (crp-* or txr-*; no FK), subject_party_role,
---       subject_transaction_id (-> agent_transactions(id), no FK);
---     conflict_evaluation approach {approach:true, playerId, jurisdiction}
---       (domains/agents/compliance/index.mjs:1014) -> subject_is_approach / subject_player_id /
---       subject_jurisdiction.
---   reasons[] -> regulatory_review_reasons; policyVersions[] ->
---   regulatory_review_policy_versions; snapshot -> snapshot_json (an
---     immutable copy of the engine result at request time, by design; read
---     only as a whole by the reviewer view); requestedAt -> requested_at;
---   requestedBy{kind,userId,name,role?} -> requested_by_*; startedAt ->
---   started_at; startedBy{id,name,role} -> started_by_id / started_by_name /
---   started_by_role; decidedAt -> decided_at; decision{} -> decision_* columns:
---     reviewerId/reviewerName/reviewerRole -> decision_reviewer_id /
---     decision_reviewer_name / decision_reviewer_role; outcome ->
---     decision_outcome; reasonCode -> decision_reason_code (≤60; 'cancelled'
---     on cancel); reason -> decision_reason (≤1000); evidenceRefs[] ->
---     regulatory_review_evidence_refs; decision.policyVersions -> derived, not
---     stored (always a copy of r.policyVersions at decision time); at ->
---     decision_at; priorState/resultingState -> decision_prior_state_json /
---     decision_resulting_state_json (small per-kind variant objects
---     {status, facetState | agreementStatus | contextOutcome,
---     representationStatus, note?}; read only by the T&S audit projection;
---     deferred normalisation — would need one nullable column per kind);
---   supersedes -> supersedes_id; supersededBy -> superseded_by_id;
---   keys.resolve{key,fp} -> idempotency_keys (action 'resolve');
---   rev/revAt/revBy -> rev / rev_at / rev_by_*; history[] -> regulatory_review_history.
--- notes: "one open review per subject" is enforced by code (openReviewFor /
---   migration dedupe) — not expressible as one unique index across the
---   per-kind subject columns, so none is created. Reviewer identity is
---   attributed (G-C0); pre-P5.6C rows with 'shared_admin_key' attribution do
---   not exist in this store (the note in REVIEWER_LEGACY_NOTE is prose).
--- -----------------------------------------------------------------------------
-CREATE TABLE regulatory_reviews (
-  id                             TEXT PRIMARY KEY,
-  kind                           TEXT NOT NULL CHECK (kind IN ('verification_facet','representation_declared','conflict_evaluation','representation_dispute')),
-  status                         TEXT NOT NULL CHECK (status IN ('PENDING','IN_REVIEW','APPROVED','REJECTED','CANCELLED','SUPERSEDED')),
-  agency_org_id                  TEXT REFERENCES orgs(id) ON DELETE RESTRICT,
-  agent_user_id                  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  -- subject (per kind) --
-  subject_profile_id             TEXT REFERENCES agent_profiles(id) ON DELETE RESTRICT,
-  subject_user_id                TEXT,
-  subject_facet                  TEXT CHECK (subject_facet IS NULL OR subject_facet IN ('fifa_licence','national_registration','domestic_authorisation','minors_authorisation')),
-  subject_member_association     TEXT CHECK (subject_member_association IS NULL OR length(subject_member_association) = 3),
-  subject_reference_hash         TEXT,                   -- defect: holds String(reference.length)
-  subject_agreement_id           TEXT REFERENCES representation_agreements(id) ON DELETE RESTRICT,
-  subject_context_id             TEXT,                   -- -> compliance_contexts(id), no FK (cycle)
-  subject_representation_id      TEXT,                   -- crp-* / txr-*, no FK
-  subject_party_role             TEXT CHECK (subject_party_role IS NULL OR subject_party_role IN ('individual','engaging_entity','releasing_entity')),
-  subject_transaction_id         TEXT,                   -- -> agent_transactions(id), no FK (cycle)
-  subject_is_approach            INTEGER NOT NULL DEFAULT 0 CHECK (subject_is_approach IN (0,1)),
-  subject_player_id              TEXT,                   -- players(id); no FK (approach subject may be removed)
-  subject_jurisdiction           TEXT CHECK (subject_jurisdiction IS NULL OR length(subject_jurisdiction) = 3),
-  subject_json                   TEXT NOT NULL CHECK (json_valid(subject_json)),   -- verbatim subject object (per-kind shape by design)
-  -- request / progress --
-  snapshot_json                  TEXT CHECK (snapshot_json IS NULL OR json_valid(snapshot_json)),   -- engine result at request time (immutable snapshot by design)
-  requested_at                   INTEGER NOT NULL,
-  requested_by_kind              TEXT CHECK (requested_by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  requested_by_id                TEXT,
-  requested_by_name              TEXT,                   -- snapshot
-  requested_by_role              TEXT,
-  started_at                     INTEGER,
-  started_by_id                  TEXT REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
-  started_by_name                TEXT,                   -- snapshot
-  started_by_role                TEXT,
-  decided_at                     INTEGER,
-  -- decision --
-  decision_reviewer_id           TEXT REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
-  decision_reviewer_name         TEXT,                   -- snapshot
-  decision_reviewer_role         TEXT,
-  decision_outcome               TEXT CHECK (decision_outcome IS NULL OR decision_outcome IN ('APPROVED','REJECTED','CANCELLED')),
-  decision_reason_code           TEXT,
-  decision_reason                TEXT,
-  decision_at                    INTEGER,
-  decision_prior_state_json      TEXT CHECK (decision_prior_state_json IS NULL OR json_valid(decision_prior_state_json)),
-  decision_resulting_state_json  TEXT CHECK (decision_resulting_state_json IS NULL OR json_valid(decision_resulting_state_json)),
-  supersedes_id                  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
-  superseded_by_id               TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
-  rev                            INTEGER NOT NULL DEFAULT 1,
-  rev_at                         INTEGER,
-  rev_by_user_id                 TEXT,
-  rev_by_name                    TEXT,                   -- snapshot
-  CHECK ((decision_outcome IS NULL) = (decision_reviewer_id IS NULL))
-) STRICT;
-CREATE INDEX regulatory_reviews_status_requested ON regulatory_reviews(status, requested_at);
-CREATE INDEX regulatory_reviews_agency ON regulatory_reviews(agency_org_id, agent_user_id);
-CREATE INDEX regulatory_reviews_subject_facet ON regulatory_reviews(kind, subject_profile_id, subject_facet, subject_member_association);
-CREATE INDEX regulatory_reviews_subject_agreement ON regulatory_reviews(subject_agreement_id);
-CREATE INDEX regulatory_reviews_subject_context ON regulatory_reviews(subject_context_id);
-
--- source: db.regulatoryReviews[].reasons[]  — reason objects from domains/agents/compliance/policy.mjs
---         reasonOf() / domains/agents/compliance/conflict.mjs reason(): {code, ruleId, ruleStatus,
---         regulator, jurisdiction, policyVersion, ...extra}; migration/hook rows
---         carry only {code, ruleId, ruleStatus, policyVersion}.
--- mapping: index -> position; code -> code; ruleId -> rule_id; ruleStatus ->
---   rule_status; regulator -> regulator; jurisdiction -> jurisdiction;
---   policyVersion -> policy_version_id (a jurisdiction_policies id; no FK —
---   seeded reasons may name a version absent from a restored snapshot);
---   every other key (facet, memberAssociation, state, agentUserId, partyRoles[],
---   consentKind, detail, overrideRuleId, viaConnectedAgent, …) -> extra_json
---   (free-form by design: per-reason-code extras).
-CREATE TABLE regulatory_review_reasons (
-  review_id          TEXT NOT NULL REFERENCES regulatory_reviews(id) ON DELETE CASCADE,
-  position           INTEGER NOT NULL CHECK (position >= 0),
-  code               TEXT NOT NULL,
-  rule_id            TEXT,
-  rule_status        TEXT,
-  regulator          TEXT,
-  jurisdiction       TEXT,
-  policy_version_id  TEXT,
-  extra_json         TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
-  PRIMARY KEY (review_id, position)
-) STRICT;
-
--- source: db.regulatoryReviews[].policyVersions[]  (policy set ids in force at request)
-CREATE TABLE regulatory_review_policy_versions (
-  review_id          TEXT NOT NULL REFERENCES regulatory_reviews(id) ON DELETE CASCADE,
-  policy_version_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
-  PRIMARY KEY (review_id, policy_version_id)
-) STRICT;
-
--- source: db.regulatoryReviews[].decision.evidenceRefs[]  (domains/agents/compliance/index.mjs:866:
---         free strings ≤200, ≤10; an APPROVED decision needs ≥1)
--- mapping: index -> position; element -> ref (free text; NOT a ver_evidence id
---   by contract — the reviewer cites whatever evidence reference they hold)
-CREATE TABLE regulatory_review_evidence_refs (
-  review_id  TEXT NOT NULL REFERENCES regulatory_reviews(id) ON DELETE CASCADE,
-  position   INTEGER NOT NULL CHECK (position >= 0 AND position < 10),
-  ref        TEXT NOT NULL,
-  PRIMARY KEY (review_id, position)
-) STRICT;
-
--- source: db.regulatoryReviews[].history[]
--- actions: regulatory_review_requested, regulatory_review_started,
---   regulatory_review_resolved, regulatory_review_cancelled, regulatory_review_superseded
--- notes: the T&S decision audit (domains/agents/compliance/audit.mjs reviewerDecisionRows) is a
---   projection over these rows' detail (outcome, reasonCode, evidenceRefs,
---   policyVersions, priorState, resultingState, rev).
-CREATE TABLE regulatory_review_history (
-  id           TEXT PRIMARY KEY,
-  review_id    TEXT NOT NULL REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id        TEXT,
-  by_name      TEXT,
-  by_role      TEXT,
-  by_org_id    TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
-) STRICT;
-CREATE INDEX regulatory_review_history_review ON regulatory_review_history(review_id, at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.complianceContexts   created at domains/agents/compliance/index.mjs:547
---         (POST /org/agent/compliance/contexts) and domains/agents/compliance/index.mjs:1046
---         (transactionSeam.openContext, one per agent transaction)
--- owner/writer: m25 (parties, representations, evaluate, close, review
---         decisions, policy publication flag); m26 through the seam
---         (project() rewrites parties/representations from the transaction;
---         evaluate; closeContext on CANCELLED/CLOSED); m25 onPlayerDeleted
---         (party removed + player actors anonymised).
--- lifecycle: status open -> closed; never deleted.
--- mapping: id -> id (ctx-*); agencyOrgId -> agency_org_id; agentUserId ->
---   agent_user_id; type -> type; jurisdictions[] -> compliance_context_jurisdictions;
---   parties[] -> compliance_context_parties; representations[] ->
---   compliance_context_representations; otherServices[] -> NOT MIGRATED
---     (-- dead field: initialised [] and never written by any route; the engine
---     reads it); interests[] -> NOT MIGRATED (-- dead field: same);
---   resolvedFacts[] -> compliance_context_resolved_facts; evaluations[] ->
---   compliance_evaluations; reEvaluationPending -> re_evaluation_pending;
---   reviewRejectedAt -> review_rejected_at; status -> status; openedAt ->
---   opened_at; closedAt -> closed_at; origin -> origin ('transaction' when
---     opened by the seam, absent otherwise -> NULL); transactionId ->
---     transaction_id (-> agent_transactions(id), no FK: transactions reference
---     contexts; 1:1, partial unique index); keys.create{key,fp} ->
---     idempotency_keys (action 'create'; seam-opened contexts have none);
---   rev/revAt/revBy -> rev / rev_at / rev_by_*; history[] -> compliance_context_history.
--- notes: personal to the opening agent (ownContext conceals colleagues').
---   For origin='transaction' the parties/representations rows are a PROJECTION
---   rebuilt from transaction_parties / transaction_representations on every
---   evaluation (domains/agents/compliance/index.mjs:1063); the transaction rows are the truth.
+-- S11b-2: IMPLEMENTED, migration 0028_compliance_records REGISTERED (repositories/complianceRecords.mjs, 5 Nov 2026).
+-- The definitions below are the migration's DDL; scripts/testSchemaDdl.mjs compares them column by column.
+-- Sources: domains/agents/compliance/index.mjs (contexts, evaluations, reviews, consents; the transaction seam opens,
+-- projects, evaluates and closes a transaction's context); domains/agents/core/index.mjs (a facet or a dispute raises
+-- a review through the hooks).
+-- How the model differs from the first draft of this file:
+--   * No JSON columns. A review's subject is typed columns by kind (the facet subject's "referenceHash", which held the
+--     reference's length, is gone). Its snapshot is the outcome at request time and the evaluation row it was taken
+--     from (snapshot_evaluation_id), never a copy; an Approach item, which has no context, keeps the outcome and instant.
+--     The decision's prior and resulting state are columns (prior_* / result_*, with result_note for a subject that
+--     is gone). An evaluation's identity of inputs is two child tables and the proposed representation two columns.
+--   * A reason's extras (facet, member association, state, agent, party role, consent kind, detail, override,
+--     connected-agent attribution) are columns; its party-role and jurisdiction lists are *_reason_items rows.
+--   * History details are typed columns or worked out from their record: a review's request, resolution and
+--     cancellation repeat the review; a consent's entries repeat the consent; an evaluation entry names its row.
+--   * Idempotency keys are columns of their owner (key + fp), not rows of a shared table.
+--   * A revocation keeps only its own facts (id, instant, actor); the consent it revokes is UNIQUE (revoked once).
+--   * Dead fields are gone: a context's otherServices and interests (no route wrote either), the revocation's copy of
+--     its consent's fields and its second history entry; alias, required actions, missing evidence and rule statuses
+--     are worked out on read.
+--   * Every key is immediate RESTRICT (a child row's CASCADE): agencies, staff, reviewers, policy versions,
+--     agreements, profiles and, within the domain, a review's context, evaluation and supersession, a representation's
+--     review and a consent's context. A party's, a consent's and an Approach item's player or club carries no key.
+-- Read patterns: contexts by agent, by create key, open ones of an agency (connected agents), open ones of a
+--   jurisdiction whose latest evaluation predates a version (policy publication); reviews by subject (one open item
+--   per facet or agreement), by context, by agency, the T&S queue (open first, by cursor), metrics, the newest
+--   decision entries; consents by context, by subject, by agent, by request key, metrics.
 -- -----------------------------------------------------------------------------
 CREATE TABLE compliance_contexts (
-  id                     TEXT PRIMARY KEY,
-  agency_org_id          TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  agent_user_id          TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  type                   TEXT NOT NULL CHECK (type IN ('employment_contract','transfer','loan','other_services')),
-  status                 TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
-  re_evaluation_pending  INTEGER NOT NULL DEFAULT 0 CHECK (re_evaluation_pending IN (0,1)),
-  review_rejected_at     INTEGER,
-  origin                 TEXT CHECK (origin IS NULL OR origin IN ('transaction')),
-  transaction_id         TEXT,                          -- -> agent_transactions(id), no FK (cycle); 1:1
-  opened_at              INTEGER NOT NULL,
-  closed_at              INTEGER,
-  rev                    INTEGER NOT NULL DEFAULT 1,
-  rev_at                 INTEGER,
-  rev_by_user_id         TEXT,
-  rev_by_name            TEXT,                          -- snapshot
-  CHECK ((origin IS NULL) = (transaction_id IS NULL))
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  agency_org_id  TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  agent_user_id  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  type  TEXT NOT NULL CHECK (type IN ('employment_contract','transfer','loan','other_services')),
+  status  TEXT NOT NULL CHECK (status IN ('open','closed')),
+  re_evaluation_pending  INTEGER NOT NULL CHECK (re_evaluation_pending IN (0,1)),
+  review_rejected_at  INTEGER,
+  origin  TEXT CHECK (origin IS NULL OR origin = 'transaction'),
+  transaction_id  TEXT CHECK (transaction_id IS NULL OR (length(transaction_id) > 0 AND length(transaction_id) <= 80)),
+  opened_at  INTEGER NOT NULL,
+  closed_at  INTEGER,
+  create_key  TEXT CHECK (create_key IS NULL OR (length(create_key) > 0 AND length(create_key) <= 64)),
+  create_fp  TEXT CHECK ((create_fp IS NULL OR length(create_fp) <= 4000) AND ((create_key IS NULL) = (create_fp IS NULL))),
+  rev  INTEGER NOT NULL CHECK (rev >= 1),
+  rev_at  INTEGER,
+  rev_by_id  TEXT CHECK (rev_by_id IS NULL OR (length(rev_by_id) > 0 AND length(rev_by_id) <= 80)),
+  rev_by_name  TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  CHECK ((origin IS NULL) = (transaction_id IS NULL)),
+  CHECK ((status = 'closed') = (closed_at IS NOT NULL))
 ) STRICT;
-CREATE INDEX compliance_contexts_agency_agent ON compliance_contexts(agency_org_id, agent_user_id);
-CREATE INDEX compliance_contexts_status ON compliance_contexts(status);
+CREATE INDEX compliance_contexts_agent ON compliance_contexts(agency_org_id, agent_user_id);
+CREATE INDEX compliance_contexts_open ON compliance_contexts(agency_org_id) WHERE status = 'open';
 CREATE UNIQUE INDEX compliance_contexts_transaction ON compliance_contexts(transaction_id) WHERE transaction_id IS NOT NULL;
-
--- source: db.complianceContexts[].jurisdictions[]  (upper-cased 3-letter codes,
---         de-duplicated; not restricted to JURISDICTIONS — an unencoded MA is
---         reported as missing by applicablePolicySet)
+CREATE UNIQUE INDEX compliance_contexts_create_key ON compliance_contexts(agency_org_id, agent_user_id, create_key) WHERE create_key IS NOT NULL;
 CREATE TABLE compliance_context_jurisdictions (
-  context_id          TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE CASCADE,
-  member_association  TEXT NOT NULL CHECK (length(member_association) = 3),
-  PRIMARY KEY (context_id, member_association)
+  context_id  TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0 AND ord < 10),
+  member_association  TEXT NOT NULL CHECK (member_association GLOB '[A-Z][A-Z][A-Z]'),
+  PRIMARY KEY (context_id, ord),
+  UNIQUE (context_id, member_association)
 ) STRICT;
-
--- source: db.complianceContexts[].parties[]  created at domains/agents/compliance/index.mjs:502/507
---         (resolveParty, id cpt-*) or copied from a transaction's parties by
---         transactionSeam.project (domains/agents/compliance/index.mjs:1064, id txp-*)
--- mapping: id -> id; partyRole -> party_role; subjectKind/subjectId ->
---   subject_kind / subject_id (polymorphic: players(id) | orgs(id); no FK —
---   a removed player stays as an id); addedAt -> added_at; removed -> removed;
---   removedAt -> removed_at (set by onPlayerDeleted, or copied from the
---   transaction party).
--- notes: one un-removed party per (context, partyRole) enforced by code
---   (CONTEXT_PARTY_EXISTS); partial unique index is new.
+CREATE INDEX compliance_context_jurisdictions_ma ON compliance_context_jurisdictions(member_association);
 CREATE TABLE compliance_context_parties (
-  id            TEXT PRIMARY KEY,
-  context_id    TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE CASCADE,
-  party_role    TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
+  context_id  TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  id  TEXT NOT NULL CHECK ((length(id) > 0 AND length(id) <= 80)),
+  party_role  TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
   subject_kind  TEXT NOT NULL CHECK (subject_kind IN ('player','club')),
-  subject_id    TEXT NOT NULL,                          -- polymorphic with subject_kind; no FK
-  added_at      INTEGER NOT NULL,
-  removed       INTEGER NOT NULL DEFAULT 0 CHECK (removed IN (0,1)),
-  removed_at    INTEGER
+  subject_id  TEXT NOT NULL CHECK ((length(subject_id) > 0 AND length(subject_id) <= 80)),
+  added_at  INTEGER,
+  removed  INTEGER NOT NULL CHECK (removed IN (0,1)),
+  removed_at  INTEGER,
+  PRIMARY KEY (context_id, id),
+  UNIQUE (context_id, ord),
+  CHECK (removed = 1 OR removed_at IS NULL)
 ) STRICT;
-CREATE INDEX compliance_context_parties_context ON compliance_context_parties(context_id);
-CREATE UNIQUE INDEX compliance_context_parties_live_role ON compliance_context_parties(context_id, party_role) WHERE removed = 0;   -- new; code enforces
-
--- source: db.complianceContexts[].representations[]  created at
---         domains/agents/compliance/index.mjs:635 (pending_review, declared-only) / :647 (verified)
---         (id crp-*), or projected from transaction_representations
---         (domains/agents/compliance/index.mjs:1065, id txr-*)
--- owner/writer: m25 (declare, withdraw, review decision); seam project()
--- lifecycle: status verified | pending_review | withdrawn (withdrawn is terminal)
--- mapping: id -> id; agentUserId -> agent_user_id; partyRole -> party_role;
---   agreementId -> agreement_id; status -> status; declaredOnly -> declared_only;
---   reviewId -> review_id; declaredAt -> declared_at; firstActAt -> first_act_at
---   (null for a review-verified declaration until the agent acts);
---   withdrawnAt -> withdrawn_at; verifiedByReviewId -> verified_by_review_id;
---   verifiedAt -> verified_at; keys.declare{key,fp} -> idempotency_keys
---   (action 'declare', fp over {partyRole, agreementId}).
--- notes: one non-withdrawn representation per (context, partyRole, agent)
---   enforced by code; partial unique index is new. Projected rows (txr-*)
---   carry no declared_at / keys; declared_at is therefore nullable.
+CREATE INDEX compliance_context_parties_subject ON compliance_context_parties(subject_kind, subject_id);
 CREATE TABLE compliance_context_representations (
-  id                     TEXT PRIMARY KEY,
-  context_id             TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE CASCADE,
-  agent_user_id          TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  party_role             TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
-  agreement_id           TEXT REFERENCES representation_agreements(id) ON DELETE RESTRICT,
-  status                 TEXT NOT NULL CHECK (status IN ('verified','pending_review','withdrawn')),
-  declared_only          INTEGER NOT NULL DEFAULT 0 CHECK (declared_only IN (0,1)),
-  review_id              TEXT REFERENCES regulatory_reviews(id) ON DELETE SET NULL,
-  declared_at            INTEGER,
-  first_act_at           INTEGER,
-  withdrawn_at           INTEGER,
-  verified_by_review_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE SET NULL,
-  verified_at            INTEGER
+  context_id  TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  id  TEXT NOT NULL CHECK ((length(id) > 0 AND length(id) <= 80)),
+  agent_user_id  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  party_role  TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
+  agreement_id  TEXT REFERENCES representation_agreements(id) ON DELETE RESTRICT,
+  status  TEXT NOT NULL CHECK (status IN ('verified','pending_review','withdrawn')),
+  declared_only  INTEGER NOT NULL CHECK (declared_only IN (0,1)),
+  review_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
+  declared_at  INTEGER,
+  first_act_at  INTEGER,
+  withdrawn_at  INTEGER,
+  verified_by_review_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
+  verified_at  INTEGER,
+  declare_key  TEXT CHECK (declare_key IS NULL OR (length(declare_key) > 0 AND length(declare_key) <= 64)),
+  declare_fp  TEXT CHECK ((declare_fp IS NULL OR length(declare_fp) <= 4000) AND ((declare_key IS NULL) = (declare_fp IS NULL))),
+  PRIMARY KEY (context_id, id),
+  UNIQUE (context_id, ord)
 ) STRICT;
-CREATE INDEX compliance_context_representations_context ON compliance_context_representations(context_id);
-CREATE UNIQUE INDEX compliance_context_representations_live ON compliance_context_representations(context_id, party_role, agent_user_id) WHERE status <> 'withdrawn';   -- new; code enforces
-
--- source: db.complianceContexts[].resolvedFacts[]  (domains/agents/compliance/index.mjs:953: reason
---         codes an APPROVED conflict_evaluation review settled; de-duplicated)
 CREATE TABLE compliance_context_resolved_facts (
   context_id  TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE CASCADE,
-  code        TEXT NOT NULL CHECK (code IN ('OTHER_SERVICES_PRESUMPTION','INTEREST_DECLARED','REPRESENTATION_UNVERIFIED')),
-  PRIMARY KEY (context_id, code)
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  code  TEXT NOT NULL CHECK (code IN ('OTHER_SERVICES_PRESUMPTION','INTEREST_DECLARED','REPRESENTATION_UNVERIFIED')),
+  PRIMARY KEY (context_id, ord),
+  UNIQUE (context_id, code)
 ) STRICT;
-
--- source: db.complianceContexts[].evaluations[]  APPEND-ONLY, pushed at
---         domains/agents/compliance/index.mjs:476 (evaluateAndRecord) with the domains/agents/compliance/conflict.mjs
---         evaluateConflict() result spread in.
--- owner/writer: m25 only (m26 asks through the seam). Never edited or removed.
--- mapping: (no source id) -> id = <context_id> || '#' || position, where
---     position is the 1-based array index — this is exactly the evaluationId
---     m26 records on its compliance snapshot (domains/agents/transactions/index.mjs:205), so the
---     snapshot's reference becomes a real key; array index -> position;
---   outcome -> outcome; alias -> derived, not stored ('PERMITTED_WITH_CONSENT'
---     iff outcome is the long form); reasons[] -> compliance_evaluation_reasons;
---   consentsOutstanding[] -> compliance_evaluation_consents_outstanding;
---   requiredActions[] -> derived, not stored (requiredActionsFor(outcome,
---     reasons, consentsOutstanding) is a pure function of stored data);
---   missingEvidence[] -> derived, not stored (filter of reasons by code);
---   ruleStatuses{} -> derived, not stored (reasons rule_id -> rule_status);
---   policyVersions[] -> compliance_evaluation_policy_versions; evaluatedAt ->
---   evaluated_at; inputHash -> input_hash (sha256 hex of the canonical engine
---   input — a fingerprint, not a secret); snapshotOf{parties[],representations[],
---   proposed} -> snapshot_of_json (immutable snapshot of the inputs' identity
---   at evaluation time, by design; read as a whole).
 CREATE TABLE compliance_evaluations (
-  id                TEXT PRIMARY KEY,                   -- '<ctx-id>#<position>'
-  context_id        TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE RESTRICT,
-  position          INTEGER NOT NULL CHECK (position >= 1),
-  outcome           TEXT NOT NULL CHECK (outcome IN ('CLEAR','PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED','PROHIBITED_CONFLICT','MANUAL_REGULATORY_REVIEW_REQUIRED','INSUFFICIENT_DATA')),
-  evaluated_at      INTEGER NOT NULL,
-  input_hash        TEXT NOT NULL CHECK (length(input_hash) = 64),
-  snapshot_of_json  TEXT NOT NULL CHECK (json_valid(snapshot_of_json))
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 100),
+  context_id  TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE CASCADE,
+  position  INTEGER NOT NULL CHECK (position >= 1),
+  outcome  TEXT NOT NULL CHECK (outcome IN ('CLEAR','PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED','PROHIBITED_CONFLICT','MANUAL_REGULATORY_REVIEW_REQUIRED','INSUFFICIENT_DATA')),
+  evaluated_at  INTEGER NOT NULL,
+  input_hash  TEXT NOT NULL CHECK (length(input_hash) = 64),
+  proposed_party_role  TEXT CHECK (proposed_party_role IS NULL OR proposed_party_role IN ('individual','engaging_entity','releasing_entity')),
+  proposed_agent_user_id  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  UNIQUE (context_id, position),
+  CHECK (id = context_id || '#' || position),
+  CHECK ((proposed_party_role IS NULL) = (proposed_agent_user_id IS NULL))
 ) STRICT;
-CREATE UNIQUE INDEX compliance_evaluations_context_position ON compliance_evaluations(context_id, position);
-
--- source: db.complianceContexts[].evaluations[].reasons[]  (domains/agents/compliance/conflict.mjs reason())
--- mapping: as regulatory_review_reasons (same object shape).
+CREATE INDEX compliance_evaluations_outcome ON compliance_evaluations(outcome);
 CREATE TABLE compliance_evaluation_reasons (
-  evaluation_id      TEXT NOT NULL REFERENCES compliance_evaluations(id) ON DELETE CASCADE,
-  position           INTEGER NOT NULL CHECK (position >= 0),
-  code               TEXT NOT NULL,
-  rule_id            TEXT,
-  rule_status        TEXT,
-  regulator          TEXT,
-  jurisdiction       TEXT,
-  policy_version_id  TEXT,
-  extra_json         TEXT CHECK (extra_json IS NULL OR json_valid(extra_json)),
-  PRIMARY KEY (evaluation_id, position)
+  evaluation_id  TEXT NOT NULL REFERENCES compliance_evaluations(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  code  TEXT NOT NULL CHECK ((length(code) > 0 AND length(code) <= 60)),
+  rule_id  TEXT CHECK (rule_id IS NULL OR (length(rule_id) > 0 AND length(rule_id) <= 40)),
+  rule_status  TEXT CHECK (rule_status IS NULL OR rule_status IN ('ACTIVE','SUSPENDED','PARTIALLY_SUSPENDED','JURISDICTION_OVERRIDE','PENDING_IMPLEMENTATION','UNDER_LEGAL_REVIEW','UNKNOWN')),
+  regulator  TEXT CHECK (regulator IS NULL OR (length(regulator) > 0 AND length(regulator) <= 20)),
+  jurisdiction  TEXT CHECK (jurisdiction IS NULL OR jurisdiction GLOB '[A-Z][A-Z][A-Z]'),
+  policy_version_id  TEXT CHECK (policy_version_id IS NULL OR (length(policy_version_id) > 0 AND length(policy_version_id) <= 80)),
+  facet  TEXT CHECK (facet IS NULL OR (length(facet) > 0 AND length(facet) <= 80)),
+  member_association  TEXT CHECK (member_association IS NULL OR (length(member_association) > 0 AND length(member_association) <= 80)),
+  state  TEXT CHECK (state IS NULL OR (length(state) > 0 AND length(state) <= 80)),
+  agent_user_id  TEXT CHECK (agent_user_id IS NULL OR (length(agent_user_id) > 0 AND length(agent_user_id) <= 80)),
+  party_role  TEXT CHECK (party_role IS NULL OR (length(party_role) > 0 AND length(party_role) <= 80)),
+  consent_kind  TEXT CHECK (consent_kind IS NULL OR (length(consent_kind) > 0 AND length(consent_kind) <= 80)),
+  detail_text  TEXT CHECK (detail_text IS NULL OR (length(detail_text) > 0 AND length(detail_text) <= 300)),
+  reason_text  TEXT CHECK (reason_text IS NULL OR (length(reason_text) > 0 AND length(reason_text) <= 80)),
+  override_rule_id  TEXT CHECK (override_rule_id IS NULL OR (length(override_rule_id) > 0 AND length(override_rule_id) <= 80)),
+  kind_text  TEXT CHECK (kind_text IS NULL OR (length(kind_text) > 0 AND length(kind_text) <= 80)),
+  via_connected_agent  INTEGER CHECK (via_connected_agent IS NULL OR via_connected_agent = 1),
+  has_party_roles  INTEGER NOT NULL DEFAULT 0 CHECK (has_party_roles IN (0,1)),
+  has_jurisdictions  INTEGER NOT NULL DEFAULT 0 CHECK (has_jurisdictions IN (0,1)),
+  PRIMARY KEY (evaluation_id, ord)
 ) STRICT;
-
--- source: db.complianceContexts[].evaluations[].consentsOutstanding[]
---         ({partyRole, agentUserId, consentKind, reasonCode}; de-duplicated per
---         (partyRole, consentKind))
+CREATE TABLE compliance_evaluation_reason_items (
+  evaluation_id  TEXT NOT NULL,
+  reason_ord  INTEGER NOT NULL,
+  list  TEXT NOT NULL CHECK (list IN ('partyRoles','jurisdictions')),
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  value  TEXT NOT NULL CHECK (length(value) > 0 AND length(value) <= 80),
+  PRIMARY KEY (evaluation_id, reason_ord, list, ord),
+  FOREIGN KEY (evaluation_id, reason_ord) REFERENCES compliance_evaluation_reasons(evaluation_id, ord) ON DELETE CASCADE
+) STRICT;
 CREATE TABLE compliance_evaluation_consents_outstanding (
   evaluation_id  TEXT NOT NULL REFERENCES compliance_evaluations(id) ON DELETE CASCADE,
-  party_role     TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
-  consent_kind   TEXT NOT NULL CHECK (consent_kind IN ('dual_representation')),
-  agent_user_id  TEXT,
-  reason_code    TEXT NOT NULL,
-  PRIMARY KEY (evaluation_id, party_role, consent_kind)
-) STRICT;
-
--- source: db.complianceContexts[].evaluations[].policyVersions[]
-CREATE TABLE compliance_evaluation_policy_versions (
-  evaluation_id      TEXT NOT NULL REFERENCES compliance_evaluations(id) ON DELETE CASCADE,
-  policy_version_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
-  PRIMARY KEY (evaluation_id, policy_version_id)
-) STRICT;
-
--- source: db.complianceContexts[].history[]
--- actions: compliance_context_opened, compliance_context_party_added,
---   compliance_context_party_removed, compliance_representation_declared,
---   compliance_representation_verified, compliance_representation_withdrawn,
---   compliance_context_evaluated, compliance_context_policy_changed,
---   compliance_context_closed
-CREATE TABLE compliance_context_history (
-  id           TEXT PRIMARY KEY,
-  context_id   TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE RESTRICT,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id        TEXT,
-  by_name      TEXT,
-  by_role      TEXT,
-  by_org_id    TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
-) STRICT;
-CREATE INDEX compliance_context_history_context ON compliance_context_history(context_id, at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.regulatoryConsents (kind <> 'revocation')   created at
---         domains/agents/compliance/index.mjs:728 (requestDualRepresentationConsent — from the
---         context route and from m26 /agent/transactions/:id/consents/request)
--- owner/writer: m25 (request; player/club grant, decline); m25 onPlayerDeleted
---         anonymises player actors.
--- lifecycle: status requested -> granted | declined. 'revoked' is DERIVED: a
---         granted consent is revoked iff a regulatory_consent_revocations row
---         names it (consentStatusOf). Rows are never edited after the answer
---         except for keys/rev; never deleted.
--- TWO TABLES, not one with kind: the source keeps revocation rows in the same
---   array (kind 'revocation') but they have a different shape (of, at, by; no
---   status, rev, keys, particulars, policyVersions), a different lifecycle
---   (a pure append-only fact) and every reader filters them out
---   (consentById, consentsFor, engineConsentsFor). The ledger property —
---   "the granted row is never edited" — is exactly what a separate
---   revocations table with a UNIQUE consent_id expresses. Both share the
---   rcs-* id namespace.
--- mapping: id -> id (rcs-*); kind -> kind (only dual_representation written;
---   the other CONSENT_KINDS are defined vocabulary); contextId -> context_id;
---   agentUserId -> agent_user_id; agencyOrgId -> agency_org_id; partyRole ->
---   party_role; subject{kind,id} -> subject_kind / subject_id (polymorphic:
---   players(id) | orgs(id), no FK); regarding[] -> regulatory_consent_regarding;
---   status -> status; requestedAt -> requested_at; requestedBy -> requested_by_*;
---   grantedAt -> granted_at; grantedBy{kind,userId,name,orgId?,signatory?} ->
---   granted_by_kind / granted_by_id / granted_by_name / granted_by_org_id /
---   granted_by_signatory (true for a club signatory; absent for a player ->
---   NULL); declinedAt -> declined_at; declinedBy -> declined_by_*;
---   particulars{fullParticularsProvided,legalAdviceOffered,proposedFeeDisclosed,
---     acknowledged{particulars,legalAdvice,at}|null} -> full_particulars_provided /
---     legal_advice_offered / proposed_fee_disclosed / acknowledged_particulars /
---     acknowledged_legal_advice / acknowledged_at (acknowledged null -> the
---     three NULL);
---   policyVersions[] -> regulatory_consent_policy_versions; ruleIds[] ->
---   regulatory_consent_rule_ids; keys.request/grant/decline/revoke {key,fp} ->
---   idempotency_keys (actions 'request','grant','decline','revoke' — note the
---   revoke key lives on the CONSENT row, domains/agents/compliance/index.mjs:763); rev/revAt/revBy ->
---   rev / rev_at / rev_by_*; history[] -> regulatory_consent_history.
--- notes: one requested/granted consent per (context, agent, partyRole, kind)
---   enforced by code (CONSENT_ALREADY_REQUESTED, on effective status) —
---   partial unique on stored status would also hold since revocation does not
---   change stored status, but a revoked-then-re-requested consent would then
---   be refused by the index while the code allows it; so index only.
--- -----------------------------------------------------------------------------
-CREATE TABLE regulatory_consents (
-  id                         TEXT PRIMARY KEY,
-  kind                       TEXT NOT NULL CHECK (kind IN ('dual_representation','agency_performance','guardian_approach','guardian_agreement','legal_advice_ack')),
-  context_id                 TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE RESTRICT,
-  agent_user_id              TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  agency_org_id              TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  party_role                 TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
-  subject_kind               TEXT NOT NULL CHECK (subject_kind IN ('player','club')),
-  subject_id                 TEXT NOT NULL,             -- polymorphic with subject_kind; no FK
-  status                     TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested','granted','declined')),
-  requested_at               INTEGER NOT NULL,
-  requested_by_kind          TEXT CHECK (requested_by_kind IN ('org')),
-  requested_by_id            TEXT,
-  requested_by_name          TEXT,                      -- snapshot
-  granted_at                 INTEGER,
-  granted_by_kind            TEXT CHECK (granted_by_kind IS NULL OR granted_by_kind IN ('player','club_user')),
-  granted_by_id              TEXT,
-  granted_by_name            TEXT,                      -- snapshot; nulled on player deletion
-  granted_by_org_id          TEXT,
-  granted_by_signatory       INTEGER CHECK (granted_by_signatory IS NULL OR granted_by_signatory IN (0,1)),
-  declined_at                INTEGER,
-  declined_by_kind           TEXT CHECK (declined_by_kind IS NULL OR declined_by_kind IN ('player','club_user')),
-  declined_by_id             TEXT,
-  declined_by_name           TEXT,                      -- snapshot
-  declined_by_org_id         TEXT,
-  full_particulars_provided  INTEGER NOT NULL DEFAULT 0 CHECK (full_particulars_provided IN (0,1)),
-  legal_advice_offered       INTEGER NOT NULL DEFAULT 0 CHECK (legal_advice_offered IN (0,1)),
-  proposed_fee_disclosed     INTEGER NOT NULL DEFAULT 0 CHECK (proposed_fee_disclosed IN (0,1)),
-  acknowledged_particulars   INTEGER CHECK (acknowledged_particulars IS NULL OR acknowledged_particulars IN (0,1)),
-  acknowledged_legal_advice  INTEGER CHECK (acknowledged_legal_advice IS NULL OR acknowledged_legal_advice IN (0,1)),
-  acknowledged_at            INTEGER,
-  rev                        INTEGER NOT NULL DEFAULT 1,
-  rev_at                     INTEGER,
-  rev_by_user_id             TEXT,
-  rev_by_name                TEXT                       -- snapshot
-) STRICT;
-CREATE INDEX regulatory_consents_context ON regulatory_consents(context_id, kind);
-CREATE INDEX regulatory_consents_subject ON regulatory_consents(subject_kind, subject_id, kind);
-CREATE INDEX regulatory_consents_agency_agent ON regulatory_consents(agency_org_id, agent_user_id);
-
--- source: db.regulatoryConsents[].regarding[]  (the other un-removed party roles
---         in the context at request time)
-CREATE TABLE regulatory_consent_regarding (
-  consent_id  TEXT NOT NULL REFERENCES regulatory_consents(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
   party_role  TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
-  PRIMARY KEY (consent_id, party_role)
+  agent_user_id  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  consent_kind  TEXT NOT NULL CHECK (consent_kind IN ('dual_representation','agency_performance','guardian_approach','guardian_agreement','legal_advice_ack')),
+  reason_code  TEXT NOT NULL CHECK ((length(reason_code) > 0 AND length(reason_code) <= 60)),
+  PRIMARY KEY (evaluation_id, ord),
+  UNIQUE (evaluation_id, party_role, consent_kind)
 ) STRICT;
-
--- source: db.regulatoryConsents[].policyVersions[]  (ids of the policy set in
---         force at request; consentSufficiency requires one ACTIVE deciding
---         version among them)
-CREATE TABLE regulatory_consent_policy_versions (
-  consent_id         TEXT NOT NULL REFERENCES regulatory_consents(id) ON DELETE CASCADE,
+CREATE TABLE compliance_evaluation_policy_versions (
+  evaluation_id  TEXT NOT NULL REFERENCES compliance_evaluations(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
   policy_version_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
-  PRIMARY KEY (consent_id, policy_version_id)
+  PRIMARY KEY (evaluation_id, ord),
+  UNIQUE (evaluation_id, policy_version_id)
 ) STRICT;
-
--- source: db.regulatoryConsents[].ruleIds[]  ([rule.ruleId] — the deciding
---         dual-representation rule, e.g. 'ENG-6.3' or 'FIFA-12.8')
-CREATE TABLE regulatory_consent_rule_ids (
-  consent_id  TEXT NOT NULL REFERENCES regulatory_consents(id) ON DELETE CASCADE,
-  rule_id     TEXT NOT NULL,
-  PRIMARY KEY (consent_id, rule_id)
+CREATE TABLE compliance_evaluation_snapshot_parties (
+  evaluation_id  TEXT NOT NULL REFERENCES compliance_evaluations(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  party_role  TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
+  subject_kind  TEXT NOT NULL CHECK (subject_kind IN ('player','club')),
+  subject_id  TEXT NOT NULL CHECK ((length(subject_id) > 0 AND length(subject_id) <= 80)),
+  PRIMARY KEY (evaluation_id, ord)
 ) STRICT;
-
--- source: db.regulatoryConsents (kind = 'revocation')   created at
---         domains/agents/compliance/index.mjs:760 ({id, kind:'revocation', of, contextId, agentUserId,
---         agencyOrgId, partyRole, subject, at, by, history[]})
--- owner/writer: m25 consentAnswer('revoke')   lifecycle: append-only fact; never edited.
--- mapping: id -> id (rcs-*); kind -> implied by the table; of -> consent_id
---   (UNIQUE: a consent can be revoked once — code refuses a second revoke
---   because effective status is already 'revoked'); contextId -> context_id;
---   agentUserId -> agent_user_id; agencyOrgId -> agency_org_id; partyRole ->
---   party_role; subject{kind,id} -> subject_kind / subject_id (copied from the
---   consent); at -> revoked_at; by{kind,userId,name,orgId?} -> by_kind / by_id /
---   by_name / by_org_id (player actors anonymised on deletion);
---   history[] -> regulatory_consent_history rows with revocation_id set (the
---   revocation's single history entry is a second copy of the
---   regulatory_consent_revoked entry also appended to the consent).
-CREATE TABLE regulatory_consent_revocations (
-  id             TEXT PRIMARY KEY,
-  consent_id     TEXT NOT NULL REFERENCES regulatory_consents(id) ON DELETE RESTRICT,
-  context_id     TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE RESTRICT,
+CREATE TABLE compliance_evaluation_snapshot_representations (
+  evaluation_id  TEXT NOT NULL REFERENCES compliance_evaluations(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  agent_user_id  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  party_role  TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
+  status  TEXT NOT NULL CHECK (status IN ('verified','pending_review','withdrawn')),
+  PRIMARY KEY (evaluation_id, ord)
+) STRICT;
+CREATE TABLE regulatory_reviews (
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  kind  TEXT NOT NULL CHECK (kind IN ('verification_facet','representation_declared','conflict_evaluation','representation_dispute')),
+  status  TEXT NOT NULL CHECK (status IN ('PENDING','IN_REVIEW','APPROVED','REJECTED','CANCELLED','SUPERSEDED')),
+  agency_org_id  TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  agent_user_id  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  subject_profile_id  TEXT REFERENCES agent_profiles(id) ON DELETE RESTRICT,
+  subject_user_id  TEXT CHECK (subject_user_id IS NULL OR (length(subject_user_id) > 0 AND length(subject_user_id) <= 80)),
+  subject_facet  TEXT CHECK (subject_facet IS NULL OR subject_facet IN ('fifa_licence','national_registration','domestic_authorisation','minors_authorisation')),
+  subject_member_association  TEXT CHECK (subject_member_association IS NULL OR subject_member_association GLOB '[A-Z][A-Z][A-Z]'),
+  subject_agreement_id  TEXT REFERENCES representation_agreements(id) ON DELETE RESTRICT,
+  subject_context_id  TEXT REFERENCES compliance_contexts(id) ON DELETE RESTRICT,
+  subject_transaction_id  TEXT CHECK (subject_transaction_id IS NULL OR (length(subject_transaction_id) > 0 AND length(subject_transaction_id) <= 80)),
+  subject_representation_id  TEXT CHECK (subject_representation_id IS NULL OR (length(subject_representation_id) > 0 AND length(subject_representation_id) <= 80)),
+  subject_party_role  TEXT CHECK (subject_party_role IS NULL OR subject_party_role IN ('individual','engaging_entity','releasing_entity')),
+  subject_is_approach  INTEGER NOT NULL CHECK (subject_is_approach IN (0,1)),
+  subject_player_id  TEXT CHECK (subject_player_id IS NULL OR (length(subject_player_id) > 0 AND length(subject_player_id) <= 80)),
+  subject_jurisdiction  TEXT CHECK (subject_jurisdiction IS NULL OR subject_jurisdiction GLOB '[A-Z][A-Z][A-Z]'),
+  snapshot_outcome  TEXT CHECK (snapshot_outcome IS NULL OR snapshot_outcome IN ('CLEAR','PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED','PROHIBITED_CONFLICT','MANUAL_REGULATORY_REVIEW_REQUIRED','INSUFFICIENT_DATA')),
+  snapshot_evaluation_id  TEXT REFERENCES compliance_evaluations(id) ON DELETE RESTRICT,
+  snapshot_evaluated_at  INTEGER,
+  requested_at  INTEGER NOT NULL,
+  requested_by_kind  TEXT NOT NULL CHECK (requested_by_kind IN ('org','player','club_user','ts_reviewer','system')),
+  requested_by_id  TEXT CHECK (requested_by_id IS NULL OR (length(requested_by_id) > 0 AND length(requested_by_id) <= 80)),
+  requested_by_name  TEXT CHECK (requested_by_name IS NULL OR length(requested_by_name) <= 200),
+  requested_by_role  TEXT CHECK (requested_by_role IS NULL OR length(requested_by_role) <= 60),
+  started_at  INTEGER,
+  started_by_id  TEXT REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
+  started_by_name  TEXT CHECK (started_by_name IS NULL OR length(started_by_name) <= 200),
+  started_by_role  TEXT CHECK (started_by_role IS NULL OR started_by_role IN ('trust_safety_reviewer','trust_safety_admin')),
+  decided_at  INTEGER,
+  decision_reviewer_id  TEXT REFERENCES ts_reviewers(id) ON DELETE RESTRICT,
+  decision_reviewer_name  TEXT CHECK (decision_reviewer_name IS NULL OR length(decision_reviewer_name) <= 200),
+  decision_reviewer_role  TEXT CHECK (decision_reviewer_role IS NULL OR decision_reviewer_role IN ('trust_safety_reviewer','trust_safety_admin')),
+  decision_outcome  TEXT CHECK (decision_outcome IS NULL OR decision_outcome IN ('APPROVED','REJECTED','CANCELLED')),
+  decision_reason_code  TEXT CHECK (decision_reason_code IS NULL OR (length(decision_reason_code) > 0 AND length(decision_reason_code) <= 60)),
+  decision_reason  TEXT CHECK (decision_reason IS NULL OR (length(decision_reason) > 0 AND length(decision_reason) <= 1000)),
+  decision_at  INTEGER,
+  prior_status  TEXT CHECK (prior_status IS NULL OR prior_status IN ('PENDING','IN_REVIEW','APPROVED','REJECTED','CANCELLED','SUPERSEDED')),
+  prior_facet_state  TEXT CHECK (prior_facet_state IS NULL OR prior_facet_state IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
+  prior_agreement_status  TEXT CHECK (prior_agreement_status IS NULL OR prior_agreement_status IN ('proposed','active','declined','expired','terminated_by_client','terminated_by_agent','disputed')),
+  prior_context_outcome  TEXT CHECK (prior_context_outcome IS NULL OR prior_context_outcome IN ('CLEAR','PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED','PROHIBITED_CONFLICT','MANUAL_REGULATORY_REVIEW_REQUIRED','INSUFFICIENT_DATA')),
+  prior_representation_status  TEXT CHECK (prior_representation_status IS NULL OR prior_representation_status IN ('verified','pending_review','withdrawn')),
+  result_facet_state  TEXT CHECK (result_facet_state IS NULL OR result_facet_state IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
+  result_agreement_status  TEXT CHECK (result_agreement_status IS NULL OR result_agreement_status IN ('proposed','active','declined','expired','terminated_by_client','terminated_by_agent','disputed')),
+  result_context_outcome  TEXT CHECK (result_context_outcome IS NULL OR result_context_outcome IN ('CLEAR','PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED','PROHIBITED_CONFLICT','MANUAL_REGULATORY_REVIEW_REQUIRED','INSUFFICIENT_DATA')),
+  result_representation_status  TEXT CHECK (result_representation_status IS NULL OR result_representation_status IN ('verified','pending_review','withdrawn')),
+  result_note  TEXT CHECK (result_note IS NULL OR result_note IN ('profile gone','not disputed any more','context gone')),
+  supersedes_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
+  superseded_by_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
+  resolve_key  TEXT CHECK (resolve_key IS NULL OR (length(resolve_key) > 0 AND length(resolve_key) <= 64)),
+  resolve_fp  TEXT CHECK ((resolve_fp IS NULL OR length(resolve_fp) <= 4000) AND ((resolve_key IS NULL) = (resolve_fp IS NULL))),
+  rev  INTEGER NOT NULL CHECK (rev >= 1),
+  rev_at  INTEGER,
+  rev_by_id  TEXT CHECK (rev_by_id IS NULL OR (length(rev_by_id) > 0 AND length(rev_by_id) <= 80)),
+  rev_by_name  TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  CHECK ((decision_outcome IS NULL) = (decision_reviewer_id IS NULL)),
+  CHECK (snapshot_evaluation_id IS NULL OR snapshot_outcome IS NOT NULL)
+) STRICT;
+CREATE INDEX regulatory_reviews_queue ON regulatory_reviews(status, requested_at);
+CREATE INDEX regulatory_reviews_agency ON regulatory_reviews(agency_org_id, agent_user_id);
+CREATE INDEX regulatory_reviews_subject_facet ON regulatory_reviews(subject_profile_id, subject_facet, subject_member_association) WHERE subject_profile_id IS NOT NULL;
+CREATE INDEX regulatory_reviews_subject_agreement ON regulatory_reviews(subject_agreement_id) WHERE subject_agreement_id IS NOT NULL;
+CREATE INDEX regulatory_reviews_subject_context ON regulatory_reviews(subject_context_id) WHERE subject_context_id IS NOT NULL;
+CREATE TABLE regulatory_review_reasons (
+  review_id  TEXT NOT NULL REFERENCES regulatory_reviews(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  code  TEXT NOT NULL CHECK ((length(code) > 0 AND length(code) <= 60)),
+  rule_id  TEXT CHECK (rule_id IS NULL OR (length(rule_id) > 0 AND length(rule_id) <= 40)),
+  rule_status  TEXT CHECK (rule_status IS NULL OR rule_status IN ('ACTIVE','SUSPENDED','PARTIALLY_SUSPENDED','JURISDICTION_OVERRIDE','PENDING_IMPLEMENTATION','UNDER_LEGAL_REVIEW','UNKNOWN')),
+  regulator  TEXT CHECK (regulator IS NULL OR (length(regulator) > 0 AND length(regulator) <= 20)),
+  jurisdiction  TEXT CHECK (jurisdiction IS NULL OR jurisdiction GLOB '[A-Z][A-Z][A-Z]'),
+  policy_version_id  TEXT CHECK (policy_version_id IS NULL OR (length(policy_version_id) > 0 AND length(policy_version_id) <= 80)),
+  facet  TEXT CHECK (facet IS NULL OR (length(facet) > 0 AND length(facet) <= 80)),
+  member_association  TEXT CHECK (member_association IS NULL OR (length(member_association) > 0 AND length(member_association) <= 80)),
+  state  TEXT CHECK (state IS NULL OR (length(state) > 0 AND length(state) <= 80)),
+  agent_user_id  TEXT CHECK (agent_user_id IS NULL OR (length(agent_user_id) > 0 AND length(agent_user_id) <= 80)),
+  party_role  TEXT CHECK (party_role IS NULL OR (length(party_role) > 0 AND length(party_role) <= 80)),
+  consent_kind  TEXT CHECK (consent_kind IS NULL OR (length(consent_kind) > 0 AND length(consent_kind) <= 80)),
+  detail_text  TEXT CHECK (detail_text IS NULL OR (length(detail_text) > 0 AND length(detail_text) <= 300)),
+  reason_text  TEXT CHECK (reason_text IS NULL OR (length(reason_text) > 0 AND length(reason_text) <= 80)),
+  override_rule_id  TEXT CHECK (override_rule_id IS NULL OR (length(override_rule_id) > 0 AND length(override_rule_id) <= 80)),
+  kind_text  TEXT CHECK (kind_text IS NULL OR (length(kind_text) > 0 AND length(kind_text) <= 80)),
+  via_connected_agent  INTEGER CHECK (via_connected_agent IS NULL OR via_connected_agent = 1),
+  has_party_roles  INTEGER NOT NULL DEFAULT 0 CHECK (has_party_roles IN (0,1)),
+  has_jurisdictions  INTEGER NOT NULL DEFAULT 0 CHECK (has_jurisdictions IN (0,1)),
+  PRIMARY KEY (review_id, ord)
+) STRICT;
+CREATE TABLE regulatory_review_reason_items (
+  review_id  TEXT NOT NULL,
+  reason_ord  INTEGER NOT NULL,
+  list  TEXT NOT NULL CHECK (list IN ('partyRoles','jurisdictions')),
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  value  TEXT NOT NULL CHECK (length(value) > 0 AND length(value) <= 80),
+  PRIMARY KEY (review_id, reason_ord, list, ord),
+  FOREIGN KEY (review_id, reason_ord) REFERENCES regulatory_review_reasons(review_id, ord) ON DELETE CASCADE
+) STRICT;
+CREATE TABLE regulatory_review_policy_versions (
+  review_id  TEXT NOT NULL REFERENCES regulatory_reviews(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  policy_version_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
+  PRIMARY KEY (review_id, ord),
+  UNIQUE (review_id, policy_version_id)
+) STRICT;
+CREATE TABLE regulatory_review_evidence_refs (
+  review_id  TEXT NOT NULL REFERENCES regulatory_reviews(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0 AND ord < 10),
+  ref  TEXT NOT NULL CHECK ((length(ref) > 0 AND length(ref) <= 200)),
+  PRIMARY KEY (review_id, ord)
+) STRICT;
+CREATE TABLE regulatory_review_history (
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  review_id  TEXT NOT NULL REFERENCES regulatory_reviews(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  at  INTEGER NOT NULL,
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
+  by_id  TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role  TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  by_org_id  TEXT CHECK (by_org_id IS NULL OR (length(by_org_id) > 0 AND length(by_org_id) <= 80)),
+  action  TEXT NOT NULL CHECK (action IN ('regulatory_review_requested','regulatory_review_started','regulatory_review_resolved','regulatory_review_cancelled','regulatory_review_superseded')),
+  detail_rev  INTEGER,
+  detail_review_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
+  detail_prior_status  TEXT CHECK (detail_prior_status IS NULL OR detail_prior_status IN ('PENDING','IN_REVIEW','APPROVED','REJECTED','CANCELLED','SUPERSEDED')),
+  UNIQUE (review_id, ord)
+) STRICT;
+CREATE INDEX regulatory_review_history_decisions ON regulatory_review_history(at) WHERE action <> 'regulatory_review_requested';
+CREATE TABLE compliance_context_history (
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  context_id  TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  at  INTEGER NOT NULL,
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
+  by_id  TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role  TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  by_org_id  TEXT CHECK (by_org_id IS NULL OR (length(by_org_id) > 0 AND length(by_org_id) <= 80)),
+  action  TEXT NOT NULL CHECK (action IN ('compliance_context_opened','compliance_context_party_added','compliance_context_party_removed','compliance_representation_declared','compliance_representation_verified','compliance_representation_withdrawn','compliance_context_evaluated','compliance_context_policy_changed','compliance_context_closed')),
+  detail_party_role  TEXT CHECK (detail_party_role IS NULL OR detail_party_role IN ('individual','engaging_entity','releasing_entity')),
+  detail_subject_kind  TEXT CHECK (detail_subject_kind IS NULL OR detail_subject_kind IN ('player','club')),
+  detail_status  TEXT CHECK (detail_status IS NULL OR detail_status IN ('verified','pending_review','withdrawn')),
+  detail_review_outcome  TEXT CHECK (detail_review_outcome IS NULL OR detail_review_outcome IN ('review_approved','review_rejected')),
+  detail_evaluation_id  TEXT REFERENCES compliance_evaluations(id) ON DELETE RESTRICT,
+  detail_review_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
+  detail_policy_version_id  TEXT REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
+  UNIQUE (context_id, ord)
+) STRICT;
+CREATE TABLE compliance_context_history_policy_versions (
+  history_id  TEXT NOT NULL REFERENCES compliance_context_history(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  policy_version_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
+  PRIMARY KEY (history_id, ord),
+  UNIQUE (history_id, policy_version_id)
+) STRICT;
+CREATE TABLE regulatory_consents (
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  kind  TEXT NOT NULL CHECK (kind IN ('dual_representation','agency_performance','guardian_approach','guardian_agreement','legal_advice_ack')),
+  context_id  TEXT NOT NULL REFERENCES compliance_contexts(id) ON DELETE RESTRICT,
   agent_user_id  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
   agency_org_id  TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  party_role     TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
-  subject_kind   TEXT NOT NULL CHECK (subject_kind IN ('player','club')),
-  subject_id     TEXT NOT NULL,                         -- polymorphic; no FK
-  revoked_at     INTEGER NOT NULL,
-  by_kind        TEXT CHECK (by_kind IN ('player','club_user')),
-  by_id          TEXT,
-  by_name        TEXT,                                  -- snapshot; nulled on player deletion
-  by_org_id      TEXT
+  party_role  TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
+  subject_kind  TEXT NOT NULL CHECK (subject_kind IN ('player','club')),
+  subject_id  TEXT NOT NULL CHECK ((length(subject_id) > 0 AND length(subject_id) <= 80)),
+  status  TEXT NOT NULL CHECK (status IN ('requested','granted','declined')),
+  requested_at  INTEGER NOT NULL,
+  requested_by_kind  TEXT NOT NULL CHECK (requested_by_kind IN ('org','player','club_user','ts_reviewer','system')),
+  requested_by_id  TEXT CHECK (requested_by_id IS NULL OR (length(requested_by_id) > 0 AND length(requested_by_id) <= 80)),
+  requested_by_name  TEXT CHECK (requested_by_name IS NULL OR length(requested_by_name) <= 200),
+  requested_by_role  TEXT CHECK (requested_by_role IS NULL OR length(requested_by_role) <= 60),
+  granted_at  INTEGER,
+  granted_by_kind  TEXT CHECK (granted_by_kind IS NULL OR granted_by_kind IN ('player','club_user')),
+  granted_by_id  TEXT CHECK (granted_by_id IS NULL OR (length(granted_by_id) > 0 AND length(granted_by_id) <= 80)),
+  granted_by_name  TEXT CHECK (granted_by_name IS NULL OR length(granted_by_name) <= 200),
+  granted_by_org_id  TEXT CHECK (granted_by_org_id IS NULL OR (length(granted_by_org_id) > 0 AND length(granted_by_org_id) <= 80)),
+  granted_by_signatory  INTEGER CHECK (granted_by_signatory IS NULL OR granted_by_signatory = 1),
+  declined_at  INTEGER,
+  declined_by_kind  TEXT CHECK (declined_by_kind IS NULL OR declined_by_kind IN ('player','club_user')),
+  declined_by_id  TEXT CHECK (declined_by_id IS NULL OR (length(declined_by_id) > 0 AND length(declined_by_id) <= 80)),
+  declined_by_name  TEXT CHECK (declined_by_name IS NULL OR length(declined_by_name) <= 200),
+  declined_by_org_id  TEXT CHECK (declined_by_org_id IS NULL OR (length(declined_by_org_id) > 0 AND length(declined_by_org_id) <= 80)),
+  full_particulars_provided  INTEGER NOT NULL CHECK (full_particulars_provided IN (0,1)),
+  legal_advice_offered  INTEGER NOT NULL CHECK (legal_advice_offered IN (0,1)),
+  proposed_fee_disclosed  INTEGER NOT NULL CHECK (proposed_fee_disclosed IN (0,1)),
+  acknowledged_at  INTEGER,
+  request_key  TEXT CHECK (request_key IS NULL OR (length(request_key) > 0 AND length(request_key) <= 64)),
+  request_fp  TEXT CHECK ((request_fp IS NULL OR length(request_fp) <= 4000) AND ((request_key IS NULL) = (request_fp IS NULL))),
+  grant_key  TEXT CHECK (grant_key IS NULL OR (length(grant_key) > 0 AND length(grant_key) <= 64)),
+  grant_fp  TEXT CHECK ((grant_fp IS NULL OR length(grant_fp) <= 4000) AND ((grant_key IS NULL) = (grant_fp IS NULL))),
+  decline_key  TEXT CHECK (decline_key IS NULL OR (length(decline_key) > 0 AND length(decline_key) <= 64)),
+  decline_fp  TEXT CHECK ((decline_fp IS NULL OR length(decline_fp) <= 4000) AND ((decline_key IS NULL) = (decline_fp IS NULL))),
+  revoke_key  TEXT CHECK (revoke_key IS NULL OR (length(revoke_key) > 0 AND length(revoke_key) <= 64)),
+  revoke_fp  TEXT CHECK ((revoke_fp IS NULL OR length(revoke_fp) <= 4000) AND ((revoke_key IS NULL) = (revoke_fp IS NULL))),
+  rev  INTEGER NOT NULL CHECK (rev >= 1),
+  rev_at  INTEGER,
+  rev_by_id  TEXT CHECK (rev_by_id IS NULL OR (length(rev_by_id) > 0 AND length(rev_by_id) <= 80)),
+  rev_by_name  TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  CHECK ((status = 'granted') = (granted_at IS NOT NULL AND granted_by_kind IS NOT NULL)),
+  CHECK ((status = 'declined') = (declined_at IS NOT NULL AND declined_by_kind IS NOT NULL)),
+  CHECK ((status = 'granted') = (acknowledged_at IS NOT NULL))
 ) STRICT;
-CREATE UNIQUE INDEX regulatory_consent_revocations_consent ON regulatory_consent_revocations(consent_id);   -- enforced by code today (effective status)
-
--- source: db.regulatoryConsents[].history[]  (both consent rows and revocation rows)
--- actions: regulatory_consent_requested, regulatory_consent_granted,
---   regulatory_consent_declined, regulatory_consent_revoked
--- mapping: consent_id is the consent the entry belongs to; revocation_id is set
---   only for entries that lived on a revocation row's own history[].
+CREATE INDEX regulatory_consents_context ON regulatory_consents(context_id, agent_user_id);
+CREATE INDEX regulatory_consents_subject ON regulatory_consents(subject_kind, subject_id);
+CREATE INDEX regulatory_consents_agency ON regulatory_consents(agency_org_id, agent_user_id);
+CREATE UNIQUE INDEX regulatory_consents_request_key ON regulatory_consents(context_id, agent_user_id, request_key) WHERE request_key IS NOT NULL;
+CREATE TABLE regulatory_consent_regarding (
+  consent_id  TEXT NOT NULL REFERENCES regulatory_consents(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  party_role  TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
+  PRIMARY KEY (consent_id, ord),
+  UNIQUE (consent_id, party_role)
+) STRICT;
+CREATE TABLE regulatory_consent_policy_versions (
+  consent_id  TEXT NOT NULL REFERENCES regulatory_consents(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  policy_version_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
+  PRIMARY KEY (consent_id, ord),
+  UNIQUE (consent_id, policy_version_id)
+) STRICT;
+CREATE TABLE regulatory_consent_rule_ids (
+  consent_id  TEXT NOT NULL REFERENCES regulatory_consents(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  rule_id  TEXT NOT NULL CHECK (length(rule_id) > 0 AND length(rule_id) <= 40),
+  PRIMARY KEY (consent_id, ord),
+  UNIQUE (consent_id, rule_id)
+) STRICT;
+CREATE TABLE regulatory_consent_revocations (
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  consent_id  TEXT NOT NULL UNIQUE REFERENCES regulatory_consents(id) ON DELETE CASCADE,
+  revoked_at  INTEGER NOT NULL,
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('player','club_user')),
+  by_id  TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_org_id  TEXT CHECK (by_org_id IS NULL OR (length(by_org_id) > 0 AND length(by_org_id) <= 80))
+) STRICT;
 CREATE TABLE regulatory_consent_history (
-  id             TEXT PRIMARY KEY,
-  consent_id     TEXT NOT NULL REFERENCES regulatory_consents(id) ON DELETE RESTRICT,
-  revocation_id  TEXT REFERENCES regulatory_consent_revocations(id) ON DELETE RESTRICT,
-  at             INTEGER NOT NULL,
-  by_kind        TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id          TEXT,
-  by_name        TEXT,
-  by_role        TEXT,
-  by_org_id      TEXT,
-  action         TEXT NOT NULL,
-  detail_json    TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  consent_id  TEXT NOT NULL REFERENCES regulatory_consents(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  at  INTEGER NOT NULL,
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
+  by_id  TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role  TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  by_org_id  TEXT CHECK (by_org_id IS NULL OR (length(by_org_id) > 0 AND length(by_org_id) <= 80)),
+  action  TEXT NOT NULL CHECK (action IN ('regulatory_consent_requested','regulatory_consent_granted','regulatory_consent_declined','regulatory_consent_revoked')),
+  UNIQUE (consent_id, ord)
 ) STRICT;
-CREATE INDEX regulatory_consent_history_consent ON regulatory_consent_history(consent_id, at);
 
 
 -- -----------------------------------------------------------------------------
