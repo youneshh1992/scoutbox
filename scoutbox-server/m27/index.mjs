@@ -57,7 +57,9 @@ export function registerIntegration(ctx) {
     agentCore, unit, // S11a: an opportunity share is a row of its agreement, written by agreements.update in a unit
     recruitmentCases, // S8b: the handoff is part of its case, written by cases.update
     recruitmentReads, // §4.3 step 2: contacts are read through SQL
+    transactionReads, // S11c: the live transaction covering a case is read through SQL
   } = ctx;
+  if (typeof transactionReads?.transactions?.liveForIndividual !== 'function') throw new TypeError('registerIntegration needs transactionReads from the data layer');
   if (!recruitmentCases?.cases) throw new TypeError('registerIntegration needs the recruitment-cases repository from the data layer');
   if (typeof agentCore?.agreements?.update !== 'function' || typeof unit !== 'function') throw new TypeError('registerIntegration needs the agent core repository and unit from the data layer');
   if (typeof recruitmentReads?.contacts?.forAgent !== 'function') throw new TypeError('registerIntegration needs recruitmentReads (contacts) from the data layer');
@@ -581,7 +583,7 @@ export function registerIntegration(ctx) {
 
   /** The live transaction, if any, that already covers this club's context. */
   function liveTransactionFor(kase) {
-    return duplicateTransactionOf(db.agentTransactions ?? [], {
+    return duplicateTransactionOf(transactionReads.transactions.liveForIndividual(kase.playerId, 'employment_contract'), {
       clientId: kase.playerId,
       type: 'employment_contract',
       engagingOrgId: kase.orgId,

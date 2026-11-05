@@ -433,10 +433,10 @@ export const MIGRATIONS = [
     //                              evidence vault. It stores no bytes; ScoutBox
     //                              has one upload path and this is not a second.
     note: 'M23 P5.6D: transaction stores (agentTransactions, transactionRepresentations, transactionDocuments). Three empty containers; nothing is backfilled and no existing record is reinterpreted as a transaction.',
-    up(db) {
-      db.agentTransactions ??= [];
-      db.transactionRepresentations ??= [];
-      db.transactionDocuments ??= [];
+    up() {
+      // The three stores are tables since S11c (migration 0029, repositories/agentTransactions.mjs): there is no
+      // db.agentTransactions, db.transactionRepresentations or db.transactionDocuments to create. A recorded no-op (its
+      // id stays).
     },
   },
   {

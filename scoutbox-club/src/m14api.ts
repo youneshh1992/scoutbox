@@ -168,6 +168,8 @@ const G = (s: Session, path: string) => req<any>(path, { headers: H(s) });
 export const httpM14: M14Api = {
   me: (s) => G(s, '/org/verification/me'),
   agentConsents: (s) => G(s, '/org/compliance/consents'),
+  // The server pages a club's transactions ({ items, nextCursor }, newest first); this reads the first page. The list will
+  // need a "load more" that passes `?cursor=<nextCursor>` (not built yet, by decision).
   transactions: (s) => G(s, '/org/transactions'),
   confirmTransaction: (s, id, input) => P(s, `/org/transactions/${encodeURIComponent(id)}/confirm`, input),
   transactionNote: (s, id, input) => P(s, `/org/transactions/${encodeURIComponent(id)}/notes`, input),

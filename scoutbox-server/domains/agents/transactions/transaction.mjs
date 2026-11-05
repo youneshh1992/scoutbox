@@ -362,6 +362,35 @@ export const PENDING_REASONS = Object.freeze([
   'CONSENT_REQUIRED', 'MANUAL_REVIEW', 'INSUFFICIENT_DATA', 'PROVIDER_UNAVAILABLE',
   'JURISDICTION_UNSUPPORTED', 'FACET_NOT_VERIFIED', 'PARTIES_NOT_CONFIRMED', 'REPRESENTATION_MISSING',
 ]);
+/** The refusals a snapshot can record when the facet gate answered before the engine ran (no evaluation row exists). */
+export const COMPLIANCE_GATES = Object.freeze(['FACET_NOT_VERIFIED', 'JURISDICTION_UNSUPPORTED']);
+/** Why a snapshot is no longer the one the current facts produce (snapshotStaleness). */
+export const STALENESS_REASONS = Object.freeze(['NO_SNAPSHOT', 'INPUTS_CHANGED', 'POLICY_CHANGED', 'EXPIRED']);
+/** Why a representation binding was withdrawn. */
+export const WITHDRAWN_REASONS = Object.freeze(['party_removed', 'agent_withdrew', 'subject_removed', 'review_rejected']);
+
+/**
+ * The full compliance view of a stored snapshot (S11c). A snapshot stores the evaluation row it names (or the gate that
+ * refused before the engine ran), the pending reason it reached, the party revision and the licence freshness; the
+ * outcome, reason codes, policy versions and consent requirements are the evaluation's own, read back from its row.
+ * `evaluation` is that row as the compliance seam decodes it (null for a gate snapshot). Pure.
+ */
+export function snapshotView(tx, stored, evaluation) {
+  if (!stored) return null;
+  const gate = stored.gate ?? null;
+  const outcome = gate ? null : evaluation?.outcome ?? null;
+  const reasonCodes = gate ? (gate === 'JURISDICTION_UNSUPPORTED' ? ['POLICY_NOT_ENCODED'] : []) : [...new Set((evaluation?.reasons ?? []).map((r) => r.code))];
+  const pendingReason = stored.pendingReason ?? null;
+  const consents = gate ? [] : (evaluation?.consentsOutstanding ?? []);
+  const state = { outcome, reasonCodes, pendingReason, blocked: pendingReason === null && outcome === 'PROHIBITED_CONFLICT', clear: pendingReason === null && outcome === 'CLEAR' };
+  if (pendingReason === 'CONSENT_REQUIRED' && outcome === PERMITTED_WITH_CONSENT) state.consentsOutstanding = consents;
+  return {
+    evaluationId: gate ? `${tx.id}#gate` : stored.evaluationId, contextId: tx.contextId ?? null, evaluatedAt: stored.evaluatedAt,
+    policyVersions: gate ? [] : (evaluation?.policyVersions ?? []), outcome, reasonCodes, pendingReason, blocked: state.blocked, clear: state.clear,
+    consentRequirements: consents.map((c) => ({ partyRole: c.partyRole, consentKind: c.consentKind, reasonCode: c.reasonCode })),
+    verificationFreshness: stored.verificationFreshness ?? null, partyRevision: stored.partyRevision, state,
+  };
+}
 
 export function complianceStateFrom({ outcome = null, gate = null, reasons = [], consentsOutstanding = [], representationCount = 0, partiesConfirmed = false }) {
   const codes = [...new Set((reasons ?? []).map((r) => (typeof r === 'string' ? r : r?.code)).filter(Boolean))];

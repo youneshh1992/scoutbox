@@ -48,6 +48,7 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
 import { MIGRATIONS, SCHEMA_VERSION, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
+import { TABLE_BACKED } from '../../repositories/index.mjs';
 import { openStore } from '../../store.mjs';
 
 const PORT = 6900 + Math.floor(Math.random() * 200);
@@ -241,17 +242,19 @@ section('pure §66/§67/§68 — the error contract conceals, and never carries 
 
 section('pure AA/AC/AD — stores, migration, events, notifications, rate policies, permissions');
 {
-  for (const s of ['agentTransactions', 'transactionRepresentations', 'transactionDocuments']) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `AA1 ${s} is migration-guaranteed and production-required`);
+  // S11c: the three stores are tables (migration 0029, repositories/agentTransactions.mjs), not collections.
+  for (const s of ['agentTransactions', 'transactionRepresentations', 'transactionDocuments']) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s) && TABLE_BACKED.includes(s), `AA1 ${s} is a table of the agent transactions repository, not a collection`);
   const step = MIGRATIONS.find((m) => m.id === 'm260_001_transaction_stores');
   ok(step?.version === 2307 && MIGRATIONS.filter((m) => m.version === 2307).length === 1, 'AA2 exactly one step advances the schema to 2307');
   // P7 (m280_001_signing_workflow) is the ONE step above it: the current schema is 2308.
   neg(SCHEMA_VERSION === 2308 && MIGRATIONS.filter((m) => m.version > 2307).length === 1 && MIGRATIONS.find((m) => m.version > 2307)?.version === 2308, 'AA3 and exactly one step above it — P7\'s signing workflow at 2308');
   const src = String(step.up);
   neg(!/recruitmentCases|complianceContexts|signings|offers/.test(src), 'AA4 the step reinterprets no existing record as a transaction and creates no offer or signing store (§3, §5)');
+  // S11c: the step is a recorded no-op; the tables start empty (migration 0029 is DDL only).
   const fresh = {}; step.up(fresh);
-  ok(Object.keys(fresh).length === 3 && Object.values(fresh).every((v) => Array.isArray(v) && v.length === 0), 'AA5 three empty containers, nothing backfilled');
-  step.up(fresh); fresh.agentTransactions.push({ id: 'x' }); step.up(fresh);
-  ok(fresh.agentTransactions.length === 1, 'AA6 replaying the step is harmless and destroys nothing');
+  ok(Object.keys(fresh).length === 0, 'AA5 the step creates nothing and backfills nothing (the stores are tables)');
+  const keep = { agentTransactions: [{ id: 'x' }] }; step.up(keep); step.up(keep);
+  ok(keep.agentTransactions.length === 1 && Object.keys(keep).length === 1, 'AA6 replaying the step is harmless and destroys nothing');
   const EVENTS = ['agent_transaction_created', 'agent_transaction_party_changed', 'agent_transaction_compliance_updated', 'agent_transaction_status_changed', 'agent_transaction_document_added', 'agent_transaction_message_linked', 'agent_transaction_held', 'agent_transaction_cancelled', 'agent_transaction_closed'];
   for (const e of EVENTS) {
     const reg = EVENT_REGISTRY[e];
@@ -285,7 +288,8 @@ section('pure §3/§4/§5 — the four separations are in the code, not only in 
   neg(!/offer_made|offer_accepted|offer_declined|db\.recruitmentOffers/.test(both), '§4 and no offer lifecycle string appears in its code');
   neg(!/db\.roomComments|db\.roomDecisions|db\.assessments/.test(both), '§46 club-private assessment, Room and decision stores are not read by the transaction module');
   neg(!/db\.boxSessions|db\.passport/.test(both), '§47 nor Box Cam or Passport stores');
-  ok(/db\.channels/.test(m26index) && !/messages\.push|new Message/.test(m26index), '§36 the canonical Inbox is referenced; no message store and no message writer is created');
+  // S11c: the Inbox is read through the message-thread repository (channels.byId), not db.channels.
+  ok(/channels\.byId/.test(m26index) && !/messages\.push|new Message/.test(m26index), '§36 the canonical Inbox is referenced; no message store and no message writer is created');
 }
 
 // =================================================================== HTTP
@@ -475,6 +479,15 @@ section('D/§12/§16/§25/§26 — transitions are server-validated and complian
     neg(expect(collect(`D-${bad}`, await j('POST', `/org/agent/transactions/${TX1}/status`, { to: bad }, ANA.token)), 409, 'TRANSACTION_TRANSITION_NOT_ALLOWED'), `D15 an actor cannot request ${bad}: it is the compliance layer's answer, not a request (#25, #26)`);
   }
   neg(expect(collect('D16', await j('POST', `/org/agent/transactions/${TX1}/status`, { to: 'NOT_A_STATE' }, ANA.token)), 400, 'TRANSACTION_INPUT_INVALID'), 'D16 a freeform status string is refused (§11)');
+  // S11c: valid input only — the route refuses what it used to coerce, cut off or record unread, naming the field.
+  const junk = async (label, url, body) => { const r = collect(label, await j('POST', url, body, ANA.token)); return r.status === 400 && r.body?.error === 'TRANSACTION_INPUT_INVALID' ? r.body.field : `${r.status} ${r.body?.error}`; };
+  neg(await junk('D16a', `/org/agent/transactions/${TX1}/status`, { to: 'ACTIVE', reasonCode: 'other' }) === 'reasonCode', 'D16a a move that takes no reason code is refused one (it used to be recorded unread)');
+  neg(await junk('D16b', `/org/agent/transactions/${TX1}/status`, { to: 'CANCELLED', reasonCode: ['other'] }) === 'reasonCode', 'D16b a reason code that is not text is refused, not coerced');
+  neg(await junk('D16c', '/org/agent/transactions', { type: ['transfer'], jurisdictions: ['ENG'] }) === 'type', 'D16c a type that is not text is refused, not coerced');
+  neg(await junk('D16d', '/org/agent/transactions', { type: 'transfer', jurisdictions: ['ENG'], parties: Array.from({ length: 5 }, () => ({ partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' })) }) === 'parties', 'D16d more than four parties are refused, not silently cut off');
+  neg(await junk('D16e', '/org/agent/transactions', { type: 'transfer', jurisdictions: ['ENG', 'USA', 'FRA', 'ESP', 'GER', 'ITA', 'NED', 'POR', 'BEL', 'SCO', 'WAL'] }) === 'jurisdictions', 'D16e more than ten jurisdictions are refused');
+  neg(await junk('D16f', '/org/agent/transactions', { type: 'transfer', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 7 }] }) === 'parties', 'D16f a party id that is not text is refused');
+  neg(expect(collect('D16g', await j('POST', `/org/agent/transactions/${TX1}/notes`, { text: 12345, visibility: 'AGENT_PRIVATE' }, ANA.token)), 400, 'NOTE_INPUT_INVALID'), 'D16g a note whose text is not text is refused, not coerced');
   const active = collect('D17', await j('POST', `/org/agent/transactions/${TX1}/status`, { to: 'ACTIVE' }, ANA.token));
   neg(active.status === 422 && ['TRANSACTION_COMPLIANCE_PENDING', 'TRANSACTION_COMPLIANCE_BLOCKED', 'TRANSACTION_COMPLIANCE_STALE'].includes(active.body.error), `D17 ACTIVE is refused while compliance is outstanding, by compliance and not by the map (${active.body.error})`);
   neg(active.body.pendingReason !== undefined || active.body.staleness !== undefined || active.body.outcome !== undefined, 'D18 …and the refusal names which fact is in the way');
@@ -836,19 +849,28 @@ section('AI/§92 — a corrupt row is contained and named by its effect, never r
   const store = openStore(DATA_DIR);
   const snap = store.load();
   const db = snap.db;
-  db.agentTransactions.push({
+  // S11c: a status the machine does not know is not a row the typed table can hold — the save refuses it, naming it,
+  // and writes nothing. A typed row can still carry no compliance snapshot at all; that one is planted and judged on read.
+  const party = { id: 'txp-ai1', partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi', addedAt: T0, addedBy: { kind: 'org', userId: ANA_ID, name: 'Ana Costa' }, removed: false, removedAt: null, confirmedAt: T0, confirmedBy: { kind: 'player', userId: 'pl-adeyemi', name: 'Kola Adeyemi' }, subjectRemovedAt: null };
+  const row = (over) => ({
     id: 'atx-corrupt', agencyOrgId: 'org-northstar', agentUserId: ANA_ID, type: 'transfer', jurisdictions: ['ENG'],
-    status: 'SOMETHING_NOBODY_WROTE', parties: [{ id: 'p1', partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi', addedAt: T0, removed: false, confirmedAt: T0 }],
-    contextId: null, compliance: null, notes: [], linkedThreads: [], links: {}, terms: { versions: [] },
-    initiatedBy: { kind: 'system', userId: null, name: 'fixture' }, initiatedAt: T0, createdAt: T0, updatedAt: T0, keys: {}, rev: 1, revAt: T0, revBy: null, history: [],
+    status: 'SOMETHING_NOBODY_WROTE', parties: [party], contextId: 'ctx-ai1', compliance: null, reEvaluationPending: false,
+    notes: [], linkedThreads: [], links: { trialId: null, opportunityId: null, recruitmentCaseId: null }, terms: { versions: [] },
+    holdReasonCode: null, holdReason: null, heldAt: null, cancelReasonCode: null, cancelledAt: null, closeReasonCode: null, closedAt: null, archivedAt: null,
+    initiatedBy: { kind: 'org', userId: ANA_ID, name: 'Ana Costa' }, createdAt: T0, updatedAt: T0, keys: {}, rev: 1, revAt: T0, revBy: null, history: [], ...over,
   });
+  const context = { id: 'ctx-ai1', agencyOrgId: 'org-northstar', agentUserId: ANA_ID, type: 'transfer', jurisdictions: ['ENG'], parties: [], representations: [], resolvedFacts: [], reEvaluationPending: false, reviewRejectedAt: null, status: 'open', origin: 'transaction', transactionId: 'atx-corrupt', openedAt: T0, closedAt: null, keys: {}, rev: 1, revAt: T0, revBy: null, history: [], evaluations: [] };
+  let refusedStatus = null;
+  try { store.save({ ...snap, db: { ...db, complianceContexts: [...db.complianceContexts, context], agentTransactions: [...db.agentTransactions, row({})] } }); } catch (e) { refusedStatus = e; }
+  neg(refusedStatus?.code === 'AGENT_TRANSACTIONS_IMPORT_BLOCKED' && /atx-corrupt\.status/.test(refusedStatus.message), 'AI2 a row with a status nobody wrote is refused by the save, naming it — nothing is repaired and nothing is written');
+  neg(!actorTransitionAllowed('SOMETHING_NOBODY_WROTE', 'ACTIVE') && !ALL_TRANSITIONS.some((t) => t.from === 'SOMETHING_NOBODY_WROTE'), 'AI3 …and no transition exists from a status the machine does not know');
+  db.complianceContexts.push(context);
+  db.agentTransactions.push(row({ status: 'READY' }));
   store.save(snap);
   server = await boot();
   const read = await j('GET', '/org/agent/transactions/atx-corrupt', undefined, ANA.token);
-  ok(read.status === 200 && read.body.transaction.status === 'SOMETHING_NOBODY_WROTE', 'AI2 the corrupt row reads back as it is on disk — the bytes are the bytes, nothing is repaired on boot');
-  neg(read.body.transaction.allowedTransitions.length === 0, 'AI3 …and no transition is offered from a status the machine does not know');
-  neg(expect(collect('AI4', await j('POST', '/org/agent/transactions/atx-corrupt/status', { to: 'ACTIVE' }, ANA.token)), 409, 'TRANSACTION_TRANSITION_NOT_ALLOWED'), 'AI4 no status transition is possible from a status the machine does not know');
-  neg(expect(collect('AI5', await j('POST', '/org/agent/transactions/atx-corrupt/notes', { text: 'x', visibility: 'AGENT_PRIVATE' }, ANA.token)), 409, 'TRANSACTION_NOT_LIVE'), 'AI5 nor a note');
+  ok(read.status === 200 && read.body.transaction.status === 'READY', 'AI4 a row with no compliance snapshot reads back as it is on disk — nothing is repaired on boot');
+  neg(expect(collect('AI5', await j('POST', '/org/agent/transactions/atx-corrupt/status', { to: 'ACTIVE' }, ANA.token)), 422, 'TRANSACTION_COMPLIANCE_STALE'), 'AI5 it cannot enter the live workflow: the absence of an evaluation authorises nothing');
   neg(read.body.transaction.compliance.staleness === 'NO_SNAPSHOT' && read.body.transaction.compliance.clear === false, 'AI6 a row with no compliance snapshot reads as NO_SNAPSHOT, never as clear');
 }
 
@@ -886,6 +908,22 @@ section('AB/§71 — an account removal keeps the shape and loses the person');
   neg(!docs.some((d) => d.ownerKind === 'player'), 'AB8 the removed person\'s own documents are gone from the workspace');
 }
 
+// ============================================================ S11c — the lists that grow page by cursor
+section('S11c — the agent\'s, the club\'s and Trust & Safety\'s lists page newest first by cursor; junk is a 400');
+{
+  const all = (await j('GET', '/org/agent/transactions', undefined, ANA.token)).body;
+  ok(all.items.length >= 2 && all.nextCursor === null && all.counts.live === all.items.filter((t) => LIVE_STATUSES.includes(t.status)).length, `PG1 the first page holds every one of ${all.items.length} transactions, and the counts cover them all`);
+  const p1 = (await j('GET', '/org/agent/transactions?limit=1', undefined, ANA.token)).body;
+  const p2 = (await j('GET', `/org/agent/transactions?limit=1&cursor=${encodeURIComponent(p1.nextCursor)}`, undefined, ANA.token)).body;
+  ok(p1.items.length === 1 && p1.nextCursor && p2.items.length === 1 && p2.items[0].id !== p1.items[0].id && p1.items[0].id === all.items[0].id && p2.items[0].id === all.items[1].id, 'PG2 a page of one, then the next from its cursor — newest first');
+  neg(p1.counts.live === all.counts.live, 'PG3 the counts are over every transaction, not the page');
+  neg((await j('GET', '/org/agent/transactions?limit=0', undefined, ANA.token)).status === 400 && (await j('GET', '/org/agent/transactions?cursor=junk', undefined, ANA.token)).status === 400 && (await j('GET', '/org/agent/transactions?status=SOMETHING', undefined, ANA.token)).status === 400, 'PG4 a junk limit, cursor or status filter is a 400, never clamped');
+  const ts = (await j('GET', '/ts/transactions?limit=1', undefined, PRIYA.token)).body;
+  ok(ts.items.length === 1 && typeof ts.nextCursor === 'string', 'PG5 the Trust & Safety list pages the same way');
+  const club = (await j('GET', '/org/transactions?limit=1', undefined, maria.token)).body;
+  ok(club.items.length === 1 && 'nextCursor' in club, 'PG6 and so does a club\'s');
+}
+
 // ============================================================ Z — the refusal sweep
 section('Z — every refusal in this run: a code, and no private field');
 {
@@ -893,7 +931,8 @@ section('Z — every refusal in this run: a code, and no private field');
   const noCode = ERROR_BODIES.filter((e) => e.body !== null && !e.body.error);
   neg(noCode.length === 0, 'Z7 every JSON refusal carried an error code');
   const blob = JSON.stringify(ERROR_BODIES);
-  neg(!/ at .*\(|node_modules|Error:/.test(blob), 'Z8 no stack and no internal frame reached a refusal');
+  const leak8 = blob.match(/ at .*\(|node_modules|Error:/);
+  neg(leak8 === null, `Z8 no stack and no internal frame reached a refusal${leak8 ? ` — …${blob.slice(Math.max(0, leak8.index - 200), leak8.index + 60)}…` : ''}`);
   const leak9 = blob.match(/Kola|Adeyemi|Maria Keane|Priya|Marcus|wage ceiling|signing-on fee|budget note/);
   neg(leak9 === null, `Z9 no party name, reviewer name, note text or document label reached a refusal${leak9 ? ` — leaked "${leak9[0]}" in …${blob.slice(Math.max(0, leak9.index - 140), leak9.index + 40)}…` : ''}`);
   const leak10 = blob.replace(/MINOR_[A-Z_]+/g, '').match(/"dob"|dateOfBirth|\bblocked\b|\bminor\b/i);

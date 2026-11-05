@@ -1258,6 +1258,8 @@ export function createComplianceRecordsRepository({ sqlite, unit = null, now = D
       return deepFreeze(evaluationOf(evId));
     }),
     byId: contextById,
+    /** One evaluation row, decoded (a transaction's snapshot names one), or null. */
+    evaluationById: (id) => { if (typeof id !== 'string') return null; const e = evaluationOf(id); return e ? deepFreeze(e) : null; },
     /** The agent's own contexts in the agency, oldest first. */
     forAgent: many(decodeContexts, 'SELECT * FROM compliance_contexts WHERE agency_org_id = ? AND agent_user_id = ? ORDER BY rowid'),
     /** The agent's context opened under this client key, or null. */
@@ -1406,6 +1408,9 @@ export function createComplianceRecordsRepository({ sqlite, unit = null, now = D
     forAgency: many(decodeConsents, 'SELECT * FROM regulatory_consents WHERE agency_org_id = ? ORDER BY rowid'),
     /** The consent the agent requested in the context under this client key, or null. */
     byRequestKey: one(decodeConsents, 'SELECT * FROM regulatory_consents WHERE context_id = ? AND agent_user_id = ? AND request_key = ?'),
+    /** How long each answered consent of a transaction's context waited for its answer (the transaction metrics), in ms. */
+    transactionAnswerWaits: () => q(`SELECT COALESCE(c.granted_at, c.declined_at) - c.requested_at AS d FROM regulatory_consents c JOIN compliance_contexts x ON x.id = c.context_id
+      WHERE x.origin = 'transaction' AND (c.granted_at IS NOT NULL OR c.declined_at IS NOT NULL) ORDER BY d`).all().map((r) => r.d),
     /** The T&S metrics: dual-representation consents requested, granted, declined, revoked. */
     metrics: () => {
       const r = q(`SELECT COUNT(*) AS requested, SUM(CASE WHEN c.status = 'granted' AND v.id IS NULL THEN 1 ELSE 0 END) AS granted, SUM(CASE WHEN c.status = 'declined' THEN 1 ELSE 0 END) AS declined, SUM(CASE WHEN v.id IS NOT NULL THEN 1 ELSE 0 END) AS revoked

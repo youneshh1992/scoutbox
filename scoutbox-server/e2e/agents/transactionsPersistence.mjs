@@ -1,12 +1,11 @@
 // M23 P5.6D — persistence, migration and restart audit for the Agent
 // Transaction Workspace.
 //
-//   1  schema 2307: exactly one step above 2306, three EMPTY stores on a clean
-//      database, idempotent, and every P5.6D store production-required
-//   2  upgrade from a 2306 snapshot: the three containers appear and NOTHING
-//      else changes — no recruitment case, no compliance context, no agreement
-//      and no player becomes or gains a transaction, and a re-run creates
-//      nothing twice
+//   1  schema 2307: exactly one step above 2306, a recorded no-op since S11c (the
+//      three stores are tables of migration 0029), EMPTY on a clean database
+//   2  upgrade from a 2306 snapshot: NOTHING changes — no recruitment case, no
+//      compliance context, no agreement and no player becomes or gains a
+//      transaction, a re-run creates nothing, and a partial record is refused
 //   3  a real boot over that snapshot: /healthz 2307, the transaction lanes
 //      answer, and an empty workspace is an empty list rather than an error
 //   4  clean boot → transaction → confirmations → representation → document →
@@ -14,11 +13,10 @@
 //      history, the compliance snapshot reference, document metadata and its
 //      version chain, the timeline, revs and idempotency keys), and the 2307
 //      step does not run twice
-//   5  corruption on disk is contained and named: a transaction whose
-//      compliance snapshot points at a context that is gone reads as
-//      NO_SNAPSHOT rather than clear, a document whose transaction is gone
-//      reaches nobody, a party revision that no longer matches reads STALE,
-//      and an unknown status permits no transition
+//   5  corruption is contained and named: a transaction whose context is gone,
+//      a document whose transaction is gone and an unknown status are rows the
+//      typed tables cannot hold (the save refuses them, naming them); a party
+//      revision that no longer matches the facts is planted and reads STALE
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
@@ -30,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { MIGRATIONS, SCHEMA_VERSION, runMigrations, PRODUCTION_REQUIRED_STORES } from '../../domains/platform/migrations.mjs';
 import { openStore } from '../../store.mjs';
 import { guaranteeFor } from '../../storeContract.mjs';
+import { TABLE_BACKED } from '../../repositories/index.mjs';
 import { partyRevisionOf, snapshotStaleness, actorTransitionAllowed, TRANSACTION_STATUSES } from '../../domains/agents/transactions/transaction.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -81,7 +80,7 @@ const snapshotOf = (dir) => openStore(dir).load()?.db ?? null;
 const writeSnapshot = (dir, db) => openStore(dir).save({ db, idCounter: 500_000, savedAt: Date.now() });
 
 // ============================================================ 1
-section('1 — the P5.6D step: one step at 2307, three EMPTY stores, idempotent, production-required');
+section('1 — the P5.6D step: one step at 2307, a recorded no-op; the three stores are tables, EMPTY on a clean database');
 {
   const step = MIGRATIONS.find((m) => m.id === STEP);
   ok(step?.version === 2307 && SCHEMA_VERSION === 2308, `${STEP} is version 2307; the current schema is ${SCHEMA_VERSION} (P7 added m280_001_signing_workflow at 2308)`);
@@ -91,8 +90,12 @@ section('1 — the P5.6D step: one step at 2307, three EMPTY stores, idempotent,
   neg(new Set(versions).size === versions.length, 'every versioned step reaches a distinct schema version — no version is advanced twice');
   const fresh = {};
   const up = runMigrations(fresh);
-  ok(up.to === 2308 && STORES.every((s) => Array.isArray(fresh[s])), 'a clean database gets the three stores (and the schema lands at 2308)');
-  neg(STORES.every((s) => fresh[s].length === 0), 'all three start EMPTY — a transaction is a new concept and no existing record is reinterpreted as one');
+  // S11c: the three stores are tables (migration 0029); the step is a recorded no-op.
+  ok(up.to === 2308 && STORES.every((s) => fresh[s] === undefined), 'a clean database gets no transaction collection (the three stores are tables) and the schema lands at 2308');
+  const freshDir = mkdtempSync(path.join(tmpdir(), 'sbx-m26p-fresh-'));
+  openStore(freshDir).save({ db: fresh });
+  const tables = openStore(freshDir).load().db;
+  neg(STORES.every((s) => Array.isArray(tables[s]) && tables[s].length === 0), 'all three tables start EMPTY — a transaction is a new concept and no existing record is reinterpreted as one');
   neg(fresh.recruitmentOffers === undefined && fresh.offers === undefined && fresh.agencyInvoices === undefined, 'no offer and no agency-invoice store was created (out of scope; the invoice store is deferred with its reason recorded)');
   const { schema: _s1, ...storesBefore } = fresh;
   const before = stableJson(storesBefore);
@@ -100,14 +103,13 @@ section('1 — the P5.6D step: one step at 2307, three EMPTY stores, idempotent,
   const again = runMigrations(fresh);
   const { schema: _s2, ...storesAfter } = fresh;
   ok(again.ran.length === 0 && stableJson(storesAfter) === before && fresh.schema.migrations.map((m) => m.id).join() === idsBefore, 'running again changes no store and adds no migration record');
-  fresh.agentTransactions.push({ id: 'atx-keep' });
-  runMigrations(fresh);
-  neg(fresh.agentTransactions.length === 1 && fresh.agentTransactions[0].id === 'atx-keep', 'a replay over a populated store destroys nothing');
-  for (const s of STORES) ok(guaranteeFor(s) === 'migration' && PRODUCTION_REQUIRED_STORES.includes(s), `${s} is migration-guaranteed and production-required`);
+  const keep = { agentTransactions: [{ id: 'atx-keep' }] }; MIGRATIONS.find((m) => m.id === STEP).up(keep);
+  neg(keep.agentTransactions.length === 1 && keep.agentTransactions[0].id === 'atx-keep', 'a replay of the step over anything destroys nothing (it is a no-op)');
+  for (const s of STORES) ok(guaranteeFor(s) !== 'migration' && !PRODUCTION_REQUIRED_STORES.includes(s) && TABLE_BACKED.includes(s), `${s} is a table of the agent transactions repository, not a migration-guaranteed collection`);
 }
 
 // ============================================================ 2
-section('2 — upgrade from 2306: three containers appear and nothing else moves');
+section('2 — upgrade from 2306: nothing moves, and nothing is invented');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m26p-up-'));
   // Build a real 2307 database, then REWIND it to 2306 by dropping the P5.6D
@@ -135,14 +137,17 @@ section('2 — upgrade from 2306: three containers appear and nothing else moves
   ok(db.schema.version === 2306 && db.agentTransactions === undefined, 'the fixture is a 2306 snapshot with a recruitment case, a compliance context and an agreement, and no transaction store');
   const up = runMigrations(db);
   ok(up.ran.join(',') === `${STEP},m280_001_signing_workflow` && up.to === 2308, 'a 2306 snapshot runs exactly the P5.6D step and then the P7 step, in order');
-  neg(STORES.every((s) => Array.isArray(db[s]) && db[s].length === 0), 'the three containers appear EMPTY');
+  neg(STORES.every((s) => db[s] === undefined), 'no transaction collection appears (S11c: the stores are tables, empty until a route writes one)');
   neg(stableJson(db.recruitmentCases) === casesBefore, 'the recruitment case is untouched — it did not become a transaction and gained no transaction field (§3)');
   neg(stableJson(db.complianceContexts) === contextsBefore, 'the compliance context is untouched — it is not reinterpreted as a transaction either');
   neg(stableJson(db.representationAgreements) === agreementsBefore && stableJson(db.players) === playersBefore, 'no agreement and no player row was touched');
   db.schema.version = 2306; db.schema.migrations = db.schema.migrations.filter((m) => m.id !== STEP);
-  db.agentTransactions.push({ id: 'atx-partial' });
   const rerun = runMigrations(db);
-  neg(rerun.ran[0] === STEP && db.agentTransactions.length === 1, 'a partial upgrade (the store exists, the record does not) completes without duplicating anything');
+  neg(rerun.ran[0] === STEP && STORES.every((s) => db[s] === undefined), 'a partial upgrade (the record missing) completes and creates nothing');
+  // S11c: a partial transaction record is not a row the typed table can hold: the save refuses it, naming it.
+  let refusedPartial = null;
+  try { writeSnapshot(mkdtempSync(path.join(tmpdir(), 'sbx-m26p-partial-')), { ...db, agentTransactions: [{ id: 'atx-partial' }] }); } catch (e) { refusedPartial = e; }
+  neg(refusedPartial?.code === 'AGENT_TRANSACTIONS_IMPORT_BLOCKED' && /atx-partial/.test(refusedPartial.message), 'a partial transaction record is refused by the save, naming it — nothing is written');
   writeSnapshot(dir, db);
   globalThis.UPGRADE_DIR = dir;
 }
@@ -164,7 +169,7 @@ section('3 — a real boot over the upgraded snapshot');
     ok(canon.status === 200, `the canonical player lane answers on this minimal database (${canon.status})`);
     const pl = await s.j('GET', '/player/transactions', undefined, player.body?.token);
     ok(pl.status === 200 && pl.body.items.length === 0, `and so is the individual's side (${pl.status} ${JSON.stringify(pl.body).slice(0, 80)})`);
-    neg(expect(await s.j('GET', '/org/agent/transactions/atx-partial', undefined, org.body.token), 404, 'TRANSACTION_NOT_FOUND'), 'the fixture row left on disk by the partial-upgrade test belongs to nobody and reads as absent');
+    neg(expect(await s.j('GET', '/org/agent/transactions/atx-partial', undefined, org.body.token), 404, 'TRANSACTION_NOT_FOUND'), 'the refused partial row is not on disk: it reads as absent');
   }
   await s.stop();
 }
@@ -216,7 +221,10 @@ section('4 — a real workspace survives a restart byte for byte');
   ok(snap && snap.schema.version === 2308 && snap.agentTransactions.length === 1 && snap.transactionRepresentations.length === 1 && snap.transactionDocuments.length === 2, 'the snapshot on disk holds one transaction, one representation binding and two document versions at 2307');
   const row = snap.agentTransactions[0];
   ok(row.status === 'ON_HOLD' && row.holdReasonCode === 'awaiting_document' && row.parties.length === 2 && row.parties.every((p) => p.confirmedAt), 'the status, its reason code and both party confirmations are on disk');
-  ok(row.compliance?.evaluationId && row.compliance.contextId && row.compliance.partyRevision && row.compliance.policyVersions.length >= 1, 'the compliance snapshot reference — evaluation, context, party revision and policy versions — is on disk');
+  // S11c: the snapshot names its evaluation row ('<context>#<n>'); the policy versions are that evaluation's own.
+  const ctxRow = snap.complianceContexts.find((c) => c.id === row.contextId);
+  const evaluation = ctxRow?.evaluations[Number(String(row.compliance?.evaluationId).split('#').pop()) - 1];
+  ok(row.compliance?.evaluationId?.startsWith(`${row.contextId}#`) && row.compliance.partyRevision && evaluation?.policyVersions.length >= 1, 'the compliance snapshot reference — the evaluation row of its context, the party revision and (through the evaluation) the policy versions — is on disk');
   neg(row.notes.length === 1 && row.terms.versions.length === 1 && row.history.length >= 8, 'the scoped note, the recorded terms version and the append-only history are on disk');
   neg(row.keys && Object.keys(row.keys).length >= 2, 'the idempotency keys are on disk');
   const chain = snap.transactionDocuments;
@@ -258,32 +266,49 @@ section('5 — corruption on disk is contained and named by its effect, never re
   const dir = globalThis.LIVE_DIR;
   const TX = globalThis.LIVE_TX;
   const db = snapshotOf(dir);
-  // (a) the compliance snapshot points at a context that is gone
-  db.complianceContexts = db.complianceContexts.filter((c) => c.id !== db.agentTransactions[0].contextId);
-  // (b) a document whose transaction no longer exists
-  db.transactionDocuments.push({ id: 'txd-orphan', transactionId: 'atx-gone', documentType: 'mandate', visibility: 'ALL_TRANSACTION_PARTIES', label: 'Orphan', version: 1, owner: { kind: 'agent', id: 'usr-x' }, uploadedBy: { kind: 'org', userId: 'usr-x', name: 'Ghost' }, createdAt: 1, expiresAt: null, signedAt: null, evidenceRef: null, supersedes: null, supersededBy: null, removedAt: null, keys: {}, rev: 1, revAt: 1, revBy: null, history: [] });
-  // (c) a transaction with a status nobody wrote
-  db.agentTransactions.push({ ...structuredClone(db.agentTransactions[0]), id: 'atx-odd', status: 'HALF_WRITTEN', keys: {}, rev: 1 });
+  // S11c: three of the old corruptions are rows the typed tables cannot hold — the save refuses each, naming it, and
+  // writes nothing: (a) a transaction whose compliance context is gone, (b) a document whose transaction is gone,
+  // (c) a status nobody wrote.
+  const refusedSave = (over) => { try { writeSnapshot(mkdtempSync(path.join(tmpdir(), 'sbx-m26p-bad-')), { ...db, ...over }); return null; } catch (e) { return e; } };
+  const goneCtx = refusedSave({ complianceContexts: db.complianceContexts.filter((c) => c.id !== db.agentTransactions[0].contextId) });
+  neg(goneCtx?.code === 'AGENT_TRANSACTIONS_REFERENCE_MISSING' || goneCtx?.code === 'COMPLIANCE_RECORDS_REFERENCE_MISSING', `(a) a transaction whose compliance context is gone is refused by the save (${goneCtx?.code})`);
+  const orphan = { id: 'txd-orphan', transactionId: 'atx-gone', documentType: 'mandate', visibility: 'ALL_TRANSACTION_PARTIES', label: 'Orphan', version: 1, owner: { kind: 'agent', id: 'usr-x' }, ownerPartyRole: null, uploadedBy: { kind: 'org', userId: 'usr-x', name: 'Ghost' }, createdAt: 1, expiresAt: null, evidenceRef: null, supersedes: null, supersededBy: null, removedAt: null, keys: {}, rev: 1, revAt: 1, revBy: null, history: [] };
+  neg(refusedSave({ transactionDocuments: [...db.transactionDocuments, orphan] })?.code === 'AGENT_TRANSACTIONS_REFERENCE_MISSING', '(b) a document whose transaction is gone is refused by the save — a document belongs to a transaction');
+  const odd = refusedSave({ agentTransactions: [...db.agentTransactions, { ...structuredClone(db.agentTransactions[0]), id: 'atx-odd', status: 'HALF_WRITTEN', keys: {}, rev: 1 }] });
+  neg(odd?.code === 'AGENT_TRANSACTIONS_IMPORT_BLOCKED' && /atx-odd\.status/.test(odd.message), '(c) a status nobody wrote is refused by the save, naming the row');
+  // A policy version published for the jurisdiction flags the transaction's compliance context (P5.6C). S11c: the
+  // transaction reads that flag — its snapshot is POLICY_CHANGED and authorises nothing until it is re-evaluated.
+  const ctxOfTx = db.complianceContexts.find((c) => c.id === db.agentTransactions[0].contextId);
+  ctxOfTx.reEvaluationPending = true;
+  writeSnapshot(dir, db);
+  const sp = await bootOn(dir, globalThis.LIVE_PORT + 3);
+  ok(sp.up, 'the server boots over a context flagged by a policy publication');
+  if (sp.up) {
+    const ana = (await sp.j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Ana Costa', role: 'Agent', platform: 'agent' })).body;
+    const comp = (await sp.j('GET', `/org/agent/transactions/${TX}`, undefined, ana.token)).body.transaction.compliance;
+    neg(comp.staleness === 'POLICY_CHANGED' && comp.clear === false, `a transaction whose context a policy publication flagged reads POLICY_CHANGED, not clear (${comp.staleness})`);
+    const progress = await sp.j('POST', `/org/agent/transactions/${TX}/status`, { to: 'ACTIVE' }, ana.token);
+    neg(progress.status === 422 && progress.body.error === 'TRANSACTION_COMPLIANCE_STALE' && progress.body.staleness === 'POLICY_CHANGED', `and it cannot enter the live workflow until re-evaluated (${progress.status} ${progress.body?.staleness})`);
+    await sp.stop();
+  }
+  ctxOfTx.reEvaluationPending = false;
+  // What a typed row CAN still carry is planted and judged on read: a snapshot taken under a party revision the current
+  // facts no longer produce.
+  db.agentTransactions[0].compliance.partyRevision = 'f'.repeat(64);
   writeSnapshot(dir, db);
   const s = await bootOn(dir, globalThis.LIVE_PORT + 2);
-  ok(s.up, 'the server boots over the corrupt rows');
+  ok(s.up, 'the server boots over the planted row');
   if (s.up) {
     const ana = (await s.j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Ana Costa', role: 'Agent', platform: 'agent' })).body;
     const read = await s.j('GET', `/org/agent/transactions/${TX}`, undefined, ana.token);
-    ok(read.status === 200, 'the transaction whose compliance context is gone still reads');
+    ok(read.status === 200, 'the transaction whose snapshot no longer matches the facts still reads');
     const comp = read.body.transaction.compliance;
-    neg(comp.clear === false && comp.staleness !== null && comp.snapshotClear === true, `and its compliance reads as NOT currently clear, stale (${comp.staleness}), while still showing what the recorded evaluation said — a stale verdict is never presented as a clearance`);
+    neg(comp.clear === false && comp.staleness === 'INPUTS_CHANGED' && comp.snapshotClear === true, `and its compliance reads as NOT currently clear, stale (${comp.staleness}), while still showing what the recorded evaluation said — a stale verdict is never presented as a clearance`);
     const progress = await s.j('POST', `/org/agent/transactions/${TX}/status`, { to: 'ACTIVE' }, ana.token);
     neg(progress.status === 422, `it cannot be progressed (${progress.status} ${progress.body?.error})`);
-    const docs = await s.j('GET', `/org/agent/transactions/${TX}/documents`, undefined, ana.token);
-    neg(!docs.body.items.some((d) => d.id === 'txd-orphan'), 'the orphan document reaches nobody — a document belongs to a transaction, and its transaction is gone');
-    const odd = await s.j('GET', '/org/agent/transactions/atx-odd', undefined, ana.token);
-    ok(odd.status === 200 && odd.body.transaction.status === 'HALF_WRITTEN' && odd.body.transaction.allowedTransitions.length === 0, 'the row with an unknown status reads back as it is on disk and offers no transition');
-    neg(expect(await s.j('POST', '/org/agent/transactions/atx-odd/status', { to: 'ACTIVE' }, ana.token), 409, 'TRANSACTION_TRANSITION_NOT_ALLOWED'), 'and nothing can move it');
-    neg(expect(await s.j('POST', '/org/agent/transactions/atx-odd/notes', { text: 'x', visibility: 'AGENT_PRIVATE' }, ana.token), 409, 'TRANSACTION_NOT_LIVE'), 'nor can anything be written to it');
-    const after = snapshotOf(dir);
-    neg(after.agentTransactions.find((t) => t.id === 'atx-odd').status === 'HALF_WRITTEN' && after.transactionDocuments.some((d) => d.id === 'txd-orphan'), 'neither row was repaired or dropped on boot — the bytes are the bytes');
     await s.stop();
+    const after = snapshotOf(dir);
+    neg(after.agentTransactions[0].compliance.partyRevision === 'f'.repeat(64), 'the planted snapshot was not repaired on boot — the bytes are the bytes');
   }
 }
 

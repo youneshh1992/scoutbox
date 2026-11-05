@@ -1176,6 +1176,10 @@ export function registerCompliance(rawCtx) {
     },
     evaluate(c, by, opts = {}) { return evaluateAndRecord(c, by, opts); },
     lastEvaluation,
+    /** The evaluation row a transaction's snapshot names (S11c: the snapshot reads its outcome, reasons and versions from it). */
+    evaluationById: (id) => contexts.evaluationById(id),
+    /** How long each answered consent of a transaction's context waited (the transaction metrics). */
+    consentAnswerWaits: () => consents.transactionAnswerWaits(),
     /** A snapshot taken without an evaluation (the facet gate refused first) still answers the policy flag. */
     clearReEvaluation(c) { if (c && contextById(c.id)?.reEvaluationPending) contexts.update(c.id, (d) => { d.reEvaluationPending = false; }); },
     consentsFor: engineConsentsFor,

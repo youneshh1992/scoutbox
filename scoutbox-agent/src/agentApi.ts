@@ -571,6 +571,8 @@ export const httpAgent: AgentApi = {
   closeContext: (s, id, expectedRev) => post(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}/close`, expectedRev === undefined ? {} : { expectedRev }),
   requestConsent: (s, id, input) => post(s, `/org/agent/compliance/contexts/${encodeURIComponent(id)}/consents/request`, input),
   clubs: async () => (await request<ClubHit[]>('/orgs?platform=main')).filter((o) => o.type === 'club'),
+  // The server pages the agent's transactions ({ items, nextCursor }, newest first; the counts cover all of them); this
+  // reads the first page. The list will need a "load more" that passes `?cursor=<nextCursor>` (not built yet, by decision).
   transactions: (s, status) => get(s, `/org/agent/transactions${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   createTransaction: (s, input) => post(s, '/org/agent/transactions', input),
   transaction: (s, id) => get(s, `/org/agent/transactions/${encodeURIComponent(id)}`),

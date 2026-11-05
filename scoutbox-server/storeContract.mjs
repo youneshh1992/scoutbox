@@ -170,10 +170,9 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // the seeded policy versions), read through repositories/compliancePolicies.mjs. Each db.* name throws.
   // complianceContexts, regulatoryReviews, regulatoryConsents: the same since S11b-2 — typed tables (migration 0028), read
   // through repositories/complianceRecords.mjs.
-  // M23 P5.6D — Agent Transaction Workspace. Guaranteed by migration 2307.
-  agentTransactions: { guarantee: 'migration', owner: 'm26', reason: 'P5.6D: the frozen P5.6A §4 multi-party transaction workspace — parties, status ladder, compliance snapshot, scoped notes and append-only history; never a recruitment case, never an offer, never a signing' },
-  transactionRepresentations: { guarantee: 'migration', owner: 'm26', reason: 'P5.6D: the frozen P5.6A §5 (agent, party role, transaction) binding with its own lifecycle, rev and review link — the conflict engine\'s unit of evaluation, kept out of the transaction row on purpose' },
-  transactionDocuments: { guarantee: 'migration', owner: 'm26', reason: 'P5.6D: document classification and visibility — type, owner, visibility class, version chain, expiry and a reference into the canonical evidence vault; stores no bytes, so it is not a second upload path' },
+  // M23 P5.6D — Agent Transaction Workspace. agentTransactions, transactionRepresentations, transactionDocuments: never a
+  // db.* read since S11c — typed tables (migration 0029), read through repositories/agentTransactions.mjs. Each db.*
+  // name throws; blob step 2307 is a recorded no-op.
   reputationSeed: { guarantee: 'migration', owner: 'core', reason: 'demo track records; EMPTY is the correct production value — fabricating them would be worse than the bug (D2)' },
   reviewLater: { guarantee: 'module', owner: 'm13', reason: 'existed only because insightSweep() happens to run once synchronously at registration; a store whose existence depends on a sweep moves the day the sweep is made lazy' },
   savedSearches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },

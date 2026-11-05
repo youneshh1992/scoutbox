@@ -281,6 +281,8 @@ export function M25Panel({ tab, say }: { tab: M25Tab; adminKey: string; say: (t:
       }
       if (tab === 'agenttransactions') {
         const q = txStatusFilter ? `?status=${encodeURIComponent(txStatusFilter)}` : '';
+        // The server pages the transactions ({ items, nextCursor }, newest first); this reads the first page. The tab will
+        // need a "load more" that passes `cursor=<nextCursor>` (not built yet, by decision).
         setTxs((await call<{ items: TsTransaction[] }>(`/ts/transactions${q}`)).items);
         setTxMetrics(await call<TxMetrics>('/ts/transactions/metrics'));
       }

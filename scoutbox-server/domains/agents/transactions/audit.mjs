@@ -49,35 +49,43 @@ function safeDetail(detail) {
 }
 
 /**
- * Audit rows for a tenant or one transaction. Pure over the db.
+ * Audit rows for a tenant or one transaction (S11c: read through the repository's queries, never a scan of a store).
  *
  * `agencyOrgId` gives the agency its own rows (they are merged into the agency
  * audit feed beside the P5.6B and P5.6C rows); `transactionId` gives the
- * attributed Trust & Safety read one transaction's rows.
+ * attributed Trust & Safety read one transaction's rows. `snapshotOf(tx)` is the
+ * transaction's compliance snapshot as the routes read it (the evaluation row it names).
  */
-export function transactionAuditRows(db, { agencyOrgId = null, transactionId = null } = {}) {
+export function transactionAuditRows({ reads, snapshotOf }, { agencyOrgId = null, transactionId = null } = {}) {
   const rows = [];
-  for (const tx of db.agentTransactions ?? []) {
-    if (!tx) continue;
-    if (agencyOrgId && tx.agencyOrgId !== agencyOrgId) continue;
-    if (transactionId && tx.id !== transactionId) continue;
-    for (const h of tx.history ?? []) {
+  let txs; let reps; let docs;
+  if (transactionId) {
+    const tx = reads.transactions.byId(transactionId);
+    txs = tx && (!agencyOrgId || tx.agencyOrgId === agencyOrgId) ? [tx] : [];
+    reps = txs.length ? reads.representations.forTransaction(transactionId) : [];
+    docs = txs.length ? reads.documents.forTransaction(transactionId) : [];
+  } else if (agencyOrgId) {
+    txs = reads.transactions.forAgency(agencyOrgId);
+    reps = reads.representations.forAgency(agencyOrgId);
+    docs = reads.documents.forAgency(agencyOrgId);
+  } else return rows;
+  const byTx = new Map(txs.map((t) => [t.id, t]));
+  for (const tx of txs) {
+    const snap = snapshotOf(tx);
+    for (const h of tx.history) {
       if (!TRANSACTION_AUDIT_ACTIONS.has(h?.action)) continue;
       rows.push({
         id: h.id, at: h.at, action: h.action, domain: 'transaction', actor: actorOf(h),
         target: { type: 'agent_transaction', id: tx.id, transactionType: tx.type, status: tx.status },
-        complianceSnapshot: tx.compliance ? { evaluationId: tx.compliance.evaluationId, evaluatedAt: tx.compliance.evaluatedAt, outcome: tx.compliance.outcome, policyVersions: tx.compliance.policyVersions } : null,
+        complianceSnapshot: snap ? { evaluationId: snap.evaluationId, evaluatedAt: snap.evaluatedAt, outcome: snap.outcome, policyVersions: snap.policyVersions } : null,
         detail: safeDetail(h.detail),
       });
     }
   }
-  for (const d of db.transactionDocuments ?? []) {
-    if (!d) continue;
-    const tx = (db.agentTransactions ?? []).find((t) => t && t.id === d.transactionId);
+  for (const d of docs) {
+    const tx = byTx.get(d.transactionId);
     if (!tx) continue;
-    if (agencyOrgId && tx.agencyOrgId !== agencyOrgId) continue;
-    if (transactionId && tx.id !== transactionId) continue;
-    for (const h of d.history ?? []) {
+    for (const h of d.history) {
       if (!TRANSACTION_AUDIT_ACTIONS.has(h?.action)) continue;
       rows.push({
         id: h.id, at: h.at, action: h.action, domain: 'transaction', actor: actorOf(h),
@@ -86,11 +94,8 @@ export function transactionAuditRows(db, { agencyOrgId = null, transactionId = n
       });
     }
   }
-  for (const r of db.transactionRepresentations ?? []) {
-    if (!r) continue;
-    if (agencyOrgId && r.agencyOrgId !== agencyOrgId) continue;
-    if (transactionId && r.transactionId !== transactionId) continue;
-    for (const h of r.history ?? []) {
+  for (const r of reps) {
+    for (const h of r.history) {
       if (!TRANSACTION_AUDIT_ACTIONS.has(h?.action)) continue;
       rows.push({
         id: h.id, at: h.at, action: h.action, domain: 'transaction', actor: actorOf(h),

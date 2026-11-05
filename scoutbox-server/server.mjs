@@ -201,7 +201,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -5005,6 +5005,8 @@ m26Ctx = registerTransactions({
   // The same P5.6E holder the recruitment side reads. M26 is registered before
   // M27 too, so the handoff binding and the duplicate rule arrive by reference.
   integration: agentIntegration,
+  agentTransactions, unit, // S11c: transactions, bindings and documents are tables (repositories/agentTransactions.mjs)
+  channels, // a linked thread's own authorisation
 });
 // An attributed review of a declared-only binding lands on the transaction's own
 // representation row, which is its truth — not only on the compliance context's
@@ -5030,6 +5032,7 @@ m27Ctx = registerIntegration({
   compliance: m25Ctx.integrationSeam,
   recruitmentCases, // S8b: the transaction handoff is an explicit write of its case
   agentCore, unit, // S11a: an opportunity share is an explicit write of its agreement
+  transactionReads: agentTransactions.reads, // S11c: the live transaction covering a case is read through SQL
 });
 Object.assign(agentIntegration, m27Ctx.seam);
 

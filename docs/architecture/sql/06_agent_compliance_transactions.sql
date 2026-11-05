@@ -8,8 +8,8 @@
 -- Source collections (created by domains/platform/migrations.mjs): agentProfiles,
 -- agencyAffiliations, representationAgreements (step 2305, lines 391-393);
 -- tsReviewers, jurisdictionPolicies, regulatoryReviews, regulatoryConsents,
--- complianceContexts (step 2306, lines 471-475); agentTransactions,
--- transactionRepresentations, transactionDocuments (step 2307, lines 547-549);
+-- complianceContexts (step 2306); agentTransactions, transactionRepresentations,
+-- transactionDocuments (step 2307; tables since S11c, migration 0029);
 -- orgs.agencySettings (domains/agents/core/index.mjs:443, no migration step).
 --
 -- Conventions: see ddl-conventions.md. All epoch-ms instants are INTEGER *_at;
@@ -962,453 +962,310 @@ CREATE TABLE regulatory_consent_history (
 
 
 -- -----------------------------------------------------------------------------
--- source: db.agentTransactions   created at domains/agents/transactions/index.mjs:594
---         (POST /org/agent/transactions); migration 2307 creates the empty store
--- owner/writer: m26 (agent lane: parties, representations, status, terms,
---         links, documents, notes; club lane: confirm, documents, notes,
---         message link, trial link; player lane: confirm, documents;
---         compliance re-evaluation writes the snapshot and compliance-driven
---         status moves); m26 onPlayerDeleted (tombstone); m27 bindHandoff
---         records the transaction id on recruitment_cases.transactionHandoff.
--- lifecycle: status DRAFT | PARTIES_CONFIRMED | COMPLIANCE_PENDING |
---         COMPLIANCE_BLOCKED | READY | ACTIVE | ON_HOLD | CANCELLED | CLOSED |
---         ARCHIVED per ACTOR_TRANSITIONS / COMPLIANCE_TRANSITIONS
---         (domains/agents/transactions/transaction.mjs:122/145). Never deleted; ARCHIVED is read-only.
--- mapping: id -> id (atx-*); agencyOrgId -> agency_org_id; agentUserId ->
---   agent_user_id; type -> type; jurisdictions[] -> agent_transaction_jurisdictions;
---   status -> status; parties[] -> transaction_parties; contextId -> context_id
---   (1:1 with compliance_contexts, set at creation); compliance{} (snapshot,
---   domains/agents/transactions/index.mjs:204) -> compliance_evaluation_id (either a compliance_evaluations
---     id '<ctx>#<n>' or '<tx-id>#gate' when the facet gate refused before the
---     engine ran — hence no FK), compliance_context_id, compliance_evaluated_at,
---     policyVersions[] -> agent_transaction_compliance_policy_versions,
---     outcome -> compliance_outcome, reasonCodes[] ->
---     agent_transaction_compliance_reason_codes, pendingReason ->
---     compliance_pending_reason, blocked -> compliance_blocked, clear ->
---     compliance_clear, consentRequirements[] -> agent_transaction_consent_requirements,
---     verificationFreshness -> compliance_verification_freshness (the agent's
---     fifa_licence effective state at evaluation), partyRevision ->
---     compliance_party_revision (sha256 hex), state{} -> derived, not stored
---     (state.outcome/reasonCodes/pendingReason/blocked/clear duplicate the
---     columns; state.consentsOutstanding duplicates consent_requirements
---     including agent_user_id); compliance null -> compliance_evaluation_id NULL;
---   reEvaluationPending -> re_evaluation_pending; notes[] -> transaction_notes;
---   linkedThreads[] -> transaction_linked_threads; links{trialId,opportunityId,
---     recruitmentCaseId} -> link_trial_id / link_opportunity_id /
---     link_recruitment_case_id; terms.versions[] -> transaction_terms_versions;
---   holdReasonCode/holdReason/heldAt -> hold_reason_code / hold_reason (≤400) /
---     held_at (all cleared on ACTIVE); cancelReasonCode/cancelledAt ->
---     cancel_reason_code / cancelled_at; closeReasonCode/closedAt ->
---     close_reason_code / closed_at; archivedAt -> archived_at;
---   initiatedBy{kind,userId,name} -> initiated_by_kind / initiated_by_user_id /
---     initiated_by_name; initiatedAt -> initiated_at; createdAt/updatedAt ->
---     created_at / updated_at; keys.create -> idempotency_keys (action
---     'create'); keys['party:<key>'] -> idempotency_keys (action 'party', key =
---     <key>); keys['status:<key>'] -> idempotency_keys (action 'status');
---   rev/revAt/revBy -> rev / rev_at / rev_by_label (bumpTxRev stores
---     {userId:null, name:<role label>} — the ROLE, never a person, by design
---     domains/agents/transactions/index.mjs:104; rev_by_user_id is therefore omitted: always null);
---   history[] -> transaction_history.
--- notes: duplicate rule "one live transaction per (individual, type, engaging
---   org, releasing org)" is enforced by code over parties[] (m27
---   duplicateTransactionOf) — no index. Derived projection ids (playerId,
---   engagingOrgId, releasingOrgId) are computed from transaction_parties.
---   Tenant privacy: a colleague's transaction is concealed (404).
+-- S11c: IMPLEMENTED, migration 0029_agent_transactions REGISTERED (repositories/agentTransactions.mjs, 5 Nov 2026).
+-- The definitions below are the migration's DDL; scripts/testSchemaDdl.mjs compares them column by column.
+-- Sources: domains/agents/transactions/index.mjs (the agent, club, player and Trust & Safety lanes; the account
+-- deletion tombstone; a reviewer's decision on a declared binding through the compliance seam); m27 reads the live
+-- transaction covering a case (the duplicate rule).
+-- How the model differs from the first draft of this file:
+--   * No JSON columns. A history entry's detail is typed columns (the timeline's allowlist) with its reason codes and
+--     policy versions as item rows; a document's entries repeat the document's own fields and are worked out on read.
+--   * The compliance snapshot names the evaluation row it was taken from (compliance_evaluation_id, a key), or the
+--     facet gate that refused before the engine ran (compliance_gate; the old '<tx>#gate' string is worked out on
+--     read). Its outcome, reason codes, policy versions and consent requirements are the evaluation's own, never
+--     copied: only the pending reason it reached, the party revision and the licence freshness are stored.
+--   * Idempotency keys are columns of their owner (create, attach, add) or transaction_keys rows (the party and
+--     status replay keys), not rows of a shared table.
+--   * A representation's jurisdiction is one column (an agreement has one); its withdrawal reason is a vocabulary.
+--   * Dead fields are gone: a party's own history (never read: the transaction history holds the same entries), a
+--     representation's declared evidence, a document's signature instant and a note's removal (never written),
+--     initiatedAt (always the creation instant), the initiator's id (always the agent).
+--   * Agencies and staff are RESTRICT, as are the context, the snapshot's evaluation, agreements, reviews, evidence
+--     and the cited recruitment case, and within the domain a binding's and a document's transaction and the version
+--     chain. A party's player or club, a document owner, a linked channel (deleted with its player) and the trial and
+--     opportunity links (deletable by their own routes) carry no key: the record keeps the fact.
+-- Read patterns: a transaction by id, by create key; the agent's, a club's and the Trust & Safety lists newest first
+--   by cursor; the agent's counts (GROUP BY, with the unconfirmed-party test in SQL); a player's list; the live
+--   transactions of a type naming an individual (the duplicate rule); an agency's records (its audit); the live ones
+--   (the stale-snapshot figure); process metrics by GROUP BY; bindings and live documents of a page in one read.
 -- -----------------------------------------------------------------------------
 CREATE TABLE agent_transactions (
-  id                                 TEXT PRIMARY KEY,
-  agency_org_id                      TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  agent_user_id                      TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  type                               TEXT NOT NULL CHECK (type IN ('employment_contract','transfer','loan','other_services')),
-  status                             TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','PARTIES_CONFIRMED','COMPLIANCE_PENDING','COMPLIANCE_BLOCKED','READY','ACTIVE','ON_HOLD','CANCELLED','CLOSED','ARCHIVED')),
-  context_id                         TEXT REFERENCES compliance_contexts(id) ON DELETE RESTRICT,
-  -- compliance snapshot (null when compliance_evaluation_id is null) --
-  compliance_evaluation_id           TEXT,              -- compliance_evaluations(id) or '<tx-id>#gate'; no FK
-  compliance_context_id              TEXT REFERENCES compliance_contexts(id) ON DELETE RESTRICT,
-  compliance_evaluated_at            INTEGER,
-  compliance_outcome                 TEXT CHECK (compliance_outcome IS NULL OR compliance_outcome IN ('CLEAR','PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED','PROHIBITED_CONFLICT','MANUAL_REGULATORY_REVIEW_REQUIRED','INSUFFICIENT_DATA')),
-  compliance_pending_reason          TEXT CHECK (compliance_pending_reason IS NULL OR compliance_pending_reason IN ('CONSENT_REQUIRED','MANUAL_REVIEW','INSUFFICIENT_DATA','PROVIDER_UNAVAILABLE','JURISDICTION_UNSUPPORTED','FACET_NOT_VERIFIED','PARTIES_NOT_CONFIRMED','REPRESENTATION_MISSING')),
-  compliance_blocked                 INTEGER NOT NULL DEFAULT 0 CHECK (compliance_blocked IN (0,1)),
-  compliance_clear                   INTEGER NOT NULL DEFAULT 0 CHECK (compliance_clear IN (0,1)),
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  agency_org_id  TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  agent_user_id  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  type  TEXT NOT NULL CHECK (type IN ('employment_contract','transfer','loan','other_services')),
+  status  TEXT NOT NULL CHECK (status IN ('DRAFT','PARTIES_CONFIRMED','COMPLIANCE_PENDING','COMPLIANCE_BLOCKED','READY','ACTIVE','ON_HOLD','CANCELLED','CLOSED','ARCHIVED')),
+  context_id  TEXT NOT NULL UNIQUE REFERENCES compliance_contexts(id) ON DELETE RESTRICT,
+  compliance_evaluation_id  TEXT REFERENCES compliance_evaluations(id) ON DELETE RESTRICT,
+  compliance_gate  TEXT CHECK (compliance_gate IS NULL OR compliance_gate IN ('FACET_NOT_VERIFIED','JURISDICTION_UNSUPPORTED')),
+  compliance_evaluated_at  INTEGER,
+  compliance_pending_reason  TEXT CHECK (compliance_pending_reason IS NULL OR compliance_pending_reason IN ('CONSENT_REQUIRED','MANUAL_REVIEW','INSUFFICIENT_DATA','PROVIDER_UNAVAILABLE','JURISDICTION_UNSUPPORTED','FACET_NOT_VERIFIED','PARTIES_NOT_CONFIRMED','REPRESENTATION_MISSING')),
   compliance_verification_freshness  TEXT CHECK (compliance_verification_freshness IS NULL OR compliance_verification_freshness IN ('UNVERIFIED','PENDING','VERIFIED','STALE','INACTIVE','MANUAL_REVIEW_REQUIRED')),
-  compliance_party_revision          TEXT CHECK (compliance_party_revision IS NULL OR length(compliance_party_revision) = 64),
-  re_evaluation_pending              INTEGER NOT NULL DEFAULT 0 CHECK (re_evaluation_pending IN (0,1)),
-  -- links (references only; nothing is copied) --
-  link_trial_id                      TEXT REFERENCES trials(id) ON DELETE SET NULL,
-  link_opportunity_id                TEXT REFERENCES opportunities(id) ON DELETE SET NULL,
-  link_recruitment_case_id           TEXT REFERENCES recruitment_cases(id) ON DELETE SET NULL,   -- visible only to agent + owning engaging club
-  -- hold / end --
-  hold_reason_code                   TEXT CHECK (hold_reason_code IS NULL OR hold_reason_code IN ('awaiting_party_decision','awaiting_document','awaiting_regulatory_answer','window_closed','party_request','other')),
-  hold_reason                        TEXT,
-  held_at                            INTEGER,
-  cancel_reason_code                 TEXT CHECK (cancel_reason_code IS NULL OR cancel_reason_code IN ('party_withdrew','terms_not_agreed','window_closed','compliance_not_cleared','duplicate','other')),
-  cancelled_at                       INTEGER,
-  close_reason_code                  TEXT CHECK (close_reason_code IS NULL OR close_reason_code IN ('process_concluded','proceeded_outside_scoutbox','superseded','other')),
-  closed_at                          INTEGER,
-  archived_at                        INTEGER,
-  -- provenance --
-  initiated_by_kind                  TEXT NOT NULL CHECK (initiated_by_kind IN ('org')),
-  initiated_by_user_id               TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
-  initiated_by_name                  TEXT,              -- snapshot
-  initiated_at                       INTEGER NOT NULL,
-  created_at                         INTEGER NOT NULL,
-  updated_at                         INTEGER NOT NULL,
-  rev                                INTEGER NOT NULL DEFAULT 1,
-  rev_at                             INTEGER,
-  rev_by_label                       TEXT,              -- role label ('Representing agent', 'Club signatory', 'Player', …), never a person
-  CHECK ((compliance_evaluation_id IS NULL) = (compliance_evaluated_at IS NULL))
+  compliance_party_revision  TEXT CHECK (compliance_party_revision IS NULL OR (length(compliance_party_revision) = 64 AND compliance_party_revision NOT GLOB '*[^0-9a-f]*')),
+  re_evaluation_pending  INTEGER NOT NULL CHECK (re_evaluation_pending IN (0,1)),
+  link_trial_id  TEXT CHECK (link_trial_id IS NULL OR (length(link_trial_id) > 0 AND length(link_trial_id) <= 80)),
+  link_opportunity_id  TEXT CHECK (link_opportunity_id IS NULL OR (length(link_opportunity_id) > 0 AND length(link_opportunity_id) <= 80)),
+  link_recruitment_case_id  TEXT REFERENCES recruitment_cases(id) ON DELETE RESTRICT,
+  hold_reason_code  TEXT CHECK (hold_reason_code IS NULL OR hold_reason_code IN ('awaiting_party_decision','awaiting_document','awaiting_regulatory_answer','window_closed','party_request','other')),
+  hold_reason  TEXT CHECK (hold_reason IS NULL OR (length(hold_reason) > 0 AND length(hold_reason) <= 400)),
+  held_at  INTEGER,
+  cancel_reason_code  TEXT CHECK (cancel_reason_code IS NULL OR cancel_reason_code IN ('party_withdrew','terms_not_agreed','window_closed','compliance_not_cleared','duplicate','other')),
+  cancelled_at  INTEGER,
+  close_reason_code  TEXT CHECK (close_reason_code IS NULL OR close_reason_code IN ('process_concluded','proceeded_outside_scoutbox','superseded','other')),
+  closed_at  INTEGER,
+  archived_at  INTEGER,
+  initiated_by_name  TEXT CHECK (initiated_by_name IS NULL OR length(initiated_by_name) <= 200),
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  create_key  TEXT CHECK (create_key IS NULL OR (length(create_key) > 0 AND length(create_key) <= 64)),
+  create_fp  TEXT CHECK ((create_fp IS NULL OR length(create_fp) <= 4000) AND ((create_key IS NULL) = (create_fp IS NULL))),
+  rev  INTEGER NOT NULL CHECK (rev >= 1),
+  rev_at  INTEGER,
+  rev_by_label  TEXT CHECK (rev_by_label IS NULL OR length(rev_by_label) <= 200),
+  CHECK (compliance_evaluation_id IS NULL OR compliance_gate IS NULL),
+  CHECK ((compliance_evaluated_at IS NULL) = (compliance_evaluation_id IS NULL AND compliance_gate IS NULL)),
+  CHECK ((compliance_evaluated_at IS NULL) = (compliance_party_revision IS NULL)),
+  CHECK (compliance_gate IS NULL OR compliance_pending_reason = compliance_gate),
+  CHECK (compliance_evaluated_at IS NOT NULL OR (compliance_pending_reason IS NULL AND compliance_verification_freshness IS NULL)),
+  CHECK ((hold_reason_code IS NULL) = (held_at IS NULL) AND (hold_reason IS NULL OR hold_reason_code IS NOT NULL)),
+  CHECK ((cancel_reason_code IS NULL) = (cancelled_at IS NULL)),
+  CHECK ((close_reason_code IS NULL) = (closed_at IS NULL))
 ) STRICT;
-CREATE INDEX agent_transactions_agency_agent_status ON agent_transactions(agency_org_id, agent_user_id, status);
+CREATE INDEX agent_transactions_agent ON agent_transactions(agency_org_id, agent_user_id, status);
 CREATE INDEX agent_transactions_status ON agent_transactions(status);
-CREATE INDEX agent_transactions_case ON agent_transactions(link_recruitment_case_id);
-CREATE UNIQUE INDEX agent_transactions_context ON agent_transactions(context_id) WHERE context_id IS NOT NULL;
-
--- source: db.agentTransactions[].jurisdictions[]  (upper-cased 3-letter codes, de-duplicated)
+CREATE INDEX agent_transactions_case ON agent_transactions(link_recruitment_case_id) WHERE link_recruitment_case_id IS NOT NULL;
+CREATE UNIQUE INDEX agent_transactions_create_key ON agent_transactions(agency_org_id, agent_user_id, create_key) WHERE create_key IS NOT NULL;
 CREATE TABLE agent_transaction_jurisdictions (
-  transaction_id      TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
-  member_association  TEXT NOT NULL CHECK (length(member_association) = 3),
-  PRIMARY KEY (transaction_id, member_association)
-) STRICT;
-
--- source: db.agentTransactions[].compliance.policyVersions[]  (snapshot copy of
---         the evaluation's policy set; [] for a gate snapshot)
-CREATE TABLE agent_transaction_compliance_policy_versions (
-  transaction_id     TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
-  policy_version_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
-  PRIMARY KEY (transaction_id, policy_version_id)
-) STRICT;
-
--- source: db.agentTransactions[].compliance.reasonCodes[]  (de-duplicated codes
---         from the evaluation's reasons or the gate's reasons)
-CREATE TABLE agent_transaction_compliance_reason_codes (
   transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
-  code            TEXT NOT NULL,
-  PRIMARY KEY (transaction_id, code)
+  ord  INTEGER NOT NULL CHECK (ord >= 0 AND ord < 10),
+  member_association  TEXT NOT NULL CHECK (member_association GLOB '[A-Z][A-Z][A-Z]'),
+  PRIMARY KEY (transaction_id, ord),
+  UNIQUE (transaction_id, member_association)
 ) STRICT;
-
--- source: db.agentTransactions[].compliance.consentRequirements[]
---         ({partyRole, consentKind, reasonCode}) merged with
---         compliance.state.consentsOutstanding[] ({…, agentUserId})
-CREATE TABLE agent_transaction_consent_requirements (
-  transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
-  party_role      TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
-  consent_kind    TEXT NOT NULL CHECK (consent_kind IN ('dual_representation')),
-  agent_user_id   TEXT,
-  reason_code     TEXT NOT NULL,
-  PRIMARY KEY (transaction_id, party_role, consent_kind)
-) STRICT;
-
--- source: db.agentTransactions[].parties[]  created at domains/agents/transactions/index.mjs:494/499
---         (resolveParty: id txp-*)
--- owner/writer: m26 (add, remove; club/player confirm; onPlayerDeleted tombstone)
--- lifecycle: removed soft marker; cap 12 rows (TRANSACTION_LIMITS.parties*3);
---         one un-removed party per role.
--- mapping: id -> id; partyRole -> party_role; subjectKind/subjectId ->
---   subject_kind / subject_id (polymorphic: players(id) | orgs(id) club; no FK —
---   the row outlives a removed player as an id); addedAt -> added_at;
---   addedBy{kind,userId,name} -> added_by_kind / added_by_user_id / added_by_name;
---   removed -> removed; removedAt -> removed_at; confirmedAt -> confirmed_at;
---   confirmedBy{kind player|club_user,userId,name,orgId?} -> confirmed_by_kind /
---   confirmed_by_user_id / confirmed_by_name / confirmed_by_org_id (player
---   actors reduced to NULL ids/names on deletion); subjectRemovedAt ->
---   subject_removed_at; history[] -> transaction_party_history.
--- notes: the compliance context mirrors these rows (projection) under
---   compliance_context_parties with the same txp-* ids.
 CREATE TABLE transaction_parties (
-  id                    TEXT PRIMARY KEY,
-  transaction_id        TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
-  party_role            TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
-  subject_kind          TEXT NOT NULL CHECK (subject_kind IN ('player','club')),
-  subject_id            TEXT NOT NULL,                  -- polymorphic with subject_kind; no FK
-  added_at              INTEGER NOT NULL,
-  added_by_kind         TEXT CHECK (added_by_kind IN ('org')),
-  added_by_user_id      TEXT,
-  added_by_name         TEXT,                          -- snapshot
-  removed               INTEGER NOT NULL DEFAULT 0 CHECK (removed IN (0,1)),
-  removed_at            INTEGER,
-  confirmed_at          INTEGER,
-  confirmed_by_kind     TEXT CHECK (confirmed_by_kind IS NULL OR confirmed_by_kind IN ('player','club_user')),
-  confirmed_by_user_id  TEXT,
-  confirmed_by_name     TEXT,                          -- snapshot; nulled on player deletion
-  confirmed_by_org_id   TEXT,
-  subject_removed_at    INTEGER,
-  CHECK (subject_kind <> 'player' OR party_role = 'individual'),
-  CHECK (subject_kind <> 'club' OR party_role <> 'individual')
-) STRICT;
-CREATE INDEX transaction_parties_transaction ON transaction_parties(transaction_id);
-CREATE INDEX transaction_parties_subject ON transaction_parties(subject_kind, subject_id) WHERE removed = 0;   -- club lane / player lane listing
-CREATE UNIQUE INDEX transaction_parties_live_role ON transaction_parties(transaction_id, party_role) WHERE removed = 0;   -- new; code enforces
-
--- source: db.agentTransactions[].parties[].history[]  (domains/agents/transactions/index.mjs:602/648/674/1177/1266)
--- actions: transaction_party_added, transaction_party_removed, transaction_party_confirmed
-CREATE TABLE transaction_party_history (
-  id           TEXT PRIMARY KEY,
-  party_id     TEXT NOT NULL REFERENCES transaction_parties(id) ON DELETE RESTRICT,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id        TEXT,
-  by_name      TEXT,
-  by_role      TEXT,
-  by_org_id    TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
-) STRICT;
-CREATE INDEX transaction_party_history_party ON transaction_party_history(party_id, at);
-
--- source: db.agentTransactions[].notes[]  created at domains/agents/transactions/index.mjs:1120 (addNote;
---         agent and club lanes; id txn-*); cap 200.
--- mapping: id -> id; visibility -> visibility (NOTE_VISIBILITY = document
---   classes minus T_AND_S_ONLY); text -> text (≤2000); by -> by_*; at ->
---   created_at (source field `at`); removedAt -> removed_at (initialised null
---   and NEVER SET by any code path; readers filter on it — kept nullable).
--- notes: a note is absent, not redacted, for anyone its class excludes.
-CREATE TABLE transaction_notes (
-  id              TEXT PRIMARY KEY,
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
   transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
-  visibility      TEXT NOT NULL CHECK (visibility IN ('AGENT_PRIVATE','PLAYER_PRIVATE','ENGAGING_CLUB_PRIVATE','RELEASING_CLUB_PRIVATE','PLAYER_AGENT_SHARED','ENGAGING_AGENT_SHARED','RELEASING_AGENT_SHARED','ALL_TRANSACTION_PARTIES')),
-  text            TEXT NOT NULL,
-  by_kind         TEXT CHECK (by_kind IN ('org','club_user','player')),
-  by_id           TEXT,
-  by_name         TEXT,                                 -- snapshot; nulled on player deletion
-  by_org_id       TEXT,
-  created_at      INTEGER NOT NULL,
-  removed_at      INTEGER                               -- never written today
+  ord  INTEGER NOT NULL CHECK (ord >= 0 AND ord < 12),
+  party_role  TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
+  subject_kind  TEXT NOT NULL CHECK (subject_kind IN ('player','club')),
+  subject_id  TEXT NOT NULL CHECK ((length(subject_id) > 0 AND length(subject_id) <= 80)),
+  added_at  INTEGER NOT NULL,
+  added_by_id  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  added_by_name  TEXT CHECK (added_by_name IS NULL OR length(added_by_name) <= 200),
+  removed  INTEGER NOT NULL CHECK (removed IN (0,1)),
+  removed_at  INTEGER,
+  confirmed_at  INTEGER,
+  confirmed_by_kind  TEXT CHECK (confirmed_by_kind IS NULL OR confirmed_by_kind IN ('player','club_user')),
+  confirmed_by_id  TEXT CHECK (confirmed_by_id IS NULL OR (length(confirmed_by_id) > 0 AND length(confirmed_by_id) <= 80)),
+  confirmed_by_name  TEXT CHECK (confirmed_by_name IS NULL OR length(confirmed_by_name) <= 200),
+  confirmed_by_org_id  TEXT CHECK (confirmed_by_org_id IS NULL OR (length(confirmed_by_org_id) > 0 AND length(confirmed_by_org_id) <= 80)),
+  subject_removed_at  INTEGER,
+  UNIQUE (transaction_id, ord),
+  CHECK (subject_kind <> 'player' OR party_role = 'individual'),
+  CHECK (subject_kind <> 'club' OR party_role <> 'individual'),
+  CHECK ((removed = 1) = (removed_at IS NOT NULL)),
+  CHECK ((confirmed_at IS NULL) = (confirmed_by_kind IS NULL)),
+  CHECK ((confirmed_by_kind = 'club_user') = (confirmed_by_org_id IS NOT NULL)),
+  CHECK (subject_removed_at IS NULL OR removed = 1)
 ) STRICT;
-CREATE INDEX transaction_notes_transaction ON transaction_notes(transaction_id, created_at);
-
--- source: db.agentTransactions[].linkedThreads[]  created at domains/agents/transactions/index.mjs:1222
---         (club signatory links a canonical Inbox channel; id txm-*); cap 20.
--- mapping: id -> id; channelId -> channel_id (-> channels(id), 03; SET NULL
---   because channels are deleted on player deletion while the link row is an
---   audit fact that a conversation existed); linkedBy{kind,userId,name,orgId}
---   -> linked_by_*; linkedAt -> linked_at.
--- notes: one link per (transaction, channel) enforced by code (idempotent
---   replay); readability is re-derived from the channel's own gate.
+CREATE INDEX transaction_parties_subject ON transaction_parties(subject_kind, subject_id) WHERE removed = 0;
+CREATE UNIQUE INDEX transaction_parties_live_role ON transaction_parties(transaction_id, party_role) WHERE removed = 0;
+CREATE TABLE transaction_notes (
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0 AND ord < 200),
+  visibility  TEXT NOT NULL CHECK (visibility IN ('AGENT_PRIVATE','PLAYER_PRIVATE','ENGAGING_CLUB_PRIVATE','RELEASING_CLUB_PRIVATE','PLAYER_AGENT_SHARED','ENGAGING_AGENT_SHARED','RELEASING_AGENT_SHARED','ALL_TRANSACTION_PARTIES')),
+  text  TEXT NOT NULL CHECK ((length(text) > 0 AND length(text) <= 2000)),
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('org','club_user')),
+  by_id  TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_org_id  TEXT CHECK (by_org_id IS NULL OR (length(by_org_id) > 0 AND length(by_org_id) <= 80)),
+  at  INTEGER NOT NULL,
+  UNIQUE (transaction_id, ord),
+  CHECK ((by_kind = 'club_user') = (by_org_id IS NOT NULL))
+) STRICT;
 CREATE TABLE transaction_linked_threads (
-  id                 TEXT PRIMARY KEY,
-  transaction_id     TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
-  channel_id         TEXT REFERENCES channels(id) ON DELETE SET NULL,
-  linked_by_kind     TEXT CHECK (linked_by_kind IN ('club_user')),
-  linked_by_user_id  TEXT,
-  linked_by_name     TEXT,                              -- snapshot
-  linked_by_org_id   TEXT,
-  linked_at          INTEGER NOT NULL
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0 AND ord < 20),
+  channel_id  TEXT NOT NULL CHECK ((length(channel_id) > 0 AND length(channel_id) <= 80)),
+  linked_by_id  TEXT CHECK (linked_by_id IS NULL OR (length(linked_by_id) > 0 AND length(linked_by_id) <= 80)),
+  linked_by_name  TEXT CHECK (linked_by_name IS NULL OR length(linked_by_name) <= 200),
+  linked_by_org_id  TEXT NOT NULL CHECK ((length(linked_by_org_id) > 0 AND length(linked_by_org_id) <= 80)),
+  linked_at  INTEGER NOT NULL,
+  UNIQUE (transaction_id, ord),
+  UNIQUE (transaction_id, channel_id)
 ) STRICT;
-CREATE UNIQUE INDEX transaction_linked_threads_channel ON transaction_linked_threads(transaction_id, channel_id) WHERE channel_id IS NOT NULL;   -- enforced by code today
-
--- source: db.agentTransactions[].terms.versions[]  created at domains/agents/transactions/index.mjs:957
---         (POST /org/agent/transactions/:id/terms; id txt-*); cap 50.
--- mapping: id -> id; version -> version (1-based, length+1 at write);
---   at -> recorded_at; by -> recorded_by_*; recordedFor -> recorded_for;
---   visibility -> visibility (uploadable classes of the agent; never T_AND_S_ONLY);
---   summary -> summary (≤2000, prose; ScoutBox validates no fee/cap/duration).
 CREATE TABLE transaction_terms_versions (
-  id                   TEXT PRIMARY KEY,
-  transaction_id       TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
-  version              INTEGER NOT NULL CHECK (version >= 1),
-  recorded_at          INTEGER NOT NULL,
-  recorded_by_kind     TEXT CHECK (recorded_by_kind IN ('org')),
-  recorded_by_user_id  TEXT,
-  recorded_by_name     TEXT,                            -- snapshot
-  recorded_for         TEXT NOT NULL CHECK (recorded_for IN ('individual','engaging_entity','releasing_entity')),
-  visibility           TEXT NOT NULL CHECK (visibility IN ('AGENT_PRIVATE','PLAYER_PRIVATE','ENGAGING_CLUB_PRIVATE','RELEASING_CLUB_PRIVATE','PLAYER_AGENT_SHARED','ENGAGING_AGENT_SHARED','RELEASING_AGENT_SHARED','ALL_TRANSACTION_PARTIES')),
-  summary              TEXT NOT NULL
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
+  version  INTEGER NOT NULL CHECK (version >= 1 AND version <= 50),
+  recorded_at  INTEGER NOT NULL,
+  recorded_by_id  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  recorded_by_name  TEXT CHECK (recorded_by_name IS NULL OR length(recorded_by_name) <= 200),
+  recorded_for  TEXT NOT NULL CHECK (recorded_for IN ('individual','engaging_entity','releasing_entity')),
+  visibility  TEXT NOT NULL CHECK (visibility IN ('AGENT_PRIVATE','PLAYER_PRIVATE','ENGAGING_CLUB_PRIVATE','RELEASING_CLUB_PRIVATE','PLAYER_AGENT_SHARED','ENGAGING_AGENT_SHARED','RELEASING_AGENT_SHARED','ALL_TRANSACTION_PARTIES')),
+  summary  TEXT NOT NULL CHECK ((length(summary) > 0 AND length(summary) <= 2000)),
+  UNIQUE (transaction_id, version)
 ) STRICT;
-CREATE UNIQUE INDEX transaction_terms_versions_version ON transaction_terms_versions(transaction_id, version);
-
--- source: db.agentTransactions[].history[]  (domains/agents/transactions/index.mjs hist on the tx; all lanes)
--- actions: transaction_created, transaction_party_added, transaction_party_removed,
---   transaction_party_confirmed, transaction_representation_attached,
---   transaction_representation_withdrawn, transaction_compliance_evaluated,
---   transaction_compliance_stale, transaction_status_changed, transaction_held,
---   transaction_cancelled, transaction_closed, transaction_archived,
---   transaction_document_added, transaction_document_superseded,
---   transaction_note_added, transaction_message_linked, transaction_terms_recorded,
---   transaction_subject_tombstoned
--- notes: the timeline audience (all_parties | agent_only | player_and_agent |
---   club_side | per_document | audit_only) is derived from action
---   (timelineAudienceOf) — not stored. Link routes record a no-op
---   transaction_status_changed {from:x,to:x} (domains/agents/transactions/index.mjs:978/1239).
---   Player actors anonymised on deletion.
+CREATE TABLE transaction_keys (
+  transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
+  action  TEXT NOT NULL CHECK (action IN ('party','status')),
+  key  TEXT NOT NULL CHECK ((length(key) > 0 AND length(key) <= 64)),
+  fp  TEXT NOT NULL CHECK (length(fp) <= 4000),
+  PRIMARY KEY (transaction_id, action, key)
+) STRICT;
 CREATE TABLE transaction_history (
-  id              TEXT PRIMARY KEY,
-  transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE RESTRICT,
-  at              INTEGER NOT NULL,
-  by_kind         TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id           TEXT,
-  by_name         TEXT,
-  by_role         TEXT,
-  by_org_id       TEXT,
-  action          TEXT NOT NULL,
-  detail_json     TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  at  INTEGER NOT NULL,
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
+  by_id  TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role  TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  by_org_id  TEXT CHECK (by_org_id IS NULL OR (length(by_org_id) > 0 AND length(by_org_id) <= 80)),
+  action  TEXT NOT NULL CHECK (action IN ('transaction_created','transaction_party_added','transaction_party_removed','transaction_party_confirmed','transaction_status_changed','transaction_held','transaction_cancelled','transaction_closed','transaction_archived','transaction_compliance_evaluated','transaction_compliance_stale','transaction_document_added','transaction_document_superseded','transaction_message_linked','transaction_terms_recorded','transaction_representation_attached','transaction_representation_withdrawn','transaction_note_added','transaction_subject_tombstoned')),
+  detail_from  TEXT CHECK (detail_from IS NULL OR detail_from IN ('DRAFT','PARTIES_CONFIRMED','COMPLIANCE_PENDING','COMPLIANCE_BLOCKED','READY','ACTIVE','ON_HOLD','CANCELLED','CLOSED','ARCHIVED')),
+  detail_to  TEXT CHECK (detail_to IS NULL OR detail_to IN ('DRAFT','PARTIES_CONFIRMED','COMPLIANCE_PENDING','COMPLIANCE_BLOCKED','READY','ACTIVE','ON_HOLD','CANCELLED','CLOSED','ARCHIVED')),
+  detail_party_role  TEXT CHECK (detail_party_role IS NULL OR detail_party_role IN ('individual','engaging_entity','releasing_entity')),
+  detail_subject_kind  TEXT CHECK (detail_subject_kind IS NULL OR detail_subject_kind IN ('player','club')),
+  detail_status  TEXT CHECK (detail_status IS NULL OR detail_status IN ('verified','pending_review','withdrawn')),
+  detail_outcome  TEXT CHECK (detail_outcome IS NULL OR detail_outcome IN ('CLEAR','PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED','PROHIBITED_CONFLICT','MANUAL_REGULATORY_REVIEW_REQUIRED','INSUFFICIENT_DATA')),
+  detail_pending_reason  TEXT CHECK (detail_pending_reason IS NULL OR detail_pending_reason IN ('CONSENT_REQUIRED','MANUAL_REVIEW','INSUFFICIENT_DATA','PROVIDER_UNAVAILABLE','JURISDICTION_UNSUPPORTED','FACET_NOT_VERIFIED','PARTIES_NOT_CONFIRMED','REPRESENTATION_MISSING')),
+  detail_document_type  TEXT CHECK (detail_document_type IS NULL OR detail_document_type IN ('representation_agreement_reference','compliance_consent_reference','guardian_evidence','mandate','term_sheet_draft','employment_contract_draft','club_document','regulatory_evidence','correspondence_attachment')),
+  detail_visibility  TEXT CHECK (detail_visibility IS NULL OR detail_visibility IN ('AGENT_PRIVATE','PLAYER_PRIVATE','ENGAGING_CLUB_PRIVATE','RELEASING_CLUB_PRIVATE','PLAYER_AGENT_SHARED','ENGAGING_AGENT_SHARED','RELEASING_AGENT_SHARED','ALL_TRANSACTION_PARTIES','T_AND_S_ONLY')),
+  detail_staleness  TEXT CHECK (detail_staleness IS NULL OR detail_staleness IN ('NO_SNAPSHOT','INPUTS_CHANGED','POLICY_CHANGED','EXPIRED')),
+  detail_reason_code  TEXT CHECK (detail_reason_code IS NULL OR detail_reason_code IN ('awaiting_party_decision','awaiting_document','awaiting_regulatory_answer','window_closed','party_request','other','party_withdrew','terms_not_agreed','compliance_not_cleared','duplicate','process_concluded','proceeded_outside_scoutbox','superseded')),
+  detail_version  INTEGER CHECK (detail_version IS NULL OR detail_version >= 0),
+  detail_count  INTEGER CHECK (detail_count IS NULL OR detail_count >= 0),
+  has_reason_codes  INTEGER NOT NULL CHECK (has_reason_codes IN (0,1)),
+  has_policy_versions  INTEGER NOT NULL CHECK (has_policy_versions IN (0,1)),
+  UNIQUE (transaction_id, ord)
 ) STRICT;
-CREATE INDEX transaction_history_transaction ON transaction_history(transaction_id, at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.transactionRepresentations   created at domains/agents/transactions/index.mjs:784
---         (POST /org/agent/transactions/:id/representations)
--- owner/writer: m26 (attach, withdraw, party removal withdraws, review
---         decision via representationReviewed, onPlayerDeleted withdraws)
--- lifecycle: status verified | pending_review | withdrawn (terminal). Never deleted.
--- mapping: id -> id (txr-*); transactionId -> transaction_id; agencyOrgId ->
---   agency_org_id; agentUserId -> agent_user_id; partyRole -> party_role;
---   agreementId -> agreement_id (null for a declared-only entity binding);
---   declaredOnly -> declared_only; declaredEvidenceId -> declared_evidence_id
---     (initialised null, NEVER WRITTEN — -- dead field today; kept as a
---     nullable reference to ver_evidence(id), 05, no FK);
---   scope[] -> transaction_representation_scopes (copied from the agreement at
---     bind time — a snapshot, by design: the binding was made on that scope);
---   jurisdictions[] -> transaction_representation_jurisdictions ([agreement.jurisdiction]
---     or []); status -> status; reviewId -> review_id; createdAt -> created_at;
---   verifiedAt -> verified_at; verifiedByReviewId -> verified_by_review_id;
---   firstActAt -> first_act_at; withdrawnAt -> withdrawn_at; withdrawnReason ->
---   withdrawn_reason; keys.attach{key,fp} -> idempotency_keys (action 'attach',
---   fp over {partyRole, agreementId}); rev/revAt/revBy -> rev / rev_at /
---   rev_by_user_id / rev_by_name (bumped by both bumpRev(user) at :680 and
---   bumpTxRev(label) at :820/1401, so rev_by_name may be a person OR a role
---   label); history[] -> transaction_representation_history.
--- notes: one non-withdrawn row per (transaction, partyRole, agent) enforced by
---   code (TRANSACTION_PARTY_EXISTS); partial unique index is new. The
---   compliance context mirrors these rows as compliance_context_representations
---   with the same txr-* ids (projection; this table is the truth).
--- -----------------------------------------------------------------------------
+CREATE INDEX transaction_history_status_moves ON transaction_history(transaction_id, ord) WHERE action = 'transaction_status_changed';
+CREATE TABLE transaction_history_reason_codes (
+  history_id  TEXT NOT NULL REFERENCES transaction_history(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  code  TEXT NOT NULL CHECK (length(code) > 0 AND length(code) <= 60),
+  PRIMARY KEY (history_id, ord),
+  UNIQUE (history_id, code)
+) STRICT;
+CREATE TABLE transaction_history_policy_versions (
+  history_id  TEXT NOT NULL REFERENCES transaction_history(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  policy_version_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
+  PRIMARY KEY (history_id, ord),
+  UNIQUE (history_id, policy_version_id)
+) STRICT;
 CREATE TABLE transaction_representations (
-  id                     TEXT PRIMARY KEY,
-  transaction_id         TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE RESTRICT,
-  agency_org_id          TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  agent_user_id          TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
-  party_role             TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
-  agreement_id           TEXT REFERENCES representation_agreements(id) ON DELETE RESTRICT,
-  declared_only          INTEGER NOT NULL DEFAULT 0 CHECK (declared_only IN (0,1)),
-  declared_evidence_id   TEXT,                          -- -> ver_evidence(id); never written today
-  status                 TEXT NOT NULL CHECK (status IN ('verified','pending_review','withdrawn')),
-  review_id              TEXT REFERENCES regulatory_reviews(id) ON DELETE SET NULL,
-  created_at             INTEGER NOT NULL,
-  verified_at            INTEGER,
-  verified_by_review_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE SET NULL,
-  first_act_at           INTEGER,
-  withdrawn_at           INTEGER,
-  withdrawn_reason       TEXT CHECK (withdrawn_reason IS NULL OR withdrawn_reason IN ('party_removed','agent_withdrew','subject_removed','review_rejected')),
-  rev                    INTEGER NOT NULL DEFAULT 1,
-  rev_at                 INTEGER,
-  rev_by_user_id         TEXT,
-  rev_by_name            TEXT,                          -- snapshot or role label
-  CHECK ((status = 'withdrawn') = (withdrawn_at IS NOT NULL))
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE RESTRICT,
+  agency_org_id  TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  agent_user_id  TEXT NOT NULL REFERENCES org_users(id) ON DELETE RESTRICT,
+  party_role  TEXT NOT NULL CHECK (party_role IN ('individual','engaging_entity','releasing_entity')),
+  agreement_id  TEXT REFERENCES representation_agreements(id) ON DELETE RESTRICT,
+  declared_only  INTEGER NOT NULL CHECK (declared_only IN (0,1)),
+  jurisdiction  TEXT CHECK (jurisdiction IS NULL OR jurisdiction GLOB '[A-Z][A-Z][A-Z]'),
+  status  TEXT NOT NULL CHECK (status IN ('verified','pending_review','withdrawn')),
+  review_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
+  created_at  INTEGER NOT NULL,
+  verified_at  INTEGER,
+  verified_by_review_id  TEXT REFERENCES regulatory_reviews(id) ON DELETE RESTRICT,
+  first_act_at  INTEGER,
+  withdrawn_at  INTEGER,
+  withdrawn_reason  TEXT CHECK (withdrawn_reason IS NULL OR withdrawn_reason IN ('party_removed','agent_withdrew','subject_removed','review_rejected')),
+  attach_key  TEXT CHECK (attach_key IS NULL OR (length(attach_key) > 0 AND length(attach_key) <= 64)),
+  attach_fp  TEXT CHECK ((attach_fp IS NULL OR length(attach_fp) <= 4000) AND ((attach_key IS NULL) = (attach_fp IS NULL))),
+  rev  INTEGER NOT NULL CHECK (rev >= 1),
+  rev_at  INTEGER,
+  rev_by_id  TEXT CHECK (rev_by_id IS NULL OR (length(rev_by_id) > 0 AND length(rev_by_id) <= 80)),
+  rev_by_name  TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  CHECK ((status = 'withdrawn') = (withdrawn_at IS NOT NULL)),
+  CHECK ((withdrawn_at IS NULL) = (withdrawn_reason IS NULL)),
+  CHECK (status <> 'pending_review' OR (declared_only = 1 AND review_id IS NOT NULL)),
+  CHECK (declared_only = 1 OR agreement_id IS NOT NULL OR verified_by_review_id IS NOT NULL)
 ) STRICT;
 CREATE INDEX transaction_representations_transaction ON transaction_representations(transaction_id);
 CREATE INDEX transaction_representations_agency ON transaction_representations(agency_org_id);
-CREATE UNIQUE INDEX transaction_representations_live ON transaction_representations(transaction_id, party_role, agent_user_id) WHERE status <> 'withdrawn';   -- new; code enforces
-
--- source: db.transactionRepresentations[].scope[]  (snapshot of agreement.scope at bind)
+CREATE UNIQUE INDEX transaction_representations_live ON transaction_representations(transaction_id, party_role, agent_user_id) WHERE status <> 'withdrawn';
+CREATE UNIQUE INDEX transaction_representations_attach_key ON transaction_representations(transaction_id, attach_key) WHERE attach_key IS NOT NULL;
 CREATE TABLE transaction_representation_scopes (
   representation_id  TEXT NOT NULL REFERENCES transaction_representations(id) ON DELETE CASCADE,
-  scope              TEXT NOT NULL CHECK (scope IN ('employment','transfer','commercial','other_services')),
-  PRIMARY KEY (representation_id, scope)
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  scope  TEXT NOT NULL CHECK (scope IN ('employment','transfer','commercial','other_services')),
+  PRIMARY KEY (representation_id, ord),
+  UNIQUE (representation_id, scope)
 ) STRICT;
-
--- source: db.transactionRepresentations[].jurisdictions[]  ([agreement.jurisdiction] or [])
-CREATE TABLE transaction_representation_jurisdictions (
-  representation_id   TEXT NOT NULL REFERENCES transaction_representations(id) ON DELETE CASCADE,
-  member_association  TEXT NOT NULL CHECK (member_association IN ('INT','ENG','USA')),
-  PRIMARY KEY (representation_id, member_association)
-) STRICT;
-
--- source: db.transactionRepresentations[].history[]
--- actions: transaction_representation_attached, transaction_representation_withdrawn
 CREATE TABLE transaction_representation_history (
-  id                 TEXT PRIMARY KEY,
-  representation_id  TEXT NOT NULL REFERENCES transaction_representations(id) ON DELETE RESTRICT,
-  at                 INTEGER NOT NULL,
-  by_kind            TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id              TEXT,
-  by_name            TEXT,
-  by_role            TEXT,
-  by_org_id          TEXT,
-  action             TEXT NOT NULL,
-  detail_json        TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  representation_id  TEXT NOT NULL REFERENCES transaction_representations(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  at  INTEGER NOT NULL,
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
+  by_id  TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role  TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  by_org_id  TEXT CHECK (by_org_id IS NULL OR (length(by_org_id) > 0 AND length(by_org_id) <= 80)),
+  action  TEXT NOT NULL CHECK (action IN ('transaction_representation_attached','transaction_representation_withdrawn')),
+  detail_party_role  TEXT CHECK (detail_party_role IS NULL OR detail_party_role IN ('individual','engaging_entity','releasing_entity')),
+  detail_status  TEXT CHECK (detail_status IS NULL OR detail_status IN ('verified','pending_review','withdrawn')),
+  has_policy_versions  INTEGER NOT NULL CHECK (has_policy_versions IN (0,1)),
+  UNIQUE (representation_id, ord)
 ) STRICT;
-CREATE INDEX transaction_representation_history_representation ON transaction_representation_history(representation_id, at);
-
-
--- -----------------------------------------------------------------------------
--- source: db.transactionDocuments   created at domains/agents/transactions/index.mjs:1028 (addDocument:
---         agent, club signatory and player lanes) and :1090 (supersede: a new
---         row copying the old one with version+1)
--- owner/writer: m26   lifecycle: version chain via supersedes / superseded_by
---         (old row kept, never edited except superseded_by + rev); removed_at
---         soft delete (set only by onPlayerDeleted on player-owned documents);
---         cap 200 live rows per transaction. STORES NO BYTES — evidence_ref
---         points at the canonical evidence vault.
--- mapping: id -> id (txd-*); transactionId -> transaction_id; documentType ->
---   document_type; visibility -> visibility (T_AND_S_ONLY is in the vocabulary
---   but no lane may write it); label -> label (≤120); version -> version;
---   owner{kind,id} -> owner_kind / owner_id (polymorphic: org_users(id) for
---     'agent', orgs(id) for 'club', players(id) for 'player'; no FK — the id is
---     nulled on player deletion); ownerPartyRole -> owner_party_role (null for
---     the agent); uploadedBy{kind,userId,name,orgId?} -> uploaded_by_*;
---   createdAt -> created_at; expiresAt -> expires_at (epoch ms; an unreadable
---     expiry reads as expired at read time); signedAt -> signed_at (reserved by
---     design §32, NEVER SET by any writer — kept nullable);
---   evidenceRef{kind:'verification_evidence',id} -> evidence_ref_kind /
---     evidence_ref_id (-> ver_evidence(id), 05; the uploader must own the
---     evidence record); supersedes -> supersedes_id; supersededBy ->
---     superseded_by_id; removedAt -> removed_at; keys.add{key,fp} ->
---     idempotency_keys (action 'add'; a superseding row has keys {});
---   rev/revAt/revBy -> rev / rev_at / rev_by_user_id / rev_by_name (bumped
---     with the role label by bumpTxRev); history[] -> transaction_document_history.
--- notes: read access is re-derived from room roles + visibility class on every
---   read; holding evidence_ref_id is not authority to download.
--- -----------------------------------------------------------------------------
+CREATE TABLE transaction_representation_history_policy_versions (
+  history_id  TEXT NOT NULL REFERENCES transaction_representation_history(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  policy_version_id  TEXT NOT NULL REFERENCES jurisdiction_policies(id) ON DELETE RESTRICT,
+  PRIMARY KEY (history_id, ord),
+  UNIQUE (history_id, policy_version_id)
+) STRICT;
 CREATE TABLE transaction_documents (
-  id                   TEXT PRIMARY KEY,
-  transaction_id       TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE RESTRICT,
-  document_type        TEXT NOT NULL CHECK (document_type IN ('representation_agreement_reference','compliance_consent_reference','guardian_evidence','mandate','term_sheet_draft','employment_contract_draft','club_document','regulatory_evidence','correspondence_attachment')),
-  visibility           TEXT NOT NULL CHECK (visibility IN ('AGENT_PRIVATE','PLAYER_PRIVATE','ENGAGING_CLUB_PRIVATE','RELEASING_CLUB_PRIVATE','PLAYER_AGENT_SHARED','ENGAGING_AGENT_SHARED','RELEASING_AGENT_SHARED','ALL_TRANSACTION_PARTIES','T_AND_S_ONLY')),
-  label                TEXT NOT NULL,
-  version              INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
-  owner_kind           TEXT NOT NULL CHECK (owner_kind IN ('agent','club','player')),
-  owner_id             TEXT,                            -- polymorphic with owner_kind; no FK; nulled on player deletion
-  owner_party_role     TEXT CHECK (owner_party_role IS NULL OR owner_party_role IN ('individual','engaging_entity','releasing_entity')),
-  uploaded_by_kind     TEXT CHECK (uploaded_by_kind IN ('org','club_user','player')),
-  uploaded_by_id       TEXT,
-  uploaded_by_name     TEXT,                            -- snapshot; nulled on player deletion
-  uploaded_by_org_id   TEXT,
-  created_at           INTEGER NOT NULL,
-  expires_at           INTEGER,
-  signed_at            INTEGER,                         -- reserved; never written today
-  evidence_ref_kind    TEXT CHECK (evidence_ref_kind IS NULL OR evidence_ref_kind IN ('verification_evidence')),
-  evidence_ref_id      TEXT REFERENCES ver_evidence(id) ON DELETE RESTRICT,
-  supersedes_id        TEXT REFERENCES transaction_documents(id) ON DELETE RESTRICT,
-  superseded_by_id     TEXT REFERENCES transaction_documents(id) ON DELETE RESTRICT,
-  removed_at           INTEGER,
-  rev                  INTEGER NOT NULL DEFAULT 1,
-  rev_at               INTEGER,
-  rev_by_user_id       TEXT,
-  rev_by_name          TEXT,                            -- snapshot or role label
-  CHECK ((evidence_ref_kind IS NULL) = (evidence_ref_id IS NULL))
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  transaction_id  TEXT NOT NULL REFERENCES agent_transactions(id) ON DELETE RESTRICT,
+  document_type  TEXT NOT NULL CHECK (document_type IN ('representation_agreement_reference','compliance_consent_reference','guardian_evidence','mandate','term_sheet_draft','employment_contract_draft','club_document','regulatory_evidence','correspondence_attachment')),
+  visibility  TEXT NOT NULL CHECK (visibility IN ('AGENT_PRIVATE','PLAYER_PRIVATE','ENGAGING_CLUB_PRIVATE','RELEASING_CLUB_PRIVATE','PLAYER_AGENT_SHARED','ENGAGING_AGENT_SHARED','RELEASING_AGENT_SHARED','ALL_TRANSACTION_PARTIES','T_AND_S_ONLY')),
+  label  TEXT NOT NULL CHECK ((length(label) > 0 AND length(label) <= 120)),
+  version  INTEGER NOT NULL CHECK (version >= 1),
+  owner_kind  TEXT NOT NULL CHECK (owner_kind IN ('agent','club','player')),
+  owner_id  TEXT CHECK (owner_id IS NULL OR (length(owner_id) > 0 AND length(owner_id) <= 80)),
+  owner_party_role  TEXT CHECK (owner_party_role IS NULL OR owner_party_role IN ('individual','engaging_entity','releasing_entity')),
+  uploaded_by_kind  TEXT NOT NULL CHECK (uploaded_by_kind IN ('org','club_user','player')),
+  uploaded_by_id  TEXT CHECK (uploaded_by_id IS NULL OR (length(uploaded_by_id) > 0 AND length(uploaded_by_id) <= 80)),
+  uploaded_by_name  TEXT CHECK (uploaded_by_name IS NULL OR length(uploaded_by_name) <= 200),
+  uploaded_by_org_id  TEXT CHECK (uploaded_by_org_id IS NULL OR (length(uploaded_by_org_id) > 0 AND length(uploaded_by_org_id) <= 80)),
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER,
+  evidence_id  TEXT REFERENCES ver_evidence(id) ON DELETE RESTRICT,
+  supersedes_id  TEXT REFERENCES transaction_documents(id) ON DELETE RESTRICT,
+  superseded_by_id  TEXT REFERENCES transaction_documents(id) ON DELETE RESTRICT,
+  removed_at  INTEGER,
+  add_key  TEXT CHECK (add_key IS NULL OR (length(add_key) > 0 AND length(add_key) <= 64)),
+  add_fp  TEXT CHECK ((add_fp IS NULL OR length(add_fp) <= 4000) AND ((add_key IS NULL) = (add_fp IS NULL))),
+  rev  INTEGER NOT NULL CHECK (rev >= 1),
+  rev_at  INTEGER,
+  rev_by_id  TEXT CHECK (rev_by_id IS NULL OR (length(rev_by_id) > 0 AND length(rev_by_id) <= 80)),
+  rev_by_name  TEXT CHECK (rev_by_name IS NULL OR length(rev_by_name) <= 200),
+  CHECK ((owner_kind = 'agent') = (owner_party_role IS NULL)),
+  CHECK ((uploaded_by_kind = 'club_user') = (uploaded_by_org_id IS NOT NULL)),
+  CHECK ((version = 1) = (supersedes_id IS NULL))
 ) STRICT;
-CREATE INDEX transaction_documents_transaction ON transaction_documents(transaction_id, removed_at);
-CREATE INDEX transaction_documents_supersedes ON transaction_documents(supersedes_id);
-
--- source: db.transactionDocuments[].history[]
--- actions: transaction_document_added, transaction_document_superseded
---   (transaction_document_removed is in the audit vocabulary but no code path
---   writes it: onPlayerDeleted sets removed_at without a history entry)
+CREATE INDEX transaction_documents_transaction ON transaction_documents(transaction_id);
+CREATE UNIQUE INDEX transaction_documents_superseded_once ON transaction_documents(supersedes_id) WHERE supersedes_id IS NOT NULL;
+CREATE UNIQUE INDEX transaction_documents_add_key ON transaction_documents(transaction_id, add_key) WHERE add_key IS NOT NULL;
 CREATE TABLE transaction_document_history (
-  id           TEXT PRIMARY KEY,
-  document_id  TEXT NOT NULL REFERENCES transaction_documents(id) ON DELETE RESTRICT,
-  at           INTEGER NOT NULL,
-  by_kind      TEXT CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
-  by_id        TEXT,
-  by_name      TEXT,
-  by_role      TEXT,
-  by_org_id    TEXT,
-  action       TEXT NOT NULL,
-  detail_json  TEXT CHECK (json_valid(detail_json) OR detail_json IS NULL)
+  id  TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  document_id  TEXT NOT NULL REFERENCES transaction_documents(id) ON DELETE CASCADE,
+  ord  INTEGER NOT NULL CHECK (ord >= 0),
+  at  INTEGER NOT NULL,
+  by_kind  TEXT NOT NULL CHECK (by_kind IN ('org','player','club_user','ts_reviewer','system')),
+  by_id  TEXT CHECK (by_id IS NULL OR (length(by_id) > 0 AND length(by_id) <= 80)),
+  by_name  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  by_role  TEXT CHECK (by_role IS NULL OR length(by_role) <= 60),
+  by_org_id  TEXT CHECK (by_org_id IS NULL OR (length(by_org_id) > 0 AND length(by_org_id) <= 80)),
+  action  TEXT NOT NULL CHECK (action IN ('transaction_document_added','transaction_document_superseded')),
+  UNIQUE (document_id, ord)
 ) STRICT;
-CREATE INDEX transaction_document_history_document ON transaction_document_history(document_id, at);
-
 
 -- =============================================================================
 -- not tables:

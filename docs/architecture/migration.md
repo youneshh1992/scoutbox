@@ -52,7 +52,7 @@ A domain that is in tables but still loaded whole into memory is only part-way t
 
 ## 3. Status
 
-28 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0029`. Each step
+29 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0030`. Each step
 takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Status |
@@ -64,8 +64,8 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S10a–c | verification, passport, transitions and vouches | `0023`–`0025` | `verification`, `passport`, `transitionsVouches` | done |
 | S11a | agent profiles, affiliations, agreements, agency settings | `0026` | `agentCore` | done |
 | S11b | T&S reviewers, policy versions; compliance contexts, evaluations, reviews, consents | `0027`, `0028` | `compliancePolicies`, `complianceRecords` | done |
-| S11c | transactions | | | **next** |
-| S12 | development, Box Cam, discovery | | | not started |
+| S11c | transactions, representation bindings, transaction documents | `0029` | `agentTransactions` | done |
+| S12 | development, Box Cam, discovery | | | **next** |
 | S13 | operations and integrations | | | not started |
 | S14 | retire the blob | | | not started |
 
@@ -94,7 +94,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -149,6 +149,9 @@ separate risk; the script moves the fixtures' instants to today to measure the s
 - `/player/journeys`, `/player/signings`, `/player/offers`, `/player/trials` for a player in 191 clubs' Rooms: each
   still decodes every record of each club's case. Revisit with projections after S14.
 - The Room comment write (75 ms): the organisations' per-unit cost (§4.3.1).
+- Transactions (S11c): a projection reads each transaction's consents, context and evaluation by id (a page's bindings and
+  documents are one batch); the T&S stale-snapshot figure and the agency audit decode their records. Bounded by one
+  agent's, one club's or the live transactions, not the player base.
 
 ### 4.3.1 Costs that grow with the whole player base
 
@@ -174,14 +177,13 @@ explicit like identity's.
   domain's batteries. `operations/clubOperations` still holds the F2 section (verification) and other sections that
   move with their domains.
 
-### 4.5 S11c–S13: the remaining domains
+### 4.5 S12–S13: the remaining domains
 
 One step per `sql/*.sql` file, split when a step gets too big to review (each part with its own migration). Each step
 starts by moving its domain's code (§4.4).
 
 | Step | Schema file | Collections | Watch out for |
 |---|---|---|---|
-| S11c Transactions | `06_agent_compliance_transactions.sql` | `agentTransactions`, `transactionRepresentations`, `transactionDocuments` | Reaches its compliance context only through the seam (`openContext`, `project`, `evaluate`, `clearReEvaluation`, `closeContext`); a snapshot names an evaluation row. Documents are evidence records. Uniqueness on an *effective* status stays in code. Minors are refused on agreements. |
 | S12 Development, Box Cam, discovery | `07_development_boxcam_discovery.sql` | about 30: `devObjectives`, `drillGuidance`, `boxCam*`/`box*`, `combine*`, `recruitmentBriefs`, `nobodyMissedReviews`, `secondLookItems`, `dynamicWatchlists`, `watchlistHistory`, `development*`, `exposureEvents`, `reviewLater`, `evidenceSuggestions`, `calibrationSessions`, `fixtures`, `coverage*` | Large: consider splitting Box Cam/Combine from discovery and watchlists. Reads that write (Second Look and watchlist reconciliation, evidence suggestions) become explicit upserts. Hash the nonce. Split `fixture_id` into kind and id. Consent gate; one entry per challenge and player. The player opportunity board pages with discovery. The Box Cam evaluation tools in `scripts/tools/` write files the Combine production gate reads. |
 | S13 Operations and integrations | `08_operations_integrations.sql` | `apiKeys`, `webhook*`, `orgInvites`, `sso*`, `support*`, `importBatches`, `prospects`, `identityReviews`, `groups`, `groupGrants`, `uploadSessions`, `savedSearches`, `openTrials`, `matchdays`, `friendlies`, `invoices`, `plans`, `archetypes`, `reputationSeed`, the `delivery*` singletons | Invites and SSO states are hashed. Invoices are stored exactly, in minor units. Production's empty first boot (catalogues only, demo opt-in with `SCOUTBOX_SEED_DEMO=1`) must survive the catalogues becoming rows. |
 
