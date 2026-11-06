@@ -19,11 +19,8 @@ export function migrateM13(db, players) {
   db.groupGrants ??= [];          // F8 — explicit, expiring, revocable sharing grants
   db.dispatches ??= [];           // F11 — per-channel delivery records for notifications (S7b: a table; attachDataLayer replaces this container with the repository's read-only view before m13 registers)
   db.deliveryCallbacksSeen ??= [];// F11 — processed provider callback ids (idempotency)
-  db.orgInvites ??= [];           // F12 — staff invitations
-  db.ssoConfigs ??= [];           // F12 — per-org identity-provider configuration
-  db.ssoStates ??= [];            // F12 — in-flight SSO authorisation states (state+nonce)
-  db.supportTickets ??= [];       // F12 — support tickets referencing records by id
-  db.supportAccessGrants ??= [];  // F12 — explicit, time-limited support access
+  // F12 staff invites, SSO configurations and states, support tickets and access grants: tables of
+  // repositories/enterprise.mjs (S13b), read through enterpriseReads.
   db.opsEvents ??= [];            // F12 — persisted operational failures/alerts
   // F9 — deal scenarios live on the case (typed rows since S8b: a case without one reads back `budget: null`).
   // Staff records (`db.users`) are owned by the users repository

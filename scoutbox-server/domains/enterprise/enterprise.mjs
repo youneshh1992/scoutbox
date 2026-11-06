@@ -14,6 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { totpValid, b32encode, timingSafeEqStr } from '../../m13/shared.mjs';
 import { devLoginsEnabled } from '../platform/capabilities.mjs';
+import { readPage, sendPageError } from '../platform/paging.mjs';
+import { ENTERPRISE_LIMITS, typeRefs } from '../../repositories/enterprise.mjs';
 
 // ---------------------------------------------------- request instrumentation
 // Exported separately so server.mjs can install it BEFORE all routes.
@@ -64,63 +66,80 @@ export function registerEnterprise(ctx) {
   const {
     db, byId, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, players, app, orgRouter, adminRouter, nextId, persist, persistNow, notify,
     mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
-    storage, DATA_DIR, backupDatabase,
+    storage, DATA_DIR, backupDatabase, unit, enterprise, enterpriseReads,
   } = ctx;
+  if (!enterprise || !enterpriseReads) throw new TypeError('registerEnterprise needs the enterprise repository (ctx.enterprise, ctx.enterpriseReads)');
   // S6b: an ops event is a row of ops_events (repositories/safetyAudit.mjs), staged into the persist() that follows each one; a bare context without the repository keeps the array push.
   const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
 
   const DEV = devLoginsEnabled();
 
   // ================================================== A. org onboarding
+  // S13b: staff invites are rows of org_invites (repositories/enterprise.mjs). The emailed code is stored only as its
+  // sha-256; a response is built from an allowlist and never carries the hash.
+  const inviteView = (i) => ({
+    id: i.id, orgId: i.orgId, email: i.email, name: i.name, role: i.role, status: i.status, invitedBy: i.invitedBy,
+    createdAt: i.createdAt, expiresAt: i.expiresAt, acceptedAt: i.acceptedAt, revokedAt: i.revokedAt, userId: i.userId,
+  });
+  const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
+  const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
+  const L = ENTERPRISE_LIMITS;
+
   orgRouter.post('/invites', (req, res) => {
     if (!requireLead(req, res)) return;
     const { email, name, role } = req.body ?? {};
     if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'EMAIL_INVALID' }); // a string only: RegExp.test would coerce an array
+    if (email.length > L.email) return res.status(400).json({ error: 'EMAIL_INVALID', message: `An e-mail address has at most ${L.email} characters.` });
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
+    if (name.trim().length > L.inviteName) return fieldInvalid(res, 'name', `name is at most ${L.inviteName} characters.`);
+    if (!(role === undefined || role === null || (typeof role === 'string' && role.trim() && role.trim().length <= L.role))) return fieldInvalid(res, 'role', `role is text of 1 to ${L.role} characters.`);
     if (db.users.some((u) => u.orgId === req.org.id && !u.removedAt && u.email === email)) {
       return res.status(409).json({ error: 'ALREADY_STAFF', message: 'Someone with this email is already on your staff.' });
     }
-    const inv = {
-      id: nextId('inv'), orgId: req.org.id, email: String(email), name: String(name).trim().slice(0, 80),
-      role: String(role ?? 'Scout').trim().slice(0, 60),
-      token: crypto.randomBytes(18).toString('hex'),
-      status: 'pending', invitedBy: req.orgUser.name, createdAt: Date.now(),
-      expiresAt: Date.now() + 7 * 86_400_000, acceptedAt: null, revokedAt: null,
-    };
-    db.orgInvites.push(inv);
+    const code = crypto.randomBytes(18).toString('hex');
+    const at = Date.now();
+    const inv = enterprise.invites.create({
+      id: nextId('inv'), orgId: req.org.id, email, name: name.trim(), role: typeof role === 'string' ? role.trim() : 'Scout',
+      tokenHash: sha256(code), status: 'pending', invitedBy: req.orgUser.name ?? null, createdAt: at,
+      expiresAt: at + 7 * 86_400_000, acceptedAt: null, revokedAt: null, userId: null,
+    });
     // A rejected send (a refused record, a failed provider call) is observed here: logged by id, never an unhandled
     // rejection ending the process; the invite stands as it always did (review of 40aa05c, F2).
-    mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} invited you to join ${req.org.name} on ScoutBox as ${inv.role}.\n\nAccept with invite code: ${inv.token}\n\nThe code expires in 7 days.` }).catch((err) => console.error(`staff invite ${inv.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`));
+    mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} invited you to join ${req.org.name} on ScoutBox as ${inv.role}.\n\nAccept with invite code: ${code}\n\nThe code expires in 7 days.` }).catch((err) => console.error(`staff invite ${inv.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`));
     persistNow();
-    res.status(201).json({ invite: { ...inv, token: undefined }, note: 'The invite code went to their email (dev outbox in this environment).' });
+    res.status(201).json({ invite: inviteView(inv), note: 'The invite code went to their email (dev outbox in this environment).' });
   });
 
+  // Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
   orgRouter.get('/invites', (req, res) => {
-    res.json({ items: db.orgInvites.filter((i) => i.orgId === req.org.id).map(({ token, ...i }) => i) });
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    const p = enterpriseReads.invites.page(req.org.id, page);
+    res.json({ items: p.items.map(inviteView), nextCursor: p.nextCursor });
   });
 
   orgRouter.post('/invites/:id/revoke', (req, res) => {
     if (!requireLead(req, res)) return;
-    const inv = db.orgInvites.find((i) => i.id === req.params.id && i.orgId === req.org.id);
+    const inv = enterpriseReads.invites.forOrgById(req.org.id, req.params.id);
     if (!inv) return res.status(404).json({ error: 'INVITE_NOT_FOUND' });
-    if (inv.status === 'pending') { inv.status = 'revoked'; inv.revokedAt = Date.now(); persistNow(); }
-    res.json({ invite: { ...inv, token: undefined } });
+    res.json({ invite: inviteView(enterprise.invites.revoke(inv.id, Date.now())) });
   });
 
-  // Public accept: the emailed code is the proof of invitation.
+  // Public accept: the emailed code is the proof of invitation. The code is looked up by its hash.
   app.post('/auth/org/accept-invite', (req, res) => {
     const { token, scoutName } = req.body ?? {};
-    const inv = db.orgInvites.find((i) => i.token === String(token ?? ''));
+    if (!(scoutName === undefined || scoutName === null || typeof scoutName === 'string')) return fieldInvalid(res, 'scoutName', 'scoutName is text.');
+    const inv = typeof token === 'string' && token ? enterpriseReads.invites.byTokenHash(sha256(token)) : null;
     if (!inv || inv.status !== 'pending') return res.status(404).json({ error: 'INVITE_INVALID' });
-    if (inv.expiresAt < Date.now()) { inv.status = 'expired'; persist(); return res.status(410).json({ error: 'INVITE_EXPIRED' }); }
+    if (inv.expiresAt < Date.now()) { enterprise.invites.expire(inv.id); return res.status(410).json({ error: 'INVITE_EXPIRED' }); }
     const org = byId.org(inv.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
+    // Staff writes cannot join a unit of work (migration.md §4.3): the account is created or bound first, then the invite
+    // is accepted naming it.
     let user = db.users.find((u) => u.orgId === org.id && u.name.toLowerCase() === inv.name.toLowerCase() && !u.removedAt);
     if (!user) user = users.insert({ orgId: org.id, name: scoutName?.trim() || inv.name, role: inv.role });
     users.update(user.id, { email: inv.email }); // email is bound by the invite — the basis for SSO linking
-    inv.status = 'accepted';
-    inv.acceptedAt = Date.now();
-    inv.userId = user.id;
+    enterprise.invites.accept(inv.id, { userId: user.id, at: Date.now() });
     persistNow();
     res.status(201).json({
       userId: user.id, role: user.role, org: ctx.orgSafe(org),
@@ -222,7 +241,7 @@ export function registerEnterprise(ctx) {
   // ================================================== B2. SSO (local test IdP)
   // Explicit per-org configuration; nothing implicit.
   orgRouter.get('/sso', (req, res) => {
-    const cfg = db.ssoConfigs.find((c) => c.orgId === req.org.id);
+    const cfg = enterpriseReads.sso.forOrg(req.org.id);
     res.json({
       config: cfg ?? null,
       available: DEV ? ['local-test-idp'] : [],
@@ -237,12 +256,8 @@ export function registerEnterprise(ctx) {
       return res.status(400).json({ error: 'IDP_UNAVAILABLE', message: 'Only the local test IdP exists in this environment. A real provider needs its issuer URL, client id and secret configured on the server.' });
     }
     if (!DEV) return res.status(403).json({ error: 'TEST_IDP_DEV_ONLY' });
-    let cfg = db.ssoConfigs.find((c) => c.orgId === req.org.id);
-    if (!cfg) { cfg = { id: nextId('sso'), orgId: req.org.id, createdAt: Date.now() }; db.ssoConfigs.push(cfg); }
-    cfg.issuer = issuer;
-    cfg.clientId = `scoutbox-${req.org.id}`;
-    cfg.updatedAt = Date.now();
-    persistNow();
+    // S13b: one row per organisation (sso_configs), created on the first configuration and replaced after.
+    const cfg = enterprise.sso.configure({ id: enterpriseReads.sso.forOrg(req.org.id) ? null : nextId('sso'), orgId: req.org.id, issuer, clientId: `scoutbox-${req.org.id}`, at: Date.now() });
     res.json({ config: cfg });
   });
 
@@ -275,15 +290,14 @@ export function registerEnterprise(ctx) {
   app.post('/auth/sso/start', (req, res) => {
     if (testIdpOnly(res)) return;
     const org = byId.org(req.body?.orgId);
-    const cfg = org && db.ssoConfigs.find((c) => c.orgId === org.id);
+    const cfg = org && enterpriseReads.sso.forOrg(org.id);
     if (!cfg) return res.status(404).json({ error: 'SSO_NOT_CONFIGURED', message: 'This organisation has no identity provider configured.' });
-    const st = {
-      id: nextId('sst'), state: crypto.randomBytes(16).toString('hex'), nonce: crypto.randomBytes(16).toString('hex'),
-      orgId: org.id, createdAt: Date.now(), expiresAt: Date.now() + 10 * 60_000, usedAt: null,
-    };
-    db.ssoStates.push(st);
-    persist();
-    res.json({ authUrl: `/testidp/authorize?client_id=${cfg.clientId}&state=${st.state}&nonce=${st.nonce}`, state: st.state });
+    // S13b: the state and the nonce go to the browser; the row keeps only their hashes (sso_states).
+    const state = crypto.randomBytes(16).toString('hex');
+    const nonce = crypto.randomBytes(16).toString('hex');
+    const at = Date.now();
+    enterprise.ssoStates.create({ id: nextId('sst'), stateHash: sha256(state), nonceHash: sha256(nonce), orgId: org.id, createdAt: at, expiresAt: at + 10 * 60_000, usedAt: null });
+    res.json({ authUrl: `/testidp/authorize?client_id=${cfg.clientId}&state=${state}&nonce=${nonce}`, state });
   });
 
   if (DEV) {
@@ -300,14 +314,14 @@ export function registerEnterprise(ctx) {
   app.post('/auth/sso/callback', (req, res) => {
     if (testIdpOnly(res)) return;
     const { code, state } = req.body ?? {};
-    const st = db.ssoStates.find((s) => s.state === String(state ?? ''));
-    if (!st || st.usedAt || st.expiresAt < Date.now()) {
+    const st = typeof state === 'string' && state ? enterpriseReads.ssoStates.byStateHash(sha256(state)) : null;
+    // Single use, always — even on failure below: the database decides, so two callbacks racing on one state cannot both pass.
+    if (!st || st.usedAt || st.expiresAt < Date.now() || !enterprise.ssoStates.markUsed(st.id, Date.now())) {
       return res.status(401).json({ error: 'SSO_STATE_INVALID', message: 'Unknown, expired or already-used state — restart the sign-in.' });
     }
-    st.usedAt = Date.now(); // single use, always — even on failure below
     const tok = verifyToken(code);
     if (!tok || tok.typ !== 'code' || tok.exp < Date.now()) return res.status(401).json({ error: 'SSO_TOKEN_INVALID' });
-    if (tok.nonce !== st.nonce) return res.status(401).json({ error: 'SSO_NONCE_MISMATCH', message: 'The token was not minted for this sign-in attempt.' });
+    if (typeof tok.nonce !== 'string' || sha256(tok.nonce) !== st.nonceHash) return res.status(401).json({ error: 'SSO_NONCE_MISMATCH', message: 'The token was not minted for this sign-in attempt.' });
     const org = byId.org(st.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
     // Account linking requires PROOF: the user's email was bound by an
@@ -339,81 +353,96 @@ export function registerEnterprise(ctx) {
       importHistories: ctx.integrationReads.batches.historiesForOrg(orgId),
       grantsGiven: db.groupGrants.filter((g) => g.fromOrgId === orgId),
       grantsReceived: db.groupGrants.filter((g) => g.toOrgIds?.includes(orgId)),
-      supportAccess: db.supportAccessGrants.filter((g) => g.orgId === orgId),
+      supportAccess: enterpriseReads.grants.forOrg(orgId),
     };
     opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'audit_export', detail: { orgId, by: req.orgUser.name } });
     persist();
     res.json(scoped);
   });
 
+  // S13b: tickets, their references and replies, and the access grants with their logs are rows
+  // (repositories/enterprise.mjs). A reference is a case or an import of the organisation, by id; nothing is copied.
   orgRouter.post('/support', (req, res) => {
     const { subject, body, refs } = req.body ?? {};
     if (typeof subject !== 'string' || !subject.trim()) return res.status(400).json({ error: 'SUBJECT_REQUIRED' }); // PRE-M24 (PM-10)
     if (body != null && typeof body !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'body' });
-    const t = {
-      id: nextId('tkt'), orgId: req.org.id, byUserId: req.orgUser.id, byName: req.orgUser.name,
-      subject: String(subject).slice(0, 160), body: String(body ?? '').slice(0, 2000),
-      refs: (Array.isArray(refs) ? refs : []).slice(0, 10).map((r) => ({ kind: String(r.kind).slice(0, 30), id: String(r.id).slice(0, 40) })),
-      status: 'open', replies: [], createdAt: Date.now(),
-    };
-    db.supportTickets.push(t);
-    persistNow();
+    const r = typeRefs(refs ?? [], 'refs');
+    if (!r.ok) return fieldInvalid(res, r.field ?? 'refs', `${r.reason}. A reference is { kind: 'case' | 'import', id }, at most ${L.refs}.`);
+    const t = enterprise.tickets.create({
+      id: nextId('tkt'), orgId: req.org.id, byUserId: req.orgUser.id, byName: req.orgUser.name ?? null,
+      // Free text: over-long text is shortened, as before.
+      subject: subject.slice(0, L.subject), body: (body ?? '').slice(0, L.body),
+      refs: r.value, status: 'open', replies: [], createdAt: Date.now(),
+    });
     res.status(201).json({ ticket: t, note: 'Records are referenced by id — nothing was copied into the ticket.' });
   });
 
+  // Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
   orgRouter.get('/support', (req, res) => {
-    res.json({ items: db.supportTickets.filter((t) => t.orgId === req.org.id).slice().reverse() });
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    res.json(enterpriseReads.tickets.page(req.org.id, page));
   });
 
   orgRouter.post('/support/:id/approve-access', (req, res) => {
     if (!requireLead(req, res)) return;
-    const g = db.supportAccessGrants.find((x) => x.ticketId === req.params.id && x.orgId === req.org.id && x.status === 'requested');
+    const g = enterpriseReads.grants.pendingFor(req.org.id, req.params.id);
     if (!g) return res.status(404).json({ error: 'NO_PENDING_REQUEST' });
-    g.status = 'active';
-    g.approvedBy = req.orgUser.name;
-    g.approvedAt = Date.now();
-    g.expiresAt = Date.now() + g.hours * 3600_000;
-    persistNow();
-    res.json({ grant: g });
+    res.json({ grant: enterprise.grants.approve(g.id, { by: req.orgUser.name ?? null, at: Date.now() }) });
   });
 
-  adminRouter.get('/support', (_req, res) => res.json({ items: db.supportTickets.slice().reverse(), grants: db.supportAccessGrants.slice().reverse() }));
+  // Every organisation's tickets, newest first, paged by cursor ({ items, nextCursor }), with the access grants of the
+  // tickets on the page (newest first).
+  adminRouter.get('/support', (req, res) => {
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    const p = enterpriseReads.tickets.pageAll(page);
+    res.json({ items: p.items, nextCursor: p.nextCursor, grants: enterpriseReads.grants.forTickets(p.items.map((t) => t.id)) });
+  });
 
   adminRouter.post('/support/:id/reply', (req, res) => {
-    const t = db.supportTickets.find((x) => x.id === req.params.id);
+    const t = enterpriseReads.tickets.byId(req.params.id);
     if (!t) return res.status(404).json({ error: 'TICKET_NOT_FOUND' });
-    t.replies.push({ at: Date.now(), by: 'Trust & Safety', text: String(req.body?.text ?? '').slice(0, 2000) });
-    if (req.body?.close) t.status = 'closed';
-    const lead = byId.user(t.byUserId);
-    if (lead) notify({ kind: 'org_user', id: lead.id }, 'support', `Support replied on “${t.subject}”.`, t.id);
-    persistNow();
-    res.json({ ticket: t });
+    const { text, close } = req.body ?? {};
+    if (typeof text !== 'string' || !text.trim()) return fieldInvalid(res, 'text', 'A reply is text.');
+    if (!(close === undefined || close === null || typeof close === 'boolean')) return fieldInvalid(res, 'close', 'close is true or false.');
+    // The reply and its notification are one unit.
+    const ticket = unit(() => {
+      const out = enterprise.tickets.reply(t.id, { at: Date.now(), by: 'Trust & Safety', text: text.slice(0, L.reply) }, { close: close === true });
+      const lead = byId.user(t.byUserId);
+      if (lead) notify({ kind: 'org_user', id: lead.id }, 'support', `Support replied on “${t.subject}”.`, t.id);
+      return out;
+    });
+    res.json({ ticket });
   });
 
   adminRouter.post('/support/:id/request-access', (req, res) => {
-    const t = db.supportTickets.find((x) => x.id === req.params.id);
+    const t = enterpriseReads.tickets.byId(req.params.id);
     if (!t) return res.status(404).json({ error: 'TICKET_NOT_FOUND' });
-    const hours = Math.min(Math.max(Number(req.body?.hours) || 24, 1), 72);
-    const g = {
-      id: nextId('sag'), ticketId: t.id, orgId: t.orgId, hours,
-      status: 'requested', requestedAt: Date.now(), approvedBy: null, approvedAt: null, expiresAt: null, accessLog: [],
-    };
-    db.supportAccessGrants.push(g);
-    const lead = byId.user(t.byUserId);
-    if (lead) notify({ kind: 'org_user', id: lead.id }, 'support', `Trust & Safety asks for time-limited access (${hours}h) to investigate “${t.subject}”. A lead can approve it from the Support screen.`, t.id);
-    persistNow();
+    const raw = req.body?.hours;
+    if (!(raw === undefined || raw === null || (Number.isInteger(raw) && raw >= L.hours[0] && raw <= L.hours[1]))) return fieldInvalid(res, 'hours', `hours is a whole number from ${L.hours[0]} to ${L.hours[1]}.`);
+    const hours = raw ?? 24;
+    // The request and its notification are one unit.
+    const g = unit(() => {
+      const out = enterprise.grants.request({
+        id: nextId('sag'), ticketId: t.id, orgId: t.orgId, hours,
+        status: 'requested', requestedAt: Date.now(), approvedBy: null, approvedAt: null, expiresAt: null, accessLog: [],
+      });
+      const lead = byId.user(t.byUserId);
+      if (lead) notify({ kind: 'org_user', id: lead.id }, 'support', `Trust & Safety asks for time-limited access (${hours}h) to investigate “${t.subject}”. A lead can approve it from the Support screen.`, t.id);
+      return out;
+    });
     res.status(201).json({ grant: g, note: 'Access starts only after an organisation lead approves, and every read is logged.' });
   });
 
   // The ONLY admin view into org-private records — gated by an approved,
   // unexpired grant; every use appended to the grant's access log.
   adminRouter.get('/support/:id/org-records', (req, res) => {
-    const t = db.supportTickets.find((x) => x.id === req.params.id);
+    const t = enterpriseReads.tickets.byId(req.params.id);
     if (!t) return res.status(404).json({ error: 'TICKET_NOT_FOUND' });
-    const g = db.supportAccessGrants.find((x) => x.ticketId === t.id && x.status === 'active' && x.expiresAt > Date.now());
+    const g = enterpriseReads.grants.liveFor(t.id, Date.now());
     if (!g) return res.status(403).json({ error: 'SUPPORT_ACCESS_NOT_GRANTED', message: 'A lead of the organisation must approve time-limited access first. There is no silent access path.' });
-    g.accessLog.push({ at: Date.now(), what: 'org-records' });
-    persistNow();
+    enterprise.grants.logAccess(g.id, { at: Date.now(), what: 'org-records' });
     const orgId = t.orgId;
     res.json({
       grant: { id: g.id, expiresAt: g.expiresAt },

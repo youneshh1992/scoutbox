@@ -199,7 +199,7 @@ await test('[cutover] the cutover and the mailer\'s rows: a fresh boot records 0
   // The invite: one revision for the invite row and its mail row.
   await settle(S); const seq0 = seqOf(dir); // the logins' own debounced save lands first, so the count below is the invite's alone
   const invite = await S.j('POST', '/org/invites', { email: 'synthetic-invitee@example.invalid', name: 'Synthetic Invitee', role: 'Scout' }, maria); assert.equal(invite.status, 201, invite.text);
-  const after = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mail: readStored(c).outbox.find((m) => m.subject && /invited you/.test(m.subject)), inviteRow: (blobRows(c, 'orgInvites') ?? []).some((i) => i.id === invite.body.invite.id) }));
+  const after = snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mail: readStored(c).outbox.find((m) => m.subject && /invited you/.test(m.subject)), inviteRow: !!c.get('SELECT 1 AS one FROM org_invites WHERE id = ?', invite.body.invite.id) /* S13b: a row of org_invites */ }));
   assert.equal(after.seq, seq0 + 1, 'one save'); assert.ok(after.mail && after.inviteRow, 'the mail row and the invite row are in that save'); assert.equal(after.mail.transport, 'dev-outbox'); assert.equal(after.mail.delivered, true);
   // The sign-up: no save of its own; the debounced one carries it.
   const signup = await S.j('POST', '/auth/guardian/signup', { name: 'Synthetic Guardian', email: 'synthetic-guardian@example.invalid', password: 'synthetic-password-1' }); assert.equal(signup.status, 201, signup.text);
@@ -301,7 +301,7 @@ await test('[cutover] an ordinary account deletion leaves the three tables alone
 await test('[valid input only] POST /org/invites and POST /org/verification/player-invites refuse an e-mail that is not a string — a JSON array (which RegExp.test / emailProblem used to coerce, handing the ORIGINAL array to the mailer), an array holding raw JSON 1e400, an object, a number — with 400 (EMAIL_INVALID / EMAIL_SYNTAX), storing no invite and no mail record; an ordinary string is answered 201 with its mail record in the route\'s one save, as before; on the live transport (provider intercepted locally) the provider receives the string and the row records its answer with the next save', async () => {
   const dir = tempDir('s7c-email'); const S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const logBefore = S.log().length;
-  const counts = () => snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mails: readStored(c).outbox.length, invites: (blobRows(c, 'orgInvites') ?? []).length, playerInvites: (blobRows(c, 'verPlayerInvites') ?? []).length }));
+  const counts = () => snap(dir, (c) => ({ seq: Number(c.get("SELECT value FROM meta WHERE key = 'saveSeq'").value), mails: readStored(c).outbox.length, invites: c.get('SELECT COUNT(*) AS n FROM org_invites').n /* S13b: rows of org_invites */, playerInvites: (blobRows(c, 'verPlayerInvites') ?? []).length }));
   await settle(S); const before = counts(); // the login's own debounced save lands first
   for (const email of [['synthetic-review@example.invalid'], ['synthetic-second@example.invalid', 'x'], { a: 1 }, 7]) {
     const r = await S.j('POST', '/org/invites', { email, name: 'Synthetic Reviewer', role: 'Scout' }, maria); assert.equal(r.status, 400, `${JSON.stringify(email)}: ${r.text}`); assert.equal(r.body.error, 'EMAIL_INVALID');

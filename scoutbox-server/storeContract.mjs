@@ -49,6 +49,9 @@
 // running server fails the build.
 
 export const PRODUCTION_STORE_CONTRACT = Object.freeze({
+  // orgInvites, ssoConfigs, ssoStates, supportTickets, supportAccessGrants: never a db.* read since S13b — typed tables
+  // (migration 0035), read through repositories/enterprise.mjs (enterpriseReads). Each db.* name throws; migrateM13 no
+  // longer creates them.
   // importBatches, prospects, identityReviews, apiKeys, webhookEndpoints, webhookDeliveries: never a db.* read since S13a —
   // typed tables (migration 0034), read through repositories/integrations.mjs (integrationReads). Each db.* name throws;
   // migrateM13 no longer creates them.
@@ -122,7 +125,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // opportunities: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
   // (scoutingReads). db.opportunities throws.
   opsEvents: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration; since S6b a read-only view over the ops_events table, written only through the safetyAudit repository (every kind an ordinary row)' },
-  orgInvites: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   orgNotes: { guarantee: 'migration', owner: 'core', reason: 'a club private notes on a player; same first-write defect as idvQueue; since S6b a read-only view over the org_notes table, written only through the safetyAudit repository' },
   orgs: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   // outbox, pushLog, pushTokens: no longer blob collections since S7c — the rows live in outbox / push_log / push_tokens
@@ -164,10 +166,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   savedSearches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   sessions: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   sourceChanges: { guarantee: 'migration', owner: 'm18.1', reason: 'M18.1 source-change clock, guaranteed by the migration registry; since S6b a read-only view over the source_changes table, written only through recordSourceChange → the safetyAudit repository (the 20 000 cap deletes the oldest rows)' },
-  ssoConfigs: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  ssoStates: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  supportAccessGrants: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  supportTickets: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   // transitionCases: never a db.* read since S10c — typed tables (migration 0025), read through repositories/transitionsVouches.mjs (verificationReads). db.transitionCases throws.
   uploadSessions: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
   users: { guarantee: 'migration', owner: 'core', reason: 'staff accounts. Guaranteed by the migration registry in memory; since the data layer the rows live in the org_users table (repositories/users.mjs) and db.users is the repository\'s read-only view after attachDataLayer' },

@@ -268,174 +268,137 @@ CREATE TABLE webhook_delivery_attempts (
 ) STRICT;
 
 
--- ---------------------------------------------------------------------
--- org_invites
--- source: db.orgInvites  created at m13/shared.mjs:29; rows minted at domains/enterprise/enterprise.mjs:80-86
--- owner/writer: domains/enterprise/enterprise.mjs   lifecycle: pending -> accepted | revoked | expired (expired is set
---               lazily only when an expired code is presented, enterprise.mjs:110); never deleted
--- mapping: id -> id (inv-N — the SAME prefix as invoices; the global counter keeps ids distinct);
---          orgId -> org_id; email -> email; name -> name; role -> role;
---          token -> token_hash (sha256 hex of the 36-hex code; the PLAIN token was stored before,
---          enterprise.mjs:83, and is emailed as the invite code — lookup becomes hash(token));
---          status -> status; invitedBy -> invited_by_name (name string); createdAt -> created_at;
---          expiresAt -> expires_at; acceptedAt -> accepted_at; revokedAt -> revoked_at;
---          userId (added on accept, enterprise.mjs:118) -> user_id
--- notes: email + name are invitee PII held before any account exists. Read patterns: by org
---        (enterprise.mjs:94,99); by token on public accept (enterprise.mjs:108) -> unique token_hash.
--- ---------------------------------------------------------------------
+-- =====================================================================
+-- M13 F12 — staff invites, SSO, support tickets and support access
+-- S13b: IMPLEMENTED, migration 0035_enterprise REGISTERED (repositories/enterprise.mjs, 6 Nov 2026).
+-- The DDL below is the migration's, generated from the repository's field specs (scripts/testSchemaDdl.mjs compares
+-- them column for column).
+-- =====================================================================
+--
+-- A staff invite (inv-*, domains/enterprise/enterprise.mjs): the emailed code is stored only as its sha-256
+-- (token_hash, unique); the public accept hashes the presented code and looks it up. pending → accepted (user_id names
+-- the staff account it bound, a RESTRICT key) | revoked | expired (written when an expired code is presented). email
+-- and name are the invitee's personal data, held before any account exists. No list serves the hash.
+--
+-- An SSO configuration (sso-*): one per organisation (UNIQUE org_id); only the local test identity provider can be
+-- named. No identity-provider secret is stored (TEST_IDP_SECRET is the environment's).
+--
+-- An SSO sign-in state (sst-*): the state and the nonce handed to the browser are stored only as hashes; the callback
+-- hashes the state to find the row and compares the token's nonce by its hash. Single use: used_at is set by a
+-- conditional UPDATE, so two callbacks on one state cannot both pass. Nothing prunes used or expired states yet.
+--
+-- A support ticket (tkt-*): the records it references are ordered support_ticket_refs rows, kind 'case' or 'import'
+-- (the only kinds the support read resolves; anything else is refused at the route), by id, nothing copied. Trust &
+-- Safety's replies are ordered support_ticket_replies rows (text required).
+--
+-- A support access grant (sag-*): requested by Trust & Safety for 1–72 hours, approved by a lead of the organisation
+-- (approved_at and expires_at set exactly then); expiry is derived from expires_at, never a stored state. Every read
+-- under it is an ordered support_access_log row (audit: RESTRICT, never cascaded away).
+--
+-- Keys: organisations and staff RESTRICT; a grant's ticket RESTRICT; child rows cascade with their ticket.
 CREATE TABLE org_invites (
-  id              TEXT PRIMARY KEY,
-  org_id          TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  email           TEXT NOT NULL,                       -- personal data
-  name            TEXT NOT NULL,                       -- personal data
-  role            TEXT NOT NULL,
-  token_hash      TEXT NOT NULL,                       -- sha256 hex; plain token was stored before
-  status          TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'revoked', 'expired')),
-  invited_by_name TEXT NOT NULL,                       -- snapshot
-  created_at      INTEGER NOT NULL,
-  expires_at      INTEGER NOT NULL,
-  accepted_at     INTEGER,
-  revoked_at      INTEGER,
-  user_id         TEXT REFERENCES org_users(id) ON DELETE SET NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  email                                    TEXT NOT NULL CHECK (length(email) <= 254 AND length(email) > 0),
+  name                                     TEXT NOT NULL CHECK (length(name) <= 80 AND length(name) > 0),
+  role                                     TEXT NOT NULL CHECK (length(role) <= 60 AND length(role) > 0),
+  token_hash                               TEXT NOT NULL CHECK (length(token_hash) <= 64),
+  status                                   TEXT NOT NULL CHECK (status IN ('pending','accepted','revoked','expired')),
+  invited_by_name                          TEXT CHECK (invited_by_name IS NULL OR length(invited_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  expires_at                               INTEGER NOT NULL,
+  accepted_at                              INTEGER,
+  revoked_at                               INTEGER,
+  user_id                                  TEXT CHECK (user_id IS NULL OR length(user_id) <= 80 AND length(user_id) > 0),
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (length(token_hash) = 64 AND token_hash NOT GLOB '*[^0-9a-f]*'),
+  CHECK ((status = 'accepted') = (accepted_at IS NOT NULL)),
+  CHECK ((status = 'accepted') = (user_id IS NOT NULL)),
+  CHECK ((status = 'revoked') = (revoked_at IS NOT NULL))
 ) STRICT;
-CREATE UNIQUE INDEX org_invites_token_hash ON org_invites(token_hash);
-CREATE INDEX org_invites_org_id ON org_invites(org_id);
-
-
--- ---------------------------------------------------------------------
--- sso_configs
--- source: db.ssoConfigs  created at m13/shared.mjs:30; rows minted at domains/enterprise/enterprise.mjs:235-238
--- owner/writer: domains/enterprise/enterprise.mjs   lifecycle: one per org, upserted; never deleted
--- mapping: id -> id (sso-N); orgId -> org_id; createdAt -> created_at; issuer -> issuer;
---          clientId -> client_id; updatedAt -> updated_at
--- notes: one row per org enforced by code (find-or-create, enterprise.mjs:234) — unique index.
---        Only 'local-test-idp' can ever be written (enterprise.mjs:230). No IdP secrets are stored;
---        the test IdP key is env TEST_IDP_SECRET. Read: by org (enterprise.mjs:219,272).
--- ---------------------------------------------------------------------
+CREATE UNIQUE INDEX org_invites_token_hash ON org_invites (token_hash);
+CREATE INDEX org_invites_org ON org_invites (org_id);
 CREATE TABLE sso_configs (
-  id         TEXT PRIMARY KEY,
-  org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  issuer     TEXT NOT NULL CHECK (issuer IN ('local-test-idp')),
-  client_id  TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  issuer                                   TEXT NOT NULL CHECK (issuer IN ('local-test-idp')),
+  client_id                                TEXT NOT NULL CHECK (length(client_id) <= 200 AND length(client_id) > 0),
+  created_at                               INTEGER NOT NULL,
+  updated_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  UNIQUE (org_id)
 ) STRICT;
-CREATE UNIQUE INDEX sso_configs_org_id ON sso_configs(org_id);
-
-
--- ---------------------------------------------------------------------
--- sso_states
--- source: db.ssoStates  created at m13/shared.mjs:31; rows minted at domains/enterprise/enterprise.mjs:274-278
--- owner/writer: domains/enterprise/enterprise.mjs   lifecycle: single-use (used_at set on first callback, even on
---               failure, enterprise.mjs:301); 10-minute expiry; NEVER pruned
--- mapping: id -> id (sst-N); state -> state_hash (sha256 hex; plain 32-hex value stored before —
---          the callback looks it up as hash(state)); nonce -> nonce_hash (sha256 hex; verified as
---          hash(tok.nonce) = nonce_hash, enterprise.mjs:304); orgId -> org_id; createdAt -> created_at;
---          expiresAt -> expires_at; usedAt -> used_at
--- notes: both values are one-time secrets handed to the browser; hashing them removes the replay
---        material from backups. Read: by state (enterprise.mjs:297) -> unique state_hash.
---        Retention: nothing deletes these; a scheduled prune of used/expired rows is recommended.
--- ---------------------------------------------------------------------
 CREATE TABLE sso_states (
-  id         TEXT PRIMARY KEY,
-  state_hash TEXT NOT NULL,                            -- sha256 hex; plain stored before
-  nonce_hash TEXT NOT NULL,                            -- sha256 hex; plain stored before
-  org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  created_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  used_at    INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  state_hash                               TEXT NOT NULL CHECK (length(state_hash) <= 64),
+  nonce_hash                               TEXT NOT NULL CHECK (length(nonce_hash) <= 64),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  created_at                               INTEGER NOT NULL,
+  expires_at                               INTEGER NOT NULL,
+  used_at                                  INTEGER,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (length(state_hash) = 64 AND state_hash NOT GLOB '*[^0-9a-f]*'),
+  CHECK (length(nonce_hash) = 64 AND nonce_hash NOT GLOB '*[^0-9a-f]*')
 ) STRICT;
-CREATE UNIQUE INDEX sso_states_state_hash ON sso_states(state_hash);
-
-
--- ---------------------------------------------------------------------
--- support_tickets
--- source: db.supportTickets  created at m13/shared.mjs:32; rows minted at domains/enterprise/enterprise.mjs:347-352
--- owner/writer: domains/enterprise/enterprise.mjs (org creates; admin replies/closes)   lifecycle: open -> closed; never deleted
--- mapping: id -> id (tkt-N); orgId -> org_id; byUserId -> by_user_id; byName -> by_name;
---          subject -> subject (<=160); body -> body (<=2000); refs[] -> support_ticket_refs child table;
---          status -> status; replies[] -> support_ticket_replies child table; createdAt -> created_at
--- notes: refs are ids only — nothing is copied into the ticket (enterprise.mjs:355). Read: by org
---        (enterprise.mjs:359); by id (admin); admin full list newest first.
--- ---------------------------------------------------------------------
+CREATE UNIQUE INDEX sso_states_state_hash ON sso_states (state_hash);
 CREATE TABLE support_tickets (
-  id         TEXT PRIMARY KEY,
-  org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  by_user_id TEXT REFERENCES org_users(id) ON DELETE SET NULL,   -- code tolerates a missing user (enterprise.mjs:381)
-  by_name    TEXT NOT NULL,                            -- snapshot
-  subject    TEXT NOT NULL,
-  body       TEXT NOT NULL DEFAULT '',
-  status     TEXT NOT NULL CHECK (status IN ('open', 'closed')),
-  created_at INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  by_user_id                               TEXT NOT NULL CHECK (length(by_user_id) <= 80 AND length(by_user_id) > 0),
+  by_name                                  TEXT CHECK (by_name IS NULL OR length(by_name) <= 200),
+  subject                                  TEXT NOT NULL CHECK (length(subject) <= 160 AND length(subject) > 0),
+  body                                     TEXT NOT NULL CHECK (length(body) <= 2000),
+  status                                   TEXT NOT NULL CHECK (status IN ('open','closed')),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (by_user_id) REFERENCES org_users(id) ON DELETE RESTRICT
 ) STRICT;
-CREATE INDEX support_tickets_org_id_created_at ON support_tickets(org_id, created_at);
-
--- source: db.supportTickets[].replies[]  ({at, by:'Trust & Safety', text}, enterprise.mjs:379)
--- owner/writer: domains/enterprise/enterprise.mjs adminRouter   lifecycle: append-only
--- mapping: array index -> reply_no (1-based); at -> replied_at; by -> by_name; text -> text (<=2000)
--- notes: no id in source; natural PK (ticket_id, reply_no). by is always the literal 'Trust & Safety'.
-CREATE TABLE support_ticket_replies (
-  ticket_id  TEXT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
-  reply_no   INTEGER NOT NULL CHECK (reply_no >= 1),
-  replied_at INTEGER NOT NULL,
-  by_name    TEXT NOT NULL,                            -- snapshot ('Trust & Safety')
-  text       TEXT NOT NULL,
-  PRIMARY KEY (ticket_id, reply_no)
-) STRICT;
-
--- source: db.supportTickets[].refs[]  ({kind<=30, id<=40}, max 10, enterprise.mjs:350)
--- owner/writer: domains/enterprise/enterprise.mjs   lifecycle: set once at creation
--- mapping: array index -> ref_no (1-based); kind -> ref_kind; id -> ref_id
--- notes: polymorphic reference, no FK. kind is free text from the client; the only kinds the
---        server resolves are 'case' (recruitment_cases) and 'import' (import_batches),
---        enterprise.mjs:416-417. Other kinds are stored and ignored.
+CREATE INDEX support_tickets_org ON support_tickets (org_id);
 CREATE TABLE support_ticket_refs (
-  ticket_id TEXT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
-  ref_no    INTEGER NOT NULL CHECK (ref_no >= 1),
-  ref_kind  TEXT NOT NULL,                             -- polymorphic: 'case' | 'import' | other (ignored)
-  ref_id    TEXT NOT NULL,
-  PRIMARY KEY (ticket_id, ref_no)
+  ticket_id                                TEXT NOT NULL CHECK (length(ticket_id) > 0 AND length(ticket_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  kind                                     TEXT NOT NULL CHECK (kind IN ('case','import')),
+  ref_id                                   TEXT NOT NULL CHECK (length(ref_id) > 0 AND length(ref_id) <= 80),
+  FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE,
+  PRIMARY KEY (ticket_id, ord)
 ) STRICT;
-
-
--- ---------------------------------------------------------------------
--- support_access_grants
--- source: db.supportAccessGrants  created at m13/shared.mjs:33; rows minted at domains/enterprise/enterprise.mjs:391-394
--- owner/writer: domains/enterprise/enterprise.mjs (admin requests; org lead approves; admin reads log access)
--- lifecycle: requested -> active; expiry is DERIVED (expires_at > now), never a stored state; never deleted
--- mapping: id -> id (sag-N); ticketId -> ticket_id; orgId -> org_id; hours -> hours (1..72);
---          status -> status; requestedAt -> requested_at; approvedBy -> approved_by_name (name string);
---          approvedAt -> approved_at; expiresAt -> expires_at; accessLog[] -> support_access_log child table
--- notes: read patterns: by ticket+org+status='requested' (enterprise.mjs:364); by ticket+status='active'
---        +expires_at>now (enterprise.mjs:407); by org for audit export (enterprise.mjs:336).
---        Audit rows: ON DELETE RESTRICT from the ticket.
--- ---------------------------------------------------------------------
+CREATE TABLE support_ticket_replies (
+  ticket_id                                TEXT NOT NULL CHECK (length(ticket_id) > 0 AND length(ticket_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  at                                       INTEGER NOT NULL,
+  by_name                                  TEXT NOT NULL CHECK (length(by_name) > 0 AND length(by_name) <= 200),
+  text                                     TEXT NOT NULL CHECK (length(text) > 0 AND length(text) <= 2000),
+  FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE,
+  PRIMARY KEY (ticket_id, ord)
+) STRICT;
 CREATE TABLE support_access_grants (
-  id               TEXT PRIMARY KEY,
-  ticket_id        TEXT NOT NULL REFERENCES support_tickets(id) ON DELETE RESTRICT,
-  org_id           TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  hours            INTEGER NOT NULL CHECK (hours BETWEEN 1 AND 72),
-  status           TEXT NOT NULL CHECK (status IN ('requested', 'active')),
-  requested_at     INTEGER NOT NULL,
-  approved_by_name TEXT,                               -- snapshot
-  approved_at      INTEGER,
-  expires_at       INTEGER
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  ticket_id                                TEXT NOT NULL CHECK (length(ticket_id) <= 80 AND length(ticket_id) > 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  hours                                    INTEGER NOT NULL,
+  status                                   TEXT NOT NULL CHECK (status IN ('requested','active')),
+  requested_at                             INTEGER NOT NULL,
+  approved_by_name                         TEXT CHECK (approved_by_name IS NULL OR length(approved_by_name) <= 200),
+  approved_at                              INTEGER,
+  expires_at                               INTEGER,
+  FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE RESTRICT,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (hours >= 1 AND hours <= 72),
+  CHECK ((status = 'active') = (approved_at IS NOT NULL)),
+  CHECK ((status = 'active') = (expires_at IS NOT NULL)),
+  CHECK (status = 'active' OR approved_by_name IS NULL)
 ) STRICT;
-CREATE INDEX support_access_grants_ticket_id_status ON support_access_grants(ticket_id, status);
-CREATE INDEX support_access_grants_org_id ON support_access_grants(org_id);
-
--- source: db.supportAccessGrants[].accessLog[]  ({at, what:'org-records'}, enterprise.mjs:409)
--- owner/writer: domains/enterprise/enterprise.mjs   lifecycle: append-only audit of every admin read under the grant
--- mapping: array index -> access_no (1-based); at -> accessed_at; what -> what
--- notes: no id in source; natural PK (grant_id, access_no). Audit: RESTRICT.
+CREATE INDEX support_access_grants_ticket ON support_access_grants (ticket_id, status);
+CREATE INDEX support_access_grants_org ON support_access_grants (org_id);
 CREATE TABLE support_access_log (
-  grant_id    TEXT NOT NULL REFERENCES support_access_grants(id) ON DELETE RESTRICT,
-  access_no   INTEGER NOT NULL CHECK (access_no >= 1),
-  accessed_at INTEGER NOT NULL,
-  what        TEXT NOT NULL,
-  PRIMARY KEY (grant_id, access_no)
+  grant_id                                 TEXT NOT NULL CHECK (length(grant_id) > 0 AND length(grant_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  at                                       INTEGER NOT NULL,
+  what                                     TEXT NOT NULL CHECK (what IN ('org-records')),
+  FOREIGN KEY (grant_id) REFERENCES support_access_grants(id) ON DELETE RESTRICT,
+  PRIMARY KEY (grant_id, ord)
 ) STRICT;
-
 
 -- ---------------------------------------------------------------------
 -- groups

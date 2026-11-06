@@ -65,6 +65,7 @@ import * as m0031 from './migrations/0031_box_cam.mjs';
 import * as m0032 from './migrations/0032_discovery.mjs';
 import * as m0033 from './migrations/0033_insight_coverage.mjs';
 import * as m0034 from './migrations/0034_integrations.mjs';
+import * as m0035 from './migrations/0035_enterprise.mjs';
 import { trialReportsFor } from './playerSubrecords.mjs';
 import { createRecruitmentRepository, RECRUITMENT_SNAPSHOT, RECRUITMENT_COLLECTIONS, RECRUITMENT_MIGRATION, assertRecruitmentConsistent, unresolvedPlayerReferences as unresolvedRecruitmentPlayers, retainedPlayerReferences as retainedRecruitmentPlayers } from './recruitment.mjs';
 import { createRecruitmentCasesRepository, RECRUITMENT_CASES_SNAPSHOT, RECRUITMENT_CASES_COLLECTIONS, RECRUITMENT_CASES_MIGRATION, unresolvedPlayerReferences as unresolvedCasePlayers, retainedPlayerReferences as retainedCasePlayers } from './recruitmentCases.mjs';
@@ -85,6 +86,7 @@ import { createBoxCamRepository, BOX_CAM_SNAPSHOT, BOX_CAM_COLLECTIONS, BOX_CAM_
 import { createDiscoveryRepository, DISCOVERY_SNAPSHOT, DISCOVERY_COLLECTIONS, unresolvedPlayerReferences as unresolvedDiscoveryPlayers } from './discovery.mjs';
 import { createInsightCoverageRepository, INSIGHT_COVERAGE_SNAPSHOT, INSIGHT_COVERAGE_COLLECTIONS, unresolvedPlayerReferences as unresolvedInsightPlayers } from './insightCoverage.mjs';
 import { createIntegrationsRepository, INTEGRATIONS_SNAPSHOT, INTEGRATIONS_COLLECTIONS, unresolvedPlayerReferences as unresolvedIntegrationPlayers } from './integrations.mjs';
+import { createEnterpriseRepository, ENTERPRISE_SNAPSHOT, ENTERPRISE_COLLECTIONS } from './enterprise.mjs';
 import { createTransitionsVouchesRepository, TRANSITIONS_SNAPSHOT, TRANSITIONS_COLLECTIONS, unresolvedPlayerReferences as unresolvedTransitionPlayers, retainedPlayerReferences as retainedTransitionPlayers } from './transitionsVouches.mjs';
 import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, NOTIFICATIONS_MIGRATION } from './notifications.mjs';
@@ -93,7 +95,7 @@ import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MI
 import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, assertChannelReferencesConsistent } from './channels.mjs';
 import { createSafetyAuditRepository, AUDIT_COLLECTIONS, AUDIT_SNAPSHOT_TABLES, SAFETY_AUDIT_MIGRATION, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
 
-export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020, m0021, m0022, m0023, m0024, m0025, m0026, m0027, m0028, m0029, m0030, m0031, m0032, m0033, m0034]);
+export const DATA_MIGRATIONS = Object.freeze([m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008, m0009, m0010, m0011, m0012, m0013, m0014, m0015, m0016, m0017, m0018, m0019, m0020, m0021, m0022, m0023, m0024, m0025, m0026, m0027, m0028, m0029, m0030, m0031, m0032, m0033, m0034, m0035]);
 
 // Single-collection dispatchers, in snapshot-write order: organisations first
 // (staff reference them), then staff (sessions reference them), then
@@ -144,7 +146,7 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
  * operations; a record the columns cannot hold is refused
  * (repositories/recruitmentContactsOffers.mjs).
  */
-export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS, ...RECRUITMENT_CASES_COLLECTIONS, ...RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, ...SIGNINGS_FOLLOWUPS_COLLECTIONS, ...SCOUTING_EVIDENCE_COLLECTIONS, ...SCOUTING_ASSESSMENTS_COLLECTIONS, ...CLUB_SETUP_COLLECTIONS, ...OPPORTUNITIES_CAMPAIGNS_COLLECTIONS, ...VERIFICATION_COLLECTIONS, ...PASSPORT_COLLECTIONS, ...TRANSITIONS_COLLECTIONS, ...AGENT_CORE_COLLECTIONS, ...COMPLIANCE_POLICIES_COLLECTIONS, ...COMPLIANCE_RECORDS_COLLECTIONS, ...AGENT_TRANSACTIONS_COLLECTIONS, ...DEVELOPMENT_COLLECTIONS, ...BOX_CAM_COLLECTIONS, ...DISCOVERY_COLLECTIONS, ...INSIGHT_COVERAGE_COLLECTIONS, ...INTEGRATIONS_COLLECTIONS]);
+export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS, ...RECRUITMENT_CASES_COLLECTIONS, ...RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, ...SIGNINGS_FOLLOWUPS_COLLECTIONS, ...SCOUTING_EVIDENCE_COLLECTIONS, ...SCOUTING_ASSESSMENTS_COLLECTIONS, ...CLUB_SETUP_COLLECTIONS, ...OPPORTUNITIES_CAMPAIGNS_COLLECTIONS, ...VERIFICATION_COLLECTIONS, ...PASSPORT_COLLECTIONS, ...TRANSITIONS_COLLECTIONS, ...AGENT_CORE_COLLECTIONS, ...COMPLIANCE_POLICIES_COLLECTIONS, ...COMPLIANCE_RECORDS_COLLECTIONS, ...AGENT_TRANSACTIONS_COLLECTIONS, ...DEVELOPMENT_COLLECTIONS, ...BOX_CAM_COLLECTIONS, ...DISCOVERY_COLLECTIONS, ...INSIGHT_COVERAGE_COLLECTIONS, ...INTEGRATIONS_COLLECTIONS, ...ENTERPRISE_COLLECTIONS]);
 /** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
 /** The notification, dispatch, outbox and push tables: no reference to any other table (polymorphic audiences; the dispatch's notification reference is indexed, not a foreign key; the outbox and push rows reference nothing), dispatched last. */
@@ -214,6 +216,8 @@ export function readTableBacked(sqlite) {
   if (insight) Object.assign(out, insight);
   const integrations = INTEGRATIONS_SNAPSHOT.read(sqlite); // S13a: imports, prospects, identity reviews, API keys, webhooks (null before the 0034 record)
   if (integrations) Object.assign(out, integrations);
+  const enterprise = ENTERPRISE_SNAPSHOT.read(sqlite); // S13b: staff invites, SSO, support tickets and access grants (null before the 0035 record)
+  if (enterprise) Object.assign(out, enterprise);
   return out;
 }
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
@@ -354,6 +358,8 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   written.push(...INSIGHT_COVERAGE_SNAPSHOT.replace(sqlite, snapshot));
   // S13a: integrations, the same way (its organisation and staff keys are RESTRICT).
   written.push(...INTEGRATIONS_SNAPSHOT.replace(sqlite, snapshot));
+  // S13b: enterprise, the same way (its organisation and staff keys are RESTRICT).
+  written.push(...ENTERPRISE_SNAPSHOT.replace(sqlite, snapshot));
   if (present.includes(CHANNELS_TABLE.name) && CHANNELS_TABLE.replace(sqlite, snapshot[CHANNELS_TABLE.name], { requests: requestsSupplied ? snapshot.requests : undefined })) written.push(CHANNELS_TABLE.name);
   // Rows the snapshot no longer lists go last, children before parents, so a
   // parent that is still referenced makes the foreign key refuse the save
@@ -455,6 +461,7 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   if (written.some((n) => DISCOVERY_COLLECTIONS.includes(n))) DISCOVERY_SNAPSHOT.assert(sqlite);
   if (written.some((n) => INSIGHT_COVERAGE_COLLECTIONS.includes(n))) INSIGHT_COVERAGE_SNAPSHOT.assert(sqlite);
   if (written.some((n) => INTEGRATIONS_COLLECTIONS.includes(n))) INTEGRATIONS_SNAPSHOT.assert(sqlite);
+  if (written.some((n) => ENTERPRISE_COLLECTIONS.includes(n))) ENTERPRISE_SNAPSHOT.assert(sqlite);
   // A saved snapshot is never a first installation: the server attaches to the
   // tables it wrote and never initialises them from its seed.
   const settle = sqlite.prepare("UPDATE meta SET value = 'done' WHERE key = ? AND value = 'pending'");
@@ -895,6 +902,17 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     }
     retireCollection(db, name, 'integrations');
   }
+  // S13b (migration 0035): staff invites, SSO configurations and states, support tickets and support access grants
+  // (repositories/enterprise.mjs); each db.* name throws.
+  const enterprise = createEnterpriseRepository({ sqlite, log, now, unit: store.unit });
+  const enterpriseBoot = enterprise.attach();
+  for (const name of ENTERPRISE_COLLECTIONS) {
+    if (Object.hasOwn(db, name)) {
+      delete db[name];
+      sqlite.prepare('DELETE FROM collections WHERE name = ?').run(name);
+    }
+    retireCollection(db, name, 'enterprise');
+  }
   for (const name of ['requests', 'trials']) {
     if (Object.hasOwn(db, name)) {
       delete db[name];
@@ -979,8 +997,9 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
     discovery,
     insightCoverage,
     integrations,
+    enterprise,
     migrations,
-    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot, safetyAudit: safetyAuditBoot, recruitment: recruitmentBoot, recruitmentCases: recruitmentCasesBoot, recruitmentContactsOffers: recruitmentContactsOffersBoot, signingsFollowUps: signingsFollowUpsBoot, scoutingEvidence: scoutingEvidenceBoot, scoutingAssessments: scoutingAssessmentsBoot, clubSetup: clubSetupBoot, opportunitiesCampaigns: opportunitiesCampaignsBoot, verification: verificationBoot, passport: passportBoot, transitionsVouches: transitionsVouchesBoot, agentCore: agentCoreBoot, compliancePolicies: compliancePoliciesBoot, complianceRecords: complianceRecordsBoot, agentTransactions: agentTransactionsBoot, development: developmentBoot, boxCam: boxCamBoot, discovery: discoveryBoot, insightCoverage: insightCoverageBoot, integrations: integrationsBoot },
+    boot: { orgs: orgsBoot, identity: identityBoot, users: usersBoot, sessions: sessionsBoot, codes: codesBoot, notifications: notificationsBoot, dispatches: dispatchesBoot, outboxPush: outboxPushBoot, channels: channelsBoot, safetyAudit: safetyAuditBoot, recruitment: recruitmentBoot, recruitmentCases: recruitmentCasesBoot, recruitmentContactsOffers: recruitmentContactsOffersBoot, signingsFollowUps: signingsFollowUpsBoot, scoutingEvidence: scoutingEvidenceBoot, scoutingAssessments: scoutingAssessmentsBoot, clubSetup: clubSetupBoot, opportunitiesCampaigns: opportunitiesCampaignsBoot, verification: verificationBoot, passport: passportBoot, transitionsVouches: transitionsVouchesBoot, agentCore: agentCoreBoot, compliancePolicies: compliancePoliciesBoot, complianceRecords: complianceRecordsBoot, agentTransactions: agentTransactionsBoot, development: developmentBoot, boxCam: boxCamBoot, discovery: discoveryBoot, insightCoverage: insightCoverageBoot, integrations: integrationsBoot, enterprise: enterpriseBoot },
     /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
     report: () => ({
       ...dataSchemaReport(sqlite, DATA_MIGRATIONS),
@@ -1015,6 +1034,7 @@ export function attachDataLayer({ db, store, nextId, sessionTtlMs, now = Date.no
         discovery: { mode: 'live', rows: discovery.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedDiscoveryPlayers(sqlite), writeMode: 'explicit: briefs, Nobody Missed reviews, Second Look items and watchlists created and updated whole (inside the route\'s unit of work when one is open); a read that finds a change records it as an explicit upsert in one unit (Second Look items and their notification; a watchlist\'s membership, its new transitions and their notification), and a read that finds none writes nothing; trails only grow', readMode: 'SQL: briefs, items and watchlists by id and organisation, reviews by organisation, brief and player, a watchlist\'s last membership, the watchlist list and its transitions (paged), the latest change batch; no mirror and no db.* view', typing: 'typed columns only: brief criteria as columns with positions, evidence requirements and Combine protocols as rows (position groups worked out); watchlist criteria as typed columns by kind with their values as rows; fingerprints, resolved reasons, trails and the last membership as rows; no JSON columns', references: 'player ids no foreign key (tolerant, counted); organisations, staff, a review\'s and a watchlist\'s brief, and the room and decision an item or review names RESTRICT; within the domain RESTRICT; child rows cascade with their owner' },
         insightCoverage: { mode: 'live', rows: insightCoverage.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedInsightPlayers(sqlite), writeMode: 'explicit: exposure events recorded once a day, deferrals replaced, evidence suggestions reconciled and moved by status, calibration sessions created, submitted, noted and closed, fixtures, plans and assignments created, completed and cancelled (inside the route\'s unit of work when one is open)' },
         integrations: { mode: 'live', rows: integrations.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedIntegrationPlayers(sqlite), webhookBacklog: integrations.deliveries.backlogCount(), writeMode: 'explicit: import batches created, committed (with their prospects, identity reviews and webhook deliveries in one unit) and reversed; a review resolved, a separate prospect kept; API keys created, revoked and touched on use; webhook endpoints created, rotated and deactivated; a delivery\'s attempts recorded one at a time (inside the route\'s unit of work when one is open)', readMode: 'SQL: batches and prospects paged by cursor, the open reviews, keys and endpoints of one organisation, the due deliveries by an indexed query; secrets and key hashes are never served' },
+        enterprise: { mode: 'live', rows: enterprise.counts(), pendingWrites: 0, writeMode: 'explicit: invites created, accepted, revoked and expired, SSO configured and sign-in states created and used once, tickets created and replied to, access grants requested, approved and logged (inside the route\'s unit of work when one is open)' },
         safetyAudit: { mode: 'live', rows: safetyAudit.counts(), pendingWrites: safetyAudit.pending(), unresolvedPlayerReferences: unresolvedPlayerReferences(sqlite), retainedPlayerReferences: retainedPlayerReferences(sqlite), writeMode: 'staged: a block with its ledger row, a report with its suspension blocks, a note and a moderation hit land in the next save; a source change in its writer\'s save; an ops event in its caller\'s save; the IDV entry and the admin toggle land in their units\' commits', references: 'no foreign key on any of the eight tables. The five player references (blocks, reports, org_notes, ledger, source_changes) are tolerant historical references (Q4): an id that resolves to no player is counted here, never refused, never given a fabricated parent, never deleted; a count, not a claim about why it is absent. idv_queue.guardian_id is strict (Q4b): a write or import naming a missing guardian is refused and every snapshot that touches the queue or the identity pair is checked against the FINAL guardians table. A lifted block is deleted, as before (Q5). Organisation and staff references are historical pointers the routes never checked' },
       },
       identity: { initState: identity.initState() },

@@ -244,11 +244,11 @@ them.
 | `apiKeys` | persistent (hash only) | 08 | `api_keys`, `api_key_scopes` | S13a (0034) |
 | `webhookEndpoints` | persistent | 08 | `webhook_endpoints`, `webhook_endpoint_events` | S13a (0034) |
 | `webhookDeliveries` | audit (never pruned; typed payload) | 08 | `webhook_deliveries`, `webhook_delivery_attempts` | S13a (0034) |
-| `orgInvites` | temporary | 08 | `org_invites` (`token_hash`) | S13 |
-| `ssoConfigs` | persistent | 08 | `sso_configs` | S13 |
-| `ssoStates` | temporary | 08 | `sso_states` (`state_hash`, `nonce_hash`) | S13 |
-| `supportTickets` | persistent | 08 | `support_tickets`, `support_ticket_replies`, `support_ticket_refs` | S13 |
-| `supportAccessGrants` | persistent | 08 | `support_access_grants`, `support_access_log` | S13 |
+| `orgInvites` | persistent (code hash only) | 08 | `org_invites` (`token_hash`) | S13b (0035) |
+| `ssoConfigs` | persistent (one per organisation) | 08 | `sso_configs` | S13b (0035) |
+| `ssoStates` | temporary (hashes only; not yet pruned) | 08 | `sso_states` (`state_hash`, `nonce_hash`) | S13b (0035) |
+| `supportTickets` | persistent | 08 | `support_tickets`, `support_ticket_replies`, `support_ticket_refs` | S13b (0035) |
+| `supportAccessGrants` | persistent (audit log RESTRICT) | 08 | `support_access_grants`, `support_access_log` | S13b (0035) |
 | `importBatches` | persistent (PII rows) | 08 | `import_batches`, `import_batch_columns`, `import_batch_rows`, `import_batch_row_errors`, `import_batch_history`, `import_batch_created_prospects` | S13a (0034) |
 | `prospects` | persistent (one live per provider and external id) | 08 | `prospects` | S13a (0034) |
 | `identityReviews` | persistent (the record is its batch row's) | 08 | `identity_reviews` | S13a (0034) |
@@ -923,7 +923,7 @@ the route and response half is named with its plan step.
 1. **Plain-text secrets in the snapshot and in backups:** session tokens
    (`server.mjs:650`), guardian `emailCode` (`1244`; fixed 3 Nov 2026, hashed), `emailChallenges.code` (`3024`),
    `pairingCodes.code` (`3766`), `vouches.code` (`3692`), `orgInvites.token`
-   (`domains/enterprise/enterprise.mjs:80`), `ssoStates.state/nonce` (`274`), `boxSessions.nonce`
+   (fixed 6 Nov 2026 by S13b, hashed), `ssoStates.state/nonce` (fixed by S13b, hashed), `boxSessions.nonce`
    (`domains/development/boxcam/sessions.mjs:89`), `users.mfa.secretB32` (`m13/mfa`), `webhookEndpoints.secret`,
    `secrets.mediaSign` (`server.mjs:345`; fixed 3 Nov 2026, the key is env-only), and one-time codes inside `outbox.text`. Schema:
    `*_hash` columns everywhere except push tokens and webhook secrets (OPEN: encrypt at rest

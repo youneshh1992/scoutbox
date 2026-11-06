@@ -52,7 +52,7 @@ A domain that is in tables but still loaded whole into memory is only part-way t
 
 ## 3. Status
 
-34 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0035`. Each step
+35 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0036`. Each step
 takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Status |
@@ -70,7 +70,8 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S12c | discovery: Recruitment Briefs, Nobody Missed, Second Look, Dynamic Watchlists | `0032` | `discovery` | done |
 | S12d | insight and coverage: exposure, review-later, evidence gaps, calibration, fixtures and coverage | `0033` | `insightCoverage` | done |
 | S13a | integrations: CSV imports, prospects, identity reviews, API keys, webhooks | `0034` | `integrations` | done |
-| S13b–e | enterprise; groups; grassroots operations; the remaining operations collections (§4.5) | | | **next** |
+| S13b | enterprise: staff invites, SSO, support tickets and support access | `0035` | `enterprise` | done |
+| S13c–e | groups; grassroots operations; the remaining operations collections (§4.5) | | | **next** |
 | S14 | retire the blob | | | not started |
 
 Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1.
@@ -98,7 +99,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -203,7 +204,7 @@ starts by moving its domain's code (§4.4).
 | Step | Schema file | Collections | Watch out for |
 |---|---|---|---|
 | S12 Development, Box Cam, discovery | `07_development_boxcam_discovery.sql` | Split in four, one migration each. **S12a (done)**: `devObjectives`, `drillGuidance`, `development*`. **S12b (done)**: `boxCamPrefs`, `boxChallenges`, `boxChallengeEntries`, `boxAssignments`, `boxSessions`, `boxSessionEvents` (retired, no table), `boxCamDisputes`, `combineRequests`, `combineAttempts`, `boxCamCvResults`. **S12c (done)**: `recruitmentBriefs`, `nobodyMissedReviews`, `secondLookItems`, `dynamicWatchlists`, `watchlistHistory`. **S12d (done)**: `exposureEvents`, `reviewLater`, `evidenceSuggestions`, `calibrationSessions`, `fixtures`, `coveragePlans`, `coverageAssignments` | — |
-| S13 Operations and integrations | `08_operations_integrations.sql` | Split in five, one migration each. **S13a (done)**: `importBatches`, `prospects`, `identityReviews`, `apiKeys`, `webhookEndpoints`, `webhookDeliveries`. **S13b**: `orgInvites`, `sso*`, `support*`. **S13c**: `groups`, `groupGrants`. **S13d**: `openTrials`, `matchdays`, `friendlies`. **S13e**: `uploadSessions`, `savedSearches`, `invoices`, `plans`, `archetypes`, `reputationSeed`, the `delivery*` singletons | Invites and SSO states are hashed. Invoices are stored exactly, in minor units. Production's empty first boot (catalogues only, demo opt-in with `SCOUTBOX_SEED_DEMO=1`) must survive the catalogues becoming rows. The player opportunity board pages once `openTrials` is a table (it merges opportunities and open days). A coverage assignment names a friendly or an open day by `event_id` with no key: give it one when `friendlies` and `openTrials` are tables, and page `/org/coverage/fixtures` by cursor. |
+| S13 Operations and integrations | `08_operations_integrations.sql` | Split in five, one migration each. **S13a (done)**: `importBatches`, `prospects`, `identityReviews`, `apiKeys`, `webhookEndpoints`, `webhookDeliveries`. **S13b (done)**: `orgInvites`, `ssoConfigs`, `ssoStates`, `supportTickets`, `supportAccessGrants`. **S13c**: `groups`, `groupGrants`. **S13d**: `openTrials`, `matchdays`, `friendlies`. **S13e**: `uploadSessions`, `savedSearches`, `invoices`, `plans`, `archetypes`, `reputationSeed`, the `delivery*` singletons | Invoices are stored exactly, in minor units. Production's empty first boot (catalogues only, demo opt-in with `SCOUTBOX_SEED_DEMO=1`) must survive the catalogues becoming rows. The player opportunity board pages once `openTrials` is a table (it merges opportunities and open days). A coverage assignment names a friendly or an open day by `event_id` with no key: give it one when `friendlies` and `openTrials` are tables, and page `/org/coverage/fixtures` by cursor. |
 
 **Open from earlier steps** (not blocking): a coach affiliation is matched to a staff member by display name (a
 Founder question: keying it by account restricts affiliations to people with a login); `orgs.verified` is synced by

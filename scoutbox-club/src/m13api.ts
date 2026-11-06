@@ -240,6 +240,7 @@ export const httpM13: M13Api = {
 
 
   onboarding: (s) => G(s, '/org/onboarding'),
+  // The server pages this list ({ items, nextCursor }, newest first, S13b); the first page is shown. TODO: "load more" with ?cursor=.
   listInvites: async (s) => (await G(s, '/org/invites')).items,
   createInvite: async (s, email, name, role) => (await P(s, '/org/invites', { email, name, role })).invite,
   mfaSetup: (s) => P(s, '/org/mfa/setup'),
@@ -248,6 +249,7 @@ export const httpM13: M13Api = {
   revokeSession: (s, sid) => P(s, '/org/sessions/revoke', { sid }),
   getSso: (s) => G(s, '/org/sso'),
   setSso: (s, issuer) => P(s, '/org/sso', { issuer }, 'PUT'),
+  // The server pages this list ({ items, nextCursor }, newest first, S13b); the first page is shown. TODO: "load more" with ?cursor=.
   listSupport: async (s) => (await G(s, '/org/support')).items,
   createSupport: async (s, subject, body, refs) => (await P(s, '/org/support', { subject, body, refs })).ticket,
   approveSupportAccess: (s, ticketId) => P(s, `/org/support/${ticketId}/approve-access`),

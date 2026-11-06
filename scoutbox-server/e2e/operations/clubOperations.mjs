@@ -419,6 +419,43 @@ let inviteUserToken = null;
   const grants = (await fetch(`${BASE}/admin/support`, { headers: A() }).then((x) => x.json())).grants;
   ok(grants[0].accessLog.length === 1, 'every support read lands in the access log');
 
+  // S13b: invites, SSO states, tickets and grants are typed tables — junk is refused naming the field (not clamped,
+  // coerced or stored as 'undefined'), the lists page by cursor, an invite code is single-use whatever its state.
+  r = await j('POST', '/org/invites', { email: 'role.junk@eastport.example', name: 'Role Junk', role: 42 }, maria.token);
+  ok(r.status === 400 && r.body.field === 'role', 'an invite role that is not text is refused, naming it');
+  r = await j('POST', '/org/invites', { email: 'revoked.invitee@eastport.example', name: 'Revoked Invitee', role: 'Analyst' }, maria.token);
+  ok(r.status === 201 && r.body.invite.tokenHash === undefined && r.body.invite.token === undefined, 'an invite is served without its code or the code\'s hash');
+  const revokedCode = (await fetch(`${BASE}/admin/outbox`, { headers: A() }).then((x) => x.json())).find((m) => m.to === 'revoked.invitee@eastport.example')?.text.match(/invite code: ([a-f0-9]+)/)?.[1];
+  await j('POST', `/org/invites/${r.body.invite.id}/revoke`, {}, maria.token);
+  r = await j('POST', '/auth/org/accept-invite', { token: revokedCode });
+  ok(!!revokedCode && r.status === 404 && r.body.error === 'INVITE_INVALID', 'a revoked invite\'s code accepts nothing');
+  r = await j('POST', '/auth/org/accept-invite', { token: ['not', 'a', 'code'] });
+  ok(r.status === 404, 'a code that is not text finds nothing');
+  r = await j('GET', '/org/invites?limit=1', undefined, maria.token);
+  ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].status === 'revoked' && typeof r.body.nextCursor === 'string', 'invites page by cursor, newest first');
+  r = await j('GET', `/org/invites?limit=1&cursor=${r.body.nextCursor}`, undefined, maria.token);
+  ok(r.status === 200 && r.body.items[0]?.status === 'accepted', 'the cursor continues to the accepted invite');
+  for (const [refs, field] of [['case-1', 'refs'], [[{ kind: 'player', id: 'pl-1' }], 'refs[0].kind'], [[{ kind: 'case', id: 42 }], 'refs[0].id'], [Array.from({ length: 11 }, (_, i) => ({ kind: 'case', id: `c${i}` })), 'refs']]) {
+    r = await j('POST', '/org/support', { subject: 'Junk refs', refs }, maria.token);
+    ok(r.status === 400 && r.body.field === field, `a support reference ${JSON.stringify(refs).slice(0, 40)} is refused, naming ${field}`);
+  }
+  const junkTicket = (await j('POST', '/org/support', { subject: 'Reply junk' }, maria.token)).body.ticket;
+  const adminPost = (p, body) => fetch(`${BASE}${p}`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (x) => ({ status: x.status, body: await x.json() }));
+  r = await adminPost(`/admin/support/${junkTicket.id}/reply`, {});
+  ok(r.status === 400 && r.body.field === 'text', 'a reply with no text is refused (it used to store the word "undefined")');
+  r = await adminPost(`/admin/support/${junkTicket.id}/reply`, { text: 'ok', close: 'yes' });
+  ok(r.status === 400 && r.body.field === 'close', 'close must be true or false');
+  for (const hours of [0, 73, 1.5, '4']) {
+    r = await adminPost(`/admin/support/${junkTicket.id}/request-access`, { hours });
+    ok(r.status === 400 && r.body.field === 'hours', `access hours ${JSON.stringify(hours)} are refused (no longer clamped)`);
+  }
+  r = await adminPost(`/admin/support/${junkTicket.id}/request-access`, {});
+  ok(r.status === 201 && r.body.grant.hours === 24, 'access hours default to 24');
+  r = await j('GET', '/org/support?limit=1', undefined, maria.token);
+  ok(r.status === 200 && r.body.items[0]?.id === junkTicket.id && typeof r.body.nextCursor === 'string', 'tickets page by cursor, newest first');
+  const adminPage = await fetch(`${BASE}/admin/support?limit=1`, { headers: A() }).then((x) => x.json());
+  ok(adminPage.items.length === 1 && adminPage.items[0].id === junkTicket.id && adminPage.grants.every((g) => g.ticketId === junkTicket.id) && adminPage.grants.length === 1, 'the admin list pages by cursor, with the grants of the tickets on the page');
+
   // Metrics + injected failure detection. Inject exactly MAX_ATTEMPTS (4 in
   // fast mode) so the dispatch to Nina (who HAS an email) exhausts its
   // retries and surfaces as a monitored failure — with nothing left over to
