@@ -127,7 +127,10 @@ export interface M13Api {
   inviteToGroup(s: Session, id: string, orgId: string): Promise<void>;
   previewGrant(s: Session, groupId: string, input: { resourceKind: string; resourceId: string; toOrgIds: string[] }): Promise<{ recipients: { orgName: string; wouldSee: SharedResource }[] }>;
   createGrant(s: Session, groupId: string, input: { resourceKind: string; resourceId: string; toOrgIds: string[]; expiresDays: number }): Promise<GrantRow>;
-  listGrants(s: Session): Promise<{ given: GrantRow[]; received: GrantRow[] }>;
+  // The server pages the given grants ({ given, nextCursor, received }, newest first); the screens show the first
+  // page. TODO: "load more" is needed for a club that has given more than a page of grants.
+  listGrants(s: Session): Promise<{ given: GrantRow[]; nextCursor?: string | null; received: GrantRow[] }>;
+  grantCounts(s: Session): Promise<{ given: number; received: number }>;
   revokeGrant(s: Session, id: string): Promise<void>;
   readShared(s: Session, grantId: string): Promise<{ from: string; resource: SharedResource }>;
   groupReport(s: Session, id: string): Promise<{ group: { name: string; members: number }; activity: { orgName: string; assessments: number | string; signings: number | string }[]; note: string }>;
@@ -227,6 +230,7 @@ export const httpM13: M13Api = {
   previewGrant: (s, groupId, input) => P(s, `/org/groups/${groupId}/grants/preview`, input),
   createGrant: async (s, groupId, input) => (await P(s, `/org/groups/${groupId}/grants`, input)).grant,
   listGrants: (s) => G(s, '/org/grants'),
+  grantCounts: (s) => G(s, '/org/grants/counts'),
   revokeGrant: (s, id) => P(s, `/org/grants/${id}/revoke`),
   readShared: (s, grantId) => G(s, `/org/shared/${grantId}`),
   groupReport: (s, id) => G(s, `/org/groups/${id}/report`),

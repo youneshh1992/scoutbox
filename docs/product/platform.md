@@ -124,6 +124,12 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
   - The first login on a credentialed org with no staff bootstraps a lead-tier admin
     (`staff_bootstrapped`).
   - Passwordless seeded orgs are dev only.
+- Group workspaces (federations, F8): Trust & Safety creates a group with one admin club;
+  agencies can neither join nor administer one. Membership shares nothing; a grant shares
+  one shortlist, case or assessment with named fellow members for 1–180 days (30 by
+  default). When a club leaves, a grant ends once its owner shares no group with any of
+  its recipients; a grant whose other recipients remain stays live for them, and the
+  shared read re-checks membership for every reader. (S13c, 6 Nov 2026)
 - Signed media URLs last 15 minutes. Each one is bound to the minting session, and the
   viewer's current entitlement is checked again on every fetch.
 

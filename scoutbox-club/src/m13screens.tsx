@@ -374,7 +374,10 @@ export function InsightScreen({ session, notify, openPlayer }: ScreenProps) {
 // ======================================== F8+F2 Club network
 export function NetworkScreen({ session, notify }: ScreenProps) {
   const [groups, reloadGroups] = useAsync(() => m13.listGroups(session), [session]);
-  const [grants, reloadGrants] = useAsync(() => m13.listGrants(session), [session]);
+  const [grants, reloadGrantList] = useAsync(() => m13.listGrants(session), [session]);
+  // The given grants are paged, so the tab counts through the counts route, not the list.
+  const [grantCounts, reloadGrantCounts] = useAsync(() => m13.grantCounts(session), [session]);
+  const reloadGrants = () => { reloadGrantList(); reloadGrantCounts(); };
   const [transitions] = useAsync(() => m13.listTransitions(session), [session]);
   const [networkTab, setNetworkTab] = useState('relationships');
   const members = [...new Map((groups?.items ?? []).flatMap(g=>g.members).filter(m=>m.id!==session.org.id).map(m=>[m.id,m])).values()];
@@ -383,7 +386,7 @@ export function NetworkScreen({ session, notify }: ScreenProps) {
 
   return (
     <div className="pro-network-workspace">
-      <div className="pro-workflow-tabs" role="group" aria-label="Network views">{[['relationships','Relationships',groups?.items.length],['access','Shared access',(grants?.given.length??0)+(grants?.received.length??0)],['transitions','Transition packs',transitions?.items.length]].map(([id,label,count])=><button key={String(id)} aria-pressed={networkTab===id} onClick={()=>setNetworkTab(String(id))}><span>{label}</span><b>{count??'—'}</b></button>)}</div>
+      <div className="pro-workflow-tabs" role="group" aria-label="Network views">{[['relationships','Relationships',groups?.items.length],['access','Shared access',grantCounts?(grantCounts.given+grantCounts.received):undefined],['transitions','Transition packs',transitions?.items.length]].map(([id,label,count])=><button key={String(id)} aria-pressed={networkTab===id} onClick={()=>setNetworkTab(String(id))}><span>{label}</span><b>{count??'—'}</b></button>)}</div>
       {networkTab==='relationships'&&groups&&<ProNetworkMap club={session.org.name} members={members}/>}
       <div className="section pro-network-groups" hidden={networkTab!=='relationships'}>
         <h3>{t('m13.grp.title')}</h3>

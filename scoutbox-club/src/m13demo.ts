@@ -346,7 +346,8 @@ export const demoM13: M13Api = {
     GRANTS_GIVEN.push(g);
     return delay(g);
   },
-  listGrants: () => delay({ given: GRANTS_GIVEN, received: GRANTS_RECEIVED }),
+  listGrants: () => delay({ given: [...GRANTS_GIVEN].reverse(), nextCursor: null, received: GRANTS_RECEIVED }),
+  grantCounts: () => delay({ given: GRANTS_GIVEN.length, received: GRANTS_RECEIVED.length }),
   revokeGrant: (s, gid) => { const g = GRANTS_GIVEN.find((x) => x.id === gid); if (g) { g.revokedAt = Date.now(); g.live = false; } return delay(undefined); },
   readShared: (s, gid) => {
     const g = GRANTS_RECEIVED.find((x) => x.id === gid);

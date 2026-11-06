@@ -79,6 +79,7 @@ export function M13Panel({ tab, adminKey, say }: { tab: M13Tab; adminKey: string
       return;
     }
     try {
+      // The server pages the groups ({ items, nextCursor }, newest first); this shows the first page. TODO: "load more" is needed.
       if (tab === 'groups') setGroups((await call<{ items: Grp[] }>(adminKey, '/admin/groups')).items);
       if (tab === 'supportdesk') {
         // The server pages the tickets ({ items, nextCursor, grants }, newest first, with the grants of the tickets on the

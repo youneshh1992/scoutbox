@@ -400,119 +400,102 @@ CREATE TABLE support_access_log (
   PRIMARY KEY (grant_id, ord)
 ) STRICT;
 
--- ---------------------------------------------------------------------
--- groups
--- source: db.groups  created at m13/shared.mjs:25; rows minted at m13/groups.mjs:23-28 (admin only)
--- owner/writer: m13/groups.mjs   lifecycle: never deleted; membership arrays mutate
--- mapping: id -> id (grp-N); name -> name (<=100); adminOrgIds[] -> group_admins; memberOrgIds[] -> group_members;
---          pendingInvites[] -> group_pending_invites; sharedTemplateIds[] -> group_shared_templates;
---          programmes[] -> group_programmes; createdAt -> created_at
--- notes: read patterns: groups containing an org (groups.mjs:15 groupsOf; shared.mjs:202 sameGroupLive =
---        two orgs share a group) -> group_members(org_id); pending invites by org (groups.mjs:43); by id.
--- ---------------------------------------------------------------------
+-- =====================================================================
+-- M13 F8 — group workspaces and group grants
+-- S13c: IMPLEMENTED, migration 0036_groups REGISTERED (repositories/groups.mjs, 6 Nov 2026).
+-- The DDL below is the migration's, generated from the repository's field specs (scripts/testSchemaDdl.mjs compares
+-- them column for column).
+-- =====================================================================
+--
+-- A group (grp-*, domains/groups/groups.mjs): created by Trust & Safety with one admin organisation (never an agency).
+-- Its members are group_members rows, one per organisation, with an admin flag: an admin is always a member (the
+-- earlier design's separate group_admins table could not say so). The admin invites (group_pending_invites, one per
+-- invited organisation, never a member's; deleted when accepted — there is no decline); a lead of the invited
+-- organisation accepts. Leaving deletes the member row. Groups are never deleted, so their rows cascade only in
+-- principle.
+--
+-- group_shared_templates names an assessment template by its id alone: template ids are shared by every version and
+-- every club until after S14 (known-issues.md), so there is no key. Nothing reads the list beyond echoing the group.
+-- group_programmes (pgm-*): a name (1–100) and an optional region (≤80).
+--
+-- A group grant (gnt-*): one organisation shares one resource with named fellow members (group_grant_recipients,
+-- ordered, each once, never the owner) until expires_at (1–180 days after creation) or revocation. resource_id is
+-- polymorphic with no key: '*' for a shortlist (the owner's whole shortlist, read from the ledger), a
+-- recruitment_cases id for 'case', an assessments id for 'assessment'. Ownership, liveness, shared membership and each
+-- player's visibility to the reader are re-checked on every shared read. revoked_at and revoke_reason are set
+-- together: 'revoked_by_owner', or 'group_departure' when an organisation leaves and the owner then shares no group
+-- with any of the grant's recipients (the earlier code tested only the first recipient).
+--
+-- Keys: organisations RESTRICT; a grant's group RESTRICT; child rows cascade with their group or grant.
 CREATE TABLE groups (
-  id         TEXT PRIMARY KEY,
-  name       TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  name                                     TEXT NOT NULL CHECK (length(name) <= 100 AND length(name) > 0),
+  created_at                               INTEGER NOT NULL
 ) STRICT;
-
--- source: db.groups[].adminOrgIds[]  (groups.mjs:25; removed on leave, groups.mjs:80)
--- mapping: each org id -> (group_id, org_id). An admin is always also a member (code invariant, not enforced here).
-CREATE TABLE group_admins (
-  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  org_id   TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  PRIMARY KEY (group_id, org_id)
-) STRICT;
-
--- source: db.groups[].memberOrgIds[]  (groups.mjs:25,70; removed on leave, groups.mjs:79)
--- mapping: each org id -> (group_id, org_id)
--- notes: agencies are refused at invite time (groups.mjs:55). Index by org serves groupsOf/sameGroupLive.
 CREATE TABLE group_members (
-  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  org_id   TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  group_id                                 TEXT NOT NULL CHECK (length(group_id) > 0 AND length(group_id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) > 0 AND length(org_id) <= 80),
+  admin                                    INTEGER NOT NULL CHECK (admin IN (0,1)),
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
   PRIMARY KEY (group_id, org_id)
 ) STRICT;
-CREATE INDEX group_members_org_id ON group_members(org_id);
-
--- source: db.groups[].pendingInvites[]  ({orgId, invitedBy (org id), at}, groups.mjs:57; removed on accept, groups.mjs:69)
--- mapping: orgId -> org_id; invitedBy -> invited_by_org_id; at -> invited_at
--- notes: no id in source; natural PK (group_id, org_id) — code refuses a second invite (groups.mjs:56).
---        Hard-deleted on accept (there is no decline route).
+CREATE INDEX group_members_org ON group_members (org_id, group_id);
 CREATE TABLE group_pending_invites (
-  group_id          TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  org_id            TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  invited_by_org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  invited_at        INTEGER NOT NULL,
+  group_id                                 TEXT NOT NULL CHECK (length(group_id) > 0 AND length(group_id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) > 0 AND length(org_id) <= 80),
+  invited_by_org_id                        TEXT NOT NULL CHECK (length(invited_by_org_id) > 0 AND length(invited_by_org_id) <= 80),
+  invited_at                               INTEGER NOT NULL,
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (invited_by_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
   PRIMARY KEY (group_id, org_id)
 ) STRICT;
-CREATE INDEX group_pending_invites_org_id ON group_pending_invites(org_id);
-
--- source: db.groups[].sharedTemplateIds[]  (groups.mjs:99)
--- mapping: each template id -> (group_id, template_id)
--- notes: the code stores ONLY the template id, and assessment template ids are reused across versions
---        (key is (id, version)); the lookup at groups.mjs:97 resolves to the first (v1) row — known defect.
---        No FK to assessment_templates(id, version) is possible without a version; template_id kept bare.
---        Nothing reads this list today beyond echoing the group (dead-end feature).
+CREATE INDEX group_pending_invites_org ON group_pending_invites (org_id);
 CREATE TABLE group_shared_templates (
-  group_id    TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  template_id TEXT NOT NULL,                           -- assessment_templates.id without version (see notes)
+  group_id                                 TEXT NOT NULL CHECK (length(group_id) > 0 AND length(group_id) <= 80),
+  template_id                              TEXT NOT NULL CHECK (length(template_id) > 0 AND length(template_id) <= 80),
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
   PRIMARY KEY (group_id, template_id)
 ) STRICT;
-
--- source: db.groups[].programmes[]  ({id pgm-N, name<=100, region<=80|null, createdAt}, groups.mjs:108)
--- owner/writer: m13/groups.mjs   lifecycle: append-only; never read back except with the group
--- mapping: id -> id; name -> name; region -> region; createdAt -> created_at
 CREATE TABLE group_programmes (
-  id         TEXT PRIMARY KEY,
-  group_id   TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  name       TEXT NOT NULL,
-  region     TEXT,
-  created_at INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  group_id                                 TEXT NOT NULL CHECK (length(group_id) <= 80 AND length(group_id) > 0),
+  name                                     TEXT NOT NULL CHECK (length(name) <= 100 AND length(name) > 0),
+  region                                   TEXT CHECK (region IS NULL OR length(region) <= 80 AND length(region) > 0),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
 ) STRICT;
-CREATE INDEX group_programmes_group_id ON group_programmes(group_id);
-
-
--- ---------------------------------------------------------------------
--- group_grants
--- source: db.groupGrants  created at m13/shared.mjs:26; rows minted at m13/groups.mjs:180-185
--- owner/writer: m13/groups.mjs (create, revoke, departure revoke)   lifecycle: live until revoked_at or expires_at; never deleted
--- mapping: id -> id (gnt-N); groupId -> group_id; fromOrgId -> from_org_id; fromOrgName -> from_org_name;
---          toOrgIds[] -> group_grant_recipients child table; resourceKind -> resource_kind; resourceId -> resource_id;
---          expiresAt -> expires_at; revokedAt -> revoked_at; revokeReason (added on revoke, groups.mjs:86,209) -> revoke_reason;
---          createdBy -> created_by_name (name string); createdAt -> created_at
--- notes: resource_id is polymorphic: '*' for shortlist (the org's whole shortlist, derived from the ledger),
---        a recruitment_cases(id) for 'case', an assessments(id) for 'assessment' — no FK. Ownership and
---        liveness are re-checked on every read (activeGrant, shared.mjs:194-200). Read patterns: by from_org
---        (groups.mjs:199,207); by recipient org (junction) + live + sameGroupLive (groups.mjs:200); by id
---        (groups.mjs:215); by group (groups.mjs:233); activeGrant = from+kind+resource+recipient+live.
---        Departure revoke (groups.mjs:83-87) tests sameGroupLive against toOrgIds[0] only — known quirk.
--- ---------------------------------------------------------------------
+CREATE INDEX group_programmes_group ON group_programmes (group_id);
 CREATE TABLE group_grants (
-  id              TEXT PRIMARY KEY,
-  group_id        TEXT NOT NULL REFERENCES groups(id) ON DELETE RESTRICT,
-  from_org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  from_org_name   TEXT NOT NULL,                       -- snapshot
-  resource_kind   TEXT NOT NULL CHECK (resource_kind IN ('shortlist', 'case', 'assessment')),
-  resource_id     TEXT NOT NULL,                       -- polymorphic: '*' | recruitment_cases.id | assessments.id
-  expires_at      INTEGER NOT NULL,
-  revoked_at      INTEGER,
-  revoke_reason   TEXT CHECK (revoke_reason IS NULL OR revoke_reason IN ('group_departure', 'revoked_by_owner')),
-  created_by_name TEXT NOT NULL,                       -- snapshot
-  created_at      INTEGER NOT NULL
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  group_id                                 TEXT NOT NULL CHECK (length(group_id) <= 80 AND length(group_id) > 0),
+  from_org_id                              TEXT NOT NULL CHECK (length(from_org_id) <= 80 AND length(from_org_id) > 0),
+  from_org_name                            TEXT NOT NULL CHECK (length(from_org_name) <= 200),
+  resource_kind                            TEXT NOT NULL CHECK (resource_kind IN ('shortlist','case','assessment')),
+  resource_id                              TEXT NOT NULL CHECK (length(resource_id) <= 80 AND length(resource_id) > 0),
+  expires_at                               INTEGER NOT NULL,
+  revoked_at                               INTEGER,
+  revoke_reason                            TEXT CHECK (revoke_reason IS NULL OR revoke_reason IN ('group_departure','revoked_by_owner')),
+  created_by_name                          TEXT CHECK (created_by_name IS NULL OR length(created_by_name) <= 200),
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE RESTRICT,
+  FOREIGN KEY (from_org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  CHECK (resource_kind <> 'shortlist' OR resource_id = '*'),
+  CHECK ((revoked_at IS NULL) = (revoke_reason IS NULL))
 ) STRICT;
-CREATE INDEX group_grants_from_org_id ON group_grants(from_org_id);
-CREATE INDEX group_grants_group_id ON group_grants(group_id);
-CREATE INDEX group_grants_from_org_id_resource_kind_resource_id ON group_grants(from_org_id, resource_kind, resource_id);
-
--- source: db.groupGrants[].toOrgIds[]  (filtered recipients, groups.mjs:178)
--- mapping: each org id -> (grant_id, org_id)
--- notes: received-grants query (groups.mjs:200; enterprise.mjs:335) -> index by org_id.
+CREATE INDEX group_grants_from_org ON group_grants (from_org_id);
+CREATE INDEX group_grants_group ON group_grants (group_id);
 CREATE TABLE group_grant_recipients (
-  grant_id TEXT NOT NULL REFERENCES group_grants(id) ON DELETE CASCADE,
-  org_id   TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  PRIMARY KEY (grant_id, org_id)
+  grant_id                                 TEXT NOT NULL CHECK (length(grant_id) > 0 AND length(grant_id) <= 80),
+  ord                                      INTEGER NOT NULL CHECK (ord >= 0),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) > 0 AND length(org_id) <= 80),
+  FOREIGN KEY (grant_id) REFERENCES group_grants(id) ON DELETE CASCADE,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  PRIMARY KEY (grant_id, ord),
+  UNIQUE (grant_id, org_id)
 ) STRICT;
-CREATE INDEX group_grant_recipients_org_id ON group_grant_recipients(org_id);
+CREATE INDEX group_grant_recipients_org ON group_grant_recipients (org_id);
 
 
 -- ---------------------------------------------------------------------

@@ -6,44 +6,70 @@
 // RECEIVING org under the standing safeguarding rules). Group membership by
 // itself shares nothing, and no group administrator can hand out access the
 // receiving club could not hold on its own.
+//
+// S13c: groups and grants are rows of repositories/groups.mjs, written through its explicit operations and read
+// through `groupReads`. Responses are built from the allowlists below, never by spreading a stored record.
+import { readPage, sendPageError } from '../platform/paging.mjs';
+import { GRANT_RESOURCE_KINDS, GROUP_LIMITS as L, typeExpiresDays, grantExpiry } from '../../repositories/groups.mjs';
+
+export const groupView = (g) => ({
+  id: g.id, name: g.name, adminOrgIds: [...g.adminOrgIds], memberOrgIds: [...g.memberOrgIds],
+  pendingInvites: g.pendingInvites.map((i) => ({ orgId: i.orgId, invitedBy: i.invitedBy, at: i.at })),
+  sharedTemplateIds: [...g.sharedTemplateIds],
+  programmes: g.programmes.map((p) => ({ id: p.id, name: p.name, region: p.region, createdAt: p.createdAt })),
+  createdAt: g.createdAt,
+});
+export const grantView = (gr) => ({
+  id: gr.id, groupId: gr.groupId, fromOrgId: gr.fromOrgId, fromOrgName: gr.fromOrgName, toOrgIds: [...gr.toOrgIds],
+  resourceKind: gr.resourceKind, resourceId: gr.resourceId, expiresAt: gr.expiresAt, revokedAt: gr.revokedAt,
+  revokeReason: gr.revokeReason, createdBy: gr.createdBy, createdAt: gr.createdAt,
+});
+
 export function registerGroups(ctx) {
   const {
-    db, byId, orgRouter, adminRouter, nextId, persistNow, notify, findPlayer,
-    orgCanSee, paginate, isLead, requireLead, suppress, sameGroupLive,
+    db, byId, users, orgRouter, adminRouter, nextId, notify, findPlayer, unit,
+    orgCanSee, requireLead, suppress, groups, groupReads,
   } = ctx;
+  if (!groups || !groupReads) throw new TypeError('registerGroups needs the groups repository (ctx.groups, ctx.groupReads)');
   // §4.3 step 2: the signings are read through SQL (the signings repository's queries).
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerGroups needs recruitmentReads (signings) from the data layer');
-
-  const groupsOf = (orgId) => db.groups.filter((g) => g.memberOrgIds.includes(orgId));
-  const isGroupAdmin = (group, orgId) => group.adminOrgIds.includes(orgId);
+  const G = groupReads.groups;
+  const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
+  const leadOf = (orgId) => users.listByOrg(orgId).find((u) => !u.removedAt) ?? null;
 
   // ------------------------------------------------------- administration
   adminRouter.post('/groups', (req, res) => {
     const { name, adminOrgId } = req.body ?? {};
-    const admin = byId.org(adminOrgId);
+    if (name !== undefined && name !== null && typeof name !== 'string') return fieldInvalid(res, 'name', 'A group name is text.');
+    if (typeof name === 'string' && name.length > L.name) return fieldInvalid(res, 'name', `A group name is at most ${L.name} characters.`);
+    const admin = typeof adminOrgId === 'string' ? byId.org(adminOrgId) : null;
     if (!name?.trim() || !admin) return res.status(400).json({ error: 'GROUP_FIELDS', message: 'name and a valid adminOrgId are required.' });
-    const g = {
-      id: nextId('grp'), name: String(name).slice(0, 100),
-      adminOrgIds: [admin.id], memberOrgIds: [admin.id],
-      pendingInvites: [], sharedTemplateIds: [], programmes: [],
-      createdAt: Date.now(),
-    };
-    db.groups.push(g);
-    persistNow();
-    res.status(201).json({ group: g });
+    if (admin.type === 'agency') return res.status(403).json({ error: 'AGENCIES_EXCLUDED', message: 'Agency organisations cannot join club/federation workspaces.' });
+    // In a unit, so the id counter is saved with the row.
+    const g = unit(() => groups.groups.create({
+      id: nextId('grp'), name, adminOrgIds: [admin.id], memberOrgIds: [admin.id],
+      pendingInvites: [], sharedTemplateIds: [], programmes: [], createdAt: Date.now(),
+    }));
+    res.status(201).json({ group: groupView(g) });
   });
 
-  adminRouter.get('/groups', (_req, res) => res.json({ items: db.groups }));
+  // Every group, newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
+  adminRouter.get('/groups', (req, res) => {
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    const p = G.page(page);
+    res.json({ items: p.items.map(groupView), nextCursor: p.nextCursor });
+  });
 
   orgRouter.get('/groups', (req, res) => {
     res.json({
-      items: groupsOf(req.org.id).map((g) => ({
-        ...g,
+      items: G.forMember(req.org.id).map((g) => ({
+        ...groupView(g),
         members: g.memberOrgIds.map((id) => { const o = byId.org(id); return o ? { id: o.id, name: o.name, level: o.level ?? 'pro' } : null; }).filter(Boolean),
-        youAdmin: isGroupAdmin(g, req.org.id),
+        youAdmin: g.adminOrgIds.includes(req.org.id),
       })),
-      invites: db.groups.filter((g) => g.pendingInvites.some((i) => i.orgId === req.org.id)).map((g) => ({ groupId: g.id, name: g.name })),
+      invites: G.invitesFor(req.org.id),
     });
   });
 
@@ -51,76 +77,84 @@ export function registerGroups(ctx) {
   // accepts. Nobody is added to a group silently.
   orgRouter.post('/groups/:id/invite', (req, res) => {
     if (!requireLead(req, res)) return;
-    const g = db.groups.find((x) => x.id === req.params.id);
-    if (!g || !isGroupAdmin(g, req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
-    const target = byId.org(req.body?.orgId);
+    const g = G.byId(req.params.id);
+    if (!g || !g.adminOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
+    const target = typeof req.body?.orgId === 'string' ? byId.org(req.body.orgId) : null;
     if (!target) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     if (target.type === 'agency') return res.status(403).json({ error: 'AGENCIES_EXCLUDED', message: 'Agency organisations cannot join club/federation workspaces.' });
     if (g.memberOrgIds.includes(target.id) || g.pendingInvites.some((i) => i.orgId === target.id)) return res.status(409).json({ error: 'ALREADY_INVITED' });
-    g.pendingInvites.push({ orgId: target.id, invitedBy: req.org.id, at: Date.now() });
-    const lead = db.users.find((u) => u.orgId === target.id && !u.removedAt);
-    if (lead) notify({ kind: 'org_user', id: lead.id }, 'group', `🤝 ${req.org.name} invited ${target.name} to the “${g.name}” workspace. A lead can accept from Group settings. Joining shares NOTHING by itself.`, g.id);
-    persistNow();
-    res.status(201).json({ group: g });
+    if (g.memberOrgIds.length + g.pendingInvites.length >= L.members) return res.status(409).json({ error: 'GROUP_LIMIT', message: `A group holds at most ${L.members} members and invites.` });
+    // The invite and its notification are one unit.
+    const out = unit(() => {
+      const next = groups.groups.invite(g.id, { orgId: target.id, invitedBy: req.org.id, at: Date.now() });
+      const lead = leadOf(target.id);
+      if (lead) notify({ kind: 'org_user', id: lead.id }, 'group', `🤝 ${req.org.name} invited ${target.name} to the “${g.name}” workspace. A lead can accept from Group settings. Joining shares NOTHING by itself.`, g.id);
+      return next;
+    });
+    res.status(201).json({ group: groupView(out) });
   });
 
   orgRouter.post('/groups/:id/accept', (req, res) => {
     if (!requireLead(req, res)) return;
-    const g = db.groups.find((x) => x.id === req.params.id);
-    const inv = g?.pendingInvites.find((i) => i.orgId === req.org.id);
-    if (!inv) return res.status(404).json({ error: 'NO_INVITE' });
-    g.pendingInvites = g.pendingInvites.filter((i) => i !== inv);
-    g.memberOrgIds.push(req.org.id);
-    persistNow();
-    res.json({ group: g, note: 'You are a member. Access to anything remains grant-by-grant: default isolated.' });
+    const g = G.byId(req.params.id);
+    if (!g?.pendingInvites.some((i) => i.orgId === req.org.id)) return res.status(404).json({ error: 'NO_INVITE' });
+    const next = groups.groups.accept(g.id, req.org.id);
+    res.json({ group: groupView(next), note: 'You are a member. Access to anything remains grant-by-grant: default isolated.' });
   });
 
   orgRouter.post('/groups/:id/leave', (req, res) => {
     if (!requireLead(req, res)) return;
-    const g = db.groups.find((x) => x.id === req.params.id);
+    const g = G.byId(req.params.id);
     if (!g || !g.memberOrgIds.includes(req.org.id)) return res.status(404).json({ error: 'NOT_A_MEMBER' });
-    g.memberOrgIds = g.memberOrgIds.filter((id) => id !== req.org.id);
-    g.adminOrgIds = g.adminOrgIds.filter((id) => id !== req.org.id);
-    // Departure: grants in either direction that relied on this group die now.
-    let killed = 0;
-    for (const gr of db.groupGrants) {
-      if (gr.revokedAt) continue;
-      const involved = gr.fromOrgId === req.org.id || gr.toOrgIds.includes(req.org.id);
-      if (involved && !sameGroupLive(gr.fromOrgId, gr.toOrgIds[0])) { gr.revokedAt = Date.now(); gr.revokeReason = 'group_departure'; killed++; }
-    }
-    persistNow();
+    // Departure: grants in either direction whose owner no longer shares a group with any of their recipients end now,
+    // in the same unit as the departure. (A grant whose other recipients still share a group stays live for them; the
+    // shared read re-checks membership for every reader.)
+    const killed = unit(() => {
+      groups.groups.leave(g.id, req.org.id);
+      return groups.grants.endUnshared(req.org.id, Date.now());
+    });
     res.json({ left: true, grantsEnded: killed, note: 'Your records stay yours — leaving removes group access in both directions, never ownership.' });
   });
 
   // Group templates: the admin org designates shared assessment templates.
   orgRouter.post('/groups/:id/templates', (req, res) => {
     if (!requireLead(req, res)) return;
-    const g = db.groups.find((x) => x.id === req.params.id);
-    if (!g || !isGroupAdmin(g, req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
-    const t = ctx.scoutingReads.templates.currentById(req.body?.templateId);
+    const g = G.byId(req.params.id);
+    if (!g || !g.adminOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
+    const t = typeof req.body?.templateId === 'string' ? ctx.scoutingReads.templates.currentById(req.body.templateId) : null;
     if (!t) return res.status(404).json({ error: 'TEMPLATE_NOT_FOUND' });
-    if (!g.sharedTemplateIds.includes(t.id)) g.sharedTemplateIds.push(t.id);
-    persistNow();
-    res.json({ group: g });
+    if (!g.sharedTemplateIds.includes(t.id) && g.sharedTemplateIds.length >= L.templates) return res.status(409).json({ error: 'GROUP_LIMIT', message: `A group shares at most ${L.templates} templates.` });
+    res.json({ group: groupView(groups.groups.shareTemplate(g.id, t.id)) });
   });
 
   orgRouter.post('/groups/:id/programmes', (req, res) => {
     if (!requireLead(req, res)) return;
-    const g = db.groups.find((x) => x.id === req.params.id);
-    if (!g || !isGroupAdmin(g, req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
-    g.programmes.push({ id: nextId('pgm'), name: String(req.body?.name ?? 'Programme').slice(0, 100), region: String(req.body?.region ?? '').slice(0, 80) || null, createdAt: Date.now() });
-    persistNow();
-    res.status(201).json({ group: g });
+    const g = G.byId(req.params.id);
+    if (!g || !g.adminOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
+    const { name = null, region = null } = req.body ?? {};
+    if (name !== null && (typeof name !== 'string' || !name.trim() || name.length > L.programmeName)) return fieldInvalid(res, 'name', `A programme name is text of 1 to ${L.programmeName} characters.`);
+    if (region !== null && (typeof region !== 'string' || region.length > L.region)) return fieldInvalid(res, 'region', `A region is text of at most ${L.region} characters.`);
+    if (g.programmes.length >= L.programmes) return res.status(409).json({ error: 'GROUP_LIMIT', message: `A group holds at most ${L.programmes} programmes.` });
+    const next = unit(() => groups.groups.addProgramme(g.id, { id: nextId('pgm'), name: name ?? 'Programme', region: region?.trim() ? region : null, createdAt: Date.now() }));
+    res.status(201).json({ group: groupView(next) });
   });
 
   // --------------------------------------------------------------- grants
-  const RESOURCE_KINDS = ['shortlist', 'case', 'assessment'];
-
   function resourceOwnerOk(kind, id, orgId) {
+    if (typeof id !== 'string') return false;
     if (kind === 'shortlist') return id === '*'; // "my shortlist" as a whole
     if (kind === 'case') return ctx.recruitmentReads.cases.byId(id)?.orgId === orgId;
     if (kind === 'assessment') { const a = ctx.scoutingReads.assessments.byId(id); return !!a && a.orgId === orgId && a.state !== 'draft'; }
     return false;
+  }
+  /** `toOrgIds`: absent is none; otherwise a list of organisation ids. The members other than the sharer, once each. */
+  function recipientsOf(res, g, toOrgIds, orgId) {
+    if (toOrgIds === undefined || toOrgIds === null) return [];
+    if (!Array.isArray(toOrgIds) || toOrgIds.length > L.members || !toOrgIds.every((id) => typeof id === 'string')) {
+      fieldInvalid(res, 'toOrgIds', `toOrgIds is a list of at most ${L.members} organisation ids.`);
+      return null;
+    }
+    return [...new Set(toOrgIds)].filter((id) => g.memberOrgIds.includes(id) && id !== orgId);
   }
 
   // What WOULD the recipient see? Same code path as the real read — the
@@ -156,13 +190,14 @@ export function registerGroups(ctx) {
 
   orgRouter.post('/groups/:id/grants/preview', (req, res) => {
     if (!requireLead(req, res)) return;
-    const g = db.groups.find((x) => x.id === req.params.id);
+    const g = G.byId(req.params.id);
     if (!g || !g.memberOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'NOT_A_MEMBER' });
     const { resourceKind, resourceId, toOrgIds } = req.body ?? {};
-    if (!RESOURCE_KINDS.includes(resourceKind) || !resourceOwnerOk(resourceKind, resourceId, req.org.id)) {
+    if (!GRANT_RESOURCE_KINDS.includes(resourceKind) || !resourceOwnerOk(resourceKind, resourceId, req.org.id)) {
       return res.status(400).json({ error: 'RESOURCE_INVALID', message: 'You can only share resources your organisation owns.' });
     }
-    const recipients = (Array.isArray(toOrgIds) ? toOrgIds : []).filter((id) => g.memberOrgIds.includes(id) && id !== req.org.id);
+    const recipients = recipientsOf(res, g, toOrgIds, req.org.id);
+    if (!recipients) return;
     res.json({
       recipients: recipients.map((id) => {
         const org = byId.org(id);
@@ -174,72 +209,86 @@ export function registerGroups(ctx) {
 
   orgRouter.post('/groups/:id/grants', (req, res) => {
     if (!requireLead(req, res)) return;
-    const g = db.groups.find((x) => x.id === req.params.id);
+    const g = G.byId(req.params.id);
     if (!g || !g.memberOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'NOT_A_MEMBER' });
     const { resourceKind, resourceId, toOrgIds, expiresDays } = req.body ?? {};
-    if (!RESOURCE_KINDS.includes(resourceKind) || !resourceOwnerOk(resourceKind, resourceId, req.org.id)) {
+    if (!GRANT_RESOURCE_KINDS.includes(resourceKind) || !resourceOwnerOk(resourceKind, resourceId, req.org.id)) {
       return res.status(400).json({ error: 'RESOURCE_INVALID', message: 'You can only share resources your organisation owns.' });
     }
-    const recipients = (Array.isArray(toOrgIds) ? toOrgIds : []).filter((id) => g.memberOrgIds.includes(id) && id !== req.org.id && byId.org(id)?.type !== 'agency');
+    const days = typeExpiresDays(expiresDays);
+    if (!days.ok) return fieldInvalid(res, 'expiresDays', `expiresDays is a whole number from ${L.expiresDays[0]} to ${L.expiresDays[1]}.`);
+    const listed = recipientsOf(res, g, toOrgIds, req.org.id);
+    if (!listed) return;
+    const recipients = listed.filter((id) => byId.org(id)?.type !== 'agency');
     if (!recipients.length) return res.status(400).json({ error: 'RECIPIENTS_REQUIRED', message: 'Name at least one other member organisation.' });
-    const grant = {
-      id: nextId('gnt'), groupId: g.id, fromOrgId: req.org.id, fromOrgName: req.org.name,
-      toOrgIds: recipients, resourceKind, resourceId: String(resourceId),
-      expiresAt: Date.now() + Math.min(Math.max(Number(expiresDays) || 30, 1), 180) * 86_400_000,
-      revokedAt: null, createdBy: req.orgUser.name, createdAt: Date.now(),
-    };
-    db.groupGrants.push(grant);
-    for (const id of recipients) {
-      const u = db.users.find((x) => x.orgId === id && !x.removedAt);
-      if (u) notify({ kind: 'org_user', id: u.id }, 'group', `📂 ${req.org.name} shared a ${resourceKind} with your club in “${g.name}”.`, grant.id);
-    }
-    persistNow();
-    res.status(201).json({ grant });
+    const at = Date.now();
+    // The grant and its notifications are one unit.
+    const grant = unit(() => {
+      const out = groups.grants.create({
+        id: nextId('gnt'), groupId: g.id, fromOrgId: req.org.id, fromOrgName: req.org.name,
+        toOrgIds: recipients, resourceKind, resourceId, expiresAt: grantExpiry(at, days.value),
+        revokedAt: null, revokeReason: null, createdBy: req.orgUser.name ?? null, createdAt: at,
+      });
+      for (const id of recipients) {
+        const u = leadOf(id);
+        if (u) notify({ kind: 'org_user', id: u.id }, 'group', `📂 ${req.org.name} shared a ${resourceKind} with your club in “${g.name}”.`, out.id);
+      }
+      return out;
+    });
+    res.status(201).json({ grant: grantView(grant) });
   });
 
+  // The grants the organisation gave, newest first, paged by cursor (`nextCursor` pages `given`), and the grants it
+  // can read now (live, and the owner still shares a group with it).
   orgRouter.get('/grants', (req, res) => {
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
     const now = Date.now();
-    const live = (gr) => !gr.revokedAt && gr.expiresAt > now;
+    const given = groupReads.grants.pageGiven(req.org.id, page);
     res.json({
-      given: db.groupGrants.filter((gr) => gr.fromOrgId === req.org.id).map((gr) => ({ ...gr, live: live(gr) })),
-      received: db.groupGrants.filter((gr) => gr.toOrgIds.includes(req.org.id) && live(gr) && sameGroupLive(gr.fromOrgId, req.org.id))
+      given: given.items.map((gr) => ({ ...grantView(gr), live: !gr.revokedAt && gr.expiresAt > now })),
+      nextCursor: given.nextCursor,
+      received: groupReads.grants.liveReceived(req.org.id, now)
         .map((gr) => ({ id: gr.id, fromOrgName: gr.fromOrgName, resourceKind: gr.resourceKind, expiresAt: gr.expiresAt })),
     });
   });
 
+  // How many grants the organisation gave, and how many it can read now (the Network screen's count).
+  orgRouter.get('/grants/counts', (req, res) => res.json(groupReads.grants.countsFor(req.org.id, Date.now())));
+
   orgRouter.post('/grants/:id/revoke', (req, res) => {
     if (!requireLead(req, res)) return;
-    const gr = db.groupGrants.find((x) => x.id === req.params.id && x.fromOrgId === req.org.id);
+    const gr = groupReads.grants.givenBy(req.org.id, req.params.id);
     if (!gr) return res.status(404).json({ error: 'GRANT_NOT_FOUND' });
-    if (!gr.revokedAt) { gr.revokedAt = Date.now(); gr.revokeReason = 'revoked_by_owner'; persistNow(); }
-    res.json({ grant: gr, note: 'Effective immediately: the shared read, media entitlements and event delivery all re-check the grant live.' });
+    const next = groups.grants.revoke(gr.id, { at: Date.now(), reason: 'revoked_by_owner' });
+    res.json({ grant: grantView(next), note: 'Effective immediately: the shared read, media entitlements and event delivery all re-check the grant live.' });
   });
 
   // The shared read — every condition of the intersection, evaluated NOW.
   orgRouter.get('/shared/:grantId', (req, res) => {
-    const gr = db.groupGrants.find((x) => x.id === req.params.grantId);
+    const gr = groupReads.grants.byId(req.params.grantId);
     if (!gr || !gr.toOrgIds.includes(req.org.id)) return res.status(404).json({ error: 'GRANT_NOT_FOUND' });
     if (gr.revokedAt || gr.expiresAt <= Date.now()) return res.status(403).json({ error: 'GRANT_ENDED', message: 'This share was revoked or expired.' });
-    if (!sameGroupLive(gr.fromOrgId, req.org.id)) return res.status(403).json({ error: 'GROUP_MEMBERSHIP_ENDED', message: 'One of the organisations left the shared workspace.' });
+    if (!G.shareAGroup(gr.fromOrgId, req.org.id)) return res.status(403).json({ error: 'GROUP_MEMBERSHIP_ENDED', message: 'One of the organisations left the shared workspace.' });
     res.json({ grantId: gr.id, from: gr.fromOrgName, resource: resourceViewFor(gr, req.org) });
   });
 
   // Aggregate reporting for the admin org — n<3 suppression everywhere.
   orgRouter.get('/groups/:id/report', (req, res) => {
     if (!requireLead(req, res)) return;
-    const g = db.groups.find((x) => x.id === req.params.id);
-    if (!g || !isGroupAdmin(g, req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
+    const g = G.byId(req.params.id);
+    if (!g || !g.adminOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
     const memberRows = g.memberOrgIds.map((orgId) => {
       const org = byId.org(orgId);
       const assessments = ctx.scoutingReads.assessments.forOrg(orgId).filter((a) => a.state !== 'draft').length;
       const signings = reads.signings.countForOrg(orgId);
       return { orgId, orgName: org?.name, assessments: suppress(assessments) ? '<3' : assessments, signings: suppress(signings) ? '<3' : signings };
     });
-    const grants = db.groupGrants.filter((gr) => gr.groupId === g.id);
+    const sharing = groupReads.grants.countsForGroup(g.id, Date.now());
     res.json({
       group: { id: g.id, name: g.name, members: g.memberOrgIds.length },
       activity: memberRows,
-      sharing: { grantsCreated: grants.length, live: grants.filter((gr) => !gr.revokedAt && gr.expiresAt > Date.now()).length },
+      sharing: { grantsCreated: sharing.created, live: sharing.live },
       note: 'Counts under 3 are suppressed. This report contains NO player-level data — player records stay inside each member club\'s own permissions.',
     });
   });

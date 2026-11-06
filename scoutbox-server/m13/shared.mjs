@@ -15,8 +15,7 @@ export function migrateM13(db, players) {
   // F10 adult representation (the legacy lane): removed in S11a; agent relationships are repositories/agentCore.mjs.
   // F4–F7 exposure, review-later, evidence suggestions, calibration, fixtures and coverage: tables of
   // repositories/insightCoverage.mjs (S12d), read through insightReads.
-  db.groups ??= [];               // F8 — parent organisations / federations
-  db.groupGrants ??= [];          // F8 — explicit, expiring, revocable sharing grants
+  // F8 group workspaces and group grants: tables of repositories/groups.mjs (S13c), read through groupReads.
   db.dispatches ??= [];           // F11 — per-channel delivery records for notifications (S7b: a table; attachDataLayer replaces this container with the repository's read-only view before m13 registers)
   db.deliveryCallbacksSeen ??= [];// F11 — processed provider callback ids (idempotency)
   // F12 staff invites, SSO configurations and states, support tickets and access grants: tables of
@@ -179,20 +178,6 @@ export function buildSharedM13(ctx) {
   // ----- finance-visible roles (F9): the lead tier plus finance roles (roles.mjs)
   const canViewFinance = isFinanceUser;
 
-  // ----- group grant evaluation (F8). THE rule: effective permission is the
-  // INTERSECTION of membership ∧ live grant ∧ resource permission ∧ current
-  // player eligibility (visibleToOrg for the RECEIVING org) ∧ consent.
-  function activeGrant(fromOrgId, toOrgId, resourceKind, resourceId, now = Date.now()) {
-    return db.groupGrants.find((g) =>
-      g.fromOrgId === fromOrgId && !g.revokedAt && (!g.expiresAt || g.expiresAt > now)
-      && g.resourceKind === resourceKind && (g.resourceId === resourceId || g.resourceId === '*')
-      && (g.toOrgIds.includes(toOrgId))
-      && sameGroupLive(fromOrgId, toOrgId)) ?? null;
-  }
-  function sameGroupLive(orgA, orgB) {
-    return db.groups.some((grp) => grp.memberOrgIds.includes(orgA) && grp.memberOrgIds.includes(orgB));
-  }
-
   // ----- append-only history, same shape m12 records use.
   const histAppend = (record, byKind, byId, byName, action, detail = null) => {
     record.history ??= [];
@@ -219,7 +204,7 @@ export function buildSharedM13(ctx) {
     suppress, SUPPRESS_MIN,
     signBody, timingSafeEq, webhookUrlProblem,
     slotsOverlap, slotToUtcRange, tzOffsetMinutes, coarseArea,
-    canViewFinance, activeGrant, sameGroupLive,
+    canViewFinance,
     b32encode, b32decode, hotp, totp, totpValid,
     isAdult, ageOn, adultAgeFor, visibleToOrg, haversineKm,
   };

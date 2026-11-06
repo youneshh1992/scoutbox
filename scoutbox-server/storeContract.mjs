@@ -105,8 +105,8 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // evidence, coachAffiliations, squadInvites: never a db.* read since S9a — typed tables (migration 0019), read through
   // repositories/scoutingEvidence.mjs (scoutingReads). db.<name> throws.
   friendlies: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
-  groupGrants: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  groups: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
+  // groups, groupGrants: never a db.* read since S13c — typed tables (migration 0036), read through
+  // repositories/groups.mjs (groupReads). Each db.* name throws; migrateM13 no longer creates them.
   guardians: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   idvQueue: { guarantee: 'migration', owner: 'core', reason: 'guardian identity-verification queue; was created by ??= inside a request handler, so it existed only after the first write; since S6b a read-only view over the idv_queue table, written only through the safetyAudit repository (Q4b: every entry names an existing guardian, checked in code)' },
   invoices: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },

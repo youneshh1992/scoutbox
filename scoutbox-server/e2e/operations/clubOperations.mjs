@@ -727,6 +727,77 @@ section('F8 — group workspaces');
   ok(r.status === 403, 'post-departure fetch denied');
 }
 
+// S13c: groups and group grants are typed tables — junk is refused naming the field (not clamped, cut off or turned
+// into text), lists page by cursor, and a departure ends only the grants whose owner shares no group with any
+// recipient.
+section('S13c — group workspaces as tables');
+{
+  const post = (url, body) => fetch(`${BASE}${url}`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (x) => ({ status: x.status, body: await x.json() }));
+  let r = await post('/admin/groups', { name: 42, adminOrgId: 'org-eastport' });
+  ok(r.status === 400 && r.body.field === 'name', 'a group name that is not text is refused, naming the field (it crashed the route)');
+  r = await post('/admin/groups', { name: 'x'.repeat(101), adminOrgId: 'org-eastport' });
+  ok(r.status === 400 && r.body.field === 'name', 'an over-long group name is refused (it was cut off)');
+  r = await post('/admin/groups', { name: 'Agency-led group', adminOrgId: 'org-northstar' });
+  ok(r.status === 403 && r.body.error === 'AGENCIES_EXCLUDED', 'an agency cannot administer a group either');
+  r = await post('/admin/groups', { name: 'Coast Partnership', adminOrgId: 'org-eastport' });
+  ok(r.status === 201 && JSON.stringify(Object.keys(r.body.group).sort()) === JSON.stringify(['adminOrgIds', 'createdAt', 'id', 'memberOrgIds', 'name', 'pendingInvites', 'programmes', 'sharedTemplateIds']), 'the group is answered from an allowlist');
+  const coast = r.body.group;
+
+  const harbour = (await j('POST', '/auth/org/login', { orgId: 'org-harbour', scoutName: 'Hal Harbour', role: 'Head of Recruitment' })).body;
+  for (const [org, tok] of [['org-hackneymarsh', hackney.token], ['org-harbour', harbour.token]]) {
+    r = await j('POST', `/org/groups/${coast.id}/invite`, { orgId: org }, maria.token);
+    ok(r.status === 201, `${org} invited`);
+    r = await j('POST', `/org/groups/${coast.id}/accept`, {}, tok);
+    ok(r.status === 200 && r.body.group.memberOrgIds.includes(org), `${org} joins`);
+  }
+  r = await j('POST', `/org/groups/${coast.id}/invite`, { orgId: 'org-harbour' }, maria.token);
+  ok(r.status === 409, 'a member cannot be invited again');
+
+  r = await j('POST', `/org/groups/${coast.id}/programmes`, { name: 'U14 pathway', region: 7 }, maria.token);
+  ok(r.status === 400 && r.body.field === 'region', 'a region that is not text is refused (it was turned into text)');
+  r = await j('POST', `/org/groups/${coast.id}/programmes`, { name: '   ' }, maria.token);
+  ok(r.status === 400 && r.body.field === 'name', 'a blank programme name is refused');
+  r = await j('POST', `/org/groups/${coast.id}/programmes`, { name: 'U14 pathway', region: 'Coast' }, maria.token);
+  ok(r.status === 201 && r.body.group.programmes.at(-1).name === 'U14 pathway' && r.body.group.programmes.at(-1).region === 'Coast', 'a programme is added');
+
+  const shareTo = (body) => j('POST', `/org/groups/${coast.id}/grants`, { resourceKind: 'shortlist', resourceId: '*', ...body }, maria.token);
+  r = await shareTo({ toOrgIds: ['org-hackneymarsh'], expiresDays: 0 });
+  ok(r.status === 400 && r.body.field === 'expiresDays', 'expiresDays out of range is refused (it was clamped)');
+  r = await shareTo({ toOrgIds: ['org-hackneymarsh'], expiresDays: '30' });
+  ok(r.status === 400 && r.body.field === 'expiresDays', 'expiresDays that is not a number is refused');
+  r = await shareTo({ toOrgIds: 'org-hackneymarsh' });
+  ok(r.status === 400 && r.body.field === 'toOrgIds', 'toOrgIds that is not a list is refused (it read as no recipients)');
+  r = await shareTo({ toOrgIds: ['org-harbour', 'org-hackneymarsh', 'org-harbour'] });
+  const both = r.body.grant;
+  ok(r.status === 201 && JSON.stringify(both.toOrgIds) === JSON.stringify(['org-harbour', 'org-hackneymarsh']) && both.expiresAt - both.createdAt === 30 * 86_400_000, 'a grant to two members (each once), 30 days by default');
+  r = await shareTo({ toOrgIds: ['org-harbour'] });
+  const harbourOnly = r.body.grant;
+
+  r = await j('GET', '/org/grants?limit=1', undefined, maria.token);
+  ok(r.status === 200 && r.body.given.length === 1 && r.body.given[0].id === harbourOnly.id && typeof r.body.nextCursor === 'string', 'the given grants page newest first by cursor');
+  const rest = await j('GET', `/org/grants?limit=100&cursor=${r.body.nextCursor}`, undefined, maria.token);
+  ok(rest.body.given.some((g) => g.id === both.id) && !rest.body.given.some((g) => g.id === harbourOnly.id), 'the next page continues where the first stopped');
+  r = await j('GET', '/org/grants?limit=abc', undefined, maria.token);
+  ok(r.status === 400 && r.body.error === 'PAGE_LIMIT_INVALID', 'a junk page limit is refused');
+  r = await j('GET', '/org/grants/counts', undefined, harbour.token);
+  ok(r.status === 200 && r.body.received === 2 && r.body.given === 0, 'the counts route counts what the organisation can read now');
+
+  // The first recipient of the two-recipient grant leaves: the grant stays live for the other one.
+  r = await j('POST', `/org/groups/${coast.id}/leave`, {}, harbour.token);
+  ok(r.status === 200 && r.body.grantsEnded === 1, 'leaving ends only the grant the leaver alone received');
+  r = await j('GET', `/org/shared/${both.id}`, undefined, hackney.token);
+  ok(r.status === 200, 'the grant whose first recipient left stays readable by its other recipient');
+  r = await j('GET', `/org/shared/${both.id}`, undefined, harbour.token);
+  ok(r.status === 403 && r.body.error === 'GROUP_MEMBERSHIP_ENDED', 'and the organisation that left cannot read it');
+  r = await j('GET', `/org/shared/${harbourOnly.id}`, undefined, harbour.token);
+  ok(r.status === 403 && r.body.error === 'GRANT_ENDED', 'the grant it alone received has ended');
+
+  r = await fetch(`${BASE}/admin/groups?limit=1`, { headers: A() }).then((x) => x.json());
+  ok(r.items.length === 1 && r.items[0].id === coast.id && typeof r.nextCursor === 'string', 'Trust & Safety pages the groups newest first by cursor');
+  r = await j('GET', '/org/audit/export', undefined, maria.token);
+  ok(r.body.grantsGiven.some((g) => g.id === both.id && g.revokedAt === null) && r.body.grantsGiven.every((g) => g.fromOrgId === 'org-eastport'), 'the audit export lists the grants the organisation gave');
+}
+
 // ================================================================ F9
 section('F9 — budget scenarios over the API');
 {

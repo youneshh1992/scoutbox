@@ -16,6 +16,7 @@ import { totpValid, b32encode, timingSafeEqStr } from '../../m13/shared.mjs';
 import { devLoginsEnabled } from '../platform/capabilities.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { ENTERPRISE_LIMITS, typeRefs } from '../../repositories/enterprise.mjs';
+import { grantView as grantExport } from '../groups/groups.mjs';
 
 // ---------------------------------------------------- request instrumentation
 // Exported separately so server.mjs can install it BEFORE all routes.
@@ -69,6 +70,7 @@ export function registerEnterprise(ctx) {
     storage, DATA_DIR, backupDatabase, unit, enterprise, enterpriseReads,
   } = ctx;
   if (!enterprise || !enterpriseReads) throw new TypeError('registerEnterprise needs the enterprise repository (ctx.enterprise, ctx.enterpriseReads)');
+  if (!ctx.groupReads) throw new TypeError('registerEnterprise needs groupReads (the audit export lists the group grants)');
   // S6b: an ops event is a row of ops_events (repositories/safetyAudit.mjs), staged into the persist() that follows each one; a bare context without the repository keeps the array push.
   const opsEvent = (row) => (safetyAudit ? safetyAudit.opsEvents.append(row) : db.opsEvents.push(row));
 
@@ -351,8 +353,8 @@ export function registerEnterprise(ctx) {
       ledger: db.ledger.filter((l) => l.orgId === orgId),
       caseHistories: ctx.recruitmentReads.cases.forOrg(orgId).map((c) => ({ id: c.id, playerId: c.playerId, history: c.history })),
       importHistories: ctx.integrationReads.batches.historiesForOrg(orgId),
-      grantsGiven: db.groupGrants.filter((g) => g.fromOrgId === orgId),
-      grantsReceived: db.groupGrants.filter((g) => g.toOrgIds?.includes(orgId)),
+      grantsGiven: ctx.groupReads.grants.allGivenBy(orgId).map(grantExport),
+      grantsReceived: ctx.groupReads.grants.allReceivedBy(orgId).map(grantExport),
       supportAccess: enterpriseReads.grants.forOrg(orgId),
     };
     opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'audit_export', detail: { orgId, by: req.orgUser.name } });

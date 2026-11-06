@@ -201,7 +201,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions, development, boxCam, discovery, insightCoverage, integrations, enterprise } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions, development, boxCam, discovery, insightCoverage, integrations, enterprise, groups } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -225,6 +225,7 @@ const boxCamReads = boxCam.reads;
 const discoveryReads = discovery.reads; // S12c: briefs, Nobody Missed reviews, Second Look items, watchlists and their transitions (queries only)
 const insightReads = insightCoverage.reads; // S12d: exposure, review-later, evidence suggestions, calibration and coverage (queries only)
 const enterpriseReads = enterprise.reads; // S13b: staff invites, SSO, support tickets and access grants (queries only)
+const groupReads = groups.reads; // S13c: group workspaces and group grants (queries only)
 const integrationReads = integrations.reads; // S13a: import batches, prospects, identity reviews, API keys, webhook endpoints and deliveries (queries only)
 const complianceReads = complianceRecords.reads; // S11b-2: contexts, evaluations, reviews and consents (queries only)
 // Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
@@ -4726,6 +4727,7 @@ const m13Ctx = registerM13({
   transitionsVouches, // S10c: transition cases, their grants and history are explicit repository writes
   insightCoverage, // S12d: exposure, deferrals, evidence suggestions, calibration and coverage are explicit repository writes
   enterprise, enterpriseReads, // S13b: staff invites, SSO, support tickets and support access are explicit repository writes
+  groups, groupReads, // S13c: group workspaces and group grants are explicit repository writes
   integrations, integrationReads, // S13a: imports, prospects, identity reviews, API keys and webhooks are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,

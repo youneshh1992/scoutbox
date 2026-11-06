@@ -252,8 +252,8 @@ them.
 | `importBatches` | persistent (PII rows) | 08 | `import_batches`, `import_batch_columns`, `import_batch_rows`, `import_batch_row_errors`, `import_batch_history`, `import_batch_created_prospects` | S13a (0034) |
 | `prospects` | persistent (one live per provider and external id) | 08 | `prospects` | S13a (0034) |
 | `identityReviews` | persistent (the record is its batch row's) | 08 | `identity_reviews` | S13a (0034) |
-| `groups` | persistent | 08 | `groups`, `group_admins`, `group_members`, `group_pending_invites`, `group_shared_templates`, `group_programmes` | S13 |
-| `groupGrants` | persistent | 08 | `group_grants`, `group_grant_recipients` | S13 |
+| `groups` | persistent (an admin is a flagged member row) | 08 | `groups`, `group_members`, `group_pending_invites`, `group_shared_templates`, `group_programmes` | S13c (0036) |
+| `groupGrants` | persistent | 08 | `group_grants`, `group_grant_recipients` | S13c (0036) |
 | `uploadSessions` | temporary | 08 | `upload_sessions`, `upload_session_chunks` (chunk bytes stay on disk) | S13 |
 | `savedSearches` | persistent | 08 | `saved_searches` | S13 |
 | `openTrials` | persistent | 08 | `open_trials`, `open_trial_positions`, `open_trial_registrations` | S13 |
