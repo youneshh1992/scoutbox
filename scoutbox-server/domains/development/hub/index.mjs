@@ -62,7 +62,7 @@ export const M21_STORES = Object.freeze([
 
 export function registerDevelopment(ctx) {
   const {
-    db, byId, nextId, notify, broadcast, findPlayer, orgCanSee, isLead,
+    db, byId, users, nextId, notify, broadcast, findPlayer, orgCanSee, isLead,
     orgRouter, playerRouter, guardianRouter, audit, isAdult, unit,
     recruitmentReads, scoutingReads, // §4.3 step 2: the trials (and, since S9a, the evidence) are read through SQL
     development, developmentReads, // S12a: the Hub's own records
@@ -144,7 +144,7 @@ export function registerDevelopment(ctx) {
     else if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'development', text);
   };
   const tellOrg = (orgId, text) => {
-    for (const u of db.users.filter((x) => x.orgId === orgId && !x.removedAt)) {
+    for (const u of users.forOrg(orgId, { active: true })) {
       notify({ kind: 'org_user', id: u.id }, 'development', text);
     }
   };
@@ -353,7 +353,7 @@ export function registerDevelopment(ctx) {
 
     let assignee = existing?.assignee ?? null;
     if (Object.prototype.hasOwnProperty.call(body ?? {}, 'assignee')) {
-      const a = canAssign({ assignee: body.assignee, plan, player, db });
+      const a = canAssign({ assignee: body.assignee, plan, player, db, staffById: (id) => byId.user(id) });
       if (a.error) return a;
       assignee = a.value;
     }

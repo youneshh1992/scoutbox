@@ -42,7 +42,7 @@ export function registerTransitions(ctx) {
   const clip = (name) => (typeof name === 'string' ? name.slice(0, L.name) : null);
   const entry = (actor, action, detail = null) => ({ id: nextId('aud'), at: Date.now(), byKind: actor.kind, byId: actor.id, byName: clip(actor.name), action, detail });
   const SYSTEM = { kind: 'system', id: 'sweep', name: 'system' };
-  const firstStaff = (orgId) => users.listByOrg(orgId).find((u) => !u.removedAt) ?? null;
+  const firstStaff = (orgId) => users.firstActive(orgId);
 
   // ------------------------------------------------------------ views (allowlists)
   const recipientView = (r) => ({ orgId: r.orgId, orgName: r.orgName, grantedAt: r.grantedAt, expiresAt: r.expiresAt, revokedAt: r.revokedAt, viewedAt: r.viewedAt });

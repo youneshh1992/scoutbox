@@ -14,6 +14,16 @@ fixed on 3 November; these were found while fixing it.
 
 ## Data model
 
+- **An invitation can bind to a colleague's existing account.** `/auth/org/accept-invite` binds the invite to
+  whichever account of the organisation has the invited name, sets that account's e-mail to the invite's and returns
+  a session without the account's MFA. So a lead who invites "Maria Keane" to their own address signs in as Maria.
+  Found in the S14f review (it predates S14f, which only extends it to removed accounts, whose restore the Founder
+  approved). The fix is probably that an invite under a current colleague's name is refused, or needs that person's
+  confirmation: a product question.
+- **Staff quiet hours are saved but never applied.** `PUT /org/delivery/prefs` stores a staff member's quiet hours,
+  but the delivery centre only honours the e-mail on/off switch for staff (players' and guardians' quiet hours do
+  work). Found in S14f; making it work is a feature, so it waits for the end of the freeze.
+
 - **Assessment templates are shared by every club.** When one club's lead publishes a new version of a position
   template (`POST /org/assessment-templates`), it becomes the current template for every club: other clubs' new
   assessments use it, though reports already written keep their version. Deferred until the migration is finished

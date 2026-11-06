@@ -1,7 +1,7 @@
 /**
  * Bearer sessions — the second live domain (plan step S2).
  *
- * Owns the `sessions` table and the `db.sessions` read-only view. A session
+ * Owns the `sessions` table (no mirror and no db.* view since S14f: every read is a query). A session
  * row never stores the bearer token: only `token_hash` (sha256 hex) is kept,
  * and a token is looked up by hashing what the client presents. The token
  * string exists exactly once outside the client: in the return value of
@@ -34,7 +34,6 @@
  * thing S2 removes).
  */
 import crypto from 'node:crypto';
-import { readonlyView, markView } from './readonly.mjs';
 import { migrationApplied } from './database.mjs';
 
 export const SESSION_KINDS = Object.freeze(['player', 'guardian', 'org', 'ts_reviewer']);
@@ -50,8 +49,8 @@ const KNOWN_KEYS = new Set(['token', 'tokenHash', 'sid', 'kind', 'refId', 'userI
  * Decide whether a snapshot session row can be stored, without coercing it.
  * Returns `{ ok: true, row }` with the row normalised to the table's fields
  * (`tokenHash`, `sid`, `kind`, `refId`, `userId`, `via`, `createdAt`), or
- * `{ ok: false, reason }`. `orgUserExists(id)` answers whether a staff row
- * exists. A missing `sid` is derived from the token hash (the server has
+ * `{ ok: false, reason }`. `orgUserExists(id, orgId)` answers whether that staff row exists in
+ * that organisation. A missing `sid` is derived from the token hash (the server has
  * backfilled sids at boot since M13; that is the one normalisation kept).
  */
 export function validateSessionRow(raw, { orgUserExists }) {
@@ -67,7 +66,7 @@ export function validateSessionRow(raw, { orgUserExists }) {
   if (raw.via !== undefined && raw.via !== null && !SESSION_VIAS.includes(raw.via)) return { ok: false, reason: `via "${String(raw.via)}" is not supported` };
   if (raw.kind === 'org') {
     if (typeof raw.userId !== 'string' || !raw.userId) return { ok: false, reason: 'an org session names no staff member' };
-    if (!orgUserExists(raw.userId)) return { ok: false, reason: `staff member ${raw.userId} does not exist` };
+    if (!orgUserExists(raw.userId, raw.refId)) return { ok: false, reason: `staff member ${raw.userId} does not exist in organisation ${raw.refId}` };
   } else if (raw.userId !== undefined && raw.userId !== null) {
     return { ok: false, reason: `a ${raw.kind} session must not name a staff member` };
   }
@@ -122,7 +121,7 @@ export const SESSIONS_TABLE = {
     if (!cutOver(sqlite)) return false;
     if (!Array.isArray(rows)) throw new TypeError('sessions: the snapshot "sessions" collection is not an array');
     const ttl = readTtl(sqlite);
-    const orgUserExists = (id) => !!sqlite.prepare('SELECT 1 FROM org_users WHERE id = ?').get(id);
+    const orgUserExists = (id, orgId) => !!sqlite.prepare('SELECT 1 FROM org_users WHERE id = ? AND org_id = ?').get(id, orgId);
     const valid = [];
     const seenHash = new Set();
     const seenSid = new Set();
@@ -153,7 +152,6 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
     insert: sqlite.prepare('INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
     listFor: sqlite.prepare(`${SELECT} WHERE kind = ? AND ref_id = ? ORDER BY created_at, sid`),
     listOrgUser: sqlite.prepare(`${SELECT} WHERE kind = 'org' AND org_user_id = ? ORDER BY created_at, sid`),
-    all: sqlite.prepare(`${SELECT} ORDER BY created_at, sid`),
     count: sqlite.prepare('SELECT COUNT(*) AS n FROM sessions'),
     delSid: sqlite.prepare('DELETE FROM sessions WHERE sid = ?'),
     delHash: sqlite.prepare('DELETE FROM sessions WHERE token_hash = ?'),
@@ -169,25 +167,10 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
 
   const live = (row, at = now()) => !!row && Number.isInteger(row.createdAt) && row.createdAt > 0 && at - row.createdAt < sessionTtlMs;
 
-  // db.sessions: a read-only view whose rows are read from the table on each
-  // access, with no token or hash. Routes do not iterate sessions any more;
-  // this exists so snapshot contracts and any straggling reader keep working.
-  const mirror = [];
-  const refresh = () => {
-    let rows;
-    try { rows = stmt.all.all(); } catch { return; } // connection closed (a tool serialising after close): keep the last rows
-    mirror.length = 0;
-    for (const r of rows) mirror.push(toRow(r));
-  };
-  const view = markView(new Proxy(readonlyView(mirror, 'a session'), { get(target, prop, receiver) { refresh(); return Reflect.get(target, prop, receiver); } }));
-  // Unit-of-work participation: this repository keeps no in-memory state of its
-  // own (every read is a query, `mirror` is refreshed on access), so a row
-  // written inside the store's unit of work is simply undone by the SQL
-  // rollback and nothing here needs restoring. It therefore needs no
-  // snapshotState/restoreState and its writes are allowed inside a unit.
+  // Every read is a query and every write a statement on the store's connection, so a write inside a unit of work
+  // joins it and is undone by its rollback; there is no in-memory state to restore.
 
   const repo = {
-    view,
     ttlMs: sessionTtlMs,
     isLive: live,
 
@@ -245,8 +228,8 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
     /**
      * Every stored row in snapshot form (with `tokenHash`, never a token), for
      * the admin backup: a restore of that snapshot keeps the sessions alive
-     * exactly as a copy of the database file would. The hash-free `view` is
-     * for routes and reports; it cannot round-trip, so it must not be exported.
+     * exactly as a copy of the database file would. The hash-free rows of the
+     * list queries cannot round-trip, so they must not be exported.
      */
     exportRows: () => SESSIONS_TABLE.read(sqlite) ?? [],
 

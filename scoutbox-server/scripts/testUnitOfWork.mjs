@@ -43,7 +43,7 @@ function boot(dir, seed = fixtureSeed()) {
   const store = openStore(dir, { tableBacked: TABLE_BACKED });
   const db = {};
   const layer = attachDataLayer({ db, seed, store, nextId, persist: () => {}, sessionTtlMs: TTL });
-  layer.users.insert({ orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment' });
+  layer.users.create({ orgId: 'org-pro', name: 'Maria', role: 'Head of Recruitment' });
   store.save();
   const raw = (sql, ...p) => store.sqlite.prepare(sql).get(...p);
   return { store, layer, db, raw, unit: (fn) => store.unitOfWork(fn) };
@@ -242,16 +242,25 @@ await test('unit of work: a nested unit joins the enclosing one (an inner failur
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await test('unit of work: participants — organisations and sessions take part; staff (org_users) writes are refused inside a unit because their bookkeeping is not integrated, and nothing of the attempt persists', () => {
+await test('unit of work: participants — organisations, staff (S14f) and sessions take part: a failure later in the unit leaves none of them; a unit that finishes commits them together', () => {
   const dir = tempDir('uow-parts'); const t = boot(dir);
   let err = null;
-  try { t.unit(() => { t.layer.orgs.insert({ id: 'org-x', name: 'X', type: 'club', plan: 'Pro' }); t.layer.users.insert({ orgId: 'org-pro', name: 'New Staff', role: 'Scout' }); }); } catch (e) { err = e; }
-  assert.match(err.message, /org_users .*unit of work|not integrated/);
+  try {
+    t.unit(() => {
+      t.layer.orgs.insert({ id: 'org-x', name: 'X', type: 'club', plan: 'Pro' });
+      const u = t.layer.users.create({ orgId: 'org-pro', name: 'New Staff', role: 'Scout' });
+      t.layer.sessions.create('org', 'org-pro', { userId: u.id });
+      assert.equal(t.layer.users.byOrgAndName('org-pro', 'new staff')?.id, u.id, 'a read inside the unit sees its write');
+      throw new Error('late failure');
+    });
+  } catch (e) { err = e; }
+  assert.match(err.message, /late failure/);
   assert.equal(t.layer.orgs.byId('org-x'), null); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-x'").n, 0);
-  assert.equal(t.raw('SELECT COUNT(*) AS n FROM org_users').n, 1); assert.equal(t.db.users.length, 1);
-  // Outside a unit, staff writes work as before (their own autocommit).
-  t.layer.users.insert({ orgId: 'org-pro', name: 'Later Staff', role: 'Scout' });
+  assert.equal(t.raw('SELECT COUNT(*) AS n FROM org_users').n, 1); assert.equal(t.layer.users.byOrgAndName('org-pro', 'New Staff'), null);
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'org'").n, 0);
+  const kept = t.unit(() => { const u = t.layer.users.create({ orgId: 'org-pro', name: 'Later Staff', role: 'Scout' }); t.layer.sessions.create('org', 'org-pro', { userId: u.id }); return u; });
   assert.equal(t.raw('SELECT COUNT(*) AS n FROM org_users').n, 2);
+  assert.equal(t.layer.sessions.listOrgUser(kept.id).length, 1);
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 

@@ -58,7 +58,7 @@ const ORGS = () => [
 /** A minimal player record migration 0005 accepts (dob and country are required; everything else is optional). */
 const PLAYER_1 = (name = 'P') => ({ id: 'pl-1', name, dob: '2001-01-01', country: 'GB', media: [] });
 const fixtureUsers = () => [
-  { id: 'usr-pro', orgId: 'org-pro', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1, mfa: { secretB32: 'S', enabledAt: 7, recoveryHashes: ['h1'] }, deliveryPrefs: { quietStart: '22:00' }, oddField: { kept: true } },
+  { id: 'usr-pro', orgId: 'org-pro', name: 'Maria Keane', role: 'Head of Recruitment', createdAt: 1, mfa: { secretB32: 'SECRETSECRETSECRET', enabledAt: 7, recoveryHashes: ['1'.repeat(64)] }, deliveryPrefs: { quietStart: '22:00', quietEnd: '07:00', channels: { email: false } } },
   { id: 'usr-grass', orgId: 'org-grass', name: 'Sam', role: 'Manager', createdAt: 2 },
   { id: 'usr-agency', orgId: 'org-agency', name: 'Ava', role: 'Agent', createdAt: 3 },
 ];
@@ -117,13 +117,13 @@ test('validation: unsupported records are refused with a reason and nothing is c
 });
 
 // ------------------------------------------------------------- the migration
-test('migration 0004 on a new database: org_users is rebuilt STRICT with the orgs foreign key, sessions still reference it, the first installation is pending, and a failure before commit leaves no trace', () => {
+test('migration 0004 on a new database: orgs is rebuilt while org_users (0001\'s final form since S14f) and sessions keep referencing it, the first installation is pending, and a failure before commit leaves no trace', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
   assert.ok(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran.includes(ORGS_CUTOVER_MIGRATION));
   const after = s.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql;
-  assert.match(after, /STRICT/); assert.match(after, /REFERENCES orgs\(id\)/); assert.match(after, /json_valid\(mfa_json\)/);
-  assert.deepEqual(s.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'org_users' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((x) => x.name), ['org_users_org', 'org_users_org_email', 'org_users_org_name', 'org_users_sso']);
-  assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE name = 'sessions'").get().sql, /REFERENCES org_users\(id\)/, 'sessions references org_users, not a temporary name');
+  assert.match(after, /STRICT/); assert.match(after, /REFERENCES orgs\(id\)/);
+  assert.deepEqual(s.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'org_users' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((x) => x.name), ['org_users_org', 'org_users_org_email', 'org_users_org_name', 'org_users_removed_by', 'org_users_sso']);
+  assert.match(s.prepare("SELECT sql FROM sqlite_master WHERE name = 'sessions'").get().sql, /REFERENCES org_users\(id, org_id\)/, 'sessions references org_users');
   assert.equal(s.prepare("SELECT value FROM meta WHERE key = 'orgsInit'").get().value, 'pending', 'a new database is a first installation');
   assert.equal(s.prepare('PRAGMA foreign_keys').get().foreign_keys, 1, 'foreign keys are back on after the rebuild');
   // The keys and checks are enforced.
@@ -131,10 +131,11 @@ test('migration 0004 on a new database: org_users is rebuilt STRICT with the org
   assert.equal(JSON.stringify(ORGS_TABLE.read(s)), JSON.stringify(ORGS()), 'records read back exactly as written');
   assert.equal(s.prepare("SELECT level FROM orgs WHERE id = 'org-agency'").get().level, null, 'the nullable level is stored as NULL');
   assert.equal(s.prepare("SELECT password_hash FROM orgs WHERE id = 'org-pro'").get().password_hash, 'scrypt$00$11');
-  assert.throws(() => s.prepare("INSERT INTO org_users (id, org_id, name) VALUES ('usr-x', 'org-none', 'X')").run(), /FOREIGN KEY/);
-  s.prepare("INSERT INTO org_users (id, org_id, name) VALUES ('usr-new', 'org-pro', 'New')").run();
+  assert.throws(() => s.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES ('usr-x', 'org-none', 'X', 'x', 'Scout', 1)").run(), /FOREIGN KEY/);
+  s.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES ('usr-new', 'org-pro', 'New', 'new', 'Scout', 1)").run();
   s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES ('h-new', 'sid-new', 'org', 'org-pro', 'usr-new', 1, 2)").run();
-  assert.throws(() => s.prepare("UPDATE org_users SET mfa_json = 'not json' WHERE id = 'usr-new'").run(), /CHECK/);
+  assert.throws(() => s.prepare("UPDATE org_users SET quiet_start = '25:00' WHERE id = 'usr-new'").run(), /CHECK/);
+  assert.throws(() => s.prepare("INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, created_at, expires_at) VALUES ('h-x', 'sid-x', 'org', 'org-grass', 'usr-new', 1, 2)").run(), /FOREIGN KEY/, 'an org session names staff of its own organisation');
   assert.throws(() => s.prepare("DELETE FROM orgs WHERE id = 'org-pro'").run(), /FOREIGN KEY/, 'an organisation with staff cannot be deleted (deletion policy is open question O2)');
   s.close();
   // Failure injection after the rebuild but before the commit.
@@ -146,7 +147,7 @@ test('migration 0004 on a new database: org_users is rebuilt STRICT with the org
   f = openRaw(dir);
   const exploding = { id: m0004.id, note: m0004.note, foreignKeysOff: true, up(sqlite, ctx) { m0004.up(sqlite, ctx); throw new Error('process died before commit'); } };
   assert.throws(() => runDataMigrations(f, [m0001, m0002, m0003, exploding], { context: { sessionTtlMs: TTL } }), /process died before commit/);
-  assert.ok(!/STRICT/.test(f.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql));
+  assert.ok(!/facets_json/.test(f.prepare("SELECT sql FROM sqlite_master WHERE name = 'orgs'").get().sql), 'the orgs rebuild was rolled back');
   assert.equal(f.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
   f.close();
   assert.equal(fileDigest(dir), before, 'nothing of the failed attempt reached the file');

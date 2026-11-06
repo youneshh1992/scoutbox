@@ -387,14 +387,16 @@ section('§5 — access is one table, and the table refuses');
     'a shared club plan is readable by the player and not editable');
 
   // ---- assignment
-  const dbUsers = { users: [{ id: 'u1', orgId: 'org-a' }, { id: 'u9', orgId: 'org-b' }, { id: 'u-gone', orgId: 'org-a', removedAt: NOW }], guardians: [{ id: 'g1', childIds: ['p2'] }] };
-  N(31, canAssign({ assignee: { kind: 'org_user', id: 'u9' }, plan: orgPlan(), player: adult, db: dbUsers }).error === 'ASSIGNEE_INVALID',
+  const staff = [{ id: 'u1', orgId: 'org-a', removedAt: null }, { id: 'u9', orgId: 'org-b', removedAt: null }, { id: 'u-gone', orgId: 'org-a', removedAt: NOW }];
+  const dbUsers = { guardians: [{ id: 'g1', childIds: ['p2'] }] };
+  const staffById = (id) => staff.find((u) => u.id === id) ?? null;
+  N(31, canAssign({ assignee: { kind: 'org_user', id: 'u9' }, plan: orgPlan(), player: adult, db: dbUsers, staffById }).error === 'ASSIGNEE_INVALID',
     'a colleague in another organisation cannot be assigned an action');
-  N(32, canAssign({ assignee: { kind: 'org_user', id: 'u-gone' }, plan: orgPlan(), player: adult, db: dbUsers }).error === 'ASSIGNEE_INVALID',
+  N(32, canAssign({ assignee: { kind: 'org_user', id: 'u-gone' }, plan: orgPlan(), player: adult, db: dbUsers, staffById }).error === 'ASSIGNEE_INVALID',
     'a removed member of staff is not an assignee');
-  ok(canAssign({ assignee: { kind: 'org_user', id: 'u1' }, plan: orgPlan(), player: adult, db: dbUsers }).value?.id === 'u1', 'current staff of the owning club can be assigned');
-  ok(canAssign({ assignee: { kind: 'player', id: 'p1' }, plan: orgPlan(), player: adult, db: dbUsers }).value?.kind === 'player', 'the player can be the assignee');
-  neg(canAssign({ assignee: { kind: 'guardian', id: 'g1' }, plan: { ...orgPlan(), playerId: 'p2' }, player: adult, db: dbUsers }).error === 'ASSIGNEE_INVALID',
+  ok(canAssign({ assignee: { kind: 'org_user', id: 'u1' }, plan: orgPlan(), player: adult, db: dbUsers, staffById }).value?.id === 'u1', 'current staff of the owning club can be assigned');
+  ok(canAssign({ assignee: { kind: 'player', id: 'p1' }, plan: orgPlan(), player: adult, db: dbUsers, staffById }).value?.kind === 'player', 'the player can be the assignee');
+  neg(canAssign({ assignee: { kind: 'guardian', id: 'g1' }, plan: { ...orgPlan(), playerId: 'p2' }, player: adult, db: dbUsers, staffById }).error === 'ASSIGNEE_INVALID',
     'a guardian cannot be assigned an adult player’s actions');
 
   // ---- the review view strips by capability, once

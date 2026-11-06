@@ -252,7 +252,7 @@ function boot(dir, { players = [], guardians = [], trialList = [] } = {}) {
   const layer = attachDataLayer({ db, seed: baseSeed(clone(players), clone(guardians), clone(trialList)), store, nextId, sessionTtlMs: TTL, now: () => NOW });
   // S8a: the trials are rows of `trials` and the repository never imports from memory — the fixture's trials enter through it (the identity initialisation above reconciled the players' copies against the same in-memory list)
   // The reports' scout (usr-1): a staff row the requests reference (S14a: the data layer no longer imports a staff list).
-  store.sqlite.prepare("INSERT INTO org_users (id, org_id, name, role, created_at) VALUES ('usr-1', 'org-pro', 'Maria', 'Head of Recruitment', 1)").run();
+  store.sqlite.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES ('usr-1', 'org-pro', 'Maria', 'maria', 'Head of Recruitment', 1)").run();
   for (const x of clone(trialList)) { layer.recruitment.requests.create(requestOf(x.report)); layer.recruitment.trials.create(x); }
   return wire({ store, layer, db });
 }

@@ -51,7 +51,7 @@ import {
 
 export function registerIntegration(ctx) {
   const {
-    db, orgRouter, playerRouter, nextId, persistNow, notify, broadcast,
+    db, byId, orgRouter, playerRouter, nextId, persistNow, notify, broadcast,
     findPlayer, isAdult, isBlocked, orgCanSee, checkEligibility, distanceBand,
     agent, compliance, rateLimit,
     agentCore, unit, // S11a: an opportunity share is a row of its agreement, written by agreements.update in a unit
@@ -89,7 +89,7 @@ export function registerIntegration(ctx) {
     return k.key;
   };
   const agentDisplayName = (userId) => agent?.profileOf?.(userId)?.displayName
-    ?? (db.users ?? []).find((u) => u && u.id === userId)?.name ?? null;
+    ?? byId.user(userId)?.name ?? null;
 
   /**
    * The case, through M17's own concealing lookup and M17's own role ranking —
@@ -267,7 +267,7 @@ export function registerIntegration(ctx) {
     const decision = decide({ surface: 'club_agent_presence', clientId: player.id, agentUserId: agreement.agentUserId, viewerOrgId, at });
     if (decision.allowed !== true) return null;
     const profile = agent?.profileOf ? agent.profileOf(agreement.agentUserId) : null;
-    const user = (db.users ?? []).find((u) => u && u.id === agreement.agentUserId) ?? null;
+    const user = byId.user(agreement.agentUserId);
     const org = (db.orgs ?? []).find((o) => o && o.id === agreement.agencyOrgId) ?? null;
     return clubAgentPresence({
       decision,

@@ -66,38 +66,49 @@ CREATE TABLE orgs (
 ) STRICT;
 CREATE INDEX orgs_type_level ON orgs (type, level);        -- /orgs directory filters (server.mjs:1683-1696, 4052)
 
--- source: db.users → LIVE TABLE since migration 0001 (repositories/users.mjs); shown here for completeness
--- owner/writer: repositories/users.mjs only
--- lifecycle: removed_at soft delete; rows are never deleted (history stays attributable)
--- mapping: id→id, orgId→org_id, name→name, role→role, email→email, ssoSubject→sso_subject, createdAt→created_at,
---   removedAt→removed_at, removedBy→removed_by, provenance→provenance, mfa→mfa_json (secretB32 is PLAIN today: open
---   question §9), deliveryPrefs→delivery_prefs_json. Typed columns only (the fidelity rule, 3 November 2026): an
---   unknown field is not stored (the blob import drops it and reports it with the row id), a wrong-typed value is
---   refused by name
--- notes: created non-STRICT and without a foreign key by migration 0001 (S0); REBUILT by migration 0004 (S3) in the
---   form below — STRICT, org_id REFERENCES orgs(id) (NO ACTION: an organisation with staff cannot be deleted; the
---   deletion policy itself is open question O2 and is not implemented), json_valid CHECKs on the two JSON columns.
---   The rebuild runs with foreign keys off (create new, copy, drop old, rename), so `sessions.org_user_id` keeps
---   referencing this table by name and no staff session is cascaded away; the migration runner verifies
---   PRAGMA foreign_key_check before committing. scripts/testSchemaDdl.mjs compares this definition with the migrations.
+-- source: the staff accounts (repositories/users.mjs)
+-- owner/writer: repositories/users.mjs only (explicit since S14f: create, update(id, draft => …), the MFA operations)
+-- lifecycle: removed_at soft delete (removed_by_id: who removed the account); rows are never deleted by a route, so
+--   history stays attributable; a re-invite restores a removed account (Founder, S14f)
+-- rules: staff sign in by name, so a name is unique in its organisation, case-insensitive, removed accounts included
+--   (name_key is the repository's lower-cased name: SQLite's lower() folds ASCII only); an e-mail is unique among the
+--   organisation's current staff; an SSO subject is unique in the organisation. (id, org_id) is unique so an org
+--   session names its staff member and organisation as one key. The TOTP secret cannot be hashed (codes are checked
+--   against it); it never appears on a record. Recovery codes are stored as sha256 hashes, one row each, and spent by
+--   deleting the row (a code works once).
+-- notes: created in this final form by migration 0001 (amended in place by S14f; 0004 no longer rebuilds it).
+--   scripts/testSchemaDdl.mjs compares this definition with the migrations.
 CREATE TABLE org_users (
-  id                  TEXT PRIMARY KEY,
-  org_id              TEXT NOT NULL REFERENCES orgs(id),  -- S3: real foreign key
-  name                TEXT NOT NULL,
-  role                TEXT,
-  email               TEXT,                               -- personal data
-  sso_subject         TEXT,
-  created_at          INTEGER,
-  removed_at          INTEGER,
-  removed_by          TEXT,                               -- snapshot (name)
-  provenance          TEXT,
-  mfa_json            TEXT CHECK (mfa_json IS NULL OR json_valid(mfa_json)),                       -- {secretB32, enabledAt, recoveryHashes[]}
-  delivery_prefs_json TEXT CHECK (delivery_prefs_json IS NULL OR json_valid(delivery_prefs_json))
+  id             TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 80),
+  org_id         TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  name           TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 120),
+  name_key       TEXT NOT NULL,
+  role           TEXT NOT NULL CHECK (length(role) BETWEEN 1 AND 60),
+  email          TEXT CHECK (email IS NULL OR length(email) BETWEEN 3 AND 254),
+  sso_subject    TEXT CHECK (sso_subject IS NULL OR length(sso_subject) BETWEEN 1 AND 255),
+  created_at     INTEGER NOT NULL,
+  removed_at     INTEGER,
+  removed_by_id  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  provenance     TEXT CHECK (provenance IS NULL OR provenance IN ('org_password_bootstrap')),
+  mfa_secret     TEXT CHECK (mfa_secret IS NULL OR length(mfa_secret) BETWEEN 16 AND 128),
+  mfa_enabled_at INTEGER,
+  quiet_start    TEXT CHECK (quiet_start IS NULL OR quiet_start GLOB '[01][0-9]:[0-5][0-9]' OR quiet_start GLOB '2[0-3]:[0-5][0-9]'),
+  quiet_end      TEXT CHECK (quiet_end IS NULL OR quiet_end GLOB '[01][0-9]:[0-5][0-9]' OR quiet_end GLOB '2[0-3]:[0-5][0-9]'),
+  email_enabled  INTEGER NOT NULL DEFAULT 1 CHECK (email_enabled IN (0, 1)),
+  UNIQUE (id, org_id),
+  CHECK (removed_by_id IS NULL OR removed_at IS NOT NULL),
+  CHECK (mfa_enabled_at IS NULL OR mfa_secret IS NOT NULL)
 ) STRICT;
 CREATE INDEX org_users_org ON org_users (org_id);
-CREATE INDEX org_users_org_name ON org_users (org_id, lower(name));
-CREATE INDEX org_users_org_email ON org_users (org_id, email);
-CREATE INDEX org_users_sso ON org_users (sso_subject);
+CREATE UNIQUE INDEX org_users_org_name ON org_users (org_id, name_key);
+CREATE UNIQUE INDEX org_users_org_email ON org_users (org_id, lower(email)) WHERE email IS NOT NULL AND removed_at IS NULL;
+CREATE UNIQUE INDEX org_users_sso ON org_users (org_id, sso_subject) WHERE sso_subject IS NOT NULL;
+CREATE INDEX org_users_removed_by ON org_users (removed_by_id) WHERE removed_by_id IS NOT NULL;
+CREATE TABLE org_user_recovery_codes (
+  org_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE CASCADE,
+  code_hash   TEXT NOT NULL CHECK (length(code_hash) = 64),
+  PRIMARY KEY (org_user_id, code_hash)
+) STRICT;
 
 -- source: db.guardians  (seed.mjs:92-113; signup server.mjs:1249; co-guardian 1588)
 -- owner/writer: server.mjs (core)
@@ -227,11 +238,13 @@ CREATE TABLE sessions (
   sid         TEXT NOT NULL UNIQUE,                       -- non-secret id bound into media URLs (server.mjs:356)
   kind        TEXT NOT NULL CHECK (kind IN ('player','guardian','org','ts_reviewer')),
   ref_id      TEXT NOT NULL,                              -- polymorphic on kind: players.id | guardians.id | orgs.id | ts_reviewers.id
-  org_user_id TEXT REFERENCES org_users(id) ON DELETE CASCADE,
+  org_user_id TEXT,                                       -- an org session's staff member (with ref_id, one key)
   via         TEXT CHECK (via IS NULL OR via IN ('sso')),
   created_at  INTEGER NOT NULL,
   expires_at  INTEGER NOT NULL,
-  CHECK ((kind = 'org') = (org_user_id IS NOT NULL))
+  CHECK ((kind = 'org') = (org_user_id IS NOT NULL)),
+  CHECK (expires_at > created_at),
+  FOREIGN KEY (org_user_id, ref_id) REFERENCES org_users(id, org_id) ON DELETE CASCADE  -- S14f: staff of the session's org
 ) STRICT;
 CREATE INDEX sessions_ref ON sessions (kind, ref_id);                        -- revoke by subject (server.mjs:3983; m25:150)
 CREATE INDEX sessions_org_user ON sessions (org_user_id);                    -- revokeOrgUserAccess (4298), own sessions (m13:203)

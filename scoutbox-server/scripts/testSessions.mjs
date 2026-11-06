@@ -39,7 +39,7 @@ const ORG_A = { id: 'org-a', name: 'Org A', type: 'club', level: 'pro', plan: 'P
 /** A minimal player record migration 0005 accepts (dob and country are required; everything else is optional). */
 const PLAYER_1 = (name = 'P') => ({ id: 'pl-1', name, dob: '2001-01-01', country: 'GB' });
 const seedOrg = (s, id = 'org-a') => s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES (?, 'Org', 'club', 'pro', 'Pro')").run(id);
-const seedUser = (s, id = 'usr-1', org = 'org-a') => { seedOrg(s, org); s.prepare("INSERT INTO org_users (id, org_id, name, role, created_at) VALUES (?, ?, 'Staff', 'Scout', 1)").run(id, org); };
+const seedUser = (s, id = 'usr-1', org = 'org-a') => { seedOrg(s, org); s.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES (?, ?, 'Staff', ?, 'Scout', 1)").run(id, org, `staff ${id}`); };
 
 /**
  * A fixture written in snapshot mode (staff with fixed ids included: S14a has no users import), then the server-mode
@@ -103,7 +103,7 @@ const liveRepo = (opts = {}) => {
   repo.attach();
   return { s, repo };
 };
-test('repository: create returns the token once; the table and the view hold only the hash-free row; lookup is by hash', () => {
+test('repository: create returns the token once; the table and the list queries hold only the hash-free row; lookup is by hash; there is no view (S14f)', () => {
   const { s, repo } = liveRepo();
   const { token, session } = repo.create('player', 'pl-1');
   assert.equal(token.length, 48); assert.equal(session.kind, 'player'); assert.equal(session.refId, 'pl-1'); assert.ok(session.sid);
@@ -111,10 +111,11 @@ test('repository: create returns the token once; the table and the view hold onl
   assert.deepEqual(repo.byToken(token), session);
   assert.equal(repo.byToken('not-a-token'), null); assert.equal(repo.byToken(''), null); assert.equal(repo.byToken(null), null);
   assert.deepEqual(repo.bySid(session.sid), session); assert.equal(repo.bySid('nope'), null);
-  const dump = JSON.stringify(s.prepare('SELECT * FROM sessions').all()) + JSON.stringify([...repo.view]);
+  const listed = JSON.stringify(repo.listFor('player', 'pl-1'));
+  const dump = JSON.stringify(s.prepare('SELECT * FROM sessions').all()) + listed;
   assert.ok(!dump.includes(token), 'the plain token appears nowhere');
-  assert.ok(JSON.stringify([...repo.view]).includes(session.sid) && !JSON.stringify([...repo.view]).includes(sha256(token)), 'the view carries neither token nor hash');
-  assert.throws(() => { repo.view.push({}); }, /repositories|read-only|a session/);
+  assert.ok(listed.includes(session.sid) && !listed.includes(sha256(token)), 'a list carries neither token nor hash');
+  assert.equal('view' in repo, false, 'no mirror and no view');
   assert.throws(() => repo.create('org', 'org-a', {}), /needs a staff member/);
   assert.throws(() => repo.create('wizard', 'x'), /not a session kind/);
   assert.throws(() => repo.create('player', 'pl-1', { via: 'carrier-pigeon' }), /not supported/);
@@ -243,8 +244,10 @@ test('snapshot mode: an invalid or conflicting session row rejects the whole sav
   attempt((s) => { s.db.sessions.push({ ...s.db.sessions[0], sid: 'sid-dup-hash' }); }, /duplicate token/);
   // A staff relationship the snapshot itself contradicts: usr-2 is gone from users but their session is still listed.
   attempt((s) => { s.db.users = s.db.users.filter((u) => u.id !== 'usr-2'); }, /staff member usr-2 does not exist|FOREIGN KEY/);
+  // S14f: an org session names staff of its own organisation.
+  attempt((s) => { s.db.sessions.push({ token: 'cross-org', sid: 'sid-cross', kind: 'org', refId: 'org-b', userId: 'usr-1', createdAt: Date.now() }); }, /staff member usr-1 does not exist in organisation org-b/);
   // A staff field of the wrong type refuses the whole snapshot write by code, id and field (typed columns, valid input only).
-  attempt((s) => { s.db.users[0].email = ['not', 'text']; }, /ORG_USERS_SNAPSHOT_INVALID: staff usr-\S+: email must be text/);
+  attempt((s) => { s.db.users[0].email = ['not', 'text']; }, /ORG_USERS_IMPORT_BLOCKED: .*staff usr-\S+: email must be text/);
   // Nothing was removed by any refused save; the plain error text names sids and reasons, never a token or hash.
   try { const s = tool.load(); s.db.sessions[0].createdAt = -1; tool.save(s); assert.fail('unreachable'); } catch (err) {
     assert.ok(!err.message.includes(a.token) && !err.message.includes(sha256(a.token)) && !err.message.includes(b.token), 'the error carries no token or hash');

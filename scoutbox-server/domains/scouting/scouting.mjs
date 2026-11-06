@@ -587,7 +587,7 @@ export function registerScouting(ctx) {
     // M23 P8.1 (D-P81-13): a task is given to someone in THIS organisation, as
     // the Room task route already requires; a foreign or unknown user id is refused.
     const assigneeRaw = req.body?.assigneeUserId ? String(req.body.assigneeUserId) : null;
-    if (assigneeRaw && !db.users.some((u) => u.id === assigneeRaw && u.orgId === req.org.id && !u.removedAt)) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
+    if (assigneeRaw && !byId.user(assigneeRaw, (u) => u.orgId === req.org.id && !u.removedAt)) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
     const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
     if (dueAt === undefined) return;
     const t = { id: nextId('tsk'), title: String(req.body?.title ?? '').slice(0, 200), dueAt, assigneeUserId: assigneeRaw, status: 'open', createdAt: Date.now() };
@@ -724,7 +724,7 @@ export function registerScouting(ctx) {
   // (sessions gone, SSE silenced, media re-checks fail) but the user ROW
   // stays so decisions and history remain attributable.
   orgRouter.get('/staff', (req, res) => {
-    res.json(db.users.filter((u) => u.orgId === req.org.id).map((u) => ({ id: u.id, name: u.name, role: u.role, lead: isLead(u), removedAt: u.removedAt ?? null })));
+    res.json(users.forOrg(req.org.id).map((u) => ({ id: u.id, name: u.name, role: u.role, lead: isLead(u), removedAt: u.removedAt ?? null })));
   });
 
   orgRouter.post('/staff/:userId/remove', (req, res) => {
@@ -733,10 +733,14 @@ export function registerScouting(ctx) {
     const u = byId.user(req.params.userId, (x) => x.orgId === req.org.id);
     if (!u) return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
     if (u.removedAt) return res.status(409).json({ error: 'ALREADY_REMOVED' });
-    users.update(u.id, { removedAt: Date.now(), removedBy: req.orgUser.name });
-    revokeOrgUserAccess(u.id);
-    ledgerAppend({ type: 'staff_removed', orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
-    res.json({ removed: { id: u.id, name: u.name, removedAt: u.removedAt }, note: 'Sessions revoked, event streams silenced, media links dead on next fetch. History stays attributed to the named person.' });
+    // One unit: the account, its sessions and the ledger row (the event streams close after the commit).
+    const removed = unit(() => {
+      const out = users.update(u.id, (d) => { d.removedAt = Date.now(); d.removedById = req.orgUser.id; });
+      revokeOrgUserAccess(u.id);
+      ledgerAppend({ type: 'staff_removed', orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
+      return out;
+    });
+    res.json({ removed: { id: removed.id, name: removed.name, removedAt: removed.removedAt }, note: 'Sessions revoked, event streams silenced, media links dead on next fetch. History stays attributed to the named person.' });
   });
 
   // ================================================================== F4

@@ -999,7 +999,7 @@ export function registerOrganisationVerification(ctx) {
         id: nextId('vroot'), status: 'collecting_evidence',
         orgName: String(b.orgName).trim().slice(0, L.orgName), orgType: b.orgType, country: String(b.country).slice(0, L.country),
         federation: String(b.federation ?? '').slice(0, L.federation) || null, website: String(b.website).slice(0, L.website),
-        domain, applicantName: String(b.applicantName).trim().slice(0, L.applicantName), applicantRole: String(b.applicantRole).slice(0, L.applicantRole),
+        domain, applicantName: String(b.applicantName).trim().slice(0, L.applicantName), applicantRole: String(b.applicantRole).trim().slice(0, L.applicantRole),
         workEmail: String(b.workEmail).toLowerCase(), officialContact: String(b.officialContact ?? '').slice(0, L.officialContact) || null,
         declarations: decl ? { authorised: decl.authorised } : null, checks, riskFlags: flags,
         reviewReasons: [], emailProved: false, existingOrgId: dupOrg?.id ?? null,

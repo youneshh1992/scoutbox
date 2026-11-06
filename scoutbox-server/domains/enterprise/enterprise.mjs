@@ -16,6 +16,7 @@ import { totpValid, b32encode, timingSafeEqStr } from '../../m13/shared.mjs';
 import { devLoginsEnabled } from '../platform/capabilities.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { ENTERPRISE_LIMITS, typeRefs } from '../../repositories/enterprise.mjs';
+import { STAFF_LIMITS } from '../../repositories/users.mjs';
 import { grantView as grantExport } from '../groups/groups.mjs';
 
 // ---------------------------------------------------- request instrumentation
@@ -96,7 +97,7 @@ export function registerEnterprise(ctx) {
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
     if (name.trim().length > L.inviteName) return fieldInvalid(res, 'name', `name is at most ${L.inviteName} characters.`);
     if (!(role === undefined || role === null || (typeof role === 'string' && role.trim() && role.trim().length <= L.role))) return fieldInvalid(res, 'role', `role is text of 1 to ${L.role} characters.`);
-    if (db.users.some((u) => u.orgId === req.org.id && !u.removedAt && u.email === email)) {
+    if (users.activeByEmail(req.org.id, email)) {
       return res.status(409).json({ error: 'ALREADY_STAFF', message: 'Someone with this email is already on your staff.' });
     }
     const code = crypto.randomBytes(18).toString('hex');
@@ -137,22 +138,47 @@ export function registerEnterprise(ctx) {
     if (inv.expiresAt < Date.now()) { enterprise.invites.expire(inv.id); return res.status(410).json({ error: 'INVITE_EXPIRED' }); }
     const org = byId.org(inv.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
-    // Staff writes cannot join a unit of work (migration.md §4.3): the account is created or bound first, then the invite
-    // is accepted naming it.
-    let user = db.users.find((u) => u.orgId === org.id && u.name.toLowerCase() === inv.name.toLowerCase() && !u.removedAt);
-    if (!user) user = users.insert({ orgId: org.id, name: scoutName?.trim() || inv.name, role: inv.role });
-    users.update(user.id, { email: inv.email }); // email is bound by the invite — the basis for SSO linking
-    enterprise.invites.accept(inv.id, { userId: user.id, at: Date.now() });
-    persistNow();
+    const name = scoutName?.trim() || inv.name;
+    if (name.length > STAFF_LIMITS.name) return fieldInvalid(res, 'scoutName', `scoutName is at most ${STAFF_LIMITS.name} characters.`);
+    // One unit: the account (bound, restored or created), its e-mail, the accepted invite and the session.
+    // Staff sign in by name, so a name belongs to one account of the organisation (removed accounts included):
+    // the invited name's account is bound when current and restored when removed (Founder, S14f), with the
+    // invite's role; any other name already taken is refused.
+    let out;
+    try {
+      out = unit(() => {
+        const at = Date.now();
+        const existing = users.byOrgAndName(org.id, inv.name);
+        let user;
+        if (existing) {
+          // A restored account starts without its old authenticator (the person may no longer have it); they set MFA up again.
+          if (existing.removedAt && existing.mfa) users.disableMfa(existing.id);
+          user = users.update(existing.id, (d) => {
+            if (d.removedAt) { d.removedAt = null; d.removedById = null; d.role = inv.role; }
+            d.email = inv.email; // email is bound by the invite — the basis for SSO linking
+          });
+        } else {
+          user = users.create({ orgId: org.id, name, role: inv.role, email: inv.email, createdAt: at });
+        }
+        enterprise.invites.accept(inv.id, { userId: user.id, at });
+        return { user, restored: !!existing?.removedAt, token: ctx.createSession('org', org.id, { userId: user.id }) };
+      });
+    } catch (e) {
+      if (e?.code === 'STAFF_NAME_TAKEN') return res.status(409).json({ error: 'STAFF_NAME_TAKEN', message: 'Someone with this name is already on the staff — sign in with a different name (a middle initial, for example).' });
+      if (e?.code === 'STAFF_EMAIL_TAKEN') return res.status(409).json({ error: 'ALREADY_STAFF', message: 'Someone with this email is already on the staff.' });
+      throw e;
+    }
+    const { user, restored } = out;
     res.status(201).json({
       userId: user.id, role: user.role, org: ctx.orgSafe(org),
-      token: ctx.createSession('org', org.id, { userId: user.id }),
+      token: out.token,
+      ...(restored ? { restored: true } : {}),
       onboarding: onboardingFor(org, user),
     });
   });
 
   function onboardingFor(org, user) {
-    const staff = db.users.filter((u) => u.orgId === org.id && !u.removedAt);
+    const staff = users.forOrg(org.id, { active: true });
     const leads = staff.filter((u) => isLead(u));
     const tasks = [
       { id: 'verify_org', label: 'Verify your organisation (company email domain)', done: !!org.verified, help: 'Trust & Safety reviews verification — required before any under-18 visibility.' },
@@ -188,8 +214,7 @@ export function registerEnterprise(ctx) {
   orgRouter.post('/mfa/setup', (req, res) => {
     if (req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_ALREADY_ENABLED' });
     const secretB32 = b32encode(crypto.randomBytes(20));
-    users.update(req.orgUser.id, { mfa: { secretB32, enabledAt: null, recoveryHashes: [] } });
-    persistNow();
+    users.startMfa(req.orgUser.id, secretB32);
     res.json({
       secret: secretB32,
       otpauth: `otpauth://totp/ScoutBox:${encodeURIComponent(req.orgUser.name)}?secret=${secretB32}&issuer=ScoutBox`,
@@ -198,23 +223,20 @@ export function registerEnterprise(ctx) {
   });
 
   orgRouter.post('/mfa/verify', (req, res) => {
-    const m = req.orgUser.mfa;
-    if (!m?.secretB32 || m.enabledAt) return res.status(409).json({ error: 'MFA_NOT_PENDING' });
+    const secret = users.mfaSecretOf(req.orgUser.id);
+    if (!secret || req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_NOT_PENDING' });
     if (mfaLocked(req.orgUser.id)) return res.status(429).json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
-    if (!totpValid(m.secretB32, req.body?.code)) { mfaFail(req.orgUser.id); return res.status(401).json({ error: 'MFA_CODE_WRONG' }); }
+    if (!totpValid(secret, req.body?.code)) { mfaFail(req.orgUser.id); return res.status(401).json({ error: 'MFA_CODE_WRONG' }); }
     const plain = Array.from({ length: 10 }, () => crypto.randomBytes(5).toString('hex'));
-    users.update(req.orgUser.id, { mfa: { ...m, enabledAt: Date.now(), recoveryHashes: plain.map((c) => crypto.createHash('sha256').update(c).digest('hex')) } });
-    persistNow();
+    users.enableMfa(req.orgUser.id, { at: Date.now(), recoveryHashes: plain.map((c) => crypto.createHash('sha256').update(c).digest('hex')) });
     res.json({ enabled: true, recoveryCodes: plain, note: 'Store these recovery codes now — each works once and they are never shown again.' });
   });
 
   orgRouter.post('/mfa/disable', (req, res) => {
     // Self-service disable requires a current valid code (proof of control).
-    const m = req.orgUser.mfa;
-    if (!m?.enabledAt) return res.status(409).json({ error: 'MFA_NOT_ENABLED' });
-    if (!totpValid(m.secretB32, req.body?.code)) return res.status(401).json({ error: 'MFA_CODE_WRONG' });
-    users.update(req.orgUser.id, { mfa: null });
-    persistNow();
+    if (!req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_NOT_ENABLED' });
+    if (!totpValid(users.mfaSecretOf(req.orgUser.id), req.body?.code)) return res.status(401).json({ error: 'MFA_CODE_WRONG' });
+    users.disableMfa(req.orgUser.id);
     res.json({ enabled: false });
   });
 
@@ -330,14 +352,21 @@ export function registerEnterprise(ctx) {
     // Account linking requires PROOF: the user's email was bound by an
     // accepted invite (or a previous linked login). An SSO assertion for an
     // email we never invited links nothing and creates nothing.
-    const user = db.users.find((u) => u.orgId === org.id && !u.removedAt && (u.ssoSubject === tok.sub || (u.email && u.email.toLowerCase() === String(tok.email).toLowerCase())));
+    // The subject's linked account first, then the current account bound to the e-mail.
+    const linked = typeof tok.sub === 'string' && tok.sub ? users.bySsoSubject(org.id, tok.sub) : null;
+    const user = linked && !linked.removedAt ? linked : users.activeByEmail(org.id, typeof tok.email === 'string' ? tok.email : null);
     if (!user) {
       return res.status(403).json({ error: 'SSO_NOT_LINKED', message: 'No staff account with this email exists in the organisation. Ask a lead for an invitation — SSO never creates accounts by itself.' });
     }
-    users.update(user.id, { ssoSubject: tok.sub }); // link (or confirm) sub ↔ user
+    if (user.ssoSubject !== tok.sub) {
+      // Link (or re-link) sub ↔ user. A subject still held by a removed account of the organisation is not moved.
+      try { users.update(user.id, (d) => { d.ssoSubject = tok.sub; }); } catch (e) {
+        if (e?.code === 'STAFF_SSO_TAKEN') return res.status(409).json({ error: 'SSO_LINK_CONFLICT', message: 'This identity-provider account is linked to another staff account of the organisation.' });
+        throw e;
+      }
+    }
     // SSO group claims NEVER grant ScoutBox privileges: role, verification and
     // safeguarding approval only change through ScoutBox's own flows.
-    persistNow();
     res.json({
       userId: user.id, role: user.role, org: ctx.orgSafe(org),
       token: ctx.createSession('org', org.id, { userId: user.id, via: 'sso' }),

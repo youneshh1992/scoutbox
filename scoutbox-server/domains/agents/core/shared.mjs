@@ -9,7 +9,7 @@
  * The frozen P5.6A contract this implements (M23_P56A_AGENT_AUTHORIZATION_CONTRACT.md,
  * M23_P56A_AGENT_STORE_PROPOSAL.md):
  *
- *   - the licensed natural person is a `db.users` row + an `agentProfiles`
+ *   - the licensed natural person is an `org_users` row + an `agentProfiles`
  *     row; the agency is a `db.orgs` row of type 'agency' and holds no licence;
  *   - membership is an `agencyAffiliations` row with a window and roles;
  *     membership alone authorises no regulated action;

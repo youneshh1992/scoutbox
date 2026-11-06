@@ -35,7 +35,7 @@ export function registerOperations(ctx) {
   const LIMITS = { progression: 200, endReason: 200, note: 300 };
   const tooLong = (res, field, value, max) => { if (value === undefined || value === null) return false; if (typeof value !== 'string') { res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be text.` }); return true; } if (value.length > max) { res.status(400).json({ error: 'FIELD_TOO_LONG', field, max, message: `Keep ${field} under ${max} characters.` }); return true; } return false; };
 
-  const usersOf = (orgId) => users.listByOrg(orgId).filter((u) => !u.removedAt);
+  const usersOf = (orgId) => users.forOrg(orgId, { active: true });
 
   // ================================================================== F11
   function scheduleFollowUps(signing) {

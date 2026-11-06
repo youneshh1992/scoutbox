@@ -145,7 +145,9 @@ registration → listen.
   - A nested unit joins the outer one. An inner failure fails the whole unit even if the
     caller catches it. Repository refusals do the same (participant failure).
   - Retry is explicit: rerun the whole operation.
-  - Staff (`org_users`) writes are refused inside a unit. Do them outside.
+  - Staff (`org_users`) writes and session writes join the unit like every other
+    explicit repository (S14f). Only the staged repositories (organisations, players,
+    guardians) still keep mirrors that the unit restores.
   - Expected negative results (no live code, nothing to delete) are return values and do
     not poison the unit.
 - **`store.afterCommit(fn)`** is the mechanism for side effects: broadcasts, pushes, SSE

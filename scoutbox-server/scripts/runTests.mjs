@@ -22,7 +22,7 @@ export const SUITES = [
   'testOutboxPushServer', 'testDispatchesServer', 'testSafetyAuditServer', 'testCoreIdentityServer',
   'testWriterAtomicity', 'testNotificationsServer', 'testOneTimeCodesServer', 'testRecruitmentServer',
   'testScoutingEvidence', 'testScoutingAssessments', 'testClubSetup', 'testOpportunitiesCampaigns', 'testVerification', 'testPassport', 'testTransitionsVouches', 'testAgentCore', 'testCompliancePolicies', 'testComplianceRecords', 'testAgentTransactions', 'testDevelopment', 'testBoxCam', 'testDiscovery', 'testInsightCoverage', 'testIntegrations', 'testEnterprise', 'testGroups', 'testGrassroots', 'testOperations', 'testRecruitmentContactsOffersServer', 'testChannelsServer', 'testRecruitmentCasesServer', 'testPlayerErasureServer',
-  'testBackup', 'testSessions', 'testOrgs', 'testIdentity',
+  'testBackup', 'testSessions', 'testStaff', 'testOrgs', 'testIdentity',
   'testRuntime', 'testTrust', 'testDataLayer', 'testCoreSchema', 'testUnitOfWork', 'testCoreIdentityMapping',
   'testIdentityRepositories', 'testCoreIdentityMigration', 'testMediaDeletions', 'testPlayerSubrecords',
   'testOneTimeCodes', 'testNotifications', 'testDispatches', 'testOutboxPush', 'testChannels', 'testSafetyAudit',

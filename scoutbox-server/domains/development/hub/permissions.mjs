@@ -169,7 +169,7 @@ function orgAccess(viewer, plan, player, { orgCanSee, isLead }) {
  * removed colleague is not an assignee, and a colleague in another club never
  * was one.
  */
-export function canAssign({ assignee, plan, player, db }) {
+export function canAssign({ assignee, plan, player, db, staffById = () => null }) {
   if (!assignee) return { value: null };
   const kind = String(assignee.kind ?? '');
 
@@ -187,8 +187,8 @@ export function canAssign({ assignee, plan, player, db }) {
 
   if (kind === 'org_user') {
     if (plan.owner.kind !== 'org') return { error: 'ASSIGNEE_INVALID', detail: 'Club staff can only be assigned actions on a club-owned plan.' };
-    const u = (db.users ?? []).find((x) => x.id === assignee.id && x.orgId === plan.owner.orgId && !x.removedAt);
-    if (!u) return { error: 'ASSIGNEE_INVALID', detail: 'That person is not current staff of the organisation that owns this plan.' };
+    const u = staffById(assignee.id);
+    if (!u || u.orgId !== plan.owner.orgId || u.removedAt) return { error: 'ASSIGNEE_INVALID', detail: 'That person is not current staff of the organisation that owns this plan.' };
     return { value: { kind: 'org_user', id: u.id, name: u.name } };
   }
 

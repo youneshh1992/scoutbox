@@ -493,13 +493,14 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
   Object.defineProperty(db, 'guardians', { value: identity.guardians.view, writable: false, configurable: false, enumerable: true });
   store.setSaveHook?.(identity.saveHook());
 
-  const users = createUsersRepository({ sqlite, nextId, log, warn, unit: store.unit });
+  // S14f: staff and sessions are explicit, with no mirror; their old collection names throw.
+  const users = createUsersRepository({ sqlite, nextId, log, now, unit: store.unit });
   const usersBoot = users.attach();
-  Object.defineProperty(db, 'users', { value: users.view, writable: false, configurable: false, enumerable: true });
+  retireCollection(db, 'users', 'users');
 
   const sessions = createSessionsRepository({ sqlite, sessionTtlMs, log });
   const sessionsBoot = sessions.attach();
-  Object.defineProperty(db, 'sessions', { value: sessions.view, writable: false, configurable: false, enumerable: true });
+  retireCollection(db, 'sessions', 'sessions');
 
   const mediaDeletions = createMediaDeletionsQueue({ sqlite, log, warn, now, liveRecords: () => identity.players.view });
 
@@ -715,8 +716,8 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
         orgs: { rows: orgs.count(), mode: 'live', transitional: 'facets_json (unknown fields; tactical, squad, lookingFor and federationCheck are clubSetup tables since S9c; verification is verification tables since S10a, its revokedAt the verificationRevokedAt column)' },
         players: { rows: identity.players.count(), retained: identity.players.retainedCount(), mode: 'live', transitional: 'facets_json (unknown fields and shape metadata)', subrecords: { mode: 'live', tables: identity.players.subrecordRows(), trialReports: 'derived from trials' }, deletion: 'S4b-R (migration 0014): an account deletion keeps the row as a retained record — id, deleted_at, birth_date, country; placeholders and NULL elsewhere; owned rows and links removed — served by no account reader; retained records travel in backups as playersRetained' },
         guardians: { rows: identity.guardians.count(), mode: 'live', links: identity.report().links, transitional: 'facets_json (coGuardians)' },
-        users: { rows: users.count(), mode: 'live' },
-        sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs },
+        users: { rows: users.count(), mode: 'live', writeMode: 'explicit: create, update(id, draft => …), startMfa / enableMfa / disableMfa and useRecoveryCode (a code is spent by deleting its row) write at once, inside the route\'s unit of work when one is open', readMode: 'SQL: byId, byOrgAndName, forOrg, firstActive, activeByEmail, bySsoSubject, mfaSecretOf; no mirror and no db.* view; fresh deep-frozen records without the MFA secret or recovery codes', typing: 'typed columns: name 1–120 and unique in its organisation (case-insensitive, removed accounts included), role 1–60, an e-mail unique among current staff, an SSO subject unique in its organisation, the provenance vocabulary, MFA and delivery preferences as columns, recovery-code hashes as child rows', references: 'org_id → orgs and removed_by_id → org_users (RESTRICT); recovery codes and sessions cascade with their account' },
+        sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs, readMode: 'SQL: byToken (by hash), bySid, listFor, listOrgUser; no db.* view', references: 'an org session\'s (org_user_id, ref_id) → org_users(id, org_id), cascading with the account' },
         oneTimeCodes: { mode: 'live', rows: codes.counts(), outstanding: codes.outstanding(), lifetimesMs: { emailChallenge: codes.emailChallengeTtlMs, pairingCode: codes.pairingCodeTtlMs }, maxEmailAttempts: codes.maxEmailAttempts },
         notifications: { mode: 'live', rows: notifications.counts(), pendingWrites: 0, coalesceMs: notifications.coalesceMs, writeMode: 'explicit: a notification is written in the unit of work of the action it announces (or its own transaction); its push and live event run after that commit; a coalesce, a read, an acknowledgment (with its dispatches) and the delivery marker (with the dispatches made) are single operations', readMode: 'SQL: byId, a person\'s feed (newest first), unread and awaiting-acknowledgment counts, the coalescing lookup, the undispatched notices, a person\'s preferences; no mirror and no db.* view', references: 'a staff audience is a RESTRICT key to org_users (generated staff_id); player and guardian ids carry no key (tolerant)' },
         dispatches: { mode: 'live', rows: dispatches.count(), attempts: dispatches.attemptCount(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: 0, writeMode: 'explicit: a notification\'s dispatches are created in one unit; each send (its attempt, status, outbox row, injected-failure use and, when the retries run out, the ops event and webhook) in one unit; a callback event with its seen marker in one unit; an acknowledgment with the notification\'s contract', notificationReference: 'indexed, no foreign key (a dispatch outlives its notification; retention is an open decision)', organisation: 'a staff audience\'s organisation, a deferred RESTRICT key' },

@@ -408,7 +408,7 @@ export function registerVerificationReview(ctx) {
     //  * with no candidates at all, the applicant is provisioned as a new
     //    user per the existing workflow — no guessing.
     const norm = (s) => String(s ?? '').trim().toLowerCase();
-    const activeUsers = existingOrg ? db.users.filter((u) => u.orgId === existingOrg.id && !u.removedAt) : [];
+    const activeUsers = existingOrg ? users.forOrg(existingOrg.id, { active: true }) : [];
     const emailMatches = r.emailProved ? activeUsers.filter((u) => u.email && u.email.toLowerCase() === r.workEmail) : [];
     const nameCandidates = activeUsers.filter((u) => norm(u.name) === norm(r.applicantName) && !emailMatches.includes(u));
     let user = null;
@@ -432,8 +432,18 @@ export function registerVerificationReview(ctx) {
         })),
       });
     }
-    // The organisation and the applicant's account first (staff writes cannot join a unit of work yet, users.mjs);
-    // then one unit: the claims, the verified flag, the domain, the root grant and the decision commit together.
+    // Staff sign in by name: a new account cannot take a name an account of the organisation already has
+    // (removed accounts included; Founder, S14f). Refused before anything is written.
+    if (!user && existingOrg && users.byOrgAndName(existingOrg.id, r.applicantName)) {
+      return res.status(409).json({ error: 'STAFF_NAME_TAKEN', message: 'An account of this organisation (current or removed) already has the applicant\'s name. Link it (linkUserId) if it is a current account and the applicant\'s; otherwise reject the request and ask the applicant to re-apply under a name that tells them apart.' });
+    }
+    // A work e-mail belongs to one current staff member of the organisation.
+    const emailHolder = existingOrg ? users.activeByEmail(existingOrg.id, r.workEmail) : null;
+    if (emailHolder && emailHolder.id !== user?.id && !user?.email) {
+      return res.status(409).json({ error: 'STAFF_EMAIL_TAKEN', message: 'Another current staff member of this organisation has the applicant\'s work e-mail. Link that account (linkUserId) if it is the applicant\'s.' });
+    }
+    // The organisation first (its repository is staged); then one unit: the applicant's account, the claims, the
+    // verified flag, the domain, the root grant and the decision commit together.
     let org = existingOrg;
     if (!org) {
       // S3: created through the organisations repository (a table row from the
@@ -446,12 +456,10 @@ export function registerVerificationReview(ctx) {
         ...(r.orgType === 'grassroots club' ? { location: { lat: 51.5, lng: -0.1, city: '' }, federationRef: r.federation ? { federation: r.federation, registrationId: 'pending' } : null } : {}),
       });
     }
-    if (!user) {
-      user = users.insert({ orgId: org.id, name: r.applicantName, role: r.applicantRole, email: r.workEmail });
-      identityLink ??= 'provisioned_new_user';
-    }
-    if (!user.email) users.update(user.id, { email: r.workEmail });
+    if (!user) identityLink ??= 'provisioned_new_user';
     const { approved } = unit(() => {
+      if (!user) user = users.create({ orgId: org.id, name: r.applicantName.trim(), role: r.applicantRole.trim() || 'Manager', email: r.workEmail });
+      else if (!user.email) user = users.update(user.id, (d) => { d.email = r.workEmail; });
       // …organisation identity claim: established by Trust & Safety review.
       createClaim({
         subjectType: 'org', subjectId: org.id, claimType: 'ORGANISATION_IDENTITY', organisationId: org.id,

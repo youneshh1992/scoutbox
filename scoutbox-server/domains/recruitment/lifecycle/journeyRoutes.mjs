@@ -105,7 +105,7 @@ export function registerJourneyRoutes(ctx) {
   // ------------------------------------------------------ notification targets
 
   /** The org a notification's staff audience belongs to, so a target never crosses a tenant. */
-  const orgUserOrg = (userId) => { const u = (db.users ?? []).find((x) => x && x.id === userId); return u ? u.orgId : null; };
+  const orgUserOrg = (userId) => (ctx.byId?.user ?? ctx.users?.byId)?.(userId)?.orgId ?? null;
   const caseFor = (caseId, orgId) => { const k = recruitmentReads.cases.byId(caseId); return k && k.room && (orgId === null || k.orgId === orgId) ? k : null; };
   const room = (k, tab) => (k ? { kind: 'room', roomId: k.id, tab } : null);
   const blocked = (playerId, orgId) => safetyReads.blocks.has(playerId, orgId);

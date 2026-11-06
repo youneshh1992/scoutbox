@@ -186,7 +186,7 @@ export function registerJourneys(ctx) {
     broadcast('applications', { playerId: player.id });
     res.status(201).json({ application: applicationView(appn) });
   }
-  const usersOf = (orgId) => users.listByOrg(orgId).filter((u) => !u.removedAt);
+  const usersOf = (orgId) => users.forOrg(orgId, { active: true });
   /** One history entry in the shared shape (detail is plain text or null). */
   const historyEntry = (byKind, byId_, byName, action, at = Date.now()) => ({ id: nextId('aud'), at, byKind, byId: byId_, byName: storedName(byName), action, detail: null });
 

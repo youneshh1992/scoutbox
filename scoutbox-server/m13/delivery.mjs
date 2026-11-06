@@ -285,17 +285,15 @@ export function registerDelivery(ctx) {
 
   orgRouter.put('/delivery/prefs', (req, res) => {
     const { quietStart, quietEnd, email } = req.body ?? {};
+    // S14f: the switch is a boolean or absent (on) — anything else used to read as "on".
+    if (!(email === undefined || email === null || typeof email === 'boolean')) return res.status(400).json({ error: 'FIELD_INVALID', field: 'email', message: 'email is true or false.' });
     // PRE-M24 (PM-10): quiet hours are HH:MM or absent — an object was stored and read back as a time.
     const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
     for (const [f, v] of [['quietStart', quietStart], ['quietEnd', quietEnd]]) if (v != null && !(typeof v === 'string' && HHMM.test(v))) return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is a time written HH:MM.` });
-    users.update(req.orgUser.id, {
-      deliveryPrefs: {
-        quietStart: quietStart ?? null, quietEnd: quietEnd ?? null,
-        channels: { email: email !== false },
-      },
+    const saved = users.update(req.orgUser.id, (d) => {
+      d.deliveryPrefs = { quietStart: quietStart ?? null, quietEnd: quietEnd ?? null, channels: { email: email !== false } };
     });
-    persistNow();
-    res.json({ prefs: req.orgUser.deliveryPrefs });
+    res.json({ prefs: saved.deliveryPrefs });
   });
 
   adminRouter.get('/delivery', (req, res) => {

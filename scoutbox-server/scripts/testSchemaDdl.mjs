@@ -29,8 +29,7 @@ for (const f of files) {
 }
 
 const tables = docs.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
-// Every table is STRICT: org_users was created non-STRICT by migration 0001 and
-// rebuilt STRICT (with the orgs foreign key and json_valid checks) at S3.
+// Every table is STRICT (org_users included: since S14f migration 0001 creates its final form).
 test(`the target schema defines ${tables.length} tables, all STRICT`, () => {
   assert.ok(tables.length >= 100, `expected the full model, found ${tables.length}`);
   for (const t of tables) {
@@ -99,7 +98,7 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
   const S10B_TABLES = ['passport_prefs', 'passport_pref_positions', 'passport_position_history', 'passport_position_history_positions', 'passport_public_selections', 'passport_career_entries', 'passport_achievements', 'passport_shares', 'passport_corrections'];
   const S9D_TABLES = ['opportunities', 'opportunity_training_slots', 'opportunity_texts', 'applications', 'application_suitability', 'application_history', 'campaigns', 'campaign_drills', 'campaign_rubric', 'campaign_submissions', 'campaign_attempts', 'campaign_attempt_issues', 'player_prefs', 'player_pref_slots', 'player_pref_texts'];
   const S9B_TABLES = ['assessment_templates', 'assessment_template_attributes', 'assessments', 'assessment_ratings', 'assessment_rating_refs', 'assessment_history', 'video_segments', 'video_segment_labels', 'playlists', 'playlist_segments'];
-  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', ...AUDIT_TABLES, ...AUDIT_CHILD_TABLES, ...S5_TABLES, ...S8A_TABLES, ...S8B_TABLES, ...S8C_TABLES, ...S8D_TABLES, ...S9A_TABLES, ...S9B_TABLES, ...S9C_TABLES, ...S9D_TABLES, ...S10A_TABLES, ...S10B_TABLES, ...S10C_TABLES, ...S11A_TABLES, ...S11B1_TABLES, ...S11B2_TABLES, ...S11C_TABLES, ...S12A_TABLES, ...S12B_TABLES, ...S12C_TABLES, ...S12D_TABLES, ...S13A_TABLES, ...S13B_TABLES, ...S13C_TABLES, ...S13D_TABLES, ...S13E_TABLES, 'counters']) {
+  for (const t of ['orgs', 'guardians', 'players', 'guardian_children', 'sessions', 'org_users', 'org_user_recovery_codes', 'media_deletions', 'email_challenges', 'pairing_codes', 'notifications', 'notification_prefs', 'notification_pref_categories', 'dispatches', 'dispatch_attempts', 'outbox', 'push_log', 'push_tokens', 'channels', 'messages', 'message_attachments', ...AUDIT_TABLES, ...AUDIT_CHILD_TABLES, ...S5_TABLES, ...S8A_TABLES, ...S8B_TABLES, ...S8C_TABLES, ...S8D_TABLES, ...S9A_TABLES, ...S9B_TABLES, ...S9C_TABLES, ...S9D_TABLES, ...S10A_TABLES, ...S10B_TABLES, ...S10C_TABLES, ...S11A_TABLES, ...S11B1_TABLES, ...S11B2_TABLES, ...S11C_TABLES, ...S12A_TABLES, ...S12B_TABLES, ...S12C_TABLES, ...S12D_TABLES, ...S13A_TABLES, ...S13B_TABLES, ...S13C_TABLES, ...S13D_TABLES, ...S13E_TABLES, 'counters']) {
     const cols = (d) => d.prepare(`PRAGMA table_info(${t})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.pk}:${c.dflt_value ?? ''}`);
     assert.deepEqual(cols(mig), cols(docs), `${t} columns`);
     const idx = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name NOT LIKE 'sqlite_%' ORDER BY name").all(t).map((r) => r.name);
@@ -121,6 +120,12 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
   assert.match(header03, /notificationPrefs[^\n]*0009_notifications[^\n]*REGISTERED/, 'the scope header of 03 states that the preference tables are live since 0009');
   // S14e (0009 amended in place): a staff audience is the notifications' and preferences' one key (RESTRICT, through
   // the generated staff_id); vocabulary CHECKs on the audience kind and the category; no group key or acknowledger column.
+  // S14f: a staff account's keys; an org session names its staff member and organisation as one key.
+  for (const d of [docs, mig]) {
+    assert.deepEqual(d.prepare('PRAGMA foreign_key_list(org_users)').all().map((f) => [f.from, f.table, f.on_delete]).sort(), [['org_id', 'orgs', 'RESTRICT'], ['removed_by_id', 'org_users', 'RESTRICT']], 'staff: organisation and remover RESTRICT (S14f)');
+    assert.deepEqual(d.prepare('PRAGMA foreign_key_list(sessions)').all().map((f) => [f.from, f.to, f.table, f.on_delete]).sort(), [['org_user_id', 'id', 'org_users', 'CASCADE'], ['ref_id', 'org_id', 'org_users', 'CASCADE']], 'an org session: (org_user_id, ref_id) → org_users(id, org_id) (S14f)');
+    assert.deepEqual(d.prepare('PRAGMA foreign_key_list(org_user_recovery_codes)').all().map((f) => [f.from, f.table, f.on_delete]), [['org_user_id', 'org_users', 'CASCADE']], 'recovery codes cascade with their account');
+  }
   for (const d of [docs, mig]) for (const t of ['notifications', 'notification_prefs']) assert.deepEqual(d.prepare(`PRAGMA foreign_key_list(${t})`).all().map((f) => [f.from, f.table, f.on_delete]), [['staff_id', 'org_users', 'RESTRICT']], `${t} references only its staff audience`);
   for (const [t, col] of [['notifications', 'audience_kind'], ['notifications', 'category'], ['notification_prefs', 'audience_kind'], ['notification_pref_categories', 'category']]) assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, new RegExp(`${col} IN \\(`), `${t}.${col} is a vocabulary CHECK`);
   for (const d of [docs, mig]) assert.deepEqual(d.prepare('PRAGMA table_xinfo(notifications)').all().filter((c) => ['group_key', 'action_acked_by'].includes(c.name)), [], 'the group key and the acknowledger are worked out, not stored');

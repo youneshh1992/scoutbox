@@ -125,6 +125,14 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
   - The first login on a credentialed org with no staff bootstraps a lead-tier admin
     (`staff_bootstrapped`).
   - Passwordless seeded orgs are dev only.
+  - Staff sign in by name, so a name belongs to one account of the organisation (any case,
+    removed accounts included). A new account under a taken name is refused
+    (`STAFF_NAME_TAKEN`), including when Trust & Safety provisions one (S14f, Founder, 6 Nov).
+  - Removing a staff member keeps the account (history stays attributed), ends its sessions
+    and records who removed it. Accepting a new invitation for a removed person restores
+    their account, with the invite's role (S14f, Founder, 6 Nov).
+  - An e-mail belongs to one current staff member of an organisation (any case). A
+    recovery code works exactly once.
 - Group workspaces (federations, F8): Trust & Safety creates a group with one admin club;
   agencies can neither join nor administer one. Membership shares nothing; a grant shares
   one shortlist, case or assessment with named fellow members for 1–180 days (30 by

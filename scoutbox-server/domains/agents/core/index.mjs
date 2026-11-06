@@ -397,20 +397,20 @@ export function registerAgent(rawCtx) {
         return sendAgentError(res, { error: 'AFFILIATION_IDEMPOTENCY_CONFLICT' }, 'team');
       }
     }
-    let user = db.users.find((u) => u.orgId === req.org.id && u.name.toLowerCase() === name.toLowerCase());
+    const user = users.byOrgAndName(req.org.id, name);
     if (user?.removedAt) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: 'This person\'s access was removed; removal is not undone from the team page.' }, 'team');
     if (user && activeAffiliationOf(user.id, req.org.id)) return sendAgentError(res, { error: 'MEMBER_ALREADY_AFFILIATED' }, 'team');
-    // Staff writes cannot join a unit of work yet (repositories/users.mjs): the account exists before its membership.
-    if (!user) user = users.insert({ orgId: req.org.id, name, role: role ?? 'Agency staff', createdAt: now() });
+    // One unit: the account (when new), the membership and its notice.
     const aff = unit(() => {
+      const member = user ?? users.create({ orgId: req.org.id, name, role: role ?? 'Agency staff', createdAt: now() });
       const draft = {
-        id: nextId('aff'), agencyOrgId: req.org.id, userId: user.id, tiers, startedAt: now(), endedAt: null, endedReason: null,
+        id: nextId('aff'), agencyOrgId: req.org.id, userId: member.id, tiers, startedAt: now(), endedAt: null, endedReason: null,
         createdAt: now(), rev: 1, revAt: now(), revBy: null, keys: key ? { create: { key, fp } } : {}, history: [],
       };
       hist(draft, 'agency_affiliation_created', byOrg(req), { tiers });
       const out = affiliations.create(draft);
-      broadcast('agency_affiliation_created', { orgId: req.org.id, userId: user.id });
-      notify({ kind: 'org_user', id: user.id }, 'agency_membership', `You were added to ${req.org.name} (${tiers.join(', ')}).`, out.id);
+      broadcast('agency_affiliation_created', { orgId: req.org.id, userId: member.id });
+      notify({ kind: 'org_user', id: member.id }, 'agency_membership', `You were added to ${req.org.name} (${tiers.join(', ')}).`, out.id);
       return out;
     });
     res.status(201).json({ member: memberRows(req.org).find((m) => m.affiliationId === aff.id) });
@@ -454,12 +454,12 @@ export function registerAgent(rawCtx) {
         bumpRev(d, { by: req.orgUser, at: now() });
       });
       broadcast('agency_affiliation_ended', { orgId: req.org.id, userId: aff.userId });
+      // Current agency access ends now, in the same unit; the person's agent profile and every
+      // historical attribution stay exactly as they are.
+      const user = byId.user(aff.userId);
+      if (user && !user.removedAt) users.update(user.id, (d) => { d.removedAt = now(); d.removedById = req.orgUser.id; });
+      revokeOrgUserAccess?.(aff.userId);
     });
-    // Current agency access ends now; the person's agent profile and every
-    // historical attribution stay exactly as they are. (Staff writes commit on their own, after the membership.)
-    const user = byId.user(aff.userId);
-    if (user && !user.removedAt) users.update(user.id, { removedAt: now() });
-    revokeOrgUserAccess?.(aff.userId);
     res.json({ member: memberRows(req.org).find((m) => m.affiliationId === aff.id) });
   });
 

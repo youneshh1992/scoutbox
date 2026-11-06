@@ -37,7 +37,7 @@ import { readPage, sendPageError } from '../../platform/paging.mjs';
 import { isAbsent, parseStrictDateOnly } from '../../../temporal.mjs';
 export function registerRooms(ctx) {
   const {
-    db, orgRouter, adminRouter, nextId, persistNow, notify, ledgerAppend, broadcast,
+    db, byId, users, orgRouter, adminRouter, nextId, persistNow, notify, ledgerAppend, broadcast,
     findPlayer, moderateOrRefuse, playerViewForOrg, orgCanSee, isLead, audit, vmetric,
     faults = null,
     recruitmentCases, unit, dueAtOrRefuse, // S8b: every case and room write is an explicit repository operation, inside `unit` when it touches more than one row
@@ -51,8 +51,9 @@ export function registerRooms(ctx) {
   // ------------------------------------------------------------- utilities
 
   const now = () => Date.now();
-  const orgUsers = (orgId) => db.users.filter((u) => u.orgId === orgId && !u.removedAt);
-  const orgUser = (orgId, userId) => orgUsers(orgId).find((u) => u.id === userId) ?? null;
+  const orgUsers = (orgId) => users.forOrg(orgId, { active: true });
+  // The staff index, not a scan of the club's staff (migration.md §4.3, deferred).
+  const orgUser = (orgId, userId) => { const u = byId.user(userId); return u && u.orgId === orgId && !u.removedAt ? u : null; };
 
   // Fixed-window counters for the abuse surfaces. Same shape as the in-memory
   // guards M13 already uses; nothing here is security-critical state.

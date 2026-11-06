@@ -65,7 +65,7 @@ function syntheticSnapshot({ orgUserId = 'usr-9001' } = {}) {
     ],
   };
 }
-const seedOrgUser = (s, id = 'usr-9001') => { s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES ('org-a', 'Org A', 'club', 'pro', 'Pro')").run(); s.prepare("INSERT INTO org_users (id, org_id, name, role, created_at) VALUES (?, 'org-a', 'Maria Keane', 'Head of Recruitment', ?)").run(id, Date.now()); };
+const seedOrgUser = (s, id = 'usr-9001') => { s.prepare("INSERT OR IGNORE INTO orgs (id, name, type, level, plan) VALUES ('org-a', 'Org A', 'club', 'pro', 'Pro')").run(); s.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES (?, 'org-a', 'Maria Keane', ?, 'Head of Recruitment', ?)").run(id, `maria keane ${id}`, Date.now()); };
 
 // ------------------------------------------------------------- migration 0002
 test('the five core identity tables exist as STRICT tables after the registered migrations, and the registry applies nothing twice', () => {

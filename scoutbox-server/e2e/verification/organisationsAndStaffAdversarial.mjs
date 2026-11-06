@@ -190,7 +190,15 @@ let provisionedSamId;
   ok(r.body.candidates.some((c) => c.id === sam.userId && c.matched === 'name_similarity_only'), 'the name match is surfaced as a review candidate only');
   r = await j('POST', `/admin/verification/root-requests/${req1}/approve`, { reason: 'x', linkUserId: 'usr-does-not-exist' }, null, A);
   ok(r.status === 404 && r.body.error === 'LINK_USER_NOT_FOUND', 'explicit selection of a non-existent account refused');
+  // S14f (Founder): staff sign in by name, so a second "Sam Cole" account is refused — even when T&S provisions it
+  // deliberately — and nothing is written. Rewritten: this used to provision a same-named account that could never
+  // sign in by name.
   r = await j('POST', `/admin/verification/root-requests/${req1}/approve`, { reason: 'new person, provisioned deliberately', provisionNewUser: true }, null, REV);
+  ok(r.status === 409 && r.body.error === 'STAFF_NAME_TAKEN', 'provisioning a new account with an existing staff member\'s name is refused');
+  r = await j('POST', `/admin/verification/root-requests/${req1}/reject`, { reason: 'please re-apply with a name that tells you apart from your colleague' }, null, A);
+  ok(r.status === 200, 'the ambiguous request is rejected instead');
+  const req1b = await applyFor('Sam J. Cole', 'sam.cole@eastport-mail.co');
+  r = await j('POST', `/admin/verification/root-requests/${req1b}/approve`, { reason: 'new person, provisioned deliberately', provisionNewUser: true }, null, REV);
   ok(r.status === 200 && r.body.identityLink === 'provisioned_new_user', 'T&S explicitly provisions a NEW account instead of guessing');
   provisionedSamId = r.body.rootAdminUserId;
   ok(provisionedSamId && provisionedSamId !== sam.userId, 'the wrong (name-matched) account received NO root authority');
@@ -202,7 +210,7 @@ let provisionedSamId;
 
   // Exact verified-email match: the SAME mailbox re-applies → links to the
   // provisioned account, not to employee Sam Cole.
-  const req2 = await applyFor('Sam Cole', 'sam.cole@eastport-mail.co');
+  const req2 = await applyFor('Sam J. Cole', 'sam.cole@eastport-mail.co');
   r = await j('POST', `/admin/verification/root-requests/${req2}/approve`, { reason: 'email re-proved; same person' }, null, A);
   ok(r.status === 200 && r.body.identityLink === 'verified_work_email', 'exact verified work-email match links authoritatively');
   ok(r.body.rootAdminUserId === provisionedSamId, 'email linkage selects the CORRECT account (never the name-matched one)');

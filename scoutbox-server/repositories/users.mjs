@@ -1,309 +1,355 @@
 /**
- * Organisation staff — the first domain repository.
+ * Organisation staff as typed tables with explicit writes (S0, migration `0001_org_users`; explicit since S14f,
+ * docs/architecture/migration.md §4.6; sql/01_identity.sql).
  *
- * Owns the `org_users` table and the `db.users` view. Every write to a staff
- * record goes through `insert` or `update`, which write one row inside the
- * database immediately (no debounce, no whole-collection rewrite) and then
- * refresh the in-memory view the rest of the server reads. The view keeps
- * the exact row shapes routes have always seen: a field that is unset is
- * absent, not null, so no response changes shape.
+ * Record (the keys every reader sees, all always present):
+ *   { id, orgId, name, role, email, ssoSubject, createdAt, removedAt, removedById, provenance,
+ *     mfa: null | { enabledAt },                       enabledAt null: set up but not yet confirmed
+ *     deliveryPrefs: { quietStart, quietEnd, channels: { email } } }
+ * The TOTP secret and the recovery-code hashes are never on a record: `mfaSecretOf` gives the secret to the code
+ * checks and `useRecoveryCode` spends a code. Responses are allowlists, never the record.
  *
- * Typed columns, valid input only: a record holds the named fields and
- * nothing else. Unknown keys are not stored (a legacy blob import drops them
- * and reports each with the row id); a known field of the wrong type is
- * refused by name, never stored.
+ * Tables:
+ *   org_users                one row per staff account; removed softly (`removed_at`), never deleted by a route
+ *   org_user_recovery_codes  the hashes of a staff member's unused recovery codes, one row each
+ * Staff sign in by name, so a name is unique in its organisation (case-insensitive, removed staff included; the
+ * repository writes `name_key`); an e-mail is unique among an organisation's current staff, an SSO subject within
+ * an organisation. `org_id` and `removed_by_id` are RESTRICT keys; `(id, org_id)` is unique so an org session can
+ * name its staff member and organisation together (sessions, migration 0002).
  *
- * node:sqlite is required: the repository has no in-memory engine, and
- * `createUsersRepository` refuses a missing connection (store.mjs refuses to
- * open at all without node:sqlite, before any data is touched).
+ * WRITES are explicit operations, each joining the open unit of work, the caller's transaction or its own. READS
+ * are SQL: no mirror and no db.* view; fresh, deep-frozen records. Refusals carry a code and name the id and the
+ * field, never a value.
  */
-import { readonlyView } from './readonly.mjs';
 import { transaction, migrationApplied } from './database.mjs';
+import { deepFreeze } from './scoutingEvidence.mjs';
 
-/**
- * The typed columns (the fidelity rule, 3 November 2026: typed columns, valid
- * input only). A record holds these fields and nothing else; a field the
- * schema does not name is not stored.
- */
-const STRINGS = {
-  orgId: 'org_id', name: 'name', role: 'role', email: 'email', ssoSubject: 'sso_subject',
-  removedBy: 'removed_by', provenance: 'provenance',
-};
-const INTEGERS = { createdAt: 'created_at', removedAt: 'removed_at' };
-const OBJECTS = { mfa: 'mfa_json', deliveryPrefs: 'delivery_prefs_json' };
-const KNOWN = new Set(['id', ...Object.keys(STRINGS), ...Object.keys(INTEGERS), ...Object.keys(OBJECTS)]);
+export const USERS_MIGRATION = '0001_org_users';
+export const STAFF_LIMITS = Object.freeze({ id: 80, name: 120, role: 60, email: 254, ssoSubject: 255, secret: 128 });
+export const STAFF_PROVENANCES = Object.freeze(['org_password_bootstrap']);
+const L = STAFF_LIMITS;
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const HHMM_CHECK = (c) => `CHECK (${c} IS NULL OR ${c} GLOB '[01][0-9]:[0-5][0-9]' OR ${c} GLOB '2[0-3]:[0-5][0-9]')`;
 
-const SELECT = 'SELECT id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json FROM org_users';
-const COLUMN_LIST = 'id, org_id, name, role, email, sso_subject, created_at, removed_at, removed_by, provenance, mfa_json, delivery_prefs_json';
-const PARAM_LIST = '@id, @org_id, @name, @role, @email, @sso_subject, @created_at, @removed_at, @removed_by, @provenance, @mfa_json, @delivery_prefs_json';
+export const ORG_USERS_DDL = `
+CREATE TABLE org_users (
+  id             TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND ${L.id}),
+  org_id         TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
+  name           TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND ${L.name}),
+  name_key       TEXT NOT NULL,
+  role           TEXT NOT NULL CHECK (length(role) BETWEEN 1 AND ${L.role}),
+  email          TEXT CHECK (email IS NULL OR length(email) BETWEEN 3 AND ${L.email}),
+  sso_subject    TEXT CHECK (sso_subject IS NULL OR length(sso_subject) BETWEEN 1 AND ${L.ssoSubject}),
+  created_at     INTEGER NOT NULL,
+  removed_at     INTEGER,
+  removed_by_id  TEXT REFERENCES org_users(id) ON DELETE RESTRICT,
+  provenance     TEXT CHECK (provenance IS NULL OR provenance IN (${STAFF_PROVENANCES.map((p) => `'${p}'`).join(', ')})),
+  mfa_secret     TEXT CHECK (mfa_secret IS NULL OR length(mfa_secret) BETWEEN 16 AND ${L.secret}),
+  mfa_enabled_at INTEGER,
+  quiet_start    TEXT ${HHMM_CHECK('quiet_start')},
+  quiet_end      TEXT ${HHMM_CHECK('quiet_end')},
+  email_enabled  INTEGER NOT NULL DEFAULT 1 CHECK (email_enabled IN (0, 1)),
+  UNIQUE (id, org_id),
+  CHECK (removed_by_id IS NULL OR removed_at IS NOT NULL),
+  CHECK (mfa_enabled_at IS NULL OR mfa_secret IS NOT NULL)
+) STRICT;
+CREATE INDEX org_users_org ON org_users (org_id);
+CREATE UNIQUE INDEX org_users_org_name ON org_users (org_id, name_key);
+CREATE UNIQUE INDEX org_users_org_email ON org_users (org_id, lower(email)) WHERE email IS NOT NULL AND removed_at IS NULL;
+CREATE UNIQUE INDEX org_users_sso ON org_users (org_id, sso_subject) WHERE sso_subject IS NOT NULL;
+CREATE INDEX org_users_removed_by ON org_users (removed_by_id) WHERE removed_by_id IS NOT NULL;
+CREATE TABLE org_user_recovery_codes (
+  org_user_id TEXT NOT NULL REFERENCES org_users(id) ON DELETE CASCADE,
+  code_hash   TEXT NOT NULL CHECK (length(code_hash) = 64),
+  PRIMARY KEY (org_user_id, code_hash)
+) STRICT;`;
 
-const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+export const usersLive = (sqlite) => migrationApplied(sqlite, USERS_MIGRATION);
+const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isClock = (v) => Number.isSafeInteger(v) && v >= 0;
+const isHash = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
+const textOk = (v, max, min = 1) => typeof v === 'string' && v.length >= min && v.length <= max && v === v.trim();
+/** The key a name is unique by in its organisation (and looked up by at sign-in). */
+export const staffNameKey = (name) => String(name ?? '').trim().toLowerCase();
 
-/** Why `value` cannot be stored as `key`, or null when it can (null/undefined mean "unset" and always can). */
-function offType(key, value) {
-  if (value === undefined || value === null) return null;
-  if (key in STRINGS) return typeof value === 'string' ? null : 'must be text';
-  if (key in INTEGERS) return Number.isSafeInteger(value) ? null : 'must be an integer timestamp';
-  if (key in OBJECTS) return isPlainObject(value) ? null : 'must be an object';
+const DEFAULT_PREFS = Object.freeze({ quietStart: null, quietEnd: null, channels: Object.freeze({ email: true }) });
+const RECORD_KEYS = Object.freeze(['id', 'orgId', 'name', 'role', 'email', 'ssoSubject', 'createdAt', 'removedAt', 'removedById', 'provenance', 'mfa', 'deliveryPrefs']);
+/** The fields an update's draft may change (the rest never change, or change through their own operation). */
+const EDITABLE = Object.freeze(['name', 'role', 'email', 'ssoSubject', 'removedAt', 'removedById', 'deliveryPrefs']);
+
+/** Why a delivery-preference value cannot be stored, or null. */
+function prefsProblem(p) {
+  if (!isPlainObject(p)) return `deliveryPrefs must be { quietStart, quietEnd, channels: { email } } (got ${describe(p)})`;
+  const unknown = Object.keys(p).filter((k) => !['quietStart', 'quietEnd', 'channels'].includes(k));
+  if (unknown.length) return `deliveryPrefs carries unknown field(s) ${unknown.join(', ')}`;
+  for (const k of ['quietStart', 'quietEnd']) if (p[k] != null && !(typeof p[k] === 'string' && HHMM.test(p[k]))) return `deliveryPrefs.${k} is a time written HH:MM or null`;
+  const ch = p.channels ?? { email: true };
+  if (!isPlainObject(ch) || Object.keys(ch).some((k) => k !== 'email')) return 'deliveryPrefs.channels must be { email }';
+  if (ch.email !== undefined && typeof ch.email !== 'boolean') return 'deliveryPrefs.channels.email must be a boolean';
   return null;
 }
+const prefsOf = (p) => (p == null ? DEFAULT_PREFS : { quietStart: p.quietStart ?? null, quietEnd: p.quietEnd ?? null, channels: { email: p.channels?.email ?? true } });
 
-function toRow(dbRow) {
-  const row = { id: dbRow.id, orgId: dbRow.org_id, name: dbRow.name };
-  if (dbRow.role != null) row.role = dbRow.role;
-  if (dbRow.created_at != null) row.createdAt = dbRow.created_at;
-  if (dbRow.email != null) row.email = dbRow.email;
-  if (dbRow.sso_subject != null) row.ssoSubject = dbRow.sso_subject;
-  if (dbRow.removed_at != null) row.removedAt = dbRow.removed_at;
-  if (dbRow.removed_by != null) row.removedBy = dbRow.removed_by;
-  if (dbRow.provenance != null) row.provenance = dbRow.provenance;
-  if (dbRow.mfa_json != null) row.mfa = JSON.parse(dbRow.mfa_json);
-  if (dbRow.delivery_prefs_json != null) row.deliveryPrefs = JSON.parse(dbRow.delivery_prefs_json);
-  return row;
-}
-
-/** Column parameters for a record whose known fields are already typed (unknown keys are ignored). */
-function toParams(row) {
-  return {
-    id: row.id, org_id: row.orgId, name: row.name, role: row.role ?? null,
-    email: row.email ?? null, sso_subject: row.ssoSubject ?? null,
-    created_at: row.createdAt ?? null, removed_at: row.removedAt ?? null, removed_by: row.removedBy ?? null,
-    provenance: row.provenance ?? null,
-    mfa_json: row.mfa == null ? null : JSON.stringify(row.mfa),
-    delivery_prefs_json: row.deliveryPrefs == null ? null : JSON.stringify(row.deliveryPrefs),
-  };
-}
-
-/** The record's known, set fields only (a copy); unknown keys and unset values are left out. */
-function knownFields(row) {
-  const out = {};
-  for (const key of Object.keys(row)) if (KNOWN.has(key) && row[key] !== undefined && row[key] !== null) out[key] = clone(row[key]);
+/** The problems with a record's scalar fields (a staff record, or a draft after an update), by field name. */
+function recordProblems(r) {
+  const out = [];
+  if (!textOk(r.id, L.id)) out.push(`id must be text of 1 to ${L.id} characters`);
+  if (typeof r.orgId !== 'string' || !r.orgId) out.push('orgId must name an organisation');
+  if (!textOk(r.name, L.name)) out.push(`name must be text of 1 to ${L.name} characters without surrounding spaces`);
+  if (!textOk(r.role, L.role)) out.push(`role must be text of 1 to ${L.role} characters without surrounding spaces`);
+  if (r.email !== null && !textOk(r.email, L.email, 3)) out.push(`email must be text of 3 to ${L.email} characters or null`);
+  if (r.ssoSubject !== null && !textOk(r.ssoSubject, L.ssoSubject)) out.push(`ssoSubject must be text of 1 to ${L.ssoSubject} characters or null`);
+  if (!isClock(r.createdAt)) out.push('createdAt must be an integer timestamp');
+  if (r.removedAt !== null && !isClock(r.removedAt)) out.push('removedAt must be an integer timestamp or null');
+  if (r.removedById !== null && (typeof r.removedById !== 'string' || !r.removedById)) out.push('removedById must name a staff member or null');
+  if (r.removedById !== null && r.removedAt === null) out.push('removedById is set only on a removed account');
+  if (r.provenance !== null && !STAFF_PROVENANCES.includes(r.provenance)) out.push(`provenance must be one of ${STAFF_PROVENANCES.join(', ')} or null`);
+  const p = prefsProblem(r.deliveryPrefs); if (p) out.push(p);
   return out;
 }
 
+const COLS = 'id, org_id, name, name_key, role, email, sso_subject, created_at, removed_at, removed_by_id, provenance, mfa_secret, mfa_enabled_at, quiet_start, quiet_end, email_enabled';
+const SELECT = `SELECT ${COLS} FROM org_users`;
+const INSERT = `INSERT INTO org_users (${COLS}) VALUES (${COLS.split(', ').map((c) => `@${c}`).join(', ')})`;
+const params = (r, { secret = null, enabledAt = null } = {}) => ({
+  id: r.id, org_id: r.orgId, name: r.name, name_key: staffNameKey(r.name), role: r.role, email: r.email, sso_subject: r.ssoSubject,
+  created_at: r.createdAt, removed_at: r.removedAt, removed_by_id: r.removedById, provenance: r.provenance,
+  mfa_secret: secret, mfa_enabled_at: enabledAt,
+  quiet_start: r.deliveryPrefs.quietStart, quiet_end: r.deliveryPrefs.quietEnd, email_enabled: r.deliveryPrefs.channels.email ? 1 : 0,
+});
+/** The record for a table row (plain; the repository freezes what it hands out). */
+function fromDb(d) {
+  return {
+    id: d.id, orgId: d.org_id, name: d.name, role: d.role, email: d.email, ssoSubject: d.sso_subject, createdAt: d.created_at,
+    removedAt: d.removed_at, removedById: d.removed_by_id, provenance: d.provenance,
+    mfa: d.mfa_secret === null ? null : { enabledAt: d.mfa_enabled_at },
+    deliveryPrefs: { quietStart: d.quiet_start, quietEnd: d.quiet_end, channels: { email: d.email_enabled === 1 } },
+  };
+}
+
+/** The uniqueness rules, named before the engine would refuse them (`except`: the row being updated). */
+function clashOf(q, r) {
+  if (q('SELECT 1 FROM org_users WHERE org_id = ? AND name_key = ? AND id <> ?').get(r.orgId, staffNameKey(r.name), r.id)) {
+    return refusal('STAFF_NAME_TAKEN', `org_users ${r.id}: another staff account of organisation ${r.orgId} has this name`, { field: 'name' });
+  }
+  if (r.email !== null && r.removedAt === null && q('SELECT 1 FROM org_users WHERE org_id = ? AND lower(email) = lower(?) AND removed_at IS NULL AND id <> ?').get(r.orgId, r.email, r.id)) {
+    return refusal('STAFF_EMAIL_TAKEN', `org_users ${r.id}: another current staff member of organisation ${r.orgId} has this e-mail`, { field: 'email' });
+  }
+  if (r.ssoSubject !== null && q('SELECT 1 FROM org_users WHERE org_id = ? AND sso_subject = ? AND id <> ?').get(r.orgId, r.ssoSubject, r.id)) {
+    return refusal('STAFF_SSO_TAKEN', `org_users ${r.id}: another staff account of organisation ${r.orgId} is linked to this sign-in subject`, { field: 'ssoSubject' });
+  }
+  return null;
+}
+
+// ------------------------------------------------------------------ the snapshot path
 /**
- * Type a staff row from a legacy blob for import: unknown fields and
- * wrong-typed optional values are dropped, each reported with the row id and
- * field name (never the value). The caller has already checked isStaffRow.
+ * Type one snapshot staff row: `{ ok: true, row, mfa }` or `{ ok: false, reason }`. The snapshot carries what a
+ * round trip needs: the record's fields, with `mfa` as `{ secretB32, enabledAt, recoveryHashes }`. Absent optional
+ * fields take their defaults; an unknown field is refused.
  */
-function typeForImport(raw) {
-  const notes = [];
-  const record = {};
-  for (const key of Object.keys(raw)) {
-    if (!KNOWN.has(key)) { notes.push(`staff ${raw.id}: unknown field ${key} dropped`); continue; }
-    const why = offType(key, raw[key]);
-    if (why) { notes.push(`staff ${raw.id}: ${key} ${why}; dropped`); continue; }
-    if (raw[key] !== undefined && raw[key] !== null) record[key] = clone(raw[key]);
+export function typeStaffSnapshotRow(raw) {
+  if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
+  const at = `staff ${typeof raw.id === 'string' ? raw.id : '(no id)'}`;
+  const unknown = Object.keys(raw).filter((k) => !RECORD_KEYS.includes(k));
+  if (unknown.length) return { ok: false, reason: `${at}: unknown field(s) ${unknown.join(', ')}` };
+  const r = { email: null, ssoSubject: null, removedAt: null, removedById: null, provenance: null, ...raw, deliveryPrefs: raw.deliveryPrefs == null ? DEFAULT_PREFS : raw.deliveryPrefs };
+  const problems = recordProblems(r);
+  if (problems.length) return { ok: false, reason: `${at}: ${problems.join('; ')}` };
+  let mfa = null;
+  if (raw.mfa != null) {
+    const m = raw.mfa;
+    if (!isPlainObject(m) || Object.keys(m).some((k) => !['secretB32', 'enabledAt', 'recoveryHashes'].includes(k))) return { ok: false, reason: `${at}: mfa must be { secretB32, enabledAt, recoveryHashes } or null` };
+    if (!textOk(m.secretB32, L.secret, 16)) return { ok: false, reason: `${at}: mfa.secretB32 must be text of 16 to ${L.secret} characters` };
+    if (m.enabledAt != null && !isClock(m.enabledAt)) return { ok: false, reason: `${at}: mfa.enabledAt must be an integer timestamp or null` };
+    const hashes = m.recoveryHashes ?? [];
+    if (!Array.isArray(hashes) || !hashes.every(isHash) || new Set(hashes).size !== hashes.length) return { ok: false, reason: `${at}: mfa.recoveryHashes must be distinct sha256 hex hashes` };
+    if (hashes.length && m.enabledAt == null) return { ok: false, reason: `${at}: recovery codes exist only once MFA is enabled` };
+    mfa = { secret: m.secretB32, enabledAt: m.enabledAt ?? null, hashes };
   }
-  return { record, notes };
+  return { ok: true, row: { id: r.id, orgId: r.orgId, name: r.name, role: r.role, email: r.email, ssoSubject: r.ssoSubject, createdAt: r.createdAt, removedAt: r.removedAt, removedById: r.removedById, provenance: r.provenance, deliveryPrefs: prefsOf(r.deliveryPrefs) }, mfa };
 }
 
-/** Refuse (by code, id and field, never the value) a record whose known field holds the wrong type. */
-function refuseOffType(row, code) {
-  for (const key of Object.keys(row)) {
-    if (!KNOWN.has(key)) continue;
-    const why = offType(key, row[key]);
-    if (why) throw new TypeError(`${code}: staff ${typeof row.id === 'string' ? row.id : '(no id)'}: ${key} ${why}`);
+const blocked = (detail, extra = {}) => refusal('ORG_USERS_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
+function readSnapshot(sqlite) {
+  const codes = new Map();
+  for (const c of sqlite.prepare('SELECT org_user_id, code_hash FROM org_user_recovery_codes ORDER BY rowid').all()) {
+    if (!codes.has(c.org_user_id)) codes.set(c.org_user_id, []);
+    codes.get(c.org_user_id).push(c.code_hash);
   }
+  return sqlite.prepare(`${SELECT} ORDER BY rowid`).all().map((d) => ({
+    ...fromDb(d),
+    mfa: d.mfa_secret === null ? null : { secretB32: d.mfa_secret, enabledAt: d.mfa_enabled_at, recoveryHashes: codes.get(d.id) ?? [] },
+  }));
 }
-
-const clone = (v) => (v === null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v)));
-
-/** A staff row from a snapshot is one with an id, an organisation and a name; anything else is not a staff row. */
-const isStaffRow = (u) => !!u && typeof u === 'object' && typeof u.id === 'string' && u.id && typeof u.orgId === 'string' && u.orgId && typeof u.name === 'string' && u.name;
-
-/** The table is authoritative once migration 0001 is recorded (it created the table and cut the domain over in one step). */
-const cutOver = (sqlite) => migrationApplied(sqlite, '0001_org_users');
+const keptIds = (rows) => new Set((Array.isArray(rows) ? rows : []).filter((r) => isPlainObject(r) && typeof r.id === 'string').map((r) => r.id));
 
 /**
- * Whole-table access for tools that treat the database file as one snapshot
- * (backups, restores, the persistence suites' fixtures). Returns null before
- * the cutover record exists, so a caller keeps using the blob.
+ * Whole-table access for snapshot mode (tools, fixtures, the persistence suites). `replace` types every row first
+ * (an unknown field, a wrong-typed value or a broken uniqueness rule refuses the whole write, naming the row) and
+ * upserts in place, so the sessions and the many tables that reference a kept staff member keep their rows.
+ * `prune: false` leaves the deletions to a later `prune(sqlite, rows)` (after the tables that name staff).
  */
 export const USERS_TABLE = {
   name: 'users',
-  read(sqlite) {
-    if (!cutOver(sqlite)) return null;
-    return sqlite.prepare(`${SELECT} ORDER BY rowid`).all().map(toRow);
-  },
-  /**
-   * Make the table's contents equal to `rows`; the caller owns the transaction.
-   * Rows are upserted in place and only ids absent from `rows` are deleted:
-   * `sessions.org_user_id` cascades on delete, so a blanket DELETE + INSERT
-   * would silently destroy every staff session whenever a snapshot tool wrote
-   * the users collection back. A staff member who is genuinely gone from the
-   * snapshot still takes their sessions with them, which is the intent.
-   * `prune: false` (S8a-core) leaves the deletions to a later `prune(sqlite, rows)`
-   * call: since migration 0015 the recruitment_requests rows reference org_users
-   * (RESTRICT), so a snapshot write prunes the requests it no longer lists before
-   * the staff rows they named — the same children-before-parents order every
-   * other prune of the snapshot write follows.
-   */
+  read(sqlite) { return usersLive(sqlite) ? readSnapshot(sqlite) : null; },
   replace(sqlite, rows, { prune = true } = {}) {
-    if (!cutOver(sqlite)) return false;
-    const list = (Array.isArray(rows) ? rows : []).filter(isStaffRow);
-    // Unknown keys are not stored; a known field of the wrong type refuses the
-    // whole write before any row is touched.
-    for (const row of list) refuseOffType(row, 'ORG_USERS_SNAPSHOT_INVALID');
-    const upsert = sqlite.prepare(`INSERT INTO org_users (${COLUMN_LIST}) VALUES (${PARAM_LIST})
-      ON CONFLICT(id) DO UPDATE SET org_id = excluded.org_id, name = excluded.name, role = excluded.role, email = excluded.email, sso_subject = excluded.sso_subject,
-        created_at = excluded.created_at, removed_at = excluded.removed_at, removed_by = excluded.removed_by, provenance = excluded.provenance,
-        mfa_json = excluded.mfa_json, delivery_prefs_json = excluded.delivery_prefs_json`);
-    for (const row of list) upsert.run(toParams(knownFields(row)));
+    if (!usersLive(sqlite)) return false;
+    if (!sqlite.isTransaction) throw new Error('org_users: replace() runs inside the caller\'s transaction');
+    if (!Array.isArray(rows)) throw blocked(`the users snapshot collection must be an array (got ${describe(rows)})`);
+    const typed = []; const problems = []; const seen = new Set(); const names = new Set();
+    rows.forEach((raw, i) => {
+      const v = typeStaffSnapshotRow(raw);
+      if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
+      if (seen.has(v.row.id)) { problems.push(`entry #${i}: duplicates staff ${v.row.id}`); return; }
+      const nk = `${v.row.orgId}\u0000${staffNameKey(v.row.name)}`;
+      if (names.has(nk)) { problems.push(`entry #${i}: staff ${v.row.id} has the name of another staff account of ${v.row.orgId}`); return; }
+      seen.add(v.row.id); names.add(nk); typed.push(v);
+    });
+    if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in the users snapshot collection — ${problems.slice(0, 20).join('; ')}`, { problems });
+    // Names move between rows only through a delete; clear the keys first so a swap of names between kept rows is not a clash.
+    const upsert = sqlite.prepare(`${INSERT} ON CONFLICT(id) DO UPDATE SET ${COLS.split(', ').filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}`);
+    const clearKey = sqlite.prepare("UPDATE org_users SET name_key = char(0) || id WHERE id = ?");
+    for (const { row } of typed) clearKey.run(row.id);
+    const delCodes = sqlite.prepare('DELETE FROM org_user_recovery_codes WHERE org_user_id = ?');
+    const addCode = sqlite.prepare('INSERT INTO org_user_recovery_codes (org_user_id, code_hash) VALUES (?, ?)');
+    const setRemover = sqlite.prepare('UPDATE org_users SET removed_by_id = ? WHERE id = ?');
+    try {
+      // Removers are set in a second pass: a row may name a staff member listed after it.
+      for (const { row, mfa } of typed) upsert.run(params({ ...row, removedById: null }, mfa ? { secret: mfa.secret, enabledAt: mfa.enabledAt } : {}));
+      for (const { row } of typed) if (row.removedById !== null) setRemover.run(row.removedById, row.id);
+      for (const { row, mfa } of typed) { delCodes.run(row.id); for (const h of mfa?.hashes ?? []) addCode.run(row.id, h); }
+    } catch (err) {
+      throw blocked(`the users snapshot collection could not be stored (${String(err?.message ?? err).replace(/^SQLITE_\w+:\s*/, '')})`);
+    }
     if (prune) USERS_TABLE.prune(sqlite, rows);
     return true;
   },
-  /**
-   * Import a legacy `users` blob into an empty table (the sessions cutover,
-   * migration 0003, does this on a pre-S0 file; the caller owns the
-   * transaction). Entries that are not staff rows are skipped; unknown fields
-   * and wrong-typed optional values are dropped. Returns counts and the notes
-   * (row ids and field names only) for the caller's cutover record.
-   */
-  importLegacy(sqlite, rows) {
-    const given = Array.isArray(rows) ? rows : [];
-    const insert = sqlite.prepare(`INSERT INTO org_users (${COLUMN_LIST}) VALUES (${PARAM_LIST})`);
-    const notes = [];
-    const seen = new Set();
-    let imported = 0, normalised = 0;
-    for (const raw of given) {
-      if (!isStaffRow(raw)) continue;
-      if (seen.has(raw.id)) { notes.push(`staff ${raw.id}: duplicate id; the later entry skipped`); continue; }
-      seen.add(raw.id);
-      const t = typeForImport(raw);
-      insert.run(toParams(t.record));
-      imported += 1;
-      if (t.notes.length) { normalised += 1; notes.push(...t.notes); }
-    }
-    return { imported, skipped: given.length - imported, normalised, notes };
-  },
-  /** Delete every staff row whose id is absent from `rows` (the second half of `replace`; the caller owns the transaction). */
+  /** Delete every staff row whose id is absent from `rows` (their sessions and recovery codes cascade; the caller owns the transaction). */
   prune(sqlite, rows) {
-    if (!cutOver(sqlite)) return;
-    const keep = (Array.isArray(rows) ? rows : []).filter(isStaffRow).map((r) => r.id);
+    if (!usersLive(sqlite)) return;
+    const keep = keptIds(rows);
     const del = sqlite.prepare('DELETE FROM org_users WHERE id = ?');
-    for (const r of sqlite.prepare('SELECT id FROM org_users').all()) if (!keep.includes(r.id)) del.run(r.id);
+    for (const r of sqlite.prepare('SELECT id FROM org_users ORDER BY rowid DESC').all()) if (!keep.has(r.id)) del.run(r.id);
   },
 };
 
-export function createUsersRepository({ sqlite, nextId, log = () => {}, warn = () => {}, unit = null }) {
-  if (!sqlite) throw new TypeError('the staff repository needs a SQLite connection (node:sqlite); the data layer has no in-memory fallback');
-  const rows = [];                 // plain targets, insertion order
-  const byIdMap = new Map();       // id → plain target
-  const byOrgMap = new Map();      // orgId → plain targets, insertion order
-  const view = readonlyView(rows, 'a staff record');
-  // Writes commit on their own. This repository's in-memory rows are NOT yet
-  // integrated with the store's unit of work (no snapshotState/restoreState),
-  // so a write inside a unit — or inside any other open transaction — is
-  // refused rather than left half-tracked after a rollback.
-  const requireAutocommit = (what) => {
-    if (!sqlite.isTransaction) return;
-    if (unit?.active?.()) throw new Error(`org_users.${what} is not integrated with the unit of work yet (its in-memory rows would survive a rollback); perform staff changes outside the unit`);
-    throw new Error(`org_users.${what} writes in a transaction of its own and cannot run inside an open transaction`);
+// ------------------------------------------------------------------ the repository
+const WRITES = new Set(['create', 'update', 'startMfa', 'enableMfa', 'disableMfa', 'useRecoveryCode']);
+
+/** `createUsersRepository({ sqlite, nextId, unit, now, log })`: the staff writes and queries, plus `reads` (the queries alone). */
+export function createUsersRepository({ sqlite, nextId, unit = null, now = Date.now, log = () => {} }) {
+  if (!sqlite) throw new TypeError('the staff repository needs a SQLite connection (node:sqlite); staff have no in-memory fallback');
+  if (typeof nextId !== 'function') throw new TypeError('the staff repository needs nextId');
+  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const cache = new Map();
+  const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
+  const dec = (rows) => rows.map((d) => deepFreeze(fromDb(d)));
+  const byId = (id) => (typeof id === 'string' && id ? dec(q(`${SELECT} WHERE id = ?`).all(id))[0] ?? null : null);
+  const invalid = (id, problems) => refusal('STAFF_RECORD_INVALID', `org_users ${id}: ${problems.join('; ')}`, { problems });
+  const mustExist = (id) => { const r = q('SELECT id, mfa_secret, mfa_enabled_at FROM org_users WHERE id = ?').get(id); if (!r) throw refusal('STAFF_NOT_FOUND', `org_users ${id} does not exist`); return r; };
+  const checkRemover = (r) => {
+    if (r.removedById === null) return;
+    const by = byId(r.removedById);
+    if (!by || by.orgId !== r.orgId) throw invalid(r.id, ['removedById must name a staff member of the same organisation']);
   };
-
-  const insertStmt = sqlite.prepare(`INSERT INTO org_users (${COLUMN_LIST}) VALUES (${PARAM_LIST})`);
-  const updateStmt = sqlite.prepare(`UPDATE org_users SET org_id = @org_id, name = @name, role = @role, email = @email, sso_subject = @sso_subject, created_at = @created_at,
-    removed_at = @removed_at, removed_by = @removed_by, provenance = @provenance, mfa_json = @mfa_json, delivery_prefs_json = @delivery_prefs_json WHERE id = @id`);
-
-  const indexOrg = (target) => { if (!byOrgMap.has(target.orgId)) byOrgMap.set(target.orgId, []); byOrgMap.get(target.orgId).push(target); };
-  const remember = (target) => { rows.push(target); byIdMap.set(target.id, target); indexOrg(target); return readonlyView(target, 'a staff record'); };
-
-  function validate(row, { creating = false } = {}) {
-    if (typeof row.orgId !== 'string' || !row.orgId) throw new TypeError('a staff record needs an orgId');
-    if (typeof row.name !== 'string' || !row.name.trim()) throw new TypeError('a staff record needs a name');
-    // Every record created here has a role; a row imported from an older
-    // snapshot may lack one, and an update must not refuse to touch it.
-    if ((creating || row.role !== undefined) && (typeof row.role !== 'string' || !row.role.trim())) throw new TypeError('a staff record needs a role');
-    for (const key of Object.keys(row)) { const why = offType(key, row[key]); if (why) throw new TypeError(`a staff record's ${key} ${why}`); }
-  }
+  let updating = null;
 
   const repo = {
-    /** The read view the rest of the server uses as `db.users`. */
-    view,
-
-    byId: (id) => (id && byIdMap.has(id) ? readonlyView(byIdMap.get(id), 'a staff record') : null),
-    byOrgAndName(orgId, name) {
-      const wanted = String(name ?? '').trim().toLowerCase();
-      if (!wanted) return null;
-      const hit = rows.find((u) => u.orgId === orgId && u.name.toLowerCase() === wanted);
-      return hit ? readonlyView(hit, 'a staff record') : null;
-    },
-    listByOrg: (orgId) => (byOrgMap.get(orgId) ?? []).map((u) => readonlyView(u, 'a staff record')),
-    count: () => rows.length,
-
-    /** Create a staff record; the id is assigned here, never by the caller. */
-    insert(fields) {
-      requireAutocommit('insert');
-      // Only the typed fields are kept: a key the schema does not name is not stored.
-      const target = knownFields(fields);
-      delete target.id;
-      target.createdAt ??= Date.now();
-      validate(target, { creating: true });
-      // The id counter is persisted with the snapshot, which is debounced; a
-      // row is written immediately. After an abrupt stop the counter can be
-      // behind the table, so an id that already exists is skipped, not reused.
-      let id = nextId('usr');
-      while (byIdMap.has(id)) id = nextId('usr');
-      target.id = id;
-      insertStmt.run(toParams(target));
-      return remember(target);
-    },
-
+    // ---------------------------------------------------------- writes
+    /** Create a staff account (the id is minted here). Refuses junk by field and a name, e-mail or SSO subject already taken. Returns the stored record. */
+    create: ({ orgId, name, role, email = null, ssoSubject = null, provenance = null, deliveryPrefs = null, createdAt = now() } = {}) => operation(() => {
+      const r = { id: nextId('usr'), orgId, name, role, email, ssoSubject, createdAt, removedAt: null, removedById: null, provenance, deliveryPrefs: deliveryPrefs ?? DEFAULT_PREFS };
+      const problems = recordProblems(r);
+      if (problems.length) throw invalid(r.id, problems);
+      if (!q('SELECT 1 FROM orgs WHERE id = ?').get(orgId)) throw refusal('STAFF_ORG_MISSING', `org_users ${r.id}: organisation ${orgId} does not exist`);
+      const clash = clashOf(q, r); if (clash) throw clash;
+      q(INSERT).run(params({ ...r, deliveryPrefs: prefsOf(r.deliveryPrefs) }));
+      return byId(r.id);
+    }),
     /**
-     * Change fields on a staff record. `undefined` leaves a field alone and
-     * `null` clears it. Nested values (mfa, deliveryPrefs) are replaced whole.
-     * Returns the same view object callers already hold, now current.
+     * `update(id, (draft) => …)`: the draft is a plain copy of the record; the change is typed whole and written at
+     * once. Only name, role, email, ssoSubject, removedAt, removedById and deliveryPrefs change here (MFA has its
+     * own operations); any other change, or an unknown field, is refused. Returns the stored record.
      */
-    update(id, patch) {
-      requireAutocommit('update');
-      const target = byIdMap.get(id);
-      if (!target) throw new Error(`staff record ${id} does not exist`);
-      if (patch.id !== undefined && patch.id !== id) throw new TypeError('a staff record id never changes');
-      const next = { ...target };
-      for (const [key, value] of Object.entries(patch)) {
-        if (key === 'id' || value === undefined || !KNOWN.has(key)) continue; // a key the schema does not name is not stored
-        if (value === null) delete next[key]; else next[key] = clone(value);
+    update: (id, edit) => operation(() => {
+      if (typeof edit !== 'function') throw new TypeError('users.update(id, (draft) => …) takes a function');
+      if (updating === id) throw refusal('STAFF_UPDATE_REENTRANT', `org_users ${id} is already being updated`);
+      const before = byId(id);
+      if (!before) throw refusal('STAFF_NOT_FOUND', `org_users ${id} does not exist`);
+      const draft = JSON.parse(JSON.stringify(before));
+      updating = id;
+      try { edit(draft); } finally { updating = null; }
+      const unknown = Object.keys(draft).filter((k) => !RECORD_KEYS.includes(k));
+      if (unknown.length) throw invalid(id, [`unknown field(s) ${unknown.join(', ')}`]);
+      for (const k of RECORD_KEYS) {
+        if (EDITABLE.includes(k)) continue;
+        if (JSON.stringify(draft[k]) !== JSON.stringify(before[k])) throw invalid(id, [`${k} does not change through update`]);
       }
-      validate(next);
-      updateStmt.run(toParams(next));
-      const movedOrg = next.orgId !== target.orgId;
-      if (movedOrg) { const list = byOrgMap.get(target.orgId); list.splice(list.indexOf(target), 1); }
-      for (const key of Object.keys(target)) if (!(key in next)) delete target[key];
-      Object.assign(target, next);
-      if (movedOrg) { byOrgMap.clear(); for (const u of rows) indexOrg(u); } // keeps each organisation's list in insertion order
-      return readonlyView(target, 'a staff record');
-    },
+      const problems = recordProblems(draft);
+      if (problems.length) throw invalid(id, problems);
+      checkRemover(draft);
+      const clash = clashOf(q, draft); if (clash) throw clash;
+      const m = mustExist(id);
+      q(`UPDATE org_users SET ${COLS.split(', ').filter((c) => c !== 'id').map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`)
+        .run(params({ ...draft, deliveryPrefs: prefsOf(draft.deliveryPrefs) }, { secret: m.mfa_secret, enabledAt: m.mfa_enabled_at }));
+      return byId(id);
+    }),
+    /** Begin MFA set-up with a new secret (replacing an unconfirmed one); refused once MFA is enabled. Returns the stored record. */
+    startMfa: (id, secretB32) => operation(() => {
+      const m = mustExist(id);
+      if (m.mfa_enabled_at !== null) throw refusal('STAFF_MFA_ENABLED', `org_users ${id}: MFA is already enabled`);
+      if (!textOk(secretB32, L.secret, 16)) throw invalid(id, [`the MFA secret must be text of 16 to ${L.secret} characters`]);
+      q('UPDATE org_users SET mfa_secret = ?, mfa_enabled_at = NULL WHERE id = ?').run(secretB32, id);
+      q('DELETE FROM org_user_recovery_codes WHERE org_user_id = ?').run(id);
+      return byId(id);
+    }),
+    /** Confirm MFA: enabled from `at`, with these recovery-code hashes (each usable once). Returns the stored record. */
+    enableMfa: (id, { at = now(), recoveryHashes = [] } = {}) => operation(() => {
+      const m = mustExist(id);
+      if (m.mfa_secret === null || m.mfa_enabled_at !== null) throw refusal('STAFF_MFA_NOT_PENDING', `org_users ${id}: MFA is not awaiting confirmation`);
+      if (!isClock(at)) throw invalid(id, ['at must be an integer timestamp']);
+      if (!Array.isArray(recoveryHashes) || !recoveryHashes.every(isHash) || new Set(recoveryHashes).size !== recoveryHashes.length) throw invalid(id, ['recovery codes are distinct sha256 hex hashes']);
+      q('UPDATE org_users SET mfa_enabled_at = ? WHERE id = ?').run(at, id);
+      const add = q('INSERT INTO org_user_recovery_codes (org_user_id, code_hash) VALUES (?, ?)');
+      for (const h of recoveryHashes) add.run(id, h);
+      return byId(id);
+    }),
+    /** Turn MFA off: the secret and the unused recovery codes go. Returns the stored record. */
+    disableMfa: (id) => operation(() => {
+      mustExist(id);
+      q('DELETE FROM org_user_recovery_codes WHERE org_user_id = ?').run(id);
+      q('UPDATE org_users SET mfa_secret = NULL, mfa_enabled_at = NULL WHERE id = ?').run(id);
+      return byId(id);
+    }),
+    /** Spend one recovery code (by its hash). True when it existed and is now gone: a code works exactly once. */
+    useRecoveryCode: (id, codeHash) => operation(() => (isHash(codeHash) ? q('DELETE FROM org_user_recovery_codes WHERE org_user_id = ? AND code_hash = ?').run(id, codeHash).changes === 1 : false)),
 
-    /**
-     * Boot: load the table, or import the legacy blob array into it when the
-     * table is empty (first boot after the move, or a restore from a backup
-     * snapshot). Returns what happened, for the boot log.
-     */
-    attach(legacyRows) {
-      const given = Array.isArray(legacyRows) ? legacyRows : [];
-      const legacy = given.filter(isStaffRow);
-      if (legacy.length !== given.length) warn(`org_users: ${given.length - legacy.length} entry(ies) in the users blob are not staff rows (no id, organisation or name) and were not imported`);
-      const stored = sqlite.prepare(`${SELECT} ORDER BY rowid`).all();
-      if (stored.length === 0 && legacy.length) {
-        const result = transaction(sqlite, () => USERS_TABLE.importLegacy(sqlite, legacy));
-        for (const note of result.notes) warn(`org_users: ${note}`);
-        log(`org_users: imported ${result.imported} staff record(s) from the users blob${result.normalised ? `; ${result.normalised} with fields dropped` : ''}`);
-        for (const u of sqlite.prepare(`${SELECT} ORDER BY rowid`).all()) remember(toRow(u));
-        return { engine: 'sqlite', loaded: rows.length, imported: result.imported };
-      }
-      if (stored.length && legacy.length) {
-        // The in-memory array may be the blob a data migration imported into
-        // the table a moment ago (S2 does this on a legacy upgrade): then it is
-        // superseded, not stale. Only rows the table does not hold are stale.
-        const ids = new Set(stored.map((r) => r.id));
-        const unknown = legacy.filter((u) => !ids.has(u.id)).length;
-        if (unknown) warn(`org_users: the table holds ${stored.length} row(s); a stale users blob with ${unknown} row(s) the table does not hold was ignored and will be deleted on the next save`);
-        else log(`org_users: the users blob (${legacy.length} row(s)) is superseded by the table`);
-      }
-      for (const u of stored) remember(toRow(u));
-      return { engine: 'sqlite', loaded: rows.length, imported: 0 };
+    // ---------------------------------------------------------- reads
+    byId,
+    /** The account with this name in the organisation (case-insensitive; removed accounts included), or null. */
+    byOrgAndName: (orgId, name) => { const key = staffNameKey(name); return key ? dec(q(`${SELECT} WHERE org_id = ? AND name_key = ?`).all(orgId, key))[0] ?? null : null; },
+    /** The organisation's staff in creation order; `active: true` leaves out removed accounts. */
+    forOrg: (orgId, { active = false } = {}) => dec(q(`${SELECT} WHERE org_id = ?${active ? ' AND removed_at IS NULL' : ''} ORDER BY rowid`).all(orgId)),
+    /** The organisation's first current staff member (creation order), or null. */
+    firstActive: (orgId) => dec(q(`${SELECT} WHERE org_id = ? AND removed_at IS NULL ORDER BY rowid LIMIT 1`).all(orgId))[0] ?? null,
+    /** The current staff member with this e-mail (case-insensitive), or null. */
+    activeByEmail: (orgId, email) => (typeof email === 'string' && email ? dec(q(`${SELECT} WHERE org_id = ? AND lower(email) = lower(?) AND removed_at IS NULL`).all(orgId, email))[0] ?? null : null),
+    /** The account linked to this SSO subject in the organisation, or null. */
+    bySsoSubject: (orgId, subject) => (typeof subject === 'string' && subject ? dec(q(`${SELECT} WHERE org_id = ? AND sso_subject = ?`).all(orgId, subject))[0] ?? null : null),
+    /** The TOTP secret for the code checks (never on a record), or null. */
+    mfaSecretOf: (id) => q('SELECT mfa_secret FROM org_users WHERE id = ?').get(id)?.mfa_secret ?? null,
+    /** How many unused recovery codes a staff member has. */
+    recoveryCodesLeft: (id) => q('SELECT COUNT(*) AS n FROM org_user_recovery_codes WHERE org_user_id = ?').get(id).n,
+    count: () => q('SELECT COUNT(*) AS n FROM org_users').get().n,
+    attach() {
+      if (!usersLive(sqlite)) throw new Error(`the staff repository needs ${USERS_MIGRATION} recorded`);
+      const rows = repo.count();
+      log(`org_users: ${rows} staff account(s) in the table`);
+      return { engine: 'sqlite', rows };
     },
   };
+  repo.reads = Object.freeze(Object.fromEntries(Object.entries(repo).filter(([k, v]) => typeof v === 'function' && !WRITES.has(k) && k !== 'attach')));
   return repo;
 }

@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
+import { STAFF_LIMITS } from './repositories/users.mjs';
 import { MESSAGE_LIMITS } from './repositories/channels.mjs';
 import { NOTIFICATION_LIMITS, feedItem } from './repositories/notifications.mjs';
 import { createIdCounter } from './repositories/counters.mjs';
@@ -205,7 +206,6 @@ const complianceReads = complianceRecords.reads; // S11b-2: contexts, evaluation
 // Lookups by id through the repositories' indexes, never a scan of the collection (migration.md §4.3.1): handed to
 // every module context as `byId` (`byId.player(id)`, `byId.org(id)`, …; null when there is none).
 const byId = createLookups({ players, guardians, users, orgs });
-if (dataLayer.boot.users.imported) console.log(`data layer: ${dataLayer.boot.users.imported} staff record(s) moved into org_users`);
 if (dataLayer.boot.identity.imported) console.log(`data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`);
 
 /**
@@ -470,7 +470,7 @@ function shouldDeliver(identity, event, payload) {
     return false;
   }
   if (event === 'notify') {
-    if (identity.kind === 'org') return db.users.some((u) => u.id === payload.audienceId && u.orgId === org.id) && payload.audienceKind === 'org_user';
+    if (identity.kind === 'org') return payload.audienceKind === 'org_user' && users.byId(payload.audienceId)?.orgId === org.id;
     if (identity.kind === 'player') return payload.audienceKind === 'player' && payload.audienceId === identity.playerId;
     if (identity.kind === 'guardian') return payload.audienceKind === 'guardian' && payload.audienceId === identity.guardianId;
     return false;
@@ -1851,12 +1851,16 @@ app.post('/auth/org/register-grassroots', (req, res) => {
     safeguardingContractSigned: false,
     ...(password ? { password: hashPassword(String(password)) } : {}),
   });
-  const user = users.insert({ orgId: org.id, name: scoutName.trim(), role: (role || 'Manager').trim() });
+  // The administrator's account and session are one unit (the organisation is still written first: its repository is staged).
+  const { user, token } = unit(() => {
+    const created = users.create({ orgId: org.id, name: scoutName.trim(), role: role?.trim() || 'Manager' });
+    return { user: created, token: createSession('org', org.id, { userId: created.id }) };
+  });
   persist();
   broadcast('orgs');
   res.status(201).json({
     userId: user.id, role: user.role, org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
-    token: createSession('org', org.id, { userId: user.id }),
+    token,
     note: 'Registered. Adults within 50km are visible now; under-18 visibility needs verification + the safeguarding contract, reviewed by Trust & Safety.',
   });
 });
@@ -1886,6 +1890,7 @@ app.post('/auth/org/login', (req, res) => {
     // Accountability by user: no anonymous / shared workspace access.
     return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED', message: 'Every session is attributed to a named individual.' });
   }
+  if (scoutName.trim().length > STAFF_LIMITS.name) return res.status(400).json({ error: 'FIELD_INVALID', field: 'scoutName', message: `scoutName is at most ${STAFF_LIMITS.name} characters.` });
   // Org credentials: provisioned orgs require their password; unprovisioned
   // (seeded demo) orgs are a development shortcut only.
   if (org.password) {
@@ -1908,14 +1913,10 @@ app.post('/auth/org/login', (req, res) => {
     }
     const { mfaCode, recoveryCode } = req.body ?? {};
     let second = false;
-    if (mfaCode) second = totpValid(user.mfa.secretB32, mfaCode);
+    if (mfaCode) second = totpValid(users.mfaSecretOf(user.id), mfaCode);
     else if (recoveryCode) {
-      const hash = crypto.createHash('sha256').update(String(recoveryCode)).digest('hex');
-      const idx = user.mfa.recoveryHashes.indexOf(hash);
-      if (idx >= 0) { // each code works exactly once
-        users.update(user.id, { mfa: { ...user.mfa, recoveryHashes: user.mfa.recoveryHashes.filter((_, i) => i !== idx) } });
-        second = true;
-      }
+      // Each code works exactly once: spending it deletes its row, and only the call that deleted it passes.
+      second = users.useRecoveryCode(user.id, crypto.createHash('sha256').update(String(recoveryCode)).digest('hex'));
     }
     if (!second) {
       if (mfaCode || recoveryCode) m13Ctx?.mfaGuards?.mfaFail(user.id);
@@ -1945,8 +1946,7 @@ app.post('/auth/org/login', (req, res) => {
   let roleNote;
   if (!user) {
     if (credentialed) {
-      const staff = users.listByOrg(orgId).filter((u) => !u.removedAt);
-      if (staff.length) {
+      if (users.firstActive(orgId)) {
         return res.status(403).json({
           error: 'STAFF_NOT_PROVISIONED',
           message: 'No staff account with this name exists in the organisation. Ask a lead for an invitation — the organisation password does not create accounts.',
@@ -1955,20 +1955,23 @@ app.post('/auth/org/login', (req, res) => {
       // First account on a credentialed organisation: the administrator. A
       // lead-tier role is required so the organisation can invite its staff.
       const requested = (role || '').trim();
-      user = users.insert({
-        orgId, name: scoutName.trim(),
-        role: isLeadRole(requested) ? requested : 'Manager',
-        provenance: 'org_password_bootstrap',
+      user = unit(() => {
+        const created = users.create({
+          orgId, name: scoutName.trim(),
+          role: isLeadRole(requested) ? requested : 'Manager',
+          provenance: 'org_password_bootstrap',
+        });
+        safetyAudit.opsEvents.record({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: created.id, by: created.name } });
+        return created;
       });
-      safetyAudit.opsEvents.record({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: user.id, by: user.name } });
     } else {
-      user = users.insert({ orgId, name: scoutName.trim(), role: (role || 'Scout').trim() });
+      user = users.create({ orgId, name: scoutName.trim(), role: role?.trim() || 'Scout' });
     }
   } else if (role && role.trim() && role.trim() !== user.role) {
     if (credentialed) {
       roleNote = 'Roles are assigned by your organisation; the role entered at sign-in was not applied.';
     } else {
-      users.update(user.id, { role: role.trim() }); // development shortcut only — see above
+      user = users.update(user.id, (d) => { d.role = role.trim(); }); // development shortcut only — see above
     }
   }
   res.json({
@@ -4694,14 +4697,17 @@ function revokeOrgUserAccess(userId) {
   // Immediate, structural: sessions die (API + media on the next byte) and
   // any open SSE stream for that user goes silent via shouldDeliver's live
   // user check. The user ROW is kept (removedAt) so history stays attributed.
+  // Inside a unit (the staff removal) the sessions go with its commit and the streams close after it.
   sessions.revokeOrgUser(userId);
-  for (const client of [...sseClients]) {
-    if (client.identity?.kind === 'org' && client.identity.userId === userId) {
-      try { client.res.end(); } catch { /* already gone */ }
-      sseClients.delete(client);
+  const silence = () => {
+    for (const client of [...sseClients]) {
+      if (client.identity?.kind === 'org' && client.identity.userId === userId) {
+        try { client.res.end(); } catch { /* already gone */ }
+        sseClients.delete(client);
+      }
     }
-  }
-  persistNow();
+  };
+  if (store.inUnitOfWork?.()) store.afterCommit(silence); else silence();
 }
 
 registerM12({
@@ -4824,7 +4830,7 @@ const m162Ctx = registerM162({
 const m17Ctx = registerM17({
   rateLimit,
   faults: faultLayer, // M23 P8.1 — the development fault seam inside the ONE lifecycle writer
-  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit, recruitmentCases, unit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
   storage, publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
@@ -4857,7 +4863,7 @@ const m17Ctx = registerM17({
 // M18 registers no player, guardian or public route at all.
 const m18Ctx = registerM18({
   rateLimit,
-  db, byId, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+  db, byId, users, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   discovery, unit, // S12c: every brief, review, Second Look item and watchlist is an explicit repository write
   combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id), // a brief's Combine protocols are refused unless known (S12c)
   nextId, persist, persistNow, notify, ledgerAppend, broadcast, safetyAudit,

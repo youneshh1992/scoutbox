@@ -8,6 +8,9 @@
  * three shadow definitions with the live ones). This module stays as the
  * recorded first step of a database's schema history.
  *
+ * S14f amended the sessions table in place: an org session's staff member and organisation are one key,
+ * (org_user_id, ref_id) → org_users(id, org_id), so a session cannot name staff of another organisation.
+ *
  * The DDL is the identity section of docs/architecture/sql/01_identity.sql
  * (the player_* sub-record tables of that file arrive with step S5).
  */
@@ -128,11 +131,13 @@ export function up(sqlite) {
       sid         TEXT NOT NULL UNIQUE,
       kind        TEXT NOT NULL CHECK (kind IN ('player','guardian','org','ts_reviewer')),
       ref_id      TEXT NOT NULL,
-      org_user_id TEXT REFERENCES org_users(id) ON DELETE CASCADE,
+      org_user_id TEXT,
       via         TEXT CHECK (via IS NULL OR via IN ('sso')),
       created_at  INTEGER NOT NULL,
       expires_at  INTEGER NOT NULL,
-      CHECK ((kind = 'org') = (org_user_id IS NOT NULL))
+      CHECK ((kind = 'org') = (org_user_id IS NOT NULL)),
+      CHECK (expires_at > created_at),
+      FOREIGN KEY (org_user_id, ref_id) REFERENCES org_users(id, org_id) ON DELETE CASCADE
     ) STRICT;
     CREATE INDEX sessions_ref ON sessions (kind, ref_id);
     CREATE INDEX sessions_org_user ON sessions (org_user_id);

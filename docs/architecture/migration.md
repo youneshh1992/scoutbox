@@ -79,11 +79,12 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S14c | message threads become explicit writes and SQL reads; the tables re-typed (the request key from the start, the activity time, the sender by kind with staff a key, length CHECKs, the retry id unique) | `0012` (amended in place) | `channels` | done |
 | S14d | delivery dispatches, the mail outbox, the push log and device tokens become explicit writes and SQL reads; the tables re-typed (vocabulary CHECKs, a staff audience's organisation as a key, integer clocks, an address on every outbox row, one row per device token) | `0010`, `0011` (amended in place) | `dispatches`, `outboxPush` | done |
 | S14e | notifications and their preferences become explicit writes and SQL reads; the tables re-typed (the audience kind's vocabulary, a staff audience a key, length and category CHECKs, the delivery marker; the group key and acknowledger worked out) | `0009` (amended in place) | `notifications` | done |
-| S14f… | the remaining staged repositories become explicit, one per step (§4.6) | | | **next** |
+| S14f | staff and sessions become explicit writes and SQL reads; the staff table re-typed (a name unique in its organisation, removed accounts included; an e-mail unique among current staff; MFA and delivery preferences as columns, recovery codes as child rows; the remover a key) and an org session's staff and organisation one key | `0001`, `0002` (amended in place; `0004` no longer rebuilds `org_users`) | `users`, `sessions` | done |
+| S14g… | the remaining staged repositories (the organisations' facets, players and guardians) become explicit, one per step (§4.6) | | | **next** |
 | S14 last | the save path, `db` and snapshot mode go (§4.6) | | | |
 
 Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1, and
-S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d, S7a's since S14e.
+S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d, S7a's since S14e, S0's and S2's since S14f.
 
 ## 4. The order of work
 
@@ -103,12 +104,12 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   own `update` and takes the extra detail its callers used to patch on afterwards.
 - **Units of work.** Every route that writes more than one row (including its notifications and ledger rows) runs in
   one unit. A refusal is thrown inside the unit, replacing hand-written undo code. Routes check every field before
-  writing anything. Staff writes (`users.mjs`) cannot join a unit yet: create the staff account before the unit.
+  writing anything. Only the organisations' writes still have to come first (`orgs.insert` is staged).
 - **Reads.** No mirror. The old `db.<collection>` name throws, naming the repository: don't delete it, or the `??= []`
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, the delivery centre the `dispatches` and `outboxPush` repositories, and the feed and preferences the `notifications` repository); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, the delivery centre the `dispatches` and `outboxPush` repositories, the feed and preferences the `notifications` repository, and staff readers the `users` repository or `byId.user`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -157,9 +158,8 @@ separate risk; the script moves the fixtures' instants to today to measure the s
 **Deferred: what still misses §2** (busy club / stress case). None blocks the next step:
 
 - `/org/recruitment-analytics` (526 ms): needs its own projections in SQL, not decoded records. After S14.
-- `/org/rooms` (197 ms) and a Room (10–12 ms): mostly the per-player Passport and Trust assembly, and a scan of the
-  org's staff for each comment's author (`orgUsers` in `domains/recruitment/rooms/rooms.mjs`), which should use the
-  staff index.
+- `/org/rooms` (197 ms) and a Room (10–12 ms): mostly the per-player Passport and Trust assembly (a comment's author
+  is a staff lookup by id since S14f).
 - `/player/journeys`, `/player/signings`, `/player/offers`, `/player/trials` for a player in 191 clubs' Rooms: each
   still decodes every record of each club's case. Revisit with projections after S14.
 - The Room comment write (75 ms): the organisations' per-unit cost (§4.3.1).
@@ -278,8 +278,21 @@ Split in parts, like S12 and S13.
   identical unread row whose last occurrence was within six hours" (the old scan's early stop is gone). The
   preference route refuses non-boolean values (`400 PREFS_INVALID`) instead of coercing them; a notice's text is
   shortened to 2,000 characters; a system-raised report's resolution no longer writes a notice to nobody.
-- **S14f onwards: the remaining staged repositories become explicit**, one per step, the S8 way:
-  staff and sessions, the organisations' remaining facets, players and guardians. Each loses its mirror, its `db.<name>` view and its save hook, and its reads become queries.
+- **S14f (done): staff and sessions** are explicit writes and SQL reads, with no mirror and no `db.users` /
+  `db.sessions` (the names throw). Migration `0001` was amended in place to create the final staff table (and `0004`
+  no longer rebuilds it): name 1–120 and role 1–60 characters, required; a name unique in its organisation through
+  the repository's `name_key` (case-insensitive, removed accounts included); an e-mail unique among current staff;
+  an SSO subject unique in the organisation; `removed_by_id` a RESTRICT key (it was a copied name); the provenance
+  vocabulary; MFA as `mfa_secret` and `mfa_enabled_at` with `org_user_recovery_codes` child rows (a code is spent by
+  deleting its row); delivery preferences as columns. The TOTP secret is never on a record (`mfaSecretOf`). `0002`
+  makes an org session's `(org_user_id, ref_id)` one key to `org_users(id, org_id)`. Writes are `create`,
+  `update(id, draft => …)` and the MFA operations, and now join units: registration, the password bootstrap, an
+  accepted invite, an agency team member's addition and ending, the claim approval and a staff removal are each one
+  unit. Founder decisions: a re-invite restores the removed account; a name already in the organisation is refused
+  (`STAFF_NAME_TAKEN`). Junk refused: a non-boolean e-mail switch on `/org/delivery/prefs`, a sign-in or invite name
+  over 120 characters.
+- **S14g onwards: the remaining staged repositories become explicit**, one per step, the S8 way:
+  the organisations' remaining facets, players and guardians. Each loses its mirror, its `db.<name>` view and its save hook, and its reads become queries.
   This is also what closes §4.3.1's cost of an empty unit of work.
 - **S14 last: the save path goes.** `persist()`, `persistNow()`, the debounced save, the save hooks,
   `repositories/memento.mjs`, `repositories/readonly.mjs` and `db` itself; then snapshot mode (`openStore(dir)`

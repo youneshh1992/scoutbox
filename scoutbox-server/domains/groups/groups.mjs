@@ -36,7 +36,7 @@ export function registerGroups(ctx) {
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerGroups needs recruitmentReads (signings) from the data layer');
   const G = groupReads.groups;
   const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
-  const leadOf = (orgId) => users.listByOrg(orgId).find((u) => !u.removedAt) ?? null;
+  const leadOf = (orgId) => users.firstActive(orgId);
 
   // ------------------------------------------------------- administration
   adminRouter.post('/groups', (req, res) => {
