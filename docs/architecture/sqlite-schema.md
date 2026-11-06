@@ -928,7 +928,7 @@ the route and response half is named with its plan step.
    `secrets.mediaSign` (`server.mjs:345`; fixed 3 Nov 2026, the key is env-only), and one-time codes inside `outbox.text`. Schema:
    `*_hash` columns everywhere except push tokens and webhook secrets (OPEN: encrypt at rest
    with a key from env); `mediaSign` leaves the database; `outbox.text` retention OPEN.
-2. **Unsalted sha256 for API keys, verification tokens and share tokens** (`m13/imports.mjs`,
+2. **Unsalted sha256 for API keys, verification tokens and share tokens** (`domains/integrations/imports.mjs`,
    `domains/verification/claims/shared.mjs:299`, `domains/verification/passport/sharing.mjs:31`). Acceptable for 32-byte random tokens; not for
    6-character codes (`email_challenges`, `pairing_codes`, ~30 bits): the header notes it and
    S6 adds attempt limits per code.

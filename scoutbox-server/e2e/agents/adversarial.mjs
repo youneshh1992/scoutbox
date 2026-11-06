@@ -196,7 +196,7 @@ section('J/pure â€” the minor threshold is canonical, and the pathway is shut (Â
   // F-8 regression. `new Date(null)` is the EPOCH, not an invalid date, so a
   // null date of birth used to compute as a 56-year-old and read as an ADULT on
   // both age paths. `0` and `false` did the same. A missing date of birth is
-  // exactly the shape an imported record has (m13/imports.mjs treats dob as
+  // exactly the shape an imported record has (domains/integrations/imports.mjs treats dob as
   // optional and projects a missing one as null), so this was a reachable
   // safeguarding fail-open, not a theoretical one.
   for (const bad of [null, undefined, '', 0, false, [], {}, 'not-a-date']) {

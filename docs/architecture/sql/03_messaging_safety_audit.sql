@@ -861,7 +861,7 @@ CREATE INDEX ledger_occurred_at ON ledger (occurred_at);
 --         m13/delivery.mjs (delivery_failed, staged into the sweep pass's persistNow with the
 --         dispatch and outbox rows), m13/enterprise.mjs (audit_export, backup_created,
 --         backup_refused, backup_failed and the other operations events: EVERY kind is an
---         ordinary row — no vocabulary CHECK), m13/imports.mjs (webhook_failed). The m13
+--         ordinary row — no vocabulary CHECK), domains/integrations/imports.mjs (webhook_failed). The m13
 --         modules keep an array push for a bare context without the repository (the reviewer
 --         feasibility scripts); the server always passes the repository.
 -- lifecycle: append-only; UNBOUNDED, never pruned (unchanged).

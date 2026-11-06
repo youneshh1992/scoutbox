@@ -24,8 +24,8 @@
 
 -- ---------------------------------------------------------------------
 -- api_keys
--- source: db.apiKeys  created at m13/shared.mjs:13 (migrateM13); rows minted at m13/imports.mjs:259-265
--- owner/writer: m13/imports.mjs   lifecycle: live until revoked_at set (soft revoke, never deleted)
+-- source: db.apiKeys  created at m13/shared.mjs:13 (migrateM13); rows minted at domains/integrations/imports.mjs:259-265
+-- owner/writer: domains/integrations/imports.mjs   lifecycle: live until revoked_at set (soft revoke, never deleted)
 -- mapping: id -> id (key-N); orgId -> org_id; scopes[] -> api_key_scopes child table;
 --          keyHash -> key_hash (already sha256 hex of the plaintext, unsalted, imports.mjs:261 — unchanged);
 --          label -> label; createdBy -> created_by_name (code stores req.orgUser.name, not an id);
@@ -49,7 +49,7 @@ CREATE UNIQUE INDEX api_keys_key_hash ON api_keys(key_hash);
 CREATE INDEX api_keys_org_id ON api_keys(org_id);
 
 -- source: db.apiKeys[].scopes[]  (string array, imports.mjs:256)
--- owner/writer: m13/imports.mjs   lifecycle: set once at creation, never changed
+-- owner/writer: domains/integrations/imports.mjs   lifecycle: set once at creation, never changed
 -- mapping: each scope string -> one row (api_key_id, scope); PK is the natural pair
 -- notes: values limited to API_SCOPES (imports.mjs:253). At least one scope is enforced by code.
 CREATE TABLE api_key_scopes (
@@ -61,8 +61,8 @@ CREATE TABLE api_key_scopes (
 
 -- ---------------------------------------------------------------------
 -- webhook_endpoints
--- source: db.webhookEndpoints  created at m13/shared.mjs:14; rows minted at m13/imports.mjs:329-334
--- owner/writer: m13/imports.mjs   lifecycle: active 1 -> 0 on deactivate (never deleted)
+-- source: db.webhookEndpoints  created at m13/shared.mjs:14; rows minted at domains/integrations/imports.mjs:329-334
+-- owner/writer: domains/integrations/imports.mjs   lifecycle: active 1 -> 0 on deactivate (never deleted)
 -- mapping: id -> id (whk-N); orgId -> org_id; url -> url; events[] -> webhook_endpoint_events child table;
 --          secret -> secret; secretPrev -> secret_prev; secretPrevValidUntil -> secret_prev_valid_until;
 --          active -> active; createdBy -> created_by_name (name string, imports.mjs:332); createdAt -> created_at
@@ -88,7 +88,7 @@ CREATE TABLE webhook_endpoints (
 CREATE INDEX webhook_endpoints_org_id_active ON webhook_endpoints(org_id, active);
 
 -- source: db.webhookEndpoints[].events[]  (string array filtered to WEBHOOK_EVENTS, imports.mjs:321,327)
--- owner/writer: m13/imports.mjs   lifecycle: set once at creation
+-- owner/writer: domains/integrations/imports.mjs   lifecycle: set once at creation
 -- mapping: each event string -> one row (endpoint_id, event); natural PK
 -- notes: emit filters `x.events.includes(type)` — served by the PK.
 CREATE TABLE webhook_endpoint_events (
@@ -100,8 +100,8 @@ CREATE TABLE webhook_endpoint_events (
 
 -- ---------------------------------------------------------------------
 -- webhook_deliveries
--- source: db.webhookDeliveries  created at m13/shared.mjs:15; rows minted at m13/imports.mjs:368-372
--- owner/writer: m13/imports.mjs (emitWebhook, deliverOne, webhookSweep)
+-- source: db.webhookDeliveries  created at m13/shared.mjs:15; rows minted at domains/integrations/imports.mjs:368-372
+-- owner/writer: domains/integrations/imports.mjs (emitWebhook, deliverOne, webhookSweep)
 -- lifecycle: queued -> retrying* -> delivered | failed | abandoned; NEVER pruned
 -- mapping: id -> id (dlv-N); endpointId -> endpoint_id; orgId -> org_id; eventId -> event_id;
 --          type -> type; data -> data_json; status -> status; attempts[] -> webhook_delivery_attempts child table;
@@ -131,7 +131,7 @@ CREATE INDEX webhook_deliveries_status_next_at ON webhook_deliveries(status, nex
 
 -- source: db.webhookDeliveries[].attempts[]  ({at,status} on HTTP response, {at,error} on fetch error /
 --         rejected destination; imports.mjs:389,406,409)
--- owner/writer: m13/imports.mjs deliverOne   lifecycle: append-only, max 5 per delivery (MAX_ATTEMPTS)
+-- owner/writer: domains/integrations/imports.mjs deliverOne   lifecycle: append-only, max 5 per delivery (MAX_ATTEMPTS)
 -- mapping: array index -> attempt_no (1-based); at -> attempted_at; status -> http_status; error -> error
 -- notes: no id in source; natural PK (delivery_id, attempt_no). Retry ladder RETRY_MS is code, not data.
 CREATE TABLE webhook_delivery_attempts (
@@ -315,8 +315,8 @@ CREATE TABLE support_access_log (
 
 -- ---------------------------------------------------------------------
 -- import_batches
--- source: db.importBatches  created at m13/shared.mjs:10; rows minted at m13/imports.mjs:112-127
--- owner/writer: m13/imports.mjs   lifecycle: validated -> committed -> reversed; never deleted
+-- source: db.importBatches  created at m13/shared.mjs:10; rows minted at domains/integrations/imports.mjs:112-127
+-- owner/writer: domains/integrations/imports.mjs   lifecycle: validated -> committed -> reversed; never deleted
 -- mapping: id -> id (imp-N); orgId -> org_id; kind -> kind; createdBy -> created_by_user_id (user id);
 --          createdByName -> created_by_name; createdAt -> created_at;
 --          header[] -> header_json (the uploaded CSV's header row — free-form by design, user-supplied column names);
@@ -357,7 +357,7 @@ CREATE INDEX import_batches_org_id_created_at ON import_batches(org_id, created_
 CREATE INDEX import_batches_org_id_status ON import_batches(org_id, status);
 
 -- source: db.importBatches[].rows[]  ({row, record{...}, errors[], disposition, matchPlayerId}, imports.mjs:99)
--- owner/writer: m13/imports.mjs validateRows   lifecycle: written once at validation; NEVER mutated or pruned
+-- owner/writer: domains/integrations/imports.mjs validateRows   lifecycle: written once at validation; NEVER mutated or pruned
 -- mapping: row (CSV line number, header = 1) -> row_no (natural key within the batch);
 --          record.name -> record_name; record.dob -> record_dob (raw text: on 'error' rows it may be
 --          malformed, so no length CHECK here); record.position -> record_position; record.foot -> record_foot;
@@ -386,7 +386,7 @@ CREATE TABLE import_batch_rows (
 ) STRICT;
 
 -- source: db.importBatches[].history[]  (histAppend, m13/shared.mjs:206-209: {id aud-N, at, byKind, byId, byName, action, detail})
--- owner/writer: m13/imports.mjs   lifecycle: append-only (actions: validated, committed, reversed)
+-- owner/writer: domains/integrations/imports.mjs   lifecycle: append-only (actions: validated, committed, reversed)
 -- mapping: id -> id; at -> at; byKind -> by_kind; byId -> by_id; byName -> by_name; action -> action; detail -> detail_json
 -- notes: exported in the org audit export (enterprise.mjs:333). detail is the summary object / counts.
 CREATE TABLE import_batches_history (
@@ -404,8 +404,8 @@ CREATE INDEX import_batches_history_batch_id_at ON import_batches_history(batch_
 
 -- ---------------------------------------------------------------------
 -- prospects
--- source: db.prospects  created at m13/shared.mjs:11; rows minted at m13/imports.mjs:155-160 (commit) and 227-231 (review 'separate')
--- owner/writer: m13/imports.mjs   lifecycle: live until reversed_at set (soft delete by batch reversal); never hard-deleted
+-- source: db.prospects  created at m13/shared.mjs:11; rows minted at domains/integrations/imports.mjs:155-160 (commit) and 227-231 (review 'separate')
+-- owner/writer: domains/integrations/imports.mjs   lifecycle: live until reversed_at set (soft delete by batch reversal); never hard-deleted
 -- mapping: id -> id (prs-N); orgId -> org_id; batchId -> batch_id; name -> name; dob -> dob ('' in source -> NULL);
 --          position -> position; foot -> foot; heightCm -> height_cm; provider -> provider; externalId -> external_id;
 --          notes -> notes; minor -> minor (tri-state: null when no dob, and ABSENT on the review-'separate' path -> NULL);
@@ -442,7 +442,7 @@ CREATE INDEX prospects_org_id_created_at ON prospects(org_id, created_at);
 CREATE INDEX prospects_batch_id ON prospects(batch_id);
 
 -- source: db.importBatches[].createdProspectIds[]  (imports.mjs:162)
--- owner/writer: m13/imports.mjs commit   lifecycle: append at commit; read by reverse (imports.mjs:185)
+-- owner/writer: domains/integrations/imports.mjs commit   lifecycle: append at commit; read by reverse (imports.mjs:185)
 -- mapping: each id -> one row (batch_id, prospect_id)
 -- notes: NOT derivable from prospects.batch_id — prospects created via identity-review 'separate'
 --        (imports.mjs:227-232) carry batch_id but are NOT in this list and are NOT reversed with the batch.
@@ -456,8 +456,8 @@ CREATE TABLE import_batch_created_prospects (
 
 -- ---------------------------------------------------------------------
 -- identity_reviews
--- source: db.identityReviews  created at m13/shared.mjs:12; rows minted at m13/imports.mjs:164-168
--- owner/writer: m13/imports.mjs   lifecycle: open -> resolved; never deleted
+-- source: db.identityReviews  created at m13/shared.mjs:12; rows minted at domains/integrations/imports.mjs:164-168
+-- owner/writer: domains/integrations/imports.mjs   lifecycle: open -> resolved; never deleted
 -- mapping: id -> id (idr-N); orgId -> org_id; batchId -> batch_id; row -> row_no;
 --          record -> NOT duplicated: it is the same object as import_batch_rows(batch_id,row_no).record_*
 --          (imports.mjs:166 passes r.record of that row; rows are immutable) — read through the composite FK;
@@ -968,7 +968,7 @@ CREATE INDEX media_deletions_queued ON media_deletions (queued_at);
 --     (required in production); development uses a random per-process key. Signed media URLs (15-minute TTL)
 --     stop verifying after a restart without MEDIA_SECRET, which clients tolerate (links are re-minted on every
 --     SSE tick).
---   CONNECTORS registry (m13/imports.mjs:432-436) — code registry, status derived from env keys.
+--   CONNECTORS registry (domains/integrations/imports.mjs:432-436) — code registry, status derived from env keys.
 --   API_SCOPES, WEBHOOK_EVENTS, RETRY_MS ladders, MAX_ATTEMPTS, EXPORT_CONTRACT_VERSION (imports.mjs) — code constants
 --     (the enum values appear as CHECKs above).
 --   metrics counters, exposureHook, mfaAttempts map, IDP_SECRET, signToken/verifyToken (m13/enterprise.mjs) — in-memory / env.

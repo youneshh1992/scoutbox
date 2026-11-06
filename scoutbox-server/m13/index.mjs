@@ -6,7 +6,7 @@
 // another consumes (delivery exposes notifyAction; imports exposes
 // emitWebhook; enterprise exposes the exposure hook).
 import { migrateM13, buildSharedM13 } from './shared.mjs';
-import { registerImports } from './imports.mjs';
+import { registerImports } from '../domains/integrations/imports.mjs';
 import { registerDelivery } from './delivery.mjs';
 import { registerEnterprise } from './enterprise.mjs';
 import { registerSuitability } from '../domains/scouting/suitability.mjs';

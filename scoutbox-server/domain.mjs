@@ -39,7 +39,7 @@ export function adultAgeFor(country) {
  * did so by accident rather than by rule.
  *
  * A missing date of birth is exactly the shape an IMPORTED record has: the M13
- * prospect import treats dob as optional (m13/imports.mjs) and projects a
+ * prospect import treats dob as optional (domains/integrations/imports.mjs) and projects a
  * missing one as `dob: null`. So "age unknown" is a real state, and the only
  * safe reading of it is NOT "adult".
  *

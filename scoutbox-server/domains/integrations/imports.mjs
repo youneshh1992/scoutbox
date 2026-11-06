@@ -7,7 +7,7 @@
 //  * Outgoing webhooks are signed, tenant-scoped, retried with bounds, and
 //    SSRF-guarded. Connectors report "not configured" until credentialed.
 import crypto from 'node:crypto';
-import { parseDobStrict } from '../temporal.mjs';
+import { parseDobStrict } from '../../temporal.mjs';
 
 const PROSPECT_FIELDS = ['name', 'dob', 'position', 'foot', 'heightCm', 'provider', 'externalId', 'notes'];
 const POSITIONS = ['GK', 'CB', 'RB', 'LB', 'RWB', 'LWB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF'];
