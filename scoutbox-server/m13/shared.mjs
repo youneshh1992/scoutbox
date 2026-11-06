@@ -17,7 +17,8 @@ export function migrateM13(db, players) {
   // repositories/insightCoverage.mjs (S12d), read through insightReads.
   // F8 group workspaces and group grants: tables of repositories/groups.mjs (S13c), read through groupReads.
   db.dispatches ??= [];           // F11 — per-channel delivery records for notifications (S7b: a table; attachDataLayer replaces this container with the repository's read-only view before m13 registers)
-  db.deliveryCallbacksSeen ??= [];// F11 — processed provider callback ids (idempotency)
+  // F11 processed provider callback ids, the delivery centre's start and injected failures: tables of
+  // repositories/operations.mjs (S13e).
   // F12 staff invites, SSO configurations and states, support tickets and access grants: tables of
   // repositories/enterprise.mjs (S13b), read through enterpriseReads.
   db.opsEvents ??= [];            // F12 — persisted operational failures/alerts

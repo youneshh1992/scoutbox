@@ -57,7 +57,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // migrateM13 no longer creates them.
   // applications: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
   // (scoutingReads). db.applications throws.
-  archetypes: { guarantee: 'migration', owner: 'core', reason: 'product configuration, restored from catalogue.mjs; empty is a lie with consequences (D2)' },
   // blocks, reports, moderationLog, orgNotes, ledger, opsEvents, sourceChanges, idvQueue: no longer blob collections since S6b —
   // the rows live in blocks / reports / moderation_log / org_notes / ledger / ops_events / source_changes / idv_queue (migration
   // 0013_safety_audit, repositories/safetyAudit.mjs). The entries stay because seed.mjs, the snapshot migrations m230_001 / m230_003
@@ -79,9 +78,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // order, messages nested in array order), written only through the channels repository (the acceptance routes'
   // openChannel, postMessage, the three receipt routes, the account deletion).
   channels: { guarantee: 'migration', owner: 'core', reason: 'moderated message threads, opened on acceptance (D2); container guaranteed by the migration registry before the data layer attaches; since S7d a read-only view over the channels table, written only through the channels repository' },
-  deliveryCallbacksSeen: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  deliveryCentreSince: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
-  deliveryFailInject: { guarantee: 'module', owner: 'm13', reason: 'M13 feature collection, created by migrateM13 at registration' },
   // devObjectives, drillGuidance (the reviews only; the guidance is code), developmentPlans, developmentGoals,
   // developmentActions, developmentEvidenceLinks, developmentReviews: never a db.* read since S12a — typed tables (migration
   // 0030), read through repositories/development.mjs (developmentReads). Each db.* name throws; blob step m210_001 is a
@@ -109,7 +105,6 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // repositories/groups.mjs (groupReads). Each db.* name throws; migrateM13 no longer creates them.
   guardians: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   idvQueue: { guarantee: 'migration', owner: 'core', reason: 'guardian identity-verification queue; was created by ??= inside a request handler, so it existed only after the first write; since S6b a read-only view over the idv_queue table, written only through the safetyAudit repository (Q4b: every entry names an existing guardian, checked in code)' },
-  invoices: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   ledger: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore; since S6b a read-only view over the ledger table (insertion order), written only through ledgerAppend → the safetyAudit repository (userId / scoutName verbatim)' },
   // matchdays: never a db.* read since S13d — a typed table (migration 0037), read through repositories/grassroots.mjs (grassrootsReads).
   mediaBlobs: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
@@ -135,7 +130,7 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // pairingCodes: no longer a production db.* read since S6a — the rows live in pairing_codes (migration 0008,
   // repositories/oneTimeCodes.mjs) and the routes go through the repository; the data layer still defines a hash-free
   // read-only view at db.pairingCodes, like the other table-backed collections. (mediaDeletions is the precedent.)
-  plans: { guarantee: 'migration', owner: 'core', reason: 'product configuration, restored from catalogue.mjs; empty would silently move a Grassroots attribution window from 12 to 18 months (D2)' },
+  // plans, archetypes: never a db.* read since S13e — constants (catalogue.mjs PLANS, ARCHETYPES), not stored.
   // playerPrefs: never a db.* read since S9d — a typed table (migration 0022), read through repositories/opportunitiesCampaigns.mjs
   // (scoutingReads). db.playerPrefs throws.
   players: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
@@ -162,12 +157,11 @@ export const PRODUCTION_STORE_CONTRACT = Object.freeze({
   // M23 P5.6D — Agent Transaction Workspace. agentTransactions, transactionRepresentations, transactionDocuments: never a
   // db.* read since S11c — typed tables (migration 0029), read through repositories/agentTransactions.mjs. Each db.*
   // name throws; blob step 2307 is a recorded no-op.
-  reputationSeed: { guarantee: 'migration', owner: 'core', reason: 'demo track records; EMPTY is the correct production value — fabricating them would be worse than the bug (D2)' },
-  savedSearches: { guarantee: 'module', owner: 'core', reason: 'owned by server.mjs, which has no register() of its own; created during synchronous composition before the socket opens' },
   sessions: { guarantee: 'migration', owner: 'core', reason: 'core platform collection, guaranteed by the migration registry so it survives an arbitrary restore' },
   sourceChanges: { guarantee: 'migration', owner: 'm18.1', reason: 'M18.1 source-change clock, guaranteed by the migration registry; since S6b a read-only view over the source_changes table, written only through recordSourceChange → the safetyAudit repository (the 20 000 cap deletes the oldest rows)' },
   // transitionCases: never a db.* read since S10c — typed tables (migration 0025), read through repositories/transitionsVouches.mjs (verificationReads). db.transitionCases throws.
-  uploadSessions: { guarantee: 'module', owner: 'm12', reason: 'M12 feature collection, created by migrateM12 at registration' },
+  // uploadSessions, savedSearches, invoices, reputationSeed, deliveryCallbacksSeen, deliveryCentreSince, deliveryFailInject:
+  // never a db.* read since S13e — typed tables (migration 0038), read through repositories/operations.mjs. Each db.* name throws.
   users: { guarantee: 'migration', owner: 'core', reason: 'staff accounts. Guaranteed by the migration registry in memory; since the data layer the rows live in the org_users table (repositories/users.mjs) and db.users is the repository\'s read-only view after attachDataLayer' },
   // vacancies: never a db.* read since S9c — a typed table (migration 0021), read through repositories/clubSetup.mjs
   // (scoutingReads). db.vacancies throws. The organisation facets tactical, squad, lookingFor and federationCheck moved

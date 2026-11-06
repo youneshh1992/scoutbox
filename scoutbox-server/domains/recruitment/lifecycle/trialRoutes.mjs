@@ -378,10 +378,7 @@ export function registerTrial(ctx) {
 
     // Failure injection (M13 mechanism): the transport refuses, NOTHING is
     // written — no request row, no case move, no notification.
-    const inject = db.deliveryFailInject;
-    if (inject && Number(inject.trial ?? 0) > 0) {
-      inject.trial = Number(inject.trial) - 1;
-      persistNow();
+    if (ctx.operations.delivery.consumeInjectedFailure('trial')) { // S13e: used up through the delivery bookkeeping (a row)
       console.error(`TRIAL transport_failed invitation case=${room.id}`);
       return err(res, 'TRIAL_TRANSPORT_REFUSED', 'The invitation could not be delivered. Nothing was sent; try again.');
     }
@@ -617,9 +614,7 @@ export function registerTrial(ctx) {
     if (!gate.ok) return err(res, gate.error, gate.message, gate.reasons ? { reasons: gate.reasons } : {});
     if (!revGate(req, res, t)) return;
     if (limited('trial_attendance', req.org.id)) return res.status(429).json(rateLimitedBody('trial_attendance'));
-    if (db.deliveryFailInject && Number(db.deliveryFailInject.trial ?? 0) > 0) {
-      db.deliveryFailInject.trial = Number(db.deliveryFailInject.trial) - 1;
-      persistNow();
+    if (ctx.operations.delivery.consumeInjectedFailure('trial')) {
       return err(res, 'TRIAL_TRANSPORT_REFUSED', 'The completion could not be recorded. Nothing was changed; try again.');
     }
     const by = orgActor(req);
@@ -826,10 +821,7 @@ export function registerTrial(ctx) {
     if (r.recipient.type !== by) return fail('TRIAL_RECIPIENT_UNAVAILABLE', by === 'guardian' ? 'This player is now the recipient of their own trial invitations; the club needs to re-invite.' : 'This invitation is managed by the player\'s guardian.');
     if (by === 'guardian' && r.recipient.guardianId !== actorId) return fail('TRIAL_GUARDIAN_REQUIRED', 'You are no longer the verified guardian route for this player.');
     if (by === 'player' && r.recipient.playerId !== actorId) return fail('TRIAL_RECIPIENT_UNAVAILABLE', 'This invitation is not yours to accept.');
-    const inject = db.deliveryFailInject;
-    if (inject && Number(inject.trial ?? 0) > 0) {
-      inject.trial = Number(inject.trial) - 1;
-      persistNow();
+    if (ctx.operations.delivery.consumeInjectedFailure('trial')) {
       return fail('TRIAL_TRANSPORT_REFUSED', 'The acceptance could not be recorded. Nothing was changed; try again.');
     }
     return { ok: true };

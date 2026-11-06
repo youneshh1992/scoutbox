@@ -36,6 +36,7 @@
  * save time; `persistNow()` only carries the blobs the route touched beside the rows (the case audit is an explicit S8b write in the same unit).
  */
 
+import { PLANS } from '../../../catalogue.mjs';
 import { createHash } from 'node:crypto';
 import { CLUB_SETUP_LIMITS } from '../../../repositories/clubSetup.mjs';
 import { buildShared } from '../../../m12/shared.mjs';
@@ -304,7 +305,7 @@ export function registerSigning(rawCtx) {
     }
     const events = (db.ledger ?? []).filter((l) => l.playerId === player.id && l.orgId === org.id);
     const first = events[0] ?? null;
-    const windowMonths = db.plans?.[org.plan]?.attributionWindowMonths ?? 18;
+    const windowMonths = PLANS[org.plan].attributionWindowMonths; // orgs.plan is one of the catalogue's plans (its CHECK)
     const windowEnds = first ? first.ts + windowMonths * 30.44 * 24 * 3600 * 1000 : null;
     const row = ledgerAppend({ type: 'signing', playerId: player.id, orgId: org.id, orgName: org.name, userId: actor?.id ?? null, scoutName: actor?.name ?? null });
     const ts = pkg ? at : row.ts;
@@ -322,8 +323,9 @@ export function registerSigning(rawCtx) {
     // The revenue event: a signing inside the attribution window issues the success-fee invoice through the billing adapter — once per
     // signing, AFTER the signing committed (an external provider call never runs inside the transaction; the dev ledger's row is saved
     // right after it is issued). A rolled-back completion therefore never issues an invoice.
-    if (signing.insideAttributionWindow && billing?.invoiceForSigning && !(db.invoices ?? []).some((i) => i?.signingId === signing.id)) {
-      afterCommit(() => Promise.resolve(billing.invoiceForSigning(signing, org)).then(() => persistNow()));
+    // S13e: the invoice is a row of its own table, written by the adapter in its own transaction; the table holds one per signing.
+    if (signing.insideAttributionWindow && billing?.invoiceForSigning) {
+      afterCommit(() => Promise.resolve(billing.invoiceForSigning(signing, org)).catch((e) => console.error(`BILLING invoice_failed signing=${signing.id}: ${e?.message ?? e}`)));
     }
     // A signing moves the player's level: grassroots signings make semi-pros, academy/pro signings make pros.
     const levelBefore = player.level ?? 'amateur';

@@ -45,7 +45,8 @@ import {
   PRODUCTION_REQUIRED_STORES, missingRequiredStores,
 } from '../../domains/platform/migrations.mjs';
 import { integrityReport } from '../../domains/platform/integrity.mjs';
-import { PLANS } from '../../catalogue.mjs';
+import { PLANS, ARCHETYPES } from '../../catalogue.mjs';
+import { ORG_PLANS } from '../../repositories/orgs.mjs';
 import { openStore } from '../../store.mjs';
 import { TABLE_BACKED } from '../../repositories/index.mjs';
 import { ROOM_STATUSES, ROOM_STATUS_LABELS, TERMINAL_ROOM_STATUSES, stageForRoomStatus } from '../../domains/recruitment/rooms/shared.mjs';
@@ -78,8 +79,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * that predates the registry or arrived by another road (a partial restore, a
  * hand-assembled import, an export that dropped empty collections).
  *
- * It legitimately lacks blocks, channels, reports, moderationLog, plans,
- * archetypes and reputationSeed. It is NOT corrupt — §44's corruption case is
+ * It legitimately lacks blocks, channels, reports and moderationLog. It is NOT corrupt — §44's corruption case is
  * `inconsistentSnapshot()` below, and it is treated completely differently.
  */
 function priorSnapshot({ withExistingRows = false } = {}) {
@@ -98,7 +98,6 @@ function priorSnapshot({ withExistingRows = false } = {}) {
     db.blocks = [{ id: 'blk-legacy', playerId: 'pl-legacy', orgId: 'org-legacy', by: 'guardian', reason: 'legacy', ts: 1 }];
     db.requests = [{ id: 'req-legacy', playerId: 'pl-legacy', playerName: 'Legacy Player', orgId: 'org-legacy', orgName: 'Legacy FC', orgType: 'club', orgVerified: false, orgSafeguardingCertified: false, userId: 'usr-legacy', scoutName: 'Legacy Scout', scoutRole: 'Scout', type: 'contact', message: '', trialDetails: null, status: 'pending', createdAt: 1, routedTo: 'player', guardianId: null, contactChannel: null }]; // issueRecruitmentRequest's literal: a request names the staff member who sent it
     db.channels = [{ id: 'ch-legacy', requestId: 'req-legacy', playerId: 'pl-legacy', orgId: 'org-legacy', orgName: 'Legacy FC', counterparty: 'player', createdAt: 1, messages: [], readBy: { org: null, counterparty: null } }]; // the channel literal (openChannel); the data layer refuses a thread without its request
-    db.plans = { Grassroots: { name: 'Grassroots', attributionWindowMonths: 99, customised: true } };
   }
   return db;
 }
@@ -165,17 +164,17 @@ console.log('\n— §8 — clean boot: empty database, no seed —');
   ok(Array.isArray(db.channels), 'db.channels exists');
   ok(Array.isArray(db.reports), 'db.reports exists');
   ok(Array.isArray(db.moderationLog), 'db.moderationLog exists');
-  ok(Array.isArray(db.reputationSeed) && db.reputationSeed.length === 0,
-    'db.reputationSeed exists and is EMPTY — seeded track records are demo data, not production truth');
-  ok(db.plans && typeof db.plans === 'object' && !Array.isArray(db.plans), 'db.plans exists as an object');
-  ok(Array.isArray(db.archetypes) && db.archetypes.length === 5, 'db.archetypes exists with the 5 catalogue entries');
+  // S13e (rewritten: these described the old storage): the demo reputation rows are a table (empty in production, §14
+  // below), and the plans and archetypes are constants, so no snapshot step creates them and none can lose them.
+  ok(!Object.hasOwn(db, 'reputationSeed') && !Object.hasOwn(db, 'plans') && !Object.hasOwn(db, 'archetypes'),
+    'reputationSeed, plans and archetypes are not collections a snapshot step creates (S13e)');
+  ok(ARCHETYPES.length === 5, 'the archetypes are the 5 catalogue entries, whatever the snapshot holds');
 }
 
 console.log('\n— §9/§12 — a prior snapshot upgrades and gains what it lacked —');
 {
   const db = priorSnapshot();
   neg(db.blocks === undefined, 'fixture: the prior snapshot genuinely has no blocks');
-  neg(db.plans === undefined, 'fixture: and no plans');
   const r = runMigrations(db);
   ok(r.to === SCHEMA_VERSION, `it migrates to ${SCHEMA_VERSION}`);
   ok(missingRequiredStores(db).length === 0, 'every required store is present afterwards');
@@ -205,7 +204,6 @@ console.log('\n— §14/§17/§27 — existing rows survive, byte for byte —')
   const blockBefore = JSON.stringify(db.blocks);
   const reqBefore = JSON.stringify(db.requests);
   const chanBefore = JSON.stringify(db.channels);
-  const plansBefore = JSON.stringify(db.plans);
 
   runMigrations(db);
 
@@ -213,26 +211,25 @@ console.log('\n— §14/§17/§27 — existing rows survive, byte for byte —')
   ok(db.blocks.length === 1, 'and not duplicated');
   ok(JSON.stringify(db.requests) === reqBefore, 'an existing request row is preserved exactly');
   ok(JSON.stringify(db.channels) === chanBefore, 'an existing channel row is preserved exactly');
-  ok(JSON.stringify(db.plans) === plansBefore,
-    'a CUSTOMISED plan table is preserved — the migration never overwrites configuration it finds');
-  neg(db.plans.Grassroots.attributionWindowMonths === 99,
-    'specifically: the customised 99-month window survives rather than being reset to the catalogue value');
+  // (S13e: the check that a customised plan table survived went with the table; the plans are constants.)
 
   // And the block still works.
   const blocked = db.blocks.some((b) => b.playerId === 'pl-legacy' && b.orgId === 'org-legacy');
   ok(blocked === true, 'the preserved block is still effective after migration');
 }
 
-console.log('\n— §24 — the plans catalogue is restored, not emptied —');
+console.log('\n— §24 — the plans catalogue cannot be emptied —');
 {
+  // S13e (rewritten: it described the old storage): the plans are a constant, read by every route, so no restore can
+  // empty them; an organisation's plan is always one of them (ORG_PLANS, the orgs table's CHECK).
   const db = priorSnapshot();
   runMigrations(db);
-  ok(db.plans.Grassroots?.attributionWindowMonths === 12,
-    'a restored Grassroots plan keeps its 12-month attribution window');
-  neg(db.plans.Grassroots?.attributionWindowMonths !== 18,
-    'it is NOT 18 — an empty plans table would have fallen through `?? 18` and silently changed billing');
-  ok(Object.keys(db.plans).length === Object.keys(PLANS).length,
-    `all ${Object.keys(PLANS).length} plans are present`);
+  ok(PLANS.Grassroots?.attributionWindowMonths === 12,
+    'a restored Grassroots organisation keeps its 12-month attribution window');
+  neg(PLANS.Grassroots?.attributionWindowMonths !== 18,
+    'it is NOT 18 — no plan lookup falls through to a default and silently changes billing');
+  ok(Object.keys(PLANS).length === 4 && ORG_PLANS.every((p) => PLANS[p]),
+    'all 4 plans are present, and every plan an organisation can be on has its catalogue entry');
 }
 
 console.log('\n— §10/§48 — idempotency and restart —');
@@ -471,9 +468,9 @@ console.log('\n— §47 — a PRE-M23 snapshot keeps all thirteen original statu
     version: 2200,
     migrations: MIGRATIONS.filter((m) => !m.id.startsWith('m230_')).map((m) => ({ id: m.id, at: '2026-01-01T00:00:00.000Z' })),
   };
-  // Deliberately PRE-D2: the seven stores that pass added are absent, which is
+  // Deliberately PRE-D2: the stores that pass added are absent, which is
   // the real shape of a database last written before D2 landed.
-  for (const store of ['blocks', 'channels', 'reports', 'moderationLog', 'plans', 'archetypes', 'reputationSeed']) delete db[store];
+  for (const store of ['blocks', 'channels', 'reports', 'moderationLog']) delete db[store];
   db.recruitmentCases = PRE_M23.map((st, i) => ({
     id: `old-${st}`, orgId: 'org-legacy', playerId: 'pl-legacy', stage: 'review', createdAt: 1000 + i,
     room: { status: st, rev: 2 },
@@ -801,20 +798,16 @@ section('§13/§14 — db.assessments and the D2 stores, checked by name');
   // §4.3 step 2 (rewritten: it described the old storage): the D2 `requests` and `trials` are typed tables read
   // through SQL, no db collection a migration creates; the recruitment suites prove they are there on every boot.
   // S9b likewise for `assessments` (§13 above): a table, present after boot, created by a data migration.
-  const D2 = ['blocks', 'reports', 'moderationLog', 'channels', 'reputationSeed', 'plans', 'archetypes',
-    'assessments'];
+  // S13e: `reputationSeed` is a table (migration 0038); plans and archetypes are constants, not stores (rewritten).
+  const D2 = ['blocks', 'reports', 'moderationLog', 'channels', 'reputationSeed', 'assessments'];
   const absent = D2.filter((k) => !presentAfterBoot.has(k));
   for (const k of absent) console.error(`   D2 store absent after boot: db.${k}`);
   neg(absent.length === 0, `§14 all ${D2.length} D2 stores are present after a full production boot`);
   neg(D2.every((k) => byMigration.has(k) || TABLE_BACKED.includes(k)), 'and all of them by migration (a snapshot step or a table\'s data migration), not by module registration');
 
-  // The two that are configuration rather than containers must not be empty:
-  // an empty plans table silently moves a Grassroots attribution window.
-  const plans = clean.db?.plans;
-  neg(plans && typeof plans === 'object' && Object.keys(plans).length > 0,
-    'and db.plans came back as a populated catalogue, not an empty object');
-  neg(Array.isArray(clean.db?.archetypes) && clean.db.archetypes.length === 5,
-    'and db.archetypes with its five entries — configuration does not default to empty');
+  // The configuration is not a store at all (S13e): the plans and archetypes are constants, never empty.
+  neg(Object.keys(PLANS).length === 4 && ARCHETYPES.length === 5,
+    'and the plans and archetypes are the catalogue constants — configuration cannot default to empty');
   neg(Array.isArray(clean.db?.reputationSeed) && clean.db.reputationSeed.length === 0,
     'while reputationSeed is EMPTY, because fabricated track records would be worse than the bug');
 }

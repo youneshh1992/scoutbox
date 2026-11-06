@@ -5,7 +5,7 @@
 //   Mailer   → SENDGRID_API_KEY switches to SendGrid (dev: the outbox table)
 //   Push     → EXPO_ACCESS_TOKEN switches to Expo   (dev: the push log table)
 //   IDV      → dev attestation only: instant approval with an audit reference
-//   Billing  → dev ledger only: invoices recorded in db.invoices
+//   Billing  → dev ledger only: invoices recorded in the invoices table (repositories/operations.mjs)
 //   Storage  → local disk only: files under DATA_DIR/media/
 //
 // No real IDV, billing or object-storage provider is integrated yet. Each seam
@@ -210,14 +210,20 @@ export function createIdvProvider() {
 // The deck's model: club subscription plans + a success fee when a signing is
 // recorded inside the attribution window. Dev provider issues the invoice
 // records; Stripe slots in behind the same call.
-const SUCCESS_FEE_BY_PLAN = { Pro: 1500, Academy: 500, Agency: 2000 };
+// S13e: the invoice is a row of `invoices` (repositories/operations.mjs), stored exactly in minor units (cents), one per
+// signing; the API still answers `amount` in whole euros.
+const SUCCESS_FEE_MINOR_BY_PLAN = { Pro: 150_000, Academy: 50_000, Agency: 200_000 };
+const DEFAULT_SUCCESS_FEE_MINOR = 100_000;
 
-export function createBilling(db, nextId) {
+export function createBilling({ invoices, nextId }) {
+  if (typeof invoices?.issue !== 'function') throw new TypeError('createBilling needs the invoices repository (S13e)');
   return {
     provider: 'dev-ledger',
+    /** Issues the signing's invoice (once: a second call for one signing answers the first invoice). */
     async invoiceForSigning(signing, org) {
-      const amount = SUCCESS_FEE_BY_PLAN[org.plan] ?? 1000;
-      const invoice = {
+      const existing = invoices.forSigning(signing.id);
+      if (existing) return existing;
+      return invoices.issue({
         id: nextId('inv'),
         ts: Date.now(),
         orgId: org.id,
@@ -225,16 +231,20 @@ export function createBilling(db, nextId) {
         signingId: signing.id,
         playerName: signing.playerName,
         description: `Success fee — ${signing.playerName} signed inside the attribution window`,
-        amount,
+        amountMinor: SUCCESS_FEE_MINOR_BY_PLAN[org.plan] ?? DEFAULT_SUCCESS_FEE_MINOR,
         currency: 'EUR',
         status: 'issued',
         provider: 'dev-ledger',
-      };
-      db.invoices.push(invoice);
-      return invoice;
+      });
     },
   };
 }
+
+/** An invoice as the API answers it: `amount` in major units (the stored minor units divided by 100). */
+export const invoiceView = (i) => ({
+  id: i.id, ts: i.ts, orgId: i.orgId, orgName: i.orgName, signingId: i.signingId, playerName: i.playerName,
+  description: i.description, amount: i.amountMinor / 100, currency: i.currency, status: i.status, provider: i.provider,
+});
 
 // ------------------------------------------------------------- object storage
 // Media files live OUTSIDE the database, on the local disk under DATA_DIR. The

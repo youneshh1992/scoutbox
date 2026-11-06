@@ -39,6 +39,7 @@ import { registerM17 } from './domains/recruitment/rooms/index.mjs';
 import { registerM18 } from './domains/discovery/index.mjs';
 import { registerMatching } from './domains/discovery/matching/index.mjs';
 import { registerSavedSearches } from './domains/discovery/savedSearches.mjs';
+import { removeUploadChunks } from './domains/media/uploads.mjs';
 import { registerAnalytics } from './m20/index.mjs';
 import { registerDevelopment } from './domains/development/hub/index.mjs';
 import { registerM23, migrateM23 } from './domains/recruitment/lifecycle/index.mjs';
@@ -105,6 +106,8 @@ import {
 } from './domain.mjs';
 import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIanaZone, localParts } from './temporal.mjs';
 import { readPage, sendPageError, pageOf } from './domains/platform/paging.mjs';
+import { PLANS, ARCHETYPES } from './catalogue.mjs';
+import { invoiceView } from './adapters.mjs';
 import { createLookups } from './domains/platform/lookups.mjs';
 
 /**
@@ -203,7 +206,7 @@ const dataLayer = attachDataLayer({
   sessionTtlMs: (Number(process.env.SESSION_TTL_DAYS) > 0 ? Number(process.env.SESSION_TTL_DAYS) : 30) * 24 * 3600 * 1000,
   log: (m) => { if (process.env.M13_QUIET_LOGS !== '1') console.log(m); },
 });
-const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions, development, boxCam, discovery, insightCoverage, integrations, enterprise, groups, grassroots } = dataLayer;
+const { users, sessions, orgs, players, guardians, identity, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, recruitmentContactsOffers, signingsFollowUps, scoutingEvidence, scoutingAssessments, clubSetup, opportunitiesCampaigns, verification, passport, transitionsVouches, agentCore, compliancePolicies, complianceRecords, agentTransactions, development, boxCam, discovery, insightCoverage, integrations, enterprise, groups, grassroots, operations } = dataLayer;
 // The recruitment domains read through SQL rather than db.* (§4.3 step 2): read-only query objects, handed to every
 // module context as `recruitmentReads` (contacts, offers, signingPackages, signings, followUps, outcomeReports, requests, trials,
 // cases, comments, snapshots, decisions, evidenceStates).
@@ -283,7 +286,7 @@ if (!integrity.stores.ok) {
 // Player defaults (firstTeamSeeker, notificationPrefs, programme) are set when a player is created
 // (repositories/identity.mjs PLAYER_CREATION_DEFAULTS); a media item reads back from its row with every field. No boot
 // pass over the players (migration.md §4.3.1).
-db.savedSearches ??= [];
+// Saved searches are a table of repositories/operations.mjs since S13e (domains/discovery/savedSearches.mjs).
 // db.signings: no db collection since §4.3 step 2 — the signings repository's queries (signingsFollowUps.signings.*).
 // db.pairingCodes: the data layer's hash-free read-only view since S6a (rows of pairing_codes; repositories/oneTimeCodes.mjs) — never assigned here.
 // db.notifications, db.notificationPrefs: the data layer's read-only views since S7a (rows of notifications / notification_prefs; repositories/notifications.mjs) — never assigned here; writes go through `notifications`.
@@ -306,7 +309,7 @@ db.pushTokens ??= [];      // device push tokens, registered per user
 // 0013) since attachDataLayer ran above — never assigned here; writes go through
 // `safetyAudit` (ledgerAppend, moderateOrRefuse, handleReport, the block, note,
 // IDV, resolve and lift routes, the m13 ops events and m181's source changes).
-db.invoices ??= [];        // billing records (success fees)
+// Invoices, upload sessions and the delivery centre's bookkeeping are tables of repositories/operations.mjs since S13e.
 // db.emailChallenges: the data layer's hash-free read-only view since S6a (rows of email_challenges) — never assigned here.
 // Open days, match days and friendlies are tables of repositories/grassroots.mjs since S13d (grassrootsReads).
 // Coach references (vouches) are a table of repositories/transitionsVouches.mjs since S10c (verificationReads.vouches).
@@ -320,7 +323,7 @@ db.mediaBlobs ??= {};
 const mailer = createMailer(db, (p) => nextId(p), { outbox });
 const pushSender = createPushSender(db, (p) => nextId(p), { pushLog, pushTokens });
 const idv = createIdvProvider();
-const billing = createBilling(db, (p) => nextId(p));
+const billing = createBilling({ invoices: operations.invoices, nextId: (p) => nextId(p) });
 const storage = createStorage(DATA_DIR);
 
 // Media blobs migrate out of the database onto object storage (local disk in
@@ -1222,7 +1225,7 @@ app.get('/health', (_req, res) => res.json({
 app.get('/meta', (_req, res) => {
   res.json({
     adultAges: { note: 'age of majority per country; DEFAULT applies otherwise' },
-    plans: db.plans,
+    plans: PLANS,
     positions: ['GK', 'CB', 'RB', 'LB', 'RWB', 'LWB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF'],
   });
 });
@@ -2127,7 +2130,7 @@ orgRouter.get('/players/:id', (req, res) => {
     .map((c) => ({ playerId: c.id, name: c.name, position: c.position, score: similarityScore(p, c) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 3);
-  const archetypes = db.archetypes
+  const archetypes = ARCHETYPES
     .map((a) => ({ archetypeId: a.id, label: a.label, score: similarityScore(p, a) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 2);
@@ -2561,7 +2564,7 @@ orgRouter.get('/feed', (req, res) => {
 });
 
 // --------------------------------------------------------- saved searches (domains/discovery/savedSearches.mjs)
-const { checkSavedSearches } = registerSavedSearches({ db, byId, orgRouter, notify, persist, nextId, playerViewForOrg, reqText, badField });
+const { checkSavedSearches } = registerSavedSearches({ byId, orgRouter, notify, nextId, playerViewForOrg, reqText, savedSearches: operations.savedSearches });
 
 // Calendar export for an accepted trial.
 orgRouter.get('/trials/:id/ics', (req, res) => {
@@ -2783,8 +2786,12 @@ orgRouter.get('/signings', (req, res) => {
   res.json(signingsFollowUps.signings.pageForOrg(req.org.id, page));
 });
 
+// S13e: the organisation's invoices, newest first, by cursor (`?limit=&cursor=`); the apps read the first page.
 orgRouter.get('/invoices', (req, res) => {
-  res.json(db.invoices.filter((i) => i.orgId === req.org.id).slice().reverse());
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const { items, nextCursor } = operations.invoices.pageForOrg(req.org.id, page);
+  res.json({ items: items.map(invoiceView), nextCursor });
 });
 
 // ------------------------------------------- open trial days (grassroots)
@@ -3305,7 +3312,7 @@ orgRouter.get('/players/:id/proofpack', (req, res) => {
   if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
   const events = db.ledger.filter((l) => l.playerId === p.id && l.orgId === req.org.id);
   const first = events[0] || null;
-  const windowMonths = db.plans[req.org.plan]?.attributionWindowMonths ?? 18;
+  const windowMonths = PLANS[req.org.plan].attributionWindowMonths; // orgs.plan is one of the catalogue's plans (its CHECK)
   res.json({
     playerId: p.id,
     playerName: p.name,
@@ -3319,7 +3326,7 @@ orgRouter.get('/players/:id/proofpack', (req, res) => {
 });
 
 orgRouter.get('/plan', (req, res) => {
-  const plan = db.plans[req.org.plan];
+  const plan = PLANS[req.org.plan];
   res.json({
     org: { id: req.org.id, name: req.org.name, type: req.org.type, trustedPartner: req.org.trustedPartner },
     plan,
@@ -3343,7 +3350,7 @@ orgRouter.get('/reputation', (_req, res) => {
     if (l.type === 'trial_request' || l.type === 'trial_report') live[key].trials++;
     if (l.type === 'signing') live[key].signings++;
   }
-  res.json({ seeded: db.reputationSeed, live: Object.values(live) });
+  res.json({ seeded: operations.reputationSeed.all(), live: Object.values(live) });
 });
 
 // ------------------------------------------------------------ player routes
@@ -4337,6 +4344,7 @@ function deletePlayerData(playerId) {
   if (!p) return false;
   const at = Date.now();
   const mediaIds = p.media.map((m) => m.id);
+  let uploadIds = [];
   // ONE unit of work (readiness review §7.4): the player row becomes the retained
   // record and its links go (S4b-R), the removal of the media FILES is
   // queued in the same transaction, every session of the person is revoked
@@ -4367,6 +4375,7 @@ function deletePlayerData(playerId) {
   scoutingAssessments.assessments.redactPlayer(playerId); // S9b: the club keeps its assessments; the player's name goes, in this unit
   recruitmentContactsOffers.contacts.redactPlayer(playerId); // S8c: the reply's words go; the contact stays
   grassroots.openTrials.redactPlayer(playerId); // S13d: the registration keeps the id; the name goes, in this unit
+  uploadIds = operations.uploads.removeForPlayer(playerId); // S13e: the player's upload sessions go, in this unit (their chunk files after COMMIT)
   // M23 P5.6B: agent relationships become id-only tombstones (no name is
   // stored on them; the dispute text and any player-authored history names go).
   m24Ctx?.onPlayerDeleted?.(playerId, at);
@@ -4391,6 +4400,7 @@ function deletePlayerData(playerId) {
   });
   // After COMMIT: the filesystem boundary. A failure here keeps the queue entry; the next boot or sweep retries.
   mediaDeletions.process(storage);
+  removeUploadChunks(DATA_DIR, uploadIds);
   return true;
 }
 
@@ -4519,7 +4529,7 @@ adminRouter.get('/overview', (_req, res) => {
     moderationHits: db.moderationLog.length,
     channels: db.channels.length,
     signings: signingsFollowUps.signings.count(),
-    invoices: db.invoices.length,
+    invoices: operations.invoices.count(),
     emailsSent: db.outbox.length,
     pushesSent: db.pushLog.length,
     sessions: sessions.count(),
@@ -4539,7 +4549,13 @@ adminRouter.get('/reports', (_req, res) => {
 // with its full text while this process holds it (mailer.devDeliveredText; never saved, never backed up).
 adminRouter.get('/outbox', (_req, res) => res.json(db.outbox.slice().reverse().map((m) => { const full = mailer.devDeliveredText(m.id); return full ? { ...m, text: full } : m; })));
 adminRouter.get('/push-log', (_req, res) => res.json(db.pushLog.slice(-200).reverse()));
-adminRouter.get('/invoices', (_req, res) => res.json(db.invoices.slice().reverse()));
+// S13e: every invoice, newest first, by cursor (`?limit=&cursor=`); the admin app reads the first page.
+adminRouter.get('/invoices', (req, res) => {
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const { items, nextCursor } = operations.invoices.page(page);
+  res.json({ items: items.map(invoiceView), nextCursor });
+});
 // Every coach reference, newest first, by cursor (`?limit=&cursor=`); the coach's email is shown to T&S, never the code.
 adminRouter.get('/vouches', (req, res) => {
   let page;
@@ -4723,6 +4739,7 @@ registerM12({
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
   publishedVouchesFor, pathwayRecord, DRILLS, DATA_DIR,
+  operations, // S13e: upload sessions are explicit repository writes
 });
 
 // ------------------------------------------------------------ Milestone 13
@@ -4737,6 +4754,7 @@ const m13Ctx = registerM13({
   enterprise, enterpriseReads, // S13b: staff invites, SSO, support tickets and support access are explicit repository writes
   groups, groupReads, // S13c: group workspaces and group grants are explicit repository writes
   integrations, integrationReads, // S13a: imports, prospects, identity reviews, API keys and webhooks are explicit repository writes
+  operations, // S13e: the delivery centre's callback ids, start and injected failures are explicit repository writes
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg, sessionFor,
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
@@ -4953,6 +4971,7 @@ const m23Ctx = registerM23({
   recruitment, // S8a: requests and trials are explicit repository writes (requests/trials.create / update), inside a unit of work
   unit, afterCommit: (fn) => store.afterCommit(fn),
   ...m19Ctx,
+  operations, // S13e: an injected transport failure is used up through the delivery bookkeeping
   isAdult,
   // M17's room seams live on the object registerM17 returned; registerM18
   // returns a fresh object, so they do not arrive via m19Ctx. Passed

@@ -58,6 +58,9 @@ const q1 = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scou
 const qAll = (dir, sql, ...p) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare(sql).all(...p).map((r) => ({ ...r })); } finally { s.close(); } };
 const seqOf = (dir) => Number(q1(dir, "SELECT value FROM meta WHERE key = 'saveSeq'")?.value) || 0;
 // S6b: opsEvents is the ops_events table since 0013 — read in the writer's literal through the repository's own reader when the blob is retired.
+// S13e: the delivery centre's bookkeeping is rows of repositories/operations.mjs (rewritten: the blob reads described the old storage).
+const seenIds = (dir) => qAll(dir, 'SELECT callback_id FROM delivery_callbacks_seen ORDER BY rowid').map((r) => r.callback_id);
+const injected = (dir) => Object.fromEntries(qAll(dir, 'SELECT channel, remaining FROM delivery_fail_injections').map((r) => [r.channel, r.remaining]));
 const blobRows = (dir, name) => { const r = q1(dir, 'SELECT value FROM collections WHERE name = ?', name); if (r) return JSON.parse(r.value); const t = AUDIT_SNAPSHOT_TABLES.find((x) => x.name === name); if (!t) return null; const s = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true }); try { return s.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t.table) ? t.read(s) : null; } finally { s.close(); } };
 /** The webhook deliveries as the DATABASE holds them (S13a: rows of webhook_deliveries, the payload typed, attempts counted). */
 const webhookRows = (dir) => qAll(dir, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'webhook_deliveries'").length
@@ -99,7 +102,7 @@ await test('a sweep pass is ONE save: the dispatch rows it creates, the attempt 
   assert.ok(emailId, 'the sweep created and saved the dispatch rows');
   const first = storedRow(dir, emailId); assert.equal(first.status, 'retrying'); assert.deepEqual(first.attempts.map((a) => [a.ok, a.error]), [[false, 'injected provider failure']]);
   assert.equal(q1(dir, "SELECT COUNT(*) AS n FROM collections WHERE name = 'dispatches'").n, 0, 'no dispatches blob after the cutover');
-  const outboxBefore = outboxRows(dir).length; const seq0 = seqOf(dir); const injectBefore = blobRows(dir, 'deliveryFailInject');
+  const outboxBefore = outboxRows(dir).length; const seq0 = seqOf(dir); const injectBefore = injected(dir);
   // The next pass sends (and the provider accepts): arm the seam so that pass's save fails at COMMIT.
   await inject(S, 0 + 1); await sleep(50); // one more failure, so the row is still retrying when the seam is armed and the following success is the one we watch
   await until(async () => storedRow(dir, emailId).attempts.length === 2, 5000);
@@ -122,7 +125,7 @@ await test('a sweep pass is ONE save: the dispatch rows it creates, the attempt 
   assert.equal(landed.attempts.length, 3); assert.deepEqual(landed.attempts.map((a) => a.ok), [false, false, true]); assert.ok(landed.providerMessageId);
   assert.equal(outboxRows(dir).filter((m) => m.providerMessageId === landed.providerMessageId).length, 1, 'exactly one outbox row for the one accepted send (no replay of the failed save)');
   assert.ok(outboxRows(dir).length >= outboxBefore + 1); assert.ok(seqOf(dir) > seqArmed);
-  assert.deepEqual(blobRows(dir, 'deliveryFailInject'), { ...injectBefore, email: 0 }, 'the counter landed with the rows');
+  assert.deepEqual(injected(dir), { ...injectBefore, email: 0 }, 'the counter is used up, and the rows landed');
   assert.ok(stored(dir).some((d) => d.notificationId === notice2.id), 'the new notice\'s rows landed in that same save');
   await S.stop(); rm(dir);
 });
@@ -158,7 +161,7 @@ await test('provider callbacks through the real route: a finite fractional `at` 
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const amara = await guardianLogin(S, 'gd-amara');
   const n1 = await guardianNotice(S, maria, amara); const r1 = await emailRowOf(S, dir, n1); assert.equal(r1.status, 'accepted');
   const n2 = await guardianNotice(S, maria, amara, 'trial'); const r2 = await emailRowOf(S, dir, n2); assert.equal(r2.status, 'accepted');
-  const seenBefore = (blobRows(dir, 'deliveryCallbacksSeen') ?? []).length;
+  const seenBefore = seenIds(dir).length;
   // Fractional, exactly.
   let c = await callback(S, [{ callbackId: 'cb-frac', providerMessageId: r1.providerMessageId, status: 'opened', at: FRACTIONAL }]); assert.deepEqual(c.body, { applied: 1, duplicates: 0 });
   await until(async () => storedRow(dir, r1.id).status === 'opened');
@@ -191,8 +194,8 @@ await test('provider callbacks through the real route: a finite fractional `at` 
   assert.equal(storedRow(dir, nullRows[0].id).openedAt, nullRows[0].openedAt ?? 11, 'the FIRST null row is the one matched (its clock set if it had none)'); assert.equal(storedRow(dir, nullRows[1].id).openedAt, nullRows[1].openedAt, 'the second null row untouched');
   c = await callback(S, [{ callbackId: 'cb-missing', status: 'delivered', at: 13 }]); assert.deepEqual(c.body, { applied: 0, duplicates: 0 });
   c = await callback(S, [{ callbackId: 'cb-missing', status: 'delivered', at: 13 }]); assert.deepEqual(c.body, { applied: 0, duplicates: 1 }, 'remembered although it matched nothing');
-  await until(async () => (blobRows(dir, 'deliveryCallbacksSeen') ?? []).length >= seenBefore + 9);
-  assert.equal((blobRows(dir, 'deliveryCallbacksSeen') ?? []).length, seenBefore + 9, 'every distinct callbackId is remembered, in the same saves as the dispatch updates');
+  await until(async () => seenIds(dir).length >= seenBefore + 9);
+  assert.equal(seenIds(dir).length, seenBefore + 9, 'every distinct callbackId is remembered');
   await S.stop(); rm(dir);
 });
 
@@ -286,7 +289,7 @@ await test('crash recovery: a SIGKILL while an e-mail dispatch is retrying loses
   const done = await until(async () => { const d = storedRow(dir, id); return d.status === 'accepted' ? d : null; }, 20_000);
   // Diagnostics on failure only (the review of c6cf5e1 saw this assertion fail once): the row, every e-mail row of the
   // notice, the persisted failure-injection counter, the save revision, the clocks and the child server's own output.
-  const diag = () => JSON.stringify({ atKill, now: storedRow(dir, id), sameNotice: stored(dir).filter((x) => x.notificationId === notice.id).map((x) => ({ id: x.id, channel: x.channel, status: x.status, nextAt: x.nextAt, attempts: x.attempts })), deliveryFailInject: blobRows(dir, 'deliveryFailInject'), saveSeq: seqOf(dir), waitedMs: Date.now() - resumedAt, clock: Date.now(), childExit: S.proc.exitCode, childLog: S.log().slice(-2500) });
+  const diag = () => JSON.stringify({ atKill, now: storedRow(dir, id), sameNotice: stored(dir).filter((x) => x.notificationId === notice.id).map((x) => ({ id: x.id, channel: x.channel, status: x.status, nextAt: x.nextAt, attempts: x.attempts })), deliveryFailInject: injected(dir), saveSeq: seqOf(dir), waitedMs: Date.now() - resumedAt, clock: Date.now(), childExit: S.proc.exitCode, childLog: S.log().slice(-2500) });
   assert.ok(done, `the ladder resumed after the restart — ${done ? '' : diag()}`); assert.equal(done.attempts.length, 4); assert.deepEqual(done.attempts.map((a) => a.ok), [false, false, false, true]);
   await S.stop(); rm(dir);
 });
@@ -356,7 +359,7 @@ await test('through the real route, the pre-S7b nullish precedence survives a no
   c = await callback(S, [{ callbackId: 'rv-f2', providerMessageId: r2.providerMessageId, status: 'opened', at: 888 }]); assert.equal(c.body.applied, 1);
   await until(async () => storedRow(dir, r2.id).deliveredAt === 777);
   s2 = storedRow(dir, r2.id); assert.equal(s2.deliveredAt, 777, 'the retried change landed'); assert.equal(s2.openedAt, 888); assert.ok(seqOf(dir) > seqBefore);
-  assert.ok((blobRows(dir, 'deliveryCallbacksSeen') ?? []).includes('rv-f1') && (blobRows(dir, 'deliveryCallbacksSeen') ?? []).includes('rv-f2'), 'the callback bookkeeping landed in the same save');
+  assert.ok(seenIds(dir).includes('rv-f1') && seenIds(dir).includes('rv-f2'), 'the callback bookkeeping is durable');
   await S.stop(); rm(dir);
 });
 

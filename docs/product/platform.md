@@ -19,7 +19,7 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 - Boot order in `server.mjs`: seed builder, `loadSnapshot`, `runMigrations`, then `integrityReport` (reports `STORE_MISSING`, **never repairs**), then every module `register*()`, then `app.listen` as the last statement. There is no top-level await in between, so no request reaches a module before all modules have registered. (M23_PRODUCTION_BOOT_CONTRACT)
 - Every store read in production is declared in `scoutbox-server/storeContract.mjs` as `migration`, `module` (initialised at registration) or `optional` (absence has product meaning). `PRODUCTION_REQUIRED_STORES` is derived from it. A domain whose reads moved to SQL (since §4.3 step 2: contacts and offers) is not a store: it has no `db.*` collection. (M23_PRODUCTION_BOOT_CONTRACT)
 - A `db.x ??=` inside a request handler (store created on first write) is forbidden. Stores are initialised at registration or by migration. (M23_PRODUCTION_BOOT_CONTRACT)
-- Containers of user data default to empty. Product configuration does not: `plans` (the billing catalogue, not M21 development plans) and `archetypes` are restored from `catalogue.mjs` if absent, because an empty `plans` silently moves the Grassroots attribution window from 12 to 18 months. `reputationSeed` is empty in production; never fabricate track records. (M23_STORE_INITIALIZATION_AUDIT)
+- Containers of user data default to empty. Product configuration is not stored: the billing plans (not M21 development plans) and the archetypes are constants in `catalogue.mjs` (since S13e), so no restore can empty them or silently move the Grassroots attribution window from 12 to 18 months; changing a plan is a release. The demo reputation rows are empty in production; never fabricate track records. (M23_STORE_INITIALIZATION_AUDIT)
 - Restarting must not mutate any collection, and missing rows are never inferred. (M23_PRODUCTION_BOOT_CONTRACT, M23_STORE_INITIALIZATION_AUDIT)
 
 ### Production configuration
@@ -136,6 +136,17 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
   the assignment). A player listed twice on a match day is credited once. An open day's
   positions are free text (at most 20, each up to 40 characters, repeats dropped). Club
   names on open days and friendlies are the club's current name. (S13d, 6 Nov 2026)
+- Uploads, saved searches, invoices and delivery bookkeeping (S13e, 6 Nov 2026):
+  - A resumable upload refuses a size that is not a whole number of bytes, a title that is
+    not text and a checksum that is not 64 hexadecimal characters (all were coerced). A
+    deleted player's upload sessions and their half-sent chunks are deleted with the account.
+  - A saved search refuses unknown or junk filters, naming the field (`filters.<key>`); an
+    empty, false or null filter means "no filter". A saved search is written at once (it
+    could be lost before the next save). New-player alerts skip staff who were removed.
+  - Invoices are stored exactly in cents, one per signing; the club's and the admin's
+    invoice lists page by cursor (newest first) and the apps show the first page.
+  - The admin failure injection refuses an unknown channel or a count outside 1–20
+    (they were read as email or clamped).
 - Signed media URLs last 15 minutes. Each one is bound to the minting session, and the
   viewer's current entitlement is checked again on every fetch.
 

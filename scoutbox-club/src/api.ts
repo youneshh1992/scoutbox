@@ -590,7 +590,8 @@ export const httpApi: ScoutboxApi = {
 
   getFunnel: (s) => request<Funnel>('/org/funnel', { headers: headers(s) }),
 
-  getInvoices: (s) => request<Invoice[]>('/org/invoices', { headers: headers(s) }),
+  // Pages by cursor (S13e), newest first: the first page is read; "load more" (nextCursor) is still needed.
+  getInvoices: async (s) => (await request<{ items: Invoice[]; nextCursor: string | null }>('/org/invoices', { headers: headers(s) })).items,
 
   requestEmailVerification: (s, email) =>
     request<void>('/org/verification/email', { method: 'POST', headers: headers(s), body: JSON.stringify({ email }) }),

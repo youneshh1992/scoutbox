@@ -19,7 +19,7 @@
 // delivery intent of an exhausted retry (`persistNow()` below); an
 // acknowledgment's status changes land in the unit's commit with the
 // notification's contract; a callback's changes land with the
-// `deliveryCallbacksSeen` bookkeeping. The ladder's RANK, the retry schedule,
+// callback-id bookkeeping (S13e: rows of delivery_callbacks_seen, written at once). The ladder's RANK, the retry schedule,
 // the destination rules and the callback contract are unchanged.
 import crypto from 'node:crypto';
 
@@ -29,10 +29,14 @@ export function registerDelivery(ctx) {
   const {
     db, byId, users, notifications, dispatches, outbox, safetyAudit, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
     nextId, persist, persistNow, notify, findPlayer, isAdult,
-    signBody, timingSafeEq, paginate,
+    signBody, timingSafeEq, paginate, operations,
   } = ctx;
   if (!notifications) throw new TypeError('registerDelivery needs the notifications repository (ctx.notifications)');
   if (!dispatches) throw new TypeError('registerDelivery needs the dispatches repository (ctx.dispatches)');
+  if (typeof operations?.delivery?.markSeen !== 'function') throw new TypeError('registerDelivery needs the operations repository (ctx.operations, S13e)');
+  // S13e: the callback ids applied, the instant the delivery centre started and the injected failures are rows of
+  // repositories/operations.mjs (delivery_callbacks_seen, delivery_centre, delivery_fail_injections), written explicitly.
+  const bookkeeping = operations.delivery;
   // S6b: an exhausted retry's ops event is a row of ops_events (repositories/safetyAudit.mjs),
   // staged into the sweep pass's persistNow() with the dispatch rows and the outbox row; a bare
   // context without the repository keeps the array push (the same fallback as the outbox below).
@@ -49,18 +53,15 @@ export function registerDelivery(ctx) {
     },
   };
 
-  db.deliveryFailInject ??= { email: 0, push: 0 }; // admin-injected provider failures (tests/monitoring)
-  db.deliveryCentreSince ??= Date.now(); // notifications older than this get an in-app record only — no retroactive email blast on upgrade
+  // Notifications older than the delivery centre's start (written by migration 0038) get an in-app record only — no
+  // retroactive email blast; admin-injected provider failures (tests/monitoring) are used up one send at a time.
 
   // Local fake provider: deterministic, in-process, honestly labelled.
   // Real email/SMS/push transport is NOT configured in this environment.
   const PROVIDER = 'local-fake';
   const CALLBACK_SECRET = process.env.DELIVERY_CALLBACK_SECRET || 'local-fake-callback-secret';
   function fakeSend(channel, to, text) {
-    if (db.deliveryFailInject[channel] > 0) {
-      db.deliveryFailInject[channel] -= 1;
-      return { ok: false, error: 'injected provider failure' };
-    }
+    if (bookkeeping.consumeInjectedFailure(channel)) return { ok: false, error: 'injected provider failure' };
     const providerMessageId = `fm_${crypto.randomBytes(8).toString('hex')}`;
     // S7c: the delivery record is an outbox row (repositories/outboxPush.mjs), staged
     // into the same save as the dispatch rows and attempts of this pass; `to` is the
@@ -114,9 +115,10 @@ export function registerDelivery(ctx) {
     //    the same eighteen-key literal every build since M13 wrote (the
     //    repository validates it and refuses anything else).
     const seen = dispatches.notificationIdsWithRows();
+    const centreSince = bookkeeping.centreSince();
     for (const n of notifications.view) {
       if (seen.has(n.id)) continue;
-      const historical = n.ts < db.deliveryCentreSince;
+      const historical = n.ts < centreSince;
       for (const dest of destinationsFor(n)) {
         if (historical && dest.channel !== 'in_app') { dest.skip = 'predates delivery centre — no retroactive external send'; }
         const hold = dest.channel !== 'in_app' ? quietHoldUntil(n) : null;
@@ -223,13 +225,16 @@ export function registerDelivery(ctx) {
     if (!ts || Math.abs(Date.now() - Number(ts)) > 5 * 60_000) return res.status(401).json({ error: 'TIMESTAMP_INVALID', message: 'Callbacks older than 5 minutes are rejected (replay protection).' });
     if (!timingSafeEq(sig, signBody(CALLBACK_SECRET, 'callback', ts, body))) return res.status(401).json({ error: 'SIGNATURE_INVALID' });
     const events = Array.isArray(req.body?.events) ? req.body.events.slice(0, 100) : [];
+    // S13e: a callback id is 1 to 200 characters; a batch carrying a longer one is refused whole, before anything is applied.
+    const tooLong = events.findIndex((ev) => String(ev?.callbackId ?? '').length > 200);
+    if (tooLong !== -1) return res.status(400).json({ error: 'FIELD_INVALID', field: `events[${tooLong}].callbackId`, message: 'A callback id is at most 200 characters.' });
     let applied = 0, duplicates = 0;
+    // S13e: each callback id is remembered at once (a row of delivery_callbacks_seen; the newest 5,000 are kept); the
+    // dispatch changes it applies are the staged dispatch store's (S7b) and land with this request's save, as before.
     for (const ev of events) {
       const cbId = String(ev.callbackId ?? '');
       if (!cbId) continue;
-      if (db.deliveryCallbacksSeen.includes(cbId)) { duplicates++; continue; } // idempotent
-      db.deliveryCallbacksSeen.push(cbId);
-      if (db.deliveryCallbacksSeen.length > 5000) db.deliveryCallbacksSeen.splice(0, 1000);
+      if (!bookkeeping.markSeen(cbId, Date.now())) { duplicates++; continue; } // idempotent
       // The lookup every build since M13 made: the FIRST row in insertion order
       // whose providerMessageId strictly equals the event's (an explicit null
       // matches the first null row; an omitted id matches nothing — but the
@@ -306,10 +311,13 @@ export function registerDelivery(ctx) {
     // completion refuse at the transport with NOTHING written.
     // `decision` (M23 P5) makes the next formal decision finalize refuse
     // before anything is written.
-    const channel = ['push', 'contact', 'trial', 'decision'].includes(req.body?.channel) ? req.body.channel : 'email';
-    const count = Math.min(Math.max(Number(req.body?.count) || 1, 1), 20);
-    db.deliveryFailInject[channel] = (db.deliveryFailInject[channel] ?? 0) + count;
-    persistNow();
+    // S13e: junk is refused, not read as `email` or clamped: the channel is one of the five (default email), the count a
+    // whole number from 1 to 20 (default 1).
+    const channel = req.body?.channel ?? 'email';
+    const count = req.body?.count ?? 1;
+    if (!['email', 'push', 'contact', 'trial', 'decision'].includes(channel)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'channel', message: 'channel is email, push, contact, trial or decision.' });
+    if (!Number.isSafeInteger(count) || count < 1 || count > 20) return res.status(400).json({ error: 'FIELD_INVALID', field: 'count', message: 'count is a whole number from 1 to 20.' });
+    bookkeeping.inject(channel, count);
     res.json({ injected: { channel, count }, note: 'The next sends on this channel will fail at the provider — for monitoring/retry tests.' });
   });
 

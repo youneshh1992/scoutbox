@@ -10,6 +10,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 
 const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PORT = 4102;
@@ -692,6 +693,35 @@ const badUp = r.body.upload;
 await put(`/player/uploads/${badUp.id}/chunks/0`, { data: crypto.randomBytes(512).toString('base64') }, bearer(KOLA));
 r = await post(`/player/uploads/${badUp.id}/finalise`, {}, bearer(KOLA));
 ok(r.status === 409 && r.body.error === 'INTEGRITY_FAILED', 'integrity mismatch refuses finalisation');
+// S13e: an upload session is a row; junk is refused at session open, naming the field (it was coerced).
+r = await post('/player/uploads', { size: 1.5, mime: 'video/webm', title: 'half a byte' }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'size', 'a size that is not a whole number of bytes is refused, naming the field');
+r = await post('/player/uploads', { size: 512, mime: 'video/webm', title: 'short sha', sha256: 'abc' }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'sha256', 'a checksum that is not 64 hexadecimal characters is refused (it was cut to 64)');
+r = await post('/player/uploads', { size: 512, mime: 'video/webm', title: 42 }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'title', 'a title that is not text is refused (it was stringified)');
+r = await post(`/player/uploads/${badUp.id}/abort`, {}, bearer(KOLA));
+ok(r.status === 200 && r.body.upload.status === 'aborted' && !fs.existsSync(path.join(DATA, 'upload-tmp', badUp.id)), 'an aborted session keeps its row and loses its chunk files');
+r = await j(`/player/uploads/${badUp.id}`, {}, bearer(KOLA));
+ok(r.status === 200 && r.body.upload.status === 'aborted' && r.body.upload.received.length === 1, 'and reads back aborted, with the chunk it had received');
+r = await j(`/player/uploads/${badUp.id}`, {}, bearer(MARIA));
+ok(r.status !== 200, 'another account never reads a player\'s upload session');
+// A deleted player's upload sessions go with the account, and so do their chunk files.
+r = await j('/auth/player/signup', { method: 'POST', body: JSON.stringify({ name: 'Leaving Uploader', dob: '2000-02-02', country: 'GB', position: 'CM', password: 'longenough1' }) });
+const leaver = r.body.token;
+r = await post('/player/uploads', { size: 600 * 1024, mime: 'video/mp4', title: 'Half sent' }, bearer(leaver));
+const leaverUp = r.body.upload;
+await put(`/player/uploads/${leaverUp.id}/chunks/0`, { data: crypto.randomBytes(leaverUp.chunkSize).toString('base64') }, bearer(leaver));
+ok(fs.existsSync(path.join(DATA, 'upload-tmp', leaverUp.id)), 'fixture: the half-sent upload has a chunk on disk');
+r = await j('/player/account', { method: 'DELETE' }, bearer(leaver));
+ok(r.status === 200, 'the uploader deletes their account');
+{
+  const s = new DatabaseSync(path.join(DATA, 'scoutbox.db'), { readOnly: true });
+  try {
+    ok(s.prepare('SELECT COUNT(*) AS n FROM upload_sessions WHERE id = ?').get(leaverUp.id).n === 0 && s.prepare('SELECT COUNT(*) AS n FROM upload_session_chunks WHERE upload_session_id = ?').get(leaverUp.id).n === 0, 'the deleted player\'s upload session and its chunk rows are gone');
+  } finally { s.close(); }
+}
+ok(!fs.existsSync(path.join(DATA, 'upload-tmp', leaverUp.id)), 'and its chunk files are removed');
 // captions
 r = await post(`/player/media/${upMedia}/captions`, { vtt: 'WEBVTT\n\n00:00.000 --> 00:04.000\nCoach: two cones, thirty metres.' }, bearer(KOLA));
 ok(r.status === 200, 'caption track uploads');

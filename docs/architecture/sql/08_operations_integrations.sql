@@ -3,9 +3,8 @@
 -- Scope: integrations (API keys, webhooks, imports, prospects, identity
 -- reviews), enterprise (org invites, SSO, support), group workspaces,
 -- grassroots operations (open trials, matchdays, friendlies), saved
--- searches, resumable uploads, billing invoices, product catalogues
--- (plans, archetypes), demo reputation seed, delivery idempotency and
--- operational settings.
+-- searches, resumable uploads, billing invoices, demo reputation seed and
+-- the delivery centre's bookkeeping. (Plans and archetypes are constants.)
 --
 -- Conventions: see ddl-conventions (STRICT tables, snake_case, epoch-ms
 -- INTEGER *_at, TEXT YYYY-MM-DD *_date, booleans INTEGER 0/1, JSON only
@@ -498,71 +497,6 @@ CREATE TABLE group_grant_recipients (
 CREATE INDEX group_grant_recipients_org ON group_grant_recipients (org_id);
 
 
--- ---------------------------------------------------------------------
--- upload_sessions
--- source: db.uploadSessions  created at m12/shared.mjs:27; rows minted at m12/operations.mjs:167-172
--- owner/writer: m12/operations.mjs   lifecycle: open -> finalised | aborted | abandoned (sweep after 24h, operations.mjs:382-387); never deleted
--- mapping: id -> id (upl-N); playerId -> player_id; size -> size_bytes; mime -> mime; title -> title (<=120);
---          sha256 -> declared_sha256 (client-declared checksum, not a secret, nullable); chunkSize -> chunk_size;
---          totalChunks -> total_chunks; received[] -> upload_session_chunks child table; status -> status;
---          createdAt -> created_at; finalisedMediaId -> finalised_media_id
--- notes: chunk BYTES live on disk under DATA_DIR/upload-tmp/<id>/ — not schema. finalised_media_id names the
---        player media item created at finalise (player media table in 01_identity); no FK: media rows are
---        deleted with the player while upload sessions are NOT touched by deletePlayerData (orphan defect) —
---        hence ON DELETE CASCADE here so the migration fixes it. Read patterns: by id+player
---        (operations.mjs:179); sweep status='open' AND created_at < now-24h (operations.mjs:383).
--- ---------------------------------------------------------------------
-CREATE TABLE upload_sessions (
-  id                 TEXT PRIMARY KEY,
-  player_id          TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  size_bytes         INTEGER NOT NULL CHECK (size_bytes > 0),
-  mime               TEXT NOT NULL,
-  title              TEXT NOT NULL,
-  declared_sha256    TEXT,
-  chunk_size         INTEGER NOT NULL,
-  total_chunks       INTEGER NOT NULL,
-  status             TEXT NOT NULL CHECK (status IN ('open', 'finalised', 'aborted', 'abandoned')),
-  created_at         INTEGER NOT NULL,
-  finalised_media_id TEXT                              -- player media id (01_identity); no FK, see notes
-) STRICT;
-CREATE INDEX upload_sessions_player_id ON upload_sessions(player_id);
-CREATE INDEX upload_sessions_status_created_at ON upload_sessions(status, created_at);
-
--- source: db.uploadSessions[].received[]  (chunk indices, operations.mjs:197)
--- mapping: each index -> (upload_session_id, chunk_index)
--- notes: idempotent re-upload of the same index is a no-op (PK).
-CREATE TABLE upload_session_chunks (
-  upload_session_id TEXT NOT NULL REFERENCES upload_sessions(id) ON DELETE CASCADE,
-  chunk_index       INTEGER NOT NULL CHECK (chunk_index >= 0),
-  PRIMARY KEY (upload_session_id, chunk_index)
-) STRICT;
-
-
--- ---------------------------------------------------------------------
--- saved_searches
--- source: db.savedSearches  created at server.mjs:215; rows minted at server.mjs:2424
--- owner/writer: server.mjs   lifecycle: HARD delete by owner org (server.mjs:2429-2434); untouched by player deletion (4017)
--- mapping: id -> id (ss-N); orgId -> org_id; userId -> user_id; scoutName -> scout_name; name -> name (<=120);
---          filters{} -> filters_json; createdAt -> created_at
--- notes: filters_json stays JSON — free-form by design: an arbitrary object the client sends, matched key by key
---        by matchesSearch (server.mjs:~2380-2402: q, position, foot, ageGroup, availability, ...); unknown keys
---        are ignored, none are queried server-side. Read patterns: by org (server.mjs:2417); by id+org on delete;
---        FULL SCAN of every saved search on every player signup (checkSavedSearches, server.mjs:2405) — the
---        notify target is user_id, which is why it is kept even though the user may have been removed.
---        POST /searches does not call persist() (server.mjs:2420-2427) — rows could be lost before the next save.
--- ---------------------------------------------------------------------
-CREATE TABLE saved_searches (
-  id           TEXT PRIMARY KEY,
-  org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
-  user_id      TEXT REFERENCES org_users(id) ON DELETE SET NULL,
-  scout_name   TEXT NOT NULL,                          -- snapshot
-  name         TEXT NOT NULL,
-  filters_json TEXT NOT NULL CHECK (json_valid(filters_json)),  -- free-form search filters by design
-  created_at   INTEGER NOT NULL
-) STRICT;
-CREATE INDEX saved_searches_org_id ON saved_searches(org_id);
-
-
 -- =====================================================================
 -- M10 grassroots operations — open days, match days, the friendlies board
 -- S13d: IMPLEMENTED, migration 0037_grassroots REGISTERED (repositories/grassroots.mjs, 6 Nov 2026).
@@ -685,143 +619,128 @@ CREATE TABLE friendly_responses (
 CREATE INDEX friendly_responses_org ON friendly_responses (org_id);
 
 
--- ---------------------------------------------------------------------
--- invoices
--- source: db.invoices  created at server.mjs:222 (and seed.mjs:488); rows minted at adapters.mjs:164-176 (createBilling.invoiceForSigning)
--- owner/writer: adapters.mjs billing seam, called from domains/recruitment/signings/index.mjs:275   lifecycle: status only ever 'issued'; never
---               deleted except the in-request rollback at domains/recruitment/signings/index.mjs:619 (array truncated to its pre-request length)
--- mapping: id -> id (inv-N — prefix shared with org_invites); ts -> created_at (source field is literally `ts`);
---          orgId -> org_id; orgName -> org_name; signingId -> signing_id; playerName -> player_name; description -> description;
---          amount (MAJOR units, e.g. 1500) -> amount_minor (= amount * 100); currency -> currency (always 'EUR' today);
---          status -> status; provider -> provider
--- notes: one invoice per signing enforced by code before issuing (domains/recruitment/signings/index.mjs:275 `.some(i.signingId === signing.id)`)
---        -> unique index. player_name is retained after player deletion (deletePlayerData leaves invoices alone) —
---        billing record; retention justified but flagged. Read patterns: by org newest first (server.mjs:2627);
---        admin all (4153); existence by signing_id.
--- ---------------------------------------------------------------------
+-- =====================================================================
+-- The remaining operations collections — uploads, saved searches, invoices, the demo reputation seed, the delivery
+-- centre's bookkeeping
+-- S13e: IMPLEMENTED, migration 0038_operations REGISTERED (repositories/operations.mjs, 6 Nov 2026).
+-- The DDL below is the migration's, generated from the repository's field specs (scripts/testSchemaDdl.mjs compares
+-- them column for column).
+-- =====================================================================
+--
+-- An upload session (upl-*) is a player's resumable upload (domains/media/uploads.mjs): open → finalised (naming the
+-- media item it became) | aborted | abandoned (the 24-hour sweep). The chunk numbers received are rows; the chunk bytes
+-- live on disk under DATA_DIR/upload-tmp/<id>/. The player id carries no key: deleting a player deletes their sessions
+-- explicitly, in the deletion's unit, and their chunk files after it commits.
+--
+-- A saved search (ss-*) is one club's "tell me when…" search, by one staff member. Its filters are typed columns, each
+-- NULL when not set (the vocabularies are the players' own: position, foot, availability), not a JSON object; the
+-- scout's name is read live from org_users. When a player joins, the searches of current staff are prefiltered in SQL
+-- by position, foot, country and availability.
+--
+-- An invoice (inv-*) is the success fee of one signing (one per signing: a unique index), stored exactly in minor units
+-- (amount_minor; the API answers `amount` in major units). Its copies of the organisation's and player's names are
+-- billing records and are kept after a player's deletion.
+--
+-- reputation_seed holds the demo's scout track records, empty in production: imported once with a first
+-- installation's demo seed. `seeded: true` is derived on read.
+--
+-- The delivery centre's bookkeeping: the provider callback ids already applied (the newest 5,000; the oldest 1,000 go
+-- when the 5,001st arrives), written in the same unit as the dispatch changes the callback applied; the instant the
+-- centre started (one row, written by the migration: a notification older than it is never sent externally); and the
+-- admin-injected provider failures still to fire, one row per channel (all five written by the migration, at zero).
+--
+-- Plans and archetypes are NOT tables: they are constants (catalogue.mjs PLANS, ARCHETYPES), never written by a route.
+-- orgs.plan's CHECK (01_identity.sql) lists the four plans; repositories/orgs.mjs ORG_PLANS is derived from PLANS.
+--
+-- Keys: organisations, staff and signings RESTRICT; chunk rows cascade with their session. Player ids carry no key.
+
+CREATE TABLE upload_sessions (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  player_id                                TEXT NOT NULL CHECK (length(player_id) <= 80 AND length(player_id) > 0),
+  size_bytes                               INTEGER NOT NULL,
+  mime                                     TEXT NOT NULL CHECK (mime IN ('video/webm','video/mp4','video/quicktime','image/jpeg','image/png','image/webp')),
+  title                                    TEXT NOT NULL CHECK (length(title) <= 120 AND length(title) > 0),
+  declared_sha256                          TEXT CHECK (declared_sha256 IS NULL OR length(declared_sha256) <= 64),
+  chunk_size                               INTEGER NOT NULL,
+  total_chunks                             INTEGER NOT NULL,
+  status                                   TEXT NOT NULL CHECK (status IN ('open','finalised','aborted','abandoned')),
+  created_at                               INTEGER NOT NULL,
+  finalised_media_id                       TEXT CHECK (finalised_media_id IS NULL OR length(finalised_media_id) <= 80 AND length(finalised_media_id) > 0),
+  CHECK (size_bytes > 0 AND size_bytes <= 41943040),
+  CHECK (chunk_size > 0),
+  CHECK (total_chunks >= 1 AND total_chunks <= 1024),
+  CHECK (declared_sha256 IS NULL OR length(declared_sha256) = 64),
+  CHECK ((status = 'finalised') = (finalised_media_id IS NOT NULL))
+) STRICT;
+CREATE INDEX upload_sessions_player ON upload_sessions (player_id);
+CREATE INDEX upload_sessions_open ON upload_sessions (created_at) WHERE status = 'open';
+CREATE TABLE upload_session_chunks (
+  upload_session_id                        TEXT NOT NULL CHECK (length(upload_session_id) > 0 AND length(upload_session_id) <= 80),
+  chunk_index                              INTEGER NOT NULL CHECK (chunk_index >= 0),
+  FOREIGN KEY (upload_session_id) REFERENCES upload_sessions(id) ON DELETE CASCADE,
+  PRIMARY KEY (upload_session_id, chunk_index)
+) STRICT;
+CREATE TABLE saved_searches (
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  user_id                                  TEXT NOT NULL CHECK (length(user_id) <= 80 AND length(user_id) > 0),
+  name                                     TEXT NOT NULL CHECK (length(name) <= 120 AND length(name) > 0),
+  q                                        TEXT CHECK (q IS NULL OR length(q) <= 120 AND length(q) > 0),
+  position                                 TEXT CHECK (position IS NULL OR position IN ('GK','CB','RB','LB','RWB','LWB','CDM','CM','CAM','RW','LW','ST','CF')),
+  foot                                     TEXT CHECK (foot IS NULL OR foot IN ('left','right')),
+  availability                             TEXT CHECK (availability IS NULL OR availability IN ('available_now','end_of_season','loan_open','overseas_open','not_seeking')),
+  country                                  TEXT CHECK (country IS NULL OR length(country) <= 60 AND length(country) > 0),
+  academy_plus                             INTEGER CHECK (academy_plus IS NULL OR academy_plus IN (0,1)),
+  age_group                                TEXT CHECK (age_group IS NULL OR age_group IN ('u16','u18','18-21','senior')),
+  new_days                                 INTEGER,
+  created_at                               INTEGER NOT NULL,
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (user_id) REFERENCES org_users(id) ON DELETE RESTRICT,
+  CHECK (new_days IS NULL OR (new_days >= 1 AND new_days <= 3650)),
+  CHECK (academy_plus IS NULL OR academy_plus = 1)
+) STRICT;
+CREATE INDEX saved_searches_org ON saved_searches (org_id);
 CREATE TABLE invoices (
-  id           TEXT PRIMARY KEY,
-  created_at   INTEGER NOT NULL,
-  org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE RESTRICT,
-  org_name     TEXT NOT NULL,                          -- snapshot
-  signing_id   TEXT NOT NULL REFERENCES signings(id) ON DELETE RESTRICT,
-  player_name  TEXT NOT NULL,                          -- snapshot; personal data retained after deletion (billing)
-  description  TEXT NOT NULL,
-  amount_minor INTEGER NOT NULL CHECK (amount_minor >= 0),
-  currency     TEXT NOT NULL CHECK (length(currency) = 3),
-  status       TEXT NOT NULL CHECK (status IN ('issued')),
-  provider     TEXT NOT NULL CHECK (provider IN ('stripe', 'dev-ledger'))
+  id                                       TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80),
+  created_at                               INTEGER NOT NULL,
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  org_name                                 TEXT NOT NULL CHECK (length(org_name) <= 200),
+  signing_id                               TEXT NOT NULL CHECK (length(signing_id) <= 80 AND length(signing_id) > 0),
+  player_name                              TEXT NOT NULL CHECK (length(player_name) <= 200),
+  description                              TEXT NOT NULL CHECK (length(description) <= 300),
+  amount_minor                             INTEGER NOT NULL,
+  currency                                 TEXT NOT NULL CHECK (length(currency) <= 3),
+  status                                   TEXT NOT NULL CHECK (status IN ('issued')),
+  provider                                 TEXT NOT NULL CHECK (provider IN ('dev-ledger','stripe')),
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  FOREIGN KEY (signing_id) REFERENCES signings(id) ON DELETE RESTRICT,
+  CHECK (amount_minor >= 0),
+  CHECK (currency GLOB '[A-Z][A-Z][A-Z]')
 ) STRICT;
-CREATE UNIQUE INDEX invoices_signing_id ON invoices(signing_id);
-CREATE INDEX invoices_org_id_created_at ON invoices(org_id, created_at);
-
-
--- ---------------------------------------------------------------------
--- plans  (catalogue, keyed by name)
--- source: db.plans  object keyed by plan name; seeded from catalogue.mjs PLANS (seed.mjs:444) and restored by
---         domains/platform/migrations.mjs:257 (`db.plans ??= planCatalogue()`); never written by a route
--- owner/writer: catalogue.mjs (constants) via seed/migration   lifecycle: static product configuration
--- mapping: object key -> name (PRIMARY KEY); name -> name (identical to the key); pricePerMonthGBP (major GBP) ->
---          price_per_month_minor (= value * 100) + currency 'GBP'; seats -> seats; attributionWindowMonths -> attribution_window_months;
---          antiCircumvention -> anti_circumvention
--- notes: read by name = orgs.plan (server.mjs:1112 /meta full dump; 3064, 3078 and domains/recruitment/signings/index.mjs:260 by key with
---        `?? 18` fallback). orgs.plan (01_identity) should REFERENCE plans(name) — declared there, not here.
---        An EMPTY table reproduces the M23-D2 billing bug (catalogue.mjs:24-29): the migration must insert the
---        four rows. `customised` seen in e2e/platform/storeGuarantees.mjs:84 is a test fixture, not a product field.
--- ---------------------------------------------------------------------
-CREATE TABLE plans (
-  name                      TEXT PRIMARY KEY CHECK (name IN ('Grassroots', 'Academy', 'Pro', 'Agency')),
-  price_per_month_minor     INTEGER NOT NULL CHECK (price_per_month_minor >= 0),
-  currency                  TEXT NOT NULL DEFAULT 'GBP' CHECK (length(currency) = 3),
-  seats                     INTEGER NOT NULL CHECK (seats >= 1),
-  attribution_window_months INTEGER NOT NULL CHECK (attribution_window_months >= 1),
-  anti_circumvention        TEXT NOT NULL
-) STRICT;
-
-
--- ---------------------------------------------------------------------
--- archetypes  (catalogue)
--- source: db.archetypes  seeded from catalogue.mjs ARCHETYPES (seed.mjs:435) and restored by domains/platform/migrations.mjs:258; never written by a route
--- owner/writer: catalogue.mjs via seed/migration   lifecycle: static; exactly 5 rows
--- mapping: id -> id (arch-*); label -> label; position -> position; foot -> foot; dob -> dob (synthetic yardstick date);
---          heightCm -> height_cm; weightKg -> weight_kg; stats.appearances -> stat_appearances; stats.goals -> stat_goals;
---          stats.assists -> stat_assists
--- notes: not people — never counted or ranked as a person (catalogue.mjs:76-78). Read: full scan for the
---        similarity lead (server.mjs:1965). Shape mirrors the player fields similarityScore reads.
--- ---------------------------------------------------------------------
-CREATE TABLE archetypes (
-  id               TEXT PRIMARY KEY,
-  label            TEXT NOT NULL,
-  position         TEXT NOT NULL,
-  foot             TEXT NOT NULL CHECK (foot IN ('left', 'right')),
-  dob              TEXT NOT NULL CHECK (length(dob) = 10),
-  height_cm        INTEGER NOT NULL,
-  weight_kg        INTEGER NOT NULL,
-  stat_appearances INTEGER NOT NULL,
-  stat_goals       INTEGER NOT NULL,
-  stat_assists     INTEGER NOT NULL
-) STRICT;
-
-
--- ---------------------------------------------------------------------
--- reputation_seed  -- DEMO ONLY
--- source: db.reputationSeed  seeded at seed.mjs:438-442; domains/platform/migrations.mjs:254 restores it as [] (empty is the
---         correct production value, storeContract.mjs:155); never written by a route
--- owner/writer: seed.mjs   lifecycle: static demo rows; EMPTY in production
--- mapping: scoutName -> scout_name; orgName -> org_name; discoveries -> discoveries; successRatePct -> success_rate_pct;
---          avgResaleMultiple -> avg_resale_multiple; seeded -> derived, not stored: always true for these rows —
---          the /reputation response (server.mjs:3102) returns them under `seeded` and computes live rows from the ledger with seeded:false
--- notes: no id in source; natural PK (scout_name, org_name) matches the live-row key `${scoutName}|${orgName}`.
---        Table exists only so demo snapshots migrate; a production migration inserts nothing.
--- ---------------------------------------------------------------------
+CREATE UNIQUE INDEX invoices_signing ON invoices (signing_id);
+CREATE INDEX invoices_org ON invoices (org_id);
 CREATE TABLE reputation_seed (
-  scout_name          TEXT NOT NULL,                   -- demo data; personal-looking names of fictional scouts
-  org_name            TEXT NOT NULL,
-  discoveries         INTEGER NOT NULL,
-  success_rate_pct    INTEGER NOT NULL,
-  avg_resale_multiple REAL NOT NULL,
-  PRIMARY KEY (scout_name, org_name)
+  scout_name                               TEXT NOT NULL CHECK (length(scout_name) <= 200 AND length(scout_name) > 0),
+  org_name                                 TEXT NOT NULL CHECK (length(org_name) <= 200 AND length(org_name) > 0),
+  discoveries                              INTEGER NOT NULL,
+  success_rate_pct                         INTEGER NOT NULL,
+  avg_resale_multiple                      REAL NOT NULL,
+  PRIMARY KEY (scout_name, org_name),
+  CHECK (discoveries >= 0),
+  CHECK (success_rate_pct BETWEEN 0 AND 100),
+  CHECK (avg_resale_multiple >= 0)
 ) STRICT;
-
-
--- ---------------------------------------------------------------------
--- delivery_callbacks_seen
--- source: db.deliveryCallbacksSeen  string[] created at m13/shared.mjs:28; appended at m13/delivery.mjs:185;
---         FIFO-capped at 5000 (oldest 1000 spliced, delivery.mjs:186)
--- owner/writer: m13/delivery.mjs /callbacks/delivery   lifecycle: idempotency ledger of processed provider callback ids
--- mapping: each string -> callback_id (PRIMARY KEY); seen_at -> NEW column (the array had only insertion order;
---          the migration assigns migration_time + array_index so the FIFO prune can keep working on seen_at)
--- notes: read pattern is membership test by id (delivery.mjs:184) — the PK. The cap becomes
---        `DELETE ... ORDER BY seen_at LIMIT 1000` when COUNT > 5000.
--- ---------------------------------------------------------------------
 CREATE TABLE delivery_callbacks_seen (
-  callback_id TEXT PRIMARY KEY,
-  seen_at     INTEGER NOT NULL
+  callback_id                              TEXT PRIMARY KEY CHECK (length(callback_id) > 0 AND length(callback_id) <= 200),
+  seen_at                                  INTEGER NOT NULL
 ) STRICT;
-CREATE INDEX delivery_callbacks_seen_seen_at ON delivery_callbacks_seen(seen_at);
-
-
--- ---------------------------------------------------------------------
--- ops_settings  (key/value singletons)
--- source: db.deliveryFailInject (object {email, push, contact?, trial?, decision?} of pending injected failures,
---         m13/delivery.mjs:20, incremented at 250, decremented at 29 and domains/recruitment/lifecycle/{trialRoutes:391,628,830;
---         contactRoutes:461; decisionRoutes:360}) and db.deliveryCentreSince (number, m13/delivery.mjs:21, read at 82)
--- owner/writer: m13/delivery.mjs (+ m23 route files decrement)   lifecycle: persistent singletons; never deleted
--- mapping: deliveryCentreSince -> row key 'delivery_centre_since', value_json = epoch-ms integer;
---          deliveryFailInject.<channel> -> row key 'delivery_fail_inject.<channel>' for channel in
---          email | push | contact | trial | decision, value_json = non-negative integer
--- notes: DECISION — a table, not "not a table": both values are persisted on purpose and read after restart.
---        delivery_centre_since is the high-water mark that stops a retroactive email blast to every historical
---        notification when the delivery centre is first enabled (delivery.mjs:21,82-84) — losing it on restart
---        would re-send history. The fail-inject counters are decremented across separate requests and persisted
---        with persistNow() each time (delivery.mjs:251; trialRoutes.mjs:392) so a restart mid-test keeps the
---        remaining count. Neither is a collection, so one key/value table holds both; JSON value keeps the
---        column typeless for future singletons. updated_at is NEW (audit of admin injections).
--- ---------------------------------------------------------------------
-CREATE TABLE ops_settings (
-  key        TEXT PRIMARY KEY,
-  value_json TEXT NOT NULL CHECK (json_valid(value_json)),
-  updated_at INTEGER NOT NULL
+CREATE TABLE delivery_centre (
+  id                                       INTEGER PRIMARY KEY CHECK (id = 1),
+  since                                    INTEGER NOT NULL
+) STRICT;
+CREATE TABLE delivery_fail_injections (
+  channel                                  TEXT PRIMARY KEY CHECK (channel IN ('email','push','contact','trial','decision')),
+  remaining                                INTEGER NOT NULL CHECK (remaining >= 0)
 ) STRICT;
 
 -- ---------------------------------------------------------------------
@@ -846,6 +765,7 @@ CREATE INDEX media_deletions_queued ON media_deletions (queued_at);
 
 -- =====================================================================
 -- not tables:
+--   plans, archetypes (catalogue.mjs) — product constants since S13e; changing one is a release.
 --   db.secrets.mediaSign — RETIRED (3 Nov 2026), no table. The signing key is process.env.MEDIA_SECRET only
 --     (required in production); development uses a random per-process key. Signed media URLs (15-minute TTL)
 --     stop verifying after a restart without MEDIA_SECRET, which clients tolerate (links are re-minted on every

@@ -194,7 +194,8 @@ export default function App() {
       setModeration(await call<ModRow[]>(key, '/admin/moderation'));
       setThreads(await call<ThreadRow[]>(key, '/admin/channels'));
       setOutbox(await call<MailRow[]>(key, '/admin/outbox'));
-      setInvoices(await call<InvoiceRow[]>(key, '/admin/invoices'));
+      // Pages by cursor (S13e), newest first: the first page is read; "load more" (nextCursor) is still needed.
+      setInvoices((await call<{ items: InvoiceRow[]; nextCursor: string | null }>(key, '/admin/invoices')).items);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Cannot reach scoutbox-server — is it running with your ADMIN_KEY?');
       setEntered(false);

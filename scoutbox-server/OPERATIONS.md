@@ -21,8 +21,8 @@ is archived in git under the tag `docs-archive-2026-11`. The migration's status 
   whenever you want a clean world.
 - **First boot.** When the directory has never been saved to, `seed.mjs` (`buildSeed()`)
   initialises it. In development that is the demo world (people, clubs, track records);
-  in production it is the product catalogues only (plans, archetypes) and no people or
-  clubs. `SCOUTBOX_SEED_DEMO=1` or `=0` overrides either way (`demoSeedEnabled` in
+  in production it is empty: no people, clubs or track records (the plans and archetypes
+  are constants in `catalogue.mjs`, not data). `SCOUTBOX_SEED_DEMO=1` or `=0` overrides either way (`demoSeedEnabled` in
   `domains/platform/capabilities.mjs`). On later boots the saved database is authoritative, even when a
   table is empty, and the seed is never imported over it. `NODE_ENV=production` also:
   - passwordless seeded demo logins are refused (`DEV_LOGIN_DISABLED`);
@@ -233,7 +233,7 @@ used to relabel stubs as live providers; production now refuses them (`PROVIDER_
 | Mail | `SENDGRID_API_KEY` | Records go to the `outbox` table, visible at `GET /admin/outbox`. Codes are withheld from the persisted text. The full text of the last 500 mails is kept in process memory only, so after a restart request a fresh code. | Real SendGrid `fetch` |
 | Push | `EXPO_ACCESS_TOKEN` | Records go to `push_log` (`GET /admin/push-log`) | Real Expo `fetch` |
 | IDV | none | Instant approval with an audit reference (`dev-attestation`), in every mode | Not built |
-| Billing | none | Success-fee invoices in `db.invoices` (`dev-ledger`) | Not built |
+| Billing | none | Success-fee invoices in the `invoices` table, in minor units (`dev-ledger`) | Not built |
 | Storage | none | Files under `DATA_DIR/media/` | Not built |
 | Delivery centre | n/a | In-process `local-fake` provider. `POST /admin/delivery/inject-failure` simulates failures and `POST /admin/delivery/sweep` forces a pass | No real provider |
 | Box Cam CV | `BOX_CAM_TEST_PROVIDER=1` | Labelled simulated observer, never production evidence | No production CV provider |

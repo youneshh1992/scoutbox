@@ -156,6 +156,21 @@ const newPlayerId = r.body.playerId;
 const newPlayerToken = r.body.token;
 let notifs = await j('/org/notifications', {}, bearer(EASTPORT));
 ok(notifs.body.some((n) => n.type === 'saved_search' && /Young strikers GB/.test(n.text)), 'saved-search alert fires for the new signup');
+// S13e: a saved search is a row with typed filters; junk filters are refused naming the field, an empty value means no filter.
+r = await j('/org/searches', {}, bearer(EASTPORT));
+const savedYoung = r.body.find((x) => x.name === 'Young strikers GB');
+ok(savedYoung && savedYoung.scoutName && JSON.stringify(savedYoung.filters) === JSON.stringify({ position: 'ST', country: 'GB' }), 'the saved search reads back with its filters and the scout\'s name');
+for (const [filters, field] of [[{ position: 'Striker' }, 'filters.position'], [{ ageGroup: 'u12' }, 'filters.ageGroup'], [{ sort: 'age' }, 'filters.sort'], [{ academyPlus: 'yes' }, 'filters.academyPlus'], [{ newDays: '7' }, 'filters.newDays']]) {
+  r = await j('/org/searches', { method: 'POST', body: JSON.stringify({ name: 'Junk', filters }) }, bearer(EASTPORT));
+  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `a junk search filter is refused naming ${field}`);
+}
+r = await j('/org/searches', { method: 'POST', body: JSON.stringify({ name: 'Any winger', filters: { q: '', position: 'RW', academyPlus: false, country: null } }) }, bearer(EASTPORT));
+ok(r.status === 201 && JSON.stringify(r.body.filters) === JSON.stringify({ position: 'RW' }), 'empty, false and null filters mean no filter, as the apps send them');
+r = await j(`/org/searches/${r.body.id}`, { method: 'DELETE' }, bearer(EASTPORT));
+ok(r.status === 200, 'the club deletes its saved search');
+const HARBOUR = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-harbour', scoutName: 'Coach D. Ansah', role: 'Head of Recruitment' }) })).body.token;
+r = await j(`/org/searches/${savedYoung.id}`, { method: 'DELETE' }, bearer(HARBOUR));
+ok(r.status === 404, 'another club cannot delete it');
 
 // ---- 6. mandatory report with feedback, then minor trial via guardian slot choice
 r = await j(`/org/trials/${trial.id}/report`, {
@@ -191,7 +206,7 @@ await j(`/player/requests/${r.body.requestId}/respond`, { method: 'POST', body: 
 r = await j('/org/players/pl-svensson/signing', { method: 'POST', body: JSON.stringify({ note: 'Signed after trial run.' }) }, bearer(EASTPORT));
 ok(r.status === 201 && r.body.signing.insideAttributionWindow, 'signing recorded inside attribution window');
 let invoices = await j('/org/invoices', {}, bearer(EASTPORT));
-ok(invoices.body.some((i) => i.signingId === r.body.signing.id && i.amount > 0), 'success-fee invoice issued through the billing adapter');
+ok(invoices.body.items.some((i) => i.signingId === r.body.signing.id && i.amount > 0), 'success-fee invoice issued through the billing adapter');
 let funnel = await j('/org/funnel', {}, bearer(EASTPORT));
 const stage = (k) => funnel.body.stages.find((s) => s.key === k)?.count ?? -1;
 ok(stage('requests') >= 3 && stage('trials') >= 2 && stage('signings') >= 1, 'funnel computes real stage counts from the ledger');

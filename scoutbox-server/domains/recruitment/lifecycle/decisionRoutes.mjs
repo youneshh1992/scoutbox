@@ -357,10 +357,7 @@ export function registerDecision(ctx) {
 
       // Failure injection (M13 mechanism): the write refuses BEFORE anything is
       // recorded — no row, no history, no case move, no notification (§54).
-      const inject = db.deliveryFailInject;
-      if (inject && Number(inject.decision ?? 0) > 0) {
-        inject.decision = Number(inject.decision) - 1;
-        persistNow();
+      if (ctx.operations.delivery.consumeInjectedFailure('decision')) { // S13e: used up through the delivery bookkeeping (a row)
         console.error(`DECISION transport_failed finalize case=${kase.id}`);
         return err(res, 'DECISION_TRANSPORT_REFUSED', 'The decision could not be recorded. Nothing was changed; try again.');
       }

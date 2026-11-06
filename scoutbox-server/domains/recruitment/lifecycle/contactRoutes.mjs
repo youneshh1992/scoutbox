@@ -453,10 +453,9 @@ export function registerContact(ctx) {
     // request row is the message in the recipient's mailbox. A refusal here
     // (injected for tests, or a real persistence problem surfaced by the
     // caller) leaves an honest `failed` attempt and no recipient object.
-    const inject = db.deliveryFailInject;
-    if (inject && Number(inject.contact ?? 0) > 0) {
+    if (ctx.operations.delivery.injected('contact') > 0) {
       const failed = unit(() => {
-        inject.contact = Number(inject.contact) - 1;
+        ctx.operations.delivery.consumeInjectedFailure('contact'); // S13e: used up in the unit that records the failed attempt
         const fresh = contacts.update(c.id, (d) => {
           d.keys.send = sendKey;
           d.status = 'failed';

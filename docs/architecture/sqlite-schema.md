@@ -254,18 +254,18 @@ them.
 | `identityReviews` | persistent (the record is its batch row's) | 08 | `identity_reviews` | S13a (0034) |
 | `groups` | persistent (an admin is a flagged member row) | 08 | `groups`, `group_members`, `group_pending_invites`, `group_shared_templates`, `group_programmes` | S13c (0036) |
 | `groupGrants` | persistent | 08 | `group_grants`, `group_grant_recipients` | S13c (0036) |
-| `uploadSessions` | temporary | 08 | `upload_sessions`, `upload_session_chunks` (chunk bytes stay on disk) | S13 |
-| `savedSearches` | persistent | 08 | `saved_searches` | S13 |
+| `uploadSessions` | temporary (deleted with the player) | 08 | `upload_sessions`, `upload_session_chunks` (chunk bytes stay on disk) | S13e (0038) |
+| `savedSearches` | persistent | 08 | `saved_searches` (filters as typed columns, no JSON) | S13e (0038) |
 | `openTrials` | persistent (deleting stamps `deleted_at`) | 08 | `open_trials`, `open_trial_positions`, `open_trial_registrations` | S13d (0037) |
 | `matchdays` | persistent | 08 | `matchdays`, `matchday_players` | S13d (0037) |
 | `friendlies` | persistent | 08 | `friendlies`, `friendly_responses` | S13d (0037) |
-| `invoices` | persistent (money) | 08 | `invoices` (`amount_minor`, `currency`) | S13 |
-| `plans` | catalogue | 08 | `plans` (`price_per_month_minor`, `currency 'GBP'`) | S13 |
-| `archetypes` | catalogue | 08 | `archetypes` | S13 |
-| `reputationSeed` | demo | 08 | `reputation_seed`; production init leaves it empty | S13 |
-| `deliveryCallbacksSeen` | temporary (string[], capped 5k) | 08 | `delivery_callbacks_seen` (+ `seen_at` for the cap) | S13 |
-| `deliveryCentreSince` | persistent (number) | 08 | `ops_settings` key `delivery_centre_since` | S13 |
-| `deliveryFailInject` | operational/test (object) | 08 | `ops_settings` keys `delivery_fail_inject.<channel>` | S13 |
+| `invoices` | persistent (money) | 08 | `invoices` (`amount_minor`, `currency`; one per signing) | S13e (0038) |
+| `plans` | catalogue | — | none: a constant (`catalogue.mjs PLANS`) | S13e (no table) |
+| `archetypes` | catalogue | — | none: a constant (`catalogue.mjs ARCHETYPES`) | S13e (no table) |
+| `reputationSeed` | demo | 08 | `reputation_seed`; imported once with a first installation's demo seed, empty in production | S13e (0038) |
+| `deliveryCallbacksSeen` | temporary (string[], capped 5k) | 08 | `delivery_callbacks_seen` (+ `seen_at`) | S13e (0038) |
+| `deliveryCentreSince` | persistent (number) | 08 | `delivery_centre` (one row, written by the migration) | S13e (0038) |
+| `deliveryFailInject` | operational/test (object) | 08 | `delivery_fail_injections` (one row per channel) | S13e (0038) |
 | `secrets` | secret (`mediaSign`) | 08 | no table: the key is env `MEDIA_SECRET` only | **retired** (3 Nov 2026; the server no longer reads or writes it) |
 | `mediaBlobs` | dead (legacy, always `{}` after boot, `server.mjs:246-249`) | 01 | none; dropped at S14 | — |
 
@@ -353,9 +353,9 @@ to each file's author; the rules are restated here so the document is self-conta
   `moderation_log.context_kind`) have no CHECK and the observed values are listed in the
   header.
 - **Money.** INTEGER minor units named `*_minor` plus `currency TEXT CHECK (length = 3)`.
-  `invoices.amount` (major units today) is converted by `× 100`; `plans.pricePerMonthGBP`
-  becomes `price_per_month_minor` with `currency 'GBP'`. Budget scenarios already use minor
-  units.
+  `invoices.amount_minor` holds the success fee exactly (the API still answers `amount` in
+  major units). Plan prices are constants (`catalogue.mjs`), not rows. Budget scenarios
+  already use minor units.
 - **JSON columns.** TEXT named `*_json` with `CHECK (json_valid(x))`. Each one is justified in
   its header as either free-form by design (arbitrary tags, provider traces, rule parameters,
   `detail` of audit entries) or deferred normalisation with the step that normalises it
@@ -692,9 +692,9 @@ API keys (hashed) with scopes, webhook endpoints and deliveries with attempts, o
 access logs, import batches with their PII rows, prospects and identity reviews, groups
 with admins, members, invites, shared templates and programmes, group grants, upload
 sessions (chunks on disk), saved searches, open trials with positions and registrations,
-matchdays, friendlies, invoices (minor units), plan and archetype catalogues, the demo-only
-reputation seed, processed callback ids, and a key/value `ops_settings` table for the two
-persisted operational singletons.
+matchdays, friendlies, invoices (minor units), the demo-only reputation seed, processed
+callback ids, the delivery centre's start and the injected failures by channel. Plans and
+archetypes are constants, not tables (S13e).
 
 ---
 

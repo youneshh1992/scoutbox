@@ -26,7 +26,6 @@
  * snapshot store has no concept of one and inventing it here would be theatre.
  */
 
-import { planCatalogue, archetypeCatalogue } from '../../catalogue.mjs';
 import { MIGRATION_GUARANTEED } from '../../storeContract.mjs';
 
 // 23.0.0 — bumped because M23-D2 changes what a migrated database GUARANTEES:
@@ -227,21 +226,13 @@ export const MIGRATIONS = [
     //   rows means nothing happened. An empty `blocks` means no block
     //   relation exists, which is exactly what it means today.
     //
-    //   Product configuration does NOT default to empty, because empty is a
-    //   lie with consequences. An empty `plans` makes every
-    //   `db.plans[org.plan]?.attributionWindowMonths ?? 18` fall through, and
-    //   a Grassroots organisation's attribution window would silently move
-    //   from 12 months to 18 — a billing change caused by a persistence bug.
-    //   So the catalogue is restored from catalogue.mjs, the one definition
-    //   the seed now also uses.
-    //
-    // `reputationSeed` is the third case: it is demo data, its rows are
-    // literally marked `seeded: true`, and it is served beside figures
-    // computed from the live ledger. Empty is the correct production value —
-    // fabricating scout track records to fill it would be worse than the bug.
+    //   Product configuration (plans, archetypes) was restored here from
+    //   catalogue.mjs, and the demo reputation rows defaulted to empty. Since
+    //   S13e the catalogues are constants and the reputation rows a table, so
+    //   this step creates only the user-data containers.
     //
     // Nothing here overwrites: every assignment is `??=`, so a snapshot that
-    // already carries blocks, channels or a customised plan table keeps
+    // already carries blocks or channels keeps
     // exactly what it has.
     note: 'M23-D2: core production-read collections exist after restore, not only after seed.',
     up(db) {
@@ -250,11 +241,8 @@ export const MIGRATIONS = [
       db.reports ??= [];        // report-user/scout/club submissions
       db.moderationLog ??= [];  // moderation hits, counted on the T&S dashboard
       db.channels ??= [];       // moderated message threads, opened on acceptance
-      db.reputationSeed ??= []; // demo track records; empty is correct in production
-
-      // Product configuration — empty would change behaviour, so restore the catalogue.
-      db.plans ??= planCatalogue();
-      db.archetypes ??= archetypeCatalogue();
+      // reputationSeed, plans and archetypes: not collections since S13e (the demo reputation rows are a table of
+      // repositories/operations.mjs; plans and archetypes are constants in catalogue.mjs).
     },
   },
   {
@@ -459,20 +447,13 @@ export const MIGRATIONS = [
  * Collections production code may read without guarding.
  *
  * DERIVED from `storeContract.mjs`, which is the one place ownership and
- * guarantee are declared. This used to be a second hand-kept list beside that
- * one, and the two disagreed by two entries — `db.schema` (the registry's own
- * record, not a collection) and `db.reputationSeed`.
- *
- * `reputationSeed` is created by a migration step but is deliberately NOT
- * required: its rows are demo track records marked `seeded: true`, and empty is
- * the correct production value. "Guaranteed to exist" and "must be non-empty
- * for production to be healthy" are different claims, and only the first one is
- * what this list makes.
+ * guarantee are declared. (The demo reputation rows, once the one exception,
+ * are a table since S13e.)
  *
  * Asserted by `e2e/platform/storeGuarantees.mjs` against a snapshot that has been
  * through `runMigrations` and nothing else — no seed, no fixtures, no demo.
  */
-export const PRODUCTION_REQUIRED_STORES = MIGRATION_GUARANTEED.filter((s) => s !== 'reputationSeed');
+export const PRODUCTION_REQUIRED_STORES = MIGRATION_GUARANTEED;
 
 /**
  * Which required stores are absent from this snapshot.

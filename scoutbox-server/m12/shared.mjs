@@ -20,7 +20,7 @@ export function migrateM12(db, players) {
   // repository (S9d), read through SQL (scoutingReads); no db.* here.
   // F8 development objectives: a table since S12a (repositories/development.mjs, developmentReads.objectives).
   // F11 follow-ups and outcome reports: tables of the signings repository, read through SQL (§4.3 step 2); no db.* here.
-  db.uploadSessions ??= [];      // F12 — resumable upload sessions
+  // F12 resumable upload sessions: tables of repositories/operations.mjs (S13e), domains/media/uploads.mjs.
   // F12E — caption track (vtt text) or null. Since S5 a media item is a row of
   // player_media: the default is written through the repository only where the
   // stored item lacks the field (an existing null stays as it is).

@@ -24,6 +24,7 @@ import {
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
 import { registerNotificationPrefs, CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
+import { createOperationsRepository } from '../repositories/operations.mjs';
 import { registerDelivery } from '../m13/delivery.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, freshFile, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump } from './coreIdentityTestFixtures.mjs';
@@ -368,7 +369,7 @@ test('m13 notifyAction: a muted notification (the gate returned null) yields nul
   const router = { post() {}, get() {}, put() {} };
   let muted = false;
   const notify = (audience, type, text, refId = null, { actionRequired = null } = {}) => (muted ? null : repo.create({ audience, type, text, refId, category: 'security_account', deferredPush: false, actionRequired }));
-  const ctx = { db: { dispatches: dispatches.view, notifications: repo.view, users: [], guardians: [], outbox: outboxPush.outbox.view }, notifications: repo, dispatches, outbox: outboxPush.outbox, users: [], app: { post() {} }, orgRouter: router, playerRouter: router, guardianRouter: router, adminRouter: router, nextId, persist() {}, persistNow() {}, notify, findPlayer: () => null, isAdult: () => true, signBody: () => '', timingSafeEq: () => false, paginate: (_r, x) => x, unit: (w) => w() };
+  const ctx = { db: { dispatches: dispatches.view, notifications: repo.view, users: [], guardians: [], outbox: outboxPush.outbox.view }, notifications: repo, dispatches, outbox: outboxPush.outbox, users: [], app: { post() {} }, orgRouter: router, playerRouter: router, guardianRouter: router, adminRouter: router, nextId, persist() {}, persistNow() {}, notify, findPlayer: () => null, isAdult: () => true, signBody: () => '', timingSafeEq: () => false, paginate: (_r, x) => x, unit: (w) => w(), operations: createOperationsRepository({ sqlite: s, now: () => NOW }) };
   const saveInterval = globalThis.setInterval; globalThis.setInterval = () => ({ unref() {} });
   try { registerDelivery(ctx); } finally { globalThis.setInterval = saveInterval; }
   const n = ctx.notifyAction(ORG_USER, 'transition', 'Withdrawn.', 'trn-1', NOW + HOUR);

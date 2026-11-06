@@ -1,33 +1,16 @@
 /**
  * Product catalogue — constants that are NOT user data.
  *
- * WHY THIS FILE EXISTS (M23-D2).
- *
- * `db.plans` and `db.archetypes` are product configuration: a billing plan
- * table and a fixed set of positional yardsticks. Both are read by production
- * routes, and both lived only inside `buildSeed()` — the demo-data builder.
- *
- * That is fine on a first boot, because the server starts from `buildSeed()`.
- * It is NOT fine on the restore path. `loadSnapshot()` does:
- *
- *     for (const key of Object.keys(db)) delete db[key];
- *     Object.assign(db, raw.db);
- *
- * — it DELETES the seeded object and replaces it with exactly what the
- * snapshot holds. A snapshot written before a collection existed therefore
- * removes it, and the next production read is a TypeError, not a 404.
- *
- * So these constants move here, where the seed and the migration can both
- * reach one definition. §23: one source of truth. The seed's behaviour is
- * unchanged — it imports the same values it used to declare inline.
- *
- * NOTE ON EMPTINESS. For a container of user data, empty is the correct
- * default: no rows means nothing happened. For these two, empty is a LIE with
- * consequences. An empty `plans` makes every `db.plans[org.plan]?.x ?? 18`
- * silently fall back, which would move a Grassroots organisation's attribution
- * window from 12 months to 18 — a billing change introduced by a persistence
- * bug. So the migration restores the catalogue rather than an empty object.
+ * The billing plans and the positional archetypes are product configuration: no route writes them. Since S13e they
+ * are read from here and nowhere else (they were `db.plans` and `db.archetypes`, restored by a migration step so an
+ * old snapshot could not lose them: M23-D2). Changing one is a release. `orgs.plan` is one of the PLANS keys (its
+ * CHECK; repositories/orgs.mjs ORG_PLANS is derived from this object), so a plan lookup never falls back.
  */
+
+function deepFreeze(v) {
+  if (v && typeof v === 'object') { for (const x of Object.values(v)) deepFreeze(x); Object.freeze(v); }
+  return v;
+}
 
 /**
  * Billing plans, keyed by the value stored on `org.plan`.
@@ -35,7 +18,7 @@
  * Read by the signing route and the plan view for the attribution window.
  * A missing key already falls back safely; a missing TABLE does not.
  */
-export const PLANS = Object.freeze({
+export const PLANS = deepFreeze({
   Grassroots: {
     name: 'Grassroots',
     pricePerMonthGBP: 0,
@@ -77,7 +60,7 @@ export const PLANS = Object.freeze({
  * These are not players and never become players. They carry no identity and
  * are never counted, ranked or shown as a score about a person.
  */
-export const ARCHETYPES = Object.freeze([
+export const ARCHETYPES = deepFreeze([
   { id: 'arch-pressing-forward', label: 'Pressing forward', position: 'ST', foot: 'right', dob: '2002-01-01', heightCm: 185, weightKg: 80, stats: { appearances: 30, goals: 18, assists: 5 } },
   { id: 'arch-deep-playmaker', label: 'Deep-lying playmaker', position: 'CM', foot: 'left', dob: '2001-01-01', heightCm: 177, weightKg: 72, stats: { appearances: 30, goals: 3, assists: 10 } },
   { id: 'arch-ball-playing-cb', label: 'Ball-playing centre-back', position: 'CB', foot: 'right', dob: '2001-01-01', heightCm: 190, weightKg: 84, stats: { appearances: 30, goals: 2, assists: 1 } },
@@ -85,6 +68,3 @@ export const ARCHETYPES = Object.freeze([
   { id: 'arch-sweeper-keeper', label: 'Sweeper keeper', position: 'GK', foot: 'right', dob: '2000-01-01', heightCm: 192, weightKg: 87, stats: { appearances: 30, goals: 0, assists: 0 } },
 ]);
 
-/** A deep, writable copy — the exports are frozen so a caller cannot edit the catalogue. */
-export const planCatalogue = () => structuredClone(PLANS);
-export const archetypeCatalogue = () => structuredClone(ARCHETYPES);

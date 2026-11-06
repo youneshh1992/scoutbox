@@ -1,53 +1,94 @@
-// Saved searches (moved from server.mjs): "Tell me when a left-footed U16 winger joins" — the club feed made personal.
-export function registerSavedSearches({ db, byId, orgRouter, notify, persist, nextId, playerViewForOrg, reqText, badField }) {
-  // "Tell me when a left-footed U16 winger joins" — the club feed made personal.
-  function matchesSearch(view, f) {
-    if (f.q) {
-      const n = String(f.q).toLowerCase();
-      if (!view.name.toLowerCase().includes(n) && !(view.city || '').toLowerCase().includes(n) && !(view.country || '').toLowerCase().includes(n)) return false;
-    }
-    if (f.position && view.position !== f.position) return false;
-    if (f.availability && view.availability !== f.availability) return false;
-    if (f.academyPlus && !view.academyPlus) return false;
-    if (f.country && view.country !== f.country) return false;
-    if (f.foot && view.foot !== f.foot) return false;
-    if (f.ageGroup === 'u16' && view.age >= 16) return false;
-    if (f.ageGroup === 'u18' && view.age >= 18) return false;
-    if (f.ageGroup === '18-21' && (view.age < 18 || view.age > 21)) return false;
-    if (f.ageGroup === 'senior' && view.age < 22) return false;
-    return true;
-  }
+// Saved searches: "Tell me when a left-footed U16 winger joins" — the club feed made personal.
+//
+// S13e: a saved search is a row of `saved_searches` (repositories/operations.mjs), its filters typed columns; the
+// scout's name is read live from the staff row. Creating and deleting are explicit repository writes. When a player
+// joins, SQL narrows the saved searches of current staff to those whose position, foot, country and availability the
+// player could match, and the whole filter is then applied to the player as the club sees them.
+//
+// Filters are refused when junk (400 FIELD_INVALID naming `filters.<key>`): an unknown key, a value of the wrong type,
+// a position, foot, availability or age group outside the vocabulary, a newDays that is not a whole number of days.
+// An empty or blank string, `false` or null means "no filter", as the apps send it.
+import { SAVED_SEARCH_FILTERS, SEARCH_AGE_GROUPS, OPERATIONS_LIMITS } from '../../repositories/operations.mjs';
+import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from '../../repositories/identityMapping.mjs';
 
-  // Called whenever a player joins: alert every saved search that matches.
+const L = OPERATIONS_LIMITS;
+const unset = (v) => v === undefined || v === null || v === false || (typeof v === 'string' && !v.trim()); // an empty or blank box: no filter
+const RULES = {
+  q: (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= L.searchQ,
+  position: (v) => PLAYER_POSITIONS.includes(v),
+  foot: (v) => PLAYER_FEET.includes(v),
+  availability: (v) => PLAYER_AVAILABILITY.includes(v),
+  country: (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= L.country,
+  academyPlus: (v) => v === true,
+  ageGroup: (v) => SEARCH_AGE_GROUPS.includes(v),
+  newDays: (v) => Number.isSafeInteger(v) && v >= 1 && v <= L.newDays,
+};
+
+/** The filters as stored (only the set ones), or `{ field }` naming the first junk one. */
+export function readSearchFilters(raw) {
+  if (raw === undefined || raw === null) return { filters: {} };
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { field: 'filters' };
+  const filters = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!SAVED_SEARCH_FILTERS.includes(k)) return { field: `filters.${k}` };
+    if (unset(v)) continue;
+    if (!RULES[k](v)) return { field: `filters.${k}` };
+    filters[k] = v;
+  }
+  return { filters };
+}
+
+function matchesSearch(view, f) {
+  if (f.q) {
+    const n = String(f.q).toLowerCase();
+    if (!view.name.toLowerCase().includes(n) && !(view.city || '').toLowerCase().includes(n) && !(view.country || '').toLowerCase().includes(n)) return false;
+  }
+  if (f.position && view.position !== f.position) return false;
+  if (f.availability && view.availability !== f.availability) return false;
+  if (f.academyPlus && !view.academyPlus) return false;
+  if (f.country && view.country !== f.country) return false;
+  if (f.foot && view.foot !== f.foot) return false;
+  if (f.ageGroup === 'u16' && view.age >= 16) return false;
+  if (f.ageGroup === 'u18' && view.age >= 18) return false;
+  if (f.ageGroup === '18-21' && (view.age < 18 || view.age > 21)) return false;
+  if (f.ageGroup === 'senior' && view.age < 22) return false;
+  return true;
+}
+
+/** A saved search as the API answers it. */
+const searchView = (s) => ({ id: s.id, orgId: s.orgId, userId: s.userId, scoutName: s.scoutName, name: s.name, filters: { ...s.filters }, createdAt: s.createdAt });
+
+export function registerSavedSearches({ byId, orgRouter, notify, nextId, playerViewForOrg, reqText, savedSearches }) {
+  if (typeof savedSearches?.create !== 'function') throw new TypeError('registerSavedSearches needs the saved-searches repository (S13e)');
+
+  // Called whenever a player joins: alert the staff whose saved search matches.
   function checkSavedSearches(player) {
-    for (const ss of db.savedSearches) {
+    for (const ss of savedSearches.candidatesFor({ position: player.position ?? null, foot: player.foot ?? null, country: player.country ?? null, availability: player.availability ?? null })) {
       const org = byId.org(ss.orgId);
       if (!org) continue;
       const view = playerViewForOrg(player, org);
-      if (view && matchesSearch(view, ss.filters ?? {})) {
+      if (view && matchesSearch(view, ss.filters)) {
         notify({ kind: 'org_user', id: ss.userId }, 'saved_search', `New match for your saved search “${ss.name}”: ${player.name} (${player.position ?? '—'}) just joined.`, player.id);
       }
     }
   }
 
+  // One club's list: not paged.
   orgRouter.get('/searches', (req, res) => {
-    res.json(db.savedSearches.filter((s) => s.orgId === req.org.id));
+    res.json(savedSearches.forOrg(req.org.id).map(searchView));
   });
 
   orgRouter.post('/searches', (req, res) => {
     const { name, filters } = req.body || {};
-    if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
-    if (filters != null && (typeof filters !== 'object' || Array.isArray(filters))) return badField(res, 'filters');
-    const ss = { id: nextId('ss'), orgId: req.org.id, userId: req.orgUser.id, scoutName: req.orgUser.name, name: name.trim(), filters: filters ?? {}, createdAt: Date.now() };
-    db.savedSearches.push(ss);
-    res.status(201).json(ss);
+    if (!reqText(name, L.searchName)) return res.status(400).json({ error: 'NAME_REQUIRED' }); // PRE-M24 (PM-10)
+    const read = readSearchFilters(filters);
+    if (read.field) return res.status(400).json({ error: 'FIELD_INVALID', field: read.field, message: `${read.field} is not a search filter this build accepts.` });
+    const ss = savedSearches.create({ id: nextId('ss'), orgId: req.org.id, userId: req.orgUser.id, name: name.trim(), filters: read.filters, createdAt: Date.now() });
+    res.status(201).json(searchView(ss));
   });
 
   orgRouter.delete('/searches/:id', (req, res) => {
-    const idx = db.savedSearches.findIndex((s) => s.id === req.params.id && s.orgId === req.org.id);
-    if (idx === -1) return res.status(404).json({ error: 'SEARCH_NOT_FOUND' });
-    db.savedSearches.splice(idx, 1);
-    persist();
+    if (!savedSearches.remove(req.org.id, req.params.id)) return res.status(404).json({ error: 'SEARCH_NOT_FOUND' });
     res.json({ ok: true });
   });
 

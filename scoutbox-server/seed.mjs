@@ -3,15 +3,13 @@
 // Agencies never see them; unverified clubs never see them; verified clubs
 // contact the guardian, never the child (domain.mjs / visibleToOrg).
 //
-// M23-D2: the billing plans and positional archetypes are product constants,
-// not demo data, so they now live in catalogue.mjs where the migration can
-// reach the same definition. The values are unchanged.
-import { planCatalogue, archetypeCatalogue } from './catalogue.mjs';
+// The billing plans and positional archetypes are product constants
+// (catalogue.mjs), not data: the seed carries neither (S13e).
 
 /**
- * The world a first boot starts from. `demo: false` keeps only the product
- * catalogues (plans, archetypes) and every container empty: no people, clubs
- * or track records. The server picks with demoSeedEnabled() (domains/platform/capabilities.mjs).
+ * The world a first boot starts from. `demo: false` keeps every container
+ * empty: no people, clubs or track records (the product catalogues are
+ * constants in catalogue.mjs). The server picks with demoSeedEnabled() (domains/platform/capabilities.mjs).
  */
 export function buildSeed({ demo = true } = {}) {
   const now = Date.now();
@@ -436,17 +434,13 @@ export function buildSeed({ demo = true } = {}) {
   players.find((p) => p.id === 'pl-adeyemi').activityLog = [now - 2 * day, now - day, now - 3600_000];
   players.find((p) => p.id === 'pl-guni').activityLog = [now - 4 * day, now - 3 * day, now - 2 * day, now - day, now - 7200_000];
 
-  // Reference archetypes for the Similar Players engine.
-  const archetypes = archetypeCatalogue();
-
-  // Seeded scout & coach track records; live rows are computed from the ledger.
+  // Seeded scout & coach track records (demo only); live rows are computed from the ledger. The data layer imports them
+  // once, with a first installation's players, into reputation_seed (S13e).
   const reputationSeed = [
     { scoutName: 'Maria Keane', orgName: 'Eastport FC', discoveries: 14, successRatePct: 64, avgResaleMultiple: 3.1, seeded: true },
     { scoutName: 'Coach D. Ansah', orgName: 'Harbour City FC', discoveries: 9, successRatePct: 55, avgResaleMultiple: 2.2, seeded: true },
     { scoutName: 'Tomás Rivera', orgName: 'North Star Sports Agency', discoveries: 21, successRatePct: 48, avgResaleMultiple: 2.8, seeded: true },
   ];
-
-  const plans = planCatalogue();
 
   players.push(player({
     id: 'pl-osei',
@@ -476,9 +470,7 @@ export function buildSeed({ demo = true } = {}) {
     orgs: demo ? orgs : [],
     guardians: demo ? guardians : [],
     players: demo ? players : [],
-    archetypes,
     reputationSeed: demo ? reputationSeed : [],
-    plans,
     users: [],       // org scout users, created at org login (with verified role)
     requests: [],    // contact/trial requests (minors: routed to guardian)
     trials: [],      // accepted trials awaiting/holding reports
@@ -490,7 +482,6 @@ export function buildSeed({ demo = true } = {}) {
     outbox: [],
     pushLog: [],
     pushTokens: [],
-    invoices: [],
     emailChallenges: [],
     channels: [],       // moderated message threads, opened on acceptance
     notifications: [],  // in-app notification feed per audience

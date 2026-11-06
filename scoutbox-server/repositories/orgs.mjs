@@ -51,6 +51,7 @@
  * (`rollback()`), which discards it, so a change flushed into a save that
  * later failed is flushed again by the next save.
  */
+import { PLANS } from '../catalogue.mjs';
 import { readonlyView, markView } from './readonly.mjs';
 import { captureGraph, restoreGraph } from './memento.mjs';
 import { migrationApplied } from './database.mjs';
@@ -61,7 +62,8 @@ export const ORGS_CUTOVER_MIGRATION = '0004_orgs_live';
 export const ORGS_INIT_META = 'orgsInit';
 export const ORG_TYPES = Object.freeze(['club', 'agency']);
 export const ORG_LEVELS = Object.freeze(['pro', 'academy', 'agency', 'grassroots']);
-export const ORG_PLANS = Object.freeze(['Pro', 'Academy', 'Agency', 'Grassroots']);
+/** The plans an organisation can be on: the catalogue's (one definition; the orgs table's CHECK lists the same four). */
+export const ORG_PLANS = Object.freeze(Object.keys(PLANS));
 
 /** Scalar record keys that live in a column of their own. */
 const SCALARS = Object.freeze({

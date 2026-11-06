@@ -407,7 +407,7 @@ section('I/J/K — required parties, evidence, the completion gate and the canon
   ok(cs.status === 200 && revOf(cs).requiredParties.every((p) => p.status === 'COMPLETED') && revOf(cs).requiredParties.find((p) => p.partyType === 'CLUB_SIGNATORY').completedBy.name === 'Maria Keane', 'J3 the recruitment lead signs for the club as herself: every party complete');
   neg(expect(await clubSign(K.SID, { expectedRev: sv(cs).rev, revisionId: K.SREV, documentSha256: SHA_A, clientKey: key() }), 409, 'SIGNING_PARTY_ALREADY_COMPLETED'), 'J4 not twice');
   neg((await stage(K.RID)) === 'offer_accepted' && (await signings()).every((s) => s.playerId !== 'pl-adeyemi'), '#22 J5 all parties complete is still not a signing: nothing is written until the completion');
-  const before = { signings: (await signings()).length, invoices: ((await j('GET', '/org/invoices', undefined, maria.token)).body ?? []).length, player: await orgPlayer('pl-adeyemi') };
+  const before = { signings: (await signings()).length, invoices: ((await j('GET', '/org/invoices', undefined, maria.token)).body?.items ?? []).length, player: await orgPlayer('pl-adeyemi') };
   const orgSse = await sseCollect(maria.token, 1500);
   const KC = key();
   const done = await complete(K.SID, { expectedRev: sv(cs).rev, clientKey: KC });
@@ -423,8 +423,15 @@ section('I/J/K — required parties, evidence, the completion gate and the canon
   const after = await orgPlayer('pl-adeyemi');
   const pl = after.player ?? after;
   ok(pl.contractStatus === 'under_contract' && pl.availability === 'not_seeking' && pl.level === 'pro', '#25 K6 under_contract, not seeking, level moved by the pro club');
-  const inv = (await j('GET', '/org/invoices', undefined, maria.token)).body ?? [];
+  const inv = (await j('GET', '/org/invoices', undefined, maria.token)).body?.items ?? []; // S13e: paged (newest first)
   ok(inv.filter((i) => i.signingId === row.id).length === (row.insideAttributionWindow ? 1 : 0) && inv.length - before.invoices <= 1, 'O1 the success-fee invoice is issued at most once, only inside the attribution window');
+  { // S13e: the invoice is stored exactly in minor units and answered in whole euros; the list pages by cursor.
+    const mine = inv.find((i) => i.signingId === row.id);
+    ok(!row.insideAttributionWindow ? !mine : (!!mine && mine.amount === 1500 && mine.currency === 'EUR' && Object.keys(mine).sort().join() === 'amount,currency,description,id,orgId,orgName,playerName,provider,signingId,status,ts'), 'the success fee reads back as EUR 1,500 for a Pro club, from an allowlisted invoice');
+    const one = (await j('GET', '/org/invoices?limit=1', undefined, maria.token)).body;
+    ok(one.items.length <= 1 && (inv.length > 1 ? typeof one.nextCursor === 'string' : one.nextCursor === null), 'the invoices page by cursor');
+    ok((await j('GET', '/org/invoices?limit=0', undefined, maria.token)).status === 400, 'a junk page size is refused');
+  }
   ok(countIn(frames, /"event":"signing_completed"/g) === 1 && !has(frames, SHA_A) && !has(frames, S_NOTE), '#40 V1 exactly one signing_completed event, ids only');
   const replay = await complete(K.SID, { expectedRev: 999, clientKey: KC });
   ok(replay.status === 200 && replay.body.idempotent === true && (await signings()).length === rows.length, '#20 #47 K7 the completion key replays: no second row');
@@ -538,7 +545,7 @@ section('P — concurrency: exactly one authoritative result');
   const frames = await orgSse.stop();
   neg(two.filter((x) => x.status === 200).length === 1 && two.some((x) => x.status === 409 && ['SIGNING_ALREADY_COMPLETED', 'SIGNING_REV_CONFLICT'].includes(x.body.error)) && (await signings()).filter((s) => s.signingPackageId === KI.SID).length === 1 && countIn(frames, /"event":"signing_completed"/g) === 1, `#20 #47 P6 two completions at once: one row, one event (${codes(two)})`);
   const kiRow = (await signings()).find((s) => s.signingPackageId === KI.SID);
-  const invK = ((await j('GET', '/org/invoices', undefined, maria.token)).body ?? []).filter((i) => i.signingId === kiRow?.id);
+  const invK = ((await j('GET', '/org/invoices', undefined, maria.token)).body?.items ?? []).filter((i) => i.signingId === kiRow?.id);
   neg(invK.length <= 1, 'P6b at most one invoice');
   globalThis.__KI = KI;
 }

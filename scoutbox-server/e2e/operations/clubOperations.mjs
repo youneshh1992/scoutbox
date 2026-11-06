@@ -460,6 +460,11 @@ let inviteUserToken = null;
   // fast mode) so the dispatch to Nina (who HAS an email) exhausts its
   // retries and surfaces as a monitored failure — with nothing left over to
   // pollute later delivery tests.
+  // S13e: junk is refused naming the field (an unknown channel read as email, a count was clamped).
+  for (const [body, field] of [[{ channel: 'fax', count: 1 }, 'channel'], [{ channel: 'email', count: 0 }, 'count'], [{ channel: 'email', count: 21 }, 'count'], [{ channel: 'email', count: '2' }, 'count']]) {
+    const bad = await fetch(`${BASE}/admin/delivery/inject-failure`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    ok(bad.status === 400 && (await bad.json()).field === field, `an injection with a junk ${field} is refused, naming it`);
+  }
   await fetch(`${BASE}/admin/delivery/inject-failure`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'email', count: 4 }) });
   const failTicket = (await j('POST', '/org/support', { subject: 'Failure-injection ticket', body: 'x', refs: [] }, inviteUserToken)).body.ticket;
   await fetch(`${BASE}/admin/support/${failTicket.id}/reply`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'This reply will fail to email.' }) });

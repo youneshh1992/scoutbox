@@ -761,7 +761,8 @@ export const httpApi: ScoutboxApi = {
   respondFriendly: (s, id, message) =>
     request<void>(`/org/friendlies/${id}/respond`, { method: 'POST', headers: headers(s), body: JSON.stringify({ message }) }),
 
-  getInvoices: (s) => request<Invoice[]>('/org/invoices', { headers: headers(s) }),
+  // Pages by cursor (S13e), newest first: the first page is read; "load more" (nextCursor) is still needed.
+  getInvoices: async (s) => (await request<{ items: Invoice[]; nextCursor: string | null }>('/org/invoices', { headers: headers(s) })).items,
 
   requestEmailVerification: (s, email) =>
     request<void>('/org/verification/email', { method: 'POST', headers: headers(s), body: JSON.stringify({ email }) }),

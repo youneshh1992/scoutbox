@@ -52,7 +52,7 @@ A domain that is in tables but still loaded whole into memory is only part-way t
 
 ## 3. Status
 
-37 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0038`. Each step
+38 migrations are registered in `repositories/index.mjs` (`DATA_MIGRATIONS`). The next free id is `0039`. Each step
 takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 
 | Step | Domain | Migration | Repository | Status |
@@ -73,8 +73,8 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S13b | enterprise: staff invites, SSO, support tickets and support access | `0035` | `enterprise` | done |
 | S13c | group workspaces and group grants | `0036` | `groups` | done |
 | S13d | grassroots operations: open days, match days, the friendlies board | `0037` | `grassroots` | done |
-| S13e | the remaining operations collections (§4.5) | | | **next** |
-| S14 | retire the blob | | | not started |
+| S13e | uploads, saved searches, invoices, the demo reputation seed, the delivery centre's bookkeeping (plans and archetypes became constants) | `0038` | `operations` | done |
+| S14 | retire the blob | | | **next** |
 
 Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1.
 
@@ -101,7 +101,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`; S13e's few readers take the `operations` repository itself); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -177,6 +177,11 @@ separate risk; the script moves the fixtures' instants to today to measure the s
   box on the host club's location, the exact 50 km test in code, so a board page is cut after filtering. The player
   opportunity board (opportunities and open days) is filtered per player in code and then paged. Bounded by the
   clubs and upcoming events, not the player base.
+- Operations (S13e): a new player's saved-search alerts read the searches of current staff that SQL prefilters by
+  position, foot, country and availability, then apply the whole filter in code. Bounded by the clubs' saved searches,
+  not the player base. A provider callback's id is remembered at once while the dispatch changes it applies are still
+  the staged dispatch store's (S7b) and land with the request's save: a crash between the two would leave the id
+  remembered and that delivery status unrecorded. It closes when the dispatches become explicit writes.
 
 ### 4.3.1 Costs that grow with the whole player base
 
@@ -195,7 +200,7 @@ explicit like identity's.
 - Each step first moves its domain's files into `domains/<domain>/` in a commit with no other change, then edits
   them. The agents code is already in `domains/agents/` (`core/`, `compliance/`, `transactions/`), the development code
   in `domains/development/` (`objectives.mjs`, `hub/`, `boxcam/` with the CV engine in `boxcam/cv/`), the discovery code
-  in `domains/discovery/` (Second Look, briefs and Nobody Missed; M19 matching and watchlists in `matching/`), the insight and coverage code in `domains/insight/` (`insight.mjs`, `coverage.mjs`; the F9 deal budgets in `domains/recruitment/budgets.mjs`), the M13 F1 imports, API keys and webhooks in `domains/integrations/imports.mjs`, the F12 enterprise code (onboarding, invites, MFA, SSO, support, backups, metrics) in `domains/enterprise/enterprise.mjs`, the F8 group workspaces and grants in `domains/groups/groups.mjs`. The M10 grassroots operations routes (open days, match days, friendlies) are still in `server.mjs`, beside the S9c squad routes they share helpers with. Still in milestone folders: `m12`, `m13` (mixed: split file by file as each domain comes round; `domains/scouting/scouting.mjs` still
+  in `domains/discovery/` (Second Look, briefs and Nobody Missed; M19 matching and watchlists in `matching/`), the insight and coverage code in `domains/insight/` (`insight.mjs`, `coverage.mjs`; the F9 deal budgets in `domains/recruitment/budgets.mjs`), the M13 F1 imports, API keys and webhooks in `domains/integrations/imports.mjs`, the F12 enterprise code (onboarding, invites, MFA, SSO, support, backups, metrics) in `domains/enterprise/enterprise.mjs`, the F8 group workspaces and grants in `domains/groups/groups.mjs`, the F12A resumable uploads in `domains/media/uploads.mjs`, the saved searches in `domains/discovery/savedSearches.mjs`. The M10 grassroots operations routes (open days, match days, friendlies) are still in `server.mjs`, beside the S9c squad routes they share helpers with. Still in milestone folders: `m12`, `m13` (mixed: split file by file as each domain comes round; `domains/scouting/scouting.mjs` still
   holds the M12 recruitment-case routes, F3), `m20`, `m27` (`m20` and `m27` read across domains and are
   placed when their readers are). A step may move its domain's routes out of `server.mjs`. Whatever is left goes in a
   final pass after S14.
@@ -211,7 +216,7 @@ starts by moving its domain's code (§4.4).
 | Step | Schema file | Collections | Watch out for |
 |---|---|---|---|
 | S12 Development, Box Cam, discovery | `07_development_boxcam_discovery.sql` | Split in four, one migration each. **S12a (done)**: `devObjectives`, `drillGuidance`, `development*`. **S12b (done)**: `boxCamPrefs`, `boxChallenges`, `boxChallengeEntries`, `boxAssignments`, `boxSessions`, `boxSessionEvents` (retired, no table), `boxCamDisputes`, `combineRequests`, `combineAttempts`, `boxCamCvResults`. **S12c (done)**: `recruitmentBriefs`, `nobodyMissedReviews`, `secondLookItems`, `dynamicWatchlists`, `watchlistHistory`. **S12d (done)**: `exposureEvents`, `reviewLater`, `evidenceSuggestions`, `calibrationSessions`, `fixtures`, `coveragePlans`, `coverageAssignments` | — |
-| S13 Operations and integrations | `08_operations_integrations.sql` | Split in five, one migration each. **S13a (done)**: `importBatches`, `prospects`, `identityReviews`, `apiKeys`, `webhookEndpoints`, `webhookDeliveries`. **S13b (done)**: `orgInvites`, `ssoConfigs`, `ssoStates`, `supportTickets`, `supportAccessGrants`. **S13c (done)**: `groups`, `groupGrants`. **S13d (done)**: `openTrials`, `matchdays`, `friendlies`. **S13e**: `uploadSessions`, `savedSearches`, `invoices`, `plans`, `archetypes`, `reputationSeed`, the `delivery*` singletons | Invoices are stored exactly, in minor units. Production's empty first boot (catalogues only, demo opt-in with `SCOUTBOX_SEED_DEMO=1`) must survive the catalogues becoming rows. |
+| S13 Operations and integrations | `08_operations_integrations.sql` | Split in five, one migration each. **S13a (done)**: `importBatches`, `prospects`, `identityReviews`, `apiKeys`, `webhookEndpoints`, `webhookDeliveries`. **S13b (done)**: `orgInvites`, `ssoConfigs`, `ssoStates`, `supportTickets`, `supportAccessGrants`. **S13c (done)**: `groups`, `groupGrants`. **S13d (done)**: `openTrials`, `matchdays`, `friendlies`. **S13e (done)**: `uploadSessions`, `savedSearches`, `invoices`, `reputationSeed`, the `delivery*` bookkeeping; `plans` and `archetypes` became constants (`catalogue.mjs`), not tables | — |
 
 **Open from earlier steps** (not blocking): a coach affiliation is matched to a staff member by display name (a
 Founder question: keying it by account restricts affiliations to people with a login); `orgs.verified` is synced by
