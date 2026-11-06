@@ -851,7 +851,7 @@ assessments, contacts and open-trial registrations, runs the m24–m29 hooks, an
 in `signings`, `vouches`, `invoices`, `matchdays.playerIds`, squad entries, and all audit
 rows (`ledger`, `blocks`, `reports`, `orgNotes`, `moderationLog`, `outbox`, `pushLog`,
 `pushTokens`, `idvQueue`); it leaves orphans in every m13–m22 store. There is no guardian or
-org deletion route. Backups (`m13/enterprise.mjs:428`) copy the snapshot including tokens and
+org deletion route. Backups (`domains/enterprise/enterprise.mjs:428`) copy the snapshot including tokens and
 `secrets.mediaSign` although the manifest says they contain no secrets.
 
 DECISIONs:
@@ -923,7 +923,7 @@ the route and response half is named with its plan step.
 1. **Plain-text secrets in the snapshot and in backups:** session tokens
    (`server.mjs:650`), guardian `emailCode` (`1244`; fixed 3 Nov 2026, hashed), `emailChallenges.code` (`3024`),
    `pairingCodes.code` (`3766`), `vouches.code` (`3692`), `orgInvites.token`
-   (`m13/enterprise.mjs:80`), `ssoStates.state/nonce` (`274`), `boxSessions.nonce`
+   (`domains/enterprise/enterprise.mjs:80`), `ssoStates.state/nonce` (`274`), `boxSessions.nonce`
    (`domains/development/boxcam/sessions.mjs:89`), `users.mfa.secretB32` (`m13/mfa`), `webhookEndpoints.secret`,
    `secrets.mediaSign` (`server.mjs:345`; fixed 3 Nov 2026, the key is env-only), and one-time codes inside `outbox.text`. Schema:
    `*_hash` columns everywhere except push tokens and webhook secrets (OPEN: encrypt at rest
@@ -941,7 +941,7 @@ the route and response half is named with its plan step.
    The unique index makes it impossible; the shadow report shows existing duplicates first.
 6. **Coach affiliation matched by display name** (`domains/scouting/passport.mjs:328`): `coach_affiliations`
    keeps `coach_user_id` and the name as a snapshot; S9 makes the id the key.
-7. **Backups include secrets despite the manifest** (`m13/enterprise.mjs:454`). Fixed by 1
+7. **Backups include secrets despite the manifest** (`domains/enterprise/enterprise.mjs:454`). Fixed by 1
    and S13.
 8. **Deletion leaves names and orphans** (§10). Fixed by the tombstone design at S4 and the
    per-table lifecycle statements.

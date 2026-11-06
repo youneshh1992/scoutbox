@@ -32,7 +32,7 @@ import { buildReportingContext, buildDashboard, ROOM_PRIORITIES } from './dashbo
 import { STALL_THRESHOLDS, DEFAULT_STALL_DAYS } from './timeSeries.mjs';
 import { SOURCE_CONTEXTS } from '../domains/recruitment/rooms/shared.mjs';
 import { rateLimitedBody } from '../domains/platform/rateLimit.mjs';
-import { metrics } from '../m13/enterprise.mjs';
+import { metrics } from '../domains/enterprise/enterprise.mjs';
 
 /** The metrics whose rows a director can page through. */
 export const DRILLDOWN_METRICS = ['stalled_rooms', 'decision_outstanding', 'terminal_with_recorded_decision', 'overdue_trial_reports'];

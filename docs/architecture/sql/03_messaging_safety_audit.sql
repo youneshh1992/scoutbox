@@ -457,7 +457,7 @@ CREATE TABLE dispatch_attempts (
 -- owner/writer: the outbox repository, called by adapters.mjs createMailer.send (nine route
 --         sites: server.mjs guardian sign-up, club e-mail challenge (the one `secrets` site),
 --         reference request; domains/verification/claims/organisations.mjs 236/533/717/918; domains/recruitment/lifecycle/contactRoutes.mjs:521;
---         m13/enterprise.mjs:88) and by m13/delivery.mjs fakeSend; the mailer's `markDelivered`
+--         domains/enterprise/enterprise.mjs:88) and by m13/delivery.mjs fakeSend; the mailer's `markDelivered`
 --         after the live provider call settles.
 -- lifecycle: append-only; never pruned; never deleted on player deletion; `seq` is the
 --         insertion order every reader depends on (the admin view lists newest first).
@@ -859,7 +859,7 @@ CREATE INDEX ledger_occurred_at ON ledger (occurred_at);
 --         m13/shared.mjs migrateM13; db.opsEvents is the read-only view).
 -- owner/writer: safetyAudit.opsEvents.append from server.mjs (staff_bootstrapped),
 --         m13/delivery.mjs (delivery_failed, staged into the sweep pass's persistNow with the
---         dispatch and outbox rows), m13/enterprise.mjs (audit_export, backup_created,
+--         dispatch and outbox rows), domains/enterprise/enterprise.mjs (audit_export, backup_created,
 --         backup_refused, backup_failed and the other operations events: EVERY kind is an
 --         ordinary row — no vocabulary CHECK), domains/integrations/imports.mjs (webhook_failed). The m13
 --         modules keep an array push for a bare context without the repository (the reviewer

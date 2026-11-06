@@ -196,7 +196,7 @@ section('§8 — every notification type is classified, mentions are recognised 
   neg(categoryOf('message', 'someone wrote "mentioned you" in a message') !== 'mentions', 'user text saying "mentioned you" in another type is NOT a mention');
   neg(categoryOf('never_seen_type') === null, 'an unknown type is unclassified (and, below, delivered)');
   // The server's notify() call sites: every literal type is classified.
-  const srv = ['server.mjs', 'domains/scouting/journeys.mjs', 'domains/scouting/scouting.mjs', 'm13/delivery.mjs', 'm13/enterprise.mjs', 'domains/verification/claims/index.mjs', 'domains/verification/passport/index.mjs', 'domains/development/boxcam/combine.mjs', 'domains/development/boxcam/index.mjs', 'domains/recruitment/rooms/rooms.mjs', 'domains/discovery/secondLook.mjs', 'domains/discovery/nobodyMissed.mjs', 'grassrootsJourney.mjs']
+  const srv = ['server.mjs', 'domains/scouting/journeys.mjs', 'domains/scouting/scouting.mjs', 'm13/delivery.mjs', 'domains/enterprise/enterprise.mjs', 'domains/verification/claims/index.mjs', 'domains/verification/passport/index.mjs', 'domains/development/boxcam/combine.mjs', 'domains/development/boxcam/index.mjs', 'domains/recruitment/rooms/rooms.mjs', 'domains/discovery/secondLook.mjs', 'domains/discovery/nobodyMissed.mjs', 'grassrootsJourney.mjs']
     .filter((f) => fs.existsSync(path.join(SERVER_DIR, f)));
   const types = new Set();
   for (const f of srv) for (const m of fs.readFileSync(path.join(SERVER_DIR, f), 'utf8').matchAll(/notify\??\.?\([^,]+,\s*'([a-z_]+)'/g)) types.add(m[1]);
@@ -437,7 +437,7 @@ section('§18 — unsaved-change protection and the audit/preferences panels are
 
 section('§19 — the request log carries no personal data');
 {
-  const ent = read('scoutbox-server/m13/enterprise.mjs');
+  const ent = read('scoutbox-server/domains/enterprise/enterprise.mjs');
   const line = ent.match(/console\.log\(JSON\.stringify\(\{[^}]+\}\)\)/)?.[0] ?? '';
   ok(/t: Date\.now\(\), id: req\.correlationId, m: req\.method, p: fullPath/.test(line), 'the structured log line is time, id, method, path, status, duration');
   neg(!/authorization|token|body|email|dob|query/.test(line), 'and nothing else');

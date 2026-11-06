@@ -9,7 +9,7 @@
 // S12d: every record here is a typed row of repositories/insightCoverage.mjs, written by an explicit operation and read
 // through `insightReads`.
 import crypto from 'node:crypto';
-import { exposureHook } from '../../m13/enterprise.mjs';
+import { exposureHook } from '../enterprise/enterprise.mjs';
 import { parseStrictDateOnly } from '../../temporal.mjs';
 import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';
 import { EVIDENCE_RULE_IDS, CALIBRATION_CONFIDENCE, INSIGHT_LIMITS, typeSubmission } from '../../repositories/insightCoverage.mjs';

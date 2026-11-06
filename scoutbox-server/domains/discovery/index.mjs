@@ -10,7 +10,7 @@
 // moderation all run before any M18 handler. Neither system is player-facing:
 // there is no player, guardian or public route in this milestone at all.
 import { buildShared } from '../../m12/shared.mjs';
-import { metrics } from '../../m13/enterprise.mjs';
+import { metrics } from '../enterprise/enterprise.mjs';
 import { registerSecondLook } from './secondLook.mjs';
 import { registerNobodyMissed } from './nobodyMissed.mjs';
 import {

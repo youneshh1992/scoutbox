@@ -66,7 +66,7 @@ import { integrityReport, integritySummary } from './domains/platform/integrity.
 import { orgPlayerView, guardianChildView, guardianSelfView, adminGuardianView } from './views/playerViews.mjs';
 import { validateContactReply } from './domains/recruitment/lifecycle/contact.mjs';
 import { icsLocal as trialIcsLocal, icsText as trialIcsText } from './domains/recruitment/lifecycle/trial.mjs';
-import { requestInstrumentation } from './m13/enterprise.mjs';
+import { requestInstrumentation } from './domains/enterprise/enterprise.mjs';
 import { totpValid, timingSafeEqStr } from './m13/shared.mjs';
 import { hashCode } from './repositories/oneTimeCodes.mjs';
 import {

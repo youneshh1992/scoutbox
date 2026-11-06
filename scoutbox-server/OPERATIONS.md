@@ -201,7 +201,7 @@ no units of work.
 
 ## Backups and restore
 
-These routes exist (`m13/enterprise.mjs`). Admin routes need the `x-admin-key` header.
+These routes exist (`domains/enterprise/enterprise.mjs`). Admin routes need the `x-admin-key` header.
 
 - `POST /admin/backup` writes `DATA_DIR/backups/<timestamp>/`, which contains:
   - `scoutbox.db`: a consistent copy of the database (`VACUUM INTO`, `store.copyTo`),

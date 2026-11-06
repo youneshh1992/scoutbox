@@ -10,7 +10,7 @@
 // self-submitted career entries, achievements (+confirmations), shares
 // (hashed tokens) and correction requests — since S10b typed tables owned by
 // repositories/passport.mjs (ctx.passport writes; ctx.verificationReads reads).
-import { metrics } from '../../../m13/enterprise.mjs';
+import { metrics } from '../../enterprise/enterprise.mjs';
 import { registerPassportCore } from './passport.mjs';
 import { registerPassportSharing } from './sharing.mjs';
 

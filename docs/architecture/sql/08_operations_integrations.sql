@@ -270,8 +270,8 @@ CREATE TABLE webhook_delivery_attempts (
 
 -- ---------------------------------------------------------------------
 -- org_invites
--- source: db.orgInvites  created at m13/shared.mjs:29; rows minted at m13/enterprise.mjs:80-86
--- owner/writer: m13/enterprise.mjs   lifecycle: pending -> accepted | revoked | expired (expired is set
+-- source: db.orgInvites  created at m13/shared.mjs:29; rows minted at domains/enterprise/enterprise.mjs:80-86
+-- owner/writer: domains/enterprise/enterprise.mjs   lifecycle: pending -> accepted | revoked | expired (expired is set
 --               lazily only when an expired code is presented, enterprise.mjs:110); never deleted
 -- mapping: id -> id (inv-N — the SAME prefix as invoices; the global counter keeps ids distinct);
 --          orgId -> org_id; email -> email; name -> name; role -> role;
@@ -304,8 +304,8 @@ CREATE INDEX org_invites_org_id ON org_invites(org_id);
 
 -- ---------------------------------------------------------------------
 -- sso_configs
--- source: db.ssoConfigs  created at m13/shared.mjs:30; rows minted at m13/enterprise.mjs:235-238
--- owner/writer: m13/enterprise.mjs   lifecycle: one per org, upserted; never deleted
+-- source: db.ssoConfigs  created at m13/shared.mjs:30; rows minted at domains/enterprise/enterprise.mjs:235-238
+-- owner/writer: domains/enterprise/enterprise.mjs   lifecycle: one per org, upserted; never deleted
 -- mapping: id -> id (sso-N); orgId -> org_id; createdAt -> created_at; issuer -> issuer;
 --          clientId -> client_id; updatedAt -> updated_at
 -- notes: one row per org enforced by code (find-or-create, enterprise.mjs:234) — unique index.
@@ -325,8 +325,8 @@ CREATE UNIQUE INDEX sso_configs_org_id ON sso_configs(org_id);
 
 -- ---------------------------------------------------------------------
 -- sso_states
--- source: db.ssoStates  created at m13/shared.mjs:31; rows minted at m13/enterprise.mjs:274-278
--- owner/writer: m13/enterprise.mjs   lifecycle: single-use (used_at set on first callback, even on
+-- source: db.ssoStates  created at m13/shared.mjs:31; rows minted at domains/enterprise/enterprise.mjs:274-278
+-- owner/writer: domains/enterprise/enterprise.mjs   lifecycle: single-use (used_at set on first callback, even on
 --               failure, enterprise.mjs:301); 10-minute expiry; NEVER pruned
 -- mapping: id -> id (sst-N); state -> state_hash (sha256 hex; plain 32-hex value stored before —
 --          the callback looks it up as hash(state)); nonce -> nonce_hash (sha256 hex; verified as
@@ -350,8 +350,8 @@ CREATE UNIQUE INDEX sso_states_state_hash ON sso_states(state_hash);
 
 -- ---------------------------------------------------------------------
 -- support_tickets
--- source: db.supportTickets  created at m13/shared.mjs:32; rows minted at m13/enterprise.mjs:347-352
--- owner/writer: m13/enterprise.mjs (org creates; admin replies/closes)   lifecycle: open -> closed; never deleted
+-- source: db.supportTickets  created at m13/shared.mjs:32; rows minted at domains/enterprise/enterprise.mjs:347-352
+-- owner/writer: domains/enterprise/enterprise.mjs (org creates; admin replies/closes)   lifecycle: open -> closed; never deleted
 -- mapping: id -> id (tkt-N); orgId -> org_id; byUserId -> by_user_id; byName -> by_name;
 --          subject -> subject (<=160); body -> body (<=2000); refs[] -> support_ticket_refs child table;
 --          status -> status; replies[] -> support_ticket_replies child table; createdAt -> created_at
@@ -371,7 +371,7 @@ CREATE TABLE support_tickets (
 CREATE INDEX support_tickets_org_id_created_at ON support_tickets(org_id, created_at);
 
 -- source: db.supportTickets[].replies[]  ({at, by:'Trust & Safety', text}, enterprise.mjs:379)
--- owner/writer: m13/enterprise.mjs adminRouter   lifecycle: append-only
+-- owner/writer: domains/enterprise/enterprise.mjs adminRouter   lifecycle: append-only
 -- mapping: array index -> reply_no (1-based); at -> replied_at; by -> by_name; text -> text (<=2000)
 -- notes: no id in source; natural PK (ticket_id, reply_no). by is always the literal 'Trust & Safety'.
 CREATE TABLE support_ticket_replies (
@@ -384,7 +384,7 @@ CREATE TABLE support_ticket_replies (
 ) STRICT;
 
 -- source: db.supportTickets[].refs[]  ({kind<=30, id<=40}, max 10, enterprise.mjs:350)
--- owner/writer: m13/enterprise.mjs   lifecycle: set once at creation
+-- owner/writer: domains/enterprise/enterprise.mjs   lifecycle: set once at creation
 -- mapping: array index -> ref_no (1-based); kind -> ref_kind; id -> ref_id
 -- notes: polymorphic reference, no FK. kind is free text from the client; the only kinds the
 --        server resolves are 'case' (recruitment_cases) and 'import' (import_batches),
@@ -400,8 +400,8 @@ CREATE TABLE support_ticket_refs (
 
 -- ---------------------------------------------------------------------
 -- support_access_grants
--- source: db.supportAccessGrants  created at m13/shared.mjs:33; rows minted at m13/enterprise.mjs:391-394
--- owner/writer: m13/enterprise.mjs (admin requests; org lead approves; admin reads log access)
+-- source: db.supportAccessGrants  created at m13/shared.mjs:33; rows minted at domains/enterprise/enterprise.mjs:391-394
+-- owner/writer: domains/enterprise/enterprise.mjs (admin requests; org lead approves; admin reads log access)
 -- lifecycle: requested -> active; expiry is DERIVED (expires_at > now), never a stored state; never deleted
 -- mapping: id -> id (sag-N); ticketId -> ticket_id; orgId -> org_id; hours -> hours (1..72);
 --          status -> status; requestedAt -> requested_at; approvedBy -> approved_by_name (name string);
@@ -425,7 +425,7 @@ CREATE INDEX support_access_grants_ticket_id_status ON support_access_grants(tic
 CREATE INDEX support_access_grants_org_id ON support_access_grants(org_id);
 
 -- source: db.supportAccessGrants[].accessLog[]  ({at, what:'org-records'}, enterprise.mjs:409)
--- owner/writer: m13/enterprise.mjs   lifecycle: append-only audit of every admin read under the grant
+-- owner/writer: domains/enterprise/enterprise.mjs   lifecycle: append-only audit of every admin read under the grant
 -- mapping: array index -> access_no (1-based); at -> accessed_at; what -> what
 -- notes: no id in source; natural PK (grant_id, access_no). Audit: RESTRICT.
 CREATE TABLE support_access_log (
@@ -926,10 +926,10 @@ CREATE INDEX media_deletions_queued ON media_deletions (queued_at);
 --   CONNECTORS registry (domains/integrations/imports.mjs:432-436) — code registry, status derived from env keys.
 --   API_SCOPES, WEBHOOK_EVENTS, RETRY_MS ladders, MAX_ATTEMPTS, EXPORT_CONTRACT_VERSION (imports.mjs) — code constants
 --     (the enum values appear as CHECKs above).
---   metrics counters, exposureHook, mfaAttempts map, IDP_SECRET, signToken/verifyToken (m13/enterprise.mjs) — in-memory / env.
+--   metrics counters, exposureHook, mfaAttempts map, IDP_SECRET, signToken/verifyToken (domains/enterprise/enterprise.mjs) — in-memory / env.
 --   PROVIDER 'local-fake', CALLBACK_SECRET (m13/delivery.mjs:25-26) — code constant / env DELIVERY_CALLBACK_SECRET.
 --   Upload chunk files under DATA_DIR/upload-tmp/<id>/ (m12/operations.mjs:153-158) — filesystem, swept with the session.
---   Backups directory + manifest.json (m13/enterprise.mjs:428-484) — filesystem artefacts, listed from disk.
+--   Backups directory + manifest.json (domains/enterprise/enterprise.mjs:428-484) — filesystem artefacts, listed from disk.
 --   Derived at read time, never stored: grant liveness (revoked_at/expires_at), support-grant expiry, upload
 --     `complete` flag, import rowCount, group `members`/`youAdmin` views, friendlies `mine`/`distanceKm`,
 --     open-trial `registered`, pathway record, invoice existence check, reputation live rows (from ledger),

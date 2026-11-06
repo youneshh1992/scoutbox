@@ -44,7 +44,7 @@ import { collectPlan, buildDevelopmentPlan, planListItem, buildTimeline, TIMELIN
 import { buildGoalSnapshots, validateReview, validateSupersession, pageReviews } from './reviews.mjs';
 import { guardRev, bumpRev } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
-import { metrics } from '../../../m13/enterprise.mjs';
+import { metrics } from '../../enterprise/enterprise.mjs';
 import { readPage, sendPageError, pageSorted } from '../../platform/paging.mjs';
 
 /** How close together two identical creates must be to count as one retry. */
