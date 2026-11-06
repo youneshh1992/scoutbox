@@ -27,7 +27,7 @@ export const SUITES = [
   'testIdentityRepositories', 'testCoreIdentityMigration', 'testMediaDeletions', 'testPlayerSubrecords',
   'testOneTimeCodes', 'testNotifications', 'testDispatches', 'testOutboxPush', 'testChannels', 'testSafetyAudit',
   'testPlayerErasure', 'testRecruitment', 'testRecruitmentCases', 'testRecruitmentContactsOffers',
-  'testSigningsFollowUps', 'testSchemaDdl', 'testPaging',
+  'testSigningsFollowUps', 'testSchemaDdl', 'testPaging', 'testSuiteRunner',
 ];
 // Files named test*.mjs that are helpers, not suites. Any other test*.mjs must
 // be in SUITES: a new suite that nobody listed would otherwise never run.
