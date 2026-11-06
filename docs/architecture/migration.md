@@ -78,11 +78,12 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S14b | safety and audit become explicit writes and SQL reads; their tables re-typed (vocabulary CHECKs, details as typed columns by type, organisation and staff keys) | `0013` (amended in place) | `safetyAudit` | done |
 | S14c | message threads become explicit writes and SQL reads; the tables re-typed (the request key from the start, the activity time, the sender by kind with staff a key, length CHECKs, the retry id unique) | `0012` (amended in place) | `channels` | done |
 | S14d | delivery dispatches, the mail outbox, the push log and device tokens become explicit writes and SQL reads; the tables re-typed (vocabulary CHECKs, a staff audience's organisation as a key, integer clocks, an address on every outbox row, one row per device token) | `0010`, `0011` (amended in place) | `dispatches`, `outboxPush` | done |
-| S14e… | the remaining staged repositories become explicit, one per step (§4.6) | | | **next** |
+| S14e | notifications and their preferences become explicit writes and SQL reads; the tables re-typed (the audience kind's vocabulary, a staff audience a key, length and category CHECKs, the delivery marker; the group key and acknowledger worked out) | `0009` (amended in place) | `notifications` | done |
+| S14f… | the remaining staged repositories become explicit, one per step (§4.6) | | | **next** |
 | S14 last | the save path, `db` and snapshot mode go (§4.6) | | | |
 
 Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1, and
-S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d.
+S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d, S7a's since S14e.
 
 ## 4. The order of work
 
@@ -107,7 +108,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, and the delivery centre the `dispatches` and `outboxPush` repositories); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, the delivery centre the `dispatches` and `outboxPush` repositories, and the feed and preferences the `notifications` repository); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -193,9 +194,10 @@ separate risk; the script moves the fixtures' instants to today to measure the s
 - Operations (S13e): a new player's saved-search alerts read the searches of current staff that SQL prefilters by
   position, foot, country and availability, then apply the whole filter in code. Bounded by the clubs' saved searches,
   not the player base.
-- Delivery (S14d): the sweep finds the notifications without dispatches, and the in-app dispatches whose notice was
-  read, through the notifications' mirror (a scan of every notification per sweep, every minute). Both become SQL
-  joins when the notifications are explicit (S14e).
+- Notifications (S14e): a person's feed is unpaged (per person, by rule) and read whole, so a busy staff member's bell
+  grows with their history; it needs paging (and the apps a "load more") if feeds get long. The preference gate reads
+  the person's preferences once per notice. The delivery sweep's two scans are indexed SQL (the undispatched marker,
+  and a join from the unopened in-app dispatches to the read notifications).
 
 ### 4.3.1 Costs that grow with the whole player base
 
@@ -206,7 +208,8 @@ and 2,000 players. Players get their defaults at creation (`PLAYER_CREATION_DEFA
 
 **Left:** an empty unit of work cost about 23 ms at 30k players, mostly the organisations (captured and flushed
 whole per unit, because their remaining facets are still edited in place) and the blob collections' memento. The
-memento went with the blob (S14a); the organisations' part goes when their facet writes become explicit (S14b on).
+memento went with the blob (S14a), the notifications' whole-mirror copy per unit with S14e; the organisations' part
+goes when their facet writes become explicit.
 
 ### 4.4 Code and test layout
 
@@ -266,7 +269,16 @@ Split in parts, like S12 and S13.
   and, when the retries run out, the ops event and webhook) is one unit; a callback event commits with its seen
   marker; junk callbacks are refused whole. Device tokens are players' and guardians' only, and a token another
   account registers moves to it. The admin outbox and push log and the club's delivery list page by cursor.
-- **S14e onwards: the remaining staged repositories become explicit**, one per step, the S8 way: notifications,
+- **S14e (done): notifications and preferences** are explicit writes and SQL reads. Migration `0009` was amended in
+  place: the audience kind is a vocabulary CHECK (`player`, `guardian`, `org_user`), a staff audience a RESTRICT key
+  to `org_users` through a generated `staff_id`, lengths and the category vocabulary CHECKed, the preferences'
+  `updated_at` required; `group_key` and `action_acked_by` are worked out on read; `dispatched_at` is the delivery
+  centre's marker, set in the unit that makes the dispatches. `notify()` writes inside the announcing action's unit
+  (or its own transaction) and its push and live event are `store.afterCommit` effects. Coalescing is "the newest
+  identical unread row whose last occurrence was within six hours" (the old scan's early stop is gone). The
+  preference route refuses non-boolean values (`400 PREFS_INVALID`) instead of coercing them; a notice's text is
+  shortened to 2,000 characters; a system-raised report's resolution no longer writes a notice to nobody.
+- **S14f onwards: the remaining staged repositories become explicit**, one per step, the S8 way:
   staff and sessions, the organisations' remaining facets, players and guardians. Each loses its mirror, its `db.<name>` view and its save hook, and its reads become queries.
   This is also what closes §4.3.1's cost of an empty unit of work.
 - **S14 last: the save path goes.** `persist()`, `persistNow()`, the debounced save, the save hooks,

@@ -107,11 +107,13 @@ Cross-cutting server contracts: errors, boot, dates and time zones, capabilities
 - The persisted mail outbox withholds secret codes (`[code withheld …]`). The recipient
   still gets the full text.
 - Notifications: the feed is newest first by insertion. An identical unread notification
-  within 6 h refreshes the existing row in place and does not move it. A notification is
-  never durable before the action it announces. Push and live events fire only after
-  commit and never for a rolled-back operation.
+  (same person, type, text and record) whose last occurrence was within 6 h refreshes the
+  newest such row in place and does not move it. A notification commits with the action
+  it announces. Push and live events fire only after commit and never for a rolled-back
+  operation. Text over 2,000 characters is shortened.
 - Categories `compliance` and `security_account` are mandatory and cannot be set to
-  `false`. Preferences survive account deletion.
+  `false`. A preference value must be `true` or `false` (anything else is `400
+  PREFS_INVALID`). Preferences survive account deletion.
 - Delivery callbacks match the first dispatch in insertion order whose
   `providerMessageId` equals the event's. Dispatch rows survive a person's deletion
   (orphans are kept; retention is undecided).

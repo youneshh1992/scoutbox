@@ -119,6 +119,11 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
   // S7a: the notification tables.
   assert.match(header03, /notifications\s+→ notifications[^\n]*0009_notifications[^\n]*REGISTERED/, 'the scope header of 03 states that notifications is live since 0009');
   assert.match(header03, /notificationPrefs[^\n]*0009_notifications[^\n]*REGISTERED/, 'the scope header of 03 states that the preference tables are live since 0009');
+  // S14e (0009 amended in place): a staff audience is the notifications' and preferences' one key (RESTRICT, through
+  // the generated staff_id); vocabulary CHECKs on the audience kind and the category; no group key or acknowledger column.
+  for (const d of [docs, mig]) for (const t of ['notifications', 'notification_prefs']) assert.deepEqual(d.prepare(`PRAGMA foreign_key_list(${t})`).all().map((f) => [f.from, f.table, f.on_delete]), [['staff_id', 'org_users', 'RESTRICT']], `${t} references only its staff audience`);
+  for (const [t, col] of [['notifications', 'audience_kind'], ['notifications', 'category'], ['notification_prefs', 'audience_kind'], ['notification_pref_categories', 'category']]) assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, new RegExp(`${col} IN \\(`), `${t}.${col} is a vocabulary CHECK`);
+  for (const d of [docs, mig]) assert.deepEqual(d.prepare('PRAGMA table_xinfo(notifications)').all().filter((c) => ['group_key', 'action_acked_by'].includes(c.name)), [], 'the group key and the acknowledger are worked out, not stored');
   // S7b: the dispatch tables; the attempt-shape CHECK is total in the documented DDL too (review of dc4b559, finding 1).
   assert.match(header03, /dispatches\s+→ dispatches, dispatch_attempts[^\n]*0010_dispatches[^\n]*REGISTERED/, 'the scope header of 03 states that the dispatch tables are live since 0010');
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'dispatch_attempts'").get().sql, /ok IS NOT NULL/, 'the documented attempt CHECK rejects a NULL send outcome');

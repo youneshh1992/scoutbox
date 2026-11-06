@@ -5,7 +5,7 @@
 // the stop at the first older row — planted rows included), the notification
 // row durable in its table with the message it announces and across a SIGKILL,
 // the acknowledgment atomic with the dispatch rows under a real COMMIT failure,
-// preferences (a mandatory category stored false through numeric zero, forced
+// preferences (a non-boolean value refused, the mandatory category forced
 // on; a muted category never creates a row), mark-read, account deletion, the
 // admin backup (a database copy) and its restore. Nothing here touches
 // DATA_DIR or any real data. Run with: npm test
@@ -54,14 +54,14 @@ const stored = (dir) => qAll(dir, 'SELECT id, occurred_at AS ts, audience_kind, 
 function plant(dir, rows) {
   const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA busy_timeout = 5000;');
   try {
-    const ins = s.prepare('INSERT INTO notifications (id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)');
-    for (const n of rows) ins.run(n.id, n.ts, n.audience.kind, n.audience.id, n.type, n.text, n.refId ?? null, n.read ? 1 : 0, n.repeatCount ?? 1, n.groupKey ?? null, n.category ?? null, n.deferredPush ? 1 : 0);
+    const ins = s.prepare('INSERT INTO notifications (id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, category, deferred_push, dispatched_at, action_required) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)');
+    for (const n of rows) ins.run(n.id, n.ts, n.audience.kind, n.audience.id, n.type, n.text, n.refId ?? null, n.read ? 1 : 0, n.repeatCount ?? 1, n.category ?? null, n.deferredPush ? 1 : 0, n.ts);
   } finally { s.close(); }
 }
 const orgLogin = async (S, orgId, scoutName, role) => { const r = await S.j('POST', '/auth/org/login', { orgId, scoutName, role }); assert.equal(r.status, 200, `org login ${orgId}: ${r.text}`); return r.body.token; };
 const playerLogin = async (S, playerId) => { const r = await S.j('POST', '/auth/player/login', { playerId }); assert.equal(r.status, 200, r.text); return r.body.token; };
 const COMMIT_SEAM = 'internal:unit.sqlite_commit';
-/** A preference write is saved by the debounced snapshot save (2 s) on both builds: wait for it. */
+/** Poll until `check()` holds (a few seconds at most). */
 async function settled(check) { for (let i = 0; i < 120; i++) { if (check()) return true; await new Promise((r) => setTimeout(r, 50)); } return check(); }
 /** Arm one seam, perform the operation once, prove it was answered 500 and left `unchanged()`, disarm. */
 async function refusedBy(S, rule, act, unchanged) {
@@ -86,7 +86,7 @@ const feedOf = async (S, p, token) => { const r = await S.j('GET', p, undefined,
 const sameFeed = (feed) => feed.map((n) => ({ id: n.id, ts: n.ts, repeatCount: n.repeatCount, read: n.read, ackedAt: n.actionRequired?.ackedAt ?? null }));
 
 // ------------------------------------------------------------- the feed order and coalescing, through the real routes
-await test('feed and coalescing through the real routes: an identical message notification coalesces into one row (repeatCount, refreshed ts, no second row); the feed is reverse INSERTION order — a later, different notification stays above the refreshed one; a planted identical row older than six hours is not coalesced and STOPS the scan (a new row is created although a recent identical unread row sits behind it); a planted identical row inside the window is the one coalesced, the earlier identical row untouched; the order survives a SIGKILL; and after the cutover the rows are in the notifications table with the message that announced them', async () => {
+await test('feed and coalescing through the real routes: an identical message notification coalesces into one row (repeatCount, refreshed ts, no second row); the feed is reverse INSERTION order — a later, different notification stays above the refreshed one; a planted identical row older than six hours is not coalesced while the recent identical unread row is (S14e: the newest identical unread row whose last occurrence is within six hours; the old scan stopping at the first older row is gone); a planted identical row inside the window, inserted last, is the one coalesced, the earlier identical row untouched; the order survives a SIGKILL; and after the cutover the rows are in the notifications table with the message that announced them', async () => {
   const dir = tempDir('s7a-feed'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const { channelId } = await openThread(S, maria, kola);
@@ -117,33 +117,32 @@ await test('feed and coalescing through the real routes: an identical message no
   // SIGKILL: the order and the counts are what the file holds.
   await S.kill(); S = await boot(dir);
   assert.deepEqual((await feedOf(S, '/player/notifications', kola)).map((n) => n.id), orderBefore, 'the order survived a SIGKILL');
-  // Plant an identical unread row older than the window at the END of the feed: it is never coalesced and it stops the scan.
+  // Plant an identical unread row older than the window at the END of the feed: it is never coalesced; the recent identical unread row behind it is.
   await S.stop();
   const now = Date.now();
-  const planted = (id, ts) => ({ id, ts, audience: { kind: 'player', id: 'pl-adeyemi' }, type: 'message', text, refId: channelId, read: false, repeatCount: 1, groupKey: `message:${channelId}`, category: 'messages', deferredPush: false });
+  const planted = (id, ts) => ({ id, ts, audience: { kind: 'player', id: 'pl-adeyemi' }, type: 'message', text, refId: channelId, read: false, repeatCount: 1, category: 'messages', deferredPush: false });
   plant(dir, [planted('ntf-planted-old', now - 6 * HOUR - 2 * MIN)]);
   S = await boot(dir);
   assert.equal((await say('Third message.')).status, 201);
   feed = await feedOf(S, '/player/notifications', kola);
   assert.equal(feed.find((n) => n.id === 'ntf-planted-old').repeatCount, 1, 'the row older than six hours is not coalesced');
-  assert.equal(feed.find((n) => n.id === msg.id).repeatCount, 2, 'the recent identical unread row behind it was never examined (the scan stopped)');
-  const created = feed.filter((n) => n.type === 'message' && n.refId === channelId);
-  assert.equal(created.length, 3, 'so a NEW row was created'); assert.equal(feed[0].id, created.find((n) => !['ntf-planted-old', msg.id].includes(n.id)).id, 'and it is first');
-  // Plant an identical unread row inside the window at the END: it is the one coalesced; the new row above stays at 1.
+  assert.equal(feed.find((n) => n.id === msg.id).repeatCount, 3, 'the recent identical unread row is (its last occurrence is inside the window)');
+  assert.equal(feed.filter((n) => n.type === 'message' && n.refId === channelId).length, 2, 'so no new row was created');
+  // Plant an identical unread row inside the window at the END: as the newest identical row it is the one coalesced.
   await S.stop();
   plant(dir, [planted('ntf-planted-recent', now - 5 * HOUR)]);
   S = await boot(dir);
   assert.equal((await say('Fourth message.')).status, 201);
   feed = await feedOf(S, '/player/notifications', kola);
-  assert.equal(feed.find((n) => n.id === 'ntf-planted-recent').repeatCount, 2, 'the last matching unread row coalesces');
-  assert.equal(feed.filter((n) => n.type === 'message' && n.refId === channelId).length, 4, 'no fifth row');
-  assert.equal(feed.filter((n) => n.repeatCount === 2).length, 2, 'only one row per coalesce; the earlier rows are untouched');
+  assert.equal(feed.find((n) => n.id === 'ntf-planted-recent').repeatCount, 2, 'the newest matching unread row coalesces');
+  assert.equal(feed.find((n) => n.id === msg.id).repeatCount, 3, 'the earlier identical row is untouched');
+  assert.equal(feed.filter((n) => n.type === 'message' && n.refId === channelId).length, 3, 'no new row');
   assert.equal(feed[0].id, 'ntf-planted-recent', 'planted last, it is the newest insertion');
   // Reading, then a new occurrence: a new row (a read row never coalesces).
   assert.equal((await S.j('POST', '/player/notifications/read', {}, kola)).status, 200);
   assert.equal((await say('Fifth message.')).status, 201);
   feed = await feedOf(S, '/player/notifications', kola);
-  assert.equal(feed.filter((n) => n.type === 'message' && n.refId === channelId).length, 5); assert.equal(feed[0].read, false); assert.equal(feed[1].read, true);
+  assert.equal(feed.filter((n) => n.type === 'message' && n.refId === channelId).length, 4); assert.equal(feed[0].read, false); assert.equal(feed[1].read, true);
   assert.deepEqual(qAll(dir, 'SELECT id, read FROM notifications WHERE audience_kind = ? ORDER BY seq DESC LIMIT 2', 'player').map((r) => r.read), [0, 1], 'mark-read is durable');
   // The server log never carries a notification text in its data-layer lines.
   for (const line of S.log().split('\n').filter((l) => /notifications/i.test(l))) assert.equal(line.includes(text), false, `a log line carries notification text: ${line}`);
@@ -151,7 +150,7 @@ await test('feed and coalescing through the real routes: an identical message no
 });
 
 // ------------------------------------------------------------- acknowledgment: atomic with the dispatch rows
-await test('acknowledgment: a withdrawal notice (notifyAction) lands with its contract and the sweep creates its dispatch rows; a failure of the real COMMIT during the ack is answered 500 and leaves BOTH the notification (table, second connection) and the dispatch statuses (blob) unchanged; the retry acknowledges both together; a SIGKILL right after keeps both; a second ack is a no-op', async () => {
+await test('acknowledgment: a withdrawal notice (notifyAction) lands with its contract and the sweep creates its dispatch rows; a failure of the real COMMIT during the ack is answered 500 and leaves BOTH the notification (table, second connection) and the dispatch statuses (table) unchanged; the retry acknowledges both together; a SIGKILL right after keeps both; a second ack is a no-op', async () => {
   const dir = tempDir('s7a-ack'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const me = (await S.j('GET', '/player/me', undefined, kola)).body; const mediaId = me.media?.[0]?.id ?? me.player?.media?.[0]?.id; assert.ok(mediaId);
@@ -174,7 +173,7 @@ await test('acknowledgment: a withdrawal notice (notifyAction) lands with its co
   });
   const ok = await ack();
   assert.equal(ok.status, 200, ok.text); assert.ok(ok.body.ackedAt);
-  assert.equal(q1(dir, 'SELECT action_acked_at AS at, action_acked_by AS by FROM notifications WHERE id = ?', notice.id).at, ok.body.ackedAt, 'durable when the response is sent');
+  assert.equal(q1(dir, 'SELECT action_acked_at AS at FROM notifications WHERE id = ?', notice.id).at, ok.body.ackedAt, 'durable when the response is sent');
   // A skipped external row (no e-mail on record) keeps 'skipped' and gains actionedAt, exactly as before S7a (the ladder never moves a terminal side state).
   assert.ok(dispatches().every((d) => d.actionedAt && (d.status === 'actioned' || d.status === 'skipped')), `the dispatch rows moved to actioned in the same commit: ${JSON.stringify(dispatches().map((d) => [d.channel, d.status]))}`);
   assert.ok(dispatches().some((d) => d.status === 'actioned'), 'the in-app row is actioned');
@@ -186,7 +185,7 @@ await test('acknowledgment: a withdrawal notice (notifyAction) lands with its co
 });
 
 // ------------------------------------------------------------- preferences
-await test('preferences through the real routes: a category turned off never creates a notification (and creates one again once it is on); a mandatory category sent as numeric zero is accepted and stored false (table, second connection) while the view and the gate keep it on; a literal false, an unknown category and a non-object are refused; emailIntent is stored; everything survives a restart; the preferences of one person never touch another', async () => {
+await test('preferences through the real routes: a category turned off never creates a notification (and creates one again once it is on); a non-boolean value (numeric zero on the mandatory category, a numeric emailIntent) is refused and nothing is stored (S14e); a literal false on the mandatory category, an unknown category and a non-object are refused; the mandatory category is on in the view; emailIntent is stored; everything survives a restart; the preferences of one person never touch another', async () => {
   const dir = tempDir('s7a-prefs'); let S = await boot(dir);
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const { channelId } = await openThread(S, maria, kola);
@@ -195,13 +194,17 @@ await test('preferences through the real routes: a category turned off never cre
   const messageRows = async () => (await feedOf(S, '/player/notifications', kola)).filter((n) => n.type === 'message' && n.refId === channelId);
   const rows = async () => (await messageRows()).length;
   assert.equal((await say('One.')).status, 201); assert.equal(await rows(), 1);
-  let r = await put({ categories: { messages: false, compliance: 0 }, emailIntent: 1 });
-  assert.equal(r.status, 200, r.text);
-  const compliance = r.body.preferences.categories.find((c) => c.id === 'compliance'); assert.deepEqual([compliance.enabled, compliance.mandatory], [true, true], 'the view forces the mandatory category on');
-  assert.equal(r.body.preferences.categories.find((c) => c.id === 'messages').enabled, false); assert.equal(r.body.preferences.emailIntent, true);
   const cats = () => qAll(dir, 'SELECT category, enabled FROM notification_pref_categories WHERE audience_kind = ? AND audience_id = ? ORDER BY category', 'player', 'pl-adeyemi').map((x) => [x.category, x.enabled]);
-  assert.ok(await settled(() => cats().length === 2), 'the preference write landed with the debounced save');
-  assert.deepEqual(cats(), [['compliance', 0], ['messages', 0]], 'stored as the route coerced it: false, the mandatory one included');
+  let r = await put({ categories: { messages: false, compliance: 0 }, emailIntent: true });
+  assert.equal(r.status, 400, r.text); assert.equal(r.body.error, 'PREFS_INVALID'); assert.equal(r.body.category, 'compliance');
+  r = await put({ categories: { messages: false }, emailIntent: 1 });
+  assert.equal(r.status, 400, r.text); assert.equal(r.body.error, 'PREFS_INVALID'); assert.equal(r.body.field, 'emailIntent');
+  assert.deepEqual(cats(), [], 'a refused write stores nothing');
+  r = await put({ categories: { messages: false }, emailIntent: true });
+  assert.equal(r.status, 200, r.text);
+  const compliance = r.body.preferences.categories.find((c) => c.id === 'compliance'); assert.deepEqual([compliance.enabled, compliance.mandatory], [true, true], 'the view shows the mandatory category on');
+  assert.equal(r.body.preferences.categories.find((c) => c.id === 'messages').enabled, false); assert.equal(r.body.preferences.emailIntent, true);
+  assert.deepEqual(cats(), [['messages', 0]], 'durable when the response is sent (second connection)');
   assert.equal(q1(dir, 'SELECT email_intent AS e FROM notification_prefs WHERE audience_id = ?', 'pl-adeyemi').e, 1);
   r = await put({ categories: { compliance: false } }); assert.equal(r.status, 400); assert.equal(r.body.error, 'PREF_CATEGORY_MANDATORY');
   r = await put({ categories: { gossip: true } }); assert.equal(r.status, 400); assert.equal(r.body.error, 'PREF_CATEGORY_UNKNOWN');
@@ -252,7 +255,7 @@ await test('backup/restore: the admin backup\'s database copy holds the notifica
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const { channelId } = await openThread(S, maria, kola);
   for (const t of ['One.', 'Two.']) assert.equal((await S.j('POST', `/org/channels/${channelId}/messages`, { text: t }, maria)).status, 201);
-  assert.equal((await S.j('PUT', '/org/notification-preferences', { categories: { mentions: false, compliance: 0 }, emailIntent: true }, maria)).status, 200);
+  assert.equal((await S.j('PUT', '/org/notification-preferences', { categories: { mentions: false }, emailIntent: true }, maria)).status, 200);
   const playerFeed = await feedOf(S, '/player/notifications', kola); const orgFeed = await feedOf(S, '/org/notifications', maria);
   assert.ok(playerFeed.some((n) => n.repeatCount === 2));
   const bk = await S.j('POST', '/admin/backup', {}, null, A); assert.equal(bk.status, 201, bk.text);

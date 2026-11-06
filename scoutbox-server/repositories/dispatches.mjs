@@ -262,14 +262,12 @@ export function createDispatchesRepository({ sqlite, unit = null, now = Date.now
     byId,
     /** Every dispatch of one notification, in creation order. */
     forNotification: (notificationId) => dec(q('SELECT * FROM dispatches WHERE notification_id = ? ORDER BY seq').all(notificationId)),
-    /** The ids of the notifications that already have dispatches (the sweep's first step). */
-    notificationIdsWithRows: () => new Set(q('SELECT DISTINCT notification_id AS id FROM dispatches').all().map((r) => r.id)),
     /** The dispatch the provider accepted under this message id, or null. */
     byProviderMessageId: (value) => (typeof value === 'string' ? one('SELECT * FROM dispatches WHERE provider_message_id = ?', value) : null),
     /** The external sends due at `at` (queued, retrying or held for quiet hours), in creation order. */
     due: (at) => dec(q("SELECT * FROM dispatches WHERE status IN ('queued', 'retrying', 'held_quiet_hours') AND next_at <= ? ORDER BY seq").all(at)),
-    /** The in-app dispatches not yet opened, in creation order (the sweep matches them to read notifications). */
-    unopenedInApp: () => q("SELECT id, notification_id, status FROM dispatches WHERE channel = 'in_app' AND opened_at IS NULL ORDER BY seq").all().map((r) => Object.freeze({ id: r.id, notificationId: r.notification_id, status: r.status })),
+    /** The in-app dispatches not yet opened whose notification was read, in creation order (the sweep marks them opened). */
+    unopenedInAppRead: () => q("SELECT d.id, d.notification_id, d.status FROM dispatches d JOIN notifications n ON n.id = d.notification_id WHERE d.channel = 'in_app' AND d.opened_at IS NULL AND n.read = 1 ORDER BY d.seq").all().map((r) => Object.freeze({ id: r.id, notificationId: r.notification_id, status: r.status })),
     /** A page of one organisation's staff dispatches, newest first: `{ items, nextCursor }`. */
     pageForOrg: (orgId, { after = null, limit }) => {
       const rows = q('SELECT * FROM dispatches WHERE org_id = ? AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?').all(orgId, after?.[0] ?? null, after?.[0] ?? null, limit + 1);

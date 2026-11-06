@@ -27,6 +27,7 @@ import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { attachDataLayer, TABLE_BACKED } from './repositories/index.mjs';
 import { MESSAGE_LIMITS } from './repositories/channels.mjs';
+import { NOTIFICATION_LIMITS, feedItem } from './repositories/notifications.mjs';
 import { createIdCounter } from './repositories/counters.mjs';
 import { GRASSROOTS_LIMITS, boxAround } from './repositories/grassroots.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
@@ -544,10 +545,10 @@ function broadcast(event, rawPayload = {}) {
 /**
  * Write one already-minimised event to the replay log and the live streams —
  * the transport half of broadcast(), with no registry check and no save of
- * its own. notify() hands this to the notifications repository as an effect
- * of the row it wrote (S7a, corrected): the repository runs it only once the
- * snapshot save that carried the row committed, so a `notify` frame is never
- * on a stream or in the replay log for a row the file does not hold. The
+ * its own. notify() registers it as a store.afterCommit effect of the row it
+ * wrote (S14e): inside a unit it runs after the COMMIT and never for a
+ * rollback, so a `notify` frame is never on a stream or in the replay log for
+ * a row the file does not hold. The
  * payload must already have passed minimizePayload (broadcast does that at the
  * call site, before the effect is registered).
  */
@@ -811,23 +812,20 @@ let m24Ctx = null; // M23 P5.6B — assigned when the Agent module registers, be
 const notificationsSuppressed = { count: 0 };
 
 /**
- * Create (or coalesce) one notification. S7a: the row is a row of the
- * `notifications` table, written through the repository in its staged mode —
- * visible in memory at once, durable inside the next snapshot save together
- * with the blob edits the caller made alongside it (the message, the request,
- * the case), or inside the enclosing unit of work's commit. It is never
- * durable ahead of the action it announces. `actionRequired: { deadline }`
- * attaches an acknowledgment contract in the same write (M13 notifyAction).
- * Returns the row (read-only) or null when the person's preferences mute it.
+ * Create (or coalesce) one notification: a row of the `notifications` table
+ * (repositories/notifications.mjs), written at once — inside the unit of work
+ * of the action it announces when one is open, so it commits or rolls back
+ * with it, in a transaction of its own otherwise (S14e). `actionRequired:
+ * { deadline }` attaches an acknowledgment contract in the same write (M13
+ * notifyAction). Text longer than the table keeps is shortened (it can carry
+ * names people typed). Returns the stored record or null when the person's
+ * preferences mute it.
  *
  * Its external effects — the push and the `notify` event on the live streams
- * and in the replay log — are registered with the repository as effects of
- * that write (notifications.afterDurable) and run only once the save that
- * carries the row COMMITTED: never before it, never after a save that failed
- * (the row and its effects wait for the retry and go out exactly once with
- * it), never for a unit of work that rolled back. A save is requested here
- * (persist), never from inside an effect. A provider error after COMMIT is a
- * delivery failure, counted by the store, never a rollback.
+ * and in the replay log — are store.afterCommit effects: inside a unit they
+ * wait for its COMMIT and are dropped with its rollback; outside one the row
+ * is already committed and they run at once. A provider error after COMMIT is
+ * a delivery failure, counted by the store, never a rollback.
  */
 function notify(audience, type, text, refId = null, { actionRequired = null } = {}) {
   // M18.2: a category the person has turned off is never CREATED — not
@@ -837,63 +835,59 @@ function notify(audience, type, text, refId = null, { actionRequired = null } = 
     notificationsSuppressed.count += 1;
     return null;
   }
+  // Cut at a character boundary: never half of an emoji's surrogate pair.
+  const cut = (t, n) => { let s = t.slice(0, n); if (/[\uD800-\uDBFF]$/.test(s)) s = s.slice(0, -1); return s; };
+  const body = typeof text === 'string' && text.length > NOTIFICATION_LIMITS.text ? `${cut(text, NOTIFICATION_LIMITS.text - 1)}…` : text;
   // Coalesce identical unread notifications. The same sentence about the same
   // record arriving twice is not two pieces of news: it pushed the recipient's
   // phone twice and buried the twenty other rows in their bell. So an existing
-  // unread row is refreshed and counted rather than duplicated — and crucially
-  // no second push is sent. Once the recipient has READ it, a new occurrence is
-  // genuinely new and gets its own row; coalescing a notification someone has
-  // already dealt with would hide the fact that it happened again. The scan
-  // (newest first, six hours, a stop at the first older row) is the
-  // repository's and is unchanged from M18.1; the refreshed row keeps its
-  // position in the feed.
+  // unread row whose last occurrence was within six hours is refreshed and
+  // counted rather than duplicated — and no second push is sent. Once the
+  // recipient has READ it, a new occurrence is genuinely new and gets its own
+  // row. The refreshed row keeps its position in the feed.
   const at = Date.now();
   // The event the feed listeners get; minimised through the registry NOW (a
-  // bad call site fails here, inside the unit if there is one), delivered by
-  // the repository once the row's save committed. No second push: a coalesce
-  // refreshes news the recipient's phone already carried.
+  // bad call site fails here, inside the unit if there is one), delivered
+  // after the commit.
   const announce = () => {
     const { payload, dropped, unregistered } = minimizePayload('notify', { audienceKind: audience.kind, audienceId: audience.id });
     if (unregistered || dropped.length) { eventPayloadDrops.count += 1; eventPayloadDrops.lastEvent = 'notify'; throw new Error(`notify: the 'notify' event ${unregistered ? 'is not in the event registry' : `carried unregistered payload keys: ${dropped.join(', ')}`}`); }
-    notifications.afterDurable(() => publishEvent('notify', payload));
+    store.afterCommit(() => publishEvent('notify', payload));
   };
-  const existing = notifications.findCoalescible({ audience, type, text, refId, at });
+  const existing = notifications.findCoalescible({ audience, type, text: body, refId, at });
   if (existing) {
     const c = notifications.coalesce(existing.id, { at, actionRequired });
     announce();
-    persist();
+    persist(); // the staged organisations a caller edited alongside (until their facets are explicit)
     return c;
   }
 
-  // M18.2: `groupKey` lets any reader fold several DIFFERENT updates about the
-  // same record ("status moved", "task assigned", "decision recorded" on one
-  // Room) into "3 changes in …" rather than three rows, without the server
-  // deciding presentation. `category` is what the preference gate matched.
+  // M18.2: `groupKey` (worked out from type and refId) lets any reader fold
+  // several DIFFERENT updates about the same record into "3 changes in …"
+  // rather than three rows, without the server deciding presentation.
+  // `category` is what the preference gate matched.
   const n = notifications.create({
-    audience, type, text, refId, at, actionRequired,
-    category: m182Ctx?.notificationCategoryOf?.(type, text) ?? null,
+    audience, type, text: body, refId, at, actionRequired,
+    category: m182Ctx?.notificationCategoryOf?.(type, body) ?? null,
     deferredPush: pushDeferred(audience),
   });
   // Push delivery honours quiet hours / school-hours mute; the in-app feed
-  // above always keeps the record either way. The push is an external
-  // delivery and goes out only once the row it announces is committed — an
-  // effect of the write, run by the repository after the carrying save's
-  // COMMIT (standalone or unit of work alike). The promise is RETURNED so the
+  // above always keeps the record either way. The promise is RETURNED so the
   // store observes it: a rejected delivery is counted and logged instead of
   // becoming an unhandled rejection, and is never mistaken for a rollback.
-  if (!n.deferredPush) notifications.afterDurable(() => pushSender.send(audience, 'ScoutBox', text));
+  if (!n.deferredPush) store.afterCommit(() => pushSender.send(audience, 'ScoutBox', body));
   announce();
-  persist();
+  persist(); // the staged organisations a caller edited alongside (until their facets are explicit)
   return n;
 }
 
 function notificationsFor(kind, id) {
   // M23 P8 §30 — each row is decorated at READ time with the current,
   // authorized resource its refId points to (or null). Nothing is stored.
-  // S7a: the feed is the repository's (newest insertion first).
+  // The feed is the repository's (newest insertion first), each row an allowlist.
   const resolve = journeyCtx?.notificationTargetFor;
   return notifications.forAudience(kind, id)
-    .map((n) => (resolve ? { ...n, target: resolve(n, { kind, id }) } : n));
+    .map((n) => (resolve ? { ...feedItem(n), target: resolve(n, { kind, id }) } : feedItem(n)));
 }
 
 function markNotificationsRead(kind, id) {
@@ -4551,7 +4545,7 @@ adminRouter.post('/reports/:id/resolve', (req, res) => {
   const resolved = unit(() => {
     const r = safetyAudit.reports.resolve(report.id, { outcome: outcome.trim(), at: Date.now() });
     if (action === 'suspend_org' && r.targetOrgId) orgs.update(r.targetOrgId, { suspended: true });
-    notify({ kind: r.by, id: r.byId }, 'report_resolved', `Your report was reviewed: ${r.outcome}`, r.id);
+    if (r.by !== 'system') notify({ kind: r.by, id: r.byId }, 'report_resolved', `Your report was reviewed: ${r.outcome}`, r.id); // a system escalation has no reporter to tell
     return r;
   });
   res.json(reportView(resolved));

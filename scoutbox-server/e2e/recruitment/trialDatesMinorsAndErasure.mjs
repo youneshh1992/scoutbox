@@ -347,7 +347,10 @@ section('C — D10: a minor hears their guardian\'s decision');
   neg(!view.categories.some((c) => ['constructor', 'toString', '__proto__'].includes(c.id)), 'C3b and the preferences view carries no prototype name');
   neg(expect(await j('PUT', '/player/notification-preferences', { categories: { security_account: false } }, guni.token), 400, 'PREF_CATEGORY_MANDATORY'), 'C3c the mandatory category still cannot be muted');
   neg(expect(await j('PUT', '/player/notification-preferences', { categories: [] }, guni.token), 400, 'PREFS_INVALID'), 'C3d a list is not a preferences object');
-  neg(expect(await j('PUT', '/player/notification-preferences', { categories: { messages: 'yes' } }, guni.token), 200, null) && (await j('GET', '/player/notification-preferences', undefined, guni.token)).body.preferences.categories.find((c) => c.id === 'messages').enabled === true, 'C3e a truthy non-boolean is stored as true (documented M18.2 behaviour, unchanged)');
+  // S14e (approved design change): a non-boolean value is refused, no longer coerced with !!v; the stored value is untouched.
+  neg(expect(await j('PUT', '/player/notification-preferences', { categories: { messages: 'yes' } }, guni.token), 400, 'PREFS_INVALID') && (await j('GET', '/player/notification-preferences', undefined, guni.token)).body.preferences.categories.find((c) => c.id === 'messages').enabled === true, 'C3e a truthy non-boolean is refused (400 PREFS_INVALID), nothing stored');
+  neg(expect(await j('PUT', '/player/notification-preferences', { categories: { security_account: 0 } }, guni.token), 400, 'PREFS_INVALID'), 'C3f a numeric 0 on the mandatory category is refused, never stored as "off"');
+  neg(expect(await j('PUT', '/player/notification-preferences', { emailIntent: 'yes' }, guni.token), 400, 'PREFS_INVALID'), 'C3g a non-boolean emailIntent is refused');
 
   // privacy sentinel: club-private text never reaches the child, the guardian, or a foreign club
   const room = await j('POST', '/org/rooms', { playerId: 'pl-guni' }, maria.token);

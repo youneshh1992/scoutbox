@@ -1,260 +1,161 @@
 /**
- * Notifications and category notification preferences — migration plan step
- * S7a (docs/architecture/s7-readiness-review.md §3, §5–§8; the four
- * compatibility corrections of the S7a review).
+ * Notifications and category notification preferences as typed tables with explicit writes (S7a, migration
+ * `0009_notifications`; explicit since S14e, docs/architecture/migration.md §4.6; sql/03_messaging_safety_audit.sql).
  *
- * Owns three tables and the read-only views `db.notifications` and
- * `db.notificationPrefs`:
+ * Record (the keys every reader sees):
+ *   { id, ts, audience: { kind, id }, type, text, refId, read, repeatCount, groupKey, category, deferredPush,
+ *     dispatchedAt[, actionRequired: { deadline, ackedAt, ackedBy }] }
+ *   `groupKey` is worked out (`type:refId` when there is a refId) and `ackedBy` is the audience's id: neither is
+ *   stored. `dispatchedAt` is the delivery centre's marker (m13/delivery.mjs): when it made the notice's dispatches.
+ *   Responses use `feedItem` (an allowlist), never the record.
+ * Preference record: { audienceKind, audienceId, categories: { [category]: boolean }, emailIntent, updatedAt }.
  *
- *   notifications                 the in-app feed, one row per notification
+ * Tables:
+ *   notifications                 the feed, one row per notification; `seq` is insertion order, the feed order (a
+ *                                 coalesced row keeps its place, so `occurred_at` is never an ordering key)
  *   notification_prefs            one row per person who ever saved a preference
- *   notification_pref_categories  the categories that person set (absent key = default)
+ *   notification_pref_categories  the categories that person set (an absent one is the default)
+ * The audience kind is `player`, `guardian` or `org_user`; a staff audience is a RESTRICT key to `org_users` through
+ * the generated `staff_id` column (staff are removed softly, so the key never blocks); player and guardian ids carry
+ * no key (tolerant: a deleted player's rows go in the deletion unit, their preferences are kept by decision).
  *
- * THE ORDERING KEY. The feed every reader expects is reverse INSERTION order,
- * not timestamp order: coalescing refreshes a row's `ts` and counts the repeat
- * without moving the row (server.mjs notify, since M18.1). `seq INTEGER
- * PRIMARY KEY` is that order, durable: assigned at insert, preserved by the
- * migration (array position), by every backup and restore (array position in
- * the exported collection) and by the rollback (rows written back in `seq`
- * order). The feed is `ORDER BY seq DESC`; `occurred_at` is never an ordering key.
+ * COALESCING. An identical unread notice (same audience, type, text and refId) whose last occurrence was at most six
+ * hours ago is refreshed and counted rather than duplicated (`findCoalescible`, then `coalesce`); the newest such row.
  *
- * COALESCING is the pre-S7a reverse scan, unchanged, over the in-memory mirror
- * (which IS the insertion order): newest first, a stop at the first row older
- * than the six-hour cutoff — whatever lies before it is never examined, even a
- * matching row whose clock was refreshed — read rows skipped, same audience,
- * type, text and refId. Exactly six hours old is included. Only the row that
- * scan selects coalesces. The repository's `findCoalescible` is that scan;
- * scripts/testNotifications.mjs proves it differentially against the verbatim
- * pre-S7a code.
+ * WRITES are explicit operations: each joins the open unit of work, the caller's transaction or its own. The push
+ * and the live event of a notification are the caller's `store.afterCommit` effects. READS are SQL: no mirror, no
+ * db.* view; fresh, deep-frozen records.
  *
- * THE MIRROR. The repository keeps every row in memory (the array behind
- * `db.notifications`, loaded once from the table in `seq` order) and keeps it
- * current on every mutation, so reads cost what they cost before S7a and the
- * coalescing scan is the same loop over the same array. Rows are plain objects
- * in the shape every reader expects ({ id, ts, audience, type, text, refId,
- * read, repeatCount, groupKey, category, deferredPush[, actionRequired] }),
- * built from the typed columns only.
- *
- * TWO WRITE MODES.
- *   immediate (tools, tests, the migration; `staged: false`): every mutation
- *     runs through one boundary — joined inside an open unit of work through
- *     the store's participant API (a failure poisons the unit even when the
- *     caller catches it), as part of a raw transaction a tool opened on the
- *     connection (no BEGIN of its own), in a transaction of its own otherwise.
- *   staged (the running server; `staged: true`, registered as a save hook):
- *     a mutation updates the mirror at once and queues its SQL; the queue runs
- *     inside the NEXT snapshot save transaction — an ordinary save, a
- *     persistNow, or a unit of work's commit — before the blob rows are
- *     written, so a notification is durable TOGETHER WITH the blob edits made
- *     alongside it (the message it announces, the request it reports) and
- *     never ahead of them. Inside an open unit the mutation still joins the
- *     unit (a refused argument poisons it) and its SQL runs in the unit's
- *     commit; on a rollback the mirror and the queue return to the state they
- *     had when the unit began, writes queued BEFORE the unit stay queued. A
- *     foreign transaction the repository did not open is refused in this mode
- *     (its outcome could never be reported back to the queue). The queue is
- *     FIFO and drained whole at every flush, so the order of the file is the
- *     order of memory. This is a deliberate reading of "own transaction when
- *     standalone" for a server whose ~170 notify() call sites edit blobs saved
- *     later: the transaction a standalone notification belongs to is the save
- *     that carries those blobs (S7a review, §3.2 as corrected).
- *
- * EFFECTS WAIT FOR THE DURABLE WRITE (review of ba6956d, finding 1). A write
- * usually has external effects — the push, the `notify` event on the live
- * streams and in the replay log — and those must not happen before the state
- * they announce is committed. `afterDurable(fn)` registers an effect for the
- * writes queued so far; in staged mode it is held in a second FIFO queue,
- * bounded by the same save that carries the writes, and is run only when the
- * store reports that save's COMMIT: never before the save, never after a
- * failed flush or a failed COMMIT (the write and its effects stay queued for
- * the retry, which delivers them exactly once), discarded with a rolled-back
- * unit of work (effects of writes queued BEFORE the unit survive and run when
- * the next save or unit commits them, in order). Each effect is run through
- * `runEffect` (the store's `afterCommit`: counted, logged, never thrown into
- * the save — a provider error after COMMIT is a delivery failure, never a
- * database rollback, and never a replay of the batch). An effect never
- * schedules a save of its own. This is a durability boundary, not an
- * exactly-once guarantee: a crash between COMMIT and the effect loses the
- * push/event, exactly as it did before S7a. In immediate mode a standalone
- * write is durable when the operation returns (its own transaction), so
- * `afterDurable` hands the effect to `runEffect` at once; inside an open unit
- * of work — in EITHER mode, whatever `runEffect` is (review of 7655bae,
- * finding 1) — the effect is queued through the joined boundary and run only
- * when the registered save hook reports the unit's COMMIT, discarded with its
- * rollback; a caller-owned raw transaction is refused (the repository could
- * not see its outcome).
- *
- * PARTICIPANT PRECONDITIONS ARE PARTICIPANT FAILURES (review of 7655bae,
- * finding 2). While a unit of work is open, every precondition this
- * repository checks before a write or an effect — the save hook taken for
- * registration, the argument shape — is checked INSIDE `unit.join`, so a
- * refusal poisons the unit even when the caller catches it: the unit's other
- * edits can never commit around a notification that was refused.
- *
- * OWNED TRANSACTION FAILURE RESTORES MEMORY (finding 2). An immediate-mode
- * operation that runs in a transaction of its own takes a snapshot of the
- * mirror first and restores it in place — rows, the id index, preference
- * records, every read-only view a caller holds — when the transaction fails,
- * at a statement or at COMMIT itself, so memory never shows a row the file
- * refused and the same id can be retried. A joined unit restores through the
- * store's rollback, which is why a repository given the participant API
- * refuses to join a unit until its `saveHook()` was taken for registration
- * (without the hook the unit's rollback could not reach the mirror). Only a
- * caller-owned raw transaction keeps the explicit `reload()` contract.
- *
- * TYPED COLUMNS, VALID INPUT ONLY (the S8d fidelity rule, 3 November 2026).
- * Every stored field is a typed column; there is no side column. A top-level
- * field of a notification this repository does not know is DROPPED — silently
- * at a snapshot write, reported by row id (`unknownFieldsDropped` in the
- * cutover record and the boot log; ids and counts, never content) at the
- * migration. A wrong-typed value for a known field is refused by name. Nested
- * objects the schema maps to columns (the audience, the acknowledgment
- * contract, a category map) and a preference record refuse unknown fields, as
- * they always did.
- *
- * Whether the tables are authoritative is decided by the cutover record
- * `0009_notifications` in `data_migrations`, never by the tables existing or
- * by row counts. Preferences are retained when a person's notifications are
- * deleted (no cascade: a decision recorded in the readiness review). The
- * audience is polymorphic (no foreign key, any non-empty kind: the reports
- * path writes a `system` audience today and must keep importing). A stored
- * mandatory category `false` is accepted at storage (the route accepts numeric
- * zero and stores it; a legacy row may hold it) and forced ON by the effective
- * view and the gate in domains/platform/notificationPrefs.mjs — nothing is rewritten.
- *
- * Snapshot format (backups, restores, the persistence suites): the legacy
- * shapes exactly, one entry per row / per person, in insertion order. An entry
- * the validators below refuse — and they coerce nothing — refuses the whole
- * write (a save, the migration) with NOTIFICATIONS_IMPORT_BLOCKED, naming the
- * entry index, the row id and the reason and NEVER the text. Normalisations are the ones
- * the pre-S7a snapshot migrations applied or the literal always set:
- * repeatCount absent → 1 (m182_005), read absent → false, groupKey / category
- * absent → null, deferredPush absent → false; each is counted in the cutover
- * record. Logs carry counts, never a text or a preference.
+ * Refusals name the table, the id and the field, never a text or a preference.
  */
-import crypto from 'node:crypto';
-import { readonlyView } from './readonly.mjs';
-import { migrationApplied, transaction } from './database.mjs';
+import { transaction, migrationApplied } from './database.mjs';
+import { deepFreeze } from './scoutingEvidence.mjs';
 import { CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
 
 export const NOTIFICATIONS_MIGRATION = '0009_notifications';
 export const NOTIFICATION_TABLES = Object.freeze(['notifications', 'notification_prefs', 'notification_pref_categories']);
-/** How long an identical UNREAD notification stays coalescible (M18.1; server.mjs NOTIFY_COALESCE_MS before S7a). */
+/** How long an identical UNREAD notification stays coalescible (M18.1). */
 export const NOTIFY_COALESCE_MS = 6 * 60 * 60 * 1000;
+export const NOTIFICATION_AUDIENCE_KINDS = Object.freeze(['player', 'guardian', 'org_user']);
+export const NOTIFICATION_LIMITS = Object.freeze({ id: 80, type: 80, text: 2000, refId: 200 });
+const L = NOTIFICATION_LIMITS;
+const list = (v) => v.map((x) => `'${x}'`).join(', ');
+const len = (c, max, min = 1) => `CHECK (${c} IS NULL OR length(${c}) BETWEEN ${min} AND ${max})`;
+const STAFF = "GENERATED ALWAYS AS (CASE WHEN audience_kind = 'org_user' THEN audience_id END) STORED REFERENCES org_users(id) ON DELETE RESTRICT";
 
 export const NOTIFICATIONS_DDL = `
 CREATE TABLE notifications (
   seq                INTEGER PRIMARY KEY,
-  id                 TEXT NOT NULL UNIQUE,
+  id                 TEXT NOT NULL UNIQUE ${len('id', L.id)},
   occurred_at        INTEGER NOT NULL,
-  audience_kind      TEXT NOT NULL,
-  audience_id        TEXT NOT NULL,
-  type               TEXT NOT NULL,
-  text               TEXT NOT NULL,
-  ref_id             TEXT,
-  read               INTEGER NOT NULL DEFAULT 0 CHECK (read IN (0,1)),
+  audience_kind      TEXT NOT NULL CHECK (audience_kind IN (${list(NOTIFICATION_AUDIENCE_KINDS)})),
+  audience_id        TEXT NOT NULL ${len('audience_id', L.id)},
+  staff_id           TEXT ${STAFF},
+  type               TEXT NOT NULL ${len('type', L.type)},
+  text               TEXT NOT NULL ${len('text', L.text)},
+  ref_id             TEXT ${len('ref_id', L.refId)},
+  read               INTEGER NOT NULL DEFAULT 0 CHECK (read IN (0, 1)),
   repeat_count       INTEGER NOT NULL DEFAULT 1 CHECK (repeat_count >= 1),
-  group_key          TEXT,
-  category           TEXT,
-  deferred_push      INTEGER NOT NULL DEFAULT 0 CHECK (deferred_push IN (0,1)),
-  action_required    INTEGER NOT NULL DEFAULT 0 CHECK (action_required IN (0,1)),
+  category           TEXT CHECK (category IS NULL OR category IN (${list(CATEGORY_NAMES)})),
+  deferred_push      INTEGER NOT NULL DEFAULT 0 CHECK (deferred_push IN (0, 1)),
+  dispatched_at      INTEGER,
+  action_required    INTEGER NOT NULL DEFAULT 0 CHECK (action_required IN (0, 1)),
   action_deadline_at INTEGER,
   action_acked_at    INTEGER,
-  action_acked_by    TEXT,
-  CHECK (action_required = 1 OR (action_deadline_at IS NULL AND action_acked_at IS NULL AND action_acked_by IS NULL))
+  CHECK (action_required = 1 OR (action_deadline_at IS NULL AND action_acked_at IS NULL))
 ) STRICT;
 CREATE INDEX notifications_audience_seq ON notifications (audience_kind, audience_id, seq);
+CREATE INDEX notifications_unread ON notifications (audience_kind, audience_id, type, occurred_at) WHERE read = 0;
+CREATE INDEX notifications_staff ON notifications (staff_id) WHERE staff_id IS NOT NULL;
+CREATE INDEX notifications_undispatched ON notifications (seq) WHERE dispatched_at IS NULL;
+CREATE INDEX notifications_awaiting_ack ON notifications (seq) WHERE action_required = 1 AND action_acked_at IS NULL;
 CREATE TABLE notification_prefs (
-  audience_kind TEXT NOT NULL,
-  audience_id   TEXT NOT NULL,
-  email_intent  INTEGER NOT NULL DEFAULT 0 CHECK (email_intent IN (0,1)),
-  updated_at    INTEGER,
+  audience_kind TEXT NOT NULL CHECK (audience_kind IN (${list(NOTIFICATION_AUDIENCE_KINDS)})),
+  audience_id   TEXT NOT NULL ${len('audience_id', L.id)},
+  staff_id      TEXT ${STAFF},
+  email_intent  INTEGER NOT NULL DEFAULT 0 CHECK (email_intent IN (0, 1)),
+  updated_at    INTEGER NOT NULL,
   PRIMARY KEY (audience_kind, audience_id)
 ) STRICT;
+CREATE INDEX notification_prefs_staff ON notification_prefs (staff_id) WHERE staff_id IS NOT NULL;
 CREATE TABLE notification_pref_categories (
   audience_kind TEXT NOT NULL,
   audience_id   TEXT NOT NULL,
-  category      TEXT NOT NULL,
-  enabled       INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  category      TEXT NOT NULL CHECK (category IN (${list(CATEGORY_NAMES)})),
+  enabled       INTEGER NOT NULL CHECK (enabled IN (0, 1)),
   PRIMARY KEY (audience_kind, audience_id, category),
   FOREIGN KEY (audience_kind, audience_id) REFERENCES notification_prefs(audience_kind, audience_id) ON DELETE CASCADE
 ) STRICT;`;
 
 export const notificationsLive = (sqlite) => migrationApplied(sqlite, NOTIFICATIONS_MIGRATION);
+const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+const blocked = (detail, extra = {}) => refusal('NOTIFICATIONS_IMPORT_BLOCKED', `${detail}; nothing was written`, extra);
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`);
-const blocked = (detail, extra = {}) => Object.assign(new Error(`NOTIFICATIONS_IMPORT_BLOCKED: ${detail}; nothing was imported`), { code: 'NOTIFICATIONS_IMPORT_BLOCKED', ...extra });
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v) => Number.isSafeInteger(v);
-const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
-const isCategory = (k) => Object.hasOwn(CATEGORIES_SET, k);
-const CATEGORIES_SET = Object.freeze(Object.fromEntries(CATEGORY_NAMES.map((k) => [k, true])));
-const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
-// ------------------------------------------------------------------ validation (no coercion; every refusal names the reason, never the text)
-const KNOWN_KEYS = Object.freeze(['id', 'ts', 'audience', 'type', 'text', 'refId', 'read', 'repeatCount', 'groupKey', 'category', 'deferredPush', 'actionRequired']);
-const ACTION_KEYS = Object.freeze(['deadline', 'ackedAt', 'ackedBy']);
-const AUDIENCE_KEYS = Object.freeze(['kind', 'id']);
-/** Validate one audience ({ kind, id }, both non-empty strings, nothing else: the two columns are all the schema keeps; the kind is open — polymorphic, no foreign key). */
-function audienceOf(raw, field = 'audience') {
+const isClock = (v) => isInt(v) && v >= 0;
+const text = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
+const isCategory = (k) => CATEGORY_NAMES.includes(k);
+const unknownOf = (raw, known) => Object.keys(raw).filter((k) => !known.includes(k));
+const groupKeyOf = (type, refId) => (refId ? `${type}:${refId}` : null);
+
+// ------------------------------------------------------------------ typing (no coercion; a refusal names the field, never the text)
+/** Type an audience `{ kind, id }`: `{ audience }` or `{ reason }`. */
+export function audienceOf(raw, field = 'audience') {
   if (!isPlainObject(raw)) return { reason: `${field} must be an object { kind, id } (got ${describe(raw)})` };
-  const unknown = Object.keys(raw).filter((k) => !AUDIENCE_KEYS.includes(k));
-  if (unknown.length) return { reason: `${field} carries unknown field(s) ${unknown.join(', ')} (the schema keeps an audience as kind and id only; a field dropped here would be lost)` };
-  if (!nonEmpty(raw.kind)) return { reason: `${field}.kind must be a non-empty string` };
-  if (!nonEmpty(raw.id)) return { reason: `${field}.id must be a non-empty string` };
+  const unknown = unknownOf(raw, ['kind', 'id']);
+  if (unknown.length) return { reason: `${field} carries unknown field(s) ${unknown.join(', ')}` };
+  if (!NOTIFICATION_AUDIENCE_KINDS.includes(raw.kind)) return { reason: `${field}.kind must be one of ${NOTIFICATION_AUDIENCE_KINDS.join(', ')}` };
+  if (!text(raw.id, L.id)) return { reason: `${field}.id must be text of 1 to ${L.id} characters` };
   return { audience: { kind: raw.kind, id: raw.id } };
 }
-function actionOf(raw) {
-  if (raw === undefined || raw === null) return { action: null };
-  if (!isPlainObject(raw)) return { reason: `actionRequired must be an object { deadline, ackedAt, ackedBy } or null (got ${describe(raw)})` };
-  const unknown = Object.keys(raw).filter((k) => !ACTION_KEYS.includes(k));
-  if (unknown.length) return { reason: `actionRequired carries unknown field(s) ${unknown.join(', ')}` };
-  const deadline = raw.deadline === undefined ? null : raw.deadline;
-  if (deadline !== null && !isInt(deadline)) return { reason: 'actionRequired.deadline must be an integer timestamp or null' };
-  const ackedAt = raw.ackedAt === undefined ? null : raw.ackedAt;
-  if (ackedAt !== null && !isInt(ackedAt)) return { reason: 'actionRequired.ackedAt must be an integer timestamp or null' };
-  const ackedBy = raw.ackedBy === undefined ? null : raw.ackedBy;
-  if (ackedBy !== null && typeof ackedBy !== 'string') return { reason: 'actionRequired.ackedBy must be a string or null' };
-  return { action: { deadline, ackedAt, ackedBy } };
-}
-/** Validate one exported notification: `{ ok: true, row, normalised: [...names], dropped: [...unknown field names] }` or `{ ok: false, reason }`. The row is the mirror shape, known fields only. */
-export function validateNotificationRow(raw) {
-  if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
-  if (!nonEmpty(raw.id)) return { ok: false, reason: 'id must be a non-empty string' };
-  if (!isInt(raw.ts) || raw.ts < 0) return { ok: false, reason: 'ts must be a non-negative integer timestamp' };
-  const a = audienceOf(raw.audience); if (a.reason) return { ok: false, reason: a.reason };
-  if (!nonEmpty(raw.type)) return { ok: false, reason: 'type must be a non-empty string' };
-  if (typeof raw.text !== 'string') return { ok: false, reason: 'text must be a string' };
-  const refId = raw.refId === undefined ? null : raw.refId;
-  if (refId !== null && typeof refId !== 'string') return { ok: false, reason: 'refId must be a string, null or absent' };
-  const normalised = [];
-  let read = raw.read; if (read === undefined) { read = false; normalised.push('read'); } else if (typeof read !== 'boolean') return { ok: false, reason: 'read must be a boolean' };
-  let repeatCount = raw.repeatCount; if (repeatCount === undefined) { repeatCount = 1; normalised.push('repeatCount'); } else if (!isInt(repeatCount) || repeatCount < 1) return { ok: false, reason: 'repeatCount must be an integer of at least 1' };
-  let groupKey = raw.groupKey; if (groupKey === undefined) { groupKey = null; normalised.push('groupKey'); } else if (groupKey !== null && typeof groupKey !== 'string') return { ok: false, reason: 'groupKey must be a string, null or absent' };
-  let category = raw.category; if (category === undefined) { category = null; normalised.push('category'); } else if (category !== null && (typeof category !== 'string' || !isCategory(category))) return { ok: false, reason: `category ${typeof category === 'string' ? category : describe(category)} is not a notification category` };
-  let deferredPush = raw.deferredPush; if (deferredPush === undefined) { deferredPush = false; normalised.push('deferredPush'); } else if (typeof deferredPush !== 'boolean') return { ok: false, reason: 'deferredPush must be a boolean' };
-  const act = actionOf(raw.actionRequired); if (act.reason) return { ok: false, reason: act.reason };
-  const dropped = Object.keys(raw).filter((k) => !KNOWN_KEYS.includes(k));
-  const row = { id: raw.id, ts: raw.ts, audience: a.audience, type: raw.type, text: raw.text, refId, read, repeatCount, groupKey, category, deferredPush };
-  if (act.action) row.actionRequired = act.action;
-  return { ok: true, row, normalised, dropped };
-}
-/** Validate a whole exported notifications collection; throws NOTIFICATIONS_IMPORT_BLOCKED (entries and reasons, never a text). Returns `{ rows, normalised, unknownFieldsDropped: [...row ids], withActionRequired }`. */
-export function validateNotificationRows(rows, { label = 'the notifications collection' } = {}) {
-  if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
-  const out = []; const problems = []; const ids = new Set();
-  const normalised = { read: 0, repeatCount: 0, groupKey: 0, category: 0, deferredPush: 0 }; const unknownFieldsDropped = []; let withActionRequired = 0;
-  rows.forEach((raw, i) => {
-    const v = validateNotificationRow(raw);
-    if (!v.ok) { problems.push(`entry #${i}${nonEmpty(raw?.id) ? ` (${raw.id})` : ''}: ${v.reason}`); return; }
-    if (ids.has(v.row.id)) { problems.push(`entry #${i}: duplicates the id of an earlier entry (${v.row.id})`); return; }
-    ids.add(v.row.id); for (const n of v.normalised) normalised[n] += 1; if (v.dropped.length) unknownFieldsDropped.push(v.row.id); if (v.row.actionRequired) withActionRequired += 1;
-    out.push(v.row);
-  });
-  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  return { rows: out, normalised, unknownFieldsDropped, withActionRequired };
+/** An acknowledgment contract given to `create` / `coalesce`: `{ deadline }` (an integer or null). */
+function contractOf(raw) {
+  if (raw === null || raw === undefined) return { action: null };
+  if (!isPlainObject(raw) || unknownOf(raw, ['deadline']).length) return { reason: 'actionRequired must be { deadline } or null' };
+  const deadline = raw.deadline ?? null;
+  if (deadline !== null && !isClock(deadline)) return { reason: 'actionRequired.deadline must be an integer timestamp or null' };
+  return { action: { deadline, ackedAt: null } };
 }
 
-const PREF_KEYS = Object.freeze(['audienceKind', 'audienceId', 'categories', 'emailIntent', 'updatedAt']);
-/** Validate one category map (own keys only, every key a category, every value a boolean). Returns `{ categories }` or `{ reason }`. */
+const RECORD_KEYS = Object.freeze(['id', 'ts', 'audience', 'type', 'text', 'refId', 'read', 'repeatCount', 'groupKey', 'category', 'deferredPush', 'dispatchedAt', 'actionRequired']);
+/**
+ * Type one whole record (the snapshot path): `{ ok: true, row }` or `{ ok: false, reason }`. An unknown field is
+ * refused. Absent `read`, `repeatCount`, `category`, `deferredPush`, `dispatchedAt` take their defaults; a given
+ * `groupKey` must be the worked-out one and a given `actionRequired.ackedBy` the audience's id (neither is stored).
+ */
+export function typeNotification(raw) {
+  if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
+  if (!text(raw.id, L.id)) return { ok: false, reason: `id must be text of 1 to ${L.id} characters` };
+  const at = `notification ${raw.id}`;
+  const unknown = unknownOf(raw, RECORD_KEYS);
+  if (unknown.length) return { ok: false, reason: `${at}: unknown field(s) ${unknown.join(', ')}` };
+  const r = { refId: null, read: false, repeatCount: 1, category: null, deferredPush: false, dispatchedAt: null, actionRequired: null, ...raw };
+  if (!isClock(r.ts)) return { ok: false, reason: `${at}: ts must be a non-negative integer timestamp` };
+  const a = audienceOf(r.audience); if (a.reason) return { ok: false, reason: `${at}: ${a.reason}` };
+  if (!text(r.type, L.type)) return { ok: false, reason: `${at}: type must be text of 1 to ${L.type} characters` };
+  if (!text(r.text, L.text)) return { ok: false, reason: `${at}: text must be text of 1 to ${L.text} characters` };
+  if (r.refId !== null && !text(r.refId, L.refId)) return { ok: false, reason: `${at}: refId must be text of 1 to ${L.refId} characters or null` };
+  if (typeof r.read !== 'boolean') return { ok: false, reason: `${at}: read must be a boolean` };
+  if (!isInt(r.repeatCount) || r.repeatCount < 1) return { ok: false, reason: `${at}: repeatCount must be an integer of at least 1` };
+  if (Object.hasOwn(r, 'groupKey') && r.groupKey !== groupKeyOf(r.type, r.refId)) return { ok: false, reason: `${at}: groupKey is worked out from the type and refId (${groupKeyOf(r.type, r.refId) === null ? 'null without a refId' : 'type:refId'})` };
+  if (r.category !== null && !isCategory(r.category)) return { ok: false, reason: `${at}: category must be a notification category or null` };
+  if (typeof r.deferredPush !== 'boolean') return { ok: false, reason: `${at}: deferredPush must be a boolean` };
+  if (r.dispatchedAt !== null && !isClock(r.dispatchedAt)) return { ok: false, reason: `${at}: dispatchedAt must be an integer timestamp or null` };
+  let action = null;
+  if (r.actionRequired !== null) {
+    const x = r.actionRequired;
+    if (!isPlainObject(x) || unknownOf(x, ['deadline', 'ackedAt', 'ackedBy']).length) return { ok: false, reason: `${at}: actionRequired must be { deadline, ackedAt, ackedBy } or null` };
+    const deadline = x.deadline ?? null; const ackedAt = x.ackedAt ?? null; const ackedBy = x.ackedBy ?? null;
+    if (deadline !== null && !isClock(deadline)) return { ok: false, reason: `${at}: actionRequired.deadline must be an integer timestamp or null` };
+    if (ackedAt !== null && !isClock(ackedAt)) return { ok: false, reason: `${at}: actionRequired.ackedAt must be an integer timestamp or null` };
+    if (ackedBy !== null && (ackedAt === null || ackedBy !== a.audience.id)) return { ok: false, reason: `${at}: actionRequired.ackedBy is the audience's id once acknowledged, null before` };
+    action = { deadline, ackedAt };
+  }
+  return { ok: true, row: { id: r.id, ts: r.ts, audience: a.audience, type: r.type, text: r.text, refId: r.refId, read: r.read, repeatCount: r.repeatCount, category: r.category, deferredPush: r.deferredPush, dispatchedAt: r.dispatchedAt, action } };
+}
+
+/** Type a category map (own keys, every key a category, every value a boolean): `{ categories }` or `{ reason }`. */
 function categoriesOf(raw, field = 'categories') {
   if (!isPlainObject(raw)) return { reason: `${field} must be an object of category → boolean (got ${describe(raw)})` };
   const categories = {};
@@ -265,439 +166,235 @@ function categoriesOf(raw, field = 'categories') {
   }
   return { categories };
 }
-/** Validate one exported preference record: `{ ok: true, row, normalised }` or `{ ok: false, reason }`. */
-export function validateNotificationPrefsRow(raw) {
+const PREF_KEYS = Object.freeze(['audienceKind', 'audienceId', 'categories', 'emailIntent', 'updatedAt']);
+/** Type one whole preference record (the snapshot path): `{ ok: true, row }` or `{ ok: false, reason }`. */
+export function typeNotificationPrefs(raw) {
   if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
-  const unknown = Object.keys(raw).filter((k) => !PREF_KEYS.includes(k));
+  const unknown = unknownOf(raw, PREF_KEYS);
   if (unknown.length) return { ok: false, reason: `unknown field(s) ${unknown.join(', ')}` };
-  if (!nonEmpty(raw.audienceKind)) return { ok: false, reason: 'audienceKind must be a non-empty string' };
-  if (!nonEmpty(raw.audienceId)) return { ok: false, reason: 'audienceId must be a non-empty string' };
-  const c = categoriesOf(raw.categories === undefined ? {} : raw.categories); if (c.reason) return { ok: false, reason: c.reason };
-  const normalised = [];
-  let emailIntent = raw.emailIntent; if (emailIntent === undefined) { emailIntent = false; normalised.push('emailIntent'); } else if (typeof emailIntent !== 'boolean') return { ok: false, reason: 'emailIntent must be a boolean' };
-  let updatedAt = raw.updatedAt; if (updatedAt === undefined) { updatedAt = null; normalised.push('updatedAt'); } else if (updatedAt !== null && !isInt(updatedAt)) return { ok: false, reason: 'updatedAt must be an integer timestamp, null or absent' };
-  return { ok: true, row: { audienceKind: raw.audienceKind, audienceId: raw.audienceId, categories: c.categories, emailIntent, updatedAt }, normalised };
-}
-/** Validate a whole exported preferences collection; throws NOTIFICATIONS_IMPORT_BLOCKED. Returns `{ rows, categories, normalised }`. */
-export function validateNotificationPrefsRows(rows, { label = 'the notificationPrefs collection' } = {}) {
-  if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
-  const out = []; const problems = []; const seen = new Set(); const normalised = { emailIntent: 0, updatedAt: 0 }; let categories = 0;
-  rows.forEach((raw, i) => {
-    const v = validateNotificationPrefsRow(raw);
-    if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
-    const key = `${v.row.audienceKind}\u0000${v.row.audienceId}`;
-    if (seen.has(key)) { problems.push(`entry #${i}: a second entry for ${v.row.audienceKind} ${v.row.audienceId} (one record per person)`); return; }
-    seen.add(key); for (const n of v.normalised) normalised[n] += 1; categories += Object.keys(v.row.categories).length;
-    out.push(v.row);
-  });
-  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
-  return { rows: out, categories, normalised };
+  const a = audienceOf({ kind: raw.audienceKind, id: raw.audienceId }, 'audienceKind / audienceId'); if (a.reason) return { ok: false, reason: a.reason };
+  const c = categoriesOf(raw.categories ?? {}); if (c.reason) return { ok: false, reason: c.reason };
+  const emailIntent = raw.emailIntent ?? false;
+  if (typeof emailIntent !== 'boolean') return { ok: false, reason: 'emailIntent must be a boolean' };
+  if (!isClock(raw.updatedAt)) return { ok: false, reason: 'updatedAt must be an integer timestamp' };
+  return { ok: true, row: { audienceKind: a.audience.kind, audienceId: a.audience.id, categories: c.categories, emailIntent, updatedAt: raw.updatedAt } };
 }
 
-// ------------------------------------------------------------------ rows ↔ the table
-const SELECT = 'SELECT seq, id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required, action_deadline_at, action_acked_at, action_acked_by FROM notifications';
-const INSERT = 'INSERT INTO notifications (id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, group_key, category, deferred_push, action_required, action_deadline_at, action_acked_at, action_acked_by) VALUES (@id, @occurred_at, @audience_kind, @audience_id, @type, @text, @ref_id, @read, @repeat_count, @group_key, @category, @deferred_push, @action_required, @action_deadline_at, @action_acked_at, @action_acked_by)';
-/** The mirror row for a table row. */
-function rowFromDb(r) {
-  const row = { id: r.id, ts: r.occurred_at, audience: { kind: r.audience_kind, id: r.audience_id }, type: r.type, text: r.text, refId: r.ref_id, read: r.read === 1, repeatCount: r.repeat_count, groupKey: r.group_key, category: r.category, deferredPush: r.deferred_push === 1 };
-  if (r.action_required === 1) row.actionRequired = { deadline: r.action_deadline_at, ackedAt: r.action_acked_at, ackedBy: r.action_acked_by };
+// ------------------------------------------------------------------ rows ↔ the tables
+const COLS = 'id, occurred_at, audience_kind, audience_id, type, text, ref_id, read, repeat_count, category, deferred_push, dispatched_at, action_required, action_deadline_at, action_acked_at';
+const INSERT = `INSERT INTO notifications (${COLS}) VALUES (${COLS.split(', ').map((c) => `@${c}`).join(', ')})`;
+const SELECT = `SELECT seq, ${COLS} FROM notifications`;
+const rowParams = (r) => ({
+  id: r.id, occurred_at: r.ts, audience_kind: r.audience.kind, audience_id: r.audience.id, type: r.type, text: r.text, ref_id: r.refId, read: r.read ? 1 : 0,
+  repeat_count: r.repeatCount, category: r.category, deferred_push: r.deferredPush ? 1 : 0, dispatched_at: r.dispatchedAt,
+  action_required: r.action ? 1 : 0, action_deadline_at: r.action ? r.action.deadline : null, action_acked_at: r.action ? r.action.ackedAt : null,
+});
+/** The record for a table row (a plain object; the repository freezes what it hands out). */
+function fromDb(r) {
+  const row = {
+    id: r.id, ts: r.occurred_at, audience: { kind: r.audience_kind, id: r.audience_id }, type: r.type, text: r.text, refId: r.ref_id, read: r.read === 1,
+    repeatCount: r.repeat_count, groupKey: groupKeyOf(r.type, r.ref_id), category: r.category, deferredPush: r.deferred_push === 1, dispatchedAt: r.dispatched_at,
+  };
+  if (r.action_required === 1) row.actionRequired = { deadline: r.action_deadline_at, ackedAt: r.action_acked_at, ackedBy: r.action_acked_at === null ? null : r.audience_id };
   return row;
 }
-/** The insert parameters for a mirror row. */
-function rowParams(row) {
-  const a = row.actionRequired ?? null;
-  return {
-    id: row.id, occurred_at: row.ts, audience_kind: row.audience.kind, audience_id: row.audience.id, type: row.type, text: row.text, ref_id: row.refId, read: row.read ? 1 : 0, repeat_count: row.repeatCount,
-    group_key: row.groupKey, category: row.category, deferred_push: row.deferredPush ? 1 : 0, action_required: a ? 1 : 0, action_deadline_at: a ? a.deadline : null, action_acked_at: a ? a.ackedAt : null, action_acked_by: a ? a.ackedBy : null,
-  };
+/** What a feed response carries for one record: an allowlist (the delivery marker is the server's). */
+export function feedItem(n) {
+  const out = { id: n.id, ts: n.ts, audience: { kind: n.audience.kind, id: n.audience.id }, type: n.type, text: n.text, refId: n.refId, read: n.read, repeatCount: n.repeatCount, groupKey: n.groupKey, category: n.category, deferredPush: n.deferredPush };
+  if (n.actionRequired) out.actionRequired = { deadline: n.actionRequired.deadline, ackedAt: n.actionRequired.ackedAt, ackedBy: n.actionRequired.ackedBy };
+  return out;
 }
-/** A DETACHED copy of a mirror row (the export / snapshot shape; nothing shared with the mirror). */
-const copyRow = (row) => { const c = { ...row, audience: { ...row.audience } }; if (row.actionRequired) c.actionRequired = { ...row.actionRequired }; return c; };
-const copyPref = (p) => ({ audienceKind: p.audienceKind, audienceId: p.audienceId, categories: { ...p.categories }, emailIntent: p.emailIntent, updatedAt: p.updatedAt });
-const prefKey = (kind, id) => `${kind}\u0000${id}`;
-
-function readRows(sqlite) { return sqlite.prepare(`${SELECT} ORDER BY seq`).all().map(rowFromDb); }
+const readRows = (sqlite) => sqlite.prepare(`${SELECT} ORDER BY seq`).all().map(fromDb);
 function readPrefs(sqlite) {
   const out = []; const by = new Map();
   for (const r of sqlite.prepare('SELECT audience_kind, audience_id, email_intent, updated_at FROM notification_prefs ORDER BY rowid').all()) {
     const p = { audienceKind: r.audience_kind, audienceId: r.audience_id, categories: {}, emailIntent: r.email_intent === 1, updatedAt: r.updated_at };
-    out.push(p); by.set(prefKey(p.audienceKind, p.audienceId), p);
+    out.push(p); by.set(`${p.audienceKind}\u0000${p.audienceId}`, p);
   }
-  for (const r of sqlite.prepare('SELECT audience_kind, audience_id, category, enabled FROM notification_pref_categories ORDER BY rowid').all()) by.get(prefKey(r.audience_kind, r.audience_id)).categories[r.category] = r.enabled === 1;
+  for (const r of sqlite.prepare('SELECT audience_kind, audience_id, category, enabled FROM notification_pref_categories ORDER BY rowid').all()) by.get(`${r.audience_kind}\u0000${r.audience_id}`).categories[r.category] = r.enabled === 1;
   return out;
 }
-function writeRows(sqlite, rows) {
-  sqlite.exec('DELETE FROM notifications');
-  const ins = sqlite.prepare(INSERT);
-  for (const r of rows) ins.run(rowParams(r));
-  return rows.length;
+/** Type a whole snapshot collection, refusing it whole on the first problems (ids and reasons, never a text). */
+function typeAll(rows, typer, label, keyOf) {
+  if (!Array.isArray(rows)) throw blocked(`${label} must be an array of entries (got ${describe(rows)})`);
+  const out = []; const problems = []; const seen = new Set();
+  rows.forEach((raw, i) => {
+    const v = typer(raw);
+    if (!v.ok) { problems.push(`entry #${i}: ${v.reason}`); return; }
+    const key = keyOf(v.row);
+    if (seen.has(key)) { problems.push(`entry #${i}: duplicates an earlier entry (${key.replace('\u0000', ' ')})`); return; }
+    seen.add(key); out.push(v.row);
+  });
+  if (problems.length) throw blocked(`${problems.length} invalid entr${problems.length === 1 ? 'y' : 'ies'} in ${label} — ${problems.slice(0, 20).join('; ')}${problems.length > 20 ? '; …' : ''}`, { problems });
+  return out;
 }
-function writePrefs(sqlite, rows) {
-  sqlite.exec('DELETE FROM notification_prefs'); // the categories cascade
-  const parent = sqlite.prepare('INSERT INTO notification_prefs (audience_kind, audience_id, email_intent, updated_at) VALUES (?, ?, ?, ?)');
-  const cat = sqlite.prepare('INSERT INTO notification_pref_categories (audience_kind, audience_id, category, enabled) VALUES (?, ?, ?, ?)');
-  for (const p of rows) {
-    parent.run(p.audienceKind, p.audienceId, p.emailIntent ? 1 : 0, p.updatedAt);
-    for (const [k, v] of Object.entries(p.categories)) cat.run(p.audienceKind, p.audienceId, k, v ? 1 : 0);
-  }
-  return rows.length;
+/** The staff a set of audiences names that `org_users` does not hold (named before the engine would). */
+function missingStaff(sqlite, ids) {
+  const has = sqlite.prepare('SELECT 1 FROM org_users WHERE id = ?');
+  return [...new Set(ids)].filter((id) => !has.get(id));
 }
 
 /**
- * Whole-table access for the tools that treat the file as one snapshot
- * (backups, restores, the persistence suites). Before the cutover record both
- * methods decline (`null` / `false`): the caller keeps the legacy blob, which
- * the migration imports on the next boot. Afterwards `read` returns the rows in
- * the legacy shape, in insertion order, and `replace` validates every entry,
- * rewrites the table inside the caller's transaction (array position → seq)
- * and refuses the whole write on the first problem.
+ * Whole-table access for snapshot mode (tools, fixtures, the persistence suites). `read` returns every row in
+ * insertion order; `replace` types every entry (an unknown field or a wrong-typed value refuses the whole write,
+ * naming the entry) and rewrites the table inside the caller's transaction (array position → seq). Both decline
+ * before the 0009 record. A staff audience must name an existing staff member (NOTIFICATIONS_STAFF_MISSING).
  */
 export const NOTIFICATIONS_TABLE = {
   name: 'notifications',
-  read(sqlite) { if (!notificationsLive(sqlite)) return null; return readRows(sqlite); },
+  read(sqlite) { return notificationsLive(sqlite) ? readRows(sqlite) : null; },
   replace(sqlite, rows) {
     if (!notificationsLive(sqlite)) return false;
     if (!sqlite.isTransaction) throw new Error('notifications: replace() runs inside the caller\'s transaction');
-    writeRows(sqlite, validateNotificationRows(rows).rows);
+    const typed = typeAll(rows, typeNotification, 'the notifications snapshot collection', (r) => r.id);
+    const missing = missingStaff(sqlite, typed.filter((r) => r.audience.kind === 'org_user').map((r) => r.audience.id));
+    if (missing.length) throw refusal('NOTIFICATIONS_STAFF_MISSING', `notifications name staff that org_users does not hold: ${missing.slice(0, 20).join(', ')}; nothing was written`, { ids: missing });
+    sqlite.exec('DELETE FROM notifications');
+    const ins = sqlite.prepare(INSERT);
+    for (const r of typed) ins.run(rowParams(r));
     return true;
   },
 };
 export const NOTIFICATION_PREFS_TABLE = {
   name: 'notificationPrefs',
-  read(sqlite) { if (!notificationsLive(sqlite)) return null; return readPrefs(sqlite); },
+  read(sqlite) { return notificationsLive(sqlite) ? readPrefs(sqlite) : null; },
   replace(sqlite, rows) {
     if (!notificationsLive(sqlite)) return false;
     if (!sqlite.isTransaction) throw new Error('notification preferences: replace() runs inside the caller\'s transaction');
-    writePrefs(sqlite, validateNotificationPrefsRows(rows).rows);
+    const typed = typeAll(rows, typeNotificationPrefs, 'the notificationPrefs snapshot collection', (p) => `${p.audienceKind}\u0000${p.audienceId}`);
+    const missing = missingStaff(sqlite, typed.filter((p) => p.audienceKind === 'org_user').map((p) => p.audienceId));
+    if (missing.length) throw refusal('NOTIFICATIONS_STAFF_MISSING', `notification preferences name staff that org_users does not hold: ${missing.slice(0, 20).join(', ')}; nothing was written`, { ids: missing });
+    sqlite.exec('DELETE FROM notification_prefs'); // the categories cascade
+    const parent = sqlite.prepare('INSERT INTO notification_prefs (audience_kind, audience_id, email_intent, updated_at) VALUES (?, ?, ?, ?)');
+    const cat = sqlite.prepare('INSERT INTO notification_pref_categories (audience_kind, audience_id, category, enabled) VALUES (?, ?, ?, ?)');
+    for (const p of typed) {
+      parent.run(p.audienceKind, p.audienceId, p.emailIntent ? 1 : 0, p.updatedAt);
+      for (const [k, v] of Object.entries(p.categories)) cat.run(p.audienceKind, p.audienceId, k, v ? 1 : 0);
+    }
     return true;
   },
 };
 
 // ------------------------------------------------------------------ the repository
-const defaultNextId = (prefix) => `${prefix}-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
+const WRITES = new Set(['create', 'coalesce', 'ack', 'markRead', 'markDispatched', 'deleteForAudience', 'updatePrefs']);
+const defaultNextId = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}`;
 
-/** Run one effect without a store: it never throws into the caller; a failure (thrown or rejected) is reported through `warn`. */
-const bareEffectRunner = (warn) => (fn) => {
-  const failed = (err) => warn(`notifications: an effect failed after the write was durable (the write stands): ${String(err?.message ?? err).slice(0, 200)}`);
-  let result; try { result = fn(); } catch (err) { failed(err); return; }
-  if (result !== null && (typeof result === 'object' || typeof result === 'function') && typeof result.then === 'function') Promise.resolve(result).then(undefined, failed);
-};
-
-/**
- * `unit` is the store's participant API ({ active(), join(work) }) or null (a
- * tool, a test, the migration). `staged` selects the server's write mode (see
- * the header); it needs `unit`, and the store must register `saveHook()` —
- * with `unit` given, no operation joins a unit until `saveHook()` was taken.
- * `runEffect(fn)` runs one durable effect (the store's `afterCommit`: counted,
- * logged, never thrown; a tool without a store gets a runner that reports
- * through `warn`). `nextId(prefix)` mints notification ids (the server's
- * generator; a tool may leave the default).
- */
-export function createNotificationsRepository({ sqlite, now = Date.now, nextId = defaultNextId, log = () => {}, warn = () => {}, unit = null, staged = false, runEffect = bareEffectRunner(warn) } = {}) {
-  if (!sqlite) throw new TypeError('the notifications repository needs a SQLite connection (node:sqlite); notifications have no in-memory or JSON fallback');
-  if (unit !== null && (typeof unit?.active !== 'function' || typeof unit?.join !== 'function')) throw new TypeError('the notifications repository needs the store\'s participant API `unit` ({ active(), join(work) }) or null; a unit without join() could not report an operation\'s failure to the unit of work');
-  if (staged && !unit) throw new TypeError('the notifications repository in staged mode needs the store\'s participant API `unit` and the store must register its saveHook()');
-  if (typeof runEffect !== 'function') throw new TypeError('runEffect must be a function (the store\'s afterCommit)');
-  const stmt = {
-    cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
-    insert: sqlite.prepare(INSERT),
-    coalesce: sqlite.prepare('UPDATE notifications SET occurred_at = ?, repeat_count = ? WHERE id = ?'),
-    action: sqlite.prepare('UPDATE notifications SET action_required = 1, action_deadline_at = ?, action_acked_at = NULL, action_acked_by = NULL WHERE id = ?'),
-    ack: sqlite.prepare('UPDATE notifications SET action_acked_at = ?, action_acked_by = ? WHERE id = ?'),
-    markRead: sqlite.prepare('UPDATE notifications SET read = 1 WHERE audience_kind = ? AND audience_id = ? AND read = 0'),
-    deleteFor: sqlite.prepare('DELETE FROM notifications WHERE audience_kind = ? AND audience_id = ?'),
-    prefUpsert: sqlite.prepare('INSERT INTO notification_prefs (audience_kind, audience_id, email_intent, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(audience_kind, audience_id) DO UPDATE SET email_intent = excluded.email_intent, updated_at = excluded.updated_at'),
-    catUpsert: sqlite.prepare('INSERT INTO notification_pref_categories (audience_kind, audience_id, category, enabled) VALUES (?, ?, ?, ?) ON CONFLICT(audience_kind, audience_id, category) DO UPDATE SET enabled = excluded.enabled'),
+/** `createNotificationsRepository({ sqlite, unit, now, nextId, log })`: the notifications' writes and queries, plus `reads` (the queries alone). */
+export function createNotificationsRepository({ sqlite, unit = null, now = Date.now, nextId = defaultNextId, log = () => {} } = {}) {
+  if (!sqlite) throw new TypeError('the notifications repository needs a SQLite connection (node:sqlite); notifications have no in-memory fallback');
+  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const cache = new Map();
+  const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
+  const dec = (rows) => rows.map((r) => deepFreeze(fromDb(r)));
+  const byId = (id) => (typeof id === 'string' ? dec(q(`${SELECT} WHERE id = ?`).all(id))[0] ?? null : null);
+  const notFound = (id) => refusal('NOTIFICATION_NOT_FOUND', `notifications ${id} is not a record of the repository`);
+  const invalid = (reason) => refusal('NOTIFICATION_RECORD_INVALID', reason);
+  const prefsFor = (kind, id) => {
+    const p = q('SELECT email_intent, updated_at FROM notification_prefs WHERE audience_kind = ? AND audience_id = ?').get(kind, id);
+    if (!p) return null;
+    const categories = {};
+    for (const c of q('SELECT category, enabled FROM notification_pref_categories WHERE audience_kind = ? AND audience_id = ? ORDER BY rowid').all(kind, id)) categories[c.category] = c.enabled === 1;
+    return deepFreeze({ audienceKind: kind, audienceId: id, categories, emailIntent: p.email_intent === 1, updatedAt: p.updated_at });
   };
-
-  // The mirror: every row, in insertion order; every preference record.
-  const rows = []; const byId = new Map();
-  const prefs = []; const prefsBy = new Map();
-  const view = readonlyView(rows, 'a notification');
-  const prefsView = readonlyView(prefs, 'a notification preference');
-  const load = () => {
-    rows.length = 0; byId.clear(); prefs.length = 0; prefsBy.clear();
-    if (!notificationsLive(sqlite)) return;
-    for (const r of readRows(sqlite)) { rows.push(r); byId.set(r.id, r); }
-    for (const p of readPrefs(sqlite)) { prefs.push(p); prefsBy.set(prefKey(p.audienceKind, p.audienceId), p); }
-  };
-  load();
-
-  // Staged mode: the SQL queue, FIFO, drained whole inside every save
-  // transaction; and the effects queue, each entry bound to the writes queued
-  // before it (`at` = how many), run when the save that carried them commits.
-  const pending = []; let inFlight = 0;
-  const effects = [];
-  let hookTaken = false; // saveHook() was taken for registration with the store
-  const inUnit = () => !!unit?.active?.();
-  const hookRefusal = (what) => new Error(`notifications: ${what} needs the repository's save hook registered with the store first (store.setSaveHook(repo.saveHook())): the hook is how a save writes the queued statements and how a unit of work's rollback restores this repository's memory`);
-  /**
-   * The one boundary of every mutation. `fn(exec)` validates, then mutates the
-   * mirror and hands each SQL statement to `exec` — run at once in immediate
-   * mode, queued in staged mode. Joined inside an open unit in both modes,
-   * its preconditions included (refused — as a participant failure — until
-   * the save hook was taken). An owned immediate transaction that fails — a
-   * statement, or COMMIT itself — restores the mirror in place.
-   */
-  const operation = (fn) => {
-    if (inUnit()) {
-      // Every participant precondition runs INSIDE the joined failure boundary
-      // (review of 7655bae, finding 2): a refusal here is a participant failure
-      // the store records, so a caller that catches it still cannot commit the
-      // unit's other edits around the write that never happened.
-      return unit.join(() => {
-        if (!hookTaken) throw hookRefusal(staged ? 'a staged write inside a unit of work' : 'joining a unit of work');
-        return staged ? fn((op) => { pending.push(op); }) : fn((op) => op());
-      });
-    }
-    if (staged) {
-      if (!hookTaken) throw hookRefusal('a staged write');
-      if (sqlite.isTransaction) throw new Error('notifications: the staged repository cannot take part in a transaction it did not open (the server\'s transactions are units of work or snapshot saves)');
-      return fn((op) => { pending.push(op); });
-    }
-    const body = () => fn((op) => op());
-    if (sqlite.isTransaction) return body(); // caller-owned: see reload()
-    const state = repo.snapshotState();
-    try { return transaction(sqlite, body); } catch (err) { repo.restoreState(state); throw err; }
-  };
-  const restoreInto = (obj, copy) => {
-    for (const k of Object.keys(obj)) if (!Object.hasOwn(copy, k)) delete obj[k];
-    for (const [k, v] of Object.entries(copy)) {
-      if (k === 'actionRequired' && obj.actionRequired && v) { Object.assign(obj.actionRequired, v); continue; }
-      if (k === 'categories' && obj.categories && v) { for (const c of Object.keys(obj.categories)) delete obj.categories[c]; Object.assign(obj.categories, v); continue; }
-      obj[k] = v;
-    }
-  };
+  const staffExists = (audience) => audience.kind !== 'org_user' || !!q('SELECT 1 FROM org_users WHERE id = ?').get(audience.id);
 
   const repo = {
-    view,
-    prefsView,
     coalesceMs: NOTIFY_COALESCE_MS,
-    /** Boot: refuse to run without the cutover record; (re)load the mirror; report counts (never a text). */
+
+    // ---------------------------------------------------------- writes
+    /** A new row at the end of the feed. Refuses junk by field and a staff audience that does not exist. Returns the stored record. */
+    create: ({ audience, type, text: body, refId = null, category = null, deferredPush = false, actionRequired = null, at = now(), id = nextId('ntf') } = {}) => operation(() => {
+      const a = audienceOf(audience); if (a.reason) throw invalid(`a notification's ${a.reason}`);
+      if (!text(type, L.type)) throw invalid(`a notification's type must be text of 1 to ${L.type} characters`);
+      if (!text(body, L.text)) throw invalid(`a notification's text must be text of 1 to ${L.text} characters`);
+      if (refId !== null && !text(refId, L.refId)) throw invalid(`a notification's refId must be text of 1 to ${L.refId} characters or null`);
+      if (category !== null && !isCategory(category)) throw invalid('a notification\'s category must be a notification category or null');
+      if (typeof deferredPush !== 'boolean') throw invalid('deferredPush must be a boolean');
+      if (!isClock(at)) throw invalid('at must be an integer timestamp');
+      if (!text(id, L.id)) throw invalid(`a notification's id must be text of 1 to ${L.id} characters`);
+      const c = contractOf(actionRequired); if (c.reason) throw invalid(c.reason);
+      if (q('SELECT 1 FROM notifications WHERE id = ?').get(id)) throw refusal('NOTIFICATION_DUPLICATE', `notifications ${id} already exists`);
+      if (!staffExists(a.audience)) throw refusal('NOTIFICATIONS_STAFF_MISSING', `notifications ${id}: org_users ${a.audience.id} does not exist`);
+      q(INSERT).run(rowParams({ id, ts: at, audience: a.audience, type, text: body, refId, read: false, repeatCount: 1, category, deferredPush, dispatchedAt: null, action: c.action }));
+      return byId(id);
+    }),
+    /** Refresh a row's clock and count the repeat; with `actionRequired`, (re)set its acknowledgment contract. Returns the stored record. */
+    coalesce: (id, { at = now(), actionRequired = null } = {}) => operation(() => {
+      if (!isClock(at)) throw invalid('at must be an integer timestamp');
+      const c = contractOf(actionRequired); if (c.reason) throw invalid(c.reason);
+      const { changes } = q('UPDATE notifications SET occurred_at = ?, repeat_count = repeat_count + 1 WHERE id = ?').run(at, id);
+      if (!changes) throw notFound(id);
+      if (c.action) q('UPDATE notifications SET action_required = 1, action_deadline_at = ?, action_acked_at = NULL WHERE id = ?').run(c.action.deadline, id);
+      return byId(id);
+    }),
+    /**
+     * Acknowledge an action notice for its audience: `{ status: 'not_found' }` (no such row for this audience),
+     * `{ status: 'no_action' }`, or `{ status: 'ok', ackedAt, already }` (`already`: the first acknowledgment stands).
+     */
+    ack: (id, audience, { at = now() } = {}) => operation(() => {
+      const n = byId(id);
+      if (!n || !audience || n.audience.kind !== audience.kind || n.audience.id !== audience.id) return { status: 'not_found' };
+      if (!n.actionRequired) return { status: 'no_action' };
+      if (n.actionRequired.ackedAt !== null) return { status: 'ok', ackedAt: n.actionRequired.ackedAt, already: true };
+      if (!isClock(at)) throw invalid('at must be an integer timestamp');
+      q('UPDATE notifications SET action_acked_at = ? WHERE id = ?').run(at, id);
+      return { status: 'ok', ackedAt: at, already: false };
+    }),
+    /** Mark every unread row of one audience read. Returns how many changed. */
+    markRead: (kind, id) => operation(() => Number(q('UPDATE notifications SET read = 1 WHERE audience_kind = ? AND audience_id = ? AND read = 0').run(kind, id).changes)),
+    /** The delivery centre made this notice's dispatches (its sweep, in the same unit). Returns the stored record. */
+    markDispatched: (id, { at = now() } = {}) => operation(() => {
+      if (!isClock(at)) throw invalid('at must be an integer timestamp');
+      if (!q('SELECT 1 FROM notifications WHERE id = ?').get(id)) throw notFound(id);
+      q('UPDATE notifications SET dispatched_at = ? WHERE id = ? AND dispatched_at IS NULL').run(at, id);
+      return byId(id);
+    }),
+    /** Remove every row of one audience (the deletion unit); the person's preferences are kept. Returns how many went. */
+    deleteForAudience: (kind, id) => operation(() => Number(q('DELETE FROM notifications WHERE audience_kind = ? AND audience_id = ?').run(kind, id).changes)),
+    /**
+     * Merge a preference write for one person: the categories given are set (the others kept), `emailIntent` when
+     * given, `updatedAt` stamped. The values must be booleans and the categories known (the route refuses first).
+     * Returns the stored record.
+     */
+    updatePrefs: (kind, id, { categories = {}, emailIntent = undefined } = {}, { at = now() } = {}) => operation(() => {
+      const a = audienceOf({ kind, id }); if (a.reason) throw invalid(`a preference record's ${a.reason}`);
+      const c = categoriesOf(categories); if (c.reason) throw invalid(c.reason);
+      if (emailIntent !== undefined && typeof emailIntent !== 'boolean') throw invalid('emailIntent must be a boolean');
+      if (!isClock(at)) throw invalid('at must be an integer timestamp');
+      if (!staffExists(a.audience)) throw refusal('NOTIFICATIONS_STAFF_MISSING', `notification preferences: org_users ${id} does not exist`);
+      const intent = emailIntent === undefined ? (prefsFor(kind, id)?.emailIntent ?? false) : emailIntent;
+      q('INSERT INTO notification_prefs (audience_kind, audience_id, email_intent, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(audience_kind, audience_id) DO UPDATE SET email_intent = excluded.email_intent, updated_at = excluded.updated_at').run(kind, id, intent ? 1 : 0, at);
+      const cat = q('INSERT INTO notification_pref_categories (audience_kind, audience_id, category, enabled) VALUES (?, ?, ?, ?) ON CONFLICT(audience_kind, audience_id, category) DO UPDATE SET enabled = excluded.enabled');
+      for (const [k, v] of Object.entries(c.categories)) cat.run(kind, id, k, v ? 1 : 0);
+      return prefsFor(kind, id);
+    }),
+
+    // ---------------------------------------------------------- reads
+    byId,
+    /** The feed: this audience's rows, newest insertion first; `limit` caps it (the Agent inbox). */
+    forAudience: (kind, id, { limit = null } = {}) => dec(limit === null
+      ? q(`${SELECT} WHERE audience_kind = ? AND audience_id = ? ORDER BY seq DESC`).all(kind, id)
+      : q(`${SELECT} WHERE audience_kind = ? AND audience_id = ? ORDER BY seq DESC LIMIT ?`).all(kind, id, limit)),
+    unreadCount: (kind, id) => q('SELECT COUNT(*) AS n FROM notifications WHERE audience_kind = ? AND audience_id = ? AND read = 0').get(kind, id).n,
+    awaitingAckCount: () => q('SELECT COUNT(*) AS n FROM notifications WHERE action_required = 1 AND action_acked_at IS NULL').get().n,
+    /** The row an identical unread notice would refresh (last occurrence at most six hours before `at`), or null. */
+    findCoalescible: ({ audience, type, text: body, refId = null, at = now() }) => dec(q(`${SELECT} WHERE audience_kind = ? AND audience_id = ? AND read = 0 AND type = ? AND occurred_at >= ? AND text = ? AND ref_id IS ? ORDER BY seq DESC LIMIT 1`)
+      .all(audience.kind, audience.id, type, at - NOTIFY_COALESCE_MS, body, refId ?? null))[0] ?? null,
+    /** The notices the delivery centre has not made dispatches for yet, in insertion order after `afterSeq`, at most `limit`: `[{ seq, notification }]`. */
+    undispatched: ({ afterSeq = 0, limit = 500 } = {}) => q(`${SELECT} WHERE dispatched_at IS NULL AND seq > ? ORDER BY seq LIMIT ?`).all(afterSeq, limit).map((r) => Object.freeze({ seq: r.seq, notification: deepFreeze(fromDb(r)) })),
+    prefsFor,
+    count: () => q('SELECT COUNT(*) AS n FROM notifications').get().n,
+    prefsCount: () => q('SELECT COUNT(*) AS n FROM notification_prefs').get().n,
+    counts: () => ({ notifications: repo.count(), notificationPrefs: repo.prefsCount() }),
+    pending: () => 0,
     attach() {
-      if (!stmt.cutover.get(NOTIFICATIONS_MIGRATION)) throw new Error(`notifications: the cutover record ${NOTIFICATIONS_MIGRATION} is missing from data_migrations; the tables cannot be trusted as the source of truth`);
-      load();
-      log(`notifications: ${rows.length} notification(s) and ${prefs.length} preference record(s) loaded from the tables`);
-      return { engine: 'sqlite', rows: repo.counts() };
+      if (!notificationsLive(sqlite)) throw new Error(`the notifications repository needs ${NOTIFICATIONS_MIGRATION} recorded`);
+      const rows = repo.counts();
+      log(`notifications: ${rows.notifications} notification(s) and ${rows.notificationPrefs} preference record(s) in the tables`);
+      return { engine: 'sqlite', rows };
     },
-    /**
-     * Re-read the mirror from the tables. A tool that ran operations inside a
-     * raw transaction of its own and then rolled that transaction back must
-     * call this: the repository cannot see a ROLLBACK it did not issue, so until
-     * then the mirror shows the statements it ran (immediate mode only; the
-     * server's staged mode refuses foreign transactions for this reason).
-     */
-    reload() { load(); return repo.counts(); },
-    count: () => rows.length,
-    prefsCount: () => prefs.length,
-    counts: () => ({ notifications: rows.length, notificationPrefs: prefs.length }),
-    /** Staged writes not yet in a committed save (0 in immediate mode). */
-    pending: () => pending.length,
-    /** Effects waiting for the save or unit commit that carries their writes (0 outside a unit in immediate mode). */
-    pendingEffects: () => effects.length,
-    /**
-     * Register an external effect of the writes made so far (a push, a live
-     * event): see EFFECTS WAIT FOR THE DURABLE WRITE in the header. Inside an
-     * open unit of work (either mode) it is queued, through the joined
-     * boundary, until the store reports the unit's COMMIT — never run while
-     * the unit is active, discarded with its rollback. Staged mode outside a
-     * unit queues it until the store reports the carrying save's commit; a
-     * failed save keeps it. Immediate mode outside a unit hands it to
-     * `runEffect` now (the owned write already committed); refused inside a
-     * caller-owned raw transaction.
-     */
-    afterDurable(fn) {
-      if (inUnit()) {
-        return unit.join(() => {
-          if (typeof fn !== 'function') throw new TypeError('afterDurable needs a function');
-          if (!hookTaken) throw hookRefusal('registering an effect inside a unit of work');
-          effects.push({ fn, at: pending.length });
-        });
-      }
-      if (typeof fn !== 'function') throw new TypeError('afterDurable needs a function');
-      if (staged) {
-        if (!hookTaken) throw hookRefusal('registering an effect');
-        if (sqlite.isTransaction) throw new Error('notifications: an effect cannot be bound to a transaction the repository did not open');
-        effects.push({ fn, at: pending.length });
-        return;
-      }
-      if (sqlite.isTransaction) throw new Error('notifications: an effect inside a caller-owned transaction has no commit to wait for that the repository could see; register it after the caller\'s COMMIT');
-      runEffect(fn);
-    },
-
-    // ---------------------------------------------------------- reads (the mirror)
-    byId: (id) => { const r = byId.get(id); return r ? readonlyView(r, 'a notification') : null; },
-    /** The feed: this audience's rows, newest insertion first. */
-    forAudience(kind, id) {
-      const out = [];
-      for (let i = rows.length - 1; i >= 0; i--) { const r = rows[i]; if (r.audience.kind === kind && r.audience.id === id) out.push(readonlyView(r, 'a notification')); }
-      return out;
-    },
-    unreadCount(kind, id) { let n = 0; for (const r of rows) if (!r.read && r.audience.kind === kind && r.audience.id === id) n += 1; return n; },
-    awaitingAckCount() { let n = 0; for (const r of rows) if (r.actionRequired && !r.actionRequired.ackedAt) n += 1; return n; },
-    /**
-     * The coalescing scan (see the header): the row an identical unread
-     * notification would refresh, or null. A pure read.
-     */
-    findCoalescible({ audience, type, text, refId = null, at = now() }) {
-      const cutoff = at - NOTIFY_COALESCE_MS;
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const c = rows[i];
-        if (c.ts < cutoff) break; // the array is append-ordered: whatever lies before the first old row is never examined
-        if (c.read) continue;
-        if (c.audience.kind !== audience.kind || c.audience.id !== audience.id) continue;
-        if (c.type !== type || c.text !== text || (c.refId ?? null) !== (refId ?? null)) continue;
-        return readonlyView(c, 'a notification');
-      }
-      return null;
-    },
-    prefsFor(kind, id) { const p = prefsBy.get(prefKey(kind, id)); return p ? readonlyView(p, 'a notification preference') : null; },
-
-    // ---------------------------------------------------------- mutations
-    /** A new row at the end of the feed. Returns it (read-only). */
-    create({ audience, type, text, refId = null, category = null, deferredPush = false, actionRequired = null, at = now(), id = nextId('ntf') } = {}) {
-      return operation((exec) => {
-        const a = audienceOf(audience); if (a.reason) throw new TypeError(`a notification needs an audience: ${a.reason}`);
-        if (!nonEmpty(type)) throw new TypeError('a notification needs a non-empty type');
-        if (typeof text !== 'string') throw new TypeError('a notification needs a text (a string)');
-        if (refId !== null && typeof refId !== 'string') throw new TypeError('refId must be a string or null');
-        if (category !== null && (typeof category !== 'string' || !isCategory(category))) throw new TypeError('category must be a notification category or null');
-        if (typeof deferredPush !== 'boolean') throw new TypeError('deferredPush must be a boolean');
-        if (!isInt(at) || at < 0) throw new TypeError('at must be an integer timestamp');
-        if (!nonEmpty(id)) throw new TypeError('a notification needs an id'); if (byId.has(id)) throw new Error(`notifications: a row with id ${id} already exists`);
-        let action = null;
-        if (actionRequired !== null) { if (!isPlainObject(actionRequired)) throw new TypeError('actionRequired must be an object { deadline } or null'); const d = actionRequired.deadline ?? null; if (d !== null && !isInt(d)) throw new TypeError('actionRequired.deadline must be an integer timestamp or null'); action = { deadline: d, ackedAt: null, ackedBy: null }; }
-        const row = { id, ts: at, audience: a.audience, type, text, refId, read: false, repeatCount: 1, groupKey: refId ? `${type}:${refId}` : null, category, deferredPush };
-        if (action) row.actionRequired = action;
-        rows.push(row); byId.set(id, row);
-        const params = rowParams(row);
-        exec(() => stmt.insert.run(params));
-        return readonlyView(row, 'a notification');
-      });
-    },
-    /** Refresh an existing row's clock and count the repeat; with `actionRequired`, (re)set its acknowledgment contract as notifyAction always did. */
-    coalesce(id, { at = now(), actionRequired = undefined } = {}) {
-      return operation((exec) => {
-        const row = byId.get(id); if (!row) throw new Error(`notifications: no row ${id} to coalesce`);
-        if (!isInt(at) || at < 0) throw new TypeError('at must be an integer timestamp');
-        let action; if (actionRequired !== undefined && actionRequired !== null) { if (!isPlainObject(actionRequired)) throw new TypeError('actionRequired must be an object { deadline } or null'); const d = actionRequired.deadline ?? null; if (d !== null && !isInt(d)) throw new TypeError('actionRequired.deadline must be an integer timestamp or null'); action = { deadline: d, ackedAt: null, ackedBy: null }; }
-        row.ts = at; row.repeatCount += 1;
-        const count = row.repeatCount;
-        exec(() => stmt.coalesce.run(at, count, id));
-        if (action) { if (row.actionRequired) Object.assign(row.actionRequired, action); else row.actionRequired = action; const d = action.deadline; exec(() => stmt.action.run(d, id)); }
-        return readonlyView(row, 'a notification');
-      });
-    },
-    /**
-     * Acknowledge an action notice for its audience: `{ status: 'not_found' }`
-     * (no such row for this audience), `{ status: 'no_action' }`, or
-     * `{ status: 'ok', ackedAt, already }` (`already` when it had been
-     * acknowledged before: nothing changes, the first ack is returned).
-     */
-    ack(id, audience, { at = now() } = {}) {
-      const row = byId.get(id);
-      if (!row || !audience || row.audience.kind !== audience.kind || row.audience.id !== audience.id) return { status: 'not_found' };
-      if (!row.actionRequired) return { status: 'no_action' };
-      if (row.actionRequired.ackedAt) return { status: 'ok', ackedAt: row.actionRequired.ackedAt, already: true };
-      return operation((exec) => {
-        if (!isInt(at) || at < 0) throw new TypeError('at must be an integer timestamp');
-        row.actionRequired.ackedAt = at; row.actionRequired.ackedBy = audience.id;
-        const by = audience.id;
-        exec(() => stmt.ack.run(at, by, id));
-        return { status: 'ok', ackedAt: at, already: false };
-      });
-    },
-    /** Mark every unread row of one audience read. Returns how many changed (0 is a result, not an operation). */
-    markRead(kind, id) {
-      let n = 0; for (const r of rows) if (!r.read && r.audience.kind === kind && r.audience.id === id) n += 1;
-      if (!n) return 0;
-      return operation((exec) => {
-        for (const r of rows) if (!r.read && r.audience.kind === kind && r.audience.id === id) r.read = true;
-        exec(() => stmt.markRead.run(kind, id));
-        return n;
-      });
-    },
-    /** Remove every row of one audience (the deletion unit); the person's preferences are retained. Returns how many went. */
-    deleteForAudience(kind, id) {
-      if (!rows.some((r) => r.audience.kind === kind && r.audience.id === id)) return 0;
-      return operation((exec) => {
-        let n = 0;
-        for (let i = rows.length - 1; i >= 0; i--) { const r = rows[i]; if (r.audience.kind === kind && r.audience.id === id) { rows.splice(i, 1); byId.delete(r.id); n += 1; } }
-        exec(() => stmt.deleteFor.run(kind, id));
-        return n;
-      });
-    },
-    /**
-     * Merge a preference write for one person: the categories given are set
-     * (the others kept), `emailIntent` when given, `updatedAt` stamped. The
-     * values must be booleans and the categories known — the route coerces and
-     * refuses before it calls this; a mandatory category may be stored false
-     * (the effective view forces it on). Returns the stored record (read-only).
-     */
-    updatePrefs(kind, id, { categories = {}, emailIntent = undefined } = {}, { at = now() } = {}) {
-      return operation((exec) => {
-        if (!nonEmpty(kind)) throw new TypeError('a preference record needs an audience kind');
-        if (!nonEmpty(id)) throw new TypeError('a preference record needs an audience id');
-        const c = categoriesOf(categories); if (c.reason) throw new TypeError(c.reason);
-        if (emailIntent !== undefined && typeof emailIntent !== 'boolean') throw new TypeError('emailIntent must be a boolean');
-        if (!isInt(at) || at < 0) throw new TypeError('at must be an integer timestamp');
-        const key = prefKey(kind, id);
-        let p = prefsBy.get(key);
-        if (!p) { p = { audienceKind: kind, audienceId: id, categories: {}, emailIntent: false, updatedAt: null }; prefs.push(p); prefsBy.set(key, p); }
-        Object.assign(p.categories, c.categories);
-        if (emailIntent !== undefined) p.emailIntent = emailIntent;
-        p.updatedAt = at;
-        const intent = p.emailIntent ? 1 : 0;
-        exec(() => stmt.prefUpsert.run(kind, id, intent, at));
-        for (const [k, v] of Object.entries(c.categories)) exec(() => stmt.catUpsert.run(kind, id, k, v ? 1 : 0));
-        return readonlyView(p, 'a notification preference');
-      });
-    },
-
-    /** Every row in the legacy export shape, in insertion order (the admin backup; the mirror is the intended state, like every blob collection). */
-    exportRows: () => rows.map(copyRow),
-    exportPrefs: () => prefs.map(copyPref),
-
-    // ---------------------------------------------------------- the save hook (staged mode)
-    /** Inside every save transaction: run the queued statements, in order; they count as committed only once the store reports `commit()`. */
-    flush() {
-      if (!sqlite.isTransaction) throw new Error('notifications.flush runs inside a save transaction; the store reports its commit or rollback afterwards');
-      for (const op of pending) op();
-      inFlight = pending.length;
-      return inFlight;
-    },
-    /**
-     * The store reports COMMIT: the flushed statements leave the queue, and the
-     * effects bound to them — those registered after no more than the flushed
-     * writes — run now, in order, each through `runEffect` (never thrown into
-     * the store; a failure is a delivery failure, the data is committed).
-     * Effects bound to writes that were not part of this save stay queued.
-     * They are taken off the queue before any runs, so an effect that
-     * registers another binds it to the writes of the NEXT save.
-     */
-    commit() {
-      pending.splice(0, inFlight);
-      const due = [];
-      let i = 0; while (i < effects.length && effects[i].at <= inFlight) i += 1;
-      due.push(...effects.splice(0, i));
-      for (const e of effects) e.at -= inFlight;
-      inFlight = 0;
-      for (const e of due) runEffect(e.fn);
-    },
-    /** The store reports a failed save (flush, blob write or COMMIT): nothing the flush ran exists; the writes and their effects stay queued for the retry. */
-    rollback() { inFlight = 0; },
-    /** Unit-of-work participation: the mirror rows (by identity, restored in place) and both queue lengths when the unit began. */
-    snapshotState: () => ({ pendingLength: pending.length, effectsLength: effects.length, rows: rows.map((r) => [r, copyRow(r)]), prefs: prefs.map((p) => [p, copyPref(p)]) }),
-    restoreState(state) {
-      if (!state) return;
-      pending.length = state.pendingLength; effects.length = state.effectsLength; inFlight = 0;
-      rows.length = 0; byId.clear();
-      for (const [obj, copy] of state.rows) { restoreInto(obj, copy); rows.push(obj); byId.set(obj.id, obj); }
-      prefs.length = 0; prefsBy.clear();
-      for (const [obj, copy] of state.prefs) { restoreInto(obj, copy); prefs.push(obj); prefsBy.set(prefKey(obj.audienceKind, obj.audienceId), obj); }
-    },
-    /** What the store registers (staged mode; and immediate mode with a `unit`, before any operation may join one). Taking it is the registration this repository can see. */
-    saveHook: () => { hookTaken = true; return { flush: () => repo.flush(), commit: () => repo.commit(), rollback: () => repo.rollback(), snapshotState: () => repo.snapshotState(), restoreState: (s) => repo.restoreState(s) }; },
+    now,
   };
+  repo.reads = Object.freeze(Object.fromEntries(Object.entries(repo).filter(([k, v]) => typeof v === 'function' && !WRITES.has(k) && k !== 'attach')));
   return repo;
 }

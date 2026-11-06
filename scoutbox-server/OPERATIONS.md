@@ -91,8 +91,8 @@ A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 (the first installation's initialisation states, the session lifetime) and `counters` (the id counter, written at
 every mint).
 
-Most repositories write their rows at once. The staged ones (organisations' facets, players and guardians,
-notifications) keep a mirror in memory and
+Most repositories write their rows at once. The staged ones (organisations' facets, players and guardians) keep a
+mirror in memory and
 write what changed at the next save: a 2-second debounce (`persist()`), immediately with `persistNow()`, or in the
 commit of the unit of work they joined.
 
@@ -151,8 +151,8 @@ registration → listen.
 - **`store.afterCommit(fn)`** is the mechanism for side effects: broadcasts, pushes, SSE
   events and mail sent after a write. The function runs only after `COMMIT`. A throw or a
   rejected promise inside it is counted and logged, and it never undoes the data. Outside
-  a unit it runs immediately. A notification's push and `notify` event run through
-  `notifications.afterDurable`, only after the save that carried the row commits.
+  a unit it runs immediately. A notification's push and `notify` event go through it too:
+  inside a unit they wait for its commit, outside one the row is already committed.
 - **Ordinary saves.** If a debounced save fails, memory stays the intended state and the
   next save writes it. The log line `save failed:` means a retry is pending, not
   that data was lost. Every save and unit begins with `BEGIN IMMEDIATE`, and every

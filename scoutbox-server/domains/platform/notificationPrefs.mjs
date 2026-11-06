@@ -198,7 +198,7 @@ export function defaultPrefs() {
 }
 
 export function registerNotificationPrefs(ctx) {
-  const { notifications, orgRouter, playerRouter, guardianRouter, persist } = ctx;
+  const { notifications, orgRouter, playerRouter, guardianRouter } = ctx;
   // S7a: the stored preferences are rows of notification_prefs /
   // notification_pref_categories (repositories/notifications.mjs); this module
   // keeps the vocabulary, the validation, the effective view and the gate.
@@ -213,8 +213,8 @@ export function registerNotificationPrefs(ctx) {
     if (stored) {
       // Own keys only: `'constructor' in CATEGORIES` is true through the
       // prototype, and a stored prototype name must never become a category.
-      for (const [k, v] of Object.entries(stored.categories ?? {})) if (Object.hasOwn(CATEGORIES, k)) out.categories[k] = !!v;
-      out.emailIntent = !!stored.emailIntent;
+      for (const [k, v] of Object.entries(stored.categories)) if (Object.hasOwn(CATEGORIES, k)) out.categories[k] = v;
+      out.emailIntent = stored.emailIntent;
     }
     for (const [k, v] of Object.entries(CATEGORIES)) if (v.mandatory) out.categories[k] = true;
     return out;
@@ -254,23 +254,19 @@ export function registerNotificationPrefs(ctx) {
     if (incoming !== undefined && (typeof incoming !== 'object' || incoming === null || Array.isArray(incoming))) {
       return res.status(400).json({ error: 'PREFS_INVALID', message: 'categories must be an object of category → boolean.' });
     }
-    for (const k of Object.keys(incoming ?? {})) {
+    for (const [k, v] of Object.entries(incoming ?? {})) {
       // Own keys only — `__proto__`, `constructor`, `toString` are not categories.
       if (!Object.hasOwn(CATEGORIES, k)) return res.status(400).json({ error: 'PREF_CATEGORY_UNKNOWN', category: k, message: 'That is not a notification category.' });
-      if (CATEGORIES[k].mandatory && incoming[k] === false) {
+      // S14e: a value is true or false; anything else is refused, never coerced (a numeric 0 once stored "off" on a mandatory category).
+      if (typeof v !== 'boolean') return res.status(400).json({ error: 'PREFS_INVALID', category: k, message: `${k} must be true or false.` });
+      if (CATEGORIES[k].mandatory && v === false) {
         return res.status(400).json({ error: 'PREF_CATEGORY_MANDATORY', category: k, message: 'Security and account notices cannot be turned off.' });
       }
     }
-    // The values are coerced exactly as before S7a (`!!v`): a numeric zero on a
-    // mandatory category passes the check above and is stored false; the
-    // effective view and the gate force it on. The repository stores what it
-    // is given and refuses anything but booleans and known categories.
-    const categories = {};
-    for (const [k, v] of Object.entries(incoming ?? {})) categories[k] = !!v;
-    const patch = { categories };
-    if (body?.emailIntent !== undefined) patch.emailIntent = !!body.emailIntent;
+    if (body?.emailIntent !== undefined && typeof body.emailIntent !== 'boolean') return res.status(400).json({ error: 'PREFS_INVALID', field: 'emailIntent', message: 'emailIntent must be true or false.' });
+    const patch = { categories: { ...(incoming ?? {}) } };
+    if (body?.emailIntent !== undefined) patch.emailIntent = body.emailIntent;
     notifications.updatePrefs(kind, id, patch, { at: Date.now() });
-    persist();
     res.json({ preferences: view(kind, id) });
   }
 

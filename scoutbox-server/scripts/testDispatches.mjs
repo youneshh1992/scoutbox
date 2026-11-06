@@ -107,7 +107,7 @@ test('the repository: create types the whole record (an unknown field, a wrong-t
   s.close(); rm(dir);
 });
 
-test('the sweep\'s and the screens\' queries: due() returns queued, retrying and held sends whose time has come, in creation order; unopenedInApp() the in-app rows not yet opened; forNotification and notificationIdsWithRows; pageForOrg pages one organisation\'s staff dispatches newest first by cursor and never another\'s; recent, the counts and the backlog are SQL', () => {
+test('the sweep\'s and the screens\' queries: due() returns queued, retrying and held sends whose time has come, in creation order; unopenedInAppRead() the in-app rows not yet opened whose notification was read (a join); forNotification; pageForOrg pages one organisation\'s staff dispatches newest first by cursor and never another\'s; recent, the counts and the backlog are SQL', () => {
   const dir = tempDir('dsp-reads'); fixtureFile(dir, { orgs: [...ORGS(), { ...ORGS()[0], id: 'org-two', name: 'Northside', memos: [] }], users: [...USERS(), { id: 'usr-2', orgId: 'org-two', name: 'Rita', role: 'Scout', createdAt: 1 }] }); const s = openRaw(dir); const repo = bare(s);
   repo.create(email({ id: 'q-due', notificationId: 'n1' })); repo.create(inApp({ id: 'ia-1', notificationId: 'n1' }));
   repo.create(email({ id: 'q-later', notificationId: 'n2', nextAt: NOW + 60_000 })); repo.create(email({ id: 'r-due', notificationId: 'n3', status: 'retrying' }));
@@ -115,9 +115,12 @@ test('the sweep\'s and the screens\' queries: due() returns queued, retrying and
   repo.create(email({ id: 'other', notificationId: 'n6', audience: { kind: 'org_user', id: 'usr-2' }, orgId: 'org-two' })); repo.create(inApp({ id: 'ia-op', notificationId: 'n7', openedAt: NOW, status: 'opened' }));
   repo.create(forPlayer({ id: 'pl', notificationId: 'n8', status: 'skipped', skipReason: 'no email on record', to: null }));
   assert.deepEqual(repo.due(NOW).map((d) => d.id), ['q-due', 'r-due', 'h-due', 'other']);
-  assert.deepEqual(repo.unopenedInApp().map((d) => d.id), ['ia-1']);
+  const note = s.prepare("INSERT INTO notifications (id, occurred_at, audience_kind, audience_id, type, text, read) VALUES (?, ?, 'player', 'pl-adult', 'badge', 'B', ?)");
+  note.run('n1', NOW, 0); note.run('n7', NOW, 1);
+  assert.deepEqual(repo.unopenedInAppRead().map((d) => d.id), [], 'n1 is unread: its in-app row is not opened yet');
+  s.prepare("UPDATE notifications SET read = 1 WHERE id = 'n1'").run();
+  assert.deepEqual(repo.unopenedInAppRead().map((d) => d.id), ['ia-1'], 'once n1 is read, its unopened in-app row is due (ia-op is already opened)');
   assert.deepEqual(repo.forNotification('n1').map((d) => d.id), ['q-due', 'ia-1']);
-  assert.deepEqual([...repo.notificationIdsWithRows()].sort(), ['n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7', 'n8']);
   const p1 = repo.pageForOrg('org-pro', { limit: 3 });
   assert.deepEqual(p1.items.map((d) => d.id), ['ia-op', 'acc', 'h-due']); assert.ok(p1.nextCursor);
   const after = JSON.parse(Buffer.from(p1.nextCursor, 'base64url').toString());

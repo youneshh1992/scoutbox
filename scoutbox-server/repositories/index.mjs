@@ -103,8 +103,10 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
 export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS, ...RECRUITMENT_CASES_COLLECTIONS, ...RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, ...SIGNINGS_FOLLOWUPS_COLLECTIONS, ...SCOUTING_EVIDENCE_COLLECTIONS, ...SCOUTING_ASSESSMENTS_COLLECTIONS, ...CLUB_SETUP_COLLECTIONS, ...OPPORTUNITIES_CAMPAIGNS_COLLECTIONS, ...VERIFICATION_COLLECTIONS, ...PASSPORT_COLLECTIONS, ...TRANSITIONS_COLLECTIONS, ...AGENT_CORE_COLLECTIONS, ...COMPLIANCE_POLICIES_COLLECTIONS, ...COMPLIANCE_RECORDS_COLLECTIONS, ...AGENT_TRANSACTIONS_COLLECTIONS, ...DEVELOPMENT_COLLECTIONS, ...BOX_CAM_COLLECTIONS, ...DISCOVERY_COLLECTIONS, ...INSIGHT_COVERAGE_COLLECTIONS, ...INTEGRATIONS_COLLECTIONS, ...ENTERPRISE_COLLECTIONS, ...GROUPS_COLLECTIONS, ...GRASSROOTS_COLLECTIONS, ...OPERATIONS_COLLECTIONS]);
 /** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
-/** The notification, outbox and push tables: no reference to any other table (polymorphic audiences; the outbox and push rows reference nothing), dispatched last. The dispatches (a staff audience's organisation is a key) go before the organisation prune. */
-const NOTIFICATION_TABLE_DISPATCH = Object.freeze([NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, ...OUTBOX_PUSH_SNAPSHOT_TABLES]);
+/** The outbox and push tables: no reference to any other table, dispatched last. The dispatches and the notifications (staff and organisation keys) go before the prunes. */
+const NOTIFICATION_TABLE_DISPATCH = Object.freeze([...OUTBOX_PUSH_SNAPSHOT_TABLES]);
+/** The notifications and preferences (a staff audience is a RESTRICT key): written after the staff upsert, before the staff prune. */
+const NOTIFICATION_FEED_TABLES = Object.freeze([NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE]);
 
 /**
  * Whole-snapshot access for tools that read or write the database file as one
@@ -126,7 +128,7 @@ export function readTableBacked(sqlite) {
   if (retained) out[PLAYERS_RETAINED.name] = retained;
   const queue = MEDIA_DELETIONS_TABLE.read(sqlite);
   if (queue) out[MEDIA_DELETIONS_TABLE.name] = queue;
-  for (const table of [...CODE_TABLES, ...NOTIFICATION_TABLE_DISPATCH, DISPATCHES_TABLE, CHANNELS_TABLE]) {
+  for (const table of [...CODE_TABLES, ...NOTIFICATION_FEED_TABLES, ...NOTIFICATION_TABLE_DISPATCH, DISPATCHES_TABLE, CHANNELS_TABLE]) {
     const rows = table.read(sqlite);
     if (rows) out[table.name] = rows;
   }
@@ -331,6 +333,8 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   if (present.includes(CHANNELS_TABLE.name) && CHANNELS_TABLE.replace(sqlite, snapshot[CHANNELS_TABLE.name])) written.push(CHANNELS_TABLE.name);
   // S14d: the dispatches, before the organisation prune (a staff audience's organisation is a RESTRICT key).
   if (present.includes(DISPATCHES_TABLE.name) && DISPATCHES_TABLE.replace(sqlite, snapshot[DISPATCHES_TABLE.name])) written.push(DISPATCHES_TABLE.name);
+  // S14e: the notifications and preferences, before the staff prune (a staff audience is a RESTRICT key).
+  for (const table of NOTIFICATION_FEED_TABLES) if (present.includes(table.name) && table.replace(sqlite, snapshot[table.name])) written.push(table.name);
   // Rows the snapshot no longer lists go last, children before parents, so a
   // parent that is still referenced makes the foreign key refuse the save
   // instead of the row disappearing under its dependants. (The identity pair
@@ -364,7 +368,7 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   // the FINAL combined state is checked whichever side was written.
   for (const table of CODE_TABLES) if (present.includes(table.name) && table.replace(sqlite, snapshot[table.name])) written.push(table.name);
   if (written.some((n) => IDENTITY_COLLECTIONS.includes(n))) assertPairingCodesConsistent(sqlite, { label: 'the snapshot (players and pairingCodes together)' });
-  // S7a/S7c: the notification, outbox and push tables reference nothing
+  // S7c: the outbox and push tables reference nothing
   // (polymorphic audiences, no cascade with a person), so a snapshot
   // that carries one collection and omits another leaves the omitted table
   // alone; each entry is validated (never coerced) and one refusal rolls the
@@ -465,7 +469,7 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
   if (!sqlite) throw new TypeError('the data layer needs a store with a SQLite connection (node:sqlite); there is no in-memory or JSON fallback');
   const migrations = runDataMigrations(sqlite, DATA_MIGRATIONS, { now: now(), log, context: { sessionTtlMs } });
 
-  // The staged repositories (organisations, players and guardians, notifications)
+  // The staged repositories (organisations, players and guardians)
   // keep a mirror in memory, expose it as a read-only `db.<name>` view
   // and write what changed at the next save (`store.save()`, scheduled by persist()) or the unit of work's commit.
   // Every other repository writes its rows at once and reads through SQL; its old `db.<name>` throws.
@@ -505,12 +509,10 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
     Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
   }
 
-  const notifications = createNotificationsRepository({ sqlite, log, warn, now, nextId, unit: store.unit, staged: true, runEffect: (fn) => store.afterCommit(fn) });
+  // S14e: explicit, no mirror; its old collection names throw.
+  const notifications = createNotificationsRepository({ sqlite, log, now, nextId, unit: store.unit });
   const notificationsBoot = notifications.attach();
-  store.setSaveHook?.(notifications.saveHook());
-  for (const [name, view] of [[NOTIFICATIONS_TABLE.name, notifications.view], [NOTIFICATION_PREFS_TABLE.name, notifications.prefsView]]) {
-    Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
-  }
+  for (const name of [NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name]) retireCollection(db, name, 'notifications');
 
   // S14d: explicit, no mirror; their old collection names throw.
   const dispatches = createDispatchesRepository({ sqlite, log, now, unit: store.unit });
@@ -716,7 +718,7 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
         users: { rows: users.count(), mode: 'live' },
         sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs },
         oneTimeCodes: { mode: 'live', rows: codes.counts(), outstanding: codes.outstanding(), lifetimesMs: { emailChallenge: codes.emailChallengeTtlMs, pairingCode: codes.pairingCodeTtlMs }, maxEmailAttempts: codes.maxEmailAttempts },
-        notifications: { mode: 'live', rows: notifications.counts(), pendingWrites: notifications.pending(), pendingEffects: notifications.pendingEffects(), coalesceMs: notifications.coalesceMs, writeMode: 'staged: a standalone write lands in the next save with the rows it announces; a write inside a unit of work lands in its commit; its push and live event run only once that save committed' },
+        notifications: { mode: 'live', rows: notifications.counts(), pendingWrites: 0, coalesceMs: notifications.coalesceMs, writeMode: 'explicit: a notification is written in the unit of work of the action it announces (or its own transaction); its push and live event run after that commit; a coalesce, a read, an acknowledgment (with its dispatches) and the delivery marker (with the dispatches made) are single operations', readMode: 'SQL: byId, a person\'s feed (newest first), unread and awaiting-acknowledgment counts, the coalescing lookup, the undispatched notices, a person\'s preferences; no mirror and no db.* view', references: 'a staff audience is a RESTRICT key to org_users (generated staff_id); player and guardian ids carry no key (tolerant)' },
         dispatches: { mode: 'live', rows: dispatches.count(), attempts: dispatches.attemptCount(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: 0, writeMode: 'explicit: a notification\'s dispatches are created in one unit; each send (its attempt, status, outbox row, injected-failure use and, when the retries run out, the ops event and webhook) in one unit; a callback event with its seen marker in one unit; an acknowledgment with the notification\'s contract', notificationReference: 'indexed, no foreign key (a dispatch outlives its notification; retention is an open decision)', organisation: 'a staff audience\'s organisation, a deferred RESTRICT key' },
         outboxPush: { mode: 'live', rows: outboxPush.counts(), pendingWrites: 0, writeMode: 'explicit: a mail record before its provider call and its answer after; the delivery centre\'s record in its send\'s unit; a push record when the push is sent; a token at registration', tokens: 'one row per device token, players and guardians only (a token another account registers moves to it)', typing: 'typed columns with vocabulary CHECKs; an unknown field or a wrong-typed value is refused by name' },
         channels: { mode: 'live', rows: channels.counts(), pendingWrites: 0, writeMode: 'explicit: a thread opens with the request\'s acceptance, in its unit of work; a message with its ledger row and notifications in one unit; a receipt at once; a deleted player\'s threads go in the account-deletion unit (D-B)', readMode: 'SQL: byId, parties, a player\'s and a guardian\'s threads, the organisation\'s and the admin lists by cursor (most recently active first), the organisation\'s counts, the retry lookup; no mirror and no db.* view', references: 'request_id (unique), org_id and a staff sender are RESTRICT keys; player and guardian ids carry no key (tolerant), a guardian is checked at open and on every snapshot\'s final state; messages and attachments cascade with their thread' },

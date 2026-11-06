@@ -28,6 +28,7 @@ import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../recruitment/lifecycle/contact.mjs';
 import { sendAgentError } from './errors.mjs';
 import { agentAuditRows } from './audit.mjs';
+import { feedItem } from '../../../repositories/notifications.mjs';
 import { facetFromProviderAnswer, FACET_METHOD } from '../compliance/provider.mjs';
 import {
   AGENT_POLICY_VERSION, VERIFICATION_STATES, FACETS, JURISDICTIONS, TIERS, SCOPES, MAX_TERM_MONTHS, EXPIRY_ALERT_MS,
@@ -738,7 +739,7 @@ export function registerAgent(rawCtx) {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'inbox.read')) return;
     const me = req.orgUser.id;
-    const inbox = notifications.forAudience('org_user', me).slice(0, 100); // S7a: newest insertion first, as before
+    const inbox = notifications.forAudience('org_user', me, { limit: 100 }).map(feedItem); // the newest 100, newest insertion first; each an allowlist
     const pending = agreementsOfAgency(req.org.id).filter((a) => a.agentUserId === me && effectiveAgreementStatus(a, now()) === 'proposed')
       .map((a) => ({ ...agreementForAgent(a, now()), client: clientIdentity(a, req) }));
     res.json({ notifications: inbox, pending, note: 'Operational messages only. Negotiation and offers are not part of this workspace.' });

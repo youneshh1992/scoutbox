@@ -103,36 +103,38 @@ export function registerDelivery(ctx) {
 
   function dispatchSweep() {
     let changed = 0;
-    // 1. Create the dispatches of every notification that has none yet: one unit per notification.
-    //    (Notifications are still a mirror — S14e — so the ones without dispatches are found in memory.)
-    const seen = dispatches.notificationIdsWithRows();
+    // 1. Create the dispatches of every notification the centre has not dispatched yet (the `dispatched_at` marker,
+    //    set in the same unit): one unit per notification. A notice that already has dispatches only gets its marker.
+    //    A refused one keeps no marker and is tried again by the next sweep.
     const centreSince = bookkeeping.centreSince();
-    for (const n of notifications.view) {
-      if (seen.has(n.id)) continue;
-      changed += item(`notification ${n.id}`, () => {
-        const historical = n.ts < centreSince;
-        const audience = { kind: n.audience.kind, id: n.audience.id };
-        const orgId = orgOfAudience(audience);
-        let made = 0;
-        for (const dest of destinationsFor(n)) {
-          if (historical && dest.channel !== 'in_app') { dest.skip = 'predates delivery centre — no retroactive external send'; }
-          const hold = dest.channel !== 'in_app' ? quietHoldUntil(n) : null;
+    for (let afterSeq = 0, batch; (batch = notifications.undispatched({ afterSeq })).length; afterSeq = batch[batch.length - 1].seq) {
+      for (const { notification: n } of batch) {
+        changed += item(`notification ${n.id}`, () => {
           const at = Date.now();
-          dispatches.create({
-            id: nextId('dsp'), notificationId: n.id, audience, orgId,
-            channel: dest.channel, to: dest.to ?? null, provider: dest.channel === 'in_app' ? 'in_app' : PROVIDER,
-            status: dest.skip ? 'skipped' : dest.channel === 'in_app' ? 'delivered' : hold ? 'held_quiet_hours' : 'queued',
-            skipReason: dest.skip ?? null, providerMessageId: null,
-            attempts: [], nextAt: hold ?? at,
-            actionDeadline: n.actionRequired?.deadline ?? null,
-            createdAt: at, deliveredAt: dest.channel === 'in_app' ? at : null,
-            openedAt: null, actionedAt: null, failedAt: null, failReason: null,
-          });
-          made++;
-        }
-        return made;
-      });
-      seen.add(n.id);
+          if (dispatches.forNotification(n.id).length) { notifications.markDispatched(n.id, { at }); return 0; }
+          const historical = n.ts < centreSince;
+          const audience = { kind: n.audience.kind, id: n.audience.id };
+          const orgId = orgOfAudience(audience);
+          let made = 0;
+          for (const dest of destinationsFor(n)) {
+            if (historical && dest.channel !== 'in_app') { dest.skip = 'predates delivery centre — no retroactive external send'; }
+            const hold = dest.channel !== 'in_app' ? quietHoldUntil(n) : null;
+            dispatches.create({
+              id: nextId('dsp'), notificationId: n.id, audience, orgId,
+              channel: dest.channel, to: dest.to ?? null, provider: dest.channel === 'in_app' ? 'in_app' : PROVIDER,
+              status: dest.skip ? 'skipped' : dest.channel === 'in_app' ? 'delivered' : hold ? 'held_quiet_hours' : 'queued',
+              skipReason: dest.skip ?? null, providerMessageId: null,
+              attempts: [], nextAt: hold ?? at,
+              actionDeadline: n.actionRequired?.deadline ?? null,
+              createdAt: at, deliveredAt: dest.channel === 'in_app' ? at : null,
+              openedAt: null, actionedAt: null, failedAt: null, failReason: null,
+            });
+            made++;
+          }
+          notifications.markDispatched(n.id, { at });
+          return made;
+        });
+      }
     }
     // 2. Attempt the external sends that are due: one unit per dispatch, holding everything the send wrote.
     for (const due of dispatches.due(Date.now())) {
@@ -158,8 +160,7 @@ export function registerDelivery(ctx) {
       });
     }
     // 3. Mirror in-app reads → opened (meaningfully measured for in_app only).
-    for (const d of dispatches.unopenedInApp()) {
-      if (!notifications.byId(d.notificationId)?.read) continue;
+    for (const d of dispatches.unopenedInAppRead()) {
       changed += item(`dispatch ${d.id}`, () => { const at = Date.now(); dispatches.patch(d.id, RANK[d.status] < RANK.opened ? { openedAt: at, status: 'opened' } : { openedAt: at }); return 1; });
     }
     return changed;
@@ -201,7 +202,7 @@ export function registerDelivery(ctx) {
           }
         });
       }
-      res.json({ ok: true, ackedAt: n.actionRequired.ackedAt });
+      res.json({ ok: true, ackedAt: notifications.byId(n.id).actionRequired.ackedAt });
     };
   }
   playerRouter.post('/notifications/:id/ack', ackHandler('player'));
