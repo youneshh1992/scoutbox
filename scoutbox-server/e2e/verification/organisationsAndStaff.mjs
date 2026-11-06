@@ -58,7 +58,7 @@ const A = { 'x-admin-key': 'scoutbox-admin' };
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 async function outboxCode(to) {
   const r = await j('GET', '/admin/outbox', undefined, null, A);
-  const mail = (r.body ?? []).find((m) => m.to === to);
+  const mail = (r.body?.items ?? []).find((m) => m.to === to);
   return mail ? (mail.text.match(/code (?:is|for[^:]*:) ?([A-Za-z0-9_-]{8,})/) ?? [])[1] ?? null : null;
 }
 

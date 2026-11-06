@@ -469,25 +469,32 @@ test('runtime: an exhausted row that somehow exists (planted directly) is never 
 await testAsync('review of e020aba, finding 1 — the mailer withholds the secrets it is given from the outbox record it keeps (the record is saved and backed up): on the dev transport the full text is kept in this process\'s memory only, for the admin outbox view; on the live transport the provider receives the full text and nothing keeps it; a mail without secrets is recorded unchanged', async () => {
   const savedKey = process.env.SENDGRID_API_KEY; delete process.env.SENDGRID_API_KEY;
   let n = 0; const nextIdLocal = (p) => `${p}-${++n}`;
-  const db = { outbox: [] };
-  const dev = createMailer(db, nextIdLocal);
+  // A recording stand-in for the outbox repository (S14d: the mailer writes through it, never an array).
+  const outboxStub = () => { const rows = []; return { rows, append: (r) => { rows.push({ ...r }); return r; }, markDelivered: (id, ok) => { rows.find((r) => r.id === id).delivered = ok; } }; };
+  const db = outboxStub();
+  const dev = createMailer(nextIdLocal, { outbox: db });
   const text = 'Your ScoutBox club verification code is QX7K2M.\n\nEntering it confirms Eastport FC controls this mailbox.';
   const rec = await dev.send({ to: 'a@eastport.test', subject: 'Verify', text, secrets: ['QX7K2M'] });
   assert.equal(rec.text.includes('QX7K2M'), false); assert.ok(rec.text.includes(OUTBOX_SECRET_PLACEHOLDER)); assert.ok(rec.text.includes('Eastport FC controls this mailbox'), 'the rest of the mail is kept');
   assert.equal(dev.devDeliveredText(rec.id), text, 'the dev delivery keeps the full text in memory');
   const plain = await dev.send({ to: 'b@eastport.test', subject: 'Hello', text: 'An unrelated mail.' });
   assert.equal(plain.text, 'An unrelated mail.'); assert.equal(dev.devDeliveredText(plain.id), null, 'nothing is withheld, nothing held');
-  assert.equal(JSON.stringify(db).includes('QX7K2M'), false, 'the serialized outbox holds no secret');
+  assert.equal(JSON.stringify(db.rows).includes('QX7K2M'), false, 'the stored outbox records hold no secret');
+  // S14d (review): a subject or text longer than the outbox keeps (a name the routes do not bound) is shortened in the
+  // stored record, never refused — the mail is still recorded and sent.
+  const long = await dev.send({ to: 'd@eastport.test', subject: `Reference request for ${'N'.repeat(400)}`, text: 'T'.repeat(12_000) });
+  assert.deepEqual([long.subject.length, long.text.length], [300, 10_000]); assert.equal(db.rows.at(-1).id, long.id, 'recorded');
   // Live transport: fetch stubbed, no request leaves the process.
   process.env.SENDGRID_API_KEY = 'synthetic-not-a-real-key';
   const realFetch = globalThis.fetch; const sent = [];
   globalThis.fetch = async (url, init) => { sent.push({ url: String(url), body: init.body }); return new Response('', { status: 202 }); };
   try {
-    const liveDb = { outbox: [] }; const live = createMailer(liveDb, nextIdLocal);
+    const liveDb = outboxStub(); const live = createMailer(nextIdLocal, { outbox: liveDb });
     const r = await live.send({ to: 'c@eastport.test', subject: 'Verify', text, secrets: ['QX7K2M'] });
     assert.equal(sent.length, 1); assert.match(sent[0].url, /^https:\/\/api\.sendgrid\.com\//); assert.ok(sent[0].body.includes('QX7K2M'), 'the provider receives the full text');
     assert.equal(r.delivered, true); assert.equal(r.text.includes('QX7K2M'), false); assert.equal(live.devDeliveredText(r.id), null);
-    assert.equal(JSON.stringify(liveDb).includes('QX7K2M'), false);
+    assert.equal(liveDb.rows[0].delivered, true, 'the provider\'s answer is written to the stored record');
+    assert.equal(JSON.stringify(liveDb.rows).includes('QX7K2M'), false);
   } finally {
     globalThis.fetch = realFetch;
     if (savedKey === undefined) delete process.env.SENDGRID_API_KEY; else process.env.SENDGRID_API_KEY = savedKey;

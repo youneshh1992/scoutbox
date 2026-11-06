@@ -416,7 +416,7 @@ const J = {};
   ok(await stage(J.RID) === 'contact_planned', 'J1 the case is at contact_planned');
   const inboxBefore = (await j('GET', '/player/inbox', undefined, kola.token)).body.items;
   const notifsBefore = (await j('GET', '/player/notifications', undefined, kola.token)).body;
-  const outboxBefore = (await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body.length;
+  const outboxBefore = (await j('GET', '/admin/overview', undefined, undefined, ADMIN)).body.emailsSent; // S14d: the outbox pages; its size is the overview's count
 
   // Internal notes go in BEFORE anything is sent, so every recipient-facing
   // payload from here on is a leak test.
@@ -438,7 +438,7 @@ const J = {};
   neg(await historyLen(J.RID) === J.histAtPlanned, 'J3b and no case history entry was written');
   neg(JSON.stringify((await j('GET', '/player/inbox', undefined, kola.token)).body.items) === JSON.stringify(inboxBefore), 'J4 the player\'s Inbox is unchanged — the draft is invisible');
   neg((await j('GET', '/player/notifications', undefined, kola.token)).body.length === notifsBefore.length, 'J4b and the player was not notified');
-  neg((await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body.length === outboxBefore, 'J4c and nothing was queued to the outbox');
+  neg((await j('GET', '/admin/overview', undefined, undefined, ADMIN)).body.emailsSent === outboxBefore, 'J4c and nothing was queued to the outbox');
   neg((await j('GET', '/org/requests', undefined, maria.token)).body.items.every((r) => r.contactId !== J.CID), 'J4d and no request row exists for it');
   const sseFrames = await sseP.stop();
   neg(!sseFrames.includes(J.CID) && !/contact_created/.test(sseFrames), 'J4e the player\'s live stream carried no contact event and no contact id during the draft');
@@ -593,7 +593,7 @@ section('M — the minor journey: guardian route, no direct contact, missing gua
   await sleep(50);
   const cM = (await j('GET', `/org/rooms/${RID}/contacts/${draft.body.contact.id}`, undefined, maria.token)).body.contact;
   ok(cM.emailCopy?.state === 'local_outbox' && cM.emailCopy.to === 'guardian', 'M7 the guardian got a courtesy email copy, honestly labelled local_outbox — never "delivered"');
-  const outbox = (await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body;
+  const outbox = (await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body.items;
   const mail = outbox.find((m) => m.id === cM.emailCopy.outboxId);
   ok(mail && mail.to === 'amara.adebayo@example.com', 'M7b the outbox record is addressed to the guardian');
   neg(!mail.text.includes('U15 programme') && !mail.text.includes(SENTINEL), 'M7c and carries no message body — it says something is waiting in ScoutBox');
@@ -846,7 +846,9 @@ section('F — honest transport failure and resend');
   ok(again.status === 200 && again.body.delivered === true && again.body.contact.status === 'delivered' && again.body.contact.attempts === 2, 'F5 an explicit resend is a new attempt on the SAME Contact: delivered, attempts 2');
   ok(again.body.contact.history.map((h) => h.action).join(',') === 'contact_created,contact_send_failed,contact_sent', 'F5b history keeps both attempts in order');
   ok(await stage(RID) === 'contacted' && (await j('GET', '/player/inbox', undefined, theo.token)).body.items.length === 1, 'F5c now the case moves and the player has exactly one message');
-  neg((await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body.every((m) => !String(m.text ?? '').includes('Goalkeeping')), 'F6 no outbox record ever carries the message body');
+  const everyMail = []; // S14d: the outbox pages; read every page
+  for (let page = { nextCursor: '' }; page.nextCursor !== null;) { page = (await j('GET', `/admin/outbox?limit=100${page.nextCursor ? `&cursor=${page.nextCursor}` : ''}`, undefined, undefined, ADMIN)).body; everyMail.push(...page.items); }
+  neg(everyMail.length > 0 && everyMail.every((m) => !String(m.text ?? '').includes('Goalkeeping')), 'F6 no outbox record ever carries the message body');
 }
 
 // ==================================================================== X

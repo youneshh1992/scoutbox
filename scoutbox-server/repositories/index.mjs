@@ -85,7 +85,7 @@ import { createTransitionsVouchesRepository, TRANSITIONS_SNAPSHOT, TRANSITIONS_C
 import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE, ONE_TIME_CODES_MIGRATION, assertPairingCodesConsistent } from './oneTimeCodes.mjs';
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, NOTIFICATIONS_MIGRATION } from './notifications.mjs';
 import { createDispatchesRepository, DISPATCHES_TABLE, DISPATCHES_MIGRATION } from './dispatches.mjs';
-import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_MIGRATION } from './outboxPush.mjs';
+import { createOutboxPushRepository, OUTBOX_PUSH_SNAPSHOT_TABLES, OUTBOX_PUSH_COLLECTIONS, OUTBOX_PUSH_MIGRATION } from './outboxPush.mjs';
 import { createChannelsRepository, CHANNELS_TABLE, CHANNELS_MIGRATION, assertChannelReferencesConsistent } from './channels.mjs';
 import { createSafetyAuditRepository, AUDIT_COLLECTIONS, SAFETY_AUDIT_SNAPSHOT, SAFETY_AUDIT_MIGRATION, assertIdvQueueGuardiansConsistent, unresolvedPlayerReferences, retainedPlayerReferences } from './safetyAudit.mjs';
 
@@ -103,8 +103,8 @@ const TABLES = Object.freeze([ORGS_TABLE, USERS_TABLE, SESSIONS_TABLE]);
 export const TABLE_BACKED = Object.freeze(['orgs', ...IDENTITY_COLLECTIONS, PLAYERS_RETAINED.name, 'users', 'sessions', MEDIA_DELETIONS_TABLE.name, EMAIL_CHALLENGES_TABLE.name, PAIRING_CODES_TABLE.name, NOTIFICATIONS_TABLE.name, NOTIFICATION_PREFS_TABLE.name, DISPATCHES_TABLE.name, ...OUTBOX_PUSH_SNAPSHOT_TABLES.map((t) => t.name), CHANNELS_TABLE.name, ...AUDIT_COLLECTIONS, ...RECRUITMENT_COLLECTIONS, ...RECRUITMENT_CASES_COLLECTIONS, ...RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS, ...SIGNINGS_FOLLOWUPS_COLLECTIONS, ...SCOUTING_EVIDENCE_COLLECTIONS, ...SCOUTING_ASSESSMENTS_COLLECTIONS, ...CLUB_SETUP_COLLECTIONS, ...OPPORTUNITIES_CAMPAIGNS_COLLECTIONS, ...VERIFICATION_COLLECTIONS, ...PASSPORT_COLLECTIONS, ...TRANSITIONS_COLLECTIONS, ...AGENT_CORE_COLLECTIONS, ...COMPLIANCE_POLICIES_COLLECTIONS, ...COMPLIANCE_RECORDS_COLLECTIONS, ...AGENT_TRANSACTIONS_COLLECTIONS, ...DEVELOPMENT_COLLECTIONS, ...BOX_CAM_COLLECTIONS, ...DISCOVERY_COLLECTIONS, ...INSIGHT_COVERAGE_COLLECTIONS, ...INTEGRATIONS_COLLECTIONS, ...ENTERPRISE_COLLECTIONS, ...GROUPS_COLLECTIONS, ...GRASSROOTS_COLLECTIONS, ...OPERATIONS_COLLECTIONS]);
 /** The one-time-code tables, dispatched after the organisations are pruned (the challenge references its organisation) and after the identity pair (the final-state check reads the players). */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
-/** The notification, dispatch, outbox and push tables: no reference to any other table (polymorphic audiences; the dispatch's notification reference is indexed, not a foreign key; the outbox and push rows reference nothing), dispatched last. */
-const NOTIFICATION_TABLE_DISPATCH = Object.freeze([NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, DISPATCHES_TABLE, ...OUTBOX_PUSH_SNAPSHOT_TABLES]);
+/** The notification, outbox and push tables: no reference to any other table (polymorphic audiences; the outbox and push rows reference nothing), dispatched last. The dispatches (a staff audience's organisation is a key) go before the organisation prune. */
+const NOTIFICATION_TABLE_DISPATCH = Object.freeze([NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE, ...OUTBOX_PUSH_SNAPSHOT_TABLES]);
 
 /**
  * Whole-snapshot access for tools that read or write the database file as one
@@ -126,7 +126,7 @@ export function readTableBacked(sqlite) {
   if (retained) out[PLAYERS_RETAINED.name] = retained;
   const queue = MEDIA_DELETIONS_TABLE.read(sqlite);
   if (queue) out[MEDIA_DELETIONS_TABLE.name] = queue;
-  for (const table of [...CODE_TABLES, ...NOTIFICATION_TABLE_DISPATCH, CHANNELS_TABLE]) {
+  for (const table of [...CODE_TABLES, ...NOTIFICATION_TABLE_DISPATCH, DISPATCHES_TABLE, CHANNELS_TABLE]) {
     const rows = table.read(sqlite);
     if (rows) out[table.name] = rows;
   }
@@ -329,6 +329,8 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   // S13e: the remaining operations collections, after the signings an invoice names (organisation, staff and signing keys RESTRICT).
   written.push(...OPERATIONS_SNAPSHOT.replace(sqlite, snapshot));
   if (present.includes(CHANNELS_TABLE.name) && CHANNELS_TABLE.replace(sqlite, snapshot[CHANNELS_TABLE.name])) written.push(CHANNELS_TABLE.name);
+  // S14d: the dispatches, before the organisation prune (a staff audience's organisation is a RESTRICT key).
+  if (present.includes(DISPATCHES_TABLE.name) && DISPATCHES_TABLE.replace(sqlite, snapshot[DISPATCHES_TABLE.name])) written.push(DISPATCHES_TABLE.name);
   // Rows the snapshot no longer lists go last, children before parents, so a
   // parent that is still referenced makes the foreign key refuse the save
   // instead of the row disappearing under its dependants. (The identity pair
@@ -362,10 +364,8 @@ export function writeTableBacked(sqlite, snapshot, { now = Date.now() } = {}) {
   // the FINAL combined state is checked whichever side was written.
   for (const table of CODE_TABLES) if (present.includes(table.name) && table.replace(sqlite, snapshot[table.name])) written.push(table.name);
   if (written.some((n) => IDENTITY_COLLECTIONS.includes(n))) assertPairingCodesConsistent(sqlite, { label: 'the snapshot (players and pairingCodes together)' });
-  // S7a/S7b/S7c: the notification, dispatch, outbox and push tables reference
-  // nothing (polymorphic audiences, no cascade with a person; a dispatch's
-  // notification reference is indexed but not a foreign key — an orphan is
-  // legal; an outbox or push row references nothing at all), so a snapshot
+  // S7a/S7c: the notification, outbox and push tables reference nothing
+  // (polymorphic audiences, no cascade with a person), so a snapshot
   // that carries one collection and omits another leaves the omitted table
   // alone; each entry is validated (never coerced) and one refusal rolls the
   // whole save back.
@@ -465,7 +465,7 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
   if (!sqlite) throw new TypeError('the data layer needs a store with a SQLite connection (node:sqlite); there is no in-memory or JSON fallback');
   const migrations = runDataMigrations(sqlite, DATA_MIGRATIONS, { now: now(), log, context: { sessionTtlMs } });
 
-  // The staged repositories (organisations, players and guardians, notifications, dispatches, outbox and push)
+  // The staged repositories (organisations, players and guardians, notifications)
   // keep a mirror in memory, expose it as a read-only `db.<name>` view
   // and write what changed at the next save (`store.save()`, scheduled by persist()) or the unit of work's commit.
   // Every other repository writes its rows at once and reads through SQL; its old `db.<name>` throws.
@@ -512,17 +512,13 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
     Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
   }
 
-  const dispatches = createDispatchesRepository({ sqlite, log, now, unit: store.unit, staged: true });
+  // S14d: explicit, no mirror; their old collection names throw.
+  const dispatches = createDispatchesRepository({ sqlite, log, now, unit: store.unit });
   const dispatchesBoot = dispatches.attach();
-  store.setSaveHook?.(dispatches.saveHook());
-  Object.defineProperty(db, DISPATCHES_TABLE.name, { value: dispatches.view, writable: false, configurable: false, enumerable: true });
-
-  const outboxPush = createOutboxPushRepository({ sqlite, log, now, unit: store.unit, staged: true });
+  retireCollection(db, DISPATCHES_TABLE.name, 'dispatches');
+  const outboxPush = createOutboxPushRepository({ sqlite, log, now, unit: store.unit });
   const outboxPushBoot = outboxPush.attach();
-  store.setSaveHook?.(outboxPush.saveHook());
-  for (const [name, view] of [['outbox', outboxPush.outbox.view], ['pushLog', outboxPush.pushLog.view], ['pushTokens', outboxPush.pushTokens.view]]) {
-    Object.defineProperty(db, name, { value: view, writable: false, configurable: false, enumerable: true });
-  }
+  for (const name of OUTBOX_PUSH_COLLECTIONS) retireCollection(db, name, 'outboxPush');
 
   // The explicit repositories, in dependency order. Each retires its old collection names on `db`.
   const recruitmentContactsOffers = createRecruitmentContactsOffersRepository({ sqlite, log, now, unit: store.unit });
@@ -721,8 +717,8 @@ export function attachDataLayer({ db, seed = {}, store, nextId, sessionTtlMs, no
         sessions: { rows: sessions.count(), mode: 'live', lifetimeMs: sessions.ttlMs },
         oneTimeCodes: { mode: 'live', rows: codes.counts(), outstanding: codes.outstanding(), lifetimesMs: { emailChallenge: codes.emailChallengeTtlMs, pairingCode: codes.pairingCodeTtlMs }, maxEmailAttempts: codes.maxEmailAttempts },
         notifications: { mode: 'live', rows: notifications.counts(), pendingWrites: notifications.pending(), pendingEffects: notifications.pendingEffects(), coalesceMs: notifications.coalesceMs, writeMode: 'staged: a standalone write lands in the next save with the rows it announces; a write inside a unit of work lands in its commit; its push and live event run only once that save committed' },
-        dispatches: { mode: 'live', rows: dispatches.count(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: dispatches.pending(), writeMode: 'staged: a sweep\'s rows, attempts and status changes land in the next save with the outbox row, the injection counter and the ops/webhook rows written alongside; an acknowledgment lands in its unit\'s commit', notificationReference: 'indexed, no foreign key, no cascade (orphans after an ordinary deletion are retained; retention is an open decision)' },
-        outboxPush: { mode: 'live', rows: outboxPush.counts(), pendingWrites: outboxPush.pending(), writeMode: 'staged: a mailer record lands in the save of its route; a delivery record in the sweep\'s save with the dispatch rows; a push record — written after the notification\'s save committed — in the later save the sender\'s nextId() already schedules; a token in the route\'s persist()', tokens: 'a non-empty string (the route refuses anything else with 400 TOKEN_INVALID); no uniqueness constraint (re-registering the same token for the same session owner replaces its earlier rows)', destinations: 'a string address in to_address, or null (the routes refuse a non-string e-mail with 400)', typing: 'typed columns only: no extra_json; unknown keys are not stored; a wrong-typed field is refused by name; the cutover dropped unknown fields and normalised or dropped non-string destinations and tokens, each reported by id (meta.outboxPushCutover.notes)' },
+        dispatches: { mode: 'live', rows: dispatches.count(), attempts: dispatches.attemptCount(), byStatus: dispatches.countsByStatus(), backlog: dispatches.backlogCount(), pendingWrites: 0, writeMode: 'explicit: a notification\'s dispatches are created in one unit; each send (its attempt, status, outbox row, injected-failure use and, when the retries run out, the ops event and webhook) in one unit; a callback event with its seen marker in one unit; an acknowledgment with the notification\'s contract', notificationReference: 'indexed, no foreign key (a dispatch outlives its notification; retention is an open decision)', organisation: 'a staff audience\'s organisation, a deferred RESTRICT key' },
+        outboxPush: { mode: 'live', rows: outboxPush.counts(), pendingWrites: 0, writeMode: 'explicit: a mail record before its provider call and its answer after; the delivery centre\'s record in its send\'s unit; a push record when the push is sent; a token at registration', tokens: 'one row per device token, players and guardians only (a token another account registers moves to it)', typing: 'typed columns with vocabulary CHECKs; an unknown field or a wrong-typed value is refused by name' },
         channels: { mode: 'live', rows: channels.counts(), pendingWrites: 0, writeMode: 'explicit: a thread opens with the request\'s acceptance, in its unit of work; a message with its ledger row and notifications in one unit; a receipt at once; a deleted player\'s threads go in the account-deletion unit (D-B)', readMode: 'SQL: byId, parties, a player\'s and a guardian\'s threads, the organisation\'s and the admin lists by cursor (most recently active first), the organisation\'s counts, the retry lookup; no mirror and no db.* view', references: 'request_id (unique), org_id and a staff sender are RESTRICT keys; player and guardian ids carry no key (tolerant), a guardian is checked at open and on every snapshot\'s final state; messages and attachments cascade with their thread' },
         recruitment: { mode: 'live', rows: recruitment.counts(), pendingWrites: recruitment.pending(), unresolvedPlayerReferences: unresolvedRecruitmentPlayers(sqlite), retainedPlayerReferences: retainedRecruitmentPlayers(sqlite), writeMode: 'explicit and typed: requests.create / update, trials.create / update and tombstoneForPlayer write a record\'s rows at once (inside the route\'s unit of work) and re-read it; the views are read-only; a record the typed columns cannot hold is refused with its id', references: 'player_id (both tables) no foreign key, TOLERANT (Q7a): live, retained and historically missing ids resolve, are counted here and never refused, fabricated or deleted. case_id (both tables) → recruitment_cases (RESTRICT, immediate); recruitment_requests.trial_id → trials DEFERRABLE INITIALLY DEFERRED (a snapshot writes a request before its trial). guardian_id and recipient_guardian_id no foreign key, STRICT in code (Q7c): checked at every write and on every snapshot\'s final state. trials.request_id NOT NULL UNIQUE → recruitment_requests (RESTRICT); org_id and user_id → orgs / org_users (RESTRICT); the child tables cascade with their owner. The direct request route keeps its REQUEST_PENDING rule (D2)' },
         recruitmentCases: { mode: 'live', rows: recruitmentCases.counts(), pendingWrites: 0, unresolvedPlayerReferences: unresolvedCasePlayers(sqlite), retainedPlayerReferences: retainedCasePlayers(sqlite), writeMode: 'explicit: every change is a repository operation (cases.create / update / redactPlayer; comments, decisions and evidenceStates create / update; snapshots.create) that writes its rows at once — inside the route\'s unit of work when one is open, in a transaction of its own otherwise — and re-reads the record from the tables; the views hold read-only records (an in-place edit throws); no flush, no fingerprint', typing: 'typed columns only (file 02): the vocabulary and length CHECKs; one case history entry shape; a decision\'s snapshot is the room_snapshots row it names; the idempotency keys as columns; no absent_keys_json, offtype_json, extra_json or raw_json; a record the columns cannot hold (an unknown field included) is refused with its id', references: 'player_id (recruitment_cases, room_snapshots, room_decisions, case_transaction_handoffs) no foreign key, TOLERANT (Q8a): live, retained and historically missing ids resolve, are counted here and never refused. org_id → orgs and the staff ids (owner, lead scout, M12 decision maker, assignee, comment author) → org_users (RESTRICT); room_id (the four room tables) → recruitment_cases (RESTRICT); a decision\'s snapshot_id → room_snapshots (RESTRICT); case_request_links → recruitment_requests and case_trial_links → trials (RESTRICT); the case_id of requests, trials, contacts and offers → recruitment_cases (RESTRICT, immediate). The decision chain and a decision\'s snapshot stay inside its room, checked at every write. The children cascade with their owner. The one-open-room rule is the routes\'' },

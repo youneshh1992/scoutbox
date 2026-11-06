@@ -9,30 +9,28 @@
 // "delivered"/"opened" are set ONLY from confirmed provider callbacks — email
 // acceptance is never reported as read.
 //
-// S7b: the dispatch rows and their attempts live in the `dispatches` /
-// `dispatch_attempts` tables (repositories/dispatches.mjs, migration 0010),
-// read here through `db.dispatches` (the repository's read-only view, in
-// insertion order) and written through the `dispatches` repository in its
-// staged mode: a sweep pass's rows, attempts and status changes land in the
-// same snapshot save as the outbox row the fake provider wrote, the
-// failure-injection counter it decremented and the ops event / webhook
-// delivery intent of an exhausted retry (`persistNow()` below); an
-// acknowledgment's status changes land in the unit's commit with the
-// notification's contract; a callback's changes land with the
-// callback-id bookkeeping (S13e: rows of delivery_callbacks_seen, written at once). The ladder's RANK, the retry schedule,
-// the destination rules and the callback contract are unchanged.
+// S14d: the dispatches and their attempts (repositories/dispatches.mjs) and the
+// fake provider's outbox record (repositories/outboxPush.mjs) are explicit writes
+// and SQL reads. A notification's dispatches are created in one unit of work; each
+// send — its attempt, its status, the outbox row, the injected failure it used and,
+// when the retries run out, the ops event and the webhook intent — is one unit; a
+// provider callback event commits with its seen marker; an acknowledgment with the
+// notification's contract. The ladder's RANK, the retry schedule, the destination
+// rules and the callback contract are unchanged.
 import crypto from 'node:crypto';
+import { readPage, sendPageError } from '../domains/platform/paging.mjs';
 
 const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened: 3, actioned: 4 };
 
 export function registerDelivery(ctx) {
   const {
-    db, byId, users, notifications, dispatches, outbox, safetyAudit, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
+    byId, users, notifications, dispatches, outbox, safetyAudit, unit, app, orgRouter, playerRouter, guardianRouter, adminRouter,
     nextId, persist, persistNow, notify, findPlayer, isAdult,
-    signBody, timingSafeEq, paginate, operations,
+    signBody, timingSafeEq, operations,
   } = ctx;
   if (!notifications) throw new TypeError('registerDelivery needs the notifications repository (ctx.notifications)');
   if (!dispatches) throw new TypeError('registerDelivery needs the dispatches repository (ctx.dispatches)');
+  if (typeof outbox?.append !== 'function') throw new TypeError('registerDelivery needs the outbox repository (ctx.outbox)');
   if (typeof operations?.delivery?.markSeen !== 'function') throw new TypeError('registerDelivery needs the operations repository (ctx.operations, S13e)');
   // S13e: the callback ids applied, the instant the delivery centre started and the injected failures are rows of
   // repositories/operations.mjs (delivery_callbacks_seen, delivery_centre, delivery_fail_injections), written explicitly.
@@ -40,32 +38,19 @@ export function registerDelivery(ctx) {
   // An exhausted retry's ops event is a row of ops_events (repositories/safetyAudit.mjs), written at once
   // (in the sweep's unit of work when one is open).
   const opsEvent = (row) => safetyAudit.opsEvents.record(row);
-  // S7c: the local fake provider's record is an outbox row (repositories/outboxPush.mjs).
-  // The server always passes the repository. Without one, the record is pushed onto
-  // db.outbox exactly as before the cutover — the same fallback adapters.mjs keeps —
-  // so a bare context built around an array (the reviewer feasibility scripts of
-  // 26d492b and 6ca66ba) keeps running; anything else refuses loudly.
-  const outboxStore = outbox ?? {
-    append(record) {
-      if (!Array.isArray(db.outbox)) throw new TypeError('registerDelivery needs the outbox repository (ctx.outbox) or an outbox array on db');
-      db.outbox.push(record);
-    },
-  };
-
   // Notifications older than the delivery centre's start (written by migration 0038) get an in-app record only — no
   // retroactive email blast; admin-injected provider failures (tests/monitoring) are used up one send at a time.
 
   // Local fake provider: deterministic, in-process, honestly labelled.
   // Real email/SMS/push transport is NOT configured in this environment.
   const PROVIDER = 'local-fake';
+  const CALLBACK_STATUSES = ['delivered', 'opened', 'bounced', 'failed'];
   const CALLBACK_SECRET = process.env.DELIVERY_CALLBACK_SECRET || 'local-fake-callback-secret';
   function fakeSend(channel, to, text) {
     if (bookkeeping.consumeInjectedFailure(channel)) return { ok: false, error: 'injected provider failure' };
     const providerMessageId = `fm_${crypto.randomBytes(8).toString('hex')}`;
-    // S7c: the delivery record is an outbox row (repositories/outboxPush.mjs), staged
-    // into the same save as the dispatch rows and attempts of this pass; `to` is the
-    // dispatch's destination as it is — an accepted queued dispatch may carry null.
-    outboxStore.append({ id: nextId('mail'), at: Date.now(), channel, to, text: String(text).slice(0, 300), providerMessageId, provider: PROVIDER });
+    // The delivery record is an outbox row, written in the send's unit with the dispatch's attempt and status.
+    outbox.append({ id: nextId('mail'), at: Date.now(), channel, to, text: String(text).slice(0, 300), providerMessageId, provider: PROVIDER });
     return { ok: true, providerMessageId };
   }
 
@@ -108,66 +93,75 @@ export function registerDelivery(ctx) {
   const MAX_ATTEMPTS = RETRY_MS.length;
 
   // --------------------------------------------------------------- sweeper
+  /** One sweep item in its own unit of work; a refusal is logged by id and the sweep goes on with the next item. */
+  const item = (what, work) => {
+    try { return unit(work); } catch (err) { console.error(`delivery sweep: ${what} was not processed (${err?.code ?? err?.message ?? err})`); return 0; }
+  };
+  /** The organisation of a staff audience (null for a player, a guardian or a staff member who no longer exists). */
+  const orgOfAudience = (a) => (a.kind === 'org_user' ? byId.user(a.id)?.orgId ?? null : null);
+  const shortReason = (v) => (v == null || v === '' ? null : String(v).slice(0, 500));
+
   function dispatchSweep() {
     let changed = 0;
-    // 1. Create dispatch rows for notifications that have none yet. The row is
-    //    the same eighteen-key literal every build since M13 wrote (the
-    //    repository validates it and refuses anything else).
+    // 1. Create the dispatches of every notification that has none yet: one unit per notification.
+    //    (Notifications are still a mirror — S14e — so the ones without dispatches are found in memory.)
     const seen = dispatches.notificationIdsWithRows();
     const centreSince = bookkeeping.centreSince();
     for (const n of notifications.view) {
       if (seen.has(n.id)) continue;
-      const historical = n.ts < centreSince;
-      for (const dest of destinationsFor(n)) {
-        if (historical && dest.channel !== 'in_app') { dest.skip = 'predates delivery centre — no retroactive external send'; }
-        const hold = dest.channel !== 'in_app' ? quietHoldUntil(n) : null;
-        dispatches.create({
-          id: nextId('dsp'), notificationId: n.id, audience: { kind: n.audience.kind, id: n.audience.id },
-          channel: dest.channel, to: dest.to ?? null, provider: dest.channel === 'in_app' ? 'in_app' : PROVIDER,
-          status: dest.skip ? 'skipped' : dest.channel === 'in_app' ? 'delivered' : hold ? 'held_quiet_hours' : 'queued',
-          skipReason: dest.skip ?? null, providerMessageId: null,
-          attempts: [], nextAt: hold ?? Date.now(),
-          actionDeadline: n.actionRequired?.deadline ?? null,
-          createdAt: Date.now(), deliveredAt: dest.channel === 'in_app' ? Date.now() : null,
-          openedAt: null, actionedAt: null, failedAt: null, failReason: null,
-        });
-        changed++;
-      }
+      changed += item(`notification ${n.id}`, () => {
+        const historical = n.ts < centreSince;
+        const audience = { kind: n.audience.kind, id: n.audience.id };
+        const orgId = orgOfAudience(audience);
+        let made = 0;
+        for (const dest of destinationsFor(n)) {
+          if (historical && dest.channel !== 'in_app') { dest.skip = 'predates delivery centre — no retroactive external send'; }
+          const hold = dest.channel !== 'in_app' ? quietHoldUntil(n) : null;
+          const at = Date.now();
+          dispatches.create({
+            id: nextId('dsp'), notificationId: n.id, audience, orgId,
+            channel: dest.channel, to: dest.to ?? null, provider: dest.channel === 'in_app' ? 'in_app' : PROVIDER,
+            status: dest.skip ? 'skipped' : dest.channel === 'in_app' ? 'delivered' : hold ? 'held_quiet_hours' : 'queued',
+            skipReason: dest.skip ?? null, providerMessageId: null,
+            attempts: [], nextAt: hold ?? at,
+            actionDeadline: n.actionRequired?.deadline ?? null,
+            createdAt: at, deliveredAt: dest.channel === 'in_app' ? at : null,
+            openedAt: null, actionedAt: null, failedAt: null, failReason: null,
+          });
+          made++;
+        }
+        return made;
+      });
       seen.add(n.id);
     }
-    // 2. Attempt queued/retrying/held external sends that are due. `d` is the
-    //    repository's view of the row, so `d.attempts` shows the attempt just
-    //    recorded, exactly as the array did before S7b.
-    for (const d of db.dispatches) {
-      if (!['queued', 'retrying', 'held_quiet_hours'].includes(d.status) || d.nextAt > Date.now()) continue;
-      if (d.status === 'held_quiet_hours') {
-        const n = notifications.byId(d.notificationId);
-        const stillQuiet = n?.deferredPush && quietHoldUntil(n); // conservative single re-check window
-        if (stillQuiet && d.attempts.length === 0) { dispatches.recordAttempt(d.id, { at: Date.now(), note: 'quiet hours re-check' }); dispatches.patch(d.id, { nextAt: stillQuiet }); changed++; continue; }
-      }
-      const n = notifications.byId(d.notificationId);
-      const result = fakeSend(d.channel, d.to, n?.text ?? '');
-      dispatches.recordAttempt(d.id, { at: Date.now(), ok: result.ok, error: result.error ?? null });
-      const sends = d.attempts.filter((a) => !a.note).length; // a quiet re-check note never counts as a send
-      if (result.ok) {
-        dispatches.patch(d.id, { status: 'accepted', providerMessageId: result.providerMessageId }); // provider accepted ≠ delivered ≠ read
-      } else if (sends >= MAX_ATTEMPTS) {
-        dispatches.patch(d.id, { status: 'failed', failedAt: Date.now(), failReason: result.error });
-        opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'delivery_failed', detail: { dispatchId: d.id, channel: d.channel } });
-        ctx.emitWebhook?.(d.audience.kind === 'org_user' ? (byId.user(d.audience.id)?.orgId ?? null) : null, 'delivery.failed', { dispatchId: d.id });
-      } else {
-        dispatches.patch(d.id, { status: 'retrying', nextAt: Date.now() + RETRY_MS[sends] });
-      }
-      changed++;
+    // 2. Attempt the external sends that are due: one unit per dispatch, holding everything the send wrote.
+    for (const due of dispatches.due(Date.now())) {
+      changed += item(`dispatch ${due.id}`, () => {
+        const n = notifications.byId(due.notificationId);
+        if (due.status === 'held_quiet_hours') {
+          const stillQuiet = n?.deferredPush && quietHoldUntil(n); // conservative single re-check window
+          if (stillQuiet && due.attempts.length === 0) { dispatches.recordAttempt(due.id, { at: Date.now(), note: 'quiet hours re-check' }); dispatches.patch(due.id, { nextAt: stillQuiet }); return 1; }
+        }
+        const result = fakeSend(due.channel, due.to, n?.text ?? '');
+        const d = dispatches.recordAttempt(due.id, { at: Date.now(), ok: result.ok, error: shortReason(result.error) });
+        const sends = d.attempts.filter((a) => !Object.hasOwn(a, 'note')).length; // a quiet re-check note never counts as a send
+        if (result.ok) {
+          dispatches.patch(d.id, { status: 'accepted', providerMessageId: result.providerMessageId }); // provider accepted ≠ delivered ≠ read
+        } else if (sends >= MAX_ATTEMPTS) {
+          dispatches.patch(d.id, { status: 'failed', failedAt: Date.now(), failReason: shortReason(result.error) ?? 'provider failure' });
+          opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'delivery_failed', detail: { dispatchId: d.id, channel: d.channel } });
+          ctx.emitWebhook?.(d.orgId, 'delivery.failed', { dispatchId: d.id });
+        } else {
+          dispatches.patch(d.id, { status: 'retrying', nextAt: Date.now() + RETRY_MS[sends] });
+        }
+        return 1;
+      });
     }
     // 3. Mirror in-app reads → opened (meaningfully measured for in_app only).
-    for (const d of db.dispatches) {
-      if (d.channel === 'in_app' && !d.openedAt) {
-        const n = notifications.byId(d.notificationId);
-        if (n?.read) { dispatches.patch(d.id, RANK[d.status] < RANK.opened ? { openedAt: Date.now(), status: 'opened' } : { openedAt: Date.now() }); changed++; }
-      }
+    for (const d of dispatches.unopenedInApp()) {
+      if (!notifications.byId(d.notificationId)?.read) continue;
+      changed += item(`dispatch ${d.id}`, () => { const at = Date.now(); dispatches.patch(d.id, RANK[d.status] < RANK.opened ? { openedAt: at, status: 'opened' } : { openedAt: at }); return 1; });
     }
-    if (changed) persistNow();
     return changed;
   }
   ctx.dispatchSweep = dispatchSweep;
@@ -223,59 +217,69 @@ export function registerDelivery(ctx) {
     const body = JSON.stringify(req.body ?? {});
     if (!ts || Math.abs(Date.now() - Number(ts)) > 5 * 60_000) return res.status(401).json({ error: 'TIMESTAMP_INVALID', message: 'Callbacks older than 5 minutes are rejected (replay protection).' });
     if (!timingSafeEq(sig, signBody(CALLBACK_SECRET, 'callback', ts, body))) return res.status(401).json({ error: 'SIGNATURE_INVALID' });
-    const events = Array.isArray(req.body?.events) ? req.body.events.slice(0, 100) : [];
-    // S13e: a callback id is 1 to 200 characters; a batch carrying a longer one is refused whole, before anything is applied.
-    const tooLong = events.findIndex((ev) => String(ev?.callbackId ?? '').length > 200);
-    if (tooLong !== -1) return res.status(400).json({ error: 'FIELD_INVALID', field: `events[${tooLong}].callbackId`, message: 'A callback id is at most 200 characters.' });
-    let applied = 0, duplicates = 0;
-    // S13e: each callback id is remembered at once (a row of delivery_callbacks_seen; the newest 5,000 are kept); the
-    // dispatch changes it applies are the staged dispatch store's (S7b) and land with this request's save, as before.
-    for (const ev of events) {
-      const cbId = String(ev.callbackId ?? '');
-      if (!cbId) continue;
-      if (!bookkeeping.markSeen(cbId, Date.now())) { duplicates++; continue; } // idempotent
-      // The lookup every build since M13 made: the FIRST row in insertion order
-      // whose providerMessageId strictly equals the event's (an explicit null
-      // matches the first null row; an omitted id matches nothing — but the
-      // callbackId was still remembered above).
-      const d = dispatches.byProviderMessageId(ev.providerMessageId);
-      if (!d) continue;
-      // The clock a callback carries, as every build since M13 read it:
-      // `Number(ev.at) || Date.now()` — a finite value, fractional or not, is
-      // kept EXACTLY (the table column is the writer's double). A non-finite
-      // value (Infinity from a string such as "Infinity") is written to the
-      // mirror AS IT IS, exactly as the previous build held it in memory, so
-      // the nullish rule below treats the clock as set for every later event in
-      // this process (the same batch, a later request) — the repository stores
-      // NULL for it, which is what that build's JSON save persisted, and a
-      // restart therefore reads null, as it did (review of 26d492b, finding 3).
-      // The callback API is unchanged.
-      const clock = () => Number(ev.at) || Date.now();
-      const patch = {};
-      if (ev.status === 'delivered') {
-        if (d.deliveredAt == null) patch.deliveredAt = clock(); // nullish assignment: an existing clock is kept
-        if (RANK[d.status] < RANK.delivered) patch.status = 'delivered'; // forward-only: never regresses opened/actioned
-      } else if (ev.status === 'opened') {
-        if (d.openedAt == null) patch.openedAt = clock();
-        if (d.deliveredAt == null) patch.deliveredAt = Object.hasOwn(patch, 'openedAt') ? patch.openedAt : d.openedAt; // out-of-order: opened implies delivered
-        if (RANK[d.status] < RANK.opened) patch.status = 'opened';
-      } else if (ev.status === 'bounced' || ev.status === 'failed') {
-        // A failure report never un-delivers: recorded alongside, status only
-        // moves to failed if nothing better was ever confirmed.
-        patch.failReason = String(ev.reason ?? ev.status).slice(0, 120);
-        if (RANK[d.status] <= RANK.accepted) { patch.status = 'failed'; patch.failedAt = Date.now(); }
-      }
-      if (Object.keys(patch).length) dispatches.patch(d.id, patch);
-      applied++;
+    // S14d: the whole batch is checked before anything is applied; junk is refused naming the field, never skipped or
+    // read as "now". An event is { callbackId (1–200 characters), providerMessageId (text), status (delivered, opened,
+    // bounced or failed), at (a whole-number timestamp; omitted or null means now), reason (text, optional) }.
+    const events = req.body?.events ?? [];
+    const invalid = (field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
+    if (!Array.isArray(events)) return invalid('events', 'events is a list of delivery events.');
+    if (events.length > 100) return invalid('events', 'A callback carries at most 100 events.');
+    for (let i = 0; i < events.length; i++) {
+      const ev = events[i]; const f = (k) => `events[${i}]${k ? `.${k}` : ''}`;
+      if (ev === null || typeof ev !== 'object' || Array.isArray(ev)) return invalid(f(), 'An event is an object.');
+      if (typeof ev.callbackId !== 'string' || ev.callbackId.length < 1 || ev.callbackId.length > 200) return invalid(f('callbackId'), 'A callback id is 1 to 200 characters.');
+      if (typeof ev.providerMessageId !== 'string' || ev.providerMessageId.length < 1 || ev.providerMessageId.length > 200) return invalid(f('providerMessageId'), 'A provider message id is 1 to 200 characters.');
+      if (!CALLBACK_STATUSES.includes(ev.status)) return invalid(f('status'), `status is one of ${CALLBACK_STATUSES.join(', ')}.`);
+      if (ev.at != null && !(Number.isSafeInteger(ev.at) && ev.at > 0)) return invalid(f('at'), 'at is a whole-number timestamp in milliseconds.');
+      if (ev.reason != null && typeof ev.reason !== 'string') return invalid(f('reason'), 'reason is text.');
     }
-    persistNow();
+    let applied = 0, duplicates = 0;
+    // Each event commits with its seen marker (a row of delivery_callbacks_seen; the newest 5,000 are kept), so a
+    // crash can never leave an id remembered and its change lost.
+    for (const ev of events) {
+      const outcome = unit(() => {
+        if (!bookkeeping.markSeen(ev.callbackId, Date.now())) return 'duplicate'; // idempotent
+        const d = dispatches.byProviderMessageId(ev.providerMessageId);
+        if (!d) return 'unknown'; // the id is still remembered
+        const clock = ev.at ?? Date.now();
+        const patch = {};
+        if (ev.status === 'delivered') {
+          if (d.deliveredAt == null) patch.deliveredAt = clock; // an existing clock is kept
+          if (RANK[d.status] < RANK.delivered) patch.status = 'delivered'; // forward-only: never regresses opened/actioned
+        } else if (ev.status === 'opened') {
+          if (d.openedAt == null) patch.openedAt = clock;
+          if (d.deliveredAt == null) patch.deliveredAt = patch.openedAt ?? d.openedAt; // out-of-order: opened implies delivered
+          if (RANK[d.status] < RANK.opened) patch.status = 'opened';
+        } else {
+          // A failure report never un-delivers: recorded alongside, status only
+          // moves to failed if nothing better was ever confirmed.
+          patch.failReason = (ev.reason || ev.status).slice(0, 120);
+          if (RANK[d.status] <= RANK.accepted) { patch.status = 'failed'; patch.failedAt = Date.now(); }
+        }
+        dispatches.patch(d.id, patch);
+        return 'applied';
+      });
+      if (outcome === 'duplicate') duplicates++;
+      else if (outcome === 'applied') applied++;
+    }
     res.json({ applied, duplicates });
   });
 
   // ------------------------------------------------------------------ views
+  // S14d: a club's staff dispatches, newest first, paged by cursor (an index on the dispatch's organisation). The view
+  // is an allowlist: the fields the club's delivery screen had, the attempts as outcomes and times.
+  const orgDeliveryView = (d) => ({
+    id: d.id, notificationId: d.notificationId, audience: { kind: d.audience.kind, id: d.audience.id }, orgId: d.orgId, channel: d.channel, to: d.to,
+    provider: d.provider, status: d.status, skipReason: d.skipReason, providerMessageId: d.providerMessageId,
+    attempts: d.attempts.map((a) => (Object.hasOwn(a, 'note') ? { at: a.at, note: a.note } : { at: a.at, ok: a.ok, error: a.error })),
+    nextAt: d.nextAt, actionDeadline: d.actionDeadline, createdAt: d.createdAt, deliveredAt: d.deliveredAt, openedAt: d.openedAt,
+    actionedAt: d.actionedAt, failedAt: d.failedAt, failReason: d.failReason,
+  });
   orgRouter.get('/delivery', (req, res) => {
-    const mine = db.dispatches.filter((d) => d.audience.kind === 'org_user' && db.users.some((u) => u.id === d.audience.id && u.orgId === req.org.id));
-    res.json(paginate(req, mine.slice().reverse()));
+    let page;
+    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    const out = dispatches.pageForOrg(req.org.id, page);
+    res.json({ items: out.items.map(orgDeliveryView), nextCursor: out.nextCursor });
   });
 
   orgRouter.put('/delivery/prefs', (req, res) => {
@@ -299,7 +303,7 @@ export function registerDelivery(ctx) {
       providerNote: 'Local fake provider only — real email/SMS/push transport is not configured; no message leaves this machine.',
       counts: dispatches.countsByStatus(),
       awaitingAck: notifications.awaitingAckCount(),
-      recent: db.dispatches.slice(-100).reverse(),
+      recent: dispatches.recent(100),
     });
   });
 

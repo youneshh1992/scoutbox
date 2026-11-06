@@ -304,7 +304,7 @@ await test('through the real server: a message whose unit fails at the REAL COMM
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const { channelId } = await openThread(S, maria, kola);
   const sse = await openSse(S, kola);
-  const pushes = async () => (await S.j('GET', '/admin/push-log', undefined, null, A)).body.filter((p) => p.audience?.kind === 'player' && p.audience.id === 'pl-adeyemi' && /sent a message/.test(p.body ?? ''));
+  const pushes = async () => (await S.j('GET', '/admin/push-log', undefined, null, A)).body.items.filter((p) => p.audience?.kind === 'player' && p.audience.id === 'pl-adeyemi' && /sent a message/.test(p.body ?? ''));
   const rows = () => q1(dir, 'SELECT COUNT(*) AS n FROM notifications WHERE audience_id = ? AND type = ?', 'pl-adeyemi', 'message').n;
   const settle = async (ok) => { for (let i = 0; i < 150 && !(await ok()); i++) await new Promise((r) => setTimeout(r, 20)); };
   assert.equal((await pushes()).length, 0); assert.equal(sse.notifyFrames().length, 0);

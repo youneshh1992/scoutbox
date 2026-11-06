@@ -5,10 +5,10 @@
 --   channels            → channels, messages, message_attachments           (LIVE since migration 0012_channels, S7d, REGISTERED; explicit writes since S14c, 0012 amended in place)
 --   notifications       → notifications                                    (LIVE since migration 0009_notifications, S7a, REGISTERED)
 --   notificationPrefs   → notification_prefs, notification_pref_categories  (LIVE since migration 0009_notifications, S7a, REGISTERED)
---   dispatches          → dispatches, dispatch_attempts                  (LIVE since migration 0010_dispatches, S7b, REGISTERED — independently accepted at ac50b60)
---   outbox              → outbox                                           (LIVE since migration 0011_outbox_push, S7c, REGISTERED — implemented, pending independent acceptance)
---   pushLog             → push_log                                         (LIVE since migration 0011_outbox_push, S7c, REGISTERED — implemented, pending independent acceptance)
---   pushTokens          → push_tokens                                      (LIVE since migration 0011_outbox_push, S7c, REGISTERED — implemented, pending independent acceptance)
+--   dispatches          → dispatches, dispatch_attempts                  (LIVE since migration 0010_dispatches, S7b, REGISTERED; explicit writes since S14d, 0010 amended in place)
+--   outbox              → outbox                                           (LIVE since migration 0011_outbox_push, S7c, REGISTERED; explicit writes since S14d, 0011 amended in place)
+--   pushLog             → push_log                                         (LIVE since migration 0011_outbox_push, S7c, REGISTERED; explicit writes since S14d, 0011 amended in place)
+--   pushTokens          → push_tokens                                      (LIVE since migration 0011_outbox_push, S7c, REGISTERED; explicit writes since S14d, 0011 amended in place)
 --   blocks              → blocks                                           (LIVE since migration 0013_safety_audit, S6b, REGISTERED; explicit writes since S14b)
 --   reports             → reports                                          (LIVE since migration 0013_safety_audit, S6b, REGISTERED; explicit writes since S14b)
 --   moderationLog       → moderation_log, moderation_flags                 (LIVE since migration 0013_safety_audit, S6b, REGISTERED; explicit writes since S14b)
@@ -254,127 +254,59 @@ CREATE TABLE notification_pref_categories (
 
 
 -- -----------------------------------------------------------------------------
--- dispatches  (LIVE: migration 0010_dispatches, S7b — repositories/dispatches.mjs;
---              implemented, pending independent acceptance)
--- source: db.dispatches — the eighteen-key literal every build since M13 wrote
---         (m13/delivery.mjs dispatchSweep step 1); container m13/shared.mjs
---         (`??= []`, replaced by the repository's read-only view at boot).
--- owner/writer: repositories/dispatches.mjs (staged mode in the server:
---         m13/delivery.mjs sweep / ack / provider callback write through it).
--- lifecycle: status ladder forward-only queued/held_quiet_hours → accepted →
---         delivered → opened → actioned; terminal side states skipped, failed;
---         transient retrying. NEVER pruned: a dispatch whose notification was
---         deleted stays (option A of docs/architecture/s7-readiness-review.md
---         §9.1, as instructed by the review of dc4b559) — `notification_id` is
---         an indexed reference with NO foreign key and NO cascade; the
---         migration counts such orphans (`orphanReferences`) and imports them
---         unchanged. Retention is an open decision, not decided here.
--- ordering: `seq` is the insertion order every reader depends on (the admin
---         view reverses it, the callback lookup takes the FIRST match, the
---         sweep processes rows in it); the migration assigns it from the array
---         position, backup/restore and the rollback preserve it.
--- mapping (the legacy row ↔ the columns; the export reproduces the literal):
---   id                 -> id (dsp-*; UNIQUE — the prefix is shared with m16 disputes, ids are globally unique via the counter)
---   notificationId     -> notification_id (indexed; no FK, no cascade — see lifecycle)
---   audience.kind      -> audience_kind (copied from the notification — snapshot; open vocabulary, no CHECK)
---   audience.id        -> audience_id (snapshot; polymorphic, no FK)
---   channel            -> channel ('in_app' | 'email' today; open vocabulary)
---   to                 -> to_address (email address or "kind:id" for in_app; NULL when skipped)  -- personal data
---   provider           -> provider ('in_app' | 'local-fake' today; open vocabulary)
---   status             -> status (open vocabulary: the ladder's RANK lives in m13/delivery.mjs)
---   skipReason         -> skip_reason
---   providerMessageId  -> provider_message_id (fm_<16hex>; set on provider accept; NOT unique — duplicates are legal,
---                         the callback lookup is the FIRST row in `seq` order whose value strictly equals the event's;
---                         an explicit null matches the first NULL row; an omitted id matches nothing)
---   attempts[]         -> dispatch_attempts (child; position = seq)
---   nextAt             -> next_at (INTEGER: Date.now() or a sum of it)
---   actionDeadline     -> action_deadline_at (copied from notification.actionRequired.deadline; INTEGER or NULL)
---   createdAt          -> created_at (INTEGER)
---   deliveredAt        -> delivered_at (REAL or NULL: written by the callback route as `Number(ev.at) || Date.now()`,
---                         a finite JavaScript number that MAY be fractional; stored as the writer's double, exactly)
---   openedAt           -> opened_at (REAL or NULL: same writer, same contract)
---   actionedAt         -> actioned_at (INTEGER or NULL: the ack's Date.now())
---   failedAt           -> failed_at (INTEGER or NULL: the sweep's / callback's Date.now())
---   failReason         -> fail_reason (UNTRUNCATED at storage: the sweep writes the provider error as it is;
---                         only the callback route truncates its own input to 120 characters before writing)
---   (unknown keys)     -> not stored (typed columns, valid input only): the 0010 import drops an unknown field
---                         (top level, audience or attempt) and reports it by dispatch id and field name in
---                         meta.dispatchesCutover; create / a snapshot replace drop an unknown top-level field
---                         and refuse an unknown audience or attempt field
--- timestamp contract (review of dc4b559, finding 2): every clock this server
---   writes itself is an integer in an INTEGER column (a fraction is refused by
---   the repository and by STRICT); delivered_at / opened_at are the callback
---   route's doubles in REAL columns — node:sqlite binds every JavaScript number
---   as a double, and a REAL column states exactly what is stored, integer-valued
---   or fractional; a non-finite callback `at` (the legacy in-memory state
---   `Number('Infinity') || Date.now()`) is kept in the process's memory exactly
---   as the previous build kept it — no later event replaces it — and stored as
---   NULL (what that build's JSON save persisted; review of 26d492b, finding 3).
---   No value is rounded.
--- notes: one row per (notification, destination); a notification gets exactly
---   one in_app row plus one external row per audience rule (destinationsFor).
---   No uniqueness of (notification_id, channel) is declared (none existed).
---   Reads go through the repository's in-memory mirror (insertion order);
---   the indexes below serve tools and the future SQL readers.
+-- dispatches, dispatch_attempts  (migration 0010_dispatches, S7b; explicit since S14d, amended in place —
+--   repositories/dispatches.mjs, DISPATCHES_DDL)
+-- One row per notification and channel: an in_app row (delivered at once) and an email row (sent through the
+-- provider, skipped, or held for quiet hours). Written by the delivery centre (m13/delivery.mjs): a notification's
+-- dispatches in one unit of work; each send (its attempt, status, the outbox row, the injected failure it used and,
+-- when the retries run out, the ops event and webhook) in one unit; a callback event with its seen marker; an
+-- acknowledgment with the notification's contract. Status ladder, forward-only: queued/held_quiet_hours →
+-- accepted → delivered → opened → actioned; side states skipped, failed, retrying.
+-- keys: org_id is a staff audience's organisation, a RESTRICT key DEFERRABLE INITIALLY DEFERRED (the organisations
+--   are still written by their staged hook at COMMIT). notification_id and audience_id carry no key: a dispatch
+--   outlives its notification after an account deletion (retention is open, Q6).
+-- clocks: integers (Date.now()); a callback's at is a whole-number timestamp, junk refused at the route.
+-- attempts: ordered child rows, a send (ok 0/1, error) or a quiet re-check note; the shape CHECK is total.
 -- -----------------------------------------------------------------------------
 CREATE TABLE dispatches (
   seq                 INTEGER PRIMARY KEY,
-  id                  TEXT NOT NULL UNIQUE,
-  notification_id     TEXT NOT NULL,
-  audience_kind       TEXT NOT NULL,
-  audience_id         TEXT NOT NULL,
-  channel             TEXT NOT NULL,
-  to_address          TEXT,
-  provider            TEXT NOT NULL,
-  status              TEXT NOT NULL,
-  skip_reason         TEXT,
-  provider_message_id TEXT,
+  id                  TEXT NOT NULL UNIQUE CHECK (id IS NULL OR length(id) BETWEEN 1 AND 80),
+  notification_id     TEXT NOT NULL CHECK (notification_id IS NULL OR length(notification_id) BETWEEN 1 AND 80),
+  audience_kind       TEXT NOT NULL CHECK (audience_kind IN ('player', 'guardian', 'org_user')),
+  audience_id         TEXT NOT NULL CHECK (audience_id IS NULL OR length(audience_id) BETWEEN 1 AND 80),
+  org_id              TEXT REFERENCES orgs(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+  channel             TEXT NOT NULL CHECK (channel IN ('in_app', 'email')),
+  to_address          TEXT CHECK (to_address IS NULL OR length(to_address) BETWEEN 1 AND 320),
+  provider            TEXT NOT NULL CHECK (provider IN ('in_app', 'local-fake')),
+  status              TEXT NOT NULL CHECK (status IN ('queued', 'held_quiet_hours', 'accepted', 'delivered', 'opened', 'actioned', 'skipped', 'failed', 'retrying')),
+  skip_reason         TEXT CHECK (skip_reason IS NULL OR length(skip_reason) BETWEEN 1 AND 200),
+  provider_message_id TEXT CHECK (provider_message_id IS NULL OR length(provider_message_id) BETWEEN 1 AND 80),
   next_at             INTEGER NOT NULL,
   action_deadline_at  INTEGER,
   created_at          INTEGER NOT NULL,
-  delivered_at        REAL,
-  opened_at           REAL,
+  delivered_at        INTEGER,
+  opened_at           INTEGER,
   actioned_at         INTEGER,
   failed_at           INTEGER,
-  fail_reason         TEXT
+  fail_reason         TEXT CHECK (fail_reason IS NULL OR length(fail_reason) BETWEEN 1 AND 500),
+  CHECK (org_id IS NULL OR audience_kind = 'org_user'),
+  CHECK ((channel = 'in_app') = (provider = 'in_app')),
+  CHECK ((status = 'skipped') = (skip_reason IS NOT NULL)),
+  CHECK (channel <> 'email' OR status = 'skipped' OR to_address IS NOT NULL)
 ) STRICT;
 CREATE INDEX dispatches_notification ON dispatches (notification_id);
-CREATE INDEX dispatches_provider_message ON dispatches (provider_message_id);
+CREATE UNIQUE INDEX dispatches_provider_message ON dispatches (provider_message_id) WHERE provider_message_id IS NOT NULL;
 CREATE INDEX dispatches_status_next ON dispatches (status, next_at);
-CREATE INDEX dispatches_audience_seq ON dispatches (audience_kind, audience_id, seq);
-
-
--- -----------------------------------------------------------------------------
--- dispatch_attempts  (LIVE: migration 0010_dispatches, S7b)
--- source: db.dispatches[].attempts[] — two shapes: a send {at, ok, error}
---         (m13/delivery.mjs dispatchSweep step 2) and a quiet-hours re-check
---         note {at, note} (at most one per dispatch, never counted as a send).
--- owner/writer: repositories/dispatches.mjs recordAttempt (append-only; removed
---         with the dispatch through the internal cascade — the only cascade here).
--- mapping:
---   (parent)      -> dispatch_seq (the parent's seq; internal FK, ON DELETE CASCADE)
---   (array index) -> seq (0-based position; the key is the pair — NO minted id, no global counter consumed)
---   at            -> attempted_at (INTEGER)
---   ok            -> ok (send rows: 0/1 and NEVER NULL; note rows: NULL)
---   error         -> error (send rows: the provider error or NULL; note rows: NULL)
---   note          -> note (note rows: the text; send rows: NULL)
---   (shape)       -> kind ('send' | 'quiet_recheck')
--- the total shape CHECK (review of dc4b559, finding 1): SQLite treats a NULL
---   CHECK result as a pass, so `ok IN (0,1)` alone admitted a send row with
---   ok NULL; the predicate below names `ok IS NOT NULL` for a send row and
---   `ok IS NULL AND error IS NULL AND note IS NOT NULL` for a note row, so it
---   is total. scripts/testDispatches.mjs proves it through direct SQL.
--- notes: send rows per dispatch ≤ MAX_ATTEMPTS (4) by the sweep's rule, not by
---   a constraint (a legacy row is imported as it is).
--- -----------------------------------------------------------------------------
+CREATE INDEX dispatches_org_seq ON dispatches (org_id, seq) WHERE org_id IS NOT NULL;
+CREATE INDEX dispatches_unopened_in_app ON dispatches (seq) WHERE channel = 'in_app' AND opened_at IS NULL;
 CREATE TABLE dispatch_attempts (
   dispatch_seq INTEGER NOT NULL REFERENCES dispatches(seq) ON DELETE CASCADE,
-  seq          INTEGER NOT NULL,
+  seq          INTEGER NOT NULL CHECK (seq >= 0),
   kind         TEXT NOT NULL CHECK (kind IN ('send', 'quiet_recheck')),
   attempted_at INTEGER NOT NULL,
   ok           INTEGER,
-  error        TEXT,
-  note         TEXT,
+  error        TEXT CHECK (error IS NULL OR length(error) BETWEEN 1 AND 500),
+  note         TEXT CHECK (note IS NULL OR length(note) BETWEEN 1 AND 200),
   PRIMARY KEY (dispatch_seq, seq),
   CHECK ((kind = 'send' AND ok IS NOT NULL AND ok IN (0, 1) AND note IS NULL)
       OR (kind = 'quiet_recheck' AND ok IS NULL AND error IS NULL AND note IS NOT NULL))
@@ -382,146 +314,52 @@ CREATE TABLE dispatch_attempts (
 
 
 -- -----------------------------------------------------------------------------
--- outbox   (LIVE since migration 0011_outbox_push, S7c — repositories/outboxPush.mjs;
---           docs/architecture/s7-readiness-review.md §10 as corrected by the review of 6ca66ba)
--- source: db.outbox  TWO writers with two literals, told apart STRUCTURALLY (never by a value):
---   (a) the MAILER record   adapters.mjs createMailer.send → {id, ts, to, subject, text, transport, delivered}
---   (b) the DELIVERY record m13/delivery.mjs fakeSend     → {id, at, channel, to, text(≤300), providerMessageId, provider}
---   a shape's keys must ALL be present and none of the other shape's; an entry matching both
---   or neither is refused by position. `source` records which literal a row is.
--- owner/writer: the outbox repository, called by adapters.mjs createMailer.send (nine route
---         sites: server.mjs guardian sign-up, club e-mail challenge (the one `secrets` site),
---         reference request; domains/verification/claims/organisations.mjs 236/533/717/918; domains/recruitment/lifecycle/contactRoutes.mjs:521;
---         domains/enterprise/enterprise.mjs:88) and by m13/delivery.mjs fakeSend; the mailer's `markDelivered`
---         after the live provider call settles.
--- lifecycle: append-only; never pruned; never deleted on player deletion; `seq` is the
---         insertion order every reader depends on (the admin view lists newest first).
--- mapping:
---   (position)         -> seq (the array position at import; assigned at insert afterwards)
---   id                 -> id (mail-*; UNIQUE)
---   (shape)            -> source ('mailer' for (a), 'delivery' for (b))
---   ts | at            -> created_at (source field is `ts` in (a), `at` in (b))
---   to                 -> to_address  -- personal data; a string address or NULL. NULL is a value a writer
---                                        produces: the boot sweep over an accepted queued dispatch with
---                                        to:null writes a delivery record with to:null (review of 6ca66ba).
---                                        A non-string is refused at a write; POST /org/invites and the m14
---                                        player invite refuse a non-string e-mail with 400 (they used to
---                                        coerce an array through RegExp.test); the 0011 import stores a
---                                        non-string destination as NULL and reports it by row id
---   subject            -> subject ((a) only; NULL = the key is absent in (b))
---   text               -> text (the withheld mail text in (a) — S6a: every `secrets` value replaced by the
---                                placeholder; the dev full text lives in process memory only, never here;
---                                the first 300 chars of the notification text in (b))
---   transport | provider -> transport (as written: 'sendgrid' | 'dev-outbox' from (a); 'local-fake' from (b);
---                                      OPEN vocabulary, no CHECK)
---   delivered          -> delivered ((a) only, 0/1 from the boolean; NULL = the key is absent in (b))
---   channel            -> channel ((b) only, as written; NULL = absent in (a); OPEN vocabulary)
---   providerMessageId  -> provider_message_id ((b) only; NULL = absent in (a))
---   (unknown own keys) -> not stored (typed columns only): dropped at a write, dropped and reported by
---                         row id at the 0011 import (meta.outboxPushCutover.notes)
--- notes: the structural CHECK below is total: a mailer row carries subject and delivered and no
---   channel/provider_message_id; a delivery row carries channel and provider_message_id and no
---   subject/delivered — so NULL always means "absent key" and the way back rebuilds exactly the
---   writer's literal with exactly its keys. The six plain-code mail sites (every site but the club
---   challenge) still write their one-time code into `text`: carried through unchanged (an owner
---   decision outside S7c, not a schema concern); the one `secrets` site persists the placeholder.
---   Reads: /admin/outbox (newest first, the dev full text merged from memory), /admin/overview count.
+-- outbox, push_log, push_tokens  (migration 0011_outbox_push, S7c; explicit since S14d, amended in place —
+--   repositories/outboxPush.mjs, OUTBOX_PUSH_DDL)
+-- outbox: one row per mail handed to a transport. source 'mailer' (adapters.mjs createMailer: written before the
+--   provider call, its answer after; the text withholds every one-time code passed as a secret) or 'delivery' (the
+--   local fake provider's record of an accepted e-mail dispatch, in the send's unit). Both carry an address.
+--   Paged newest first for /admin/outbox.
+-- push_log: one row per push handed to the push sender, written once the notification is durable (an after-commit
+--   effect). Paged newest first for /admin/push-log.
+-- push_tokens: one row per device token, players and guardians only (POST /push/register). A token another account
+--   registers moves to it, so a shared phone receives only the notices of the account that last signed in on it.
+--   Not hashed: the token is the delivery address handed to Expo, not a ScoutBox credential (personal data).
+-- Nothing here carries a key: the rows outlive the accounts they were addressed to (retention is open, Q6).
 -- -----------------------------------------------------------------------------
 CREATE TABLE outbox (
   seq                 INTEGER PRIMARY KEY,
-  id                  TEXT NOT NULL UNIQUE,
+  id                  TEXT NOT NULL UNIQUE CHECK (id IS NULL OR length(id) BETWEEN 1 AND 80),
   source              TEXT NOT NULL CHECK (source IN ('mailer', 'delivery')),
   created_at          INTEGER NOT NULL,
-  to_address          TEXT,                                                -- personal data; a string address, NULL accepted (an accepted queued dispatch)
-  subject             TEXT,
-  text                TEXT NOT NULL,                                       -- withheld where the writer withheld; may contain a one-time code elsewhere (carried through)
-  transport           TEXT NOT NULL,
+  to_address          TEXT NOT NULL CHECK (to_address IS NULL OR length(to_address) BETWEEN 1 AND 320),
+  subject             TEXT CHECK (subject IS NULL OR length(subject) BETWEEN 0 AND 300),
+  text                TEXT NOT NULL CHECK (text IS NULL OR length(text) BETWEEN 0 AND 10000),
+  transport           TEXT NOT NULL CHECK (transport IN ('sendgrid', 'dev-outbox', 'local-fake')),
   delivered           INTEGER,
-  channel             TEXT,
-  provider_message_id TEXT,
-  CHECK ((source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL AND delivered IN (0, 1) AND channel IS NULL AND provider_message_id IS NULL)
-      OR (source = 'delivery' AND subject IS NULL AND delivered IS NULL AND channel IS NOT NULL AND provider_message_id IS NOT NULL))
+  channel             TEXT CHECK (channel IS NULL OR channel = 'email'),
+  provider_message_id TEXT CHECK (provider_message_id IS NULL OR length(provider_message_id) BETWEEN 1 AND 80),
+  CHECK ((source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL AND delivered IN (0, 1) AND channel IS NULL AND provider_message_id IS NULL AND transport IN ('sendgrid', 'dev-outbox'))
+      OR (source = 'delivery' AND subject IS NULL AND delivered IS NULL AND channel IS NOT NULL AND provider_message_id IS NOT NULL AND transport = 'local-fake' AND length(text) <= 300))
 ) STRICT;
-
-CREATE INDEX outbox_created_at ON outbox (created_at);
-
-
--- -----------------------------------------------------------------------------
--- push_log   (LIVE since migration 0011_outbox_push, S7c — repositories/outboxPush.mjs)
--- source: db.pushLog  the SENDER record adapters.mjs createPushSender.send →
---         {id, ts, audience: {kind, id}, title, body, transport}.
--- owner/writer: the push log repository, called by the push sender, which notify()
---         (server.mjs) runs through the notification repository's after-durable effect
---         when deferredPush is false — i.e. AFTER the save carrying the notification row
---         committed, so the push row is never in that save; the sender's nextId() calls the
---         server's debounced persist(), the existing best-effort scheduling (about two
---         seconds, not a guarantee) that lands it in a later save (review of 6ca66ba, D1).
--- lifecycle: append-only; never pruned (the admin view's 200-row window is a read-time slice);
---         never deleted on player deletion; `seq` is the insertion order.
--- mapping:
---   (position)    -> seq
---   id            -> id (push-*; UNIQUE)
---   ts            -> created_at (source field is literally `ts`)
---   audience.kind -> audience_kind (OPEN, as notifications.audience_kind: the notification
---                                   repository validated the audience; no CHECK)
---   audience.id   -> audience_id (polymorphic; no FK)
---   title         -> title (always 'ScoutBox' today)
---   body          -> body (= notification text)
---   transport     -> transport ('expo' | 'dev-log' as written; OPEN, no CHECK)
---   (unknown own keys) -> not stored: dropped at a write, dropped and reported by id at the 0011 import
--- notes: the row is written whether or not any device token matched (the staff-push
---   identity mismatch — tokens registered under 'org', pushes addressed to 'org_user' — is
---   carried through unchanged). Reads: /admin/push-log (last 200, newest first), /admin/overview count.
--- -----------------------------------------------------------------------------
 CREATE TABLE push_log (
   seq           INTEGER PRIMARY KEY,
-  id            TEXT NOT NULL UNIQUE,
+  id            TEXT NOT NULL UNIQUE CHECK (id IS NULL OR length(id) BETWEEN 1 AND 80),
   created_at    INTEGER NOT NULL,
-  audience_kind TEXT NOT NULL,
-  audience_id   TEXT NOT NULL,
-  title         TEXT NOT NULL,
-  body          TEXT NOT NULL,
-  transport     TEXT NOT NULL
+  audience_kind TEXT NOT NULL CHECK (audience_kind IN ('player', 'guardian', 'org_user')),
+  audience_id   TEXT NOT NULL CHECK (audience_id IS NULL OR length(audience_id) BETWEEN 1 AND 80),
+  title         TEXT NOT NULL CHECK (title IS NULL OR length(title) BETWEEN 1 AND 100),
+  body          TEXT NOT NULL CHECK (body IS NULL OR length(body) BETWEEN 0 AND 4000),
+  transport     TEXT NOT NULL CHECK (transport IN ('expo', 'dev-log'))
 ) STRICT;
-
-CREATE INDEX push_log_created_at ON push_log (created_at);
-CREATE INDEX push_log_audience_seq ON push_log (audience_kind, audience_id, seq);
-
-
--- -----------------------------------------------------------------------------
--- push_tokens   (LIVE since migration 0011_outbox_push, S7c — repositories/outboxPush.mjs)
--- source: db.pushTokens  the ROUTE record POST /push/register (server.mjs) → {kind, refId, token, ts}.
--- owner/writer: the push tokens repository (`register`), called by the route; read by the
---         push sender (`forAudience`) on every live push.
--- lifecycle: no expiry, no revocation; NOT removed on player deletion or logout; `seq` is
---         "last registration last" — the route's filter-then-push order.
--- mapping:
---   (position)    -> seq
---   kind   -> ref_kind (the session kind as written: 'player' | 'guardian' | 'org' | 'ts_reviewer' today; OPEN, no CHECK)
---   refId  -> ref_id (session.refId — polymorphic, no FK)
---   token  -> token: a non-empty string (the Expo device token). The route refuses anything else
---             with 400 TOKEN_INVALID (it used to accept any truthy JSON value, 1e400 included); the
---             0011 import stores a finite numeric token as its string and drops (and reports) an
---             entry whose token is neither
---   ts     -> registered_at (source field is literally `ts`)
---   (unknown own keys) -> not stored: dropped at a write, dropped and reported at the 0011 import
--- notes: NO uniqueness constraint. Re-registering the same token for the same (kind, refId)
---   deletes the earlier rows and appends a new one, so `seq` stays "last registration last";
---   no UNIQUE index, because a file the old route wrote may hold duplicates. The token is NOT hashed: it is the delivery address handed to
---   Expo, not a credential for ScoutBox. Treat as a device identifier (personal data).
---   KNOWN DEFECT, carried through: org sessions register ref_kind='org' with ref_id=orgs.id while
---   the sender filters on the notification audience ('org_user', org_users.id) → org-staff pushes
---   never match a token. Not re-keyed here.
--- -----------------------------------------------------------------------------
 CREATE TABLE push_tokens (
   seq           INTEGER PRIMARY KEY,
-  ref_kind      TEXT NOT NULL,
-  ref_id        TEXT NOT NULL,
-  token         TEXT NOT NULL CHECK (length(token) > 0),                  -- personal data (device identifier)
+  ref_kind      TEXT NOT NULL CHECK (ref_kind IN ('player', 'guardian')),
+  ref_id        TEXT NOT NULL CHECK (ref_id IS NULL OR length(ref_id) BETWEEN 1 AND 80),
+  token         TEXT NOT NULL UNIQUE CHECK (token IS NULL OR length(token) BETWEEN 1 AND 200),
   registered_at INTEGER NOT NULL
 ) STRICT;
-
-CREATE INDEX push_tokens_ref_seq ON push_tokens (ref_kind, ref_id, seq);
+CREATE INDEX push_tokens_ref ON push_tokens (ref_kind, ref_id);
 
 
 -- =============================================================================

@@ -106,7 +106,7 @@ await j('/guardian/disclaimer', { method: 'POST', body: JSON.stringify({ accepte
 r = await j('/guardian/children', { method: 'POST', body: JSON.stringify({ name: 'Test Kid', dob: '2013-01-01', country: 'GB' }) }, bearer(nadiaToken));
 ok(r.status === 403 && r.body.error === 'EMAIL_UNVERIFIED', 'unverified email blocks child onboarding even after IDV + disclaimer');
 const outbox = await j('/admin/outbox', {}, admin);
-const mail = outbox.body.find((m) => m.to === nadiaEmail);
+const mail = outbox.body.items.find((m) => m.to === nadiaEmail);
 const emailCode = /code is ([A-Z0-9]{6})/.exec(mail?.text ?? '')?.[1];
 ok(!!emailCode, 'verification code is in the dev outbox');
 r = await j('/auth/guardian/verify-email', { method: 'POST', body: JSON.stringify({ guardianId: nadiaId, code: emailCode }) });
@@ -216,7 +216,7 @@ r = await j('/org/verification/email', { method: 'POST', body: JSON.stringify({ 
 ok(r.status === 422, 'free-mail domains are refused for club verification');
 r = await j('/org/verification/email', { method: 'POST', body: JSON.stringify({ email: 'recruitment@eastportfc.co.uk' }) }, bearer(EASTPORT));
 ok(r.status === 201, 'company-domain challenge sent');
-const vMail = (await j('/admin/outbox', {}, admin)).body.find((m) => m.to === 'recruitment@eastportfc.co.uk');
+const vMail = (await j('/admin/outbox', {}, admin)).body.items.find((m) => m.to === 'recruitment@eastportfc.co.uk');
 const vCode = /code is ([A-Z0-9]{6})/.exec(vMail?.text ?? '')?.[1];
 r = await j('/org/verification/email/confirm', { method: 'POST', body: JSON.stringify({ code: vCode }) }, bearer(EASTPORT));
 ok(r.status === 200 && r.body.emailDomain === 'eastportfc.co.uk', 'code from the mailbox confirms domain control');
@@ -243,7 +243,7 @@ ok(r.status === 200, 'admin resolves the report');
 const myReports = await j('/player/reports', {}, bearer(KOLA));
 ok(myReports.body.some((x) => x.id === rep.id && /Warning issued/.test(x.outcome ?? '')), 'resolution reaches the reporter');
 const pushLog = await j('/admin/push-log', {}, admin);
-ok(pushLog.body.length > 0, 'push adapter records deliveries (dev transport)');
+ok(pushLog.body.items.length > 0, 'push adapter records deliveries (dev transport)');
 
 // ---- 12. platform separation: ScoutBox Grassroots
 r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', platform: 'grassroots' }) });
@@ -353,7 +353,7 @@ ok(gsearch.body.find((p) => p.id === 'pl-adeyemi')?.firstTeamSeeker === true, 's
 r = await j('/player/vouches/request', { method: 'POST', body: JSON.stringify({ coachName: 'Ade Falana', coachEmail: 'ade@sundayleague.org.uk', role: 'Manager' }) }, bearer(KOLA));
 ok(r.status === 201, 'vouch request sent to the coach');
 const vMailBox = await j('/admin/outbox', {}, admin);
-const vouchMail = vMailBox.body.find((m) => m.to === 'ade@sundayleague.org.uk');
+const vouchMail = vMailBox.body.items.find((m) => m.to === 'ade@sundayleague.org.uk');
 const vouchCode = /reference code is ([A-Z0-9]{8})/.exec(vouchMail?.text ?? '')?.[1];
 ok(!!vouchCode, 'vouch code delivered via the mailer');
 r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouchCode, text: "Don't tell your parents but call me on 07911 123456" }) });

@@ -583,7 +583,7 @@ export function registerEnterprise(ctx) {
       ...metrics,
       deliveryFailures: safetyAudit.opsEvents.count('delivery_failed'),
       webhookFailures: safetyAudit.opsEvents.count('webhook_failed'),
-      dispatchBacklog: dispatches.backlogCount(), // S7b: queued or retrying, the same definition as before, counted on the repository's mirror
+      dispatchBacklog: dispatches.backlogCount(), // queued or retrying (a COUNT on the dispatches table)
       webhookBacklog: ctx.integrationReads.deliveries.backlogCount(), // S13a: queued or retrying, counted in SQL
       opsEvents: safetyAudit.opsEvents.newest(50).map((e) => ({ id: e.id, at: e.at, kind: e.kind, detail: e.detail })),
       note: 'Counters cover this process since boot. Local development metrics — not a production SLA measurement.',

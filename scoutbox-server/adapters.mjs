@@ -76,18 +76,13 @@ export function makeRateLimiter({ windowMs = 60_000, max = 30, bucket = 'default
 export const OUTBOX_SECRET_PLACEHOLDER = '[code withheld — delivered to the recipient only]';
 const DEV_DELIVERY_LIMIT = 500;
 
-/**
- * S7c: the outbox record is a row of the `outbox` table, written through the
- * outbox repository (repositories/outboxPush.mjs) when the server passes one in
- * `stores.outbox`; a tool or a test that hands this adapter a plain `db` with an
- * `outbox` ARRAY keeps the array behaviour (the record pushed, `delivered`
- * mutated on the record). Both store the same literal.
- */
-const outboxStore = (db, stores) => (stores?.outbox
-  ? { append: (record) => stores.outbox.append(record), markDelivered: (record, ok) => stores.outbox.markDelivered(record.id, ok) }
-  : { append: (record) => db.outbox.push(record), markDelivered: () => {} });
+/** The mail outbox (repositories/outboxPush.mjs `outbox`): every mail is recorded there, explicitly (S14d). */
+const needOutbox = (outbox) => {
+  if (typeof outbox?.append !== 'function' || typeof outbox?.markDelivered !== 'function') throw new TypeError('createMailer needs the outbox repository ({ append, markDelivered })');
+  return outbox;
+};
 
-export function createMailer(db, nextId, stores = null) {
+export function createMailer(nextId, { outbox: outboxRepo } = {}) {
   const live = liveMailConfigured();
   // S6a (review of e020aba, finding 1): `secrets` are one-time codes embedded in
   // the mail. The outbox record is persisted with every save and copied into
@@ -97,19 +92,20 @@ export function createMailer(db, nextId, stores = null) {
   // the delivery, the full text is kept in this process's memory only (bounded,
   // never saved, gone at restart) and served by the admin outbox view.
   const devDeliveries = new Map();
-  const outbox = outboxStore(db, stores);
+  const outbox = needOutbox(outboxRepo);
   return {
     transport: live ? 'sendgrid' : 'dev-outbox',
     async send({ to, subject, text, secrets = [] }) {
       const withheld = secrets.filter((s) => typeof s === 'string' && s.length > 0);
       const stored = withheld.reduce((t, s) => t.split(s).join(OUTBOX_SECRET_PLACEHOLDER), String(text));
-      const record = { id: nextId('mail'), ts: Date.now(), to, subject, text: stored, transport: live ? 'sendgrid' : 'dev-outbox', delivered: !live };
+      // The stored record keeps at most what its columns hold (OUTBOX_LIMITS: subject 300, text 10,000); a name the
+      // routes do not bound can make a subject longer, so it is shortened here, never refused (the mail still goes).
+      const record = { id: nextId('mail'), ts: Date.now(), to, subject: String(subject ?? '').slice(0, 300), text: stored.slice(0, 10_000), transport: live ? 'sendgrid' : 'dev-outbox', delivered: !live };
       if (!live && withheld.length) {
         devDeliveries.set(record.id, String(text));
         if (devDeliveries.size > DEV_DELIVERY_LIMIT) devDeliveries.delete(devDeliveries.keys().next().value);
       }
-      // The record is written BEFORE the provider call (as the array push was) and
-      // becomes durable with the next save, exactly as its blob entry did.
+      // The record is written at once, BEFORE the provider call (in the caller's unit of work when one is open).
       outbox.append(record);
       if (live) {
         let ok = false;
@@ -128,12 +124,9 @@ export function createMailer(db, nextId, stores = null) {
         } catch {
           ok = false; // recorded in the outbox either way
         }
-        // The provider's synchronous answer: on the RECORD the caller holds (m23
-        // reads `rec.delivered` from the resolved promise) AND on the stored row —
-        // the row is a detached copy since S7c, so the update goes through the
-        // repository instead of being lost on a mutated local object.
+        // The provider's answer: on the record the caller holds (m23 reads `rec.delivered`) and on the stored row.
         record.delivered = ok;
-        outbox.markDelivered(record, ok);
+        outbox.markDelivered(record.id, ok);
       }
       return record;
     },
@@ -144,34 +137,22 @@ export function createMailer(db, nextId, stores = null) {
 
 // ---------------------------------------------------------------------- push
 /**
- * S7c: the push record is a row of `push_log` and the tokens rows of
- * `push_tokens`, read and written through the repositories when the server
- * passes them in `stores`; a plain `db` with arrays keeps the array behaviour
- * (the review of 6ca66ba's feasibility check calls this adapter that way). The
- * filter is the same in both: every token registered under exactly this
- * (kind, id), its token string.
+ * The push record is a row of `push_log` and the device tokens rows of `push_tokens` (repositories/outboxPush.mjs),
+ * written and read explicitly (S14d). The sender runs as an after-commit effect of the notification, so its record is
+ * written in its own transaction once the notification is durable.
  */
-const pushStores = (db, stores) => ({
-  append: stores?.pushLog ? (record) => stores.pushLog.append(record) : (record) => db.pushLog.push(record),
-  tokensFor: stores?.pushTokens ? (audience) => stores.pushTokens.forAudience(audience.kind, audience.id) : (audience) => (db.pushTokens ?? []).filter((t) => t.kind === audience.kind && t.refId === audience.id),
-});
-
-export function createPushSender(db, nextId, stores = null) {
+export function createPushSender(nextId, { pushLog, pushTokens } = {}) {
+  if (typeof pushLog?.append !== 'function' || typeof pushTokens?.forAudience !== 'function') throw new TypeError('createPushSender needs the push log and device token repositories');
   const live = livePushConfigured();
-  const push = pushStores(db, stores);
   return {
     transport: live ? 'expo' : 'dev-log',
     async send(audience, title, body) {
-      // `nextId` is the server's: it schedules the ordinary debounced save, which
-      // is how this record — written AFTER the notification's save committed, by
-      // the after-durable effect — reaches the file (review of 6ca66ba, D1: the
-      // existing best-effort scheduling, nothing added, no guarantee implied).
-      const record = { id: nextId('push'), ts: Date.now(), audience, title, body, transport: live ? 'expo' : 'dev-log' };
-      push.append(record);
+      // The body is the notice's text, shortened to what the log keeps (OUTBOX_LIMITS.body).
+      const record = { id: nextId('push'), ts: Date.now(), audience: { kind: audience.kind, id: audience.id }, title, body: String(body).slice(0, 4000), transport: live ? 'expo' : 'dev-log' };
+      pushLog.append(record);
       if (live) {
-        // Expo push needs a device token registered per user; the registration
-        // endpoint stores them under the push tokens keyed by the session.
-        const tokens = push.tokensFor(audience);
+        // Expo push needs a device token registered by the person (POST /push/register).
+        const tokens = pushTokens.forAudience(audience.kind, audience.id);
         for (const t of tokens) {
           try {
             await fetch('https://exp.host/--/api/v2/push/send', {
@@ -179,7 +160,7 @@ export function createPushSender(db, nextId, stores = null) {
               headers: { authorization: `Bearer ${process.env.EXPO_ACCESS_TOKEN}`, 'content-type': 'application/json' },
               body: JSON.stringify({ to: t.token, title, body }),
             });
-          } catch { /* recorded in pushLog regardless */ }
+          } catch { /* recorded in the push log regardless */ }
         }
       }
       return record;

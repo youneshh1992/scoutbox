@@ -77,11 +77,12 @@ takes the next free id; the placeholder ids in `sqlite-schema.md` mean nothing.
 | S14a | retire the blob itself: the `collections` table, `db.schema` and the snapshot migration registry, the store contract, the `??=` and `migrateMxx` lines; the id counter becomes a table | `0039` | `counters` | done |
 | S14b | safety and audit become explicit writes and SQL reads; their tables re-typed (vocabulary CHECKs, details as typed columns by type, organisation and staff keys) | `0013` (amended in place) | `safetyAudit` | done |
 | S14c | message threads become explicit writes and SQL reads; the tables re-typed (the request key from the start, the activity time, the sender by kind with staff a key, length CHECKs, the retry id unique) | `0012` (amended in place) | `channels` | done |
-| S14d… | the remaining staged repositories become explicit, one per step (§4.6) | | | **next** |
+| S14d | delivery dispatches, the mail outbox, the push log and device tokens become explicit writes and SQL reads; the tables re-typed (vocabulary CHECKs, a staff audience's organisation as a key, integer clocks, an address on every outbox row, one row per device token) | `0010`, `0011` (amended in place) | `dispatches`, `outboxPush` | done |
+| S14e… | the remaining staged repositories become explicit, one per step (§4.6) | | | **next** |
 | S14 last | the save path, `db` and snapshot mode go (§4.6) | | | |
 
 Steps before S8 were staged (written at save) rather than explicit; S4a's identity writes are explicit since §4.3.1, and
-S6b's since S14b, S7d's since S14c.
+S6b's since S14b, S7d's since S14c, S7b's and S7c's since S14d.
 
 ## 4. The order of work
 
@@ -106,7 +107,7 @@ and the DDL, so these cannot drift, and include a `date` type for football dates
   lines and `Array.isArray` guards quietly see an empty collection. The repository answers indexed queries (`byId`,
   `forOrg`, `forPlayer`, counts…) with fresh deep-frozen records; a read inside a unit sees the unit's writes. Modules
   receive a per-domain reads object on their context (`recruitmentReads`, `scoutingReads`, `verificationReads`,
-  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, and the threads' the `channels` repository); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
+  `agentReads`, `complianceReads`, `transactionReads`, `developmentReads`, `boxCamReads`, `discoveryReads`, `insightReads`, `integrationReads`, `enterpriseReads`, `groupReads`, `grassrootsReads`, `safetyReads`; S13e's few readers take the `operations` repository itself, the threads' the `channels` repository, and the delivery centre the `dispatches` and `outboxPush` repositories); pure projectors take `reads`. Sweeps are indexed predicates, admin figures are
   `GROUP BY`s. Lists decode their records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`),
   never a query per record.
 - **Reads that write become sweeps or upserts.** A notice a read used to create comes from a sweep, its marker
@@ -191,9 +192,10 @@ separate risk; the script moves the fixtures' instants to today to measure the s
   per person and unpaged. The org's unread count is one join over the club's messages.
 - Operations (S13e): a new player's saved-search alerts read the searches of current staff that SQL prefilters by
   position, foot, country and availability, then apply the whole filter in code. Bounded by the clubs' saved searches,
-  not the player base. A provider callback's id is remembered at once while the dispatch changes it applies are still
-  the staged dispatch store's (S7b) and land with the request's save: a crash between the two would leave the id
-  remembered and that delivery status unrecorded. It closes when the dispatches become explicit writes.
+  not the player base.
+- Delivery (S14d): the sweep finds the notifications without dispatches, and the in-app dispatches whose notice was
+  read, through the notifications' mirror (a scan of every notification per sweep, every minute). Both become SQL
+  joins when the notifications are explicit (S14e).
 
 ### 4.3.1 Costs that grow with the whole player base
 
@@ -256,8 +258,16 @@ Split in parts, like S12 and S13.
   characters, the retry id at most 64 and unique per thread and sender. A message, its ledger row and its
   notifications are one unit. The club's inbox (with a `playerId` filter for the Room's panel) and the admin audit
   page by cursor, most recently active first; `/org/channels/counts` gives the unread badge. Views are allowlists.
-- **S14d onwards: the remaining staged repositories become explicit**, one per step, the S8 way: outbox and push
-  with dispatches, notifications, staff and sessions, the organisations' remaining facets, players and guardians. Each loses its mirror, its `db.<name>` view and its save hook, and its reads become queries.
+- **S14d (done): delivery dispatches, the outbox and push** are explicit writes and SQL reads. Migrations `0010` and
+  `0011` were amended in place: vocabulary CHECKs (channel, provider, status, audience kind, transports, a token's
+  owner kind), a staff audience's organisation as a deferred RESTRICT key, integer callback clocks, a unique provider
+  message id, an address on every outbox row and on every e-mail dispatch that is not skipped, one row per device
+  token. A notification's dispatches are one unit; each send (its attempt, status, outbox row, injected-failure use
+  and, when the retries run out, the ops event and webhook) is one unit; a callback event commits with its seen
+  marker; junk callbacks are refused whole. Device tokens are players' and guardians' only, and a token another
+  account registers moves to it. The admin outbox and push log and the club's delivery list page by cursor.
+- **S14e onwards: the remaining staged repositories become explicit**, one per step, the S8 way: notifications,
+  staff and sessions, the organisations' remaining facets, players and guardians. Each loses its mirror, its `db.<name>` view and its save hook, and its reads become queries.
   This is also what closes §4.3.1's cost of an empty unit of work.
 - **S14 last: the save path goes.** `persist()`, `persistNow()`, the debounced save, the save hooks,
   `repositories/memento.mjs`, `repositories/readonly.mjs` and `db` itself; then snapshot mode (`openStore(dir)`

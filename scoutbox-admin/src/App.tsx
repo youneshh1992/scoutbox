@@ -196,7 +196,8 @@ export default function App() {
       setModeration((await call<{ items: ModRow[]; nextCursor: string | null }>(key, '/admin/moderation')).items);
       // Pages by cursor (S14c), most recently active first: the first page is read; "load more" (nextCursor) is still needed.
       setThreads((await call<{ items: ThreadRow[]; nextCursor: string | null }>(key, '/admin/channels')).items);
-      setOutbox(await call<MailRow[]>(key, '/admin/outbox'));
+      // Pages by cursor (S14d), newest first: the first page is read; "load more" (nextCursor) is still needed.
+      setOutbox((await call<{ items: MailRow[]; nextCursor: string | null }>(key, '/admin/outbox')).items);
       // Pages by cursor (S13e), newest first: the first page is read; "load more" (nextCursor) is still needed.
       setInvoices((await call<{ items: InvoiceRow[]; nextCursor: string | null }>(key, '/admin/invoices')).items);
     } catch (e) {

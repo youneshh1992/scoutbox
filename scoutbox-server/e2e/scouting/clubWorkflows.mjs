@@ -189,7 +189,7 @@ r = await post('/player/vouches/request', { coachName: 'Ade Balogun', coachEmail
 if (r.status === 404) r = await post('/player/vouch/request', { coachName: 'Ade Balogun', coachEmail: 'ade@sundayleague.example', role: 'Team Coach' }, bearer(KOLA));
 ok(r.status === 201, 'reference request filed');
 let outbox = (await j('/admin/outbox', {}, admin)).body;
-const mail = (Array.isArray(outbox) ? outbox : outbox.items ?? []).find((m) => String(m.text ?? m.body ?? '').includes('reference code is'));
+const mail = outbox.items.find((m) => String(m.text ?? m.body ?? '').includes('reference code is'));
 const code = /reference code is ([A-Z0-9]{8})/.exec(mail?.text ?? mail?.body ?? '')?.[1];
 ok(!!code, 'reference code recoverable from the dev outbox');
 r = await post('/vouch/submit', { code, text: 'Coached Kola two seasons. Relentless pressing, great with younger players.', seasons: '2023–2025', conflictOfInterest: 'No relation; former coach only.' });

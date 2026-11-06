@@ -801,7 +801,7 @@ section('F — honest transport failure: nothing half-written, nothing sent');
 {
   const RID = await reviewed(maria.token, 'pl-okafor');
   const chinedu = await playerLogin('pl-okafor');
-  const outboxBefore = (await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body.length;
+  const outboxBefore = (await j('GET', '/admin/overview', undefined, undefined, ADMIN)).body.emailsSent; // S14d: the outbox pages; its size is the overview's count
   const notifsBefore = (await notifs('/player/notifications', chinedu.token)).length;
   const histBefore = (await j('GET', `/org/rooms/${RID}/journey?limit=200`, undefined, maria.token)).body.history.total;
   const inj = await j('POST', '/admin/delivery/inject-failure', { channel: 'trial', count: 1 }, undefined, ADMIN);
@@ -810,7 +810,7 @@ section('F — honest transport failure: nothing half-written, nothing sent');
   neg(expect(failed, 500, 'TRIAL_TRANSPORT_REFUSED'), 'F1 the invitation is refused honestly (500 TRIAL_TRANSPORT_REFUSED)');
   const after = await trialsOf(RID);
   neg(after.invitation === null && await stage(RID) === 'under_review' && (await pendingTrial(chinedu.token)) === null, 'F2 nothing was written: no request row, the case did not move, the player has nothing in the Inbox');
-  neg((await notifs('/player/notifications', chinedu.token)).length === notifsBefore && (await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body.length === outboxBefore, 'F2b no notification, nothing queued to the outbox');
+  neg((await notifs('/player/notifications', chinedu.token)).length === notifsBefore && (await j('GET', '/admin/overview', undefined, undefined, ADMIN)).body.emailsSent === outboxBefore, 'F2b no notification, nothing queued to the outbox');
   neg((await j('GET', `/org/rooms/${RID}/journey?limit=200`, undefined, maria.token)).body.history.total === histBefore, 'F2c and the case history has no entry for an invitation that never went');
   const retry = await invite(RID, maria.token, { clientKey: 'F-inv' });
   ok(retry.status === 201 && retry.body.case.to === 'trial_requested', 'F3 the retry with the same key succeeds — the failed attempt reserved nothing');

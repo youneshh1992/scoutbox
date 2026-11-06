@@ -240,8 +240,8 @@ if (integrity.violations.length) console.error(`INTEGRITY ${integrity.violations
 
 // ---------------------------------------------------- production adapters
 // The mail, push and invoice records go through their repositories; the provider calls happen here.
-const mailer = createMailer(db, (p) => nextId(p), { outbox });
-const pushSender = createPushSender(db, (p) => nextId(p), { pushLog, pushTokens });
+const mailer = createMailer((p) => nextId(p), { outbox });
+const pushSender = createPushSender((p) => nextId(p), { pushLog, pushTokens });
 const idv = createIdvProvider();
 const billing = createBilling({ invoices: operations.invoices, nextId: (p) => nextId(p) });
 const storage = createStorage(DATA_DIR);
@@ -3216,7 +3216,6 @@ orgRouter.post('/verification/email', async (req, res) => {
     text: `Your ScoutBox club verification code is ${code}.\n\nEntering it confirms ${req.org.name} controls this company mailbox — one of the safeguarding requirements before a club can see under-18 players.`,
     secrets: [code],
   });
-  persist(); // the outbox record (its code withheld) is saved with the next debounced save, as before S6a
   res.status(201).json({ sent: true, note: 'Enter the code from the mailbox to confirm domain control.' });
 });
 
@@ -4091,22 +4090,20 @@ app.post('/auth/player/pair', (req, res) => {
   res.json({ playerId: p.id, name: p.name, token });
 });
 
-// Device push-token registration (used when EXPO_ACCESS_TOKEN switches the
-// push adapter live; harmless no-op storage in dev).
+// Device push-token registration (used when EXPO_ACCESS_TOKEN switches the push adapter live; stored in dev too).
+// S14d: players and guardians only (the Player app's accounts; staff are notified in their portal and by e-mail).
+// One row per device token: a token another account registered moves to this one, so a shared phone receives only
+// the notices of the account that last signed in on it.
 app.post('/push/register', (req, res) => {
   const session = sessionFor(req);
   if (!session) return res.status(401).json({ error: 'AUTH_REQUIRED' });
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ error: 'TOKEN_REQUIRED' });
-  // A device token is a string (Expo's ExponentPushToken[…]); a number (JSON 1e400
-  // included), an object or an array is refused rather than stored.
-  if (typeof token !== 'string') return res.status(400).json({ error: 'TOKEN_INVALID' });
-  // S7c: the filter-then-push on the push_tokens table (repositories/outboxPush.mjs
-  // `register`): an earlier row of this session holding the same token goes; the
-  // new row is last. The record lands with the debounced save, as before.
-  pushTokens.register({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
-  persist();
-  res.status(201).json({ registered: true });
+  // A device token is a string (Expo's ExponentPushToken[…]) of at most 200 characters; anything else is refused.
+  if (typeof token !== 'string' || token.length > 200) return res.status(400).json({ error: 'TOKEN_INVALID', message: 'A device token is text of at most 200 characters.' });
+  if (session.kind !== 'player' && session.kind !== 'guardian') return res.status(403).json({ error: 'PUSH_NOT_AVAILABLE', message: 'Push notifications go to the Player app\'s players and guardians.' });
+  const { moved } = pushTokens.register({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
+  res.status(201).json({ registered: true, moved });
 });
 
 // Guardian view of open trial days near a child, and registration — the
@@ -4489,8 +4486,8 @@ adminRouter.get('/overview', (_req, res) => {
     channels: channels.count(),
     signings: signingsFollowUps.signings.count(),
     invoices: operations.invoices.count(),
-    emailsSent: db.outbox.length,
-    pushesSent: db.pushLog.length,
+    emailsSent: outbox.count(),
+    pushesSent: pushLog.count(),
     sessions: sessions.count(),
     storageEngine: store.engine,
     groomingEscalations: safetyAudit.moderationLog.count('grooming'),
@@ -4509,8 +4506,18 @@ adminRouter.get('/reports', (req, res) => {
 
 // S6a: on the dev transport the outbox is the delivery, so a mail whose one-time code the persisted record withholds is shown
 // with its full text while this process holds it (mailer.devDeliveredText; never saved, never backed up).
-adminRouter.get('/outbox', (_req, res) => res.json(db.outbox.slice().reverse().map((m) => { const full = mailer.devDeliveredText(m.id); return full ? { ...m, text: full } : m; })));
-adminRouter.get('/push-log', (_req, res) => res.json(db.pushLog.slice(-200).reverse()));
+// S14d: both lists page by cursor, newest first (the admin app reads the first page).
+adminRouter.get('/outbox', (req, res) => {
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  const out = outbox.page(page);
+  res.json({ items: out.items.map((m) => { const full = mailer.devDeliveredText(m.id); return full ? { ...m, text: full } : m; }), nextCursor: out.nextCursor });
+});
+adminRouter.get('/push-log', (req, res) => {
+  let page;
+  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+  res.json(pushLog.page(page));
+});
 // S13e: every invoice, newest first, by cursor (`?limit=&cursor=`); the admin app reads the first page.
 adminRouter.get('/invoices', (req, res) => {
   let page;

@@ -20,7 +20,7 @@ export const BATTERIES = [
   'recruitment/signingsAdversarial', 'recruitment/journeyPersistence', 'recruitment/signingsPersistence',
   'recruitment/offersAdversarial', 'recruitment/journeyAdversarial', 'platform/connectedMode', 'operations/clubOperations',
   'recruitment/offers', 'recruitment/signings', 'recruitment/decisions', 'recruitment/contactsPersistence',
-  'platform/contracts', 'platform/safeguarding', 'platform/messaging', 'agents/adversarial', 'platform/sessionsAndPorts', 'recruitment/trials',
+  'platform/contracts', 'platform/safeguarding', 'platform/messaging', 'platform/delivery', 'agents/adversarial', 'platform/sessionsAndPorts', 'recruitment/trials',
   'recruitment/offersPersistence', 'agents/transactionsPersistence', 'recruitment/decisionsPersistence',
   'agents/compliancePersistence', 'recruitment/trialsPersistence', 'discovery/matchingAndWatchlists',
   'platform/storeGuarantees', 'discovery/exposureCalibrationAndCoverage', 'verification/organisationsAndStaff',

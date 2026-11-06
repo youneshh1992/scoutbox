@@ -122,16 +122,19 @@ test('the registered migrations 0001–0018 match 01_identity.sql (identity, fac
   // S7b: the dispatch tables; the attempt-shape CHECK is total in the documented DDL too (review of dc4b559, finding 1).
   assert.match(header03, /dispatches\s+→ dispatches, dispatch_attempts[^\n]*0010_dispatches[^\n]*REGISTERED/, 'the scope header of 03 states that the dispatch tables are live since 0010');
   assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'dispatch_attempts'").get().sql, /ok IS NOT NULL/, 'the documented attempt CHECK rejects a NULL send outcome');
-  assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(dispatches)').all(), [], 'the documented dispatches table has no foreign key (option A: an indexed reference, no cascade)');
-  // S7c: the outbox and push tables (review of 6ca66ba): the structural source CHECK, a nullable string destination, a string token column, no side columns, no uniqueness on tokens, no vocabulary CHECK.
+  // S14d (0010 and 0011 amended in place): a staff audience's organisation is the dispatches' one key, deferred (the
+  // organisations are still written at COMMIT); the notification and the audience carry none. Vocabulary CHECKs on both
+  // migrations' tables; one row per device token; every outbox row carries its address.
+  for (const d of [docs, mig]) assert.deepEqual(d.prepare('PRAGMA foreign_key_list(dispatches)').all().map((f) => [f.from, f.table, f.on_delete]), [['org_id', 'orgs', 'RESTRICT']], 'a dispatch references only its staff audience\'s organisation');
+  assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'dispatches'").get().sql, /org_id\s+TEXT REFERENCES orgs\(id\) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED/, 'the organisation key is deferred to COMMIT');
+  for (const [t, col] of [['dispatches', 'status'], ['dispatches', 'channel'], ['dispatches', 'audience_kind'], ['outbox', 'transport'], ['push_log', 'audience_kind'], ['push_tokens', 'ref_kind']]) assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, new RegExp(`${col} IN \\(`), `${t}.${col} is a vocabulary CHECK`);
   for (const t of ['outbox', 'push_log', 'push_tokens']) assert.match(header03, new RegExp(`${t}[^\\n]*0011_outbox_push[^\\n]*REGISTERED`), `the scope header of 03 states that ${t} is live since 0011`);
   const outboxSql = docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'outbox'").get().sql;
   assert.match(outboxSql, /source = 'mailer' AND subject IS NOT NULL AND delivered IS NOT NULL/, 'the documented outbox CHECK ties each source to its columns');
-  assert.equal(docs.prepare("PRAGMA table_info(outbox)").all().find((c) => c.name === 'to_address').notnull, 0, 'the documented destination is nullable');
-  for (const t of ['outbox', 'push_log', 'push_tokens']) assert.equal(docs.prepare(`PRAGMA table_info(${t})`).all().filter((c) => /_json$/.test(c.name)).length, 0, `${t}: typed columns only, no JSON side column`);
-  assert.match(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'push_tokens'").get().sql, /token\s+TEXT NOT NULL CHECK \(length\(token\) > 0\)/, 'the documented token column is a non-empty string');
-  assert.equal(docs.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'index' AND tbl_name = 'push_tokens' AND sql LIKE '%UNIQUE%'").get().n, 0, 'no unique index on the documented tokens');
-  for (const t of ['outbox', 'push_log', 'push_tokens']) { assert.doesNotMatch(docs.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql, /transport IN \(|audience_kind IN \(|ref_kind IN \(|channel IN \(/, `${t}: no vocabulary CHECK`); assert.deepEqual(docs.prepare(`PRAGMA foreign_key_list(${t})`).all(), [], `${t} references nothing`); }
+  assert.equal(docs.prepare("PRAGMA table_info(outbox)").all().find((c) => c.name === 'to_address').notnull, 1, 'every outbox row carries its address');
+  for (const t of ['dispatches', 'outbox', 'push_log', 'push_tokens']) assert.equal(docs.prepare(`PRAGMA table_info(${t})`).all().filter((c) => /_json$/.test(c.name)).length, 0, `${t}: typed columns only, no JSON side column`);
+  assert.ok(docs.prepare('PRAGMA index_list(push_tokens)').all().some((i) => i.unique && docs.prepare(`PRAGMA index_info(${i.name})`).all().map((c) => c.name).join() === 'token'), 'one row per device token');
+  for (const t of ['outbox', 'push_log', 'push_tokens']) assert.deepEqual(docs.prepare(`PRAGMA foreign_key_list(${t})`).all(), [], `${t} references nothing`);
   // S7d (review §11.5 as corrected by the reviews of 46e5afe and 8330f08; D-A, D-B): the thread tables.
   for (const t of ['channels', 'messages', 'message_attachments']) assert.match(header03, new RegExp(`${t}[^\\n]*0012_channels[^\\n]*REGISTERED`), `the scope header of 03 states that ${t} is live since 0012`);
   assert.deepEqual(docs.prepare('PRAGMA foreign_key_list(channels)').all().map((f) => [f.from, f.table, f.on_delete]).sort(), [['org_id', 'orgs', 'RESTRICT'], ['request_id', 'recruitment_requests', 'RESTRICT']], 'the documented channels table references orgs and, since migration 0015 (S8a-core, D-A converted), recruitment_requests; player_id (D-B, no lifecycle clause) and guardian_id (the bounded code-validated reference) carry no foreign key');

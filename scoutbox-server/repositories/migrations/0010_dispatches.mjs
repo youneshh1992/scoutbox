@@ -1,6 +1,7 @@
 /**
  * Delivery dispatch records and their attempts (S7b) get their own tables; the notification reference is indexed,
- * without a foreign key.
+ * without a foreign key. Amended in place in S14d: vocabulary and length CHECKs, the staff audience's organisation
+ * (a deferred RESTRICT key), integer callback clocks, a unique provider message id.
  * REGISTERED in DATA_MIGRATIONS. `up()` is the DDL only: the tables start empty and are written
  * through the repository.
  */
@@ -9,7 +10,7 @@ import { NOTIFICATIONS_MIGRATION } from '../notifications.mjs';
 import { DISPATCHES_MIGRATION, DISPATCHES_DDL, DISPATCH_TABLES } from '../dispatches.mjs';
 
 export const id = DISPATCHES_MIGRATION;
-export const note = 'delivery dispatch records and their attempts become their own tables (insertion order kept; notification reference indexed, no foreign key)';
+export const note = 'delivery dispatch records and their attempts become typed tables (vocabulary CHECKs; a staff audience keyed to its organisation; notification reference indexed, no foreign key)';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

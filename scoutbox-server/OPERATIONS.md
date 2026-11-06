@@ -92,7 +92,7 @@ A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 every mint).
 
 Most repositories write their rows at once. The staged ones (organisations' facets, players and guardians,
-notifications, dispatches, outbox and push) keep a mirror in memory and
+notifications) keep a mirror in memory and
 write what changed at the next save: a 2-second debounce (`persist()`), immediately with `persistNow()`, or in the
 commit of the unit of work they joined.
 
@@ -223,7 +223,7 @@ used to relabel stubs as live providers; production now refuses them (`PROVIDER_
 | Adapter | Switch | Dev behaviour | Live behaviour today |
 |---|---|---|---|
 | Mail | `SENDGRID_API_KEY` | Records go to the `outbox` table, visible at `GET /admin/outbox`. Codes are withheld from the persisted text. The full text of the last 500 mails is kept in process memory only, so after a restart request a fresh code. | Real SendGrid `fetch` |
-| Push | `EXPO_ACCESS_TOKEN` | Records go to `push_log` (`GET /admin/push-log`) | Real Expo `fetch` |
+| Push | `EXPO_ACCESS_TOKEN` | Records go to `push_log` (`GET /admin/push-log`). Devices register with `POST /push/register` (players and guardians only); one row per device token, so a token another account registers moves to it | Real Expo `fetch`, one call per registered token |
 | IDV | none | Instant approval with an audit reference (`dev-attestation`), in every mode | Not built |
 | Billing | none | Success-fee invoices in the `invoices` table, in minor units (`dev-ledger`) | Not built |
 | Storage | none | Files under `DATA_DIR/media/` | Not built |

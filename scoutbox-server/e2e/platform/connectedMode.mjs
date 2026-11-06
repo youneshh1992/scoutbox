@@ -298,7 +298,7 @@ ok(r.status === 200 && r.body.some((u) => u.name === 'Maria Keane') && !r.body.s
 r = await j('/org/invites', { method: 'POST', body: JSON.stringify({ email: 'someone.new@eastport.example', name: 'Someone New', role: 'Scout' }) }, bearer(MARIA_PROD));
 ok(r.status === 201 && r.body.invite.role === 'Scout', 'a lead invites staff with the role the organisation chose');
 r = await j('/admin/outbox', {}, prodAdmin);
-const inviteCode = r.body.find((m) => m.to === 'someone.new@eastport.example')?.text.match(/invite code: ([a-f0-9]+)/)?.[1];
+const inviteCode = r.body.items.find((m) => m.to === 'someone.new@eastport.example')?.text.match(/invite code: ([a-f0-9]+)/)?.[1];
 ok(!!inviteCode, 'the invitation code went to the local outbox');
 r = await j('/auth/org/accept-invite', { method: 'POST', body: JSON.stringify({ token: inviteCode }) });
 ok(r.status === 201 && r.body.role === 'Scout', 'accepting the invitation creates the account with the invited role');

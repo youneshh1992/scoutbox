@@ -58,7 +58,7 @@ async function j(method, url, body, token, extraHeaders = {}) {
 const A = { 'x-admin-key': 'scoutbox-admin' };
 async function mailWith(to, re) {
   const r = await j('GET', '/admin/outbox', undefined, null, A);
-  const mail = (r.body ?? []).find((m) => m.to === to);
+  const mail = (r.body?.items ?? []).find((m) => m.to === to);
   return mail ? (mail.text.match(re) ?? [])[1] ?? null : null;
 }
 

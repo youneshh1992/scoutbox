@@ -365,11 +365,11 @@ test('preferences through the real M18.2 module over the repository: defaults ar
 test('m13 notifyAction: a muted notification (the gate returned null) yields null instead of crashing, and an allowed one carries the acknowledgment contract', () => {
   const dir = tempDir('ntf-action'); s6File(dir);
   const s = openRaw(dir); runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }); // 0010 too: registerDelivery needs the dispatches repository (S7b)
-  const repo = bare(s); const dispatches = createDispatchesRepository({ sqlite: s, now: () => NOW }); const outboxPush = createOutboxPushRepository({ sqlite: s, now: () => NOW }); // S7c: registerDelivery needs the outbox repository too
+  const repo = bare(s); const dispatches = createDispatchesRepository({ sqlite: s, now: () => NOW }); const outboxPush = createOutboxPushRepository({ sqlite: s, now: () => NOW }); // registerDelivery needs the outbox repository too
   const router = { post() {}, get() {}, put() {} };
   let muted = false;
   const notify = (audience, type, text, refId = null, { actionRequired = null } = {}) => (muted ? null : repo.create({ audience, type, text, refId, category: 'security_account', deferredPush: false, actionRequired }));
-  const ctx = { db: { dispatches: dispatches.view, notifications: repo.view, users: [], guardians: [], outbox: outboxPush.outbox.view }, notifications: repo, dispatches, outbox: outboxPush.outbox, users: [], app: { post() {} }, orgRouter: router, playerRouter: router, guardianRouter: router, adminRouter: router, nextId, persist() {}, persistNow() {}, notify, findPlayer: () => null, isAdult: () => true, signBody: () => '', timingSafeEq: () => false, paginate: (_r, x) => x, unit: (w) => w(), operations: createOperationsRepository({ sqlite: s, now: () => NOW }) };
+  const ctx = { notifications: repo, dispatches, outbox: outboxPush.outbox, users: [], app: { post() {} }, orgRouter: router, playerRouter: router, guardianRouter: router, adminRouter: router, nextId, persist() {}, persistNow() {}, notify, findPlayer: () => null, isAdult: () => true, signBody: () => '', timingSafeEq: () => false, unit: (w) => w(), operations: createOperationsRepository({ sqlite: s, now: () => NOW }) };
   const saveInterval = globalThis.setInterval; globalThis.setInterval = () => ({ unref() {} });
   try { registerDelivery(ctx); } finally { globalThis.setInterval = saveInterval; }
   const n = ctx.notifyAction(ORG_USER, 'transition', 'Withdrawn.', 'trn-1', NOW + HOUR);
